@@ -1,0 +1,17 @@
+# Girls' names are personal data about minors. Nothing that contains a roster
+# belongs in version control — not the enrollment exports, and not the form
+# snapshots (Jotform stores each club's roster as checkbox options).
+data/
+backups/
+*.csv
+
+# Never commit credentials. The Jotform API key belongs in the environment
+# (JOTFORM_API_KEY) and, for the Sheet scripts, in Script Properties.
+.env
+*.key
+secrets*
+
+__pycache__/
+*.py[cod]
+.DS_Store
+node_modules/
