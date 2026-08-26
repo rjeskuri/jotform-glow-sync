@@ -11,8 +11,9 @@ the one-time setup.
 Usage (also importable):
     python3 tools/sheets_client.py whoami                   # service account email
     python3 tools/sheets_client.py tabs                     # list tabs + used rows
-    python3 tools/sheets_client.py export "Form Responses 1" out.csv
+    python3 tools/sheets_client.py export "Enrollment Responses" out.csv
     python3 tools/sheets_client.py export-all DIR           # every tab -> DIR/<tab>.csv
+    python3 tools/sheets_client.py import "Enrollment Responses" in.csv   # one-time, never overwrites
 """
 import csv
 import json
@@ -58,10 +59,23 @@ def sa_email():
 
 
 def _sheets_meta(svc):
-    return svc.spreadsheets().get(
-        spreadsheetId=spreadsheet_id(),
-        fields="sheets(properties(title,sheetId,sheetType,gridProperties))"
-    ).execute()["sheets"]
+    from googleapiclient.errors import HttpError
+    try:
+        return svc.spreadsheets().get(
+            spreadsheetId=spreadsheet_id(),
+            fields="sheets(properties(title,sheetId,sheetType,gridProperties))"
+        ).execute()["sheets"]
+    except HttpError as err:
+        if err.resp.status == 403:
+            sys.exit("Google says the robot may not open this spreadsheet (403).\n"
+                     f"Share the sheet with {sa_email()} as Editor, and check that\n"
+                     f"credentials/config.json holds the right ID ({spreadsheet_id()}).\n"
+                     "If the message mentions the API not being enabled, enable\n"
+                     "'Google Sheets API' in the Cloud project.")
+        if err.resp.status == 404:
+            sys.exit(f"No spreadsheet with ID {spreadsheet_id()} (404) - check "
+                     "credentials/config.json against the sheet's URL.")
+        raise
 
 
 def list_tabs(svc):
@@ -198,6 +212,15 @@ def main():
         for title, used, _, _ in list_tabs(svc):
             n = export_tab(svc, title, os.path.join(out_dir, title + ".csv"))
             print(f"  {title:<24} {n:>6} rows")
+    elif cmd == "import":
+        # one-time: put a CSV into a tab, refusing to overwrite existing data
+        title, src = sys.argv[2], sys.argv[3]
+        with open(src, newline="", encoding="utf-8-sig") as f:
+            rows = list(csv.reader(f))
+        if _has_tab(svc, title) and len(read_tab(svc, title)) > 1:
+            sys.exit(f"Tab '{title}' already holds data - not overwriting.")
+        write_tab(svc, title, rows)
+        print(f"{len(rows) - 1} data rows -> '{title}'")
     else:
         sys.exit(f"unknown command {cmd!r}")
 

@@ -55,11 +55,11 @@ const NOW = TODAY + ' ' + pad(nowDate.getHours()) + ':' + pad(nowDate.getMinutes
 // ------------------------------------------------ load the real .gs code
 // Only the pure-logic files; Roster.gs/Menu.gs call SpreadsheetApp.
 let src = '';
-for (const f of ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs']) {
+for (const f of ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs']) {
   src += fs.readFileSync(path.join(GS, f), 'utf8') + '\n';
 }
 src += '\nmodule.exports={TAB,ROSTER_COLS,RESPONSE_COLS,STATUS,PARTNER_REGIONS,PARTNER_REGION_NOTES,' +
-       'tidy_,key_,asciiCode_,parseRoster_,lastName_,clubCode_,mintGirlId_};\n';
+       'tidy_,key_,asciiCode_,parseRoster_,lastName_,clubCode_,mintGirlId_,planClub_};\n';
 const bundle = path.join(os.tmpdir(), 'glow_gs_bundle_' + process.pid + '.js');
 fs.writeFileSync(bundle, src);
 const gs = require(bundle);
@@ -182,57 +182,25 @@ const rosterOut = existingRows.map(r => gs.ROSTER_COLS.map(c => (r[c] == null ? 
 const issues = [], partnersSeen = {}, noRegion = {};
 let newGirls = 0, reactivated = 0;
 
+const state = { registry, sequence };
 for (const entry of clubs) {
   partnersSeen[gs.key_(entry.partner)] = entry.partner;
   const ck = gs.key_(entry.partner) + '||' + gs.key_(entry.club);
   const region = regions[gs.key_(entry.partner)] || '';
   if (!region) noRegion[gs.key_(entry.partner)] = entry.partner;
+  entry.source = gs.TAB.RESPONSES + '!' + entry.sourceRow;
 
-  if (entry.duplicates.length) {
-    issues.push({
-      issue: 'Same name listed twice', partner: entry.partner, club: entry.club,
-      detail: entry.duplicates.join(', ') +
-        ' — if these are different girls, add something to tell them apart in ' +
-        'the sheet (e.g. "Anh Nguyen (A)"), then re-run.',
-    });
+  // the same decision code the sheet runs (RosterOps.gs)
+  const plan = gs.planClub_(entry, existingByClub[ck] || [], state, region, TODAY);
+  for (const found of plan.reactivate) {
+    found.status = gs.STATUS.ACTIVE; found.removed_date = '';
+    const idx = existingRows.indexOf(found);
+    rosterOut[idx] = gs.ROSTER_COLS.map(c => (found[c] == null ? '' : found[c]));
+    reactivated++;
   }
-
-  const code = gs.clubCode_(registry, entry.partner, entry.club);
-  const current = existingByClub[ck] || [];
-  const byName = {};
-  current.forEach(row => { byName[gs.key_(row.full_name)] = row; });
-
-  for (const name of entry.names) {
-    const found = byName[gs.key_(name)];
-    if (found) {
-      if (found.status === gs.STATUS.INACTIVE) {
-        found.status = gs.STATUS.ACTIVE; found.removed_date = '';
-        const idx = existingRows.indexOf(found);
-        rosterOut[idx] = gs.ROSTER_COLS.map(c => (found[c] == null ? '' : found[c]));
-        reactivated++;
-      }
-      continue;
-    }
-    rosterOut.push([
-      gs.mintGirlId_(sequence, code, name), entry.partner, entry.club, region,
-      name, gs.lastName_(name), gs.STATUS.ACTIVE, TODAY, '',
-      gs.TAB.RESPONSES + '!' + entry.sourceRow,
-    ]);
-    newGirls++;
-  }
-
-  const submitted = {};
-  entry.names.forEach(n => { submitted[gs.key_(n)] = true; });
-  const vanished = current.filter(row =>
-    row.status === gs.STATUS.ACTIVE && !submitted[gs.key_(row.full_name)]);
-  if (vanished.length) {
-    issues.push({
-      issue: 'Girls missing from the latest enrollment', partner: entry.partner, club: entry.club,
-      detail: vanished.length + ' girl(s) on file are not in the newest submission. ' +
-        'They are still active — use the Roster Modification form to remove anyone ' +
-        'who has actually left.',
-    });
-  }
+  for (const row of plan.toAppend) rosterOut.push(row);
+  newGirls += plan.toAppend.length;
+  issues.push(...plan.issues);
 }
 
 Object.keys(noRegion).forEach(k => {

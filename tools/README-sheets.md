@@ -33,17 +33,20 @@ One-time setup, about ten minutes:
 
        python3 tools/sheets_client.py tabs
 
-   You should see `Form Responses 1` with its number of data rows (around 350).
+   You should see the sheet's tabs with their data row counts.
 
 Why Editor and not Viewer: the tools create and fill the Roster, Partners,
-ClubRegistry, ReviewQueue and Audit tabs. They never write to
-`Form Responses 1`.
+ClubRegistry, ReviewQueue and Audit tabs (and, once, the *Enrollment
+Responses* import). The spreadsheet is the new **master enrollment** sheet —
+the original response sheet stayed with its owner, so its data came across
+as a CSV export.
 
 ## What the tools do with it
 
 | Command | Effect |
 |---|---|
-| `python3 tools/sheets_client.py export "Form Responses 1" data/enrollment_<date>.csv` | Fresh export without the manual download |
+| `python3 tools/sheets_client.py export "Enrollment Responses" data/enrollment_<date>.csv` | Export the imported responses tab |
+| `python3 tools/sheets_client.py import "Enrollment Responses" data/enrollment_<date>.csv` | One-time import of the original form's responses |
 | `python3 tools/sheets_client.py export-all data/live_<date>` | Every tab, for rebuilding against the live state |
 | `node tools/build_roster_offline.js data/enrollment_<date>.csv [--existing data/live_<date>]` | Builds the five tabs locally in `data/roster_build/` using the *same* code that runs inside the sheet |
 | `python3 tools/upload_roster.py [--apply] [--replace]` | Writes them to the spreadsheet — Roster and ClubRegistry replaced, Partners merged (staff edits win), ReviewQueue and Audit appended |

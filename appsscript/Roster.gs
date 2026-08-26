@@ -56,21 +56,31 @@ function audit_(action, detail) {
 
 /**
  * Add issues to the ReviewQueue, skipping any that are already there and
- * still unresolved (same issue + partner + club). Re-running the rebuild
- * must not fill the tab with copies of the same open question.
+ * still unresolved. Re-running the rebuild must not fill the tab with copies
+ * of the same open question — but two different questions about the same
+ * club (two unmatched names, two failed responses) must both appear, so an
+ * issue may carry `dedupeKey` to tell them apart. The key is stored as a
+ * short tag at the end of the detail column.
  */
 function review_(rows) {
   if (!rows.length) return;
   const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.REVIEW, REVIEW_COLS);
+  const identity = function (issue, partner, club, detail) {
+    const m = String(detail || '').match(/\[#([^\]]*)\]\s*$/);
+    return key_(issue) + '||' + key_(partner) + '||' + key_(club) + '||' + (m ? m[1] : '');
+  };
   const open = {};
   if (sheet.getLastRow() > 1) {
     sheet.getRange(2, 1, sheet.getLastRow() - 1, REVIEW_COLS.length).getValues()
         .forEach(function (r) {
-          if (!tidy_(r[5])) open[key_(r[1]) + '||' + key_(r[2]) + '||' + key_(r[3])] = true;
+          if (!tidy_(r[5])) open[identity(r[1], r[2], r[3], r[4])] = true;
         });
   }
+  rows.forEach(function (r) {
+    if (r.dedupeKey) r.detail = (r.detail || '') + ' [#' + r.dedupeKey + ']';
+  });
   const fresh = rows.filter(function (r) {
-    return !open[key_(r.issue) + '||' + key_(r.partner) + '||' + key_(r.club)];
+    return !open[identity(r.issue, r.partner, r.club, r.detail)];
   });
   if (!fresh.length) return;
   const stamp = today_();
@@ -185,99 +195,73 @@ function rebuildRosterLocked_(ss) {
   const state = loadIdState_();
   const today = today_();
 
-  const toAppend = [], issues = [], partnersSeen = {};
-  const reactivate = [];   // sheet rows to flip back to active
+  const toAppend = [], reactivate = [], issues = [], partnersSeen = {};
   const noRegion = {};
-  let newGirls = 0;
 
   clubs.forEach(function (entry) {
     partnersSeen[key_(entry.partner)] = entry.partner;
     const ck = key_(entry.partner) + '||' + key_(entry.club);
     const region = regions[key_(entry.partner)] || '';
     if (!region) noRegion[key_(entry.partner)] = entry.partner;
+    entry.source = TAB.RESPONSES + '!' + entry.sourceRow;
 
-    if (entry.duplicates.length) {
-      issues.push({
-        issue: 'Same name listed twice',
-        partner: entry.partner, club: entry.club,
-        detail: entry.duplicates.join(', ') +
-            ' — if these are different girls, add something to tell them ' +
-            'apart in the sheet (e.g. "Anh Nguyen (A)"), then re-run.',
-      });
-    }
-
-    const code = clubCode_(state.registry, entry.partner, entry.club);
-    const current = existing.byClub[ck] || [];
-    const byName = {};
-    current.forEach(function (row) { byName[key_(row.full_name)] = row; });
-
-    entry.names.forEach(function (name) {
-      const found = byName[key_(name)];
-      if (found) {
-        // she came back: same girl, same ID
-        if (found.status === STATUS.INACTIVE) reactivate.push(found._sheetRow);
-        return;
-      }
-      toAppend.push([
-        mintGirlId_(state.sequence, code, name), entry.partner, entry.club,
-        region, name, lastName_(name), STATUS.ACTIVE, today, '',
-        TAB.RESPONSES + '!' + entry.sourceRow,
-      ]);
-      newGirls++;
-    });
-
-    // girls on file but absent from the newest submission
-    const submitted = {};
-    entry.names.forEach(function (n) { submitted[key_(n)] = true; });
-    const vanished = current.filter(function (row) {
-      return row.status === STATUS.ACTIVE && !submitted[key_(row.full_name)];
-    });
-    if (vanished.length) {
-      issues.push({
-        issue: 'Girls missing from the latest enrollment',
-        partner: entry.partner, club: entry.club,
-        detail: vanished.length + ' girl(s) on file are not in the newest ' +
-            'submission. They are still active — use the Roster Modification ' +
-            'form to remove anyone who has actually left.',
-      });
-    }
+    const plan = planClub_(entry, existing.byClub[ck] || [], state, region, today);
+    Array.prototype.push.apply(toAppend, plan.toAppend);
+    Array.prototype.push.apply(reactivate, plan.reactivate);
+    Array.prototype.push.apply(issues, plan.issues);
   });
 
   Object.keys(noRegion).forEach(function (k) {
-    issues.push({
-      issue: 'Partner has no region',
-      partner: noRegion[k], club: '',
-      detail: 'Girls were added without a region, so they will not reach any ' +
-          'regional attendance form. Fill in the region on the Partners tab, ' +
-          'then run GLOW → Refresh regions.',
-    });
+    issues.push(noRegionIssue_(noRegion[k]));
   });
 
-  const sheet = ss.getSheetByName(TAB.ROSTER);
-  if (reactivate.length) {
-    const iStatus = ROSTER_COLS.indexOf('status') + 1;
-    const iRemoved = ROSTER_COLS.indexOf('removed_date') + 1;
-    const col = function (i) { return String.fromCharCode(64 + i); };
-    sheet.getRangeList(reactivate.map(function (r) { return col(iStatus) + r; }))
-        .setValue(STATUS.ACTIVE);
-    sheet.getRangeList(reactivate.map(function (r) { return col(iRemoved) + r; }))
-        .setValue('');
-  }
-  if (toAppend.length) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, toAppend.length,
-                   ROSTER_COLS.length).setValues(toAppend);
-  }
+  applyRosterPlan_(ss, { toAppend: toAppend, reactivate: reactivate, deactivate: [] }, today);
   saveClubRegistry_(state.registry);
   seedPartners_(partnersSeen);
   review_(issues);
 
   const missingRegion = Object.keys(noRegion).length;
-  const summary = clubs.length + ' clubs, ' + newGirls + ' new girls, ' +
+  const summary = clubs.length + ' clubs, ' + toAppend.length + ' new girls, ' +
       reactivate.length + ' reactivated, ' + issues.length + ' for review' +
       (missingRegion ? ', ' + missingRegion + ' partner(s) missing a region' : '');
   audit_('rebuildRosterFromResponses', summary);
   ss.toast(summary, 'GLOW roster', 10);
   return summary;
+}
+
+function noRegionIssue_(partner) {
+  return {
+    issue: 'Partner has no region', partner: partner, club: '',
+    detail: 'Girls were added without a region, so they will not reach any ' +
+        'regional attendance form. Fill in the region on the Partners tab, ' +
+        'then run GLOW → Refresh regions.',
+  };
+}
+
+/**
+ * Write a plan from RosterOps.gs to the Roster tab: append new rows, flip
+ * reactivated rows back to active, retire deactivated rows. Rows in
+ * `reactivate` / `deactivate` carry _sheetRow from loadRoster_.
+ */
+function applyRosterPlan_(ss, plan, today) {
+  const sheet = ensureTab_(ss, TAB.ROSTER, ROSTER_COLS);
+  setRowsStatus_(sheet, plan.reactivate, STATUS.ACTIVE, '');
+  setRowsStatus_(sheet, plan.deactivate, STATUS.INACTIVE, today);
+  if (plan.toAppend.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, plan.toAppend.length,
+                   ROSTER_COLS.length).setValues(plan.toAppend);
+  }
+}
+
+function setRowsStatus_(sheet, rows, status, removedDate) {
+  if (!rows.length) return;
+  const iStatus = ROSTER_COLS.indexOf('status') + 1;
+  const iRemoved = ROSTER_COLS.indexOf('removed_date') + 1;
+  const col = function (i) { return String.fromCharCode(64 + i); };
+  sheet.getRangeList(rows.map(function (r) { return col(iStatus) + r._sheetRow; }))
+      .setValue(status);
+  sheet.getRangeList(rows.map(function (r) { return col(iRemoved) + r._sheetRow; }))
+      .setValue(removedDate);
 }
 
 function saveClubRegistry_(registry) {

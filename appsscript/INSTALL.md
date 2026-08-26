@@ -15,13 +15,15 @@ or Salesforce.
 
 ## Install
 
-1. Open the enrollment spreadsheet (the one with the "Form Responses 1" tab).
+1. Open the **master enrollment** spreadsheet (the new one-row-per-girl sheet;
+   its *Enrollment Responses* tab is a one-time import of the original
+   enrollment form's responses).
 2. **Extensions → Apps Script**. A code editor opens in a new tab.
 3. Delete the empty `Code.gs` that Google creates.
 4. For each file in this folder — `Config.gs`, `Normalize.gs`, `Ids.gs`,
-   `Regions.gs`, `Roster.gs`, `Menu.gs` — click **+ → Script**, name it
-   exactly as the file is named here (Google adds the `.gs` itself), and paste
-   the contents in.
+   `Regions.gs`, `RosterOps.gs`, `Roster.gs`, `Forms.gs`, `FormHandlers.gs`,
+   `Menu.gs` — click **+ → Script**, name it exactly as the file is named
+   here (Google adds the `.gs` itself), and paste the contents in.
 5. Click **Save** (the disk icon).
 6. Reload the spreadsheet tab. A **GLOW** menu appears next to Help.
 
@@ -29,7 +31,10 @@ or Salesforce.
 
 1. **GLOW → Set up tabs** — creates Roster, Partners, ClubRegistry,
    ReviewQueue and Audit. Google will ask you to authorize the script the
-   first time; it only ever touches this spreadsheet.
+   first time. It asks for more than the spreadsheet because of the forms
+   step below: creating Google Forms in your Drive, sending email from your
+   account (mentor confirmations, problem reports, the weekly digest) and
+   managing the script's own triggers. It never reads anything else.
 2. **GLOW → Rebuild roster from enrollment responses** — reads every
    enrollment response and fills the Roster tab. On the current data this
    produces **328 clubs and 6,210 girls**, each with a unique ID, and takes a
@@ -51,6 +56,55 @@ or Salesforce.
 
 Re-running the rebuild is always safe: existing girls keep their IDs, only new
 names get new ones.
+
+## The three Google Forms (Phase 3)
+
+Once the Roster tab exists, **GLOW → Google Forms → Create the three Google
+Forms** builds, in your own Google Drive:
+
+| Form | Who uses it | What happens on submit |
+|---|---|---|
+| **New Club Enrollment** | a partner starting a club | club + girls go into the Roster with IDs; the club is added to the **SF Pending** tab for whoever creates Salesforce Accounts; anything odd goes to the ReviewQueue |
+| **Roster Modification** | a mentor adding or removing girls | page 1 is the partner list; each partner then sees only its own clubs (no 300-item dropdown); girls are added, reactivated, or marked inactive — **never deleted**; names that don't match anyone are queued for staff (with "closest name" hints), never guessed; the mentor gets a short confirmation email that echoes only the names they typed |
+| **Something isn't working?** | anyone | one-minute problem report, emailed to staff |
+
+The run also installs the triggers and shows the three links (again later via
+**Show form links**). Responses land in the tabs *New Club Responses*,
+*Roster Changes* and *Feedback*; *FormLog* records what was done with each.
+
+Then:
+
+1. **Script Properties** (Project Settings → Script Properties): add
+   `STAFF_NOTIFY_EMAIL` = the address that should receive problem reports and
+   the Monday "clubs pending in Salesforce" digest.
+2. Put the feedback link at the bottom of the attendance forms (a one-line
+   text element above Submit, easy to remove later):
+
+       export JOTFORM_API_KEY=...
+       python3 tools/add_feedback_link.py --url <feedback form link>          # preview
+       python3 tools/add_feedback_link.py --url <feedback form link> --apply
+       python3 tools/add_feedback_link.py --remove --apply                    # later
+
+3. When you are ready to stop using the original enrollment form, ask its
+   owner to close it (Responses → "Accepting responses" off) with a message
+   pointing at the two new links. (The **Retire the old enrollment form**
+   menu item only works when the old form feeds this spreadsheet, which it
+   does not — the original sheet stayed with its owner.)
+
+Things to know:
+
+- The dropdowns are refreshed from the Roster after every submission and by
+  **Update form dropdowns from the Roster**. A brand-new partner (from the New
+  Club form's "not in this list" option) gets its own section on the
+  Modification form automatically.
+- If a trigger ever fails (Google quota, a timeout, an incomplete
+  submission), nothing is lost: FormLog records it as `ERROR: …`, the
+  ReviewQueue gets a line, and **Process any missed form responses** retries
+  every response that has not succeeded yet. (Problem reports that arrive
+  before `STAFF_NOTIFY_EMAIL` is set are sent by that same menu item once it
+  is.)
+- You can edit wording and help text in the Forms UI freely, but keep the
+  question **titles** as they are — the handlers find answers by title.
 
 ## About the IDs
 

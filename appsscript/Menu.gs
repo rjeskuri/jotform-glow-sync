@@ -10,6 +10,15 @@ function onOpen() {
       .addItem('Refresh regions from the Partners tab', 'refreshRosterRegions')
       .addSeparator()
       .addItem('Show roster summary', 'showRosterSummary')
+      .addSeparator()
+      .addSubMenu(SpreadsheetApp.getUi().createMenu('Google Forms')
+          .addItem('Create the three Google Forms', 'createGlowForms')
+          .addItem('Show form links', 'showFormLinks')
+          .addItem('Update form dropdowns from the Roster', 'syncFormChoices')
+          .addItem('Process any missed form responses', 'processMissedResponses')
+          .addItem('Install triggers', 'installTriggers')
+          .addSeparator()
+          .addItem('Retire the old enrollment form', 'retireOldEnrollmentForm'))
       .addToUi();
 }
 

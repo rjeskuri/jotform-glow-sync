@@ -123,7 +123,7 @@ def parse_roster(cell):
     """Parse one roster cell: one name per line, optional '1.' numbering.
     Returns (names, duplicates): duplicates are names listed more than once -
     usually two different girls with the same full name, who need
-    distinguishing suffixes added in the sheet (e.g. 'Anh Nguyen (Ánh)')."""
+    distinguishing suffixes added in the sheet (e.g. 'Jane Doe (A)')."""
     names = []
     for line in cell.splitlines():
         # drop invisible format characters (zero-width, LTR/RTL marks, BOM)

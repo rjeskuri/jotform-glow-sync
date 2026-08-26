@@ -226,6 +226,12 @@ clone plan + Africa split. **Nothing else in the plan depends on this
 succeeding.**
 
 ### Phase 3 — Two generated Google Forms (1–2 days)
+**Status 2026-08-26: code written** (`appsscript/Forms.gs`, `FormHandlers.gs`,
+`RosterOps.gs`; offline tests in `test/forms_logic_test.js`), plus a third
+form — **"Something isn't working?"** — a one-minute problem report emailed to
+staff, linked from the bottom of the attendance forms via
+`tools/add_feedback_link.py` for the transition period. Awaiting a run inside
+the Sheet (`GLOW → Google Forms → Create the three Google Forms`).
 - `FormsSetup.gs` one-time generator + bound handlers:
   - **Form 1 "New Club Enrollment"**: partner dropdown (from Partners tab),
     club name, roster paragraph, mentor/language fields. Handler normalizes →

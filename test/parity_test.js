@@ -14,7 +14,7 @@ for (const f of ['Normalize.gs', 'Ids.gs', 'Regions.gs']) {
   src += fs.readFileSync(path.join(GS, f), 'utf8') + '\n';
 }
 // Config constants used by the loaded functions
-src = 'const TAB={RESPONSES:"Form Responses 1"};' +
+src = 'const TAB={RESPONSES:"Enrollment Responses"};' +
       'const RESPONSE_COLS={partner:"partner organization name",' +
       'club:"club name",roster:"please list the full name"};\n' + src;
 // Expose the private (underscore) helpers to the harness
@@ -141,6 +141,21 @@ check('every sheet partner has a derived region', noRegion.length === 0,
        ' (re-run tools/derive_partner_regions.py --write)' : ''));
 check('every derived region has a note for the Partners tab',
       Object.keys(gs.PARTNER_REGIONS).every(p => gs.PARTNER_REGION_NOTES[p]));
+
+// no real girl's name appears in anything that gets installed or published:
+// the Sheet scripts (form help text, messages), docs, tools
+const publicText = [];
+for (const dir of ['appsscript', 'tools', 'docs', 'test']) {
+  for (const f of fs.readdirSync(path.join(GS, '..', dir))) {
+    if (/\.(gs|md|py|js)$/.test(f)) publicText.push(fs.readFileSync(path.join(GS, '..', dir, f), 'utf8'));
+  }
+}
+publicText.push(fs.readFileSync(path.join(GS, '..', 'README.md'), 'utf8'));
+const haystack = publicText.join('\n').toLowerCase();
+const leaked = [...new Set(ids.map(x => x.name.toLowerCase()))]
+  .filter(n => n.split(' ').length >= 2 && haystack.includes(n));
+check('no enrolled girl\'s name appears in scripts, docs or tools', leaked.length === 0,
+      leaked.length ? leaked.length + ' name(s) found — replace with fictional examples' : 'scanned ' + ids.length + ' names');
 
 // ---- parity with the Python tool's club canonicalization ----
 const pyClubs = JSON.parse(fs.readFileSync(process.env.PY_CLUBS ||
