@@ -7,6 +7,7 @@ function onOpen() {
       .addItem('Set up tabs', 'setUpTabs')
       .addItem('Rebuild roster from enrollment responses',
                'rebuildRosterFromResponses')
+      .addItem('Refresh regions from the Partners tab', 'refreshRosterRegions')
       .addSeparator()
       .addItem('Show roster summary', 'showRosterSummary')
       .addToUi();

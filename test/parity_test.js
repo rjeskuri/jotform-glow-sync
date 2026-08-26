@@ -10,7 +10,7 @@ const GS = '/Users/ryaneskuri/jotform-glow-sync/appsscript';
 
 // Load the pure-logic files (no SpreadsheetApp calls at top level).
 let src = '';
-for (const f of ['Normalize.gs', 'Ids.gs']) {
+for (const f of ['Normalize.gs', 'Ids.gs', 'Regions.gs']) {
   src += fs.readFileSync(path.join(GS, f), 'utf8') + '\n';
 }
 // Config constants used by the loaded functions
@@ -19,9 +19,9 @@ src = 'const TAB={RESPONSES:"Form Responses 1"};' +
       'club:"club name",roster:"please list the full name"};\n' + src;
 // Expose the private (underscore) helpers to the harness
 src += '\nmodule.exports={tidy_,key_,asciiCode_,parseRoster_,lastName_,' +
-       'clubCode_,mintGirlId_};\n';
+       'clubCode_,mintGirlId_,PARTNER_REGIONS,PARTNER_REGION_NOTES};\n';
 
-const tmp = '/tmp/glow_gs_bundle.js';
+const tmp = path.join(require('os').tmpdir(), 'glow_gs_bundle.js');
 fs.writeFileSync(tmp, src);
 const gs = require(tmp);
 
@@ -90,9 +90,11 @@ const unique = new Set(ids.map(x => x.id));
 check('every girl ID is unique', unique.size === ids.length,
       unique.size + ' unique / ' + ids.length);
 
+// IDs contain a real surname, so never print one unmasked
+const mask = id => id.replace(/-[A-Z0-9]+-(\d{3})$/, '-XXXX-$1');
 check('ID format CLUBCODE-LASTCODE-NNN',
       ids.every(x => /^[A-Z0-9]{1,8}-[A-Z0-9]{1,12}-\d{3}$/.test(x.id)),
-      'e.g. ' + ids[0].id);
+      'e.g. ' + mask(ids[0].id));
 
 const codes = new Set(Object.values(registry.byCode).map(e => e.code));
 check('club codes unique', codes.size === Object.keys(registry.byKey).length,
@@ -104,7 +106,7 @@ check('no empty last-name codes', ids.every(x => !/--/.test(x.id)));
 const accented = ids.filter(x => /[À-ÿ]/.test(x.name));
 check('accented surnames produce ASCII ids', accented.every(x => /^[A-Z0-9-]+$/.test(x.id)),
       accented.length + ' accented names, sample ' +
-      (accented[0] ? accented[0].id : 'n/a'));
+      (accented[0] ? mask(accented[0].id) : 'n/a'));
 
 // same surname within a club gets distinct sequence numbers
 const stems = {};
@@ -127,9 +129,22 @@ check('no invisible characters survive',
 check('list numbering stripped', ids.every(x => !/^\d+[.)]/.test(x.name)),
       'sample names: ' + ids.slice(0, 2).map(x => x.name.replace(/\S/g, 'x')).join(', '));
 
+// every partner in the sheet has a derived region (Regions.gs is current)
+const REGIONS = new Set(['Africa', 'Asia', 'Latin America', 'U.S']);
+const derived = {};
+Object.keys(gs.PARTNER_REGIONS).forEach(p => { derived[gs.key_(p)] = gs.PARTNER_REGIONS[p]; });
+const partners = [...new Set(clubs.map(c => gs.key_(c.partner)))];
+const noRegion = partners.filter(p => !REGIONS.has(derived[p]));
+check('every sheet partner has a derived region', noRegion.length === 0,
+      (partners.length - noRegion.length) + '/' + partners.length +
+      (noRegion.length ? ' — missing: ' + noRegion.join('; ') +
+       ' (re-run tools/derive_partner_regions.py --write)' : ''));
+check('every derived region has a note for the Partners tab',
+      Object.keys(gs.PARTNER_REGIONS).every(p => gs.PARTNER_REGION_NOTES[p]));
+
 // ---- parity with the Python tool's club canonicalization ----
 const pyClubs = JSON.parse(fs.readFileSync(process.env.PY_CLUBS ||
-  '/tmp/py_clubs.json', 'utf8'));
+  '/Users/ryaneskuri/jotform-glow-sync/data/py_clubs.json', 'utf8'));
 const jsKeys = new Set(clubs.map(c => gs.key_(c.partner) + '||' + gs.key_(c.club)));
 const pyKeys = new Set(pyClubs);
 const onlyJs = [...jsKeys].filter(k => !pyKeys.has(k));

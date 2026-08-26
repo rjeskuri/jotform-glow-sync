@@ -19,8 +19,9 @@ or Salesforce.
 2. **Extensions → Apps Script**. A code editor opens in a new tab.
 3. Delete the empty `Code.gs` that Google creates.
 4. For each file in this folder — `Config.gs`, `Normalize.gs`, `Ids.gs`,
-   `Roster.gs`, `Menu.gs` — click **+ → Script**, name it exactly as the file
-   is named here (Google adds the `.gs` itself), and paste the contents in.
+   `Regions.gs`, `Roster.gs`, `Menu.gs` — click **+ → Script**, name it
+   exactly as the file is named here (Google adds the `.gs` itself), and paste
+   the contents in.
 5. Click **Save** (the disk icon).
 6. Reload the spreadsheet tab. A **GLOW** menu appears next to Help.
 
@@ -33,10 +34,16 @@ or Salesforce.
    enrollment response and fills the Roster tab. On the current data this
    produces **328 clubs and 6,210 girls**, each with a unique ID, and takes a
    minute or two.
-3. Open the **Partners** tab and fill in the **region** for each of the 47
-   partners (Africa / Asia / Latin America / U.S). Regions decide which
-   attendance form each club appears on from Phase 4; clubs whose partner has
-   no region are flagged, never silently dropped.
+3. Open the **Partners** tab. The **region** column (Africa / Asia / Latin
+   America / U.S) is already filled in for all 47 partners — it was worked out
+   from which regional attendance form each partner's clubs currently sit on
+   (`tools/derive_partner_regions.py`; the map lives in `Regions.gs`). The
+   **notes** column says how solid each one is; any row whose note starts with
+   **PLEASE CONFIRM** is worth a second look. If anything is wrong, correct it
+   in this tab — the tab always wins over the derived map — then run
+   **GLOW → Refresh regions from the Partners tab**. Regions decide which
+   attendance form each club appears on from Phase 4; a partner with no region
+   lands in the ReviewQueue, never silently dropped.
 4. Open the **ReviewQueue** tab. Expect around 16 entries about the same girl's
    name appearing twice in a roster. Fix those in the sheet (give the girls
    something that tells them apart, e.g. `Anh Nguyen (A)`), then run the
@@ -47,8 +54,8 @@ names get new ones.
 
 ## About the IDs
 
-`DEMOCLUB-SAMPLE-001` = club code, surname, and a number that makes same-surname
-girls distinct.
+`DEMOCLUB-SAMPLE-001` = club code, surname, and a number that makes
+same-surname girls distinct.
 
 - **Permanent.** Once assigned, a girl's ID never changes — not when her club
   is renamed, not when the club splits, not if she leaves and comes back.
@@ -74,8 +81,14 @@ python3 -c "import importlib.util,json; \
   spec=importlib.util.spec_from_file_location('s','sync_attendance_form.py'); \
   m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); \
   sheet,_=m.read_sheet('data/enrollment_2026-08-24.csv'); \
-  json.dump([f'{p.lower()}||{c.lower()}' for p,c in sheet], open('/tmp/py_clubs.json','w'))"
+  json.dump([f'{p.lower()}||{c.lower()}' for p,c in sheet], open('data/py_clubs.json','w'))"
 node test/parity_test.js
 ```
 
-Run it after any change to the shared logic in either language.
+(`data/` is gitignored and not world-readable, unlike `/tmp` — club names
+occasionally turn out to be a girl's name.)
+
+Run it after any change to the shared logic in either language. It also
+fails if a partner in the CSV has no entry in `Regions.gs` — the fix is
+`python3 tools/derive_partner_regions.py <csv> --write` (it needs fresh
+regional-form snapshots in `backups/`, from `backup_forms.py`).

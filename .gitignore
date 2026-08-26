@@ -6,10 +6,13 @@ backups/
 *.csv
 
 # Never commit credentials. The Jotform API key belongs in the environment
-# (JOTFORM_API_KEY) and, for the Sheet scripts, in Script Properties.
+# (JOTFORM_API_KEY) and, for the Sheet scripts, in Script Properties. The
+# Google service-account key lives in credentials/.
 .env
 *.key
 secrets*
+credentials/
+service-account*.json
 
 __pycache__/
 *.py[cod]

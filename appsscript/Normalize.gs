@@ -94,7 +94,9 @@ function readResponses_() {
     const row = values[r];
     const partner = tidy_(row[iPartner]);
     const club = tidy_(row[iClub]);
-    if (!club) continue;
+    // a row without a partner or a club cannot be placed anywhere (and a
+    // blank partner would otherwise seed a nameless Partners row)
+    if (!partner || !club) continue;
     const parsed = parseRoster_(row[iRoster]);
     if (!parsed.names.length) continue;
     byIdentity[key_(partner) + '||' + key_(club)] = {

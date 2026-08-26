@@ -94,7 +94,10 @@ single test submission landing correctly in `Attendance_Batch__c`.
   for non-technical mentors while staying entirely in Google Forms.
 - **Keep the 4 regional attendance forms** (no consolidation); the automation
   manages them with per-region club filters. No region column exists today →
-  a Partners→region mapping tab is required.
+  a Partners→region mapping tab is required. Ryan has no region list to type
+  in, so the mapping is **derived** from the regional forms themselves (roster
+  overlap + club-name match per club, majority vote per partner) — see
+  `tools/derive_partner_regions.py`.
 - Regionals are rebuilt by **cloning the upgraded working copy and relabeling**,
   not by editing the drifted live forms.
 - **Prototype the dynamic roster widget FIRST** (new Phase 2.5), before
@@ -148,7 +151,10 @@ enable_fuzzy populated. Rollback: snapshots + builder Revision History.
 ### Phase 1 — Canonical Roster tab + ID backfill (1–2 days, Sheet-only)
 - New tabs in the existing spreadsheet: **Roster** (girl_id, partner, club,
   region, first/last, status active|inactive, added/removed dates, source),
-  **Partners** (47 rows; staff fills region manually), **ClubRegistry**,
+  **Partners** (47 rows; region **prefilled from `Regions.gs`** — derived
+  2026-08-24 by `tools/derive_partner_regions.py` from which regional form each
+  partner's clubs sit on: 47/47 resolved, 0 conflicts, 1 thin (Haske, one
+  matched club); the tab overrides the derived map), **ClubRegistry**,
   **ReviewQueue**, **Audit**.
 - `Normalize.gs` (bound Apps Script): direct port of `parse_roster` /
   `read_sheet` from the Python tool — invisible-Unicode stripping, numbering

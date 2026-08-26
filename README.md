@@ -12,6 +12,7 @@ it — rosters and all conditional logic — in one command.
 | `backup_forms.py` | Snapshots every form's questions + properties into `backups/` |
 | `restore_conditions.py` | Rolls a form's conditional logic back to a snapshot |
 | `appsscript/` | Scripts that live in the Google Sheet — see `appsscript/INSTALL.md` |
+| `tools/derive_partner_regions.py` | Works out each partner's region from the regional forms; regenerates `appsscript/Regions.gs` |
 | `test/parity_test.js` | Checks the Sheet scripts and the Python tool agree |
 
 **Always run `backup_forms.py` before changing a live form.** Restores are

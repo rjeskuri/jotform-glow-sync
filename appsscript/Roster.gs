@@ -5,16 +5,36 @@
  * reads this tab rather than the raw form responses. Girls are never deleted
  * here — leaving a club sets status to inactive and stamps removed_date, so
  * history stays intact.
+ *
+ * Dates are written as plain text ('yyyy-MM-dd', timestamps
+ * 'yyyy-MM-dd HH:mm:ss') in the spreadsheet's time zone, on purpose: the
+ * offline builder (tools/build_roster_offline.js) writes the same text, so
+ * the columns never mix real Date cells with strings, and they sort
+ * correctly as text.
  */
+
+const REVIEW_COLS = ['raised', 'issue', 'partner', 'club', 'detail', 'resolved'];
+const PARTNER_COLS = ['partner', 'region', 'notes'];
+const CLUB_COLS = ['club_code', 'partner', 'club', 'created'];
+const AUDIT_COLS = ['when', 'action', 'detail'];
+
+function today_() {
+  return Utilities.formatDate(new Date(),
+      SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+}
+
+function now_() {
+  return Utilities.formatDate(new Date(),
+      SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+}
 
 function setUpTabs() {
   const ss = SpreadsheetApp.getActive();
   ensureTab_(ss, TAB.ROSTER, ROSTER_COLS);
-  ensureTab_(ss, TAB.PARTNERS, ['partner', 'region', 'notes']);
-  ensureTab_(ss, TAB.CLUBS, ['club_code', 'partner', 'club', 'created']);
-  ensureTab_(ss, TAB.REVIEW,
-             ['raised', 'issue', 'partner', 'club', 'detail', 'resolved']);
-  ensureTab_(ss, TAB.AUDIT, ['when', 'action', 'detail']);
+  ensureTab_(ss, TAB.PARTNERS, PARTNER_COLS);
+  ensureTab_(ss, TAB.CLUBS, CLUB_COLS);
+  ensureTab_(ss, TAB.REVIEW, REVIEW_COLS);
+  ensureTab_(ss, TAB.AUDIT, AUDIT_COLS);
   SpreadsheetApp.getActive().toast('Tabs are ready.', 'GLOW', 5);
 }
 
@@ -30,32 +50,88 @@ function ensureTab_(ss, name, headers) {
 }
 
 function audit_(action, detail) {
-  ensureTab_(SpreadsheetApp.getActive(), TAB.AUDIT, ['when', 'action', 'detail'])
-      .appendRow([new Date(), action, detail]);
+  ensureTab_(SpreadsheetApp.getActive(), TAB.AUDIT, AUDIT_COLS)
+      .appendRow([now_(), action, detail]);
 }
 
+/**
+ * Add issues to the ReviewQueue, skipping any that are already there and
+ * still unresolved (same issue + partner + club). Re-running the rebuild
+ * must not fill the tab with copies of the same open question.
+ */
 function review_(rows) {
   if (!rows.length) return;
-  const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.REVIEW,
-      ['raised', 'issue', 'partner', 'club', 'detail', 'resolved']);
-  const now = new Date();
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 6).setValues(
-      rows.map(function (r) {
-        return [now, r.issue, r.partner || '', r.club || '', r.detail || '', ''];
+  const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.REVIEW, REVIEW_COLS);
+  const open = {};
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, REVIEW_COLS.length).getValues()
+        .forEach(function (r) {
+          if (!tidy_(r[5])) open[key_(r[1]) + '||' + key_(r[2]) + '||' + key_(r[3])] = true;
+        });
+  }
+  const fresh = rows.filter(function (r) {
+    return !open[key_(r.issue) + '||' + key_(r.partner) + '||' + key_(r.club)];
+  });
+  if (!fresh.length) return;
+  const stamp = today_();
+  sheet.getRange(sheet.getLastRow() + 1, 1, fresh.length, REVIEW_COLS.length)
+      .setValues(fresh.map(function (r) {
+        return [stamp, r.issue, r.partner || '', r.club || '', r.detail || '', ''];
       }));
 }
 
-/** Partner → region, from the Partners tab. */
+/**
+ * Partner → region.
+ *
+ * The Partners tab is authoritative; PARTNER_REGIONS (Regions.gs, derived
+ * from the regional attendance forms) fills in only where the tab is blank,
+ * so a staff correction in the tab always sticks.
+ */
 function loadPartnerRegions_() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.PARTNERS);
   const regions = {};
+  Object.keys(PARTNER_REGIONS).forEach(function (partner) {
+    if (PARTNER_REGIONS[partner]) regions[key_(partner)] = PARTNER_REGIONS[partner];
+  });
+  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.PARTNERS);
   if (!sheet || sheet.getLastRow() < 2) return regions;
   sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues()
       .forEach(function (row) {
-        const partner = tidy_(row[0]);
-        if (partner) regions[key_(partner)] = tidy_(row[1]);
+        const partner = tidy_(row[0]), region = tidy_(row[1]);
+        if (partner && region) regions[key_(partner)] = region;
       });
   return regions;
+}
+
+/**
+ * Re-stamp the region column of every Roster row from the current
+ * partner → region mapping. Run after correcting a region in the Partners
+ * tab; the rebuild only sets region on rows it creates.
+ */
+function refreshRosterRegions() {
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName(TAB.ROSTER);
+  if (!sheet || sheet.getLastRow() < 2) {
+    ss.toast('The Roster tab is empty.', 'GLOW', 5);
+    return;
+  }
+  const regions = loadPartnerRegions_();
+  const iPartner = ROSTER_COLS.indexOf('partner') + 1;
+  const iRegion = ROSTER_COLS.indexOf('region') + 1;
+  const n = sheet.getLastRow() - 1;
+  const partners = sheet.getRange(2, iPartner, n, 1).getValues();
+  const current = sheet.getRange(2, iRegion, n, 1).getValues();
+  let changed = 0, missing = 0;
+  const updated = partners.map(function (row, i) {
+    const region = regions[key_(row[0])] || '';
+    if (!region) missing++;
+    if (region !== tidy_(current[i][0])) changed++;
+    return [region];
+  });
+  sheet.getRange(2, iRegion, n, 1).setValues(updated);
+  const summary = changed + ' of ' + n + ' rows changed' +
+      (missing ? ', ' + missing + ' rows still have no region' : '');
+  audit_('refreshRosterRegions', summary);
+  ss.toast(summary, 'GLOW regions', 10);
 }
 
 /** Existing roster rows, indexed for lookup. */
@@ -87,22 +163,38 @@ function loadRoster_() {
  * roster must not silently retire two thirds of a club).
  */
 function rebuildRosterFromResponses() {
-  setUpTabs();
   const ss = SpreadsheetApp.getActive();
+  // IDs are minted here; two overlapping runs would hand out the same numbers
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(30000)) {
+    ss.toast('Another rebuild is still running - try again in a minute.', 'GLOW', 8);
+    return;
+  }
+  try {
+    return rebuildRosterLocked_(ss);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function rebuildRosterLocked_(ss) {
+  setUpTabs();
   const clubs = readResponses_();
   const regions = loadPartnerRegions_();
   const existing = loadRoster_();
   const state = loadIdState_();
-  const today = new Date();
+  const today = today_();
 
   const toAppend = [], issues = [], partnersSeen = {};
-  let newGirls = 0, reactivated = 0, missingRegion = 0;
+  const reactivate = [];   // sheet rows to flip back to active
+  const noRegion = {};
+  let newGirls = 0;
 
   clubs.forEach(function (entry) {
     partnersSeen[key_(entry.partner)] = entry.partner;
     const ck = key_(entry.partner) + '||' + key_(entry.club);
     const region = regions[key_(entry.partner)] || '';
-    if (!region) missingRegion++;
+    if (!region) noRegion[key_(entry.partner)] = entry.partner;
 
     if (entry.duplicates.length) {
       issues.push({
@@ -122,15 +214,8 @@ function rebuildRosterFromResponses() {
     entry.names.forEach(function (name) {
       const found = byName[key_(name)];
       if (found) {
-        if (found.status === STATUS.INACTIVE) {
-          // she came back: same girl, same ID
-          const sheet = ss.getSheetByName(TAB.ROSTER);
-          sheet.getRange(found._sheetRow, ROSTER_COLS.indexOf('status') + 1)
-              .setValue(STATUS.ACTIVE);
-          sheet.getRange(found._sheetRow,
-                         ROSTER_COLS.indexOf('removed_date') + 1).setValue('');
-          reactivated++;
-        }
+        // she came back: same girl, same ID
+        if (found.status === STATUS.INACTIVE) reactivate.push(found._sheetRow);
         return;
       }
       toAppend.push([
@@ -158,8 +243,27 @@ function rebuildRosterFromResponses() {
     }
   });
 
+  Object.keys(noRegion).forEach(function (k) {
+    issues.push({
+      issue: 'Partner has no region',
+      partner: noRegion[k], club: '',
+      detail: 'Girls were added without a region, so they will not reach any ' +
+          'regional attendance form. Fill in the region on the Partners tab, ' +
+          'then run GLOW → Refresh regions.',
+    });
+  });
+
+  const sheet = ss.getSheetByName(TAB.ROSTER);
+  if (reactivate.length) {
+    const iStatus = ROSTER_COLS.indexOf('status') + 1;
+    const iRemoved = ROSTER_COLS.indexOf('removed_date') + 1;
+    const col = function (i) { return String.fromCharCode(64 + i); };
+    sheet.getRangeList(reactivate.map(function (r) { return col(iStatus) + r; }))
+        .setValue(STATUS.ACTIVE);
+    sheet.getRangeList(reactivate.map(function (r) { return col(iRemoved) + r; }))
+        .setValue('');
+  }
   if (toAppend.length) {
-    const sheet = ss.getSheetByName(TAB.ROSTER);
     sheet.getRange(sheet.getLastRow() + 1, 1, toAppend.length,
                    ROSTER_COLS.length).setValues(toAppend);
   }
@@ -167,9 +271,10 @@ function rebuildRosterFromResponses() {
   seedPartners_(partnersSeen);
   review_(issues);
 
+  const missingRegion = Object.keys(noRegion).length;
   const summary = clubs.length + ' clubs, ' + newGirls + ' new girls, ' +
-      reactivated + ' reactivated, ' + issues.length + ' for review' +
-      (missingRegion ? ', ' + missingRegion + ' clubs missing a region' : '');
+      reactivate.length + ' reactivated, ' + issues.length + ' for review' +
+      (missingRegion ? ', ' + missingRegion + ' partner(s) missing a region' : '');
   audit_('rebuildRosterFromResponses', summary);
   ss.toast(summary, 'GLOW roster', 10);
   return summary;
@@ -177,30 +282,52 @@ function rebuildRosterFromResponses() {
 
 function saveClubRegistry_(registry) {
   if (!registry.added.length) return;
-  const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.CLUBS,
-      ['club_code', 'partner', 'club', 'created']);
-  const now = new Date();
-  sheet.getRange(sheet.getLastRow() + 1, 1, registry.added.length, 4).setValues(
-      registry.added.map(function (e) {
-        return [e.code, e.partner, e.club, now];
+  const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.CLUBS, CLUB_COLS);
+  const stamp = today_();
+  sheet.getRange(sheet.getLastRow() + 1, 1, registry.added.length, CLUB_COLS.length)
+      .setValues(registry.added.map(function (e) {
+        return [e.code, e.partner, e.club, stamp];
       }));
   registry.added.length = 0;
 }
 
-/** Add any partner we have seen to the Partners tab so staff can set regions. */
+/**
+ * Add any partner we have seen to the Partners tab, prefilled with the
+ * region derived from the regional attendance forms (Regions.gs) when we
+ * have one. Existing rows are left alone except that a BLANK region is
+ * filled in from the derived map (and a blank note explained); anything
+ * staff have typed stays.
+ */
 function seedPartners_(partnersSeen) {
-  const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.PARTNERS,
-      ['partner', 'region', 'notes']);
+  const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.PARTNERS, PARTNER_COLS);
+  const derived = {}, notes = {};
+  Object.keys(PARTNER_REGIONS).forEach(function (p) {
+    derived[key_(p)] = PARTNER_REGIONS[p];
+    notes[key_(p)] = PARTNER_REGION_NOTES[p] || '';
+  });
+
   const known = {};
   if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues()
-        .forEach(function (r) { known[key_(r[0])] = true; });
+    const n = sheet.getLastRow() - 1;
+    const rows = sheet.getRange(2, 1, n, PARTNER_COLS.length).getValues();
+    rows.forEach(function (r, i) {
+      const k = key_(r[0]);
+      if (!k) return;
+      known[k] = true;
+      if (!tidy_(r[1]) && derived[k]) {
+        sheet.getRange(i + 2, 2).setValue(derived[k]);
+        if (!tidy_(r[2])) sheet.getRange(i + 2, 3).setValue(notes[k]);
+      }
+    });
   }
   const missing = Object.keys(partnersSeen)
-      .filter(function (k) { return !known[k]; })
-      .map(function (k) { return [partnersSeen[k], '', 'region needed']; });
+      .filter(function (k) { return k && !known[k]; })
+      .map(function (k) {
+        return [partnersSeen[k], derived[k] || '',
+                derived[k] ? notes[k] : 'region needed'];
+      });
   if (missing.length) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, 3)
+    sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, PARTNER_COLS.length)
         .setValues(missing);
   }
 }
