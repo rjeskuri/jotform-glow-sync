@@ -1,0 +1,41 @@
+{
+  "_about": "Translations for labels added after the forms were originally translated. Keys are the exact English strings on the form; tools/add_translations.py hashes them the way Jotform does (md5 of the text) and posts them. Session N is expanded for N = 1..15.",
+  "Session": {
+    "es": "Sesión", "fr": "Séance", "th": "ครั้งที่", "ur": "سیشن", "te": "సెషన్",
+    "vi": "Buổi", "ne": "सत्र", "km": "វគ្គ", "sw": "Kipindi", "ar": "الجلسة"
+  },
+  "Session {n}": {
+    "es": "Sesión {n}", "fr": "Séance {n}", "th": "ครั้งที่ {n}", "ur": "سیشن {n}", "te": "సెషన్ {n}",
+    "vi": "Buổi {n}", "ne": "सत्र {n}", "km": "វគ្គទី {n}", "sw": "Kipindi cha {n}", "ar": "الجلسة {n}"
+  },
+  "Mentor Email": {
+    "es": "Correo electrónico del mentor", "fr": "E-mail du mentor", "th": "อีเมลของพี่เลี้ยง",
+    "ur": "مینٹر کا ای میل", "te": "మెంటర్ ఇమెయిల్", "vi": "Email của người hướng dẫn",
+    "ne": "मेन्टरको इमेल", "km": "អ៊ីមែលរបស់អ្នកណែនាំ", "sw": "Barua pepe ya mshauri",
+    "ar": "البريد الإلكتروني للمرشد"
+  },
+  "A confirmation of this attendance submission will be sent here": {
+    "es": "Aquí se enviará una confirmación de este registro de asistencia",
+    "fr": "Une confirmation de cet envoi de présence sera envoyée ici",
+    "th": "การยืนยันการส่งข้อมูลการเข้าร่วมนี้จะถูกส่งมาที่นี่",
+    "ur": "اس حاضری کی تصدیق یہاں بھیجی جائے گی",
+    "te": "ఈ హాజరు సమర్పణ యొక్క నిర్ధారణ ఇక్కడకు పంపబడుతుంది",
+    "vi": "Xác nhận về lần điểm danh này sẽ được gửi đến đây",
+    "ne": "यो उपस्थिति पेशको पुष्टि यहाँ पठाइनेछ",
+    "km": "ការបញ្ជាក់នៃការដាក់ស្នើវត្តមាននេះនឹងត្រូវផ្ញើមកទីនេះ",
+    "sw": "Uthibitisho wa mahudhurio haya utatumwa hapa",
+    "ar": "سيتم إرسال تأكيد لتسجيل الحضور هذا إلى هنا"
+  },
+  "Partner": {
+    "es": "Organización asociada", "fr": "Organisation partenaire", "th": "องค์กรพันธมิตร",
+    "ur": "پارٹنر تنظیم", "te": "భాగస్వామి సంస్థ", "vi": "Tổ chức đối tác",
+    "ne": "साझेदार संस्था", "km": "អង្គការដៃគូ", "sw": "Shirika mshirika", "ar": "المنظمة الشريكة"
+  },
+  "Click here to report a problem": {
+    "es": "Haz clic aquí para informar de un problema", "fr": "Cliquez ici pour signaler un problème",
+    "th": "คลิกที่นี่เพื่อรายงานปัญหา", "ur": "مسئلہ رپورٹ کرنے کے لیے یہاں کلک کریں",
+    "te": "సమస్యను నివేదించడానికి ఇక్కడ క్లిక్ చేయండి", "vi": "Nhấp vào đây để báo cáo sự cố",
+    "ne": "समस्या रिपोर्ट गर्न यहाँ क्लिक गर्नुहोस्", "km": "ចុចទីនេះដើម្បីរាយការណ៍បញ្ហា",
+    "sw": "Bofya hapa kuripoti tatizo", "ar": "انقر هنا للإبلاغ عن مشكلة"
+  }
+}

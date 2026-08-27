@@ -103,9 +103,14 @@ def main():
               "--data-binary", json.dumps({"properties": {"language": [src_lang]}})],
              "set language property", api_key)
     if payload:
+        # POST replaces each language's dictionary: send existing + source strings
+        merged = {}
+        for lang, d in payload.items():
+            merged[lang] = dict(d)
+            merged[lang].update(have.get(lang, {}))
         call(["-X", "POST", f"{API_BASE}/form/{args.form}/translations?apiKey={api_key}",
               "-H", "Content-Type: application/json",
-              "--data-binary", json.dumps(payload, ensure_ascii=False)],
+              "--data-binary", json.dumps(merged, ensure_ascii=False)],
              "post translations", api_key)
 
     options, langs = describe(args.form, api_key)

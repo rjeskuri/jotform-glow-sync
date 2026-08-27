@@ -44,13 +44,15 @@ def call(args, label, api_key):
     return resp["content"]
 
 
+LINK_TEXT = "Click here to report a problem"   # translated in tools/translations_additions.json
+
+
 def link_html(url):
+    # one plain sentence, so it can be translated as a single string
     u = html.escape(url, quote=True)
     return ('<p style="margin:12px 0;padding:10px 12px;border:1px solid #ddd;'
             'border-radius:6px;background:#f7f7f7;font-size:14px">'
-            '<strong>Something not working?</strong> '
-            f'<a href="{u}" target="_blank" rel="noopener">Tell us what happened</a>'
-            ' &mdash; it takes a minute and helps us fix it quickly.</p>')
+            f'<a href="{u}" target="_blank" rel="noopener">{LINK_TEXT}</a></p>')
 
 
 def main():
