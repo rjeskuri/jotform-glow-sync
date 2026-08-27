@@ -79,6 +79,71 @@ def load_roster(path):
     return by_region
 
 
+CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID = "5", "331", "18"
+
+
+def audit_rules(questions, conditions):
+    """Rule-level checks on a form's live conditions. Returns a list of
+    problem strings (empty = clean) and a summary dict."""
+    problems = []
+    qids = set(questions)
+    clubs = {qid: " ".join(q["text"].split()) for qid, q in questions.items()
+             if q.get("type") == "control_checkbox"}
+    shown_by = defaultdict(list)     # club qid -> [rule ids that show it]
+    aggregate_operands = None
+    for c in conditions:
+        try:
+            terms = json.loads(c["terms"]) if isinstance(c["terms"], str) else c["terms"]
+            actions = json.loads(c["action"]) if isinstance(c["action"], str) else c["action"]
+        except (KeyError, ValueError, TypeError):
+            problems.append(f"rule {c.get('id')}: terms/action not parseable")
+            continue
+        for t in terms:
+            if str(t.get("field")) not in qids:
+                problems.append(f"rule {c.get('id')}: term refers to missing question {t.get('field')}")
+        for a in actions:
+            f = a.get("field") or a.get("resultField")
+            if f is not None and str(f) not in qids:
+                problems.append(f"rule {c.get('id')}: action refers to missing question {f}")
+            if a.get("visibility") == "Show" and str(a.get("field")) in clubs:
+                shown_by[str(a["field"])].append((c.get("id"), terms))
+            if str(a.get("resultField")) == CONTACT_IDS_QID:
+                aggregate_operands = {x for x in str(a.get("operands", "")).split(",") if x}
+                for op in aggregate_operands:
+                    if op not in qids:
+                        problems.append(f"Contact_IDs aggregate refers to missing question {op}")
+    # every club roster has exactly one show-rule whose clubName term equals its text
+    by_name = defaultdict(list)
+    for qid, name in clubs.items():
+        by_name[name.lower()].append(qid)
+    for qid, name in clubs.items():
+        rules = shown_by.get(qid, [])
+        if len(rules) != 1:
+            problems.append(f"'{name}' (q{qid}) has {len(rules)} show-rules, expected 1")
+            continue
+        _, terms = rules[0]
+        club_terms = [t for t in terms if str(t.get("field")) == CLUB_NAME_QID]
+        if not club_terms or " ".join(str(club_terms[0].get("value")).split()).lower() != name.lower():
+            problems.append(f"'{name}' (q{qid}): show-rule does not test clubName == its text")
+        has_partner = any(str(t.get("field")) == PARTNER_QID for t in terms)
+        if len(by_name[name.lower()]) > 1 and not has_partner:
+            problems.append(f"'{name}' (q{qid}) shares its name but its rule has no Partner term")
+        if len(by_name[name.lower()]) == 1 and has_partner:
+            problems.append(f"'{name}' (q{qid}) is unique but its rule needs a Partner")
+    if aggregate_operands is None:
+        problems.append("no Contact_IDs aggregate calculation found")
+    else:
+        missing = set(clubs) - aggregate_operands
+        extra = aggregate_operands - set(clubs)
+        if missing:
+            problems.append(f"Contact_IDs aggregate misses {len(missing)} roster(s): {sorted(missing, key=int)[:5]}")
+        if extra:
+            problems.append(f"Contact_IDs aggregate includes {len(extra)} non-roster question(s): {sorted(extra)[:5]}")
+    summary = {"clubs": len(clubs), "show_rules": sum(len(v) for v in shown_by.values()),
+               "aggregate_rosters": len(aggregate_operands or [])}
+    return problems, summary
+
+
 def form_report(form_id, api_key, roster_by_region):
     label, region = FORMS.get(form_id) or DEFUNCT.get(form_id) or (form_id, None)
     props = get(f"/form/{form_id}/properties", api_key, f"{form_id} properties")
@@ -102,7 +167,9 @@ def form_report(form_id, api_key, roster_by_region):
     fuzzy = questions.get(ENABLE_FUZZY_QID, {})
     mentor_email = any(q.get("type") == "control_email" for q in questions.values())
 
+    rule_problems, rule_summary = audit_rules(questions, conditions)
     rep = {
+        "rule_problems": rule_problems, "rule_summary": rule_summary,
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -162,6 +229,12 @@ def main():
               f"salesforce {'yes' if r['salesforce'] else 'NO'}")
         f = r["enable_fuzzy"]
         print(f"   enableFuzzy: required={f['required']} selected={f['selected']!r} hidden={f['hidden']}")
+        rs = r["rule_summary"]
+        print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
+              f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "
+              f"{'CLEAN' if not r['rule_problems'] else str(len(r['rule_problems'])) + ' PROBLEM(S)'}")
+        for p in r["rule_problems"][:10]:
+            print(f"      !! {p}")
         if r["duplicate_club_questions"]:
             print(f"   DUPLICATE club questions: {r['duplicate_club_questions']}")
         rc = r.get("region_check")
