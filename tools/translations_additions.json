@@ -8,6 +8,10 @@
     "es": "Sesión {n}", "fr": "Séance {n}", "th": "ครั้งที่ {n}", "ur": "سیشن {n}", "te": "సెషన్ {n}",
     "vi": "Buổi {n}", "ne": "सत्र {n}", "km": "វគ្គទី {n}", "sw": "Kipindi cha {n}", "ar": "الجلسة {n}"
   },
+  "Module": {
+    "es": "Módulo", "fr": "Module", "th": "โมดูล", "ur": "ماڈیول", "te": "మాడ్యూల్",
+    "vi": "Học phần", "ne": "मोड्युल", "km": "ម៉ូឌុល", "sw": "Moduli", "ar": "الوحدة"
+  },
   "Mentor Email": {
     "es": "Correo electrónico del mentor", "fr": "E-mail du mentor", "th": "อีเมลของพี่เลี้ยง",
     "ur": "مینٹر کا ای میل", "te": "మెంటర్ ఇమెయిల్", "vi": "Email của người hướng dẫn",
