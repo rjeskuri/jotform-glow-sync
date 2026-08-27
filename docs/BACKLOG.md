@@ -50,6 +50,7 @@ when the form is filled". Kills Africa's 3,900-checkbox weight and the
 | 18 | 5b `Girl_ID__c` external ID on Contact; backfill by exact normalized name within Account (script + Data Loader upsert); residue → ReviewQueue. Partial coverage is fine | 1 |
 | 19 | 5c Matcher: exact `Girl_ID__c` lookup before the existing fuzzy fallback (sandbox first) | 1 (needs SF dev) |
 | 20 | 5d Sync writes checkbox `calcValues` = girl IDs (verify the checkbox alignment convention on the template first); canary on one form, then the rest | 0.5 |
+| 20a | **Deactivate, never delete — carried into Salesforce.** The sheet already does this (a removed girl's row stays with `status = inactive` and `removed_date`; her ID is never reused; she just leaves the attendance form). Salesforce has no equivalent signal yet: add an `Active__c` checkbox (or `Status__c` picklist + `Inactive_Date__c`) on Contact; the sync sets it from the Roster's status on every run (needs 5b's `Girl_ID__c` to find the Contact); no Contact is ever deleted or merged, so `Attendance_Batch__c` history and all historical counts stay exactly as they were. Reports and dashboards filter on `Active__c` for "current" numbers and ignore it for "all-time" ones. Until 5b lands, removed girls are visible in the Roster tab and the ReviewQueue only | 0.5 (after 5b) |
 
 ## Data-quality and small things (any time)
 
