@@ -19,7 +19,11 @@ one form._
 Every one of them has: current rosters from the Roster tab, zero
 error-flagged rules, the Salesforce integration (identical mapping inherited
 from the template), the mentor confirmation email, sessions named "Session 1…",
-and `enable_fuzzy_matching` sending `false` instead of blank.
+and `enable_fuzzy_matching` sending `false` instead of blank. These links are
+current as of 2026-08-27 (re-verified: each resolves, is ENABLED, and its
+browser-tab title now matches the form name — the clones had inherited a
+"Clone of Clone of …" page title, fixed the same day). No "publish" step
+exists on Jotform: an ENABLED form is live.
 
 The old forms are still online but retitled **"… (defunct)"** in Jotform
 (`260703905772560` Africa, `260704198384564` Asia, `260704170003542` Latin
@@ -38,7 +42,10 @@ links (again any time via **Show form links**). Fill them in here:
 | Club Roster Form (enroll a new club / add or remove girls — one form, page 1 picks) | https://docs.google.com/forms/d/e/1FAIpQLScPO9Dizjl9G8krMcvs1sVnqYku3k8dB7Ycv-1VahgPDssMzQ/viewform |
 | Something isn't working? | https://docs.google.com/forms/d/e/1FAIpQLSeYx286-Bre0aSOWnhEDgC4_6FjGyPssldLA3J5WzIeK8cKCA/viewform |
 
-Created 2026-08-27. Edit links (owner only): Club Roster Form
+Created 2026-08-27; both forms have since been renamed in the Forms UI to
+**"Global Catalyst – Club Roster Form"** and **"Global Catalyst – Something
+isn't working?"** — the links above are unchanged (renaming a Google Form
+never changes its URL). Edit links (owner only): Club Roster Form
 `https://docs.google.com/forms/d/1mFIEtvUApiCgzjmv3sPEfZZxC82krwI-Memel3mhEJM/edit`,
 problem report `https://docs.google.com/forms/d/1iglohAbPiyyvjPhZECtnF0sgzeoZIGOexKiHI8vsQ80/edit`.
 Responses land in the sheet tabs *Roster Form Responses* and *Feedback*.
