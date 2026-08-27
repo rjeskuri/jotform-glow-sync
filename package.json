@@ -1,0 +1,13 @@
+{
+  "name": "jotform-glow-sync",
+  "private": true,
+  "description": "Tooling for the GLOW enrollment sheet and Jotform attendance forms",
+  "scripts": {
+    "test": "node test/parity_test.js && node test/forms_logic_test.js",
+    "clasp:push": "cd appsscript && npx clasp push -f",
+    "clasp:open": "cd appsscript && npx clasp open"
+  },
+  "devDependencies": {
+    "@google/clasp": "2.4.2"
+  }
+}

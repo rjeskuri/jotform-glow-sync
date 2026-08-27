@@ -70,15 +70,32 @@ upload leaves Roster, ClubRegistry and Partners unchanged (ReviewQueue only
 gains genuinely new questions; Audit gains one line per run), which is the
 check that both paths agree.
 
-## Optional: pushing the Apps Script from here
+## Pushing the Apps Script with clasp (instead of pasting)
 
-Pasting six files into the Apps Script editor works, but `clasp` (Google's
-CLI) can push them directly:
+`clasp` is Google's command-line tool for Apps Script. Once set up, the
+whole `appsscript/` folder goes into the sheet's script project with one
+command, and so does every later change. This machine runs Node 18, so the
+repo pins clasp 2.4.2 (clasp 3 needs Node 20); `npm install` fetches it.
 
-    npm install -g @google/clasp
-    clasp login                       # browser sign-in, once
-    # in the sheet: Extensions → Apps Script → Project Settings → copy Script ID
-    cd appsscript && clasp clone <SCRIPT_ID> && clasp push
+One-time, with you at the keyboard (it signs in as *your* Google account —
+the forms and triggers it creates belong to you):
 
-`clasp login` uses your own Google account, so this needs you at the keyboard
-the first time.
+1. In a terminal in this folder: `npm install` then `npx clasp login`.
+   A browser tab opens; pick the account that owns the master enrollment
+   sheet; allow. The token lands in `~/.clasprc.json` (never in the repo).
+2. Turn on the Apps Script API for your account (clasp needs it):
+   <https://script.google.com/home/usersettings> → **Google Apps Script API → On**.
+3. Get the script's ID: open the sheet → **Extensions → Apps Script** → ⚙
+   **Project Settings** → copy **Script ID**. Put it in
+   `appsscript/.clasp.json` (gitignored):
+
+       {"scriptId": "<SCRIPT_ID>", "rootDir": "."}
+
+4. Push: `npm run clasp:push` (that is `clasp push -f` inside `appsscript/`;
+   `-f` skips the "overwrite?" prompt). Reload the sheet — the **GLOW** menu
+   appears; continue with the First run steps in `appsscript/INSTALL.md`.
+
+`appsscript/appsscript.json` is the project manifest clasp requires
+(V8 runtime, time zone for the Monday digest). Edit the `.gs` files in the
+repo, run tests, push — never edit in the online editor, the next push would
+overwrite it.

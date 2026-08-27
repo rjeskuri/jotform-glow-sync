@@ -18,3 +18,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 node_modules/
+
+# clasp login token lives in ~/.clasprc.json (never in the repo); the
+# project link (.clasp.json) is not secret but is per-installation
+appsscript/.clasp.json
