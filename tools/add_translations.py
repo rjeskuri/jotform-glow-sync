@@ -16,6 +16,12 @@ whole dictionary. This tool therefore always reads the form's current
 strings and posts them back together with the additions. Never post a
 partial dictionary; backups/translations/ holds full copies.
 
+Also learned: a translation is only ever APPLIED if its key exists in the
+`base` (and `en`) source map - the runtime resolves an element's text to a
+key through `base`. So the English source of every added string is written
+to base/en too (merged; base already holds every roster name, which is why
+it is never rebuilt from scratch here).
+
 Text elements (the report link) are matched two ways, because Jotform may
 hash either the plain sentence or the element's whole HTML: both keys are
 posted, the HTML variant carrying the link around the translated sentence.
@@ -150,6 +156,16 @@ def main():
         for lang, d in payload.items():
             merged[lang] = dict(store.get(lang, {}))
             merged[lang].update(d)
+        # The runtime finds an element's key by looking its English text up in
+        # `base` (and the server builds the text-keyed dictionaries from it),
+        # so every added key also needs its English source in base and en.
+        for src_key in ("base", "en"):
+            merged[src_key] = dict(store.get(src_key, {}))
+            for english in additions:
+                if english in strings or (link and english in link["text"]):
+                    merged[src_key].setdefault(md5(english), english)
+            if link:
+                merged[src_key].setdefault(md5(link["text"]), link["text"])
         call(["-X", "POST", f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}",
               "-H", "Content-Type: application/json",
               "--data-binary", json.dumps(merged, ensure_ascii=False)], f"{form_id} post", api_key)
