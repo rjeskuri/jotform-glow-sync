@@ -46,24 +46,23 @@ function onAnyFormSubmit(e) {
   }
 }
 
-/** 'NEW_CLUB' | 'ROSTER_MOD' | 'FEEDBACK' | null, by the sheet's linked form. */
+/** 'ROSTER' | 'FEEDBACK' | null, by the sheet's linked form. */
 function formKeyForSheet_(sheet) {
   const id = formIdOfSheet_(sheet);
   if (!id) return null;
   const props = PropertiesService.getScriptProperties();
-  const keys = { NEW_CLUB: PROP.NEW_CLUB_FORM, ROSTER_MOD: PROP.ROSTER_MOD_FORM,
-                 FEEDBACK: PROP.FEEDBACK_FORM };
+  const keys = { ROSTER: PROP.ROSTER_FORM, FEEDBACK: PROP.FEEDBACK_FORM };
   for (const k in keys) if (props.getProperty(keys[k]) === id) return k;
   return null;
 }
 
-/** Menu: run every unprocessed (or failed) response of the three forms. */
+/** Menu: run every unprocessed (or failed) response of both forms. */
 function processMissedResponses() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(120000);
   let done = 0;
   try {
-    ['NEW_CLUB', 'ROSTER_MOD', 'FEEDBACK'].forEach(function (which) {
+    ['ROSTER', 'FEEDBACK'].forEach(function (which) {
       const id = PropertiesService.getScriptProperties().getProperty(PROP[which + '_FORM']);
       const sheet = id && responseSheetFor_(id);
       if (!sheet || sheet.getLastRow() < 2) return;
@@ -92,9 +91,9 @@ function processResponseRow_(which, sheet, row) {
   const source = sheet.getName() + '!' + row;
   let result;
   try {
-    if (which === 'NEW_CLUB') result = handleNewClub_(answers, source);
-    else if (which === 'ROSTER_MOD') result = handleRosterChange_(answers, source);
-    else result = handleFeedback_(answers, source);
+    if (which === 'FEEDBACK') result = handleFeedback_(answers, source);
+    else if (isNewClubResponse_(answers)) result = handleNewClub_(answers, source);
+    else result = handleRosterChange_(answers, source);
   } catch (err) {
     result = 'ERROR: ' + err.message;
     review_([{ issue: 'Form response could not be processed', partner: '', club: '',
@@ -106,12 +105,23 @@ function processResponseRow_(which, sheet, row) {
 }
 
 /**
+ * Which branch of the Club Roster Form was used. The page-1 answer decides;
+ * if it is somehow blank, a filled-in club name means the new-club branch.
+ */
+function isNewClubResponse_(answers) {
+  const action = tidy_(answers[Q.ACTION]);
+  if (action) return key_(action) === key_(Q.ACTION_NEW);
+  return !!tidy_(answers[Q.CLUB]);
+}
+
+/**
  * A stable identity for one response: form + the timestamp in milliseconds
  * (not its text, which depends on the time zone) + partner + club.
  */
 function responseKey_(which, timestamp, answers) {
   const stamp = (timestamp instanceof Date) ? String(timestamp.getTime()) : tidy_(timestamp);
-  return which + '|' + stamp + '|' + tidy_(answers[Q.PARTNER] || answers[Q.FB_FORM]) +
+  const partner = answers[Q.PARTNER_NEW] || answers[Q.PARTNER_MOD] || answers[Q.FB_FORM];
+  return which + '|' + stamp + '|' + tidy_(partner) +
       '|' + tidy_(answers[Q.CLUB] || clubFromSections_(answers));
 }
 
@@ -142,7 +152,7 @@ function formLogAdd_(which, row, responseKey, result) {
 // ------------------------------------------------------------ New club
 function handleNewClub_(a, source) {
   const ss = SpreadsheetApp.getActive();
-  let partner = tidy_(a[Q.PARTNER]);
+  let partner = tidy_(a[Q.PARTNER_NEW]);
   const typed = tidy_(a[Q.NEW_PARTNER]);
   if (!partner || partner === OTHER_PARTNER) partner = typed;
   const club = tidy_(a[Q.CLUB]);
@@ -199,11 +209,11 @@ function handleNewClub_(a, source) {
 // ------------------------------------------------------ Roster change
 function handleRosterChange_(a, source) {
   const ss = SpreadsheetApp.getActive();
-  const partner = tidy_(a[Q.PARTNER]);
+  const partner = tidy_(a[Q.PARTNER_MOD]);
   const club = clubFromSections_(a);
   const adds = parseRoster_(a[Q.ADD]);
   const removes = parseRoster_(a[Q.REMOVE]);
-  const mentorEmail = tidy_(a[Q.MENTOR_EMAIL]);
+  const mentorEmail = tidy_(a[Q.MENTOR_EMAIL_MOD]);
   if (!partner || !club) throw new Error('incomplete submission: no partner/club chosen');
   if (!adds.names.length && !removes.names.length) return 'nothing to do (no names given)';
 

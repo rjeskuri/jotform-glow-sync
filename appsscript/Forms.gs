@@ -1,15 +1,17 @@
 /**
- * The three Google Forms, generated and kept current from the spreadsheet.
+ * The Google Forms, generated and kept current from the spreadsheet.
  *
- *   New Club Enrollment   partner dropdown; a "not listed" choice branches to
- *                         a short page that requires the new organization's
- *                         name; then club, roster, mentor details → handler
- *                         creates the club, mints IDs, queues it for Salesforce
- *   Roster Modification   partner-branched: page 1 is the partner dropdown,
- *                         each partner has its own section listing only its
- *                         clubs, then one shared "the change" page with
- *                         ADD / REMOVE lists → handler adds, reactivates or
- *                         retires girls; nothing is ever deleted
+ *   Club Roster Form   ONE form for both jobs. Page 1 asks what you want to
+ *                      do and jumps to the right branch:
+ *                        - Enroll a NEW club: partner (a "not listed" choice
+ *                          branches to a page that requires the organization's
+ *                          name), then club, roster, mentor details → the
+ *                          handler creates the club, mints IDs, queues it for
+ *                          Salesforce
+ *                        - Add/remove girls: partner → that partner's own club
+ *                          list (no 300-item dropdown) → ADD / REMOVE lists →
+ *                          the handler adds, reactivates or retires girls;
+ *                          nothing is ever deleted
  *   Something isn't working?   a one-minute problem report → staff email
  *
  * Run `createGlowForms` once from the GLOW menu (it is idempotent: forms
@@ -22,19 +24,26 @@
  *
  * NAVIGATION — read before touching setGoToPage. In FormApp a page break's
  * setGoToPage(x) sets where the form goes after completing the page BEFORE
- * that break (i.e. what happens when the respondent reaches the break by
- * pressing Next). A dropdown choice created with createChoice(value, pageBreak)
- * overrides that for the page the dropdown is on. So:
- *   - page-1 dropdown choices jump to a partner's section;
- *   - every partner section's break carries setGoToPage(changesPage), which
- *     wires "after the PREVIOUS partner's section → the change page";
- *   - the change page's break is CONTINUE, so the last partner's section
- *     flows into it too. Nothing carries SUBMIT — the last page submits.
+ * that break (i.e. what happens when the respondent presses Next at the end
+ * of the previous section). A choice created with createChoice(value,
+ * pageBreak) overrides that for the page the question is on. The Club Roster
+ * Form's pages, in order, and what each break's goToPage means:
+ *
+ *   page 1        "What would you like to do?"      choices jump to (2) or (5)
+ *   (2) NEW: partner dropdown                        choices jump to (3) or (4)
+ *   (3) "Your organization" (new partners only)      → CONTINUE into (4)
+ *   (4) "The club"                                   break (5) = SUBMIT, so
+ *                                                    finishing (4) submits
+ *   (5) MOD: partner dropdown                        choices jump to a section
+ *   (6…) one section per partner, its club list      each break → (7)
+ *   (7) "The change"                                 break = CONTINUE; last page
  */
 
 const CHANGES_PAGE_TITLE = 'The change';
 const NEW_PARTNER_PAGE_TITLE = 'Your organization';
 const CLUB_PAGE_TITLE = 'The club';
+const NEW_BRANCH_PAGE_TITLE = 'New club';
+const MOD_BRANCH_PAGE_TITLE = 'Existing club';
 
 function createGlowForms() {
   const ss = SpreadsheetApp.getActive();
@@ -42,18 +51,16 @@ function createGlowForms() {
   const made = [];
 
   const feedback = existingForm_(PROP.FEEDBACK_FORM) || createFeedbackForm_(ss, made);
-  const newClub = existingForm_(PROP.NEW_CLUB_FORM) || createNewClubForm_(ss, feedback, made);
-  const rosterMod = existingForm_(PROP.ROSTER_MOD_FORM) ||
-      createRosterModificationForm_(ss, feedback, newClub, made);
+  const roster = existingForm_(PROP.ROSTER_FORM) || createRosterForm_(ss, feedback, made);
 
   syncFormChoices();
   installTriggers();
-  audit_('createGlowForms', made.length ? 'created: ' + made.join(', ') : 'all three already existed');
+  audit_('createGlowForms', made.length ? 'created: ' + made.join(', ') : 'both forms already existed');
 
-  ui.alert('GLOW forms', formLinksText_(newClub, rosterMod, feedback) +
-      '\n\nResponses land in the tabs "' + TAB.NEW_CLUB + '", "' + TAB.ROSTER_MOD +
-      '" and "' + TAB.FEEDBACK + '". Set STAFF_NOTIFY_EMAIL in Script Properties ' +
-      'to receive problem reports and the weekly Salesforce digest.',
+  ui.alert('GLOW forms', formLinksText_(roster, feedback) +
+      '\n\nResponses land in the tabs "' + TAB.ROSTER_FORM + '" and "' + TAB.FEEDBACK +
+      '". Set STAFF_NOTIFY_EMAIL in Script Properties to receive problem reports ' +
+      'and the weekly Salesforce digest.',
       ui.ButtonSet.OK);
 }
 
@@ -73,7 +80,7 @@ function commonSettings_(form, description, confirmation) {
   try { form.setRequireLogin(false); } catch (err) { /* consumer accounts have no domain */ }
 }
 
-// ------------------------------------------------------------ Form 3
+// ------------------------------------------------------------ Feedback
 function createFeedbackForm_(ss, made) {
   const form = FormApp.create(FORM_TITLES.FEEDBACK);
   commonSettings_(form,
@@ -84,8 +91,7 @@ function createFeedbackForm_(ss, made) {
       'Thank you — we have received your report and will look into it.');
   const forms = ['Africa Attendance Form', 'Asia Attendance Form',
                  'Latin America Attendance Form', 'U.S Attendance Form',
-                 FORM_TITLES.NEW_CLUB, FORM_TITLES.ROSTER_MOD,
-                 'The enrollment spreadsheet', 'Something else'];
+                 FORM_TITLES.ROSTER, 'The enrollment spreadsheet', 'Something else'];
   form.addListItem().setTitle(Q.FB_FORM).setChoiceValues(forms).setRequired(true);
   form.addParagraphTextItem().setTitle(Q.FB_DOING);
   form.addParagraphTextItem().setTitle(Q.FB_WHAT).setRequired(true)
@@ -102,20 +108,25 @@ function createFeedbackForm_(ss, made) {
   return form;
 }
 
-// ------------------------------------------------------------ Form 1
-function createNewClubForm_(ss, feedback, made) {
-  const form = FormApp.create(FORM_TITLES.NEW_CLUB);
+// ------------------------------------------------------ Club Roster Form
+function createRosterForm_(ss, feedback, made) {
+  const form = FormApp.create(FORM_TITLES.ROSTER);
   commonSettings_(form,
-      'Use this form to enroll a NEW club. One submission per club. To add or ' +
-      'remove girls from a club that is already enrolled, use the Roster ' +
-      'Modification form instead.\n\nSomething not working? ' + feedback.getPublishedUrl(),
-      'Thank you — the club has been received. Its roster will appear on the ' +
-      'attendance form within the hour. If we have a question about any of the ' +
-      'names we will contact the mentor by email.');
-  // page 1: the partner. Choices are wired in syncFormChoices(): known
-  // partners jump straight to "The club", the "not listed" choice goes
-  // through "Your organization" first, where the name is required.
-  form.addListItem().setTitle(Q.PARTNER).setRequired(true);
+      'Enroll a new club, or add and remove girls in a club that is already ' +
+      'enrolled. Changes reach the attendance form within the hour. Removed ' +
+      'girls stop appearing on the attendance form; their history is kept.' +
+      '\n\nSomething not working? ' + feedback.getPublishedUrl(),
+      'Thank you — received. It will reach the attendance form within the hour. ' +
+      'If we have a question about any name we will contact the mentor by email ' +
+      'rather than guess.');
+
+  // page 1: which job? (choices wired below, once the pages exist)
+  const action = form.addMultipleChoiceItem().setTitle(Q.ACTION).setRequired(true);
+
+  // ---- branch A: new club
+  const newBranch = form.addPageBreakItem().setTitle(NEW_BRANCH_PAGE_TITLE)
+      .setHelpText('One submission per club.');
+  form.addListItem().setTitle(Q.PARTNER_NEW).setRequired(true);   // choices: syncFormChoices
 
   form.addPageBreakItem().setTitle(NEW_PARTNER_PAGE_TITLE)
       .setHelpText('Your organization is not enrolled yet — tell us who you are.');
@@ -140,28 +151,13 @@ function createNewClubForm_(ss, feedback, made) {
       .setValidation(FormApp.createTextValidation().requireTextIsEmail().build());
   form.addMultipleChoiceItem().setTitle(Q.ENGLISH).setChoiceValues(['Yes', 'No']);
   form.addTextItem().setTitle(Q.LANGUAGE);
-  linkFormToSheet_(form, ss, TAB.NEW_CLUB);
-  PropertiesService.getScriptProperties().setProperty(PROP.NEW_CLUB_FORM, form.getId());
-  made.push('new club');
-  return form;
-}
 
-// ------------------------------------------------------------ Form 2
-function createRosterModificationForm_(ss, feedback, newClub, made) {
-  const form = FormApp.create(FORM_TITLES.ROSTER_MOD);
-  commonSettings_(form,
-      'Use this form to ADD girls to, or REMOVE girls from, a club that is ' +
-      'already enrolled. Pick your organization, then your club, then list the ' +
-      'changes. Removed girls stop appearing on the attendance form; their ' +
-      'history is kept.\n\nEnrolling a brand-new club? Use ' + newClub.getPublishedUrl() +
-      '\nSomething not working? ' + feedback.getPublishedUrl(),
-      'Thank you — the change has been received and will reach the attendance ' +
-      'form within the hour. If a name to remove did not match anyone on the ' +
-      'roster we will check with you by email rather than guess.');
-  form.addListItem().setTitle(Q.PARTNER).setRequired(true)
-      .setHelpText('Not listed? Your organization has no enrolled clubs yet — ' +
-                   'use the New Club Enrollment form.');
-  // partner sections are inserted before this page by syncFormChoices()
+  // ---- branch B: existing club
+  const modBranch = form.addPageBreakItem().setTitle(MOD_BRANCH_PAGE_TITLE)
+      .setHelpText('Not listed? Your organization has no enrolled clubs yet — go ' +
+                   'back and choose "' + Q.ACTION_NEW + '".');
+  form.addListItem().setTitle(Q.PARTNER_MOD).setRequired(true);   // choices: syncFormChoices
+  // one section per partner is inserted here by syncFormChoices()
   form.addPageBreakItem().setTitle(CHANGES_PAGE_TITLE);
   form.addParagraphTextItem().setTitle(Q.ADD)
       .setHelpText('Leave empty if nobody is joining. Girls who were on this ' +
@@ -169,101 +165,101 @@ function createRosterModificationForm_(ss, feedback, newClub, made) {
   form.addParagraphTextItem().setTitle(Q.REMOVE)
       .setHelpText('Leave empty if nobody is leaving. Spell names as they were ' +
                    'enrolled; we match ignoring capitals.');
-  form.addTextItem().setTitle(Q.MENTOR_EMAIL).setRequired(true)
-      .setHelpText('We send a short confirmation of what changed.')
+  form.addTextItem().setTitle(Q.MENTOR_EMAIL_MOD).setRequired(true)
       .setValidation(FormApp.createTextValidation().requireTextIsEmail().build());
   form.addParagraphTextItem().setTitle(Q.NOTES);
-  linkFormToSheet_(form, ss, TAB.ROSTER_MOD);
-  PropertiesService.getScriptProperties().setProperty(PROP.ROSTER_MOD_FORM, form.getId());
-  made.push('roster modification');
+
+  // page-1 choices jump to the branches; finishing branch A submits
+  action.setChoices([action.createChoice(Q.ACTION_NEW, newBranch),
+                     action.createChoice(Q.ACTION_MOD, modBranch)]);
+  modBranch.setGoToPage(FormApp.PageNavigationType.SUBMIT);
+
+  linkFormToSheet_(form, ss, TAB.ROSTER_FORM);
+  PropertiesService.getScriptProperties().setProperty(PROP.ROSTER_FORM, form.getId());
+  made.push('club roster');
   return form;
 }
 
 // ------------------------------------------------- keeping choices current
 /**
- * Make the forms' dropdowns match the spreadsheet: the partner lists, and on
- * the Roster Modification form one section per partner holding only that
- * partner's active clubs. New partners get a new section; nothing is removed
- * (a partner whose clubs all went inactive keeps a section, which the
- * dropdown still routes to — harmless).
+ * Make the form's dropdowns match the spreadsheet: both partner lists, and
+ * one section per partner holding only that partner's active clubs. New
+ * partners get a new section; nothing is removed (a partner whose clubs all
+ * went inactive keeps a section, which the dropdown still routes to).
  */
 function syncFormChoices() {
+  const form = existingForm_(PROP.ROSTER_FORM);
+  if (!form) return 0;
   const partners = partnerChoices_();
   const clubsByPartner = activeClubsByPartner_();
   let changed = 0;
 
-  const newClub = existingForm_(PROP.NEW_CLUB_FORM);
-  if (newClub) {
-    const partnerItem = findListItem_(newClub, Q.PARTNER);
-    const newPartnerPage = findPageBreak_(newClub, NEW_PARTNER_PAGE_TITLE);
-    const clubPage = findPageBreak_(newClub, CLUB_PAGE_TITLE);
-    if (!partnerItem || !newPartnerPage || !clubPage) {
-      throw new Error('New Club form is missing its partner dropdown or its "' +
-                      NEW_PARTNER_PAGE_TITLE + '" / "' + CLUB_PAGE_TITLE + '" pages');
-    }
-    const wanted = partners.concat([OTHER_PARTNER]);
-    if (!sameValues_(partnerItem, wanted)) {
-      partnerItem.setChoices(partners.map(function (p) {
-        return partnerItem.createChoice(p, clubPage);
-      }).concat([partnerItem.createChoice(OTHER_PARTNER, newPartnerPage)]));
+  const need = function (item, what) {
+    if (!item) throw new Error('Club Roster Form is missing ' + what);
+    return item;
+  };
+  const newPartnerPage = need(findPageBreak_(form, NEW_PARTNER_PAGE_TITLE), '"' + NEW_PARTNER_PAGE_TITLE + '"');
+  const clubPage = need(findPageBreak_(form, CLUB_PAGE_TITLE), '"' + CLUB_PAGE_TITLE + '"');
+  const modBranch = need(findPageBreak_(form, MOD_BRANCH_PAGE_TITLE), '"' + MOD_BRANCH_PAGE_TITLE + '"');
+  const changesPage = need(findPageBreak_(form, CHANGES_PAGE_TITLE), '"' + CHANGES_PAGE_TITLE + '"');
+  const partnerNew = need(findListItem_(form, Q.PARTNER_NEW), 'the new-club partner dropdown');
+  const partnerMod = need(findListItem_(form, Q.PARTNER_MOD), 'the existing-club partner dropdown');
+
+  // branch A: known partners skip straight to "The club"
+  const wantedNew = partners.concat([OTHER_PARTNER]);
+  if (!sameValues_(partnerNew, wantedNew)) {
+    partnerNew.setChoices(partners.map(function (p) {
+      return partnerNew.createChoice(p, clubPage);
+    }).concat([partnerNew.createChoice(OTHER_PARTNER, newPartnerPage)]));
+    changed++;
+  }
+  clubPage.setGoToPage(FormApp.PageNavigationType.CONTINUE);      // after "Your organization"
+  modBranch.setGoToPage(FormApp.PageNavigationType.SUBMIT);       // after "The club"
+
+  // branch B: one section per partner, before "The change"
+  const sections = {};
+  form.getItems(FormApp.ItemType.PAGE_BREAK).forEach(function (pb) {
+    sections[key_(pb.getTitle())] = pb.asPageBreakItem();
+  });
+  const lists = {};
+  form.getItems(FormApp.ItemType.LIST).forEach(function (li) {
+    lists[key_(li.getTitle())] = li.asListItem();
+  });
+  const allPartners = partners.slice();
+  Object.keys(clubsByPartner).forEach(function (k) {
+    if (!partners.some(function (p) { return key_(p) === k; })) allPartners.push(clubsByPartner[k].partner);
+  });
+  allPartners.sort(function (a, b) { return a.localeCompare(b); });
+
+  allPartners.forEach(function (partner) {
+    const clubs = (clubsByPartner[key_(partner)] || { clubs: [] }).clubs;
+    let pb = sections[key_(partner)];
+    let list = lists[key_(clubQuestionTitle_(partner))];
+    if (!pb) {
+      const at = changesPage.getIndex();
+      pb = form.addPageBreakItem().setTitle(partner);
+      form.moveItem(pb.getIndex(), at);
+      list = form.addListItem().setTitle(clubQuestionTitle_(partner)).setRequired(true);
+      form.moveItem(list.getIndex(), at + 1);
+      sections[key_(partner)] = pb;
+      lists[key_(list.getTitle())] = list;
+      changed++;
+    } else if (!list) {
+      list = form.addListItem().setTitle(clubQuestionTitle_(partner)).setRequired(true);
+      form.moveItem(list.getIndex(), pb.getIndex() + 1);
+      lists[key_(list.getTitle())] = list;
       changed++;
     }
-    clubPage.setGoToPage(FormApp.PageNavigationType.CONTINUE);   // after "Your organization"
-  }
+    pb.setGoToPage(changesPage);   // "after the section before this break → the change page"
+    const values = clubs.length ? clubs : ['(no active clubs)'];
+    if (!sameValues_(list, values)) { list.setChoiceValues(values); changed++; }
+  });
+  changesPage.setGoToPage(FormApp.PageNavigationType.CONTINUE);   // last section → change page
 
-  const mod = existingForm_(PROP.ROSTER_MOD_FORM);
-  if (mod) {
-    const changesPage = findPageBreak_(mod, CHANGES_PAGE_TITLE);
-    if (!changesPage) throw new Error('Roster Modification form has no "' + CHANGES_PAGE_TITLE + '" page');
-    const sections = {};
-    mod.getItems(FormApp.ItemType.PAGE_BREAK).forEach(function (pb) {
-      sections[key_(pb.getTitle())] = pb.asPageBreakItem();
-    });
-    const lists = {};
-    mod.getItems(FormApp.ItemType.LIST).forEach(function (li) {
-      lists[key_(li.getTitle())] = li.asListItem();
-    });
+  partnerMod.setChoices(allPartners.map(function (p) {
+    return partnerMod.createChoice(p, sections[key_(p)]);
+  }));
 
-    const allPartners = partners.slice();
-    Object.keys(clubsByPartner).forEach(function (k) {
-      if (!partners.some(function (p) { return key_(p) === k; })) allPartners.push(clubsByPartner[k].partner);
-    });
-    allPartners.sort(function (a, b) { return a.localeCompare(b); });
-
-    allPartners.forEach(function (partner) {
-      const clubs = (clubsByPartner[key_(partner)] || { clubs: [] }).clubs;
-      let pb = sections[key_(partner)];
-      let list = lists[key_(clubQuestionTitle_(partner))];
-      if (!pb) {
-        // new partner: section + club dropdown, placed just before the change page
-        const at = changesPage.getIndex();
-        pb = mod.addPageBreakItem().setTitle(partner);
-        mod.moveItem(pb.getIndex(), at);
-        list = mod.addListItem().setTitle(clubQuestionTitle_(partner)).setRequired(true);
-        mod.moveItem(list.getIndex(), at + 1);
-        sections[key_(partner)] = pb;
-        lists[key_(list.getTitle())] = list;
-        changed++;
-      } else if (!list) {
-        list = mod.addListItem().setTitle(clubQuestionTitle_(partner)).setRequired(true);
-        mod.moveItem(list.getIndex(), pb.getIndex() + 1);
-        lists[key_(list.getTitle())] = list;
-        changed++;
-      }
-      // "after the section before this break → the change page" (see header)
-      pb.setGoToPage(changesPage);
-      if (!sameValues_(list, clubs.length ? clubs : ['(no active clubs)'])) {
-        list.setChoiceValues(clubs.length ? clubs : ['(no active clubs)']);
-        changed++;
-      }
-    });
-    changesPage.setGoToPage(FormApp.PageNavigationType.CONTINUE);   // last section → change page
-
-    const partnerItem = findListItem_(mod, Q.PARTNER);
-    partnerItem.setChoices(allPartners.map(function (p) {
-      return partnerItem.createChoice(p, sections[key_(p)]);
-    }));
-  }
   audit_('syncFormChoices', changed + ' dropdown(s) updated');
   return changed;
 }
@@ -369,29 +365,28 @@ function responseSheetFor_(formId) {
   return null;
 }
 
-function formLinksText_(newClub, rosterMod, feedback) {
+function formLinksText_(roster, feedback) {
   const line = function (label, f) {
     return label + '\n  fill in: ' + f.getPublishedUrl() + '\n  edit:    ' + f.getEditUrl();
   };
-  return [line('New Club Enrollment', newClub), line('Roster Modification', rosterMod),
+  return [line('Club Roster Form (new clubs + roster changes)', roster),
           line("Something isn't working?", feedback)].join('\n\n');
 }
 
 function showFormLinks() {
   const ui = SpreadsheetApp.getUi();
-  const a = existingForm_(PROP.NEW_CLUB_FORM), b = existingForm_(PROP.ROSTER_MOD_FORM),
-        c = existingForm_(PROP.FEEDBACK_FORM);
-  if (!a || !b || !c) {
-    ui.alert('GLOW forms', 'Not all forms exist yet — run "Create the three Google Forms".',
+  const a = existingForm_(PROP.ROSTER_FORM), c = existingForm_(PROP.FEEDBACK_FORM);
+  if (!a || !c) {
+    ui.alert('GLOW forms', 'The forms do not exist yet — run "Create the Google Forms".',
              ui.ButtonSet.OK);
     return;
   }
-  ui.alert('GLOW forms', formLinksText_(a, b, c), ui.ButtonSet.OK);
+  ui.alert('GLOW forms', formLinksText_(a, c), ui.ButtonSet.OK);
 }
 
 /**
  * Close the original enrollment form (the one feeding the RESPONSES tab)
- * with a message pointing at the new forms. Only works when that form feeds
+ * with a message pointing at the new form. Only works when that form feeds
  * THIS spreadsheet; asks first; reversible in the form's own settings.
  */
 function retireOldEnrollmentForm() {
@@ -400,24 +395,24 @@ function retireOldEnrollmentForm() {
   const url = sheet && sheet.getFormUrl();
   if (!url) {
     ui.alert('GLOW', 'No form feeds "' + TAB.RESPONSES + '" in this spreadsheet — ask the ' +
-             'old form\'s owner to close it and point people at the new forms.', ui.ButtonSet.OK);
+             'old form\'s owner to close it and point people at the new form.', ui.ButtonSet.OK);
     return;
   }
-  const newClub = existingForm_(PROP.NEW_CLUB_FORM), mod = existingForm_(PROP.ROSTER_MOD_FORM);
-  if (!newClub || !mod) {
-    ui.alert('GLOW', 'Create the new forms first.', ui.ButtonSet.OK);
+  const roster = existingForm_(PROP.ROSTER_FORM);
+  if (!roster) {
+    ui.alert('GLOW', 'Create the new form first.', ui.ButtonSet.OK);
     return;
   }
   const old = FormApp.openByUrl(url);
   const answer = ui.alert('Retire the old enrollment form?',
       '"' + old.getTitle() + '" will stop accepting responses and show a message ' +
-      'with links to the two new forms. Existing responses are kept.',
+      'with a link to the new form. Existing responses are kept.',
       ui.ButtonSet.YES_NO);
   if (answer !== ui.Button.YES) return;
   old.setCustomClosedFormMessage(
-      'This form has been replaced.\n\nEnroll a NEW club: ' + newClub.getPublishedUrl() +
-      '\nAdd or remove girls in an existing club: ' + mod.getPublishedUrl());
+      'This form has been replaced. Enroll a new club, or add and remove girls ' +
+      'in an existing club, here: ' + roster.getPublishedUrl());
   old.setAcceptingResponses(false);
   audit_('retireOldEnrollmentForm', old.getTitle() + ' closed with redirect message');
-  ui.alert('GLOW', 'Done — the old form now redirects to the new ones.', ui.ButtonSet.OK);
+  ui.alert('GLOW', 'Done — the old form now redirects to the new one.', ui.ButtonSet.OK);
 }

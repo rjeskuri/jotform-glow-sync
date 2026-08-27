@@ -12,7 +12,7 @@ function onOpen() {
       .addItem('Show roster summary', 'showRosterSummary')
       .addSeparator()
       .addSubMenu(SpreadsheetApp.getUi().createMenu('Google Forms')
-          .addItem('Create the three Google Forms', 'createGlowForms')
+          .addItem('Create the Google Forms', 'createGlowForms')
           .addItem('Show form links', 'showFormLinks')
           .addItem('Update form dropdowns from the Roster', 'syncFormChoices')
           .addItem('Process any missed form responses', 'processMissedResponses')

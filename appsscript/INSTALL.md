@@ -57,20 +57,19 @@ or Salesforce.
 Re-running the rebuild is always safe: existing girls keep their IDs, only new
 names get new ones.
 
-## The three Google Forms (Phase 3)
+## The Google Forms (Phase 3)
 
-Once the Roster tab exists, **GLOW → Google Forms → Create the three Google
-Forms** builds, in your own Google Drive:
+Once the Roster tab exists, **GLOW → Google Forms → Create the Google Forms**
+builds, in your own Google Drive:
 
 | Form | Who uses it | What happens on submit |
 |---|---|---|
-| **New Club Enrollment** | a partner starting a club | club + girls go into the Roster with IDs; the club is added to the **SF Pending** tab for whoever creates Salesforce Accounts; anything odd goes to the ReviewQueue |
-| **Roster Modification** | a mentor adding or removing girls | page 1 is the partner list; each partner then sees only its own clubs (no 300-item dropdown); girls are added, reactivated, or marked inactive — **never deleted**; names that don't match anyone are queued for staff (with "closest name" hints), never guessed; the mentor gets a short confirmation email that echoes only the names they typed |
+| **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section (Google Forms calls these "sections"; they behave like pages). **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to the **SF Pending** tab, anything odd goes to the ReviewQueue. **Add or remove girls**: partner → only that partner's clubs (no 300-item dropdown) → ADD / REMOVE lists → girls are added, reactivated, or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints, never guessed; the mentor gets a confirmation email echoing only the names they typed |
 | **Something isn't working?** | anyone | one-minute problem report, emailed to staff |
 
-The run also installs the triggers and shows the three links (again later via
-**Show form links**). Responses land in the tabs *New Club Responses*,
-*Roster Changes* and *Feedback*; *FormLog* records what was done with each.
+The run also installs the triggers and shows both links (again later via
+**Show form links**). Responses land in the tabs *Roster Form Responses* and
+*Feedback*; *FormLog* records what was done with each.
 
 Then:
 
@@ -94,9 +93,8 @@ Then:
 Things to know:
 
 - The dropdowns are refreshed from the Roster after every submission and by
-  **Update form dropdowns from the Roster**. A brand-new partner (from the New
-  Club form's "not in this list" option) gets its own section on the
-  Modification form automatically.
+  **Update form dropdowns from the Roster**. A brand-new partner (enrolled via
+  the "not in this list" option) gets its own club section automatically.
 - If a trigger ever fails (Google quota, a timeout, an incomplete
   submission), nothing is lost: FormLog records it as `ERROR: …`, the
   ReviewQueue gets a line, and **Process any missed form responses** retries

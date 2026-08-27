@@ -30,13 +30,12 @@ once the new links are in partners' hands.
 ### Google Forms — created by you in the master enrollment sheet
 
 Paste the 9 files from `appsscript/` into the sheet's Apps Script, then
-**GLOW → Google Forms → Create the three Google Forms**. The script shows all
-three links (again any time via **Show form links**). Fill them in here:
+**GLOW → Google Forms → Create the Google Forms**. The script shows both
+links (again any time via **Show form links**). Fill them in here:
 
 | Form | Link |
 |---|---|
-| New Club Enrollment | |
-| Roster Modification | |
+| Club Roster Form (enroll a new club / add or remove girls — one form, page 1 picks) | |
 | Something isn't working? | |
 
 ## Is it ready? — the thumbs-up checklist

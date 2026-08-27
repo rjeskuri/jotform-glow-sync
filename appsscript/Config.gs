@@ -23,8 +23,7 @@ const TAB = {
   AUDIT: 'Audit',                 // what the scripts did, and when
   // Phase 3: the generated Google Forms write here (renamed from the
   // "Form Responses N" Google creates), and the handlers read from here
-  NEW_CLUB: 'New Club Responses',
-  ROSTER_MOD: 'Roster Changes',
+  ROSTER_FORM: 'Roster Form Responses',   // new clubs AND roster changes, one form
   FEEDBACK: 'Feedback',
   SF_PENDING: 'SF Pending',       // new clubs waiting to become Salesforce Accounts
   FORM_LOG: 'FormLog',            // which form responses have been processed
@@ -32,18 +31,23 @@ const TAB = {
 
 /** Titles of the generated Google Forms. */
 const FORM_TITLES = {
-  NEW_CLUB: 'GLOW – New Club Enrollment',
-  ROSTER_MOD: 'GLOW – Roster Modification',
+  ROSTER: 'GLOW – Club Roster Form',          // enroll a new club, or change a roster
   FEEDBACK: "GLOW – Something isn't working?",
 };
 
 /**
- * Question titles. They double as the column headers of the response tabs,
+ * Question titles. They double as the column headers of the response tab,
  * so the handlers look answers up by these exact strings — change one here
- * and both the form generator and the handler follow.
+ * and both the form generator and the handler follow. Titles must be unique
+ * within a form (both branches ask for a partner and a mentor email, hence
+ * the suffixes).
  */
 const Q = {
-  PARTNER: 'Partner organization',
+  ACTION: 'What would you like to do?',
+  ACTION_NEW: 'Enroll a NEW club',
+  ACTION_MOD: 'Add or remove girls in a club that is already enrolled',
+  PARTNER_NEW: 'Partner organization',
+  PARTNER_MOD: 'Partner organization (existing club)',
   NEW_PARTNER: 'If your organization is not in the list, type its name here',
   COUNTRY: 'Country where this club meets',
   CLUB: 'Club name',
@@ -58,6 +62,7 @@ const Q = {
   CLUB_PREFIX: 'Club (',            // per-partner dropdown: 'Club (<partner>)'
   ADD: 'Girls to ADD to this club – one full name per line',
   REMOVE: 'Girls to REMOVE from this club – one full name per line, spelled as enrolled',
+  MENTOR_EMAIL_MOD: 'Mentor email (we send a short confirmation of the change)',
   NOTES: 'Anything else we should know?',
   FB_FORM: 'Which form were you using?',
   FB_DOING: 'What were you trying to do?',
@@ -73,8 +78,7 @@ const OTHER_PARTNER = 'My organization is not in this list';
 
 /** Script Properties keys (File → Project Settings → Script Properties). */
 const PROP = {
-  NEW_CLUB_FORM: 'FORM_NEW_CLUB_ID',
-  ROSTER_MOD_FORM: 'FORM_ROSTER_MOD_ID',
+  ROSTER_FORM: 'FORM_ROSTER_ID',
   FEEDBACK_FORM: 'FORM_FEEDBACK_ID',
   STAFF_EMAIL: 'STAFF_NOTIFY_EMAIL',   // gets feedback reports + the weekly SF digest
 };
