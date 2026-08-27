@@ -19,7 +19,10 @@ one form._
 Every one of them has: current rosters from the Roster tab, zero
 error-flagged rules, the Salesforce integration (identical mapping inherited
 from the template), the mentor confirmation email, sessions named "Session 1…",
-and `enable_fuzzy_matching` sending `false` instead of blank. These links are
+`enable_fuzzy_matching` sending `false` instead of blank, and the **same ten
+languages as before** (English, Español, Thai, Urdu, Telugu, Français,
+Vietnamese, Nepali, Khmer, Swahili — the API clone had reset the language
+switcher to English-only; restored 2026-08-27 afternoon, `tools/restore_translations.py`). These links are
 current as of 2026-08-27 (re-verified: each resolves, is ENABLED, and its
 browser-tab title now matches the form name — the clones had inherited a
 "Clone of Clone of …" page title, fixed the same day). No "publish" step

@@ -168,8 +168,15 @@ def form_report(form_id, api_key, roster_by_region):
     mentor_email = any(q.get("type") == "control_email" for q in questions.values())
 
     rule_problems, rule_summary = audit_rules(questions, conditions)
+    lang = props.get("language")
+    lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
+    languages = [x for x in str(lang.get("options", "")).split("|") if x]
+    if len(languages) < 2:
+        rule_problems.append(f"only {languages or ['no']} language(s) offered - the API clone "
+                             "resets this; run tools/restore_translations.py")
     rep = {
         "rule_problems": rule_problems, "rule_summary": rule_summary,
+        "languages": languages,
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -229,6 +236,7 @@ def main():
               f"salesforce {'yes' if r['salesforce'] else 'NO'}")
         f = r["enable_fuzzy"]
         print(f"   enableFuzzy: required={f['required']} selected={f['selected']!r} hidden={f['hidden']}")
+        print(f"   languages: {len(r['languages'])} ({', '.join(r['languages'][:4])}{'…' if len(r['languages']) > 4 else ''})")
         rs = r["rule_summary"]
         print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
               f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "

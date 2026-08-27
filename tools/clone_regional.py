@@ -9,7 +9,9 @@ Steps (each printed, each verifiable in the Jotform builder):
   1. POST /form/<working copy>/clone   (the API sometimes answers 504 while
      the clone still gets created - we compare the account's form list
      before and after, and delete accidental extras)
-  2. retitle the clone
+  2. retitle the clone (form title + browser-tab title) and restore the
+     list of offered languages, which the API clone resets to English only
+     (tools/restore_translations.py)
   3. sync_attendance_form.py <roster.csv> --roster --region <R> --prune --form <clone> --apply
   4. tools/form_status.py --form <clone>
 
@@ -91,11 +93,19 @@ def main():
             call(["-X", "DELETE", f"{API_BASE}/form/{extra}?apiKey={api_key}"], "delete extra", api_key)
         print(f"   clone is {clone_id}")
 
-        print(f"2. retitling to \"{title}\"")
+        print(f"2. retitling to \"{title}\" (form title and browser-tab title)")
         call(["-X", "POST", f"{API_BASE}/form/{clone_id}/properties?apiKey={api_key}",
-              "--data-urlencode", f"properties[title]={title}"], "retitle", api_key)
+              "--data-urlencode", f"properties[title]={title}",
+              "--data-urlencode", f"properties[pagetitle]={title}",
+              "--data-urlencode", "properties[pageTitleChanged]=Yes"], "retitle", api_key)
         info = call([f"{API_BASE}/form/{clone_id}?apiKey={api_key}"], "info", api_key)
         print(f"   title now: \"{info.get('title')}\"  url: {info.get('url')}")
+
+        # the API clone resets the offered-languages list to English only
+        print("2b. restoring the language list (the clone drops it)")
+        subprocess.run([sys.executable, os.path.join(REPO, "tools", "restore_translations.py"),
+                        "--form", clone_id, "--source", args.source, "--apply"],
+                       env={**os.environ, "JOTFORM_API_KEY": api_key})
 
     print(f"\n3. syncing {args.region} clubs" + (" (dry run)" if not args.apply else ""))
     cmd = [sys.executable, os.path.join(REPO, "sync_attendance_form.py"), args.roster_csv,
