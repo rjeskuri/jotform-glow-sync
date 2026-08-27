@@ -138,13 +138,19 @@ def main():
                 if lang not in store:
                     continue
                 payload.setdefault(lang, {})[md5(english)] = text
-        # text element: also key by its full HTML, keeping the link around the translated sentence
+        # Text elements are special: the runtime first translates the element's
+        # ID ("text_<qid>") as a word and, if a translation exists, replaces the
+        # whole inner HTML with it. That is how the builder stores them. Key the
+        # translated HTML by the id (and, as a fallback, by the stored HTML).
         if link:
             sentence = "Click here to report a problem"
             if sentence in link["text"] and sentence in additions:
+                text_id = f"text_{link['qid']}"
                 for lang, text in additions[sentence].items():
                     if lang in store:
-                        payload.setdefault(lang, {})[md5(link["text"])] = link["text"].replace(sentence, text)
+                        html_t = link["text"].replace(sentence, text)
+                        payload.setdefault(lang, {})[md5(text_id)] = html_t
+                        payload.setdefault(lang, {})[md5(link["text"])] = html_t
         new = {l: sum(1 for k in d if k not in store.get(l, {})) for l, d in payload.items()}
         print(f"== {label} {form_id}: {sum(len(d) for d in payload.values())} entries across "
               f"{len(payload)} languages ({sum(new.values())} new)")
@@ -166,6 +172,7 @@ def main():
                     merged[src_key].setdefault(md5(english), english)
             if link:
                 merged[src_key].setdefault(md5(link["text"]), link["text"])
+                merged[src_key].setdefault(md5(f"text_{link['qid']}"), f"text_{link['qid']}")
         call(["-X", "POST", f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}",
               "-H", "Content-Type: application/json",
               "--data-binary", json.dumps(merged, ensure_ascii=False)], f"{form_id} post", api_key)
