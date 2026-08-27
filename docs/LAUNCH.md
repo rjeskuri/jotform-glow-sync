@@ -33,10 +33,15 @@ Paste the 9 files from `appsscript/` into the sheet's Apps Script, then
 **GLOW → Google Forms → Create the Google Forms**. The script shows both
 links (again any time via **Show form links**). Fill them in here:
 
-| Form | Link |
+| Form | Link for partners / mentors |
 |---|---|
-| Club Roster Form (enroll a new club / add or remove girls — one form, page 1 picks) | |
-| Something isn't working? | |
+| Club Roster Form (enroll a new club / add or remove girls — one form, page 1 picks) | https://docs.google.com/forms/d/e/1FAIpQLScPO9Dizjl9G8krMcvs1sVnqYku3k8dB7Ycv-1VahgPDssMzQ/viewform |
+| Something isn't working? | https://docs.google.com/forms/d/e/1FAIpQLSeYx286-Bre0aSOWnhEDgC4_6FjGyPssldLA3J5WzIeK8cKCA/viewform |
+
+Created 2026-08-27. Edit links (owner only): Club Roster Form
+`https://docs.google.com/forms/d/1mFIEtvUApiCgzjmv3sPEfZZxC82krwI-Memel3mhEJM/edit`,
+problem report `https://docs.google.com/forms/d/1iglohAbPiyyvjPhZECtnF0sgzeoZIGOexKiHI8vsQ80/edit`.
+Responses land in the sheet tabs *Roster Form Responses* and *Feedback*.
 
 ## Is it ready? — the thumbs-up checklist
 
