@@ -23,13 +23,13 @@ import sys
 API_BASE = "https://api.jotform.com"
 ELEMENT_NAME = "somethingNotWorking"     # unique name = how we find it again
 
-# the live regional forms + the working copy that regionals will be cloned from
+# the live regional forms (cloned 2026-08-27) + the template they came from
 FORMS = {
-    "260703905772560": "Africa",
-    "260704198384564": "Asia",
-    "260704170003542": "Latin America",
-    "260703912140547": "U.S",
-    "262352490535154": "working copy",
+    "262382821971058": "Africa",
+    "262383129464057": "Asia",
+    "262383455778067": "Latin America",
+    "262382706852058": "U.S",
+    "262352490535154": "template",
 }
 
 

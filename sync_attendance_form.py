@@ -23,8 +23,14 @@ Usage:
     python3 sync_attendance_form.py enrollment.csv --form 262352490535154            # dry run (default)
     python3 sync_attendance_form.py enrollment.csv --form 262352490535154 --apply    # write changes
 
+    # From the Roster tab of the master enrollment sheet (one row per girl),
+    # one region only, deleting clubs that belong to OTHER regions - meant
+    # for a fresh clone (refused on any form that has submissions):
+    python3 sync_attendance_form.py roster.csv --roster --region Africa --prune --form <CLONE_ID> --apply
+
 Getting enrollment.csv: in Google Sheets, File > Download > Comma Separated
-Values (.csv) on the responses tab.
+Values (.csv) on the responses tab. Getting roster.csv:
+    python3 tools/sheets_client.py export Roster data/roster_<date>.csv
 
 Requires: Python 3.8+, no third-party packages.
 """
@@ -118,6 +124,13 @@ class Jotform:
                            "-H", "Content-Type: application/json",
                            "--data-binary", json.dumps(payload)], label)
 
+    def delete(self, path, label):
+        """DELETE (question removal - only ever used with --prune)."""
+        self.calls.append(label)
+        if not self.apply:
+            return None
+        return self._curl(["-X", "DELETE", self._url(path)], label)
+
 # -------------------------------------------------------------- sheet parsing
 def parse_roster(cell):
     """Parse one roster cell: one name per line, optional '1.' numbering.
@@ -175,6 +188,46 @@ def read_sheet(csv_path):
               "were skipped - check the export")
     return ({(p, c): r for (p, c, r) in clubs.values()},
             {clubs[i][:2]: d for i, d in dup_names.items()})
+
+def read_roster_csv(csv_path, region=None):
+    """Read an export of the Roster tab (one row per girl, ACTIVE rows only).
+
+    Returns (clubs_in_region, all_clubs, region_of) where the first two map
+    (partner, club) -> [girl, ...] in sheet order and region_of maps
+    (partner, club) -> region. With no region, clubs_in_region is all_clubs.
+    Rosters here never contain a duplicate name (the sheet rebuild already
+    routed those to the ReviewQueue), so there is no 'frozen' set."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    needed = {"partner", "club", "full_name", "status", "region"}
+    if not rows or not needed <= set(rows[0]):
+        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
+    clubs, region_by_ident = {}, {}
+    for r in rows:
+        if " ".join(r["status"].split()).lower() != "active":
+            continue
+        partner = " ".join(r["partner"].split())
+        club = " ".join(r["club"].split())
+        name = " ".join(r["full_name"].split())
+        if not (partner and club and name):
+            continue
+        ident = (partner.lower(), club.lower())
+        entry = clubs.setdefault(ident, (partner, club, [], set()))
+        if name.lower() not in entry[3]:
+            entry[2].append(name)
+            entry[3].add(name.lower())
+        region_by_ident[ident] = " ".join(r["region"].split())
+    all_clubs = {(p, c): names for (p, c, names, _) in clubs.values()}
+    region_of = {(v[0], v[1]): region_by_ident[i] for i, v in clubs.items()}
+    if region:
+        want = {k: v for k, v in all_clubs.items()
+                if region_of.get(k, "").lower() == region.lower()}
+        if not want:
+            sys.exit(f"No active clubs have region {region!r} in {csv_path} - "
+                     "check the Partners tab spelling (Africa / Asia / Latin America / U.S)")
+    else:
+        want = all_clubs
+    return want, all_clubs, region_of
 
 # --------------------------------------------------------- condition builders
 def mk_term(field, operator, value=""):
@@ -264,19 +317,48 @@ def build_conditions(club_questions, partner_of, module_options):
 # ------------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("csv", help="CSV export of the enrollment sheet")
+    ap.add_argument("csv", help="CSV export of the enrollment sheet (or of the "
+                                "Roster tab, with --roster)")
     ap.add_argument("--form", required=True, help="Jotform form ID")
     ap.add_argument("--apply", action="store_true",
                     help="write changes (default is a dry run)")
+    ap.add_argument("--roster", action="store_true",
+                    help="the CSV is an export of the Roster tab (one row per girl)")
+    ap.add_argument("--region", help="with --roster: only this region's clubs")
+    ap.add_argument("--prune", action="store_true",
+                    help="with --region: DELETE club questions that the Roster "
+                         "places in another region (fresh clones only)")
     args = ap.parse_args()
+    if args.region and not args.roster:
+        sys.exit("--region needs --roster (the Roster tab is what carries regions)")
+    if args.prune and not args.region:
+        sys.exit("--prune needs --region")
 
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
         "Set JOTFORM_API_KEY in the environment")
     jf = Jotform(api_key, args.form, args.apply)
 
-    sheet, dup_names = read_sheet(args.csv)
-    print(f"Sheet: {len(sheet)} clubs "
-          f"({sum(len(v) for v in sheet.values())} girls total)")
+    all_clubs, region_of = {}, {}
+    if args.roster:
+        sheet, all_clubs, region_of = read_roster_csv(args.csv, args.region)
+        dup_names = {}
+        print(f"Roster: {len(sheet)} active clubs"
+              f"{' in ' + args.region if args.region else ''} "
+              f"({sum(len(v) for v in sheet.values())} girls); "
+              f"{len(all_clubs)} clubs overall")
+    else:
+        sheet, dup_names = read_sheet(args.csv)
+        print(f"Sheet: {len(sheet)} clubs "
+              f"({sum(len(v) for v in sheet.values())} girls total)")
+
+    if args.prune:
+        info = jf.get("")
+        if int(info.get("count") or 0) > 0:
+            msg = (f"form {args.form} already has {info['count']} submission(s); "
+                   "--prune is for fresh clones only")
+            if args.apply:
+                sys.exit("Refusing: " + msg)
+            print(f"  ! (preview only) {msg}")
 
     # clubs whose roster lists the same full name twice: two different girls
     # need a distinguishing suffix in the SHEET before we trust that roster
@@ -336,6 +418,35 @@ def main():
         if not have or not want:
             return 0.0
         return len(have & want) / min(len(have), len(want))
+
+    def foreign_region(qid):
+        """The region the FULL roster gives this form question's club, when
+        it is not the region being synced; None when unknown or the same.
+        Same-name clubs are told apart by the partner in the form's rules."""
+        if not args.region:
+            return None
+        name = form_text[qid].lower()
+        cands = [k for k in all_clubs if k[1].lower() == name]
+        if len(cands) > 1 and qid in current_partner_of:
+            cands = [k for k in cands if partner_matches(current_partner_of[qid], k[0])]
+        if len(cands) != 1:
+            return None
+        reg = region_of.get(cands[0], "")
+        return reg if reg and reg.lower() != args.region.lower() else None
+
+    to_delete = []   # (qid, club, region it belongs to)
+
+    def keep_or_prune(qid):
+        """For a question the sheet did not claim: prune it if it belongs to
+        another region (and --prune), otherwise keep it and say why."""
+        reg = foreign_region(qid)
+        if reg and args.prune:
+            to_delete.append((qid, form_text[qid], reg))
+            return False
+        if reg:
+            print(f"  ! '{form_text[qid]}' (q{qid}) belongs to {reg} - kept "
+                  "(use --prune on a fresh clone to remove it)")
+        return True
 
     # --- reconcile clubs (grouped case-insensitively) ----------------------
     sheet_by_name = defaultdict(list)
@@ -403,6 +514,8 @@ def main():
                 to_create.append((club, partner, options, True))
         for qid in unclaimed:
             club = form_text[qid]
+            if not keep_or_prune(qid):
+                continue
             print(f"  ! '{club}' (q{qid}) matched no partner in the sheet - "
                   "keeping it, but check it in the builder")
             club_questions[qid] = club
@@ -412,13 +525,18 @@ def main():
                          "in the sheet or the form's current rules")
 
     # clubs on the form but not in the sheet: keep them working, just warn
-    # (an incomplete export looks the same - always export the FULL tab)
+    # (an incomplete export looks the same - always export the FULL tab) -
+    # unless the Roster says they belong to another region and we are pruning
+    pruned = {q for q, _, _ in to_delete}
     for low, qids in sorted(existing.items()):
         for qid in qids:
-            if qid not in club_questions:
-                club_questions[qid] = form_text[qid]
-                print(f"  ? '{form_text[qid]}' (q{qid}) is on the form but "
-                      "not in the sheet export - keeping its current roster")
+            if qid in club_questions or qid in pruned:
+                continue
+            if not keep_or_prune(qid):
+                continue
+            club_questions[qid] = form_text[qid]
+            print(f"  ? '{form_text[qid]}' (q{qid}) is on the form but "
+                  "not in the sheet export - keeping its current roster")
 
     # every club sharing a (case-insensitive) name with another MUST have a
     # partner for its rule; fall back to the form's current rules for clubs
@@ -436,6 +554,10 @@ def main():
                              f"(q{qid}): no partner in the sheet or the "
                              "form's current rules. Make sure the export "
                              "includes every club's enrollment row.")
+
+    # --- prune other regions' clubs (fresh clones only) --------------------
+    for qid, club, reg in to_delete:
+        jf.delete(f"/question/{qid}", f"DELETE roster '{club}' (q{qid}, belongs to {reg})")
 
     # --- write roster changes ----------------------------------------------
     def order_of(q):

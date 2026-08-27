@@ -13,7 +13,16 @@ it — rosters and all conditional logic — in one command.
 | `restore_conditions.py` | Rolls a form's conditional logic back to a snapshot |
 | `appsscript/` | Scripts that live in the Google Sheet — see `appsscript/INSTALL.md` |
 | `tools/derive_partner_regions.py` | Works out each partner's region from the regional forms; regenerates `appsscript/Regions.gs` |
-| `test/parity_test.js` | Checks the Sheet scripts and the Python tool agree |
+| `tools/form_status.py` | Launch-readiness report: every form vs the Roster tab, rules, integration, submissions |
+| `tools/clone_regional.py` | Builds a regional form by cloning the template and syncing one region with `--prune` |
+| `tools/sheets_client.py`, `tools/upload_roster.py`, `tools/build_roster_offline.js` | Master enrollment sheet access and the one-row-per-girl Roster build/upload — see `tools/README-sheets.md` |
+| `tools/needs_attention.py` | The list of clubs and names a human must chase down |
+| `tools/add_feedback_link.py` | Puts the "Something not working?" link above Submit on the attendance forms |
+| `test/parity_test.js`, `test/forms_logic_test.js` | Check the Sheet scripts and the Python tool agree; test the form-driven roster changes |
+
+**Where things stand:** `docs/LAUNCH.md` (links, readiness checklist) and
+`docs/BACKLOG.md` (what remains, in order). The plan behind it all is
+`docs/PLAN.md`.
 
 **Always run `backup_forms.py` before changing a live form.** Restores are
 proven working (rehearsed 2026-08-24 on the working copy): `restore_conditions.py
@@ -36,14 +45,29 @@ club roster.
 
 ## Usage
 
+Since 2026-08-27 the source of truth is the **Roster** tab of the master
+enrollment sheet (one row per girl), and there is one live form per region:
+
 ```bash
 export JOTFORM_API_KEY=...   # a full-access key for the account
 
-# 1. In Google Sheets: File > Download > .csv on the enrollment responses tab
-# 2. Preview what would change (writes nothing):
-python3 sync_attendance_form.py enrollment.csv --form <FORM_ID>
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv     # 1. current roster
+python3 tools/form_status.py --roster data/roster_<date>.csv            # 2. what differs?
+python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --region Africa --form 262382821971058                          # 3. preview (dry run)
+python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --region Africa --form 262382821971058 --apply                  # 4. apply
+```
 
-# 3. Apply:
+Regions and form ids: Africa `262382821971058`, Asia `262383129464057`,
+Latin America `262383455778067`, U.S `262382706852058`; the template every
+logic change lands on first is `262352490535154`.
+
+The original mode — a CSV export of the raw enrollment responses tab —
+still works for the template:
+
+```bash
+python3 sync_attendance_form.py enrollment.csv --form <FORM_ID>          # preview
 python3 sync_attendance_form.py enrollment.csv --form <FORM_ID> --apply
 ```
 

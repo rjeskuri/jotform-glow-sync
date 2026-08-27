@@ -22,12 +22,16 @@ API_BASE = "https://api.jotform.com"
 REPO = os.path.dirname(os.path.abspath(__file__))
 
 FORMS = {
-    "262352490535154": "working copy (upgraded; template for clones)",
-    "260555608160556": "master (old architecture)",
-    "260703905772560": "Africa",
-    "260704198384564": "Asia",
-    "260704170003542": "Latin America",
-    "260703912140547": "U.S",
+    "262352490535154": "template (every sync-logic change lands here first)",
+    "262382821971058": "Africa (live from 2026-08-27)",
+    "262383129464057": "Asia (live from 2026-08-27)",
+    "262383455778067": "Latin America (live from 2026-08-27)",
+    "262382706852058": "U.S (live from 2026-08-27)",
+    "260555608160556": "master (defunct)",
+    "260703905772560": "Africa (defunct)",
+    "260704198384564": "Asia (defunct)",
+    "260704170003542": "Latin America (defunct)",
+    "260703912140547": "U.S (defunct)",
 }
 
 

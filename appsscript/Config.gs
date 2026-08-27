@@ -94,12 +94,14 @@ const RESPONSE_COLS = {
 
 /** Jotform forms this pipeline manages (Phase 2+). */
 const FORMS = {
-  WORKING_COPY: '262352490535154',  // upgraded; template for regional clones
-  MASTER: '260555608160556',        // old architecture, being retired
-  AFRICA: '260703905772560',
-  ASIA: '260704198384564',
-  LATIN_AMERICA: '260704170003542',
-  US: '260703912140547',
+  TEMPLATE: '262352490535154',      // every sync-logic change lands here first
+  AFRICA: '262382821971058',        // live regionals, cloned from the template 2026-08-27
+  ASIA: '262383129464057',
+  LATIN_AMERICA: '262383455778067',
+  US: '262382706852058',
+  // defunct (kept as archives, labelled "(defunct)" in Jotform):
+  // master 260555608160556, Africa 260703905772560, Asia 260704198384564,
+  // Latin America 260704170003542, U.S 260703912140547
 };
 
 /**
