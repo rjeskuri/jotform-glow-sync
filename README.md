@@ -17,7 +17,8 @@ it — rosters and all conditional logic — in one command.
 | `tools/clone_regional.py` | Builds a regional form by cloning the template and syncing one region with `--prune` |
 | `tools/sheets_client.py`, `tools/upload_roster.py`, `tools/build_roster_offline.js` | Master enrollment sheet access and the one-row-per-girl Roster build/upload — see `tools/README-sheets.md` |
 | `tools/needs_attention.py` | The list of clubs and names a human must chase down |
-| `tools/add_feedback_link.py` | Puts the "Something not working?" link above Submit on the attendance forms |
+| `tools/add_feedback_link.py` | Puts the "Click here to report a problem" link above Submit on the attendance forms |
+| `tools/restore_translations.py`, `tools/add_translations.py`, `tools/add_language.py` | Languages: restore the switcher after a clone, translate added labels (`translations_additions.json`), offer a new language (`translations_or.json` for Odia) |
 | `test/parity_test.js`, `test/forms_logic_test.js` | Check the Sheet scripts and the Python tool agree; test the form-driven roster changes |
 
 **Where things stand:** `docs/LAUNCH.md` (links, readiness checklist) and

@@ -13,6 +13,7 @@ Ordered by what unblocks the most. Effort is consultant days. Items marked
 | 4 | **Work the P1 rows of `data/needs_attention_2026-08-26.csv`** with partners: 16 rosters with a name listed twice (7 of these are currently on the forms with one girl missing), 8 re-submitted rosters, Otra Cosa's stale combined clubs, YWOU's Shinning/Shining Stars | every one of these is a girl who either does not appear on the form or appears twice | 1–2 elapsed weeks of emails; 0.3 tooling | needs Ryan/partners |
 | 5 | **Confirm Haske's region** (Partners tab says Africa on thin evidence; row is marked PLEASE CONFIRM) | wrong region = wrong form | 0.05 | needs Ryan |
 | 6 | Close the old enrollment Google Form (its owner) with a note pointing to the new ones | avoids a third path into the data | 0.05 | needs the form's owner |
+| 6a | **Native-speaker check of the Odia labels** (`tools/translations_or.json`, 63 strings) by a VIEWS mentor; corrections re-applied with `tools/add_language.py --code or --name Oriya --dict … --apply` | the other languages came from Jotform's machine translation; Odia was written by us | 0.1 + partner time | needs VIEWS |
 
 ## Weeks 2–3: Phase 2 — automatic Sheet → Jotform sync
 
