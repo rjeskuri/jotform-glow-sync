@@ -35,6 +35,22 @@
     "ur": "پارٹنر تنظیم", "te": "భాగస్వామి సంస్థ", "vi": "Tổ chức đối tác",
     "ne": "साझेदार संस्था", "km": "អង្គការដៃគូ", "sw": "Shirika mshirika", "ar": "المنظمة الشريكة"
   },
+  "Club": {
+    "es": "Club", "fr": "Club", "th": "ชมรม", "ur": "کلب", "te": "క్లబ్",
+    "vi": "Câu lạc bộ", "ne": "क्लब", "km": "ក្លឹប", "sw": "Klabu", "ar": "النادي"
+  },
+  "Choose your club from the list (on a computer, start typing its name)": {
+    "es": "Elige tu club de la lista (en una computadora, empieza a escribir su nombre)",
+    "fr": "Choisissez votre club dans la liste (sur un ordinateur, commencez à taper son nom)",
+    "th": "เลือกชมรมของคุณจากรายการ (บนคอมพิวเตอร์ ให้เริ่มพิมพ์ชื่อชมรม)",
+    "ur": "فہرست میں سے اپنا کلب منتخب کریں (کمپیوٹر پر اس کا نام ٹائپ کرنا شروع کریں)",
+    "te": "జాబితా నుండి మీ క్లబ్‌ను ఎంచుకోండి (కంప్యూటర్‌లో దాని పేరు టైప్ చేయడం ప్రారంభించండి)",
+    "vi": "Chọn câu lạc bộ của bạn trong danh sách (trên máy tính, hãy bắt đầu gõ tên)",
+    "ne": "सूचीबाट आफ्नो क्लब छान्नुहोस् (कम्प्युटरमा, यसको नाम टाइप गर्न सुरु गर्नुहोस्)",
+    "km": "ជ្រើសរើសក្លឹបរបស់អ្នកពីបញ្ជី (នៅលើកុំព្យូទ័រ សូមចាប់ផ្តើមវាយឈ្មោះរបស់វា)",
+    "sw": "Chagua klabu yako kutoka kwenye orodha (kwenye kompyuta, anza kuandika jina lake)",
+    "ar": "اختر ناديك من القائمة (على الحاسوب، ابدأ بكتابة اسمه)"
+  },
   "Click here to report a problem": {
     "es": "Haz clic aquí para informar de un problema", "fr": "Cliquez ici pour signaler un problème",
     "th": "คลิกที่นี่เพื่อรายงานปัญหา", "ur": "مسئلہ رپورٹ کرنے کے لیے یہاں کلک کریں",

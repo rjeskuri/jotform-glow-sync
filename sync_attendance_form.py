@@ -62,6 +62,16 @@ MODULES = {"1": "14", "2": "92", "3": "93"}       # year -> module dropdown qid
 WEEKS = {8: "15", 10: "95", 14: "96", 15: "97"}   # session count -> dropdown qid
 CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID = "18", "98", "100", "102"
 
+# Optional "Club" picker: a required dropdown listing every club on the form,
+# so mentors choose their club instead of typing it. Added once per form with
+# --club-picker; recognised by name from then on. When present, the roster
+# visibility rules key on it and a calculation copies its value into the
+# CLUB_NAME textbox (hidden), which stays the field the Salesforce mapping
+# reads. Its option list is kept equal to the form's clubs on every run.
+PICKER_NAME = "clubPicker"
+PICKER_TEXT = "Club"
+PICKER_SUBLABEL = "Choose your club from the list (on a computer, start typing its name)"
+
 # Sessions per module. Modules not listed default to 8 sessions.
 # EDIT HERE when the curriculum changes; the cascade rules are generated
 # from this table and from the module dropdowns' live option lists.
@@ -263,10 +273,13 @@ def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
     return {"id": next_id(), "type": "calculation", "link": "Any",
             "priority": "0", "index": "0", "terms": terms, "action": [action]}
 
-def build_conditions(club_questions, partner_of, module_options):
+def build_conditions(club_questions, partner_of, module_options, picker=None):
     """club_questions: {qid: club display name}; partner_of: {qid: partner}
-    for clubs whose name is shared by several partners."""
+    for clubs whose name is shared by several partners; picker: qid of the
+    Club dropdown when the form has one (the rules then key on it and its
+    value is copied into the CLUB_NAME textbox for Salesforce)."""
     conds = []
+    club_field = picker or CLUB_NAME
 
     # A. roster visibility
     # ambiguity is judged case-insensitively because Jotform's runtime
@@ -278,15 +291,15 @@ def build_conditions(club_questions, partner_of, module_options):
         if len(by_name[name.lower()]) > 1:
             conds.append(mk_field_rule(
                 [mk_term(PARTNER, "equals", partner_of[qid]),
-                 mk_term(CLUB_NAME, "equals", name)],
+                 mk_term(club_field, "equals", name)],
                 [mk_show(qid)], link="All"))
         else:
-            conds.append(mk_field_rule([mk_term(CLUB_NAME, "equals", name)],
+            conds.append(mk_field_rule([mk_term(club_field, "equals", name)],
                                        [mk_show(qid)]))
     for low, qids in sorted(by_name.items()):
         if len(qids) > 1:  # ambiguous name -> reveal the Partner box
             conds.append(mk_field_rule(
-                [mk_term(CLUB_NAME, "equals", club_questions[qids[0]])],
+                [mk_term(club_field, "equals", club_questions[qids[0]])],
                 [mk_show(PARTNER)]))
 
     # B. curriculum cascade
@@ -304,6 +317,9 @@ def build_conditions(club_questions, partner_of, module_options):
                 [mk_show(WEEKS[n])], link="All"))
 
     # C. salesforce bridge
+    if picker:  # the picked club -> the textbox Salesforce reads (Account_Name__c)
+        conds.append(mk_calc_rule([mk_term(picker, "isFilled")], CLUB_NAME,
+                                  picker, "{%s}" % picker, as_text=True))
     conds.append(mk_calc_rule([mk_term(YEAR, "isFilled")], YEAR_ID,
                               YEAR, "{%s}" % YEAR))
     for module_qid in MODULES.values():
@@ -314,7 +330,7 @@ def build_conditions(club_questions, partner_of, module_options):
                                   week_qid, "{%s}" % week_qid))
     roster_qids = sorted(club_questions, key=int)
     conds.append(mk_calc_rule(
-        [mk_term(CLUB_NAME, "isFilled")], CONTACT_IDS,
+        [mk_term(club_field, "isFilled")], CONTACT_IDS,
         ",".join(roster_qids), "".join("{%s}" % q for q in roster_qids),
         ignore_hidden=True, as_text=True))
 
@@ -340,6 +356,9 @@ def main():
     ap.add_argument("--summary-json", metavar="PATH",
                     help="also write a machine-readable summary of the plan to PATH "
                          "(used by tools/auto_sync.py)")
+    ap.add_argument("--club-picker", action="store_true",
+                    help="add the Club dropdown to this form (once; afterwards it is "
+                         "maintained on every run) and hide the Club Name textbox")
     args = ap.parse_args()
     if args.region and not args.roster:
         sys.exit("--region needs --roster (the Roster tab is what carries regions)")
@@ -400,6 +419,14 @@ def main():
     module_options = {
         year: [o for o in questions[mqid]["options"].split("|") if o]
         for year, mqid in MODULES.items()}
+
+    picker_qid = next((qid for qid, q in questions.items()
+                       if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME),
+                      None)
+    if picker_qid:
+        print(f"Club picker: q{picker_qid} (mentors choose their club from a list)")
+        if args.club_picker:
+            print("  - the form already has the Club picker; --club-picker is not needed")
 
     # partner mapping already encoded in the form's current rules
     # (used to match same-named clubs to their existing questions)
@@ -605,10 +632,37 @@ def main():
                      f"UPDATE roster '{club}' (q{qid}, "
                      f"{options.count('|')+1} girls)")
 
+    # --- the Club picker: its options are always exactly the form's clubs ---
+    picker_names = {}   # one entry per distinct name (same-name clubs share it;
+    for name in list(club_questions.values()) + [c for c, _, _, _ in to_create]:
+        picker_names.setdefault(name.lower(), name)   # the Partner box tells them apart)
+    picker_options = "|".join(sorted(picker_names.values(), key=str.lower))
+    if picker_qid is None and args.club_picker:
+        content = jf.post_form("/questions", {
+            "question[type]": "control_dropdown",
+            "question[text]": PICKER_TEXT,
+            "question[name]": PICKER_NAME,
+            "question[order]": str(questions[CLUB_NAME].get("order", "3")),
+            "question[required]": "Yes",
+            "question[emptyText]": "Please Select",
+            "question[subLabel]": PICKER_SUBLABEL,
+            "question[options]": picker_options,
+        }, f"CREATE club picker ({len(picker_names)} clubs)")
+        if content:
+            picker_qid = str(content["qid"])
+        jf.post_form(f"/question/{CLUB_NAME}",
+                     {"question[hidden]": "Yes", "question[required]": "No"},
+                     f"HIDE clubName textbox (q{CLUB_NAME}: filled from the picker; "
+                     "Salesforce keeps reading it)")
+    elif picker_qid is not None and questions[picker_qid].get("options") != picker_options:
+        jf.post_form(f"/question/{picker_qid}", {"question[options]": picker_options},
+                     f"UPDATE club picker ({len(picker_names)} clubs)")
+
     # --- regenerate all conditions -----------------------------------------
     # The API stores each condition's terms/action as JSON-encoded STRINGS
     # (that is what GET returns and what the builder saves) - encode them.
-    conds = build_conditions(club_questions, partner_of, module_options)
+    conds = build_conditions(club_questions, partner_of, module_options,
+                             picker=picker_qid or ("NEW" if args.club_picker else None))
     wire = [{"id": c["id"], "type": c["type"], "link": c["link"],
              "priority": c["priority"], "index": c["index"],
              "terms": json.dumps(c["terms"]),
@@ -637,6 +691,7 @@ def main():
                         for q, c, o in to_update],
             "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
+            "club_picker": picker_qid,
             "plan_hash": hashlib.sha1("\n".join(sorted(jf.calls)).encode()).hexdigest(),
         }
         with open(args.summary_json, "w", encoding="utf-8") as f:

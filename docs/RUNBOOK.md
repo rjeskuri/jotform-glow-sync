@@ -144,6 +144,35 @@ a `syncRequested … → HTTP 204` row every time the sheet sends the event.
 conditions back. Questions are never deleted by the runner. To stop the
 automation: `AUTO_SYNC_APPLY=0` (or clear the two Script Properties).
 
+## The Club picker (mentors choose their club instead of typing it)
+
+Intent: [intent/2026-09-01-club-picker.md](intent/2026-09-01-club-picker.md).
+A required **Club** dropdown listing every club on the form; the roster
+rules key on it, and a calculation copies the pick into the (now hidden)
+Club Name textbox, question 5, which is what the Salesforce mapping reads —
+so `Account_Name__c` still receives the plain club name. Added once per
+form; from then on every sync run keeps its option list equal to the form's
+clubs (`UPDATE club picker (N clubs)` in the plan).
+
+```bash
+python3 backup_forms.py --form 262352490535154
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-picker            # dry run
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-picker --apply    # add it
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv     # "club picker: q<id>", rules CLEAN
+```
+
+(The template takes no `--region`; a regional form takes its `--region`.)
+Verify in the browser: pick a club → its names appear; pick another → they
+swap; submit a test → the submission and Salesforce show the club name in
+the Club Name field. Rollback: `restore_conditions.py` for the rules, and in
+the builder delete the Club dropdown and un-hide Club Name (or
+`question[hidden]=No`, `question[required]=Yes` on q5 via the API).
+
+Before the regional rollout add the label and sublabel ("Club", "Choose
+your club from the list…") to `tools/translations_additions.json` and run
+`tools/add_translations.py --apply` on each form, or the picker shows in
+English in every language.
+
 ## Backup and restore (Jotform)
 
 ```bash

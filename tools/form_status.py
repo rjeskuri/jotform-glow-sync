@@ -80,6 +80,13 @@ def load_roster(path):
 
 
 CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID = "5", "331", "18"
+PICKER_NAME = "clubPicker"   # the optional Club dropdown (sync_attendance_form.py --club-picker)
+
+
+def club_picker(questions):
+    """qid of the Club dropdown, or None when mentors type the club name."""
+    return next((qid for qid, q in questions.items()
+                 if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
 
 
 def audit_rules(questions, conditions):
@@ -87,6 +94,7 @@ def audit_rules(questions, conditions):
     problem strings (empty = clean) and a summary dict."""
     problems = []
     qids = set(questions)
+    club_field = club_picker(questions) or CLUB_NAME_QID
     clubs = {qid: " ".join(q["text"].split()) for qid, q in questions.items()
              if q.get("type") == "control_checkbox"}
     shown_by = defaultdict(list)     # club qid -> [rule ids that show it]
@@ -122,9 +130,10 @@ def audit_rules(questions, conditions):
             problems.append(f"'{name}' (q{qid}) has {len(rules)} show-rules, expected 1")
             continue
         _, terms = rules[0]
-        club_terms = [t for t in terms if str(t.get("field")) == CLUB_NAME_QID]
+        club_terms = [t for t in terms if str(t.get("field")) == club_field]
         if not club_terms or " ".join(str(club_terms[0].get("value")).split()).lower() != name.lower():
-            problems.append(f"'{name}' (q{qid}): show-rule does not test clubName == its text")
+            problems.append(f"'{name}' (q{qid}): show-rule does not test the club field "
+                            f"(q{club_field}) == its text")
         has_partner = any(str(t.get("field")) == PARTNER_QID for t in terms)
         if len(by_name[name.lower()]) > 1 and not has_partner:
             problems.append(f"'{name}' (q{qid}) shares its name but its rule has no Partner term")
@@ -168,6 +177,19 @@ def form_report(form_id, api_key, roster_by_region):
     mentor_email = any(q.get("type") == "control_email" for q in questions.values())
 
     rule_problems, rule_summary = audit_rules(questions, conditions)
+    picker = club_picker(questions)
+    if picker:
+        listed = {key(o) for o in (questions[picker].get("options") or "").split("|") if o.strip()}
+        missing = [v[0][0] for k, v in clubs.items() if k not in listed]
+        extra = sorted(o for o in listed if o not in clubs)
+        if missing:
+            rule_problems.append(f"club picker misses {len(missing)} club(s): {missing[:5]}")
+        if extra:
+            rule_problems.append(f"club picker lists {len(extra)} name(s) with no roster: {extra[:5]}")
+        if questions[picker].get("required") != "Yes":
+            rule_problems.append("club picker is not required")
+        if questions.get(CLUB_NAME_QID, {}).get("hidden") != "Yes":
+            rule_problems.append("club picker present but the Club Name textbox is still visible")
     lang = props.get("language")
     lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
     languages = [x for x in str(lang.get("options", "")).split("|") if x]
@@ -176,7 +198,7 @@ def form_report(form_id, api_key, roster_by_region):
                              "resets this; run tools/restore_translations.py")
     rep = {
         "rule_problems": rule_problems, "rule_summary": rule_summary,
-        "languages": languages,
+        "languages": languages, "club_picker": picker,
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -237,6 +259,7 @@ def main():
         f = r["enable_fuzzy"]
         print(f"   enableFuzzy: required={f['required']} selected={f['selected']!r} hidden={f['hidden']}")
         print(f"   languages: {len(r['languages'])} ({', '.join(r['languages'][:4])}{'…' if len(r['languages']) > 4 else ''})")
+        print(f"   club picker: {'q' + r['club_picker'] if r['club_picker'] else 'none (mentors type the club name)'}")
         rs = r["rule_summary"]
         print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
               f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "

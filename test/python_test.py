@@ -39,6 +39,7 @@ DRY RUN (use --apply to write):
   - UPDATE roster 'Old Name Club' (q120, 14 girls)
   - UPDATE roster 'Sunrise Club, Eastside "B"' (q121, 3 girls)
   - DELETE roster 'Elsewhere' (q140, belongs to Africa)
+  - UPDATE club picker (13 clubs)
   - REPLACE conditions (57 rules + ~1 more once the new rosters exist)
 """
 
@@ -66,7 +67,8 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertEqual(plan["rules"], 57)
         self.assertEqual((plan["roster_clubs"], plan["roster_girls"]), (12, 176))
         self.assertEqual(len(plan["warnings"]), 2)
-        self.assertEqual(auto_sync.changes(plan), 4)
+        self.assertEqual(plan["picker"], [{"op": "UPDATE", "clubs": 13}])
+        self.assertEqual(auto_sync.changes(plan), 5)
 
     def test_in_sync_when_only_the_conditions_rewrite_is_planned(self):
         plan = auto_sync.parse_plan("Roster: 3 active clubs in U.S (40 girls); 300 clubs overall\n"
@@ -80,10 +82,13 @@ class AutoSyncPlan(unittest.TestCase):
         summary = {"creates": [{"club": "A", "partner": "P", "girls": 2}],
                    "updates": [{"qid": "7", "club": "B", "girls": 5}],
                    "deletes": [], "rules": 9, "warnings": ["  ? 'B' (q7) is on the form"],
+                   "calls": ["CREATE roster 'A' (2 girls)", "UPDATE roster 'B' (q7, 5 girls)",
+                             "UPDATE club picker (2 clubs)", "REPLACE conditions (9 rules)"],
                    "roster_clubs": 2, "roster_girls": 7}
         plan = auto_sync.plan_from_summary(summary)
         self.assertEqual(set(plan), set(auto_sync.parse_plan("")))
-        self.assertEqual(auto_sync.changes(plan), 2)
+        self.assertEqual(plan["picker"], [{"op": "UPDATE", "clubs": 2}])
+        self.assertEqual(auto_sync.changes(plan), 3)
         self.assertEqual(plan["warnings"], ["? 'B' (q7) is on the form"])
 
     def test_bands_refuse_deletes_big_waves_and_replaced_rosters(self):
@@ -144,8 +149,68 @@ class AutoSyncPlan(unittest.TestCase):
         for fragment in ("CREATE roster '{club}' (", "UPDATE roster '{club}' (q{qid}, ",
                          "DELETE roster '{club}' (q{qid}, belongs to {reg})",
                          "REPLACE conditions ({len(conds)} rules", auto_sync.NOT_IN_EXPORT,
-                         auto_sync.NO_SHARED_NAMES, "--summary-json"):
+                         auto_sync.NO_SHARED_NAMES, "--summary-json",
+                         "CREATE club picker ({len(picker_names)} clubs)",
+                         "UPDATE club picker ({len(picker_names)} clubs)"):
             self.assertIn(fragment, joined, fragment)
+
+
+class ConditionBuilder(unittest.TestCase):
+    CLUBS = {"10": "Alpha Club", "11": "Stars", "12": "Stars", "13": "Beta Club"}
+    PARTNERS = {"11": "Partner One", "12": "Partner Two"}
+    MODULES = {"1": ["Core 1"], "2": ["Core 2", "Elective - Healthy GLOW"], "3": ["Core 3"]}
+
+    def rules(self, picker=None):
+        sync._counter[0] = 0
+        return sync.build_conditions(self.CLUBS, self.PARTNERS, self.MODULES, picker=picker)
+
+    def show_rules(self, conds):
+        """Rules that show a club roster or the Partner box (not the curriculum cascade)."""
+        targets = set(self.CLUBS) | {sync.PARTNER}
+        return [c for c in conds if c["type"] == "field"
+                and any(a.get("visibility") == "Show" and a.get("field") in targets
+                        for a in c["action"])]
+
+    def test_without_picker_rules_key_on_the_club_name_textbox(self):
+        conds = self.rules()
+        for c in self.show_rules(conds):
+            fields = {t["field"] for t in c["terms"]}
+            self.assertIn(sync.CLUB_NAME, fields, c)
+        agg = [c for c in conds if c["type"] == "calculation"
+               and c["action"][0]["resultField"] == sync.CONTACT_IDS]
+        self.assertEqual(len(agg), 1)
+        self.assertEqual(agg[0]["terms"][0]["field"], sync.CLUB_NAME)
+        self.assertEqual(agg[0]["action"][0]["operands"], "10,11,12,13")
+        self.assertFalse([c for c in conds if c["type"] == "calculation"
+                          and c["action"][0]["resultField"] == sync.CLUB_NAME])
+
+    def test_with_picker_rules_key_on_it_and_copy_into_the_textbox(self):
+        conds = self.rules(picker="500")
+        for c in self.show_rules(conds):
+            fields = {t["field"] for t in c["terms"]}
+            self.assertIn("500", fields, c)
+            self.assertNotIn(sync.CLUB_NAME, fields, c)
+        # same-name clubs still need the Partner term, and the Partner box is revealed
+        stars = [c for c in self.show_rules(conds) if c["action"][0]["field"] in ("11", "12")]
+        self.assertEqual(len(stars), 2)
+        self.assertTrue(all(any(t["field"] == sync.PARTNER for t in c["terms"]) for c in stars))
+        reveal = [c for c in self.show_rules(conds) if c["action"][0]["field"] == sync.PARTNER]
+        self.assertEqual(len(reveal), 1)
+        copy = [c for c in conds if c["type"] == "calculation"
+                and c["action"][0]["resultField"] == sync.CLUB_NAME]
+        self.assertEqual(len(copy), 1)
+        self.assertEqual(copy[0]["terms"][0]["field"], "500")
+        self.assertEqual(copy[0]["action"][0]["equation"], "{500}")
+        self.assertTrue(copy[0]["action"][0]["insertAsText"])
+        agg = [c for c in conds if c["type"] == "calculation"
+               and c["action"][0]["resultField"] == sync.CONTACT_IDS][0]
+        self.assertEqual(agg["terms"][0]["field"], "500")
+        self.assertEqual(len(conds), len(self.rules()) + 1)
+
+    def test_indexes_are_sequential(self):
+        conds = self.rules(picker="500")
+        self.assertEqual([c["index"] for c in conds], [str(i) for i in range(len(conds))])
+        self.assertEqual([c["priority"] for c in conds], [c["index"] for c in conds])
 
 
 class EnrollmentParser(unittest.TestCase):

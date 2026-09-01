@@ -58,6 +58,7 @@ CREATE_RX = re.compile(r"^  - CREATE roster '(?P<club>.+)' \((?P<girls>\d+) girl
 UPDATE_RX = re.compile(r"^  - UPDATE roster '(?P<club>.+)' \(q(?P<qid>\d+), (?P<girls>\d+) girls\)$")
 DELETE_RX = re.compile(r"^  - DELETE roster '(?P<club>.+)' \(q(?P<qid>\d+), belongs to (?P<region>.+)\)$")
 REPLACE_RX = re.compile(r"^  - REPLACE conditions \((?P<rules>\d+) rules")
+PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs\)$")
 ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) girls\); "
                        r"(?P<all>\d+) clubs overall")
 NOT_IN_EXPORT = "is on the form but not in the sheet export"
@@ -71,9 +72,13 @@ def key(s):
 # ------------------------------------------------------------ pure functions
 def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
-    plan = {"creates": [], "updates": [], "deletes": [], "rules": None, "warnings": [],
-            "roster_clubs": None, "roster_girls": None}
+    plan = {"creates": [], "updates": [], "deletes": [], "picker": [], "rules": None,
+            "warnings": [], "roster_clubs": None, "roster_girls": None}
     for line in text.splitlines():
+        m = PICKER_RX.match(line)
+        if m:
+            plan["picker"].append({"op": m["op"], "clubs": int(m["clubs"])})
+            continue
         m = CREATE_RX.match(line)
         if m:
             plan["creates"].append({"club": m["club"], "girls": int(m["girls"])})
@@ -106,6 +111,8 @@ def plan_from_summary(summary):
                         for u in summary.get("updates", [])],
             "deletes": [{"qid": d["qid"], "club": d["club"], "region": d["region"]}
                         for d in summary.get("deletes", [])],
+            "picker": [{"op": m["op"], "clubs": int(m["clubs"])}
+                       for m in (PICKER_RX.match("  - " + c) for c in summary.get("calls", [])) if m],
             "rules": summary.get("rules"),
             "warnings": [w.strip() for w in summary.get("warnings", [])],
             "roster_clubs": summary.get("roster_clubs"),
@@ -113,7 +120,10 @@ def plan_from_summary(summary):
 
 
 def changes(plan):
-    return len(plan["creates"]) + len(plan["updates"]) + len(plan["deletes"])
+    """Roster creates/updates/deletes plus a Club-picker option update (never a create:
+    the runner does not pass --club-picker, so a CREATE here means someone else did)."""
+    return (len(plan["creates"]) + len(plan["updates"]) + len(plan["deletes"])
+            + len(plan.get("picker", [])))
 
 
 def check_bands(plan, max_creates=5, max_updates=20):
