@@ -1,0 +1,7 @@
+# Only the Google Sheets tools (tools/sheets_client.py and what imports it:
+# upload_roster.py, auto_sync.py) need these. Every other script in the repo
+# is Python 3.10 standard library on purpose.
+# Install into the repo's own environment, never system-wide:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+google-api-python-client>=2.100,<3
+google-auth>=2.23,<3

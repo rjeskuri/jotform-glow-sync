@@ -1,9 +1,9 @@
 # Launch: what goes out, what is ready, what is still on you
 
-_Last updated 2026-08-27. The four regional Jotforms below were built today
-by cloning the upgraded template and syncing each from the **Roster** tab of
-the master enrollment sheet, keeping only that region's clubs. Africa stays
-one form._
+_Last updated 2026-09-01 (launch day). The four regional Jotforms below were
+built on 2026-08-27 by cloning the upgraded template and syncing each from the
+**Roster** tab of the master enrollment sheet, keeping only that region's
+clubs. Africa stays one form. Languages were completed 2026-08-28._
 
 ## Links to hand over
 
@@ -40,9 +40,10 @@ once the new links are in partners' hands.
 
 ### Google Forms — created by you in the master enrollment sheet
 
-Paste the 9 files from `appsscript/` into the sheet's Apps Script, then
-**GLOW → Google Forms → Create the Google Forms**. The script shows both
-links (again any time via **Show form links**). Fill them in here:
+Deploy `appsscript/` into the sheet (`npm run clasp:push`, see
+[../appsscript/INSTALL.md](../appsscript/INSTALL.md)), then **GLOW → Google
+Forms → Create the Google Forms**. The script shows both links (again any
+time via **Show form links**). Fill them in here:
 
 | Form | Link for partners / mentors |
 |---|---|
@@ -52,10 +53,10 @@ links (again any time via **Show form links**). Fill them in here:
 Created 2026-08-27; both forms have since been renamed in the Forms UI to
 **"Global Catalyst – Club Roster Form"** and **"Global Catalyst – Something
 isn't working?"** — the links above are unchanged (renaming a Google Form
-never changes its URL). Edit links (owner only): Club Roster Form
-`https://docs.google.com/forms/d/1mFIEtvUApiCgzjmv3sPEfZZxC82krwI-Memel3mhEJM/edit`,
-problem report `https://docs.google.com/forms/d/1iglohAbPiyyvjPhZECtnF0sgzeoZIGOexKiHI8vsQ80/edit`.
-Responses land in the sheet tabs *Roster Form Responses* and *Feedback*.
+never changes its URL). The owner-only edit links are shown by **GLOW →
+Google Forms → Show form links** in the sheet (they are deliberately not
+written down here). Responses land in the sheet tabs *Roster Form Responses*
+and *Feedback*.
 
 ## Is it ready? — the thumbs-up checklist
 
@@ -102,13 +103,7 @@ Things that are true today and fine for launch but on the backlog
 
 ## How the regional forms are maintained from now on
 
-Until Phase 2 (automatic hourly sync) is built, a roster change reaches the
-attendance forms with three commands, run by whoever has the Jotform key:
-
-    python3 tools/sheets_client.py export Roster data/roster_<date>.csv
-    python3 tools/form_status.py                                         # what differs?
-    python3 sync_attendance_form.py data/roster_<date>.csv --roster --region Africa --form 262382821971058 --apply
-    # (same for Asia 262383129464057, "Latin America" 262383455778067, U.S 262382706852058)
-
-Never `--prune` a live form (it refuses anyway once a form has submissions).
-`backup_forms.py` before, `restore_conditions.py` if anything looks wrong.
+A roster change in the sheet reaches the attendance forms automatically
+(sheet → `Dispatch.gs` → GitHub Actions → `tools/auto_sync.py`), and the
+`SyncLog` tab shows every run. The manual loop, the backup/rollback steps and
+the automatic sync's switches are all in one place: [RUNBOOK.md](RUNBOOK.md).

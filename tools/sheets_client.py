@@ -5,7 +5,7 @@ Read and write the enrollment spreadsheet from this machine.
 Auth is a Google service account: a robot user that the spreadsheet is shared
 with, so nothing has to be made public. Its key file lives at
 credentials/service-account.json and the spreadsheet's ID in
-credentials/config.json (both gitignored) - see tools/README-sheets.md for
+credentials/config.json (both gitignored) - see docs/SHEETS-ACCESS.md for
 the one-time setup.
 
 Usage (also importable):
@@ -46,7 +46,7 @@ def service():
         sys.exit("pip3 install google-api-python-client google-auth")
     if not os.path.exists(KEY_FILE):
         sys.exit(f"No service-account key at {KEY_FILE}\n"
-                 "See tools/README-sheets.md for the one-time setup.")
+                 "See docs/SHEETS-ACCESS.md for the one-time setup.")
     creds = service_account.Credentials.from_service_account_file(
         KEY_FILE, scopes=SCOPES)
     return build("sheets", "v4", credentials=creds, cache_discovery=False)

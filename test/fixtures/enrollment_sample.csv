@@ -1,0 +1,178 @@
+Timestamp,Email Address,Partner Organization Name,Club Name,Number of Girls Enrolled in This Club?,"For this club, please list the full name (First, Middle and Last Name/Surname) of all enrolled girls. Enter one full name per line.","Are there any girls in this club with the exact same name (First, middle and last name/surname)?","Please specify the identical full names and any known identifier (e.g., additional middle name). Enter one full name per line.",Does the mentor who will submit attendance for this specific club speak English?,"If no, what is the primary language of the mentors?",Column 10
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Alpha,Glow Club,5,"Grace Fennwhistle
+Mercy Fennwhistle
+Hope Fennwhistle
+Amara Marrowgate
+Zainab Ostrivane",No,,Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Gamma,Estrellas,5,"Lucía Ñandúvex
+Josefa Peñascote
+Amélie Zörblequist
+Inés Álvarquibble
+Valeria Cobblewynd",No,,No,Español,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Beta,Bright Stars,4,"Amara Marrowgate
+Beatrice Pellucidor
+Amara Marrowgate
+Chiara Thornquibble",Yes,"Amara Marrowgate - two girls, one has a middle name",Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Gamma,Rising Suns,4,"Zainab Ostrivane
+Dalia Umberlash
+zainab ostrivane
+Esther Wrenfoldy",No,,Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Delta,Dawn Circle,3,"Nia Kestrelby
+Olga Lorrimane
+Nia Kestrelby",No,,Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Beta,Hidden Chars,4,"​Maya Pellucidor
+Leila‎ Thornquibble
+﻿Yara Umberlash
+Uma Wrenfoldy⁠",No,,Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Alpha,Numbered List,8,"1. Dalia Yexleyton
+12) Esther Grimboltz
+- Farah Halverquist
+3 Gloria Ixworthing
+Hana Jubbleton,
+Ines Lorrimane.
+
+  Joy   Nimbleford  
+	Kavya Quillstrand	",No,,Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Delta,"Sunrise Club, Eastside ""B""",3,"Priya Vexmoorish
+Rosa Zaffrewick
+Sofia Brindlecote",No,,Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Alpha,Stars,2,"Thandi Cobblewynd
+Wanjiru Fennwhistle",No,,Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Beta,Stars,3,"Ximena Marrowgate
+Yara Ostrivane
+Aisha Pellucidor",No,,Yes,,
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Gamma,Miscounted,7,"Bianca Thornquibble
+Camila Umberlash
+Diana Wrenfoldy",No,,Yes,,
+8/21/2026 09:10:00,mentor2@example.org,Fixture Partner Alpha,Southern Stars,14,"Julia Halverquist
+Thandi Cobblewynd
+Valeria Umberlash
+Aisha Ixworthing
+Sofia Pellucidor
+Yara Ixworthing
+Rosa Brindlecote
+Camila Jubbleton
+Zainab Cobblewynd
+Maya Pellucidor
+Olga Quillstrand
+Amara Ostrivane
+Keza Lorrimane
+Diana Fennwhistle",No,,Yes,,
+8/22/2026 09:11:00,mentor3@example.org,Fixture Partner Beta,Mountain Wings,14,"Fatima Vexmoorish
+Zainab Nimbleford
+Ximena Grimboltz
+Rosa Lorrimane
+Nadia Halverquist
+Hana Halverquist
+Ines Pellucidor
+Aisha Nimbleford
+Fatima Fennwhistle
+Bianca Thornquibble
+Aisha Grimboltz
+Rosa Cobblewynd
+Ines Kestrelby
+Olivia Zaffrewick",No,,Yes,,
+8/23/2026 09:12:00,mentor4@example.org,Fixture Partner Gamma,Ocean Lights,10,"Hope Nimbleford
+Thandi Halverquist
+Wanjiru Nimbleford
+Rosa Cobblewynd
+Fatima Wrenfoldy
+Uma Halverquist
+Gloria Marrowgate
+Isabel Ixworthing
+Zainab Halverquist
+Olga Yexleyton",No,,Yes,,
+8/24/2026 09:13:00,mentor5@example.org,Fixture Partner Delta,Mountain Wings,8,"Uma Kestrelby
+Rosa Umberlash
+Farah Kestrelby
+Keza Halverquist
+Isabel Kestrelby
+Keza Yexleyton
+Dalia Yexleyton
+Mercy Ostrivane",No,,Yes,,
+8/25/2026 09:14:00,mentor6@example.org,Fixture Partner Alpha,Valley Flames,13,"Hana Quillstrand
+Thandi Pellucidor
+Isabel Pellucidor
+Farah Brindlecote
+Diana Kestrelby
+Sofia Kestrelby
+Priya Umberlash
+Diana Nimbleford
+Julia Quillstrand
+Elena Fennwhistle
+Zainab Thornquibble
+Julia Marrowgate
+Nia Jubbleton",No,,Yes,,
+8/26/2026 09:15:00,mentor7@example.org,Fixture Partner Beta,Rising Lights,6,"Olivia Grimboltz
+Farah Quillstrand
+Sofia Grimboltz
+Maya Grimboltz
+Aisha Umberlash
+Valeria Jubbleton",No,,Yes,,
+8/27/2026 09:16:00,mentor8@example.org,Fixture Partner Gamma,Rising Lights,9,"Joy Wrenfoldy
+Keza Lorrimane
+Nadia Kestrelby
+Camila Halverquist
+Uma Cobblewynd
+Valeria Marrowgate
+Diana Ostrivane
+Beatrice Jubbleton
+Farah Ixworthing",No,,Yes,,
+8/21/2026 09:17:00,mentor9@example.org,Fixture Partner Delta,Mountain Roots,10,"Priya Zaffrewick
+Mercy Umberlash
+Chiara Ostrivane
+Sofia Ostrivane
+Esther Vexmoorish
+Keza Ixworthing
+Mercy Quillstrand
+Leila Marrowgate
+Farah Marrowgate
+Joy Thornquibble",No,,Yes,,
+8/22/2026 09:18:00,mentor10@example.org,Fixture Partner Alpha,Northern Lights,9,"Kavya Cobblewynd
+Sofia Jubbleton
+Zainab Wrenfoldy
+Nia Grimboltz
+Yara Kestrelby
+Kavya Zaffrewick
+Chiara Ostrivane
+Thandi Lorrimane
+Nia Jubbleton",No,,Yes,,
+8/23/2026 09:19:00,mentor11@example.org,Fixture Partner Beta,Evening Voices,10,"Nia Lorrimane
+Wanjiru Yexleyton
+Esther Ostrivane
+Maya Nimbleford
+Olivia Umberlash
+Hana Kestrelby
+Amara Vexmoorish
+Maya Yexleyton
+Rosa Brindlecote
+Ines Kestrelby",No,,Yes,,
+8/24/2026 09:20:00,mentor12@example.org,Fixture Partner Gamma,Morning Stars,13,"Ximena Zaffrewick
+Fatima Zaffrewick
+Isabel Umberlash
+Leila Yexleyton
+Camila Ostrivane
+Hana Quillstrand
+Olga Nimbleford
+Ximena Grimboltz
+Valeria Lorrimane
+Bianca Jubbleton
+Olivia Ostrivane
+Kavya Brindlecote
+Amara Kestrelby",No,,Yes,,
+8/25/2026 09:21:00,mentor13@example.org,Fixture Partner Delta,Silver Wings,7,"Rosa Halverquist
+Priya Pellucidor
+Leila Pellucidor
+Gloria Pellucidor
+Ximena Fennwhistle
+Julia Cobblewynd
+Zainab Vexmoorish",No,,Yes,,
+8/28/2026 08:00:00,mentor99@example.org,Fixture Partner Delta,Short Row
+8/20/2026 10:14:02,mentor1@example.org,Fixture Partner Delta,,2,"Elena Grimboltz
+Farah Halverquist",No,,Yes,,
+8/29/2026 17:45:10,mentor1@example.org,Fixture Partner Alpha,GLOW Club,6,"Grace Fennwhistle
+Mercy Fennwhistle
+Hope Fennwhistle
+Amara Marrowgate
+Zainab Ostrivane
+Gloria Ixworthing",No,,Yes,,

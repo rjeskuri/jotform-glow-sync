@@ -1,0 +1,28 @@
+# Decisions
+
+One line per decision that shaped the system; the reasoning lives in the
+linked plan or intent. Add a row when a choice is made that a future reader
+would otherwise re-litigate.
+
+| Date | Decision | Why | Consequences |
+|---|---|---|---|
+| 2026-08-24 | Keep Jotform's native Salesforce V2 integration; no custom SF client | mapping is 8 rows keyed to question ids and identical on every form; the matcher lives in Salesforce | question ids 5/17/18/19/98/100/102/105/109 are frozen; changing them breaks the integration |
+| 2026-08-24 | Girl IDs `CLUBCODE-LASTCODE-NNN`, immutable, numbers never reused | historical Salesforce records must never point at the wrong person | reactivation reuses the same id; a renamed club keeps its code via the ClubRegistry |
+| 2026-08-24 | The sheet's Roster tab (one row per girl) is the source of truth; forms follow | the raw form responses are append-only and inconsistent | every tool reads the Roster export; nobody edits the forms by hand |
+| 2026-08-25 | Deactivate, never delete (girls, clubs, questions) | history and Salesforce counts stay intact | `--prune` exists only for fresh clones and refuses on forms with submissions |
+| 2026-08-26 | Partner → region derived from which regional form each partner's clubs were on, Partners tab overrides | nobody had typed regions; the old forms encoded them | `Regions.gs` is generated and frozen at that derivation; the Partners tab is authoritative |
+| 2026-08-26 | Git history rewritten once to remove a real girl's id used as an example | privacy | examples are `DEMOCLUB-SAMPLE-001` and fictional surnames only |
+| 2026-08-27 | Four regional forms cloned from the upgraded template and relabelled, old forms kept as "(defunct)" | clone keeps the Salesforce mapping byte-identical; Africa stays one form | languages must be restored after a clone (`restore_translations.py`) |
+| 2026-08-27 | One Google "Club Roster Form" with a page-1 choice instead of two forms | partners kept picking the wrong form | handlers route by the linked form url, never by tab name |
+| 2026-08-27 | Deploy Apps Script with clasp 2.4.2 on Node 18 | one command instead of pasting nine files; clasp 3 needs Node 20 | `.nvmrc`, `engines`, `.claspignore` |
+| 2026-09-01 | Adopt the AI-native SDLC playbook: intent → spec → plan under `docs/`, CLAUDE.md, REVIEW.md, skills, hooks, `make check` | see `docs/plans/2026-09-01-ai-native-sdlc-adoption.md` | plan mode for non-trivial changes; committed plans are the audit trail |
+| 2026-09-01 | `Makefile` + `scripts/*.py` as the check interface (not npm scripts, not a lone shell script) | named sub-targets, no dependencies, portable regex (BSD grep has no `\b`), make 3.81 on macOS | `make check` is the definition of done |
+| 2026-09-01 | Synthetic fixture generated in Python with a fixed seed; `expected.json` written by the Python parser | the real export is PII and never leaves `data/`; Python is the parity oracle | `make fixtures-check` catches parser drift; tests are green on a fresh clone and in CI |
+| 2026-09-01 | Live-system gate is a PreToolUse hook keyed on an environment variable set outside the agent | the playbook's "deterministic control layer"; a command cannot approve itself | `GLOW_LIVE_OK=1` exported before launching Claude Code, or Ryan runs the command |
+| 2026-09-01 | The Jotform key found in `.claude/settings.local.json` is rotated; settings.local is gitignored by the repo and holds no rules | the file was protected only by a machine-local global ignore | keys live in `.env`; never on a command line in a Claude session |
+| 2026-09-01 | Automatic sync is event-driven: `Dispatch.gs` → GitHub Actions → the existing Python sync, with a daily backstop | runs when the Mac is off; reuses the proven tools; a native Apps Script port (old Phase 2) would duplicate `sync_attendance_form.py` | credentials as GitHub secrets in a private repo; `AUTO_SYNC_APPLY` variable as the kill switch; dry runs first |
+| 2026-09-01 | Safety bands: ≤5 creates, ≤20 updates, no deletes, no "shares no names" replacements, no truncated exports | an unattended writer must have a blast radius a human can review | bigger changes are applied by hand after reading `ATTENTION.md` |
+| 2026-09-01 | `SyncLog` tab in the sheet records every run; the Audit tab records every request | Ryan asked for a timestamped record in the sheet; the Roster's date columns cannot show reactivations | `SYNC_LOG_COLS` duplicated in `Roster.gs` and `auto_sync.py`, parity-tested |
+| 2026-09-01 | `docs/PLAN.md` archived, not rewritten | it is the best record of *why*; current state lives in LAUNCH/BACKLOG/ARCHITECTURE | `docs/archive/2026-08-24-original-plan.md` |
+| 2026-09-01 | `backup_forms.py` and `restore_conditions.py` stay at the repo root for now | the launch-day rollback pair; muscle memory and every doc reference | moving them into `tools/` is a backlog item |
+| 2026-09-01 | Plan mode is not made the default (`defaultMode`) during launch week | quick fixes may be needed on launch day | revisit after the first week |

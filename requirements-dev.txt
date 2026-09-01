@@ -1,0 +1,4 @@
+# Development-only tools. Runtime deps are in requirements.txt.
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+ruff==0.16.5

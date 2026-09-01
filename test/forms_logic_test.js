@@ -5,25 +5,15 @@
  * Runs the real .gs files in Node against a real club from the enrollment
  * CSV plus synthetic edge cases. No Google APIs involved.
  *
- *   node test/forms_logic_test.js            (needs data/enrollment_2026-08-24.csv)
+ *   node test/forms_logic_test.js   (the real-CSV section runs only if data/enrollment_2026-08-24.csv exists)
  */
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const loadGs = require('./load_gs');
 
 const REPO = path.resolve(__dirname, '..');
-const GS = path.join(REPO, 'appsscript');
-
-let src = '';
-for (const f of ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs']) {
-  src += fs.readFileSync(path.join(GS, f), 'utf8') + '\n';
-}
-src += '\nmodule.exports={ROSTER_COLS,STATUS,tidy_,key_,parseRoster_,lastName_,clubCode_,' +
-       'mintGirlId_,planClub_,planModification_,closestNames_};\n';
-const bundle = path.join(os.tmpdir(), 'glow_ops_bundle_' + process.pid + '.js');
-fs.writeFileSync(bundle, src);
-const gs = require(bundle);
-fs.unlinkSync(bundle);
+const gs = loadGs(['ROSTER_COLS', 'STATUS', 'tidy_', 'key_', 'parseRoster_', 'lastName_', 'clubCode_',
+                   'mintGirlId_', 'planClub_', 'planModification_', 'closestNames_']);
 
 let failures = 0;
 function check(label, cond, detail) {
@@ -116,8 +106,8 @@ check('ranks by shared words', gs.closestNames_('Zibblewick', ['Mary Zibblewick'
 check('empty query → no candidates', gs.closestNames_('   ', ['Mary Zibblewick']).length === 0);
 
 // --------------------------------------------- real data, if available
-const csvPath = path.join(REPO, 'data', 'enrollment_2026-08-24.csv');
-if (fs.existsSync(csvPath)) {
+const csvPath = process.env.CSV || path.join(REPO, 'data', 'enrollment_2026-08-24.csv');
+if (fs.existsSync(csvPath) && path.basename(csvPath) === 'enrollment_2026-08-24.csv') {
   console.log('\nreal CSV — planClub_ over every club matches a fresh mint');
   const text = fs.readFileSync(csvPath, 'utf8').replace(/^﻿/, '');
   const rows = [];

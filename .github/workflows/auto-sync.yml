@@ -1,0 +1,76 @@
+# Keep the regional Jotform attendance forms in step with the Roster tab.
+#
+# Runs when the sheet's Apps Script reports a roster change (Dispatch.gs sends
+# a repository_dispatch), every morning as a backstop, or by hand. Writes to
+# the forms ONLY when the repository variable AUTO_SYNC_APPLY is "1" (and, for
+# a manual run, the "apply" input is ticked); otherwise it is a dry run.
+# Secrets: JOTFORM_API_KEY, GLOW_SA_JSON (service-account key file contents),
+# GLOW_SHEET_ID. See docs/RUNBOOK.md, "Automatic sync".
+name: auto-sync
+on:
+  repository_dispatch:
+    types: [roster-changed]
+  schedule:
+    - cron: "0 11 * * *"       # 06:00 Chicago in summer, 05:00 in winter
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "Africa | Asia | Latin America | U.S | all"
+        default: all
+      apply:
+        description: "write to the forms (AUTO_SYNC_APPLY must also be 1)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: auto-sync            # one run at a time; a second request waits, it is not dropped
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: America/Chicago     # SyncLog times match the sheet's time zone
+      JOTFORM_API_KEY: ${{ secrets.JOTFORM_API_KEY }}
+      GLOW_SHEET_ID: ${{ secrets.GLOW_SHEET_ID }}
+      GLOW_SA_KEY: ${{ runner.temp }}/service-account.json
+      AUTO_SYNC_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install -q -r requirements.txt
+      - name: Service-account key
+        env:
+          GLOW_SA_JSON: ${{ secrets.GLOW_SA_JSON }}
+        run: |
+          if [ -z "$GLOW_SA_JSON" ]; then echo "secret GLOW_SA_JSON is not set" >&2; exit 1; fi
+          printf '%s' "$GLOW_SA_JSON" > "$GLOW_SA_KEY"
+      - name: Sync
+        env:
+          EVENT: ${{ github.event_name }}
+          APPLY_VAR: ${{ vars.AUTO_SYNC_APPLY }}
+          APPLY_INPUT: ${{ inputs.apply }}
+          REGION_INPUT: ${{ inputs.region }}
+          REASON: ${{ github.event.client_payload.reason }}
+        run: |
+          args=(--trigger "${EVENT}${REASON:+:$REASON}")
+          if [ "$APPLY_VAR" = "1" ]; then
+            if [ "$EVENT" != "workflow_dispatch" ] || [ "$APPLY_INPUT" = "true" ]; then args+=(--apply); fi
+          fi
+          if [ -n "$REGION_INPUT" ] && [ "$REGION_INPUT" != "all" ]; then args+=(--region "$REGION_INPUT"); fi
+          echo "python3 tools/auto_sync.py ${args[*]}"
+          python3 tools/auto_sync.py "${args[@]}"
+      - name: Keep the redacted log and the condition backups (no rosters)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-sync-${{ github.run_id }}
+          path: |
+            data/auto_sync/*.log
+            data/auto_sync/ATTENTION.md
+            backups/*/properties-*.json
+          if-no-files-found: ignore
+          retention-days: 30

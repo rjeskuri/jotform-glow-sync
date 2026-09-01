@@ -27,6 +27,7 @@ const TAB = {
   FEEDBACK: 'Feedback',
   SF_PENDING: 'SF Pending',       // new clubs waiting to become Salesforce Accounts
   FORM_LOG: 'FormLog',            // which form responses have been processed
+  SYNC_LOG: 'SyncLog',            // every run of the Jotform auto-sync (written by tools/auto_sync.py)
 };
 
 /** Titles of the generated Google Forms. */
@@ -81,6 +82,9 @@ const PROP = {
   ROSTER_FORM: 'FORM_ROSTER_ID',
   FEEDBACK_FORM: 'FORM_FEEDBACK_ID',
   STAFF_EMAIL: 'STAFF_NOTIFY_EMAIL',   // gets feedback reports + the weekly SF digest
+  // Automatic Jotform sync (Dispatch.gs): unset = no notification is sent
+  SYNC_DISPATCH_REPO: 'SYNC_DISPATCH_REPO',     // owner/name of the GitHub repo
+  SYNC_DISPATCH_TOKEN: 'SYNC_DISPATCH_TOKEN',   // fine-grained token scoped to that repo
 };
 
 /** Columns of the Roster tab, in order. */

@@ -1,0 +1,32 @@
+{
+ "clubs": 23,
+ "girls": 165,
+ "partners": 4,
+ "duplicate_name_clubs": 3,
+ "accented_names": 4,
+ "py_clubs": [
+  "fixture partner alpha||glow club",
+  "fixture partner alpha||northern lights",
+  "fixture partner alpha||numbered list",
+  "fixture partner alpha||southern stars",
+  "fixture partner alpha||stars",
+  "fixture partner alpha||valley flames",
+  "fixture partner beta||bright stars",
+  "fixture partner beta||evening voices",
+  "fixture partner beta||hidden chars",
+  "fixture partner beta||mountain wings",
+  "fixture partner beta||rising lights",
+  "fixture partner beta||stars",
+  "fixture partner delta||dawn circle",
+  "fixture partner delta||mountain roots",
+  "fixture partner delta||mountain wings",
+  "fixture partner delta||silver wings",
+  "fixture partner delta||sunrise club, eastside \"b\"",
+  "fixture partner gamma||estrellas",
+  "fixture partner gamma||miscounted",
+  "fixture partner gamma||morning stars",
+  "fixture partner gamma||ocean lights",
+  "fixture partner gamma||rising lights",
+  "fixture partner gamma||rising suns"
+ ]
+}

@@ -203,6 +203,7 @@ function handleNewClub_(a, source) {
       plan.toAppend.length + ' girls added, ' + plan.reactivate.length + ' reactivated, ' +
       issues.length + ' for review';
   audit_('newClubForm', summary);
+  if (plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
   return summary;
 }
 
@@ -248,6 +249,9 @@ function handleRosterChange_(a, source) {
       (plan.alreadyInactive.length ? ', ' + plan.alreadyInactive.length + ' already removed' : '') +
       (plan.unmatched.length ? ', ' + plan.unmatched.length + ' removal(s) did not match' : '');
   audit_('rosterChangeForm', summary);
+  if (plan.toAppend.length || plan.reactivate.length || plan.deactivate.length) {
+    tryNotifySync_('rosterChangeForm');
+  }
   if (mentorEmail) sendChangeConfirmation_(mentorEmail, club, partner, plan);
   return summary;
 }

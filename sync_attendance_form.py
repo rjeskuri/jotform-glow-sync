@@ -36,6 +36,7 @@ Requires: Python 3.8+, no third-party packages.
 """
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
@@ -69,6 +70,14 @@ SESSION_OVERRIDES = {
     "Elective - Girl Boss Basics": 10,
     "Elective - Girl Boss Pro": 15,
 }
+
+# Warnings are printed as they happen and collected for --summary-json
+# (tools/auto_sync.py decides from them whether a plan is safe to apply).
+WARNINGS = []
+
+def warn(msg):
+    WARNINGS.append(msg)
+    print(msg)
 
 # ------------------------------------------------------------------ id minting
 _counter = [0]
@@ -184,8 +193,8 @@ def read_sheet(csv_path):
             clubs[ident] = (partner, club, roster)
             dup_names[ident] = dups
     if skipped:
-        print(f"  ! {skipped} non-empty CSV row(s) had too few columns and "
-              "were skipped - check the export")
+        warn(f"  ! {skipped} non-empty CSV row(s) had too few columns and "
+             "were skipped - check the export")
     return ({(p, c): r for (p, c, r) in clubs.values()},
             {clubs[i][:2]: d for i, d in dup_names.items()})
 
@@ -328,6 +337,9 @@ def main():
     ap.add_argument("--prune", action="store_true",
                     help="with --region: DELETE club questions that the Roster "
                          "places in another region (fresh clones only)")
+    ap.add_argument("--summary-json", metavar="PATH",
+                    help="also write a machine-readable summary of the plan to PATH "
+                         "(used by tools/auto_sync.py)")
     args = ap.parse_args()
     if args.region and not args.roster:
         sys.exit("--region needs --roster (the Roster tab is what carries regions)")
@@ -358,7 +370,7 @@ def main():
                    "--prune is for fresh clones only")
             if args.apply:
                 sys.exit("Refusing: " + msg)
-            print(f"  ! (preview only) {msg}")
+            warn(f"  ! (preview only) {msg}")
 
     # clubs whose roster lists the same full name twice: two different girls
     # need a distinguishing suffix in the SHEET before we trust that roster
@@ -366,12 +378,12 @@ def main():
     for key, dups in dup_names.items():
         if dups:
             frozen.add(key)
-            print(f"  ! {key[1]} ({key[0]}): {', '.join(dups)} appears twice "
-                  "in the roster. If these are two different girls, add a "
-                  "distinguishing suffix in the sheet (e.g. 'Anh Nguyen (A)'). "
-                  "An existing roster on the form is not updated from this "
-                  "row; a brand-new club is created with the name listed "
-                  "once.")
+            warn(f"  ! {key[1]} ({key[0]}): {', '.join(dups)} appears twice "
+                 "in the roster. If these are two different girls, add a "
+                 "distinguishing suffix in the sheet (e.g. 'Anh Nguyen (A)'). "
+                 "An existing roster on the form is not updated from this "
+                 "row; a brand-new club is created with the name listed "
+                 "once.")
 
     questions = jf.get("/questions")
     norm = lambda s: " ".join(s.split())
@@ -444,8 +456,8 @@ def main():
             to_delete.append((qid, form_text[qid], reg))
             return False
         if reg:
-            print(f"  ! '{form_text[qid]}' (q{qid}) belongs to {reg} - kept "
-                  "(use --prune on a fresh clone to remove it)")
+            warn(f"  ! '{form_text[qid]}' (q{qid}) belongs to {reg} - kept "
+                 "(use --prune on a fresh clone to remove it)")
         return True
 
     # --- reconcile clubs (grouped case-insensitively) ----------------------
@@ -467,9 +479,9 @@ def main():
                         not partner_matches(current_partner_of[qid], partner):
                     # same name but a DIFFERENT partner's club: don't overwrite
                     # the existing roster - create a sibling, partner-gated
-                    print(f"  ! '{club}' from {partner} shares its name with "
-                          f"q{qid} ({current_partner_of[qid]}) - creating a "
-                          "separate roster")
+                    warn(f"  ! '{club}' from {partner} shares its name with "
+                         f"q{qid} ({current_partner_of[qid]}) - creating a "
+                         "separate roster")
                     club_questions[qid] = form_text[qid]
                     partner_of[qid] = current_partner_of[qid]
                     to_create.append((club, partner, options, True))
@@ -478,10 +490,10 @@ def main():
                     if questions[qid]["options"] != options \
                             and (partner, club) not in frozen:
                         if roster_overlap(qid, roster) == 0:
-                            print(f"  ! '{club}' (q{qid}): proposed roster "
-                                  "shares NO names with the current one - "
-                                  "verify it is the same club before "
-                                  "applying")
+                            warn(f"  ! '{club}' (q{qid}): proposed roster "
+                                 "shares NO names with the current one - "
+                                 "verify it is the same club before "
+                                 "applying")
                         to_update.append((qid, club, options))
             else:
                 to_create.append((club, partner, options, False))
@@ -516,8 +528,8 @@ def main():
             club = form_text[qid]
             if not keep_or_prune(qid):
                 continue
-            print(f"  ! '{club}' (q{qid}) matched no partner in the sheet - "
-                  "keeping it, but check it in the builder")
+            warn(f"  ! '{club}' (q{qid}) matched no partner in the sheet - "
+                 "keeping it, but check it in the builder")
             club_questions[qid] = club
             partner_of[qid] = current_partner_of.get(qid, "")
             if not partner_of[qid]:
@@ -535,8 +547,8 @@ def main():
             if not keep_or_prune(qid):
                 continue
             club_questions[qid] = form_text[qid]
-            print(f"  ? '{form_text[qid]}' (q{qid}) is on the form but "
-                  "not in the sheet export - keeping its current roster")
+            warn(f"  ? '{form_text[qid]}' (q{qid}) is on the form but "
+                 "not in the sheet export - keeping its current roster")
 
     # every club sharing a (case-insensitive) name with another MUST have a
     # partner for its rule; fall back to the form's current rules for clubs
@@ -613,6 +625,22 @@ def main():
         print(f"  - {call}")
     if not jf.calls:
         print("  nothing to do - form already matches the sheet")
+
+    if args.summary_json:
+        summary = {
+            "form": args.form, "region": args.region, "apply": args.apply,
+            "roster_clubs": len(sheet),
+            "roster_girls": sum(len(v) for v in sheet.values()),
+            "creates": [{"club": c, "partner": p, "girls": o.count("|") + 1}
+                        for c, p, o, _ in to_create],
+            "updates": [{"qid": q, "club": c, "girls": o.count("|") + 1}
+                        for q, c, o in to_update],
+            "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
+            "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
+            "plan_hash": hashlib.sha1("\n".join(sorted(jf.calls)).encode()).hexdigest(),
+        }
+        with open(args.summary_json, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=1)
 
 if __name__ == "__main__":
     main()

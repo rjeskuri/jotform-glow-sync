@@ -17,6 +17,9 @@ const REVIEW_COLS = ['raised', 'issue', 'partner', 'club', 'detail', 'resolved']
 const PARTNER_COLS = ['partner', 'region', 'notes'];
 const CLUB_COLS = ['club_code', 'partner', 'club', 'created'];
 const AUDIT_COLS = ['when', 'action', 'detail'];
+// Appended by tools/auto_sync.py (keep in step with SYNC_LOG_COLS there)
+const SYNC_LOG_COLS = ['when', 'trigger', 'region', 'mode', 'creates', 'updates',
+                       'rules', 'result', 'detail', 'run_url'];
 
 function today_() {
   return Utilities.formatDate(new Date(),
@@ -35,6 +38,7 @@ function setUpTabs() {
   ensureTab_(ss, TAB.CLUBS, CLUB_COLS);
   ensureTab_(ss, TAB.REVIEW, REVIEW_COLS);
   ensureTab_(ss, TAB.AUDIT, AUDIT_COLS);
+  ensureTab_(ss, TAB.SYNC_LOG, SYNC_LOG_COLS);
   SpreadsheetApp.getActive().toast('Tabs are ready.', 'GLOW', 5);
 }
 
@@ -141,6 +145,7 @@ function refreshRosterRegions() {
   const summary = changed + ' of ' + n + ' rows changed' +
       (missing ? ', ' + missing + ' rows still have no region' : '');
   audit_('refreshRosterRegions', summary);
+  if (changed) tryNotifySync_('refreshRosterRegions');
   ss.toast(summary, 'GLOW regions', 10);
 }
 
@@ -225,6 +230,7 @@ function rebuildRosterLocked_(ss) {
       reactivate.length + ' reactivated, ' + issues.length + ' for review' +
       (missingRegion ? ', ' + missingRegion + ' partner(s) missing a region' : '');
   audit_('rebuildRosterFromResponses', summary);
+  if (toAppend.length || reactivate.length) tryNotifySync_('rebuildRosterFromResponses');
   ss.toast(summary, 'GLOW roster', 10);
   return summary;
 }

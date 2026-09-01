@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""
+Offline Python tests (standard library unittest; run by `make py`):
+
+  - the auto-sync runner's decisions (plan parsing, safety bands, the
+    blank-region guard, verification, redaction), on fabricated output;
+  - the enrollment parser on the synthetic fixture (numbers pinned in
+    test/fixtures/expected.json) and its edge cases;
+  - the constants that exist in BOTH Python and appsscript/Config.gs /
+    Roster.gs - form ids, qids, SESSION_OVERRIDES, SyncLog columns - so a
+    change on one side fails here until the other side follows.
+
+    python3 test/python_test.py
+"""
+import json
+import os
+import re
+import sys
+import unittest
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+sys.path.insert(0, os.path.join(REPO, "tools"))
+import auto_sync                      # noqa: E402
+import form_status                    # noqa: E402
+import sync_attendance_form as sync   # noqa: E402
+
+FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
+EXPECTED = os.path.join(REPO, "test", "fixtures", "expected.json")
+CONFIG_GS = os.path.join(REPO, "appsscript", "Config.gs")
+ROSTER_GS = os.path.join(REPO, "appsscript", "Roster.gs")
+
+DRY_RUN = """Roster: 12 active clubs in Asia (176 girls); 332 clubs overall
+  ! 'Old Name Club' (q120): proposed roster shares NO names with the current one - verify it is the same club before applying
+  ? 'Left Behind' (q133) is on the form but not in the sheet export - keeping its current roster
+
+DRY RUN (use --apply to write):
+  - CREATE roster 'Brand New Club' (9 girls)
+  - UPDATE roster 'Old Name Club' (q120, 14 girls)
+  - UPDATE roster 'Sunrise Club, Eastside "B"' (q121, 3 girls)
+  - DELETE roster 'Elsewhere' (q140, belongs to Africa)
+  - REPLACE conditions (57 rules + ~1 more once the new rosters exist)
+"""
+
+
+def read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def gs_block(src, name):
+    """Body of `const NAME = {...};` or `const NAME = [...];` in a .gs file."""
+    m = re.search(r"const %s = [\{\[](.*?)\n?[\}\]];" % re.escape(name), src, re.S)
+    assert m, name
+    return m.group(1)
+
+
+class AutoSyncPlan(unittest.TestCase):
+    def test_parse_plan_reads_every_line_kind(self):
+        plan = auto_sync.parse_plan(DRY_RUN)
+        self.assertEqual([c["club"] for c in plan["creates"]], ["Brand New Club"])
+        self.assertEqual(plan["creates"][0]["girls"], 9)
+        self.assertEqual([(u["qid"], u["club"], u["girls"]) for u in plan["updates"]],
+                         [("120", "Old Name Club", 14), ("121", 'Sunrise Club, Eastside "B"', 3)])
+        self.assertEqual(plan["deletes"], [{"qid": "140", "club": "Elsewhere", "region": "Africa"}])
+        self.assertEqual(plan["rules"], 57)
+        self.assertEqual((plan["roster_clubs"], plan["roster_girls"]), (12, 176))
+        self.assertEqual(len(plan["warnings"]), 2)
+        self.assertEqual(auto_sync.changes(plan), 4)
+
+    def test_in_sync_when_only_the_conditions_rewrite_is_planned(self):
+        plan = auto_sync.parse_plan("Roster: 3 active clubs in U.S (40 girls); 300 clubs overall\n"
+                                    "\nDRY RUN (use --apply to write):\n"
+                                    "  - REPLACE conditions (40 rules)\n")
+        self.assertEqual(auto_sync.changes(plan), 0)
+        self.assertEqual(plan["rules"], 40)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+
+    def test_summary_json_gives_the_same_shape(self):
+        summary = {"creates": [{"club": "A", "partner": "P", "girls": 2}],
+                   "updates": [{"qid": "7", "club": "B", "girls": 5}],
+                   "deletes": [], "rules": 9, "warnings": ["  ? 'B' (q7) is on the form"],
+                   "roster_clubs": 2, "roster_girls": 7}
+        plan = auto_sync.plan_from_summary(summary)
+        self.assertEqual(set(plan), set(auto_sync.parse_plan("")))
+        self.assertEqual(auto_sync.changes(plan), 2)
+        self.assertEqual(plan["warnings"], ["? 'B' (q7) is on the form"])
+
+    def test_bands_refuse_deletes_big_waves_and_replaced_rosters(self):
+        plan = auto_sync.parse_plan(DRY_RUN)
+        reasons = auto_sync.check_bands(plan)
+        self.assertTrue(any("delete" in r for r in reasons))
+        self.assertTrue(any("shares no names" in r for r in reasons))
+        self.assertEqual(len(reasons), 2)
+        big = {"creates": [{"club": f"C{i}", "girls": 1} for i in range(6)], "updates": [],
+               "deletes": [], "rules": 1, "warnings": [], "roster_clubs": 50, "roster_girls": 1}
+        self.assertEqual(len(auto_sync.check_bands(big)), 1)
+        self.assertEqual(auto_sync.check_bands(big, max_creates=6), [])
+        many = dict(big, creates=[], updates=[{"qid": str(i), "club": "c", "girls": 1} for i in range(21)])
+        self.assertIn("update", auto_sync.check_bands(many)[0])
+
+    def test_bands_catch_a_truncated_export(self):
+        warnings = [f"? 'Club {i}' (q{i}) {auto_sync.NOT_IN_EXPORT} - keeping its current roster"
+                    for i in range(12)]
+        plan = {"creates": [], "updates": [{"qid": "1", "club": "x", "girls": 2}], "deletes": [],
+                "rules": 5, "warnings": warnings, "roster_clubs": 30, "roster_girls": 100}
+        self.assertTrue(any("truncated" in r for r in auto_sync.check_bands(plan)))
+        plan["roster_clubs"] = 200      # 12 of 200 is normal drift, not truncation
+        self.assertEqual(auto_sync.check_bands(plan), [])
+
+    def test_blank_region_rows(self):
+        rows = [{"partner": "P", "club": "A", "status": "active", "region": ""},
+                {"partner": "P", "club": "A", "status": "ACTIVE ", "region": "  "},
+                {"partner": "P", "club": "A", "status": "inactive", "region": ""},
+                {"partner": "Q", "club": "B", "status": "active", "region": "Asia"},
+                {"partner": " Q ", "club": "C", "status": "active", "region": ""}]
+        self.assertEqual(auto_sync.blank_region_rows(rows), [("P", "A", 2), ("Q", "C", 1)])
+
+    def test_verify_report(self):
+        clean = {"error_conditions": 0, "salesforce": True, "rule_problems": [],
+                 "languages": ["a"] * 12, "duplicate_club_questions": [],
+                 "region_check": {"missing_from_form": [], "not_in_roster": ["Extra"],
+                                  "rosters_out_of_date": []}}
+        problems, notes = auto_sync.verify_report(clean)
+        self.assertEqual(problems, [])
+        self.assertEqual(len(notes), 1)
+        bad = dict(clean, error_conditions=2, salesforce=False, languages=["en"],
+                   region_check={"missing_from_form": ["M"], "not_in_roster": [],
+                                 "rosters_out_of_date": [["S", 1, 0]]})
+        problems, _ = auto_sync.verify_report(bad)
+        self.assertEqual(len(problems), 5)
+        self.assertIn("no region check", auto_sync.verify_report(dict(clean, region_check=None))[0][0])
+
+    def test_redact_masks_names_longest_first_and_case_insensitively(self):
+        text = "UPDATE roster 'X' - Ana Fennwhistle Long and ana fennwhistle, plus Bo Vexmoorish."
+        out = auto_sync.redact(text, ["Ana Fennwhistle", "Ana Fennwhistle Long", "Bo Vexmoorish", ""])
+        self.assertEqual(out, "UPDATE roster 'X' - [girl] and [girl], plus [girl].")
+        self.assertEqual(auto_sync.redact("nothing", []), "nothing")
+
+    def test_plan_line_formats_still_exist_in_the_sync_tool(self):
+        src = read(os.path.join(REPO, "sync_attendance_form.py"))
+        # string literals in the source may be split across lines: join them before looking
+        joined = re.sub(r'"\s*\n\s*"', "", src)
+        for fragment in ("CREATE roster '{club}' (", "UPDATE roster '{club}' (q{qid}, ",
+                         "DELETE roster '{club}' (q{qid}, belongs to {reg})",
+                         "REPLACE conditions ({len(conds)} rules", auto_sync.NOT_IN_EXPORT,
+                         auto_sync.NO_SHARED_NAMES, "--summary-json"):
+            self.assertIn(fragment, joined, fragment)
+
+
+class EnrollmentParser(unittest.TestCase):
+    def test_fixture_matches_expected_json(self):
+        expected = json.loads(read(EXPECTED))
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            sheet, dups = sync.read_sheet(FIXTURE)
+        self.assertEqual(len(sheet), expected["clubs"])
+        self.assertEqual(sum(len(v) for v in sheet.values()), expected["girls"])
+        self.assertEqual(len({p for p, _ in sheet}), expected["partners"])
+        self.assertEqual(sum(1 for d in dups.values() if d), expected["duplicate_name_clubs"])
+        self.assertEqual(sorted(f"{p.lower()}||{c.lower()}" for p, c in sheet), expected["py_clubs"])
+        # the case-only re-submission won, with the later spelling and the extra girl
+        glow = [k for k in sheet if k[1].lower() == "glow club"]
+        self.assertEqual(len(glow), 1)
+        self.assertEqual(glow[0][1], "GLOW Club")
+        self.assertEqual(len(sheet[glow[0]]), 6)
+
+    def test_parse_roster_edge_cases(self):
+        names, dups = sync.parse_roster("1. Dalia Yexleyton\n12) Esther Grimboltz\n- Farah Halverquist\n"
+                                        "3 Gloria Ixworthing\nHana Jubbleton,\nInes Lorrimane.\n\n"
+                                        "  Joy   Nimbleford  \n\tKavya Quillstrand\t\n"
+                                        "​Maya Pellucidor\nmaya pellucidor")
+        self.assertEqual(names, ["Dalia Yexleyton", "Esther Grimboltz", "Farah Halverquist",
+                                 "Gloria Ixworthing", "Hana Jubbleton", "Ines Lorrimane",
+                                 "Joy Nimbleford", "Kavya Quillstrand", "Maya Pellucidor"])
+        self.assertEqual(dups, ["maya pellucidor"])
+
+    def test_read_roster_csv_filters_active_and_region(self):
+        import tempfile
+        rows = ("girl_id,partner,club,region,full_name,last_name,status,added_date,removed_date,source\n"
+                "A-B-001,P,Club One,Asia,Ana Fennwhistle,Fennwhistle,active,2026-01-01,,x\n"
+                "A-B-002,P,Club One,Asia,Bea Fennwhistle,Fennwhistle,inactive,2026-01-01,2026-02-01,x\n"
+                "A-C-001,P,Club Two,,Cy Marrowgate,Marrowgate,active,2026-01-01,,x\n"
+                "A-D-001,Q,Club Three,africa,Di Ostrivane,Ostrivane,active,2026-01-01,,x\n")
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as f:
+            f.write(rows)
+        try:
+            want, all_clubs, region_of = sync.read_roster_csv(f.name, "Asia")
+            self.assertEqual(list(want), [("P", "Club One")])
+            self.assertEqual(want[("P", "Club One")], ["Ana Fennwhistle"])
+            self.assertEqual(len(all_clubs), 3)
+            self.assertEqual(region_of[("P", "Club Two")], "")     # blank region: silently not in any region
+            self.assertEqual(list(sync.read_roster_csv(f.name, "AFRICA")[0]), [("Q", "Club Three")])
+        finally:
+            os.remove(f.name)
+
+
+class PythonAppsScriptParity(unittest.TestCase):
+    def setUp(self):
+        self.config = read(CONFIG_GS)
+
+    def test_form_ids(self):
+        forms = dict(re.findall(r"^\s+([A-Z_]+): '(\d+)',", gs_block(self.config, "FORMS"), re.M))
+        self.assertEqual({"Africa": forms["AFRICA"], "Asia": forms["ASIA"],
+                          "Latin America": forms["LATIN_AMERICA"], "U.S": forms["US"]},
+                         auto_sync.REGIONAL_FORMS)
+        template = [fid for fid, (label, _) in form_status.FORMS.items() if label == "template"]
+        self.assertEqual(template, [forms["TEMPLATE"]])
+        self.assertEqual({fid for fid, (_, region) in form_status.FORMS.items() if region},
+                         set(auto_sync.REGIONAL_FORMS.values()))
+        self.assertTrue(all(re.fullmatch(r"\d{15}", f) for f in auto_sync.REGIONAL_FORMS.values()))
+
+    def test_qids(self):
+        block = gs_block(self.config, "QID")
+        simple = dict(re.findall(r"^\s+([A-Z_]+): '(\d+)',", block, re.M))
+        self.assertEqual(simple["CLUB_NAME"], sync.CLUB_NAME)
+        self.assertEqual(simple["PARTNER"], sync.PARTNER)
+        self.assertEqual(simple["YEAR"], sync.YEAR)
+        self.assertEqual((simple["CONTACT_IDS"], simple["MODULE_ID"], simple["WEEK_ID"], simple["YEAR_ID"]),
+                         (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID))
+        self.assertEqual(simple["ENABLE_FUZZY"], form_status.ENABLE_FUZZY_QID)
+        self.assertEqual((simple["CLUB_NAME"], simple["PARTNER"], simple["CONTACT_IDS"]),
+                         (form_status.CLUB_NAME_QID, form_status.PARTNER_QID, form_status.CONTACT_IDS_QID))
+        modules = dict(re.findall(r"'(\d)': '(\d+)'", re.search(r"MODULE: \{([^}]*)\}", block).group(1)))
+        self.assertEqual(modules, sync.MODULES)
+        sessions = {int(k): v for k, v in
+                    re.findall(r"(\d+): '(\d+)'", re.search(r"SESSIONS: \{([^}]*)\}", block).group(1))}
+        self.assertEqual(sessions, sync.WEEKS)
+
+    def test_session_overrides(self):
+        pairs = {k: int(v) for k, v in
+                 re.findall(r"'([^']+)': (\d+),", gs_block(self.config, "SESSION_OVERRIDES"))}
+        self.assertEqual(pairs, sync.SESSION_OVERRIDES)
+
+    def test_synclog_columns(self):
+        m = re.search(r"const SYNC_LOG_COLS = \[(.*?)\];", read(ROSTER_GS), re.S)
+        self.assertEqual(re.findall(r"'([a-z_]+)'", m.group(1)), auto_sync.SYNC_LOG_COLS)
+        self.assertIn("SYNC_LOG: 'SyncLog'", self.config)
+        self.assertEqual(auto_sync.SYNC_LOG_TAB, "SyncLog")
+
+    def test_roster_columns_python_side_is_a_subset(self):
+        cols = re.findall(r"'([a-z_]+)'", gs_block(self.config, "ROSTER_COLS"))
+        self.assertTrue({"partner", "club", "full_name", "status", "region"} <= set(cols))
+        self.assertEqual(cols[0], "girl_id")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

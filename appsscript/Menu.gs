@@ -18,6 +18,8 @@ function onOpen() {
           .addItem('Process any missed form responses', 'processMissedResponses')
           .addItem('Install triggers', 'installTriggers')
           .addSeparator()
+          .addItem('Request Jotform sync now', 'requestJotformSync')
+          .addSeparator()
           .addItem('Retire the old enrollment form', 'retireOldEnrollmentForm'))
       .addToUi();
 }

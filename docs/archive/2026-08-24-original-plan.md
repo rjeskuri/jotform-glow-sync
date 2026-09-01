@@ -1,10 +1,16 @@
 # GLOW Enrollment → Attendance → Salesforce Workflow Automation
 
+> **Historical document.** Written 2026-08-24, before launch. Phases 0, 1, 3 and 4 shipped by
+> 2026-08-28 (four regional forms live; Roster tab + Google Forms in the master enrollment sheet).
+> Current state lives in [LAUNCH.md](../LAUNCH.md), [BACKLOG.md](../BACKLOG.md),
+> [ARCHITECTURE.md](../ARCHITECTURE.md) and [DECISIONS.md](../DECISIONS.md). Kept for the
+> reasoning behind the decisions; paths were made repo-relative when it was archived.
+
 ## Context
 
 The 2026-08-24 overhaul made the Jotform attendance side maintainable: the
 enrollment Google Sheet is the source of truth and
-[sync_attendance_form.py](/Users/ryaneskuri/jotform-glow-sync/sync_attendance_form.py)
+[sync_attendance_form.py](../../sync_attendance_form.py)
 regenerates rosters + all conditional logic from a CSV export. Still manual or
 fragile: (1) every new enrollment response requires a manual CSV download + a
 sync run; (2) new-club enrollment and roster changes share one free-text
@@ -130,7 +136,7 @@ single test submission landing correctly in `Attendance_Batch__c`.
 - **First**: copy the session-scratchpad snapshots into the durable repo
   `~/jotform-glow-sync/backups/` — original pre-upgrade state
   (`properties.json`, `questions.json`, `emails_verbatim.json` from
-  `/private/tmp/claude-501/-Users-ryaneskuri/286ab1f0-b277-4137-8062-be2677d79d45/scratchpad/jotform/`),
+  `<a session scratchpad, since copied into backups/>`),
   current post-sync state (`properties_final.json`, `questions_final.json`),
   and `enrollment_full.csv`. Then snapshot questions/properties/emails for
   master + all 4 regionals via GET. (The scratchpad is session-ephemeral and
@@ -336,10 +342,10 @@ regional consolidation; Spanish-language mentor confirmation email.
 
 ## Reuse & references
 
-- Porting source: [sync_attendance_form.py](/Users/ryaneskuri/jotform-glow-sync/sync_attendance_form.py)
+- Porting source: [sync_attendance_form.py](../../sync_attendance_form.py)
   (`parse_roster`, `read_sheet`, reconcile, `build_conditions`, `Jotform`
-  API-call shapes) and [README.md](/Users/ryaneskuri/jotform-glow-sync/README.md).
-- Verified API semantics: memory note `jotform-api-quirks.md`.
+  API-call shapes) and [README.md](../../README.md).
+- Verified API semantics: now `.claude/skills/jotform-api/SKILL.md` (was a memory note outside the repo).
 - Current-state templates: scratchpad `questions_final.json` /
   `properties_final.json` (copy to repo in Phase 0); original pre-upgrade
   state: `properties.json` / `questions.json` / `emails_verbatim.json`.

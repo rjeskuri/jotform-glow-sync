@@ -1,0 +1,59 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make check)", "Bash(make test)", "Bash(make py)", "Bash(make gs)", "Bash(make secrets)",
+      "Bash(make docs-links)", "Bash(make fixtures-check)", "Bash(make lint)", "Bash(make help)",
+      "Bash(npm test)", "Bash(npm run check)",
+      "Bash(node test/:*)", "Bash(node scripts/check_gs.js)",
+      "Bash(python3 test/python_test.py)", "Bash(.venv/bin/python3 test/python_test.py)",
+      "Bash(python3 scripts/check_:*)", "Bash(.venv/bin/python3 scripts/check_:*)",
+      "Bash(python3 test/fixtures/make_fixture.py --check)",
+      "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+      "Bash(git ls-files:*)", "Bash(git check-ignore:*)", "Bash(git branch:*)", "Bash(git blame:*)",
+      "Bash(python3 tools/form_status.py:*)",
+      "Bash(python3 backup_forms.py:*)",
+      "Bash(python3 tools/needs_attention.py:*)",
+      "Bash(python3 tools/add_translations.py --audit:*)",
+      "Bash(python3 tools/sheets_client.py tabs)", "Bash(python3 tools/sheets_client.py whoami)",
+      "Bash(python3 tools/sheets_client.py export:*)",
+      "Bash(ls:*)", "Bash(wc:*)", "Bash(which:*)"
+    ],
+    "ask": [
+      "Read(./data/**)", "Read(./backups/**)",
+      "Bash(git commit:*)", "Bash(git push:*)", "Bash(git tag:*)",
+      "Bash(npm run clasp:*)", "Bash(npx clasp:*)",
+      "Bash(python3 tools/derive_partner_regions.py:*)",
+      "Bash(python3 test/fixtures/make_fixture.py --write)", "Bash(make fixtures)"
+    ],
+    "deny": [
+      "Read(./credentials/service-account.json)", "Read(./credentials/config.json)",
+      "Read(./.env)", "Read(./.env.local)",
+      "Read(./.claude/settings.local.json)",
+      "Read(~/.clasprc.json)", "Read(~/.config/gcloud/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/live_gate.sh", "timeout": 5 }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/protected_paths.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/secret_scan.sh", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

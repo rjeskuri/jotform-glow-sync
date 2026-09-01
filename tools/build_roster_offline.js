@@ -27,10 +27,8 @@
  */
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const REPO = path.resolve(__dirname, '..');
-const GS = path.join(REPO, 'appsscript');
 
 // ---------------------------------------------------------------- arguments
 const argv = process.argv.slice(2);
@@ -54,16 +52,9 @@ const NOW = TODAY + ' ' + pad(nowDate.getHours()) + ':' + pad(nowDate.getMinutes
 
 // ------------------------------------------------ load the real .gs code
 // Only the pure-logic files; Roster.gs/Menu.gs call SpreadsheetApp.
-let src = '';
-for (const f of ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs']) {
-  src += fs.readFileSync(path.join(GS, f), 'utf8') + '\n';
-}
-src += '\nmodule.exports={TAB,ROSTER_COLS,RESPONSE_COLS,STATUS,PARTNER_REGIONS,PARTNER_REGION_NOTES,' +
-       'tidy_,key_,asciiCode_,parseRoster_,lastName_,clubCode_,mintGirlId_,planClub_};\n';
-const bundle = path.join(os.tmpdir(), 'glow_gs_bundle_' + process.pid + '.js');
-fs.writeFileSync(bundle, src);
-const gs = require(bundle);
-fs.unlinkSync(bundle);
+const gs = require('../test/load_gs')(['TAB', 'ROSTER_COLS', 'RESPONSE_COLS', 'STATUS',
+  'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'tidy_', 'key_', 'asciiCode_', 'parseRoster_',
+  'lastName_', 'clubCode_', 'mintGirlId_', 'planClub_']);
 
 const REVIEW_COLS = ['raised', 'issue', 'partner', 'club', 'detail', 'resolved'];
 const PARTNER_COLS = ['partner', 'region', 'notes'];
