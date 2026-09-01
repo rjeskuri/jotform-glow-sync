@@ -48,10 +48,14 @@ out to the four regional forms.
 
 ## Open questions
 
-- Jotform's native dropdown has no type-to-filter (support confirms); the
-  Autocomplete widget allows free text and its conditions are
-  `contains`-based. Decision: native dropdown (exact matching, no free
-  text, translatable, no iframe); a partner → club two-step cascade is the
-  follow-up if the long list on Africa (204 clubs) bothers mentors.
-- Where should the picker sit — in place of the textbox (same position) or
-  above the mentor email? Decision: same position as the textbox.
+- Jotform's plain dropdown only jumps to the first letter (Ryan's test);
+  the Autocomplete widget allows free text and its conditions are
+  `contains`-based. Decision: the native dropdown in its searchable mode
+  (`multipleSelections=Yes` renders Jotform's own filter-as-you-type
+  component; exact matching, no free text, translatable, no iframe) —
+  Ryan verified it on the template 2026-09-01 and likes it.
+- Where should the picker sit — same position as the textbox. Decided.
+- Rollout: **template only for now**; the regional forms get it in a later
+  mass update with other features (Ryan). Before that: apply the queued
+  translations, and confirm a mentor cannot pick two clubs (Jotform ignores
+  `maxSelection` on dropdowns; if two can be picked, add a guard rule).

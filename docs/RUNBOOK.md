@@ -147,12 +147,16 @@ automation: `AUTO_SYNC_APPLY=0` (or clear the two Script Properties).
 ## The Club picker (mentors choose their club instead of typing it)
 
 Intent: [intent/2026-09-01-club-picker.md](intent/2026-09-01-club-picker.md).
-A required **Club** dropdown listing every club on the form; the roster
-rules key on it, and a calculation copies the pick into the (now hidden)
-Club Name textbox, question 5, which is what the Salesforce mapping reads —
-so `Account_Name__c` still receives the plain club name. Added once per
-form; from then on every sync run keeps its option list equal to the form's
-clubs (`UPDATE club picker (N clubs)` in the plan).
+A required **Club** dropdown in Jotform's searchable mode (type to filter,
+on phones too) listing every club on the form; the roster rules key on it,
+and a calculation copies the pick into the (now hidden) Club Name textbox,
+question 5, which is what the Salesforce mapping reads — so `Account_Name__c`
+still receives the plain club name. Added once per form; from then on every
+sync run keeps its option list and properties in the shape `PICKER_PROPS`
+defines (`UPDATE club picker (N clubs: options, subLabel…)` in the plan).
+**Status:** on the template since 2026-09-01, verified by Ryan; the regional
+forms get it in the planned mass update together with other features — do
+not roll it out on its own.
 
 ```bash
 python3 backup_forms.py --form 262352490535154
@@ -168,10 +172,14 @@ the Club Name field. Rollback: `restore_conditions.py` for the rules, and in
 the builder delete the Club dropdown and un-hide Club Name (or
 `question[hidden]=No`, `question[required]=Yes` on q5 via the API).
 
-Before the regional rollout add the label and sublabel ("Club", "Choose
-your club from the list…") to `tools/translations_additions.json` and run
-`tools/add_translations.py --apply` on each form, or the picker shows in
-English in every language.
+Before the regional rollout run `tools/add_translations.py --apply` on each
+form: the label, sublabel and search placeholder are already queued in
+`tools/translations_additions.json` (written by us — have a native speaker
+glance at them, as with the Odia strings). Without that step the picker
+shows in English in every language. Still to confirm during the mass
+update: that the searchable component lets a mentor pick only one club
+(Jotform ignores `maxSelection` on dropdowns); if two can be picked, the
+sync must add a guard rule.
 
 ## Backup and restore (Jotform)
 

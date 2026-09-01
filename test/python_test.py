@@ -39,7 +39,7 @@ DRY RUN (use --apply to write):
   - UPDATE roster 'Old Name Club' (q120, 14 girls)
   - UPDATE roster 'Sunrise Club, Eastside "B"' (q121, 3 girls)
   - DELETE roster 'Elsewhere' (q140, belongs to Africa)
-  - UPDATE club picker (13 clubs)
+  - UPDATE club picker (13 clubs: options, subLabel)
   - REPLACE conditions (57 rules + ~1 more once the new rosters exist)
 """
 
@@ -151,8 +151,17 @@ class AutoSyncPlan(unittest.TestCase):
                          "REPLACE conditions ({len(conds)} rules", auto_sync.NOT_IN_EXPORT,
                          auto_sync.NO_SHARED_NAMES, "--summary-json",
                          "CREATE club picker ({len(picker_names)} clubs)",
-                         "UPDATE club picker ({len(picker_names)} clubs)"):
+                         "UPDATE club picker ({len(picker_names)} clubs: "):
             self.assertIn(fragment, joined, fragment)
+
+    def test_picker_shape_is_the_searchable_component(self):
+        self.assertEqual(sync.PICKER_PROPS["multipleSelections"], "Yes")   # Jotform's type-to-filter dropdown
+        self.assertEqual(sync.PICKER_PROPS["required"], "Yes")
+        self.assertNotIn("on a computer", sync.PICKER_PROPS["subLabel"])
+        # the label and sublabel must have translations queued for the rollout
+        additions = json.loads(read(os.path.join(REPO, "tools", "translations_additions.json")))
+        self.assertIn(sync.PICKER_TEXT, additions)
+        self.assertIn(sync.PICKER_SUBLABEL, additions)
 
 
 class ConditionBuilder(unittest.TestCase):

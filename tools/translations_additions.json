@@ -39,17 +39,24 @@
     "es": "Club", "fr": "Club", "th": "ชมรม", "ur": "کلب", "te": "క్లబ్",
     "vi": "Câu lạc bộ", "ne": "क्लब", "km": "ក្លឹប", "sw": "Klabu", "ar": "النادي"
   },
-  "Choose your club from the list (on a computer, start typing its name)": {
-    "es": "Elige tu club de la lista (en una computadora, empieza a escribir su nombre)",
-    "fr": "Choisissez votre club dans la liste (sur un ordinateur, commencez à taper son nom)",
-    "th": "เลือกชมรมของคุณจากรายการ (บนคอมพิวเตอร์ ให้เริ่มพิมพ์ชื่อชมรม)",
-    "ur": "فہرست میں سے اپنا کلب منتخب کریں (کمپیوٹر پر اس کا نام ٹائپ کرنا شروع کریں)",
-    "te": "జాబితా నుండి మీ క్లబ్‌ను ఎంచుకోండి (కంప్యూటర్‌లో దాని పేరు టైప్ చేయడం ప్రారంభించండి)",
-    "vi": "Chọn câu lạc bộ của bạn trong danh sách (trên máy tính, hãy bắt đầu gõ tên)",
-    "ne": "सूचीबाट आफ्नो क्लब छान्नुहोस् (कम्प्युटरमा, यसको नाम टाइप गर्न सुरु गर्नुहोस्)",
-    "km": "ជ្រើសរើសក្លឹបរបស់អ្នកពីបញ្ជី (នៅលើកុំព្យូទ័រ សូមចាប់ផ្តើមវាយឈ្មោះរបស់វា)",
-    "sw": "Chagua klabu yako kutoka kwenye orodha (kwenye kompyuta, anza kuandika jina lake)",
-    "ar": "اختر ناديك من القائمة (على الحاسوب، ابدأ بكتابة اسمه)"
+  "Start typing your club's name and pick it from the list": {
+    "es": "Empieza a escribir el nombre de tu club y elígelo de la lista",
+    "fr": "Commencez à taper le nom de votre club et choisissez-le dans la liste",
+    "th": "เริ่มพิมพ์ชื่อชมรมของคุณ แล้วเลือกจากรายการ",
+    "ur": "اپنے کلب کا نام ٹائپ کرنا شروع کریں اور فہرست میں سے منتخب کریں",
+    "te": "మీ క్లబ్ పేరు టైప్ చేయడం ప్రారంభించి జాబితా నుండి ఎంచుకోండి",
+    "vi": "Bắt đầu gõ tên câu lạc bộ của bạn rồi chọn từ danh sách",
+    "ne": "आफ्नो क्लबको नाम टाइप गर्न सुरु गर्नुहोस् र सूचीबाट छान्नुहोस्",
+    "km": "ចាប់ផ្តើមវាយឈ្មោះក្លឹបរបស់អ្នក រួចជ្រើសរើសពីបញ្ជី",
+    "sw": "Anza kuandika jina la klabu yako kisha uichague kwenye orodha",
+    "ar": "ابدأ بكتابة اسم ناديك ثم اختره من القائمة"
+  },
+  "Type to search your club": {
+    "es": "Escribe para buscar tu club", "fr": "Tapez pour chercher votre club",
+    "th": "พิมพ์เพื่อค้นหาชมรมของคุณ", "ur": "اپنا کلب تلاش کرنے کے لیے ٹائپ کریں",
+    "te": "మీ క్లబ్‌ను వెతకడానికి టైప్ చేయండి", "vi": "Gõ để tìm câu lạc bộ của bạn",
+    "ne": "आफ्नो क्लब खोज्न टाइप गर्नुहोस्", "km": "វាយដើម្បីស្វែងរកក្លឹបរបស់អ្នក",
+    "sw": "Andika ili kutafuta klabu yako", "ar": "اكتب للبحث عن ناديك"
   },
   "Click here to report a problem": {
     "es": "Haz clic aquí para informar de un problema", "fr": "Cliquez ici pour signaler un problème",

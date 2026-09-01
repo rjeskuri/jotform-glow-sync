@@ -67,10 +67,23 @@ CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID = "18", "98", "100", "102"
 # --club-picker; recognised by name from then on. When present, the roster
 # visibility rules key on it and a calculation copies its value into the
 # CLUB_NAME textbox (hidden), which stays the field the Salesforce mapping
-# reads. Its option list is kept equal to the form's clubs on every run.
+# reads. Its option list and properties are kept in this shape on every run.
+# multipleSelections=Yes selects Jotform's own searchable dropdown component
+# (type to filter, on phones too); the plain single-select is a browser
+# <select> that only jumps to the first letter. Verified on the template
+# 2026-09-01 (docs/intent/2026-09-01-club-picker.md).
 PICKER_NAME = "clubPicker"
 PICKER_TEXT = "Club"
-PICKER_SUBLABEL = "Choose your club from the list (on a computer, start typing its name)"
+PICKER_SUBLABEL = "Start typing your club's name and pick it from the list"
+PICKER_PROPS = {
+    "text": PICKER_TEXT,
+    "subLabel": PICKER_SUBLABEL,
+    "required": "Yes",
+    "multipleSelections": "Yes",
+    "searchText": "Type to search your club",
+    "visibleOptions": "5",
+    "emptyText": "Please Select",
+}
 
 # Sessions per module. Modules not listed default to 8 sessions.
 # EDIT HERE when the curriculum changes; the cascade rules are generated
@@ -638,25 +651,28 @@ def main():
         picker_names.setdefault(name.lower(), name)   # the Partner box tells them apart)
     picker_options = "|".join(sorted(picker_names.values(), key=str.lower))
     if picker_qid is None and args.club_picker:
-        content = jf.post_form("/questions", {
-            "question[type]": "control_dropdown",
-            "question[text]": PICKER_TEXT,
-            "question[name]": PICKER_NAME,
-            "question[order]": str(questions[CLUB_NAME].get("order", "3")),
-            "question[required]": "Yes",
-            "question[emptyText]": "Please Select",
-            "question[subLabel]": PICKER_SUBLABEL,
-            "question[options]": picker_options,
-        }, f"CREATE club picker ({len(picker_names)} clubs)")
-        if content:
+        fields = {"question[type]": "control_dropdown", "question[name]": PICKER_NAME,
+                  "question[order]": str(questions[CLUB_NAME].get("order", "3")),
+                  "question[options]": picker_options}
+        fields.update({f"question[{k}]": v for k, v in PICKER_PROPS.items()})
+        content = jf.post_form("/questions", fields,
+                               f"CREATE club picker ({len(picker_names)} clubs)")
+        if isinstance(content, dict) and content.get("qid"):
             picker_qid = str(content["qid"])
         jf.post_form(f"/question/{CLUB_NAME}",
                      {"question[hidden]": "Yes", "question[required]": "No"},
                      f"HIDE clubName textbox (q{CLUB_NAME}: filled from the picker; "
                      "Salesforce keeps reading it)")
-    elif picker_qid is not None and questions[picker_qid].get("options") != picker_options:
-        jf.post_form(f"/question/{picker_qid}", {"question[options]": picker_options},
-                     f"UPDATE club picker ({len(picker_names)} clubs)")
+    elif picker_qid is not None:
+        current = questions[picker_qid]
+        drift = {k: v for k, v in PICKER_PROPS.items() if current.get(k) != v}
+        if current.get("options") != picker_options:
+            drift["options"] = picker_options
+        if drift:
+            jf.post_form(f"/question/{picker_qid}",
+                         {f"question[{k}]": v for k, v in drift.items()},
+                         f"UPDATE club picker ({len(picker_names)} clubs: "
+                         f"{', '.join(sorted(drift))})")
 
     # --- regenerate all conditions -----------------------------------------
     # The API stores each condition's terms/action as JSON-encoded STRINGS

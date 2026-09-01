@@ -58,7 +58,7 @@ CREATE_RX = re.compile(r"^  - CREATE roster '(?P<club>.+)' \((?P<girls>\d+) girl
 UPDATE_RX = re.compile(r"^  - UPDATE roster '(?P<club>.+)' \(q(?P<qid>\d+), (?P<girls>\d+) girls\)$")
 DELETE_RX = re.compile(r"^  - DELETE roster '(?P<club>.+)' \(q(?P<qid>\d+), belongs to (?P<region>.+)\)$")
 REPLACE_RX = re.compile(r"^  - REPLACE conditions \((?P<rules>\d+) rules")
-PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs\)$")
+PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs(?::[^)]*)?\)$")
 ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) girls\); "
                        r"(?P<all>\d+) clubs overall")
 NOT_IN_EXPORT = "is on the form but not in the sheet export"
