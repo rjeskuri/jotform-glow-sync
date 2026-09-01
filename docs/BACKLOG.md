@@ -1,13 +1,17 @@
 # Backlog — from "launched" to "fully upgraded" by end of September 2026
 
 Ordered by what unblocks the most. Effort is consultant days. Items marked
-**needs Ryan** cannot be done by the tooling alone.
+**needs Ryan** cannot be done by the tooling alone. Week 1 = the week of
+2026-09-01 (launch day). Larger items have an intent under `docs/intent/`.
 
 ## Week 1 (right after launch)
 
 | # | Item | Why | Effort | Who |
 |---|---|---|---|---|
-| 1 | **Disable the five defunct Jotforms** with a "moved" message once partners have the new links | two live forms per region = split submissions | 0.1 | needs Ryan's go, then one command |
+| 1 | **Disable the five defunct Jotforms** with a "moved" message once partners have the new links (`docs/intent/2026-09-01-disable-defunct-forms.md`) | two live forms per region = split submissions | 0.1 | needs Ryan's go, then one command |
+| 1a | **Rotate the Jotform API key** (it sat in a Claude settings file); put the new one in `.env` and the GitHub secret; create a read-only key for monitoring | credential hygiene | 0.05 | needs Ryan |
+| 1b | **Switch on the automatic sync** (`docs/RUNBOOK.md`, "Automatic sync": secrets, PAT, Script Properties, `clasp push`, Set up tabs, Request Jotform sync now, then `AUTO_SYNC_APPLY=1` after a dry-run day) | no more manual export → sync loop | 0.2 | needs Ryan |
+| 1c | **Club picker rollout**: after the template pilot is verified, `--club-picker` on the four regional forms (with the label translations applied first) | mentors pick the club instead of typing it; wrong club names become impossible | 0.2 | needs Ryan's verification, then one command per form |
 | 2 | **Confirm Salesforce received the test batch** from the new Africa form; note what `enable_fuzzy_matching__c = false` does to matching | the matcher is unknown (Phase 5a); this is the first evidence | 0.2 | needs Ryan (SF admin) |
 | 3 | **Set `STAFF_NOTIFY_EMAIL`** in the sheet's Script Properties; put the feedback link on the four attendance forms (`tools/add_feedback_link.py`) | problem reports go nowhere until then | 0.1 | Ryan + tooling |
 | 4 | **Work the P1 rows of `data/needs_attention_2026-08-26.csv`** with partners: 16 rosters with a name listed twice (7 of these are currently on the forms with one girl missing), 8 re-submitted rosters, Otra Cosa's stale combined clubs, YWOU's Shinning/Shining Stars | every one of these is a girl who either does not appear on the form or appears twice | 1–2 elapsed weeks of emails; 0.3 tooling | needs Ryan/partners |
@@ -17,17 +21,19 @@ Ordered by what unblocks the most. Effort is consultant days. Items marked
 
 ## Weeks 2–3: Phase 2 — automatic Sheet → Jotform sync
 
-The manual loop today is `export Roster → sync per region`. Phase 2 moves it
-into the sheet so a New Club / Roster Modification submission reaches the
-attendance form within the hour with nobody at a keyboard.
+**Built 2026-09-01 as an event-driven loop instead** (`docs/intent/2026-09-01-auto-sync.md`):
+the sheet's Apps Script notifies GitHub, a workflow runs the existing Python sync within
+safety bands, and the `SyncLog` tab records every run. Items 7–9 are superseded; what remains:
 
 | # | Item | Effort |
 |---|---|---|
-| 7 | `Jotform.gs`: UrlFetchApp wrapper with the verified call shapes (form-urlencoded question POST merges; conditions PUT wholesale as JSON-encoded strings; 13-digit ids; sequential index/priority) — the API key lives in Script Properties | 0.5 |
-| 8 | `Sync.gs`: port of the reconcile + `build_conditions` from `sync_attendance_form.py`, reading the Roster tab with a region filter; targets = the four regional form ids in `Config.gs` | 1.5 |
-| 9 | Rollout ladder: dry-run → Audit tab; "Sync now" menu item; then the form handlers set a dirty flag and an hourly time trigger syncs if dirty, under LockService | 0.5 |
-| 10 | **Parity harness**: same Roster export → Python dry-run and Apps Script dry-run → diff the planned calls; run before every risky change | 0.5 |
-| 11 | Deploy the Apps Script with `clasp` instead of pasting (`tools/README-sheets.md`) so updates are one command | 0.2 |
+| ~~7~~ | ~~`Jotform.gs`: UrlFetchApp wrapper~~ — superseded by the GitHub Actions runner (no Jotform key in the sheet) | — |
+| ~~8~~ | ~~`Sync.gs`: port of the reconcile + `build_conditions`~~ — superseded; the Python tool is the one implementation | — |
+| ~~9~~ | ~~Rollout ladder / hourly trigger~~ — superseded by `repository_dispatch` + the daily backstop | — |
+| 10 | **Parity harness** between the Python dry run and the runner's plan on the same export is now `test/python_test.py`; still open: a recorded-API replay test for `sync_attendance_form.py` itself (no network) | 0.5 |
+| ~~11~~ | ~~Deploy the Apps Script with `clasp`~~ — done 2026-08-27 (`npm run clasp:push`, `appsscript/INSTALL.md`) | — |
+| 11a | **De-duplicate the Python tools** into a `glow/` package (`docs/intent/2026-09-01-shared-jotform-client.md`); make "nothing to do" real by skipping an unchanged conditions rewrite | 1 |
+| 11b | **Duplicate-club guards** on the Club Roster Form (`docs/intent/2026-09-01-duplicate-club-guards.md`): hold and flag near-duplicate "new club" submissions instead of importing them; show the partner's clubs on the form | 1 |
 
 ## Weeks 3–4: Phase 2.5 — dynamic roster picker pilot (the "backend upgrade")
 
@@ -64,6 +70,15 @@ when the form is filled". Kills Africa's 3,900-checkbox weight and the
 | 25 | Spanish-language mentor confirmation email for Latin America |
 | 26 | Monthly three-way reconciliation report: Roster ↔ forms ↔ Salesforce |
 | 27 | Salesforce REST auto-creation of Accounts for new clubs (replaces the SF Pending digest) |
+| 28 | Close the Python ↔ Apps Script parity gaps (partner-less rows, `•`/`*` bullets, invisible characters in partner/club cells, region case) — `docs/intent/2026-09-01-parity-partnerless-rows.md` |
+| 29 | Move `backup_forms.py` / `restore_conditions.py` into `tools/` (doc references only) |
+| 30 | A daily drift check with a read-only key that writes intents on a band breach; agent evals in CI — `docs/intent/2026-09-01-ci-and-evals.md` |
+| 31 | Turn on plan mode by default (`defaultMode: plan` in `.claude/settings.json`) after launch week |
+| 32 | `tools/form_status.py --roster` defaults to the stale offline build; default to the newest `data/roster_*.csv` or require the flag |
+| 33 | `tools/needs_attention.py` `REGION_UNSURE` is vacuous once regions are derived from the live forms; decide what it should check |
+| 34 | Add an `updated` timestamp column to the Roster tab so reactivations and region refreshes are visible per row (the Audit tab is the record today) |
+| 35 | Decide whether the attendance forms should require at least one girl ticked (hide Submit while `Contact_IDs` is empty) — a mentor submitted with no names; with the Club picker an unknown club is impossible, a zero-girl submission still is |
+| 36 | Partner → club two-step picker on the attendance forms if the single long list (Africa: 204 clubs) bothers mentors |
 
 ## Explicitly not planned
 

@@ -1,146 +1,130 @@
-# Installing the GLOW scripts in the enrollment spreadsheet
+# The Apps Script in the master enrollment spreadsheet
 
-These scripts live *inside* the enrollment Google Sheet, so there is no server
-to run and nothing to keep switched on. Installing takes about ten minutes and
-only needs doing once.
+These scripts live *inside* the master enrollment Google Sheet, so there is no
+server to run and nothing to keep switched on. They mint the permanent girl
+IDs, keep the Roster tab, generate and handle the two Google Forms, and tell
+the automatic Jotform sync when the Roster changed.
 
-## What Phase 1 gives you
+## Deploy with clasp (the normal way)
 
-A **Roster** tab: one row per girl, each with a permanent ID like
-`DEMOCLUB-SAMPLE-001`. That tab becomes the thing everything else reads —
-today the Python sync tool, and from Phase 2 the attendance forms directly.
+`clasp` pushes the whole `appsscript/` folder into the sheet's script project
+with one command — every later change too. The repo pins clasp 2.4.2 because
+this machine runs Node 18 (clasp 3 needs Node 20); `npm install` fetches it.
 
-Nothing outside the spreadsheet changes yet. This step cannot affect Jotform
-or Salesforce.
+One-time, with you at the keyboard (clasp signs in as *your* Google account —
+the forms and triggers the script creates belong to you):
 
-## Install
+1. `npm install`, then `npx clasp login`: a browser tab opens; pick the
+   account that owns the master enrollment sheet; allow. The token lands in
+   `~/.clasprc.json`, never in the repo.
+2. Turn on the Apps Script API for your account:
+   <https://script.google.com/home/usersettings> → **Google Apps Script API → On**.
+3. Get the script's ID: open the sheet → **Extensions → Apps Script** → ⚙
+   **Project Settings** → copy **Script ID**. Put it in `appsscript/.clasp.json`
+   (gitignored):
 
-1. Open the **master enrollment** spreadsheet (the new one-row-per-girl sheet;
-   its *Enrollment Responses* tab is a one-time import of the original
-   enrollment form's responses).
-2. **Extensions → Apps Script**. A code editor opens in a new tab.
-3. Delete the empty `Code.gs` that Google creates.
-4. For each file in this folder — `Config.gs`, `Normalize.gs`, `Ids.gs`,
-   `Regions.gs`, `RosterOps.gs`, `Roster.gs`, `Forms.gs`, `FormHandlers.gs`,
-   `Menu.gs` — click **+ → Script**, name it exactly as the file is named
-   here (Google adds the `.gs` itself), and paste the contents in.
-5. Click **Save** (the disk icon).
-6. Reload the spreadsheet tab. A **GLOW** menu appears next to Help.
+       {"scriptId": "<SCRIPT_ID>", "rootDir": "."}
+
+4. `make gs` (every file parses — a broken file breaks every form handler),
+   then `npm run clasp:push` (that is `clasp push -f` inside `appsscript/`;
+   `.claspignore` limits the push to `*.gs` and `appsscript.json`). Reload
+   the sheet: the **GLOW** menu appears next to Help.
+
+Edit the `.gs` files in the repo, run `make check`, push — never edit in the
+online editor; the next push would overwrite it. Inside Claude Code the push
+is gated by `.claude/hooks/live_gate.sh` (`docs/RUNBOOK.md`, "Live gate").
+
+### Fallback: paste by hand
+
+**Extensions → Apps Script**, delete the empty `Code.gs`, then for each file
+here — `Config.gs`, `Normalize.gs`, `Ids.gs`, `Regions.gs`, `RosterOps.gs`,
+`Roster.gs`, `Forms.gs`, `FormHandlers.gs`, `Menu.gs`, `Dispatch.gs` — click
+**+ → Script**, name it exactly as the file (Google adds `.gs`), paste, Save.
+Reload the spreadsheet.
 
 ## First run
 
 1. **GLOW → Set up tabs** — creates Roster, Partners, ClubRegistry,
-   ReviewQueue and Audit. Google will ask you to authorize the script the
-   first time. It asks for more than the spreadsheet because of the forms
-   step below: creating Google Forms in your Drive, sending email from your
-   account (mentor confirmations, problem reports, the weekly digest) and
-   managing the script's own triggers. It never reads anything else.
+   ReviewQueue, Audit and SyncLog. Google asks you to authorize the script
+   the first time. It asks for more than the spreadsheet because of the
+   forms and the sync notification: creating Google Forms in your Drive,
+   sending email from your account (mentor confirmations, problem reports,
+   the weekly digest), managing the script's own triggers, and connecting
+   to an external service (GitHub). It never reads anything else. Adding a
+   Google service to a `.gs` file later adds a scope and triggers this
+   prompt once more.
 2. **GLOW → Rebuild roster from enrollment responses** — reads every
-   enrollment response and fills the Roster tab. On the current data this
-   produces **328 clubs and 6,210 girls**, each with a unique ID, and takes a
-   minute or two.
+   enrollment response and fills the Roster tab (on the launch data: 328
+   clubs and 6,210 girls, a minute or two). Re-running is always safe:
+   existing girls keep their IDs, only new names get new ones.
 3. Open the **Partners** tab. The **region** column (Africa / Asia / Latin
-   America / U.S) is already filled in for all 47 partners — it was worked out
-   from which regional attendance form each partner's clubs currently sit on
-   (`tools/derive_partner_regions.py`; the map lives in `Regions.gs`). The
-   **notes** column says how solid each one is; any row whose note starts with
-   **PLEASE CONFIRM** is worth a second look. If anything is wrong, correct it
-   in this tab — the tab always wins over the derived map — then run
-   **GLOW → Refresh regions from the Partners tab**. Regions decide which
-   attendance form each club appears on from Phase 4; a partner with no region
-   lands in the ReviewQueue, never silently dropped.
-4. Open the **ReviewQueue** tab. Expect around 16 entries about the same girl's
-   name appearing twice in a roster. Fix those in the sheet (give the girls
-   something that tells them apart, e.g. `Anh Nguyen (A)`), then run the
-   rebuild again.
+   America / U.S) was derived from which regional attendance form each
+   partner's clubs sat on (`tools/derive_partner_regions.py`; the map is
+   `Regions.gs`). The **notes** column says how solid each one is; a row
+   whose note starts with **PLEASE CONFIRM** or says **region needed** is
+   worth a look. Correct it here — the tab always wins over the derived
+   map — then **GLOW → Refresh regions from the Partners tab**. A partner
+   with no region lands in the ReviewQueue, and its girls reach no
+   attendance form until the region is filled in.
+4. Open the **ReviewQueue** tab and work through it (duplicate names: give
+   the girls something that tells them apart, e.g. `Anh Nguyen (A)`, then
+   rebuild).
 
-Re-running the rebuild is always safe: existing girls keep their IDs, only new
-names get new ones.
+## The Google Forms
 
-## The Google Forms (Phase 3)
-
-Once the Roster tab exists, **GLOW → Google Forms → Create the Google Forms**
-builds, in your own Google Drive:
+**GLOW → Google Forms → Create the Google Forms** builds, in your Drive:
 
 | Form | Who uses it | What happens on submit |
 |---|---|---|
-| **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section (Google Forms calls these "sections"; they behave like pages). **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to the **SF Pending** tab, anything odd goes to the ReviewQueue. **Add or remove girls**: partner → only that partner's clubs (no 300-item dropdown) → ADD / REMOVE lists → girls are added, reactivated, or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints, never guessed; the mentor gets a confirmation email echoing only the names they typed |
+| **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section. **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to **SF Pending**, anything odd goes to the ReviewQueue. **Add or remove girls**: partner → only that partner's clubs → ADD / REMOVE lists → girls are added, reactivated, or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints; the mentor gets a confirmation email echoing only the names they typed |
 | **Something isn't working?** | anyone | one-minute problem report, emailed to staff |
 
-The run also installs the triggers and shows both links (again later via
-**Show form links**). Responses land in the tabs *Roster Form Responses* and
-*Feedback*; *FormLog* records what was done with each.
+The run installs the triggers and shows both links (again via **Show form
+links**). Responses land in *Roster Form Responses* and *Feedback*; *FormLog*
+records what was done with each.
 
-Then:
+Then, in **Project Settings → Script Properties**:
 
-1. **Script Properties** (Project Settings → Script Properties): add
-   `STAFF_NOTIFY_EMAIL` = the address that should receive problem reports and
-   the Monday "clubs pending in Salesforce" digest.
-2. Put the feedback link at the bottom of the attendance forms (a one-line
-   text element above Submit, easy to remove later):
+- `STAFF_NOTIFY_EMAIL` — receives problem reports and the Monday "clubs
+  pending in Salesforce" digest.
+- `SYNC_DISPATCH_REPO` and `SYNC_DISPATCH_TOKEN` — switch on the automatic
+  Jotform sync (`docs/RUNBOOK.md`, "Automatic sync"); unset, the sheet sends
+  nothing. Test with **GLOW → Google Forms → Request Jotform sync now**.
 
-       export JOTFORM_API_KEY=...
-       python3 tools/add_feedback_link.py --url <feedback form link>          # preview
-       python3 tools/add_feedback_link.py --url <feedback form link> --apply
-       python3 tools/add_feedback_link.py --remove --apply                    # later
-
-3. When you are ready to stop using the original enrollment form, ask its
-   owner to close it (Responses → "Accepting responses" off) with a message
-   pointing at the two new links. (The **Retire the old enrollment form**
-   menu item only works when the old form feeds this spreadsheet, which it
-   does not — the original sheet stayed with its owner.)
+And put the problem-report link on the attendance forms
+(`tools/add_feedback_link.py`, see `docs/RUNBOOK.md`).
 
 Things to know:
 
-- The dropdowns are refreshed from the Roster after every submission and by
-  **Update form dropdowns from the Roster**. A brand-new partner (enrolled via
-  the "not in this list" option) gets its own club section automatically.
-- If a trigger ever fails (Google quota, a timeout, an incomplete
-  submission), nothing is lost: FormLog records it as `ERROR: …`, the
-  ReviewQueue gets a line, and **Process any missed form responses** retries
-  every response that has not succeeded yet. (Problem reports that arrive
-  before `STAFF_NOTIFY_EMAIL` is set are sent by that same menu item once it
-  is.)
-- You can edit wording and help text in the Forms UI freely, but keep the
-  question **titles** as they are — the handlers find answers by title.
+- The form dropdowns are refreshed from the Roster after every submission
+  and by **Update form dropdowns from the Roster**. A brand-new partner
+  (enrolled via "not in this list") gets its own club section automatically.
+- If a trigger ever fails (quota, timeout, an incomplete submission), nothing
+  is lost: FormLog records `ERROR: …`, the ReviewQueue gets a line, and
+  **Process any missed form responses** retries every response that has not
+  succeeded yet.
+- Edit wording and help text in the Forms UI freely, but keep the question
+  **titles** as they are — the handlers find answers by title (`Config.gs Q`).
+- Every Roster change writes an Audit row; when the sync notification is
+  configured it also writes `syncRequested … → HTTP 204`, and the runner's
+  outcome appears in **SyncLog**.
 
 ## About the IDs
 
 `DEMOCLUB-SAMPLE-001` = club code, surname, and a number that makes
-same-surname girls distinct.
-
-- **Permanent.** Once assigned, a girl's ID never changes — not when her club
-  is renamed, not when the club splits, not if she leaves and comes back.
-- **A stale-looking club code is fine.** The ID is a label, not a description;
-  the ClubRegistry tab is what makes it authoritative.
-- **Numbers are never reused.** A girl who leaves keeps her number retired, so
-  a historical record can never end up pointing at a different person.
-
-## Nobody is ever deleted
-
-Removing a girl sets her status to `inactive` and stamps the date. Her row,
-her ID, and every Salesforce record that references her stay exactly as they
-were. She simply stops appearing on the attendance form.
+same-surname girls distinct. **Permanent** (a rename or a split never changes
+it), **a stale-looking club code is fine** (the ClubRegistry tab is
+authoritative), **numbers are never reused** (a girl who leaves keeps her
+number retired). Removing a girl sets her status to `inactive` and stamps the
+date; her row, her ID and every Salesforce record stay as they were.
 
 ## Testing the logic without the spreadsheet
 
-`test/parity_test.js` runs the same normalization and ID code against the real
-enrollment CSV and checks it agrees with the Python tool:
-
-```bash
-cd ~/jotform-glow-sync
-python3 -c "import importlib.util,json; \
-  spec=importlib.util.spec_from_file_location('s','sync_attendance_form.py'); \
-  m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); \
-  sheet,_=m.read_sheet('data/enrollment_2026-08-24.csv'); \
-  json.dump([f'{p.lower()}||{c.lower()}' for p,c in sheet], open('data/py_clubs.json','w'))"
-node test/parity_test.js
-```
-
-(`data/` is gitignored and not world-readable, unlike `/tmp` — club names
-occasionally turn out to be a girl's name.)
-
-Run it after any change to the shared logic in either language. It also
-fails if a partner in the CSV has no entry in `Regions.gs` — the fix is
-`python3 tools/derive_partner_regions.py <csv> --write` (it needs fresh
-regional-form snapshots in `backups/`, from `backup_forms.py`).
+`make check` runs the pure `.gs` files in Node against a synthetic fixture
+(and against the real export when `data/enrollment_2026-08-24.csv` exists)
+and checks they agree with the Python tool; it also parses every `.gs` file.
+`test/forms_logic_test.js` covers the roster-change decisions,
+`test/dispatch_test.js` the sync notification. Run it after any change to
+the shared logic in either language. If a real partner has no entry in
+`Regions.gs`, regenerate it: `python3 tools/derive_partner_regions.py <csv>
+--forms defunct --write` (needs the pre-launch form snapshots in `backups/`).
