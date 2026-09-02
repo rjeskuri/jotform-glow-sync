@@ -34,7 +34,9 @@ jobs:
       TZ: America/Chicago     # SyncLog times match the sheet's time zone
       JOTFORM_API_KEY: ${{ secrets.JOTFORM_API_KEY }}
       GLOW_SHEET_ID: ${{ secrets.GLOW_SHEET_ID }}
-      GLOW_SA_KEY: ${{ runner.temp }}/service-account.json
+      # the runner context is not allowed in job-level env (that invalidated the
+      # whole workflow file); the checkout's credentials/ dir is gitignored anyway
+      GLOW_SA_KEY: ${{ github.workspace }}/credentials/service-account.json
       AUTO_SYNC_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
