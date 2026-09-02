@@ -15,7 +15,9 @@ else
 fi
 [ -z "$CMD" ] && exit 0
 
-PATTERN='(--apply|--prune|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|GLOW_LIVE_OK=)'
+# Tool flags AND the raw API shapes the tools wrap - a direct curl PUT to
+# Jotform or a python snippet with apply_changes=True is just as live a write.
+PATTERN='(--apply|--prune|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|GLOW_LIVE_OK=|api\.jotform\.com|api\.github\.com/repos/[^[:space:]]*/dispatches|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate)'
 MATCH=$(printf '%s' "$CMD" | grep -Eo "$PATTERN" | head -1) || true
 [ -z "$MATCH" ] && exit 0
 
@@ -33,6 +35,8 @@ To proceed: (1) show the dry-run output first, (2) back up (backup_forms.py /
 sheets_client.py export-all), (3) get Ryan's explicit go in this conversation,
 then EITHER Ryan runs the command himself in a terminal OR Ryan restarts Claude
 Code with GLOW_LIVE_OK=1 exported in his shell. Putting GLOW_LIVE_OK= inside the
-command does not count. See docs/RUNBOOK.md, "Live gate".
+command does not count. Direct API access (curl to api.jotform.com, Sheets write
+snippets, GitHub dispatches) is gated exactly like the tool flags - use the repo
+tools and their dry runs. See docs/RUNBOOK.md, "Live gate".
 EOF
 exit 2

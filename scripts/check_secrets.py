@@ -17,6 +17,8 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# The allow entries are tested against the MATCHED TEXT itself, never against
+# the surrounding line — a real address cannot hide next to an allowed one.
 RULES = [
     ("32-hex token (Jotform key / md5)",
      re.compile(r"(?<![0-9a-fA-F])[0-9a-f]{32}(?![0-9a-fA-F])"), []),
@@ -27,14 +29,14 @@ RULES = [
     ("API key on a URL", re.compile(r"apiKey=[0-9A-Za-z]{8,}"), []),
     ("Drive / Sheet / Script id",
      re.compile(r"(?<![0-9A-Za-z_-])1[0-9A-Za-z_-]{40,60}(?![0-9A-Za-z_-])"),
-     ["forms/d/e/1FAIpQLS"]),          # public viewform links are fine
-    ("girl ID",
-     re.compile(r"(?<![A-Za-z0-9_-])[A-Z0-9]{2,8}-[A-Z]{2,12}-[0-9]{3}(?![A-Za-z0-9_-])"),
-     ["DEMOCLUB-SAMPLE-", "SUNRISEC-", "FIXTURE"]),   # documented / test-only ids
+     ["1FAIpQLS"]),                    # public viewform links are fine
+    ("girl ID",                        # second segment must contain a letter (surname code)
+     re.compile(r"(?<![A-Za-z0-9_-])[A-Z0-9]{2,8}-(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2,12}-[0-9]{3}"
+                r"(?![A-Za-z0-9_-])"),
+     ["DEMOCLUB-SAMPLE-", "SUNRISEC-"]),   # documented / test-only ids
     ("e-mail address",
      re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
-     ["@example.org", "@example.com", "gserviceaccount.com", "noreply.github.com",
-      "noreply@anthropic.com"]),
+     ["@example.org", "@example.com", "@users.noreply.github.com", "noreply@anthropic.com"]),
     # (the literal is assembled so this file does not match its own rule)
     ("session scratchpad path", re.compile("/private" + "/tmp/" + "claude-"), []),
 ]
@@ -52,7 +54,7 @@ def scan_text(text, label):
     for n, line in enumerate(text.splitlines(), 1):
         for name, rx, allow in RULES:
             for m in rx.finditer(line):
-                if any(a in line for a in allow):
+                if any(a in m.group(0) for a in allow):
                     continue
                 hits.append(f"{label}:{n}: {name}: {mask(m.group(0))}")
     return hits

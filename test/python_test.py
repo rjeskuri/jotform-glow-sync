@@ -141,6 +141,12 @@ class AutoSyncPlan(unittest.TestCase):
         out = auto_sync.redact(text, ["Ana Fennwhistle", "Ana Fennwhistle Long", "Bo Vexmoorish", ""])
         self.assertEqual(out, "UPDATE roster 'X' - [girl] and [girl], plus [girl].")
         self.assertEqual(auto_sync.redact("nothing", []), "nothing")
+        # one-word roster entries must not garble ordinary words or region names
+        self.assertEqual(auto_sync.redact("== Asia  form 262383129464057", ["Asia"]),
+                         "== Asia  form 262383129464057")
+        # whole words only: a name inside another word stays
+        self.assertEqual(auto_sync.redact("Milan Ostrivane's club", ["Lan Ostrivane"]),
+                         "Milan Ostrivane's club")
 
     def test_plan_line_formats_still_exist_in_the_sync_tool(self):
         src = read(os.path.join(REPO, "sync_attendance_form.py"))
@@ -284,6 +290,25 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertEqual({fid for fid, (_, region) in form_status.FORMS.items() if region},
                          set(auto_sync.REGIONAL_FORMS.values()))
         self.assertTrue(all(re.fullmatch(r"\d{15}", f) for f in auto_sync.REGIONAL_FORMS.values()))
+        # every other Python copy of the table (docs promise this test catches drift)
+        import add_feedback_link
+        import add_language
+        import add_translations
+        import backup_forms
+        import clone_regional
+        import restore_translations
+        live = set(auto_sync.REGIONAL_FORMS.values()) | {forms["TEMPLATE"]}
+        defunct = set(form_status.DEFUNCT)
+        self.assertEqual(set(backup_forms.FORMS), live | defunct)
+        self.assertEqual(set(add_translations.FORMS), live)
+        self.assertEqual(set(add_language.FORMS), live)
+        self.assertEqual(set(add_feedback_link.FORMS), live)
+        self.assertEqual(clone_regional.WORKING_COPY, forms["TEMPLATE"])
+        self.assertEqual(restore_translations.TEMPLATE, forms["TEMPLATE"])
+        self.assertEqual(set(clone_regional.TITLES), set(auto_sync.REGIONAL_FORMS))
+
+    def test_picker_name_is_shared(self):
+        self.assertEqual(form_status.PICKER_NAME, sync.PICKER_NAME)
 
     def test_qids(self):
         block = gs_block(self.config, "QID")
@@ -303,13 +328,18 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertEqual(sessions, sync.WEEKS)
 
     def test_session_overrides(self):
-        pairs = {k: int(v) for k, v in
-                 re.findall(r"'([^']+)': (\d+),", gs_block(self.config, "SESSION_OVERRIDES"))}
+        # tolerant of a missing trailing comma and of double-quoted keys, so a
+        # GS-side addition can never be invisible to this test
+        block = gs_block(self.config, "SESSION_OVERRIDES")
+        pairs = {k or k2: int(v) for k, k2, v in
+                 re.findall(r"(?:'([^']+)'|\"([^\"]+)\")\s*:\s*(\d+)\s*,?", block)}
         self.assertEqual(pairs, sync.SESSION_OVERRIDES)
+        self.assertEqual(len(pairs), block.count(":"))   # every entry was parsed
 
     def test_synclog_columns(self):
         m = re.search(r"const SYNC_LOG_COLS = \[(.*?)\];", read(ROSTER_GS), re.S)
-        self.assertEqual(re.findall(r"'([a-z_]+)'", m.group(1)), auto_sync.SYNC_LOG_COLS)
+        self.assertEqual(re.findall(r"'([a-z0-9_]+)'", m.group(1)), auto_sync.SYNC_LOG_COLS)
+        self.assertEqual(m.group(1).count("'") // 2, len(auto_sync.SYNC_LOG_COLS))
         self.assertIn("SYNC_LOG: 'SyncLog'", self.config)
         self.assertEqual(auto_sync.SYNC_LOG_TAB, "SyncLog")
 

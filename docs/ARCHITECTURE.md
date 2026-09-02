@@ -91,6 +91,10 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
   `tidy_` strips them from partner and club cells too.
 - `read_roster_csv` matches `--region` case-insensitively; `form_status.py`
   matches the region string exactly.
+- `parse_roster` splits on every Unicode line break (`str.splitlines`:
+  U+2028/U+2029, NEL, a lone CR, VT, FF); `parseRoster_` only on `\r?\n` — an
+  iOS soft line break (U+2028) merges two girls into one on the Apps Script
+  side while Python sees two.
 - The sync rewrites all conditions every run, so its "nothing to do" line is
   unreachable; `auto_sync.py` decides "changed" from CREATE/UPDATE/DELETE.
 - Reactivating a girl leaves no timestamp in the Roster row (only

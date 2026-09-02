@@ -70,8 +70,9 @@ python3 tools/form_status.py --form 262382821971058 --roster data/roster_<date>.
 Or all four regions in one go, with the same guards the workflow uses:
 
 ```bash
-python3 tools/auto_sync.py --no-synclog            # dry run, every region
-python3 tools/auto_sync.py --no-synclog --apply    # apply within the bands
+python3 tools/auto_sync.py             # dry run, every region, nothing written anywhere
+python3 tools/auto_sync.py --apply     # apply within the bands
+# --synclog additionally records the run in the sheet's SyncLog (the workflow always passes it)
 ```
 
 What to know:
@@ -95,7 +96,8 @@ a rebuild, or a region refresh) → `appsscript/Dispatch.gs` sends a
 `tools/auto_sync.py` exports the Roster tab and, per region, dry-runs the
 sync, checks the safety bands, backs up, applies, verifies with
 `form_status.py`, and appends a row to the sheet's **SyncLog** tab. The
-workflow also runs every morning (06:00 Chicago) as a backstop for missed
+workflow also runs every morning (the cron is UTC: 06:00 Chicago in summer,
+05:00 in winter) as a backstop for missed
 events and manual sheet edits, and can be started by hand from the Actions
 tab ("Run workflow", optional region).
 
@@ -131,18 +133,25 @@ a `syncRequested … → HTTP 204` row every time the sheet sends the event.
 2. Create a fine-grained personal access token limited to this repository
    with *Contents: read and write*; set `SYNC_DISPATCH_REPO=<owner>/<repo>`
    and `SYNC_DISPATCH_TOKEN=<token>` in the sheet's Script Properties.
-3. `npm run clasp:push`, then in the sheet **GLOW → Set up tabs** (creates
-   `SyncLog`) and **GLOW → Google Forms → Request Jotform sync now**. The
-   first call asks you to authorize the new "connect to an external service"
-   scope; until then the notification fails softly into the Audit tab.
+3. `npm run clasp:push` at a quiet moment, **then immediately, in the same
+   sitting**, open the sheet, run **GLOW → Set up tabs** (creates `SyncLog`)
+   and accept the authorization prompt. The push adds the "connect to an
+   external service" scope, and **until the trigger owner re-authorizes, the
+   form-submit trigger fails hard** — submissions land in the response tabs
+   but are NOT processed (no Roster/FormLog/Audit rows; only trigger-failure
+   e-mails show it). After authorizing, run **GLOW → Google Forms → Process
+   any missed form responses** to catch anything that arrived in between,
+   then **Request Jotform sync now** to test the notification.
 4. Watch the Actions run (dry run) and the SyncLog row; after a clean day set
    `AUTO_SYNC_APPLY=1`.
 
-**Rollback:** the workflow keeps `backups/<form>/properties-<stamp>.json`
-(conditions only, no names) as an artifact for 30 days;
-`python3 restore_conditions.py --form <id> --from <file> --apply` puts the
-conditions back. Questions are never deleted by the runner. To stop the
-automation: `AUTO_SYNC_APPLY=0` (or clear the two Script Properties).
+**Rollback:** before every apply the runner snapshots the form and writes a
+conditions-only file `backups/<form>/conditions-<stamp>.json` (that file —
+no staff e-mails, no integration settings, no rosters — is what the workflow
+keeps as an artifact for 30 days);
+`python3 restore_conditions.py --form <id> --from conditions-<stamp>.json --apply`
+puts the conditions back. Questions are never deleted by the runner. To stop
+the automation: `AUTO_SYNC_APPLY=0` (or clear the two Script Properties).
 
 ## The Club picker (mentors choose their club instead of typing it)
 
@@ -218,9 +227,12 @@ npm run clasp:push      # gated: GLOW_LIVE_OK=1 for Claude, or run it yourself
 ```
 
 Setup and the manual-paste fallback: [../appsscript/INSTALL.md](../appsscript/INSTALL.md).
-Adding a Google service to a `.gs` file (UrlFetchApp, MailApp…) adds an
-OAuth scope — the next menu action asks for re-authorization once. Rollback
-is a push of the previous commit's `appsscript/`.
+**Scope rule:** adding a Google service to a `.gs` file (UrlFetchApp,
+MailApp…) grows the project's OAuth scopes, and until the trigger owner
+re-authorizes interactively, the installable triggers **fail hard** — form
+submissions go unprocessed. So: push at a quiet moment, immediately run a
+GLOW menu item and accept the prompt, then **Process any missed form
+responses**. Rollback is a push of the previous commit's `appsscript/`.
 
 ## Roster rebuild and upload (offline path)
 

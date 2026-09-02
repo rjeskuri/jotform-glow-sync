@@ -50,9 +50,12 @@ Reload the spreadsheet.
    forms and the sync notification: creating Google Forms in your Drive,
    sending email from your account (mentor confirmations, problem reports,
    the weekly digest), managing the script's own triggers, and connecting
-   to an external service (GitHub). It never reads anything else. Adding a
-   Google service to a `.gs` file later adds a scope and triggers this
-   prompt once more.
+   to an external service (GitHub). It never reads anything else. **Adding a
+   Google service to a `.gs` file later grows the scope set, and until you
+   re-authorize, the form-submit trigger fails hard — submissions arrive but
+   are not processed.** After any push that adds a service, run a GLOW menu
+   item at once, accept the prompt, then **Process any missed form
+   responses**.
 2. **GLOW → Rebuild roster from enrollment responses** — reads every
    enrollment response and fills the Roster tab (on the launch data: 328
    clubs and 6,210 girls, a minute or two). Re-running is always safe:
@@ -127,4 +130,4 @@ and checks they agree with the Python tool; it also parses every `.gs` file.
 `test/dispatch_test.js` the sync notification. Run it after any change to
 the shared logic in either language. If a real partner has no entry in
 `Regions.gs`, regenerate it: `python3 tools/derive_partner_regions.py <csv>
---forms defunct --write` (needs the pre-launch form snapshots in `backups/`).
+--write` (it derives from the pre-launch form snapshots in `backups/`).

@@ -20,8 +20,8 @@ case "$FP" in
 esac
 case "$REL" in
   .env.example|credentials/README.md|credentials/config.example.json) exit 0 ;;
-  data/*|backups/*|credentials/*|appsscript/Regions.gs|.claude/settings.local.json|.env|.env.*|.claude/live_gate.log)
-    echo "BLOCKED by .claude/hooks/protected_paths.sh: '$REL' holds personal data or secrets, or is generated (Regions.gs comes from tools/derive_partner_regions.py --forms defunct --write). Change the generator or ask Ryan." >&2
+  data/*|backups/*|credentials/*|appsscript/Regions.gs|.claude/settings.local.json|.env|.env.*|.claude/live_gate.log|.claude/hooks/*|.claude/settings.json)
+    echo "BLOCKED by .claude/hooks/protected_paths.sh: '$REL' holds personal data or secrets, is generated (Regions.gs comes from tools/derive_partner_regions.py --write), or is part of the Claude Code guardrails themselves - the gate must not be editable by the thing it gates. Change the generator, or ask Ryan to make guardrail changes himself (or with his explicit go outside this hook)." >&2
     exit 2 ;;
 esac
 exit 0

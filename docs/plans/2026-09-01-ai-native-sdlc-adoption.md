@@ -72,8 +72,10 @@ pilot on the template form.
 - The live `clasp push`: a syntax error breaks every form handler → `make gs` parses all `.gs`;
   the notification is inert until properties are set and wrapped so it cannot fail a
   submission; rollback is a push of the previous commit.
-- Re-authorization: `UrlFetchApp` adds an OAuth scope; until Ryan runs the menu item once the
-  notification fails softly into the Audit tab and the daily schedule still covers changes.
+- Re-authorization: `UrlFetchApp` adds an OAuth scope, and until the trigger owner re-authorizes,
+  the form-submit trigger fails hard (submissions unprocessed — the notification's try/catch never
+  runs). Mitigation (review finding, 2026-09-01): push at a quiet moment; authorize via a GLOW menu
+  item immediately; then "Process any missed form responses". The runbook's setup step now says so.
 - An unattended writer: bands (≤ 5 creates, ≤ 20 updates, no deletes, no truncated export),
   backup before apply, verify after, `AUTO_SYNC_APPLY` as the kill switch, a dry-run day first.
 - Secrets in GitHub: private repo, rotated key only, redacted logs, no roster artifacts.
@@ -91,5 +93,11 @@ bash <scratchpad>/hook_test.sh                            # every live command e
 grep -c ALLOWED .claude/live_gate.log                     # no unattended live write happened
 ```
 
-Status log: 2026-09-01 — steps 1–5 done (commits `916bd1a`, `541bbcf`); Club picker piloted on the
-template at Ryan's request (`docs/intent/2026-09-01-club-picker.md`); step 6 and the merge pending.
+Status log: 2026-09-01 — steps 1–5 done (`916bd1a`); Club picker piloted on the template at
+Ryan's request and switched to the searchable mode he verified (`541bbcf`, `0aa1a72`;
+`docs/intent/2026-09-01-club-picker.md`); the GET-only capture tool landed (`9ed51f2`).
+2026-09-02 — the five-pass adversarial review ran (30 agents); its confirmed findings were fixed
+(unverified applies raise ATTENTION, duplicate-name stale check, conditions-only artifacts, live
+log redaction, per-match secret allowlists, raw-API and guardrail-file gate patterns, `--synclog`
+opt-in, extended constants parity, regex robustness, doc corrections). Step 6 (the `glow/`
+refactor) and the merge are pending; no live change beyond the template pilot.

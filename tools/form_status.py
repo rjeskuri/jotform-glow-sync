@@ -219,7 +219,9 @@ def form_report(form_id, api_key, roster_by_region):
         stale = []
         for k in want:
             if k in clubs:
-                on_form = clubs[k][0][1]
+                # same-named clubs (different partners) each have their own question;
+                # the roster side merges them by name, so compare union against union
+                on_form = set().union(*(opts for _, opts, _ in clubs[k]))
                 if on_form != want[k][1]:
                     stale.append((want[k][0], len(want[k][1] - on_form), len(on_form - want[k][1])))
         rep["region_check"] = {

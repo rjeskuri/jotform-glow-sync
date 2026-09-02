@@ -23,8 +23,8 @@ on:
         default: false
 
 concurrency:
-  group: auto-sync            # one run at a time; a second request waits, it is not dropped
-  cancel-in-progress: false
+  group: auto-sync            # one run at a time, at most one more pending; a burst beyond that
+  cancel-in-progress: false   # is coalesced - every run syncs the whole Roster, nothing is lost
 
 jobs:
   sync:
@@ -56,14 +56,16 @@ jobs:
           REGION_INPUT: ${{ inputs.region }}
           REASON: ${{ github.event.client_payload.reason }}
         run: |
-          args=(--trigger "${EVENT}${REASON:+:$REASON}")
+          args=(--trigger "${EVENT}${REASON:+:$REASON}" --synclog)
           if [ "$APPLY_VAR" = "1" ]; then
             if [ "$EVENT" != "workflow_dispatch" ] || [ "$APPLY_INPUT" = "true" ]; then args+=(--apply); fi
           fi
           if [ -n "$REGION_INPUT" ] && [ "$REGION_INPUT" != "all" ]; then args+=(--region "$REGION_INPUT"); fi
           echo "python3 tools/auto_sync.py ${args[*]}"
           python3 tools/auto_sync.py "${args[@]}"
-      - name: Keep the redacted log and the condition backups (no rosters)
+      - name: Keep the redacted log and the conditions-only rollback files
+        # never the full properties snapshots (staff e-mails, integration settings)
+        # and never questions-*.json (rosters)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -71,6 +73,6 @@ jobs:
           path: |
             data/auto_sync/*.log
             data/auto_sync/ATTENTION.md
-            backups/*/properties-*.json
+            backups/*/conditions-*.json
           if-no-files-found: ignore
           retention-days: 30

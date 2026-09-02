@@ -79,6 +79,7 @@ when the form is filled". Kills Africa's 3,900-checkbox weight and the
 | 34 | Add an `updated` timestamp column to the Roster tab so reactivations and region refreshes are visible per row (the Audit tab is the record today) |
 | 35 | Decide whether the attendance forms should require at least one girl ticked (hide Submit while `Contact_IDs` is empty) — a mentor submitted with no names; with the Club picker an unknown club is impossible, a zero-girl submission still is |
 | 36 | Partner → club two-step picker on the attendance forms if the single long list (Africa: 204 clubs) bothers mentors |
+| 37 | Pin `oauthScopes` explicitly in `appsscript/appsscript.json` and make `scripts/check_gs.js` fail when a `.gs` uses a Google service whose scope is not listed — a scope-set change becomes a visible diff instead of a silent trigger-breaker (review finding 2026-09-01) |
 
 ## Explicitly not planned
 

@@ -14,7 +14,8 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 - `make venv` once per checkout (`.venv/`); `make lint` is advisory ruff.
 - `python3 tools/form_status.py --roster data/roster_<date>.csv` — read-only; needs
   `JOTFORM_API_KEY`. Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`.
-- `python3 tools/auto_sync.py --no-synclog` — the automatic loop as a dry run; healthy: `in-sync`.
+- `python3 tools/auto_sync.py` — the automatic loop as a dry run (writes nothing anywhere;
+  `--synclog` would record it in the sheet); healthy: every region `in-sync`.
 - `python3 sync_attendance_form.py <roster.csv> --roster --region Africa --form 262382821971058`
   — dry run; `--apply` writes. Form ids: `docs/RUNBOOK.md`.
 
@@ -50,4 +51,6 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 10. Python `read_sheet` keeps partner-less rows and only strips `-` bullets; Apps Script drops those
     rows and strips `•`/`*` too — known divergences, do not silently fix one side.
 11. Node 18 + clasp 2.4.2 are pinned (clasp 3 needs Node 20). A new Google service in a `.gs` file
-    adds an OAuth scope → the next menu action re-authorizes once.
+    adds an OAuth scope, and until the owner re-authorizes, the form-submit trigger FAILS HARD
+    (submissions unprocessed) — push at a quiet moment, authorize immediately, then run
+    "Process any missed form responses" (docs/RUNBOOK.md, "Apps Script deploy").

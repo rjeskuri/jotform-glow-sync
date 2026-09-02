@@ -5,9 +5,12 @@
  * UrlFetchApp call itself is exercised by the "Request Jotform sync now"
  * menu item (docs/RUNBOOK.md, "Automatic sync").
  */
+const fs = require('fs');
+const path = require('path');
 const loadGs = require('./load_gs');
 
 const gs = loadGs(['buildDispatchRequest_', 'DISPATCH_EVENT', 'PROP', 'TAB'], ['Config.gs', 'Dispatch.gs']);
+const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'auto-sync.yml'), 'utf8');
 
 let failures = 0;
 function check(label, cond, detail) {
@@ -37,6 +40,10 @@ check('token never appears in the payload', !req.options.payload.includes('TOKEN
 check('Script Property names are declared in Config.gs',
       gs.PROP.SYNC_DISPATCH_REPO === 'SYNC_DISPATCH_REPO' && gs.PROP.SYNC_DISPATCH_TOKEN === 'SYNC_DISPATCH_TOKEN');
 check('SyncLog tab is declared in Config.gs', gs.TAB.SYNC_LOG === 'SyncLog');
+check('the workflow listens for exactly this event type',
+      workflow.includes('types: [' + gs.DISPATCH_EVENT + ']'));
+check('the workflow reads the reason from the payload the sheet sends',
+      workflow.includes('github.event.client_payload.reason'));
 
 console.log('\n' + (failures ? failures + ' FAILURES' : 'ALL CHECKS PASSED'));
 process.exit(failures ? 1 : 0);

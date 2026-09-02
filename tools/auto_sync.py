@@ -8,14 +8,16 @@ by hand:
 
     python3 tools/auto_sync.py                     # dry run: export, plan, report
     python3 tools/auto_sync.py --apply             # also write, within the safety bands
-    python3 tools/auto_sync.py --region Asia --roster data/roster_<date>.csv --no-synclog
+    python3 tools/auto_sync.py --region Asia --roster data/roster_<date>.csv
 
 One run, per region: export the Roster tab -> guards -> dry-run the existing
 sync -> if it plans changes and they are within the bands -> back up the
-form -> apply -> verify with form_status.py. Every region's outcome is
-appended to the sheet's SyncLog tab and to data/auto_sync/<stamp>.log (with
-girls' names redacted). Exit 0 = every region in sync or applied cleanly;
-2 = something needs a human (ATTENTION.md says what); 1 = a step failed.
+form -> apply -> verify with form_status.py. With --synclog (the workflow
+always passes it; local runs write nothing to the sheet by default) every
+region's outcome is appended to the sheet's SyncLog tab; the console and
+data/auto_sync/<stamp>.log are redacted (girls' names never appear). Exit
+0 = every region in sync or applied cleanly; 2 = something needs a human
+(ATTENTION.md says what, and an unverified apply counts); 1 = a step failed.
 
 It never passes --prune, never deletes a question, and refuses to apply when
 one region would create more than --max-creates clubs or update more than
@@ -191,13 +193,23 @@ def verify_report(rep, min_languages=MIN_LANGUAGES):
     return problems, notes
 
 
-def redact(text, names):
-    """Replace every listed full name with [girl] (case-insensitive, longest first)."""
-    names = sorted({" ".join(n.split()) for n in names if n and n.strip()}, key=len, reverse=True)
+def name_regex(names):
+    """Compiled matcher for the listed full names, or None.
+
+    Only names of two or more words are matched (a one-word roster entry like a
+    bare first name would garble club names and ordinary words), whole-word,
+    longest first, case-insensitively."""
+    names = sorted({" ".join(n.split()) for n in names if n and len(n.split()) >= 2},
+                   key=len, reverse=True)
     if not names:
-        return text
-    rx = re.compile("|".join(re.escape(n) for n in names), re.IGNORECASE)
-    return rx.sub("[girl]", text)
+        return None
+    return re.compile(r"\b(?:" + "|".join(re.escape(n) for n in names) + r")\b", re.IGNORECASE)
+
+
+def redact(text, names):
+    """Replace every listed full name with [girl]."""
+    rx = name_regex(names)
+    return rx.sub("[girl]", text) if rx else text
 
 
 def slug(region):
@@ -217,8 +229,17 @@ class Run:
         self.when = now.strftime("%Y-%m-%d %H:%M:%S")
         self.mode = "apply" if args.apply else "dry-run"
         self.names = []
+        self._rx = None          # set once the roster is loaded; from then on every
+                                 # logged line is redacted BEFORE it reaches stdout
+                                 # (the Actions job log keeps raw step output for 90 days)
+
+    def set_names(self, names):
+        self.names = names
+        self._rx = name_regex(names)
 
     def log(self, msg=""):
+        if self._rx is not None:
+            msg = self._rx.sub("[girl]", msg)
         print(msg, flush=True)
         self.lines.append(msg)
 
@@ -307,6 +328,7 @@ class Run:
             self.failed = True
             self.result(region, plan, "failed", "backup failed - nothing applied")
             return
+        self.save_conditions(form)
         applied = self.sync(csv_path, region, form, apply=True)
         if applied.returncode != 0:
             self.log("  ! apply failed once - retrying (a failure between the question writes and "
@@ -323,13 +345,20 @@ class Run:
             return
         ver = self.cmd([sys.executable, os.path.join(TOOLS, "form_status.py"), "--form", form,
                         "--roster", csv_path, "--json"], "verify")
-        if ver.returncode != 0:
-            self.result(region, plan, "applied-unverified", summary + "; form_status failed")
-            return
-        try:
-            rep = json.loads(ver.stdout)[0]
-        except (ValueError, IndexError):
-            self.result(region, plan, "applied-unverified", summary + "; unreadable form_status output")
+        rep = None
+        if ver.returncode == 0:
+            try:
+                rep = json.loads(ver.stdout)[0]
+            except (ValueError, IndexError):
+                rep = None
+        if rep is None:
+            # a live write whose check could not run must never pass silently
+            self.attention.append((f"{region}: applied but NOT verified",
+                                   "The write succeeded but form_status could not confirm the form "
+                                   "is clean. Check by hand:\n"
+                                   f"python3 tools/form_status.py --form {form} --roster <roster.csv>\n\n"
+                                   + (ver.stderr or "").strip()[-300:]))
+            self.result(region, plan, "applied-unverified", summary + "; verification could not run")
             return
         problems, notes = verify_report(rep)
         for note in notes:
@@ -340,6 +369,23 @@ class Run:
             self.result(region, plan, "applied-with-problems", summary + "; " + "; ".join(problems))
         else:
             self.result(region, plan, "applied", summary + "; verified clean")
+
+    def save_conditions(self, form):
+        """A conditions-only rollback file next to the full snapshot.
+
+        The full properties snapshot holds staff e-mail configs and the
+        Salesforce integration settings, so only this file may leave the
+        machine (the workflow artifact). Restore with:
+        restore_conditions.py --form <id> --from conditions-<stamp>.json"""
+        src = os.path.join(REPO, "backups", form, "properties-latest.json")
+        try:
+            with open(src, encoding="utf-8") as f:
+                props = json.load(f)
+            out = os.path.join(REPO, "backups", form, f"conditions-{self.stamp}.json")
+            with open(out, "w", encoding="utf-8") as f:
+                json.dump({"conditions": props.get("conditions", [])}, f, indent=1)
+        except (OSError, ValueError) as err:
+            self.log(f"  ! could not write the conditions-only copy: {err}")
 
     def append_synclog(self, svc):
         if not sc._has_tab(svc, SYNC_LOG_TAB) or not sc.read_tab(svc, SYNC_LOG_TAB):
@@ -378,7 +424,9 @@ def main():
     ap.add_argument("--max-updates", type=int, default=20, help="per region, per run (default 20)")
     ap.add_argument("--min-active", type=int, default=1000,
                     help="refuse an export with fewer active rows than this (default 1000)")
-    ap.add_argument("--no-synclog", action="store_true", help="do not write the SyncLog tab")
+    ap.add_argument("--synclog", action="store_true",
+                    help="append this run's outcomes to the sheet's SyncLog tab (the workflow "
+                         "always passes this; without it nothing is written to the sheet)")
     ap.add_argument("--out", default=DEFAULT_OUT, help="working directory for exports and logs")
     ap.add_argument("--run-url", default=os.environ.get("AUTO_SYNC_RUN_URL", ""),
                     help="link recorded in SyncLog (Actions sets AUTO_SYNC_RUN_URL)")
@@ -403,7 +451,7 @@ def main():
     needed = {"partner", "club", "full_name", "status", "region"}
     if not rows or not needed <= set(rows[0]):
         sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
-    run.names = [r["full_name"] for r in rows]
+    run.set_names([r["full_name"] for r in rows])
     active = [r for r in rows if key(r["status"]) == "active"]
     run.log(f"Roster: {len(rows)} rows, {len(active)} active")
     if len(active) < args.min_active:
@@ -423,13 +471,15 @@ def main():
     for region in args.region or list(REGIONAL_FORMS):
         run.region(region, csv_path)
 
-    if not args.no_synclog and run.results:
+    if args.synclog and run.results:
         try:
             svc = svc or sc.service()
             run.with_retry(lambda: run.append_synclog(svc), "SyncLog")
-        except SystemExit:
-            raise
-        except Exception as err:                          # noqa: BLE001
+        except (SystemExit, Exception) as err:            # noqa: BLE001 - sheets_client reports via sys.exit;
+            # a SyncLog failure must not discard the log/ATTENTION files below
+            run.attention.append(("SyncLog row could not be written",
+                                  f"{err.__class__.__name__}: {str(err)[:300]}\n"
+                                  "The sheet is missing this run's record; the log file below has it."))
             run.log(f"  ! could not write SyncLog: {err.__class__.__name__}: {str(err)[:200]}")
     run.write_files()
     if run.failed:
