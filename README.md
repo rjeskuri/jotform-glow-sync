@@ -28,6 +28,7 @@ every operational procedure, with its dry-run and apply forms, in
 
 | Path | What it does |
 |---|---|
+| `glow/` | The shared library every tool imports: the one Jotform client (dry-run gated), the one form-id table, the text helpers, the parsers and structural question ids |
 | `sync_attendance_form.py` | The product: makes one form match the Roster export — rosters, the Club picker, and every condition. Dry run by default, `--apply` writes |
 | `backup_forms.py`, `restore_conditions.py` | Snapshot a form; roll its conditions back |
 | `tools/auto_sync.py` | The unattended loop run by GitHub Actions: export → plan → safety bands → backup → apply → verify → `SyncLog` |

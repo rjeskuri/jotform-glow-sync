@@ -1,7 +1,7 @@
 ---
 title: One Jotform client, one form table, one set of text helpers
 author: Claude (scope approved by Ryan)
-status: proposed
+status: done          # 2026-09-02, commit cec1c6c; proof in the commit message
 created: 2026-09-01
 ---
 

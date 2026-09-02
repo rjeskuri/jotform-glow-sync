@@ -99,5 +99,8 @@ Ryan's request and switched to the searchable mode he verified (`541bbcf`, `0aa1
 2026-09-02 — the five-pass adversarial review ran (30 agents); its confirmed findings were fixed
 (unverified applies raise ATTENTION, duplicate-name stale check, conditions-only artifacts, live
 log redaction, per-match secret allowlists, raw-API and guardrail-file gate patterns, `--synclog`
-opt-in, extended constants parity, regex robustness, doc corrections). Step 6 (the `glow/`
-refactor) and the merge are pending; no live change beyond the template pilot.
+opt-in, extended constants parity, regex robustness, doc corrections). Step 6 shipped the same
+day (`cec1c6c`): the `glow/` package, twelve scripts migrated, the conditions-equality skip; the
+GET-only before/after capture over the four live forms differed only in the two intended
+behavior changes. Remaining: the fast-forward merge into `main` (when Ryan confirms no tool is
+running) and Ryan's setup steps. No live change beyond the template pilot.
