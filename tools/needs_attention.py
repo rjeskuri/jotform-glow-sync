@@ -34,43 +34,26 @@ Usage:
 import argparse
 import csv
 import difflib
-import importlib.util
 import os
 import re
 import sys
-import unicodedata
 from collections import Counter, defaultdict
 from datetime import date
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import derive_partner_regions as regions  # noqa: E402
+sys.path.insert(0, REPO)
+import derive_partner_regions as regions   # noqa: E402
+from glow.sync import parse_roster, read_sheet  # noqa: E402
+from glow.text import key, name_key        # noqa: E402
 
 COLUMNS = ["priority", "issue", "partner", "club", "detail", "what_to_do",
            "sheet_row", "resolved"]
 SIMILAR = 0.8          # difflib ratio at which two names count as a respelling
 
 
-def key(s):
-    return " ".join(str(s or "").split()).lower()
-
-
-def name_key(s):
-    s = unicodedata.normalize("NFKD", str(s or ""))
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    return " ".join(s.split()).lower()
-
-
 def similar(a, b):
     return difflib.SequenceMatcher(None, name_key(a), name_key(b)).ratio()
-
-
-def load_sync():
-    spec = importlib.util.spec_from_file_location(
-        "sync", os.path.join(REPO, "sync_attendance_form.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def find_col(header, fragment):
@@ -91,8 +74,7 @@ def main():
     ap.add_argument("--out", help="output CSV (default data/needs_attention_<date>.csv)")
     args = ap.parse_args()
 
-    sync = load_sync()
-    sheet, dup_names = sync.read_sheet(args.csv)
+    sheet, dup_names = read_sheet(args.csv)
     with open(args.csv, newline="", encoding="utf-8-sig") as f:
         raw = list(csv.reader(f))
     header = raw[0]
@@ -119,7 +101,7 @@ def main():
         partner = " ".join(row[i_partner].split())
         if not club:
             continue
-        names, _ = sync.parse_roster(row[i_roster])
+        names, _ = parse_roster(row[i_roster])
         if not names:
             continue   # read_sheet ignores these too
         submissions[(key(partner), key(club))].append({

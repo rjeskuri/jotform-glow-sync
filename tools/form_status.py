@@ -18,51 +18,23 @@ import argparse
 import csv
 import json
 import os
-import subprocess
 import sys
-import unicodedata
-from collections import Counter, defaultdict
+from collections import defaultdict
 
-API_BASE = "https://api.jotform.com"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from glow import forms as glow_forms       # noqa: E402
+from glow.cli import run                   # noqa: E402
+from glow.jotform import Client            # noqa: E402
+from glow.sync import PICKER_NAME          # noqa: E402  (shared with the sync tool)
+from glow.text import key, name_key        # noqa: E402
 
-FORMS = {
-    "262352490535154": ("template", None),
-    "262382821971058": ("Africa", "Africa"),
-    "262383129464057": ("Asia", "Asia"),
-    "262383455778067": ("Latin America", "Latin America"),
-    "262382706852058": ("U.S", "U.S"),
-}
-DEFUNCT = {
-    "260555608160556": ("master (defunct)", None),
-    "260703905772560": ("Africa (defunct)", "Africa"),
-    "260704198384564": ("Asia (defunct)", "Asia"),
-    "260704170003542": ("Latin America (defunct)", "Latin America"),
-    "260703912140547": ("U.S (defunct)", "U.S"),
-}
+FORMS = {glow_forms.TEMPLATE: ("template", None),
+         **{fid: (region, region) for region, fid in glow_forms.REGIONALS.items()}}
+DEFUNCT = {glow_forms.DEFUNCT["master"]: ("master (defunct)", None),
+           **{fid: (f"{region} (defunct)", region)
+              for region, fid in glow_forms.DEFUNCT.items() if region != "master"}}
 ENABLE_FUZZY_QID = "109"
-
-
-def get(path, api_key, label):
-    out = subprocess.run(["curl", "-sS", f"{API_BASE}{path}?apiKey={api_key}&limit=1000"],
-                         capture_output=True, text=True)
-    try:
-        resp = json.loads(out.stdout)
-    except json.JSONDecodeError:
-        sys.exit(f"{label}: non-JSON response: {out.stdout[:200]}")
-    if resp.get("responseCode") != 200:
-        sys.exit(f"{label}: {resp.get('responseCode')} {resp.get('message')}")
-    return resp["content"]
-
-
-def key(s):
-    return " ".join(str(s or "").split()).lower()
-
-
-def name_key(s):
-    s = unicodedata.normalize("NFKD", str(s or ""))
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    return " ".join(s.split()).lower()
 
 
 def load_roster(path):
@@ -80,7 +52,6 @@ def load_roster(path):
 
 
 CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID = "5", "331", "18"
-PICKER_NAME = "clubPicker"   # the optional Club dropdown (sync_attendance_form.py --club-picker)
 
 
 def club_picker(questions):
@@ -153,11 +124,11 @@ def audit_rules(questions, conditions):
     return problems, summary
 
 
-def form_report(form_id, api_key, roster_by_region):
+def form_report(form_id, client, roster_by_region):
     label, region = FORMS.get(form_id) or DEFUNCT.get(form_id) or (form_id, None)
-    props = get(f"/form/{form_id}/properties", api_key, f"{form_id} properties")
-    questions = get(f"/form/{form_id}/questions", api_key, f"{form_id} questions")
-    info = get(f"/form/{form_id}", api_key, f"{form_id} info")
+    props = client.get(f"/form/{form_id}/properties", limit=1000)
+    questions = client.get(f"/form/{form_id}/questions", limit=1000)
+    info = client.get(f"/form/{form_id}", limit=1000)
 
     clubs = {}
     for q in questions.values():
@@ -241,9 +212,10 @@ def main():
     if args.defunct:
         FORMS.update(DEFUNCT)
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
+    client = Client(api_key)
     roster = load_roster(args.roster)
 
-    reports = [form_report(f, api_key, roster) for f in (args.form or FORMS)]
+    reports = [form_report(f, client, roster) for f in (args.form or FORMS)]
     if args.json:
         print(json.dumps(reports, indent=1))
         return
@@ -288,4 +260,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

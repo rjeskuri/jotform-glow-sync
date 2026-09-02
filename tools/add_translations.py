@@ -34,41 +34,24 @@ Usage:
     python3 tools/add_translations.py --apply --form <ID>     # one form
 """
 import argparse
-import hashlib
 import html as H
 import json
 import os
 import re
-import subprocess
 import sys
 
-API_BASE = "https://api.jotform.com"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FORMS = {
-    "262382821971058": "Africa",
-    "262383129464057": "Asia",
-    "262383455778067": "Latin America",
-    "262382706852058": "U.S",
-    "262352490535154": "template",
-}
+sys.path.insert(0, REPO)
+from glow import forms as glow_forms   # noqa: E402
+from glow.cli import run               # noqa: E402
+from glow.jotform import Client        # noqa: E402
+from glow.text import md5              # noqa: E402
+
+FORMS = {**{fid: region for region, fid in glow_forms.REGIONALS.items()},
+         glow_forms.TEMPLATE: "template"}
 # hidden bridge fields, headers and images whose text never shows to a mentor
 NEVER_SHOWN = {"18", "98", "100", "102", "105", "109", "103", "13"}
 LINK_ELEMENT_NAME = "somethingNotWorking"
-
-
-def md5(s):
-    return hashlib.md5(s.encode("utf-8")).hexdigest()
-
-
-def call(args, label, api_key):
-    out = subprocess.run(["curl", "-sS"] + args, capture_output=True, text=True)
-    try:
-        resp = json.loads(out.stdout)
-    except json.JSONDecodeError:
-        sys.exit(f"{label}: non-JSON response (gateway error?): {out.stdout[:120]!r}")
-    if resp.get("responseCode") != 200:
-        sys.exit(f"{label}: {resp.get('responseCode')} {resp.get('message')}")
-    return resp["content"]
 
 
 def visible_strings(questions):
@@ -112,12 +95,13 @@ def main():
     ap.add_argument("--audit", action="store_true", help="only report untranslated labels")
     args = ap.parse_args()
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
+    client = Client(api_key, apply=args.apply)
     additions = load_additions()
     targets = {f: FORMS.get(f, f) for f in args.form} if args.form else FORMS
 
     for form_id, label in targets.items():
-        questions = call([f"{API_BASE}/form/{form_id}/questions?apiKey={api_key}"], f"{form_id} questions", api_key)
-        store = call([f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}"], f"{form_id} translations", api_key)
+        questions = client.get(f"/form/{form_id}/questions")
+        store = client.get(f"/form/{form_id}/translations")
         langs = [l for l in store if l not in ("en", "base")]
         strings = visible_strings(questions)
         link = next((q for q in questions.values() if q.get("name") == LINK_ELEMENT_NAME), None)
@@ -173,10 +157,8 @@ def main():
             if link:
                 merged[src_key].setdefault(md5(link["text"]), link["text"])
                 merged[src_key].setdefault(md5(f"text_{link['qid']}"), f"text_{link['qid']}")
-        call(["-X", "POST", f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}",
-              "-H", "Content-Type: application/json",
-              "--data-binary", json.dumps(merged, ensure_ascii=False)], f"{form_id} post", api_key)
-        after = call([f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}"], f"{form_id} verify", api_key)
+        client.post_json(f"/form/{form_id}/translations", merged, f"{form_id} post")
+        after = client.get(f"/form/{form_id}/translations")
         ok = all(after.get(l, {}).get(k) == v for l, d in merged.items() for k, v in d.items())
         print("   " + (f"stored ({', '.join(f'{l}:{len(after.get(l, {}))}' for l in merged)})"
                        if ok else "MISMATCH after write"))
@@ -186,4 +168,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

@@ -228,6 +228,123 @@ class ConditionBuilder(unittest.TestCase):
         self.assertEqual([c["priority"] for c in conds], [c["index"] for c in conds])
 
 
+class GlowClient(unittest.TestCase):
+    """The dry-run gate and call shapes of glow.jotform.Client (no network)."""
+
+    def setUp(self):
+        import glow.jotform as gj
+        self.gj = gj
+        self.spawned = []
+
+    def fake(self, outputs):
+        """subprocess.run replacement yielding the given stdout strings in order."""
+        import subprocess as sp
+
+        def runner(argv, capture_output=True, text=True):
+            self.spawned.append(argv)
+            out = outputs[min(len(self.spawned) - 1, len(outputs) - 1)]
+            return sp.CompletedProcess(argv, 0, stdout=out, stderr="")
+        return runner
+
+    def ok(self, content=None):
+        return json.dumps({"responseCode": 200, "content": content if content is not None else {"x": 1}})
+
+    def test_writes_are_recorded_and_skipped_without_apply(self):
+        from unittest import mock
+        c = self.gj.Client("KEY")
+        with mock.patch.object(self.gj.subprocess, "run", self.fake([self.ok()])):
+            self.assertIsNone(c.post_form("/form/1/questions", {"a": "b"}, "CREATE x"))
+            self.assertIsNone(c.put_json("/form/1/properties", {}, "REPLACE y"))
+            self.assertIsNone(c.delete("/form/1/question/2", "DELETE z"))
+            self.assertEqual(c.get("/form/1/questions"), {"x": 1})
+        self.assertEqual(c.calls, ["CREATE x", "REPLACE y", "DELETE z"])
+        self.assertEqual(len(self.spawned), 1)          # only the GET ran
+
+    def test_apply_runs_writes_and_still_records_them(self):
+        from unittest import mock
+        c = self.gj.Client("KEY", apply=True)
+        with mock.patch.object(self.gj.subprocess, "run", self.fake([self.ok()])):
+            self.assertEqual(c.post_form("/form/1/questions", {"a": "b"}, "CREATE x"), {"x": 1})
+        self.assertEqual(c.calls, ["CREATE x"])
+        argv = self.spawned[0]
+        self.assertEqual(argv[:2], ["curl", "-sS"])
+        self.assertIn("--data-urlencode", argv)
+        self.assertIn("a=b", argv)
+        self.assertEqual(argv.count("https://api.jotform.com/form/1/questions?apiKey=KEY"), 1)
+
+    def test_url_params_and_max_time(self):
+        from unittest import mock
+        c = self.gj.Client("KEY", max_time=150)
+        self.assertEqual(c.url("/form/1/questions", limit=1000),
+                         "https://api.jotform.com/form/1/questions?apiKey=KEY&limit=1000")
+        with mock.patch.object(self.gj.subprocess, "run", self.fake([self.ok()])):
+            c.get("/form/1/questions", limit=1000)
+        self.assertIn("--max-time", self.spawned[0])
+
+    def test_retry_then_success_then_give_up(self):
+        from unittest import mock
+        naps = []
+        c = self.gj.Client("KEY", retries=3, backoff=1, sleep=naps.append)
+        with mock.patch.object(self.gj.subprocess, "run",
+                               self.fake(["<html>504</html>", "<html>504</html>", self.ok()])):
+            self.assertEqual(c.get("/x"), {"x": 1})
+        self.assertEqual((len(self.spawned), naps), (3, [1, 1]))
+        self.spawned.clear()
+        c1 = self.gj.Client("KEY")                       # default: one attempt
+        with mock.patch.object(self.gj.subprocess, "run", self.fake(["nope"])):
+            with self.assertRaises(self.gj.JotformError):
+                c1.get("/x")
+            self.assertIsNone(c1.call([c1.url("/x")], "GET /x", allow_fail=True))
+
+    def test_is_write_catches_every_shape(self):
+        w = self.gj.is_write
+        self.assertTrue(w(["-X", "POST", "u"]))
+        self.assertTrue(w(["-X", "DELETE", "u"]))
+        self.assertTrue(w(["u", "--data-binary", "{}"]))
+        self.assertTrue(w(["--data-urlencode", "a=b", "u"]))
+        self.assertFalse(w(["u"]))
+        self.assertFalse(w(["-H", "Accept: x", "u"]))
+
+
+class GlowText(unittest.TestCase):
+    """glow.text must be byte-equal to the per-script copies it replaced."""
+
+    CORPUS = [None, "", "  ", 7, "Ana  Maria\tLopez ", "ÑANDÚ vex", "Zoë", "İstanbul",
+              "café", "​Grace", "a b", "MiXeD CaSe", "ümit-öz"]
+
+    @staticmethod
+    def old_key(s):                                     # tools/form_status.py (pre-refactor)
+        return " ".join(str(s or "").split()).lower()
+
+    @staticmethod
+    def old_name_key(s):
+        import unicodedata
+        s = unicodedata.normalize("NFKD", str(s or ""))
+        s = "".join(c for c in s if not unicodedata.combining(c))
+        return " ".join(s.split()).lower()
+
+    def test_byte_equal_to_the_old_implementations(self):
+        from glow import text
+        import hashlib
+        for s in self.CORPUS:
+            self.assertEqual(text.key(s), self.old_key(s), repr(s))
+            self.assertEqual(text.name_key(s), self.old_name_key(s), repr(s))
+        for s in ("Session 4", "Mentor Email", "日本語", ""):
+            self.assertEqual(text.md5(s), hashlib.md5(s.encode("utf-8")).hexdigest())
+
+
+class GlowForms(unittest.TestCase):
+    def test_shape(self):
+        from glow import forms
+        self.assertEqual(set(forms.REGIONALS), set(forms.REGIONS))
+        self.assertEqual(len(forms.LABELS), 10)
+        self.assertEqual(forms.region_of(forms.REGIONALS["Asia"]), "Asia")
+        self.assertIsNone(forms.region_of(forms.TEMPLATE))
+        self.assertIsNone(forms.region_of(forms.DEFUNCT["Africa"]))
+        ids = {forms.TEMPLATE, *forms.REGIONALS.values(), *forms.DEFUNCT.values()}
+        self.assertEqual(len(ids), 10)
+
+
 class EnrollmentParser(unittest.TestCase):
     def test_fixture_matches_expected_json(self):
         expected = json.loads(read(EXPECTED))
@@ -247,10 +364,11 @@ class EnrollmentParser(unittest.TestCase):
         self.assertEqual(len(sheet[glow[0]]), 6)
 
     def test_parse_roster_edge_cases(self):
-        names, dups = sync.parse_roster("1. Dalia Yexleyton\n12) Esther Grimboltz\n- Farah Halverquist\n"
-                                        "3 Gloria Ixworthing\nHana Jubbleton,\nInes Lorrimane.\n\n"
-                                        "  Joy   Nimbleford  \n\tKavya Quillstrand\t\n"
-                                        "​Maya Pellucidor\nmaya pellucidor")
+        from glow.sync import parse_roster   # its home since the de-dup refactor
+        names, dups = parse_roster("1. Dalia Yexleyton\n12) Esther Grimboltz\n- Farah Halverquist\n"
+                                   "3 Gloria Ixworthing\nHana Jubbleton,\nInes Lorrimane.\n\n"
+                                   "  Joy   Nimbleford  \n\tKavya Quillstrand\t\n"
+                                   "​Maya Pellucidor\nmaya pellucidor")
         self.assertEqual(names, ["Dalia Yexleyton", "Esther Grimboltz", "Farah Halverquist",
                                  "Gloria Ixworthing", "Hana Jubbleton", "Ines Lorrimane",
                                  "Joy Nimbleford", "Kavya Quillstrand", "Maya Pellucidor"])

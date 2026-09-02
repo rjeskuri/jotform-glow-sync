@@ -36,16 +36,13 @@ import time
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
+sys.path.insert(0, REPO)
 import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily inside it)
+from glow import forms as glow_forms  # noqa: E402
 
-# The live regional forms (docs/RUNBOOK.md has the same table). Kept in step
-# with appsscript/Config.gs FORMS by test/python_test.py.
-REGIONAL_FORMS = {
-    "Africa": "262382821971058",
-    "Asia": "262383129464057",
-    "Latin America": "262383455778067",
-    "U.S": "262382706852058",
-}
+# The live regional forms (one source: glow/forms.py, parity-tested against
+# appsscript/Config.gs by test/python_test.py).
+REGIONAL_FORMS = glow_forms.REGIONALS
 ROSTER_TAB = "Roster"
 SYNC_LOG_TAB = "SyncLog"
 # keep in step with SYNC_LOG_COLS in appsscript/Roster.gs

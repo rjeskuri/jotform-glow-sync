@@ -21,45 +21,22 @@ Usage:
     python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json --apply
 """
 import argparse
-import hashlib
 import json
 import os
-import re
-import subprocess
 import sys
-import time
 
-API_BASE = "https://api.jotform.com"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FORMS = {
-    "262382821971058": "Africa Attendance Form",
-    "262383129464057": "Asia Attendance Form",
-    "262383455778067": "Latin America Attendance Form",
-    "262382706852058": "U.S Attendance Form",
-    "262352490535154": "Attendance Form (Template)",
-}
+sys.path.insert(0, REPO)
+from glow import forms as glow_forms   # noqa: E402
+from glow.cli import run               # noqa: E402
+from glow.jotform import Client        # noqa: E402
+from glow.text import md5              # noqa: E402
+
+FORMS = {**{fid: glow_forms.TITLES[region] for region, fid in glow_forms.REGIONALS.items()},
+         glow_forms.TEMPLATE: glow_forms.TEMPLATE_TITLE}
 SPECIAL_NAMES = {"arabic": "Arabic‬‎"}   # as in Jotform's table
 LINK_SENTENCE = "Click here to report a problem"
 LINK_ELEMENT_NAME = "somethingNotWorking"
-
-
-def md5(s):
-    return hashlib.md5(s.encode("utf-8")).hexdigest()
-
-
-def call(args, label, api_key, tries=5):
-    for t in range(tries):
-        out = subprocess.run(["curl", "-sS", "--max-time", "150"] + args,
-                             capture_output=True, text=True).stdout
-        try:
-            resp = json.loads(out)
-            if resp.get("responseCode") == 200:
-                return resp["content"]
-            print(f"   {label}: {resp.get('responseCode')} {str(resp.get('message'))[:80]} (try {t + 1})")
-        except json.JSONDecodeError:
-            print(f"   {label}: gateway error (try {t + 1})")
-        time.sleep(8)
-    sys.exit(f"{label}: gave up")
 
 
 def load_dict(path):
@@ -85,16 +62,18 @@ def main():
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
+    # the big translation POSTs 504 at the gateway now and then: retry hard
+    client = Client(api_key, apply=args.apply, retries=5, backoff=8, max_time=150)
     name = SPECIAL_NAMES.get(args.name.lower(), args.name)
     words = load_dict(args.dict) if args.dict else {}
     targets = {f: FORMS.get(f, f) for f in args.form} if args.form else FORMS
 
     for form_id, title in targets.items():
-        props = call([f"{API_BASE}/form/{form_id}/properties?apiKey={api_key}"], f"{form_id} props", api_key)
+        props = client.get(f"/form/{form_id}/properties")
         lang = props.get("language")
         lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
         options = [o for o in str(lang.get("options", "")).split("|") if o]
-        store = call([f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}"], f"{form_id} store", api_key)
+        store = client.get(f"/form/{form_id}/translations")
         have = store.get(args.code, {})
         base = store.get("base", {})
 
@@ -104,7 +83,7 @@ def main():
             for english, text in words.items():
                 if md5(english) in base:
                     new[md5(english)] = text
-            questions = call([f"{API_BASE}/form/{form_id}/questions?apiKey={api_key}"], f"{form_id} questions", api_key)
+            questions = client.get(f"/form/{form_id}/questions")
             link = next((q for q in questions.values() if q.get("name") == LINK_ELEMENT_NAME), None)
             if link and LINK_SENTENCE in words:
                 text_id = f"text_{link['qid']}"
@@ -121,22 +100,18 @@ def main():
 
         if name not in options:
             lang["options"] = "|".join(options + [name])
-            call(["-X", "PUT", f"{API_BASE}/form/{form_id}/properties?apiKey={api_key}",
-                  "-H", "Content-Type: application/json",
-                  "--data-binary", json.dumps({"properties": {"language": [lang]}})],
-                 f"{form_id} set options", api_key)
+            client.put_json(f"/form/{form_id}/properties",
+                            {"properties": {"language": [lang]}}, f"{form_id} set options")
         if new:
             merged = dict(have)
             merged.update(new)
-            call(["-X", "POST", f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}",
-                  "-H", "Content-Type: application/json",
-                  "--data-binary", json.dumps({args.code: merged}, ensure_ascii=False)],
-                 f"{form_id} post {args.code}", api_key)
+            client.post_json(f"/form/{form_id}/translations", {args.code: merged},
+                             f"{form_id} post {args.code}")
         # re-render the cached page
-        call(["-X", "POST", f"{API_BASE}/form/{form_id}/properties?apiKey={api_key}",
-              "--data-urlencode", f"properties[pagetitle]={title}"], f"{form_id} nudge", api_key)
-        after = call([f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}"], f"{form_id} verify", api_key)
-        props = call([f"{API_BASE}/form/{form_id}/properties?apiKey={api_key}"], f"{form_id} props", api_key)
+        client.post_form(f"/form/{form_id}/properties",
+                         {"properties[pagetitle]": title}, f"{form_id} nudge")
+        after = client.get(f"/form/{form_id}/translations")
+        props = client.get(f"/form/{form_id}/properties")
         opts = props["language"][0]["options"] if isinstance(props.get("language"), list) else ""
         ok = name in opts and all(after.get(args.code, {}).get(k) == v for k, v in new.items())
         print(f"   {'OK' if ok else 'PROBLEM'}: switcher = {opts}")
@@ -146,4 +121,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

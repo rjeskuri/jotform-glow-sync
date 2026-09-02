@@ -37,15 +37,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheets_client as sc  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from glow.text import key   # noqa: E402
+
 BUILD = os.path.join(REPO, "data", "roster_build")
 REPLACE_TABS = ["Roster", "ClubRegistry"]
 MERGE_TABS = ["Partners"]
 APPEND_TABS = ["ReviewQueue", "Audit"]
 TABS = REPLACE_TABS + MERGE_TABS + APPEND_TABS
-
-
-def key(s):
-    return " ".join(str(s or "").split()).lower()
 
 
 def read_csv(path):

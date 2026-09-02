@@ -27,22 +27,23 @@ Usage:
     python3 tools/derive_partner_regions.py enrollment.csv --write    # also regenerate Regions.gs
 """
 import argparse
-import csv
-import importlib.util
 import json
 import os
 import sys
-import unicodedata
 from collections import Counter, defaultdict
 from datetime import date
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REGIONAL_FORMS = {
-    "260703905772560": "Africa",
-    "260704198384564": "Asia",
-    "260704170003542": "Latin America",
-    "260703912140547": "U.S",
-}
+sys.path.insert(0, REPO)
+from glow import forms as glow_forms          # noqa: E402
+from glow.sync import read_sheet              # noqa: E402
+from glow.text import key, name_key           # noqa: E402
+
+# The PRE-LAUNCH regional forms, on purpose: the live regionals were built
+# FROM the Partners tab's regions, so deriving from them would be circular.
+# These snapshots are the last independent evidence of where each club sat.
+REGIONAL_FORMS = {fid: region for region, fid in glow_forms.DEFUNCT.items()
+                  if region != "master"}
 # A roster "matches" a regional checkbox when the girl sets overlap this much
 # (Jaccard) AND share at least MIN_SHARED girls. 0.3 is deliberately below the
 # ~0.5 overlap seen when a partner re-types a roster with respellings and a
@@ -52,25 +53,6 @@ REGIONAL_FORMS = {
 OVERLAP_THRESHOLD = 0.3
 MIN_SHARED = 5
 OUT_GS = os.path.join(REPO, "appsscript", "Regions.gs")
-
-
-def load_sync_tool():
-    spec = importlib.util.spec_from_file_location(
-        "sync", os.path.join(REPO, "sync_attendance_form.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def key(s):
-    return " ".join(str(s or "").split()).lower()
-
-
-def name_key(s):
-    """Accent-insensitive, whitespace-collapsed, lowercase."""
-    s = unicodedata.normalize("NFKD", str(s or ""))
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    return " ".join(s.split()).lower()
 
 
 def load_regional_rosters():
@@ -212,8 +194,7 @@ def main():
                     help="regenerate appsscript/Regions.gs")
     args = ap.parse_args()
 
-    sync = load_sync_tool()
-    sheet, _ = sync.read_sheet(args.csv)
+    sheet, _ = read_sheet(args.csv)
     rosters = load_regional_rosters()
     clubs = classify_clubs(sheet, rosters)
     partners = roll_up_to_partners(clubs)

@@ -15,34 +15,20 @@ Usage:
 """
 import argparse
 import html
-import json
 import os
-import subprocess
 import sys
 
-API_BASE = "https://api.jotform.com"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from glow import forms as glow_forms   # noqa: E402
+from glow.cli import run               # noqa: E402
+from glow.jotform import Client        # noqa: E402
+
 ELEMENT_NAME = "somethingNotWorking"     # unique name = how we find it again
 
-# the live regional forms (cloned 2026-08-27) + the template they came from
-FORMS = {
-    "262382821971058": "Africa",
-    "262383129464057": "Asia",
-    "262383455778067": "Latin America",
-    "262382706852058": "U.S",
-    "262352490535154": "template",
-}
-
-
-def call(args, label, api_key):
-    out = subprocess.run(["curl", "-sS"] + args, capture_output=True, text=True)
-    try:
-        resp = json.loads(out.stdout)
-    except json.JSONDecodeError:
-        sys.exit(f"{label}: non-JSON response: {out.stdout[:200]}")
-    if resp.get("responseCode") != 200:
-        sys.exit(f"{label}: {resp.get('responseCode')} {resp.get('message')}")
-    return resp["content"]
-
+# the live regional forms + the template they came from
+FORMS = {**{fid: region for region, fid in glow_forms.REGIONALS.items()},
+         glow_forms.TEMPLATE: "template"}
 
 LINK_TEXT = "Click here to report a problem"   # translated in tools/translations_additions.json
 
@@ -65,13 +51,13 @@ def main():
     if not args.remove and not args.url:
         sys.exit("--url is required (or --remove)")
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
+    client = Client(api_key, apply=args.apply)
 
     targets = {f: FORMS.get(f, "?") for f in args.form} if args.form else FORMS
     print("DRY RUN\n" if not args.apply else "APPLYING\n")
 
     for form_id, label in targets.items():
-        questions = call([f"{API_BASE}/form/{form_id}/questions?apiKey={api_key}"],
-                         f"{form_id} questions", api_key)
+        questions = client.get(f"/form/{form_id}/questions")
         ours = [q for q in questions.values() if q.get("name") == ELEMENT_NAME]
         button = [q for q in questions.values() if q.get("type") == "control_button"]
         top_order = max(int(q.get("order", 0)) for q in questions.values())
@@ -83,8 +69,8 @@ def main():
             for q in ours:
                 print(f"  {form_id} {label:<14} DELETE qid {q['qid']}")
                 if args.apply:
-                    call(["-X", "DELETE", f"{API_BASE}/form/{form_id}/question/{q['qid']}?apiKey={api_key}"],
-                         f"{form_id} delete {q['qid']}", api_key)
+                    client.delete(f"/form/{form_id}/question/{q['qid']}",
+                                  f"{form_id} delete {q['qid']}")
             continue
 
         body = link_html(args.url)
@@ -92,9 +78,8 @@ def main():
             q = ours[0]
             print(f"  {form_id} {label:<14} UPDATE qid {q['qid']} (already present)")
             if args.apply:
-                call(["-X", "POST", f"{API_BASE}/form/{form_id}/question/{q['qid']}?apiKey={api_key}",
-                      "--data-urlencode", f"question[text]={body}"],
-                     f"{form_id} update {q['qid']}", api_key)
+                client.post_form(f"/form/{form_id}/question/{q['qid']}",
+                                 {"question[text]": body}, f"{form_id} update {q['qid']}")
             continue
 
         # place it right before the Submit button: same order as the button,
@@ -104,17 +89,17 @@ def main():
         print(f"  {form_id} {label:<14} ADD text element at order {order}"
               + (f", move Submit (qid {btn['qid']}) to {order + 1}" if btn else ""))
         if args.apply:
-            created = call(["-X", "POST", f"{API_BASE}/form/{form_id}/questions?apiKey={api_key}",
-                            "--data-urlencode", "question[type]=control_text",
-                            "--data-urlencode", f"question[name]={ELEMENT_NAME}",
-                            "--data-urlencode", f"question[text]={body}",
-                            "--data-urlencode", f"question[order]={order}"],
-                           f"{form_id} add", api_key)
+            created = client.post_form(f"/form/{form_id}/questions", {
+                "question[type]": "control_text",
+                "question[name]": ELEMENT_NAME,
+                "question[text]": body,
+                "question[order]": str(order),
+            }, f"{form_id} add")
             new_qid = created.get("qid") if isinstance(created, dict) else None
             if btn:
-                call(["-X", "POST", f"{API_BASE}/form/{form_id}/question/{btn['qid']}?apiKey={api_key}",
-                      "--data-urlencode", f"question[order]={order + 1}"],
-                     f"{form_id} move submit", api_key)
+                client.post_form(f"/form/{form_id}/question/{btn['qid']}",
+                                 {"question[order]": str(order + 1)},
+                                 f"{form_id} move submit")
             print(f"      added qid {new_qid}")
 
     if not args.apply:
@@ -122,4 +107,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

@@ -15,22 +15,12 @@ Usage:
 import argparse
 import json
 import os
-import subprocess
 import sys
 
-API_BASE = "https://api.jotform.com"
 REPO = os.path.dirname(os.path.abspath(__file__))
-
-
-def call(args, label):
-    out = subprocess.run(["curl", "-sS"] + args, capture_output=True, text=True)
-    try:
-        resp = json.loads(out.stdout)
-    except json.JSONDecodeError:
-        sys.exit(f"{label}: non-JSON response: {out.stdout[:200]}")
-    if resp.get("responseCode") != 200:
-        sys.exit(f"{label}: {resp.get('responseCode')} {resp.get('message')}")
-    return resp["content"]
+sys.path.insert(0, REPO)
+from glow.cli import run          # noqa: E402
+from glow.jotform import Client   # noqa: E402
 
 
 def main():
@@ -44,6 +34,7 @@ def main():
 
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
         "Set JOTFORM_API_KEY in the environment")
+    client = Client(api_key, apply=args.apply)
 
     path = os.path.join(REPO, "backups", args.form,
                         args.src or "properties-latest.json")
@@ -54,8 +45,7 @@ def main():
     if not conditions:
         sys.exit(f"{path} holds no conditions - refusing to wipe the form")
 
-    live = call([f"{API_BASE}/form/{args.form}/properties?apiKey={api_key}"],
-                "GET properties")
+    live = client.get(f"/form/{args.form}/properties")
     print(f"form {args.form}: live has {len(live.get('conditions', []))} "
           f"conditions; snapshot has {len(conditions)}")
     print(f"snapshot: {os.path.relpath(path, REPO)}")
@@ -64,13 +54,10 @@ def main():
         print("\nDRY RUN - re-run with --apply to restore")
         return
 
-    payload = json.dumps({"properties": {"conditions": conditions}})
-    call(["-X", "PUT", f"{API_BASE}/form/{args.form}/properties?apiKey={api_key}",
-          "-H", "Content-Type: application/json", "--data-binary", payload],
-         "PUT conditions")
+    client.put_json(f"/form/{args.form}/properties",
+                    {"properties": {"conditions": conditions}}, "PUT conditions")
 
-    after = call([f"{API_BASE}/form/{args.form}/properties?apiKey={api_key}"],
-                 "GET properties (verify)")
+    after = client.get(f"/form/{args.form}/properties")
     n = len(after.get("conditions", []))
     ok = n == len(conditions)
     print(f"RESTORED: {n} conditions on the server "
@@ -79,4 +66,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

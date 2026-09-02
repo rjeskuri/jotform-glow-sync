@@ -32,47 +32,36 @@ Getting enrollment.csv: in Google Sheets, File > Download > Comma Separated
 Values (.csv) on the responses tab. Getting roster.csv:
     python3 tools/sheets_client.py export Roster data/roster_<date>.csv
 
-Requires: Python 3.8+, no third-party packages.
+Requires: Python 3.10, standard library plus glow/ (this repo's shared library).
 """
 import argparse
-import csv
 import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 from collections import defaultdict
 
-API_BASE = "https://api.jotform.com"
-
-# ---------------------------------------------------------------- sheet layout
-# Column headers in the enrollment sheet (matched loosely, case-insensitive).
-COL_PARTNER = "partner organization name"
-COL_CLUB = "club name"
-COL_ROSTER = "please list the full name"
-
-# ------------------------------------------------------------- fixed field ids
-# Structural fields of the master form. If the form is ever rebuilt from
-# scratch, update these ids (GET /form/{id}/questions to look them up).
-CLUB_NAME = "5"      # Club Name textbox (matched by the visibility rules)
-PARTNER = "331"      # Partner textbox (shown only for ambiguous club names)
-YEAR = "94"          # GLOW Club Year dropdown (1|2|3)
-MODULES = {"1": "14", "2": "92", "3": "93"}       # year -> module dropdown qid
-WEEKS = {8: "15", 10: "95", 14: "96", 15: "97"}   # session count -> dropdown qid
-CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID = "18", "98", "100", "102"
+REPO = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, REPO)
+from glow.cli import run            # noqa: E402
+from glow.jotform import Client     # noqa: E402
+from glow.sync import (             # noqa: E402  - the parsers and structural ids,
+    CLUB_NAME, CONTACT_IDS,   # shared with the
+    MODULE_ID, MODULES, PARTNER, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
+    WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, read_roster_csv, read_sheet, warn,                            # against Config.gs
+)
 
 # Optional "Club" picker: a required dropdown listing every club on the form,
 # so mentors choose their club instead of typing it. Added once per form with
-# --club-picker; recognised by name from then on. When present, the roster
-# visibility rules key on it and a calculation copies its value into the
-# CLUB_NAME textbox (hidden), which stays the field the Salesforce mapping
-# reads. Its option list and properties are kept in this shape on every run.
-# multipleSelections=Yes selects Jotform's own searchable dropdown component
-# (type to filter, on phones too); the plain single-select is a browser
-# <select> that only jumps to the first letter. Verified on the template
-# 2026-09-01 (docs/intent/2026-09-01-club-picker.md).
-PICKER_NAME = "clubPicker"
+# --club-picker; recognised by name (glow.sync.PICKER_NAME) from then on. When
+# present, the roster visibility rules key on it and a calculation copies its
+# value into the CLUB_NAME textbox (hidden), which stays the field the
+# Salesforce mapping reads. Its option list and properties are kept in this
+# shape on every run. multipleSelections=Yes selects Jotform's own searchable
+# dropdown component (type to filter, on phones too); the plain single-select
+# is a browser <select> that only jumps to the first letter. Verified on the
+# template 2026-09-01 (docs/intent/2026-09-01-club-picker.md).
 PICKER_TEXT = "Club"
 PICKER_SUBLABEL = "Start typing your club's name and pick it from the list"
 PICKER_PROPS = {
@@ -85,22 +74,8 @@ PICKER_PROPS = {
     "emptyText": "Please Select",
 }
 
-# Sessions per module. Modules not listed default to 8 sessions.
-# EDIT HERE when the curriculum changes; the cascade rules are generated
-# from this table and from the module dropdowns' live option lists.
-SESSION_OVERRIDES = {
-    "Elective - Healthy GLOW": 14,
-    "Elective - Girl Boss Basics": 10,
-    "Elective - Girl Boss Pro": 15,
-}
-
-# Warnings are printed as they happen and collected for --summary-json
-# (tools/auto_sync.py decides from them whether a plan is safe to apply).
-WARNINGS = []
-
-def warn(msg):
-    WARNINGS.append(msg)
-    print(msg)
+# SESSION_OVERRIDES (sessions per elective module) lives in glow/sync.py -
+# edit it THERE when the curriculum changes, and mirror appsscript/Config.gs.
 
 # ------------------------------------------------------------------ id minting
 _counter = [0]
@@ -112,154 +87,30 @@ def next_id():
 
 # ------------------------------------------------------------------- API layer
 class Jotform:
+    """Form-scoped view over glow.jotform.Client: the same get/post_form/
+    put_json/delete surface this script always had, with paths relative to
+    /form/{id}. The dry-run gate lives in the shared client."""
+
     def __init__(self, api_key, form_id, apply_changes=False):
-        self.key = api_key
+        self._client = Client(api_key, apply=apply_changes)
         self.form = form_id
         self.apply = apply_changes
-        self.calls = []
 
-    def _url(self, path):
-        return f"{API_BASE}/form/{self.form}{path}?apiKey={self.key}"
-
-    def _curl(self, args, label):
-        out = subprocess.run(["curl", "-sS", "--fail-with-body"] + args,
-                             capture_output=True, text=True)
-        try:
-            resp = json.loads(out.stdout)
-        except json.JSONDecodeError:
-            raise RuntimeError(f"{label}: non-JSON response: "
-                               f"{out.stdout[:300]} {out.stderr[:300]}")
-        if resp.get("responseCode") != 200:
-            raise RuntimeError(f"{label}: {resp.get('responseCode')} "
-                               f"{resp.get('message')}")
-        return resp["content"]
+    @property
+    def calls(self):
+        return self._client.calls
 
     def get(self, path):
-        return self._curl([self._url(path)], f"GET {path}")
+        return self._client.get(f"/form/{self.form}{path}")
 
     def post_form(self, path, data, label):
-        """form-urlencoded POST (question create/update)."""
-        self.calls.append(label)
-        if not self.apply:
-            return None
-        args = ["-X", "POST", self._url(path)]
-        for k, v in data.items():
-            args += ["--data-urlencode", f"{k}={v}"]
-        return self._curl(args, label)
+        return self._client.post_form(f"/form/{self.form}{path}", data, label)
 
     def put_json(self, path, payload, label):
-        """JSON PUT (properties update)."""
-        self.calls.append(label)
-        if not self.apply:
-            return None
-        return self._curl(["-X", "PUT", self._url(path),
-                           "-H", "Content-Type: application/json",
-                           "--data-binary", json.dumps(payload)], label)
+        return self._client.put_json(f"/form/{self.form}{path}", payload, label)
 
     def delete(self, path, label):
-        """DELETE (question removal - only ever used with --prune)."""
-        self.calls.append(label)
-        if not self.apply:
-            return None
-        return self._curl(["-X", "DELETE", self._url(path)], label)
-
-# -------------------------------------------------------------- sheet parsing
-def parse_roster(cell):
-    """Parse one roster cell: one name per line, optional '1.' numbering.
-    Returns (names, duplicates): duplicates are names listed more than once -
-    usually two different girls with the same full name, who need
-    distinguishing suffixes added in the sheet (e.g. 'Jane Doe (A)')."""
-    names = []
-    for line in cell.splitlines():
-        # drop invisible format characters (zero-width, LTR/RTL marks, BOM)
-        line = re.sub("[\\u200b\\u200c\\u200d\\u200e\\u200f\\u2060\\ufeff]", "", line)
-        line = re.sub(r"^\s*\d+[\.\)]?\s*", "", line).strip(" \t,.-")
-        if line:
-            names.append(" ".join(line.split()))  # collapse inner whitespace
-    seen, out, dups = set(), [], []
-    for n in names:
-        if n.lower() not in seen:
-            seen.add(n.lower())
-            out.append(n)
-        else:
-            dups.append(n)
-    return out, dups
-
-def read_sheet(csv_path):
-    """Return ({(partner, club): [girl, ...]}, {(partner, club): [dup, ...]}).
-    Last submission per club wins."""
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.reader(f))
-    header = [h.lower() for h in rows[0]]
-
-    def col(fragment):
-        for i, h in enumerate(header):
-            if fragment in h:
-                return i
-        sys.exit(f"Could not find a column containing {fragment!r} in the CSV header")
-
-    ip, ic, ir = col(COL_PARTNER), col(COL_CLUB), col(COL_ROSTER)
-    # identity is case-insensitive (partner, club): re-submissions that only
-    # change capitalization ("Glow Club" -> "GLOW Club") are the same club,
-    # and the LAST submission wins, keeping its spelling
-    clubs, dup_names, skipped = {}, {}, 0
-    for row in rows[1:]:
-        if len(row) <= max(ip, ic, ir):
-            if any(cell.strip() for cell in row):
-                skipped += 1
-            continue
-        partner = " ".join(row[ip].split())
-        club = " ".join(row[ic].split())
-        roster, dups = parse_roster(row[ir])
-        if club and roster:
-            ident = (partner.lower(), club.lower())
-            clubs[ident] = (partner, club, roster)
-            dup_names[ident] = dups
-    if skipped:
-        warn(f"  ! {skipped} non-empty CSV row(s) had too few columns and "
-             "were skipped - check the export")
-    return ({(p, c): r for (p, c, r) in clubs.values()},
-            {clubs[i][:2]: d for i, d in dup_names.items()})
-
-def read_roster_csv(csv_path, region=None):
-    """Read an export of the Roster tab (one row per girl, ACTIVE rows only).
-
-    Returns (clubs_in_region, all_clubs, region_of) where the first two map
-    (partner, club) -> [girl, ...] in sheet order and region_of maps
-    (partner, club) -> region. With no region, clubs_in_region is all_clubs.
-    Rosters here never contain a duplicate name (the sheet rebuild already
-    routed those to the ReviewQueue), so there is no 'frozen' set."""
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
-    needed = {"partner", "club", "full_name", "status", "region"}
-    if not rows or not needed <= set(rows[0]):
-        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
-    clubs, region_by_ident = {}, {}
-    for r in rows:
-        if " ".join(r["status"].split()).lower() != "active":
-            continue
-        partner = " ".join(r["partner"].split())
-        club = " ".join(r["club"].split())
-        name = " ".join(r["full_name"].split())
-        if not (partner and club and name):
-            continue
-        ident = (partner.lower(), club.lower())
-        entry = clubs.setdefault(ident, (partner, club, [], set()))
-        if name.lower() not in entry[3]:
-            entry[2].append(name)
-            entry[3].add(name.lower())
-        region_by_ident[ident] = " ".join(r["region"].split())
-    all_clubs = {(p, c): names for (p, c, names, _) in clubs.values()}
-    region_of = {(v[0], v[1]): region_by_ident[i] for i, v in clubs.items()}
-    if region:
-        want = {k: v for k, v in all_clubs.items()
-                if region_of.get(k, "").lower() == region.lower()}
-        if not want:
-            sys.exit(f"No active clubs have region {region!r} in {csv_path} - "
-                     "check the Partners tab spelling (Africa / Asia / Latin America / U.S)")
-    else:
-        want = all_clubs
-    return want, all_clubs, region_of
+        return self._client.delete(f"/form/{self.form}{path}", label)
 
 # --------------------------------------------------------- condition builders
 def mk_term(field, operator, value=""):
@@ -351,6 +202,28 @@ def build_conditions(club_questions, partner_of, module_options, picker=None):
         c["index"] = str(i)
         c["priority"] = str(i)
     return conds
+
+def _norm_rules(conds):
+    """Rules with the re-minted ids and counters stripped, for comparison."""
+    out = []
+    for c in conds:
+        terms = json.loads(c["terms"]) if isinstance(c.get("terms"), str) else c["terms"]
+        action = json.loads(c["action"]) if isinstance(c.get("action"), str) else c["action"]
+        out.append((c.get("type"), c.get("link"),
+                    json.dumps([{k: v for k, v in t.items() if k != "id"} for t in terms],
+                               sort_keys=True),
+                    json.dumps([{k: v for k, v in a.items() if k != "id"} for a in action],
+                               sort_keys=True)))
+    return out
+
+def same_conditions(current, planned):
+    """True when the live rules equal the regenerated ones (ids and the
+    index/priority counters aside) - then the rewrite is a no-op and skipped,
+    so an unchanged form stays untouched (and its Revision History quiet)."""
+    try:
+        return _norm_rules(current) == _norm_rules(planned)
+    except (TypeError, ValueError, KeyError):
+        return False
 
 # ------------------------------------------------------------------------ main
 def main():
@@ -679,14 +552,18 @@ def main():
     # (that is what GET returns and what the builder saves) - encode them.
     conds = build_conditions(club_questions, partner_of, module_options,
                              picker=picker_qid or ("NEW" if args.club_picker else None))
-    wire = [{"id": c["id"], "type": c["type"], "link": c["link"],
-             "priority": c["priority"], "index": c["index"],
-             "terms": json.dumps(c["terms"]),
-             "action": json.dumps(c["action"])} for c in conds]
-    label = f"REPLACE conditions ({len(conds)} rules"
-    if to_create and not args.apply:
-        label += f" + ~{len(to_create)} more once the new rosters exist"
-    jf.put_json("/properties", {"properties": {"conditions": wire}}, label + ")")
+    if not (to_create or to_update or to_delete) and \
+            same_conditions(props.get("conditions", []), conds):
+        print("  (conditions unchanged - skipping the rewrite)")
+    else:
+        wire = [{"id": c["id"], "type": c["type"], "link": c["link"],
+                 "priority": c["priority"], "index": c["index"],
+                 "terms": json.dumps(c["terms"]),
+                 "action": json.dumps(c["action"])} for c in conds]
+        label = f"REPLACE conditions ({len(conds)} rules"
+        if to_create and not args.apply:
+            label += f" + ~{len(to_create)} more once the new rosters exist"
+        jf.put_json("/properties", {"properties": {"conditions": wire}}, label + ")")
 
     # --- report ------------------------------------------------------------
     mode = "APPLIED" if args.apply else "DRY RUN (use --apply to write)"
@@ -714,4 +591,4 @@ def main():
             json.dump(summary, f, indent=1)
 
 if __name__ == "__main__":
-    main()
+    run(main)

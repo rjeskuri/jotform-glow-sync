@@ -22,39 +22,19 @@ Usage:
     python3 tools/clone_regional.py "Africa" data/roster_2026-08-27.csv --apply --existing <CLONE_ID>   # re-sync a clone made earlier
 """
 import argparse
-import json
 import os
 import subprocess
 import sys
 
-API_BASE = "https://api.jotform.com"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WORKING_COPY = "262352490535154"
-TITLES = {
-    "Africa": "Africa Attendance Form",
-    "Asia": "Asia Attendance Form",
-    "Latin America": "Latin America Attendance Form",
-    "U.S": "U.S Attendance Form",
-}
+sys.path.insert(0, REPO)
+from glow.cli import run                                # noqa: E402
+from glow.forms import TEMPLATE as WORKING_COPY, TITLES  # noqa: E402
+from glow.jotform import Client                          # noqa: E402
 
 
-def call(args, label, api_key, allow_fail=False):
-    out = subprocess.run(["curl", "-sS"] + args, capture_output=True, text=True)
-    try:
-        resp = json.loads(out.stdout)
-    except json.JSONDecodeError:
-        if allow_fail:
-            return None
-        sys.exit(f"{label}: non-JSON response: {out.stdout[:200]}")
-    if resp.get("responseCode") != 200:
-        if allow_fail:
-            return None
-        sys.exit(f"{label}: {resp.get('responseCode')} {resp.get('message')}")
-    return resp["content"]
-
-
-def live_form_ids(api_key):
-    forms = call([f"{API_BASE}/user/forms?apiKey={api_key}&limit=200"], "list forms", api_key)
+def live_form_ids(client):
+    forms = client.get("/user/forms", limit=200)
     return {f["id"]: f for f in forms if f.get("status") != "DELETED"}
 
 
@@ -67,6 +47,7 @@ def main():
     ap.add_argument("--source", default=WORKING_COPY, help="form to clone (default: working copy)")
     args = ap.parse_args()
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
+    client = Client(api_key, apply=args.apply)
     title = TITLES[args.region]
 
     if args.existing:
@@ -77,11 +58,11 @@ def main():
               "with --prune. Previewing the sync against the SOURCE form instead:\n")
         clone_id = args.source
     else:
-        before = live_form_ids(api_key)
+        before = live_form_ids(client)
         print(f"1. cloning {args.source} ...")
-        content = call(["-X", "POST", f"{API_BASE}/form/{args.source}/clone?apiKey={api_key}"],
-                       "clone", api_key, allow_fail=True)
-        after = live_form_ids(api_key)
+        content = client.call(["-X", "POST", client.url(f"/form/{args.source}/clone")],
+                              "clone", allow_fail=True)
+        after = live_form_ids(client)
         new_ids = [i for i in after if i not in before]
         if content and content.get("id") and content["id"] not in new_ids:
             new_ids.append(content["id"])
@@ -90,15 +71,16 @@ def main():
         clone_id = new_ids[0]
         for extra in new_ids[1:]:
             print(f"   deleting accidental extra clone {extra}")
-            call(["-X", "DELETE", f"{API_BASE}/form/{extra}?apiKey={api_key}"], "delete extra", api_key)
+            client.delete(f"/form/{extra}", "delete extra")
         print(f"   clone is {clone_id}")
 
         print(f"2. retitling to \"{title}\" (form title and browser-tab title)")
-        call(["-X", "POST", f"{API_BASE}/form/{clone_id}/properties?apiKey={api_key}",
-              "--data-urlencode", f"properties[title]={title}",
-              "--data-urlencode", f"properties[pagetitle]={title}",
-              "--data-urlencode", "properties[pageTitleChanged]=Yes"], "retitle", api_key)
-        info = call([f"{API_BASE}/form/{clone_id}?apiKey={api_key}"], "info", api_key)
+        client.post_form(f"/form/{clone_id}/properties", {
+            "properties[title]": title,
+            "properties[pagetitle]": title,
+            "properties[pageTitleChanged]": "Yes",
+        }, "retitle")
+        info = client.get(f"/form/{clone_id}")
         print(f"   title now: \"{info.get('title')}\"  url: {info.get('url')}")
 
         # the API clone resets the offered-languages list to English only
@@ -121,10 +103,10 @@ def main():
         subprocess.run([sys.executable, os.path.join(REPO, "tools", "form_status.py"),
                         "--form", clone_id, "--roster", args.roster_csv],
                        env={**os.environ, "JOTFORM_API_KEY": api_key})
-        info = call([f"{API_BASE}/form/{clone_id}?apiKey={api_key}"], "info", api_key)
+        info = client.get(f"/form/{clone_id}")
         print(f"\nDONE: {title}  id {clone_id}\n  fill in: {info.get('url')}\n"
               f"  builder: https://www.jotform.com/build/{clone_id}")
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

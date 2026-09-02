@@ -28,43 +28,32 @@ Usage:
     python3 tools/restore_translations.py --form <ID> --check                # just report
 """
 import argparse
-import json
 import os
-import subprocess
 import sys
 
-API_BASE = "https://api.jotform.com"
-TEMPLATE = "262352490535154"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from glow.cli import run               # noqa: E402
+from glow.forms import TEMPLATE        # noqa: E402
+from glow.jotform import Client        # noqa: E402
+
 ENGLISH_KEYS = {"en", "base"}
 
 
-def call(args, label, api_key):
-    out = subprocess.run(["curl", "-sS"] + args, capture_output=True, text=True)
-    try:
-        resp = json.loads(out.stdout)
-    except json.JSONDecodeError:
-        sys.exit(f"{label}: non-JSON response (gateway error?): {out.stdout[:120]!r}")
-    if resp.get("responseCode") != 200:
-        sys.exit(f"{label}: {resp.get('responseCode')} {resp.get('message')}")
-    return resp["content"]
-
-
-def language_of(form_id, api_key):
-    props = call([f"{API_BASE}/form/{form_id}/properties?apiKey={api_key}"],
-                 f"{form_id} properties", api_key)
+def language_of(form_id, client):
+    props = client.get(f"/form/{form_id}/properties")
     lang = props.get("language")
     return lang[0] if isinstance(lang, list) and lang else (lang or {})
 
 
-def translations_of(form_id, api_key):
-    t = call([f"{API_BASE}/form/{form_id}/translations?apiKey={api_key}"],
-             f"{form_id} translations", api_key)
+def translations_of(form_id, client):
+    t = client.get(f"/form/{form_id}/translations")
     return t if isinstance(t, dict) else {}
 
 
-def describe(form_id, api_key):
-    lang = language_of(form_id, api_key)
-    tr = translations_of(form_id, api_key)
+def describe(form_id, client):
+    lang = language_of(form_id, client)
+    tr = translations_of(form_id, client)
     langs = {k: len(v) for k, v in tr.items() if k not in ENGLISH_KEYS}
     return lang.get("options", ""), langs
 
@@ -77,16 +66,17 @@ def main():
     ap.add_argument("--check", action="store_true", help="only report the target's state")
     args = ap.parse_args()
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
+    client = Client(api_key, apply=args.apply)
 
-    options, langs = describe(args.form, api_key)
+    options, langs = describe(args.form, client)
     print(f"target {args.form}: languages offered: {options or '(none)'}")
     print(f"   translated strings: {langs or 'none'}")
     if args.check:
         return
 
-    src_lang = language_of(args.source, api_key)
-    src_tr = translations_of(args.source, api_key)
-    have = translations_of(args.form, api_key)
+    src_lang = language_of(args.source, client)
+    src_tr = translations_of(args.source, client)
+    have = translations_of(args.form, client)
     payload = {k: v for k, v in src_tr.items()
                if k not in ENGLISH_KEYS and len(have.get(k, {})) < len(v)}
     print(f"source {args.source}: languages offered: {src_lang.get('options')}")
@@ -98,22 +88,17 @@ def main():
         return
 
     if options != src_lang.get("options"):
-        call(["-X", "PUT", f"{API_BASE}/form/{args.form}/properties?apiKey={api_key}",
-              "-H", "Content-Type: application/json",
-              "--data-binary", json.dumps({"properties": {"language": [src_lang]}})],
-             "set language property", api_key)
+        client.put_json(f"/form/{args.form}/properties",
+                        {"properties": {"language": [src_lang]}}, "set language property")
     if payload:
         # POST replaces each language's dictionary: send existing + source strings
         merged = {}
         for lang, d in payload.items():
             merged[lang] = dict(d)
             merged[lang].update(have.get(lang, {}))
-        call(["-X", "POST", f"{API_BASE}/form/{args.form}/translations?apiKey={api_key}",
-              "-H", "Content-Type: application/json",
-              "--data-binary", json.dumps(merged, ensure_ascii=False)],
-             "post translations", api_key)
+        client.post_json(f"/form/{args.form}/translations", merged, "post translations")
 
-    options, langs = describe(args.form, api_key)
+    options, langs = describe(args.form, client)
     ok = options == src_lang.get("options") and all(
         langs.get(k, 0) >= len(v) for k, v in src_tr.items() if k not in ENGLISH_KEYS)
     print(f"\nafter: languages offered: {options}")
@@ -123,4 +108,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)
