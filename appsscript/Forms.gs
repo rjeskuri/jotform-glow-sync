@@ -5,7 +5,7 @@
  *                      do and jumps to the right branch:
  *                        - Enroll a NEW club: partner (a "not listed" choice
  *                          branches to a page that requires the organization's
- *                          name), then club, roster, mentor details → the
+ *                          name and its region), then club, roster, mentor details → the
  *                          handler creates the club, mints IDs, queues it for
  *                          Salesforce
  *                        - Add/remove girls: partner → that partner's own club
@@ -44,6 +44,11 @@ const NEW_PARTNER_PAGE_TITLE = 'Your organization';
 const CLUB_PAGE_TITLE = 'The club';
 const NEW_BRANCH_PAGE_TITLE = 'New club';
 const MOD_BRANCH_PAGE_TITLE = 'Existing club';
+
+/** Under the Region picker on the "Your organization" page. */
+const REGION_HELP = 'This decides which regional attendance form your clubs ' +
+    'will use. Not sure which region fits? Choose the closest one — our team ' +
+    'can correct it later.';
 
 function createGlowForms() {
   const ss = SpreadsheetApp.getActive();
@@ -131,7 +136,8 @@ function createRosterForm_(ss, feedback, made) {
   form.addPageBreakItem().setTitle(NEW_PARTNER_PAGE_TITLE)
       .setHelpText('Your organization is not enrolled yet — tell us who you are.');
   form.addTextItem().setTitle(Q.NEW_PARTNER).setRequired(true);
-  form.addTextItem().setTitle(Q.COUNTRY).setRequired(true);
+  form.addListItem().setTitle(Q.REGION).setRequired(true)
+      .setChoiceValues(REGIONS).setHelpText(REGION_HELP);
 
   form.addPageBreakItem().setTitle(CLUB_PAGE_TITLE);
   form.addTextItem().setTitle(Q.CLUB).setRequired(true)
@@ -382,6 +388,79 @@ function showFormLinks() {
     return;
   }
   ui.alert('GLOW forms', formLinksText_(a, c), ui.ButtonSet.OK);
+}
+
+/**
+ * One-shot (2026-09, backlog 38): replace the free-text Country question on
+ * the "Your organization" page with the required Region picker. Idempotent —
+ * a second run re-asserts the picker's properties and says so. The response
+ * tab keeps the old Country column and its historical answers; the handler
+ * reads Q.COUNTRY only as a legacy detail. List items carry no navigation,
+ * so the page flow (see NAVIGATION above) is untouched.
+ */
+function migrateCountryToRegion() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  // the document lock every mutating entry point takes: two concurrent runs
+  // would BOTH pass the "is the picker there yet?" check and insert twice
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(30000)) {
+    ss.toast('Another GLOW operation is still running - try again in a minute.', 'GLOW', 8);
+    return;
+  }
+  try {
+    migrateCountryToRegionLocked_(ui);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function migrateCountryToRegionLocked_(ui) {
+  const form = existingForm_(PROP.ROSTER_FORM);
+  if (!form) {
+    ui.alert('GLOW', 'The Club Roster Form does not exist yet — run "Create the ' +
+        'Google Forms" instead; a freshly created form already has the Region picker.',
+        ui.ButtonSet.OK);
+    return;
+  }
+  const country = findItem_(form, FormApp.ItemType.TEXT, Q.COUNTRY);
+  let region = findListItem_(form, Q.REGION);
+  let note;
+  if (region) {
+    region.setRequired(true).setChoiceValues(REGIONS).setHelpText(REGION_HELP);
+    note = 'already migrated; picker re-asserted';
+    if (country) {
+      // a run that crashed between insert and move left the picker at the
+      // form's END (a required question on the wrong page) - put it in place
+      form.moveItem(region.getIndex(), country.getIndex());
+      note = 'picker re-asserted and moved into the Country question\'s place';
+    }
+  } else {
+    let at;
+    if (country) {
+      at = country.getIndex();
+    } else {
+      const nameBox = findItem_(form, FormApp.ItemType.TEXT, Q.NEW_PARTNER);
+      if (!nameBox) {
+        ui.alert('GLOW', 'Neither "' + Q.COUNTRY + '" nor "' + Q.NEW_PARTNER + '" is on ' +
+            'the form — it does not look like ours. Nothing was changed; check the form ' +
+            'in the Forms editor.', ui.ButtonSet.OK);
+        return;
+      }
+      at = nameBox.getIndex() + 1;
+    }
+    const added = form.addListItem().setTitle(Q.REGION).setRequired(true)
+        .setChoiceValues(REGIONS).setHelpText(REGION_HELP);
+    form.moveItem(added.getIndex(), at);
+    note = 'Region picker inserted';
+  }
+  if (country) {
+    form.deleteItem(country);
+    note += '; Country question removed';
+  }
+  audit_('migrateCountryToRegion', note);
+  ui.alert('GLOW', 'Done — ' + note + '.\n\nPreview the fill-in form (do NOT submit a ' +
+      'test response): ' + form.getPublishedUrl(), ui.ButtonSet.OK);
 }
 
 /**

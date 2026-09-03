@@ -22,8 +22,9 @@ const loadGs = require('./load_gs');
 
 const REPO = path.resolve(__dirname, '..');
 const gs = loadGs(['tidy_', 'key_', 'asciiCode_', 'parseRoster_', 'lastName_', 'clubCode_',
-                   'mintGirlId_', 'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'RESPONSE_COLS']);
-const REGIONS = new Set(['Africa', 'Asia', 'Latin America', 'U.S']);
+                   'mintGirlId_', 'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'RESPONSE_COLS',
+                   'REGIONS']);
+const REGIONS = new Set(gs.REGIONS);   // the canonical list lives in Config.gs (backlog 38)
 
 let failures = 0;
 function check(label, cond, detail) {

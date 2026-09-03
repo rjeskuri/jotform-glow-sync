@@ -163,8 +163,9 @@ function handleNewClub_(a, source) {
         (!partner ? 'partner' : !club ? 'club name' : 'roster'));
   }
 
-  const regions = loadPartnerRegions_();
-  const region = regions[key_(partner)] || '';
+  const formRegion = canonicalRegion_(a[Q.REGION]);   // '' unless exactly one of REGIONS
+  const region = chooseRegion_(loadPartnerTabRegions_()[key_(partner)], formRegion,
+                               derivedPartnerRegions_()[key_(partner)]);
   const existing = loadRoster_();
   const state = loadIdState_();
   const today = today_();
@@ -177,12 +178,19 @@ function handleNewClub_(a, source) {
   applyRosterPlan_(ss, plan, today);
   saveClubRegistry_(state.registry);
   const seen = {}; seen[key_(partner)] = partner;
-  seedPartners_(seen);
+  const formRegions = {};
+  if (formRegion) formRegions[key_(partner)] = formRegion;
+  seedPartners_(seen, formRegions);
 
   const issues = plan.issues;
   if (!region) {
     const issue = noRegionIssue_(partner);
-    if (tidy_(a[Q.COUNTRY])) issue.detail += ' (Country given: ' + tidy_(a[Q.COUNTRY]) + ')';
+    if (tidy_(a[Q.REGION])) {
+      issue.detail += ' (Region answer ignored: "' + tidy_(a[Q.REGION]) +
+          '" is not one of ' + REGIONS.join(', ') + ')';
+    } else if (tidy_(a[Q.COUNTRY])) {
+      issue.detail += ' (Country given: ' + tidy_(a[Q.COUNTRY]) + ')';
+    }
     issues.push(issue);
   }
   if (String(a[Q.SAME_NAME]).toLowerCase().indexOf('y') === 0 && !parsed.duplicates.length) {

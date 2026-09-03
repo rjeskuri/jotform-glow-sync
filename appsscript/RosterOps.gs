@@ -155,3 +155,33 @@ function closestNames_(name, names) {
   scored.sort(function (a, b) { return b.score - a.score || a.n.localeCompare(b.n); });
   return scored.slice(0, 3).map(function (s) { return s.n; });
 }
+
+// -------------------------------------------------------------- regions
+/** The canonical spelling for a region answer, or '' if it is not one of REGIONS. */
+function canonicalRegion_(answer) {
+  const k = key_(answer);
+  if (!k) return '';
+  for (let i = 0; i < REGIONS.length; i++) {
+    if (key_(REGIONS[i]) === k) return REGIONS[i];
+  }
+  return '';
+}
+
+/**
+ * The region a new-club submission lands with. Precedence: the Partners tab
+ * (staff-typed, used verbatim) > the form's Region answer (validated against
+ * REGIONS, canonical spelling stored) > the derived Regions.gs map > ''
+ * (which callers turn into noRegionIssue_).
+ */
+function chooseRegion_(tabRegion, formAnswer, derivedRegion) {
+  return tidy_(tabRegion) || canonicalRegion_(formAnswer) || tidy_(derivedRegion) || '';
+}
+
+/** key_(partner) → derived region (Regions.gs only; the Partners tab is read separately). */
+function derivedPartnerRegions_() {
+  const regions = {};
+  Object.keys(PARTNER_REGIONS).forEach(function (p) {
+    if (PARTNER_REGIONS[p]) regions[key_(p)] = PARTNER_REGIONS[p];
+  });
+  return regions;
+}

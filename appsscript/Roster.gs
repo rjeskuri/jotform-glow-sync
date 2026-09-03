@@ -94,6 +94,19 @@ function review_(rows) {
       }));
 }
 
+/** Partner → region from the Partners tab ONLY (staff-authoritative; no derived fallback). */
+function loadPartnerTabRegions_() {
+  const regions = {};
+  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.PARTNERS);
+  if (!sheet || sheet.getLastRow() < 2) return regions;
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues()
+      .forEach(function (row) {
+        const partner = tidy_(row[0]), region = tidy_(row[1]);
+        if (partner && region) regions[key_(partner)] = region;
+      });
+  return regions;
+}
+
 /**
  * Partner → region.
  *
@@ -102,17 +115,9 @@ function review_(rows) {
  * so a staff correction in the tab always sticks.
  */
 function loadPartnerRegions_() {
-  const regions = {};
-  Object.keys(PARTNER_REGIONS).forEach(function (partner) {
-    if (PARTNER_REGIONS[partner]) regions[key_(partner)] = PARTNER_REGIONS[partner];
-  });
-  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.PARTNERS);
-  if (!sheet || sheet.getLastRow() < 2) return regions;
-  sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues()
-      .forEach(function (row) {
-        const partner = tidy_(row[0]), region = tidy_(row[1]);
-        if (partner && region) regions[key_(partner)] = region;
-      });
+  const regions = derivedPartnerRegions_();
+  const tab = loadPartnerTabRegions_();
+  Object.keys(tab).forEach(function (k) { regions[k] = tab[k]; });
   return regions;
 }
 
@@ -282,19 +287,24 @@ function saveClubRegistry_(registry) {
 }
 
 /**
- * Add any partner we have seen to the Partners tab, prefilled with the
- * region derived from the regional attendance forms (Regions.gs) when we
- * have one. Existing rows are left alone except that a BLANK region is
- * filled in from the derived map (and a blank note explained); anything
- * staff have typed stays.
+ * Add any partner we have seen to the Partners tab. Region for a new row or
+ * a BLANK region cell: the region chosen on the Club Roster Form
+ * (formRegions, already validated against REGIONS) first, else the map
+ * derived from the regional attendance forms (Regions.gs); a blank note is
+ * explained either way. Anything staff have typed stays.
+ * formRegions: optional {key_(partner): canonical region}.
  */
-function seedPartners_(partnersSeen) {
+function seedPartners_(partnersSeen, formRegions) {
+  formRegions = formRegions || {};
   const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.PARTNERS, PARTNER_COLS);
-  const derived = {}, notes = {};
+  const derived = derivedPartnerRegions_(), notes = {};
   Object.keys(PARTNER_REGIONS).forEach(function (p) {
-    derived[key_(p)] = PARTNER_REGIONS[p];
     notes[key_(p)] = PARTNER_REGION_NOTES[p] || '';
   });
+  const regionFor = function (k) { return formRegions[k] || derived[k] || ''; };
+  const noteFor = function (k) {
+    return formRegions[k] ? 'region chosen on the Club Roster Form' : (notes[k] || '');
+  };
 
   const known = {};
   if (sheet.getLastRow() > 1) {
@@ -304,17 +314,17 @@ function seedPartners_(partnersSeen) {
       const k = key_(r[0]);
       if (!k) return;
       known[k] = true;
-      if (!tidy_(r[1]) && derived[k]) {
-        sheet.getRange(i + 2, 2).setValue(derived[k]);
-        if (!tidy_(r[2])) sheet.getRange(i + 2, 3).setValue(notes[k]);
+      if (!tidy_(r[1]) && regionFor(k)) {
+        sheet.getRange(i + 2, 2).setValue(regionFor(k));
+        if (!tidy_(r[2])) sheet.getRange(i + 2, 3).setValue(noteFor(k));
       }
     });
   }
   const missing = Object.keys(partnersSeen)
       .filter(function (k) { return k && !known[k]; })
       .map(function (k) {
-        return [partnersSeen[k], derived[k] || '',
-                derived[k] ? notes[k] : 'region needed'];
+        return [partnersSeen[k], regionFor(k),
+                regionFor(k) ? noteFor(k) : 'region needed'];
       });
   if (missing.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, PARTNER_COLS.length)

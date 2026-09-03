@@ -13,7 +13,8 @@ const loadGs = require('./load_gs');
 
 const REPO = path.resolve(__dirname, '..');
 const gs = loadGs(['ROSTER_COLS', 'STATUS', 'tidy_', 'key_', 'parseRoster_', 'lastName_', 'clubCode_',
-                   'mintGirlId_', 'planClub_', 'planModification_', 'closestNames_']);
+                   'mintGirlId_', 'planClub_', 'planModification_', 'closestNames_',
+                   'chooseRegion_', 'canonicalRegion_', 'derivedPartnerRegions_', 'REGIONS']);
 
 let failures = 0;
 function check(label, cond, detail) {
@@ -104,6 +105,26 @@ check('unmatched removals carry the name as dedupe key',
 console.log('\nclosestNames_');
 check('ranks by shared words', gs.closestNames_('Zibblewick', ['Mary Zibblewick', 'Grace Zibblewick', 'Joy Blorptest']).length === 2);
 check('empty query → no candidates', gs.closestNames_('   ', ['Mary Zibblewick']).length === 0);
+
+console.log('\nchooseRegion_ / canonicalRegion_ — the Region picker (backlog 38)');
+check('REGIONS pinned, U.S with one dot', gs.REGIONS.join('|') === 'Africa|Asia|Latin America|U.S', gs.REGIONS.join('|'));
+check('Partners tab wins over form and derived', gs.chooseRegion_('Asia', 'Africa', 'U.S') === 'Asia');
+check('tab value used verbatim after tidy (a staff typo is not vetoed)', gs.chooseRegion_(' africa ', 'Asia', '') === 'africa');
+check('form answer used when the tab is blank', gs.chooseRegion_('', 'Latin America', 'Africa') === 'Latin America');
+check('form answer canonicalized: case + whitespace', gs.chooseRegion_('', '  u.s ', '') === 'U.S');
+check('invalid form answer falls through to derived', gs.chooseRegion_('', 'Europe', 'Africa') === 'Africa');
+check('all blank or undefined → empty string',
+      gs.chooseRegion_('', '', '') === '' && gs.chooseRegion_(undefined, undefined, undefined) === '');
+check('"U.S." (trailing dot) is not a region', gs.canonicalRegion_('U.S.') === '');
+check('"USA" is not a region', gs.canonicalRegion_('USA') === '');
+check('blank / whitespace / null / undefined → empty',
+      ['', '   ', null, undefined].every(v => gs.canonicalRegion_(v) === ''));
+check('every canonical region maps to itself', gs.REGIONS.every(r => gs.canonicalRegion_(r) === r));
+check('derived map keys are key_-normalized, values non-empty', (function () {
+  const d = gs.derivedPartnerRegions_();
+  const ks = Object.keys(d);
+  return ks.length > 0 && ks.every(k => k === gs.key_(k) && !!d[k]);
+})());
 
 // --------------------------------------------- real data, if available
 const csvPath = process.env.CSV || path.join(REPO, 'data', 'enrollment_2026-08-24.csv');

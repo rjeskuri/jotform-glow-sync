@@ -85,7 +85,11 @@ What to know:
   only; the sync refuses it on any form with submissions.
 - Active roster rows with a **blank region** reach no form and no tool warns
   except `auto_sync.py` (ATTENTION) and the sheet's ReviewQueue. Fill in the
-  Partners tab, then **GLOW → Refresh regions from the Partners tab**.
+  Partners tab, then **GLOW → Refresh regions from the Partners tab**. Since
+  2026-09 NEW partners choose a region on the Club Roster Form itself; a blank
+  region can still come from older rows, a cleared Partners cell, or a known
+  partner whose Partners row has no region (the picker is only shown to
+  organizations not yet in the partner list).
 - Region spelling must be exactly `Africa`, `Asia`, `Latin America`, `U.S`.
 
 ## Automatic sync

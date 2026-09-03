@@ -466,6 +466,15 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertTrue({"partner", "club", "full_name", "status", "region"} <= set(cols))
         self.assertEqual(cols[0], "girl_id")
 
+    def test_regions_match_glow_forms(self):
+        # the Club Roster Form's region picker (Config.gs REGIONS) must offer
+        # exactly the regions the Python sync routes on — spelling included
+        from glow import forms as glow_forms
+        regions = re.findall(r"'([^']+)'", gs_block(self.config, "REGIONS"))
+        self.assertEqual(tuple(regions), glow_forms.REGIONS)
+        self.assertIn("U.S", regions)                     # one dot, no trailing dot
+        self.assertIn("REGION: 'Region where this club meets'", self.config)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -15,6 +15,8 @@ function onOpen() {
           .addItem('Create the Google Forms', 'createGlowForms')
           .addItem('Show form links', 'showFormLinks')
           .addItem('Update form dropdowns from the Roster', 'syncFormChoices')
+          .addItem('Replace the Country question with the Region picker (one-time)',
+                   'migrateCountryToRegion')
           .addItem('Process any missed form responses', 'processMissedResponses')
           .addItem('Install triggers', 'installTriggers')
           .addSeparator()

@@ -50,7 +50,8 @@ const Q = {
   PARTNER_NEW: 'Partner organization',
   PARTNER_MOD: 'Partner organization (existing club)',
   NEW_PARTNER: 'If your organization is not in the list, type its name here',
-  COUNTRY: 'Country where this club meets',
+  COUNTRY: 'Country where this club meets',   // legacy (replaced by REGION 2026-09; still read from old response rows)
+  REGION: 'Region where this club meets',     // required list picker, choices = REGIONS
   CLUB: 'Club name',
   COUNT: 'Number of girls enrolled in this club',
   ROSTER: 'Full name of every enrolled girl (First, Middle and Last Name/Surname) – one name per line',
@@ -76,6 +77,14 @@ const Q = {
 
 /** The partner-dropdown escape hatch on the New Club form. */
 const OTHER_PARTNER = 'My organization is not in this list';
+
+/**
+ * Canonical region names = the four regional attendance forms. The spelling
+ * is load-bearing ('U.S': one dot, no trailing dot) — glow/forms.py REGIONS,
+ * the Partners tab and the Jotform sync all use these exact strings;
+ * test/python_test.py fails if the two sides drift.
+ */
+const REGIONS = ['Africa', 'Asia', 'Latin America', 'U.S'];
 
 /** Script Properties keys (File → Project Settings → Script Properties). */
 const PROP = {
