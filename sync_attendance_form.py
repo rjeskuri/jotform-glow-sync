@@ -62,8 +62,8 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
 # dropdown component (type to filter, on phones too); the plain single-select
 # is a browser <select> that only jumps to the first letter. Verified on the
 # template 2026-09-01 (docs/intent/2026-09-01-club-picker.md).
-PICKER_TEXT = "Club"
-PICKER_SUBLABEL = "Start typing your club's name and pick it from the list"
+PICKER_TEXT = "Club Name"
+PICKER_SUBLABEL = "Select your Club Name to see your roster."   # exact wording from the training guide (2026-09-12)
 PICKER_PROPS = {
     "text": PICKER_TEXT,
     "subLabel": PICKER_SUBLABEL,

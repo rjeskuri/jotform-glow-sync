@@ -1,5 +1,5 @@
 {
-  "_about": "Translations for labels added after the forms were originally translated. Keys are the exact English strings on the form; tools/add_translations.py hashes them the way Jotform does (md5 of the text) and posts them. Session N is expanded for N = 1..15.",
+  "_about": "Translations for labels added after the forms were originally translated. Keys are the exact English strings on the form; tools/add_translations.py hashes them the way Jotform does (md5 of the text) and posts them. Session N is expanded for N = 1..15. The Club picker and static-field strings follow the training guide's exact wording (2026-09-12); translations were written by us - flag for native-speaker review like the Odia set.",
   "Session": {
     "es": "Sesión", "fr": "Séance", "th": "ครั้งที่", "ur": "سیشن", "te": "సెషన్",
     "vi": "Buổi", "ne": "सत्र", "km": "វគ្គ", "sw": "Kipindi", "ar": "الجلسة"
@@ -12,11 +12,17 @@
     "es": "Módulo", "fr": "Module", "th": "โมดูล", "ur": "ماڈیول", "te": "మాడ్యూల్",
     "vi": "Học phần", "ne": "मोड्युल", "km": "ម៉ូឌុល", "sw": "Moduli", "ar": "الوحدة"
   },
-  "Mentor Email": {
-    "es": "Correo electrónico del mentor", "fr": "E-mail du mentor", "th": "อีเมลของพี่เลี้ยง",
-    "ur": "مینٹر کا ای میل", "te": "మెంటర్ ఇమెయిల్", "vi": "Email của người hướng dẫn",
-    "ne": "मेन्टरको इमेल", "km": "អ៊ីមែលរបស់អ្នកណែនាំ", "sw": "Barua pepe ya mshauri",
-    "ar": "البريد الإلكتروني للمرشد"
+  "Partner Coordinator Email": {
+    "es": "Correo electrónico del coordinador asociado",
+    "fr": "E-mail du coordinateur partenaire",
+    "th": "อีเมลผู้ประสานงานพันธมิตร",
+    "ur": "پارٹنر کوآرڈینیٹر کا ای میل",
+    "te": "భాగస్వామి సమన్వయకర్త ఇమెయిల్",
+    "vi": "Email điều phối viên đối tác",
+    "ne": "साझेदार संयोजकको इमेल",
+    "km": "អ៊ីមែលអ្នកសម្របសម្រួលដៃគូ",
+    "sw": "Barua pepe ya mratibu wa shirika mshirika",
+    "ar": "البريد الإلكتروني لمنسق الشريك"
   },
   "A confirmation of this attendance submission will be sent here": {
     "es": "Aquí se enviará una confirmación de este registro de asistencia",
@@ -35,21 +41,22 @@
     "ur": "پارٹنر تنظیم", "te": "భాగస్వామి సంస్థ", "vi": "Tổ chức đối tác",
     "ne": "साझेदार संस्था", "km": "អង្គការដៃគូ", "sw": "Shirika mshirika", "ar": "المنظمة الشريكة"
   },
-  "Club": {
-    "es": "Club", "fr": "Club", "th": "ชมรม", "ur": "کلب", "te": "క్లబ్",
-    "vi": "Câu lạc bộ", "ne": "क्लब", "km": "ក្លឹប", "sw": "Klabu", "ar": "النادي"
+  "Club Name": {
+    "es": "Nombre del club", "fr": "Nom du club", "th": "ชื่อชมรม", "ur": "کلب کا نام",
+    "te": "క్లబ్ పేరు", "vi": "Tên câu lạc bộ", "ne": "क्लबको नाम", "km": "ឈ្មោះក្លឹប",
+    "sw": "Jina la klabu", "ar": "اسم النادي"
   },
-  "Start typing your club's name and pick it from the list": {
-    "es": "Empieza a escribir el nombre de tu club y elígelo de la lista",
-    "fr": "Commencez à taper le nom de votre club et choisissez-le dans la liste",
-    "th": "เริ่มพิมพ์ชื่อชมรมของคุณ แล้วเลือกจากรายการ",
-    "ur": "اپنے کلب کا نام ٹائپ کرنا شروع کریں اور فہرست میں سے منتخب کریں",
-    "te": "మీ క్లబ్ పేరు టైప్ చేయడం ప్రారంభించి జాబితా నుండి ఎంచుకోండి",
-    "vi": "Bắt đầu gõ tên câu lạc bộ của bạn rồi chọn từ danh sách",
-    "ne": "आफ्नो क्लबको नाम टाइप गर्न सुरु गर्नुहोस् र सूचीबाट छान्नुहोस्",
-    "km": "ចាប់ផ្តើមវាយឈ្មោះក្លឹបរបស់អ្នក រួចជ្រើសរើសពីបញ្ជី",
-    "sw": "Anza kuandika jina la klabu yako kisha uichague kwenye orodha",
-    "ar": "ابدأ بكتابة اسم ناديك ثم اختره من القائمة"
+  "Select your Club Name to see your roster.": {
+    "es": "Selecciona el nombre de tu club para ver tu lista.",
+    "fr": "Sélectionnez le nom de votre club pour voir votre liste.",
+    "th": "เลือกชื่อชมรมของคุณเพื่อดูรายชื่อ",
+    "ur": "اپنی فہرست دیکھنے کے لیے اپنے کلب کا نام منتخب کریں۔",
+    "te": "మీ జాబితాను చూడటానికి మీ క్లబ్ పేరును ఎంచుకోండి.",
+    "vi": "Chọn tên câu lạc bộ của bạn để xem danh sách.",
+    "ne": "आफ्नो सूची हेर्न आफ्नो क्लबको नाम छान्नुहोस्।",
+    "km": "ជ្រើសរើសឈ្មោះក្លឹបរបស់អ្នកដើម្បីមើលបញ្ជីឈ្មោះ",
+    "sw": "Chagua jina la klabu yako ili kuona orodha yako.",
+    "ar": "اختر اسم ناديك لعرض قائمة الأسماء."
   },
   "Type to search your club": {
     "es": "Escribe para buscar tu club", "fr": "Tapez pour chercher votre club",
@@ -57,6 +64,18 @@
     "te": "మీ క్లబ్‌ను వెతకడానికి టైప్ చేయండి", "vi": "Gõ để tìm câu lạc bộ của bạn",
     "ne": "आफ्नो क्लब खोज्न टाइप गर्नुहोस्", "km": "វាយដើម្បីស្វែងរកក្លឹបរបស់អ្នក",
     "sw": "Andika ili kutafuta klabu yako", "ar": "اكتب للبحث عن ناديك"
+  },
+  "Upload one photo of everyone in attendance today. All girl faces should be visible.": {
+    "es": "Sube una foto de todas las asistentes de hoy. Todas las caras de las niñas deben ser visibles.",
+    "fr": "Téléchargez une photo de toutes les personnes présentes aujourd'hui. Tous les visages des filles doivent être visibles.",
+    "th": "อัปโหลดรูปถ่ายหนึ่งรูปของทุกคนที่เข้าร่วมวันนี้ ใบหน้าของเด็กหญิงทุกคนต้องมองเห็นได้",
+    "ur": "آج حاضر تمام افراد کی ایک تصویر اپ لوڈ کریں۔ تمام لڑکیوں کے چہرے نظر آنے چاہئیں۔",
+    "te": "ఈరోజు హాజరైన అందరి ఒక ఫోటోను అప్‌లోడ్ చేయండి. అమ్మాయిల ముఖాలన్నీ కనిపించాలి.",
+    "vi": "Tải lên một ảnh của tất cả những người tham dự hôm nay. Phải nhìn rõ khuôn mặt của tất cả các em.",
+    "ne": "आज उपस्थित सबैको एउटा फोटो अपलोड गर्नुहोस्। सबै बालिकाहरूको अनुहार देखिनुपर्छ।",
+    "km": "បង្ហោះរូបថតមួយសន្លឹកនៃអ្នកចូលរួមទាំងអស់ថ្ងៃនេះ។ មុខក្មេងស្រីទាំងអស់ត្រូវតែមើលឃើញ។",
+    "sw": "Pakia picha moja ya wote waliohudhuria leo. Nyuso za wasichana wote zionekane.",
+    "ar": "حمّل صورة واحدة لجميع الحاضرات اليوم. يجب أن تظهر وجوه جميع الفتيات."
   },
   "Click here to report a problem": {
     "es": "Haz clic aquí para informar de un problema", "fr": "Cliquez ici pour signaler un problème",
