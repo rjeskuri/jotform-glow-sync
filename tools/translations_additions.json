@@ -22,7 +22,8 @@
     "ne": "साझेदार संयोजकको इमेल",
     "km": "អ៊ីមែលអ្នកសម្របសម្រួលដៃគូ",
     "sw": "Barua pepe ya mratibu wa shirika mshirika",
-    "ar": "البريد الإلكتروني لمنسق الشريك"
+    "ar": "البريد الإلكتروني لمنسق الشريك",
+    "or": "ପାର୍ଟନର କୋଅର୍ଡିନେଟରଙ୍କ ଇମେଲ୍"
   },
   "A confirmation of this attendance submission will be sent here": {
     "es": "Aquí se enviará una confirmación de este registro de asistencia",
@@ -56,14 +57,16 @@
     "ne": "आफ्नो सूची हेर्न आफ्नो क्लबको नाम छान्नुहोस्।",
     "km": "ជ្រើសរើសឈ្មោះក្លឹបរបស់អ្នកដើម្បីមើលបញ្ជីឈ្មោះ",
     "sw": "Chagua jina la klabu yako ili kuona orodha yako.",
-    "ar": "اختر اسم ناديك لعرض قائمة الأسماء."
+    "ar": "اختر اسم ناديك لعرض قائمة الأسماء.",
+    "or": "ଆପଣଙ୍କ ତାଲିକା ଦେଖିବା ପାଇଁ ଆପଣଙ୍କ କ୍ଲବ୍ ନାମ ବାଛନ୍ତୁ।"
   },
   "Type to search your club": {
     "es": "Escribe para buscar tu club", "fr": "Tapez pour chercher votre club",
     "th": "พิมพ์เพื่อค้นหาชมรมของคุณ", "ur": "اپنا کلب تلاش کرنے کے لیے ٹائپ کریں",
     "te": "మీ క్లబ్‌ను వెతకడానికి టైప్ చేయండి", "vi": "Gõ để tìm câu lạc bộ của bạn",
     "ne": "आफ्नो क्लब खोज्न टाइप गर्नुहोस्", "km": "វាយដើម្បីស្វែងរកក្លឹបរបស់អ្នក",
-    "sw": "Andika ili kutafuta klabu yako", "ar": "اكتب للبحث عن ناديك"
+    "sw": "Andika ili kutafuta klabu yako", "ar": "اكتب للبحث عن ناديك",
+    "or": "ଆପଣଙ୍କ କ୍ଲବ୍ ଖୋଜିବାକୁ ଟାଇପ୍ କରନ୍ତୁ"
   },
   "Upload one photo of everyone in attendance today. All girl faces should be visible.": {
     "es": "Sube una foto de todas las asistentes de hoy. Todas las caras de las niñas deben ser visibles.",
@@ -75,7 +78,8 @@
     "ne": "आज उपस्थित सबैको एउटा फोटो अपलोड गर्नुहोस्। सबै बालिकाहरूको अनुहार देखिनुपर्छ।",
     "km": "បង្ហោះរូបថតមួយសន្លឹកនៃអ្នកចូលរួមទាំងអស់ថ្ងៃនេះ។ មុខក្មេងស្រីទាំងអស់ត្រូវតែមើលឃើញ។",
     "sw": "Pakia picha moja ya wote waliohudhuria leo. Nyuso za wasichana wote zionekane.",
-    "ar": "حمّل صورة واحدة لجميع الحاضرات اليوم. يجب أن تظهر وجوه جميع الفتيات."
+    "ar": "حمّل صورة واحدة لجميع الحاضرات اليوم. يجب أن تظهر وجوه جميع الفتيات.",
+    "or": "ଆଜି ଉପସ୍ଥିତ ସମସ୍ତଙ୍କର ଗୋଟିଏ ଫଟୋ ଅପଲୋଡ୍ କରନ୍ତୁ। ସମସ୍ତ ଝିଅଙ୍କ ମୁହଁ ଦେଖାଯିବା ଆବଶ୍ୟକ।"
   },
   "Click here to report a problem": {
     "es": "Haz clic aquí para informar de un problema", "fr": "Cliquez ici pour signaler un problème",
