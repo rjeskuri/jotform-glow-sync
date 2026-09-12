@@ -81,6 +81,11 @@
     "ar": "حمّل صورة واحدة لجميع الحاضرات اليوم. يجب أن تظهر وجوه جميع الفتيات.",
     "or": "ଆଜି ଉପସ୍ଥିତ ସମସ୍ତଙ୍କର ଗୋଟିଏ ଫଟୋ ଅପଲୋଡ୍ କରନ୍ତୁ। ସମସ୍ତ ଝିଅଙ୍କ ମୁହଁ ଦେଖାଯିବା ଆବଶ୍ୟକ।"
   },
+  "Submit": {
+    "_note": "the Submit button: Jotform's own pass covered es/fr/sw/ar only, so just the seven missing languages are listed - never overwrite Jotform's entries",
+    "th": "ส่ง", "ur": "جمع کروائیں", "te": "సమర్పించండి", "vi": "Gửi",
+    "ne": "पेश गर्नुहोस्", "km": "ដាក់ស្នើ", "or": "ଦାଖଲ କରନ୍ତୁ"
+  },
   "Click here to report a problem": {
     "es": "Haz clic aquí para informar de un problema", "fr": "Cliquez ici pour signaler un problème",
     "th": "คลิกที่นี่เพื่อรายงานปัญหา", "ur": "مسئلہ رپورٹ کرنے کے لیے یہاں کلک کریں",

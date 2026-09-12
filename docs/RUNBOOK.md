@@ -167,9 +167,17 @@ question 5, which is what the Salesforce mapping reads — so `Account_Name__c`
 still receives the plain club name. Added once per form; from then on every
 sync run keeps its option list and properties in the shape `PICKER_PROPS`
 defines (`UPDATE club picker (N clubs: options, subLabel…)` in the plan).
-**Status:** on the template since 2026-09-01, verified by Ryan; the regional
-forms get it in the planned mass update together with other features — do
-not roll it out on its own.
+**Status:** rolled out to the template and all four regional forms on
+2026-09-12 with leadership's approval (`plans/2026-09-12-picker-rollout.md`).
+The wording follows the training guide — label **Club Name**, sublabel
+"Select your Club Name to see your roster." — and lives in `PICKER_PROPS`:
+change it there, never in the builder (the sync reverts hand edits). The same
+day `tools/update_static_fields.py` renamed the mentor email field to
+"Partner Coordinator Email" and opened the Group Photo question (one photo,
+faces visible, 10 MB, HEIC accepted). Still to confirm in the browser: that
+the searchable component lets a mentor pick only one club (Jotform ignores
+`maxSelection` on dropdowns); if two can be picked, the sync must add a
+guard rule.
 
 ```bash
 python3 backup_forms.py --form 262352490535154
@@ -185,14 +193,15 @@ the Club Name field. Rollback: `restore_conditions.py` for the rules, and in
 the builder delete the Club dropdown and un-hide Club Name (or
 `question[hidden]=No`, `question[required]=Yes` on q5 via the API).
 
-Before the regional rollout run `tools/add_translations.py --apply` on each
-form: the label, sublabel and search placeholder are already queued in
-`tools/translations_additions.json` (written by us — have a native speaker
-glance at them, as with the Odia strings). Without that step the picker
-shows in English in every language. Still to confirm during the mass
-update: that the searchable component lets a mentor pick only one club
-(Jotform ignores `maxSelection` on dropdowns); if two can be picked, the
-sync must add a guard rule.
+Translations for the picker strings and the static-field wording are in
+`tools/translations_additions.json` (ten languages plus Odia for the newer
+strings; written by us — have a native speaker glance at them, as with the
+Odia set). The tool only posts strings that exist on a form, so run it AFTER
+the picker is there: `sync … --club-picker --apply`, then
+`tools/add_translations.py --form <id> --apply`. A gateway 504 on the POST
+can hide a completed write: re-run the dry run, and "0 new" means it landed.
+Club names (the picker's options and the roster labels) are deliberately
+never translated — they display in English in every language.
 
 ## Backup and restore (Jotform)
 
