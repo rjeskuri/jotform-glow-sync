@@ -1,7 +1,7 @@
 ---
 title: Rename a club in place (sheet + forms), first use 2026-09-14
 author: Claude (executed with Ryan)
-status: in-progress
+status: done
 created: 2026-09-14
 intent: none — an operational correction Ryan asked for on 2026-09-14
 ---
@@ -67,3 +67,21 @@ sync do only what it always does: rewrite the picker options and the rules.
 `make check` tail, the dry-run and apply output of the tool (partner and club
 names only, no girls' names), the sync dry runs and `form_status … → CLEAN`,
 pasted in the conversation and summarised in this file when done.
+
+## Result (executed 2026-09-14)
+
+- `tools/rename_club.py --apply` at 13:43 local: 14 Roster cells (rows
+  6383-6396), ClubRegistry row 340 (code kept), SF Pending row 12, 1 Audit row
+  (`renameClub`); Asia q446 and template q450 relabelled. Every write verified
+  by re-read. Tabs before the change: `data/rename_club/2026-09-14T134346/`;
+  form snapshots `backups/<id>/*-2026-09-14T134346.json`.
+- Sync (`--roster --region Asia --form 262383129464057 --apply`, then the
+  template with no region): each applied only `UPDATE club picker` and
+  `REPLACE conditions` (117 / 376 rules). No roster question created or
+  updated.
+- `form_status.py` → Asia CLEAN (88 rosters, 0 flagged), template CLEAN;
+  `auto_sync.py` dry run → all four regions in-sync. Both forms: no question,
+  picker option or rule carries the old name; the new name is present.
+- `make check` → CHECK PASSED (new `RenameClub` tests included).
+- Left for Ryan: GLOW → Google Forms → Update form dropdowns from the Roster
+  (or wait for the next form submission).
