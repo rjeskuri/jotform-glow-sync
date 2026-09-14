@@ -23,6 +23,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import auto_sync                      # noqa: E402
 import form_status                    # noqa: E402
+import rename_club                    # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
@@ -474,6 +475,52 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertEqual(tuple(regions), glow_forms.REGIONS)
         self.assertIn("U.S", regions)                     # one dot, no trailing dot
         self.assertIn("REGION: 'Region where this club meets'", self.config)
+
+
+class RenameClub(unittest.TestCase):
+    """tools/rename_club.py: the pure planning helpers, on fabricated tabs."""
+
+    HDR = ["girl_id", "partner", "club", "region", "full_name", "status"]
+
+    def rows(self):
+        return [self.HDR,
+                ["DEMOCLUB-SAMPLE-001", "Demo Partner", "Old Club", "Asia", "A", "active"],
+                ["DEMOCLUB-SAMPLE-002", "Demo Partner", " old  club ", "Asia", "B", "removed"],
+                ["OTHER-X-001", "Other Partner", "Old Club", "Africa", "C", "active"],
+                ["DEMOCLUB-Y-001", "Demo Partner", "Sunrise", "Asia", "D", "active"]]
+
+    def test_find_cells_matches_partner_and_club_case_insensitively(self):
+        i_c, hits, clashes, regions = rename_club.find_cells(
+            self.rows(), "demo partner", "OLD CLUB", "New Club")
+        self.assertEqual(i_c, 2)
+        self.assertEqual(hits, [2, 3])          # any status; not the other partner's club
+        self.assertEqual(clashes, [])
+        self.assertEqual(regions, {"Asia"})
+
+    def test_find_cells_reports_a_clash_with_the_new_name(self):
+        _, hits, clashes, _ = rename_club.find_cells(
+            self.rows(), "Demo Partner", "Old Club", "sunrise")
+        self.assertEqual(hits, [2, 3])
+        self.assertEqual(clashes, [5])
+
+    def test_find_cells_without_a_region_column(self):
+        rows = [["club_code", "partner", "club", "created"],
+                ["OLDCLUB", "Demo Partner", "Old Club", "2026-08-26"]]
+        i_c, hits, clashes, regions = rename_club.find_cells(rows, "Demo Partner", "Old Club", "New")
+        self.assertEqual((i_c, hits, clashes, regions), (2, [2], [], set()))
+
+    def test_find_cells_refuses_a_tab_without_the_columns(self):
+        with self.assertRaises(SystemExit):
+            rename_club.find_cells([["when", "action", "detail"]], "p", "a", "b")
+
+    def test_col_letter_and_row_descriptions(self):
+        self.assertEqual([rename_club.col_letter(i) for i in (0, 2, 25, 26, 27)],
+                         ["A", "C", "Z", "AA", "AB"])
+        self.assertEqual(rename_club.describe_rows([]), "no rows")
+        self.assertEqual(rename_club.describe_rows([7]), "row 7")
+        self.assertEqual(rename_club.describe_rows([3, 4, 5]), "rows 3-5")
+        self.assertEqual(rename_club.describe_rows([3, 5]), "rows 3, 5")
+        self.assertEqual(rename_club.a1("SF Pending", "C4"), "'SF Pending'!C4")
 
 
 if __name__ == "__main__":

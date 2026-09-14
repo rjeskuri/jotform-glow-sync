@@ -92,6 +92,30 @@ What to know:
   organizations not yet in the partner list).
 - Region spelling must be exactly `Africa`, `Asia`, `Latin America`, `U.S`.
 
+## Renaming a club
+
+A club is keyed by its name in the Roster, ClubRegistry and SF Pending tabs
+and by its roster question's label on the region's form and the template.
+Never rename by editing the sheet alone: the next sync would CREATE a second
+question and leave the old one orphaned in the Club picker. Rename in place,
+then let the sync rewrite the picker options and the rules:
+
+```bash
+python3 tools/rename_club.py --partner "<partner>" --old "<current name>" --new "<new name>"   # dry run
+python3 tools/rename_club.py --partner "<partner>" --old "<current name>" --new "<new name>" --apply
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --region <region> --form <id>   # then --apply
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154         # template, same
+python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv                        # CLEAN
+```
+
+The club keeps its `club_code`, so the girls' ids do not change (`Ids.gs`).
+`--apply` saves the tabs under `data/rename_club/<stamp>/` and snapshots the
+forms first; the rollback is those CSVs and `restore_conditions.py`. Then, in
+the sheet, **GLOW → Google Forms → Update form dropdowns from the Roster** so
+the Modification form offers the new name (it also refreshes on the next
+submission). Attendance already submitted under the old name keeps it.
+
 ## Automatic sync
 
 **Path:** a roster change in the sheet (New Club / Roster Modification form,
