@@ -527,16 +527,18 @@ class RenameClub(unittest.TestCase):
 class SwitcherFlags(unittest.TestCase):
     """tools/switcher_flags.py: the CSS block builder and the injectCSS merge."""
 
-    def test_data_uri_is_css_safe_and_round_trips(self):
-        import urllib.parse
+    def test_data_uri_is_base64_and_round_trips(self):
+        # base64 on purpose: Jotform rewrites "http:" inside injectCSS when serving the page
+        import base64
         import xml.etree.ElementTree as ET
         svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24">\n  <path fill="#FF9933" d="M0 0h32v8H0z"/>\n</svg>'
         uri = switcher_flags.data_uri(svg)
-        self.assertTrue(uri.startswith("data:image/svg+xml,"))
-        for bad in ('"', "#", "<", ">", "\n", " "):
-            self.assertNotIn(bad, uri)
-        root = ET.fromstring(urllib.parse.unquote(uri.split(",", 1)[1]))
+        self.assertTrue(uri.startswith("data:image/svg+xml;base64,"))
+        self.assertNotIn("http:", uri)
+        self.assertRegex(uri.split(",", 1)[1], r"^[A-Za-z0-9+/=]+$")
+        root = ET.fromstring(base64.b64decode(uri.split(",", 1)[1]))
         self.assertEqual(root[0].get("fill"), "#FF9933")
+        self.assertEqual(root.get("xmlns", root.tag.split("}")[0].strip("{")), "http://www.w3.org/2000/svg")
 
     def test_block_and_merge_are_idempotent(self):
         import tempfile
@@ -553,16 +555,24 @@ class SwitcherFlags(unittest.TestCase):
         self.assertEqual(once.count(switcher_flags.START), 1)
         self.assertEqual(switcher_flags.merge(once, block), once)          # replace, not append
         self.assertEqual(switcher_flags.merge("", block), block + "\n")
-        newer = block.replace("#123", "#456").replace("%23123", "%23456")
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "xx.svg"), "w") as f:
+                f.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24"><path fill="#456" d="M0 0h32v24H0z"/></svg>')
+            newer = switcher_flags.css_block({"xx": "xx.svg"}, d)
+        self.assertNotEqual(newer, block)
         self.assertNotIn(block, switcher_flags.merge(once, newer))
+        older = once.replace(switcher_flags.START, "/* GLOW switcher flags v1 */")   # an earlier version's block
+        upgraded = switcher_flags.merge(older, block)
+        self.assertEqual(upgraded, once)
+        self.assertEqual(upgraded.count("GLOW switcher flags v"), 1)
 
     def test_real_flag_files_parse(self):
-        import urllib.parse
+        import base64
         import xml.etree.ElementTree as ET
         for code, filename in switcher_flags.FLAGS.items():
             with open(os.path.join(switcher_flags.SVG_DIR, filename), encoding="utf-8") as f:
                 uri = switcher_flags.data_uri(f.read())
-            root = ET.fromstring(urllib.parse.unquote(uri.split(",", 1)[1]))
+            root = ET.fromstring(base64.b64decode(uri.split(",", 1)[1]))
             self.assertTrue(root.tag.endswith("svg"), code)
 
 

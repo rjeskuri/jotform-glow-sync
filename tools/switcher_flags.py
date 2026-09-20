@@ -26,11 +26,11 @@ API) and reports, per language, whether the switcher row carries a flag.
     python3 tools/switcher_flags.py --check-page --form <id>
 """
 import argparse
+import base64
 import os
 import re
 import subprocess
 import sys
-import urllib.parse
 from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,16 +42,18 @@ from glow.jotform import Client           # noqa: E402
 
 FLAGS = {"or": "or.svg"}                  # language code -> file under tools/switcher_flags/
 SVG_DIR = os.path.join(REPO, "tools", "switcher_flags")
-START, END = "/* GLOW switcher flags v1 */", "/* /GLOW switcher flags */"
+START, END = "/* GLOW switcher flags v2 */", "/* /GLOW switcher flags */"
+ANY_START = "/* GLOW switcher flags v"          # an earlier version's block is replaced too
 PUBLIC = "https://form.jotform.com/"
 
 
 def data_uri(svg):
-    """One-line data: URI safe inside CSS url("..."): double quotes become
-    single, everything URL-unsafe (#, <, >, %, spaces, parentheses) is
-    percent-encoded."""
-    svg = re.sub(r"\s+", " ", svg.strip()).replace('"', "'")
-    return "data:image/svg+xml," + urllib.parse.quote(svg, safe="/:=,;'-.")
+    """One-line base64 data: URI. Base64, not percent-encoding: Jotform
+    rewrites "http:" to "//" inside injectCSS when it serves the page, which
+    turned the SVG's xmlns into //www.w3.org/2000/svg and broke the image
+    (found 2026-09-20). Base64 carries no URL for it to touch."""
+    svg = re.sub(r"\s+", " ", svg.strip())
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
 
 
 def css_block(flags=FLAGS, svg_dir=SVG_DIR):
@@ -73,7 +75,7 @@ def css_block(flags=FLAGS, svg_dir=SVG_DIR):
 def merge(existing, block):
     """existing injectCSS with the marked block replaced, or appended."""
     existing = existing or ""
-    i, j = existing.find(START), existing.find(END)
+    i, j = existing.find(ANY_START), existing.find(END)
     if i >= 0 and j > i:
         return existing[:i] + block + existing[j + len(END):]
     return existing.rstrip("\n") + ("\n\n" if existing.strip() else "") + block + "\n"
@@ -123,7 +125,7 @@ def main():
         if wanted == current:
             print(f"== {label}  form {fid}: already has this block")
             continue
-        verb = "replace the earlier block in" if START in current else "append to"
+        verb = "replace the earlier block in" if ANY_START in current else "append to"
         print(f"== {label}  form {fid}: {verb} injectCSS ({len(current)} -> {len(wanted)} chars)")
         if not args.apply:
             continue

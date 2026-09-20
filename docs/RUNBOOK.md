@@ -258,8 +258,10 @@ python3 tools/switcher_flags.py                          # preview the flag CSS 
 Jotform's switcher shows a nation flag per language from its own table; a
 language outside it (Oriya) gets an empty slot. `tools/switcher_flags.py`
 paints one through the form's `injectCSS` (Jotform's own India SVG for
-Oriya, `tools/switcher_flags/or.svg`) — add a code + SVG to `FLAGS` for any
-other flagless language, dry-run, `--apply`, then `--check-page`. Hindi and
+Oriya, `tools/switcher_flags/or.svg`, as a base64 data URI — the public page
+rewrites `http:` inside injected CSS, which breaks a percent-encoded SVG) —
+add a code + SVG to `FLAGS` for any other flagless language, dry-run,
+`--apply`, then `--check-page`. Hindi and
 Persian are offered on the Asia form only; the other forms can get them with
 the same two `add_language.py` commands minus `--form`.
 

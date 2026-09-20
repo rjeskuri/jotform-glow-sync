@@ -65,7 +65,13 @@ unless `--apply`.
 
 ## Properties
 - Form-urlencoded `POST /form/{id}/properties` with `properties[key]=value` sets scalars (title,
-  pagetitle); JSON `PUT` for structured ones (language, conditions).
+  pagetitle, injectCSS); JSON `PUT` for structured ones (language, conditions).
+- `injectCSS` is stored verbatim (GET returns what was sent) but the public page serves it with
+  every `http:` rewritten to `//` (protocol-relative) — inside a percent-encoded SVG data URI that
+  turned `xmlns='http://www.w3.org/2000/svg'` into `//www.w3.org/2000/svg` and the image never
+  painted (2026-09-20). Use base64 data URIs (`tools/switcher_flags.py`). The page is served
+  inside `<style id="form-designer-style">` in `<head>`, BEFORE the switcher stylesheet linked
+  in `<body>`, so equal-specificity rules lose: use id-based selectors.
 
 ## Salesforce
 - Native Salesforce V2 integration, 8 mapping rows keyed to question ids
