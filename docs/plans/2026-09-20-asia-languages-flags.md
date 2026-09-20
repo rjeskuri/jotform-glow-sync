@@ -84,6 +84,14 @@ convention gives it.
   `injectCSS` 2231 → 4774 chars, snapshot `backups/<id>/*-2026-09-20T1437.json`,
   written and verified; a second dry run says "already has this block" for
   all five; `--check-page` shows the block served on all five public pages.
+- First render of the live page showed the Oriya slot still empty although
+  the rule applied and a solid colour painted: Jotform serves `injectCSS`
+  with every `http:` rewritten to `//`, which turned the SVG's xmlns into
+  `//www.w3.org/2000/svg`. The block became v2 with a base64 data URI (no
+  URL to rewrite), re-applied to all five forms (snapshots
+  `*-2026-09-20T1451.json`), served byte-identical; a local Chrome render of
+  the live page shows the India flag on the Oriya row and on the trigger
+  with Oriya selected. Recorded in the jotform-api skill.
 - `form_status.py` Asia → CLEAN, 14 languages. `make check` → CHECK PASSED.
 - Left open: native-speaker review of Hindi and Persian (backlog 6b); Hindi
   and Persian on the other forms if ever wanted (same commands, no `--form`).
