@@ -1,7 +1,7 @@
 ---
 title: Hindi and Persian on the Asia form; a switcher flag for Odia on every form
 author: Claude (executed with Ryan)
-status: in-progress
+status: done
 created: 2026-09-20
 intent: none — requested by Ryan on 2026-09-20
 ---
@@ -64,3 +64,27 @@ convention gives it.
 ## Proof
 `make check` tail; the dry-run and apply output of both tools; the audit;
 `--check-page` output per form. Recorded below when done.
+
+## Result (executed 2026-09-20)
+
+- Translations: 14 workflow agents (translator, three review lenses, editor,
+  fresh-eyes refuter per language; CSS design + two refuters). Hindi: three
+  reviewer issues, two accepted (the confirmation sublabel now says the
+  *submission* is confirmed; "roster" rendered as the girls' list), one
+  rejected (October spelling); refuter found nothing. Persian: no issues at
+  any stage; Dari-compatible English-derived month names chosen on purpose.
+- `add_language.py --form 262383129464057 --code hi --name Hindi … --apply`
+  then `--code fa --name Persian`: each +68 strings, 68 of 68 form strings
+  covered, switcher re-read OK. `add_translations.py --audit`: hi and fa show
+  the same residue as every other language (the year digits and the club
+  names). Backup of the store: `backups/translations/2026-09-20-asia-before.json`.
+- Public page: Jotform ships built-in flags for Hindi (India) and Persian
+  (Iran); Oriya was the only flagless language on every form.
+- `switcher_flags.py --apply` on the template and the four regionals: each
+  `injectCSS` 2231 → 4774 chars, snapshot `backups/<id>/*-2026-09-20T1437.json`,
+  written and verified; a second dry run says "already has this block" for
+  all five; `--check-page` shows the block served on all five public pages.
+- `form_status.py` Asia → CLEAN, 14 languages. `make check` → CHECK PASSED.
+- Left open: native-speaker review of Hindi and Persian (backlog 6b); Hindi
+  and Persian on the other forms if ever wanted (same commands, no `--form`).
+
