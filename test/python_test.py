@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 import auto_sync                      # noqa: E402
 import form_status                    # noqa: E402
 import rename_club                    # noqa: E402
+import switcher_flags                 # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
@@ -521,6 +522,48 @@ class RenameClub(unittest.TestCase):
         self.assertEqual(rename_club.describe_rows([3, 4, 5]), "rows 3-5")
         self.assertEqual(rename_club.describe_rows([3, 5]), "rows 3, 5")
         self.assertEqual(rename_club.a1("SF Pending", "C4"), "'SF Pending'!C4")
+
+
+class SwitcherFlags(unittest.TestCase):
+    """tools/switcher_flags.py: the CSS block builder and the injectCSS merge."""
+
+    def test_data_uri_is_css_safe_and_round_trips(self):
+        import urllib.parse
+        import xml.etree.ElementTree as ET
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24">\n  <path fill="#FF9933" d="M0 0h32v8H0z"/>\n</svg>'
+        uri = switcher_flags.data_uri(svg)
+        self.assertTrue(uri.startswith("data:image/svg+xml,"))
+        for bad in ('"', "#", "<", ">", "\n", " "):
+            self.assertNotIn(bad, uri)
+        root = ET.fromstring(urllib.parse.unquote(uri.split(",", 1)[1]))
+        self.assertEqual(root[0].get("fill"), "#FF9933")
+
+    def test_block_and_merge_are_idempotent(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "xx.svg"), "w") as f:
+                f.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24"><path fill="#123" d="M0 0h32v24H0z"/></svg>')
+            block = switcher_flags.css_block({"xx": "xx.svg"}, d)
+        self.assertTrue(block.startswith(switcher_flags.START) and block.endswith(switcher_flags.END))
+        self.assertIn('#langList li[data-lang="xx"] .jfLangDd-flag', block)
+        self.assertIn('html[lang="xx"] #langDd .jfLangDd-current:not(.lang-emp) .jfLangDd-flag', block)
+        theme = ".form-all { font-family: Inter; }"
+        once = switcher_flags.merge(theme, block)
+        self.assertTrue(once.startswith(theme))
+        self.assertEqual(once.count(switcher_flags.START), 1)
+        self.assertEqual(switcher_flags.merge(once, block), once)          # replace, not append
+        self.assertEqual(switcher_flags.merge("", block), block + "\n")
+        newer = block.replace("#123", "#456").replace("%23123", "%23456")
+        self.assertNotIn(block, switcher_flags.merge(once, newer))
+
+    def test_real_flag_files_parse(self):
+        import urllib.parse
+        import xml.etree.ElementTree as ET
+        for code, filename in switcher_flags.FLAGS.items():
+            with open(os.path.join(switcher_flags.SVG_DIR, filename), encoding="utf-8") as f:
+                uri = switcher_flags.data_uri(f.read())
+            root = ET.fromstring(urllib.parse.unquote(uri.split(",", 1)[1]))
+            self.assertTrue(root.tag.endswith("svg"), code)
 
 
 if __name__ == "__main__":

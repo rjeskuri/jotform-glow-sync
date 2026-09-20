@@ -18,6 +18,7 @@ Ordered by what unblocks the most. Effort is consultant days. Items marked
 | 5 | **Confirm Haske's region** (Partners tab says Africa on thin evidence; row is marked PLEASE CONFIRM) | wrong region = wrong form | 0.05 | needs Ryan |
 | 6 | Close the old enrollment Google Form (its owner) with a note pointing to the new ones | avoids a third path into the data | 0.05 | needs the form's owner |
 | 6a | **Native-speaker check of the Odia labels** (`tools/translations_or.json`, 63 strings) by a VIEWS mentor; corrections re-applied with `tools/add_language.py --code or --name Oriya --dict … --apply` | the other languages came from Jotform's machine translation; Odia was written by us | 0.1 + partner time | needs VIEWS |
+| 6b | **Native-speaker check of the Hindi and Persian labels** on the Asia form (`tools/translations_hi.json`, `tools/translations_fa.json`, 52 strings each, written 2026-09-20 with a three-lens review); corrections re-applied with `tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict … --apply` (Persian: `--code fa --name Persian`) | written by us, like Odia; Persian readers may be Afghan (Dari) | 0.1 + partner time | needs a Hindi and a Persian speaker |
 
 ## Weeks 2–3: Phase 2 — automatic Sheet → Jotform sync
 

@@ -249,7 +249,19 @@ python3 tools/add_translations.py --apply
 python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json          # preview
 python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json --apply
 python3 tools/restore_translations.py --form <clone id> --check   # after a clone: is the switcher intact?
+python3 tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict tools/translations_hi.json     # Asia only (2026-09-20)
+python3 tools/add_language.py --form 262383129464057 --code fa --name Persian --dict tools/translations_fa.json   # Asia only (2026-09-20)
+python3 tools/switcher_flags.py --check-page             # which switcher languages have no built-in flag (public page, no key)
+python3 tools/switcher_flags.py                          # preview the flag CSS block per form; --apply writes injectCSS
 ```
+
+Jotform's switcher shows a nation flag per language from its own table; a
+language outside it (Oriya) gets an empty slot. `tools/switcher_flags.py`
+paints one through the form's `injectCSS` (Jotform's own India SVG for
+Oriya, `tools/switcher_flags/or.svg`) — add a code + SVG to `FLAGS` for any
+other flagless language, dry-run, `--apply`, then `--check-page`. Hindi and
+Persian are offered on the Asia form only; the other forms can get them with
+the same two `add_language.py` commands minus `--form`.
 
 Jotform's `POST /form/{id}/translations` replaces a language's whole
 dictionary — the tools always GET, merge, then POST. A new English string
