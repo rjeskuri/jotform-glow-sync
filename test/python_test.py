@@ -15,6 +15,7 @@ Offline Python tests (standard library unittest; run by `make py`):
 import json
 import os
 import re
+import struct
 import sys
 import unittest
 
@@ -25,6 +26,7 @@ import auto_sync                      # noqa: E402
 import form_status                    # noqa: E402
 import rename_club                    # noqa: E402
 import switcher_flags                 # noqa: E402
+import update_static_fields           # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
@@ -574,6 +576,71 @@ class SwitcherFlags(unittest.TestCase):
                 uri = switcher_flags.data_uri(f.read())
             root = ET.fromstring(base64.b64decode(uri.split(",", 1)[1]))
             self.assertTrue(root.tag.endswith("svg"), code)
+
+
+class HeaderImage(unittest.TestCase):
+    """tools/update_static_fields.py: the header-logo field and its URL guard."""
+
+    @staticmethod
+    def png(width, height):
+        return (b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR"
+                + struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+
+    def fetch(self, status="200", content_type="image/png", head=None):
+        return lambda url: (status, content_type, self.png(410, 206) if head is None else head)
+
+    def test_png_size_reads_the_ihdr_and_rejects_other_bytes(self):
+        self.assertEqual(update_static_fields.png_size(self.png(410, 206)), (410, 206))
+        self.assertIsNone(update_static_fields.png_size(b"GIF89a" + b"\0" * 40))
+        self.assertIsNone(update_static_fields.png_size(b""))
+
+    def test_the_image_field_is_left_alone_without_a_url(self):
+        fields = update_static_fields.wanted_fields()
+        self.assertEqual(set(fields), {"mentorEmail", "photo"})
+        self.assertEqual(fields, update_static_fields.WANTED)
+        fields["photo"] = {}                       # a copy, not the constant
+        self.assertNotEqual(update_static_fields.WANTED["photo"], {})
+
+    def test_the_image_field_carries_the_url_size_and_derived_name(self):
+        url = "https://www.jotform.com/uploads/Someone/form_files/logo-2x.png?v=3"
+        image = update_static_fields.wanted_fields(url)[update_static_fields.IMAGE_FIELD]
+        self.assertEqual(image["src"], url)
+        self.assertEqual(image["text"], "logo-2x")          # basename, no extension, no query
+        self.assertEqual((image["width"], image["height"]), ("205", "103"))
+        self.assertEqual(image["align"], "Center")
+        # 205x103 keeps the replaced banner's height and the new logo's own shape
+        self.assertEqual(int(image["height"]), 103)
+        self.assertAlmostEqual(int(image["width"]) / int(image["height"]), 1.99, places=1)
+
+    def test_check_src_accepts_a_2x_png_and_describes_it(self):
+        line = update_static_fields.check_src("https://x.test/logo.png", self.fetch())
+        self.assertIn("410x206", line)
+        self.assertIn("205x103", line)
+        self.assertIn("2x", line)
+
+    def test_check_src_refuses_what_a_browser_could_not_load(self):
+        for url, fetch in (
+            ("http://x.test/logo.png", self.fetch()),                       # not https
+            ("https://x.test/logo.png", self.fetch(status="404")),          # missing
+            ("https://x.test/logo.png", self.fetch(content_type="text/html")),
+            ("https://x.test/logo.png", self.fetch(head=self.png(100, 50))),  # too small
+        ):
+            with self.assertRaises(SystemExit):
+                update_static_fields.check_src(url, fetch)
+
+    def test_check_src_passes_a_non_png_image_through(self):
+        line = update_static_fields.check_src(
+            "https://x.test/logo.svg", self.fetch(content_type="image/svg+xml", head=b"<svg/>"))
+        self.assertIn("image/svg+xml", line)
+
+    def test_the_committed_header_asset_is_big_enough_to_display(self):
+        path = os.path.join(REPO, "assets", "global-catalyst-header.png")
+        self.assertTrue(os.path.exists(path), path)
+        with open(path, "rb") as f:
+            size = update_static_fields.png_size(f.read(64))
+        self.assertIsNotNone(size, "the header asset must be a PNG")
+        props = update_static_fields.IMAGE_PROPS
+        self.assertEqual(size, (int(props["width"]) * 2, int(props["height"]) * 2))
 
 
 if __name__ == "__main__":

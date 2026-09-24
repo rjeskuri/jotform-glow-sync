@@ -47,6 +47,7 @@ enrollment responses → `sync_attendance_form.py read_sheet` (no `--roster`).
 | `tools/rename_club.py` | Rename a club in place: Roster/ClubRegistry/SF Pending cells (code kept) and the question label on the region's form and the template; the sync then follows | Sheets API, Jotform API |
 | `tools/needs_attention.py`, `tools/derive_partner_regions.py` | Data-quality report; partner → region derivation (generates `appsscript/Regions.gs`) | local snapshots |
 | `tools/add_translations.py`, `add_language.py`, `restore_translations.py`, `switcher_flags.py`, `add_feedback_link.py`, `clone_regional.py` | Languages, switcher flags for languages Jotform has none for (`injectCSS`), the problem-report link, building a regional form | Jotform API |
+| `tools/update_static_fields.py` | The fields the sync never touches: label wording, the Group Photo limits, and the header logo (`--image-src`, since the API cannot upload an asset). Declarative — wanted properties per field name, re-read and compared after every write | Jotform API |
 | `appsscript/*.gs` | Bound to the sheet: config, normalization, ids, roster ops, form generation, submission handlers, menu, dispatch | Google services |
 | `test/`, `scripts/`, `Makefile` | The offline feedback loop (`make check`) | nothing |
 

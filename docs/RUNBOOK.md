@@ -227,6 +227,35 @@ can hide a completed write: re-run the dry run, and "0 new" means it landed.
 Club names (the picker's options and the roster labels) are deliberately
 never translated — they display in English in every language.
 
+## Header logo
+
+The logo above the form title is the `image` field (q13 on every form), and
+`tools/update_static_fields.py` maintains it. **Jotform's API cannot upload an
+asset** — `src` only ever points at a file that is already hosted — so the
+file goes into the account through the builder once and its URL is passed to
+every form:
+
+1. Open any form in the builder, click the image element, upload
+   `assets/global-catalyst-header.png` (410×206, i.e. 2× the displayed size so
+   it stays sharp on phones), and copy the URL it gets
+   (`https://www.jotform.com/uploads/<account>/form_files/<file>.png`).
+2. Point all five forms at it (the dry run prints the current value first, and
+   refuses a URL that is not a reachable image at least as large as the box):
+
+```bash
+python3 backup_forms.py                                        # snapshot everything first
+python3 tools/update_static_fields.py --image-src <URL>        # dry run, template + 4 regionals
+python3 tools/update_static_fields.py --image-src <URL> --apply
+```
+
+The display size lives in `IMAGE_PROPS` (205×103: the height of the banner it
+replaced, the width from the logo's own proportions). Without `--image-src`
+the image field is left alone, so the tool's other fields can be re-run
+safely. Rollback: the `src`/`width`/`height` in
+`backups/<id>/questions-<stamp>.json`, re-applied with the same flag, or
+Jotform's Revision History. The image carries no translated text (q13 is in
+`add_translations.py`'s `NEVER_SHOWN`), and the sync never touches it.
+
 ## Backup and restore (Jotform)
 
 ```bash

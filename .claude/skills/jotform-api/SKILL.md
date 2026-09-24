@@ -38,6 +38,15 @@ unless `--apply`.
 - Hidden fields (`hidden=Yes`) are still submitted and still reach the integrations; validation
   (`required`) is skipped while a field is hidden.
 
+## Images and other assets
+- There is NO upload endpoint: `control_image`'s `src` can only point at an already-hosted file
+  (verified against the docs and Jotform's own answers, 2026-09-24). The builder's uploader puts
+  files at `https://www.jotform.com/uploads/<account>/form_files/<name>.png`, and that URL works
+  as an `src` on any form. `/form/{id}/files` lists SUBMISSION uploads, not form assets.
+- `width` / `height` / `align` on the question are the display size; `text` is the file's
+  basename and is not shown to a mentor (q13 is in `add_translations.py`'s `NEVER_SHOWN`).
+  Ship a 2x file and set width/height to half of it, or phones render it soft.
+
 ## Emails
 - Managed through the `emails` property (no endpoint); autoresponder type `"autorespond"`,
   recipient `to: "{fieldUniqueName}"`. Writing replaces the whole array — resend the existing
