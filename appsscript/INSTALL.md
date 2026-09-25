@@ -58,8 +58,11 @@ Reload the spreadsheet.
    responses**.
 2. **GLOW → Rebuild roster from enrollment responses** — reads every
    enrollment response and fills the Roster tab (on the launch data: 328
-   clubs and 6,210 girls, a minute or two). Re-running is always safe:
-   existing girls keep their IDs, only new names get new ones.
+   clubs and 6,210 girls, a minute or two). Before launch, re-running was
+   safe: existing girls keep their IDs, only new names get new ones. **Since
+   launch (2026-09-01) do not re-run it.** It reactivates girls removed
+   through the Club Roster Form and re-creates renamed or moved clubs under
+   their old name or partner (`docs/RUNBOOK.md`, "Roster rebuild and upload").
 3. Open the **Partners** tab. The **region** column (Africa / Asia / Latin
    America / U.S) was derived from which regional attendance form each
    partner's clubs sat on (`tools/derive_partner_regions.py`; the map is
@@ -71,7 +74,8 @@ Reload the spreadsheet.
    attendance form until the region is filled in.
 4. Open the **ReviewQueue** tab and work through it (duplicate names: give
    the girls something that tells them apart, e.g. `Anh Nguyen (A)`, then
-   rebuild).
+   rebuild — before launch only; since launch the partner resubmits through
+   the Club Roster Form).
 
 ## The Google Forms
 

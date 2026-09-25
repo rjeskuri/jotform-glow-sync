@@ -65,4 +65,6 @@ With the Apps Script deployed (`../appsscript/INSTALL.md`), the GLOW menu
 maintains those tabs going forward; re-running its rebuild after an upload
 leaves Roster, ClubRegistry and Partners unchanged (ReviewQueue only gains
 genuinely new questions; Audit gains one line per run), which is the check
-that both paths agree.
+that both paths agree. That held before launch. Since 2026-09-01, neither
+path is run: both re-derive from the raw responses (`RUNBOOK.md`, "Roster
+rebuild and upload").

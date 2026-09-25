@@ -480,6 +480,64 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertIn("REGION: 'Region where this club meets'", self.config)
 
 
+class FakeSheet:
+    """An in-memory spreadsheet for rename_club.main(): read_tab, the values
+    batchUpdate and append_rows. before_read(sheet, tab, nth read of that tab)
+    can change a tab mid-run, the way a form submission would."""
+
+    def __init__(self, tabs, before_read=None):
+        self.tabs = {t: [list(r) for r in rows] for t, rows in tabs.items()}
+        self.batches, self.reads, self.before_read, self.last = [], {}, before_read, 0
+
+    def read_tab(self, svc, tab):
+        self.reads[tab] = self.reads.get(tab, 0) + 1
+        if self.before_read:
+            self.before_read(self, tab, self.reads[tab])
+        return [list(r) for r in self.tabs.get(tab, [])]
+
+    def append_rows(self, svc, tab, rows):
+        self.tabs.setdefault(tab, []).extend(list(r) for r in rows)
+
+    def spreadsheets(self):
+        return self
+
+    def values(self):
+        return self
+
+    def batchUpdate(self, spreadsheetId, body):
+        self.batches.append(body["data"])
+        for d in body["data"]:
+            m = re.match(r"'((?:[^']|'')+)'!([A-Z]+)(\d+)$", d["range"])
+            col = 0
+            for ch in m.group(2):
+                col = col * 26 + ord(ch) - 64
+            row = self.tabs[m.group(1).replace("''", "'")][int(m.group(3)) - 1]
+            row += [""] * (col - len(row))
+            row[col - 1] = d["values"][0][0]
+        self.last = len(body["data"])
+        return self
+
+    def execute(self):
+        return {"totalUpdatedCells": self.last}
+
+
+class FakeJotform:
+    """The two GETs a move makes; q352 is the club's roster, q444 the picker."""
+
+    def __init__(self, gated=False):
+        self.gated = gated
+
+    def get(self, path, **params):
+        if path.endswith("/questions"):
+            return {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
+                    "444": {"type": "control_dropdown", "text": "Club Name"}}
+        terms = [{"field": "444", "operator": "equals", "value": "Sunrise Club"}]
+        if self.gated:
+            terms.insert(0, {"field": sync.PARTNER, "operator": "equals", "value": "asoc demo"})
+        return {"conditions": [{"id": "1", "type": "field", "terms": json.dumps(terms),
+                                "action": json.dumps([{"visibility": "Show", "field": "352"}])}]}
+
+
 class RenameClub(unittest.TestCase):
     """tools/rename_club.py: the pure planning helpers, on fabricated tabs."""
 
@@ -524,6 +582,213 @@ class RenameClub(unittest.TestCase):
         self.assertEqual(rename_club.describe_rows([3, 4, 5]), "rows 3-5")
         self.assertEqual(rename_club.describe_rows([3, 5]), "rows 3, 5")
         self.assertEqual(rename_club.a1("SF Pending", "C4"), "'SF Pending'!C4")
+
+    # --- --new-partner: moving a club filed under a mistyped partner ---------------
+    PARTNERS = [["partner", "region", "notes"],
+                ["Asociación Demo", "Latin America", "derived"],
+                ["asoc demo", "Latin America", "derived"],
+                ["Demo Partner", "Asia", ""]]
+
+    def move_rows(self):
+        return [self.HDR,
+                ["SUNRISEC-SAMPLE-001", "asoc demo", "Sunrise Club", "Latin America", "A", "active"],
+                ["SUNRISEC-SAMPLE-002", "asoc\u200b demo ", "sunrise  club", "Latin America", "B", "inactive"],
+                ["DEMOCLUB-SAMPLE-001", "Asociación Demo", "Demo Club", "Latin America", "C", "active"]]
+
+    def test_cell_key_is_the_apps_script_key(self):
+        self.assertEqual(rename_club.cell_key(" Asoc\u200b  Demo\ufeff "), "asoc demo")
+        self.assertEqual(rename_club.tidy("a\u2060b  c "), "ab c")
+        # key_ folds neither accents nor Unicode form; nfc_key only fixes the form
+        self.assertNotEqual(rename_club.cell_key("Asociación"), rename_club.cell_key("Asociacion"))
+        self.assertNotEqual(rename_club.cell_key("Asociación"), rename_club.cell_key("Asociacio\u0301n"))
+        self.assertEqual(rename_club.nfc_key("Asociación"), rename_club.nfc_key("Asociacio\u0301n"))
+
+    def test_find_cells_for_a_move_matches_the_old_partner_any_status(self):
+        i_c, hits, clashes, regions = rename_club.find_cells(
+            self.move_rows(), "asoc demo", "Sunrise Club", "Sunrise Club", "Asociación Demo")
+        self.assertEqual((i_c, hits, clashes, regions), (2, [2, 3], [], {"Latin America"}))
+
+    def test_find_cells_for_a_move_refuses_a_target_that_has_the_club(self):
+        rows = self.move_rows() + [["X-1", "Asociación Demo", "Sunrise Club", "Latin America", "D", "active"]]
+        _, hits, clashes, _ = rename_club.find_cells(
+            rows, "asoc demo", "Sunrise Club", "Sunrise Club", "Asociación Demo")
+        self.assertEqual((hits, clashes), ([2, 3], [5]))
+
+    def test_partner_count_and_sharing_partners(self):
+        rows = self.move_rows()
+        self.assertEqual(rename_club.partner_count(rows, "ASOC DEMO"), 2)
+        self.assertEqual(rename_club.partner_count(rows, "Asociación Demo"), 1)
+        self.assertEqual(rename_club.sharing_partners(rows, ("asoc demo", "Asociación Demo"),
+                                                      {"Sunrise Club"}), [])
+        rows.append(["Y-1", "Demo Partner", "SUNRISE CLUB", "Asia", "E", "active"])
+        rows.append(["Z-1", "", "Sunrise Club", "", "F", "active"])      # partner-less: not a group
+        self.assertEqual(rename_club.sharing_partners(rows, ("asoc demo", "Asociación Demo"),
+                                                      {"Sunrise Club"}), ["Demo Partner"])
+
+    def test_partner_rows_and_the_accent_suggestion(self):
+        found = rename_club.partner_rows(self.PARTNERS, "asociacio\u0301n  demo")   # NFD, spaced
+        self.assertEqual(found, [(2, "Asociación Demo", "Latin America", "derived")])
+        self.assertEqual(rename_club.partner_rows(self.PARTNERS, "Asociacion Demo"), [])
+        self.assertEqual(rename_club.near_partners(self.PARTNERS, "Asociacion Demo"), ["Asociación Demo"])
+        self.assertEqual(rename_club.partner_rows(self.PARTNERS, ""), [])
+
+    def test_partner_gated_finds_only_rules_that_test_the_partner_box(self):
+        plain = {"id": "1", "terms": json.dumps([{"field": "444", "operator": "equals", "value": "Sunrise Club"}]),
+                 "action": json.dumps([{"visibility": "Show", "field": "352"}])}
+        gated = {"id": "2", "terms": [{"field": sync.PARTNER, "operator": "equals", "value": "asoc demo"},
+                                      {"field": "444", "operator": "equals", "value": "Sunrise Club"}],
+                 "action": {"visibility": "Show", "field": "352"}}
+        other = {"id": "3", "terms": gated["terms"], "action": [{"visibility": "Show", "field": "353"}]}
+        broken = {"id": "4", "terms": "{not json", "action": "[]"}
+        self.assertEqual(rename_club.partner_gated([plain, other, broken], {"352"}), [])
+        self.assertEqual(rename_club.partner_gated([plain, gated, other], {"352"}), ["2"])
+
+    def test_late_rows_finds_the_club_appended_after_the_read(self):
+        rows = self.move_rows()
+        self.assertEqual(rename_club.late_rows(rows, len(rows), "asoc demo", "Sunrise Club"), [])
+        rows += [["SUNRISEC-SAMPLE-003", "ASOC DEMO", "sunrise club", "Latin America", "G", "active"],
+                 ["DEMOCLUB-SAMPLE-002", "Asociación Demo", "Demo Club", "Latin America", "H", "active"]]
+        self.assertEqual(rename_club.late_rows(rows, 4, "asoc demo", "Sunrise Club"), [5])
+        self.assertEqual(rename_club.late_rows([], 0, "asoc demo", "Sunrise Club"), [])
+
+    def test_invisible_characters_are_normalize_gs_own(self):
+        with open(os.path.join(REPO, "appsscript", "Normalize.gs"), encoding="utf-8") as f:
+            src = f.read()
+        gs_class = re.search(r"const INVISIBLE = /\[(.*?)\]/g;", src).group(1)
+        self.assertEqual({int(h, 16) for h in re.findall(r"\\u([0-9A-Fa-f]{4})", gs_class)},
+                         {ord(c) for c in rename_club.INVISIBLE.pattern.strip("[]")})
+
+    # --- main() on an in-memory sheet (no network, fictional rows) ---------------
+    MOVE = ["--partner", "asoc demo", "--club", "Sunrise Club",
+            "--new-partner", "asociacio\u0301n demo"]          # NFD on purpose
+
+    def move_sheet(self, before_read=None):
+        return FakeSheet({
+            "Roster": self.move_rows(),
+            "ClubRegistry": [["club_code", "partner", "club", "created"],
+                             ["SUNRISEC", "asoc demo", "Sunrise Club", "2026-08-26"],
+                             ["DEMOCLUB", "Asociación Demo", "Demo Club", "2026-08-26"]],
+            "SF Pending": [["added", "partner", "club", "region"]],
+            "Partners": self.PARTNERS,
+            "Audit": [["when", "action", "detail"]],
+        }, before_read)
+
+    def run_main(self, argv, sheet, client=None, key=None):
+        import contextlib
+        import io
+        import tempfile
+        from unittest import mock
+        out, env = io.StringIO(), {"JOTFORM_API_KEY": key} if key else {}
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(rename_club, "OUT", d), \
+                mock.patch.object(rename_club.sc, "service", lambda: sheet), \
+                mock.patch.object(rename_club.sc, "read_tab", sheet.read_tab), \
+                mock.patch.object(rename_club.sc, "append_rows", sheet.append_rows), \
+                mock.patch.object(rename_club.sc, "spreadsheet_id", lambda: "SHEET"), \
+                mock.patch.object(rename_club.sc, "sa_email", lambda: "robot"), \
+                mock.patch.object(rename_club, "Client", lambda api_key, apply=False: client), \
+                mock.patch.dict(os.environ, env), \
+                mock.patch.object(sys, "argv", ["rename_club.py"] + argv), \
+                contextlib.redirect_stdout(out):
+            try:
+                rename_club.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def test_move_dry_run_writes_nothing_and_says_what_it_would_do(self):
+        sheet = self.move_sheet()
+        code, out = self.run_main(self.MOVE + ["--sheet-only"], sheet)
+        self.assertEqual(code, 0, out)
+        self.assertIn("partner 'asoc demo' -> 'Asociación Demo'", out)
+        self.assertIn("rows 2-3", out)                      # both statuses, the invisible char too
+        self.assertIn("('asoc demo' blanked, note added)", out)
+        self.assertIn("forms          not checked (--sheet-only)", out)
+        self.assertIn("DRY RUN", out)
+        self.assertEqual(sheet.batches, [])
+
+    def test_move_apply_moves_every_row_and_retires_the_typo(self):
+        sheet = self.move_sheet()
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(sheet.batches), 1)
+        roster, reg, partners = sheet.tabs["Roster"], sheet.tabs["ClubRegistry"], sheet.tabs["Partners"]
+        self.assertEqual([r[1] for r in roster[1:3]], ["Asociación Demo"] * 2)
+        self.assertEqual([r[4] for r in roster[1:]], ["A", "B", "C"])          # nothing else touched
+        self.assertEqual(reg[1][:3], ["SUNRISEC", "Asociación Demo", "Sunrise Club"])
+        self.assertEqual(partners[2][:2], ["", "Latin America"])
+        self.assertTrue(partners[2][2].startswith(
+            "was 'asoc demo': its club 'Sunrise Club' moved to 'Asociación Demo' on "), partners[2])
+        self.assertTrue(partners[2][2].endswith("; earlier note: derived"))
+        self.assertEqual(partners[1][0], "Asociación Demo")
+        audit = sheet.tabs["Audit"][-1]
+        self.assertEqual(audit[1], "moveClub")
+        self.assertIn("2 Roster rows, ClubRegistry SUNRISEC kept", audit[2])
+        self.assertIn("GLOW -> Google Forms -> Update form dropdowns", out)
+
+    def test_move_refuses_a_partner_gated_rule_and_sheet_only_apply(self):
+        sheet = self.move_sheet()
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(gated=True), key="test")
+        self.assertIn("typed Partner", str(code))
+        self.assertEqual(sheet.batches, [])
+        code, _ = self.run_main(self.MOVE + ["--sheet-only", "--apply"], sheet)
+        self.assertIn("drop --sheet-only", str(code))
+        self.assertEqual(sheet.batches, [])
+
+    def test_move_stops_when_the_club_grows_before_the_write(self):
+        def add_row(sheet, tab, n):
+            if tab == "Roster" and n == 2:            # the re-read just before the write
+                sheet.tabs["Roster"].append(["SUNRISEC-SAMPLE-003", "asoc demo", "Sunrise Club",
+                                             "Latin America", "G", "active"])
+        sheet = self.move_sheet(add_row)
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
+        self.assertIn("nothing written", str(code))
+        self.assertEqual(sheet.batches, [])
+
+    def test_move_writes_a_row_that_arrives_during_the_write(self):
+        def add_row(sheet, tab, n):
+            if tab == "Roster" and n == 3:            # the verify re-read, after the batch
+                sheet.tabs["Roster"].append(["SUNRISEC-SAMPLE-003", "asoc demo", "Sunrise Club",
+                                             "Latin America", "G", "active"])
+        sheet = self.move_sheet(add_row)
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(sheet.batches), 2)
+        self.assertEqual({r[1] for r in sheet.tabs["Roster"][1:] if r[2] == "Sunrise Club"},
+                         {"Asociación Demo"})
+        self.assertIn("Roster: 1 late row(s) written and verified", out)
+        self.assertIn("3 Roster rows", sheet.tabs["Audit"][-1][2])
+
+    def test_move_stops_for_a_row_edited_in_or_another_club_under_the_typo(self):
+        def edit_in(sheet, tab, n):
+            if tab == "Roster" and n == 2:
+                sheet.tabs["Roster"][-1][2] = "Sunrise Club"         # 'Moon Club' becomes the club
+        sheet = self.move_sheet(edit_in)
+        sheet.tabs["Roster"].append(["DEMOCLUB-SAMPLE-009", "asoc demo", "Moon Club", "Latin America", "G", "active"])
+        code, _ = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
+        self.assertIn("row 5 changed since the plan was read", str(code))
+        self.assertEqual(sheet.batches, [])
+
+        def enroll(sheet, tab, n):
+            if tab == "Roster" and n == 2:                           # the typo is not retired now
+                sheet.tabs["Roster"].append(["DEMOCLUB-SAMPLE-009", "asoc demo", "Moon Club",
+                                             "Latin America", "G", "active"])
+        sheet = self.move_sheet(enroll)
+        code, _ = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
+        self.assertIn("row must stay - nothing written", str(code))
+        self.assertEqual(sheet.batches, [])
+
+    def test_move_ignores_handler_edits_during_the_write(self):
+        def handlers(sheet, tab, n):
+            if n == 3 and tab == "Roster":                          # setRowsStatus_ on a moved girl
+                sheet.tabs["Roster"][1][5] = "inactive"
+            if n == 3 and tab == "Partners":                        # seedPartners_ on another partner
+                sheet.tabs["Partners"][3] = ["Demo Partner", "Asia", "region chosen on the form"]
+        sheet = self.move_sheet(handlers)
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sheet.tabs["Audit"][-1][1], "moveClub")
 
 
 class SwitcherFlags(unittest.TestCase):

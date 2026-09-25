@@ -116,6 +116,82 @@ the sheet, **GLOW → Google Forms → Update form dropdowns from the Roster** s
 the Modification form offers the new name (it also refreshes on the next
 submission). Attendance already submitted under the old name keeps it.
 
+## Moving a club to another partner (a mistyped partner)
+
+The old enrollment form took the partner's name as free text, so a club can
+sit under a misspelled partner of its own (2026-09-24: Club Glow Traslasierra
+under `ion bu` instead of Fundación Kaleidos,
+[plans/2026-09-24-move-club-partner.md](plans/2026-09-24-move-club-partner.md)).
+The attendance form does not notice, because it keys a club by its label. The
+Club Roster Form, though, lists the club in the typo's own section, so the
+partner cannot find it to add or remove girls. Move it in place:
+
+```bash
+python3 tools/rename_club.py --partner "<typo>" --club "<club>" --new-partner "<partner>"           # dry run
+python3 tools/rename_club.py --partner "<typo>" --club "<club>" --new-partner "<partner>" --apply
+```
+
+The dry run can take `--sheet-only`; the `--apply` cannot, because it first
+reads the region's form and the template (`JOTFORM_API_KEY`) to make sure no
+rule shows the club only for a typed Partner.
+
+Then, in the sheet, **straight away**: **GLOW → Google Forms → Update form
+dropdowns from the Roster**. A direct sheet write triggers nothing. Until
+the refresh, a change sent through the typo's section is skipped as "club not
+on file": it is never retried ("Process any missed form responses" treats it
+as done), and the mentor gets no confirmation. So afterwards, look in the
+ReviewQueue for "Roster change for a club not on file" under the typo, and
+ask the partner to send any such change again. Preview the form (never submit
+a test): Existing club → the partner should list the club. Then export the
+Roster; `tools/auto_sync.py --region "<region>"` (dry run) should say
+`in-sync`, and `form_status.py` should say `CLEAN`. A move without `--new`
+writes nothing to Jotform, so a `CREATE` for the club means stop. Salesforce
+is outside the tools: check that the club's Account is not filed under the
+typo.
+
+What the tool does and guards:
+
+- It changes the partner cell of every Roster row of the club (any status),
+  its one ClubRegistry row (the code, and so the girls' ids, stay) and its SF
+  Pending rows, all in one batch. Roster and ClubRegistry must never disagree,
+  because `Ids.gs` looks a code up by partner + club: a mismatch mints a
+  second code on the next submission. A part-moved club looks like two
+  same-named clubs to the sync, which then Partner-gates both roster questions.
+  So never do this by hand with Find & Replace, and never sort the Roster
+  (the attendance forms list each club's girls in Roster row order, and this
+  tool and the form handlers address cells by row number).
+- Just before it writes, it re-reads the tabs and stops, with nothing
+  written, if the club gained a row or a planned row changed (a form
+  submission in the meantime); run it again. Rows of the club that arrive
+  during the write are moved too, in a second verified batch.
+- It writes the partner exactly as the **Partners tab** spells it. `key_`
+  folds neither accents nor Unicode form, so `Fundacion` would be a third
+  partner. It refuses a target that is missing from the tab (and suggests the
+  accented spelling), one in another region, a club whose name another
+  partner's club shares, and a club whose show rule already tests the
+  Partner box.
+- When nothing else names the typo, it blanks the typo's Partners row and
+  notes why, which takes the typo out of both partner lists on the Club Roster
+  Form. No row is deleted; `--keep-old-partner` leaves it. The typo's section
+  stays on the Google Form, unreachable. Leave it; if anyone removes it, they
+  must remove the page break **and** its `Club (<typo>)` list together.
+- Rollback: put the typo back into its Partners row (from
+  `data/rename_club/<stamp>/Partners.csv`), run the tool the other way
+  (`--partner "<partner>" --club "<club>" --new-partner "<typo>"`), and
+  refresh the dropdowns.
+
+While a club is missing from its partner's list, tell the partner **not** to
+use "Enroll a NEW club": the Existing-club page's help text ("Not listed? Your
+organization has no enrolled clubs yet — go back and choose …") points there,
+and it would
+enroll the club a second time with new ids and gate its roster behind the
+Partner box. Until the move, they can reach the club through Existing club →
+the typo's name.
+
+The raw Enrollment Responses keep the typo (the tab is append-only), so a
+rebuild from them brings it back — see the warning under "Roster rebuild and
+upload".
+
 ## Automatic sync
 
 **Path:** a roster change in the sheet (New Club / Roster Modification form,
@@ -315,6 +391,14 @@ GLOW menu item and accept the prompt, then **Process any missed form
 responses**. Rollback is a push of the previous commit's `appsscript/`.
 
 ## Roster rebuild and upload (offline path)
+
+**Not after launch.** Since 2026-09-01 the Roster has moved on from the raw
+enrollment responses. A rebuild from them, whether this offline path or
+**GLOW → Rebuild roster from enrollment responses**, reactivates every girl
+removed through the Club Roster Form whose name is still on her club's
+original enrollment row (`planClub_`). It also re-creates any enrolled club
+that was renamed or moved to another partner, under its old name or partner
+and with new ids. Change single clubs with the tools above instead.
 
 Used when the Roster tab has to be rebuilt from the raw enrollment responses
 outside the sheet:

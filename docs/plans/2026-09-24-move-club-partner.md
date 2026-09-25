@@ -71,7 +71,24 @@ skeptic, plus a completeness critic):
   (`--keep-old-partner` skips that). Same ritual as a rename: tabs saved under
   `data/rename_club/<stamp>/`, one RAW batch, re-read and compare, one Audit
   row (`moveClub`). Cell matching strips invisible characters, as `key_` does.
-- `test/python_test.py` — `RenameClub`: move-mode helpers on fabricated tabs.
+  After the adversarial review (2026-09-25; 17 findings, 3 refuted), the tool
+  also: re-reads just before the write and stops, with nothing written, if the
+  club gained a row or a planned row changed; writes rows of the club that
+  arrive during the write in a second verified batch (the review reproduced a
+  split club from a submission in that window); refuses `--sheet-only
+  --apply` on a move, so the Partner-rule check always runs; compares only
+  the written columns on rows it did not address; treats a cell-count
+  mismatch as a note and lets the re-read decide. A second round (5
+  findings, 2 refuted, none important; privacy audit clean) added: the
+  pre-write re-read plans again (a row edited into the club, or another club
+  enrolled under the typo, which must keep its Partners row, stops the run);
+  the late rows are verified whole; the cells a form handler flips in place
+  (status, removed_date) and another Partners row's notes no longer fail the
+  verify.
+- `test/python_test.py` — `RenameClub`: move-mode helpers on fabricated tabs;
+  `main()` on an in-memory sheet (dry run, apply, Partner-gated refusal,
+  `--sheet-only --apply` refusal, a row arriving before and during the
+  write); the invisible-character class checked against `Normalize.gs`.
 - `docs/RUNBOOK.md` — "Moving a club to another partner"; the Club Roster
   Form's "Not listed? enroll a NEW club" trap; the rebuild warning.
 - `docs/ARCHITECTURE.md` — tool table. `docs/DECISIONS.md` — one row.
@@ -101,7 +118,8 @@ skeptic, plus a completeness critic):
 
 ## Risks
 - **Kaleidos enrolls the club again** through "Enroll a NEW club" (the
-  Existing-club page's help text points there when a club is missing). That
+  Existing-club page's help text, "Not listed? Your organization has no
+  enrolled clubs yet — go back and choose Enroll a NEW club", points there). That
   would duplicate the club with new ids and Partner-gate its roster. Mitigation:
   tell them now; until step 5 the club can be reached through Existing club →
   `ion bu`. Rows added that way are picked up by the tool, which counts at
