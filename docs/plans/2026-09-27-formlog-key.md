@@ -137,13 +137,21 @@ Offline: `make check` — the healthy tail is unchanged (`ALL CHECKS PASSED` ×3
   the ERROR Feedback rows, also after later +13 h and −12 h switches; a brand-new submission
   is still selected;
 - the planner: a successful row for the same sheet row under another key → `held`; a
-  never-logged Roster row older than 7 days → `old`; Feedback never `old`; Feedback before
-  Roster; the preview never contains a roster name or e-mail from the answers and caps at 15
-  lines;
+  Roster row older than 7 days, never logged **or failed**, → `old` (a failed old response
+  replays into today's roster just the same — a deliberate widening of "never logged");
+  Feedback never `old`; Feedback before Roster; the preview never contains a roster name or
+  e-mail from the answers and caps at 15 lines;
+- the RUNBOOK procedures: releasing a held row (its FormLog rows' `sheet_row` cell) runs only
+  that row; dismissing a failure by rewriting its `ERROR:` result counts as done;
+- the menu run itself, Google services stubbed in a vm: three questions then the result;
+  confirmed rows run in sheet order (an old enrollment before its later change — review
+  finding 2026-09-27); NO to everything writes one Audit row and runs nothing;
 - a source guard: the spreadsheet's time zone, never the script's.
 
-Service set unchanged: `git grep -ohE '\b(\w+App|\w+Service|Session|Utilities)\b' <base> --
-'appsscript/*.gs' | sort -u` equals the same at HEAD.
+Service set unchanged (macOS `git grep` has no `\b`/`\w`, so compare extracted trees):
+`git archive <base> appsscript | tar -x -C <tmp>`, then
+`grep -ohE '\b(\w+App|\w+Service|Session|Utilities)\b' <tmp>/appsscript/*.gs | sort -u`
+equals the same over `appsscript/*.gs`, is not empty, and `appsscript.json` is unchanged.
 
 Live (Ryan's go):
 1. `python3 tools/sheets_client.py tabs` — note the FormLog and response-tab counts.
@@ -151,8 +159,10 @@ Live (Ryan's go):
 3. GLOW → Google Forms → Process any missed form responses → the Feedback preview lists
    exactly rows 2 and 3 (`retry after ERROR: STAFF_NOTIFY_EMAIL …`); the Club Roster Form has
    nothing to run, 0 held, 0 old. Answer NO → Audit `cancelled at the preview (would have run
-   Feedback!2, Feedback!3)`. (A later YES sends the two stale reports to staff — Ryan's
-   choice; or resolve ReviewQueue 21-22 by hand.)
+   Feedback!2, Feedback!3)`. Then Ryan's choice: YES sends the two stale reports to staff;
+   or, since both are moot (row 3's club was renamed on 09-14, row 2 is a session note),
+   rewrite their FormLog results to `resolved by hand by <name> <date>` (RUNBOOK step 4) and
+   tick ReviewQueue 21-22 — the next run then says "Nothing to process."
 4. The next real submission → a FormLog `ROSTER|w:…` row that is not ERROR; Executions shows
    onAnyFormSubmit Completed; `python3 tools/auto_sync.py` → every region in-sync.
 

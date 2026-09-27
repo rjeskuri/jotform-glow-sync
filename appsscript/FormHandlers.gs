@@ -121,6 +121,7 @@ function processMissedResponses() {
           ' days ago and never processed',
       'Running one now applies it to TODAY\'s roster: it can put back girls removed since ' +
       'it was sent. Run them anyway?');
+  confirmed.sort(missedOrder_);   // asked in groups, run in sheet order: a change needs its enrollment
 
   if (!confirmed.length) {
     audit_('processMissedResponses', 'cancelled at the preview (would have run ' +
@@ -142,7 +143,8 @@ function processMissedResponses() {
   for (let i = 0; i < confirmed.length; i++) {
     if (Date.now() - started > MISSED.BUDGET_MS) break;
     const lock = LockService.getDocumentLock();
-    if (!lock.tryLock(MISSED.LOCK_WAIT_MS)) break;   // a submission is being processed
+    const wait = Math.max(0, Math.min(MISSED.LOCK_WAIT_MS, MISSED.BUDGET_MS - (Date.now() - started)));
+    if (!lock.tryLock(wait)) break;   // a submission is being processed, or out of time
     try {
       outcomes.push(runConfirmed_(confirmed[i], snap));
     } finally {
@@ -278,6 +280,10 @@ function isNewClubResponse_(answers) {
 // {wall, ms} or {text}; these functions never see a Date.
 
 const RESPONSE_STAMP_FORMAT = 'yyyy-MM-dd HH:mm:ss.SSS';
+const QUARTER_HOUR_MS = 15 * 60 * 1000;          // every UTC offset is whole quarter-hours
+const MAX_ZONE_SHIFT_MS = 26 * 60 * 60 * 1000;   // UTC-12 … UTC+14
+const WALL_KEY = /^([A-Z]+)\|(w:[^|]*)\|/;       // which|w:<wall>|…
+const LEGACY_KEY = /^([A-Z]+)\|(\d+)\|([\s\S]*)$/;   // which|<ms>|partner|club (before 2026-09-27)
 
 /** True if a FormLog result means "not done: try again". */
 function isRetryResult_(result) {
@@ -292,14 +298,27 @@ function responseTail_(answers) {
 }
 
 /**
- * The FormLog key for one response: form | the Timestamp in milliseconds |
- * partner | club. The milliseconds move when the spreadsheet's time zone
- * changes, so a changed key must never be taken to mean a new response:
- * planMissedRun_ holds any row FormLog already has as processed.
+ * The FormLog key for one response: form | w:<the Timestamp cell's own text,
+ * to the millisecond, in the spreadsheet's zone> | partner | club.
+ *
+ * The cell stores wall-clock time, so its text survives a change of the
+ * spreadsheet's time zone. Its getTime() does not: it moved by 4 h when the
+ * zone changed on 2026-09-02, and keys built from it made 11 old responses
+ * look new on 2026-09-13. Keys written before this change (which|<ms>|…)
+ * still count — see responseDone_.
  */
 function responseKeyOf_(which, stamp, answers) {
-  const at = stamp.ms != null ? String(stamp.ms) : stamp.text;
+  const at = stamp.wall != null ? 'w:' + stamp.wall : stamp.text;
   return which + '|' + at + '|' + responseTail_(answers);
+}
+
+/**
+ * True if two getTime() readings can be one Timestamp cell read under two
+ * time zones: they differ by whole quarter-hours, by at most 26 h.
+ */
+function sameCellAcrossZones_(msNow, msLogged) {
+  const d = Math.abs(msNow - msLogged);
+  return d <= MAX_ZONE_SHIFT_MS && d % QUARTER_HOUR_MS === 0;
 }
 
 /** The one 'Club (<partner>)' column that was answered on the Modification form. */
@@ -313,11 +332,13 @@ function clubFromSections_(answers) {
 
 /**
  * FormLog rows [form, sheet_row, response_key, result] (columns B-E), indexed:
- * done = keys that succeeded; okRows = 'form|sheet_row' that succeeded under
- * any key; errorsByKey / errorsByRow = the last failure text.
+ * done = keys that succeeded; stamps = 'which|w:<wall>' that succeeded;
+ * legacy = 'which|partner|club' → the milliseconds of old keys that
+ * succeeded; okRows = 'form|sheet_row' that succeeded under any key;
+ * errorsByKey / errorsByRow = the last failure text.
  */
 function indexFormLog_(rows) {
-  const index = { done: {}, okRows: {}, errorsByKey: {}, errorsByRow: {} };
+  const index = { done: {}, stamps: {}, legacy: {}, okRows: {}, errorsByKey: {}, errorsByRow: {} };
   rows.forEach(function (r) {
     const key = String(r[2] == null ? '' : r[2]);
     if (!key) return;
@@ -328,13 +349,30 @@ function indexFormLog_(rows) {
     }
     index.done[key] = true;
     index.okRows[rowKey] = true;
+    let m = key.match(WALL_KEY);
+    if (m) {
+      index.stamps[m[1] + '|' + m[2]] = true;
+    } else if ((m = key.match(LEGACY_KEY))) {
+      const tail = m[1] + '|' + m[3];
+      (index.legacy[tail] = index.legacy[tail] || []).push(Number(m[2]));
+    }
   });
   return index;
 }
 
-/** True if FormLog records this response as processed (a failure does not count). */
+/**
+ * True if FormLog records this response as processed (a failure does not
+ * count): a key with the same form and Timestamp text — the stamp alone, so
+ * editing a partner or club cell later cannot make it look new — or a key
+ * from before 2026-09-27 with the same form, partner and club whose
+ * milliseconds are this cell's under some other time zone.
+ */
 function responseDone_(which, stamp, answers, index) {
-  return !!index.done[responseKeyOf_(which, stamp, answers)];
+  if (stamp.wall == null) return !!index.done[responseKeyOf_(which, stamp, answers)];
+  if (index.stamps[which + '|w:' + stamp.wall]) return true;
+  return (index.legacy[which + '|' + responseTail_(answers)] || []).some(function (ms) {
+    return sameCellAcrossZones_(stamp.ms, ms);
+  });
 }
 
 /**
@@ -368,13 +406,15 @@ function planMissedRun_(responses, index, today, oldAfterDays) {
       plan.run.push(item);
     }
   });
-  const order = function (a, b) {
-    return (a.which === b.which ? 0 : a.which === 'FEEDBACK' ? -1 : 1) || a.row - b.row;
-  };
-  plan.run.sort(order);
-  plan.old.sort(order);
-  plan.held.sort(order);
+  plan.run.sort(missedOrder_);
+  plan.old.sort(missedOrder_);
+  plan.held.sort(missedOrder_);
   return plan;
+}
+
+/** Problem reports first, then by sheet row (a roster change must run after its enrollment). */
+function missedOrder_(a, b) {
+  return (a.which === b.which ? 0 : a.which === 'FEEDBACK' ? -1 : 1) || a.row - b.row;
 }
 
 /**

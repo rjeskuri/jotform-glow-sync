@@ -53,4 +53,6 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 11. Node 18 + clasp 2.4.2 are pinned (clasp 3 needs Node 20). A new Google service in a `.gs` file
     adds an OAuth scope, and until the owner re-authorizes, the form-submit trigger FAILS HARD
     (submissions unprocessed) — push at a quiet moment, authorize immediately, then run
-    "Process any missed form responses" (docs/RUNBOOK.md, "Apps Script deploy").
+    "Process any missed form responses" and read its preview: only what arrived since the push,
+    plus earlier `retry after ERROR` rows (docs/RUNBOOK.md, "Missed form responses"). Never roll
+    `appsscript/` back before `7a175c4`.

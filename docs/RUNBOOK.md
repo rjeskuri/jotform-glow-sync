@@ -244,8 +244,9 @@ a `syncRequested … → HTTP 204` row every time the sheet sends the event.
    form-submit trigger fails hard** — submissions land in the response tabs
    but are NOT processed (no Roster/FormLog/Audit rows; only trigger-failure
    e-mails show it). After authorizing, run **GLOW → Google Forms → Process
-   any missed form responses** to catch anything that arrived in between,
-   then **Request Jotform sync now** to test the notification.
+   any missed form responses** to catch anything that arrived in between —
+   read its preview first ("Missed form responses") — then **Request
+   Jotform sync now** to test the notification.
 4. Watch the Actions run (dry run) and the SyncLog row; after a clean day set
    `AUTO_SYNC_APPLY=1`.
 
@@ -375,6 +376,61 @@ dictionary — the tools always GET, merge, then POST. A new English string
 must also be written to `base` and `en` or its translations never apply
 (details: `.claude/skills/jotform-api/SKILL.md`).
 
+## Missed form responses
+
+**GLOW → Google Forms → Process any missed form responses** runs the Club
+Roster Form responses and problem reports that were never processed (a
+trigger failed, e.g. between a scope-adding push and the re-authorization)
+or that failed (FormLog `ERROR: …`). It changes nothing until you confirm:
+
+1. One dialog per group lists what it would run — problem reports not yet
+   sent to staff, then Club Roster Form responses not yet processed. Each
+   line: sheet row · when it was sent · new club / roster change / problem
+   report · the club (partner), or the form a report is about · the last
+   error, for a retry. YES runs that group; NO skips it.
+2. Club Roster Form responses **sent more than 7 days ago** get a dialog of
+   their own. Answer NO unless you know why that response never ran: a
+   handler applies a response to *today's* roster, so an old one can put
+   back girls removed since it was sent — which is what the 2026-09-13 run
+   did to Radiant Girls.
+3. **Held** rows are listed and never run: FormLog already has that form +
+   sheet row as processed, under a key that no longer matches the row.
+   Something changed the row or its key — rows sorted or deleted in a
+   response tab, a question title renamed (`Config.gs` `Q`), a Timestamp
+   cell edited. Find out what first. To run one deliberately: in FormLog,
+   find **every** row with that form and `sheet_row` whose `result` does not
+   start with `ERROR:` (after a sort they record *another* response) and
+   change only their `sheet_row` cell, e.g. `released 5 by <name> <date>`.
+   Leave `response_key` and `result` alone, so what they record stays
+   processed. The next run offers the held row as new; check the preview
+   lists only that row before answering YES.
+4. A failure you have **dealt with by hand** (the report was read, the
+   change was entered another way) is offered again on every run until
+   FormLog says otherwise: change the `result` of its FormLog row from
+   `ERROR: …` to `resolved by hand by <name> <date>` — any result that does
+   not start with `ERROR:` counts as done.
+
+The run takes the document lock one row at a time (form submissions keep
+flowing) and starts no row after 4 minutes (Apps Script stops any run at 6);
+if it says rows were not started, run it again. The Audit tab records every
+use: `cancelled at the preview (would have run …)`, `started: …`,
+`finished: …; N left`. Problem reports first, then Club Roster Form
+responses in row order.
+
+**Never sort the response tabs** (Roster Form Responses, Feedback) — use a
+filter view. FormLog knows a response by its form, the text of its Timestamp
+cell to the millisecond, and its partner | club. Keys written before
+2026-09-27 used the Timestamp's milliseconds, which move when the
+spreadsheet's time zone changes (File → Settings) — the cause of the
+2026-09-13 replay; they are still recognised under any zone
+([plans/2026-09-27-formlog-key.md](plans/2026-09-27-formlog-key.md)).
+
+**Rolling back `appsscript/`** to a commit before `7a175c4` brings back the
+old menu item, which cannot read the new keys and would re-run everything
+processed since the deploy, without a preview. Roll back no further than
+`7a175c4` (`git checkout 7a175c4 -- appsscript && npm run clasp:push`); it
+shows rows logged under the new keys as held.
+
 ## Apps Script deploy
 
 ```bash
@@ -388,7 +444,10 @@ MailApp…) grows the project's OAuth scopes, and until the trigger owner
 re-authorizes interactively, the installable triggers **fail hard** — form
 submissions go unprocessed. So: push at a quiet moment, immediately run a
 GLOW menu item and accept the prompt, then **Process any missed form
-responses**. Rollback is a push of the previous commit's `appsscript/`.
+responses** and read its preview: it should list only responses that
+arrived since the push, plus any earlier failure shown as `retry after
+ERROR` ("Missed form responses" above). Rollback is a push of the previous
+commit's `appsscript/` — never to before `7a175c4`.
 
 ## Roster rebuild and upload (offline path)
 

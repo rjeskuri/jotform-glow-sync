@@ -55,7 +55,9 @@ Reload the spreadsheet.
    re-authorize, the form-submit trigger fails hard — submissions arrive but
    are not processed.** After any push that adds a service, run a GLOW menu
    item at once, accept the prompt, then **Process any missed form
-   responses**.
+   responses** and read its preview: it should list only what arrived since
+   the push, plus any earlier failure shown as `retry after ERROR`
+   (`docs/RUNBOOK.md`, "Missed form responses").
 2. **GLOW → Rebuild roster from enrollment responses** — reads every
    enrollment response and fills the Roster tab (on the launch data: 328
    clubs and 6,210 girls, a minute or two). Before launch, re-running was
@@ -108,8 +110,10 @@ Things to know:
   (enrolled via "not in this list") gets its own club section automatically.
 - If a trigger ever fails (quota, timeout, an incomplete submission), nothing
   is lost: FormLog records `ERROR: …`, the ReviewQueue gets a line, and
-  **Process any missed form responses** retries every response that has not
-  succeeded yet.
+  **Process any missed form responses** lists every response that has not
+  succeeded yet and runs the ones you confirm (responses more than a week
+  old only after a second YES; see `docs/RUNBOOK.md`, "Missed form
+  responses").
 - Edit wording and help text in the Forms UI freely, but keep the question
   **titles** as they are — the handlers find answers by title (`Config.gs Q`).
 - Every Roster change writes an Audit row; when the sync notification is

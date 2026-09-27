@@ -19,7 +19,10 @@ const vm = require('vm');
 
 const GS_DIR = path.join(__dirname, '..', 'appsscript');
 
-/** Files with no top-level Google API calls (Roster.gs/Menu.gs/Forms.gs/FormHandlers.gs call SpreadsheetApp). */
+/**
+ * The pure-logic files (Roster.gs/Menu.gs/Forms.gs/FormHandlers.gs are mostly Google API calls;
+ * forms_logic_test.js loads FormHandlers.gs by name for its pure FormLog helpers).
+ */
 const PURE = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Dispatch.gs'];
 
 function loadGs(names, files) {
