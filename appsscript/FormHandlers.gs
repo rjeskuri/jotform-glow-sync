@@ -4,15 +4,30 @@
  * One installable trigger on the spreadsheet (installTriggers) routes every
  * form submission by the form it came from — never by tab name, so renaming
  * a tab cannot break it. Each response is processed once: FormLog records
- * what was done, and "Process any missed form responses" catches anything a
- * failed trigger left behind. A response whose handler threw is logged as
- * ERROR and is retried by that menu item (every handler is safe to re-run:
- * it re-derives what to do from the sheet's current state).
+ * what was done under a key for the response, and "Process any missed form
+ * responses" catches anything a failed trigger left behind. A response whose
+ * handler threw is logged as ERROR and can be retried from that menu item.
+ *
+ * Handlers re-derive what to do from the sheet's CURRENT state: safe to
+ * retry soon after a failure, not safe to replay weeks later — an old
+ * submission replayed today can put back girls removed since (2026-09-13).
+ * So the menu item shows what it would run and asks first, never runs a row
+ * FormLog already records as processed under another key, and asks again
+ * before running Club Roster Form responses more than a week old
+ * (docs/RUNBOOK.md, "Missed form responses").
  */
 
 const FORM_LOG_COLS = ['when', 'form', 'sheet_row', 'response_key', 'result'];
 const SF_PENDING_COLS = ['added', 'partner', 'club', 'region', 'girls', 'mentor_name',
                          'mentor_email', 'country', 'status', 'notes'];
+const RETRY_PREFIXES = ['ERROR:'];   // FormLog results that mean "not done: try again"
+const MISSED = {
+  BUDGET_MS: 240000,     // stop STARTING rows this long after the menu item began (limit: 6 min)
+  LOCK_WAIT_MS: 30000,   // per row; a form-submit trigger waits up to 120 s for the same lock
+  PAUSE_MS: 500,         // between rows, so a waiting trigger can take the lock
+  OLD_AFTER_DAYS: 7,     // older Club Roster Form responses need a second YES
+  MAX_LISTED: 15,        // rows listed per preview
+};
 
 function installTriggers() {
   const ss = SpreadsheetApp.getActive();
@@ -56,38 +71,141 @@ function formKeyForSheet_(sheet) {
   return null;
 }
 
-/** Menu: run every unprocessed (or failed) response of both forms. */
+/**
+ * Menu: run the responses that were never processed, or that failed.
+ *
+ * Reads everything first and changes nothing until confirmed: one YES/NO per
+ * group — problem reports, then Club Roster Form responses, then (asked
+ * separately, with a warning) Club Roster Form responses sent more than
+ * MISSED.OLD_AFTER_DAYS ago. A row FormLog already records as processed under
+ * a different key is never run from here ("held"; docs/RUNBOOK.md). The
+ * document lock is taken one row at a time and never while a dialog is open,
+ * so form submissions keep flowing; no row is started after MISSED.BUDGET_MS,
+ * so the run ends inside Apps Script's 6-minute limit ("N left — run again").
+ */
 function processMissedResponses() {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(120000);
-  let done = 0;
-  try {
-    ['ROSTER', 'FEEDBACK'].forEach(function (which) {
-      const id = PropertiesService.getScriptProperties().getProperty(PROP[which + '_FORM']);
-      const sheet = id && responseSheetFor_(id);
-      if (!sheet || sheet.getLastRow() < 2) return;
-      for (let row = 2; row <= sheet.getLastRow(); row++) {
-        if (processResponseRow_(which, sheet, row)) done++;
-      }
-    });
-  } finally {
-    lock.releaseLock();
+  const started = Date.now();   // dialog time counts toward the 6-minute limit
+  let ui = null;
+  try { ui = SpreadsheetApp.getUi(); } catch (err) { /* script editor: no dialogs */ }
+  if (!ui) {
+    throw new Error('Run this from the sheet (GLOW → Google Forms → Process any missed ' +
+                    'form responses): it shows what it would run and asks first.');
   }
-  SpreadsheetApp.getActive().toast(done + ' response(s) processed', 'GLOW forms', 8);
-  return done;
+  const snap = readMissedSnapshot_();
+  const plan = planMissedRun_(snap.responses, snap.index, snap.today, MISSED.OLD_AFTER_DAYS);
+  const heldText = plan.held.length ? '\n\n' + missedPreviewText_(
+      'Not run — FormLog already has these as processed under a different key ' +
+      '(docs/RUNBOOK.md, "Missed form responses"):', plan.held, MISSED.MAX_LISTED) : '';
+  const sources = function (items) {
+    return items.map(function (it) { return it.source; }).join(', ') || 'none';
+  };
+  const heldNote = plan.held.length ? '; held: ' + sources(plan.held) : '';
+  if (!plan.run.length && !plan.old.length) {
+    ui.alert('GLOW forms', 'Nothing to process.' + heldText, ui.ButtonSet.OK);
+    return 0;
+  }
+
+  const confirmed = [], declined = [];
+  const ask = function (items, title, question) {
+    if (!items.length) return;
+    const answer = ui.alert('GLOW forms', missedPreviewText_(title + ' (' + items.length + '):',
+        items, MISSED.MAX_LISTED) + '\n\n' + question, ui.ButtonSet.YES_NO);
+    Array.prototype.push.apply(answer === ui.Button.YES ? confirmed : declined, items);
+  };
+  const byForm = function (which) {
+    return plan.run.filter(function (it) { return it.which === which; });
+  };
+  ask(byForm('FEEDBACK'), 'Problem reports not yet sent to staff', 'Send them to staff now?');
+  ask(byForm('ROSTER'), 'Club Roster Form responses not yet processed', 'Process them now?');
+  ask(plan.old, 'Club Roster Form responses sent more than ' + MISSED.OLD_AFTER_DAYS +
+          ' days ago and never processed',
+      'Running one now applies it to TODAY\'s roster: it can put back girls removed since ' +
+      'it was sent. Run them anyway?');
+
+  if (!confirmed.length) {
+    audit_('processMissedResponses', 'cancelled at the preview (would have run ' +
+           sources(plan.run.concat(plan.old)) + ')' + heldNote);
+    if (heldText) ui.alert('GLOW forms', 'Nothing was run.' + heldText, ui.ButtonSet.OK);
+    return 0;
+  }
+  if (Date.now() - started > MISSED.BUDGET_MS) {
+    audit_('processMissedResponses', 'nothing run: the preview was open too long (' +
+           sources(confirmed) + ')');
+    ui.alert('GLOW forms', 'Nothing was run: the preview was open too long. Run it again.',
+             ui.ButtonSet.OK);
+    return 0;
+  }
+  audit_('processMissedResponses', 'started: ' + sources(confirmed) +
+         (declined.length ? '; declined: ' + sources(declined) : '') + heldNote);
+
+  const outcomes = [];
+  for (let i = 0; i < confirmed.length; i++) {
+    if (Date.now() - started > MISSED.BUDGET_MS) break;
+    const lock = LockService.getDocumentLock();
+    if (!lock.tryLock(MISSED.LOCK_WAIT_MS)) break;   // a submission is being processed
+    try {
+      outcomes.push(runConfirmed_(confirmed[i], snap));
+    } finally {
+      lock.releaseLock();
+    }
+    Utilities.sleep(MISSED.PAUSE_MS);
+  }
+  const left = confirmed.length - outcomes.length;
+  audit_('processMissedResponses', 'finished: ' + (outcomes.join('; ') || 'nothing') +
+         '; ' + left + ' left');
+  ui.alert('GLOW forms', outcomes.length + ' processed' +
+           (left ? ', ' + left + ' not started yet — run it again for the rest.' : '.') +
+           '\n\n' + outcomes.join('\n') + heldText, ui.ButtonSet.OK);
+  return outcomes.length;
 }
 
-/** Process one response row unless FormLog says it was already done. */
-function processResponseRow_(which, sheet, row) {
-  const width = sheet.getLastColumn();
-  const header = sheet.getRange(1, 1, 1, width).getValues()[0];
-  const values = sheet.getRange(row, 1, 1, width).getValues()[0];
-  if (!values.some(function (v) { return tidy_(v); })) return false;
-  const answers = {};
-  header.forEach(function (h, i) { answers[tidy_(h)] = values[i]; });
-  const responseKey = responseKey_(which, values[0], answers);
-  if (formLogHas_(responseKey)) return false;
+/** One confirmed row, under the lock: re-checked against the sheet and FormLog first. */
+function runConfirmed_(item, snap) {
+  const sheet = snap.sheets[item.which];
+  const r = readResponseRow_(sheet, item.row, snap.zone);
+  if (!r || responseKeyOf_(item.which, r.stamp, r.answers) !== item.key) {
+    return item.source + ' skipped (the row changed since the preview)';
+  }
+  if (responseDone_(item.which, r.stamp, r.answers, readFormLogIndex_())) {
+    return item.source + ' skipped (processed meanwhile)';
+  }
+  const result = runResponse_(item.which, sheet, item.row, r.answers, item.key);
+  return item.source + (isRetryResult_(result) ? ' failed again (see FormLog)' : ' ok');
+}
 
+/** Everything the menu item needs, read once: both response tabs and FormLog. */
+function readMissedSnapshot_() {
+  const zone = spreadsheetZone_();
+  const sheets = {}, responses = [];
+  ['FEEDBACK', 'ROSTER'].forEach(function (which) {
+    const id = PropertiesService.getScriptProperties().getProperty(PROP[which + '_FORM']);
+    const sheet = id && responseSheetFor_(id);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    sheets[which] = sheet;
+    const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+    for (let i = 1; i < values.length; i++) {
+      const r = responseFromValues_(values[0], values[i], zone);
+      if (r) {
+        responses.push({ which: which, row: i + 1, tab: sheet.getName(),
+                         stamp: r.stamp, answers: r.answers });
+      }
+    }
+  });
+  return { zone: zone, sheets: sheets, responses: responses,
+           index: readFormLogIndex_(), today: today_() };
+}
+
+/** Trigger path: process one new response unless FormLog says it was already done. */
+function processResponseRow_(which, sheet, row) {
+  const r = readResponseRow_(sheet, row, spreadsheetZone_());
+  if (!r) return false;
+  if (responseDone_(which, r.stamp, r.answers, readFormLogIndex_())) return false;
+  runResponse_(which, sheet, row, r.answers, responseKeyOf_(which, r.stamp, r.answers));
+  return true;
+}
+
+/** Run the handler for one response and record the outcome in FormLog. */
+function runResponse_(which, sheet, row, answers, responseKey) {
   const source = sheet.getName() + '!' + row;
   let result;
   try {
@@ -101,7 +219,47 @@ function processResponseRow_(which, sheet, row) {
                    '"Process any missed form responses".', dedupeKey: source }]);
   }
   formLogAdd_(which, row, responseKey, result);
-  return true;
+  return result;
+}
+
+/** One response row as the handlers see it ({answers, stamp}), or null if the row is blank. */
+function readResponseRow_(sheet, row, zone) {
+  const width = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, width).getValues()[0];
+  const values = sheet.getRange(row, 1, 1, width).getValues()[0];
+  return responseFromValues_(header, values, zone);
+}
+
+function responseFromValues_(header, values, zone) {
+  if (!values.some(function (v) { return tidy_(v); })) return null;
+  const answers = {};
+  header.forEach(function (h, i) { answers[tidy_(h)] = values[i]; });
+  return { answers: answers, stamp: responseStamp_(values[0], zone) };
+}
+
+/**
+ * The Timestamp cell as {wall, ms} — wall is its text in the SPREADSHEET's
+ * time zone (the zone the cell's Date is read in), never the script's — or
+ * {text} for anything that is not a date.
+ */
+function responseStamp_(timestamp, zone) {
+  if (timestamp instanceof Date && !isNaN(timestamp.getTime())) {
+    return { wall: Utilities.formatDate(timestamp, zone, RESPONSE_STAMP_FORMAT),
+             ms: timestamp.getTime() };
+  }
+  return { text: tidy_(timestamp) };
+}
+
+function spreadsheetZone_() {
+  return SpreadsheetApp.getActive().getSpreadsheetTimeZone();
+}
+
+/** FormLog, indexed (see indexFormLog_). */
+function readFormLogIndex_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.FORM_LOG);
+  if (!sheet || sheet.getLastRow() < 2) return indexFormLog_([]);
+  // columns B-E: form, sheet_row, response_key, result
+  return indexFormLog_(sheet.getRange(2, 2, sheet.getLastRow() - 1, 4).getValues());
 }
 
 /**
@@ -114,15 +272,34 @@ function isNewClubResponse_(answers) {
   return !!tidy_(answers[Q.CLUB]);
 }
 
-/**
- * A stable identity for one response: form + the timestamp in milliseconds
- * (not its text, which depends on the time zone) + partner + club.
- */
-function responseKey_(which, timestamp, answers) {
-  const stamp = (timestamp instanceof Date) ? String(timestamp.getTime()) : tidy_(timestamp);
+// ------------------------------------------ response identity (pure)
+// From here to formLogAdd_: plain logic, no Google services, tested offline
+// in test/forms_logic_test.js. A stamp arrives as responseStamp_ built it,
+// {wall, ms} or {text}; these functions never see a Date.
+
+const RESPONSE_STAMP_FORMAT = 'yyyy-MM-dd HH:mm:ss.SSS';
+
+/** True if a FormLog result means "not done: try again". */
+function isRetryResult_(result) {
+  const text = String(result == null ? '' : result);
+  return RETRY_PREFIXES.some(function (p) { return text.indexOf(p) === 0; });
+}
+
+/** partner|club as the key spells them; a problem report puts its form there. */
+function responseTail_(answers) {
   const partner = answers[Q.PARTNER_NEW] || answers[Q.PARTNER_MOD] || answers[Q.FB_FORM];
-  return which + '|' + stamp + '|' + tidy_(partner) +
-      '|' + tidy_(answers[Q.CLUB] || clubFromSections_(answers));
+  return tidy_(partner) + '|' + tidy_(answers[Q.CLUB] || clubFromSections_(answers));
+}
+
+/**
+ * The FormLog key for one response: form | the Timestamp in milliseconds |
+ * partner | club. The milliseconds move when the spreadsheet's time zone
+ * changes, so a changed key must never be taken to mean a new response:
+ * planMissedRun_ holds any row FormLog already has as processed.
+ */
+function responseKeyOf_(which, stamp, answers) {
+  const at = stamp.ms != null ? String(stamp.ms) : stamp.text;
+  return which + '|' + at + '|' + responseTail_(answers);
 }
 
 /** The one 'Club (<partner>)' column that was answered on the Modification form. */
@@ -134,14 +311,119 @@ function clubFromSections_(answers) {
   return club;
 }
 
-/** True if this response was processed successfully before (errors are retried). */
-function formLogHas_(responseKey) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.FORM_LOG);
-  if (!sheet || sheet.getLastRow() < 2) return false;
-  const rows = sheet.getRange(2, 4, sheet.getLastRow() - 1, 2).getValues();
-  return rows.some(function (r) {
-    return r[0] === responseKey && String(r[1]).indexOf('ERROR:') !== 0;
+/**
+ * FormLog rows [form, sheet_row, response_key, result] (columns B-E), indexed:
+ * done = keys that succeeded; okRows = 'form|sheet_row' that succeeded under
+ * any key; errorsByKey / errorsByRow = the last failure text.
+ */
+function indexFormLog_(rows) {
+  const index = { done: {}, okRows: {}, errorsByKey: {}, errorsByRow: {} };
+  rows.forEach(function (r) {
+    const key = String(r[2] == null ? '' : r[2]);
+    if (!key) return;
+    const rowKey = tidy_(r[0]) + '|' + tidy_(r[1]);
+    if (isRetryResult_(r[3])) {
+      index.errorsByKey[key] = index.errorsByRow[rowKey] = String(r[3]);
+      return;
+    }
+    index.done[key] = true;
+    index.okRows[rowKey] = true;
   });
+  return index;
+}
+
+/** True if FormLog records this response as processed (a failure does not count). */
+function responseDone_(which, stamp, answers, index) {
+  return !!index.done[responseKeyOf_(which, stamp, answers)];
+}
+
+/**
+ * What the menu item would do. responses: [{which, row, tab, stamp, answers}];
+ * today: 'yyyy-MM-dd' in the spreadsheet's zone. Every response not done is
+ *   held — FormLog has its form + sheet row as processed under another key
+ *          (something re-keyed it, as the 2026-09-02 time-zone change did);
+ *          never run from the menu;
+ *   old  — a Club Roster Form response sent more than oldAfterDays ago (or
+ *          with no readable date): needs its own YES;
+ *   run  — the rest, status 'retry' (only failures logged) or 'new'.
+ * Problem reports come first, then by sheet row.
+ */
+function planMissedRun_(responses, index, today, oldAfterDays) {
+  const plan = { run: [], old: [], held: [] };
+  responses.forEach(function (r) {
+    if (responseDone_(r.which, r.stamp, r.answers, index)) return;
+    const item = describeResponse_(r);
+    const rowKey = r.which + '|' + r.row;
+    item.key = responseKeyOf_(r.which, r.stamp, r.answers);
+    if (index.okRows[rowKey]) {
+      item.status = 'held';
+      plan.held.push(item);
+      return;
+    }
+    item.lastError = index.errorsByKey[item.key] || index.errorsByRow[rowKey] || '';
+    item.status = item.lastError ? 'retry' : 'new';
+    if (r.which === 'ROSTER' && !(daysBetween_(item.day, today) <= oldAfterDays)) {
+      plan.old.push(item);
+    } else {
+      plan.run.push(item);
+    }
+  });
+  const order = function (a, b) {
+    return (a.which === b.which ? 0 : a.which === 'FEEDBACK' ? -1 : 1) || a.row - b.row;
+  };
+  plan.run.sort(order);
+  plan.old.sort(order);
+  plan.held.sort(order);
+  return plan;
+}
+
+/**
+ * What a preview may show about a response: when, which kind, and the club
+ * (partner) — or, for a problem report, only the form it names. Never the
+ * names in a roster or the free text of a report.
+ */
+function describeResponse_(r) {
+  const a = r.answers;
+  let kind, what;
+  if (r.which === 'FEEDBACK') {
+    kind = 'problem report';
+    what = 'about the ' + (tidy_(a[Q.FB_FORM]) || '?');
+  } else {
+    const isNew = isNewClubResponse_(a);
+    let partner = tidy_(isNew ? a[Q.PARTNER_NEW] : a[Q.PARTNER_MOD]);
+    if (isNew && (!partner || partner === OTHER_PARTNER)) partner = tidy_(a[Q.NEW_PARTNER]);
+    kind = isNew ? 'new club' : 'roster change';
+    what = (tidy_(isNew ? a[Q.CLUB] : clubFromSections_(a)) || '?') + ' (' + (partner || '?') + ')';
+  }
+  const wall = r.stamp.wall || '';
+  return { which: r.which, row: r.row, source: r.tab + '!' + r.row, kind: kind, what: what,
+           day: wall.slice(0, 10), sent: wall ? wall.slice(0, 16) : (r.stamp.text || '?') };
+}
+
+/** A preview block: title, one line per row (at most maxListed), then "… and N more". */
+function missedPreviewText_(title, items, maxListed) {
+  const lines = [title];
+  items.slice(0, maxListed).forEach(function (it) {
+    lines.push('• row ' + it.row + ' · sent ' + it.sent + ' · ' + it.kind + ' · ' + it.what +
+               (it.lastError ? ' · retry after ' + previewError_(it.lastError) : ''));
+  });
+  if (items.length > maxListed) lines.push('… and ' + (items.length - maxListed) + ' more');
+  return lines.join('\n');
+}
+
+/** A failure text short enough for a dialog, with e-mail addresses blanked. */
+function previewError_(text) {
+  const t = tidy_(text).replace(/\S+@\S+/g, '<e-mail>');
+  return t.length > 80 ? t.slice(0, 79) + '…' : t;
+}
+
+/** Whole days from one 'yyyy-MM-dd' to another; NaN if either is not a date. */
+function daysBetween_(fromDay, toDay) {
+  const utc = function (d) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ''));
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
+  };
+  return (utc(toDay) - utc(fromDay)) / 86400000;
 }
 
 function formLogAdd_(which, row, responseKey, result) {
