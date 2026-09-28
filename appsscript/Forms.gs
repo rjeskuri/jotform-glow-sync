@@ -20,7 +20,9 @@
  *
  * The forms are owned by whoever runs this, live in their Drive, and can be
  * edited in the normal Forms UI — but question TITLES must stay as in
- * Config.gs (Q), because the handlers find answers by title.
+ * Config.gs (Q), because the handlers find answers by title. Descriptions and
+ * help texts live in WORDING; `migrateFormWording` (one-time, previews first)
+ * brings forms built before 2026-09-28 up to it.
  *
  * NAVIGATION — read before touching setGoToPage. In FormApp a page break's
  * setGoToPage(x) sets where the form goes after completing the page BEFORE
@@ -50,6 +52,52 @@ const REGION_HELP = 'This decides which regional attendance form your clubs ' +
     'will use. Not sure which region fits? Choose the closest one — our team ' +
     'can correct it later.';
 
+/**
+ * The forms' wording (backlog 43, 2026-09-28). The generators below and the
+ * one-time menu migration (migrateFormWording) both use it, so a fresh build
+ * and a migrated live form say the same thing. *_2026_08 is what the
+ * generator wrote before: the migration replaces a text only when it is one
+ * the generator wrote, never one edited by hand. Question TITLES are not
+ * wording: they are Config.gs Q, and the handlers read answers by them.
+ * (Literals only: a top-level constant must not read another file's.)
+ */
+const WORDING = {
+  FEEDBACK_INTRO: 'Did a form do something odd, refuse to submit, show the wrong club, or ' +
+      'take forever to load? Tell us here — it takes a minute and helps us fix ' +
+      'it quickly. Please do not include girls\' names unless the problem is ' +
+      'about a specific name.',
+  ROSTER_INTRO: 'Enroll a new club, or add and remove girls in a club that is already ' +
+      'enrolled. Changes reach the attendance form within the hour. Removed ' +
+      'girls stop appearing on the attendance form; their history is kept.',
+  CLUB_HELP: 'The club\'s own name — not the mentor\'s name or a girl\'s name. Mentors ' +
+      'will choose it from a list on the attendance form, spelled exactly as you ' +
+      'type it here.',
+  CLUB_HELP_2026_08: 'The name mentors will type on the attendance form.',
+  REMOVE_HELP: 'Leave empty if nobody is leaving. Copy each name exactly as it is spelled ' +
+      'on the club\'s attendance form (capitals do not matter). A name spelled ' +
+      'differently is not removed — our team will check it with you.',
+  REMOVE_HELP_2026_08: 'Leave empty if nobody is leaving. Spell names as they were ' +
+      'enrolled; we match ignoring capitals.',
+};
+
+/** The problem form's description: roster changes belong on the Club Roster Form. */
+function feedbackDescription_(rosterUrl) {
+  return WORDING.FEEDBACK_INTRO + '\n\nTo add a girl or remove one who left, please use ' +
+      'the Club Roster Form instead and choose "' + Q.ACTION_MOD + '" — the attendance ' +
+      'form updates within the hour: ' + rosterUrl;
+}
+
+/** The Club Roster Form's description; its last line sends only real problems to the problem form. */
+function rosterDescription_(feedbackUrl) {
+  return WORDING.ROSTER_INTRO + '\n\nSomething not working? To add or remove girls, choose "' +
+      Q.ACTION_MOD + '" below; for anything else, tell us here: ' + feedbackUrl;
+}
+
+/** What rosterDescription_ said before 2026-09-28 (the migration recognises it). */
+function rosterDescription2026_08_(feedbackUrl) {
+  return WORDING.ROSTER_INTRO + '\n\nSomething not working? ' + feedbackUrl;
+}
+
 function createGlowForms() {
   const ss = SpreadsheetApp.getActive();
   const ui = SpreadsheetApp.getUi();
@@ -57,6 +105,11 @@ function createGlowForms() {
 
   const feedback = existingForm_(PROP.FEEDBACK_FORM) || createFeedbackForm_(ss, made);
   const roster = existingForm_(PROP.ROSTER_FORM) || createRosterForm_(ss, feedback, made);
+  // each description links to the other form: the problem form's gets its
+  // link once the Club Roster Form exists (existing forms: migrateFormWording)
+  if (made.indexOf('feedback') !== -1) {
+    feedback.setDescription(feedbackDescription_(roster.getPublishedUrl()));
+  }
 
   syncFormChoices();
   installTriggers();
@@ -88,11 +141,8 @@ function commonSettings_(form, description, confirmation) {
 // ------------------------------------------------------------ Feedback
 function createFeedbackForm_(ss, made) {
   const form = FormApp.create(FORM_TITLES.FEEDBACK);
-  commonSettings_(form,
-      'Did a form do something odd, refuse to submit, show the wrong club, or ' +
-      'take forever to load? Tell us here — it takes a minute and helps us fix ' +
-      'it quickly. Please do not include girls\' names unless the problem is ' +
-      'about a specific name.',
+  // createGlowForms adds the Club Roster Form paragraph once that form exists
+  commonSettings_(form, WORDING.FEEDBACK_INTRO,
       'Thank you — we have received your report and will look into it.');
   const forms = ['Africa Attendance Form', 'Asia Attendance Form',
                  'Latin America Attendance Form', 'U.S Attendance Form',
@@ -105,8 +155,7 @@ function createFeedbackForm_(ss, made) {
   form.addTextItem().setTitle(Q.FB_PARTNER);
   form.addTextItem().setTitle(Q.FB_CLUB);
   form.addTextItem().setTitle(Q.FB_DEVICE);
-  form.addTextItem().setTitle(Q.FB_EMAIL)
-      .setValidation(FormApp.createTextValidation().requireTextIsEmail().build());
+  addReplyEmailItem_(form);
   linkFormToSheet_(form, ss, TAB.FEEDBACK);
   PropertiesService.getScriptProperties().setProperty(PROP.FEEDBACK_FORM, form.getId());
   made.push('feedback');
@@ -116,11 +165,7 @@ function createFeedbackForm_(ss, made) {
 // ------------------------------------------------------ Club Roster Form
 function createRosterForm_(ss, feedback, made) {
   const form = FormApp.create(FORM_TITLES.ROSTER);
-  commonSettings_(form,
-      'Enroll a new club, or add and remove girls in a club that is already ' +
-      'enrolled. Changes reach the attendance form within the hour. Removed ' +
-      'girls stop appearing on the attendance form; their history is kept.' +
-      '\n\nSomething not working? ' + feedback.getPublishedUrl(),
+  commonSettings_(form, rosterDescription_(feedback.getPublishedUrl()),
       'Thank you — received. It will reach the attendance form within the hour. ' +
       'If we have a question about any name we will contact the mentor by email ' +
       'rather than guess.');
@@ -140,8 +185,7 @@ function createRosterForm_(ss, feedback, made) {
       .setChoiceValues(REGIONS).setHelpText(REGION_HELP);
 
   form.addPageBreakItem().setTitle(CLUB_PAGE_TITLE);
-  form.addTextItem().setTitle(Q.CLUB).setRequired(true)
-      .setHelpText('The name mentors will type on the attendance form.');
+  form.addTextItem().setTitle(Q.CLUB).setRequired(true).setHelpText(WORDING.CLUB_HELP);
   form.addTextItem().setTitle(Q.COUNT)
       .setValidation(FormApp.createTextValidation().requireNumber().build());
   form.addParagraphTextItem().setTitle(Q.ROSTER).setRequired(true)
@@ -168,9 +212,7 @@ function createRosterForm_(ss, feedback, made) {
   form.addParagraphTextItem().setTitle(Q.ADD)
       .setHelpText('Leave empty if nobody is joining. Girls who were on this ' +
                    'roster before and left are simply reactivated.');
-  form.addParagraphTextItem().setTitle(Q.REMOVE)
-      .setHelpText('Leave empty if nobody is leaving. Spell names as they were ' +
-                   'enrolled; we match ignoring capitals.');
+  form.addParagraphTextItem().setTitle(Q.REMOVE).setHelpText(WORDING.REMOVE_HELP);
   form.addTextItem().setTitle(Q.MENTOR_EMAIL_MOD).setRequired(true)
       .setValidation(FormApp.createTextValidation().requireTextIsEmail().build());
   form.addParagraphTextItem().setTitle(Q.NOTES);
@@ -461,6 +503,294 @@ function migrateCountryToRegionLocked_(ui) {
   audit_('migrateCountryToRegion', note);
   ui.alert('GLOW', 'Done — ' + note + '.\n\nPreview the fill-in form (do NOT submit a ' +
       'test response): ' + form.getPublishedUrl(), ui.ButtonSet.OK);
+}
+
+// ------------------------------------------- the forms' wording (backlog 43)
+/**
+ * One-shot (2026-09-28): give the two live Google Forms the WORDING above.
+ * The problem form's description sends roster changes to the Club Roster
+ * Form, and its reply-address question comes back (it was removed by hand;
+ * the handler reads it by its title, Q.FB_EMAIL). The Club Roster Form's
+ * last line and its "Club name" and REMOVE help texts change.
+ *
+ * Shows every change and asks first. Takes the document lock only after the
+ * answer (never while a dialog is open), re-reads, and applies only what it
+ * showed; re-reads again and records the outcome in Audit. Changes texts
+ * and adds one question — never a title, never deletes an item, never
+ * touches a response, a response tab or FormLog. A text edited by hand is
+ * left as is and listed with the suggested text. A second run finds nothing
+ * to change (docs/RUNBOOK.md, "Google Forms wording").
+ */
+function migrateFormWording() {
+  const started = Date.now();   // dialog time counts toward Apps Script's 6-minute limit
+  let ui = null;
+  try { ui = SpreadsheetApp.getUi(); } catch (err) { /* script editor: no dialogs */ }
+  if (!ui) {
+    throw new Error('Run this from the sheet (GLOW → Google Forms → Update the forms\' ' +
+                    'wording): it shows what it would change and asks first.');
+  }
+  const forms = { FEEDBACK: existingForm_(PROP.FEEDBACK_FORM), ROSTER: existingForm_(PROP.ROSTER_FORM) };
+  if (!forms.FEEDBACK || !forms.ROSTER) {
+    ui.alert('GLOW forms', 'The forms do not exist yet — run "Create the Google Forms"; a ' +
+             'fresh build already has this wording.', ui.ButtonSet.OK);
+    return 0;
+  }
+  const plan = planFormWording_(readFormWording_(forms.FEEDBACK, forms.ROSTER));
+  if (!plan.changes.length) {
+    ui.alert('GLOW forms', 'Nothing to change: the forms already have this wording.' +
+             (plan.skipped.length ? '\n\n' + formWordingPreviewText_(plan) : ''), ui.ButtonSet.OK);
+    return 0;
+  }
+  const answer = ui.alert('GLOW forms', formWordingPreviewText_(plan) + '\n\nMake these ' +
+                          'changes now?', ui.ButtonSet.YES_NO);
+  if (answer !== ui.Button.YES) {
+    audit_('migrateFormWording', 'cancelled at the preview (would have changed: ' +
+           wordingLabels_(plan.changes) + ')');
+    return 0;
+  }
+  if (Date.now() - started > WORDING_BUDGET_MS) {
+    audit_('migrateFormWording', 'nothing changed: the preview was open too long');
+    ui.alert('GLOW forms', 'Nothing was changed: the preview was open too long. Run it again.',
+             ui.ButtonSet.OK);
+    return 0;
+  }
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(30000)) {
+    ui.alert('GLOW forms', 'Another GLOW operation is still running — nothing was changed. ' +
+             'Try again in a minute.', ui.ButtonSet.OK);
+    return 0;
+  }
+  const done = [];
+  let message;
+  try {
+    message = migrateFormWordingLocked_(forms, plan, done);
+  } finally {
+    lock.releaseLock();
+  }
+  ui.alert('GLOW forms', message, ui.ButtonSet.OK);
+  return done.length;
+}
+
+/** Under the lock: re-read, apply exactly the previewed changes, re-read; the message for Ryan. */
+function migrateFormWordingLocked_(forms, plan, done) {
+  const again = planFormWording_(readFormWording_(forms.FEEDBACK, forms.ROSTER));
+  if (formWordingKey_(again) !== formWordingKey_(plan)) {
+    audit_('migrateFormWording', 'nothing changed: the forms changed since the preview');
+    return 'Nothing was changed: the forms changed since the preview. Run it again to see ' +
+        'the new preview.';
+  }
+  try {
+    applyFormWording_(forms, again.changes, done);
+  } catch (err) {
+    audit_('migrateFormWording', 'stopped after ' + done.length + ' of ' + again.changes.length +
+           ' change(s) (done: ' + (done.join('; ') || 'nothing') + '): ' + err.message);
+    return 'Stopped after ' + done.length + ' of ' + again.changes.length + ' change(s): ' +
+        err.message + '\n\nRun it again: it makes only the changes still missing.';
+  }
+  const after = planFormWording_(readFormWording_(forms.FEEDBACK, forms.ROSTER));
+  const verdict = after.changes.length ? 'STILL DIFFERENT: ' + wordingLabels_(after.changes)
+                                       : 'up to date';
+  audit_('migrateFormWording', 'changed: ' + done.join('; ') +
+         (plan.skipped.length ? '; left as is: ' + wordingLabels_(plan.skipped) : '') +
+         '; re-read: ' + verdict);
+  return (after.changes.length
+      ? 'Changed ' + done.length + ', but a re-read still differs: ' + wordingLabels_(after.changes) +
+        ' — check it in the Forms editor.'
+      : 'Done — ' + done.length + ' change(s); re-read: up to date.') +
+      '\n\nPreview the fill-in forms (do NOT submit a test response):\n  ' +
+      forms.ROSTER.getPublishedUrl() + '\n  ' + forms.FEEDBACK.getPublishedUrl();
+}
+
+/** What the forms say now, as planFormWording_ reads it (a plain snapshot). */
+function readFormWording_(feedback, roster) {
+  const help = function (type, title) {
+    const item = findItem_(roster, type, title);
+    return item ? item.getHelpText() : null;
+  };
+  return {
+    feedback: {
+      url: feedback.getPublishedUrl(),
+      description: feedback.getDescription(),
+      items: feedback.getItems().map(function (it) {
+        return { title: it.getTitle(), type: itemKind_(it) };
+      }),
+    },
+    roster: {
+      url: roster.getPublishedUrl(),
+      description: roster.getDescription(),
+      clubHelp: help(FormApp.ItemType.TEXT, Q.CLUB),
+      removeHelp: help(FormApp.ItemType.PARAGRAPH_TEXT, Q.REMOVE),
+    },
+  };
+}
+
+/** 'TEXT' | 'PARAGRAPH_TEXT' | the type's own name. */
+function itemKind_(item) {
+  const t = item.getType();
+  if (t == FormApp.ItemType.TEXT) return 'TEXT';
+  if (t == FormApp.ItemType.PARAGRAPH_TEXT) return 'PARAGRAPH_TEXT';
+  return String(t);
+}
+
+/** Make the planned changes; `done` collects each label as it lands (a failure part-way keeps them). */
+function applyFormWording_(forms, changes, done) {
+  changes.forEach(function (c) {
+    const form = forms[c.form];
+    if (c.what === 'description') {
+      form.setDescription(c.to);
+    } else if (c.what === 'help') {
+      const item = findItem_(form, FormApp.ItemType[c.itemType], c.title);
+      if (!item) throw new Error('the question "' + c.title + '" is not on the form');
+      item.setHelpText(c.to);
+    } else if (c.what === 'add-email') {
+      addReplyEmailItem_(form);
+    } else {
+      throw new Error('unknown change "' + c.what + '"');
+    }
+    done.push(c.label);
+  });
+}
+
+/** The problem form's optional reply-address question, placed after the device question. */
+function addReplyEmailItem_(form) {
+  const item = form.addTextItem().setTitle(Q.FB_EMAIL)
+      .setValidation(FormApp.createTextValidation().requireTextIsEmail().build());
+  const device = findItem_(form, FormApp.ItemType.TEXT, Q.FB_DEVICE);
+  if (device && item.getIndex() !== device.getIndex() + 1) {
+    form.moveItem(item.getIndex(), device.getIndex() + 1);
+  }
+  return item;
+}
+
+// From here to the end of the section: plain logic on the snapshot
+// readFormWording_ builds, no Google services; tested offline in
+// test/forms_logic_test.js.
+
+const WORDING_BUDGET_MS = 240000;   // no change is started after this (Apps Script stops at 6 min)
+const WORDING_LABELS = {            // how the preview, the alerts and Audit name each change
+  FEEDBACK_DESCRIPTION: 'Problem form: description',
+  FEEDBACK_EMAIL: 'Problem form: reply-email question',
+  ROSTER_DESCRIPTION: 'Club Roster Form: description',
+  CLUB_HELP: 'Club Roster Form: "Club name" help text',
+  REMOVE_HELP: 'Club Roster Form: REMOVE help text',
+};
+
+/**
+ * What migrateFormWording would do: {changes, skipped}. A text equal to the
+ * wanted one needs nothing. One the generator wrote — the 2026-08 wording,
+ * an empty text, or the wanted text with another form link — is changed.
+ * Anything else was edited by hand: left as is, listed with the suggested
+ * text (skipped). The reply-address question is added only when no question
+ * has its title and none looks like it under another title.
+ */
+function planFormWording_(s) {
+  const plan = { changes: [], skipped: [] };
+  wordingStep_(plan, { form: 'FEEDBACK', what: 'description', label: WORDING_LABELS.FEEDBACK_DESCRIPTION },
+               s.feedback.description, feedbackDescription_(s.roster.url), [WORDING.FEEDBACK_INTRO]);
+  replyEmailStep_(plan, s.feedback.items);
+  wordingStep_(plan, { form: 'ROSTER', what: 'description', label: WORDING_LABELS.ROSTER_DESCRIPTION },
+               s.roster.description, rosterDescription_(s.feedback.url),
+               [rosterDescription2026_08_(s.feedback.url)]);
+  helpStep_(plan, WORDING_LABELS.CLUB_HELP, 'TEXT', Q.CLUB, s.roster.clubHelp,
+            WORDING.CLUB_HELP, [WORDING.CLUB_HELP_2026_08]);
+  helpStep_(plan, WORDING_LABELS.REMOVE_HELP, 'PARAGRAPH_TEXT', Q.REMOVE, s.roster.removeHelp,
+            WORDING.REMOVE_HELP, [WORDING.REMOVE_HELP_2026_08]);
+  return plan;
+}
+
+/** A text as a reader sees it: line breaks kept, other spacing and invisible characters not. */
+function wordingText_(s) {
+  return String(s == null ? '' : s).replace(/\r\n?/g, '\n').split('\n')
+      .map(function (line) { return tidy_(line); }).join('\n').trim();
+}
+
+/** The same, with every link replaced: a moved form link does not make a text "edited by hand". */
+function wordingLoose_(s) {
+  return wordingText_(s).replace(/https?:\/\/\S+/g, '<link>');
+}
+
+function wordingStep_(plan, step, current, wanted, before) {
+  if (wordingText_(current) === wordingText_(wanted)) return;
+  const ours = before.concat(['', wanted]).some(function (t) {
+    return wordingLoose_(t) === wordingLoose_(current);
+  });
+  const entry = Object.assign({ from: current == null ? '' : String(current), to: wanted }, step);
+  if (ours) plan.changes.push(entry);
+  else plan.skipped.push(Object.assign(entry, { reason: 'edited by hand, so left as is' }));
+}
+
+function helpStep_(plan, label, itemType, title, current, wanted, before) {
+  const step = { form: 'ROSTER', what: 'help', label: label, itemType: itemType, title: title };
+  if (current == null) {
+    plan.skipped.push(Object.assign({ to: wanted, reason: 'the question "' + title +
+        '" is not on the form (is it ours?)' }, step));
+    return;
+  }
+  wordingStep_(plan, step, current, wanted, before);
+}
+
+function replyEmailStep_(plan, items) {
+  const step = { form: 'FEEDBACK', what: 'add-email', label: WORDING_LABELS.FEEDBACK_EMAIL,
+                 title: Q.FB_EMAIL };
+  const same = items.filter(function (it) { return key_(it.title) === key_(Q.FB_EMAIL); });
+  if (same.length) {
+    if (same[0].type !== 'TEXT') {
+      plan.skipped.push(Object.assign({ reason: 'a question with this title is there but is ' +
+          'not a short-answer question; check it in the Forms editor' }, step));
+    }
+    return;
+  }
+  const lookalike = items.filter(function (it) {
+    return (it.type === 'TEXT' || it.type === 'PARAGRAPH_TEXT') && /e-?mail/i.test(it.title);
+  });
+  if (lookalike.length) {
+    plan.skipped.push(Object.assign({ reason: '"' + lookalike[0].title + '" looks like it under ' +
+        'another title. Rename it to exactly "' + Q.FB_EMAIL + '" in the Forms editor (the ' +
+        'handler reads that title); nothing is added' }, step));
+    return;
+  }
+  const device = items.some(function (it) { return key_(it.title) === key_(Q.FB_DEVICE); });
+  plan.changes.push(Object.assign({ after: device ? Q.FB_DEVICE : '' }, step));
+}
+
+/** The preview (and the "left as is" list): every change as now → new. */
+function formWordingPreviewText_(plan) {
+  const quote = function (t) { return wordingText_(t) ? '"' + t + '"' : '(empty)'; };
+  const lines = [];
+  if (plan.changes.length) {
+    lines.push('Would change (' + plan.changes.length + '):');
+    plan.changes.forEach(function (c, i) {
+      lines.push('', (i + 1) + '. ' + c.label);
+      if (c.what === 'add-email') {
+        lines.push('   add the question ' + quote(c.title) + ': short answer, optional, must be ' +
+                   'an e-mail address, ' + (c.after ? 'after ' + quote(c.after) : 'at the end') + '.',
+                   '   The Feedback tab gets a new column with this title; leave the old one ' +
+                   'in place.');
+      } else {
+        lines.push('   now: ' + quote(c.from), '   new: ' + quote(c.to));
+      }
+    });
+  }
+  if (plan.skipped.length) {
+    lines.push('', 'Left as is (' + plan.skipped.length + '):');
+    plan.skipped.forEach(function (sk) {
+      lines.push('- ' + sk.label + ': ' + sk.reason + '.' +
+                 (sk.to ? '\n  Suggested text: ' + quote(sk.to) : ''));
+    });
+  }
+  lines.push('', 'Question titles, answers and the response tabs are not changed.');
+  return lines.join('\n');
+}
+
+function wordingLabels_(items) {
+  return items.map(function (c) { return c.label; }).join('; ') || 'nothing';
+}
+
+/** Two plans are the same change set (the preview vs the re-read under the lock). */
+function formWordingKey_(plan) {
+  return JSON.stringify(plan.changes.map(function (c) {
+    return [c.form, c.what, c.label, c.from || '', c.to || '', c.after || ''];
+  }));
 }
 
 /**

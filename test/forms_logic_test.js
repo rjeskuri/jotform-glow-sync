@@ -664,6 +664,356 @@ console.log('\n  guards');
         used === 'FormApp,LockService,MailApp,PropertiesService,ScriptApp,SpreadsheetApp,UrlFetchApp,Utilities', used);
 }
 
+// ------------------------------- the Google Forms' wording (backlog 43)
+console.log('\nGoogle Forms wording: the one-time migration and fresh builds (Forms.gs)');
+const fw = loadGs(['Q', 'WORDING', 'WORDING_LABELS', 'feedbackDescription_', 'rosterDescription_',
+                   'rosterDescription2026_08_', 'planFormWording_', 'formWordingPreviewText_',
+                   'formWordingKey_', 'wordingText_'],
+                  ['Config.gs', 'Normalize.gs', 'Forms.gs']);
+const WQ = fw.Q, W = fw.WORDING, WL = fw.WORDING_LABELS;
+const FB_URL = 'https://forms.example.org/problem/viewform';
+const RF_URL = 'https://forms.example.org/roster/viewform';
+// the problem form as it is live (2026-09-26): the reply-address question removed by hand
+const LIVE_FEEDBACK_ITEMS = [['LIST', WQ.FB_FORM], ['PARAGRAPH_TEXT', WQ.FB_DOING],
+                             ['PARAGRAPH_TEXT', WQ.FB_WHAT, 'What did you click or type, what did the screen show?'],
+                             ['TEXT', WQ.FB_PARTNER], ['TEXT', WQ.FB_CLUB], ['TEXT', WQ.FB_DEVICE]];
+const liveState = () => ({
+  feedback: { url: FB_URL, description: W.FEEDBACK_INTRO,
+              items: LIVE_FEEDBACK_ITEMS.map(([type, title]) => ({ type, title })) },
+  roster: { url: RF_URL, description: fw.rosterDescription2026_08_(FB_URL),
+            clubHelp: W.CLUB_HELP_2026_08, removeHelp: W.REMOVE_HELP_2026_08 },
+});
+const wantedState = () => {
+  const s = liveState();
+  s.feedback.description = fw.feedbackDescription_(RF_URL);
+  s.feedback.items.push({ type: 'TEXT', title: WQ.FB_EMAIL });
+  s.roster.description = fw.rosterDescription_(FB_URL);
+  s.roster.clubHelp = W.CLUB_HELP;
+  s.roster.removeHelp = W.REMOVE_HELP;
+  return s;
+};
+const labelsOf = items => items.map(c => c.label).join(' | ');
+
+console.log('\n  the wording');
+{
+  // what the live forms said on 2026-09-26 (saved public pages): the migration must recognise it
+  check('the 2026-08 texts are pinned as the live forms show them',
+        W.FEEDBACK_INTRO === 'Did a form do something odd, refuse to submit, show the wrong club, or take forever to load? ' +
+            'Tell us here — it takes a minute and helps us fix it quickly. Please do not include girls\' names unless ' +
+            'the problem is about a specific name.' &&
+        fw.rosterDescription2026_08_('<link>') === 'Enroll a new club, or add and remove girls in a club that is already ' +
+            'enrolled. Changes reach the attendance form within the hour. Removed girls stop appearing on the attendance ' +
+            'form; their history is kept.\n\nSomething not working? <link>' &&
+        W.CLUB_HELP_2026_08 === 'The name mentors will type on the attendance form.' &&
+        W.REMOVE_HELP_2026_08 === 'Leave empty if nobody is leaving. Spell names as they were enrolled; we match ignoring capitals.');
+  const fd = fw.feedbackDescription_(RF_URL), rd = fw.rosterDescription_(FB_URL);
+  check('problem form: the intro kept, then roster changes sent to the Club Roster Form\'s real branch, its link last',
+        fd.startsWith(W.FEEDBACK_INTRO + '\n\n') && fd.includes('"' + WQ.ACTION_MOD + '"') &&
+        WQ.ACTION_MOD === 'Add or remove girls in a club that is already enrolled' && fd.endsWith(': ' + RF_URL));
+  const lastLine = rd.split('\n').pop();
+  check('Club Roster Form: the intro kept; its last line sends roster changes to the branch, problems to the link',
+        rd.startsWith(W.ROSTER_INTRO + '\n\n') && lastLine.startsWith('Something not working?') &&
+        lastLine.includes('"' + WQ.ACTION_MOD + '"') && lastLine.endsWith(': ' + FB_URL), lastLine);
+  check('"Club name" help: the club\'s own name, not the mentor\'s', /club's own name/.test(W.CLUB_HELP) &&
+        /not the mentor's name/.test(W.CLUB_HELP) && !/mentors will type/i.test(W.CLUB_HELP));
+  check('REMOVE help: copy the spelling from the club\'s attendance form', /exactly as it is spelled on the club's attendance form/.test(W.REMOVE_HELP));
+}
+
+console.log('\n  the plan (pure)');
+{
+  const live = fw.planFormWording_(liveState());
+  check('the live forms: five changes, in order, nothing left as is',
+        labelsOf(live.changes) === [WL.FEEDBACK_DESCRIPTION, WL.FEEDBACK_EMAIL, WL.ROSTER_DESCRIPTION, WL.CLUB_HELP,
+                                    WL.REMOVE_HELP].join(' | ') && !live.skipped.length, labelsOf(live.changes));
+  check('…only texts and one added question: never a title',
+        live.changes.every(c => ['description', 'help', 'add-email'].includes(c.what)) &&
+        live.changes.filter(c => c.what === 'add-email').length === 1);
+  const email = live.changes.find(c => c.what === 'add-email');
+  check('the reply-address question: exactly Q.FB_EMAIL, after the device question',
+        email.title === WQ.FB_EMAIL && email.after === WQ.FB_DEVICE);
+  check('the wanted wording: nothing to change (a second run is a no-op)',
+        !fw.planFormWording_(wantedState()).changes.length && !fw.planFormWording_(wantedState()).skipped.length);
+
+  let s = wantedState();
+  s.roster.description = s.roster.description.replace(/\n/g, '\r\n') + '  ';
+  s.roster.removeHelp = '  ' + W.REMOVE_HELP.replace(/ /g, '  ');
+  check('only spacing or CRLF differs: nothing to change', !fw.planFormWording_(s).changes.length && !fw.planFormWording_(s).skipped.length);
+
+  s = liveState();
+  s.feedback.description = 'Tell us about problems with the forms.';
+  s.roster.clubHelp = 'Your club name please';
+  let p = fw.planFormWording_(s);
+  check('a text edited by hand is left as is, listed with the suggested text',
+        labelsOf(p.skipped) === WL.FEEDBACK_DESCRIPTION + ' | ' + WL.CLUB_HELP &&
+        p.skipped[0].to === fw.feedbackDescription_(RF_URL) && /edited by hand/.test(p.skipped[0].reason) &&
+        p.changes.length === 3, labelsOf(p.changes));
+
+  s = liveState();
+  s.roster.clubHelp = ''; s.roster.removeHelp = '   '; s.feedback.description = '';
+  p = fw.planFormWording_(s);
+  check('an empty text is ours to fill', p.changes.length === 5 && !p.skipped.length);
+
+  s = wantedState();
+  s.feedback.description = fw.feedbackDescription_('https://forms.example.org/old-roster/viewform');
+  s.roster.description = fw.rosterDescription2026_08_('https://forms.example.org/old-problem/viewform');
+  p = fw.planFormWording_(s);
+  check('another form link (the wanted or the 2026-08 text): changed, not "edited by hand"',
+        labelsOf(p.changes) === WL.FEEDBACK_DESCRIPTION + ' | ' + WL.ROSTER_DESCRIPTION && !p.skipped.length &&
+        p.changes[0].to.endsWith(RF_URL) && p.changes[1].to.endsWith(FB_URL));
+
+  s = liveState();
+  s.feedback.items.push({ type: 'PARAGRAPH_TEXT', title: WQ.FB_EMAIL.toUpperCase() });
+  p = fw.planFormWording_(s);
+  check('a question under the reply title that is not a short answer: nothing added, a note',
+        !p.changes.some(c => c.what === 'add-email') && labelsOf(p.skipped) === WL.FEEDBACK_EMAIL &&
+        /not a short-answer question/.test(p.skipped[0].reason));
+  s = liveState();
+  s.feedback.items.push({ type: 'TEXT', title: 'Contact e-mail' });
+  p = fw.planFormWording_(s);
+  check('an e-mail question under another title: never a second one, "rename it" instead',
+        !p.changes.some(c => c.what === 'add-email') && p.skipped.length === 1 &&
+        p.skipped[0].reason.includes('"Contact e-mail"') && p.skipped[0].reason.includes('"' + WQ.FB_EMAIL + '"'));
+  s = liveState();
+  s.feedback.items = s.feedback.items.filter(it => it.title !== WQ.FB_DEVICE);
+  check('no device question: the reply question goes at the end',
+        fw.planFormWording_(s).changes.find(c => c.what === 'add-email').after === '');
+  s = liveState();
+  s.roster.clubHelp = null;
+  p = fw.planFormWording_(s);
+  check('a missing "Club name" question: left as is ("is it ours?"), nothing thrown',
+        labelsOf(p.skipped) === WL.CLUB_HELP && /not on the form/.test(p.skipped[0].reason) && p.changes.length === 4);
+
+  const text = fw.formWordingPreviewText_(live);
+  check('the preview: numbered changes as now → new, the added question and its new column, the promise',
+        /^Would change \(5\):/.test(text) && text.includes('1. ' + WL.FEEDBACK_DESCRIPTION) &&
+        text.includes('   now: "' + W.CLUB_HELP_2026_08 + '"') && text.includes('   new: "' + W.CLUB_HELP + '"') &&
+        text.includes('add the question "' + WQ.FB_EMAIL + '"') && text.includes('after "' + WQ.FB_DEVICE + '"') &&
+        text.includes('The Feedback tab gets a new column') &&
+        text.endsWith('Question titles, answers and the response tabs are not changed.'));
+  s = liveState();
+  s.roster.removeHelp = 'Names please';
+  const skippedText = fw.formWordingPreviewText_(fw.planFormWording_(s));
+  check('…and what is left as is, with the suggested text',
+        skippedText.includes('Left as is (1):\n- ' + WL.REMOVE_HELP + ': edited by hand, so left as is.') &&
+        skippedText.includes('Suggested text: "' + W.REMOVE_HELP + '"'));
+  check('the preview key: the same plan matches, a changed "now" text does not',
+        fw.formWordingKey_(live) === fw.formWordingKey_(fw.planFormWording_(liveState())) &&
+        fw.formWordingKey_(live) !== fw.formWordingKey_(fw.planFormWording_(Object.assign(liveState(),
+            { roster: Object.assign(liveState().roster, { clubHelp: '' }) }))));
+}
+
+console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and Audit stubbed)');
+{
+  const vm = require('vm');
+  const src = ['Config.gs', 'Normalize.gs', 'Forms.gs']
+      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const ItemType = { TEXT: 'TEXT', PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', LIST: 'LIST',
+                     MULTIPLE_CHOICE: 'MULTIPLE_CHOICE', PAGE_BREAK: 'PAGE_BREAK' };
+  // A fake form exposes only what the generators and the migration may call:
+  // there is no deleteItem, deleteAllResponses, setDestination, setTitle on the
+  // form, setAcceptingResponses… so calling one fails the run. `calls` records
+  // every change made to a form, in order.
+  const world = (opts) => {
+    opts = opts || {};
+    const calls = [], audits = [], dialogs = [], forms = {}, props = Object.assign({}, opts.props);
+    let locks = 0;
+    const makeForm = (id, description, items) => {
+      const form = { id, description: description || '', items: [] };
+      const note = what => {
+        calls.push(id + '.' + what);
+        if (opts.failOn === id + '.' + what) throw new Error('Forms service unavailable');
+      };
+      const makeItem = (type, title, help) => {
+        const it = { type, title: title || '', help: help || '', validation: null };
+        const api = {
+          _it: it,
+          getType: () => type, getTitle: () => it.title, getHelpText: () => it.help,
+          getIndex: () => form.items.indexOf(api),
+          setTitle: t => { note('setTitle'); it.title = t; return api; },
+          setHelpText: h => { note('setHelpText'); it.help = h; return api; },
+          setRequired: () => api, setChoiceValues: () => api, setChoices: () => api,
+          setValidation: v => { note('setValidation'); it.validation = v; return api; },
+          createChoice: (value, page) => ({ value, page }), setGoToPage: () => api,
+          asListItem: () => api, asPageBreakItem: () => api,
+        };
+        return api;
+      };
+      const add = type => () => { note('add ' + type); const i = makeItem(type); form.items.push(i); return i; };
+      form.api = {
+        getId: () => id, getPublishedUrl: () => 'https://forms.example.org/' + id + '/viewform',
+        getEditUrl: () => 'https://forms.example.org/' + id + '/edit',
+        getDescription: () => form.description,
+        setDescription: d => { note('setDescription'); form.description = d; return form.api; },
+        getItems: t => form.items.filter(i => !t || i.getType() === t),
+        addTextItem: add('TEXT'), addParagraphTextItem: add('PARAGRAPH_TEXT'), addListItem: add('LIST'),
+        addMultipleChoiceItem: add('MULTIPLE_CHOICE'), addPageBreakItem: add('PAGE_BREAK'),
+        moveItem: (from, to) => { note('moveItem'); const [x] = form.items.splice(from, 1); form.items.splice(to, 0, x); return x; },
+        setCollectEmail: () => form.api, setLimitOneResponsePerUser: () => form.api,
+        setAllowResponseEdits: () => form.api, setShowLinkToRespondAgain: () => form.api,
+        setConfirmationMessage: () => form.api, setRequireLogin: () => form.api,
+      };
+      (items || []).forEach(([type, title, help]) => form.items.push(makeItem(type, title, help)));
+      forms[id] = form;
+      return form;
+    };
+    const ctx = vm.createContext({
+      console,
+      FormApp: {
+        ItemType, PageNavigationType: { SUBMIT: 'SUBMIT', CONTINUE: 'CONTINUE' },
+        createTextValidation: () => {
+          const v = { requireTextIsEmail: () => { v.kind = 'email'; return v; },
+                      requireNumber: () => { v.kind = 'number'; return v; }, build: () => ({ kind: v.kind }) };
+          return v;
+        },
+        create: title => makeForm('new' + Object.keys(forms).length, '', []).api,
+        openById: id => { if (!forms[id]) throw new Error('no form ' + id); return forms[id].api; },
+      },
+      PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null,
+                                                         setProperty: (k, v) => { props[k] = v; } }) },
+      SpreadsheetApp: {
+        getActive: () => ({}),
+        getUi: () => ({
+          alert: (title, text, buttons) => {
+            dialogs.push(text);
+            if (buttons !== 'YES_NO') return 'OK';
+            const reply = (opts.replies || []).shift();
+            return typeof reply === 'function' ? reply(forms) : reply;
+          },
+          Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } }),
+      },
+      LockService: { getDocumentLock: () => ({ tryLock: () => !opts.lockBusy, releaseLock: () => { locks++; } }) },
+    });
+    vm.runInContext(src, ctx);
+    ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
+    return { ctx, calls, audits, dialogs, forms, props, locks: () => locks, makeForm };
+  };
+  // the two live forms as they are (2026-09-26 saved pages; the Club Roster Form shortened)
+  const liveForms = (w, rosterEdits) => {
+    w.makeForm('FEEDBACK', W.FEEDBACK_INTRO, LIVE_FEEDBACK_ITEMS);
+    w.makeForm('ROSTER', fw.rosterDescription2026_08_('https://forms.example.org/FEEDBACK/viewform'), [
+      ['MULTIPLE_CHOICE', WQ.ACTION], ['PAGE_BREAK', 'New club', 'One submission per club.'], ['LIST', WQ.PARTNER_NEW],
+      ['PAGE_BREAK', 'The club'], ['TEXT', WQ.CLUB, (rosterEdits || {}).clubHelp || W.CLUB_HELP_2026_08],
+      ['TEXT', WQ.MENTOR_EMAIL], ['PAGE_BREAK', 'Existing club'], ['LIST', WQ.PARTNER_MOD],
+      ['PAGE_BREAK', 'The change'], ['PARAGRAPH_TEXT', WQ.ADD, 'Leave empty if nobody is joining.'],
+      ['PARAGRAPH_TEXT', WQ.REMOVE, (rosterEdits || {}).removeHelp || W.REMOVE_HELP_2026_08],
+      ['TEXT', WQ.MENTOR_EMAIL_MOD], ['PARAGRAPH_TEXT', WQ.NOTES]]);
+  };
+  const PROPS = { FORM_FEEDBACK_ID: 'FEEDBACK', FORM_ROSTER_ID: 'ROSTER' };
+  const titles = f => f.items.map(i => i.getTitle());
+  const ALLOWED = /^(FEEDBACK|ROSTER)\.(setDescription|setHelpText|add TEXT|setTitle|setValidation|moveItem)$/;
+
+  let w = world({ props: PROPS, replies: ['YES'] });
+  liveForms(w);
+  const fbBefore = titles(w.forms.FEEDBACK), rfBefore = titles(w.forms.ROSTER);
+  const made = w.ctx.migrateFormWording();
+  const fbAfter = titles(w.forms.FEEDBACK);
+  const added = w.forms.FEEDBACK.items[fbAfter.length - 1]._it;
+  check('YES: five changes; the preview, then "Done … up to date"',
+        made === 5 && w.dialogs.length === 2 && /^Would change \(5\):/.test(w.dialogs[0]) &&
+        /^Done — 5 change\(s\); re-read: up to date\./.test(w.dialogs[1]), w.dialogs[1].split('\n')[0]);
+  check('problem form: every earlier question kept, in order, same titles; the reply question after the device one',
+        fbAfter.length === fbBefore.length + 1 && fbBefore.every((t, i) => fbAfter[i] === t) &&
+        fbAfter[fbAfter.length - 1] === WQ.FB_EMAIL && fbAfter[fbAfter.length - 2] === WQ.FB_DEVICE &&
+        added.type === 'TEXT' && added.validation && added.validation.kind === 'email');
+  check('Club Roster Form: no question added or retitled; the two help texts and both descriptions are the new ones',
+        titles(w.forms.ROSTER).join('|') === rfBefore.join('|') &&
+        w.forms.ROSTER.items[4]._it.help === W.CLUB_HELP && w.forms.ROSTER.items[10]._it.help === W.REMOVE_HELP &&
+        w.forms.ROSTER.description === fw.rosterDescription_('https://forms.example.org/FEEDBACK/viewform') &&
+        w.forms.FEEDBACK.description === fw.feedbackDescription_('https://forms.example.org/ROSTER/viewform') &&
+        w.forms.ROSTER.items[9]._it.help === 'Leave empty if nobody is joining.');
+  check('only texts and one question were written (no delete, no destination, no response call exists)',
+        w.calls.every(c => ALLOWED.test(c)) && w.calls.filter(c => c === 'FEEDBACK.setTitle').length === 1 &&
+        !w.calls.some(c => c.startsWith('ROSTER.setTitle')), w.calls.join(', '));
+  check('one Audit row naming the changes (labels only) and the re-read; the lock released',
+        w.audits.length === 1 && w.audits[0] === 'migrateFormWording: changed: ' +
+            [WL.FEEDBACK_DESCRIPTION, WL.FEEDBACK_EMAIL, WL.ROSTER_DESCRIPTION, WL.CLUB_HELP, WL.REMOVE_HELP].join('; ') +
+            '; re-read: up to date' && w.locks() === 1, w.audits[0]);
+
+  w.calls.length = 0; w.audits.length = 0; w.dialogs.length = 0;
+  check('a second run: "Nothing to change", no write, no Audit row',
+        w.ctx.migrateFormWording() === 0 && !w.calls.length && !w.audits.length &&
+        w.dialogs.length === 1 && /^Nothing to change/.test(w.dialogs[0]));
+
+  w = world({ props: PROPS, replies: ['NO'] });
+  liveForms(w);
+  w.ctx.migrateFormWording();
+  check('NO: nothing written; one Audit row "cancelled at the preview"',
+        !w.calls.length && w.audits.length === 1 &&
+        w.audits[0].startsWith('migrateFormWording: cancelled at the preview (would have changed: ' + WL.FEEDBACK_DESCRIPTION));
+
+  w = world({ props: PROPS, replies: [forms => { forms.ROSTER.items[4]._it.help = 'Typed in the editor meanwhile'; return 'YES'; }] });
+  liveForms(w);
+  w.ctx.migrateFormWording();
+  check('the forms changed while the preview was open: nothing written, "run it again", Audit says so',
+        !w.calls.length && /^Nothing was changed: the forms changed since the preview/.test(w.dialogs[1]) &&
+        w.audits.join() === 'migrateFormWording: nothing changed: the forms changed since the preview' && w.locks() === 1);
+
+  w = world({ props: PROPS, replies: ['YES'], lockBusy: true });
+  liveForms(w);
+  w.ctx.migrateFormWording();
+  check('the lock busy: nothing written, no Audit row, "try again"',
+        !w.calls.length && !w.audits.length && /Another GLOW operation is still running/.test(w.dialogs[1]));
+
+  const flaky = { props: PROPS, replies: ['YES'], failOn: 'ROSTER.setDescription' };
+  w = world(flaky);
+  liveForms(w);
+  w.ctx.migrateFormWording();
+  check('a failure part-way: stops, says what landed, Audit "stopped after 2 of 5"; the lock released',
+        /^Stopped after 2 of 5 change\(s\): Forms service unavailable/.test(w.dialogs[1]) &&
+        w.audits.join() === 'migrateFormWording: stopped after 2 of 5 change(s) (done: ' + WL.FEEDBACK_DESCRIPTION +
+            '; ' + WL.FEEDBACK_EMAIL + '): Forms service unavailable' && w.locks() === 1, w.audits.join());
+  flaky.failOn = null; flaky.replies.push('YES');   // the service is back; run it again
+  w.audits.length = 0; w.dialogs.length = 0;
+  w.ctx.migrateFormWording();
+  check('…run again: only the three still missing, no second reply question',
+        /^Would change \(3\):/.test(w.dialogs[0]) && /re-read: up to date$/.test(w.audits.join()) &&
+        titles(w.forms.FEEDBACK).filter(t => t === WQ.FB_EMAIL).length === 1, w.dialogs[0].split('\n')[0]);
+
+  w = world({ props: PROPS, replies: ['YES'] });
+  liveForms(w);
+  const dev = w.forms.FEEDBACK.items.splice(5, 1)[0];
+  w.forms.FEEDBACK.items.splice(1, 0, dev);   // the device question moved up by hand
+  w.ctx.migrateFormWording();
+  const order = titles(w.forms.FEEDBACK);
+  check('the device question moved by hand: the reply question is placed right after it',
+        order[1] === WQ.FB_DEVICE && order[2] === WQ.FB_EMAIL && w.calls.includes('FEEDBACK.moveItem'), order.join(' / '));
+
+  w = world({ props: PROPS, replies: ['YES'] });
+  liveForms(w, { removeHelp: 'Our own REMOVE wording' });
+  w.ctx.migrateFormWording();
+  check('a help text edited by hand: listed as left as is, kept, and named in the Audit row',
+        /Left as is \(1\):/.test(w.dialogs[0]) && w.forms.ROSTER.items[10]._it.help === 'Our own REMOVE wording' &&
+        w.audits[0].endsWith('; left as is: ' + WL.REMOVE_HELP + '; re-read: up to date'), w.audits[0]);
+
+  w = world({ props: { FORM_FEEDBACK_ID: 'FEEDBACK' } });
+  w.makeForm('FEEDBACK', W.FEEDBACK_INTRO, LIVE_FEEDBACK_ITEMS);
+  w.ctx.migrateFormWording();
+  check('a form missing: "run Create the Google Forms", nothing written, no Audit row',
+        !w.calls.length && !w.audits.length && /do not exist yet/.test(w.dialogs[0]));
+
+  w = world({ props: PROPS });
+  liveForms(w);
+  w.ctx.SpreadsheetApp.getUi = () => { throw new Error('no UI here'); };
+  let refused = false;
+  try { w.ctx.migrateFormWording(); } catch (e) { refused = /Run this from the sheet/.test(e.message); }
+  check('from the script editor (no dialogs): refuses, nothing written', refused && !w.calls.length);
+
+  // a fresh build says the same as a migrated form
+  w = world({ props: {} });
+  w.ctx.syncFormChoices = () => 0;
+  w.ctx.installTriggers = () => {};
+  w.ctx.linkFormToSheet_ = () => null;
+  w.ctx.createGlowForms();
+  const fb = w.ctx.FormApp.openById(w.props.FORM_FEEDBACK_ID), rf = w.ctx.FormApp.openById(w.props.FORM_ROSTER_ID);
+  const fresh = w.ctx.planFormWording_(w.ctx.readFormWording_(fb, rf));
+  const fbTitles = titles(w.forms[w.props.FORM_FEEDBACK_ID]);
+  check('"Create the Google Forms": the migration finds nothing to change on a fresh build',
+        !fresh.changes.length && !fresh.skipped.length, labelsOf(fresh.changes.concat(fresh.skipped)));
+  check('…its problem form ends with the device question, then the reply question (e-mail validated)',
+        fbTitles.slice(-2).join('|') === WQ.FB_DEVICE + '|' + WQ.FB_EMAIL &&
+        w.forms[w.props.FORM_FEEDBACK_ID].items[fbTitles.length - 1]._it.validation.kind === 'email');
+}
+
 console.log('\n  the handler reads the filled-in one of two same-titled columns (FormHandlers.gs)');
 {
   const rh = loadGs(['Q', 'responseFromValues_', 'responseKeyOf_'], ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
