@@ -511,7 +511,8 @@ until you confirm:
    item's `resolved` cell starts with the word `release` ("Working the
    ReviewQueue"). The next run then asks about them in a dialog of their
    own, "New clubs held for review that staff released": YES imports each
-   as sent, against today's roster, without the duplicate check — except
+   as sent, against today's roster (girls removed since it was sent stay
+   removed, as in item 2), without the duplicate check — except
    an organization typed close to a partner on file, which fails
    `ERROR: release refused: …` until the response row's `Partner
    organization` cell names that partner, or the Partners tab has the new

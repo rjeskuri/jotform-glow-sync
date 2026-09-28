@@ -1519,6 +1519,33 @@ console.log('\n  the menu run with held rows (processMissedResponses, runConfirm
         ok === tab + '!42 ok' && heldNow === tab + '!49 held for review (see ReviewQueue)', [ok, heldNow].join(' | '));
 }
 
+console.log('\nBoth guards together: a released new club is replay-guarded too (wf/integration)');
+{
+  // A re-enrollment held on 09-21, released by staff and run on 09-28. One girl it lists was
+  // removed 09-25 (after it was sent): she stays removed. One removed 09-01 comes back.
+  const A = 'Fixture Partner Alpha';
+  const gone = (id, name, day) => [id, A, 'Sunrise Club', 'Africa', name, name.split(' ').pop(), 'inactive', '2026-08-26', day,
+                                   'Roster Form Responses!6'];
+  const tabs = () => baseTabs(rosterRows(A, 'Sunrise Club', ['Grace Zibblewick', 'Mary Zibblewick'])
+      .concat([gone('T900', 'Joy Blorptest', '2026-09-25'), gone('T901', 'Hana Blorptest', '2026-09-01')]));
+  const listed = newClub(A, 'Sunrise Club', ['Grace Zibblewick', 'Mary Zibblewick', 'Joy Blorptest', 'Hana Blorptest']);
+  let w = sheetWorld(tabs());
+  const res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, listed, KEY41, true);
+  const st = (x, n) => x.tabs.Roster.find(r => r[4] === n)[6];
+  const kept = w.tabs.ReviewQueue.filter(r => r[1] === 'Removed girls not put back by an older response');
+  check('released and run late: removed after it was sent stays removed, removed before comes back; one item, no names',
+        res === 'existing club Sunrise Club (' + A + '): 0 girls added, 1 reactivated, 1 kept removed, 1 for review ' +
+            '(released from hold by staff)' &&
+        st(w, 'Joy Blorptest') === 'inactive' && st(w, 'Hana Blorptest') === 'active' && kept.length === 1 &&
+        !/Blorptest|Zibblewick/.test(String(kept[0][4])) && w.formLog.length === 1 && w.formLog[0][3] === res, res);
+  w = sheetWorld(tabs());
+  const noDay = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, listed,
+                                   'ROSTER|9/21/2026 10:15:30|' + A + '|Sunrise Club', true);
+  check('released, but its Timestamp is not a date: refused before anything is written (no sent day, no replay guard)',
+        /^ERROR: its Timestamp cell is not a date/.test(noDay) && st(w, 'Hana Blorptest') === 'inactive' &&
+        w.tabs.Roster.length === 5 && !w.mails.length, noDay);
+}
+
 console.log('\n  guards');
 {
   const all = fs.readdirSync(loadGs.GS_DIR).filter(f => f.endsWith('.gs'))

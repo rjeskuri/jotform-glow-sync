@@ -143,8 +143,9 @@ function processMissedResponses() {
       'Send them to staff now? (Any that ask for a roster change also go to the ReviewQueue.)');
   ask(byForm('ROSTER'), 'Club Roster Form responses not yet processed', 'Process them now?');
   ask(plan.released, 'New clubs held for review that staff released in the ReviewQueue',
-      'Run them now, as sent? Each runs against TODAY\'s roster; the duplicate check is skipped ' +
-      '(an organization typed close to a partner on file is still refused).');
+      'Run them now, as sent? Each runs against TODAY\'s roster (girls removed since it was ' +
+      'sent stay removed); the duplicate check is skipped (an organization typed close to a ' +
+      'partner on file is still refused).');
   ask(plan.old, 'Club Roster Form responses sent more than ' + MISSED.OLD_AFTER_DAYS +
           ' days ago and never processed',
       'Running one now applies it to TODAY\'s roster: girls removed since it was sent stay ' +
