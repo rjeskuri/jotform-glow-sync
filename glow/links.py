@@ -131,17 +131,35 @@ def must_sit_above(questions, link):
                   key=render_key)
 
 
+def out_of_place(questions, link, q):
+    """[(element, what it should render above but does not)] for the element
+    `q` of `link`: above everything must_sit_above names, and - checked on
+    their own, since that run is empty once the anchor has slipped below the
+    button - `q` above its anchor and Submit, the anchor above Submit."""
+    submit = submit_button(questions)
+    anchor = [a for a in named(questions, link.above) if a is not q] if link.above != SUBMIT else []
+    pairs = [(q, o) for o in must_sit_above(questions, link) if o is not q]
+    pairs += [(q, a) for a in anchor] + [(q, submit)] + [(a, submit) for a in anchor]
+    out, seen = [], set()
+    for x, o in pairs:
+        if render_key(x) >= render_key(o) and (x["qid"], o["qid"]) not in seen:
+            seen.add((x["qid"], o["qid"]))
+            out.append((x, o))
+    return out
+
+
 def plan_insert(questions, link, conditions=()):
     """Where a missing element goes: (order, moves). It takes the order of the
     element it sits above (Submit when that one is missing); that element and
     everything down to Submit move one down. `moves` = [(qid, new order)] tail
     first, so each intermediate state still renders in order.
 
-    Refuses (never guesses) when that run holds anything a mentor could see
-    other than link elements and Submit, and when a dry simulation shows the
-    elements a mentor can see would come out in any other sequence than
-    before with the new one directly above its anchor - equal orders render
-    in creation order, and a new element is always the newest."""
+    Refuses (never guesses) when the element it goes above is hidden, when
+    that run holds anything a mentor could see other than link elements and
+    Submit, and when a dry simulation shows the elements a mentor can see
+    would come out in any other sequence than before with the new one
+    directly above its anchor - equal orders render in creation order, and a
+    new element is always the newest."""
     submit = submit_button(questions)
     anchor = named(questions, link.above) if link.above != SUBMIT else []
     if len(anchor) > 1:
@@ -152,7 +170,14 @@ def plan_insert(questions, link, conditions=()):
                  "move it back above Submit first")
     shown = shown_by_rules(conditions)
     run = must_sit_above(questions, link)
-    stray = [q for q in run if q is not submit and q.get("name") not in BY_NAME
+    if not can_appear(run[0], shown):   # what the new element must sit directly above
+        q = run[0]
+        fix = (f"unhide it (--link {BY_NAME[q['name']].key}) or take it out "
+               f"(--link {BY_NAME[q['name']].key} --remove)" if q.get("name") in BY_NAME
+               else "unhide it in the builder")
+        sys.exit(f"{q.get('name') or q.get('type')} (q{q['qid']}) is hidden, so nothing can "
+                 f"sit directly above it - {fix} first")
+    stray =[q for q in run if q is not submit and q.get("name") not in BY_NAME
              and can_appear(q, shown)]
     if stray:
         sys.exit("unexpected element(s) between the insertion point and Submit: "

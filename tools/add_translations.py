@@ -27,8 +27,10 @@ link and the Club Roster Form link) are keyed three ways: the plain sentence,
 the element id `text_<qid>` (what the runtime looks up first; its value
 replaces the whole inner HTML) and the stored HTML - the HTML variants carry
 the link around the translated sentence. So this runs AFTER
-tools/add_feedback_link.py has put an element on the form. Before a POST the
-form's whole store is saved to backups/translations/<form>-<stamp>.json.
+tools/add_feedback_link.py has put an element on the form, and again after
+it changes an element's URL (each language's copy holds the old link). Before
+a POST the form's whole store is saved to
+backups/translations/<form>-<stamp>-before.json (never over an earlier file).
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -142,13 +144,20 @@ def merge(store, payload, sources):
 
 
 def save_store(form_id, store, stamp):
-    """The whole translation store, before it is replaced (backups/ is never committed)."""
+    """The whole translation store, before it is replaced (backups/ is never
+    committed). Never over an earlier file: after a failed POST, a re-run with
+    the same stamp would otherwise replace the true 'before' - the rollback."""
     folder = os.path.join(REPO, "backups", "translations")
     os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, f"{form_id}-{stamp}-before.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(store, f, ensure_ascii=False, indent=1)
-    return path
+    for n in range(1, 100):
+        path = os.path.join(folder, f"{form_id}-{stamp}{'' if n == 1 else f'-{n}'}-before.json")
+        try:
+            with open(path, "x", encoding="utf-8") as f:
+                json.dump(store, f, ensure_ascii=False, indent=1)
+            return path
+        except FileExistsError:
+            continue
+    sys.exit(f"99 store backups for {form_id} at {stamp} already - look in {folder}")
 
 
 def main():
@@ -162,7 +171,7 @@ def main():
     additions = load_additions()
     targets = {f: FORMS.get(f, f) for f in args.form} if args.form else FORMS
 
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M")
+    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
 
     for form_id, label in targets.items():
         questions = client.get(f"/form/{form_id}/questions")

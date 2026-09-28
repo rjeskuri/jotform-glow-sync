@@ -1185,16 +1185,26 @@ class LinkTool(unittest.TestCase):
         low["460"]["order"] = "99"
         self.assertTrue(any("not above" in p for p in add_feedback_link.verify(low, [], self.R, self.R.url)))
 
-    def run_main(self, fake, *argv):
+    def run_main(self, fake, *argv, clock=None):
+        """(snapshotted form ids, stdout); the stamps the snapshots were given
+        land in self.stamps. `clock` stands in for datetime (its now())."""
         import contextlib
         import io
         from unittest import mock
-        snaps, out = [], io.StringIO()
-        with mock.patch.object(add_feedback_link, "Client", lambda key, apply=False: fake), \
-                mock.patch.object(add_feedback_link, "snapshot", lambda fid, c, stamp: snaps.append(fid)), \
-                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
-                mock.patch.object(sys, "argv", ["add_feedback_link.py", *argv]), \
-                contextlib.redirect_stdout(out):
+        snaps, out, self.stamps = [], io.StringIO(), []
+
+        def snapshot(fid, client, stamp):
+            snaps.append(fid)
+            self.stamps.append(stamp)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(add_feedback_link, "Client",
+                                                  lambda key, apply=False: fake))
+            stack.enter_context(mock.patch.object(add_feedback_link, "snapshot", snapshot))
+            stack.enter_context(mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}))
+            stack.enter_context(mock.patch.object(sys, "argv", ["add_feedback_link.py", *argv]))
+            if clock:
+                stack.enter_context(mock.patch.object(add_feedback_link, "datetime", clock))
+            stack.enter_context(contextlib.redirect_stdout(out))
             add_feedback_link.main()
         return snaps, out.getvalue()
 
@@ -1213,6 +1223,78 @@ class LinkTool(unittest.TestCase):
         snaps, out = self.run_main(fake, "--link", "roster", "--form", fid, "--apply")
         self.assertEqual((snaps, fake.writes), ([], []))                   # idempotent
         self.assertIn("already present", out)
+
+    def test_a_changed_url_says_the_translations_must_be_re_applied(self):
+        # every other language shows its copy of the element (keyed text_<qid>),
+        # and that copy keeps the old link until add_translations.py runs again
+        from glow import forms as glow_forms
+        fid, new = glow_forms.TEMPLATE, "https://forms.gle/NewRosterForm1"
+        fake = FakeFormClient({fid: link_form(roster=True)})
+        _, notes = self.plan(fake.forms[fid], self.R, new)
+        self.assertTrue(any("tools/add_translations.py --apply" in n for n in notes), notes)
+        _, out = self.run_main(fake, "--link", "roster", "--url", new, "--form", fid, "--apply")
+        self.assertEqual([w.split(" ", 2)[1] for w in fake.writes], ["UPDATE"])
+        after = out.split("re-read: verified", 1)[1]
+        self.assertIn("tools/add_translations.py --apply", after)
+        self.assertIn("old link", after)
+        _, out = self.run_main(fake, "--link", "roster", "--url", new, "--form", fid, "--apply")
+        self.assertNotIn("add_translations", out)                          # nothing written, nothing to redo
+        fresh = FakeFormClient({fid: link_form()})                         # a new element: English only until then
+        _, out = self.run_main(fresh, "--link", "roster", "--form", fid, "--apply")
+        self.assertIn("tools/add_translations.py --apply", out.split("re-read: verified", 1)[1])
+
+    def test_a_hidden_anchor_or_submit_is_refused_not_a_traceback(self):
+        hidden = link_form()
+        hidden["443"]["hidden"] = "Yes"
+        with self.assertRaises(SystemExit) as cm:
+            self.plan(hidden, self.R)
+        self.assertIn("hidden", str(cm.exception.code))
+        self.assertIn("--link problem", str(cm.exception.code))
+        rule = [{"id": "5", "terms": [], "action": [{"visibility": "Show", "field": "443"}]}]
+        steps, _ = self.plan(hidden, self.R, conditions=rule)             # a rule shows it: fine
+        self.assertEqual([s["op"] for s in steps], ["move", "move", "add"])
+        no_button = link_form(problem=False)
+        no_button["2"]["hidden"] = "Yes"
+        with self.assertRaises(SystemExit) as cm:
+            self.plan(no_button, self.R)
+        self.assertIn("submit2 (q2)", str(cm.exception.code))
+
+    def test_verify_and_the_plan_catch_the_anchor_below_submit(self):
+        # the tail-first moves put Submit below the anchor first; a Submit move
+        # acknowledged but not applied leaves the problem link under the button
+        qs = link_form()
+        steps, _ = self.plan(qs, self.R)
+        self.assertEqual((steps[0]["op"], steps[0]["qid"]), ("move", "2"))
+        partial = apply_steps(qs, steps[1:])
+        self.assertEqual([n for n in rendered(partial) if n in (self.R.name, self.P.name, "submit2")],
+                         [self.R.name, "submit2", self.P.name])
+        problems = add_feedback_link.verify(partial, [], self.R, self.R.url)
+        self.assertTrue(any(self.P.name in p and "submit2" in p for p in problems), problems)
+        self.assertEqual(add_feedback_link.verify(apply_steps(qs, steps), [], self.R, self.R.url), [])
+        below = link_form(roster=True)
+        below["443"]["order"] = "99"
+        steps, notes = self.plan(below, self.R)                            # present: flagged, not moved
+        self.assertEqual(steps, [])
+        self.assertTrue(any(self.P.name in n and "submit2" in n for n in notes), notes)
+
+    def test_a_retry_in_the_same_minute_keeps_the_first_snapshot(self):
+        # the pre-write snapshot is the rollback path: a re-run seconds after a
+        # failed one must not write the half-changed form over it
+        from datetime import datetime as real
+        from glow import forms as glow_forms
+        ticks = iter([real(2026, 9, 28, 10, 0, 5), real(2026, 9, 28, 10, 0, 40)])
+
+        class Clock:
+            @staticmethod
+            def now():
+                return next(ticks)
+        fid, stamps = glow_forms.TEMPLATE, []
+        for _ in range(2):
+            self.run_main(FakeFormClient({fid: link_form()}), "--link", "roster", "--form", fid,
+                          "--apply", clock=Clock)
+            stamps += self.stamps
+        self.assertEqual(len(stamps), 2)
+        self.assertNotEqual(stamps[0], stamps[1])
 
 
 class TranslationPlan(unittest.TestCase):
@@ -1300,6 +1382,33 @@ class TranslationPlan(unittest.TestCase):
         self.assertEqual(out[md5("text_443")], qs["443"]["text"].replace(links.PROBLEM.sentence, "PP"))
         self.assertEqual(add_language.text_element_keys(qs, base, {links.PROBLEM.sentence: "PP"}),
                          {md5("text_443"): qs["443"]["text"].replace(links.PROBLEM.sentence, "PP")})
+
+    def test_re_applying_after_a_url_change_replaces_every_languages_copy(self):
+        # the remedy add_feedback_link.py names after it changes a link
+        qs = link_form(roster=True)
+        store = add_translations.merge(self.store("es", "fr"), *add_translations.plan_additions(
+            qs, self.store("es", "fr"), self.additions))
+        new = "https://forms.gle/NewRosterForm1"
+        qs["460"]["text"] = links.element_html(links.ROSTER.sentence, new)
+        store = add_translations.merge(store, *add_translations.plan_additions(qs, store, self.additions))
+        for lang in ("es", "fr"):
+            self.assertEqual(links.href_of(store[lang][md5("text_460")]), new, lang)
+            self.assertEqual(links.href_of(store[lang][md5(qs["460"]["text"])]), new, lang)
+
+    def test_the_store_backup_is_never_overwritten(self):
+        # a same-stamp re-run after a failed POST must keep the true 'before'
+        import tempfile
+        from unittest import mock
+        self.assertIn("<form>-<stamp>-before.json", add_translations.__doc__)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(add_translations, "REPO", tmp):
+            first = add_translations.save_store("123", {"es": {"k": "before"}}, "2026-09-28T100005")
+            again = add_translations.save_store("123", {"es": {"k": "half-written"}}, "2026-09-28T100005")
+            self.assertNotEqual(first, again)
+            self.assertTrue(first.endswith(os.path.join("translations", "123-2026-09-28T100005-before.json")))
+            with open(first, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"es": {"k": "before"}})
+            with open(again, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"es": {"k": "half-written"}})
 
 
 class SyncLeavesTheLinksAlone(unittest.TestCase):

@@ -363,8 +363,11 @@ accepted), a URL the other link already uses, two Submit buttons, and any
 layout where inserting would change the sequence of what a mentor can see
 (it simulates the write in render order — by `order`, equal orders in
 creation order — before sending it). Re-running is a no-op; a changed URL is
-updated in place. After a write it re-reads the form: the element once, its
-text, not hidden, above its anchor and Submit, and no rule mentioning it.
+updated in place — then run `tools/add_translations.py --apply` again, since
+every other language keeps its own copy of the element, old link included,
+until it does (the tool says so after the write). After a write it re-reads
+the form: the element once, its text, not hidden, above its anchor and Submit,
+the anchor above Submit, and no rule mentioning it.
 
 Translations are a second step because they are keyed by the element's qid
 (`text_<qid>`), which exists only once the element does; the sentence's

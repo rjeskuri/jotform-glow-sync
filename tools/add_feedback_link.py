@@ -20,7 +20,9 @@ above, and no rule mentioning it (the sync rewrites rules, never this
 element). Re-running is a no-op; --remove deletes the element. Refuses an
 edit URL, a URL the other link already uses, and any layout other than
 link elements + Submit where the element goes. Translations are the second
-step: tools/add_translations.py --apply (it needs the element to exist).
+step: tools/add_translations.py --apply (it needs the element to exist), and
+again after a changed URL - each language holds its own copy of the link
+(the tool says so after the write).
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -84,12 +86,14 @@ def plan_form(questions, conditions, link, url, remove=False):
         for rid in glow_links.rules_mentioning(conditions, q["qid"]):
             notes.append(f"! rule {rid} mentions {_label(q)} - hand-made; the next "
                          "sync rewrite drops it")
-        below = [o for o in glow_links.must_sit_above(questions, link) if o is not q]
-        if any(glow_links.render_key(q) >= glow_links.render_key(o) for o in below):
-            notes.append(f"! {_label(q)} sits at order {glow_links.order_of(q)}, not above "
-                         + ", ".join(_label(o) for o in below) + " - move it in the builder")
+        for x, o in glow_links.out_of_place(questions, link, q):
+            notes.append(f"! {_label(x)} (order {glow_links.order_of(x)}) is not above "
+                         f"{_label(o)} - move it in the builder")
         if not drift:
             return [], notes + [f"{_label(q)} already present and up to date"]
+        if "text" in drift:
+            notes.append(f"! every other language shows its own copy of {_label(q)}, with the "
+                         "link it had: re-run tools/add_translations.py --apply after this")
         return [{"op": "update", "qid": q["qid"], "fields": drift,
                  "label": f"UPDATE {_label(q)}: {', '.join(sorted(drift))}"}], notes
 
@@ -120,10 +124,9 @@ def verify(questions, conditions, link, url, removed=False):
         problems.append("its text differs from what was written")
     if q.get("hidden") == "Yes":
         problems.append("it is hidden")
-    for o in glow_links.must_sit_above(questions, link):
-        if o is not q and glow_links.render_key(q) >= glow_links.render_key(o):
-            problems.append(f"it is not above {_label(o)}")
-    rules = glow_links.rules_mentioning(conditions, q["qid"])
+    for x, o in glow_links.out_of_place(questions, link, q):
+        problems.append(f"{'it' if x is q else _label(x)} is not above {_label(o)}")
+    rules =glow_links.rules_mentioning(conditions, q["qid"])
     if rules:
         problems.append(f"rule(s) {', '.join(rules)} mention it")
     return problems
@@ -154,7 +157,9 @@ def main():
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
     client = Client(api_key, apply=args.apply)
     targets = {f: FORMS.get(f, "?") for f in args.form} if args.form else FORMS
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M")
+    # to the second: a re-run just after a failed one must not snapshot the
+    # half-written form over the true "before" (the rollback path)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
 
     print(("APPLYING" if args.apply else "DRY RUN")
           + f" - {'remove ' if args.remove else ''}{link.name}: {link.sentence!r}"
@@ -176,7 +181,7 @@ def main():
         for n, step in enumerate(steps, 1):
             print(f"   {n}. {step['label']}")
 
-    failed = 0
+    failed, relinked, added = 0, [], []
     for form_id, steps in planned.items():
         if not args.apply or not steps:
             continue
@@ -192,6 +197,10 @@ def main():
             created = write(client, form_id, step)
             if step["op"] == "add" and isinstance(created, dict):
                 print(f"   added qid {created.get('qid')}")
+            if step["op"] == "add":
+                added.append(form_id)
+            elif step["op"] == "update" and "text" in step["fields"]:
+                relinked.append(form_id)
         after = client.get(f"/form/{form_id}/questions")
         conditions = client.get(f"/form/{form_id}/properties").get("conditions", [])
         problems = verify(after, conditions, link, url, args.remove)
@@ -203,6 +212,15 @@ def main():
 
     if not args.apply:
         print("\nDRY RUN - re-run with --apply to write; then tools/add_translations.py")
+    # translations are keyed by the element (text_<qid>) and each holds the
+    # whole HTML, link included: English changed, every other language did not
+    if relinked:
+        print(f"\n! translations still carry the old link on {len(relinked)} form(s) "
+              f"({', '.join(relinked)}): every language but English opens the old form "
+              "until tools/add_translations.py --apply runs (dry run first)")
+    if added:
+        print(f"\nnext: tools/add_translations.py --apply (dry run first) - until then the "
+              f"new element shows in English in every language ({', '.join(added)})")
     if failed:
         sys.exit(f"{failed} form(s) did not verify - re-read before retrying "
                  "(a gateway 504 can hide a completed write)")
