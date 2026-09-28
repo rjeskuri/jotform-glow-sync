@@ -1130,6 +1130,12 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
   check('released, failed, then the release taken back: it waits, and is not offered as "retry after ERROR"',
         src(takenBack.waiting) === '50' && takenBack.waiting[0].lastError === '' &&
         !hd.missedPreviewText_('x', takenBack.waiting, 15).includes('retry after'));
+  const hotel = R(51, '2026-09-23 08:00:00.100', 'Hotel Club');
+  const sortedAway = hd.planMissedRun_([hotel], hd.indexFormLog_([['ROSTER', 51, keyOf(hotel), HELD]]), today, 7,
+      { [tab + '!51']: { row: 15, state: 'closed', sentAt: '2026-09-20 08:00:00' } });   // another response's item
+  check('a CLOSED item for another response (tab sorted) never takes this held row off the menu: it waits',
+        src(sortedAway.waiting) === '51' && !sortedAway.run.length && !sortedAway.released.length &&
+        sortedAway.waiting[0].note === 'no ReviewQueue item for this row and time (docs/RUNBOOK.md)', src(sortedAway.waiting));
   const noHolds = hd.planMissedRun_(rows.slice(0, 1), hd.indexFormLog_(heldLog), today, 7);
   check('no decisions given (an old caller): a held row waits', src(noHolds.waiting) === '41' && !noHolds.run.length);
   const text = hd.missedPreviewText_('x', plan.waiting.concat(plan.released), 15);
@@ -1206,6 +1212,11 @@ console.log('\n  the menu run with held rows (processMissedResponses, runConfirm
   m.ctx.readHoldDecisions_ = () => open;   // staff took the release back after the preview
   const took = m.ctx.runConfirmed_(Object.assign(item(held[1]), { status: 'released' }), snap);
   m.ctx.readHoldDecisions_ = () => release42;
+  // released since the preview, but the preview offered it as 'new': the YES was not to "run as sent, check skipped"
+  const notAsked = m.ctx.runConfirmed_(Object.assign(item(held[1]), { status: 'new' }), snap);
+  check('runConfirmed_: a held row the preview did not offer as released is skipped, even if its item now says release',
+        notAsked === tab + '!42 skipped (held for review; its ReviewQueue item does not say release)' && !m.ran.length,
+        notAsked + ' | ' + m.ran.join());
   const ok = m.ctx.runConfirmed_(Object.assign(item(held[1]), { status: 'released' }), snap);
   const sneaky = m.ctx.runConfirmed_(Object.assign(item(held[0]), { status: 'new' }), snap);
   m.ctx.runResponse_ = () => 'HELD: possible duplicate (names on file) — ReviewQueue [#' + tab + '!49]';
