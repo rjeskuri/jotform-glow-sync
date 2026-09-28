@@ -161,8 +161,31 @@ class AutoSyncPlan(unittest.TestCase):
                          "REPLACE conditions ({len(conds)} rules", auto_sync.NOT_IN_EXPORT,
                          auto_sync.NO_SHARED_NAMES, "--summary-json",
                          "CREATE club picker ({len(picker_names)} clubs)",
-                         "UPDATE club picker ({len(picker_names)} clubs: "):
+                         "UPDATE club picker ({len(picker_names)} clubs: ",
+                         "CREATE partner picker ({len(choices)} partners)",
+                         "UPDATE partner picker ({len(choices)} partners: "):
             self.assertIn(fragment, joined, fragment)
+
+    def test_a_partner_list_update_is_a_change_and_parses_from_both_shapes(self):
+        text = ("Roster: 3 active clubs in Africa (40 girls); 300 clubs overall\n"
+                "\nDRY RUN (use --apply to write):\n"
+                "  - UPDATE partner picker (8 partners: options)\n"
+                "  - REPLACE conditions (254 rules)\n")
+        plan = auto_sync.parse_plan(text)
+        self.assertEqual(plan["partner_picker"], [{"op": "UPDATE", "partners": 8}])
+        self.assertEqual(plan["picker"], [])
+        self.assertEqual(auto_sync.changes(plan), 1)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        summary = {"creates": [], "updates": [], "deletes": [], "rules": 254, "warnings": [],
+                   "calls": ["CREATE partner picker (9 partners)", "REPLACE conditions (254 rules)"]}
+        self.assertEqual(auto_sync.plan_from_summary(summary)["partner_picker"],
+                         [{"op": "CREATE", "partners": 9}])
+        # the sync's own labels match the pattern the runner reads
+        for label in ("CREATE partner picker (2 partners)", "UPDATE partner picker (2 partners: options)",
+                      "UPDATE partner picker (8 partners: hidden, options)"):
+            self.assertTrue(auto_sync.PARTNER_PICKER_RX.match("  - " + label), label)
+        self.assertFalse(auto_sync.PARTNER_PICKER_RX.match(
+            "  - HIDE partner textbox (q331: the partner list replaces it)"))
 
     def test_picker_shape_is_the_searchable_component(self):
         self.assertEqual(sync.PICKER_PROPS["multipleSelections"], "Yes")   # Jotform's type-to-filter dropdown
@@ -179,9 +202,9 @@ class ConditionBuilder(unittest.TestCase):
     PARTNERS = {"11": "Partner One", "12": "Partner Two"}
     MODULES = {"1": ["Core 1"], "2": ["Core 2", "Elective - Healthy GLOW"], "3": ["Core 3"]}
 
-    def rules(self, picker=None):
+    def rules(self, picker=None, **kw):
         sync._counter[0] = 0
-        return sync.build_conditions(self.CLUBS, self.PARTNERS, self.MODULES, picker=picker)
+        return sync.build_conditions(self.CLUBS, self.PARTNERS, self.MODULES, picker=picker, **kw)
 
     def show_rules(self, conds):
         """Rules that show a club roster or the Partner box (not the curriculum cascade)."""
@@ -230,6 +253,331 @@ class ConditionBuilder(unittest.TestCase):
         conds = self.rules(picker="500")
         self.assertEqual([c["index"] for c in conds], [str(i) for i in range(len(conds))])
         self.assertEqual([c["priority"] for c in conds], [c["index"] for c in conds])
+
+    def test_the_default_partner_field_is_the_typed_box(self):
+        # a form without the partner list keeps exactly the rules it has today
+        self.assertEqual(sync._norm_rules(self.rules(picker="500")),
+                         sync._norm_rules(self.rules(picker="500", partner_field=sync.PARTNER)))
+        fields = {t["field"] for c in self.rules(picker="500") for t in c["terms"]}
+        self.assertIn(sync.PARTNER, fields)
+
+    def test_the_partner_list_changes_only_the_partner_field(self):
+        typed = self.rules(picker="500")
+        listed = self.rules(picker="500", partner_field="600")
+        self.assertEqual(len(listed), len(typed))           # same rule count
+        # the gated rules and the reveal rule test / show the list; nothing tests q331
+        self.assertFalse([t for c in listed for t in c["terms"] if t["field"] == sync.PARTNER])
+        self.assertFalse([a for c in listed for a in c["action"] if a.get("field") == sync.PARTNER])
+        stars = [c for c in listed if c["type"] == "field"
+                 and c["action"][0].get("field") in ("11", "12")]
+        self.assertEqual(sorted(t["value"] for c in stars for t in c["terms"] if t["field"] == "600"),
+                         ["Partner One", "Partner Two"])
+        self.assertTrue(all(c["link"] == "All" for c in stars))
+        reveal = [c for c in listed if c["type"] == "field" and c["action"][0].get("field") == "600"]
+        self.assertEqual([(t["field"], t["value"]) for t in reveal[0]["terms"]], [("500", "Stars")])
+        # swap the list back for the typed box: every rule is identical, in the same order
+        back = json.loads(json.dumps(listed).replace('"field": "600"', '"field": "%s"' % sync.PARTNER))
+        self.assertEqual(sync._norm_rules(back), sync._norm_rules(typed))
+        changed = [a for a, b in zip(sync._norm_rules(listed), sync._norm_rules(typed)) if a != b]
+        self.assertEqual(len(changed), 3)                   # 2 gated rosters + 1 reveal
+
+    def test_the_questions_carry_the_partner_list_as_a_partner_field(self):
+        qs = {"331": {"type": "control_textbox"}, "444": {"type": "control_dropdown", "name": "clubPicker"}}
+        self.assertEqual(sync.partner_fields(qs), {sync.PARTNER})
+        self.assertIsNone(sync.partner_picker(qs))
+        qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
+        self.assertEqual(sync.partner_picker(qs), "600")
+        self.assertEqual(sync.partner_fields(qs), {sync.PARTNER, "600"})
+        qs["600"]["type"] = "control_textbox"                # recognised as a dropdown only
+        self.assertIsNone(sync.partner_picker(qs))
+
+    def test_partner_choices_are_the_partners_of_shared_names(self):
+        clubs = {"10": "Alpha Club", "11": "Stars", "12": "STARS", "13": "Beta Club", "14": "Moon"}
+        partners = {"11": "Partner Two", "12": "partner one", "10": "Partner Three"}
+        self.assertEqual(sync.partner_choices(clubs, partners), ["partner one", "Partner Two"])
+        # a club about to be created makes its name shared; the same partner twice is listed once
+        pending = [("moon", "Partner Four"), ("Stars", " Partner  two ")]
+        self.assertEqual(sync.partner_choices({"14": "Moon", **clubs}, {"14": "Partner One", **partners},
+                                              pending),
+                         ["Partner Four", "Partner One", "Partner Two"])
+        self.assertEqual(sync.partner_choices({"10": "Alpha Club"}, {}), [])
+        self.assertEqual(sync.partner_choices({"10": "A", "11": "a"}, {"10": "", "11": " "}), [])
+
+    def test_rule_delta_counts_kept_new_and_dropped_rules(self):
+        typed = self.rules(picker="500")
+        wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"]), id="x",
+                     index="99", priority="99") for c in typed]
+        self.assertEqual(sync.rule_delta(wire, self.rules(picker="500")), (len(typed), 0, 0))
+        listed = self.rules(picker="500", partner_field="600")
+        self.assertEqual(sync.rule_delta(wire, listed), (len(typed) - 3, 3, 3))
+        self.assertEqual(sync.rule_delta([], listed), (0, len(listed), 0))
+        self.assertEqual(sync.rule_delta([{"terms": "{broken"}], listed), (0, len(listed), 0))
+
+
+class FakeForm:
+    """sync_attendance_form.Jotform stand-in: one form held in memory. Reads
+    answer from it; writes are recorded (label + payload) and, with apply, a
+    question create answers `created` (the new question's id, or {})."""
+
+    def __init__(self, questions, conditions, apply=False, created=None):
+        self.questions, self.conditions, self.apply = questions, conditions, apply
+        self.created = {"qid": 600} if created is None else created
+        self.calls, self.writes = [], []
+
+    def get(self, path):
+        if path == "/questions":
+            return json.loads(json.dumps(self.questions))
+        if path == "/properties":
+            return {"conditions": json.loads(json.dumps(self.conditions))}
+        return {"count": "0"}
+
+    def _write(self, method, path, payload, label):
+        self.calls.append(label)
+        self.writes.append((method, path, payload))
+        if not self.apply:
+            return None
+        return self.created if (method, path) == ("POST", "/questions") else {}
+
+    def post_form(self, path, data, label):
+        return self._write("POST", path, data, label)
+
+    def put_json(self, path, payload, label):
+        return self._write("PUT", path, payload, label)
+
+    def delete(self, path, label):
+        return self._write("DELETE", path, None, label)
+
+
+class PartnerPickerFlow(unittest.TestCase):
+    """sync_attendance_form.main() with --partner-picker and without, on a fake
+    Africa form: two partners share the club name "Stars". Fictional names."""
+
+    ROSTER = {("Partner One", "Alpha Club"): ["Jane Doe", "Mary Roe"],
+              ("Partner One", "Stars"): ["Ann Poe", "Kay Loe"],
+              ("Partner Two", "Stars"): ["Sue Moe", "Liz Noe"],
+              ("Partner Two", "Beta Club"): ["Eve Hoe", "Ida Toe"]}
+    QIDS = {("Partner One", "Alpha Club"): "10", ("Partner One", "Stars"): "11",
+            ("Partner Two", "Stars"): "12", ("Partner Two", "Beta Club"): "13"}
+    MODULES = {"1": "Core 1", "2": "Core 2|Elective - Healthy GLOW", "3": "Core 3"}
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        del sync.WARNINGS[:]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        del sync.WARNINGS[:]
+
+    def form(self, roster=None, partner_list=None, rules_on=None, box_hidden=None):
+        """(questions, wire conditions) of a form in step with `roster`;
+        partner_list: the list's options when the form has one (q600);
+        rules_on: the field the live gated rules test (default: the list if any)."""
+        roster = self.ROSTER if roster is None else roster
+        qs = {"5": {"type": "control_textbox", "text": "Club Name", "order": "4", "hidden": "Yes"},
+              "331": {"type": "control_textbox", "text": "Partner", "order": "7", "name": "partner"},
+              "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9"}}
+        for n, (year, mq) in enumerate(sync.MODULES.items()):
+            qs[mq] = {"type": "control_dropdown", "text": "Module", "options": self.MODULES[year],
+                      "order": str(10 + n)}
+        for n, wq in enumerate(sync.WEEKS.values()):
+            qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n)}
+        for q in (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID):
+            qs[q] = {"type": "control_textbox", "text": "bridge", "order": "30"}
+        clubs, partner_of = {}, {}
+        for (partner, club), names in roster.items():
+            qid = self.QIDS[(partner, club)]
+            qs[qid] = {"type": "control_checkbox", "text": club, "options": "|".join(names),
+                       "order": str(40 + int(qid))}
+            clubs[qid] = club
+            partner_of[qid] = partner
+        qs["500"] = dict(sync.PICKER_PROPS, type="control_dropdown", name=sync.PICKER_NAME, order="3",
+                         options="|".join(sorted(set(clubs.values()), key=str.lower)))
+        if partner_list is not None:
+            qs["600"] = dict(sync.PARTNER_PICKER_PROPS, type="control_dropdown",
+                             name=sync.PARTNER_PICKER_NAME, order="7", options=partner_list)
+            qs["331"]["hidden"] = "Yes"
+        if box_hidden is not None:
+            qs["331"]["hidden"] = box_hidden
+        field = rules_on or ("600" if partner_list is not None else sync.PARTNER)
+        modules = {y: o.split("|") for y, o in self.MODULES.items()}
+        conds = sync.build_conditions(clubs, partner_of, modules, picker="500", partner_field=field)
+        wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]
+        return qs, wire
+
+    def run_sync(self, fake, *extra, roster=None):
+        import contextlib
+        import io
+        from unittest import mock
+        roster = self.ROSTER if roster is None else roster
+        path = os.path.join(self.tmp.name, "roster.csv")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("girl_id,partner,club,full_name,status,region\n")
+            for (partner, club), names in roster.items():
+                for n, name in enumerate(names):
+                    f.write(f"DEMOCLUB-SAMPLE-{n:03d},{partner},{club},{name},active,Africa\n")
+        argv = ["sync_attendance_form.py", path, "--roster", "--region", "Africa", "--form", "999",
+                *extra]
+        out = io.StringIO()
+        with mock.patch.object(sync, "Jotform", lambda key, form, apply_changes: fake), \
+                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test"}), \
+                mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
+            try:
+                sync.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def test_without_the_list_nothing_changes_and_the_plan_says_why(self):
+        fake = FakeForm(*self.form())
+        code, out = self.run_sync(fake)
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertIn("nothing to do", out)
+        self.assertIn("Partner box: 2 partners share club names", out)
+        self.assertNotIn("Partner picker:", out)
+
+    def test_dry_run_creates_the_list_rewrites_the_rules_then_hides_the_box(self):
+        qs, wire = self.form()
+        fake = FakeForm(qs, wire)
+        code, out = self.run_sync(fake, "--partner-picker")
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.calls, ["CREATE partner picker (2 partners)",
+                                      f"REPLACE conditions ({len(wire)} rules)",
+                                      "HIDE partner textbox (q331: the partner list replaces it)"])
+        self.assertIn(f"conditions: {len(wire) - 3} kept, 3 new, 3 dropped", out)
+        _, _, fields = fake.writes[0]
+        self.assertEqual({k: fields[f"question[{k}]"] for k in ("type", "name", "order", "options")},
+                         {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME, "order": "7",
+                          "options": "Partner One|Partner Two"})
+        for k, v in sync.PARTNER_PICKER_PROPS.items():
+            self.assertEqual(fields[f"question[{k}]"], v, k)
+
+    def test_apply_points_the_rules_at_the_new_list_and_hides_the_box_last(self):
+        qs, wire = self.form()
+        fake = FakeForm(qs, wire, apply=True)
+        summary = os.path.join(self.tmp.name, "plan.json")
+        code, _ = self.run_sync(fake, "--partner-picker", "--apply", "--summary-json", summary)
+        self.assertEqual(code, 0)
+        self.assertEqual([(m, p) for m, p, _ in fake.writes],
+                         [("POST", "/questions"), ("PUT", "/properties"), ("POST", "/question/331")])
+        self.assertEqual(fake.writes[2][2], {"question[hidden]": "Yes", "question[required]": "No"})
+        conds = fake.writes[1][2]["properties"]["conditions"]
+        self.assertEqual(len(conds), len(wire))
+        terms = [t for c in conds for t in json.loads(c["terms"])]
+        actions = [a for c in conds for a in json.loads(c["action"])]
+        self.assertFalse([t for t in terms if t["field"] == sync.PARTNER])
+        self.assertFalse([a for a in actions if a.get("field") == sync.PARTNER])
+        self.assertEqual(sorted(t["value"] for t in terms if t["field"] == "600"),
+                         ["Partner One", "Partner Two"])
+        # question 5 is still filled from the Club picker, exactly as before
+        copy = [a for a in actions if a.get("resultField") == sync.CLUB_NAME]
+        self.assertEqual([(a["equation"], a["operands"]) for a in copy], [("{500}", "500")])
+        with open(summary, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["partner_picker"], "600")
+
+    def test_a_create_without_a_question_id_keeps_this_run_on_the_typed_box(self):
+        qs, wire = self.form()
+        fake = FakeForm(qs, wire, apply=True, created={})
+        code, out = self.run_sync(fake, "--partner-picker", "--apply")
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.calls, ["CREATE partner picker (2 partners)"])   # rules unchanged, box stays
+        self.assertTrue(any("carried no question id" in w for w in sync.WARNINGS))
+
+    def test_a_form_with_the_list_in_step_needs_nothing(self):
+        fake = FakeForm(*self.form(partner_list="Partner One|Partner Two"))
+        code, out = self.run_sync(fake)
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertIn("Partner picker: q600", out)
+        self.assertNotIn("Partner box:", out)
+        code, out = self.run_sync(fake, "--partner-picker")
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertIn("--partner-picker is not needed", out)
+
+    def test_the_list_is_kept_in_shape_and_the_box_kept_hidden(self):
+        fake = FakeForm(*self.form(partner_list="Old Partner|Partner One"))
+        self.run_sync(fake)
+        self.assertEqual(fake.calls, ["UPDATE partner picker (2 partners: options)"])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "Partner One|Partner Two"})
+        qs, wire = self.form(partner_list="Partner One|Partner Two", box_hidden="No")
+        qs["600"]["required"] = "No"
+        fake = FakeForm(qs, wire)
+        self.run_sync(fake)
+        self.assertEqual(fake.calls, ["UPDATE partner picker (2 partners: required)",
+                                      "HIDE partner textbox (q331: the partner list replaces it)"])
+
+    def test_rules_left_on_the_typed_box_are_read_back_and_moved_to_the_list(self):
+        # a run that created the list but failed before the rules write
+        fake = FakeForm(*self.form(partner_list="Partner One|Partner Two", rules_on=sync.PARTNER,
+                                   box_hidden="No"))
+        code, out = self.run_sync(fake)
+        self.assertEqual(code, 0)
+        self.assertEqual([c.split(" (")[0] for c in fake.calls],
+                         ["REPLACE conditions", "HIDE partner textbox"])
+        self.assertIn("conditions: ", out)
+        self.assertEqual(sync.WARNINGS, [])        # every roster matched its partner: no new roster
+
+    def test_refuses_before_any_write_when_no_name_is_shared(self):
+        on_form = {k: v for k, v in self.ROSTER.items() if k != ("Partner Two", "Stars")}
+        fake = FakeForm(*self.form(roster=on_form), apply=True)
+        # the sheet also has a new club, which an apply would otherwise create first
+        sheet = {**on_form, ("Partner Two", "Gamma Club"): ["Sue Moe", "Liz Noe"]}
+        code, _ = self.run_sync(fake, "--partner-picker", "--apply", roster=sheet)
+        self.assertIn("nothing to choose", str(code))
+        self.assertEqual(fake.writes, [])
+        code, _ = self.run_sync(FakeForm(*self.form(roster=on_form)), roster=sheet)
+        self.assertEqual(code, 0)                    # without the flag the same sheet syncs as ever
+
+    def test_refuses_before_any_write_a_partner_name_with_the_option_separator(self):
+        roster = dict(self.ROSTER)
+        roster[("Partner|Two", "Stars")] = roster.pop(("Partner Two", "Stars"))
+        self.QIDS = {**self.QIDS, ("Partner|Two", "Stars"): "12"}
+        fake = FakeForm(*self.form(roster=roster), apply=True)
+        code, _ = self.run_sync(fake, "--partner-picker", "--apply", roster=roster)
+        self.assertIn("option separator", str(code))
+        self.assertEqual(fake.writes, [])
+
+
+class FormStatusAudit(unittest.TestCase):
+    """tools/form_status.py audit_rules on forms built by the sync's own rules."""
+
+    def form(self, **kw):
+        return PartnerPickerFlow.form(PartnerPickerFlow(), **kw)
+
+    def test_the_typed_box_form_is_clean(self):
+        problems, summary = form_status.audit_rules(*self.form())
+        self.assertEqual(problems, [])
+        self.assertEqual(summary["clubs"], 4)
+
+    def test_the_partner_list_form_is_clean(self):
+        qs, wire = self.form(partner_list="Partner One|Partner Two")
+        self.assertEqual(form_status.audit_rules(qs, wire), ([], {"clubs": 4, "show_rules": 4,
+                                                                  "aggregate_rosters": 4}))
+
+    def test_the_partner_list_checks(self):
+        # rules still on the typed box while the list exists, and the box visible
+        qs, wire = self.form(partner_list="Partner One|Partner Two", rules_on=sync.PARTNER,
+                             box_hidden="No")
+        problems, _ = form_status.audit_rules(qs, wire)
+        self.assertEqual(sum("not the partner list (q600)" in p for p in problems), 2)
+        self.assertTrue(any("typed Partner box (q331) is still visible" in p for p in problems))
+        # a tested partner missing from the list, one listed that no rule tests, not required
+        qs, wire = self.form(partner_list="Partner One|Someone Else")
+        qs["600"]["required"] = "No"
+        problems, _ = form_status.audit_rules(qs, wire)
+        self.assertTrue(any("misses 1 partner(s) a rule tests: ['Partner Two']" in p for p in problems))
+        self.assertTrue(any("offers 1 partner(s) no rule tests: ['Someone Else']" in p for p in problems))
+        self.assertTrue(any("(q600) is not required" in p for p in problems))
+        self.assertEqual(len(problems), 3)
+        # an unshared name with a Partner term on the list is still flagged as before
+        qs, wire = self.form(partner_list="Partner One|Partner Two")
+        wire = [dict(c) for c in wire]
+        for c in wire:
+            if '"field": "10"' in c["action"]:
+                c["terms"] = json.dumps([{"field": "600", "operator": "equals", "value": "Partner One"},
+                                         {"field": "500", "operator": "equals", "value": "Alpha Club"}])
+        problems, _ = form_status.audit_rules(qs, wire)
+        self.assertEqual(problems, ["'Alpha Club' (q10) is unique but its rule needs a Partner"])
 
 
 class GlowClient(unittest.TestCase):
@@ -642,6 +990,25 @@ class RenameClub(unittest.TestCase):
         broken = {"id": "4", "terms": "{not json", "action": "[]"}
         self.assertEqual(rename_club.partner_gated([plain, other, broken], {"352"}), [])
         self.assertEqual(rename_club.partner_gated([plain, gated, other], {"352"}), ["2"])
+        # on a form with the partner list the rule tests the list instead
+        listed = dict(gated, id="5", terms=[dict(gated["terms"][0], field="600"), gated["terms"][1]])
+        self.assertEqual(rename_club.partner_gated([plain, listed], {"352"}), [])
+        self.assertEqual(rename_club.partner_gated([plain, listed], {"352"}, {sync.PARTNER, "600"}), ["5"])
+
+    def test_form_questions_names_the_partner_fields(self):
+        class Client:
+            def __init__(self, qs):
+                self.qs = qs
+
+            def get(self, path, **params):
+                return self.qs
+        qs = {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
+              "353": {"type": "control_checkbox", "text": "New Name"}}
+        self.assertEqual(rename_club.form_questions(Client(qs), "1", "sunrise club", "New Name"),
+                         (["352"], ["353"], {sync.PARTNER}))
+        qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
+        self.assertEqual(rename_club.form_questions(Client(qs), "1", "Sunrise Club", "x")[2],
+                         {sync.PARTNER, "600"})
 
     def test_late_rows_finds_the_club_appended_after_the_read(self):
         rows = self.move_rows()
@@ -730,7 +1097,7 @@ class RenameClub(unittest.TestCase):
     def test_move_refuses_a_partner_gated_rule_and_sheet_only_apply(self):
         sheet = self.move_sheet()
         code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(gated=True), key="test")
-        self.assertIn("typed Partner", str(code))
+        self.assertIn("given Partner", str(code))
         self.assertEqual(sheet.batches, [])
         code, _ = self.run_main(self.MOVE + ["--sheet-only", "--apply"], sheet)
         self.assertIn("drop --sheet-only", str(code))

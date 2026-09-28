@@ -40,7 +40,7 @@ import json
 import os
 import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
@@ -48,8 +48,9 @@ from glow.cli import run            # noqa: E402
 from glow.jotform import Client     # noqa: E402
 from glow.sync import (             # noqa: E402  - the parsers and structural ids,
     CLUB_NAME, CONTACT_IDS,   # shared with the
-    MODULE_ID, MODULES, PARTNER, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
-    WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, read_roster_csv, read_sheet, warn,                            # against Config.gs
+    MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
+    WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, partner_fields, partner_picker,
+    read_roster_csv, read_sheet, warn,                            # against Config.gs
 )
 
 # Optional "Club" picker: a required dropdown listing every club on the form,
@@ -71,6 +72,24 @@ PICKER_PROPS = {
     "multipleSelections": "Yes",
     "searchText": "Type to search your club",
     "visibleOptions": "5",
+    "emptyText": "Please Select",
+}
+
+# Optional partner list: when two partners have a club of the same name the
+# picker lists that name once, and the rosters are told apart by the partner.
+# The typed Partner box (q331) had to equal the partner's full name as the
+# Roster spells it, so an acronym ("HAFAI") showed no roster. Added once per
+# form with --partner-picker (docs/plans/2026-09-28-partner-box.md); from then
+# on the gated rules test this list and q331 stays hidden. Its shape is the
+# Module/Session dropdowns' (q92, q15): a plain single select, required, hidden
+# until a rule shows it. "Partner" and "Please Select" are already translated
+# on every form, and partner names stay English like club names.
+PARTNER_PICKER_PROPS = {
+    "text": "Partner",
+    "subLabel": "",
+    "required": "Yes",
+    "hidden": "Yes",
+    "multipleSelections": "No",
     "emptyText": "Please Select",
 }
 
@@ -137,11 +156,14 @@ def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
     return {"id": next_id(), "type": "calculation", "link": "Any",
             "priority": "0", "index": "0", "terms": terms, "action": [action]}
 
-def build_conditions(club_questions, partner_of, module_options, picker=None):
+def build_conditions(club_questions, partner_of, module_options, picker=None,
+                     partner_field=PARTNER):
     """club_questions: {qid: club display name}; partner_of: {qid: partner}
     for clubs whose name is shared by several partners; picker: qid of the
     Club dropdown when the form has one (the rules then key on it and its
-    value is copied into the CLUB_NAME textbox for Salesforce)."""
+    value is copied into the CLUB_NAME textbox for Salesforce); partner_field:
+    the field the same-name rules test - the typed Partner box, or the partner
+    list once the form has one."""
     conds = []
     club_field = picker or CLUB_NAME
 
@@ -154,17 +176,17 @@ def build_conditions(club_questions, partner_of, module_options, picker=None):
     for qid, name in sorted(club_questions.items(), key=lambda kv: int(kv[0])):
         if len(by_name[name.lower()]) > 1:
             conds.append(mk_field_rule(
-                [mk_term(PARTNER, "equals", partner_of[qid]),
+                [mk_term(partner_field, "equals", partner_of[qid]),
                  mk_term(club_field, "equals", name)],
                 [mk_show(qid)], link="All"))
         else:
             conds.append(mk_field_rule([mk_term(club_field, "equals", name)],
                                        [mk_show(qid)]))
     for low, qids in sorted(by_name.items()):
-        if len(qids) > 1:  # ambiguous name -> reveal the Partner box
+        if len(qids) > 1:  # ambiguous name -> reveal the Partner box (or list)
             conds.append(mk_field_rule(
                 [mk_term(club_field, "equals", club_questions[qids[0]])],
-                [mk_show(PARTNER)]))
+                [mk_show(partner_field)]))
 
     # B. curriculum cascade
     for year, module_qid in MODULES.items():
@@ -225,6 +247,35 @@ def same_conditions(current, planned):
     except (TypeError, ValueError, KeyError):
         return False
 
+def rule_delta(current, planned):
+    """(kept, new, dropped): how many planned rules the form already has (ids
+    and order aside), how many it gains, and how many of its rules go."""
+    try:
+        cur = Counter(_norm_rules(current))
+    except (TypeError, ValueError, KeyError):
+        cur = Counter()
+    plan = Counter(_norm_rules(planned))
+    kept = sum((cur & plan).values())
+    return kept, sum(plan.values()) - kept, sum(cur.values()) - kept
+
+def partner_choices(club_questions, partner_of, pending=()):
+    """What the partner list offers: the partner of every roster whose name
+    another roster shares (case-insensitively, as Jotform's "equals" compares),
+    counting the (club, partner) pairs in `pending` that are about to be
+    created. One entry per partner (first spelling kept), sorted."""
+    by_name = defaultdict(list)
+    for qid, name in club_questions.items():
+        by_name[name.lower()].append(partner_of.get(qid, ""))
+    for club, partner in pending:
+        by_name[club.lower()].append(partner)
+    out = {}
+    for partners in by_name.values():
+        if len(partners) > 1:
+            for p in partners:
+                if p and p.strip():
+                    out.setdefault(" ".join(p.split()).lower(), p)
+    return sorted(out.values(), key=str.lower)
+
 # ------------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -245,6 +296,11 @@ def main():
     ap.add_argument("--club-picker", action="store_true",
                     help="add the Club dropdown to this form (once; afterwards it is "
                          "maintained on every run) and hide the Club Name textbox")
+    ap.add_argument("--partner-picker", action="store_true",
+                    help="add the partner list to this form (once; afterwards it is "
+                         "maintained on every run): club names two partners share are "
+                         "told apart by choosing the partner instead of typing it, and "
+                         "the typed Partner box is hidden")
     args = ap.parse_args()
     if args.region and not args.roster:
         sys.exit("--region needs --roster (the Roster tab is what carries regions)")
@@ -314,9 +370,18 @@ def main():
         if args.club_picker:
             print("  - the form already has the Club picker; --club-picker is not needed")
 
+    partner_qid = partner_picker(questions)
+    if partner_qid:
+        print(f"Partner picker: q{partner_qid} (mentors choose the partner of a club name "
+              "two partners share)")
+        if args.partner_picker:
+            print("  - the form already has the partner list; --partner-picker is not needed")
+
     # partner mapping already encoded in the form's current rules
-    # (used to match same-named clubs to their existing questions)
+    # (used to match same-named clubs to their existing questions); a rule
+    # tests the typed box or, once the form has it, the partner list
     current_partner_of = {}
+    pfields = partner_fields(questions)
     props = jf.get("/properties")
     for cond in props.get("conditions", []):
         if cond.get("type") != "field":
@@ -325,7 +390,7 @@ def main():
             else cond["terms"]
         action = json.loads(cond["action"]) if isinstance(cond["action"], str) \
             else cond["action"]
-        pterm = next((t for t in terms if t["field"] == PARTNER
+        pterm = next((t for t in terms if str(t["field"]) in pfields
                       and t["operator"] == "equals"), None)
         if pterm:
             for a in action:
@@ -480,6 +545,18 @@ def main():
                              "form's current rules. Make sure the export "
                              "includes every club's enrollment row.")
 
+    # the partner list's refusals come before the first write
+    if partner_qid or args.partner_picker:
+        planned = partner_choices(club_questions, partner_of,
+                                  [(c, p) for c, p, _, _ in to_create])
+        if any("|" in p for p in planned):
+            sys.exit("A partner name contains '|', Jotform's option separator: "
+                     + ", ".join(p for p in planned if "|" in p)
+                     + " - fix its spelling in the Partners tab and the Roster first")
+        if partner_qid is None and not planned:
+            sys.exit("--partner-picker: no club name on this form is shared by two partners, "
+                     "so there is nothing to choose - the typed Partner box stays as it is")
+
     # --- prune other regions' clubs (fresh clones only) --------------------
     for qid, club, reg in to_delete:
         jf.delete(f"/question/{qid}", f"DELETE roster '{club}' (q{qid}, belongs to {reg})")
@@ -492,6 +569,7 @@ def main():
             return 0
     max_order = max(order_of(q) for q in questions.values())
     used_names = {q.get("name", "") for q in questions.values()}
+    pending = []    # (club, partner) of rosters not created (a dry run)
     for club, partner, options, ambiguous in to_create:
         max_order += 1
         slug = re.sub(r"[^A-Za-z0-9]", "", club)[:56] or "club"
@@ -513,6 +591,8 @@ def main():
             club_questions[qid] = club
             if ambiguous:
                 partner_of[qid] = partner
+        else:
+            pending.append((club, partner))
     for qid, club, options in to_update:
         jf.post_form(f"/question/{qid}", {"question[options]": options},
                      f"UPDATE roster '{club}' (q{qid}, "
@@ -547,15 +627,52 @@ def main():
                          f"UPDATE club picker ({len(picker_names)} clubs: "
                          f"{', '.join(sorted(drift))})")
 
+    # --- the partner list: the partners of every club name two partners share ---
+    choices = partner_choices(club_questions, partner_of, pending)
+    using_list = partner_qid is not None or args.partner_picker
+    if partner_qid is None and args.partner_picker:
+        fields = {"question[type]": "control_dropdown", "question[name]": PARTNER_PICKER_NAME,
+                  "question[order]": str(questions.get(PARTNER, {}).get("order", "7")),
+                  "question[options]": "|".join(choices)}
+        fields.update({f"question[{k}]": v for k, v in PARTNER_PICKER_PROPS.items()})
+        content = jf.post_form("/questions", fields,
+                               f"CREATE partner picker ({len(choices)} partners)")
+        if args.apply:
+            if isinstance(content, dict) and content.get("qid"):
+                partner_qid = str(content["qid"])
+            else:   # keep this run on the typed box; the list, hidden, waits for the re-run
+                using_list = False
+                warn("  ! the partner list was created but Jotform's answer carried no question "
+                     "id - this run keeps the typed Partner box; run the same command again "
+                     "(it finds the list by name)")
+    elif partner_qid is not None:
+        current = questions[partner_qid]
+        drift = {k: v for k, v in PARTNER_PICKER_PROPS.items() if (current.get(k) or "") != v}
+        if choices and current.get("options") != "|".join(choices):
+            drift["options"] = "|".join(choices)
+        if drift:
+            jf.post_form(f"/question/{partner_qid}",
+                         {f"question[{k}]": v for k, v in drift.items()},
+                         f"UPDATE partner picker ({len(choices)} partners: "
+                         f"{', '.join(sorted(drift))})")
+    elif choices:
+        print(f"Partner box: {len(choices)} partners share club names on this form and are "
+              f"told apart by the typed Partner box (q{PARTNER}); --partner-picker replaces "
+              "it with a list")
+    hide_box = using_list and questions.get(PARTNER, {}).get("hidden") != "Yes"
+
     # --- regenerate all conditions -----------------------------------------
     # The API stores each condition's terms/action as JSON-encoded STRINGS
     # (that is what GET returns and what the builder saves) - encode them.
     conds = build_conditions(club_questions, partner_of, module_options,
-                             picker=picker_qid or ("NEW" if args.club_picker else None))
+                             picker=picker_qid or ("NEW" if args.club_picker else None),
+                             partner_field=partner_qid or ("NEW_PARTNER" if using_list else PARTNER))
     if not (to_create or to_update or to_delete) and \
             same_conditions(props.get("conditions", []), conds):
         print("  (conditions unchanged - skipping the rewrite)")
     else:
+        kept, new, dropped = rule_delta(props.get("conditions", []), conds)
+        print(f"  conditions: {kept} kept, {new} new, {dropped} dropped")
         wire = [{"id": c["id"], "type": c["type"], "link": c["link"],
                  "priority": c["priority"], "index": c["index"],
                  "terms": json.dumps(c["terms"]),
@@ -564,6 +681,12 @@ def main():
         if to_create and not args.apply:
             label += f" + ~{len(to_create)} more once the new rosters exist"
         jf.put_json("/properties", {"properties": {"conditions": wire}}, label + ")")
+
+    # the typed box goes only after the rules stopped testing it: a failure
+    # before this point leaves the form working on the box
+    if hide_box:
+        jf.post_form(f"/question/{PARTNER}", {"question[hidden]": "Yes", "question[required]": "No"},
+                     f"HIDE partner textbox (q{PARTNER}: the partner list replaces it)")
 
     # --- report ------------------------------------------------------------
     mode = "APPLIED" if args.apply else "DRY RUN (use --apply to write)"
@@ -584,7 +707,7 @@ def main():
                         for q, c, o in to_update],
             "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
-            "club_picker": picker_qid,
+            "club_picker": picker_qid, "partner_picker": partner_qid,
             "plan_hash": hashlib.sha1("\n".join(sorted(jf.calls)).encode()).hexdigest(),
         }
         with open(args.summary_json, "w", encoding="utf-8") as f:

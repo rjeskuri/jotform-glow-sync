@@ -31,6 +31,25 @@ CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID = "18", "98", "100", "102"
 # tools/form_status.py).
 PICKER_NAME = "clubPicker"
 
+# The partner list that replaces the typed Partner box for club names two
+# partners share (created by sync_attendance_form.py --partner-picker,
+# docs/plans/2026-09-28-partner-box.md). Recognised by name, like the picker.
+PARTNER_PICKER_NAME = "partnerPicker"
+
+
+def partner_picker(questions):
+    """qid of the partner list, or None while the form has only the typed box."""
+    return next((qid for qid, q in questions.items()
+                 if q.get("type") == "control_dropdown" and q.get("name") == PARTNER_PICKER_NAME),
+                None)
+
+
+def partner_fields(questions):
+    """The fields a partner-gated rule may test: the typed box (q331) and,
+    once the form has it, the partner list."""
+    pp = partner_picker(questions)
+    return {PARTNER, pp} if pp else {PARTNER}
+
 # Sessions per module. Modules not listed default to 8 sessions.
 # EDIT HERE when the curriculum changes; the cascade rules are generated
 # from this table and from the module dropdowns' live option lists.
