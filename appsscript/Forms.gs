@@ -561,7 +561,8 @@ function migrateCountryToRegionLocked_(ui) {
  * answer (never while a dialog is open), re-reads, and applies only what it
  * showed; re-reads again and records the outcome in Audit. Changes texts
  * and adds one question — never a title, never deletes an item, never
- * touches a response, a response tab or FormLog. A text edited by hand is
+ * touches a response or FormLog; the only response-tab change is the added
+ * question's new column, which Google makes. A text edited by hand is
  * left as is and listed with the suggested text. A second run finds nothing
  * to change (docs/RUNBOOK.md, "Google Forms wording").
  */
@@ -859,7 +860,11 @@ function formWordingPreviewText_(plan) {
                  (sk.to ? '\n  Suggested text: ' + quote(sk.to) : ''));
     });
   }
-  lines.push('', 'Question titles, answers and the response tabs are not changed.');
+  // adding a question adds its column to the Feedback tab (Google does that)
+  lines.push('', plan.changes.some(function (c) { return c.what === 'add-email'; })
+      ? 'No question title or answer is changed; the response tabs get no edit except the new ' +
+        'reply column noted above.'
+      : 'Question titles, answers and the response tabs are not changed.');
   return lines.join('\n');
 }
 

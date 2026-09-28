@@ -818,7 +818,13 @@ console.log('\n  the plan (pure)');
         text.includes('   now: "' + W.CLUB_HELP_2026_08 + '"') && text.includes('   new: "' + W.CLUB_HELP + '"') &&
         text.includes('add the question "' + WQ.FB_EMAIL + '"') && text.includes('after "' + WQ.FB_DEVICE + '"') &&
         text.includes('The Feedback tab gets a new column') &&
-        text.endsWith('Question titles, answers and the response tabs are not changed.'));
+        text.endsWith('No question title or answer is changed; the response tabs get no edit except the new reply ' +
+                      'column noted above.') && !text.includes('the response tabs are not changed'),
+        text.split('\n').pop());
+  const noAdd = fw.planFormWording_(Object.assign(liveState(), { feedback: wantedState().feedback }));
+  check('…without the added question: "Question titles, answers and the response tabs are not changed."',
+        !noAdd.changes.some(c => c.what === 'add-email') && noAdd.changes.length === 3 &&
+        fw.formWordingPreviewText_(noAdd).endsWith('\n\nQuestion titles, answers and the response tabs are not changed.'));
   s = liveState();
   s.roster.removeHelp = 'Names please';
   const skippedText = fw.formWordingPreviewText_(fw.planFormWording_(s));

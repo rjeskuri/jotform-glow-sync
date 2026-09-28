@@ -71,7 +71,9 @@ two help texts) and returns `{changes, skipped}`:
 2. Reads both forms and plans. Nothing to change → "Nothing to change" (+ the skipped list); no
    Audit row. Otherwise one YES/NO dialog lists every change (`now:` / `new:`, the added
    question and "the Feedback tab gets a new column with this title"), then what is left as is,
-   then "Question titles, answers and the response tabs are not changed."
+   then "No question title or answer is changed; the response tabs get no edit except the new
+   reply column noted above." ("Question titles, answers and the response tabs are not changed."
+   when no question is added).
 3. NO → one Audit row `cancelled at the preview (would have changed …)`.
 4. YES → takes the document lock (never held while a dialog is open), re-reads and re-plans; if
    anything differs from the preview → nothing written, Audit + "run it again". Also refuses if
@@ -87,7 +89,8 @@ two help texts) and returns `{changes, skipped}`:
    The handler sets Reply-To only for a typed value that looks like an address (review
    2026-09-28, F1).
 - A second run: "Nothing to change". It never deletes an item, never changes a title, never
-  touches responses, the response tabs, FormLog or the form's destination.
+  touches responses, FormLog or the form's destination; the response tabs get nothing but the
+  added question's new column, which Google makes.
 
 **4. Fresh builds match.** `createFeedbackForm_` / `createRosterForm_` use the same `WORDING`, the
 same builders and the same `addReplyEmailItem_`; `createGlowForms` sets the problem form's
