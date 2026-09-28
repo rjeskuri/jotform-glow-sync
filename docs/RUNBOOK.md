@@ -334,7 +334,7 @@ python3 backup_forms.py --form 262352490535154
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker            # dry run
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker --apply    # add it
 python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv     # "partner picker: q<id>", rules CLEAN
-python3 tools/add_translations.py --audit --form 262352490535154                       # "Partner" already translated: nothing new
+python3 tools/add_translations.py --audit --form 262352490535154                       # same counts as before the apply (see below)
 ```
 
 The dry run prints `conditions: K kept, N new, D dropped`. Expected: template
@@ -342,6 +342,13 @@ The dry run prints `conditions: K kept, N new, D dropped`. Expected: template
 239 / 15 / 15. The rule count does not change (376 and 254), and there are no
 roster creates or updates beyond what the same command prints without the
 flag.
+
+The translation audit prints the same "untranslated" count per language
+after the apply as before it. The list's label "Partner" and its "Please
+Select" placeholder are already translated on every form. The audit skips
+the partner names, which stay English. Most of the count is the Club
+picker's club names, which also stay English (215 of Africa's 236 on
+2026-09-28).
 
 Check in the browser (template first, then Africa):
 

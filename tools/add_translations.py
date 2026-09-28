@@ -45,6 +45,7 @@ sys.path.insert(0, REPO)
 from glow import forms as glow_forms   # noqa: E402
 from glow.cli import run               # noqa: E402
 from glow.jotform import Client        # noqa: E402
+from glow.sync import PARTNER_PICKER_NAME   # noqa: E402
 from glow.text import md5              # noqa: E402
 
 FORMS = {**{fid: region for region, fid in glow_forms.REGIONALS.items()},
@@ -56,7 +57,8 @@ LINK_ELEMENT_NAME = "somethingNotWorking"
 
 def visible_strings(questions):
     """English text -> where it appears, for everything a mentor can see
-    (rosters excluded: names are not translated)."""
+    (rosters and the partner list's options excluded: names are not
+    translated; the list's "Partner" label is)."""
     out = {}
     for qid, q in questions.items():
         if q.get("type") == "control_checkbox" or qid in NEVER_SHOWN:
@@ -67,7 +69,8 @@ def visible_strings(questions):
                 plain = H.unescape(re.sub(r"<[^>]+>", "", v)).strip()
                 if plain:
                     out.setdefault(plain, set()).add(f"q{qid}.{fld}")
-        if q.get("type") in ("control_dropdown", "control_radio") and q.get("options"):
+        if q.get("type") in ("control_dropdown", "control_radio") and q.get("options") \
+                and q.get("name") != PARTNER_PICKER_NAME:
             for o in q["options"].split("|"):
                 if o.strip():
                     out.setdefault(o.strip(), set()).add(f"q{qid}.option")

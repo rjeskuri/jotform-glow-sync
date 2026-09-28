@@ -149,6 +149,8 @@ Salesforce reads (CLAUDE.md rule 5). Not without a template experiment first.
   or chosen from the partner list)".
 - `tools/auto_sync.py` — `PARTNER_PICKER_RX`, and `changes()` counts its
   lines.
+- `tools/add_translations.py` — the audit skips the list's options (partner
+  names stay English), so its counts do not change when the list is added.
 - `test/python_test.py` — golden test (the default rules are unchanged), the
   partner-list rules, `partner_choices`, `rule_delta`, the `main()` flow on a
   fake form (create order, refusals, upkeep, read-back), the `form_status`
