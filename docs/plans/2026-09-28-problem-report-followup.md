@@ -55,15 +55,15 @@ intent: none — the 2026-09-26/27 problem-report review
 the installed trigger calls it by name; a test pins that)
 - Reader normalises `raised` (Date cell → `yyyy-MM-dd` in the sheet zone; text → first 10
   chars) and builds `known` partners/clubs from ClubRegistry B:C.
-- `reviewDigestLines_(rows, today, known)` (pure): ReviewQueue section **first**: per issue
+- `reviewDigest_(rows, today, known)` (pure): ReviewQueue section **first**: per issue
   (listed in `REVIEW_ISSUES`, the 8 strings; anything else under "Other (added by hand)") the
-  open count, new in the last 7 days, oldest age; then up to 10 lines `row N · raised <day> ·
+  open count, new since the previous Monday e-mail (raised 1-7 days ago; this week's items listed first), oldest age; then up to 10 lines `row N · raised <day> ·
   <partner> / <club> · Feedback!7`. Partner/club printed only when on file in ClubRegistry, else
   "(partner not on file)" / "(not given)". A tag is printed only when it is a response-row
   reference (`Feedback!N`, `Roster Form Responses!N`, the enrollment tab) — other tags ARE
   girls' names. Never the detail column. Resolved rows left out. `DIGEST = {MAX_PER_ISSUE: 10,
   NEW_DAYS: 7}`.
-- The e-mail = ReviewQueue section + the SF Pending section as today; no early returns; nothing
+- The e-mail = ReviewQueue section + the SF Pending section as today (its 'added' date now prints as yyyy-MM-dd); no early returns; nothing
   to report → no e-mail, no Audit; STAFF_NOTIFY_EMAIL unset → Audit with both counts. Subject
   lists non-zero parts: `GLOW weekly: 14 open ReviewQueue item(s) · 31 club(s) pending in
   Salesforce` (the old subject changes — a mail filter on it would need updating). Audit: counts only.
@@ -102,8 +102,8 @@ Expected: **+7** (Feedback 4, 5, 6, 7, 10, 11, 12; 11 and 12 are one request sen
 `tools/backfill_feedback_review.py` (new), `docs/RUNBOOK.md`, `appsscript/INSTALL.md`,
 `docs/DECISIONS.md`, `docs/BACKLOG.md`, `docs/ARCHITECTURE.md` (tool table), this plan.
 
-## Tests (fictional only: canary girl 'Hope Fennwhistle', partner 'Fixture Partner Alpha',
-club 'Bright Stars', `mentor@example.org`)
+## Tests (fictional only: a canary girl's name from the fixture, partner 'Fixture Partner
+Alpha', club 'Bright Stars', `mentor@example.org`)
 - Classifier: the 22 fictional cases from the critique (form / text / '' each), incl. Spanish,
   the club-name cut-out, the accepted misses documented in a comment.
 - `feedbackReviewItem_`: no report text, no e-mail, stripped `=`, cap, tag = source.
@@ -111,7 +111,7 @@ club 'Bright Stars', `mentor@example.org`)
   send; a failed send then a retry → one e-mail, one row; a ReviewQueue failure → still e-mailed,
   "add it by hand", result NOT queued; STAFF unset → throws, nothing written; Audit never holds
   the canary, the typed club or example.org.
-- `reviewDigestLines_` / `sendSfPendingDigest`: only-ReviewQueue open; Date and text `raised`
+- `reviewDigest_` / `sendSfPendingDigest`: only-ReviewQueue open; Date and text `raised`
   both age; a row reference shown, name tags and typed off-file partner/club never; 10 per issue
   then "… and N more"; resolved rows out; "Other (added by hand)"; nothing → no e-mail; STAFF
   unset → Audit with both counts.

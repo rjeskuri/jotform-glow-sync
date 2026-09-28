@@ -74,10 +74,14 @@ Reload the spreadsheet.
    map — then **GLOW → Refresh regions from the Partners tab**. A partner
    with no region lands in the ReviewQueue, and its girls reach no
    attendance form until the region is filled in.
-4. Open the **ReviewQueue** tab and work through it (duplicate names: give
-   the girls something that tells them apart, e.g. `Anh Nguyen (A)`, then
-   rebuild — before launch only; since launch the partner resubmits through
-   the Club Roster Form).
+4. Open the **ReviewQueue** tab: one row per question the scripts could not
+   decide (a removal that matched nobody, a name listed twice, a partner with
+   no region, a problem report asking for a roster change, …). Ryan owns it;
+   the Monday e-mail lists what is open. Work it as `docs/RUNBOOK.md`,
+   "Working the ReviewQueue" says (e.g. two girls with one name: add the
+   second as `Jane Doe (B)`), and close each row with
+   `resolved <date> by <name>: <what was done>`. Never delete a row, and
+   never fix an item with the rebuild (step 2).
 
 ## The Google Forms
 
@@ -86,7 +90,7 @@ Reload the spreadsheet.
 | Form | Who uses it | What happens on submit |
 |---|---|---|
 | **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section. **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to **SF Pending**, anything odd goes to the ReviewQueue. **Add or remove girls**: partner → only that partner's clubs → ADD / REMOVE lists → girls are added, reactivated, or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints; the mentor gets a confirmation email echoing only the names they typed |
-| **Something isn't working?** | anyone | one-minute problem report, emailed to staff |
+| **Something isn't working?** | anyone | one-minute problem report, emailed to staff; one that asks for a roster change also becomes a ReviewQueue item |
 
 The run installs the triggers and shows both links (again via **Show form
 links**). Responses land in *Roster Form Responses* and *Feedback*; *FormLog*
@@ -94,8 +98,9 @@ records what was done with each.
 
 Then, in **Project Settings → Script Properties**:
 
-- `STAFF_NOTIFY_EMAIL` — receives problem reports and the Monday "clubs
-  pending in Salesforce" digest.
+- `STAFF_NOTIFY_EMAIL` — receives problem reports and the Monday e-mail:
+  the open ReviewQueue items and the clubs pending in Salesforce (sent only
+  when there is something to report).
 - `SYNC_DISPATCH_REPO` and `SYNC_DISPATCH_TOKEN` — switch on the automatic
   Jotform sync (`docs/RUNBOOK.md`, "Automatic sync"); unset, the sheet sends
   nothing. Test with **GLOW → Google Forms → Request Jotform sync now**.

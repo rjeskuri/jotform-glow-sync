@@ -38,7 +38,7 @@ function installTriggers() {
   ScriptApp.newTrigger('onAnyFormSubmit').forSpreadsheet(ss).onFormSubmit().create();
   ScriptApp.newTrigger('sendSfPendingDigest').timeBased()
       .onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
-  audit_('installTriggers', 'form-submit router + weekly SF digest');
+  audit_('installTriggers', 'form-submit router + Monday e-mail (ReviewQueue + SF Pending)');
 }
 
 /** Installable on-form-submit trigger for the whole spreadsheet. */
@@ -115,7 +115,8 @@ function processMissedResponses() {
   const byForm = function (which) {
     return plan.run.filter(function (it) { return it.which === which; });
   };
-  ask(byForm('FEEDBACK'), 'Problem reports not yet sent to staff', 'Send them to staff now?');
+  ask(byForm('FEEDBACK'), 'Problem reports not yet sent to staff',
+      'Send them to staff now? (Any that ask for a roster change also go to the ReviewQueue.)');
   ask(byForm('ROSTER'), 'Club Roster Form responses not yet processed', 'Process them now?');
   ask(plan.old, 'Club Roster Form responses sent more than ' + MISSED.OLD_AFTER_DAYS +
           ' days ago and never processed',
@@ -211,14 +212,14 @@ function runResponse_(which, sheet, row, answers, responseKey) {
   const source = sheet.getName() + '!' + row;
   let result;
   try {
-    if (which === 'FEEDBACK') result = handleFeedback_(answers, source);
+    if (which === 'FEEDBACK') result = handleFeedback_(answers, source, responseKey);
     else if (isNewClubResponse_(answers)) result = handleNewClub_(answers, source);
     else result = handleRosterChange_(answers, source);
   } catch (err) {
     result = 'ERROR: ' + err.message;
-    review_([{ issue: 'Form response could not be processed', partner: '', club: '',
-               detail: source + ': ' + err.message + ' — fix the cause, then run ' +
-                   '"Process any missed form responses".', dedupeKey: source }]);
+    tryReview_([{ issue: 'Form response could not be processed', partner: '', club: '',
+                  detail: source + ': ' + err.message + ' — fix the cause, then run ' +
+                      '"Process any missed form responses".', dedupeKey: source }], source);
   }
   formLogAdd_(which, row, responseKey, result);
   return result;
@@ -552,8 +553,9 @@ function handleRosterChange_(a, source) {
   const current = existing.byClub[key_(partner) + '||' + key_(club)] || [];
   if (!current.length) {
     review_([{ issue: 'Roster change for a club not on file', partner: partner, club: club,
-               detail: source + ': no girls are enrolled under this partner + club. ' +
-                   'If it is a new club, it needs the New Club Enrollment form.',
+               detail: source + ': no girls are enrolled under this partner + club, so nothing ' +
+                   'changed and the mentor got no confirmation. Look for the club under another ' +
+                   'name or partner (renamed or moved?); a new club needs "' + Q.ACTION_NEW + '".',
                dedupeKey: source }]);
     return 'skipped: club not on file';
   }
@@ -622,13 +624,28 @@ function sendChangeConfirmation_(to, club, partner, plan) {
 }
 
 // ------------------------------------------------------------- Feedback
-function handleFeedback_(a, source) {
+/**
+ * E-mail staff a problem report. One that looks like a roster change also
+ * becomes a ReviewQueue item ("Roster change sent as a problem report"),
+ * because an e-mail alone was never followed up (2026-09-27 review).
+ */
+function handleFeedback_(a, source, responseKey) {
   const staff = PropertiesService.getScriptProperties().getProperty(PROP.STAFF_EMAIL);
   if (!staff) {
     // thrown on purpose: logged as ERROR, so the report is sent once the
     // address is configured and "Process any missed form responses" runs
     throw new Error('STAFF_NOTIFY_EMAIL is not set in Script Properties');
   }
+  // Queued BEFORE the e-mail: review_ skips an item already open under the
+  // same tag, so a retry after a failed send adds no second row — the e-mail
+  // is the one step that must not repeat.
+  const reason = looksLikeRosterChange_(a);
+  const queued = !!reason &&
+      tryReview_([feedbackReviewItem_(a, source, sentDayOfKey_(responseKey), reason)], source);
+  const note = !reason ? '' : queued
+      ? 'Staff note: looks like a roster change; on the ReviewQueue as ' + source + '.'
+      : 'Staff note: looks like a roster change, but it could NOT be added to the ' +
+        'ReviewQueue (see Audit) — add it by hand.';
   const body = [
     'A problem report arrived via "' + FORM_TITLES.FEEDBACK + '" (' + source + ').', '',
     'Form:        ' + tidy_(a[Q.FB_FORM]),
@@ -638,36 +655,241 @@ function handleFeedback_(a, source) {
     'Reply to:    ' + tidy_(a[Q.FB_EMAIL]), '',
     'Trying to do:', tidy_(a[Q.FB_DOING]) || '(not given)', '',
     'What happened:', tidy_(a[Q.FB_WHAT]),
-  ].join('\n');
+  ].concat(note ? ['', note] : []).join('\n');
   const opts = { to: staff, subject: 'GLOW form problem: ' + tidy_(a[Q.FB_FORM]), body: body };
   if (tidy_(a[Q.FB_EMAIL])) opts.replyTo = tidy_(a[Q.FB_EMAIL]);
   MailApp.sendEmail(opts);   // a quota/send failure throws → ERROR → retried later
-  audit_('feedbackForm', 'emailed ' + staff + ' about ' + tidy_(a[Q.FB_FORM]));
-  return 'emailed staff';
+  audit_('feedbackForm', 'emailed ' + staff + ' about ' + tidy_(a[Q.FB_FORM]) +
+         (!reason ? '' : queued ? '; ReviewQueue [#' + source + ']'
+                                : '; roster change, ReviewQueue write FAILED'));
+  return 'emailed staff' +
+      (!reason ? '' : queued ? '; roster change queued' : '; roster change NOT queued (see Audit)');
 }
 
-// ---------------------------------------------------- Salesforce digest
-/** Weekly: list clubs still waiting to become Salesforce Accounts. */
-function sendSfPendingDigest() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.SF_PENDING);
-  if (!sheet || sheet.getLastRow() < 2) return;
-  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, SF_PENDING_COLS.length).getValues()
-      .filter(function (r) { return key_(r[SF_PENDING_COLS.indexOf('status')]) === 'pending'; });
-  if (!rows.length) return;
-  const staff = PropertiesService.getScriptProperties().getProperty(PROP.STAFF_EMAIL);
-  if (!staff) {
-    audit_('sendSfPendingDigest', rows.length + ' pending but STAFF_NOTIFY_EMAIL is not set');
-    return;
+/** review_ that never fails its caller: true if the items are on the ReviewQueue. */
+function tryReview_(items, source) {
+  try {
+    review_(items);
+    return true;
+  } catch (err) {
+    // issue names and the source only — never partner, club or detail
+    audit_('tryReview_', 'could not add ' + items.length + ' item(s) (' +
+           items.map(function (i) { return i.issue; }).join('; ') + ') for ' + source + ': ' +
+           err.message);
+    return false;
   }
+}
+
+// ------------------------------------ problem reports and the ReviewQueue (pure)
+// Tested offline in test/forms_logic_test.js; the back-fill tool
+// (tools/backfill_feedback_review.py) runs these same functions.
+
+/** Every issue the ReviewQueue can hold, in the order the weekly e-mail lists them. */
+const REVIEW_ISSUES = [
+  'Roster change sent as a problem report', 'Removal did not match anyone',
+  'Same name listed twice', 'Partner says two girls share a name',
+  'Girls missing from the latest enrollment', 'Roster change for a club not on file',
+  'Partner has no region', 'Form response could not be processed',
+];
+const OTHER_ISSUE = 'Other (added by hand)';
+const DIGEST = { MAX_PER_ISSUE: 10, NEW_DAYS: 7 };
+
+// "Is this report a roster change?" — a keyword heuristic, checked against the
+// 11 reports of 2026-09 (docs/plans/2026-09-28-problem-report-followup.md).
+// Singular "name", "missing", "moved", "leave" are left out on purpose: they
+// flag page and club problems ("my club is missing from the list").
+const RC_PEOPLE = /\b(?:girls?|members?|students?|names|roster|list|(?:to|from) (?:our|the|my|this) (?:club|group)|ninas?|chicas?|integrantes|participantes|nombres|lista)\b/;
+const RC_CHANGE = /\b(?:add(?:ed|ing)?|remov(?:e|ed|ing|al)|join(?:ed|ing|s)?|left|chang(?:e|ed|es|ing)|reduc(?:e|ed|es|ing|tion)|updated|up to date|agreg\w*|anadi\w*|quitar\w*|elimin\w*|se fue(?:ron)?|cambi\w*|actualizad[ao]s?)\b/;
+const RC_NEW = /\bnew (?:girls?|members?|students?|names)\b|\bnuev[ao]s? (?:ninas?|chicas?|integrantes|participantes)\b|\b(?:ninas?|chicas?|integrantes|participantes) nuev[ao]s?\b/;
+
+/** Report text as the patterns read it: lower case, accents folded (so \b sees "anadio"). */
+function foldText_(s) {
+  return key_(s).normalize('NFKD').replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * Why a problem report looks like a roster change: 'form' (it names the Club
+ * Roster Form), 'text' (its words ask to add or remove girls) or '' (it does
+ * not). A miss still reaches staff by e-mail; a false alarm is resolved
+ * "not a roster change" (docs/RUNBOOK.md, "Working the ReviewQueue").
+ */
+function looksLikeRosterChange_(a) {
+  if (key_(a[Q.FB_FORM]).indexOf('roster form') !== -1) return 'form';
+  let text = foldText_(tidy_(a[Q.FB_DOING]) + ' ' + tidy_(a[Q.FB_WHAT]));
+  const club = foldText_(a[Q.FB_CLUB]);
+  if (club.length >= 4) text = text.split(club).join(' ');   // "<X> Girls Club" is no roster word
+  return RC_NEW.test(text) || (RC_PEOPLE.test(text) && RC_CHANGE.test(text)) ? 'text' : '';
+}
+
+/**
+ * The ReviewQueue item for a roster change sent as a problem report. It points
+ * at the report (source) and never copies its text or reply address: reports
+ * name girls. Partner and club are what the mentor typed, capped, with any
+ * leading run of = + - @ and spaces stripped so the sheet never reads a formula.
+ */
+function feedbackReviewItem_(a, source, sentDay, reason) {
+  const typed = function (v) { return tidy_(v).replace(/^[\s=+\-@]+/, '').slice(0, 80); };
+  return {
+    issue: 'Roster change sent as a problem report',
+    partner: typed(a[Q.FB_PARTNER]), club: typed(a[Q.FB_CLUB]),
+    detail: source + ' (sent ' + (sentDay || '?') + '; ' +
+        (reason === 'form' ? 'Club Roster Form chosen' : 'report text') + '): enter it on ' +
+        'the Club Roster Form → "' + Q.ACTION_MOD + '", removals spelled exactly as on the ' +
+        'Roster — or ask the partner to. Then mark resolved.',
+    dedupeKey: source,
+  };
+}
+
+/** 'yyyy-MM-dd' the response was sent, from its FormLog key ('' for an older key). */
+function sentDayOfKey_(responseKey) {
+  const m = WALL_KEY.exec(String(responseKey || ''));
+  return m ? m[2].slice(2, 12) : '';
+}
+
+/**
+ * The tag a weekly e-mail may show: a response-row reference such as
+ * 'Feedback!7'. Other tags ARE girls' names (a duplicated or unmatched name).
+ */
+function responseRowTag_(detail) {
+  const m = String(detail || '').match(/\[#([^\]]*)\]\s*$/);
+  if (!m) return '';
+  const bang = m[1].lastIndexOf('!');
+  const tab = m[1].slice(0, bang), row = m[1].slice(bang + 1);
+  return bang > 0 && /^\d+$/.test(row) &&
+      [TAB.FEEDBACK, TAB.ROSTER_FORM, TAB.RESPONSES].indexOf(tab) !== -1 ? m[1] : '';
+}
+
+/** "partner / club" for the weekly e-mail: only names on file are shown. */
+function digestWho_(r, known) {
+  const p = tidy_(r.partner), c = tidy_(r.club);
+  if (!p && !c) return '(no partner or club)';
+  return (!p ? '(partner not given)' : known.partners[key_(p)] || '(partner not on file)') + ' / ' +
+         (!c ? '(club not given)' : known.clubs[key_(c)] || '(club not on file)');
+}
+
+/**
+ * The weekly e-mail's ReviewQueue section. rows: [{row, raised ('yyyy-MM-dd'),
+ * issue, partner, club, detail, resolved}]; known: {partners, clubs} from
+ * ClubRegistry, keyed by key_. Never prints the detail column, a name tag, a
+ * partner/club that is not on file, or a raised cell that is not a date.
+ * Returns {open, fresh, lines}.
+ */
+function reviewDigest_(rows, today, known) {
+  const open = rows.filter(function (r) { return tidy_(r.issue) && !tidy_(r.resolved); });
+  // raised is shown and aged only when it is a date: the cell is free text
+  const day = function (r) { const t = tidy_(r.raised); return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : ''; };
+  const age = function (r) { return daysBetween_(day(r), today); };   // NaN if unknown
+  // "new" = raised since the previous Monday e-mail (1-7 days ago): each day is
+  // counted in exactly one e-mail; an item raised today counts next week
+  const isNew = function (r) { return age(r) > 0 && age(r) <= DIGEST.NEW_DAYS; };
+  const groups = {};
+  open.forEach(function (r) {
+    const issue = REVIEW_ISSUES.indexOf(tidy_(r.issue)) !== -1 ? tidy_(r.issue) : OTHER_ISSUE;
+    (groups[issue] = groups[issue] || []).push(r);
+  });
+  const fresh = open.filter(isNew).length;
+  if (!open.length) return { open: 0, fresh: 0, lines: [] };
+  const lines = [open.length + ' open ReviewQueue item(s)' + (fresh ? ', ' + fresh + ' new this week' : '') +
+                 ' — tab "' + TAB.REVIEW + '"; how to work each one: docs/RUNBOOK.md, ' +
+                 '"Working the ReviewQueue".', ''];
+  REVIEW_ISSUES.concat([OTHER_ISSUE]).forEach(function (issue) {
+    const list = groups[issue];
+    if (!list) return;
+    const ages = list.map(age).filter(function (d) { return !isNaN(d); });
+    const n = list.filter(isNew).length;
+    lines.push(issue + ': ' + list.length + ' open' + (n ? ', ' + n + ' new' : '') +
+               (ages.length ? ', oldest ' + Math.max.apply(null, ages) + ' day(s)' : ''));
+    // this week's items first (the cap must never hide them), then the backlog oldest first
+    const shown = list.filter(isNew).concat(list.filter(function (r) { return !isNew(r); }));
+    shown.slice(0, DIGEST.MAX_PER_ISSUE).forEach(function (r) {
+      const tag = responseRowTag_(r.detail);
+      lines.push('  - row ' + r.row + ' · raised ' + (day(r) || '?') + ' · ' + digestWho_(r, known) +
+                 (tag ? ' · ' + tag : ''));
+    });
+    if (list.length > DIGEST.MAX_PER_ISSUE) {
+      lines.push('  … and ' + (list.length - DIGEST.MAX_PER_ISSUE) + ' more');
+    }
+    lines.push('');
+  });
+  return { open: open.length, fresh: fresh, lines: lines };
+}
+
+/** The weekly e-mail's Salesforce section (as before; 'added' now as yyyy-MM-dd). rows: pending SF Pending rows. */
+function sfPendingLines_(rows) {
+  if (!rows.length) return [];
   const lines = [rows.length + ' new club(s) are waiting to be created in Salesforce ' +
                  '(tab "' + TAB.SF_PENDING + '"). Set status to "done" once created.', ''];
   rows.forEach(function (r) {
     lines.push('- ' + r[2] + ' | ' + r[1] + ' | ' + (r[3] || 'region?') + ' | ' + r[4] +
                ' girls | mentor ' + r[5] + ' <' + r[6] + '> | added ' + r[0]);
   });
-  MailApp.sendEmail({ to: staff, subject: 'GLOW: ' + rows.length + ' club(s) pending in Salesforce',
-                      body: lines.join('\n') });
-  audit_('sendSfPendingDigest', 'emailed ' + staff + ' about ' + rows.length + ' club(s)');
+  return lines;
+}
+
+// ------------------------------------------------------- the weekly e-mail
+/**
+ * Weekly (Monday 08:00): the open ReviewQueue items, then the clubs still
+ * waiting to become Salesforce Accounts, in one e-mail to STAFF_NOTIFY_EMAIL.
+ * Nothing open and nothing pending → no e-mail. The installed trigger calls
+ * this BY NAME (installTriggers): renaming it stops the e-mail until
+ * "Install triggers" is run again.
+ */
+function sendSfPendingDigest() {
+  const zone = spreadsheetZone_();
+  const review = reviewDigest_(readReviewRows_(zone), today_(), readKnownNames_());
+  const pending = readSfPending_(zone);
+  if (!review.open && !pending.length) return;
+  const counts = review.open + ' open ReviewQueue item(s) (' + review.fresh + ' new this week), ' +
+      pending.length + ' club(s) pending in Salesforce';
+  const staff = PropertiesService.getScriptProperties().getProperty(PROP.STAFF_EMAIL);
+  if (!staff) {
+    audit_('sendSfPendingDigest', counts + ' but STAFF_NOTIFY_EMAIL is not set');
+    return;
+  }
+  const subject = [review.open ? review.open + ' open ReviewQueue item(s)' : '',
+                   pending.length ? pending.length + ' club(s) pending in Salesforce' : '']
+      .filter(String).join(' · ');
+  MailApp.sendEmail({ to: staff, subject: 'GLOW weekly: ' + subject,
+                      body: review.lines.concat(sfPendingLines_(pending)).join('\n') });
+  audit_('sendSfPendingDigest', 'emailed ' + staff + ': ' + counts);
+}
+
+/** The ReviewQueue for the weekly e-mail, `raised` as 'yyyy-MM-dd' whether a date cell or text. */
+function readReviewRows_(zone) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.REVIEW);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, REVIEW_COLS.length).getValues()
+      .map(function (v, i) {
+        return { row: i + 2, raised: dayText_(v[0], zone), issue: v[1], partner: v[2],
+                 club: v[3], detail: v[4], resolved: v[5] };
+      });
+}
+
+/** Partner and club names on file (ClubRegistry), keyed by key_: the only ones the e-mail prints. */
+function readKnownNames_() {
+  const known = { partners: {}, clubs: {} };
+  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.CLUBS);
+  if (!sheet || sheet.getLastRow() < 2) return known;
+  sheet.getRange(2, 2, sheet.getLastRow() - 1, 2).getValues().forEach(function (r) {
+    if (tidy_(r[0])) known.partners[key_(r[0])] = tidy_(r[0]);
+    if (tidy_(r[1])) known.clubs[key_(r[1])] = tidy_(r[1]);
+  });
+  return known;
+}
+
+/** SF Pending rows still 'pending', the 'added' date as text. */
+function readSfPending_(zone) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.SF_PENDING);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, SF_PENDING_COLS.length).getValues()
+      .filter(function (r) { return key_(r[SF_PENDING_COLS.indexOf('status')]) === 'pending'; })
+      .map(function (r) { r[0] = dayText_(r[0], zone); return r; });
+}
+
+/** 'yyyy-MM-dd' from a date cell (read in the sheet's zone) or from text. */
+function dayText_(cell, zone) {
+  return cell instanceof Date && !isNaN(cell.getTime())
+      ? Utilities.formatDate(cell, zone, 'yyyy-MM-dd') : tidy_(cell).slice(0, 10);
 }
 
 /** Keep the dropdowns current after a change; never let it fail a submission. */

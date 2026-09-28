@@ -18,8 +18,9 @@ function duplicateNamesIssue_(entry) {
     issue: 'Same name listed twice',
     partner: entry.partner, club: entry.club,
     detail: entry.duplicates.join(', ') +
-        ' — if these are different girls, add something to tell them ' +
-        'apart (e.g. "Jane Doe (A)" and "Jane Doe (B)"), then submit again.',
+        ' — listed more than once, so only one girl is on the Roster. If they are ' +
+        'different girls, add the other on the Club Roster Form ("' + Q.ACTION_MOD +
+        '") with something that tells them apart, e.g. "Jane Doe (B)".',
     dedupeKey: entry.duplicates.map(key_).join('|'),
   };
 }
@@ -64,8 +65,8 @@ function planClub_(entry, current, state, region, today) {
       issue: 'Girls missing from the latest enrollment',
       partner: entry.partner, club: entry.club,
       detail: vanished.length + ' girl(s) on file are not in the newest ' +
-          'submission. They are still active — use the Roster Modification ' +
-          'form to remove anyone who has actually left.',
+          'submission. They are still active — remove anyone who has left on the ' +
+          'Club Roster Form ("' + Q.ACTION_MOD + '"), spelled as on the Roster.',
     });
   }
 
@@ -120,7 +121,8 @@ function planModification_(entry, current, state, region, today) {
     plan.issues.push({
       issue: 'Removal did not match anyone',
       partner: entry.partner, club: entry.club,
-      detail: '"' + u.name + '" is not on this club\'s active roster' +
+      detail: (entry.source ? entry.source + ': ' : '') +
+          '"' + u.name + '" is not on this club\'s active roster' +
           (u.candidates.length ? '. Closest names on file: ' + u.candidates.join('; ') : '') +
           '. Nobody was removed; the mentor was told we would check.',
       dedupeKey: key_(u.name),

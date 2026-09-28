@@ -65,7 +65,7 @@ function createGlowForms() {
   ui.alert('GLOW forms', formLinksText_(roster, feedback) +
       '\n\nResponses land in the tabs "' + TAB.ROSTER_FORM + '" and "' + TAB.FEEDBACK +
       '". Set STAFF_NOTIFY_EMAIL in Script Properties to receive problem reports ' +
-      'and the weekly Salesforce digest.',
+      'and the Monday e-mail (open ReviewQueue items, clubs pending in Salesforce).',
       ui.ButtonSet.OK);
 }
 

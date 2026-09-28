@@ -405,6 +405,265 @@ check('menu limits: 240 s budget (6-minute limit), 30 s lock wait (< the trigger
       fh.MISSED.BUDGET_MS === 240000 && fh.MISSED.LOCK_WAIT_MS === 30000 &&
       fh.MISSED.OLD_AFTER_DAYS === 7 && fh.MISSED.MAX_LISTED === 15);
 
+// ------------------ problem reports that are roster changes; the weekly e-mail
+console.log('\nProblem reports → ReviewQueue, and the weekly e-mail (FormHandlers.gs)');
+const pr = loadGs(['Q', 'TAB', 'REVIEW_ISSUES', 'OTHER_ISSUE', 'DIGEST', 'looksLikeRosterChange_',
+                   'feedbackReviewItem_', 'sentDayOfKey_', 'responseRowTag_', 'reviewDigest_',
+                   'sfPendingLines_'],
+                  ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+const PQ = pr.Q;
+const CANARY = 'Hope Fennwhistle';   // a fictional girl: must never reach an e-mail, a digest or Audit
+const report = (form, what, extra) => Object.assign({ [PQ.FB_FORM]: form, [PQ.FB_WHAT]: what }, extra || {});
+
+console.log('\n  which reports are roster changes');
+{
+  const AF = 'Africa Attendance Form', LA = 'Latin America Attendance Form';
+  const cases = [
+    ['GLOW – Club Roster Form', 'The form would not let me choose my club.', {}, 'form'],
+    ['Club Roster Form (add or remove girls)', 'x', {}, 'form'],
+    [AF, 'Two new girls joined this week: Hana Marrowgate and Esther Ostrivane.', {}, 'text'],
+    ['Something else', 'Amara Fennwhistle left for boarding school, so we now have 18 girls.', {}, 'text'],
+    [AF, 'The list of girls on the attendance form is not the updated one.', {}, 'text'],
+    [AF, 'Please add Chiara Pellucidor and Dalia Thornquibble to the roster.', {}, 'text'],
+    [AF, 'Please remove Grace Zibblewick from our club, she moved away.', {}, 'text'],
+    [LA, 'Por favor quitar a Grace Zibblewick de la lista, se fue a otra ciudad.', {}, 'text'],
+    [LA, 'Dos niñas nuevas: Hana Marrowgate y Esther Ostrivane.', {}, 'text'],
+    [AF, 'The form will not submit.', { [PQ.FB_DOING]: 'Add two girls to our list' }, 'text'],
+    [AF, 'Nova Girls Club: two girls left.', { [PQ.FB_CLUB]: 'Nova Girls Club' }, 'text'],
+    [AF, 'The page left me on a blank screen after I pressed Submit.', {}, ''],
+    [AF, 'I could not add a photo of today\'s session.', {}, ''],
+    ['Something else', 'The list of clubs is missing mine.', {}, ''],
+    [AF, 'When I choose our club, the girls\' names do not show.', {}, ''],
+    [AF, 'I typed my own name as the club name by mistake. Please change it.', {}, ''],
+    [AF, 'The new orientation session is missing from the list.', {}, ''],
+    [LA, 'La sesión de hoy fue sobre autoestima y las niñas participaron mucho.', {}, ''],
+    [LA, 'Tuve que actualizar la página y la lista no carga.', {}, ''],
+    [AF, 'Nova Girls Club: the form left me on a blank page.', { [PQ.FB_CLUB]: 'Nova Girls Club' }, ''],
+    [LA, 'Grace Zibblewick is not on the list', {}, ''],
+    [AF, '', {}, ''],
+  ];
+  const wrong = cases.filter(([f, w, x, want]) => pr.looksLikeRosterChange_(report(f, w, x)) !== want)
+      .map(([f, w]) => w.slice(0, 40));
+  check('22 wordings classified as expected (Club Roster Form chosen, roster words + change words, Spanish)',
+        !wrong.length, wrong.join(' | '));
+  // Accepted misses (no roster word, other form chosen): "Please remove Grace Zibblewick,
+  // who moved away." / "Please add Chiara Pellucidor and Dalia Thornquibble." Every real
+  // request of this kind chose the Club Roster Form; the staff e-mail goes out regardless.
+}
+
+console.log('\n  the ReviewQueue item never carries the report');
+{
+  const a = report('GLOW – Club Roster Form', 'Please remove ' + CANARY,
+                   { [PQ.FB_DOING]: CANARY, [PQ.FB_PARTNER]: '=HYPERLINK("x")', [PQ.FB_CLUB]: 'Bright Stars',
+                     [PQ.FB_EMAIL]: 'mentor@example.org' });
+  const it = pr.feedbackReviewItem_(a, 'Feedback!7', '2026-09-20', 'form');
+  check('issue, tag = the source, partner/club as typed', it.issue === 'Roster change sent as a problem report' &&
+        it.dedupeKey === 'Feedback!7' && it.club === 'Bright Stars');
+  check('a leading = is stripped (never a formula in the sheet)', it.partner === 'HYPERLINK("x")', it.partner);
+  const typedAs = v => pr.feedbackReviewItem_(report('x', 'y', { [PQ.FB_PARTNER]: v }), 'Feedback!9', '', 'text').partner;
+  const bypass = ['= =1+1', '- =x', '@ =A1', '+ + =1', '=\t=x', '\u00a0=x', '\u200b=x'].filter(v => /^[=+\-@]/.test(typedAs(v)));
+  check('…and no mix of = + - @ and spaces gets one through', !bypass.length && typedAs('= =1+1') === '1+1', bypass.join(' | '));
+  check('detail: where, when, why — never the report text or the reply address',
+        it.detail.startsWith('Feedback!7 (sent 2026-09-20; Club Roster Form chosen): enter it on the Club Roster Form') &&
+        !/Fennwhistle|example\.org/.test(it.detail));
+  check('typed partner/club capped at 80 characters',
+        pr.feedbackReviewItem_(report('x', 'y', { [PQ.FB_CLUB]: 'x'.repeat(200) }), 'Feedback!8', '', 'text').club.length === 80);
+  check('the sent day comes from a new key; an older key gives none',
+        pr.sentDayOfKey_('FEEDBACK|w:2026-09-20 08:15:38.000|GLOW – Club Roster Form|') === '2026-09-20' &&
+        pr.sentDayOfKey_('FEEDBACK|1789820138000|GLOW – Club Roster Form|') === '');
+  check('only response-row tags may be shown; name tags never',
+        pr.responseRowTag_('x [#Feedback!7]') === 'Feedback!7' &&
+        pr.responseRowTag_('x [#Roster Form Responses!41]') === 'Roster Form Responses!41' &&
+        pr.responseRowTag_('x [#hope fennwhistle]') === '' && pr.responseRowTag_('x [#a|b]') === '' &&
+        pr.responseRowTag_('x [#Sheet9!3]') === '' && pr.responseRowTag_('no tag') === '');
+}
+
+console.log('\n  the weekly e-mail\'s ReviewQueue section');
+{
+  const known = { partners: { 'fixture partner alpha': 'Fixture Partner Alpha' }, clubs: { 'bright stars': 'Bright Stars' } };
+  const rq = (row, raised, issue, partner, club, detail, resolved) => ({ row, raised, issue, partner, club, detail, resolved: resolved || '' });
+  const rows = [
+    rq(2, '2026-08-26', 'Same name listed twice', 'Fixture Partner Alpha', 'Bright Stars', CANARY + ', ' + CANARY + ' — listed more than once [#hope fennwhistle]'),
+    rq(3, '2026-09-26', 'Removal did not match anyone', 'Fixture Partner Alpha', 'Bright Stars', '"' + CANARY + '" is not on this club\'s active roster [#hope fennwhistle]'),
+    rq(4, '2026-09-27', 'Roster change sent as a problem report', '', CANARY + ' Club', 'Feedback!7 (sent 2026-09-20; report text): … [#Feedback!7]'),
+    rq(5, '2026-09-10', 'Typed by hand about ' + CANARY, '', '', ''),
+    rq(6, '2026-09-01', 'Removal did not match anyone', 'Fixture Partner Alpha', 'Bright Stars', CANARY, 'resolved 2026-09-20 by Ryan: removed as Roster Form Responses!41'),
+    rq(7, '', 'Partner has no region', 'Fixture Partner Alpha', '', 'x'),
+  ];
+  const d = pr.reviewDigest_(rows, '2026-09-28', known);
+  const text = d.lines.join('\n');
+  check('5 open (resolved rows left out), 2 new this week', d.open === 5 && d.fresh === 2, d.open + '/' + d.fresh);
+  check('no girl\'s name anywhere: not from a tag, a typed club, a hand-typed issue or the detail',
+        !/fennwhistle/i.test(text));
+  check('the problem-report item first, with its Feedback row and an off-file club masked',
+        d.lines[2] === 'Roster change sent as a problem report: 1 open, 1 new, oldest 1 day(s)' &&
+        d.lines[3] === '  - row 4 · raised 2026-09-27 · (partner not given) / (club not on file) · Feedback!7', d.lines[3]);
+  check('on-file partner/club shown; ages in days; an unknown date shows "?"',
+        text.includes('Same name listed twice: 1 open, oldest 33 day(s)') &&
+        text.includes('  - row 3 · raised 2026-09-26 · Fixture Partner Alpha / Bright Stars') &&
+        text.includes('  - row 7 · raised ? · Fixture Partner Alpha / (club not given)') && !/NaN/.test(text));
+  check('an issue the code never raises is grouped as "Other (added by hand)"',
+        text.includes(pr.OTHER_ISSUE + ': 1 open'));
+  const many = Array.from({ length: 12 }, (_, i) => rq(i + 2, '2026-09-20', 'Removal did not match anyone', 'Fixture Partner Alpha', 'Bright Stars', 'x'));
+  const capped = pr.reviewDigest_(many, '2026-09-28', known).lines;
+  check('at most DIGEST.MAX_PER_ISSUE lines per issue, then "… and N more"',
+        capped.filter(l => l.startsWith('  - row')).length === pr.DIGEST.MAX_PER_ISSUE && capped.includes('  … and 2 more'));
+  const edge = pr.reviewDigest_([rq(2, '2026-09-21', 'Partner has no region', 'Fixture Partner Alpha', '', 'x'),
+                                 rq(3, '2026-09-28', 'Partner has no region', 'Fixture Partner Alpha', '', 'x'),
+                                 rq(4, CANARY + ' said so', 'Partner has no region', 'Fixture Partner Alpha', '', 'x')], '2026-09-28', known);
+  check('"new" = raised since the previous Monday e-mail: 7 days ago yes, today no (it counts next week)',
+        edge.fresh === 1 && edge.lines.join('\n').includes('Partner has no region: 3 open, 1 new'), String(edge.fresh));
+  check('a raised cell that is not a date prints "?" (the cell is free text)',
+        edge.lines.join('\n').includes('  - row 4 · raised ? ·') && !/fennwhistle/i.test(edge.lines.join('\n')));
+  const backlog = Array.from({ length: 11 }, (_, i) => rq(i + 2, '2026-09-01', 'Same name listed twice', 'Fixture Partner Alpha', 'Bright Stars', 'x'))
+      .concat([rq(40, '2026-09-27', 'Same name listed twice', 'Fixture Partner Alpha', 'Bright Stars', 'x')]);
+  const blines = pr.reviewDigest_(backlog, '2026-09-28', known).lines;
+  check('over the cap, this week\'s item is still listed (first), the backlog after it',
+        blines.includes('  - row 40 · raised 2026-09-27 · Fixture Partner Alpha / Bright Stars') &&
+        blines.indexOf('  - row 40 · raised 2026-09-27 · Fixture Partner Alpha / Bright Stars') < blines.indexOf('  - row 2 · raised 2026-09-01 · Fixture Partner Alpha / Bright Stars') &&
+        blines.includes('  … and 2 more'));
+  check('nothing open → no section', pr.reviewDigest_([rows[4]], '2026-09-28', known).lines.length === 0 &&
+        pr.sfPendingLines_([]).length === 0);
+}
+
+console.log('\n  the handler and the weekly e-mail, run with Google services stubbed');
+{
+  const vm = require('vm');
+  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']
+      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  // A spreadsheet of plain arrays: tabs[name] = rows (row 1 = header).
+  const world = (opts) => {
+    const tabs = {}, mails = [], audits = [];
+    const sheet = name => ({
+      getName: () => name,
+      getLastRow: () => tabs[name].length,
+      getLastColumn: () => Math.max(0, ...tabs[name].map(r => r.length)),
+      getRange: (r, c, nr, nc) => ({
+        getValues: () => {
+          if (opts.down === name) throw new Error('sheet unavailable');
+          return tabs[name].slice(r - 1, r - 1 + nr).map(row => Array.from({ length: nc }, (_, j) => row[c - 1 + j] ?? ''));
+        },
+        setValues: vals => {
+          if (opts.down === name) throw new Error('sheet unavailable');
+          vals.forEach((v, i) => { tabs[name][r - 1 + i] = v.slice(); });
+        },
+        setFontWeight: () => ({}),
+      }),
+      setFrozenRows: () => {},
+    });
+    const ctx = vm.createContext({
+      console,
+      SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
+                                             insertSheet: n => { tabs[n] = []; return sheet(n); },
+                                             getSpreadsheetTimeZone: () => 'America/New_York' }) },
+      PropertiesService: { getScriptProperties: () => ({ getProperty: k => (opts.props || {})[k] || null }) },
+      MailApp: { sendEmail: o => { if (opts.mailFails > 0) { opts.mailFails--; throw new Error('quota'); } mails.push(o); } },
+      Utilities: { formatDate: d => d.toISOString().slice(0, 10) },
+    });
+    vm.runInContext(src, ctx);
+    ctx.today_ = () => '2026-09-28';
+    ctx.now_ = () => '2026-09-28 09:00:00';
+    ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
+    ctx.formLogAdd_ = () => {};
+    tabs.ReviewQueue = [vm.runInContext('REVIEW_COLS', ctx).slice()];
+    return { ctx, tabs, mails, audits, sheet };
+  };
+  const STAFF = { STAFF_NOTIFY_EMAIL: 'staff@example.org' };
+  const KEY = 'FEEDBACK|w:2026-09-20 08:15:38.000|GLOW – Club Roster Form|';
+  const change = () => report('GLOW – Club Roster Form', 'Please remove ' + CANARY,
+      { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: 'mentor@example.org' });
+  const clean = s => !/Fennwhistle|Bright Stars|mentor@example\.org/.test(s);
+
+  let w = world({ props: STAFF });
+  const res = w.ctx.runResponse_('FEEDBACK', w.sheet('Feedback'), 7, change(), KEY);
+  const item = w.tabs.ReviewQueue[1] || [];
+  check('a roster-change report: one ReviewQueue row, tagged, dated from its key, no report text',
+        w.tabs.ReviewQueue.length === 2 && item[1] === 'Roster change sent as a problem report' &&
+        item[4].endsWith(' [#Feedback!7]') && item[4].includes('(sent 2026-09-20; Club Roster Form chosen)') &&
+        !/Fennwhistle|example\.org/.test(item[4]));
+  check('…and one staff e-mail with the note; FormLog result says queued',
+        w.mails.length === 1 && w.mails[0].body.includes('Staff note: looks like a roster change; on the ReviewQueue as Feedback!7.') &&
+        w.mails[0].replyTo === 'mentor@example.org' && res === 'emailed staff; roster change queued', res);
+  check('Audit names the source only (no girl, no typed club, no reply address)',
+        w.audits.length === 1 && w.audits[0].endsWith('; ReviewQueue [#Feedback!7]') && clean(w.audits.join('\n')));
+
+  w = world({ props: STAFF, mailFails: 1 });
+  let threw = false;
+  try { w.ctx.handleFeedback_(change(), 'Feedback!7', KEY); } catch (e) { threw = /quota/.test(e.message); }
+  w.ctx.handleFeedback_(change(), 'Feedback!7', KEY);
+  check('a failed send, then the retry: one e-mail and still one ReviewQueue row (queued before sending)',
+        threw && w.mails.length === 1 && w.tabs.ReviewQueue.length === 2);
+
+  w = world({ props: STAFF, down: 'ReviewQueue' });
+  const down = w.ctx.handleFeedback_(change(), 'Feedback!7', KEY);
+  check('the ReviewQueue unavailable: still e-mailed, "add it by hand", result NOT queued (never ERROR)',
+        w.mails.length === 1 && w.mails[0].body.includes('could NOT be added to the ReviewQueue') &&
+        down === 'emailed staff; roster change NOT queued (see Audit)' &&
+        w.audits.some(x => x.startsWith('tryReview_: could not add 1 item(s) (Roster change sent as a problem report) for Feedback!7')) &&
+        clean(w.audits.join('\n')));
+
+  w = world({ props: {} });
+  threw = false;
+  try { w.ctx.handleFeedback_(change(), 'Feedback!7', KEY); } catch (e) { threw = /STAFF_NOTIFY_EMAIL/.test(e.message); }
+  check('STAFF_NOTIFY_EMAIL unset: throws, nothing queued or sent', threw && w.tabs.ReviewQueue.length === 1 && !w.mails.length);
+
+  w = world({ props: STAFF });
+  const plain = w.ctx.handleFeedback_(report('Africa Attendance Form', 'The page left me on a blank screen.'), 'Feedback!8', KEY);
+  check('any other report: e-mail only, as before', plain === 'emailed staff' && w.tabs.ReviewQueue.length === 1 &&
+        !w.mails[0].body.includes('Staff note'));
+
+  // the weekly e-mail
+  const weekly = (reviewRows, sfRows, props) => {
+    const x = world({ props });
+    x.tabs.ReviewQueue = x.tabs.ReviewQueue.concat(reviewRows.map(r => r(x.ctx)));
+    x.tabs.ClubRegistry = [['club_code', 'partner', 'club', 'created'], ['BRIGHTST', 'Fixture Partner Alpha', 'Bright Stars', '2026-08-26']];
+    x.tabs['SF Pending'] = [vm.runInContext('SF_PENDING_COLS', x.ctx).slice()].concat(sfRows);
+    x.ctx.sendSfPendingDigest();
+    return x;
+  };
+  const dateCell = ctx => vm.runInContext('new Date("2026-09-26T12:00:00Z")', ctx);   // a Date as getValues returns it
+  const openRows = [ctx => [dateCell(ctx), 'Removal did not match anyone', 'Fixture Partner Alpha', 'Bright Stars', '"' + CANARY + '" … [#hope fennwhistle]', ''],
+                    () => ['2026-09-10', 'Roster change sent as a problem report', '', '', 'Feedback!7 (sent 2026-09-10; report text) [#Feedback!7]', '']];
+  const sfRow = ['2026-09-20', 'Fixture Partner Alpha', 'Nova Club', 'Africa', 12, 'Mentor Testperson', 'mentor@example.org', 'Kenya', 'pending', ''];
+  w = weekly(openRows, [], STAFF);
+  check('ReviewQueue only: one e-mail, "GLOW weekly: 2 open ReviewQueue item(s)"; a date cell and a text date both dated',
+        w.mails.length === 1 && w.mails[0].subject === 'GLOW weekly: 2 open ReviewQueue item(s)' &&
+        w.mails[0].body.includes('raised 2026-09-26') && w.mails[0].body.includes('raised 2026-09-10') &&
+        w.mails[0].body.includes('1 new this week') &&
+        !/fennwhistle/i.test(w.mails[0].body), w.mails[0] && w.mails[0].subject);
+  check('Audit: counts only', w.audits.join() ===
+        'sendSfPendingDigest: emailed staff@example.org: 2 open ReviewQueue item(s) (1 new this week), 0 club(s) pending in Salesforce');
+  w = weekly(openRows, [sfRow], STAFF);
+  check('both: the ReviewQueue section first, then Salesforce as before',
+        w.mails[0].subject === 'GLOW weekly: 2 open ReviewQueue item(s) · 1 club(s) pending in Salesforce' &&
+        w.mails[0].body.indexOf('open ReviewQueue item(s)') < w.mails[0].body.indexOf('waiting to be created in Salesforce') &&
+        w.mails[0].body.includes('added 2026-09-20'));
+  w = weekly([() => ['2026-09-10', 'Same name listed twice', '', '', 'x', 'resolved 2026-09-20 by Ryan: one girl']], [], STAFF);
+  check('nothing open and nothing pending: no e-mail, no Audit', !w.mails.length && !w.audits.length);
+  w = weekly(openRows, [sfRow], {});
+  check('STAFF_NOTIFY_EMAIL unset: no e-mail, an Audit row with both counts',
+        !w.mails.length && w.audits.join() === 'sendSfPendingDigest: 2 open ReviewQueue item(s) (1 new this week), 1 club(s) pending in Salesforce but STAFF_NOTIFY_EMAIL is not set');
+}
+
+console.log('\n  guards');
+{
+  const all = fs.readdirSync(loadGs.GS_DIR).filter(f => f.endsWith('.gs'))
+      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const raised = [...new Set([...all.matchAll(/issue: '([^']+)'/g)].map(m => m[1]))].sort();
+  check('every issue the code raises is in REVIEW_ISSUES (8)',
+        raised.join('|') === pr.REVIEW_ISSUES.slice().sort().join('|'), raised.join(' | '));
+  const rb = fs.readFileSync(path.join(REPO, 'docs', 'RUNBOOK.md'), 'utf8');
+  const section = (rb.split('## Working the ReviewQueue')[1] || '').split('\n## ')[0];
+  const missing = pr.REVIEW_ISSUES.filter(i => !section.includes('**' + i + '**'));
+  check('docs/RUNBOOK.md "Working the ReviewQueue" has a staff action for each', !missing.length, missing.join(' | '));
+  const fhSrc = fs.readFileSync(path.join(loadGs.GS_DIR, 'FormHandlers.gs'), 'utf8');
+  check('the weekly trigger calls sendSfPendingDigest by name, and it exists',
+        /newTrigger\('sendSfPendingDigest'\)/.test(fhSrc) && /^function sendSfPendingDigest\(\)/m.test(fhSrc));
+  const used = [...new Set(all.match(/\b(?:[A-Z]\w*App|[A-Z]\w*Service|Session|Utilities|Logger|Browser)\b(?=\s*\.)/g) || [])].sort().join(',');
+  check('Google services unchanged (a new one adds an OAuth scope: CLAUDE.md rule 11)',
+        used === 'FormApp,LockService,MailApp,PropertiesService,ScriptApp,SpreadsheetApp,UrlFetchApp,Utilities', used);
+}
+
 // --------------------------------------------- real data, if available
 const csvPath = process.env.CSV || path.join(REPO, 'data', 'enrollment_2026-08-24.csv');
 if (fs.existsSync(csvPath) && path.basename(csvPath) === 'enrollment_2026-08-24.csv') {

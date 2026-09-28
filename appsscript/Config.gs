@@ -90,7 +90,7 @@ const REGIONS = ['Africa', 'Asia', 'Latin America', 'U.S'];
 const PROP = {
   ROSTER_FORM: 'FORM_ROSTER_ID',
   FEEDBACK_FORM: 'FORM_FEEDBACK_ID',
-  STAFF_EMAIL: 'STAFF_NOTIFY_EMAIL',   // gets feedback reports + the weekly SF digest
+  STAFF_EMAIL: 'STAFF_NOTIFY_EMAIL',   // gets problem reports + the Monday e-mail (ReviewQueue + SF Pending)
   // Automatic Jotform sync (Dispatch.gs): unset = no notification is sent
   SYNC_DISPATCH_REPO: 'SYNC_DISPATCH_REPO',     // owner/name of the GitHub repo
   SYNC_DISPATCH_TOKEN: 'SYNC_DISPATCH_TOKEN',   // fine-grained token scoped to that repo

@@ -431,6 +431,44 @@ processed since the deploy, without a preview. Roll back no further than
 `7a175c4` (`git checkout 7a175c4 -- appsscript && npm run clasp:push`); it
 shows rows logged under the new keys as held.
 
+## Working the ReviewQueue
+
+The **ReviewQueue** tab holds every question the scripts could not decide.
+**Owner: Ryan.** The Monday e-mail (08:00, to `STAFF_NOTIFY_EMAIL`) lists the
+open items by issue, with their ReviewQueue row; work them that week.
+
+- An item is open while **resolved** is empty. The e-mail's "new" means raised since the previous Monday e-mail. Close it with
+  `resolved <yyyy-mm-dd> by <name>: <what was done>` — by reference (counts,
+  `Roster Form Responses!41`), **never a girl's name**. Any text closes it and
+  drops it from the e-mail; while you wait on a partner, leave it empty and
+  keep notes in a cell note (Insert → Note).
+- Never delete or sort rows (use filter views), here or in the Feedback and
+  response tabs, and never type after the `[#…]` tag that ends **detail**: it
+  is how the queue recognises a repeat.
+- The Monday e-mail shows no girls' names, by design: names live only in the
+  sheet. Work the queue in the sheet; never copy a detail cell into e-mail,
+  chat, GitHub, a commit or a Claude prompt.
+- Nothing closes an item for you — not a later submission, not "Process any
+  missed form responses". Never fix one with **Rebuild roster from enrollment
+  responses** (not after launch) or by typing in Roster cells.
+- **Entering a change yourself:** Club Roster Form → "Add or remove girls in
+  a club that is already enrolled" → partner → club → ADD / REMOVE, one
+  submission per club. For the mentor e-mail use your own address (the
+  confirmation echoes what you typed). REMOVE matches the enrolled spelling
+  only (capitals and spacing are ignored; accents, punctuation and middle
+  names are not): copy each name from the club's Roster rows.
+
+| Issue | What to do |
+|---|---|
+| **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added by `tools/backfill_feedback_review.py`). |
+| **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. REMOVE only a match that is clearly her; otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). |
+| **Same name listed twice** | Only one girl is on the Roster. Ask the partner: two girls → ADD the second with a mark, e.g. `Jane Doe (B)` (the first keeps her ID); one girl typed twice → `resolved …: one girl, no change`. Never resubmit through "Enroll a NEW club". |
+| **Partner says two girls share a name** | The partner answered Yes but no name repeats. Compare their note with the club's Roster rows: listed distinctly → resolved, no change; one missing → ADD her with a mark as above. |
+| **Girls missing from the latest enrollment** | "Enroll a NEW club" was sent for a club already on file; the girls not in that list stay active. Ask the partner who has left and REMOVE them as above. If the new list was not this club's at all (Radiant Girls, 2026-08-31), REMOVE the rows it added as above: the names whose Roster `source` is that response row (Ryan's go). |
+| **Roster change for a club not on file** | Nothing changed, the mentor got no confirmation, and it is never retried. Find the club under another name or partner ("Renaming a club", "Moving a club to another partner"), run **GLOW → Google Forms → Update form dropdowns from the Roster**, then enter the change from the response row (or ask the partner) and tell the mentor. A truly new club uses "Enroll a NEW club". |
+| **Partner has no region** | Its girls reach no attendance form. A misspelled partner → "Moving a club to another partner". Otherwise set the Partners-tab region (`Africa`, `Asia`, `Latin America`, `U.S`), run **GLOW → Refresh regions from the Partners tab**, and check that the region's next SyncLog row says `applied`. |
+| **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old: enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result does not start with `ERROR:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. |
+
 ## Apps Script deploy
 
 ```bash

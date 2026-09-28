@@ -70,7 +70,7 @@ when the form is filled". Kills Africa's 3,900-checkbox weight and the
 | 24 | Prefilled attendance links per club (`?clubName=…&mentorEmail=…`) in the partner handover emails |
 | 25 | Spanish-language mentor confirmation email for Latin America |
 | 26 | Monthly three-way reconciliation report: Roster ↔ forms ↔ Salesforce |
-| 27 | Salesforce REST auto-creation of Accounts for new clubs (replaces the SF Pending digest) |
+| 27 | Salesforce REST auto-creation of Accounts for new clubs (replaces the SF Pending section of the Monday e-mail; keep `sendSfPendingDigest`, its trigger and its ReviewQueue section) |
 | 28 | Close the Python ↔ Apps Script parity gaps (partner-less rows, `•`/`*` bullets, invisible characters in partner/club cells, region case) — `docs/intent/2026-09-01-parity-partnerless-rows.md` |
 | 29 | Move `backup_forms.py` / `restore_conditions.py` into `tools/` (doc references only) |
 | 30 | A daily drift check with a read-only key that writes intents on a band breach; agent evals in CI — `docs/intent/2026-09-01-ci-and-evals.md` |
@@ -86,6 +86,8 @@ when the form is filled". Kills Africa's 3,900-checkbox weight and the
 | 40 | **Club Roster Form, Existing-club page**: its help text ("Not listed? Your organization has no enrolled clubs yet — go back and choose "Enroll a NEW club"", meant for a missing organization) also sends a partner whose club sits under another spelling into enrolling it twice (new ids, Partner-gated roster). Point them at the problem report instead, and have the duplicate-club guards (11b) hold such a submission; a cross-partner check in `needs_attention.py` (one submitter e-mail, two partners) would have caught `ion bu` |
 | 41 | **Replay guard** (follow-up to `docs/plans/2026-09-27-formlog-key.md`): `planClub_` / `planModification_` must not reactivate a girl whose `removed_date` is after the submission (optional `entry.submitted`; `loadRoster_` normalises Date cells through the sheet's zone; the mentor e-mail echoes only typed names). Passing `submitted` from the rebuild also defuses 39 |
 | 42 | **Redo the Radiant Girls fix** undone by the 2026-09-13 replay: Club Roster Form → Existing club → Haske Humanitarian Aid Initiative → Radiant Girls → REMOVE the 20 names whose Roster `source` is `Roster Form Responses!2`; then SyncLog Africa `applied`, `form_status.py` CLEAN (q410 → 20), resolve ReviewQueue 27, check Salesforce attendance for those 20 since 09-13 — Ryan's go — **done 2026-09-28** (by a service-account write + `auto_sync.py --apply`; the plan's Result); remaining: the Salesforce attendance check |
+| 43 | **Google Forms wording** (Ryan, in the Forms editor, mirrored in `Forms.gs` for fresh builds): the problem form's description points roster changes to the Club Roster Form ("Add or remove girls in a club that is already enrolled"); restore its reply-email question (hand-removed; all 11 reports came without one, so nobody can be answered); the Club Roster Form's "Something not working?" line says roster changes belong on that form |
+| 44 | The Club Roster Form's free text (club, typed partner, names) reaches `setValues` unstripped: a leading `=` becomes a formula in the sheet. Strip it as `feedbackReviewItem_` does for problem reports |
 
 ## Explicitly not planned
 
