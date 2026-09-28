@@ -419,7 +419,8 @@ until you confirm:
    ReviewQueue"). The next run then asks about them in a dialog of their
    own, "New clubs held for review that staff released": YES imports each
    as sent, against today's roster, without the duplicate check. An item
-   resolved any other way takes its row off the menu for good. A held row
+   resolved any other way takes its row off the menu (until that cell is
+   changed to `release …`). A held row
    listed as "no ReviewQueue item for this row and time" lost its item (row
    deleted, text typed after the `[#…]` tag, or the tab sorted so the item's
    `(sent …)` no longer matches the row's Timestamp): add the item back by
