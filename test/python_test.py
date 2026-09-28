@@ -196,6 +196,16 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertIn(sync.PICKER_TEXT, additions)
         self.assertIn(sync.PICKER_SUBLABEL, additions)
 
+    def test_partner_list_shape_is_the_module_dropdowns(self):
+        # pinned here, not read back from PARTNER_PICKER_PROPS: a change to it would be
+        # applied to Africa unattended by the next runner apply (an UPDATE is a change)
+        self.assertEqual(sync.PARTNER_PICKER_PROPS["hidden"], "Yes")     # only a shared name shows it
+        self.assertEqual(sync.PARTNER_PICKER_PROPS["required"], "Yes")   # once shown, a partner is chosen
+        self.assertEqual(sync.PARTNER_PICKER_PROPS["multipleSelections"], "No")   # one partner
+        self.assertEqual(sync.PARTNER_PICKER_PROPS["text"], "Partner")   # already translated everywhere
+        self.assertEqual(sync.PARTNER_PICKER_PROPS["emptyText"], "Please Select")
+        self.assertEqual(sync.PARTNER_PICKER_PROPS["subLabel"], "")
+
 
 class ConditionBuilder(unittest.TestCase):
     CLUBS = {"10": "Alpha Club", "11": "Stars", "12": "Stars", "13": "Beta Club"}
@@ -590,6 +600,40 @@ class FormStatusAudit(unittest.TestCase):
                                          {"field": "500", "operator": "equals", "value": "Alpha Club"}])
         problems, _ = form_status.audit_rules(qs, wire)
         self.assertEqual(problems, ["'Alpha Club' (q10) is unique but its rule needs a Partner"])
+
+    @staticmethod
+    def reveals(c, field):
+        return any(a.get("visibility") == "Show" and str(a.get("field")) == field
+                   for a in json.loads(c["action"]))
+
+    def test_the_partner_list_is_hidden_and_shown_only_for_shared_names(self):
+        # (a) the list visible to everyone: every mentor must pick a partner to submit
+        qs, wire = self.form(partner_list="Partner One|Partner Two")
+        qs["600"]["hidden"] = "No"
+        self.assertEqual(form_status.audit_rules(qs, wire)[0],
+                         ["partner list (q600) is not hidden: every mentor is asked for a partner"])
+        # (b) nothing shows the list for "Stars": its two rosters can never appear
+        qs, wire = self.form(partner_list="Partner One|Partner Two")
+        wire = [c for c in wire if not self.reveals(c, "600")]
+        self.assertEqual(form_status.audit_rules(qs, wire)[0],
+                         ["'Stars' is shared, but no rule shows the partner list (q600) for it"])
+        # (c) the rule shows the hidden typed box instead of the list
+        qs, wire = self.form(partner_list="Partner One|Partner Two")
+        wire = [dict(c, action=c["action"].replace('"600"', '"331"')) if self.reveals(c, "600") else c
+                for c in wire]
+        problems, _ = form_status.audit_rules(qs, wire)
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn("'Stars' is shared, but no rule shows the partner list (q600) for it", problems)
+        self.assertTrue(any("show the typed Partner box (q331)" in p for p in problems), problems)
+        # (d) the list shown for a name no two rosters share: that mentor must pick a partner
+        qs, wire = self.form(partner_list="Partner One|Partner Two")
+        wire = wire + [dict(c, terms=c["terms"].replace('"Stars"', '"Alpha Club"'))
+                       for c in wire if self.reveals(c, "600")]
+        self.assertEqual(form_status.audit_rules(qs, wire)[0],
+                         ["the partner list (q600) is shown for 'Alpha Club', which no two rosters share"])
+        # a form without the list is audited exactly as before, whatever shows q331
+        qs, wire = self.form()
+        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
 
 
 class GlowClient(unittest.TestCase):

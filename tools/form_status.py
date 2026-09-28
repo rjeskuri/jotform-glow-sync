@@ -71,6 +71,8 @@ def audit_rules(questions, conditions):
     clubs = {qid: " ".join(q["text"].split()) for qid, q in questions.items()
              if q.get("type") == "control_checkbox"}
     shown_by = defaultdict(list)     # club qid -> [rule ids that show it]
+    list_shown_for = set()           # club names (lower) whose pick shows the partner list
+    box_shown_by = []                # rule ids that show the typed box while the list exists
     aggregate_operands = None
     for c in conditions:
         try:
@@ -88,6 +90,11 @@ def audit_rules(questions, conditions):
                 problems.append(f"rule {c.get('id')}: action refers to missing question {f}")
             if a.get("visibility") == "Show" and str(a.get("field")) in clubs:
                 shown_by[str(a["field"])].append((c.get("id"), terms))
+            if plist and a.get("visibility") == "Show" and str(a.get("field")) == plist:
+                list_shown_for.update(" ".join(str(t.get("value")).split()).lower() for t in terms
+                                      if str(t.get("field")) == club_field)
+            if plist and a.get("visibility") == "Show" and str(a.get("field")) == PARTNER_QID:
+                box_shown_by.append(c.get("id"))
             if str(a.get("resultField")) == CONTACT_IDS_QID:
                 aggregate_operands = {x for x in str(a.get("operands", "")).split(",") if x}
                 for op in aggregate_operands:
@@ -133,6 +140,23 @@ def audit_rules(questions, conditions):
                             f"tests: {extra[:5]}")
         if q.get("required") != "Yes":
             problems.append(f"partner list (q{plist}) is not required")
+        if q.get("hidden") != "Yes":
+            problems.append(f"partner list (q{plist}) is not hidden: every mentor is asked for "
+                            "a partner")
+        # a shared name must show the list (else its rosters never appear), and only a
+        # shared name may (else that club's mentor must pick a partner to submit)
+        shared = {low: clubs[qs[0]] for low, qs in by_name.items() if len(qs) > 1}
+        for low, name in sorted(shared.items()):
+            if low not in list_shown_for:
+                problems.append(f"'{name}' is shared, but no rule shows the partner list "
+                                f"(q{plist}) for it")
+        for low in sorted(list_shown_for - set(shared)):
+            name = next((clubs[qs[0]] for n, qs in by_name.items() if n == low), low)
+            problems.append(f"the partner list (q{plist}) is shown for '{name}', which no two "
+                            "rosters share")
+        if box_shown_by:
+            problems.append(f"{len(box_shown_by)} rule(s) show the typed Partner box "
+                            f"(q{PARTNER_QID}), which the partner list replaces: {box_shown_by[:5]}")
         if questions.get(PARTNER_QID, {}).get("hidden") != "Yes":
             problems.append(f"partner list present but the typed Partner box (q{PARTNER_QID}) "
                             "is still visible")
