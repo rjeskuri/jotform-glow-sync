@@ -159,7 +159,9 @@ Salesforce reads (CLAUDE.md rule 5). Not without a template experiment first.
   commands, browser check, rollback.
 - `docs/DECISIONS.md` — one row.
 - `docs/BACKLOG.md` — new item 45 (this), 36 unchanged but cross-referenced.
-- `docs/ARCHITECTURE.md` — the structural-ids row names the list.
+- `docs/ARCHITECTURE.md` — the `sync_attendance_form.py` row names the list
+  (found by field name, so it has no fixed qid and is not in the structural-ids
+  row).
 
 ## Order of work
 1. Commit this plan.

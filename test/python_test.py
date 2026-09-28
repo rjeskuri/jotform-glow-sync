@@ -899,6 +899,21 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertIn("U.S", regions)                     # one dot, no trailing dot
         self.assertIn("REGION: 'Region where this club meets'", self.config)
 
+    def test_the_architecture_table_lists_every_mirrored_constant(self):
+        # docs/ARCHITECTURE.md's "change both" table is the human copy of CLAUDE.md
+        # rule 7: one three-cell row per constant (a row with more cells than the
+        # header renders without its extra cells, and that constant disappears)
+        doc = read(os.path.join(REPO, "docs", "ARCHITECTURE.md"))
+        section = doc.split("## Constants that exist on both sides", 1)[1].split("\n## ", 1)[0]
+        rows = [ln for ln in section.splitlines() if ln.startswith("|")][2:]   # past header + rule
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(row.count("|"), 4, row)
+        firsts = [row.split("|")[1] for row in rows]
+        for constant in ("Live form ids", "Structural question ids", "SESSION_OVERRIDES",
+                         "Roster tab columns", "SyncLog columns"):
+            self.assertEqual(sum(constant in f for f in firsts), 1, constant)
+
 
 class FakeSheet:
     """An in-memory spreadsheet for rename_club.main(): read_tab, the values
