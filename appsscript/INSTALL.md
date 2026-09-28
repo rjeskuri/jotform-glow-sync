@@ -90,11 +90,14 @@ Reload the spreadsheet.
 | Form | Who uses it | What happens on submit |
 |---|---|---|
 | **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section. **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to **SF Pending**, anything odd goes to the ReviewQueue — unless it may duplicate a club already on file (names already in one club, a close club name, a typed organization close to a partner on file, or a re-enrollment with another list): then nothing is imported, it is **held** for staff (a ReviewQueue item, FormLog `HELD: …`) and the mentor is told it is being checked. **Add or remove girls**: partner → only that partner's clubs → ADD / REMOVE lists → girls are added, reactivated (never by a response sent before their removal: they stay removed and the ReviewQueue says so), or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints; the mentor gets a confirmation email echoing only the names they typed |
-| **Something isn't working?** | anyone | one-minute problem report, emailed to staff; one that asks for a roster change also becomes a ReviewQueue item |
+| **Something isn't working?** | anyone | one-minute problem report (its description sends roster changes to the Club Roster Form; a reply address is optional), emailed to staff; one that asks for a roster change also becomes a ReviewQueue item |
 
 The run installs the triggers and shows both links (again via **Show form
-links**). Responses land in *Roster Form Responses* and *Feedback*; *FormLog*
-records what was done with each.
+links**). Run again, it reuses both forms; if a saved form id does not open
+(another Google account, a Forms outage) it creates nothing and says so —
+new forms would leave the live forms' responses unprocessed. Responses land
+in *Roster Form Responses* and *Feedback*; *FormLog* records what was done
+with each.
 
 Then, in **Project Settings → Script Properties**:
 
@@ -128,6 +131,10 @@ Things to know:
   responses").
 - Edit wording and help text in the Forms UI freely, but keep the question
   **titles** as they are — the handlers find answers by title (`Config.gs Q`).
+  The generated wording lives in `Forms.gs` `WORDING`. Forms created before
+  2026-09-28 get it once through **Update the forms' wording (one-time;
+  shows the changes first)**: it lists every change and asks, and leaves any
+  text edited by hand as is (`docs/RUNBOOK.md`, "Google Forms wording").
 - Every Roster change writes an Audit row; when the sync notification is
   configured it also writes `syncRequested … → HTTP 204`, and the runner's
   outcome appears in **SyncLog**.

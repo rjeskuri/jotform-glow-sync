@@ -589,6 +589,68 @@ open items by issue, with their ReviewQueue row; work them that week.
 | **Partner has no region** | Its girls reach no attendance form. A misspelled partner → "Moving a club to another partner". Otherwise set the Partners-tab region (`Africa`, `Asia`, `Latin America`, `U.S`), run **GLOW → Refresh regions from the Partners tab**, and check that the region's next SyncLog row says `applied`. |
 | **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old, or one refused because its Timestamp cell is not a date (a retry fails the same way): enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result starts with neither `ERROR:` nor `HELD:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. A retry the duplicate-club guard held (`HELD:`) continues as its **New club held as a possible duplicate** item: close this one. |
 
+## Google Forms wording
+
+The two Google Forms (the Club Roster Form and the problem form "Something
+isn't working?") take their descriptions and help texts from
+`appsscript/Forms.gs` `WORDING`. A fresh build already has the current
+wording; forms built before 2026-09-28 get it once, from the menu
+([plans/2026-09-28-forms-wording.md](plans/2026-09-28-forms-wording.md)):
+
+1. Deploy ("Apps Script deploy" below; no new Google service, so no
+   authorization prompt). Reload the sheet.
+2. **GLOW → Google Forms → Update the forms' wording (one-time; shows the
+   changes first)**. The preview lists each change as `now:` / `new:`. On the
+   live forms there are five: the problem form's description (a new paragraph
+   sending roster changes to the Club Roster Form), its reply-email question
+   (re-added), the Club Roster Form's description (its last line), the "Club
+   name" help text (new club) and the REMOVE help text. Anything **left as
+   is**, because someone edited it by hand, is listed after them with the
+   suggested text. YES makes exactly the listed changes; NO changes nothing
+   (Audit: `cancelled at the preview`).
+3. It ends with `Done — N change(s); re-read: up to date` and one Audit row
+   `migrateFormWording: changed: …`. Open both fill-in links from the dialog;
+   **do not submit a test response**. A second run says "Nothing to change".
+
+- "The forms changed since the preview", "the preview was open too long",
+  "Another GLOW operation is still running": nothing was changed; run it
+  again.
+- "Could not open the … saved in Script Properties": nothing was changed.
+  Run it from the Google account that owns the forms, or later (a Forms
+  outage). **Never** run "Create the Google Forms" to fix this: it would
+  make new forms, and the live forms' responses would no longer be
+  processed (it refuses in that case, "Nothing was created").
+- "Stopped after N of M change(s)": what landed stays; run it again, and it
+  makes only the changes still missing. If the dialog says the reply-email
+  question was **PARTLY added**, first open the problem form in the Forms
+  editor: give that question exactly its title, Response validation
+  "Text → Email address", and move it right after the device question, or
+  delete it; then run it again. A run cannot see a missing validation (the
+  handler then simply does not use a non-address as Reply-To). An untitled
+  short-answer question, or the reply question away from the device
+  question, is listed as left as is and never gets a second question.
+- A text left as is: paste the suggested text in the Forms editor if you
+  want it, or leave it.
+- **The Feedback tab will most likely get a second column** titled "Your
+  email, if you would like a reply (optional)": the old one (kept by Google
+  when the question was removed by hand; the reports since carry no address)
+  and the new one. Leave both — the handler reads whichever cell is filled
+  in. Never delete, move or retitle response columns.
+- Wording can be edited in the Forms editor, but never a question **title**:
+  the handlers read answers by title (`Config.gs` `Q`).
+- Rollback: the Forms editor. The 2026-08 texts are in `Forms.gs`: the
+  problem form's description `WORDING.FEEDBACK_INTRO`, the Club Roster
+  Form's description `rosterDescription2026_08_()` (ending with the problem
+  form's link), and the help texts `WORDING.CLUB_HELP_2026_08` ("Club name")
+  and `WORDING.REMOVE_HELP_2026_08`. A wrongly added question is deleted
+  there, and its column in the tab stays, harmless. Rolling back
+  `appsscript/` changes nothing on the forms and removes the menu item, but
+  before 986a325 it also reverts the handler's read of two same-titled
+  columns (`responseFromValues_`): with the new reply column left of the old
+  one, every reply address would read blank again. So never roll
+  `appsscript/` back before 986a325 while the Feedback tab has two reply
+  columns.
+
 ## Apps Script deploy
 
 ```bash
