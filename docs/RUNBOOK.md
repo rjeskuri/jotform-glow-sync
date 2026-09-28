@@ -304,6 +304,67 @@ can hide a completed write: re-run the dry run, and "0 new" means it landed.
 Club names (the picker's options and the roster labels) are deliberately
 never translated — they display in English in every language.
 
+## The partner list (club names two partners share)
+
+Plan: [plans/2026-09-28-partner-box.md](plans/2026-09-28-partner-box.md).
+When two partners each have a club of the same name ("Ruby", "Angels Club"…),
+the Club picker lists the name once, and the form asks for the partner. Until
+now that was the typed **Partner** box (q331), and the roster appeared only
+when the typed text equalled the partner's full name as the Roster spells it,
+so "HAFAI" for Health Aid For All Initiative showed nothing. `--partner-picker`
+replaces the box with a **Partner** dropdown (field name `partnerPicker`). It
+lists the partners whose club name is shared on that form, stays hidden until
+such a name is picked, and is required once shown. It has the Module/Session
+dropdowns' shape, so it is a plain list and only one partner can be chosen.
+The gated rules test it and q331 is hidden. Question 5 (Salesforce) is
+untouched, and the partner choice goes nowhere else. Added once per form;
+from then on every run keeps its options and shape
+(`UPDATE partner picker (N partners: …)`, which the runner applies like a Club
+picker update). A form without it keeps the typed box and exactly today's
+rules. **Status:** built 2026-09-28, not deployed. Today only Africa (8
+partners, 10 rosters) and the template (9 partners, 11 rosters) have shared
+names; on the others the flag refuses ("nothing to choose").
+
+Order matters: the runner syncs from `main`, and the old code would put the
+rules back on the hidden box. So **merge first**, and keep
+`AUTO_SYNC_APPLY=0` for the window.
+
+```bash
+python3 backup_forms.py --form 262352490535154
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker            # dry run
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker --apply    # add it
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv     # "partner picker: q<id>", rules CLEAN
+python3 tools/add_translations.py --audit --form 262352490535154                       # "Partner" already translated: nothing new
+```
+
+The dry run prints `conditions: K kept, N new, D dropped`. Expected: template
+360 / 16 / 16, and Africa (`--region Africa --form 262382821971058`)
+239 / 15 / 15. The rule count does not change (376 and 254), and there are no
+roster creates or updates beyond what the same command prints without the
+flag.
+
+Check in the browser (template first, then Africa):
+
+1. Pick a unique club: no Partner question.
+2. Pick "Ruby": Partner appears, required, listing the partners.
+3. Choose Health Aid For All Initiative: its roster appears. Choose Binti
+   Network instead: the rosters swap.
+4. Switch the language (e.g. Kiswahili): "Partner" is translated, the
+   partner names stay English.
+5. Submit a test on the template: the Club Name field (q5) says "Ruby".
+
+Rollback, per form:
+
+1. `restore_conditions.py --form <id> --from conditions-<stamp>.json --apply`
+   puts the rules back on q331.
+2. Un-hide q331 (`question[hidden]=No`).
+3. Delete the Partner dropdown in the builder.
+4. Revert the merge (otherwise the next run re-points the rules at the list,
+   if it still exists).
+
+Until it is deployed, a mentor of a shared-name club must type the partner's
+full name exactly as the Club Roster Form lists it.
+
 ## Header logo
 
 The logo above the form title is the `image` field (q13 on every form), and

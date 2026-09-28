@@ -12,7 +12,8 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
   3. Regenerates ALL conditional logic from scratch, in three categories:
        A. ROSTER VISIBILITY  - clubName == "<club>" -> show that roster
                                (same-named clubs from different partners are
-                               disambiguated with the Partner box)
+                               disambiguated with the Partner box, or with the
+                               partner list once --partner-picker added it)
        B. CURRICULUM CASCADE - GLOW year -> module dropdown;
                                year+module -> session dropdown (8/10/14/15)
        C. SALESFORCE BRIDGE  - one aggregate Contact_IDs calculation +
