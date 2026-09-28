@@ -18,6 +18,8 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   `--synclog` would record it in the sheet); healthy: every region `in-sync`.
 - `python3 sync_attendance_form.py <roster.csv> --roster --region Africa --form 262382821971058`
   — dry run; `--apply` writes. Form ids: `docs/RUNBOOK.md`.
+- `python3 tools/worklog.py update` — hours per day from the session transcripts into
+  `worklog/worklog.csv` (Ryan invoices this work monthly); `export --month yyyy-mm` for the invoice.
 
 ## Conventions
 - Dry run by default; `--apply` writes; back up before a live write (`backup_forms.py --form`),
@@ -26,6 +28,10 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   the product `sync_attendance_form.py` and the rollback pair stay at the root.
 - Fictional names only in tests, fixtures and docs (`test/fixtures/make_fixture.py`); girls' names
   never in logs (`auto_sync.redact`), commits, or this file.
+- Work log (contract work, invoiced monthly): at the end of every working session run
+  `python3 tools/worklog.py update` and write or refresh that day's `description` in
+  `worklog/worklog.csv` — 1-3 plain, client-facing sentences on what was done; no girls' or
+  mentors' names, no jargon. Never edit `hours` of `auto` rows; Ryan adds `manual` rows.
 - Plan mode for anything beyond a one-line fix; the plan is committed under `docs/plans/` first;
   intents in `docs/intent/`, decisions in `docs/DECISIONS.md`. Review against `REVIEW.md`.
 

@@ -702,6 +702,19 @@ wording; forms built before 2026-09-28 get it once, from the menu
   `appsscript/` back before 986a325 while the Feedback tab has two reply
   columns.
 
+## Work log and invoices
+
+This is contract work, invoiced monthly from `worklog/worklog.csv` (date, hours, blocks,
+description, source). `python3 tools/worklog.py update` recomputes the hours from Claude Code's
+session transcripts: all sessions merged, cut into blocks wherever nothing happened for 30
+minutes, a block counting only if Ryan wrote in it (an agent working alone is not billed), each
+day rounded to the quarter hour, in the Mac's time zone. It keeps a written description, fills
+an empty one from that day's commits, and never touches `manual` rows or days whose transcripts
+are gone — Claude Code deletes transcripts after 30 days, so run `update` at the end of every
+session (CLAUDE.md asks Claude to). Work outside Claude Code:
+`python3 tools/worklog.py add --date 2026-09-29 --hours 1.5 --description "…"`. At month end:
+`python3 tools/worklog.py export --month 2026-09 [--rate 60] --out invoice-2026-09.csv`.
+
 ## Apps Script deploy
 
 ```bash
