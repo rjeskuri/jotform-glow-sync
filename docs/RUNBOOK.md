@@ -499,11 +499,11 @@ wording; forms built before 2026-09-28 get it once, from the menu
   makes only the changes still missing.
 - A text left as is: paste the suggested text in the Forms editor if you
   want it, or leave it.
-- **The Feedback tab gets a second column** titled "Your email, if you would
-  like a reply (optional)": the old one (the question was removed by hand;
-  empty for every report since) and the new one. Leave both — the handler
-  reads whichever cell is filled in. Never delete, move or retitle response
-  columns.
+- **The Feedback tab will most likely get a second column** titled "Your
+  email, if you would like a reply (optional)": the old one (kept by Google
+  when the question was removed by hand; the reports since carry no address)
+  and the new one. Leave both — the handler reads whichever cell is filled
+  in. Never delete, move or retitle response columns.
 - Wording can be edited in the Forms editor, but never a question **title**:
   the handlers read answers by title (`Config.gs` `Q`).
 - Rollback: the Forms editor (the 2026-08 texts are `WORDING.*_2026_08` in

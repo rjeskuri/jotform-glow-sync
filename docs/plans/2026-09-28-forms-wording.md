@@ -88,8 +88,9 @@ test builds both forms against a stubbed FormApp and checks that the planner the
 to change.
 
 **5. The handler reads the filled-in column** (`FormHandlers.gs` `responseFromValues_`). Re-adding
-the question gives the Feedback tab a second column with the same title (Google never reuses a
-deleted question's column). Today the last same-titled column wins; if Google placed the new
+the question most likely gives the Feedback tab a second column with the same title (Google keeps
+a deleted question's column and, as far as we know, does not reuse it; to be seen after the
+run). Today the last same-titled column wins; if Google placed the new
 column left of the old one, every reply address would read blank. Change: a blank cell never
 replaces an answer already read under the same title. No title repeats in either tab today, so
 no FormLog key changes (the key never uses the e-mail anyway). Leave both columns in place.
