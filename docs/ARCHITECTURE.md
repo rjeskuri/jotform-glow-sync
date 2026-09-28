@@ -10,7 +10,7 @@ master enrollment Google Sheet ── tab "Roster Form Responses"
    │  installable on-form-submit trigger
    ▼
 appsscript/FormHandlers.gs  onAnyFormSubmit → processResponseRow_ (FormLog dedupe)
-   ├─ handleNewClub_      → RosterOps.gs planClub_
+   ├─ handleNewClub_      → RosterOps.gs newClubHoldReasons_ (a possible duplicate → HELD for staff) / planClub_
    └─ handleRosterChange_ → RosterOps.gs planModification_
    ▼
 Roster.gs applyRosterPlan_ → tab "Roster"  (ONE ROW PER GIRL = the source of truth)

@@ -42,9 +42,11 @@ letter, mark or digit, letters split from digits).
     `Hillside GLOW Club Northfield`), one's distinctive words all inside the other's
     (`BRIGHT GIRLS (TESTVILLE SEC SCH)` ⊇ `BRIGHT GIRLS`), or a Ratcliff/Obershelp ratio
     (Python `difflib`'s, as `tools/needs_attention.py` uses) ≥ 0.8 of the distinctive words
-    (`BRAVEHAERT` / `BRAVEHEART`). Generic words (`glow club girls sec sch primaria …`) are
-    not distinctive; names whose numbers differ (`Harbor Club 1` / `Harbor Club 2`) are
-    never close.
+    (`BRAVEHAERT` / `BRAVEHEART`) — each also tried with what is in parentheses left out,
+    so a typo plus an added school is caught. Generic words (`glow global club girls sec
+    sch primaria …`) are not distinctive; names whose numbers, section letters or school
+    levels differ (`Harbor Club 1` / `Harbor Club 2`, `Orbit (A)` / `Orbit (B)`,
+    `… primaria` / `… secundaria`) are never close.
   - `partner`: "My organization is not in this list" was chosen and the typed name is not a
     partner on file but is close to one: equal words (accents, punctuation), acronym
     (`TARN` / `Test Aid Relief Network`, either way round), distinctive words contained, or
@@ -143,6 +145,28 @@ DECISIONS.md one row, BACKLOG 11b / 40 / 44.
   re-enrollment held; the count of other held responses reported as the false-hold rate.
 - Live (Ryan's go, after merge): push; the next new-club response gets `HELD:` or a normal
   result in FormLog; a held one shows in the menu preview under "held for review".
+
+## Result
+- 2026-09-28, branch `wf/duplicate-club-guard` (not merged, not deployed):
+  - BACKLOG 44: `sheetText_` / `parseFormRoster_`; both Club Roster Form handlers write
+    only sheet-safe typed text (a handler run over a stubbed spreadsheet checks every cell).
+  - The guard, the hold, the release, FormLog and the menu as designed; RUNBOOK, INSTALL,
+    ARCHITECTURE, DECISIONS, BACKLOG. Every guard and hold rule has a test that fails
+    when the rule is removed (checked by mutating each rule in turn).
+- Read-only evaluation on the live sheet (Roster, Roster Form Responses, Partners and
+  FormLog exported under `data/`; the script printed rows, dates, counts, club and partner
+  names only, masking a club named like a girl): of the **39** "Enroll a NEW club"
+  responses so far, **7 would have been held** — row 2 (08-31, Radiant Girls, reenroll:
+  0 of 20 names on file) and rows 54, 55, 56, 57, 58, 62 (09-22, Reach All: SKY, DESTINEY,
+  COURADGEOUS, BRIGHT, GOLDEN and SUPER GIRLS with a school added; 13-20 of 19-20 names
+  already active in the club on file, and the club name close) — and **no other**.
+  The first pass missed the club-name match for the COURADGEOUS row (typo plus school; the
+  names rule held it anyway) and would have read letter sections, `Global Glow` school
+  clubs and primaria/secundaria as close: fixed before commit `9896624`.
+- As a proxy for future false holds: of 2107 pairs of clubs of one partner on file, 17 read
+  as close — 13 known duplicates (Otra Cosa's combined vs split clubs, the six Reach All
+  pairs, YWOU's Shinning/Shining Stars) and 4 uncertain (two `Cerrito de la Virgen` pairs,
+  `CUTE QUEENS` / `QUEENS`, `Eagles` / `Eaglets Glow Club`); of 1176 partner pairs, none.
 
 ## Out of scope (follow-ups)
 The form-side question "Is your club one of these?" (intent outcome 1: a live Google Form
