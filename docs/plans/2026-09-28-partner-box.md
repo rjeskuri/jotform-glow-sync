@@ -197,11 +197,20 @@ Salesforce reads (CLAUDE.md rule 5). Not without a template experiment first.
 - **Wrong partner picked:** no roster shows, as with a wrong typed partner
   today. It cannot happen silently for the mentor's own club, because every
   partner of a shared name is on the list by construction.
-- **Rollback per form:** `restore_conditions.py --form <id> --from
-  conditions-<stamp>.json --apply` (rules back on q331). Then un-hide q331
-  (`question[hidden]=No`, or the builder) and delete the "Partner" dropdown in
-  the builder. Then revert the merge, or the runner re-points the rules on the
-  next run.
+- **Rollback per form** (RUNBOOK "The partner list" has the steps): with
+  `AUTO_SYNC_APPLY=0` throughout, `restore_conditions.py --form <id> --from
+  properties-<stamp>.json --apply` puts the rules back on q331. `<stamp>` is
+  the `backup_forms.py --form` taken just before the apply. The runner writes
+  `conditions-<stamp>.json` only in its own workspace, and every later backup
+  overwrites `properties-latest.json`. Then un-hide q331, delete the "Partner"
+  dropdown, and run a sync dry run without the flag (apply it if roster
+  changes since the snapshot left the restored rules behind). Finish with
+  `form_status`, then `AUTO_SYNC_APPLY=1`. The pause matters: a runner apply
+  while the list still exists moves the rules back onto it. If the list is
+  deleted after that, the gated rosters can never show, and a rules-only
+  difference is not a runner change. The merge stays: with no list, the
+  merged code keeps today's rules, and the old code would break any form that
+  still has its list.
 
 ## Proof
 - `make check` → `CHECK PASSED` (tail pasted below when done).

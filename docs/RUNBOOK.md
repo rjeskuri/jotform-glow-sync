@@ -330,7 +330,7 @@ rules back on the hidden box. So **merge first**, and keep
 `AUTO_SYNC_APPLY=0` for the window.
 
 ```bash
-python3 backup_forms.py --form 262352490535154
+python3 backup_forms.py --form 262352490535154                                         # note its stamp: the rollback restores it
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker            # dry run
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker --apply    # add it
 python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv     # "partner picker: q<id>", rules CLEAN
@@ -360,14 +360,34 @@ Check in the browser (template first, then Africa):
    partner names stay English.
 5. Submit a test on the template: the Club Name field (q5) says "Ruby".
 
-Rollback, per form:
+Rollback, per form. The runner stays paused from the first step to the
+last. The list is found by name, so while it exists a runner apply moves the
+rules back onto it and hides q331 again. If the list is then deleted, the
+shared-name rosters can never show. No later run repairs that: a
+rules-only difference is not a change to the runner.
 
-1. `restore_conditions.py --form <id> --from conditions-<stamp>.json --apply`
-   puts the rules back on q331.
-2. Un-hide q331 (`question[hidden]=No`).
-3. Delete the Partner dropdown in the builder.
-4. Revert the merge (otherwise the next run re-points the rules at the list,
-   if it still exists).
+1. Set `AUTO_SYNC_APPLY=0`, then `python3 backup_forms.py --form <id>` (the
+   state being rolled back).
+2. `python3 restore_conditions.py --form <id> --from properties-<stamp>.json`
+   (dry run), then with `--apply`. The rules test q331 again. `<stamp>` is
+   the backup taken just before the `--partner-picker --apply` (first command
+   above). Do not use the default `properties-latest.json`: every later backup,
+   step 1's included, overwrites it with the list's rules.
+3. Un-hide q331 in the builder (or `question[hidden]=No`). It was not required
+   before (either form, 2026-09-28). `questions-<stamp>.json` from the same
+   backup shows how it was.
+4. Delete the Partner dropdown in the builder.
+5. The sync dry run without the flag (`… --roster --form <id>`, Africa with
+   `--region Africa`). With no list on the form, it builds the rules on q331
+   exactly as before the list. It prints "nothing to do" unless roster changes
+   were applied after the snapshot, which the restored rules lack. In that case
+   it plans `REPLACE conditions`: back up and `--apply`.
+6. `tools/form_status.py --form <id> --roster …`: rules CLEAN and no "partner
+   picker" line. Then `AUTO_SYNC_APPLY=1`.
+
+Do not revert the merge. With no list on a form, the merged code keeps the
+typed box and the same rules (unit-tested). While another form still has its
+list, the old code would put that form's rules back on its hidden q331.
 
 Until it is deployed, a mentor of a shared-name club must type the partner's
 full name exactly as the Club Roster Form lists it.

@@ -560,6 +560,34 @@ class PartnerPickerFlow(unittest.TestCase):
         self.assertEqual(fake.writes, [])
 
 
+class PartnerListRunbook(unittest.TestCase):
+    """docs/RUNBOOK.md "The partner list": the rollback restores a snapshot the
+    procedure itself takes, with the runner paused first."""
+
+    def rollback(self):
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        section = doc.split("## The partner list", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("backup_forms.py --form", section)       # the procedure's backup
+        return section.split("Rollback, per form", 1)[1]
+
+    def test_the_rollback_restores_a_file_backup_forms_writes(self):
+        # backup_forms.py writes questions-/properties-<stamp>.json; only the
+        # runner (in the Actions workspace) writes conditions-<stamp>.json
+        self.assertIn('for part in ("questions", "properties")', read(os.path.join(REPO, "backup_forms.py")))
+        sources = re.findall(r"restore_conditions\.py[^`]*--from ([\w.<>-]+)", self.rollback())
+        self.assertTrue(sources)
+        for src in sources:
+            self.assertRegex(src, r"^properties-<stamp>\.json$")
+
+    def test_the_rollback_pauses_the_runner_before_the_first_write(self):
+        # a runner apply in the middle would move the rules back onto the list
+        # and hide q331 again (PartnerPickerFlow, rules left on the typed box)
+        text = self.rollback()
+        self.assertIn("AUTO_SYNC_APPLY=0", text)
+        self.assertLess(text.index("AUTO_SYNC_APPLY=0"), text.index("restore_conditions.py"))
+        self.assertIn("AUTO_SYNC_APPLY=1", text)
+
+
 class FormStatusAudit(unittest.TestCase):
     """tools/form_status.py audit_rules on forms built by the sync's own rules."""
 
