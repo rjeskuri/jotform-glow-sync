@@ -107,6 +107,14 @@ function loadPartnerTabRegions_() {
   return regions;
 }
 
+/** Every partner name on the Partners tab (column A), as typed, blanks left out. */
+function loadPartnerNames_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.PARTNERS);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues()
+      .map(function (row) { return tidy_(row[0]); }).filter(String);
+}
+
 /**
  * Partner → region.
  *

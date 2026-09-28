@@ -72,7 +72,8 @@ held item's tag, the last such row's state — `open` (resolved empty), `release
 starts with the word `release`, e.g. `release 2026-10-01 by Ryan: a new club`) or `closed`
 (any other text) — and its sent time. `planMissedRun_(…, holds)`:
 - a held response whose item is **open**, or that has no matching item (none, or its sent
-  time differs: the tab was sorted) → `waiting`: listed in every dialog, never run;
+  time differs: the tab was sorted) → `waiting`: listed with the result (as the re-keyed
+  "held" rows are), never run;
 - **release** (sent time matches) → `released`: its own YES/NO ("run as sent, against
   today's roster"), run with the guard skipped;
 - **closed** → not listed (staff dealt with it).

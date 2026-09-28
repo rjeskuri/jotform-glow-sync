@@ -15,12 +15,19 @@
  * FormLog already records as processed under another key, and asks again
  * before running Club Roster Form responses more than a week old
  * (docs/RUNBOOK.md, "Missed form responses").
+ *
+ * A new-club response that may duplicate a club on file is HELD instead
+ * (FormLog "HELD: …", a ReviewQueue item, nothing imported): not done, never
+ * offered by the menu item until staff start that item's resolved cell with
+ * "release" (docs/plans/2026-09-28-duplicate-club-guard.md).
  */
 
 const FORM_LOG_COLS = ['when', 'form', 'sheet_row', 'response_key', 'result'];
 const SF_PENDING_COLS = ['added', 'partner', 'club', 'region', 'girls', 'mentor_name',
                          'mentor_email', 'country', 'status', 'notes'];
 const RETRY_PREFIXES = ['ERROR:'];   // FormLog results that mean "not done: try again"
+const HOLD_PREFIX = 'HELD:';         // "not done: held for staff" — offered only once released
+const HOLD_ISSUE = 'New club held as a possible duplicate';   // its ReviewQueue issue
 const MISSED = {
   BUDGET_MS: 240000,     // stop STARTING rows this long after the menu item began (limit: 6 min)
   LOCK_WAIT_MS: 30000,   // per row; a form-submit trigger waits up to 120 s for the same lock
@@ -78,7 +85,9 @@ function formKeyForSheet_(sheet) {
  * group — problem reports, then Club Roster Form responses, then (asked
  * separately, with a warning) Club Roster Form responses sent more than
  * MISSED.OLD_AFTER_DAYS ago. A row FormLog already records as processed under
- * a different key is never run from here ("held"; docs/RUNBOOK.md). The
+ * a different key is never run from here ("held"; docs/RUNBOOK.md), nor is
+ * a new club held for review until staff release it in the ReviewQueue —
+ * released ones get a YES/NO of their own. The
  * document lock is taken one row at a time and never while a dialog is open,
  * so form submissions keep flowing; no row is started after MISSED.BUDGET_MS,
  * so the run ends inside Apps Script's 6-minute limit ("N left — run again").
@@ -92,15 +101,20 @@ function processMissedResponses() {
                     'form responses): it shows what it would run and asks first.');
   }
   const snap = readMissedSnapshot_();
-  const plan = planMissedRun_(snap.responses, snap.index, snap.today, MISSED.OLD_AFTER_DAYS);
-  const heldText = plan.held.length ? '\n\n' + missedPreviewText_(
+  const plan = planMissedRun_(snap.responses, snap.index, snap.today, MISSED.OLD_AFTER_DAYS, snap.holds);
+  const heldText = (plan.held.length ? '\n\n' + missedPreviewText_(
       'Not run — FormLog already has these as processed under a different key ' +
-      '(docs/RUNBOOK.md, "Missed form responses"):', plan.held, MISSED.MAX_LISTED) : '';
+      '(docs/RUNBOOK.md, "Missed form responses"):', plan.held, MISSED.MAX_LISTED) : '') +
+      (plan.waiting.length ? '\n\n' + missedPreviewText_(
+      'Not run — new clubs held for review as possible duplicates, until staff start the ' +
+      'ReviewQueue item\'s resolved cell with "release" (docs/RUNBOOK.md, "Working the ' +
+      'ReviewQueue"):', plan.waiting, MISSED.MAX_LISTED) : '');
   const sources = function (items) {
     return items.map(function (it) { return it.source; }).join(', ') || 'none';
   };
-  const heldNote = plan.held.length ? '; held: ' + sources(plan.held) : '';
-  if (!plan.run.length && !plan.old.length) {
+  const heldNote = (plan.held.length ? '; held: ' + sources(plan.held) : '') +
+      (plan.waiting.length ? '; held for review: ' + sources(plan.waiting) : '');
+  if (!plan.run.length && !plan.old.length && !plan.released.length) {
     ui.alert('GLOW forms', 'Nothing to process.' + heldText, ui.ButtonSet.OK);
     return 0;
   }
@@ -118,6 +132,8 @@ function processMissedResponses() {
   ask(byForm('FEEDBACK'), 'Problem reports not yet sent to staff',
       'Send them to staff now? (Any that ask for a roster change also go to the ReviewQueue.)');
   ask(byForm('ROSTER'), 'Club Roster Form responses not yet processed', 'Process them now?');
+  ask(plan.released, 'New clubs held for review that staff released in the ReviewQueue',
+      'Run them now, as sent? Each runs against TODAY\'s roster; the duplicate check is skipped.');
   ask(plan.old, 'Club Roster Form responses sent more than ' + MISSED.OLD_AFTER_DAYS +
           ' days ago and never processed',
       'Running one now applies it to TODAY\'s roster: it can put back girls removed since ' +
@@ -126,7 +142,7 @@ function processMissedResponses() {
 
   if (!confirmed.length) {
     audit_('processMissedResponses', 'cancelled at the preview (would have run ' +
-           sources(plan.run.concat(plan.old)) + ')' + heldNote);
+           sources(plan.run.concat(plan.released, plan.old)) + ')' + heldNote);
     if (heldText) ui.alert('GLOW forms', 'Nothing was run.' + heldText, ui.ButtonSet.OK);
     return 0;
   }
@@ -169,11 +185,19 @@ function runConfirmed_(item, snap) {
   if (!r || responseKeyOf_(item.which, r.stamp, r.answers) !== item.key) {
     return item.source + ' skipped (the row changed since the preview)';
   }
-  if (responseDone_(item.which, r.stamp, r.answers, readFormLogIndex_())) {
+  const index = readFormLogIndex_();
+  if (responseDone_(item.which, r.stamp, r.answers, index)) {
     return item.source + ' skipped (processed meanwhile)';
   }
-  const result = runResponse_(item.which, sheet, item.row, r.answers, item.key);
-  return item.source + (isRetryResult_(result) ? ' failed again (see FormLog)' : ' ok');
+  // a held response runs only as released, and only while its item still says so
+  const held = heldForReview_(item.which, r.stamp, item.key, index);
+  if (held && !(item.status === 'released' &&
+                releasedBy_(readHoldDecisions_(snap.zone)[item.source], r.stamp))) {
+    return item.source + ' skipped (held for review; its ReviewQueue item does not say release)';
+  }
+  const result = runResponse_(item.which, sheet, item.row, r.answers, item.key, held);
+  return item.source + (isRetryResult_(result) ? ' failed again (see FormLog)'
+      : isHeldResult_(result) ? ' held for review (see ReviewQueue)' : ' ok');
 }
 
 /** Everything the menu item needs, read once: both response tabs and FormLog. */
@@ -195,25 +219,38 @@ function readMissedSnapshot_() {
     }
   });
   return { zone: zone, sheets: sheets, responses: responses,
-           index: readFormLogIndex_(), today: today_() };
+           index: readFormLogIndex_(), today: today_(), holds: readHoldDecisions_(zone) };
+}
+
+/** holdDecisions_ over the ReviewQueue. */
+function readHoldDecisions_(zone) {
+  return holdDecisions_(readReviewRows_(zone));
 }
 
 /** Trigger path: process one new response unless FormLog says it was already done. */
 function processResponseRow_(which, sheet, row) {
   const r = readResponseRow_(sheet, row, spreadsheetZone_());
   if (!r) return false;
-  if (responseDone_(which, r.stamp, r.answers, readFormLogIndex_())) return false;
-  runResponse_(which, sheet, row, r.answers, responseKeyOf_(which, r.stamp, r.answers));
+  const index = readFormLogIndex_();
+  const key = responseKeyOf_(which, r.stamp, r.answers);
+  // held for staff counts too: a repeated trigger must not hold (and e-mail) twice
+  if (responseDone_(which, r.stamp, r.answers, index) || heldForReview_(which, r.stamp, key, index)) {
+    return false;
+  }
+  runResponse_(which, sheet, row, r.answers, key);
   return true;
 }
 
-/** Run the handler for one response and record the outcome in FormLog. */
-function runResponse_(which, sheet, row, answers, responseKey) {
+/**
+ * Run the handler for one response and record the outcome in FormLog.
+ * released: staff released this held new-club response (the guard is skipped).
+ */
+function runResponse_(which, sheet, row, answers, responseKey, released) {
   const source = sheet.getName() + '!' + row;
   let result;
   try {
     if (which === 'FEEDBACK') result = handleFeedback_(answers, source, responseKey);
-    else if (isNewClubResponse_(answers)) result = handleNewClub_(answers, source);
+    else if (isNewClubResponse_(answers)) result = handleNewClub_(answers, source, responseKey, !!released);
     else result = handleRosterChange_(answers, source);
   } catch (err) {
     result = 'ERROR: ' + err.message;
@@ -292,6 +329,36 @@ function isRetryResult_(result) {
   return RETRY_PREFIXES.some(function (p) { return text.indexOf(p) === 0; });
 }
 
+/** True if a FormLog result means "not done: held for staff" (the duplicate-club guard). */
+function isHeldResult_(result) {
+  return String(result == null ? '' : result).indexOf(HOLD_PREFIX) === 0;
+}
+
+/**
+ * True if FormLog has this response held for staff: by its Timestamp text
+ * (a later edit of its club cell does not lose it), or its whole key for a
+ * stamp that is not a date.
+ */
+function heldForReview_(which, stamp, key, index) {
+  return stamp.wall != null ? !!index.heldStamps[which + '|w:' + stamp.wall] : !!index.heldByKey[key];
+}
+
+/** 'yyyy-MM-dd HH:mm:ss' a response was sent — what a hold's ReviewQueue item records. */
+function sentAtOfStamp_(stamp) {
+  return (stamp.wall || '').slice(0, 19) || '?';
+}
+
+/** The same, from a FormLog key ('?' for a key that carries no wall time). */
+function sentAtOfKey_(responseKey) {
+  const m = WALL_KEY.exec(String(responseKey || ''));
+  return m ? m[2].slice(2, 21) : '?';
+}
+
+/** True if a hold decision (holdDecisions_) releases the response sent at `stamp`. */
+function releasedBy_(decision, stamp) {
+  return !!decision && decision.state === 'release' && decision.sentAt === sentAtOfStamp_(stamp);
+}
+
 /** partner|club as the key spells them; a problem report puts its form there. */
 function responseTail_(answers) {
   const partner = answers[Q.PARTNER_NEW] || answers[Q.PARTNER_MOD] || answers[Q.FB_FORM];
@@ -336,14 +403,25 @@ function clubFromSections_(answers) {
  * done = keys that succeeded; stamps = 'which|w:<wall>' that succeeded;
  * legacy = 'which|partner|club' → the milliseconds of old keys that
  * succeeded; okRows = 'form|sheet_row' that succeeded under any key;
- * errorsByKey / errorsByRow = the last failure text.
+ * errorsByKey / errorsByRow = the last failure text since any hold;
+ * heldByKey / heldStamps = responses held for staff (HELD:), by key and by
+ * 'which|w:<wall>'.
  */
 function indexFormLog_(rows) {
-  const index = { done: {}, stamps: {}, legacy: {}, okRows: {}, errorsByKey: {}, errorsByRow: {} };
+  const index = { done: {}, stamps: {}, legacy: {}, okRows: {}, errorsByKey: {}, errorsByRow: {},
+                  heldByKey: {}, heldStamps: {} };
   rows.forEach(function (r) {
     const key = String(r[2] == null ? '' : r[2]);
     if (!key) return;
     const rowKey = tidy_(r[0]) + '|' + tidy_(r[1]);
+    if (isHeldResult_(r[3])) {
+      index.heldByKey[key] = String(r[3]);
+      const w = key.match(WALL_KEY);
+      if (w) index.heldStamps[w[1] + '|' + w[2]] = String(r[3]);
+      delete index.errorsByKey[key];     // failures before the hold are over
+      delete index.errorsByRow[rowKey];
+      return;
+    }
     if (isRetryResult_(r[3])) {
       index.errorsByKey[key] = index.errorsByRow[rowKey] = String(r[3]);
       return;
@@ -385,10 +463,16 @@ function responseDone_(which, stamp, answers, index) {
  *   old  — a Club Roster Form response sent more than oldAfterDays ago (or
  *          with no readable date): needs its own YES;
  *   run  — the rest, status 'retry' (only failures logged) or 'new'.
+ * A new club FormLog has as held for review (HELD:) goes by its ReviewQueue
+ * item — holds: holdDecisions_, the item's sent time must be this row's:
+ *   released — the item's resolved cell says "release": asked on its own;
+ *   waiting  — open, or no item for this row and time: listed, never run;
+ *   (nothing) — resolved any other way: staff dealt with it.
  * Problem reports come first, then by sheet row.
  */
-function planMissedRun_(responses, index, today, oldAfterDays) {
-  const plan = { run: [], old: [], held: [] };
+function planMissedRun_(responses, index, today, oldAfterDays, holds) {
+  holds = holds || {};
+  const plan = { run: [], old: [], held: [], waiting: [], released: [] };
   responses.forEach(function (r) {
     if (responseDone_(r.which, r.stamp, r.answers, index)) return;
     const item = describeResponse_(r);
@@ -400,6 +484,23 @@ function planMissedRun_(responses, index, today, oldAfterDays) {
       return;
     }
     item.lastError = index.errorsByKey[item.key] || index.errorsByRow[rowKey] || '';
+    if (heldForReview_(r.which, r.stamp, item.key, index)) {
+      const d = holds[item.source];
+      const mine = !!d && d.sentAt === sentAtOfStamp_(r.stamp);
+      if (mine && d.state === 'closed') return;
+      if (releasedBy_(d, r.stamp)) {
+        item.status = 'released';
+        item.note = 'released in ReviewQueue row ' + d.row;
+        plan.released.push(item);
+      } else {
+        item.status = 'waiting';
+        item.lastError = '';
+        item.note = mine ? 'waiting for staff: ReviewQueue row ' + d.row
+                         : 'no ReviewQueue item for this row and time (docs/RUNBOOK.md)';
+        plan.waiting.push(item);
+      }
+      return;
+    }
     item.status = item.lastError ? 'retry' : 'new';
     if (r.which === 'ROSTER' && !(daysBetween_(item.day, today) <= oldAfterDays)) {
       plan.old.push(item);
@@ -407,9 +508,9 @@ function planMissedRun_(responses, index, today, oldAfterDays) {
       plan.run.push(item);
     }
   });
-  plan.run.sort(missedOrder_);
-  plan.old.sort(missedOrder_);
-  plan.held.sort(missedOrder_);
+  [plan.run, plan.old, plan.held, plan.waiting, plan.released].forEach(function (list) {
+    list.sort(missedOrder_);
+  });
   return plan;
 }
 
@@ -446,7 +547,8 @@ function missedPreviewText_(title, items, maxListed) {
   const lines = [title];
   items.slice(0, maxListed).forEach(function (it) {
     lines.push('• row ' + it.row + ' · sent ' + it.sent + ' · ' + it.kind + ' · ' + it.what +
-               (it.lastError ? ' · retry after ' + previewError_(it.lastError) : ''));
+               (it.lastError ? ' · retry after ' + previewError_(it.lastError) : '') +
+               (it.note ? ' · ' + it.note : ''));
   });
   if (items.length > maxListed) lines.push('… and ' + (items.length - maxListed) + ' more');
   return lines.join('\n');
@@ -475,12 +577,14 @@ function formLogAdd_(which, row, responseKey, result) {
 // ------------------------------------------------------------ New club
 // Typed answers pass sheetText_ / parseFormRoster_ before they reach the
 // sheet (a leading = would be a formula); the partner dropdown's value is
-// ours and is used as chosen.
-function handleNewClub_(a, source) {
+// ours and is used as chosen. A response that may duplicate a club on file
+// is held for staff (newClubHoldReasons_) unless they released it.
+function handleNewClub_(a, source, responseKey, released) {
   const ss = SpreadsheetApp.getActive();
   let partner = tidy_(a[Q.PARTNER_NEW]);
   const typed = sheetText_(a[Q.NEW_PARTNER]);
-  if (!partner || partner === OTHER_PARTNER) partner = typed;
+  const typedPartner = !partner || partner === OTHER_PARTNER;
+  if (typedPartner) partner = typed;
   const club = sheetText_(a[Q.CLUB]);
   const parsed = parseFormRoster_(a[Q.ROSTER]);
   if (!partner || !club || !parsed.names.length) {
@@ -489,10 +593,17 @@ function handleNewClub_(a, source) {
         (!partner ? 'partner' : !club ? 'club name' : 'roster'));
   }
 
+  const existing = loadRoster_();
+  if (!released) {
+    const reasons = newClubHoldReasons_({ partner: partner, club: club, names: parsed.names,
+                                          typedPartner: typedPartner },
+                                        existing.rows, loadPartnerNames_());
+    if (reasons.length) return holdNewClub_(a, source, responseKey, partner, club, reasons);
+  }
+
   const formRegion = canonicalRegion_(a[Q.REGION]);   // '' unless exactly one of REGIONS
   const region = chooseRegion_(loadPartnerTabRegions_()[key_(partner)], formRegion,
                                derivedPartnerRegions_()[key_(partner)]);
-  const existing = loadRoster_();
   const state = loadIdState_();
   const today = today_();
   const current = existing.byClub[key_(partner) + '||' + key_(club)] || [];
@@ -535,10 +646,51 @@ function handleNewClub_(a, source) {
 
   const summary = (isNew ? 'new club ' : 'existing club ') + club + ' (' + partner + '): ' +
       plan.toAppend.length + ' girls added, ' + plan.reactivate.length + ' reactivated, ' +
-      issues.length + ' for review';
+      issues.length + ' for review' + (released ? ' (released from hold by staff)' : '');
   audit_('newClubForm', summary);
   if (plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
   return summary;
+}
+
+/** How a hold reason reads in FormLog and Audit. */
+const HOLD_KINDS = { reenroll: 're-enrollment list', names: 'names on file', club: 'club name',
+                     partner: 'organization name' };
+
+/**
+ * Hold a new-club response for staff: one ReviewQueue item, then a short
+ * e-mail to the mentor, then Audit — nothing else is written, no dropdown
+ * refresh, no Jotform sync. If the ReviewQueue write fails this throws: the
+ * response is logged ERROR, retried from the menu, and the mentor has not
+ * been e-mailed yet. Returns the FormLog result ('HELD: …').
+ */
+function holdNewClub_(a, source, responseKey, partner, club, reasons) {
+  review_([heldClubReviewItem_(partner, club, source, sentAtOfKey_(responseKey), reasons)]);
+  const to = sheetText_(a[Q.MENTOR_EMAIL]);
+  if (to) sendHoldNotice_(to, club, partner, source);
+  const kinds = reasons.map(function (r) { return HOLD_KINDS[r.kind] || r.kind; }).join(', ');
+  audit_('newClubForm', 'held ' + source + ' for review (' + kinds + '); nothing imported');
+  return HOLD_PREFIX + ' possible duplicate (' + kinds + ') — ReviewQueue [#' + source + ']';
+}
+
+/**
+ * Tell the mentor the enrollment arrived and is being checked. Echoes only
+ * the club and partner they sent — never a club or a girl from the Roster
+ * (the address is whatever was typed into a public form). Never fails the
+ * handler; a failure goes to Audit without the address.
+ */
+function sendHoldNotice_(to, club, partner, source) {
+  const body = [
+    'Thank you. We received the enrollment of ' + club + ' (' + partner + ').', '',
+    'Before adding the girls, our team is checking it against the clubs already enrolled. ' +
+        'You do not need to do anything, and please do not send it again: we will add the ' +
+        'club, or contact you if we have a question.', '',
+    'The girls appear on the attendance form once the club is added.',
+  ].join('\n');
+  try {
+    MailApp.sendEmail({ to: to, subject: 'GLOW enrollment received – ' + club, body: body });
+  } catch (err) {
+    audit_('sendHoldNotice_', 'could not e-mail the mentor about ' + source + ': ' + previewError_(err.message));
+  }
 }
 
 // ------------------------------------------------------ Roster change
@@ -689,7 +841,7 @@ function tryReview_(items, source) {
 
 /** Every issue the ReviewQueue can hold, in the order the weekly e-mail lists them. */
 const REVIEW_ISSUES = [
-  'Roster change sent as a problem report', 'Removal did not match anyone',
+  HOLD_ISSUE, 'Roster change sent as a problem report', 'Removal did not match anyone',
   'Same name listed twice', 'Partner says two girls share a name',
   'Girls missing from the latest enrollment', 'Roster change for a club not on file',
   'Partner has no region', 'Form response could not be processed',
@@ -741,6 +893,46 @@ function feedbackReviewItem_(a, source, sentDay, reason) {
         'Roster — or ask the partner to. Then mark resolved.',
     dedupeKey: source,
   };
+}
+
+/**
+ * The ReviewQueue item for a held new-club response (holdNewClub_). Partner
+ * and club are as filed (sheet-safe); the reasons name clubs, partners and
+ * counts, never a girl. "(sent …)" and the tag are how holdDecisions_ finds
+ * it again — staff must not edit them.
+ */
+function heldClubReviewItem_(partner, club, source, sentAt, reasons) {
+  return {
+    issue: 'New club held as a possible duplicate',
+    partner: partner, club: club,
+    detail: source + ' (sent ' + (sentAt || '?') + '): nothing imported; the mentor was told it ' +
+        'is being checked. Why: ' + reasons.map(function (r) { return r.text; }).join('; ') +
+        '. Same club: enter only its new girls on "' + Q.ACTION_MOD + '" for the club on file, ' +
+        'then resolve. Really new (or the list is right): resolved "release <date> by <name>: …", ' +
+        'then run "Process any missed form responses".',
+    dedupeKey: source,
+  };
+}
+
+/**
+ * What staff decided about each held new-club response. rows: ReviewQueue
+ * rows {row, issue, detail, resolved}. Returns {'<tab>!<row>': {row, state,
+ * sentAt}} from the LAST HOLD_ISSUE item tagged with that response row:
+ * state 'open' (resolved empty), 'release' (resolved starts with the word
+ * "release") or 'closed' (any other text); sentAt from its "(sent …)".
+ */
+function holdDecisions_(rows) {
+  const out = {};
+  rows.forEach(function (r) {
+    if (tidy_(r.issue) !== HOLD_ISSUE) return;
+    const detail = String(r.detail == null ? '' : r.detail);
+    const tag = detail.match(/\[#([^\]]*)\]\s*$/), sent = detail.match(/\(sent ([^)]*)\)/);
+    if (!tag) return;
+    const resolved = tidy_(r.resolved);
+    out[tag[1]] = { row: r.row, sentAt: sent ? sent[1] : '',
+                    state: !resolved ? 'open' : /^release\b/i.test(resolved) ? 'release' : 'closed' };
+  });
+  return out;
 }
 
 /** 'yyyy-MM-dd' the response was sent, from its FormLog key ('' for an older key). */

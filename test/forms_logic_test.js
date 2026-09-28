@@ -897,12 +897,260 @@ const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
         w2.tabs.Roster[2][6] === 'inactive' && !w2.cells().some(c => /^[=+\-@]/.test(c)));
 }
 
+console.log('\nA new club that may duplicate one on file is held, then released by staff (BACKLOG 11b)');
+{
+  const A = 'Fixture Partner Alpha';
+  const PET = 'Hope Fennwhistle';   // a fictional girl: must never reach FormLog, Audit, an e-mail or a detail
+  const onFile = rosterRows(A, 'BRIGHT GIRLS', ['Ada Marrowgate', 'Bea Marrowgate', 'Cora Marrowgate', 'Dina Marrowgate'])
+      .concat(rosterRows(A, 'Sunrise Club', ['Grace Zibblewick', 'Mary Zibblewick', 'Joy Blorptest']));
+  const suffixed = () => newClub(A, 'BRIGHT GIRLS (TESTVILLE SEC SCH)', [PET, 'Eva Marrowgate', 'Fay Marrowgate']);
+  const KEY = 'ROSTER|w:2026-09-21 10:15:30.250|' + A + '|BRIGHT GIRLS (TESTVILLE SEC SCH)';
+  const SRC = 'Roster Form Responses!41';
+  const clean = s => !/Fennwhistle|Marrowgate|Zibblewick|example\.org/.test(s);
+
+  console.log('\n  held');
+  let w = sheetWorld(baseTabs(onFile));
+  const before = JSON.stringify(w.tabs);
+  let res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, suffixed(), KEY);
+  const item = w.tabs.ReviewQueue[1] || [];
+  check('FormLog: HELD, with the reason kind and the ReviewQueue tag',
+        res === 'HELD: possible duplicate (club name) — ReviewQueue [#' + SRC + ']' &&
+        w.formLog.length === 1 && w.formLog[0][3] === res, res);
+  check('nothing imported: Roster, ClubRegistry, Partners and SF Pending unchanged; no dropdown refresh, no Jotform sync',
+        JSON.stringify(Object.assign({}, w.tabs, { ReviewQueue: JSON.parse(before).ReviewQueue })) === before &&
+        !w.synced && !w.notified.length);
+  check('one ReviewQueue item: issue, partner and club as sent, sent time, the club on file, the tag last',
+        w.tabs.ReviewQueue.length === 2 && item[1] === 'New club held as a possible duplicate' && item[2] === A &&
+        item[3] === 'BRIGHT GIRLS (TESTVILLE SEC SCH)' &&
+        item[4].startsWith(SRC + ' (sent 2026-09-21 10:15:30): nothing imported') &&
+        item[4].includes('BRIGHT GIRLS (Fixture Partner Alpha), already enrolled') &&
+        item[4].endsWith('[#' + SRC + ']') && clean(item[4]), item[4]);
+  check('the mentor is told it is being checked — only the club and partner they sent, no girl, no club on file',
+        w.mails.length === 1 && w.mails[0].to === 'mentor@example.org' &&
+        w.mails[0].subject === 'GLOW enrollment received – BRIGHT GIRLS (TESTVILLE SEC SCH)' &&
+        w.mails[0].body.includes('checking it against the clubs already enrolled') &&
+        !/Fennwhistle|Marrowgate|already enrolled\)/.test(w.mails[0].body) &&
+        w.mails[0].body.split('BRIGHT GIRLS').length === 2);
+  check('Audit: the source and the reason kind only',
+        w.audits.join() === 'newClubForm: held ' + SRC + ' for review (club name); nothing imported');
+
+  console.log('\n  released');
+  w = sheetWorld(baseTabs(onFile));
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, suffixed(), KEY, true);
+  check('released: imported as sent, the guard skipped, and FormLog says so',
+        /^new club BRIGHT GIRLS \(TESTVILLE SEC SCH\) \(Fixture Partner Alpha\): 3 girls added, .*\(released from hold by staff\)$/.test(res) &&
+        w.tabs.Roster.length === onFile.length + 4 && w.tabs['SF Pending'].length === 2 &&
+        w.notified.join() === 'newClubForm' && !w.mails.length, res);
+
+  console.log('\n  the other reasons, through the handler');
+  w = sheetWorld(baseTabs(onFile));
+  res = w.ctx.handleNewClub_(newClub(A, 'Sunrise Club', ['Ivy Newperson', 'Jo Newperson', 'Hana Newperson']), SRC, KEY);
+  check('an exact re-enrollment with another list: held (re-enrollment list), nothing reactivated or added',
+        /^HELD: possible duplicate \(re-enrollment list\)/.test(res) && w.tabs.Roster.length === onFile.length + 1, res);
+  w = sheetWorld(baseTabs(onFile));
+  res = w.ctx.handleNewClub_(newClub(fh.OTHER_PARTNER, 'Evening Club', ['Grace Zibblewick', 'Mary Zibblewick', 'Ivy Newperson'],
+      { [HQ.NEW_PARTNER]: 'fixture partner  alpha.', [HQ.REGION]: 'Africa' }), SRC, KEY);
+  check('names on file under a retyped organization: held (names on file, organization name)',
+        res.startsWith('HELD: possible duplicate (names on file, organization name)'), res);
+  w = sheetWorld(baseTabs(onFile));
+  res = w.ctx.handleNewClub_(newClub(A, 'Evening Club', ['Ivy Newperson', 'Jo Newperson']), SRC, KEY);
+  check('a genuinely new club of a known partner: imported as before', /^new club Evening Club/.test(res) && !w.mails.length, res);
+
+  console.log('\n  failures');
+  w = sheetWorld(baseTabs(onFile), { down: 'ReviewQueue' });
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, suffixed(), KEY);
+  check('the ReviewQueue unavailable: ERROR (retried from the menu), the mentor NOT e-mailed, nothing imported',
+        res === 'ERROR: sheet unavailable' && !w.mails.length && w.tabs.Roster.length === onFile.length + 1, res);
+  w = sheetWorld(baseTabs(onFile), { mailFails: true });
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, suffixed(), KEY);
+  check('the e-mail failing: still held; Audit says so without the address',
+        res.startsWith('HELD:') && w.tabs.ReviewQueue.length === 2 &&
+        w.audits.some(a => a === 'sendHoldNotice_: could not e-mail the mentor about ' + SRC + ': quota') && clean(w.audits.join('\n')));
+
+  console.log('\n  a repeated trigger does not hold twice');
+  w = sheetWorld(baseTabs(onFile));
+  const stamp = { wall: '2026-09-21 10:15:30.250', ms: 0 };
+  w.ctx.spreadsheetZone_ = () => 'America/New_York';
+  w.ctx.readResponseRow_ = () => ({ answers: suffixed(), stamp });
+  w.ctx.readFormLogIndex_ = () => w.ctx.indexFormLog_(w.formLog);
+  const firstRun = w.ctx.processResponseRow_('ROSTER', w.sheet('Roster Form Responses'), 41);
+  const secondRun = w.ctx.processResponseRow_('ROSTER', w.sheet('Roster Form Responses'), 41);
+  check('the trigger holds it once; a second trigger for the same row does nothing (one e-mail, one FormLog row)',
+        firstRun && !secondRun && w.mails.length === 1 && w.formLog.length === 1 && w.formLog[0][2] === KEY);
+}
+
+console.log('\n  FormLog, the ReviewQueue decision and the menu plan');
+const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_ISSUES', 'isHeldResult_', 'isRetryResult_',
+                   'heldForReview_', 'indexFormLog_', 'holdDecisions_', 'planMissedRun_', 'missedPreviewText_',
+                   'responseKeyOf_', 'responseDone_', 'sentAtOfKey_', 'sentAtOfStamp_', 'releasedBy_',
+                   'heldClubReviewItem_', 'reviewDigest_'],
+                  ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+{
+  const today = '2026-09-28';
+  const tab = 'Roster Form Responses';
+  const R = (row, wall, club) => ({ which: 'ROSTER', row, tab, stamp: cellAt(wall, -240), answers: newClubAnswers(club) });
+  const keyOf = r => hd.responseKeyOf_('ROSTER', r.stamp, r.answers);
+  const HELD = 'HELD: possible duplicate (club name) — ReviewQueue [#…]';
+  check('HELD: is its own prefix: not a retry, not done', hd.HOLD_PREFIX === 'HELD:' && hd.isHeldResult_(HELD) &&
+        !hd.isRetryResult_(HELD) && !hd.isHeldResult_('ERROR: x') && !hd.isHeldResult_(null) &&
+        hd.RETRY_PREFIXES.join() === 'ERROR:');
+  const a = R(41, '2026-09-21 10:15:30.250', 'Alpha Club');
+  const idx = hd.indexFormLog_([['ROSTER', 41, keyOf(a), 'ERROR: incomplete submission: missing roster'],
+                                ['ROSTER', 41, keyOf(a), HELD]]);
+  check('a held row: not done, not a processed row, found by its stamp, earlier failures cleared',
+        !hd.responseDone_('ROSTER', a.stamp, a.answers, idx) && !idx.okRows['ROSTER|41'] &&
+        hd.heldForReview_('ROSTER', a.stamp, keyOf(a), idx) && !idx.errorsByKey[keyOf(a)] && !idx.errorsByRow['ROSTER|41']);
+  check('…still found after its club cell is edited (the stamp, not the key)',
+        hd.heldForReview_('ROSTER', a.stamp, 'ROSTER|w:2026-09-21 10:15:30.250|x|edited', idx));
+  const after = hd.indexFormLog_([['ROSTER', 41, keyOf(a), HELD], ['ROSTER', 41, keyOf(a), 'ERROR: quota']]);
+  check('a failure after the hold (a released run failed) is kept', after.errorsByKey[keyOf(a)] === 'ERROR: quota');
+  check('the sent time: from a key, from a stamp; "?" when there is none',
+        hd.sentAtOfKey_(keyOf(a)) === '2026-09-21 10:15:30' && hd.sentAtOfStamp_(a.stamp) === '2026-09-21 10:15:30' &&
+        hd.sentAtOfKey_('ROSTER|1789820138000|x|y') === '?' && hd.sentAtOfStamp_({ text: 'x' }) === '?');
+
+  const item = hd.heldClubReviewItem_('Fixture Partner Alpha', 'Alpha Club', tab + '!41', '2026-09-21 10:15:30',
+                                      [{ kind: 'club', text: 'the club name is close to X' }]);
+  check('the hold item\'s issue is HOLD_ISSUE, first in REVIEW_ISSUES (a club waiting to be enrolled is the most urgent)',
+        item.issue === hd.HOLD_ISSUE && hd.REVIEW_ISSUES[0] === hd.HOLD_ISSUE && item.dedupeKey === tab + '!41');
+  const rq = (row, issue, detail, resolved) => ({ row, issue, detail, resolved: resolved || '' });
+  const detail = (r, sent) => r + ' (sent ' + sent + '): nothing imported … [#' + r + ']';
+  const decisions = hd.holdDecisions_([
+    rq(5, hd.HOLD_ISSUE, detail(tab + '!41', '2026-09-21 10:15:30')),
+    rq(6, hd.HOLD_ISSUE, detail(tab + '!42', '2026-09-22 09:00:00'), 'release 2026-09-28 by Ryan: a new club'),
+    rq(7, hd.HOLD_ISSUE, detail(tab + '!43', '2026-09-22 09:30:00'), 'resolved 2026-09-28 by Ryan: same club, 1 girl added'),
+    rq(8, hd.HOLD_ISSUE, detail(tab + '!44', '2026-09-22 10:00:00'), 'released by hand'),
+    rq(9, 'Removal did not match anyone', detail(tab + '!45', '2026-09-22 10:30:00'), 'release'),
+    rq(10, hd.HOLD_ISSUE, detail(tab + '!46', '2026-09-22 11:00:00') + ' typed after the tag', 'release'),
+    rq(11, hd.HOLD_ISSUE, detail(tab + '!47', '2026-09-22 11:30:00'), 'resolved: not a club'),
+    rq(12, hd.HOLD_ISSUE, detail(tab + '!47', '2026-09-22 11:30:00'), ' RELEASE: checked with the partner'),
+  ]);
+  const st = t => decisions[tab + '!' + t] && decisions[tab + '!' + t].state;
+  check('holdDecisions_: empty → open; "release …" → release; any other text → closed ("released" is not "release")',
+        st(41) === 'open' && st(42) === 'release' && st(43) === 'closed' && st(44) === 'closed');
+  check('holdDecisions_: other issues, and an item typed after its tag, are ignored; the last item wins',
+        !decisions[tab + '!45'] && !decisions[tab + '!46'] && st(47) === 'release' && decisions[tab + '!47'].row === 12 &&
+        decisions[tab + '!41'].sentAt === '2026-09-21 10:15:30');
+
+  const rows = [R(41, '2026-09-21 10:15:30.250', 'Alpha Club'), R(42, '2026-09-22 09:00:00.100', 'Bravo Club'),
+                R(43, '2026-09-22 09:30:00.100', 'Charlie Club'), R(44, '2026-09-22 10:00:00.100', 'Delta Club'),
+                R(48, '2026-09-22 12:00:00.100', 'Echo Club'), R(49, '2026-09-27 12:00:00.100', 'Foxtrot Club'),
+                R(50, '2026-09-10 12:00:00.100', 'Golf Club')];
+  const heldLog = rows.slice(0, 5).map(r => ['ROSTER', r.row, keyOf(r), HELD])
+      .concat([['ROSTER', 50, keyOf(rows[6]), HELD], ['ROSTER', 50, keyOf(rows[6]), 'ERROR: quota']]);
+  const holds = Object.assign({}, decisions, {
+    [tab + '!48']: { row: 13, state: 'release', sentAt: '2026-09-20 08:00:00' },   // another response's item: the tab was sorted
+    [tab + '!50']: { row: 14, state: 'release', sentAt: '2026-09-10 12:00:00' },
+  });
+  const plan = hd.planMissedRun_(rows, hd.indexFormLog_(heldLog), today, 7, holds);
+  const src = items => items.map(i => i.source.replace(tab + '!', '')).join(',');
+  check('released (the item says release, sent time matches): its own group — even when older than 7 days',
+        src(plan.released) === '42,50' && plan.released.every(i => i.status === 'released'), src(plan.released));
+  check('waiting: open (41) and 48; closed (43, and 44 "released by hand") are not listed at all',
+        src(plan.waiting) === '41,48' && !/43|44/.test(src(plan.run.concat(plan.old, plan.held, plan.waiting, plan.released))),
+        src(plan.waiting));
+  check('an item for another response (tab sorted: the sent time differs) never releases this one',
+        plan.waiting[1].note === 'no ReviewQueue item for this row and time (docs/RUNBOOK.md)' &&
+        plan.waiting[0].note === 'waiting for staff: ReviewQueue row 5' && !plan.waiting[0].lastError);
+  check('a released row that failed after its release shows that failure; a new row is run as before',
+        plan.released[1].lastError === 'ERROR: quota' && src(plan.run) === '49' && !plan.old.length && !plan.held.length);
+  const takenBack = hd.planMissedRun_([rows[6]], hd.indexFormLog_(heldLog), today, 7,
+      { [tab + '!50']: { row: 14, state: 'open', sentAt: '2026-09-10 12:00:00' } });
+  check('released, failed, then the release taken back: it waits, and is not offered as "retry after ERROR"',
+        src(takenBack.waiting) === '50' && takenBack.waiting[0].lastError === '' &&
+        !hd.missedPreviewText_('x', takenBack.waiting, 15).includes('retry after'));
+  const noHolds = hd.planMissedRun_(rows.slice(0, 1), hd.indexFormLog_(heldLog), today, 7);
+  check('no decisions given (an old caller): a held row waits', src(noHolds.waiting) === '41' && !noHolds.run.length);
+  const text = hd.missedPreviewText_('x', plan.waiting.concat(plan.released), 15);
+  check('the preview says why each held row waits or runs, never a name',
+        text.includes('• row 41 · sent 2026-09-21 10:15 · new club · Alpha Club (Test Partner Org) · waiting for staff: ReviewQueue row 5') &&
+        text.includes('row 42 · sent 2026-09-22 09:00 · new club · Bravo Club (Test Partner Org) · released in ReviewQueue row 6') &&
+        !/Zibblewick|@/.test(text), text);
+  const digest = hd.reviewDigest_([{ row: 5, raised: '2026-09-22', issue: hd.HOLD_ISSUE, partner: 'Fixture Partner Alpha',
+      club: 'Alpha Club', detail: detail(tab + '!41', '2026-09-21 10:15:30'), resolved: '' }], today,
+      { partners: { 'fixture partner alpha': 'Fixture Partner Alpha' }, clubs: {} });
+  check('the Monday e-mail lists a hold first, with its response row; the new club is not on file so it is masked',
+        digest.lines[2] === hd.HOLD_ISSUE + ': 1 open, 1 new, oldest 6 day(s)' &&
+        digest.lines[3] === '  - row 5 · raised 2026-09-22 · Fixture Partner Alpha / (club not on file) · ' + tab + '!41', digest.lines.join('\n'));
+}
+
+console.log('\n  the menu run with held rows (processMissedResponses, runConfirmed_; Google services stubbed)');
+{
+  const vm = require('vm');
+  const src = ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']
+      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const tab = 'Roster Form Responses';
+  const R = (row, wall, club) => ({ which: 'ROSTER', row, tab, stamp: cellAt(wall, -240), answers: newClubAnswers(club) });
+  const HELD = 'HELD: possible duplicate (club name) — ReviewQueue [#…]';
+  const held = [R(41, '2026-09-21 10:15:30.250', 'Alpha Club'), R(42, '2026-09-22 09:00:00.100', 'Bravo Club')];
+  const fresh = R(49, '2026-09-27 12:00:00.100', 'Foxtrot Club');
+  const world = (responses, holds, replies) => {
+    const ran = [], audits = [], dialogs = [];
+    const ctx = vm.createContext({
+      console,
+      SpreadsheetApp: { getUi: () => ({
+        alert: (title, text, buttons) => { dialogs.push(text); return buttons === 'YES_NO' ? replies.shift() : 'OK'; },
+        Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } }) },
+      LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
+      Utilities: { sleep: () => {} },
+    });
+    vm.runInContext(src, ctx);
+    const log = held.map(r => ['ROSTER', r.row, ctx.responseKeyOf_('ROSTER', r.stamp, r.answers), HELD]);
+    ctx.readMissedSnapshot_ = () => ({ zone: 'America/New_York', sheets: { ROSTER: {} }, responses,
+                                       index: ctx.indexFormLog_(log), today: '2026-09-28', holds });
+    ctx.readResponseRow_ = (sheet, row) => responses.find(r => r.row === row);
+    ctx.readFormLogIndex_ = () => ctx.indexFormLog_(log);
+    ctx.readHoldDecisions_ = () => holds;
+    ctx.runResponse_ = (which, sheet, row, answers, key, released) => { ran.push(row + (released ? ' released' : '')); return 'new club ok'; };
+    ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
+    vm.runInContext('processMissedResponses()', ctx);
+    return { ran, audits, dialogs, ctx, log };
+  };
+  const open = { [tab + '!41']: { row: 5, state: 'open', sentAt: '2026-09-21 10:15:30' },
+                 [tab + '!42']: { row: 6, state: 'open', sentAt: '2026-09-22 09:00:00' } };
+  let m = world(held, open, []);
+  check('only held rows: "Nothing to process." lists them as held for review, and nothing runs',
+        m.dialogs.length === 1 && m.dialogs[0].startsWith('Nothing to process.') &&
+        m.dialogs[0].includes('new clubs held for review') && m.dialogs[0].includes('• row 41') && !m.ran.length);
+  const release42 = Object.assign({}, open, { [tab + '!42']: { row: 6, state: 'release', sentAt: '2026-09-22 09:00:00' } });
+  m = world(held.concat([fresh]), release42, ['YES', 'YES']);
+  check('a released row is asked on its own, after the new rows; the held one is listed with the result',
+        m.dialogs.length === 3 && /^Club Roster Form responses not yet processed \(1\)/.test(m.dialogs[0]) &&
+        /^New clubs held for review that staff released in the ReviewQueue \(1\):\n• row 42 .*released in ReviewQueue row 6/.test(m.dialogs[1]) &&
+        /^2 processed\./.test(m.dialogs[2]) && m.dialogs[2].includes('new clubs held for review') &&
+        m.dialogs[2].includes('• row 41'), m.dialogs.join('\n----\n'));
+  check('YES: the new row runs, the released row runs as released, the waiting row never',
+        m.ran.join() === '42 released,49' && /held for review: Roster Form Responses!41/.test(m.audits[0]), m.ran.join());
+  m = world(held, release42, ['NO']);
+  check('NO to the released group: nothing runs; Audit records it as declined and the held-for-review row',
+        !m.ran.length && /cancelled at the preview \(would have run Roster Form Responses!42\); held for review: Roster Form Responses!41/.test(m.audits[0]),
+        m.audits.join());
+
+  // runConfirmed_ re-reads the decision under the lock
+  m = world([], {}, []);
+  const snap = { zone: 'America/New_York', sheets: { ROSTER: {} } };
+  const item = r => ({ which: 'ROSTER', row: r.row, source: tab + '!' + r.row, key: m.ctx.responseKeyOf_('ROSTER', r.stamp, r.answers) });
+  m.ctx.readResponseRow_ = (sheet, row) => held.concat([fresh]).find(r => r.row === row);
+  m.ctx.readFormLogIndex_ = () => m.ctx.indexFormLog_(m.log);
+  m.ctx.readHoldDecisions_ = () => open;   // staff took the release back after the preview
+  const took = m.ctx.runConfirmed_(Object.assign(item(held[1]), { status: 'released' }), snap);
+  m.ctx.readHoldDecisions_ = () => release42;
+  const ok = m.ctx.runConfirmed_(Object.assign(item(held[1]), { status: 'released' }), snap);
+  const sneaky = m.ctx.runConfirmed_(Object.assign(item(held[0]), { status: 'new' }), snap);
+  m.ctx.runResponse_ = () => 'HELD: possible duplicate (names on file) — ReviewQueue [#' + tab + '!49]';
+  const heldNow = m.ctx.runConfirmed_(Object.assign(item(fresh), { status: 'new' }), snap);
+  check('runConfirmed_: a release taken back after the preview is skipped; a held row never runs unreleased',
+        /skipped \(held for review; its ReviewQueue item does not say release\)$/.test(took) &&
+        /skipped \(held for review/.test(sneaky) && m.ran.join() === '42 released', [took, sneaky, m.ran.join()].join(' | '));
+  check('runConfirmed_: released → "ok"; a row the guard holds now → "held for review", not "failed again"',
+        ok === tab + '!42 ok' && heldNow === tab + '!49 held for review (see ReviewQueue)', [ok, heldNow].join(' | '));
+}
+
 console.log('\n  guards');
 {
   const all = fs.readdirSync(loadGs.GS_DIR).filter(f => f.endsWith('.gs'))
       .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
   const raised = [...new Set([...all.matchAll(/issue: '([^']+)'/g)].map(m => m[1]))].sort();
-  check('every issue the code raises is in REVIEW_ISSUES (8)',
+  check('every issue the code raises is in REVIEW_ISSUES (' + pr.REVIEW_ISSUES.length + ')',
         raised.join('|') === pr.REVIEW_ISSUES.slice().sort().join('|'), raised.join(' | '));
   const rb = fs.readFileSync(path.join(REPO, 'docs', 'RUNBOOK.md'), 'utf8');
   const section = (rb.split('## Working the ReviewQueue')[1] || '').split('\n## ')[0];
