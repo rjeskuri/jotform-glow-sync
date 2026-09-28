@@ -158,6 +158,204 @@ function closestNames_(name, names) {
   return scored.slice(0, 3).map(function (s) { return s.n; });
 }
 
+// ------------------------------------------------- duplicate-club guard
+// A new-club response that may be a club we already have is HELD for staff
+// instead of imported (BACKLOG 11b, docs/intent/2026-09-01-duplicate-club-guards.md,
+// docs/plans/2026-09-28-duplicate-club-guard.md). The thresholds start where
+// the intent put them; tune them here.
+
+const DUP_GUARD = {
+  NAME_SHARE: 0.5,       // hold when this share of the names sent is active in ONE existing club…
+  MIN_SHARED: 2,         // …and at least this many names are
+  SIMILAR: 0.8,          // similarity_ of two names' distinctive words at which they may be one
+  REENROLL_SHARE: 0.5,   // an exact re-enrollment is held below this share, both ways
+  MAX_LISTED: 3,         // candidates named per reason
+};
+
+/** Words that say nothing about WHICH club, or which partner, it is. */
+const CLUB_FILLER = /^(?:glow|clubs?|girls?|gc|the|of|and|y|de|del|la|las|los|el|group|sec|secondary|sch|school|pri|primary|primaria|secundaria|escuela|colegio)$/;
+const PARTNER_FILLER = /^(?:foundation|fundacion|organi[sz]ation|org|initiative|network|trust|society|association|asociacion|ngo|inc|ltd|the|of|for|and|y|de|del|la|las|los|el|international|community|project|program(?:me)?|group|girls?|glow|club)$/;
+const ROMAN_NUMERALS = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'];
+
+/**
+ * Why a new-club response should be held for staff instead of imported, as
+ * [{kind, text}] — [] means import it. Texts name clubs, partners and counts,
+ * never a girl.
+ *
+ *   reenroll  the (partner, club) is on file, but fewer than half of the names
+ *             sent are on its roster AND fewer than half of its active girls
+ *             are in the list (the 2026-08-31 case: another club's list). No
+ *             other check runs for a club on file.
+ *   names     at least half of the names sent, and at least MIN_SHARED, are
+ *             active in ONE existing club — of any partner
+ *   club      the club name is close to a club of the same partner, or of a
+ *             partner the typed organization is close to (clubNamesClose_)
+ *   partner   "My organization is not in this list" was chosen and the name
+ *             typed is not a partner on file but is close to one (partnersClose_)
+ *
+ * entry:    {partner, club, names, typedPartner} as the handler would file it
+ * rows:     the Roster (loadRoster_().rows): {partner, club, full_name, status}
+ * partners: partner names on file (the Partners tab); the Roster's are added
+ */
+function newClubHoldReasons_(entry, rows, partners) {
+  const clubs = Object.create(null), activeIn = Object.create(null);
+  rows.forEach(function (r) {
+    const p = tidy_(r.partner), c = tidy_(r.club), n = foldKey_(r.full_name);
+    if (!p || !c || !n) return;
+    const ck = key_(p) + '||' + key_(c);
+    const club = clubs[ck] ||
+        (clubs[ck] = { partner: p, club: c, all: Object.create(null), active: Object.create(null) });
+    club.all[n] = true;
+    if (r.status === STATUS.ACTIVE && !club.active[n]) {
+      club.active[n] = true;
+      (activeIn[n] = activeIn[n] || []).push(ck);
+    }
+  });
+  const sent = Object.create(null);
+  entry.names.forEach(function (n) { if (foldKey_(n)) sent[foldKey_(n)] = true; });
+  const names = Object.keys(sent);
+  const count = function (list, set) { return list.filter(function (n) { return set[n]; }).length; };
+  const listed = function (items) {
+    return items.slice(0, DUP_GUARD.MAX_LISTED).join('; ') +
+        (items.length > DUP_GUARD.MAX_LISTED ? ' and ' + (items.length - DUP_GUARD.MAX_LISTED) + ' more' : '');
+  };
+  const pk = key_(entry.partner);
+
+  const own = clubs[pk + '||' + key_(entry.club)];
+  if (own) {
+    const onFile = count(names, own.all), active = Object.keys(own.active);
+    const kept = count(active, sent);
+    if (onFile < names.length * DUP_GUARD.REENROLL_SHARE && kept < active.length * DUP_GUARD.REENROLL_SHARE) {
+      return [{ kind: 'reenroll', text: 'this club is already enrolled, but only ' + onFile + ' of the ' +
+                names.length + ' names sent are on its roster, and ' + kept + ' of its ' + active.length +
+                ' active girls are in the list' }];
+    }
+    return [];
+  }
+
+  const reasons = [];
+  const shared = Object.create(null);
+  names.forEach(function (n) {
+    (activeIn[n] || []).forEach(function (ck) { shared[ck] = (shared[ck] || 0) + 1; });
+  });
+  const best = Object.keys(shared).sort(function (x, y) { return shared[y] - shared[x] || x.localeCompare(y); })[0];
+  if (best && shared[best] >= DUP_GUARD.MIN_SHARED && shared[best] >= names.length * DUP_GUARD.NAME_SHARE) {
+    reasons.push({ kind: 'names', text: shared[best] + ' of the ' + names.length + ' names sent are active in ' +
+                   clubs[best].club + ' (' + clubs[best].partner + ')' });
+  }
+
+  const onFile = Object.create(null);   // key_(partner) → its spelling on file
+  (partners || []).concat(Object.keys(clubs).map(function (ck) { return clubs[ck].partner; }))
+      .forEach(function (p) { if (tidy_(p) && !onFile[key_(p)]) onFile[key_(p)] = tidy_(p); });
+  const related = entry.typedPartner && !onFile[pk]
+      ? Object.keys(onFile).sort().filter(function (k) { return partnersClose_(entry.partner, onFile[k]); })
+      : [];
+
+  const near = Object.keys(clubs).sort().filter(function (ck) {
+    const k = key_(clubs[ck].partner);
+    return (k === pk || related.indexOf(k) !== -1) && clubNamesClose_(entry.club, clubs[ck].club);
+  });
+  if (near.length) {
+    reasons.push({ kind: 'club', text: 'the club name is close to ' + listed(near.map(function (ck) {
+      return clubs[ck].club + ' (' + clubs[ck].partner + ')';
+    })) + ', already enrolled' });
+  }
+  if (related.length) {
+    reasons.push({ kind: 'partner', text: 'the organization was typed as "' + entry.partner +
+                   '", close to ' + listed(related.map(function (k) { return onFile[k]; })) + ' on file' });
+  }
+  return reasons;
+}
+
+/**
+ * A name as words to compare: case and accents folded, dots dropped (so
+ * "G.L.O.W" is "glow"), split on anything that is not a letter, mark or
+ * digit, letters split from digits ("GC-2", "Club2" → …, "2").
+ */
+function matchWords_(s) {
+  return foldKey_(s).replace(/\./g, '')
+      .replace(/(\p{L})(?=\p{N})|(\p{N})(?=\p{L})/gu, '$1$2 ')
+      .split(/[^\p{L}\p{M}\p{N}]+/u).filter(String);
+}
+
+/** The numbers in a name's words ("2", "II" → 2), sorted: '' if none. */
+function numberTag_(words) {
+  return words.map(function (w) {
+    if (/^\d+$/.test(w)) return String(parseInt(w, 10));
+    const roman = ROMAN_NUMERALS.indexOf(w);
+    return roman === -1 ? '' : String(roman + 1);
+  }).filter(String).sort().join(' ');
+}
+
+/**
+ * True if two club names may be one club: the same words; or, without the
+ * filler words (CLUB_FILLER), one's words all in the other's ("BRIGHT GIRLS"
+ * in "BRIGHT GIRLS (TESTVILLE SEC SCH)") or similarity_ ≥ SIMILAR (a typo).
+ * Names whose numbers differ ("Harbor Club 1" / "Harbor Club 2") never are.
+ */
+function clubNamesClose_(a, b) {
+  const wa = matchWords_(a), wb = matchWords_(b);
+  const na = numberTag_(wa), nb = numberTag_(wb);
+  if (na && nb && na !== nb) return false;
+  return wordsClose_(wa, wb, CLUB_FILLER);
+}
+
+/**
+ * True if a typed organization may be a partner on file: the same words
+ * (accents, punctuation, spacing), an acronym of the other ("TARN" / "Test
+ * Aid Relief Network", either way round), or close as club names are, with
+ * PARTNER_FILLER as the filler words.
+ */
+function partnersClose_(typed, known) {
+  const wt = matchWords_(typed), wk = matchWords_(known);
+  if (!wt.length || !wk.length) return false;
+  const acronym = function (short, long) {
+    return short.length === 1 && short[0].length >= 3 && long.length === short[0].length &&
+        long.map(function (w) { return w.charAt(0); }).join('') === short[0];
+  };
+  return acronym(wt, wk) || acronym(wk, wt) || wordsClose_(wt, wk, PARTNER_FILLER);
+}
+
+function wordsClose_(wa, wb, filler) {
+  if (wa.join(' ') === wb.join(' ')) return true;
+  const keep = function (w) { return !filler.test(w); };
+  const da = wa.filter(keep), db = wb.filter(keep);
+  if (!da.length || !db.length) return false;
+  const short = da.length <= db.length ? da : db, long = short === da ? db : da;
+  if (short.every(function (w) { return long.indexOf(w) !== -1; })) return true;
+  return similarity_(da.join(' '), db.join(' ')) >= DUP_GUARD.SIMILAR;
+}
+
+/**
+ * How alike two strings are, 0..1 — Python's
+ * difflib.SequenceMatcher(None, a, b).ratio(), which tools/needs_attention.py
+ * uses: twice the characters in matching blocks (Ratcliff/Obershelp) over the
+ * total length.
+ */
+function similarity_(a, b) {
+  a = String(a); b = String(b);
+  if (!a.length && !b.length) return 1;
+  return 2 * matchingChars_(a, b) / (a.length + b.length);
+}
+
+/** Characters in the matching blocks: the longest common run, then the same left and right of it. */
+function matchingChars_(a, b) {
+  if (!a.length || !b.length) return 0;
+  let best = 0, endA = 0, endB = 0, prev = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = new Array(b.length + 1).fill(0);
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i - 1] !== b[j - 1]) continue;
+      cur[j] = prev[j - 1] + 1;
+      if (cur[j] > best) { best = cur[j]; endA = i; endB = j; }   // earliest in a, then in b: difflib's tie-break
+    }
+    prev = cur;
+  }
+  if (!best) return 0;
+  return best + matchingChars_(a.slice(0, endA - best), b.slice(0, endB - best)) +
+      matchingChars_(a.slice(endA), b.slice(endB));
+}
+
 // -------------------------------------------------------------- regions
 /** The canonical spelling for a region answer, or '' if it is not one of REGIONS. */
 function canonicalRegion_(answer) {

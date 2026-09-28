@@ -645,6 +645,132 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         !w.mails.length && w.audits.join() === 'sendSfPendingDigest: 2 open ReviewQueue item(s) (1 new this week), 1 club(s) pending in Salesforce but STAFF_NOTIFY_EMAIL is not set');
 }
 
+console.log('\nThe duplicate-club guard (RosterOps.gs newClubHoldReasons_, BACKLOG 11b)');
+const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose_', 'partnersClose_', 'matchWords_',
+                   'numberTag_', 'similarity_']);
+{
+  console.log('\n  similarity_ = Python difflib.SequenceMatcher(None, a, b).ratio()');
+  // values from Python 3 difflib, pinned
+  const pinned = [['bravehaert', 'braveheart', 0.9], ['shining stars', 'shinning stars', 0.9629629629629629],
+                  ['vision', 'rise', 0.4], ['abcd', 'bcde', 0.75], ['chacarita', 'traslasierra', 0.38095238095238093],
+                  ['empowerment kenya', 'empowerment uganda', 0.8], ['aaab', 'abaa', 0.5], ['xyz', '', 0], ['', '', 1]];
+  const off = pinned.filter(([a, b, want]) => Math.abs(dg.similarity_(a, b) - want) > 1e-12)
+      .map(([a, b]) => a + '/' + b + '=' + dg.similarity_(a, b));
+  check('9 pairs agree with difflib to 1e-12 (ties broken earliest in a, then in b)', !off.length, off.join(' | '));
+
+  console.log('\n  words, numbers, close names');
+  check('matchWords_: folded, dots dropped, split on punctuation, letters from digits',
+        dg.matchWords_('Hillside G.L.O.W club , Northfield').join(' ') === 'hillside glow club northfield' &&
+        dg.matchWords_('Lubbock GC-2').join(' ') === 'lubbock gc 2' && dg.matchWords_('Club2B').join(' ') === 'club 2 b' &&
+        dg.matchWords_('Fundación  Demo').join(' ') === 'fundacion demo');
+  check('numberTag_: digits and roman numerals, sorted; none → ""',
+        dg.numberTag_(['club', '02']) === '2' && dg.numberTag_(['club', 'ii']) === '2' && dg.numberTag_(['club']) === '' &&
+        dg.numberTag_(['constructor']) === '');
+  const close = [['BRIGHT GIRLS', 'BRIGHT GIRLS (TESTVILLE SEC SCH)'], ['BRAVEHEART GIRLS', 'BRAVEHAERT GIRLS'],
+                 ['Hillside GLOW Club Northfield', 'Hillside G.L.O.W club , Northfield'], ['Riverside', 'Club Glow Riverside'],
+                 ['Shining Stars', 'Shinning Stars'], ['Harbor Club', 'Harbor Club 2'], ['Harbor Club 2', 'Harbor Club II'],
+                 ['Las Lomitas', 'Las Lomitas primaria']];
+  const apart = [['Harbor Club 1', 'Harbor Club 2'], ['Vision GLOW Club', 'Rise GLOW Club'],
+                 ['Club Glow Chacarita', 'Club Glow Traslasierra'], ['GLOW Club', 'Girls Club'], ['Sunrise Club', 'Starlight Club']];
+  const wrongClose = close.filter(([a, b]) => !dg.clubNamesClose_(a, b) || !dg.clubNamesClose_(b, a));
+  const wrongApart = apart.filter(([a, b]) => dg.clubNamesClose_(a, b) || dg.clubNamesClose_(b, a));
+  check('clubNamesClose_: suffix, typo, punctuation, containment, one number added — close either way round',
+        !wrongClose.length, wrongClose.map(p => p.join(' / ')).join(' | '));
+  check('clubNamesClose_: different numbers, different distinctive words, filler only — apart',
+        !wrongApart.length, wrongApart.map(p => p.join(' / ')).join(' | '));
+  const pClose = [['Fundacion Demo', 'Fundación Demo'], ['Demo', 'Fundación Demo'], ['TARN', 'Test Aid Relief Network'],
+                  ['Test Aid Relief Network', 'TARN'], ['Test Aid Releif Network', 'Test Aid Relief Network'],
+                  ['fixture-partner alpha', 'Fixture Partner Alpha']];
+  const pApart = [['Brand New Org', 'Fixture Partner Alpha'], ['TAR', 'Test Aid Relief Network'], ['Moonbeam Collective', 'Fundación Demo'],
+                  ['Foundation', 'Fundación Demo'], ['TA', 'Test Aid']];
+  check('partnersClose_: accents, containment, acronym both ways, typo, punctuation — close',
+        pClose.every(([t, k]) => dg.partnersClose_(t, k)), pClose.filter(([t, k]) => !dg.partnersClose_(t, k)).join(' | '));
+  check('partnersClose_: unrelated, a partial acronym, filler only — apart',
+        pApart.every(([t, k]) => !dg.partnersClose_(t, k)), pApart.filter(([t, k]) => dg.partnersClose_(t, k)).join(' | '));
+
+  console.log('\n  when a new-club response is held');
+  const first = ['Ada', 'Bea', 'Cora', 'Dina', 'Eva', 'Fay', 'Gia', 'Hana', 'Ivy', 'Jo'];
+  const girls = (surname, n, from) => first.slice(from || 0, (from || 0) + n).map(f => f + ' ' + surname);
+  const R = (p, c, names, status) => names.map(n => ({ partner: p, club: c, full_name: n, status: status || 'active' }));
+  const A = 'Fixture Partner Alpha';
+  const sunrise = girls('Quillfeather', 4);
+  const rows = [].concat(
+      R(A, 'BRIGHT GIRLS', girls('Marrowgate', 5)), R(A, 'BRAVEHEART GIRLS', girls('Ostrivane', 4)),
+      R(A, 'Hillside GLOW Club Northfield', girls('Thornquibble', 3)), R(A, 'Harbor Club 1', girls('Pellucidor', 3)),
+      R(A, 'Vision GLOW Club', girls('Blorptest', 3)), R(A, 'Sunrise Club', sunrise),
+      R(A, 'Sunrise Club', ['Jo Quillfeather'], 'inactive'),
+      R('Fundación Demo', 'Club Glow Riverside', girls('Zibblewick', 3)),
+      R('Test Aid Relief Network', 'Lotus Club', girls('Qwertyson', 3)),
+      R('Other Partner Beta', 'Moonrise Club', girls('Fennwhistle', 3)),
+      R(A, 'Old Club', ['Lucía Zörblewick', 'Eva Zörblewick', 'Fay Zörblewick'], 'inactive'),
+      [{ partner: '', club: 'Stray', full_name: 'Ada Nowhere', status: 'active' }]);
+  const partners = [A, 'Fundación Demo', 'Test Aid Relief Network', 'YWTU', ''];
+  const fresh = girls('Newperson', 4);
+  const hold = (partner, club, names, typed) =>
+      dg.newClubHoldReasons_({ partner, club, names, typedPartner: !!typed }, rows, partners);
+  const kinds = r => r.map(x => x.kind).join(',');
+  const texts = r => r.map(x => x.text).join(' / ');
+  let r;
+  r = hold(A, 'BRIGHT GIRLS (TESTVILLE SEC SCH)', fresh);
+  check('club name with a school added: held (club), the club on file named',
+        kinds(r) === 'club' && texts(r) === 'the club name is close to BRIGHT GIRLS (Fixture Partner Alpha), already enrolled', texts(r));
+  r = hold(A, 'BRAVEHAERT GIRLS', fresh);
+  check('a typo of a club on file: held (club)', kinds(r) === 'club' && texts(r).includes('BRAVEHEART GIRLS'), texts(r));
+  r = hold(A, 'Hillside G.L.O.W club , Northfield', fresh);
+  check('stray punctuation and spacing: held (club)', kinds(r) === 'club', texts(r));
+  check('a numbered sibling, a different name, the same name under another partner: imported',
+        !hold(A, 'Harbor Club 2', fresh).length && !hold(A, 'Rise GLOW Club', fresh).length &&
+        !hold('Other Partner Beta', 'BRIGHT GIRLS', fresh).length);
+  r = hold(A, 'Starlight Club', sunrise.slice(0, 3).concat(['Hana Newperson']));
+  check('3 of 4 names active in one club: held (names), with the counts and that club',
+        kinds(r) === 'names' && texts(r) === '3 of the 4 names sent are active in Sunrise Club (Fixture Partner Alpha)', texts(r));
+  r = hold('Moonbeam Collective', 'Evening Club', girls('Fennwhistle', 2).concat(['Hana Newperson']), true);
+  check('names active in another partner\'s club: held too (a retyped organization)',
+        kinds(r) === 'names' && texts(r).includes('2 of the 3 names sent are active in Moonrise Club (Other Partner Beta)'), texts(r));
+  check('under MIN_SHARED or under half: imported',
+        !hold(A, 'Starlight Club', [sunrise[0], 'Hana Newperson']).length &&
+        !hold(A, 'Starlight Club', sunrise.slice(0, 2).concat(girls('Newperson', 3))).length && dg.DUP_GUARD.MIN_SHARED === 2);
+  check('only ACTIVE girls count for names (a club\'s removed girls may enrol elsewhere)',
+        !hold(A, 'Starlight Club', ['Lucia Zorblewick', 'Eva Zörblewick', 'Fay Zörblewick']).length);
+  check('names compare with accents and case folded',
+        kinds(hold('Moonbeam Collective', 'Evening Club', ['cora fennwhistle', 'BEA FENNWHISTLE'], true)) === 'names');
+  r = hold('Fundacion Demo', 'Riverside', fresh, true);
+  check('typed organization = a partner on file without its accent: held (club + partner); its clubs are compared too',
+        kinds(r) === 'club,partner' && texts(r).includes('Club Glow Riverside (Fundación Demo)') &&
+        texts(r).includes('the organization was typed as "Fundacion Demo", close to Fundación Demo on file'), texts(r));
+  check('typed acronym of a partner, or the long form of an acronym on file: held (partner)',
+        kinds(hold('TARN', 'Evening Club', fresh, true)) === 'partner' &&
+        kinds(hold('Young Women Test Union', 'Evening Club', fresh, true)) === 'partner');
+  check('typed = a partner on file (any case): it IS that partner, so no partner reason',
+        !hold('fixture partner alpha', 'Evening Club', fresh, true).length);
+  check('a new organization, a new club, new names: imported', !hold('Moonbeam Collective', 'Evening Club', fresh, true).length);
+  check('the same organization chosen from the dropdown is never a partner reason',
+        !hold('Fundacion Demo', 'Evening Club', fresh, false).length);
+
+  console.log('\n  an exact re-enrollment (the club is on file)');
+  r = hold(A, 'sunrise club', girls('Newperson', 4));
+  check('none of the names on file, none of its girls in the list: held (reenroll)',
+        kinds(r) === 'reenroll' && texts(r) === 'this club is already enrolled, but only 0 of the 4 names sent are on its ' +
+        'roster, and 0 of its 4 active girls are in the list', texts(r));
+  check('the same list with a new girl, a short list, half its girls plus many new: imported (as today)',
+        !hold(A, 'Sunrise Club', sunrise.concat(['Hana Newperson'])).length && !hold(A, 'Sunrise Club', sunrise.slice(0, 1)).length &&
+        !hold(A, 'Sunrise Club', sunrise.slice(0, 2).concat(girls('Newperson', 6))).length);
+  check('a removed girl listed again counts as on file (she is reactivated)',
+        !hold(A, 'Sunrise Club', ['Jo Quillfeather']).length);
+  r = hold(A, 'Sunrise Club', [sunrise[0]].concat(girls('Newperson', 6)));
+  check('one old name among six new: held', kinds(r) === 'reenroll' && texts(r).includes('1 of the 7 names') && texts(r).includes('1 of its 4'), texts(r));
+  check('an exact re-enrollment gets no club or names reason (siblings are expected)',
+        !hold(A, 'Harbor Club 1', girls('Pellucidor', 3)).length);
+  const everything = [hold(A, 'BRIGHT GIRLS (TESTVILLE SEC SCH)', fresh), hold(A, 'Starlight Club', sunrise.slice(0, 3)),
+                      hold('Moonbeam Collective', 'Evening Club', girls('Fennwhistle', 3), true), hold(A, 'Sunrise Club', fresh)];
+  check('reasons never carry a girl\'s name', !/Quillfeather|Fennwhistle|Newperson|Ada |Bea /.test(everything.map(texts).join(' ')));
+  const many = dg.newClubHoldReasons_({ partner: A, club: 'Star', names: fresh },
+      ['Star 1', 'Star 2', 'Star 3', 'Star 4'].map(c => ({ partner: A, club: c, full_name: 'Ivy Starling', status: 'active' })), [A]);
+  check('at most MAX_LISTED candidates named, then "and N more"',
+        texts(many) === 'the club name is close to Star 1 (Fixture Partner Alpha); Star 2 (Fixture Partner Alpha); ' +
+        'Star 3 (Fixture Partner Alpha) and 1 more, already enrolled', texts(many));
+}
+
 // ------------------------- Club Roster Form responses (the handlers, stubbed)
 console.log('\nClub Roster Form text is sheet-safe (BACKLOG 44)');
 const nz = loadGs(['sheetText_', 'parseFormRoster_', 'parseRoster_', 'foldKey_']);
