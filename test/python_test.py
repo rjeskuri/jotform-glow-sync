@@ -331,18 +331,21 @@ class ConditionBuilder(unittest.TestCase):
 
     def test_generated_rules_mention_only_rosters_and_structural_fields(self):
         # so no other element - the links above Submit included - is ever
-        # shown, hidden or computed by the sync's rewrite
+        # shown, hidden or computed by the sync's rewrite; with the partner
+        # list (wf/partner-box) the list is the one field added
         structural = {sync.CLUB_NAME, sync.PARTNER, sync.YEAR, sync.CONTACT_IDS, sync.MODULE_ID,
                       sync.WEEK_ID, sync.YEAR_ID, *sync.MODULES.values(), *sync.WEEKS.values()}
         for picker in (None, "500"):
-            mentioned = set()
-            for c in self.rules(picker=picker):
-                for item in c["terms"] + c["action"]:
-                    mentioned |= {str(item[k]) for k in ("field", "resultField") if k in item}
-                    mentioned |= {o for o in str(item.get("operands", "")).split(",") if o}
-                    mentioned |= set(re.findall(r"\{(\d+)\}", str(item.get("equation", ""))))
-            allowed = structural | set(self.CLUBS) | ({picker} if picker else set())
-            self.assertLessEqual(mentioned, allowed, mentioned - allowed)
+            for partner_field in (sync.PARTNER, "600"):
+                mentioned = set()
+                for c in self.rules(picker=picker, partner_field=partner_field):
+                    for item in c["terms"] + c["action"]:
+                        mentioned |= {str(item[k]) for k in ("field", "resultField") if k in item}
+                        mentioned |= {o for o in str(item.get("operands", "")).split(",") if o}
+                        mentioned |= set(re.findall(r"\{(\d+)\}", str(item.get("equation", ""))))
+                allowed = structural | {partner_field} | set(self.CLUBS) | ({picker} if picker else set())
+                self.assertLessEqual(mentioned, allowed, mentioned - allowed)
+                self.assertIn(partner_field, mentioned)   # the shared names really are gated
 
 
 class FakeForm:
