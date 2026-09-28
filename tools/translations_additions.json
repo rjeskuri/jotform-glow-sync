@@ -125,13 +125,14 @@
   "or": "ଆଜି ଉପସ୍ଥିତ ସମସ୍ତଙ୍କର ଗୋଟିଏ ଫଟୋ ଅପଲୋଡ୍ କରନ୍ତୁ। ସମସ୍ତ ଝିଅଙ୍କ ମୁହଁ ଦେଖାଯିବା ଆବଶ୍ୟକ।"
  },
  "Submit": {
-  "_note": "the Submit button: Jotform's own pass covered es/fr/sw/ar only, so just the seven missing languages are listed - never overwrite Jotform's entries",
+  "_note": "the Submit button: Jotform's own pass covered es/fr/ar only, so just the missing languages are listed - never overwrite Jotform's entries. sw was wrongly assumed covered until 2026-09-26: absent from every store backup since 2026-08-27, the button kept the previously chosen language's text. 'Wasilisha' matches Jotform's own sw wording ('kuwasilisha fomu hii')",
   "th": "ส่ง",
   "ur": "جمع کروائیں",
   "te": "సమర్పించండి",
   "vi": "Gửi",
   "ne": "पेश गर्नुहोस्",
   "km": "ដាក់ស្នើ",
+  "sw": "Wasilisha",
   "or": "ଦାଖଲ କରନ୍ତୁ"
  },
  "Click here to report a problem": {
