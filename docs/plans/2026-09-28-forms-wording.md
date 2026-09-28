@@ -80,7 +80,12 @@ two help texts) and returns `{changes, skipped}`:
    and re-plans: the Audit row says `changed: <labels>; re-read: up to date` (or `STILL
    DIFFERENT: …`). Labels only — the texts are fixed wording, never form answers.
 6. A failure part-way → Audit `stopped after <done> …: <error>`; every change is idempotent, so
-   running it again makes only the ones still missing.
+   running it again makes only the ones still missing. A failure inside the reply question's add
+   (after `addTextItem`) is recorded as `… reply-email question PARTLY added (check …)`, and the
+   dialog says what to check in the Forms editor; a rerun lists an untitled short-answer question,
+   or the reply question away from the device question, as left as is (never a second question).
+   The handler sets Reply-To only for a typed value that looks like an address (review
+   2026-09-28, F1).
 - A second run: "Nothing to change". It never deletes an item, never changes a title, never
   touches responses, the response tabs, FormLog or the form's destination.
 

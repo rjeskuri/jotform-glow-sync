@@ -631,8 +631,15 @@ function migrateFormWordingLocked_(forms, plan, done) {
   } catch (err) {
     audit_('migrateFormWording', 'stopped after ' + done.length + ' of ' + again.changes.length +
            ' change(s) (done: ' + (done.join('; ') || 'nothing') + '): ' + err.message);
+    const partly = done.indexOf(WORDING_LABELS.FEEDBACK_EMAIL_PARTLY) !== -1;
     return 'Stopped after ' + done.length + ' of ' + again.changes.length + ' change(s): ' +
-        err.message + '\n\nRun it again: it makes only the changes still missing.';
+        err.message + '\n\nDone: ' + (done.join('; ') || 'nothing') + '.\n\n' + (partly
+        ? 'The reply-email question is on the problem form, but its title, e-mail validation ' +
+          'or place may be missing. In the Forms editor, give it exactly the title "' +
+          Q.FB_EMAIL + '", Response validation "Text → Email address", and move it right ' +
+          'after "' + Q.FB_DEVICE + '" — or delete it. Then run this again for the ' +
+          'changes still missing; it cannot see a missing validation.'
+        : 'Run it again: it makes only the changes still missing.');
   }
   const after = planFormWording_(readFormWording_(forms.FEEDBACK, forms.ROSTER));
   const verdict = after.changes.length ? 'STILL DIFFERENT: ' + wordingLabels_(after.changes)
@@ -690,7 +697,7 @@ function applyFormWording_(forms, changes, done) {
       if (!item) throw new Error('the question "' + c.title + '" is not on the form');
       item.setHelpText(c.to);
     } else if (c.what === 'add-email') {
-      addReplyEmailItem_(form);
+      addReplyEmailItem_(form, done);
     } else {
       throw new Error('unknown change "' + c.what + '"');
     }
@@ -698,13 +705,25 @@ function applyFormWording_(forms, changes, done) {
   });
 }
 
-/** The problem form's optional reply-address question, placed after the device question. */
-function addReplyEmailItem_(form) {
-  const item = form.addTextItem().setTitle(Q.FB_EMAIL)
-      .setValidation(FormApp.createTextValidation().requireTextIsEmail().build());
-  const device = findItem_(form, FormApp.ItemType.TEXT, Q.FB_DEVICE);
-  if (device && item.getIndex() !== device.getIndex() + 1) {
-    form.moveItem(item.getIndex(), device.getIndex() + 1);
+/**
+ * The problem form's optional reply-address question, placed after the device
+ * question. A failure after addTextItem leaves a question on the form that may
+ * lack its title, its e-mail validation or its place; with the migration's
+ * `done`, that is recorded (FEEDBACK_EMAIL_PARTLY) before the error goes on,
+ * because no re-read can see a validation (Apps Script has no getter for it).
+ */
+function addReplyEmailItem_(form, done) {
+  const item = form.addTextItem();
+  try {
+    item.setTitle(Q.FB_EMAIL)
+        .setValidation(FormApp.createTextValidation().requireTextIsEmail().build());
+    const device = findItem_(form, FormApp.ItemType.TEXT, Q.FB_DEVICE);
+    if (device && item.getIndex() !== device.getIndex() + 1) {
+      form.moveItem(item.getIndex(), device.getIndex() + 1);
+    }
+  } catch (err) {
+    if (done) done.push(WORDING_LABELS.FEEDBACK_EMAIL_PARTLY);
+    throw err;
   }
   return item;
 }
@@ -717,6 +736,8 @@ const WORDING_BUDGET_MS = 240000;   // no change is started after this (Apps Scr
 const WORDING_LABELS = {            // how the preview, the alerts and Audit name each change
   FEEDBACK_DESCRIPTION: 'Problem form: description',
   FEEDBACK_EMAIL: 'Problem form: reply-email question',
+  FEEDBACK_EMAIL_PARTLY: 'Problem form: reply-email question PARTLY added (check its title, ' +
+      'e-mail validation and place in the Forms editor)',
   ROSTER_DESCRIPTION: 'Club Roster Form: description',
   CLUB_HELP: 'Club Roster Form: "Club name" help text',
   REMOVE_HELP: 'Club Roster Form: REMOVE help text',
@@ -781,10 +802,23 @@ function replyEmailStep_(plan, items) {
                  title: Q.FB_EMAIL };
   const same = items.filter(function (it) { return key_(it.title) === key_(Q.FB_EMAIL); });
   if (same.length) {
+    const device = items.map(function (it) { return key_(it.title); }).indexOf(key_(Q.FB_DEVICE));
     if (same[0].type !== 'TEXT') {
       plan.skipped.push(Object.assign({ reason: 'a question with this title is there but is ' +
           'not a short-answer question; check it in the Forms editor' }, step));
+    } else if (device !== -1 && items.indexOf(same[0]) !== device + 1) {
+      // an add that stopped before its move, or moved by hand: never moved here
+      plan.skipped.push(Object.assign({ reason: 'it is on the form but not right after "' +
+          Q.FB_DEVICE + '"; check its place, and its e-mail validation, in the Forms editor' }, step));
     }
+    return;
+  }
+  // an add that stopped before its title: a second question would sit beside it
+  if (items.some(function (it) { return it.type === 'TEXT' && !wordingText_(it.title); })) {
+    plan.skipped.push(Object.assign({ reason: 'an untitled short-answer question is on the form ' +
+        '(a run that stopped part-way?). In the Forms editor give it exactly the title "' +
+        Q.FB_EMAIL + '" and Response validation "Text → Email address", or delete it and run ' +
+        'this again; nothing is added' }, step));
     return;
   }
   const lookalike = items.filter(function (it) {

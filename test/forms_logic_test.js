@@ -607,6 +607,19 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
   try { w.ctx.handleFeedback_(change(), 'Feedback!7', KEY); } catch (e) { threw = /STAFF_NOTIFY_EMAIL/.test(e.message); }
   check('STAFF_NOTIFY_EMAIL unset: throws, nothing queued or sent', threw && w.tabs.ReviewQueue.length === 1 && !w.mails.length);
 
+  // the reply box's e-mail validation may be missing (a wording run that stopped part-way):
+  // a typed non-address never becomes the Reply-To, so it can never fail the staff e-mail
+  w = world({ props: STAFF });
+  const notAddress = report('Africa Attendance Form', 'The page left me on a blank screen.', { [PQ.FB_EMAIL]: 'call me on whatsapp' });
+  const na = w.ctx.handleFeedback_(notAddress, 'Feedback!9', KEY);
+  check('a reply "address" that is not one: e-mailed without Reply-To, the body says why',
+        na === 'emailed staff' && w.mails.length === 1 && !('replyTo' in w.mails[0]) &&
+        w.mails[0].body.includes('(not an e-mail address, so not set as Reply-To)'), JSON.stringify(Object.keys(w.mails[0] || {})));
+  w = world({ props: STAFF });
+  w.ctx.handleFeedback_(report('Africa Attendance Form', 'Blank screen.', { [PQ.FB_EMAIL]: ' mentor@example.org ' }), 'Feedback!9', KEY);
+  check('…a real address (spaces trimmed): the Reply-To, no note', w.mails[0].replyTo === 'mentor@example.org' &&
+        !w.mails[0].body.includes('not set as Reply-To'));
+
   w = world({ props: STAFF });
   const plain = w.ctx.handleFeedback_(report('Africa Attendance Form', 'The page left me on a blank screen.'), 'Feedback!8', KEY);
   check('any other report: e-mail only, as before', plain === 'emailed staff' && w.tabs.ReviewQueue.length === 1 &&
@@ -777,6 +790,22 @@ console.log('\n  the plan (pure)');
   s.feedback.items = s.feedback.items.filter(it => it.title !== WQ.FB_DEVICE);
   check('no device question: the reply question goes at the end',
         fw.planFormWording_(s).changes.find(c => c.what === 'add-email').after === '');
+  s = wantedState();
+  s.feedback.items.splice(1, 0, s.feedback.items.pop());   // the reply question, not after the device one
+  p = fw.planFormWording_(s);
+  check('the reply question there but not right after the device question: left as is, "check its place"',
+        !p.changes.length && labelsOf(p.skipped) === WL.FEEDBACK_EMAIL &&
+        /not right after "/.test(p.skipped[0].reason) && /check its place/.test(p.skipped[0].reason), p.skipped.map(x => x.reason).join());
+  s = wantedState();
+  s.feedback.items = s.feedback.items.filter(it => it.title !== WQ.FB_DEVICE);
+  check('…no device question: its place is not checked', !fw.planFormWording_(s).skipped.length);
+  s = liveState();
+  s.feedback.items.push({ type: 'TEXT', title: '' });   // a run that stopped before the title was set
+  p = fw.planFormWording_(s);
+  check('an untitled short-answer question and no reply question: nothing added, "give it the title … or delete it"',
+        !p.changes.some(c => c.what === 'add-email') && labelsOf(p.skipped) === WL.FEEDBACK_EMAIL &&
+        /untitled short-answer question/.test(p.skipped[0].reason) && p.skipped[0].reason.includes('"' + WQ.FB_EMAIL + '"'),
+        labelsOf(p.changes));
   s = liveState();
   s.roster.clubHelp = null;
   p = fw.planFormWording_(s);
@@ -968,6 +997,48 @@ console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and A
   check('…run again: only the three still missing, no second reply question',
         /^Would change \(3\):/.test(w.dialogs[0]) && /re-read: up to date$/.test(w.audits.join()) &&
         titles(w.forms.FEEDBACK).filter(t => t === WQ.FB_EMAIL).length === 1, w.dialogs[0].split('\n')[0]);
+
+  // a failure INSIDE the reply question's add (addTextItem, setTitle, setValidation, moveItem):
+  // the question is on the form, maybe untitled, unvalidated or misplaced; no re-read sees a validation
+  const partlyRun = (failOn, deviceMovedUp) => {
+    const o = { props: PROPS, replies: ['YES'], failOn };
+    const x = world(o);
+    liveForms(x);
+    if (deviceMovedUp) x.forms.FEEDBACK.items.splice(1, 0, x.forms.FEEDBACK.items.splice(5, 1)[0]);
+    x.ctx.migrateFormWording();
+    return { x, o };
+  };
+  const partlyAudit = 'migrateFormWording: stopped after 2 of 5 change(s) (done: ' + WL.FEEDBACK_DESCRIPTION + '; ' +
+      WL.FEEDBACK_EMAIL_PARTLY + '): Forms service unavailable';
+  const saysPartly = x => x.audits.join() === partlyAudit && x.dialogs[1].includes(WL.FEEDBACK_EMAIL_PARTLY) &&
+      x.dialogs[1].includes('Response validation') && !x.dialogs[1].includes('it makes only the changes still missing');
+  let pr1 = partlyRun('FEEDBACK.setTitle');
+  check('setTitle fails: dialog and Audit say the reply question is PARTLY added (not "1 of 5 … run it again")',
+        /PARTLY added/.test(WL.FEEDBACK_EMAIL_PARTLY) && saysPartly(pr1.x), pr1.x.audits.join());
+  pr1.o.failOn = null; pr1.o.replies.push('YES');
+  pr1.x.dialogs.length = 0;
+  pr1.x.ctx.migrateFormWording();
+  const fbItems = pr1.x.forms.FEEDBACK.items.map(i => i._it);
+  check('…run again: no second question beside the untitled one; it is listed as left as is',
+        fbItems.length === LIVE_FEEDBACK_ITEMS.length + 1 && !fbItems.some(i => i.title === WQ.FB_EMAIL) &&
+        /^Would change \(3\):/.test(pr1.x.dialogs[0]) && pr1.x.dialogs[0].includes('untitled short-answer question'),
+        pr1.x.dialogs[0].split('\n')[0] + ' / ' + fbItems.length + ' items');
+  pr1 = partlyRun('FEEDBACK.setValidation');
+  check('setValidation fails (the title is there): still PARTLY, so the missing validation is not taken for done',
+        saysPartly(pr1.x), pr1.x.audits.join());
+  pr1 = partlyRun('FEEDBACK.moveItem', true);
+  check('moveItem fails: PARTLY added', saysPartly(pr1.x), pr1.x.audits.join());
+  pr1.o.failOn = null; pr1.o.replies.push('YES');
+  pr1.x.dialogs.length = 0; pr1.x.audits.length = 0;
+  pr1.x.ctx.migrateFormWording();
+  check('…run again: the misplaced question is listed as left as is ("check its place"), not taken for up to date',
+        /Left as is \(1\):\n- /.test(pr1.x.dialogs[0]) && pr1.x.dialogs[0].includes('check its place') &&
+        pr1.x.audits.join().includes('left as is: ' + WL.FEEDBACK_EMAIL), pr1.x.audits.join());
+  pr1 = partlyRun('FEEDBACK.add TEXT');
+  check('addTextItem itself fails: nothing landed, so not PARTLY; "run it again" as before',
+        pr1.x.audits.join() === 'migrateFormWording: stopped after 1 of 5 change(s) (done: ' + WL.FEEDBACK_DESCRIPTION +
+            '): Forms service unavailable' && pr1.x.dialogs[1].includes('it makes only the changes still missing'),
+        pr1.x.audits.join());
 
   w = world({ props: PROPS, replies: ['YES'] });
   liveForms(w);

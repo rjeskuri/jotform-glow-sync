@@ -648,6 +648,7 @@ function handleFeedback_(a, source, responseKey) {
   // same tag, so a retry after a failed send adds no second row — the e-mail
   // is the one step that must not repeat.
   const reason = looksLikeRosterChange_(a);
+  const replyTo = replyAddress_(a[Q.FB_EMAIL]);
   const queued = !!reason &&
       tryReview_([feedbackReviewItem_(a, source, sentDayOfKey_(responseKey), reason)], source);
   const note = !reason ? '' : queued
@@ -660,18 +661,30 @@ function handleFeedback_(a, source, responseKey) {
     'Partner:     ' + tidy_(a[Q.FB_PARTNER]),
     'Club:        ' + tidy_(a[Q.FB_CLUB]),
     'Device:      ' + tidy_(a[Q.FB_DEVICE]),
-    'Reply to:    ' + tidy_(a[Q.FB_EMAIL]), '',
+    'Reply to:    ' + tidy_(a[Q.FB_EMAIL]) + (tidy_(a[Q.FB_EMAIL]) && !replyTo
+        ? ' (not an e-mail address, so not set as Reply-To)' : ''), '',
     'Trying to do:', tidy_(a[Q.FB_DOING]) || '(not given)', '',
     'What happened:', tidy_(a[Q.FB_WHAT]),
   ].concat(note ? ['', note] : []).join('\n');
   const opts = { to: staff, subject: 'GLOW form problem: ' + tidy_(a[Q.FB_FORM]), body: body };
-  if (tidy_(a[Q.FB_EMAIL])) opts.replyTo = tidy_(a[Q.FB_EMAIL]);
+  if (replyTo) opts.replyTo = replyTo;
   MailApp.sendEmail(opts);   // a quota/send failure throws → ERROR → retried later
   audit_('feedbackForm', 'emailed ' + staff + ' about ' + tidy_(a[Q.FB_FORM]) +
          (!reason ? '' : queued ? '; ReviewQueue [#' + source + ']'
                                 : '; roster change, ReviewQueue write FAILED'));
   return 'emailed staff' +
       (!reason ? '' : queued ? '; roster change queued' : '; roster change NOT queued (see Audit)');
+}
+
+/**
+ * The typed reply address, or '' when it does not look like one. The box's
+ * e-mail validation can be missing (a wording run that stopped part-way,
+ * docs/RUNBOOK.md "Google Forms wording"), and a non-address as Reply-To
+ * could fail the staff e-mail on every retry.
+ */
+function replyAddress_(v) {
+  const t = tidy_(v);
+  return /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:".]+$/.test(t) ? t : '';
 }
 
 /** review_ that never fails its caller: true if the items are on the ReviewQueue. */

@@ -501,7 +501,14 @@ wording; forms built before 2026-09-28 get it once, from the menu
   make new forms, and the live forms' responses would no longer be
   processed (it refuses in that case, "Nothing was created").
 - "Stopped after N of M change(s)": what landed stays; run it again, and it
-  makes only the changes still missing.
+  makes only the changes still missing. If the dialog says the reply-email
+  question was **PARTLY added**, first open the problem form in the Forms
+  editor: give that question exactly its title, Response validation
+  "Text → Email address", and move it right after the device question, or
+  delete it; then run it again. A run cannot see a missing validation (the
+  handler then simply does not use a non-address as Reply-To). An untitled
+  short-answer question, or the reply question away from the device
+  question, is listed as left as is and never gets a second question.
 - A text left as is: paste the suggested text in the Forms editor if you
   want it, or leave it.
 - **The Feedback tab will most likely get a second column** titled "Your
