@@ -13,8 +13,9 @@
  * submission replayed today put back 20 girls removed since (2026-09-13);
  * it no longer can — each handler passes the day the response was sent and
  * RosterOps.gs keeps anyone removed after that day removed (the replay
- * guard, docs/plans/2026-09-28-replay-guard.md) — but its removals and new
- * names still apply to today's roster. So the menu item shows what it would
+ * guard, docs/plans/2026-09-28-replay-guard.md; a response with no readable
+ * sent day is refused, see runResponse_) — but its removals and new names
+ * still apply to today's roster. So the menu item shows what it would
  * run and asks first, never runs a row FormLog already records as processed
  * under another key, and asks again before running Club Roster Form
  * responses more than a week old (docs/RUNBOOK.md, "Missed form responses").
@@ -24,6 +25,10 @@ const FORM_LOG_COLS = ['when', 'form', 'sheet_row', 'response_key', 'result'];
 const SF_PENDING_COLS = ['added', 'partner', 'club', 'region', 'girls', 'mentor_name',
                          'mentor_email', 'country', 'status', 'notes'];
 const RETRY_PREFIXES = ['ERROR:'];   // FormLog results that mean "not done: try again"
+/** Why runResponse_ refuses a Club Roster Form response with no sent day (FormLog ERROR, queued). */
+const NO_SENT_DAY_ERROR = 'its Timestamp cell is not a date, so the day it was sent is unknown ' +
+    'and the replay guard cannot run: enter the change fresh on the Club Roster Form instead ' +
+    '(docs/RUNBOOK.md, "Form response could not be processed")';
 const MISSED = {
   BUDGET_MS: 240000,     // stop STARTING rows this long after the menu item began (limit: 6 min)
   LOCK_WAIT_MS: 30000,   // per row; a form-submit trigger waits up to 120 s for the same lock
@@ -214,8 +219,11 @@ function processResponseRow_(which, sheet, row) {
 /**
  * Run the handler for one response and record the outcome in FormLog. The
  * Club Roster Form handlers get the day the response was sent (its
- * Timestamp's wall-clock day, from the key; '' for a Timestamp that is not a
- * date), so a retry or a late run never puts back girls removed since.
+ * Timestamp's wall-clock day, from the key), so a retry or a late run never
+ * puts back girls removed since. A Club Roster Form response whose Timestamp
+ * is not a date has no such day and is refused (ERROR, queued): run without
+ * the guard it could put them back, and the menu's warning for old rows
+ * promises it cannot (the rule submittedDay_ follows).
  */
 function runResponse_(which, sheet, row, answers, responseKey) {
   const source = sheet.getName() + '!' + row;
@@ -223,6 +231,7 @@ function runResponse_(which, sheet, row, answers, responseKey) {
   let result;
   try {
     if (which === 'FEEDBACK') result = handleFeedback_(answers, source, responseKey);
+    else if (!sent) throw new Error(NO_SENT_DAY_ERROR);
     else if (isNewClubResponse_(answers)) result = handleNewClub_(answers, source, sent);
     else result = handleRosterChange_(answers, source, sent);
   } catch (err) {
@@ -489,7 +498,7 @@ function keptRemovedNote_(plan) {
 }
 
 // ------------------------------------------------------------ New club
-/** submitted: 'yyyy-MM-dd' the response was sent, or '' (no replay guard). */
+/** submitted: 'yyyy-MM-dd' the response was sent ('' = no guard: runResponse_ refuses first). */
 function handleNewClub_(a, source, submitted) {
   const ss = SpreadsheetApp.getActive();
   let partner = tidy_(a[Q.PARTNER_NEW]);
@@ -557,7 +566,7 @@ function handleNewClub_(a, source, submitted) {
 }
 
 // ------------------------------------------------------ Roster change
-/** submitted: 'yyyy-MM-dd' the response was sent, or '' (no replay guard). */
+/** submitted: 'yyyy-MM-dd' the response was sent ('' = no guard: runResponse_ refuses first). */
 function handleRosterChange_(a, source, submitted) {
   const ss = SpreadsheetApp.getActive();
   const partner = tidy_(a[Q.PARTNER_MOD]);

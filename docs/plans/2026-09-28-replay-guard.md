@@ -64,7 +64,9 @@ intent: none — BACKLOG 41, the follow-up named in docs/plans/2026-09-27-formlo
 **3. The handlers** (`FormHandlers.gs`)
 - `runResponse_` passes `sentDayOfKey_(responseKey)` to `handleNewClub_` and
   `handleRosterChange_`, which put it in `entry.submitted`. A Timestamp that is not a date
-  gives `''` → today's behaviour (the menu already treats such a row as "old": second YES).
+  gives `''`; `runResponse_` then refuses the response (FormLog `ERROR:`, queued: "enter the
+  change fresh") instead of running it unguarded — review finding RG-1: the menu lists such a
+  row as "old", and that dialog now promises girls removed since stay removed.
 - The trigger path is unchanged in practice: a fresh response's sent day is today. The one
   difference: a response sent before midnight and processed after it, naming a girl whose
   `removed_date` is blank, keeps her removed (and the ReviewQueue says so).
@@ -129,7 +131,8 @@ trigger outage (CLAUDE.md rule 11); the existing guard test pins the service set
   the sent day is read in today's zone — a response within a few hours of midnight of the
   removal day can land on the other side of the comparison. Only same-day-boundary cases.
 - **A thrown guard error** would log the response as `ERROR:` (retryable); the handlers only
-  pass `''` or a day, and a test pins that `''` is accepted.
+  pass a day (`runResponse_` refuses a response without one), and a test pins that `''` is
+  accepted by the pure planners (the rebuild's path).
 - **`removed_date` meaning**: for a Club Roster Form removal run late it is now the day the
   removal was sent, not the day it ran (Audit still records when it ran). Nothing else reads
   the column (the Jotform sync reads `status`); on time the two are the same day.

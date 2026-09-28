@@ -694,6 +694,10 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         w.mails[0].replyTo === 'mentor@example.org' && res === 'emailed staff; roster change queued', res);
   check('Audit names the source only (no girl, no typed club, no reply address)',
         w.audits.length === 1 && w.audits[0].endsWith('; ReviewQueue [#Feedback!7]') && clean(w.audits.join('\n')));
+  w = world({ props: STAFF });
+  const textStamp = w.ctx.runResponse_('FEEDBACK', w.sheet('Feedback'), 7, change(), 'FEEDBACK|9/20/2026 8:15:38|GLOW – Club Roster Form|');
+  check('a problem report whose Timestamp is not a date still goes to staff (only the Club Roster Form needs a sent day)',
+        textStamp === 'emailed staff; roster change queued' && w.mails.length === 1, textStamp);
 
   w = world({ props: STAFF, mailFails: 1 });
   let threw = false;
@@ -865,8 +869,21 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
 
   w = world('America/New_York');
   result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 7, change(), 'ROSTER|9/10/2026 8:00:00|' + ORG + '|Sunrise Club');
-  check('a Timestamp that is not a date: no sent day, so today\'s behaviour (the menu asks twice for such rows)',
-        status(w, 2) === 'active|' && status(w, 4) === 'inactive|2026-09-28' && w.tabs.ReviewQueue.length === 1, result);
+  // Review finding RG-1: run unguarded it put back the girl removed 09-12, while the menu's
+  // warning for old rows (where such a row lands) promises girls removed since stay removed.
+  const refused = w.tabs.ReviewQueue[1] || [];
+  check('a Timestamp that is not a date: no sent day, so refused — Roster untouched, FormLog ERROR, queued, no e-mail',
+        /^ERROR: its Timestamp cell is not a date/.test(result) && w.formLog[0] === result &&
+        status(w, 2) === 'inactive|Date' && status(w, 3) === 'inactive|Date' && status(w, 4) === 'active|' &&
+        status(w, 5) === 'inactive|2026-08-01' && w.tabs.ReviewQueue.length === 2 &&
+        refused[1] === 'Form response could not be processed' &&
+        String(refused[4]).startsWith(RQ + '!7: its Timestamp cell is not a date') &&
+        !w.mails.length && !w.audits.length, result);
+  w = world('America/New_York');
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 8, { [FQ.ACTION]: FQ.ACTION_NEW, [FQ.PARTNER_NEW]: ORG,
+      [FQ.CLUB]: 'Sunrise Club', [FQ.ROSTER]: 'Grace Zibblewick' }, 'ROSTER|8/31/2026 8:00:00|' + ORG + '|Sunrise Club');
+  check('…the new-club branch is refused the same way', /^ERROR: its Timestamp cell is not a date/.test(result) &&
+        status(w, 2) === 'inactive|Date' && w.tabs.ReviewQueue.length === 2, result);
 
   // The trigger was down (a scope-adding push not yet authorized): responses sent earlier all run
   // on 09-28 from the menu, in sheet order. Review finding 2026-09-28: if a removal were dated the

@@ -106,7 +106,9 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
   is after the day it was sent (the replay guard, `RosterOps.gs`
   `staysRemoved_`); for that comparison a Club Roster Form removal's
   `removed_date` is the day it was sent, not the day it ran (the same day
-  unless it ran late). The rebuild passes no sent day and is unguarded.
+  unless it ran late). The rebuild passes no sent day and is unguarded; a
+  Club Roster Form response without one (a Timestamp cell that is not a
+  date) is refused (FormLog `ERROR:`), never run unguarded.
   Because a reactivation records no date, an old REMOVE replayed later can
   still take off a girl re-added since.
 

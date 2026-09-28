@@ -394,7 +394,10 @@ or that failed (FormLog `ERROR: …`). It changes nothing until you confirm:
    removed after it was sent stay removed (the replay guard; the ReviewQueue
    gets "Removed girls not put back by an older response") — the 2026-09-13
    run, before the guard, put 20 Radiant Girls back. But its removals and
-   new names still apply: an old REMOVE takes off a girl re-added since.
+   new names still apply: an old REMOVE takes off a girl re-added since. A
+   row whose "sent" shows text rather than a date (its Timestamp cell is not
+   a date) is refused, never run unguarded: FormLog `ERROR: its Timestamp
+   cell is not a date …`.
 3. **Held** rows are listed and never run: FormLog already has that form +
    sheet row as processed, under a key that no longer matches the row.
    Something changed the row or its key — rows sorted or deleted in a
@@ -470,7 +473,7 @@ open items by issue, with their ReviewQueue row; work them that week.
 | **Girls missing from the latest enrollment** | "Enroll a NEW club" was sent for a club already on file; the girls not in that list stay active. Ask the partner who has left and REMOVE them as above. If the new list was not this club's at all (Radiant Girls, 2026-08-31), REMOVE the rows it added as above: the names whose Roster `source` is that response row (Ryan's go). |
 | **Roster change for a club not on file** | Nothing changed, the mentor got no confirmation, and it is never retried. Find the club under another name or partner ("Renaming a club", "Moving a club to another partner"), run **GLOW → Google Forms → Update form dropdowns from the Roster**, then enter the change from the response row (or ask the partner) and tell the mentor. A truly new club uses "Enroll a NEW club". |
 | **Partner has no region** | Its girls reach no attendance form. A misspelled partner → "Moving a club to another partner". Otherwise set the Partners-tab region (`Africa`, `Asia`, `Latin America`, `U.S`), run **GLOW → Refresh regions from the Partners tab**, and check that the region's next SyncLog row says `applied`. |
-| **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old: enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result does not start with `ERROR:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. |
+| **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old, or one refused because its Timestamp cell is not a date (a retry fails the same way): enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result does not start with `ERROR:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. |
 
 ## Apps Script deploy
 
