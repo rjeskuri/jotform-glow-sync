@@ -13,7 +13,7 @@ const path = require('path');
 const loadGs = require('./load_gs');
 
 const REPO = path.resolve(__dirname, '..');
-const gs = loadGs(['ROSTER_COLS', 'STATUS', 'tidy_', 'key_', 'parseRoster_', 'lastName_', 'clubCode_',
+const gs = loadGs(['ROSTER_COLS', 'STATUS', 'tidy_', 'key_', 'asciiCode_', 'parseRoster_', 'lastName_', 'clubCode_',
                    'mintGirlId_', 'planClub_', 'planModification_', 'closestNames_',
                    'chooseRegion_', 'canonicalRegion_', 'derivedPartnerRegions_', 'REGIONS']);
 
@@ -102,6 +102,97 @@ check('duplicate add raises "Same name listed twice" with a dedupe key',
       plan.issues.length === 1 && plan.issues[0].issue === 'Same name listed twice' && !!plan.issues[0].dedupeKey);
 check('unmatched removals carry the name as dedupe key',
       gs.planModification_({ partner, club, adds: [], removes: ['Ghost Name'] }, current, state, region, '2026-08-28').issues[0].dedupeKey === 'ghost name');
+
+// ------------------------------------------------ the replay guard (BACKLOG 41)
+console.log('\nthe replay guard: an older response never puts back girls removed after it was sent');
+{
+  const moon = 'Moonrise Club', SRC = 'Roster Form Responses!2', KEPT = 'Removed girls not put back by an older response';
+  const girl = (name, status, removed, sheetRow) => rowObj(['MOONRISE-' + gs.asciiCode_(gs.lastName_(name)) + '-00' + sheetRow,
+      partner, moon, region, name, gs.lastName_(name), status, '2026-08-26', removed, 'T!2'], sheetRow);
+  const moonRows = () => [
+    girl('Grace Zibblewick', gs.STATUS.INACTIVE, '2026-09-12', 2),    // removed after the response
+    girl('Mary Zibblewick', gs.STATUS.INACTIVE, '2026-08-31', 3),     // removed the day it was sent
+    girl('Joy Blorptest', gs.STATUS.INACTIVE, '2026-08-01', 4),       // removed before it
+    girl('Lucía Zörblewick', gs.STATUS.INACTIVE, '', 5),              // removal day not recorded
+    girl('Amina Qwertyson', gs.STATUS.ACTIVE, '', 6),
+  ];
+  const moonState = () => {
+    const st = freshState();
+    st.registry.byKey[gs.key_(partner) + '||' + gs.key_(moon)] = st.registry.byCode.MOONRISE = { code: 'MOONRISE', partner, club: moon };
+    return st;
+  };
+  const listed = ['GRACE ZIBBLEWICK', 'Mary Zibblewick', 'Joy Blorptest', 'Lucía Zörblewick', 'Amina Qwertyson'];
+  const club_ = submitted => gs.planClub_({ partner, club: moon, names: listed, duplicates: [], source: SRC, submitted },
+                                          moonRows(), moonState(), region, '2026-09-13');
+  const rowsOf = list => list.map(r => r._sheetRow).join(',');
+
+  const none = [club_(undefined), club_(''), club_(null), club_('  ')];
+  check('no submitted (missing, blank, null): today\'s behaviour exactly — every inactive girl listed comes back',
+        none.every(p => rowsOf(p.reactivate) === '2,3,4,5' && !p.keptRemoved.length && !p.issues.length && !p.toAppend.length));
+
+  let p = club_('2026-08-31');
+  check('sent 08-31, run 09-13: removed 09-12 and removal day unknown → kept removed; removed 08-31 and 08-01 → back',
+        rowsOf(p.keptRemoved.map(k => k.row)) === '2,5' && rowsOf(p.reactivate) === '3,4', rowsOf(p.reactivate));
+  check('kept-removed names are as the mentor typed them (for the e-mail)',
+        p.keptRemoved.map(k => k.name).join('|') === 'GRACE ZIBBLEWICK|Lucía Zörblewick');
+  const issue = p.issues[0] || { detail: '' };
+  check('one ReviewQueue item for the response, tagged with its row',
+        p.issues.length === 1 && issue.issue === KEPT && issue.dedupeKey === SRC && issue.club === moon && issue.partner === partner);
+  check('its detail: source, sent day, count and Roster rows — never a name',
+        issue.detail.startsWith(SRC + ' (sent 2026-08-31): 2 girl(s) it lists were removed after it was sent') &&
+        issue.detail.includes('Roster rows 2, 5') && !/zibblewick|z[oö]rblewick|blorptest|qwertyson/i.test(issue.detail), issue.detail);
+
+  p = club_('2026-09-13');
+  check('a response sent today (the trigger path): everyone comes back, as before',
+        rowsOf(p.reactivate) === '2,3,4,5' && !p.keptRemoved.length && !p.issues.length);
+  p = club_('2026-09-12');
+  check('sent the same day as the removal: she comes back (removed_date has no time of day)',
+        rowsOf(p.reactivate) === '2,3,4' && rowsOf(p.keptRemoved.map(k => k.row)) === '5');
+
+  const odd = moonRows();
+  odd[0].removed_date = '2026-09-12 10:00:00';
+  odd[2].removed_date = new Date('2026-08-01T12:00:00Z');   // a raw Date cell loadRoster_ did not turn into text
+  p = gs.planClub_({ partner, club: moon, names: listed, duplicates: [], submitted: '2026-08-31' }, odd, moonState(), region, '2026-09-13');
+  check('a removal day followed by a time is read as that day; an unreadable cell counts as unknown (kept)',
+        rowsOf(p.keptRemoved.map(k => k.row)) === '2,4,5' && rowsOf(p.reactivate) === '3');
+  check('no source: the item is still raised, with no tag', p.issues.length === 1 && p.issues[0].dedupeKey === '' &&
+        p.issues[0].detail.startsWith('(sent 2026-08-31): 3 girl(s)'));
+
+  const bad = ['2026-8-31', '31/08/2026', '2026-08-31 10:00', 'yesterday', new Date('2026-08-31T12:00:00Z')].filter(v => {
+    try { club_(v); return true; } catch (e) { return !/submitted must be yyyy-MM-dd/.test(e.message); }
+  });
+  check('a submitted that is not exactly yyyy-MM-dd is refused (throws), never ignored', !bad.length, bad.join(' | '));
+
+  const mod = submitted => gs.planModification_({ partner, club: moon, source: SRC, submitted,
+      adds: ['grace zibblewick', 'Joy Blorptest', 'Hope Testling'], removes: ['Grace Zibblewick', 'Amina Qwertyson'] },
+      moonRows(), moonState(), region, '2026-09-13');
+  p = mod('2026-08-31');
+  check('Club Roster Form ADD: removed after it was sent → kept removed; removed before → back; unknown name → minted',
+        rowsOf(p.keptRemoved.map(k => k.row)) === '2' && p.keptRemoved[0]?.name === 'grace zibblewick' &&
+        rowsOf(p.reactivate) === '4' && p.toAppend.length === 1);
+  check('the same name under REMOVE is "already removed", never "kept on the roster"',
+        p.alreadyInactive.join() === 'Grace Zibblewick' && !p.keptBoth.length && rowsOf(p.deactivate) === '6');
+  check('one ReviewQueue item (the kept-removed one), no "did not match"',
+        p.issues.length === 1 && p.issues[0].issue === KEPT && p.issues[0].detail.includes('1 girl(s)') &&
+        p.issues[0].detail.includes('Roster rows 2. '));
+  p = mod(undefined);
+  check('…and with no submitted, exactly as before: back on the roster, kept under both lists',
+        rowsOf(p.reactivate) === '2,4' && p.keptBoth.join() === 'Grace Zibblewick' && !p.keptRemoved.length && !p.issues.length);
+  check('every plan carries keptRemoved (uniform shape)',
+        Array.isArray(gs.planClub_({ partner, club, names: [], duplicates: [] }, [], freshState(), region, '2026-08-28').keptRemoved) &&
+        Array.isArray(gs.planModification_({ partner, club, adds: [], removes: [] }, [], freshState(), region, '2026-08-28').keptRemoved));
+
+  // 2026-09-13: Roster Form Responses!2 (a new-club response sent 08-31) re-ran after its
+  // 20 girls had been removed on 09-12, and put all 20 back.
+  const nato = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'India', 'Juliet',
+                'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Quebec', 'Romeo', 'Sierra', 'Tango'];
+  const twenty = nato.map((n, i) => girl('Testgirl ' + n, gs.STATUS.INACTIVE, '2026-09-12', 100 + i));
+  const replay = gs.planClub_({ partner, club: moon, names: nato.map(n => 'Testgirl ' + n), duplicates: [], source: SRC,
+                                submitted: '2026-08-31' }, twenty, moonState(), region, '2026-09-13');
+  check('regression, the 2026-09-13 replay: 0 put back, 20 kept removed, one item, nothing minted',
+        !replay.reactivate.length && replay.keptRemoved.length === 20 && replay.issues.length === 1 &&
+        !replay.toAppend.length && !replay.vanished.length && replay.issues[0]?.detail.includes('20 girl(s)'));
+}
 
 console.log('\nclosestNames_');
 check('ranks by shared words', gs.closestNames_('Zibblewick', ['Mary Zibblewick', 'Grace Zibblewick', 'Joy Blorptest']).length === 2);
@@ -650,7 +741,7 @@ console.log('\n  guards');
   const all = fs.readdirSync(loadGs.GS_DIR).filter(f => f.endsWith('.gs'))
       .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
   const raised = [...new Set([...all.matchAll(/issue: '([^']+)'/g)].map(m => m[1]))].sort();
-  check('every issue the code raises is in REVIEW_ISSUES (8)',
+  check('every issue the code raises is in REVIEW_ISSUES (9)',
         raised.join('|') === pr.REVIEW_ISSUES.slice().sort().join('|'), raised.join(' | '));
   const rb = fs.readFileSync(path.join(REPO, 'docs', 'RUNBOOK.md'), 'utf8');
   const section = (rb.split('## Working the ReviewQueue')[1] || '').split('\n## ')[0];

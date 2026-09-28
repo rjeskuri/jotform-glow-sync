@@ -8,9 +8,15 @@
  *
  * A "row" here is an object keyed by ROSTER_COLS (plus whatever the caller
  * attaches, e.g. _sheetRow). Status compares against STATUS.* strings.
- * Every plan has the same shape: {toAppend, reactivate, deactivate, issues}.
- * Issues may carry `dedupeKey` so the ReviewQueue can tell two different
- * questions about the same club apart.
+ * Every plan has the same shape: {toAppend, reactivate, deactivate,
+ * keptRemoved, issues}. Issues may carry `dedupeKey` so the ReviewQueue can
+ * tell two different questions about the same club apart.
+ *
+ * The replay guard (BACKLOG 41, docs/plans/2026-09-28-replay-guard.md): an
+ * entry may carry `submitted`, the day its form response was sent
+ * ('yyyy-MM-dd'). A girl removed AFTER that day is never put back by it (the
+ * 2026-09-13 replay of an 08-31 response reactivated 20 girls removed on
+ * 09-12). No `submitted` (the rebuild, the offline builder) = no guard.
  */
 
 function duplicateNamesIssue_(entry) {
@@ -25,20 +31,78 @@ function duplicateNamesIssue_(entry) {
   };
 }
 
+/** 'yyyy-MM-dd' at the start of a cell's text ('2026-09-12', '2026-09-12 10:00:00'), else ''. */
+function dayOf_(v) {
+  const m = /^(\d{4}-\d{2}-\d{2})(?!\d)/.exec(tidy_(v));
+  return m ? m[1] : '';
+}
+
+/**
+ * entry.submitted as a day, or '' when it is missing or blank (= no guard).
+ * Anything else that is not exactly 'yyyy-MM-dd' is refused: a guard that
+ * silently switched itself off would be worse than a failed response (which
+ * is logged as ERROR and can be retried).
+ */
+function submittedDay_(entry) {
+  const raw = entry.submitted;
+  if (raw == null || tidy_(raw) === '') return '';
+  const day = dayOf_(raw);
+  if (!day || tidy_(raw) !== day) {
+    throw new Error('submitted must be yyyy-MM-dd, got "' + tidy_(raw).slice(0, 40) + '"');
+  }
+  return day;
+}
+
+/**
+ * True if an inactive girl named by a response sent on `sentDay` must stay
+ * removed: her removed_date is a later day. Same day or earlier → she comes
+ * back, as always (removed_date has no time of day). No readable removal day
+ * → she stays removed only if the response was sent before today. No
+ * sentDay → never (today's behaviour).
+ */
+function staysRemoved_(row, sentDay, today) {
+  if (!sentDay) return false;
+  const removed = dayOf_(row.removed_date);
+  if (removed) return removed > sentDay;
+  return sentDay < today;
+}
+
+/**
+ * The ReviewQueue item for one response that named girls removed after it
+ * was sent: Roster row numbers, never names; tagged with the response row,
+ * so a retry adds no second item and the Monday e-mail can show the tag.
+ */
+function keptRemovedIssue_(entry, sentDay, kept) {
+  const rows = kept.map(function (k) { return k.row._sheetRow; }).filter(Boolean);
+  return {
+    issue: 'Removed girls not put back by an older response',
+    partner: entry.partner, club: entry.club,
+    detail: (entry.source ? entry.source + ' ' : '') + '(sent ' + sentDay + '): ' +
+        kept.length + ' girl(s) it lists were removed after it was sent (or on a day the ' +
+        'Roster does not record), so they stay removed' +
+        (rows.length ? ' — Roster rows ' + rows.join(', ') : '') +
+        '. If one has really rejoined, ADD her on the Club Roster Form ("' + Q.ACTION_MOD +
+        '"); otherwise mark resolved.',
+    dedupeKey: entry.source || '',
+  };
+}
+
 /**
  * Plan what a club's full roster submission does to the Roster.
  *
  * Girls already on file keep their row and ID; inactive ones are
- * reactivated; new names are minted; girls on file but absent from this
- * submission are only REPORTED (a partner re-submitting a short list must
- * not silently retire two thirds of a club).
+ * reactivated — unless removed after the response was sent (keptRemoved,
+ * see staysRemoved_); new names are minted; girls on file but absent from
+ * this submission are only REPORTED (a partner re-submitting a short list
+ * must not silently retire two thirds of a club).
  *
- * entry:   {partner, club, names, duplicates, source}
+ * entry:   {partner, club, names, duplicates, source, submitted (optional)}
  * current: this club's existing rows (any status)
  * state:   from loadIdState_ (registry + sequence), mutated as IDs are minted
  */
 function planClub_(entry, current, state, region, today) {
-  const issues = [], toAppend = [], reactivate = [];
+  const issues = [], toAppend = [], reactivate = [], keptRemoved = [];
+  const sentDay = submittedDay_(entry);
 
   if (entry.duplicates && entry.duplicates.length) issues.push(duplicateNamesIssue_(entry));
 
@@ -49,11 +113,14 @@ function planClub_(entry, current, state, region, today) {
   entry.names.forEach(function (name) {
     const found = byName[key_(name)];
     if (found) {
-      if (found.status === STATUS.INACTIVE) reactivate.push(found);
+      if (found.status !== STATUS.INACTIVE) return;
+      if (staysRemoved_(found, sentDay, today)) keptRemoved.push({ name: name, row: found });
+      else reactivate.push(found);
       return;
     }
     toAppend.push(newRosterRow_(state, code, entry, region, name, today));
   });
+  if (keptRemoved.length) issues.push(keptRemovedIssue_(entry, sentDay, keptRemoved));
 
   const submitted = {};
   entry.names.forEach(function (n) { submitted[key_(n)] = true; });
@@ -71,24 +138,27 @@ function planClub_(entry, current, state, region, today) {
   }
 
   return { code: code, toAppend: toAppend, reactivate: reactivate, deactivate: [],
-           issues: issues, vanished: vanished };
+           keptRemoved: keptRemoved, issues: issues, vanished: vanished };
 }
 
 /**
  * Plan a Roster Modification submission: names to add and names to remove.
  *
  * Adds: on file and active → noted as already there; on file and inactive →
- * reactivated (same ID); unknown → minted. Removes: matched case-
+ * reactivated (same ID), unless removed after the response was sent
+ * (keptRemoved: she stays removed, and a REMOVE of the same name is then
+ * "already removed"); unknown → minted. Removes: matched case-
  * insensitively against the club's ACTIVE girls → deactivated; already
  * inactive → noted, nothing to do; anything that matches nobody is returned
  * with the closest candidates (for staff, via the ReviewQueue — never for the
  * mentor email). Nothing is ever deleted.
  *
- * entry: {partner, club, adds, removes, duplicates, source}
+ * entry: {partner, club, adds, removes, duplicates, source, submitted (optional)}
  */
 function planModification_(entry, current, state, region, today) {
-  const plan = { toAppend: [], reactivate: [], deactivate: [], issues: [],
+  const plan = { toAppend: [], reactivate: [], deactivate: [], keptRemoved: [], issues: [],
                  alreadyActive: [], alreadyInactive: [], keptBoth: [], unmatched: [] };
+  const sentDay = submittedDay_(entry);
   if (entry.duplicates && entry.duplicates.length) plan.issues.push(duplicateNamesIssue_(entry));
 
   const code = clubCode_(state.registry, entry.partner, entry.club);
@@ -98,6 +168,10 @@ function planModification_(entry, current, state, region, today) {
 
   (entry.adds || []).forEach(function (name) {
     const found = byName[key_(name)];
+    if (found && found.status === STATUS.INACTIVE && staysRemoved_(found, sentDay, today)) {
+      plan.keptRemoved.push({ name: name, row: found });   // not "added": a REMOVE of her is a no-op
+      return;
+    }
     added[key_(name)] = true;
     if (found) {
       if (found.status === STATUS.INACTIVE) plan.reactivate.push(found);
@@ -106,6 +180,7 @@ function planModification_(entry, current, state, region, today) {
     }
     plan.toAppend.push(newRosterRow_(state, code, entry, region, name, today));
   });
+  if (plan.keptRemoved.length) plan.issues.push(keptRemovedIssue_(entry, sentDay, plan.keptRemoved));
 
   const activeNames = current.filter(function (r) { return r.status === STATUS.ACTIVE; })
       .map(function (r) { return r.full_name; });

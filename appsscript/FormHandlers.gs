@@ -687,6 +687,7 @@ function tryReview_(items, source) {
 /** Every issue the ReviewQueue can hold, in the order the weekly e-mail lists them. */
 const REVIEW_ISSUES = [
   'Roster change sent as a problem report', 'Removal did not match anyone',
+  'Removed girls not put back by an older response',
   'Same name listed twice', 'Partner says two girls share a name',
   'Girls missing from the latest enrollment', 'Roster change for a club not on file',
   'Partner has no region', 'Form response could not be processed',

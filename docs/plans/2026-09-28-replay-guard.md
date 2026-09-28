@@ -88,10 +88,11 @@ trigger outage (CLAUDE.md rule 11); the existing guard test pins the service set
 
 ## Order of work (the repo stays green after each)
 1. Commit this plan (`status: proposed`).
-2. Commit — the guard in `RosterOps.gs` + pure tests (no caller passes `submitted` yet, so
-   nothing live changes).
-3. Commit — `loadRoster_` normalisation; the handlers pass `submitted`; the mentor e-mail;
-   `REVIEW_ISSUES`; stubbed handler tests; RUNBOOK rows.
+2. Commit — the guard in `RosterOps.gs` + pure tests, with the new issue in `REVIEW_ISSUES`
+   and its RUNBOOK row (the guard test requires both as soon as the code can raise it). No
+   caller passes `submitted` yet, so nothing live would change.
+3. Commit — `loadRoster_` normalisation; the handlers pass `submitted`; summaries; the mentor
+   e-mail; the old-row dialog; stubbed handler tests; RUNBOOK "Missed form responses".
 4. Commit — DECISIONS, BACKLOG; `make check` green; a review against REVIEW.md and a
    privacy pass over the diff.
 5. **Ryan**: review, set `status: accepted`, merge. **Deploy — Ryan's go** (below).
