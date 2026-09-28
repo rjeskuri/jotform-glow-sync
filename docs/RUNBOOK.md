@@ -469,6 +469,19 @@ open items by issue, with their ReviewQueue row; work them that week.
 | **Partner has no region** | Its girls reach no attendance form. A misspelled partner → "Moving a club to another partner". Otherwise set the Partners-tab region (`Africa`, `Asia`, `Latin America`, `U.S`), run **GLOW → Refresh regions from the Partners tab**, and check that the region's next SyncLog row says `applied`. |
 | **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old: enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result does not start with `ERROR:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. |
 
+## Work log and invoices
+
+This is contract work, invoiced monthly from `worklog/worklog.csv` (date, hours, blocks,
+description, source). `python3 tools/worklog.py update` recomputes the hours from Claude Code's
+session transcripts: all sessions merged, cut into blocks wherever nothing happened for 30
+minutes, a block counting only if Ryan wrote in it (an agent working alone is not billed), each
+day rounded to the quarter hour, in the Mac's time zone. It keeps a written description, fills
+an empty one from that day's commits, and never touches `manual` rows or days whose transcripts
+are gone — Claude Code deletes transcripts after 30 days, so run `update` at the end of every
+session (CLAUDE.md asks Claude to). Work outside Claude Code:
+`python3 tools/worklog.py add --date 2026-09-29 --hours 1.5 --description "…"`. At month end:
+`python3 tools/worklog.py export --month 2026-09 [--rate 60] --out invoice-2026-09.csv`.
+
 ## Apps Script deploy
 
 ```bash

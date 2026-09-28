@@ -27,6 +27,7 @@ import form_status                    # noqa: E402
 import rename_club                    # noqa: E402
 import switcher_flags                 # noqa: E402
 import update_static_fields           # noqa: E402
+import worklog                        # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
@@ -906,6 +907,114 @@ class HeaderImage(unittest.TestCase):
         self.assertIsNotNone(size, "the header asset must be a PNG")
         props = update_static_fields.IMAGE_PROPS
         self.assertEqual(size, (int(props["width"]) * 2, int(props["height"]) * 2))
+
+
+class WorkLog(unittest.TestCase):
+    """tools/worklog.py: hours from session transcripts, the log, the invoice (synthetic data)."""
+    TZ = __import__("datetime").timezone(__import__("datetime").timedelta(hours=8))
+
+    def at(self, hhmm, day="2026-09-26"):
+        import datetime as dt
+        return dt.datetime.fromisoformat(f"{day}T{hhmm}:00").replace(tzinfo=self.TZ)
+
+    def entry(self, kind, when_utc, content="x", **extra):
+        e = {"type": kind, "timestamp": when_utc, "message": {"content": content}}
+        e.update(extra)
+        return e
+
+    def test_ryans_messages_only(self):
+        ryan = worklog.is_ryans_message
+        self.assertTrue(ryan(self.entry("user", "t", [{"type": "text", "text": "Pick this back up"}])))
+        self.assertTrue(ryan(self.entry("user", "t", "Go ahead")))
+        self.assertFalse(ryan(self.entry("user", "t", [{"type": "tool_result", "content": "ok"}])))
+        self.assertFalse(ryan(self.entry("user", "t", "<task-notification><task-id>x</task-id>")))
+        self.assertFalse(ryan(self.entry("user", "t", [{"type": "text", "text": "Base dir"}], isMeta=True)))
+        self.assertFalse(ryan(self.entry("user", "t", "This session is being continued", isCompactSummary=True)))
+        self.assertFalse(ryan(self.entry("assistant", "t", [{"type": "text", "text": "Done."}])))
+
+    def test_blocks_gaps_and_the_ryan_rule(self):
+        at = self.at
+        evts = [(at("09:00"), True), (at("09:20"), False), (at("09:45"), False),    # block 1: 45 min
+                (at("11:00"), False), (at("11:20"), False),                        # agent alone: not billed
+                (at("14:00"), True), (at("14:10"), False)]                         # block 3: 10 min
+        blocks = worklog.day_blocks(evts)
+        day = at("09:00").date()
+        self.assertEqual(worklog.blocks_text(blocks[day]), "09:00-09:45, 14:00-14:10")
+        self.assertEqual(worklog.day_hours(blocks[day]), 1.0)          # 55 min -> 1.00
+        # stricter gap: 09:20 is 20 min on, so the 09:00 block is that message alone, and the
+        # 09:20-09:45 stretch has no message of Ryan's: not billed
+        self.assertEqual(worklog.day_blocks(evts, gap_minutes=15)[day][0], (at("09:00"), at("09:00")))
+
+    def test_concurrent_sessions_count_once_and_days_split(self):
+        at = self.at
+        one = [(at("10:00"), True), (at("10:40"), False)]
+        two = [(at("10:05"), True), (at("10:30"), False)]                   # a second open session
+        blocks = worklog.day_blocks(sorted(one + two))
+        self.assertEqual(worklog.day_hours(blocks[at("10:00").date()]), 0.75)   # 40 min, not 65
+        late = [(at("23:50"), True), (at("00:20", "2026-09-27"), False)]
+        split = worklog.day_blocks(late)
+        self.assertEqual(sorted(d.isoformat() for d in split), ["2026-09-26"])  # 09-27 has no message of Ryan's
+
+    def test_rounding(self):
+        at = self.at
+        self.assertEqual(worklog.day_hours([(at("09:00"), at("09:07"))]), 0.25)    # a day with work: at least 0.25
+        self.assertEqual(worklog.day_hours([(at("09:00"), at("09:52"))]), 0.75)    # 52 -> 0.75
+        self.assertEqual(worklog.day_hours([(at("09:00"), at("09:53"))]), 1.0)     # 53 -> 1.00 (half up)
+
+    def test_events_read_transcripts_in_local_time(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s.jsonl")
+            with open(path, "w") as fh:
+                for e in [self.entry("user", "2026-09-26T01:00:00.000Z", "Start"),
+                          self.entry("assistant", "2026-09-26T01:30:00.000Z"),
+                          {"type": "summary"}]:
+                    fh.write(json.dumps(e) + "\n")
+                fh.write("not json\n")
+            evts = worklog.events([path])
+        self.assertEqual(len(evts), 2)
+        self.assertTrue(evts[0][1] and not evts[1][1])
+        self.assertEqual(evts[1][0] - evts[0][0], __import__("datetime").timedelta(minutes=30))
+
+    def test_merge_keeps_manual_rows_and_written_descriptions(self):
+        rows = [{"date": "2026-09-25", "hours": "2.00", "blocks": "x", "description": "Curated text", "source": "auto"},
+                {"date": "2026-09-25", "hours": "1.00", "blocks": "", "description": "Call", "source": "manual"},
+                {"date": "2026-08-30", "hours": "3.00", "blocks": "y", "description": "Old", "source": "auto"}]
+        computed = {"2026-09-25": (2.5, "09:00-11:30"), "2026-09-26": (1.0, "10:00-11:00")}
+        subjects = {"2026-09-26": ["Second commit", "First commit"]}
+        out = worklog.merge(rows, computed, subjects)
+        by = {(r["date"], r["source"]): r for r in out}
+        self.assertEqual(by[("2026-09-25", "auto")]["hours"], "2.50")
+        self.assertEqual(by[("2026-09-25", "auto")]["description"], "Curated text")
+        self.assertEqual(by[("2026-09-25", "manual")]["hours"], "1.00")
+        self.assertEqual(by[("2026-09-26", "auto")]["description"], "First commit; Second commit")
+        self.assertIn(("2026-08-30", "auto"), by)        # an expired day is never dropped
+        self.assertEqual([r["date"] for r in out], sorted(r["date"] for r in out))
+
+    def test_invoice_rows(self):
+        rows = [{"date": "2026-09-25", "hours": "2.50", "description": "Fix", "source": "auto"},
+                {"date": "2026-09-25", "hours": "1.00", "description": "Call", "source": "manual"},
+                {"date": "2026-09-26", "hours": "1.25", "description": "", "source": "auto"},
+                {"date": "2026-10-01", "hours": "4.00", "description": "Next month", "source": "auto"}]
+        out = worklog.invoice_rows(rows, "2026-09", rate=60)
+        self.assertEqual(out[0], ["Date", "Hours", "Description", "Amount"])
+        self.assertEqual(out[1], ["2026-09-25", "3.50", "Fix / Call", "210.00"])
+        self.assertEqual(out[-1], ["Total", "4.75", "", "285.00"])
+        self.assertEqual(len(worklog.invoice_rows(rows, "2026-09")[0]), 3)   # no rate, no Amount
+
+    def test_log_round_trip(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "w", "log.csv")
+            rows = [{"date": "2026-09-25", "hours": "1.00", "blocks": "09:00-10:00",
+                     "description": 'Commas, "quotes"\nand a newline', "source": "auto"}]
+            worklog.write_log(rows, path)
+            self.assertEqual(worklog.read_log(path), rows)
+
+    def test_transcripts_dir(self):
+        repo = os.sep + os.path.join("srv", "jotform-glow-sync")          # built, not a literal path
+        self.assertTrue(worklog.transcripts_dir(repo).endswith(
+            os.path.join(".claude", "projects", "-srv-jotform-glow-sync")))
 
 
 if __name__ == "__main__":
