@@ -154,6 +154,11 @@ DECISIONS.md one row, BACKLOG 11b / 40 / 44.
     Review fix F1: a formula after the first word of a name (`Jane =1+1`) reached
     `last_name`; names are now stripped word by word (`sheetName_`), tested through both
     handlers with the formula in a later word.
+  - Review fix F2: releasing an "organization name" hold as typed filed the club under a
+    second spelling of a partner on file (a new Partners row with no region, SF Pending
+    under the typo). The item now says to set the response's `Partner organization` cell
+    to the partner on file (or add a genuinely new organization to the Partners tab)
+    before `release`, and the release run refuses (`ERROR: release refused: …`) until then.
   - The guard, the hold, the release, FormLog and the menu as designed; RUNBOOK, INSTALL,
     ARCHITECTURE, DECISIONS, BACKLOG. Every guard and hold rule has a test that fails
     when the rule is removed (checked by mutating each rule in turn).

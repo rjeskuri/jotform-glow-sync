@@ -994,6 +994,40 @@ console.log('\nA new club that may duplicate one on file is held, then released 
   res = w.ctx.handleNewClub_(newClub(A, 'Evening Club', ['Ivy Newperson', 'Jo Newperson']), SRC, KEY);
   check('a genuinely new club of a known partner: imported as before', /^new club Evening Club/.test(res) && !w.mails.length, res);
 
+  console.log('\n  an organization-name hold: released only once the partner is on file as sent (review F2)');
+  const typedOrg = extra => newClub(fh.OTHER_PARTNER, 'Evening Club', ['Ivy Newperson', 'Jo Newperson'],
+                                    Object.assign({ [HQ.NEW_PARTNER]: 'Fundacion Demo' }, extra || {}));
+  const STEP = 'if it is that partner, set the response row\'s "' + HQ.PARTNER_NEW + '" cell to it exactly as the ' +
+               'Partners tab spells it; if it is another organization, add it to the Partners tab with its region';
+  w = sheetWorld(baseTabs(onFile));
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, typedOrg(), KEY);
+  const orgDetail = (w.tabs.ReviewQueue[1] || [])[4] || '';
+  check('held (organization name); its item says to fix the partner cell (or add the organization) before "release"',
+        res.startsWith('HELD: possible duplicate (organization name)') &&
+        orgDetail.includes('Really new (or the list is right): first, ' + STEP + '; then resolved "release <date>') &&
+        orgDetail.endsWith('[#' + SRC + ']') && !(item[4] || '').includes(STEP), orgDetail.slice(0, 60));
+  w = sheetWorld(baseTabs(onFile));
+  const untouched = JSON.stringify([w.tabs.Roster, w.tabs.ClubRegistry, w.tabs.Partners, w.tabs['SF Pending']]);
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, typedOrg(), KEY, true);
+  check('released as typed: refused as ERROR (the menu offers it again), nothing imported — no second Partners row, no SF Pending row',
+        res === 'ERROR: release refused: the organization was typed as "Fundacion Demo", close to Fundación Demo on file. ' +
+                'First, ' + STEP + '.' &&
+        JSON.stringify([w.tabs.Roster, w.tabs.ClubRegistry, w.tabs.Partners, w.tabs['SF Pending']]) === untouched &&
+        w.tabs.ReviewQueue.some(r => r[1] === 'Form response could not be processed') && !w.notified.length && !w.mails.length,
+        res.slice(0, 60));
+  w = sheetWorld(baseTabs(onFile));
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, typedOrg({ [HQ.PARTNER_NEW]: 'Fundación Demo' }), KEY, true);
+  check('the response\'s partner cell set to the partner on file, then released: filed under it, with its region',
+        /^new club Evening Club \(Fundación Demo\): 2 girls added/.test(res) && w.tabs.Partners.length === 4 &&
+        w.tabs['SF Pending'][1].slice(1, 4).join('|') === 'Fundación Demo|Evening Club|Latin America' &&
+        !w.tabs.ReviewQueue.some(r => r[1] === 'Partner has no region'), res.slice(0, 60));
+  w = sheetWorld(baseTabs(onFile));
+  w.tabs.Partners.push(['Fundacion Demo', 'Asia', 'another organization']);
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, typedOrg(), KEY, true);
+  check('another organization after all, added to the Partners tab: the release imports it under its own name and region',
+        /^new club Evening Club \(Fundacion Demo\): 2 girls added/.test(res) &&
+        w.tabs['SF Pending'][1].slice(1, 4).join('|') === 'Fundacion Demo|Evening Club|Asia', res.slice(0, 60));
+
   console.log('\n  failures');
   w = sheetWorld(baseTabs(onFile), { down: 'ReviewQueue' });
   res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, suffixed(), KEY);

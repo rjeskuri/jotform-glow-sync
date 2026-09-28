@@ -133,7 +133,8 @@ function processMissedResponses() {
       'Send them to staff now? (Any that ask for a roster change also go to the ReviewQueue.)');
   ask(byForm('ROSTER'), 'Club Roster Form responses not yet processed', 'Process them now?');
   ask(plan.released, 'New clubs held for review that staff released in the ReviewQueue',
-      'Run them now, as sent? Each runs against TODAY\'s roster; the duplicate check is skipped.');
+      'Run them now, as sent? Each runs against TODAY\'s roster; the duplicate check is skipped ' +
+      '(an organization typed close to a partner on file is still refused).');
   ask(plan.old, 'Club Roster Form responses sent more than ' + MISSED.OLD_AFTER_DAYS +
           ' days ago and never processed',
       'Running one now applies it to TODAY\'s roster: it can put back girls removed since ' +
@@ -243,7 +244,8 @@ function processResponseRow_(which, sheet, row) {
 
 /**
  * Run the handler for one response and record the outcome in FormLog.
- * released: staff released this held new-club response (the guard is skipped).
+ * released: staff released this held new-club response (the guard is skipped,
+ * except a typed organization close to a partner on file: see handleNewClub_).
  */
 function runResponse_(which, sheet, row, answers, responseKey, released) {
   const source = sheet.getName() + '!' + row;
@@ -578,7 +580,8 @@ function formLogAdd_(which, row, responseKey, result) {
 // Typed answers pass sheetText_ / parseFormRoster_ before they reach the
 // sheet (a leading = would be a formula); the partner dropdown's value is
 // ours and is used as chosen. A response that may duplicate a club on file
-// is held for staff (newClubHoldReasons_) unless they released it.
+// is held for staff (newClubHoldReasons_) unless they released it; a release
+// still refuses (ERROR) a typed organization close to a partner on file.
 function handleNewClub_(a, source, responseKey, released) {
   const ss = SpreadsheetApp.getActive();
   let partner = tidy_(a[Q.PARTNER_NEW]);
@@ -594,11 +597,17 @@ function handleNewClub_(a, source, responseKey, released) {
   }
 
   const existing = loadRoster_();
+  const reasons = newClubHoldReasons_({ partner: partner, club: club, names: parsed.names,
+                                        typedPartner: typedPartner },
+                                      existing.rows, loadPartnerNames_());
   if (!released) {
-    const reasons = newClubHoldReasons_({ partner: partner, club: club, names: parsed.names,
-                                          typedPartner: typedPartner },
-                                        existing.rows, loadPartnerNames_());
     if (reasons.length) return holdNewClub_(a, source, responseKey, partner, club, reasons);
+  } else {
+    // a release skips the check, except the typed organization: run as typed
+    // it would file the club under a second spelling of a partner on file
+    // (no region, a second form section — the "ion bu" case, 2026-09-24)
+    const org = reasons.filter(function (r) { return r.kind === 'partner'; })[0];
+    if (org) throw new Error('release refused: ' + org.text + '. First, ' + orgHoldStep_() + '.');
   }
 
   const formRegion = canonicalRegion_(a[Q.REGION]);   // '' unless exactly one of REGIONS
@@ -655,6 +664,12 @@ function handleNewClub_(a, source, responseKey, released) {
 /** How a hold reason reads in FormLog and Audit. */
 const HOLD_KINDS = { reenroll: 're-enrollment list', names: 'names on file', club: 'club name',
                      partner: 'organization name' };
+/** What staff do before releasing an 'organization name' hold (its item, and a refused release). */
+function orgHoldStep_() {
+  return 'if it is that partner, set the response row\'s "' + Q.PARTNER_NEW + '" cell to it ' +
+      'exactly as the Partners tab spells it; if it is another organization, add it to the ' +
+      'Partners tab with its region';
+}
 
 /**
  * Hold a new-club response for staff: one ReviewQueue item, then a short
@@ -899,17 +914,20 @@ function feedbackReviewItem_(a, source, sentDay, reason) {
  * The ReviewQueue item for a held new-club response (holdNewClub_). Partner
  * and club are as filed (sheet-safe); the reasons name clubs, partners and
  * counts, never a girl. "(sent …)" and the tag are how holdDecisions_ finds
- * it again — staff must not edit them.
+ * it again — staff must not edit them. An 'organization name' hold also says
+ * what to fix before a release (orgHoldStep_; handleNewClub_ refuses until then).
  */
 function heldClubReviewItem_(partner, club, source, sentAt, reasons) {
+  const org = reasons.some(function (r) { return r.kind === 'partner'; });
   return {
     issue: 'New club held as a possible duplicate',
     partner: partner, club: club,
     detail: source + ' (sent ' + (sentAt || '?') + '): nothing imported; the mentor was told it ' +
         'is being checked. Why: ' + reasons.map(function (r) { return r.text; }).join('; ') +
         '. Same club: enter only its new girls on "' + Q.ACTION_MOD + '" for the club on file, ' +
-        'then resolve. Really new (or the list is right): resolved "release <date> by <name>: …", ' +
-        'then run "Process any missed form responses".',
+        'then resolve. Really new (or the list is right): ' +
+        (org ? 'first, ' + orgHoldStep_() + '; then ' : '') +
+        'resolved "release <date> by <name>: …", then run "Process any missed form responses".',
     dedupeKey: source,
   };
 }
