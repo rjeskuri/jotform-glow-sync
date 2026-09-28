@@ -150,6 +150,19 @@ console.log('\nthe replay guard: an older response never puts back girls removed
   check('sent the same day as the removal: she comes back (removed_date has no time of day)',
         rowsOf(p.reactivate) === '2,3,4' && rowsOf(p.keptRemoved.map(k => k.row)) === '5');
 
+  // Review finding RG-2: a removal day after today (a hand edit, 12/09 read as December) must not
+  // block a fresh ADD — the e-mail tells the mentor to send the form again.
+  const later = () => { const r = moonRows(); r[1].removed_date = '2026-12-09'; return r; };
+  const today13 = (submitted, rows) => gs.planClub_({ partner, club: moon, names: listed, duplicates: [], source: SRC, submitted },
+                                                    rows, moonState(), region, '2026-09-13');
+  const freshAdd = gs.planModification_({ partner, club: moon, source: SRC, submitted: '2026-09-13',
+      adds: ['Mary Zibblewick'], removes: [] }, later(), moonState(), region, '2026-09-13');
+  check('a removal day after today counts as unreadable: sent today (a fresh ADD) → back; sent earlier → kept removed',
+        rowsOf(today13('2026-09-13', later()).reactivate) === '2,3,4,5' && rowsOf(freshAdd.reactivate) === '3' &&
+        !freshAdd.keptRemoved.length && !freshAdd.issues.length &&
+        rowsOf(today13('2026-08-31', later()).keptRemoved.map(k => k.row)) === '2,3,5',
+        rowsOf(freshAdd.reactivate) + ' / ' + rowsOf(today13('2026-09-13', later()).reactivate));
+
   const odd = moonRows();
   odd[0].removed_date = '2026-09-12 10:00:00';
   odd[2].removed_date = new Date('2026-08-01T12:00:00Z');   // a raw Date cell loadRoster_ did not turn into text

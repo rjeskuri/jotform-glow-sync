@@ -56,14 +56,16 @@ function submittedDay_(entry) {
 /**
  * True if an inactive girl named by a response sent on `sentDay` must stay
  * removed: her removed_date is a later day. Same day or earlier → she comes
- * back, as always (removed_date has no time of day). No readable removal day
- * → she stays removed only if the response was sent before today. No
- * sentDay → never (today's behaviour).
+ * back, as always (removed_date has no time of day). No readable removal day,
+ * or one after today (a hand edit, e.g. 12/09 read as December: the forms
+ * never date a removal after today) → she stays removed only if the response
+ * was sent before today, so a fresh ADD always puts her back. No sentDay →
+ * never (today's behaviour).
  */
 function staysRemoved_(row, sentDay, today) {
   if (!sentDay) return false;
   const removed = dayOf_(row.removed_date);
-  if (removed) return removed > sentDay;
+  if (removed && removed <= today) return removed > sentDay;
   return sentDay < today;
 }
 

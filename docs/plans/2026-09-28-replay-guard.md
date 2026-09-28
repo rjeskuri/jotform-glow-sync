@@ -33,9 +33,10 @@ intent: none — BACKLOG 41, the follow-up named in docs/plans/2026-09-27-formlo
   handlers only ever pass a day or `''`).
 - `staysRemoved_(row, sentDay, today)`: an inactive girl the response names stays removed when
   her `removed_date` day is **after** `sentDay`. Same day or earlier → reactivated as today
-  (`removed_date` has no time of day). `removed_date` blank or not a readable day → stays
-  removed only when the response is past-dated (`sentDay < today`); a response sent today
-  behaves as today.
+  (`removed_date` has no time of day). `removed_date` blank, not a readable day, or a day
+  after today (a hand edit; review finding RG-2) → stays removed only when the response is
+  past-dated (`sentDay < today`); a response sent today behaves as today, so a fresh ADD
+  always puts her back.
 - `planClub_` and `planModification_` (ADD) put such girls in `plan.keptRemoved` —
   `[{name: <as typed>, row: <Roster row>}]` — instead of `reactivate`. Every plan carries
   `keptRemoved` (the uniform-shape rule). In `planModification_` a held-back ADD does not count
