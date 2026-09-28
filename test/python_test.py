@@ -12,6 +12,7 @@ Offline Python tests (standard library unittest; run by `make py`):
 
     python3 test/python_test.py
 """
+import copy
 import json
 import os
 import re
@@ -22,12 +23,14 @@ import unittest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
+import add_feedback_link              # noqa: E402
 import auto_sync                      # noqa: E402
 import form_status                    # noqa: E402
 import rename_club                    # noqa: E402
 import switcher_flags                 # noqa: E402
 import update_static_fields           # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
+from glow import links                # noqa: E402
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
 EXPECTED = os.path.join(REPO, "test", "fixtures", "expected.json")
@@ -230,6 +233,21 @@ class ConditionBuilder(unittest.TestCase):
         conds = self.rules(picker="500")
         self.assertEqual([c["index"] for c in conds], [str(i) for i in range(len(conds))])
         self.assertEqual([c["priority"] for c in conds], [c["index"] for c in conds])
+
+    def test_generated_rules_mention_only_rosters_and_structural_fields(self):
+        # so no other element - the links above Submit included - is ever
+        # shown, hidden or computed by the sync's rewrite
+        structural = {sync.CLUB_NAME, sync.PARTNER, sync.YEAR, sync.CONTACT_IDS, sync.MODULE_ID,
+                      sync.WEEK_ID, sync.YEAR_ID, *sync.MODULES.values(), *sync.WEEKS.values()}
+        for picker in (None, "500"):
+            mentioned = set()
+            for c in self.rules(picker=picker):
+                for item in c["terms"] + c["action"]:
+                    mentioned |= {str(item[k]) for k in ("field", "resultField") if k in item}
+                    mentioned |= {o for o in str(item.get("operands", "")).split(",") if o}
+                    mentioned |= set(re.findall(r"\{(\d+)\}", str(item.get("equation", ""))))
+            allowed = structural | set(self.CLUBS) | ({picker} if picker else set())
+            self.assertLessEqual(mentioned, allowed, mentioned - allowed)
 
 
 class GlowClient(unittest.TestCase):
@@ -906,6 +924,352 @@ class HeaderImage(unittest.TestCase):
         self.assertIsNotNone(size, "the header asset must be a PNG")
         props = update_static_fields.IMAGE_PROPS
         self.assertEqual(size, (int(props["width"]) * 2, int(props["height"]) * 2))
+
+
+# ------------------------------------------------ the links above Submit
+def link_form(problem=True, roster=False, stray=None):
+    """A fake attendance form laid out like the live ones (read 2026-09-28): the
+    top fields, a roster, the link elements, Submit, the hidden bridge fields,
+    and a roster the sync created after Submit. Fictional clubs and girls."""
+    rows = [("1", "control_head", "heading", {}),
+            ("444", "control_dropdown", sync.PICKER_NAME,
+             {**sync.PICKER_PROPS, "options": "Moonrise Club|Sunrise Club"}),
+            (sync.CLUB_NAME, "control_textbox", "clubName", {"hidden": "Yes"}),
+            (sync.PARTNER, "control_textbox", "partner", {"text": "Partner"}),
+            (sync.YEAR, "control_dropdown", "module94", {"options": "1|2|3"}),
+            ("14", "control_dropdown", "module1", {"options": "Core 1"}),
+            ("92", "control_dropdown", "module2", {"hidden": "Yes", "options": "Core 2"}),
+            ("93", "control_dropdown", "module3", {"hidden": "Yes", "options": "Core 3"}),
+            ("350", "control_checkbox", "SunriseClub",
+             {"hidden": "Yes", "text": "Sunrise Club", "options": "Girl One|Girl Two"})]
+    if roster:
+        rows.append(("460", "control_text", links.ROSTER.name,
+                     {"text": links.element_html(links.ROSTER.sentence, links.ROSTER_FORM_URL)}))
+    if problem:
+        rows.append(("443", "control_text", links.PROBLEM.name,
+                     {"text": links.element_html(links.PROBLEM.sentence, links.PROBLEM_FORM_URL)}))
+    if stray:
+        rows.append(stray)
+    rows += [("2", "control_button", "submit2", {"text": "Submit"}),
+             ("103", "control_head", "belowAre", {"hidden": "Yes"}),
+             (sync.CONTACT_IDS, "control_textarea", "contact_ids", {"hidden": "Yes"}),
+             ("400", "control_checkbox", "MoonriseClub",
+              {"hidden": "Yes", "text": "Moonrise Club", "options": "Girl Three"})]
+    return {qid: {"qid": qid, "type": t, "name": n, "order": str(i), **extra}
+            for i, (qid, t, n, extra) in enumerate(rows, 1)}
+
+
+def apply_steps(questions, steps):
+    """What add_feedback_link's steps do to a form, the way the API does it."""
+    qs = copy.deepcopy(questions)
+    for s in steps:
+        if s["op"] == "delete":
+            del qs[str(s["qid"])]
+        elif s["op"] == "add":
+            qid = str(max(int(k) for k in qs) + 1)
+            qs[qid] = {"qid": qid, **s["fields"]}
+        else:
+            qs[str(s["qid"])].update(s["fields"])
+    return qs
+
+
+def rendered(questions):
+    """Names in render order: by order, equal orders in creation (qid) order."""
+    return [q["name"] for q in sorted(questions.values(),
+                                      key=lambda q: (links.order_of(q), int(q["qid"])))]
+
+
+class FakeFormClient:
+    """Jotform for add_feedback_link.main(): GETs serve the in-memory forms and
+    writes change them as the API would."""
+
+    def __init__(self, forms):
+        self.forms, self.writes = forms, []
+
+    def get(self, path, **params):
+        fid, part = re.fullmatch(r"/form/(\d+)/(questions|properties)", path).groups()
+        return copy.deepcopy(self.forms[fid]) if part == "questions" else {"conditions": []}
+
+    def post_form(self, path, data, label):
+        self.writes.append(label)
+        fields = {re.fullmatch(r"question\[(\w+)\]", k).group(1): v for k, v in data.items()}
+        m = re.fullmatch(r"/form/(\d+)/questions", path)
+        if m:
+            qs = self.forms[m.group(1)]
+            qid = str(max(int(k) for k in qs) + 1)
+            qs[qid] = {"qid": qid, **fields}
+            return {"qid": qid}
+        fid, qid = re.fullmatch(r"/form/(\d+)/question/(\d+)", path).groups()
+        self.forms[fid][qid].update(fields)
+        return {}
+
+    def delete(self, path, label):
+        self.writes.append(label)
+        fid, qid = re.fullmatch(r"/form/(\d+)/question/(\d+)", path).groups()
+        del self.forms[fid][qid]
+
+
+class Links(unittest.TestCase):
+    """glow/links.py: the element table, its HTML, the URL guard, rule lookup."""
+
+    def test_the_problem_link_html_is_byte_identical_to_the_live_element(self):
+        # q443 as read from all five live forms on 2026-09-28: a change here would
+        # re-key its translations (md5 of the HTML) and rewrite a live element
+        live = ('<p style="margin:12px 0;padding:10px 12px;border:1px solid #ddd;'
+                'border-radius:6px;background:#f7f7f7;font-size:14px"><a href="'
+                'https://docs.google.com/forms/d/e/1FAIpQLSeYx286-Bre0aSOWnhEDgC4_6FjGyPssldLA3J5WzIeK8cKCA'
+                '/viewform" target="_blank" rel="noopener">Click here to report a problem</a></p>')
+        self.assertEqual(links.element_html(links.PROBLEM.sentence, links.PROBLEM.url), live)
+        self.assertEqual(links.href_of(live), links.PROBLEM_FORM_URL)
+
+    def test_the_urls_are_the_public_links_in_launch_md(self):
+        rows = dict(re.findall(r"^\| (.+?) \| (https://\S+) \|$",
+                               read(os.path.join(REPO, "docs", "LAUNCH.md")), re.M))
+        roster = [u for label, u in rows.items() if label.startswith("Club Roster Form")]
+        problem = [u for label, u in rows.items() if label.startswith("Something")]
+        self.assertEqual(roster, [links.ROSTER_FORM_URL])
+        self.assertEqual(problem, [links.PROBLEM_FORM_URL])
+        self.assertEqual(links.ROSTER.url, links.ROSTER_FORM_URL)
+        self.assertNotEqual(links.ROSTER_FORM_URL, links.PROBLEM_FORM_URL)
+
+    def test_the_table(self):
+        self.assertEqual(set(links.LINKS), {"problem", "roster"})
+        self.assertEqual(links.ROSTER.above, links.PROBLEM.name)   # the specific path first
+        self.assertEqual(links.PROBLEM.above, links.SUBMIT)
+        self.assertEqual(len(links.BY_NAME), len(links.LINKS))
+        for link in links.LINKS.values():
+            self.assertEqual(link.sentence, link.sentence.strip())
+            self.assertFalse(set("&<>\"") & set(link.sentence), link.sentence)
+
+    def test_only_a_public_form_link_is_accepted(self):
+        for url in (links.ROSTER_FORM_URL, links.PROBLEM_FORM_URL,
+                    links.ROSTER_FORM_URL + "?usp=sf_link", "https://forms.gle/AbCdEf123"):
+            self.assertEqual(links.check_public_url(url), url)
+        for url in (links.ROSTER_FORM_URL.replace("/viewform", "/edit"),       # owner's edit link
+                    "https://docs.google.com/forms/d/" + "1" + "x" * 43 + "/edit",
+                    links.ROSTER_FORM_URL.replace("https://", "http://"),
+                    "https://example.org/forms/d/e/" + "x" * 30 + "/viewform",
+                    links.ROSTER_FORM_URL + '"><b>', links.ROSTER_FORM_URL + " ", "", None):
+            with self.assertRaises(SystemExit, msg=url):
+                links.check_public_url(url)
+
+    def test_rules_mentioning(self):
+        conds = [{"id": "1", "terms": json.dumps([{"field": "443", "operator": "isFilled"}]),
+                  "action": json.dumps([{"visibility": "Show", "field": "350"}])},
+                 {"id": "2", "terms": [], "action": [{"resultField": "18", "operands": "350,460",
+                                                      "equation": "{350}{460}"}]},
+                 {"id": "3", "terms": [{"field": "4430"}], "action": [{"field": "44"}]}]
+        self.assertEqual(links.rules_mentioning(conds, "443"), ["1"])
+        self.assertEqual(links.rules_mentioning(conds, "460"), ["2"])
+        self.assertEqual(links.rules_mentioning(conds, 350), ["1", "2"])
+        self.assertEqual(links.rules_mentioning(conds, "44"), ["3"])
+        self.assertEqual(links.rules_mentioning(conds, "4"), [])
+        self.assertEqual(links.rules_mentioning(None, "4"), [])
+
+
+class LinkTool(unittest.TestCase):
+    """tools/add_feedback_link.py: placement, idempotence, removal, refusals."""
+
+    R, P = links.ROSTER, links.PROBLEM
+
+    def plan(self, qs, link, url=None, conditions=(), remove=False):
+        return add_feedback_link.plan_form(qs, list(conditions), link, url or link.url, remove)
+
+    def test_the_roster_link_goes_directly_above_the_problem_link(self):
+        qs = link_form()
+        steps, _ = self.plan(qs, self.R)
+        self.assertEqual([(s["op"], s["qid"]) for s in steps],
+                         [("move", "2"), ("move", "443"), ("add", None)])   # tail first
+        self.assertEqual(steps[2]["fields"]["order"], qs["443"]["order"])
+        self.assertEqual(steps[2]["fields"]["type"], "control_text")
+        self.assertNotIn("hidden", steps[2]["fields"])
+        after = apply_steps(qs, steps)
+        names = rendered(after)
+        i = names.index(self.R.name)
+        self.assertEqual(names[i:i + 3], [self.R.name, self.P.name, "submit2"])
+        self.assertEqual([n for n in names if n != self.R.name], rendered(qs))  # nothing else moves
+        self.assertEqual(add_feedback_link.verify(after, [], self.R, self.R.url), [])
+        self.assertEqual(add_feedback_link.verify(after, [], self.P, self.P.url), [])
+        for n in range(1, len(steps)):   # every intermediate state still renders in order
+            part = rendered(apply_steps(qs, steps[:n]))
+            self.assertLess(part.index(self.P.name), part.index("submit2"))
+        again, notes = self.plan(after, self.R)
+        self.assertEqual(again, [])                                     # a re-run is a no-op
+        self.assertIn("already present", notes[-1])
+
+    def test_without_the_problem_link_it_sits_above_submit_and_the_problem_link_goes_between(self):
+        qs = link_form(problem=False)
+        steps, _ = self.plan(qs, self.R)
+        self.assertEqual([s["op"] for s in steps], ["move", "add"])
+        after = apply_steps(qs, steps)
+        steps, _ = self.plan(after, self.P)
+        after = apply_steps(after, steps)
+        seen = [q["name"] for q in sorted(after.values(), key=links.render_key)
+                if links.can_appear(q, set())]      # the hidden q103 header may sit between
+        i = seen.index(self.R.name)
+        self.assertEqual(seen[i:i + 3], [self.R.name, self.P.name, "submit2"])
+        self.assertEqual(add_feedback_link.verify(after, [], self.R, self.R.url), [])
+        self.assertEqual(add_feedback_link.verify(after, [], self.P, self.P.url), [])
+
+    def test_remove_deletes_only_its_own_element(self):
+        qs = link_form(roster=True)
+        steps, _ = self.plan(qs, self.R, remove=True)
+        self.assertEqual([(s["op"], s["qid"]) for s in steps], [("delete", "460")])
+        after = apply_steps(qs, steps)
+        self.assertEqual(add_feedback_link.verify(after, [], self.R, self.R.url, removed=True), [])
+        self.assertEqual(add_feedback_link.verify(after, [], self.P, self.P.url), [])
+        steps, notes = self.plan(after, self.R, remove=True)
+        self.assertEqual(steps, [])
+        self.assertIn("nothing to remove", notes[0])
+
+    def test_a_changed_or_hidden_element_is_updated_in_place(self):
+        qs = link_form(roster=True)
+        qs["460"]["text"] = links.element_html(self.R.sentence, self.R.url + "?usp=old")
+        qs["460"]["hidden"] = "Yes"
+        steps, _ = self.plan(qs, self.R)
+        self.assertEqual([(s["op"], s["qid"]) for s in steps], [("update", "460")])
+        self.assertEqual(steps[0]["fields"], {"text": links.element_html(self.R.sentence, self.R.url),
+                                              "hidden": "No"})
+        self.assertEqual(add_feedback_link.verify(apply_steps(qs, steps), [], self.R, self.R.url), [])
+
+    def test_it_refuses_rather_than_guessing(self):
+        stray = link_form(stray=("470", "control_textbox", "somethingElse", {}))
+        two_buttons = link_form()
+        two_buttons["471"] = {"qid": "471", "type": "control_button", "name": "b2", "order": "30"}
+        twice = link_form(roster=True)
+        twice["472"] = dict(twice["460"], qid="472", order="31")
+        below = link_form()
+        below["443"]["order"] = "99"
+        shown = link_form(stray=("470", "control_dropdown", "extra", {"hidden": "Yes"}))
+        rule = [{"id": "7", "terms": [], "action": [{"visibility": "Show", "field": "470"}]}]
+        tied = link_form()   # a roster sharing Submit's order renders after it, until Submit moves
+        tied["480"] = {"qid": "480", "type": "control_checkbox", "name": "TiedClub",
+                       "hidden": "Yes", "order": tied["2"]["order"]}
+        for qs, link, url, conds in ((stray, self.R, None, ()), (two_buttons, self.R, None, ()),
+                                     (twice, self.R, None, ()), (below, self.R, None, ()),
+                                     (link_form(), self.R, self.P.url, ()),   # the other link's form
+                                     (shown, self.R, None, rule),             # hidden, but a rule shows it
+                                     (tied, self.R, None, ())):               # would land between the links
+            with self.assertRaises(SystemExit):
+                self.plan(qs, link, url, conditions=conds)
+        # a hidden field no rule shows may sit in the run: it moves along
+        quiet = link_form(stray=("470", "control_textbox", "bridge", {"hidden": "Yes"}))
+        steps, _ = self.plan(quiet, self.R)
+        self.assertEqual([s["qid"] for s in steps], ["2", "470", "443", None])
+
+    def test_a_submit_tied_with_a_hidden_field_does_not_block_the_next_insert(self):
+        # after an insert, Submit shares its order with the hidden q103 header
+        # (Submit, the older, renders first): a later insert still plans cleanly
+        qs = link_form(problem=False)
+        after = apply_steps(qs, self.plan(qs, self.R)[0])
+        self.assertEqual(after["2"]["order"], after["103"]["order"])
+        after = apply_steps(after, self.plan(after, self.P)[0])
+        visible = [n for n in rendered(after) if n in (self.R.name, self.P.name, "submit2")]
+        self.assertEqual(visible, [self.R.name, self.P.name, "submit2"])
+
+    def test_verify_catches_what_would_hide_or_misplace_it(self):
+        qs = link_form(roster=True)
+        self.assertEqual(add_feedback_link.verify(qs, [], self.R, self.R.url), [])
+        rule = [{"id": "9", "terms": [{"field": sync.YEAR, "operator": "equals", "value": "1"}],
+                 "action": [{"visibility": "Show", "field": "460"}]}]
+        self.assertTrue(any("rule(s) 9" in p for p in add_feedback_link.verify(qs, rule, self.R, self.R.url)))
+        _, notes = self.plan(qs, self.R, conditions=rule)
+        self.assertTrue(any("rule 9" in n for n in notes))
+        hidden = copy.deepcopy(qs)
+        hidden["460"]["hidden"] = "Yes"
+        self.assertIn("it is hidden", add_feedback_link.verify(hidden, [], self.R, self.R.url))
+        low = copy.deepcopy(qs)
+        low["460"]["order"] = "99"
+        self.assertTrue(any("not above" in p for p in add_feedback_link.verify(low, [], self.R, self.R.url)))
+
+    def run_main(self, fake, *argv):
+        import contextlib
+        import io
+        from unittest import mock
+        snaps, out = [], io.StringIO()
+        with mock.patch.object(add_feedback_link, "Client", lambda key, apply=False: fake), \
+                mock.patch.object(add_feedback_link, "snapshot", lambda fid, c, stamp: snaps.append(fid)), \
+                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                mock.patch.object(sys, "argv", ["add_feedback_link.py", *argv]), \
+                contextlib.redirect_stdout(out):
+            add_feedback_link.main()
+        return snaps, out.getvalue()
+
+    def test_apply_snapshots_first_writes_tail_first_and_verifies(self):
+        from glow import forms as glow_forms
+        fid = glow_forms.TEMPLATE
+        fake = FakeFormClient({fid: link_form()})
+        snaps, out = self.run_main(fake, "--link", "roster", "--form", fid)   # dry run
+        self.assertEqual((snaps, fake.writes), ([], []))
+        self.assertIn("3. ADD clubRosterFormLink", out)
+        snaps, out = self.run_main(fake, "--link", "roster", "--form", fid, "--apply")
+        self.assertEqual(snaps, [fid])
+        self.assertEqual([w.split(" ", 2)[1] for w in fake.writes], ["move", "move", "ADD"])
+        self.assertIn("re-read: verified", out)
+        fake.writes.clear()
+        snaps, out = self.run_main(fake, "--link", "roster", "--form", fid, "--apply")
+        self.assertEqual((snaps, fake.writes), ([], []))                   # idempotent
+        self.assertIn("already present", out)
+
+
+class SyncLeavesTheLinksAlone(unittest.TestCase):
+    """sync_attendance_form.py end to end (dry run, fake Jotform): the link
+    elements are neither written nor mentioned by any generated rule."""
+
+    def test_a_sync_run_never_touches_or_gates_the_link_elements(self):
+        import contextlib
+        import csv
+        import io
+        import tempfile
+        from unittest import mock
+        qs = link_form(roster=True)
+        seen = {}
+
+        class FakeForm:
+            def __init__(self, api_key, form_id, apply_changes=False):
+                self.calls, self.paths = [], []
+                seen["form"] = self
+
+            def get(self, path):
+                return {"/questions": copy.deepcopy(qs), "/properties": {"conditions": []},
+                        "": {"count": "0"}}[path]
+
+            def post_form(self, path, data, label):
+                self.calls.append(label)
+                self.paths.append(path)
+
+            def put_json(self, path, payload, label):
+                self.calls.append(label)
+                self.paths.append(path)
+                seen["conditions"] = payload["properties"]["conditions"]
+
+            def delete(self, path, label):
+                self.calls.append(label)
+                self.paths.append(path)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "roster.csv")
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["girl_id", "partner", "club", "full_name", "status", "region"])
+                for i, (partner, club, name) in enumerate((
+                        ("Partner A", "Sunrise Club", "Girl One"), ("Partner A", "Sunrise Club", "Girl Two"),
+                        ("Partner A", "Sunrise Club", "Girl Four"), ("Partner A", "Moonrise Club", "Girl Three"),
+                        ("Partner B", "Starlight Club", "Girl Five")), 1):
+                    w.writerow([f"DEMOCLUB-SAMPLE-{i:03d}", partner, club, name, "active", "Africa"])
+            with mock.patch.object(sync, "Jotform", FakeForm), \
+                    mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                    mock.patch.object(sys, "argv", ["sync_attendance_form.py", path, "--roster",
+                                                    "--region", "Africa", "--form", "999"]), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                sync.main()
+        form = seen["form"]
+        self.assertTrue(any(c.startswith("CREATE roster 'Starlight Club'") for c in form.calls), form.calls)
+        self.assertTrue(any(c.startswith("UPDATE roster 'Sunrise Club'") for c in form.calls), form.calls)
+        self.assertTrue(any(c.startswith("REPLACE conditions") for c in form.calls), form.calls)
+        for qid in ("460", "443"):
+            self.assertFalse([p for p in form.paths if p.rstrip("/").endswith(f"/{qid}")], qid)
+            self.assertEqual(links.rules_mentioning(seen["conditions"], qid), [], qid)
 
 
 if __name__ == "__main__":
