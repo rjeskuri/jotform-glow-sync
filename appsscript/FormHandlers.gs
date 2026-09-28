@@ -236,7 +236,15 @@ function readResponseRow_(sheet, row, zone) {
 function responseFromValues_(header, values, zone) {
   if (!values.some(function (v) { return tidy_(v); })) return null;
   const answers = {};
-  header.forEach(function (h, i) { answers[tidy_(h)] = values[i]; });
+  header.forEach(function (h, i) {
+    const title = tidy_(h);
+    // A question deleted and re-added under the same title leaves two columns
+    // with one header (the problem form's reply e-mail, 2026-09-28): the
+    // filled-in cell wins, whichever column Google put first.
+    if (!Object.prototype.hasOwnProperty.call(answers, title) || tidy_(values[i])) {
+      answers[title] = values[i];
+    }
+  });
   return { answers: answers, stamp: responseStamp_(values[0], zone) };
 }
 

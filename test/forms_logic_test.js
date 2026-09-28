@@ -664,6 +664,28 @@ console.log('\n  guards');
         used === 'FormApp,LockService,MailApp,PropertiesService,ScriptApp,SpreadsheetApp,UrlFetchApp,Utilities', used);
 }
 
+console.log('\n  the handler reads the filled-in one of two same-titled columns (FormHandlers.gs)');
+{
+  const rh = loadGs(['Q', 'responseFromValues_', 'responseKeyOf_'], ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+  const HQ = rh.Q;
+  const header = ['Timestamp', HQ.FB_FORM, HQ.FB_DEVICE, HQ.FB_EMAIL, HQ.FB_EMAIL + ' '];
+  const row = (oldCol, newCol) => rh.responseFromValues_(header, ['2026-09-30 10:00:00', 'Africa Attendance Form', 'phone', oldCol, newCol], 'UTC');
+  check('the re-added question\'s column to the right of the old one: its answer is read',
+        row('', 'mentor@example.org').answers[HQ.FB_EMAIL] === 'mentor@example.org');
+  check('…to the left of it: still read (a blank cell never replaces an answer)',
+        rh.responseFromValues_([header[0], header[1], header[2], header[4], header[3]],
+                               ['2026-09-30 10:00:00', 'Africa Attendance Form', 'phone', 'mentor@example.org', ''], 'UTC')
+            .answers[HQ.FB_EMAIL] === 'mentor@example.org');
+  check('an old row (answer in the old column): read too; both blank: blank',
+        row('mentor@example.org', '').answers[HQ.FB_EMAIL] === 'mentor@example.org' && row('', '').answers[HQ.FB_EMAIL] === '');
+  check('the FormLog key does not change with the second column',
+        rh.responseKeyOf_('FEEDBACK', { text: 'x' }, row('', 'mentor@example.org').answers) ===
+        rh.responseKeyOf_('FEEDBACK', { text: 'x' }, rh.responseFromValues_(header.slice(0, 4),
+            ['2026-09-30 10:00:00', 'Africa Attendance Form', 'phone', 'mentor@example.org'], 'UTC').answers));
+  const plainRow = rh.responseFromValues_(['Timestamp', 'a', 'b'], ['t', 'x', ''], 'UTC').answers;
+  check('distinct titles: read as before', plainRow.a === 'x' && plainRow.b === '' && plainRow.Timestamp === 't');
+}
+
 // --------------------------------------------- real data, if available
 const csvPath = process.env.CSV || path.join(REPO, 'data', 'enrollment_2026-08-24.csv');
 if (fs.existsSync(csvPath) && path.basename(csvPath) === 'enrollment_2026-08-24.csv') {
