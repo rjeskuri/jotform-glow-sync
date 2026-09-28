@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * Offline tests for the roster-change decisions in appsscript/RosterOps.gs —
- * the code behind the New Club Enrollment and Roster Modification forms —
- * and for FormHandlers.gs's FormLog keys and "Process any missed form
- * responses" plan. Runs the real .gs files in Node against a real club from
- * the enrollment CSV plus synthetic edge cases. No Google APIs involved.
+ * the code behind the New Club Enrollment and Roster Modification forms,
+ * including the replay guard — and for FormHandlers.gs's FormLog keys and
+ * "Process any missed form responses" plan. Runs the real .gs files in Node
+ * against a real club from the enrollment CSV plus synthetic edge cases. No
+ * Google APIs involved (the handler sections stub them).
  *
  *   node test/forms_logic_test.js   (the real-CSV section runs only if data/enrollment_2026-08-24.csv exists)
  */
@@ -736,6 +737,134 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         !w.mails.length && w.audits.join() === 'sendSfPendingDigest: 2 open ReviewQueue item(s) (1 new this week), 1 club(s) pending in Salesforce but STAFF_NOTIFY_EMAIL is not set');
 }
 
+console.log('\n  the replay guard in the Club Roster Form handlers (Google services stubbed)');
+{
+  const vm = require('vm');
+  const src = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs']
+      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  // A spreadsheet of plain arrays (tabs[name] = rows, row 1 = header) with what the handlers call.
+  const world = (zone) => {
+    const tabs = {}, mails = [], audits = [], formLog = [], syncs = [];
+    const cell = (name, r, c) => { const t = tabs[name]; while (t.length < r) t.push([]); return t[r - 1]; };
+    const sheet = name => ({
+      getName: () => name,
+      getLastRow: () => tabs[name].length,
+      getLastColumn: () => Math.max(0, ...tabs[name].map(r => r.length)),
+      getRange: (r, c, nr, nc) => ({
+        getValues: () => tabs[name].slice(r - 1, r - 1 + (nr || 1))
+            .map(row => Array.from({ length: nc || 1 }, (_, j) => row[c - 1 + j] ?? '')),
+        setValues: vals => vals.forEach((v, i) => { const row = cell(name, r + i); v.forEach((x, j) => { row[c - 1 + j] = x; }); }),
+        setValue: v => { cell(name, r)[c - 1] = v; },
+        setFontWeight: () => ({}),
+      }),
+      getRangeList: a1s => ({ setValue: v => a1s.forEach(a1 => {
+        const m = /^([A-Z])(\d+)$/.exec(a1);
+        cell(name, +m[2])[m[1].charCodeAt(0) - 65] = v;
+      }) }),
+      appendRow: row => { tabs[name].push(row.slice()); },
+      setFrozenRows: () => {},
+    });
+    const ctx = vm.createContext({
+      console,
+      SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
+                                             insertSheet: n => { tabs[n] = []; return sheet(n); },
+                                             getSpreadsheetTimeZone: () => zone }) },
+      PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
+      MailApp: { sendEmail: o => mails.push(o) },
+      Utilities: { formatDate: (d, z, fmt) => {
+        if (fmt !== 'yyyy-MM-dd') throw new Error('stub: format ' + fmt);
+        return new Intl.DateTimeFormat('en-CA', { timeZone: z, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+      } },
+    });
+    vm.runInContext(src, ctx);
+    ctx.today_ = () => '2026-09-28';
+    ctx.now_ = () => '2026-09-28 09:00:00';
+    ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
+    ctx.formLogAdd_ = (which, row, key, result) => formLog.push(result);
+    ctx.trySyncChoices_ = () => {};
+    ctx.tryNotifySync_ = why => syncs.push(why);
+    const at = iso => vm.runInContext('new Date("' + iso + '")', ctx);   // a Date cell as getValues returns it
+    const C = n => vm.runInContext(n, ctx);
+    tabs.ReviewQueue = [C('REVIEW_COLS').slice()];
+    tabs.ClubRegistry = [C('CLUB_COLS').slice(), ['SUNRISEC', ORG, 'Sunrise Club', '2026-08-26']];
+    tabs.Partners = [C('PARTNER_COLS').slice(), [ORG, 'Africa', '']];
+    const g = (id, name, status, removed) => [id, ORG, 'Sunrise Club', 'Africa', name, name.split(' ').pop(), status, '2026-08-26', removed, 'T!2'];
+    tabs.Roster = [C('ROSTER_COLS').slice(),
+      g('SUNRISEC-ZIBBLEWICK-001', 'Grace Zibblewick', 'inactive', at('2026-09-12T04:00:00Z')),   // a Date cell: 09-12 in New York
+      g('SUNRISEC-BLORPTEST-001', 'Joy Blorptest', 'inactive', at('2026-09-11T02:00:00Z')),       // 09-10 in New York, 09-11 in UTC
+      g('SUNRISEC-ZIBBLEWICK-002', 'Mary Zibblewick', 'active', ''),
+      g('SUNRISEC-ZORBLEWICK-001', 'Lucía Zörblewick', 'inactive', '2026-08-01'),                 // text
+    ];
+    return { ctx, tabs, mails, audits, formLog, syncs, sheet, at };
+  };
+  const RQ = 'Roster Form Responses';
+  const sentOn = day => 'ROSTER|w:' + day + ' 08:00:00.000|' + ORG + '|Sunrise Club';
+  const change = () => ({ [FQ.ACTION]: FQ.ACTION_MOD, [FQ.PARTNER_MOD]: ORG, [FQ.CLUB_PREFIX + ORG + ')']: 'Sunrise Club',
+                          [FQ.ADD]: 'GRACE ZIBBLEWICK\nJoy Blorptest\nLucía Zörblewick', [FQ.REMOVE]: 'Mary Zibblewick',
+                          [FQ.MENTOR_EMAIL_MOD]: 'mentor@example.org' });
+  const isDate = v => Object.prototype.toString.call(v) === '[object Date]';   // a Date from the vm's realm
+  const status = (w, r) => w.tabs.Roster[r - 1][6] + '|' + (isDate(w.tabs.Roster[r - 1][8]) ? 'Date' : w.tabs.Roster[r - 1][8]);
+  const noGirls = s => !/zibblewick|blorptest|z[oö]rblewick/i.test(s);
+
+  let w = world('America/New_York');
+  const rows = w.ctx.loadRoster_().rows;
+  check('loadRoster_: a Date cell becomes its day in the SPREADSHEET\'s zone; text stays text',
+        rows[0].removed_date === '2026-09-12' && rows[1].removed_date === '2026-09-10' &&
+        rows[3].removed_date === '2026-08-01' && rows[2].removed_date === '' && rows[0].added_date === '2026-08-26',
+        rows.map(r => r.removed_date).join(','));
+  check('…the same instant in a UTC spreadsheet is the next day (the zone is the sheet\'s)',
+        world('UTC').ctx.loadRoster_().rows[1].removed_date === '2026-09-11');
+
+  // A roster change sent 09-10 that only runs on 09-28 (a retry, or confirmed in the menu).
+  let result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 5, change(), sentOn('2026-09-10'));
+  check('sent 09-10, run 09-28: removed 09-12 stays removed; removed 09-10 (the sheet\'s zone) and 08-01 come back',
+        status(w, 2) === 'inactive|Date' && status(w, 3) === 'active|' && status(w, 5) === 'active|' &&
+        status(w, 4) === 'inactive|2026-09-28', [2, 3, 4, 5].map(r => status(w, r)).join(' '));
+  const item = w.tabs.ReviewQueue[1] || [];
+  check('one ReviewQueue row: tagged with the response, Roster row numbers, no name',
+        w.tabs.ReviewQueue.length === 2 && item[1] === 'Removed girls not put back by an older response' &&
+        item[2] === ORG && item[3] === 'Sunrise Club' &&
+        String(item[4]).startsWith(RQ + '!5 (sent 2026-09-10): 1 girl(s)') && String(item[4]).includes('Roster rows 2.') &&
+        String(item[4]).endsWith(' [#' + RQ + '!5]') && noGirls(String(item[4])), String(item[4]));
+  check('FormLog result and Audit: counts, no names',
+        w.formLog[0] === 'Sunrise Club (' + ORG + '): 0 added, 2 reactivated, 1 removed, 1 kept removed (removed after it was sent)' &&
+        w.audits.length === 1 && w.audits[0] === 'rosterChangeForm: ' + result && noGirls(w.audits.join('\n')), w.formLog[0]);
+  const body = (w.mails[0] || { body: '' }).body;
+  const kept = body.split('\n').indexOf('Not added back — they were removed from the roster after you sent this form. ' +
+                                        'If one of them has rejoined the club, send the form again to add her:');
+  check('the mentor e-mail lists her as the mentor typed her, under "Not added back"',
+        w.mails.length === 1 && kept !== -1 && body.split('\n')[kept + 1] === '  - GRACE ZIBBLEWICK' &&
+        !body.includes('Grace Zibblewick'), body);
+
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 5, change(), sentOn('2026-09-10'));
+  check('run again: still one ReviewQueue row, she is still removed',
+        w.tabs.ReviewQueue.length === 2 && status(w, 2) === 'inactive|Date' && /1 kept removed/.test(result), result);
+
+  w = world('America/New_York');
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 6, change(), sentOn('2026-09-28'));
+  check('the same change sent today (the trigger): everyone listed comes back, as before; no item, no note',
+        status(w, 2) === 'active|' && status(w, 3) === 'active|' && status(w, 5) === 'active|' &&
+        w.tabs.ReviewQueue.length === 1 && !/kept removed/.test(result) && !w.mails[0].body.includes('Not added back'), result);
+
+  w = world('America/New_York');
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 7, change(), 'ROSTER|9/10/2026 8:00:00|' + ORG + '|Sunrise Club');
+  check('a Timestamp that is not a date: no sent day, so today\'s behaviour (the menu asks twice for such rows)',
+        status(w, 2) === 'active|' && w.tabs.ReviewQueue.length === 1, result);
+
+  // The 2026-09-13 case: "Enroll a NEW club" re-sent for a club on file, replayed later.
+  w = world('America/New_York');
+  const enroll = { [FQ.ACTION]: FQ.ACTION_NEW, [FQ.PARTNER_NEW]: ORG, [FQ.CLUB]: 'Sunrise Club', [FQ.REGION]: 'Africa',
+                   [FQ.ROSTER]: 'Grace Zibblewick\nJoy Blorptest\nMary Zibblewick\nLucía Zörblewick',
+                   [FQ.MENTOR_EMAIL]: 'mentor@example.org' };
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 2, enroll, sentOn('2026-08-31'));
+  check('new-club branch, sent 08-31: removed 09-12 and 09-10 stay removed, 08-01 comes back; one item; no mentor e-mail',
+        status(w, 2) === 'inactive|Date' && status(w, 3) === 'inactive|Date' && status(w, 5) === 'active|' &&
+        w.tabs.ReviewQueue.length === 2 && String(w.tabs.ReviewQueue[1][4]).includes('2 girl(s)') &&
+        String(w.tabs.ReviewQueue[1][4]).includes('Roster rows 2, 3.') && !w.mails.length &&
+        result === 'existing club Sunrise Club (' + ORG + '): 0 girls added, 1 reactivated, 2 kept removed (removed after it was sent), 1 for review',
+        result);
+}
+
 console.log('\n  guards');
 {
   const all = fs.readdirSync(loadGs.GS_DIR).filter(f => f.endsWith('.gs'))
@@ -750,6 +879,12 @@ console.log('\n  guards');
   const fhSrc = fs.readFileSync(path.join(loadGs.GS_DIR, 'FormHandlers.gs'), 'utf8');
   check('the weekly trigger calls sendSfPendingDigest by name, and it exists',
         /newTrigger\('sendSfPendingDigest'\)/.test(fhSrc) && /^function sendSfPendingDigest\(\)/m.test(fhSrc));
+  const rosterGs = fs.readFileSync(path.join(loadGs.GS_DIR, 'Roster.gs'), 'utf8');
+  const rebuild = rosterGs.slice(rosterGs.indexOf('function rebuildRosterLocked_'), rosterGs.indexOf('function noRegionIssue_'));
+  const offline = fs.readFileSync(path.join(REPO, 'tools', 'build_roster_offline.js'), 'utf8');
+  check('the rebuild and the offline builder pass no submitted: no replay guard there (BACKLOG 39 stays open)',
+        rebuild.includes('planClub_(') && !/submitted/.test(rebuild) && offline.includes('planClub_(') && !/submitted/.test(offline));
+  check('dates are read in the spreadsheet\'s zone everywhere, never the script\'s', !/getScriptTimeZone/.test(all));
   const used = [...new Set(all.match(/\b(?:[A-Z]\w*App|[A-Z]\w*Service|Session|Utilities|Logger|Browser)\b(?=\s*\.)/g) || [])].sort().join(',');
   check('Google services unchanged (a new one adds an OAuth scope: CLAUDE.md rule 11)',
         used === 'FormApp,LockService,MailApp,PropertiesService,ScriptApp,SpreadsheetApp,UrlFetchApp,Utilities', used);

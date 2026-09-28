@@ -390,9 +390,11 @@ or that failed (FormLog `ERROR: …`). It changes nothing until you confirm:
    error, for a retry. YES runs that group; NO skips it.
 2. Club Roster Form responses **sent more than 7 days ago** get a dialog of
    their own. Answer NO unless you know why that response never ran: a
-   handler applies a response to *today's* roster, so an old one can put
-   back girls removed since it was sent — which is what the 2026-09-13 run
-   did to Radiant Girls.
+   handler applies a response to *today's* roster. Girls it lists who were
+   removed after it was sent stay removed (the replay guard; the ReviewQueue
+   gets "Removed girls not put back by an older response") — the 2026-09-13
+   run, before the guard, put 20 Radiant Girls back. But its removals and
+   new names still apply: an old REMOVE takes off a girl re-added since.
 3. **Held** rows are listed and never run: FormLog already has that form +
    sheet row as processed, under a key that no longer matches the row.
    Something changed the row or its key — rows sorted or deleted in a

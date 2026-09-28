@@ -154,17 +154,33 @@ function refreshRosterRegions() {
   ss.toast(summary, 'GLOW regions', 10);
 }
 
-/** Existing roster rows, indexed for lookup. */
+/**
+ * Existing roster rows, indexed for lookup.
+ *
+ * added_date / removed_date are written as 'yyyy-MM-dd' text, but Sheets may
+ * store such text as a Date cell; a Date cell comes back here as that day in
+ * the SPREADSHEET's time zone (the zone today_() writes in — never the
+ * script's), so the replay guard (RosterOps.gs staysRemoved_) compares days.
+ * Text cells are left as they are.
+ */
 function loadRoster_() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.ROSTER);
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName(TAB.ROSTER);
   const rows = [];
   if (!sheet || sheet.getLastRow() < 2) return { rows: rows, byClub: {} };
   const values = sheet.getRange(2, 1, sheet.getLastRow() - 1,
                                 ROSTER_COLS.length).getValues();
+  const zone = ss.getSpreadsheetTimeZone();
   const byClub = {};
   values.forEach(function (v, i) {
     const row = {};
     ROSTER_COLS.forEach(function (c, j) { row[c] = v[j]; });
+    ['added_date', 'removed_date'].forEach(function (c) {
+      const cell = row[c];
+      if (cell instanceof Date && !isNaN(cell.getTime())) {
+        row[c] = Utilities.formatDate(cell, zone, 'yyyy-MM-dd');
+      }
+    });
     row._sheetRow = i + 2;
     row._ck = key_(row.partner) + '||' + key_(row.club);
     rows.push(row);
