@@ -1072,13 +1072,13 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
   check('the preview says why each held row waits or runs, never a name',
         text.includes('• row 41 · sent 2026-09-21 10:15 · new club · Alpha Club (Test Partner Org) · waiting for staff: ReviewQueue row 5') &&
         text.includes('row 42 · sent 2026-09-22 09:00 · new club · Bravo Club (Test Partner Org) · released in ReviewQueue row 6') &&
-        !/Zibblewick|@/.test(text), text);
+        !/Zibblewick|@/.test(text), text.split('\n').length + ' lines');
   const digest = hd.reviewDigest_([{ row: 5, raised: '2026-09-22', issue: hd.HOLD_ISSUE, partner: 'Fixture Partner Alpha',
       club: 'Alpha Club', detail: detail(tab + '!41', '2026-09-21 10:15:30'), resolved: '' }], today,
       { partners: { 'fixture partner alpha': 'Fixture Partner Alpha' }, clubs: {} });
   check('the Monday e-mail lists a hold first, with its response row; the new club is not on file so it is masked',
         digest.lines[2] === hd.HOLD_ISSUE + ': 1 open, 1 new, oldest 6 day(s)' &&
-        digest.lines[3] === '  - row 5 · raised 2026-09-22 · Fixture Partner Alpha / (club not on file) · ' + tab + '!41', digest.lines.join('\n'));
+        digest.lines[3] === '  - row 5 · raised 2026-09-22 · Fixture Partner Alpha / (club not on file) · ' + tab + '!41', digest.lines[3]);
 }
 
 console.log('\n  the menu run with held rows (processMissedResponses, runConfirmed_; Google services stubbed)');
@@ -1125,7 +1125,7 @@ console.log('\n  the menu run with held rows (processMissedResponses, runConfirm
         m.dialogs.length === 3 && /^Club Roster Form responses not yet processed \(1\)/.test(m.dialogs[0]) &&
         /^New clubs held for review that staff released in the ReviewQueue \(1\):\n• row 42 .*released in ReviewQueue row 6/.test(m.dialogs[1]) &&
         /^2 processed\./.test(m.dialogs[2]) && m.dialogs[2].includes('new clubs held for review') &&
-        m.dialogs[2].includes('• row 41'), m.dialogs.join('\n----\n'));
+        m.dialogs[2].includes('• row 41'), m.dialogs.length + ' dialogs');
   check('YES: the new row runs, the released row runs as released, the waiting row never',
         m.ran.join() === '42 released,49' && /held for review: Roster Form Responses!41/.test(m.audits[0]), m.ran.join());
   m = world(held, release42, ['NO']);
