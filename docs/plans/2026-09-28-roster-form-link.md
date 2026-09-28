@@ -98,7 +98,7 @@ still renders in the right order.
   form), and a `build_conditions` invariant.
 - `docs/RUNBOOK.md` ("Links above Submit"), `docs/ARCHITECTURE.md`,
   `README.md`, `docs/LAUNCH.md` (the command), `docs/DECISIONS.md`,
-  `docs/BACKLOG.md`.
+  `docs/BACKLOG.md`, and `appsscript/INSTALL.md` (a pointer only; `.claspignore` pushes nothing but `.gs` and `appsscript.json`).
 
 ## Order of work
 1. This plan, committed.
@@ -150,9 +150,64 @@ above "Click here to report a problem". `tools/form_status.py` stays CLEAN
   97 of 220, Asia 14 of 93, Latin America 26 of 39, U.S 5 of 12 (orders read
   2026-09-28; the public Africa page renders them below Submit). A mentor of
   such a club sees her roster below the button and both links. Added to the
-  BACKLOG as its own item.
+  BACKLOG as item 46 (with 45, this link).
 
 ## Proof
-Pasted below when done: the dry-run output of the link tool against the five
-live forms, the translation simulation, `add_translations.py`'s dry run
-("0 new" on every form before the element exists), and the `make check` tail.
+Read-only runs against the live forms, 2026-09-28 (no write was made):
+
+`python3 tools/add_feedback_link.py --link roster` (dry run):
+
+    DRY RUN - clubRosterFormLink: 'A girl missing, or no longer in your club? Tell us on the Club Roster Form.'
+      -> https://docs.google.com/forms/d/e/1FAIpQLScPO9Dizjl9G8krMcvs1sVnqYku3k8dB7Ycv-1VahgPDssMzQ/viewform
+
+    == Africa 262382821971058
+       1. move submit2 (q2) 141 -> 142
+       2. move somethingNotWorking (q443) 140 -> 141
+       3. ADD clubRosterFormLink at order 140, directly above somethingNotWorking (q443)
+    == Asia 262383129464057
+       1. move submit2 (q2) 97 -> 98
+       2. move somethingNotWorking (q443) 96 -> 97
+       3. ADD clubRosterFormLink at order 96, directly above somethingNotWorking (q443)
+    == Latin America 262383455778067
+       1. move submit2 (q2) 31 -> 32
+       2. move somethingNotWorking (q443) 30 -> 31
+       3. ADD clubRosterFormLink at order 30, directly above somethingNotWorking (q443)
+    == U.S 262382706852058
+       1. move submit2 (q2) 25 -> 26
+       2. move somethingNotWorking (q443) 24 -> 25
+       3. ADD clubRosterFormLink at order 24, directly above somethingNotWorking (q443)
+    == template 262352490535154
+       1. move submit2 (q2) 237 -> 238
+       2. move somethingNotWorking (q443) 236 -> 237
+       3. ADD clubRosterFormLink at order 236, directly above somethingNotWorking (q443)
+
+`python3 tools/add_feedback_link.py` (the problem link, default URL): every
+form `somethingNotWorking (q443) already present and up to date` — the shared
+HTML is byte-identical to the live element. An edit URL and the problem
+form's URL given to `--link roster` were both refused.
+
+`python3 tools/add_translations.py` (dry run, refactored): `271 entries across
+11 languages (0 new)` on all five forms — identical output to the tool before
+the refactor; `add_language.py` dry runs (hi on Asia, or on all) identical too.
+
+Translation simulation (the element inserted in memory into each live form's
+questions, then `plan_additions` on the live store; nothing written): the
+element keyed three ways in every offered language — 11 on Africa, Latin
+America, U.S and the template (33 new entries each), 13 on Asia with hi and
+fa (39 new); the only new keys are the element's; base/en gain 3 sources;
+no offered language left untranslated.
+
+`make check` tail (after the docs commit):
+
+    py: 31 files parse, 18 scripts answer --help
+    Ran 80 tests
+    OK
+    gs: 10 files parse
+    secrets: clean
+    docs-links: ok
+    fixtures: up to date
+    CHECK PASSED
+
+## Result
+Built and tested on branch `wf/roster-form-link`; nothing deployed. The live
+steps under **Order of work** wait for Ryan's go.

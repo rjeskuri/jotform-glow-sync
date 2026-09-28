@@ -333,6 +333,54 @@ safely. Rollback: the `src`/`width`/`height` in
 Jotform's Revision History. The image carries no translated text (q13 is in
 `add_translations.py`'s `NEVER_SHOWN`), and the sync never touches it.
 
+## Links above Submit (problem report, Club Roster Form)
+
+Two text elements sit directly above the Submit button of every attendance
+form, each one linked sentence in a grey box, found by its unique name
+(`glow/links.py` holds the table; the public Google Form URLs there are pinned
+by a test to the table in [LAUNCH.md](LAUNCH.md)):
+
+| `--link` | Element name | Sentence | Opens |
+|---|---|---|---|
+| `roster` | `clubRosterFormLink` | A girl missing, or no longer in your club? Tell us on the Club Roster Form. | the Club Roster Form |
+| `problem` | `somethingNotWorking` (q443) | Click here to report a problem | the problem-report form |
+
+The Club Roster Form link sits above the problem link, so a mentor with a
+roster change meets it first. Adding, re-checking or removing one:
+
+```bash
+python3 backup_forms.py                                           # optional: the tool snapshots each form it writes
+python3 tools/add_feedback_link.py --link roster                  # dry run, template + 4 regionals
+python3 tools/add_feedback_link.py --link roster --apply          # move Submit, move q443, add; re-read and verify
+python3 tools/add_translations.py                                 # dry run: the new element's entries appear
+python3 tools/add_translations.py --apply                         # GET-merge-POST; the store is saved first
+python3 tools/add_feedback_link.py --link roster --remove --apply # take it out again
+```
+
+The tool plans all five forms before it writes any, and refuses rather than
+guesses: an edit URL (only a `…/forms/d/e/…/viewform` or `forms.gle` link is
+accepted), a URL the other link already uses, two Submit buttons, and any
+layout where inserting would change the sequence of what a mentor can see
+(it simulates the write in render order — by `order`, equal orders in
+creation order — before sending it). Re-running is a no-op; a changed URL is
+updated in place. After a write it re-reads the form: the element once, its
+text, not hidden, above its anchor and Submit, and no rule mentioning it.
+
+Translations are a second step because they are keyed by the element's qid
+(`text_<qid>`), which exists only once the element does; the sentence's
+translations (all offered languages; Hindi and Persian reach Asia only) are
+in `tools/translations_additions.json`, written by us and not
+native-reviewed. "Club Roster Form" stays in English in every language: the
+Google Form it opens is English-only.
+
+The sync never touches these elements: it writes roster checkboxes, the Club
+picker, q5's hidden flag and the conditions, and no generated rule mentions
+anything but rosters and the structural fields (both test-pinned). A rule
+hand-made on an element would be dropped by the next sync, and the tool
+flags one. Rollback: `--remove --apply` (the order gap it leaves is
+harmless), the old orders in `backups/<id>/questions-<stamp>.json`, or
+Jotform's Revision History.
+
 ## Backup and restore (Jotform)
 
 ```bash

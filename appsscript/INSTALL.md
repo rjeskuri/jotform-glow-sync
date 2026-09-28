@@ -105,8 +105,8 @@ Then, in **Project Settings → Script Properties**:
   Jotform sync (`docs/RUNBOOK.md`, "Automatic sync"); unset, the sheet sends
   nothing. Test with **GLOW → Google Forms → Request Jotform sync now**.
 
-And put the problem-report link on the attendance forms
-(`tools/add_feedback_link.py`, see `docs/RUNBOOK.md`).
+And put the problem-report and Club Roster Form links on the attendance forms
+(`tools/add_feedback_link.py`, see `docs/RUNBOOK.md`, "Links above Submit").
 
 Things to know:
 
