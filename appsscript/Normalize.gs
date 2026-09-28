@@ -109,3 +109,45 @@ function readResponses_() {
   }
   return Object.keys(byIdentity).map(function (k) { return byIdentity[k]; });
 }
+
+// ------------------------------------------ Google Form text (not in Python)
+// The Club Roster Form and the problem form are public: what they carry is
+// written to the sheet as typed, and setValues reads a leading = (or + - @)
+// as a formula. The enrollment import keeps parseRoster_ as it is (parity
+// with sync_attendance_form.py); these apply to Google Form answers only.
+
+/** tidy_, then without the leading run of = + - @ and spaces: never a formula in the sheet. */
+function sheetText_(s) {
+  return tidy_(s).replace(/^[\s=+\-@]+/, '');
+}
+
+/**
+ * sheetText_ for a girl's name, word by word: no word starts with = + - @.
+ * Her last word is filed in a cell of its own (Roster last_name, lastName_),
+ * so "Jane =1+1" must not leave "=1+1" there.
+ */
+function sheetName_(s) {
+  return tidy_(sheetText_(s).replace(/(^|\s)[=+\-@]+/g, '$1'));
+}
+
+/**
+ * parseRoster_ for a Google Form answer: every name (and every repeat) also
+ * passes sheetName_, and names the strip makes equal count as repeats.
+ */
+function parseFormRoster_(cell) {
+  const parsed = parseRoster_(cell);
+  const seen = {}, names = [];
+  const duplicates = parsed.duplicates.map(sheetName_).filter(String);
+  parsed.names.forEach(function (n) {
+    const safe = sheetName_(n);
+    if (!safe) return;
+    if (seen[safe.toLowerCase()]) duplicates.push(safe);
+    else { seen[safe.toLowerCase()] = true; names.push(safe); }
+  });
+  return { names: names, duplicates: duplicates };
+}
+
+/** key_ with accents removed ("Lucía" → "lucia"): for spotting near-duplicates, never for identity. */
+function foldKey_(s) {
+  return key_(s).normalize('NFKD').replace(/[\u0300-\u036F]/g, '');
+}

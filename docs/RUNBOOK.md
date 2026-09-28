@@ -468,8 +468,10 @@ must also be written to `base` and `en` or its translations never apply
 
 **GLOW → Google Forms → Process any missed form responses** runs the Club
 Roster Form responses and problem reports that were never processed (a
-trigger failed, e.g. between a scope-adding push and the re-authorization)
-or that failed (FormLog `ERROR: …`). It changes nothing until you confirm:
+trigger failed, e.g. between a scope-adding push and the re-authorization),
+that failed (FormLog `ERROR: …`), or that the duplicate-club guard held and
+staff have since released (FormLog `HELD: …`, item 5). It changes nothing
+until you confirm:
 
 1. One dialog per group lists what it would run — problem reports not yet
    sent to staff, then Club Roster Form responses not yet processed. Each
@@ -491,8 +493,8 @@ or that failed (FormLog `ERROR: …`). It changes nothing until you confirm:
    Something changed the row or its key — rows sorted or deleted in a
    response tab, a question title renamed (`Config.gs` `Q`), a Timestamp
    cell edited. Find out what first. To run one deliberately: in FormLog,
-   find **every** row with that form and `sheet_row` whose `result` does not
-   start with `ERROR:` (after a sort they record *another* response) and
+   find **every** row with that form and `sheet_row` whose `result` starts
+   with neither `ERROR:` nor `HELD:` (after a sort they record *another* response) and
    change only their `sheet_row` cell, e.g. `released 5 by <name> <date>`.
    Leave `response_key` and `result` alone, so what they record stays
    processed. The next run offers the held row as new; check the preview
@@ -500,8 +502,30 @@ or that failed (FormLog `ERROR: …`). It changes nothing until you confirm:
 4. A failure you have **dealt with by hand** (the report was read, the
    change was entered another way) is offered again on every run until
    FormLog says otherwise: change the `result` of its FormLog row from
-   `ERROR: …` to `resolved by hand by <name> <date>` — any result that does
-   not start with `ERROR:` counts as done.
+   `ERROR: …` to `resolved by hand by <name> <date>` — any result that starts
+   with neither `ERROR:` nor `HELD:` counts as done.
+5. **Held for review** rows are "Enroll a NEW club" responses the
+   duplicate-club guard held (FormLog `HELD: possible duplicate (…)`, a
+   **New club held as a possible duplicate** item on the ReviewQueue,
+   nothing imported). They are listed with the result, never run, until the
+   item's `resolved` cell starts with the word `release` ("Working the
+   ReviewQueue"). The next run then asks about them in a dialog of their
+   own, "New clubs held for review that staff released": YES imports each
+   as sent, against today's roster, without the duplicate check — except
+   an organization typed close to a partner on file, which fails
+   `ERROR: release refused: …` until the response row's `Partner
+   organization` cell names that partner, or the Partners tab has the new
+   organization ("Working the ReviewQueue"). An item
+   resolved any other way is never run: its row is only named on the
+   preview's last line, "Not imported — … resolved without "release"", as
+   `row N (ReviewQueue row M)`. A club meant to be imported but resolved
+   `Released`, `ok release` or `resolved …: a new club` shows there: change
+   that cell to start with `release` and run it again. A held row
+   listed as "no ReviewQueue item for this row and time" lost its item (row
+   deleted, text typed after the `[#…]` tag, or the tab sorted so the item's
+   `(sent …)` no longer matches the row's Timestamp): add the item back by
+   hand with that issue, detail `Roster Form Responses!N (sent <yyyy-mm-dd
+   hh:mm:ss from the row's Timestamp>): … [#Roster Form Responses!N]`.
 
 The run takes the document lock one row at a time (form submissions keep
 flowing) and starts no row after 4 minutes (Apps Script stops any run at 6);
@@ -553,6 +577,7 @@ open items by issue, with their ReviewQueue row; work them that week.
 
 | Issue | What to do |
 |---|---|
+| **New club held as a possible duplicate** | "Enroll a NEW club" was sent for what may be a club already on file: nothing was imported, and the mentor was told it is being checked. Detail says why — names already active in one club, a club name close to one of the partner's, a typed organization close to a partner on file, or a re-enrollment whose list is mostly not the club's — and names the club(s) on file. Compare the response row (the tag) with those clubs' Roster rows. **Same club:** enter only its new girls on "Add or remove girls" for the club on file (REMOVE anyone who has left), then `resolved <date> by <name>: same club as <club>`. **A new club after all, or the new list is right:** `release <date> by <name>: <why>` (`release` must be the first word), then run **Process any missed form responses**: it asks about released rows separately and imports each as sent. **If the reason says "the organization was typed as …, close to … on file"**, fix that first, or the club is filed under a second spelling of the partner (no region, a second form section — the `ion bu` case): if it is that partner, set the response row's `Partner organization` cell to the partner exactly as the Partners tab spells it (the row stays matched to its item by its Timestamp, and the release preview shows the corrected partner); if it really is another organization, add it to the Partners tab with its region. Until then the release run refuses it (`ERROR: release refused: …`, offered again by the next run). **Sent by mistake:** `resolved …: not imported`. Never ask the partner to send it again, and never edit the `(sent …)` or the `[#…]` tag in detail: the menu matches both to the response row. |
 | **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added by `tools/backfill_feedback_review.py`). |
 | **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. REMOVE only a match that is clearly her; otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). |
 | **Removed girls not put back by an older response** | A Club Roster Form response ran after some girls it lists had been removed — a retry, or an old response confirmed in "Missed form responses" — so they stayed removed instead of coming back (the 2026-09-13 replay cannot recur). Detail names the response row, the day it was sent and the Roster rows; the mentor's confirmation (roster changes) listed the names the mentor typed under "Not added back". Usually nothing to do: `resolved …: stayed removed`. If a girl really has rejoined since her removal (ask the partner), ADD her as above: the same ID comes back. |
@@ -561,7 +586,7 @@ open items by issue, with their ReviewQueue row; work them that week.
 | **Girls missing from the latest enrollment** | "Enroll a NEW club" was sent for a club already on file; the girls not in that list stay active. Ask the partner who has left and REMOVE them as above. If the new list was not this club's at all (Radiant Girls, 2026-08-31), REMOVE the rows it added as above: the names whose Roster `source` is that response row (Ryan's go). |
 | **Roster change for a club not on file** | Nothing changed, the mentor got no confirmation, and it is never retried. Find the club under another name or partner ("Renaming a club", "Moving a club to another partner"), run **GLOW → Google Forms → Update form dropdowns from the Roster**, then enter the change from the response row (or ask the partner) and tell the mentor. A truly new club uses "Enroll a NEW club". |
 | **Partner has no region** | Its girls reach no attendance form. A misspelled partner → "Moving a club to another partner". Otherwise set the Partners-tab region (`Africa`, `Asia`, `Latin America`, `U.S`), run **GLOW → Refresh regions from the Partners tab**, and check that the region's next SyncLog row says `applied`. |
-| **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old, or one refused because its Timestamp cell is not a date (a retry fails the same way): enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result does not start with `ERROR:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. |
+| **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old, or one refused because its Timestamp cell is not a date (a retry fails the same way): enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result starts with neither `ERROR:` nor `HELD:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. A retry the duplicate-club guard held (`HELD:`) continues as its **New club held as a possible duplicate** item: close this one. |
 
 ## Apps Script deploy
 
