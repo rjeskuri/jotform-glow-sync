@@ -143,5 +143,26 @@ text (BACKLOG 40), the attendance forms' "report a problem" link (finding 6). Li
   (a non-address is refused), the two help texts. Passive: the next problem report with an
   address → the staff e-mail has `Reply to:` filled and a reply-to header.
 
+## Built (2026-09-28, branch `wf/forms-wording`; not merged, not deployed)
+- Committed in three steps instead of four: the handler read (item 5) with its tests, then the
+  wording + menu migration with its tests, then the docs. Each step was green on its own.
+- `test/forms_logic_test.js` gained 41 checks: the wording (the 2026-08 texts pinned as the saved
+  pages show them), the planner, the preview, the menu run against fake forms that have no
+  delete / destination / response methods (YES, NO, a second run, forms edited during the
+  preview, the lock busy, a failure part-way then the rerun, a hand-moved device question, a
+  hand-edited help text, a missing form, no UI), a fresh `createGlowForms` build (nothing to
+  change), and the two-column read. The two-column checks fail without the handler change.
+- `make check` (also with the real export: 328 clubs / 6210 girls, no enrolled name in code,
+  docs or tests):
+
+      ALL CHECKS PASSED
+      py: 30 files parse, 18 scripts answer --help
+      Ran 60 tests … OK
+      gs: 10 files parse
+      secrets: clean (119 files scanned)
+      docs-links: ok (36 relative links resolve, 0 absolute paths)
+      fixtures: up to date
+      CHECK PASSED
+
 ## Result
 (to be filled in after the deploy)
