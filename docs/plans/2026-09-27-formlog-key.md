@@ -1,7 +1,7 @@
 ---
 title: Time-zone-proof form-response keys and a safe "Process any missed form responses"
 author: Claude (with Ryan)
-status: accepted
+status: done
 created: 2026-09-27
 intent: none — the 2026-09-13 incident found in the 2026-09-26/27 problem-report review
 ---
@@ -169,4 +169,21 @@ Live (Ryan's go):
 Rollback: `git checkout <commit A> -- appsscript && npm run clasp:push`.
 
 ## Result
-(filled in after the deploy)
+- 2026-09-27: review of the change (four lenses, each finding verified by a skeptic) — 7
+  verified findings, all fixed before commit B `10f9050`; notably confirmed rows now run in
+  sheet order, not dialog order. `main` fast-forwarded to `10f9050` on 2026-09-28.
+- 2026-09-28: deployed by Ryan from `main`. Live proof: GLOW → Google Forms → Process any
+  missed form responses listed exactly Feedback!2 and Feedback!3 (retry after ERROR), nothing
+  held or old; answered NO → Audit `cancelled at the preview (would have run Feedback!2,
+  Feedback!3)`. The same check run offline against the 2026-09-27 export gave the same list.
+- 2026-09-28, with Ryan's go: Feedback rows 2-3 resolved by hand (FormLog E19/E23, ReviewQueue
+  F21/F22, Audit `resolveByHand`), so the menu item should now say "Nothing to process."
+- 2026-09-28, the Radiant Girls repair (BACKLOG 42), with Ryan's go: backup of every tab to
+  `data/live_2026-09-28/` and of the Africa form; Roster rows 6212-6231 (the 20 from
+  `Roster Form Responses!2`) set inactive with removed_date 2026-09-28 (44 cells written and
+  re-read identical, Audit `deactivateRows`; Sparkle Girls untouched); `auto_sync.py --region
+  Africa` dry run = 1 update (q410, 20 girls), then applied, verified clean, SyncLog
+  `manual:radiant-redo`; `form_status.py` Africa CLEAN; q410 has 20 options; ReviewQueue 27
+  resolved.
+- Still to observe: the first real submission under the new key (a FormLog `ROSTER|w:…` row
+  that is not ERROR).
