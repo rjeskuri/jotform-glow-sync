@@ -150,7 +150,8 @@ above "Click here to report a problem". `tools/form_status.py` stays CLEAN
   97 of 220, Asia 14 of 93, Latin America 26 of 39, U.S 5 of 12 (orders read
   2026-09-28; the public Africa page renders them below Submit). A mentor of
   such a club sees her roster below the button and both links. Added to the
-  BACKLOG as item 46 (with 45, this link).
+  BACKLOG as item 47, "Rosters render below the Submit button" (with 46, this
+  link; 45 belongs to the parallel branch `wf/partner-box`).
 
 ## Proof
 Read-only runs against the live forms, 2026-09-28 (no write was made):
@@ -211,3 +212,21 @@ no offered language left untranslated.
 ## Result
 Built and tested on branch `wf/roster-form-link`; nothing deployed. The live
 steps under **Order of work** wait for Ryan's go.
+
+Code review (2026-09-28): five nits, each reproduced offline, none touching
+the planned deploy (default URLs, a visible q443). Fixed, each with a test
+that fails without it:
+- a changed URL updated in English only: every other language keeps its copy
+  of the old link, so the tool now says, in the plan and after the write, to
+  re-run `tools/add_translations.py --apply` (RUNBOOK too);
+- a hidden q443 crashed the roster plan with a traceback: it is now a refusal
+  naming the fix (`--link problem` unhides it);
+- the post-write check passed if q443 ended up below Submit (a move
+  acknowledged but not applied): it now checks the anchor against Submit too,
+  and so does the plan's note for an element already present;
+- the pre-write snapshots and store backups were stamped to the minute, so a
+  re-run within it overwrote the "before": stamped to the second, and a store
+  backup never overwrites an earlier file;
+- BACKLOG 45 collided with `wf/partner-box`: this branch's items are now 46
+  and 47. Both branches add their rows after 44, so the merge will still stop
+  on that table: keep both rows, in number order.
