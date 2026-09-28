@@ -517,6 +517,18 @@ class PartnerPickerFlow(unittest.TestCase):
         self.assertIn("conditions: ", out)
         self.assertEqual(sync.WARNINGS, [])        # every roster matched its partner: no new roster
 
+    def test_the_partner_is_read_back_from_rules_on_the_list(self):
+        # Partner Two's Stars gets an all-new roster: only the partner in the live
+        # rules (on the list) ties it to its question - roster overlap cannot
+        sheet = {**self.ROSTER, ("Partner Two", "Stars"): ["Uma Zoe", "Val Yoe"]}
+        for kw in ({"partner_list": "Partner One|Partner Two"}, {}):
+            fake = FakeForm(*self.form(**kw))
+            code, _ = self.run_sync(fake, roster=sheet)
+            self.assertEqual(code, 0)
+            self.assertEqual(fake.calls[0], "UPDATE roster 'Stars' (q12, 2 girls)", kw)
+            self.assertFalse([c for c in fake.calls if c.startswith("CREATE roster")], kw)
+            del sync.WARNINGS[:]
+
     def test_refuses_before_any_write_when_no_name_is_shared(self):
         on_form = {k: v for k, v in self.ROSTER.items() if k != ("Partner Two", "Stars")}
         fake = FakeForm(*self.form(roster=on_form), apply=True)
