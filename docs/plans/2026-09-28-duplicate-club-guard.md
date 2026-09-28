@@ -85,8 +85,9 @@ also lists the held rows. `HELD:` results read as "held for review", not "failed
 
 **4. Formula-safe text (BACKLOG 44, `Normalize.gs`).** `sheetText_(v)` = `tidy_(v)` with the
 leading run of `= + - @` and spaces stripped — the rule `feedbackReviewItem_` uses, which now
-calls it. `parseFormRoster_(cell)` = `parseRoster_` + `sheetText_` on every name (and the
-duplicates), re-deduplicated — the enrollment import keeps `parseRoster_` unchanged (Python
+calls it. `parseFormRoster_(cell)` = `parseRoster_` + `sheetName_` on every name (and the
+duplicates), re-deduplicated — `sheetName_` = `sheetText_` applied to every word, because the
+last word is filed on its own as `last_name` (review finding F1) — the enrollment import keeps `parseRoster_` unchanged (Python
 parity). Applied to typed Club Roster Form text only: the typed organization, club name,
 roster names, mentor name / e-mail / country (SF Pending), ADD names. Dropdown answers
 (partner, existing club) are ours and stay as chosen; REMOVE names are only matched.
@@ -150,6 +151,9 @@ DECISIONS.md one row, BACKLOG 11b / 40 / 44.
 - 2026-09-28, branch `wf/duplicate-club-guard` (not merged, not deployed):
   - BACKLOG 44: `sheetText_` / `parseFormRoster_`; both Club Roster Form handlers write
     only sheet-safe typed text (a handler run over a stubbed spreadsheet checks every cell).
+    Review fix F1: a formula after the first word of a name (`Jane =1+1`) reached
+    `last_name`; names are now stripped word by word (`sheetName_`), tested through both
+    handlers with the formula in a later word.
   - The guard, the hold, the release, FormLog and the menu as designed; RUNBOOK, INSTALL,
     ARCHITECTURE, DECISIONS, BACKLOG. Every guard and hold rule has a test that fails
     when the rule is removed (checked by mutating each rule in turn).

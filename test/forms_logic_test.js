@@ -781,7 +781,7 @@ const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose
 
 // ------------------------- Club Roster Form responses (the handlers, stubbed)
 console.log('\nClub Roster Form text is sheet-safe (BACKLOG 44)');
-const nz = loadGs(['sheetText_', 'parseFormRoster_', 'parseRoster_', 'foldKey_']);
+const nz = loadGs(['sheetText_', 'sheetName_', 'parseFormRoster_', 'parseRoster_', 'foldKey_', 'lastName_']);
 {
   const leaks = ['=1+1', '= =1+1', '- =x', '@ =A1', '+ + =1', '=\t=x', ' =x', '​=x', '  -@+=x']
       .filter(v => /^[\s=+\-@]/.test(nz.sheetText_(v)) || nz.sheetText_(v) === '');
@@ -794,6 +794,16 @@ const nz = loadGs(['sheetText_', 'parseFormRoster_', 'parseRoster_', 'foldKey_']
         r.names.join('|') === 'Grace Zibblewick|Mary Zibblewick|Joy Blorptest|Amina Qwertyson Alpha', r.names.join('|'));
   check('parseFormRoster_: a repeat, and names the strip makes equal, are repeats (sheet-safe too)',
         r.duplicates.join('|') === 'Grace Zibblewick|Grace Zibblewick', r.duplicates.join('|'));
+  // the last word is filed on its own (Roster last_name): no word of a name may start with = + - @
+  const w = nz.parseFormRoster_('Ivy =1+1\nJo +HYPERLINK("x")\nHana -A1 @Newperson\nUma = =Newperson\nIvy 1+1\n=Kai -\nMary-Jane Zibble-wick');
+  const wordLeaks = w.names.concat(w.duplicates).flatMap(n => n.split(' ').concat([nz.lastName_(n)]))
+      .filter(x => /^[=+\-@]/.test(x) || x === '');
+  check('parseFormRoster_: no WORD of a name starts with = + - @ (so neither does its last_name)',
+        !wordLeaks.length && w.names.join('|') === 'Ivy 1+1|Jo HYPERLINK("x")|Hana A1 Newperson|Uma Newperson|Kai|Mary-Jane Zibble-wick',
+        w.names.join('|') + ' :: ' + wordLeaks.join(' | '));
+  check('…a name the word strip makes equal is a repeat; inner - and + are left alone',
+        w.duplicates.join('|') === 'Ivy 1+1' && nz.sheetName_(' Ann  O-Neil+1 ') === 'Ann O-Neil+1' && nz.sheetName_('= - @') === '',
+        w.duplicates.join('|'));
   const plain = 'Grace Zibblewick\n2) Mary Zibblewick\n• Joy Blorptest\nmary zibblewick';
   check('parseFormRoster_ = parseRoster_ on ordinary text (the enrollment import keeps parseRoster_)',
         JSON.stringify(nz.parseFormRoster_(plain)) === JSON.stringify(nz.parseRoster_(plain)));
@@ -903,6 +913,26 @@ const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
   check('a roster change: ADD names sheet-safe, REMOVE still matched as typed',
         w2.tabs.Roster.slice(3).map(r => r[4]).join('|') === 'Joy Blorptest|Amina Qwertyson Alpha' &&
         w2.tabs.Roster[2][6] === 'inactive' && !w2.cells().some(c => /^[=+\-@]/.test(c)));
+
+  // a formula after the first word: lastName_ files the last word in last_name
+  const w3 = sheetWorld(baseTabs());
+  const res3 = w3.ctx.handleNewClub_(newClub('Fixture Partner Alpha', 'Evening Club',
+      ['Ivy =1+1', 'Jo +HYPERLINK("x")', 'Hana -A1', 'Uma @=IMAGE("x")', 'Ivy 1+1']), 'Roster Form Responses!43', KEY41);
+  const leak3 = w3.cells().filter(c => /^[=+\-@]/.test(c));
+  check('a new club with a formula in a later word of a name: no cell starts with = + - @, last_name included',
+        /^new club Evening Club/.test(res3) && !leak3.length &&
+        w3.tabs.Roster.slice(1).map(r => r[4] + '/' + r[5]).join('|') ===
+            'Ivy 1+1/1+1|Jo HYPERLINK("x")/HYPERLINK("x")|Hana A1/A1|Uma IMAGE("x")/IMAGE("x")' &&
+        w3.tabs.ReviewQueue.some(r => r[1] === 'Same name listed twice' && r[4].startsWith('Ivy 1+1 —')),
+        res3.slice(0, 40) + ' :: ' + leak3.join(' | '));
+  const w4 = sheetWorld(baseTabs(rosterRows('Fixture Partner Alpha', 'Sunrise Club', ['Grace Zibblewick'])));
+  w4.ctx.handleRosterChange_({ [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: 'Fixture Partner Alpha',
+                               [HQ.CLUB_PREFIX + 'Fixture Partner Alpha)']: 'Sunrise Club',
+                               [HQ.ADD]: 'Joy =1+1\nAmina Qwertyson -A1' }, 'Roster Form Responses!44');
+  const leak4 = w4.cells().filter(c => /^[=+\-@]/.test(c));
+  check('a roster change ADD with a formula in a later word: sheet-safe, last_name included',
+        !leak4.length && w4.tabs.Roster.slice(2).map(r => r[4] + '/' + r[5]).join('|') === 'Joy 1+1/1+1|Amina Qwertyson A1/A1',
+        leak4.join(' | '));
 }
 
 console.log('\nA new club that may duplicate one on file is held, then released by staff (BACKLOG 11b)');

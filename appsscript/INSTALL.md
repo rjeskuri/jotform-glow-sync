@@ -114,7 +114,9 @@ Things to know:
   and by **Update form dropdowns from the Roster**. A brand-new partner
   (enrolled via "not in this list") gets its own club section automatically.
 - Free text from the Club Roster Form never reaches the sheet as a formula:
-  a leading `=`, `+`, `-` or `@` is stripped (`Normalize.gs sheetText_`).
+  a leading `=`, `+`, `-` or `@` is stripped (`Normalize.gs sheetText_`) —
+  from every word of a girl's name, since her last word is also filed on its
+  own as `last_name` (`sheetName_`).
 - A held new club stays held until staff start its ReviewQueue item's
   `resolved` cell with `release`; **Process any missed form responses**
   then imports it (`docs/RUNBOOK.md`, "Working the ReviewQueue").
