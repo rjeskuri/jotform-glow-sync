@@ -145,7 +145,8 @@ Salesforce reads (CLAUDE.md rule 5). Not without a template experiment first.
 - `tools/form_status.py` — partner fields, the checks on the new list, and the
   report line.
 - `tools/rename_club.py` — `partner_gated(…, fields)`; `form_questions`
-  returns the form's partner fields.
+  returns the form's partner fields; the refusal says "a given Partner (typed
+  or chosen from the partner list)".
 - `tools/auto_sync.py` — `PARTNER_PICKER_RX`, and `changes()` counts its
   lines.
 - `test/python_test.py` — golden test (the default rules are unchanged), the
@@ -216,5 +217,49 @@ Salesforce reads (CLAUDE.md rule 5). Not without a template experiment first.
   and no roster CREATE/UPDATE beyond what the same command without the flag
   prints.
 
-## Result
-(filled in after the offline proof)
+## Result (offline, 2026-09-28; nothing deployed)
+
+Built on `wf/partner-box`. 80 Python tests, 20 of them new. They cover: the
+default rules unchanged; the list changing only the partner field; the
+`main()` flow on a fake form (create → rules → hide order, the qid-less
+create, upkeep, read-back from rules on the list, both refusals before any
+write); the `form_status` checks; `rename_club`; and the runner's parsing.
+Three mutations were each caught by a failing test: dropping the pre-write
+refusal, reading the partner back from q331 only, and hiding the box before
+the rules write.
+
+Read-only replay against the live forms (GETs only; club and partner names,
+no roster). It rebuilds `club_questions` and `partner_of` from each form's
+own questions and rules, using the club spelling the live rule tests (7
+rosters on the template and 6 on Africa carry the Roster's lower-case spelling
+in their rule, not the label's).
+
+| | Africa 262382821971058 | template 262352490535154 |
+|---|---|---|
+| default (typed box) regenerates the live rules exactly | True (254 kept, 0 new, 0 dropped) | True (376, 0, 0) |
+| with the partner list: rules | 254 → 254 | 376 → 376 |
+| `conditions:` kept / new / dropped | 239 / 15 / 15 | 360 / 16 / 16 |
+| the changed rules | 10 gated rosters + 5 reveals, the partner field only | 11 gated rosters + 5 reveals |
+| swapping the list back for q331 gives the live rules | True | True |
+| question 5 copy (`{picker}` → q5) identical to the live rule | True | True |
+| list options | 8 partners | 9 partners (+ Seeds of Hope Foundation) |
+| q331 now | not hidden, order 7 | not hidden, order 7 |
+
+"Partner" and "Please Select" have their md5 key in `base`, `en` and all 11
+language dictionaries on both forms, so the list's label and placeholder are
+translated with no translation write.
+
+Not run here: the full `sync_attendance_form.py … --partner-picker` dry runs
+against a fresh Roster export. The permission layer refused this session's
+Roster export (PII). They are read-only; Ryan runs them (Proof, above)
+before the apply.
+
+`make check`:
+
+```
+gs: 10 files parse
+secrets: clean (119 files scanned)
+docs-links: ok (36 relative links resolve, 0 absolute paths)
+fixtures: up to date
+CHECK PASSED
+```
