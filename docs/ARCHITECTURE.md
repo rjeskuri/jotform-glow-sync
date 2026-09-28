@@ -38,7 +38,7 @@ enrollment responses → `sync_attendance_form.py read_sheet` (no `--roster`).
 
 | Where | What | Talks to |
 |---|---|---|
-| `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge). Dry run by default, `--apply` writes, `--summary-json` for the runner | Jotform API via `curl` |
+| `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge), and keeps the Club picker and the partner list (found by field name, `clubPicker` / `partnerPicker`, added once by `--club-picker` / `--partner-picker`) in shape. Dry run by default, `--apply` writes, `--summary-json` for the runner | Jotform API via `curl` |
 | `backup_forms.py`, `restore_conditions.py` | Snapshot and rollback (conditions only) | Jotform API |
 | `tools/form_status.py` | Read-only audit of every form vs the Roster export, rule by rule; `--json` | Jotform API |
 | `tools/auto_sync.py` | The unattended loop (export → plan → bands → backup → apply → verify → SyncLog) | Sheets API, the tools above |

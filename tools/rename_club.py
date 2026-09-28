@@ -72,7 +72,7 @@ import backup_forms                       # noqa: E402
 from glow import forms as glow_forms      # noqa: E402
 from glow.cli import run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
-from glow.sync import PARTNER             # noqa: E402
+from glow.sync import PARTNER, partner_fields   # noqa: E402
 from glow.text import key, name_key       # noqa: E402
 
 TABS = ("Roster", "ClubRegistry", "SF Pending")   # every tab with a 'partner' and a 'club' column
@@ -205,9 +205,11 @@ def near_partners(rows, name):
     return same or difflib.get_close_matches(name, names, n=3, cutoff=0.8)
 
 
-def partner_gated(conditions, qids):
-    """Ids of the rules that show one of `qids` and test the Partner box (q331).
-    The sync writes such a term only for a club name several partners share."""
+def partner_gated(conditions, qids, fields=frozenset({PARTNER})):
+    """Ids of the rules that show one of `qids` and test a partner field: the
+    typed Partner box (q331), or the partner list on a form that has one
+    (`fields`, from glow.sync.partner_fields). The sync writes such a term only
+    for a club name several partners share."""
     out = []
     for c in conditions:
         try:
@@ -217,7 +219,7 @@ def partner_gated(conditions, qids):
             continue
         actions = actions if isinstance(actions, list) else [actions]
         shows = any(isinstance(a, dict) and str(a.get("field")) in qids for a in actions)
-        if shows and any(isinstance(t, dict) and str(t.get("field")) == PARTNER for t in terms):
+        if shows and any(isinstance(t, dict) and str(t.get("field")) in fields for t in terms):
             out.append(str(c.get("id")))
     return out
 
@@ -232,7 +234,8 @@ def describe_rows(rows):
 
 
 def form_questions(client, form_id, old, new):
-    """([qids of roster questions named old], [qids named new]) on one form."""
+    """([qids of roster questions named old], [qids named new], the form's
+    partner fields) on one form."""
     questions = client.get(f"/form/{form_id}/questions")
     hits, clashes = [], []
     for qid, q in questions.items():
@@ -242,7 +245,7 @@ def form_questions(client, form_id, old, new):
             hits.append(qid)
         elif key(q.get("text")) == key(new):
             clashes.append(qid)
-    return hits, clashes
+    return hits, clashes, partner_fields(questions)
 
 
 def trimmed(row):
@@ -407,7 +410,7 @@ def main():
                          f"(one of {', '.join(glow_forms.REGIONS)})")
             ids = [glow_forms.REGIONALS[region], glow_forms.TEMPLATE]
         for fid in ids:
-            hits, clashes = form_questions(client, fid, old, new)
+            hits, clashes, pfields = form_questions(client, fid, old, new)
             label = glow_forms.LABELS.get(fid, fid)
             if clashes:
                 sys.exit(f"form {fid}: a roster question named {new!r} already exists "
@@ -422,10 +425,11 @@ def main():
                 continue
             if moving:
                 props = client.get(f"/form/{fid}/properties", limit=1000)
-                gated = partner_gated(props.get("conditions") or [], {hits[0]})
+                gated = partner_gated(props.get("conditions") or [], {hits[0]}, pfields)
                 if gated:
                     sys.exit(f"form {fid}: rule {', '.join(gated)} shows q{hits[0]} only for a "
-                             "typed Partner - the name is shared on this form, so a move would "
+                             "given Partner (typed or chosen from the partner list) - the name "
+                             "is shared on this form, so a move would "
                              "make the next sync create a Partner-gated duplicate; sync the "
                              "form and check form_status first")
             if renaming:
@@ -436,7 +440,7 @@ def main():
                       f"term - nothing to write   [{label}]")
     elif moving:
         print("  forms          not checked (--sheet-only); --apply needs JOTFORM_API_KEY and "
-              "checks that no rule shows the club only for a typed Partner")
+              "checks that no rule shows the club only for a given Partner")
 
     if not args.apply:
         print("\nDRY RUN - re-run with --apply to write")

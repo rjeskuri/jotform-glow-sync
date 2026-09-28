@@ -58,6 +58,8 @@ UPDATE_RX = re.compile(r"^  - UPDATE roster '(?P<club>.+)' \(q(?P<qid>\d+), (?P<
 DELETE_RX = re.compile(r"^  - DELETE roster '(?P<club>.+)' \(q(?P<qid>\d+), belongs to (?P<region>.+)\)$")
 REPLACE_RX = re.compile(r"^  - REPLACE conditions \((?P<rules>\d+) rules")
 PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs(?::[^)]*)?\)$")
+PARTNER_PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) partner picker "
+                               r"\((?P<partners>\d+) partners(?::[^)]*)?\)$")
 ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) girls\); "
                        r"(?P<all>\d+) clubs overall")
 NOT_IN_EXPORT = "is on the form but not in the sheet export"
@@ -71,12 +73,16 @@ def key(s):
 # ------------------------------------------------------------ pure functions
 def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
-    plan = {"creates": [], "updates": [], "deletes": [], "picker": [], "rules": None,
-            "warnings": [], "roster_clubs": None, "roster_girls": None}
+    plan = {"creates": [], "updates": [], "deletes": [], "picker": [], "partner_picker": [],
+            "rules": None, "warnings": [], "roster_clubs": None, "roster_girls": None}
     for line in text.splitlines():
         m = PICKER_RX.match(line)
         if m:
             plan["picker"].append({"op": m["op"], "clubs": int(m["clubs"])})
+            continue
+        m = PARTNER_PICKER_RX.match(line)
+        if m:
+            plan["partner_picker"].append({"op": m["op"], "partners": int(m["partners"])})
             continue
         m = CREATE_RX.match(line)
         if m:
@@ -112,6 +118,9 @@ def plan_from_summary(summary):
                         for d in summary.get("deletes", [])],
             "picker": [{"op": m["op"], "clubs": int(m["clubs"])}
                        for m in (PICKER_RX.match("  - " + c) for c in summary.get("calls", [])) if m],
+            "partner_picker": [{"op": m["op"], "partners": int(m["partners"])}
+                               for m in (PARTNER_PICKER_RX.match("  - " + c)
+                                         for c in summary.get("calls", [])) if m],
             "rules": summary.get("rules"),
             "warnings": [w.strip() for w in summary.get("warnings", [])],
             "roster_clubs": summary.get("roster_clubs"),
@@ -119,10 +128,11 @@ def plan_from_summary(summary):
 
 
 def changes(plan):
-    """Roster creates/updates/deletes plus a Club-picker option update (never a create:
-    the runner does not pass --club-picker, so a CREATE here means someone else did)."""
+    """Roster creates/updates/deletes plus a Club-picker or partner-list update (never a
+    create: the runner passes neither --club-picker nor --partner-picker, so a CREATE here
+    means someone else did)."""
     return (len(plan["creates"]) + len(plan["updates"]) + len(plan["deletes"])
-            + len(plan.get("picker", [])))
+            + len(plan.get("picker", [])) + len(plan.get("partner_picker", [])))
 
 
 def check_bands(plan, max_creates=5, max_updates=20):

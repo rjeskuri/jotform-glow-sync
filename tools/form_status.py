@@ -26,7 +26,7 @@ sys.path.insert(0, REPO)
 from glow import forms as glow_forms       # noqa: E402
 from glow.cli import run                   # noqa: E402
 from glow.jotform import Client            # noqa: E402
-from glow.sync import PICKER_NAME          # noqa: E402  (shared with the sync tool)
+from glow.sync import PICKER_NAME, partner_picker   # noqa: E402  (shared with the sync tool)
 from glow.text import key, name_key        # noqa: E402
 
 FORMS = {glow_forms.TEMPLATE: ("template", None),
@@ -66,9 +66,13 @@ def audit_rules(questions, conditions):
     problems = []
     qids = set(questions)
     club_field = club_picker(questions) or CLUB_NAME_QID
+    plist = partner_picker(questions)            # the partner list, once the form has one
+    partner_fields = {PARTNER_QID, plist} if plist else {PARTNER_QID}
     clubs = {qid: " ".join(q["text"].split()) for qid, q in questions.items()
              if q.get("type") == "control_checkbox"}
     shown_by = defaultdict(list)     # club qid -> [rule ids that show it]
+    list_shown_for = set()           # club names (lower) whose pick shows the partner list
+    box_shown_by = []                # rule ids that show the typed box while the list exists
     aggregate_operands = None
     for c in conditions:
         try:
@@ -86,12 +90,18 @@ def audit_rules(questions, conditions):
                 problems.append(f"rule {c.get('id')}: action refers to missing question {f}")
             if a.get("visibility") == "Show" and str(a.get("field")) in clubs:
                 shown_by[str(a["field"])].append((c.get("id"), terms))
+            if plist and a.get("visibility") == "Show" and str(a.get("field")) == plist:
+                list_shown_for.update(" ".join(str(t.get("value")).split()).lower() for t in terms
+                                      if str(t.get("field")) == club_field)
+            if plist and a.get("visibility") == "Show" and str(a.get("field")) == PARTNER_QID:
+                box_shown_by.append(c.get("id"))
             if str(a.get("resultField")) == CONTACT_IDS_QID:
                 aggregate_operands = {x for x in str(a.get("operands", "")).split(",") if x}
                 for op in aggregate_operands:
                     if op not in qids:
                         problems.append(f"Contact_IDs aggregate refers to missing question {op}")
     # every club roster has exactly one show-rule whose clubName term equals its text
+    tested_partners = {}             # key(partner) -> partner, for every term on the list
     by_name = defaultdict(list)
     for qid, name in clubs.items():
         by_name[name.lower()].append(qid)
@@ -105,11 +115,51 @@ def audit_rules(questions, conditions):
         if not club_terms or " ".join(str(club_terms[0].get("value")).split()).lower() != name.lower():
             problems.append(f"'{name}' (q{qid}): show-rule does not test the club field "
                             f"(q{club_field}) == its text")
-        has_partner = any(str(t.get("field")) == PARTNER_QID for t in terms)
+        partner_terms = [t for t in terms if str(t.get("field")) in partner_fields]
+        has_partner = bool(partner_terms)
         if len(by_name[name.lower()]) > 1 and not has_partner:
             problems.append(f"'{name}' (q{qid}) shares its name but its rule has no Partner term")
         if len(by_name[name.lower()]) == 1 and has_partner:
             problems.append(f"'{name}' (q{qid}) is unique but its rule needs a Partner")
+        for t in partner_terms:
+            if plist and str(t.get("field")) != plist:
+                problems.append(f"'{name}' (q{qid}): rule tests the typed Partner box "
+                                f"(q{PARTNER_QID}), not the partner list (q{plist})")
+            elif plist:
+                tested_partners.setdefault(key(t.get("value")), str(t.get("value")))
+    if plist:
+        q = questions[plist]
+        listed = {key(o): o for o in (q.get("options") or "").split("|") if o.strip()}
+        missing = sorted(v for k, v in tested_partners.items() if k not in listed)
+        if missing:
+            problems.append(f"partner list (q{plist}) misses {len(missing)} partner(s) a rule "
+                            f"tests: {missing[:5]}")
+        extra = sorted(o for k, o in listed.items() if k not in tested_partners)
+        if tested_partners and extra:
+            problems.append(f"partner list (q{plist}) offers {len(extra)} partner(s) no rule "
+                            f"tests: {extra[:5]}")
+        if q.get("required") != "Yes":
+            problems.append(f"partner list (q{plist}) is not required")
+        if q.get("hidden") != "Yes":
+            problems.append(f"partner list (q{plist}) is not hidden: every mentor is asked for "
+                            "a partner")
+        # a shared name must show the list (else its rosters never appear), and only a
+        # shared name may (else that club's mentor must pick a partner to submit)
+        shared = {low: clubs[qs[0]] for low, qs in by_name.items() if len(qs) > 1}
+        for low, name in sorted(shared.items()):
+            if low not in list_shown_for:
+                problems.append(f"'{name}' is shared, but no rule shows the partner list "
+                                f"(q{plist}) for it")
+        for low in sorted(list_shown_for - set(shared)):
+            name = next((clubs[qs[0]] for n, qs in by_name.items() if n == low), low)
+            problems.append(f"the partner list (q{plist}) is shown for '{name}', which no two "
+                            "rosters share")
+        if box_shown_by:
+            problems.append(f"{len(box_shown_by)} rule(s) show the typed Partner box "
+                            f"(q{PARTNER_QID}), which the partner list replaces: {box_shown_by[:5]}")
+        if questions.get(PARTNER_QID, {}).get("hidden") != "Yes":
+            problems.append(f"partner list present but the typed Partner box (q{PARTNER_QID}) "
+                            "is still visible")
     if aggregate_operands is None:
         problems.append("no Contact_IDs aggregate calculation found")
     else:
@@ -169,7 +219,7 @@ def form_report(form_id, client, roster_by_region):
                              "resets this; run tools/restore_translations.py")
     rep = {
         "rule_problems": rule_problems, "rule_summary": rule_summary,
-        "languages": languages, "club_picker": picker,
+        "languages": languages, "club_picker": picker, "partner_picker": partner_picker(questions),
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -234,6 +284,9 @@ def main():
         print(f"   enableFuzzy: required={f['required']} selected={f['selected']!r} hidden={f['hidden']}")
         print(f"   languages: {len(r['languages'])} ({', '.join(r['languages'][:4])}{'…' if len(r['languages']) > 4 else ''})")
         print(f"   club picker: {'q' + r['club_picker'] if r['club_picker'] else 'none (mentors type the club name)'}")
+        if r.get("partner_picker"):
+            print(f"   partner picker: q{r['partner_picker']} (a shared club name: mentors choose "
+                  "the partner)")
         rs = r["rule_summary"]
         print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
               f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "
