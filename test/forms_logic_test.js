@@ -645,6 +645,132 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         !w.mails.length && w.audits.join() === 'sendSfPendingDigest: 2 open ReviewQueue item(s) (1 new this week), 1 club(s) pending in Salesforce but STAFF_NOTIFY_EMAIL is not set');
 }
 
+// ------------------------- Club Roster Form responses (the handlers, stubbed)
+console.log('\nClub Roster Form text is sheet-safe (BACKLOG 44)');
+const nz = loadGs(['sheetText_', 'parseFormRoster_', 'parseRoster_', 'foldKey_']);
+{
+  const leaks = ['=1+1', '= =1+1', '- =x', '@ =A1', '+ + =1', '=\t=x', ' =x', '​=x', '  -@+=x']
+      .filter(v => /^[\s=+\-@]/.test(nz.sheetText_(v)) || nz.sheetText_(v) === '');
+  check('sheetText_: no leading = + - @ or space survives, whatever the mix', !leaks.length, leaks.join(' | '));
+  check('sheetText_: tidies, and leaves ordinary text (and inner = + - @) alone',
+        nz.sheetText_('  Nova   Club ') === 'Nova Club' && nz.sheetText_('Club A+B = @home - 2') === 'Club A+B = @home - 2' &&
+        nz.sheetText_(null) === '' && nz.sheetText_('=') === '');
+  const r = nz.parseFormRoster_('=Grace Zibblewick\n+Mary Zibblewick\n1. @Joy Blorptest\n- =Grace Zibblewick\nGrace Zibblewick\n=\n@Amina Qwertyson Alpha');
+  check('parseFormRoster_: every name sheet-safe, numbering and bullets still stripped',
+        r.names.join('|') === 'Grace Zibblewick|Mary Zibblewick|Joy Blorptest|Amina Qwertyson Alpha', r.names.join('|'));
+  check('parseFormRoster_: a repeat, and names the strip makes equal, are repeats (sheet-safe too)',
+        r.duplicates.join('|') === 'Grace Zibblewick|Grace Zibblewick', r.duplicates.join('|'));
+  const plain = 'Grace Zibblewick\n2) Mary Zibblewick\n• Joy Blorptest\nmary zibblewick';
+  check('parseFormRoster_ = parseRoster_ on ordinary text (the enrollment import keeps parseRoster_)',
+        JSON.stringify(nz.parseFormRoster_(plain)) === JSON.stringify(nz.parseRoster_(plain)));
+  check('foldKey_: case and accents folded, nothing else', nz.foldKey_(' Lucía  ZÖRBLEWICK ') === 'lucia zorblewick' &&
+        nz.foldKey_('G.L.O.W') === 'g.l.o.w');
+}
+
+const HANDLER_FILES = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs'];
+const handlerSrc = HANDLER_FILES.map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+/**
+ * A spreadsheet of plain arrays (tabs[name] = rows, row 1 = header) with the
+ * real handler code loaded over it. Records e-mails, Audit, FormLog, Jotform
+ * sync notifications and dropdown refreshes instead of doing them.
+ */
+function sheetWorld(tabs, opts) {
+  opts = opts || {};
+  const vm = require('vm');
+  const out = { tabs, mails: [], audits: [], formLog: [], notified: [], synced: 0 };
+  const colNum = letters => letters.split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+  const guard = name => { if (opts.down === name) throw new Error('sheet unavailable'); };
+  const sheet = name => ({
+    getName: () => name,
+    getLastRow: () => tabs[name].length,
+    getLastColumn: () => Math.max(0, ...tabs[name].map(r => r.length)),
+    getRange: (r, c, nr, nc) => {
+      nr = nr || 1; nc = nc || 1;
+      const put = (i, j, v) => {
+        while (tabs[name].length < r + i) tabs[name].push([]);
+        tabs[name][r - 1 + i][c - 1 + j] = v;
+      };
+      return {
+        getValues: () => { guard(name); return tabs[name].slice(r - 1, r - 1 + nr).map(row => Array.from({ length: nc }, (_, j) => row[c - 1 + j] ?? '')); },
+        setValues: vals => { guard(name); vals.forEach((v, i) => v.forEach((x, j) => put(i, j, x))); },
+        setValue: v => { guard(name); put(0, 0, v); },
+        setFontWeight: () => ({}),
+      };
+    },
+    getRangeList: a1s => ({ setValue: v => a1s.forEach(a => {
+      const m = /^([A-Z]+)(\d+)$/.exec(a); sheet(name).getRange(+m[2], colNum(m[1])).setValue(v); }) }),
+    appendRow: row => { guard(name); tabs[name].push(row.slice()); },
+    setFrozenRows: () => {},
+  });
+  const ctx = vm.createContext({
+    console,
+    SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
+                                           insertSheet: n => { tabs[n] = []; return sheet(n); },
+                                           getSpreadsheetTimeZone: () => 'America/New_York' }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
+    MailApp: { sendEmail: o => { if (opts.mailFails) throw new Error('quota'); out.mails.push(o); } },
+  });
+  vm.runInContext(handlerSrc, ctx);
+  ctx.today_ = () => '2026-09-28';
+  ctx.now_ = () => '2026-09-28 09:00:00';
+  ctx.audit_ = (action, detail) => out.audits.push(action + ': ' + detail);
+  ctx.formLogAdd_ = (which, row, key, result) => out.formLog.push([which, row, key, result]);
+  ctx.trySyncChoices_ = () => { out.synced++; };
+  ctx.tryNotifySync_ = why => out.notified.push(why);
+  out.ctx = ctx;
+  out.sheet = sheet;
+  out.cells = () => Object.keys(tabs).flatMap(t => tabs[t].slice(1).flat().map(String));
+  return out;
+}
+const HQ = fh.Q;
+let girlSeq = 0;
+/** Roster rows for one club: [girl_id, partner, club, region, full_name, last_name, status, added, removed, source]. */
+const rosterRows = (partnerName, clubName, girls, status) => girls.map(g => [
+  'T' + (++girlSeq), partnerName, clubName, 'Africa', g, g.split(' ').pop(), status || 'active', '2026-08-26', '', 'Enrollment Responses!2']);
+const baseTabs = rows => ({
+  Roster: [['girl_id', 'partner', 'club', 'region', 'full_name', 'last_name', 'status', 'added_date', 'removed_date', 'source']].concat(rows || []),
+  ClubRegistry: [['club_code', 'partner', 'club', 'created']],
+  Partners: [['partner', 'region', 'notes'], ['Fixture Partner Alpha', 'Africa', ''], ['Fundación Demo', 'Latin America', ''],
+             ['Test Aid Relief Network', 'Asia', '']],
+  ReviewQueue: [['raised', 'issue', 'partner', 'club', 'detail', 'resolved']],
+  'SF Pending': [['added', 'partner', 'club', 'region', 'girls', 'mentor_name', 'mentor_email', 'country', 'status', 'notes']],
+});
+const newClub = (partnerName, clubName, girls, extra) => Object.assign({
+  [HQ.ACTION]: HQ.ACTION_NEW, [HQ.PARTNER_NEW]: partnerName, [HQ.CLUB]: clubName, [HQ.ROSTER]: girls.join('\n'),
+  [HQ.SAME_NAME]: 'No', [HQ.MENTOR_NAME]: 'Mentor Testperson', [HQ.MENTOR_EMAIL]: 'mentor@example.org' }, extra || {});
+const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
+
+{
+  const w = sheetWorld(baseTabs());
+  const answers = newClub(fh.OTHER_PARTNER, '=Nova Club', ['=Grace Zibblewick', '+Mary Zibblewick', '1. @Joy Blorptest', 'Grace Zibblewick'],
+      { [HQ.NEW_PARTNER]: '@Brand New Org', [HQ.REGION]: 'Africa', [HQ.MENTOR_NAME]: '=Mentor Testperson',
+        [HQ.COUNTRY]: '+Kenya', [HQ.SAME_NAME]: 'Yes', [HQ.SAME_NAME_DETAIL]: '=two girls' });
+  const result = w.ctx.handleNewClub_(answers, 'Roster Form Responses!41', KEY41);
+  const added = w.tabs.Roster.slice(1);
+  check('a new club typed with formula characters: imported, every value sheet-safe',
+        /^new club Nova Club \(Brand New Org\): 3 girls added/.test(result) && added.length === 3 &&
+        added.every(r => r[1] === 'Brand New Org' && r[2] === 'Nova Club') &&
+        added.map(r => r[4]).join('|') === 'Grace Zibblewick|Mary Zibblewick|Joy Blorptest', result);
+  check('…ClubRegistry, Partners and SF Pending too', w.tabs.ClubRegistry[1][2] === 'Nova Club' &&
+        w.tabs.Partners.some(r => r[0] === 'Brand New Org') &&
+        w.tabs['SF Pending'][1].slice(1, 3).join('|') === 'Brand New Org|Nova Club' &&
+        w.tabs['SF Pending'][1][5] === 'Mentor Testperson' && w.tabs['SF Pending'][1][7] === 'Kenya');
+  check('…and the ReviewQueue ("Same name listed twice" starts with the name, stripped)',
+        w.tabs.ReviewQueue.some(r => r[1] === 'Same name listed twice' && r[4].startsWith('Grace Zibblewick —')));
+  const leaked = w.cells().filter(c => /^[=+\-@]/.test(c));
+  check('no cell the handler wrote starts with = + - @', !leaked.length, leaked.join(' | '));
+
+  const club = rosterRows('Fixture Partner Alpha', 'Sunrise Club', ['Grace Zibblewick', 'Mary Zibblewick']);
+  const w2 = sheetWorld(baseTabs(club));
+  w2.ctx.handleRosterChange_({ [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: 'Fixture Partner Alpha',
+                               [HQ.CLUB_PREFIX + 'Fixture Partner Alpha)']: 'Sunrise Club',
+                               [HQ.ADD]: '=Joy Blorptest\n@=Amina Qwertyson Alpha', [HQ.REMOVE]: 'Mary Zibblewick',
+                               [HQ.MENTOR_EMAIL_MOD]: 'mentor@example.org' }, 'Roster Form Responses!42');
+  check('a roster change: ADD names sheet-safe, REMOVE still matched as typed',
+        w2.tabs.Roster.slice(3).map(r => r[4]).join('|') === 'Joy Blorptest|Amina Qwertyson Alpha' &&
+        w2.tabs.Roster[2][6] === 'inactive' && !w2.cells().some(c => /^[=+\-@]/.test(c)));
+}
+
 console.log('\n  guards');
 {
   const all = fs.readdirSync(loadGs.GS_DIR).filter(f => f.endsWith('.gs'))

@@ -473,13 +473,16 @@ function formLogAdd_(which, row, responseKey, result) {
 }
 
 // ------------------------------------------------------------ New club
+// Typed answers pass sheetText_ / parseFormRoster_ before they reach the
+// sheet (a leading = would be a formula); the partner dropdown's value is
+// ours and is used as chosen.
 function handleNewClub_(a, source) {
   const ss = SpreadsheetApp.getActive();
   let partner = tidy_(a[Q.PARTNER_NEW]);
-  const typed = tidy_(a[Q.NEW_PARTNER]);
+  const typed = sheetText_(a[Q.NEW_PARTNER]);
   if (!partner || partner === OTHER_PARTNER) partner = typed;
-  const club = tidy_(a[Q.CLUB]);
-  const parsed = parseRoster_(a[Q.ROSTER]);
+  const club = sheetText_(a[Q.CLUB]);
+  const parsed = parseFormRoster_(a[Q.ROSTER]);
   if (!partner || !club || !parsed.names.length) {
     // logged as ERROR so it is retried once staff fill in the response row
     throw new Error('incomplete submission: missing ' +
@@ -525,8 +528,8 @@ function handleNewClub_(a, source) {
 
   if (isNew) {
     ensureTab_(ss, TAB.SF_PENDING, SF_PENDING_COLS).appendRow([
-      today, partner, club, region, plan.toAppend.length, tidy_(a[Q.MENTOR_NAME]),
-      tidy_(a[Q.MENTOR_EMAIL]), tidy_(a[Q.COUNTRY]), 'pending', '']);
+      today, partner, club, region, plan.toAppend.length, sheetText_(a[Q.MENTOR_NAME]),
+      sheetText_(a[Q.MENTOR_EMAIL]), sheetText_(a[Q.COUNTRY]), 'pending', '']);
   }
   trySyncChoices_();
 
@@ -543,8 +546,8 @@ function handleRosterChange_(a, source) {
   const ss = SpreadsheetApp.getActive();
   const partner = tidy_(a[Q.PARTNER_MOD]);
   const club = clubFromSections_(a);
-  const adds = parseRoster_(a[Q.ADD]);
-  const removes = parseRoster_(a[Q.REMOVE]);
+  const adds = parseFormRoster_(a[Q.ADD]);        // written to the Roster: sheet-safe
+  const removes = parseRoster_(a[Q.REMOVE]);      // only matched against it
   const mentorEmail = tidy_(a[Q.MENTOR_EMAIL_MOD]);
   if (!partner || !club) throw new Error('incomplete submission: no partner/club chosen');
   if (!adds.names.length && !removes.names.length) return 'nothing to do (no names given)';
@@ -704,7 +707,7 @@ const RC_NEW = /\bnew (?:girls?|members?|students?|names)\b|\bnuev[ao]s? (?:nina
 
 /** Report text as the patterns read it: lower case, accents folded (so \b sees "anadio"). */
 function foldText_(s) {
-  return key_(s).normalize('NFKD').replace(/[̀-ͯ]/g, '');
+  return foldKey_(s);
 }
 
 /**
@@ -725,10 +728,10 @@ function looksLikeRosterChange_(a) {
  * The ReviewQueue item for a roster change sent as a problem report. It points
  * at the report (source) and never copies its text or reply address: reports
  * name girls. Partner and club are what the mentor typed, capped, with any
- * leading run of = + - @ and spaces stripped so the sheet never reads a formula.
+ * leading run of = + - @ and spaces stripped (sheetText_) so the sheet never reads a formula.
  */
 function feedbackReviewItem_(a, source, sentDay, reason) {
-  const typed = function (v) { return tidy_(v).replace(/^[\s=+\-@]+/, '').slice(0, 80); };
+  const typed = function (v) { return sheetText_(v).slice(0, 80); };
   return {
     issue: 'Roster change sent as a problem report',
     partner: typed(a[Q.FB_PARTNER]), club: typed(a[Q.FB_CLUB]),
