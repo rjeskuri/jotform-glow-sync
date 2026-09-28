@@ -84,6 +84,8 @@ trigger outage (CLAUDE.md rule 11); the existing guard test pins the service set
 - `docs/RUNBOOK.md` — "Working the ReviewQueue": a row for the new issue; "Missed form
   responses" step 2: what an old response still does.
 - `docs/DECISIONS.md` — one row. `docs/BACKLOG.md` — 41 built (on this branch); 39 still open.
+- `docs/ARCHITECTURE.md` (known quirks) and `appsscript/INSTALL.md` (the forms table) — one
+  sentence each, so neither still says a response always reactivates.
 - No Python change: nothing in Python plans roster changes; `ROSTER_COLS` unchanged.
 
 ## Order of work (the repo stays green after each)
@@ -149,3 +151,17 @@ Live (Ryan's go, at a quiet moment):
    `python3 tools/auto_sync.py` → every region in-sync.
 
 Rollback: `git checkout e552f55 -- appsscript && npm run clasp:push`.
+
+## Result (offline; status stays `proposed` until Ryan accepts)
+- 2026-09-28, branch `wf/replay-guard`: built as designed. Mutation checks: with the guard
+  switched off 11 checks fail; without the Date normalisation 6, with UTC instead of the
+  sheet's zone 5, with the change handler given no sent day 5, the new-club handler 1, the
+  mentor e-mail using the Roster spelling 1.
+- `make check` (also with `CSV=` the 2026-08-24 export: `real data …: parsed 328 clubs, 6210
+  girls`, pins and the 6210-name leak scan pass):
+  `ALL CHECKS PASSED` ×3, `py: 30 files parse, 18 scripts answer --help`, `OK`,
+  `gs: 10 files parse`, `secrets: clean`, `docs-links: ok`, `fixtures: up to date`,
+  `CHECK PASSED`.
+- Not checked: whether the live Roster's `removed_date` cells are Date cells or text (a
+  read-only check was not run); the code handles both.
+- Nothing live was touched. Deploy and live proof above: Ryan's go.

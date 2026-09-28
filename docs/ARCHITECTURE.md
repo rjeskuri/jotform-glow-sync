@@ -102,6 +102,11 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
   unreachable; `auto_sync.py` decides "changed" from CREATE/UPDATE/DELETE.
 - Reactivating a girl leaves no timestamp in the Roster row (only
   `added_date`/`removed_date` exist); the Audit tab is the change record.
+- A Club Roster Form response never reactivates a girl whose `removed_date`
+  is after the day it was sent (the replay guard, `RosterOps.gs`
+  `staysRemoved_`); the rebuild passes no sent day and is unguarded. Because
+  a reactivation records no date, an old REMOVE replayed later can still
+  take off a girl re-added since.
 
 ## Generated and placeholder code
 
