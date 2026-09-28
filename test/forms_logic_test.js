@@ -848,10 +848,10 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
         String(item[4]).startsWith(RQ + '!5 (sent 2026-09-10): 1 girl(s)') && String(item[4]).includes('Roster rows 2.') &&
         String(item[4]).endsWith(' [#' + RQ + '!5]') && noGirls(String(item[4])), String(item[4]));
   check('FormLog result and Audit: counts, no names',
-        w.formLog[0] === 'Sunrise Club (' + ORG + '): 0 added, 2 reactivated, 1 removed, 1 kept removed (removed after it was sent)' &&
+        w.formLog[0] === 'Sunrise Club (' + ORG + '): 0 added, 2 reactivated, 1 removed, 1 kept removed' &&
         w.audits.length === 1 && w.audits[0] === 'rosterChangeForm: ' + result && noGirls(w.audits.join('\n')), w.formLog[0]);
   const body = (w.mails[0] || { body: '' }).body;
-  const kept = body.split('\n').indexOf('Not added back — they were removed from the roster after you sent this form. ' +
+  const kept = body.split('\n').indexOf('Not added back — they are marked removed on the roster. ' +
                                         'If one of them has rejoined the club, send the form again to add her:');
   check('the mentor e-mail lists her as the mentor typed her, under "Not added back"',
         w.mails.length === 1 && kept !== -1 && body.split('\n')[kept + 1] === '  - GRACE ZIBBLEWICK' &&
@@ -919,7 +919,7 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
         status(w, 2) === 'inactive|Date' && status(w, 3) === 'inactive|Date' && status(w, 5) === 'active|' &&
         w.tabs.ReviewQueue.length === 2 && String(w.tabs.ReviewQueue[1][4]).includes('2 girl(s)') &&
         String(w.tabs.ReviewQueue[1][4]).includes('Roster rows 2, 3.') && !w.mails.length &&
-        result === 'existing club Sunrise Club (' + ORG + '): 0 girls added, 1 reactivated, 2 kept removed (removed after it was sent), 1 for review',
+        result === 'existing club Sunrise Club (' + ORG + '): 0 girls added, 1 reactivated, 2 kept removed, 1 for review',
         result);
 }
 

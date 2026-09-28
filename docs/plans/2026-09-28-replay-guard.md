@@ -72,9 +72,10 @@ intent: none — BACKLOG 41, the follow-up named in docs/plans/2026-09-27-formlo
   `removed_date` is blank, keeps her removed (and the ReviewQueue says so).
 - Summaries (Audit, FormLog result) add `, N kept removed` — a count.
 - `sendChangeConfirmation_` (roster changes; the new-club branch sends no e-mail) gains a
-  section listing the names **as the mentor typed them**: "Not added back — they were removed
-  from the roster after you sent this form. If one of them has rejoined the club, send the form
-  again to add her:" (a fresh ADD is sent today, so it reactivates).
+  section listing the names **as the mentor typed them**: "Not added back — they are marked
+  removed on the roster. If one of them has rejoined the club, send the form again to add her:"
+  (a fresh ADD is sent today, so it reactivates). Neither it nor the summary says *when* she was
+  removed: a blank removal day is kept removed too (review finding RG-3).
 - `REVIEW_ISSUES` gains the new issue (9) after "Removal did not match anyone"; the header
   comment and the old-row dialog say what an old response can still do (its removals and new
   names still apply; girls removed since stay removed).
@@ -181,6 +182,12 @@ Rollback: `git checkout e552f55 -- appsscript && npm run clasp:push`.
   removal the day it was sent (`removedOn`, Design 1, last bullet); three handler tests
   (REMOVE then ADD the same day, on consecutive days, and the reverse order) fail without it
   (4 checks). Nothing else survived verification.
+- Second review (three findings, all reproduced, each fixed with checks that fail without it):
+  RG-1 a Club Roster Form response whose Timestamp is not a date ran unguarded although the
+  menu's old-row warning promises otherwise → refused as `ERROR:` (Design 3; 2 checks); RG-2 a
+  `removed_date` after today blocked even a fresh ADD → treated as unreadable (Design 1;
+  1 check); RG-3 the summary and the mentor e-mail said "removed after it was sent" for girls
+  whose removal day is unknown → neutral wording (3 checks).
 - `make check` (also with `CSV=` the 2026-08-24 export: `real data …: parsed 328 clubs, 6210
   girls`, pins and the 6210-name leak scan pass):
   `ALL CHECKS PASSED` ×3, `py: 30 files parse, 18 scripts answer --help`, `OK`,

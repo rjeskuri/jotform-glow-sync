@@ -491,10 +491,13 @@ function formLogAdd_(which, row, responseKey, result) {
       .appendRow([now_(), which, row, responseKey, result]);
 }
 
-/** ', N kept removed' for a summary, or '' (counts only: summaries reach FormLog and Audit). */
+/**
+ * ', N kept removed' for a summary, or '' (counts only: summaries reach FormLog
+ * and Audit). No reason given: a girl whose removal day is blank is kept too.
+ */
 function keptRemovedNote_(plan) {
   const n = (plan.keptRemoved || []).length;
-  return n ? ', ' + n + ' kept removed (removed after it was sent)' : '';
+  return n ? ', ' + n + ' kept removed' : '';
 }
 
 // ------------------------------------------------------------ New club
@@ -637,8 +640,9 @@ function sendChangeConfirmation_(to, club, partner, plan) {
   section('Already on the roster (no change):', plan.alreadyActive);
   section('Already removed earlier (no change):', plan.alreadyInactive);
   section('Listed under both ADD and REMOVE — kept on the roster:', plan.keptBoth);
-  // the names as the mentor typed them, never the Roster's spelling
-  section('Not added back — they were removed from the roster after you sent this form. ' +
+  // the names as the mentor typed them, never the Roster's spelling; no claim about WHEN she
+  // was removed (the Roster may not record the day)
+  section('Not added back — they are marked removed on the roster. ' +
           'If one of them has rejoined the club, send the form again to add her:',
           (plan.keptRemoved || []).map(function (k) { return k.name; }));
   if (plan.unmatched.length) {
