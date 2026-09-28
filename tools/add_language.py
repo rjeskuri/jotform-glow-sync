@@ -28,6 +28,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms as glow_forms   # noqa: E402
+from glow import links as glow_links   # noqa: E402
 from glow.cli import run               # noqa: E402
 from glow.jotform import Client        # noqa: E402
 from glow.text import md5              # noqa: E402
@@ -35,12 +36,30 @@ from glow.text import md5              # noqa: E402
 FORMS = {**{fid: glow_forms.TITLES[region] for region, fid in glow_forms.REGIONALS.items()},
          glow_forms.TEMPLATE: glow_forms.TEMPLATE_TITLE}
 SPECIAL_NAMES = {"arabic": "Arabic‬‎"}   # as in Jotform's table
-LINK_SENTENCE = "Click here to report a problem"
-LINK_ELEMENT_NAME = "somethingNotWorking"
+
+
+def text_element_keys(questions, base, words):
+    """{key: translated HTML} for the link elements above Submit (glow/links.py)
+    whose sentence `words` translates. The runtime looks a text element up by
+    its id (`text_<qid>`) and swaps in the whole inner HTML; base may also hold
+    the element's HTML itself. Both keys carry the unchanged link."""
+    out = {}
+    for q, link in glow_links.elements_on(questions):
+        sentence = link.sentence
+        if sentence not in words:
+            continue
+        text_id = f"text_{q['qid']}"
+        for k, english in base.items():
+            if english == text_id:
+                out[k] = q["text"].replace(sentence, words[sentence])
+            elif english.startswith("<") and sentence in english:
+                out[k] = english.replace(sentence, words[sentence])
+    return out
 
 
 def load_dict(path):
-    data = json.load(open(path, encoding="utf-8"))
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
     out = {}
     for english, text in data.items():
         if english.startswith("_"):
@@ -84,13 +103,7 @@ def main():
                 if md5(english) in base:
                     new[md5(english)] = text
             questions = client.get(f"/form/{form_id}/questions")
-            link = next((q for q in questions.values() if q.get("name") == LINK_ELEMENT_NAME), None)
-            if link and LINK_SENTENCE in words:
-                text_id = f"text_{link['qid']}"
-                for k, english in base.items():
-                    if english == text_id or (LINK_SENTENCE in english and english.startswith("<")):
-                        new[k] = english.replace(LINK_SENTENCE, words[LINK_SENTENCE]) if english.startswith("<") \
-                            else link["text"].replace(LINK_SENTENCE, words[LINK_SENTENCE])
+            new.update(text_element_keys(questions, base, words))
         covered = sum(1 for k in (dict(have, **new)) if k in base)
         print(f"== {title}: switcher {'already has' if name in options else 'will get'} {name!r}; "
               f"{args.code} strings now {len(have)}, +{sum(1 for k in new if k not in have)} new, "

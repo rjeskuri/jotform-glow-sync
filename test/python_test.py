@@ -24,6 +24,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import add_feedback_link              # noqa: E402
+import add_language                   # noqa: E402
+import add_translations               # noqa: E402
 import auto_sync                      # noqa: E402
 import form_status                    # noqa: E402
 import rename_club                    # noqa: E402
@@ -31,6 +33,7 @@ import switcher_flags                 # noqa: E402
 import update_static_fields           # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
 from glow import links                # noqa: E402
+from glow.text import md5             # noqa: E402
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
 EXPECTED = os.path.join(REPO, "test", "fixtures", "expected.json")
@@ -1210,6 +1213,93 @@ class LinkTool(unittest.TestCase):
         snaps, out = self.run_main(fake, "--link", "roster", "--form", fid, "--apply")
         self.assertEqual((snaps, fake.writes), ([], []))                   # idempotent
         self.assertIn("already present", out)
+
+
+class TranslationPlan(unittest.TestCase):
+    """tools/add_translations.py plan_additions/merge and add_language's text-element keys."""
+
+    OFFERED = {"es", "fr", "th", "ur", "te", "vi", "ne", "km", "sw", "ar", "or", "hi", "fa"}
+
+    def setUp(self):
+        self.additions = add_translations.load_additions()
+
+    @staticmethod
+    def store(*langs):
+        return {**{lang: {} for lang in langs}, "base": {}, "en": {}}
+
+    def test_the_roster_sentence_is_translated_for_every_offered_language(self):
+        raw = json.loads(read(os.path.join(REPO, "tools", "translations_additions.json")))
+        entry = raw[links.ROSTER.sentence]
+        self.assertEqual(set(entry) - {"_note"}, self.OFFERED)
+        self.assertIn("not native-reviewed", entry["_note"].lower())
+        for lang in self.OFFERED:
+            text = entry[lang]
+            self.assertIn("Club Roster Form", text, lang)     # the form's own (English) name
+            self.assertNotEqual(text, links.ROSTER.sentence, lang)
+            self.assertFalse(set("&<>") & set(text), lang)
+        self.assertIn(links.PROBLEM.sentence, raw)
+
+    def test_both_link_elements_are_keyed_by_sentence_element_id_and_html(self):
+        qs = link_form(roster=True)
+        payload, sources = add_translations.plan_additions(qs, self.store("es", "hi"), self.additions)
+        self.assertEqual(set(payload), {"es", "hi"})               # only what the form offers
+        for qid, link in (("460", links.ROSTER), ("443", links.PROBLEM)):
+            stored, text_id = qs[qid]["text"], f"text_{qid}"
+            for lang in payload:
+                if lang not in self.additions[link.sentence]:
+                    continue
+                want = self.additions[link.sentence][lang]
+                html_t = payload[lang][md5(text_id)]
+                self.assertEqual(payload[lang][md5(stored)], html_t)
+                self.assertEqual(payload[lang][md5(link.sentence)], want)
+                self.assertIn(want, html_t)
+                self.assertNotIn(link.sentence, html_t)
+                self.assertEqual(links.href_of(html_t), link.url)   # the link is untouched
+            self.assertEqual(sources[md5(link.sentence)], link.sentence)
+            self.assertEqual(sources[md5(text_id)], text_id)
+            self.assertEqual(sources[md5(stored)], stored)
+        self.assertIn(md5("text_460"), payload["hi"])              # Hindi reaches the new link
+        self.assertNotIn(md5("text_443"), payload["hi"])           # its problem-link Hindi is add_language's
+
+    def test_a_form_without_the_element_gets_none_of_its_keys(self):
+        qs = link_form()
+        payload, sources = add_translations.plan_additions(qs, self.store(*self.OFFERED), self.additions)
+        keys = {k for d in payload.values() for k in d} | set(sources)
+        self.assertNotIn(md5(links.ROSTER.sentence), keys)
+        self.assertIn(md5(links.PROBLEM.sentence), keys)
+        payload, _ = add_translations.plan_additions(link_form(roster=True), self.store("es", "fr"),
+                                                     self.additions)
+        self.assertFalse({"hi", "fa", "or"} & set(payload))       # a language the form lacks is never posted
+
+    def test_merge_keeps_every_existing_entry_and_never_overwrites_a_source(self):
+        qs = link_form(roster=True)
+        store = self.store("es", "fr")
+        store["es"]["k-existing"] = "ya estaba"
+        store["fr"]["k-existing"] = "déjà là"
+        store["base"][md5(links.ROSTER.sentence)] = "an older source text"
+        store["base"]["k-roster-option"] = "Girl One"
+        payload, sources = add_translations.plan_additions(qs, store, self.additions)
+        merged = add_translations.merge(store, payload, sources)
+        self.assertEqual(merged["es"]["k-existing"], "ya estaba")
+        self.assertEqual(merged["fr"]["k-existing"], "déjà là")
+        self.assertEqual(merged["base"]["k-roster-option"], "Girl One")
+        self.assertEqual(merged["base"][md5(links.ROSTER.sentence)], "an older source text")
+        self.assertEqual(merged["en"][md5(links.ROSTER.sentence)], links.ROSTER.sentence)
+        self.assertEqual(merged["en"][md5("text_460")], "text_460")
+        for lang in ("es", "fr"):
+            self.assertLessEqual(set(store[lang]), set(merged[lang]))
+
+    def test_add_language_keys_both_elements(self):
+        qs = link_form(roster=True)
+        base = {md5("text_460"): "text_460", md5(qs["460"]["text"]): qs["460"]["text"],
+                md5("text_443"): "text_443", "k-roster-option": "Girl One"}
+        words = {links.ROSTER.sentence: "RR", links.PROBLEM.sentence: "PP"}
+        out = add_language.text_element_keys(qs, base, words)
+        self.assertEqual(set(out), {md5("text_460"), md5(qs["460"]["text"]), md5("text_443")})
+        self.assertEqual(out[md5("text_460")], qs["460"]["text"].replace(links.ROSTER.sentence, "RR"))
+        self.assertEqual(out[md5("text_443")], qs["443"]["text"].replace(links.PROBLEM.sentence, "PP"))
+        self.assertEqual(add_language.text_element_keys(qs, base, {links.PROBLEM.sentence: "PP"}),
+                         {md5("text_443"): qs["443"]["text"].replace(links.PROBLEM.sentence, "PP")})
 
 
 class SyncLeavesTheLinksAlone(unittest.TestCase):

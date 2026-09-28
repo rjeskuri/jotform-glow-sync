@@ -22,9 +22,13 @@ key through `base`. So the English source of every added string is written
 to base/en too (merged; base already holds every roster name, which is why
 it is never rebuilt from scratch here).
 
-Text elements (the report link) are matched two ways, because Jotform may
-hash either the plain sentence or the element's whole HTML: both keys are
-posted, the HTML variant carrying the link around the translated sentence.
+Text elements (the links above Submit, glow/links.py: the problem-report
+link and the Club Roster Form link) are keyed three ways: the plain sentence,
+the element id `text_<qid>` (what the runtime looks up first; its value
+replaces the whole inner HTML) and the stored HTML - the HTML variants carry
+the link around the translated sentence. So this runs AFTER
+tools/add_feedback_link.py has put an element on the form. Before a POST the
+form's whole store is saved to backups/translations/<form>-<stamp>.json.
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -39,10 +43,12 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms as glow_forms   # noqa: E402
+from glow import links as glow_links   # noqa: E402
 from glow.cli import run               # noqa: E402
 from glow.jotform import Client        # noqa: E402
 from glow.text import md5              # noqa: E402
@@ -51,7 +57,7 @@ FORMS = {**{fid: region for region, fid in glow_forms.REGIONALS.items()},
          glow_forms.TEMPLATE: "template"}
 # hidden bridge fields, headers and images whose text never shows to a mentor
 NEVER_SHOWN = {"18", "98", "100", "102", "105", "109", "103", "13"}
-LINK_ELEMENT_NAME = "somethingNotWorking"
+SOURCE_KEYS = ("base", "en")   # the English source maps, never a language to translate into
 
 
 def visible_strings(questions):
@@ -75,7 +81,8 @@ def visible_strings(questions):
 
 
 def load_additions():
-    data = json.load(open(os.path.join(REPO, "tools", "translations_additions.json"), encoding="utf-8"))
+    with open(os.path.join(REPO, "tools", "translations_additions.json"), encoding="utf-8") as f:
+        data = json.load(f)
     out = {}
     for english, langs in data.items():
         if english.startswith("_"):
@@ -86,6 +93,62 @@ def load_additions():
         else:
             out[english] = dict(langs)
     return out
+
+
+def plan_additions(questions, store, additions):
+    """What to post for one form: (payload, sources).
+
+    payload = {lang: {md5 key: translation}} for every addition whose English
+    is visible on this form, in the languages the form's store has; sources =
+    {md5 key: English} for base and en (the runtime resolves a text to its key
+    through base, so a translation whose source is missing never applies).
+    Each link element (glow/links.py) on the form is also keyed by its element
+    id `text_<qid>` and by its stored HTML, both carrying the translated
+    sentence inside the unchanged link."""
+    strings = visible_strings(questions)
+    payload, sources = {}, {}
+    for english, per_lang in additions.items():
+        if english not in strings:
+            continue   # not on this form
+        sources[md5(english)] = english
+        for lang, text in per_lang.items():
+            if lang in store and lang not in SOURCE_KEYS:
+                payload.setdefault(lang, {})[md5(english)] = text
+    for q, link in glow_links.elements_on(questions):
+        sentence, stored = link.sentence, q.get("text", "")
+        if sentence not in stored or sentence not in additions:
+            continue
+        text_id = f"text_{q['qid']}"
+        for lang, text in additions[sentence].items():
+            if lang in store and lang not in SOURCE_KEYS:
+                html_t = stored.replace(sentence, H.escape(text, quote=False))
+                payload.setdefault(lang, {})[md5(text_id)] = html_t
+                payload.setdefault(lang, {})[md5(stored)] = html_t
+        sources[md5(stored)] = stored
+        sources[md5(text_id)] = text_id
+    return payload, sources
+
+
+def merge(store, payload, sources):
+    """The dictionaries to POST: each touched language whole (existing entries
+    plus the additions), and base/en with the new sources added - never
+    overwriting a source already there (base holds every roster option)."""
+    merged = {lang: {**store.get(lang, {}), **d} for lang, d in payload.items()}
+    for key in SOURCE_KEYS:
+        merged[key] = dict(store.get(key, {}))
+        for k, english in sources.items():
+            merged[key].setdefault(k, english)
+    return merged
+
+
+def save_store(form_id, store, stamp):
+    """The whole translation store, before it is replaced (backups/ is never committed)."""
+    folder = os.path.join(REPO, "backups", "translations")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"{form_id}-{stamp}-before.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(store, f, ensure_ascii=False, indent=1)
+    return path
 
 
 def main():
@@ -99,14 +162,15 @@ def main():
     additions = load_additions()
     targets = {f: FORMS.get(f, f) for f in args.form} if args.form else FORMS
 
+    stamp = datetime.now().strftime("%Y-%m-%dT%H%M")
+
     for form_id, label in targets.items():
         questions = client.get(f"/form/{form_id}/questions")
         store = client.get(f"/form/{form_id}/translations")
-        langs = [l for l in store if l not in ("en", "base")]
-        strings = visible_strings(questions)
-        link = next((q for q in questions.values() if q.get("name") == LINK_ELEMENT_NAME), None)
+        langs = [lg for lg in store if lg not in SOURCE_KEYS]
 
         if args.audit:
+            strings = visible_strings(questions)
             print(f"\n== {label} {form_id}: {len(strings)} visible strings, languages {langs}")
             for lang in langs:
                 missing = sorted(s for s in strings if md5(s) not in store.get(lang, {}))
@@ -114,53 +178,21 @@ def main():
                       (": " + "; ".join(m[:40] for m in missing[:6]) + ("…" if len(missing) > 6 else "") if missing else ""))
             continue
 
-        payload = {}
-        for english, per_lang in additions.items():
-            if english not in strings and not (link and english in H.unescape(re.sub(r"<[^>]+>", "", link["text"]))):
-                continue   # not on this form
-            for lang, text in per_lang.items():
-                if lang not in store:
-                    continue
-                payload.setdefault(lang, {})[md5(english)] = text
-        # Text elements are special: the runtime first translates the element's
-        # ID ("text_<qid>") as a word and, if a translation exists, replaces the
-        # whole inner HTML with it. That is how the builder stores them. Key the
-        # translated HTML by the id (and, as a fallback, by the stored HTML).
-        if link:
-            sentence = "Click here to report a problem"
-            if sentence in link["text"] and sentence in additions:
-                text_id = f"text_{link['qid']}"
-                for lang, text in additions[sentence].items():
-                    if lang in store:
-                        html_t = link["text"].replace(sentence, text)
-                        payload.setdefault(lang, {})[md5(text_id)] = html_t
-                        payload.setdefault(lang, {})[md5(link["text"])] = html_t
-        new = {l: sum(1 for k in d if k not in store.get(l, {})) for l, d in payload.items()}
+        payload, sources = plan_additions(questions, store, additions)
+        new = {lg: sum(1 for k in d if k not in store.get(lg, {})) for lg, d in payload.items()}
         print(f"== {label} {form_id}: {sum(len(d) for d in payload.values())} entries across "
               f"{len(payload)} languages ({sum(new.values())} new)")
         if not args.apply or not payload:
             continue
+        backup = save_store(form_id, store, stamp)
+        print(f"   store saved: {os.path.relpath(backup, REPO)}")
         # POST /translations REPLACES each language's dictionary, so always
         # send the existing strings plus the additions, never the additions alone
-        merged = {}
-        for lang, d in payload.items():
-            merged[lang] = dict(store.get(lang, {}))
-            merged[lang].update(d)
-        # The runtime finds an element's key by looking its English text up in
-        # `base` (and the server builds the text-keyed dictionaries from it),
-        # so every added key also needs its English source in base and en.
-        for src_key in ("base", "en"):
-            merged[src_key] = dict(store.get(src_key, {}))
-            for english in additions:
-                if english in strings or (link and english in link["text"]):
-                    merged[src_key].setdefault(md5(english), english)
-            if link:
-                merged[src_key].setdefault(md5(link["text"]), link["text"])
-                merged[src_key].setdefault(md5(f"text_{link['qid']}"), f"text_{link['qid']}")
+        merged = merge(store, payload, sources)
         client.post_json(f"/form/{form_id}/translations", merged, f"{form_id} post")
         after = client.get(f"/form/{form_id}/translations")
-        ok = all(after.get(l, {}).get(k) == v for l, d in merged.items() for k, v in d.items())
-        print("   " + (f"stored ({', '.join(f'{l}:{len(after.get(l, {}))}' for l in merged)})"
+        ok = all(after.get(lg, {}).get(k) == v for lg, d in merged.items() for k, v in d.items())
+        print("   " + (f"stored ({', '.join(f'{lg}:{len(after.get(lg, {}))}' for lg in merged)})"
                        if ok else "MISMATCH after write"))
 
     if not args.apply and not args.audit:
