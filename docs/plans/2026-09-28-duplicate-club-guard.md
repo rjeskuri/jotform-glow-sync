@@ -78,7 +78,8 @@ starts with the word `release`, e.g. `release 2026-10-01 by Ryan: a new club`) o
   "held" rows are), never run;
 - **release** (sent time matches) → `released`: its own YES/NO ("run as sent, against
   today's roster"), run with the guard skipped;
-- **closed** → not listed (staff dealt with it).
+- **closed** → not run (staff dealt with it); named on one line of the preview, so a release
+  typed another way shows (review fix F4).
 `runConfirmed_` re-reads the decision before running a released row; the trigger path skips
 a held response (a duplicate trigger never re-holds or re-mails). "Nothing to process." now
 also lists the held rows. `HELD:` results read as "held for review", not "failed again".
@@ -162,6 +163,11 @@ DECISIONS.md one row, BACKLOG 11b / 40 / 44.
   - Review fix F3: two release rules survived mutation (a closed item of another response
     taking a held row off the menu; `runConfirmed_` running a held row the preview offered
     as new). Each now has a test that fails when the rule is removed.
+  - Review fix F4: a hold resolved without the word `release` first (`Released`, `ok
+    release`) vanished from the menu, the Monday e-mail and the ReviewQueue's open items,
+    so a club meant to be imported was silently left out. Such a row is still never run,
+    but the preview names it on one line (`closedHoldsText_`: response and ReviewQueue
+    rows) with how to import it. `release` stays the one word that releases.
   - The guard, the hold, the release, FormLog and the menu as designed; RUNBOOK, INSTALL,
     ARCHITECTURE, DECISIONS, BACKLOG. Every guard and hold rule has a test that fails
     when the rule is removed (checked by mutating each rule in turn).

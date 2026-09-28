@@ -423,8 +423,11 @@ until you confirm:
    `ERROR: release refused: …` until the response row's `Partner
    organization` cell names that partner, or the Partners tab has the new
    organization ("Working the ReviewQueue"). An item
-   resolved any other way takes its row off the menu (until that cell is
-   changed to `release …`). A held row
+   resolved any other way is never run: its row is only named on the
+   preview's last line, "Not imported — … resolved without "release"", as
+   `row N (ReviewQueue row M)`. A club meant to be imported but resolved
+   `Released`, `ok release` or `resolved …: a new club` shows there: change
+   that cell to start with `release` and run it again. A held row
    listed as "no ReviewQueue item for this row and time" lost its item (row
    deleted, text typed after the `[#…]` tag, or the tab sorted so the item's
    `(sent …)` no longer matches the row's Timestamp): add the item back by

@@ -1055,7 +1055,7 @@ console.log('\n  FormLog, the ReviewQueue decision and the menu plan');
 const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_ISSUES', 'isHeldResult_', 'isRetryResult_',
                    'heldForReview_', 'indexFormLog_', 'holdDecisions_', 'planMissedRun_', 'missedPreviewText_',
                    'responseKeyOf_', 'responseDone_', 'sentAtOfKey_', 'sentAtOfStamp_', 'releasedBy_',
-                   'heldClubReviewItem_', 'reviewDigest_'],
+                   'heldClubReviewItem_', 'reviewDigest_', 'closedHoldsText_'],
                   ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
 {
   const today = '2026-09-28';
@@ -1117,9 +1117,16 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
   const src = items => items.map(i => i.source.replace(tab + '!', '')).join(',');
   check('released (the item says release, sent time matches): its own group — even when older than 7 days',
         src(plan.released) === '42,50' && plan.released.every(i => i.status === 'released'), src(plan.released));
-  check('waiting: open (41) and 48; closed (43, and 44 "released by hand") are not listed at all',
-        src(plan.waiting) === '41,48' && !/43|44/.test(src(plan.run.concat(plan.old, plan.held, plan.waiting, plan.released))),
-        src(plan.waiting));
+  check('waiting: open (41) and 48; closed (43, and 44 "released by hand") are never run, only named as closed',
+        src(plan.waiting) === '41,48' && !/43|44/.test(src(plan.run.concat(plan.old, plan.held, plan.waiting, plan.released))) &&
+        src(plan.closed) === '43,44' && plan.closed.every(i => i.status === 'closed') && plan.closed[1].note === 'ReviewQueue row 8',
+        src(plan.waiting) + ' / ' + src(plan.closed));
+  const closedLine = hd.closedHoldsText_(plan.closed, 15);
+  check('closed: one line with the response and ReviewQueue rows and how to import one — a mistyped release shows, never a name',
+        closedLine === 'Not imported — new clubs held for review whose ReviewQueue item was resolved without "release" ' +
+                       '(to import one, start that resolved cell with "release" and run this again): ' +
+                       'row 43 (ReviewQueue row 7), row 44 (ReviewQueue row 8)' &&
+        hd.closedHoldsText_(plan.closed, 1).endsWith(': row 43 (ReviewQueue row 7), … and 1 more'), closedLine.slice(-60));
   check('an item for another response (tab sorted: the sent time differs) never releases this one',
         plan.waiting[1].note === 'no ReviewQueue item for this row and time (docs/RUNBOOK.md)' &&
         plan.waiting[0].note === 'waiting for staff: ReviewQueue row 5' && !plan.waiting[0].lastError);
@@ -1189,6 +1196,12 @@ console.log('\n  the menu run with held rows (processMissedResponses, runConfirm
   check('only held rows: "Nothing to process." lists them as held for review, and nothing runs',
         m.dialogs.length === 1 && m.dialogs[0].startsWith('Nothing to process.') &&
         m.dialogs[0].includes('new clubs held for review') && m.dialogs[0].includes('• row 41') && !m.ran.length);
+  m = world(held, Object.assign({}, open, { [tab + '!41']: { row: 5, state: 'closed', sentAt: '2026-09-21 10:15:30' } }), []);
+  check('a hold resolved without "release" (e.g. "Released"): not run, but named on the "Nothing to process." dialog',
+        m.dialogs.length === 1 && m.dialogs[0].startsWith('Nothing to process.') && !m.ran.length &&
+        m.dialogs[0].includes('• row 42') && !m.dialogs[0].includes('• row 41') &&
+        m.dialogs[0].endsWith('resolved without "release" (to import one, start that resolved cell with "release" and run ' +
+                              'this again): row 41 (ReviewQueue row 5)'), m.dialogs.length + ' dialogs');
   const release42 = Object.assign({}, open, { [tab + '!42']: { row: 6, state: 'release', sentAt: '2026-09-22 09:00:00' } });
   m = world(held.concat([fresh]), release42, ['YES', 'YES']);
   check('a released row is asked on its own, after the new rows; the held one is listed with the result',

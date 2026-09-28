@@ -87,7 +87,8 @@ function formKeyForSheet_(sheet) {
  * MISSED.OLD_AFTER_DAYS ago. A row FormLog already records as processed under
  * a different key is never run from here ("held"; docs/RUNBOOK.md), nor is
  * a new club held for review until staff release it in the ReviewQueue —
- * released ones get a YES/NO of their own. The
+ * released ones get a YES/NO of their own; one resolved another way is only
+ * named (closedHoldsText_). The
  * document lock is taken one row at a time and never while a dialog is open,
  * so form submissions keep flowing; no row is started after MISSED.BUDGET_MS,
  * so the run ends inside Apps Script's 6-minute limit ("N left — run again").
@@ -108,7 +109,8 @@ function processMissedResponses() {
       (plan.waiting.length ? '\n\n' + missedPreviewText_(
       'Not run — new clubs held for review as possible duplicates, until staff start the ' +
       'ReviewQueue item\'s resolved cell with "release" (docs/RUNBOOK.md, "Working the ' +
-      'ReviewQueue"):', plan.waiting, MISSED.MAX_LISTED) : '');
+      'ReviewQueue"):', plan.waiting, MISSED.MAX_LISTED) : '') +
+      (plan.closed.length ? '\n\n' + closedHoldsText_(plan.closed, MISSED.MAX_LISTED) : '');
   const sources = function (items) {
     return items.map(function (it) { return it.source; }).join(', ') || 'none';
   };
@@ -469,12 +471,13 @@ function responseDone_(which, stamp, answers, index) {
  * item — holds: holdDecisions_, the item's sent time must be this row's:
  *   released — the item's resolved cell says "release": asked on its own;
  *   waiting  — open, or no item for this row and time: listed, never run;
- *   (nothing) — resolved any other way: staff dealt with it.
+ *   closed   — resolved any other way: never run, only named on one line
+ *              (closedHoldsText_), so a release typed another way shows.
  * Problem reports come first, then by sheet row.
  */
 function planMissedRun_(responses, index, today, oldAfterDays, holds) {
   holds = holds || {};
-  const plan = { run: [], old: [], held: [], waiting: [], released: [] };
+  const plan = { run: [], old: [], held: [], waiting: [], released: [], closed: [] };
   responses.forEach(function (r) {
     if (responseDone_(r.which, r.stamp, r.answers, index)) return;
     const item = describeResponse_(r);
@@ -489,7 +492,12 @@ function planMissedRun_(responses, index, today, oldAfterDays, holds) {
     if (heldForReview_(r.which, r.stamp, item.key, index)) {
       const d = holds[item.source];
       const mine = !!d && d.sentAt === sentAtOfStamp_(r.stamp);
-      if (mine && d.state === 'closed') return;
+      if (mine && d.state === 'closed') {
+        item.status = 'closed';
+        item.note = 'ReviewQueue row ' + d.row;
+        plan.closed.push(item);
+        return;
+      }
       if (releasedBy_(d, r.stamp)) {
         item.status = 'released';
         item.note = 'released in ReviewQueue row ' + d.row;
@@ -510,7 +518,7 @@ function planMissedRun_(responses, index, today, oldAfterDays, holds) {
       plan.run.push(item);
     }
   });
-  [plan.run, plan.old, plan.held, plan.waiting, plan.released].forEach(function (list) {
+  [plan.run, plan.old, plan.held, plan.waiting, plan.released, plan.closed].forEach(function (list) {
     list.sort(missedOrder_);
   });
   return plan;
@@ -554,6 +562,20 @@ function missedPreviewText_(title, items, maxListed) {
   });
   if (items.length > maxListed) lines.push('… and ' + (items.length - maxListed) + ' more');
   return lines.join('\n');
+}
+
+/**
+ * The preview's one line for held new clubs whose ReviewQueue item was
+ * resolved without "release" (plan.closed): never run, but named, so a
+ * release typed another way ("Released", "ok release") cannot silently
+ * leave a club out. Response rows and ReviewQueue rows only.
+ */
+function closedHoldsText_(items, maxListed) {
+  const rows = items.slice(0, maxListed).map(function (it) { return 'row ' + it.row + ' (' + it.note + ')'; });
+  if (items.length > maxListed) rows.push('… and ' + (items.length - maxListed) + ' more');
+  return 'Not imported — new clubs held for review whose ReviewQueue item was resolved without ' +
+      '"release" (to import one, start that resolved cell with "release" and run this again): ' +
+      rows.join(', ');
 }
 
 /** A failure text short enough for a dialog, with e-mail addresses blanked. */
