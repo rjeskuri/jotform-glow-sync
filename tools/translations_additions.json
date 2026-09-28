@@ -147,6 +147,22 @@
   "sw": "Bofya hapa kuripoti tatizo",
   "ar": "انقر هنا للإبلاغ عن مشكلة"
  },
+ "A girl missing, or no longer in your club? Tell us on the Club Roster Form.": {
+  "_note": "the Club Roster Form link above the problem link (glow/links.py, 2026-09-28). Written by us and NOT native-reviewed (like the Odia, Hindi and Persian sets) - corrections go here and are re-applied with tools/add_translations.py --apply. 'Club Roster Form' stays in English in every language: the Google Form it opens is English-only and carries that name. hi and fa reach the Asia form only (a language is posted only to a form that offers it)",
+  "es": "¿Falta una niña en la lista o ya no está en tu club? Avísanos en el formulario “Club Roster Form”.",
+  "fr": "Il manque une fille sur la liste, ou l’une d’elles ne fait plus partie de votre club ? Dites-le-nous sur le formulaire « Club Roster Form ».",
+  "th": "มีเด็กหญิงที่ไม่มีชื่อในรายชื่อ หรือเด็กหญิงที่ไม่ได้อยู่ในชมรมของคุณแล้วหรือไม่? แจ้งเราทางแบบฟอร์ม “Club Roster Form”",
+  "ur": "کیا فہرست میں کسی لڑکی کا نام نہیں ہے، یا کوئی لڑکی اب آپ کے کلب میں نہیں ہے؟ ہمیں Club Roster Form پر بتائیں۔",
+  "te": "జాబితాలో ఏ అమ్మాయి పేరైనా లేదా, లేదా ఎవరైనా అమ్మాయి ఇకపై మీ క్లబ్‌లో లేరా? “Club Roster Form” లో మాకు తెలియజేయండి.",
+  "vi": "Thiếu tên một em trong danh sách, hoặc có em không còn trong câu lạc bộ của bạn? Hãy báo cho chúng tôi qua biểu mẫu “Club Roster Form”.",
+  "ne": "सूचीमा कुनै बालिकाको नाम छैन, वा कोही बालिका अब तपाईंको क्लबमा छैनन्? हामीलाई “Club Roster Form” मा जानकारी दिनुहोस्।",
+  "km": "ខ្វះឈ្មោះក្មេងស្រីណាម្នាក់ក្នុងបញ្ជី ឬមានក្មេងស្រីណាម្នាក់លែងនៅក្នុងក្លឹបរបស់អ្នកហើយឬ? សូមប្រាប់យើងតាមរយៈទម្រង់ “Club Roster Form”។",
+  "sw": "Kuna msichana ambaye hayupo kwenye orodha, au ambaye hayupo tena kwenye klabu yako? Tuambie kupitia fomu ya “Club Roster Form”.",
+  "ar": "هل هناك فتاة غير موجودة في القائمة، أو لم تعد في ناديك؟ أخبرنا عبر نموذج Club Roster Form.",
+  "or": "ତାଲିକାରେ କୌଣସି ଝିଅଙ୍କ ନାମ ନାହିଁ, କିମ୍ବା କେହି ଝିଅ ଆଉ ଆପଣଙ୍କ କ୍ଲବରେ ନାହାନ୍ତି? “Club Roster Form” ରେ ଆମକୁ ଜଣାନ୍ତୁ।",
+  "hi": "सूची में किसी लड़की का नाम नहीं है, या कोई लड़की अब आपके क्लब में नहीं है? हमें “Club Roster Form” पर बताएँ।",
+  "fa": "نام دختری در فهرست نیست، یا دختری دیگر در باشگاه شما نیست؟ در فرم Club Roster Form به ما اطلاع دهید."
+ },
  "Other": {
   "_note": "only Urdu lacked it on the Asia form (2026-09-20); the other languages already carry Jotform's own entry - never overwrite those",
   "ur": "دیگر"

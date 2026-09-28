@@ -1,109 +1,229 @@
 #!/usr/bin/env python3
 """
-Put a "Something not working? Tell us" link at the bottom of the Jotform
-attendance forms, just above the Submit button — and take it out again later.
+Put the links above the Submit button of the Jotform attendance forms - the
+problem-report link and the Club Roster Form link - and take them out again.
 
-It adds ONE text element per form (no logic, no integration changes) so it is
-harmless to the Salesforce mapping and trivial to reverse. Dry run by default.
+Each link is ONE text element (no logic, no integration change), found by its
+unique name; the table (names, sentences, public URLs, what sits above what)
+is glow/links.py:
+
+  --link problem  "Click here to report a problem"              (default)
+                  -> the problem-report Google Form, directly above Submit
+  --link roster   "A girl missing, or no longer in your club? Tell us on the
+                  Club Roster Form."
+                  -> the Club Roster Form, directly above the problem link
+
+Dry run by default. With --apply each form is snapshotted first
+(backup_forms.py -> backups/<id>/), written, then re-read and checked: the
+element exactly once, its text as written, not hidden, above what it must be
+above, and no rule mentioning it (the sync rewrites rules, never this
+element). Re-running is a no-op; --remove deletes the element. Refuses an
+edit URL, a URL the other link already uses, and any layout other than
+link elements + Submit where the element goes. Translations are the second
+step: tools/add_translations.py --apply (it needs the element to exist), and
+again after a changed URL - each language holds its own copy of the link
+(the tool says so after the write).
 
 Usage:
     export JOTFORM_API_KEY=...
-    python3 tools/add_feedback_link.py --url https://forms.gle/xxxx            # preview
-    python3 tools/add_feedback_link.py --url https://forms.gle/xxxx --apply
-    python3 tools/add_feedback_link.py --remove --apply                        # take it out
-    python3 tools/add_feedback_link.py --url ... --form 260703905772560 --apply  # one form only
+    python3 tools/add_feedback_link.py --link roster                    # preview, all five forms
+    python3 tools/add_feedback_link.py --link roster --apply
+    python3 tools/add_feedback_link.py --link roster --remove --apply   # take it out
+    python3 tools/add_feedback_link.py --link roster --form 262352490535154   # one form only
+    python3 tools/add_feedback_link.py --url https://forms.gle/xxxx     # another public link
 """
 import argparse
-import html
 import os
 import sys
+from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+from backup_forms import snapshot      # noqa: E402
 from glow import forms as glow_forms   # noqa: E402
+from glow import links as glow_links   # noqa: E402
 from glow.cli import run               # noqa: E402
 from glow.jotform import Client        # noqa: E402
-
-ELEMENT_NAME = "somethingNotWorking"     # unique name = how we find it again
 
 # the live regional forms + the template they came from
 FORMS = {**{fid: region for region, fid in glow_forms.REGIONALS.items()},
          glow_forms.TEMPLATE: "template"}
 
-LINK_TEXT = "Click here to report a problem"   # translated in tools/translations_additions.json
+
+def _label(q):
+    return f"{q.get('name') or q.get('type')} (q{q['qid']})"
 
 
-def link_html(url):
-    # one plain sentence, so it can be translated as a single string
-    u = html.escape(url, quote=True)
-    return ('<p style="margin:12px 0;padding:10px 12px;border:1px solid #ddd;'
-            'border-radius:6px;background:#f7f7f7;font-size:14px">'
-            f'<a href="{u}" target="_blank" rel="noopener">{LINK_TEXT}</a></p>')
+def plan_form(questions, conditions, link, url, remove=False):
+    """(steps, notes) for one form. A step is {op, qid, fields, label} with op
+    add / move / update / delete and `fields` in plain Jotform keys; notes are
+    lines to print. Pure: no API calls, so the tests drive it directly."""
+    ours = glow_links.named(questions, link.name)
+    if len(ours) > 1:
+        sys.exit(f"{len(ours)} elements are named {link.name!r} - delete the "
+                 "extra one in the builder first")
+    if remove:
+        if not ours:
+            return [], ["no such element - nothing to remove"]
+        q = ours[0]
+        return [{"op": "delete", "qid": q["qid"], "fields": {},
+                 "label": f"DELETE {_label(q)}"}], []
+
+    for other, other_link in glow_links.elements_on(questions):
+        if other_link is not link and glow_links.href_of(other.get("text")) == url:
+            sys.exit(f"{_label(other)} already links to {url} - the two links "
+                     "would open the same form; check --link / --url")
+
+    body = glow_links.element_html(link.sentence, url)
+    notes = []
+    if ours:
+        q = ours[0]
+        drift = {}
+        if q.get("text") != body:
+            drift["text"] = body
+        if q.get("hidden") == "Yes":
+            drift["hidden"] = "No"
+        for rid in glow_links.rules_mentioning(conditions, q["qid"]):
+            notes.append(f"! rule {rid} mentions {_label(q)} - hand-made; the next "
+                         "sync rewrite drops it")
+        for x, o in glow_links.out_of_place(questions, link, q):
+            notes.append(f"! {_label(x)} (order {glow_links.order_of(x)}) is not above "
+                         f"{_label(o)} - move it in the builder")
+        if not drift:
+            return [], notes + [f"{_label(q)} already present and up to date"]
+        if "text" in drift:
+            notes.append(f"! every other language shows its own copy of {_label(q)}, with the "
+                         "link it had: re-run tools/add_translations.py --apply after this")
+        return [{"op": "update", "qid": q["qid"], "fields": drift,
+                 "label": f"UPDATE {_label(q)}: {', '.join(sorted(drift))}"}], notes
+
+    order, moves = glow_links.plan_insert(questions, link, conditions)
+    steps = []
+    for qid, new_order in moves:
+        q = questions[qid]
+        steps.append({"op": "move", "qid": qid, "fields": {"order": str(new_order)},
+                      "label": f"move {_label(q)} {glow_links.order_of(q)} -> {new_order}"})
+    above = glow_links.named(questions, link.above)
+    where = _label(above[0]) if above else "Submit"
+    steps.append({"op": "add", "qid": None,
+                  "fields": {"type": "control_text", "name": link.name,
+                             "text": body, "order": str(order)},
+                  "label": f"ADD {link.name} at order {order}, directly above {where}"})
+    return steps, notes
+
+
+def verify(questions, conditions, link, url, removed=False):
+    """What is wrong on a re-read form ([] when the write landed as intended)."""
+    ours = glow_links.named(questions, link.name)
+    if removed:
+        return [f"{len(ours)} element(s) named {link.name!r} still present"] if ours else []
+    if len(ours) != 1:
+        return [f"{len(ours)} elements named {link.name!r}, expected 1"]
+    q, problems = ours[0], []
+    if q.get("text") != glow_links.element_html(link.sentence, url):
+        problems.append("its text differs from what was written")
+    if q.get("hidden") == "Yes":
+        problems.append("it is hidden")
+    for x, o in glow_links.out_of_place(questions, link, q):
+        problems.append(f"{'it' if x is q else _label(x)} is not above {_label(o)}")
+    rules =glow_links.rules_mentioning(conditions, q["qid"])
+    if rules:
+        problems.append(f"rule(s) {', '.join(rules)} mention it")
+    return problems
+
+
+def write(client, form_id, step):
+    if step["op"] == "delete":
+        return client.delete(f"/form/{form_id}/question/{step['qid']}",
+                             f"{form_id} {step['label']}")
+    data = {f"question[{k}]": v for k, v in step["fields"].items()}
+    path = f"/form/{form_id}/questions" if step["op"] == "add" \
+        else f"/form/{form_id}/question/{step['qid']}"
+    return client.post_form(path, data, f"{form_id} {step['label']}")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--url", help="the feedback Google Form's public URL")
+    ap.add_argument("--link", choices=sorted(glow_links.LINKS), default="problem",
+                    help="which link (default: problem)")
+    ap.add_argument("--url", help="the Google Form's public link (default: the one "
+                                  "in glow/links.py)")
     ap.add_argument("--form", action="append", help="limit to these form IDs")
-    ap.add_argument("--remove", action="store_true", help="delete the link element")
-    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--remove", action="store_true", help="delete the element")
+    ap.add_argument("--apply", action="store_true", help="write (dry run without it)")
     args = ap.parse_args()
-    if not args.remove and not args.url:
-        sys.exit("--url is required (or --remove)")
+    link = glow_links.LINKS[args.link]
+    url = glow_links.check_public_url(args.url or link.url)
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
     client = Client(api_key, apply=args.apply)
-
     targets = {f: FORMS.get(f, "?") for f in args.form} if args.form else FORMS
-    print("DRY RUN\n" if not args.apply else "APPLYING\n")
+    # to the second: a re-run just after a failed one must not snapshot the
+    # half-written form over the true "before" (the rollback path)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
 
-    for form_id, label in targets.items():
+    print(("APPLYING" if args.apply else "DRY RUN")
+          + f" - {'remove ' if args.remove else ''}{link.name}: {link.sentence!r}"
+          + ("" if args.remove else f"\n  -> {url}") + "\n")
+    def read_and_plan(form_id):
         questions = client.get(f"/form/{form_id}/questions")
-        ours = [q for q in questions.values() if q.get("name") == ELEMENT_NAME]
-        button = [q for q in questions.values() if q.get("type") == "control_button"]
-        top_order = max(int(q.get("order", 0)) for q in questions.values())
+        conditions = client.get(f"/form/{form_id}/properties").get("conditions", [])
+        return plan_form(questions, conditions, link, url, args.remove)
 
-        if args.remove:
-            if not ours:
-                print(f"  {form_id} {label:<14} no link element present")
-                continue
-            for q in ours:
-                print(f"  {form_id} {label:<14} DELETE qid {q['qid']}")
-                if args.apply:
-                    client.delete(f"/form/{form_id}/question/{q['qid']}",
-                                  f"{form_id} delete {q['qid']}")
+    # every form is planned before anything is written: a refusal on the
+    # fifth form must not leave the first four changed
+    planned = {}
+    for form_id, label in targets.items():
+        print(f"== {label} {form_id}")
+        steps, notes = read_and_plan(form_id)
+        planned[form_id] = steps
+        for line in notes:
+            print(f"   {line}")
+        for n, step in enumerate(steps, 1):
+            print(f"   {n}. {step['label']}")
+
+    failed, relinked, added = 0, [], []
+    for form_id, steps in planned.items():
+        if not args.apply or not steps:
             continue
-
-        body = link_html(args.url)
-        if ours:
-            q = ours[0]
-            print(f"  {form_id} {label:<14} UPDATE qid {q['qid']} (already present)")
-            if args.apply:
-                client.post_form(f"/form/{form_id}/question/{q['qid']}",
-                                 {"question[text]": body}, f"{form_id} update {q['qid']}")
+        print(f"\n== writing {targets[form_id]} {form_id}")
+        snapshot(form_id, client, stamp)       # the rollback path, before any write
+        print(f"   snapshot: backups/{form_id}/questions-{stamp}.json")
+        steps, _ = read_and_plan(form_id)      # the form may have changed since the preview
+        if [s["label"] for s in steps] != [s["label"] for s in planned[form_id]]:
+            failed += 1
+            print("   ! the form changed since the preview - nothing written; re-run")
             continue
-
-        # place it right before the Submit button: same order as the button,
-        # then bump the button by one (adding a question never shifts orders)
-        btn = button[0] if button else None
-        order = int(btn["order"]) if btn else top_order + 1
-        print(f"  {form_id} {label:<14} ADD text element at order {order}"
-              + (f", move Submit (qid {btn['qid']}) to {order + 1}" if btn else ""))
-        if args.apply:
-            created = client.post_form(f"/form/{form_id}/questions", {
-                "question[type]": "control_text",
-                "question[name]": ELEMENT_NAME,
-                "question[text]": body,
-                "question[order]": str(order),
-            }, f"{form_id} add")
-            new_qid = created.get("qid") if isinstance(created, dict) else None
-            if btn:
-                client.post_form(f"/form/{form_id}/question/{btn['qid']}",
-                                 {"question[order]": str(order + 1)},
-                                 f"{form_id} move submit")
-            print(f"      added qid {new_qid}")
+        for step in steps:
+            created = write(client, form_id, step)
+            if step["op"] == "add" and isinstance(created, dict):
+                print(f"   added qid {created.get('qid')}")
+            if step["op"] == "add":
+                added.append(form_id)
+            elif step["op"] == "update" and "text" in step["fields"]:
+                relinked.append(form_id)
+        after = client.get(f"/form/{form_id}/questions")
+        conditions = client.get(f"/form/{form_id}/properties").get("conditions", [])
+        problems = verify(after, conditions, link, url, args.remove)
+        if problems:
+            failed += 1
+            print("   ! MISMATCH after write: " + "; ".join(problems))
+        else:
+            print("   re-read: verified")
 
     if not args.apply:
-        print("\nre-run with --apply to write")
+        print("\nDRY RUN - re-run with --apply to write; then tools/add_translations.py")
+    # translations are keyed by the element (text_<qid>) and each holds the
+    # whole HTML, link included: English changed, every other language did not
+    if relinked:
+        print(f"\n! translations still carry the old link on {len(relinked)} form(s) "
+              f"({', '.join(relinked)}): every language but English opens the old form "
+              "until tools/add_translations.py --apply runs (dry run first)")
+    if added:
+        print(f"\nnext: tools/add_translations.py --apply (dry run first) - until then the "
+              f"new element shows in English in every language ({', '.join(added)})")
+    if failed:
+        sys.exit(f"{failed} form(s) did not verify - re-read before retrying "
+                 "(a gateway 504 can hide a completed write)")
 
 
 if __name__ == "__main__":

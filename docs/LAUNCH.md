@@ -94,6 +94,10 @@ Things that are true today and fine for launch but on the backlog
       python3 tools/add_feedback_link.py --url <feedback form link>          # preview
       python3 tools/add_feedback_link.py --url <feedback form link> --apply
 
+  Since 2026-09-28 the tool knows both public links above (they are its
+  defaults) and also places the Club Roster Form link, `--link roster` —
+  see RUNBOOK, "Links above Submit".
+
 - **Disable the defunct forms** (they stop accepting responses and show a
   "this form has moved" message with the new link). Say the word and it is
   one command per form; or in Jotform: form → Settings → Form Status →
