@@ -262,6 +262,20 @@ in their rule, not the label's).
 language dictionaries on both forms, so the list's label and placeholder are
 translated with no translation write.
 
+Review fixes (2026-09-28, four findings, all confirmed and fixed; 86 tests).
+- `form_status` now flags a partner list that is not hidden. It also flags a
+  shared name with no rule showing the list, the list shown for an unshared
+  name, and a rule showing q331 while the list exists. The list's shape
+  (`PARTNER_PICKER_PROPS`) is pinned by value. Read-only on Africa and the
+  template, with the list swapped in offline: 0 problems, and the "not
+  hidden" case is caught.
+- The translation audit skips the list's options, so its counts do not
+  change (Africa sw 235 → 235, fr 236 → 236).
+- The rollback pauses the runner and restores `properties-<stamp>.json` (see
+  Risks). The "revert the merge" step is gone.
+- `docs/ARCHITECTURE.md` has its `SESSION_OVERRIDES` row back, and a test
+  holds each row of that table to three cells.
+
 Not run here: the full `sync_attendance_form.py … --partner-picker` dry runs
 against a fresh Roster export. The permission layer refused this session's
 Roster export (PII). They are read-only; Ryan runs them (Proof, above)
