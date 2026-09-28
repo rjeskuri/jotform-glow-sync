@@ -89,7 +89,7 @@ Reload the spreadsheet.
 
 | Form | Who uses it | What happens on submit |
 |---|---|---|
-| **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section. **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to **SF Pending**, anything odd goes to the ReviewQueue. **Add or remove girls**: partner → only that partner's clubs → ADD / REMOVE lists → girls are added, reactivated, or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints; the mentor gets a confirmation email echoing only the names they typed |
+| **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section. **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to **SF Pending**, anything odd goes to the ReviewQueue. **Add or remove girls**: partner → only that partner's clubs → ADD / REMOVE lists → girls are added, reactivated (never by a response sent before their removal: they stay removed and the ReviewQueue says so), or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints; the mentor gets a confirmation email echoing only the names they typed |
 | **Something isn't working?** | anyone | one-minute problem report, emailed to staff; one that asks for a roster change also becomes a ReviewQueue item |
 
 The run installs the triggers and shows both links (again via **Show form

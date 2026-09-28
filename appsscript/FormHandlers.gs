@@ -9,18 +9,26 @@
  * handler threw is logged as ERROR and can be retried from that menu item.
  *
  * Handlers re-derive what to do from the sheet's CURRENT state: safe to
- * retry soon after a failure, not safe to replay weeks later — an old
- * submission replayed today can put back girls removed since (2026-09-13).
- * So the menu item shows what it would run and asks first, never runs a row
- * FormLog already records as processed under another key, and asks again
- * before running Club Roster Form responses more than a week old
- * (docs/RUNBOOK.md, "Missed form responses").
+ * retry soon after a failure, not safe to replay weeks later. An old
+ * submission replayed today put back 20 girls removed since (2026-09-13);
+ * it no longer can — each handler passes the day the response was sent and
+ * RosterOps.gs keeps anyone removed after that day removed (the replay
+ * guard, docs/plans/2026-09-28-replay-guard.md; a response with no readable
+ * sent day is refused, see runResponse_) — but its removals and new names
+ * still apply to today's roster. So the menu item shows what it would
+ * run and asks first, never runs a row FormLog already records as processed
+ * under another key, and asks again before running Club Roster Form
+ * responses more than a week old (docs/RUNBOOK.md, "Missed form responses").
  */
 
 const FORM_LOG_COLS = ['when', 'form', 'sheet_row', 'response_key', 'result'];
 const SF_PENDING_COLS = ['added', 'partner', 'club', 'region', 'girls', 'mentor_name',
                          'mentor_email', 'country', 'status', 'notes'];
 const RETRY_PREFIXES = ['ERROR:'];   // FormLog results that mean "not done: try again"
+/** Why runResponse_ refuses a Club Roster Form response with no sent day (FormLog ERROR, queued). */
+const NO_SENT_DAY_ERROR = 'its Timestamp cell is not a date, so the day it was sent is unknown ' +
+    'and the replay guard cannot run: enter the change fresh on the Club Roster Form instead ' +
+    '(docs/RUNBOOK.md, "Form response could not be processed")';
 const MISSED = {
   BUDGET_MS: 240000,     // stop STARTING rows this long after the menu item began (limit: 6 min)
   LOCK_WAIT_MS: 30000,   // per row; a form-submit trigger waits up to 120 s for the same lock
@@ -120,8 +128,9 @@ function processMissedResponses() {
   ask(byForm('ROSTER'), 'Club Roster Form responses not yet processed', 'Process them now?');
   ask(plan.old, 'Club Roster Form responses sent more than ' + MISSED.OLD_AFTER_DAYS +
           ' days ago and never processed',
-      'Running one now applies it to TODAY\'s roster: it can put back girls removed since ' +
-      'it was sent. Run them anyway?');
+      'Running one now applies it to TODAY\'s roster: girls removed since it was sent stay ' +
+      'removed (the ReviewQueue lists them), but its removals and new names still apply. ' +
+      'Run them anyway?');
   confirmed.sort(missedOrder_);   // asked in groups, run in sheet order: a change needs its enrollment
 
   if (!confirmed.length) {
@@ -207,14 +216,24 @@ function processResponseRow_(which, sheet, row) {
   return true;
 }
 
-/** Run the handler for one response and record the outcome in FormLog. */
+/**
+ * Run the handler for one response and record the outcome in FormLog. The
+ * Club Roster Form handlers get the day the response was sent (its
+ * Timestamp's wall-clock day, from the key), so a retry or a late run never
+ * puts back girls removed since. A Club Roster Form response whose Timestamp
+ * is not a date has no such day and is refused (ERROR, queued): run without
+ * the guard it could put them back, and the menu's warning for old rows
+ * promises it cannot (the rule submittedDay_ follows).
+ */
 function runResponse_(which, sheet, row, answers, responseKey) {
   const source = sheet.getName() + '!' + row;
+  const sent = sentDayOfKey_(responseKey);
   let result;
   try {
     if (which === 'FEEDBACK') result = handleFeedback_(answers, source, responseKey);
-    else if (isNewClubResponse_(answers)) result = handleNewClub_(answers, source);
-    else result = handleRosterChange_(answers, source);
+    else if (!sent) throw new Error(NO_SENT_DAY_ERROR);
+    else if (isNewClubResponse_(answers)) result = handleNewClub_(answers, source, sent);
+    else result = handleRosterChange_(answers, source, sent);
   } catch (err) {
     result = 'ERROR: ' + err.message;
     tryReview_([{ issue: 'Form response could not be processed', partner: '', club: '',
@@ -472,8 +491,18 @@ function formLogAdd_(which, row, responseKey, result) {
       .appendRow([now_(), which, row, responseKey, result]);
 }
 
+/**
+ * ', N kept removed' for a summary, or '' (counts only: summaries reach FormLog
+ * and Audit). No reason given: a girl whose removal day is blank is kept too.
+ */
+function keptRemovedNote_(plan) {
+  const n = (plan.keptRemoved || []).length;
+  return n ? ', ' + n + ' kept removed' : '';
+}
+
 // ------------------------------------------------------------ New club
-function handleNewClub_(a, source) {
+/** submitted: 'yyyy-MM-dd' the response was sent ('' = no guard: runResponse_ refuses first). */
+function handleNewClub_(a, source, submitted) {
   const ss = SpreadsheetApp.getActive();
   let partner = tidy_(a[Q.PARTNER_NEW]);
   const typed = tidy_(a[Q.NEW_PARTNER]);
@@ -496,7 +525,8 @@ function handleNewClub_(a, source) {
   const isNew = !current.length;
 
   const plan = planClub_({ partner: partner, club: club, names: parsed.names,
-                           duplicates: parsed.duplicates, source: source },
+                           duplicates: parsed.duplicates, source: source,
+                           submitted: submitted },
                          current, state, region, today);
   applyRosterPlan_(ss, plan, today);
   saveClubRegistry_(state.registry);
@@ -531,15 +561,16 @@ function handleNewClub_(a, source) {
   trySyncChoices_();
 
   const summary = (isNew ? 'new club ' : 'existing club ') + club + ' (' + partner + '): ' +
-      plan.toAppend.length + ' girls added, ' + plan.reactivate.length + ' reactivated, ' +
-      issues.length + ' for review';
+      plan.toAppend.length + ' girls added, ' + plan.reactivate.length + ' reactivated' +
+      keptRemovedNote_(plan) + ', ' + issues.length + ' for review';
   audit_('newClubForm', summary);
   if (plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
   return summary;
 }
 
 // ------------------------------------------------------ Roster change
-function handleRosterChange_(a, source) {
+/** submitted: 'yyyy-MM-dd' the response was sent ('' = no guard: runResponse_ refuses first). */
+function handleRosterChange_(a, source, submitted) {
   const ss = SpreadsheetApp.getActive();
   const partner = tidy_(a[Q.PARTNER_MOD]);
   const club = clubFromSections_(a);
@@ -567,7 +598,7 @@ function handleRosterChange_(a, source) {
 
   const plan = planModification_({ partner: partner, club: club, adds: adds.names,
                                    removes: removes.names, duplicates: adds.duplicates,
-                                   source: source },
+                                   source: source, submitted: submitted },
                                  current, state, region, today);
   applyRosterPlan_(ss, plan, today);
   saveClubRegistry_(state.registry);
@@ -577,6 +608,7 @@ function handleRosterChange_(a, source) {
 
   const summary = club + ' (' + partner + '): ' + plan.toAppend.length + ' added, ' +
       plan.reactivate.length + ' reactivated, ' + plan.deactivate.length + ' removed' +
+      keptRemovedNote_(plan) +
       (plan.alreadyActive.length ? ', ' + plan.alreadyActive.length + ' already on the roster' : '') +
       (plan.alreadyInactive.length ? ', ' + plan.alreadyInactive.length + ' already removed' : '') +
       (plan.unmatched.length ? ', ' + plan.unmatched.length + ' removal(s) did not match' : '');
@@ -608,6 +640,11 @@ function sendChangeConfirmation_(to, club, partner, plan) {
   section('Already on the roster (no change):', plan.alreadyActive);
   section('Already removed earlier (no change):', plan.alreadyInactive);
   section('Listed under both ADD and REMOVE — kept on the roster:', plan.keptBoth);
+  // the names as the mentor typed them, never the Roster's spelling; no claim about WHEN she
+  // was removed (the Roster may not record the day)
+  section('Not added back — they are marked removed on the roster. ' +
+          'If one of them has rejoined the club, send the form again to add her:',
+          (plan.keptRemoved || []).map(function (k) { return k.name; }));
   if (plan.unmatched.length) {
     lines.push('', 'We could NOT find these names on the roster, so nobody was removed for them:');
     plan.unmatched.forEach(function (u) { lines.push('  - ' + u.name); });
@@ -687,6 +724,7 @@ function tryReview_(items, source) {
 /** Every issue the ReviewQueue can hold, in the order the weekly e-mail lists them. */
 const REVIEW_ISSUES = [
   'Roster change sent as a problem report', 'Removal did not match anyone',
+  'Removed girls not put back by an older response',
   'Same name listed twice', 'Partner says two girls share a name',
   'Girls missing from the latest enrollment', 'Roster change for a club not on file',
   'Partner has no region', 'Form response could not be processed',

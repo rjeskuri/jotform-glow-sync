@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * Offline tests for the roster-change decisions in appsscript/RosterOps.gs —
- * the code behind the New Club Enrollment and Roster Modification forms —
- * and for FormHandlers.gs's FormLog keys and "Process any missed form
- * responses" plan. Runs the real .gs files in Node against a real club from
- * the enrollment CSV plus synthetic edge cases. No Google APIs involved.
+ * the code behind the New Club Enrollment and Roster Modification forms,
+ * including the replay guard — and for FormHandlers.gs's FormLog keys and
+ * "Process any missed form responses" plan. Runs the real .gs files in Node
+ * against a real club from the enrollment CSV plus synthetic edge cases. No
+ * Google APIs involved (the handler sections stub them).
  *
  *   node test/forms_logic_test.js   (the real-CSV section runs only if data/enrollment_2026-08-24.csv exists)
  */
@@ -13,7 +14,7 @@ const path = require('path');
 const loadGs = require('./load_gs');
 
 const REPO = path.resolve(__dirname, '..');
-const gs = loadGs(['ROSTER_COLS', 'STATUS', 'tidy_', 'key_', 'parseRoster_', 'lastName_', 'clubCode_',
+const gs = loadGs(['ROSTER_COLS', 'STATUS', 'tidy_', 'key_', 'asciiCode_', 'parseRoster_', 'lastName_', 'clubCode_',
                    'mintGirlId_', 'planClub_', 'planModification_', 'closestNames_',
                    'chooseRegion_', 'canonicalRegion_', 'derivedPartnerRegions_', 'REGIONS']);
 
@@ -102,6 +103,113 @@ check('duplicate add raises "Same name listed twice" with a dedupe key',
       plan.issues.length === 1 && plan.issues[0].issue === 'Same name listed twice' && !!plan.issues[0].dedupeKey);
 check('unmatched removals carry the name as dedupe key',
       gs.planModification_({ partner, club, adds: [], removes: ['Ghost Name'] }, current, state, region, '2026-08-28').issues[0].dedupeKey === 'ghost name');
+
+// ------------------------------------------------ the replay guard (BACKLOG 41)
+console.log('\nthe replay guard: an older response never puts back girls removed after it was sent');
+{
+  const moon = 'Moonrise Club', SRC = 'Roster Form Responses!2', KEPT = 'Removed girls not put back by an older response';
+  const girl = (name, status, removed, sheetRow) => rowObj(['MOONRISE-' + gs.asciiCode_(gs.lastName_(name)) + '-00' + sheetRow,
+      partner, moon, region, name, gs.lastName_(name), status, '2026-08-26', removed, 'T!2'], sheetRow);
+  const moonRows = () => [
+    girl('Grace Zibblewick', gs.STATUS.INACTIVE, '2026-09-12', 2),    // removed after the response
+    girl('Mary Zibblewick', gs.STATUS.INACTIVE, '2026-08-31', 3),     // removed the day it was sent
+    girl('Joy Blorptest', gs.STATUS.INACTIVE, '2026-08-01', 4),       // removed before it
+    girl('Lucía Zörblewick', gs.STATUS.INACTIVE, '', 5),              // removal day not recorded
+    girl('Amina Qwertyson', gs.STATUS.ACTIVE, '', 6),
+  ];
+  const moonState = () => {
+    const st = freshState();
+    st.registry.byKey[gs.key_(partner) + '||' + gs.key_(moon)] = st.registry.byCode.MOONRISE = { code: 'MOONRISE', partner, club: moon };
+    return st;
+  };
+  const listed = ['GRACE ZIBBLEWICK', 'Mary Zibblewick', 'Joy Blorptest', 'Lucía Zörblewick', 'Amina Qwertyson'];
+  const club_ = submitted => gs.planClub_({ partner, club: moon, names: listed, duplicates: [], source: SRC, submitted },
+                                          moonRows(), moonState(), region, '2026-09-13');
+  const rowsOf = list => list.map(r => r._sheetRow).join(',');
+
+  const none = [club_(undefined), club_(''), club_(null), club_('  ')];
+  check('no submitted (missing, blank, null): today\'s behaviour exactly — every inactive girl listed comes back',
+        none.every(p => rowsOf(p.reactivate) === '2,3,4,5' && !p.keptRemoved.length && !p.issues.length && !p.toAppend.length));
+
+  let p = club_('2026-08-31');
+  check('sent 08-31, run 09-13: removed 09-12 and removal day unknown → kept removed; removed 08-31 and 08-01 → back',
+        rowsOf(p.keptRemoved.map(k => k.row)) === '2,5' && rowsOf(p.reactivate) === '3,4', rowsOf(p.reactivate));
+  check('kept-removed names are as the mentor typed them (for the e-mail)',
+        p.keptRemoved.map(k => k.name).join('|') === 'GRACE ZIBBLEWICK|Lucía Zörblewick');
+  const issue = p.issues[0] || { detail: '' };
+  check('one ReviewQueue item for the response, tagged with its row',
+        p.issues.length === 1 && issue.issue === KEPT && issue.dedupeKey === SRC && issue.club === moon && issue.partner === partner);
+  check('its detail: source, sent day, count and Roster rows — never a name',
+        issue.detail.startsWith(SRC + ' (sent 2026-08-31): 2 girl(s) it lists were removed after it was sent') &&
+        issue.detail.includes('Roster rows 2, 5') && !/zibblewick|z[oö]rblewick|blorptest|qwertyson/i.test(issue.detail), issue.detail);
+
+  p = club_('2026-09-13');
+  check('a response sent today (the trigger path): everyone comes back, as before',
+        rowsOf(p.reactivate) === '2,3,4,5' && !p.keptRemoved.length && !p.issues.length);
+  p = club_('2026-09-12');
+  check('sent the same day as the removal: she comes back (removed_date has no time of day)',
+        rowsOf(p.reactivate) === '2,3,4' && rowsOf(p.keptRemoved.map(k => k.row)) === '5');
+
+  // Review finding RG-2: a removal day after today (a hand edit, 12/09 read as December) must not
+  // block a fresh ADD — the e-mail tells the mentor to send the form again.
+  const later = () => { const r = moonRows(); r[1].removed_date = '2026-12-09'; return r; };
+  const today13 = (submitted, rows) => gs.planClub_({ partner, club: moon, names: listed, duplicates: [], source: SRC, submitted },
+                                                    rows, moonState(), region, '2026-09-13');
+  const freshAdd = gs.planModification_({ partner, club: moon, source: SRC, submitted: '2026-09-13',
+      adds: ['Mary Zibblewick'], removes: [] }, later(), moonState(), region, '2026-09-13');
+  check('a removal day after today counts as unreadable: sent today (a fresh ADD) → back; sent earlier → kept removed',
+        rowsOf(today13('2026-09-13', later()).reactivate) === '2,3,4,5' && rowsOf(freshAdd.reactivate) === '3' &&
+        !freshAdd.keptRemoved.length && !freshAdd.issues.length &&
+        rowsOf(today13('2026-08-31', later()).keptRemoved.map(k => k.row)) === '2,3,5',
+        rowsOf(freshAdd.reactivate) + ' / ' + rowsOf(today13('2026-09-13', later()).reactivate));
+
+  const odd = moonRows();
+  odd[0].removed_date = '2026-09-12 10:00:00';
+  odd[2].removed_date = new Date('2026-08-01T12:00:00Z');   // a raw Date cell loadRoster_ did not turn into text
+  p = gs.planClub_({ partner, club: moon, names: listed, duplicates: [], submitted: '2026-08-31' }, odd, moonState(), region, '2026-09-13');
+  check('a removal day followed by a time is read as that day; an unreadable cell counts as unknown (kept)',
+        rowsOf(p.keptRemoved.map(k => k.row)) === '2,4,5' && rowsOf(p.reactivate) === '3');
+  check('no source: the item is still raised, with no tag', p.issues.length === 1 && p.issues[0].dedupeKey === '' &&
+        p.issues[0].detail.startsWith('(sent 2026-08-31): 3 girl(s)'));
+
+  const bad = ['2026-8-31', '31/08/2026', '2026-08-31 10:00', 'yesterday', new Date('2026-08-31T12:00:00Z')].filter(v => {
+    try { club_(v); return true; } catch (e) { return !/submitted must be yyyy-MM-dd/.test(e.message); }
+  });
+  check('a submitted that is not exactly yyyy-MM-dd is refused (throws), never ignored', !bad.length, bad.join(' | '));
+
+  const mod = submitted => gs.planModification_({ partner, club: moon, source: SRC, submitted,
+      adds: ['grace zibblewick', 'Joy Blorptest', 'Hope Testling'], removes: ['Grace Zibblewick', 'Amina Qwertyson'] },
+      moonRows(), moonState(), region, '2026-09-13');
+  p = mod('2026-08-31');
+  check('Club Roster Form ADD: removed after it was sent → kept removed; removed before → back; unknown name → minted',
+        rowsOf(p.keptRemoved.map(k => k.row)) === '2' && p.keptRemoved[0]?.name === 'grace zibblewick' &&
+        rowsOf(p.reactivate) === '4' && p.toAppend.length === 1);
+  check('the same name under REMOVE is "already removed", never "kept on the roster"',
+        p.alreadyInactive.join() === 'Grace Zibblewick' && !p.keptBoth.length && rowsOf(p.deactivate) === '6');
+  check('one ReviewQueue item (the kept-removed one), no "did not match"',
+        p.issues.length === 1 && p.issues[0].issue === KEPT && p.issues[0].detail.includes('1 girl(s)') &&
+        p.issues[0].detail.includes('Roster rows 2. '));
+  p = mod(undefined);
+  check('…and with no submitted, exactly as before: back on the roster, kept under both lists',
+        rowsOf(p.reactivate) === '2,4' && p.keptBoth.join() === 'Grace Zibblewick' && !p.keptRemoved.length && !p.issues.length);
+  check('its removals are dated the day it was sent (both sides of the guard are sent days); never after today; none → today',
+        mod('2026-08-31').removedOn === '2026-08-31' && mod(undefined).removedOn === '2026-09-13' &&
+        mod('2026-09-13').removedOn === '2026-09-13' && mod('2026-09-14').removedOn === '2026-09-13');
+  check('every plan carries keptRemoved (uniform shape)',
+        Array.isArray(gs.planClub_({ partner, club, names: [], duplicates: [] }, [], freshState(), region, '2026-08-28').keptRemoved) &&
+        Array.isArray(gs.planModification_({ partner, club, adds: [], removes: [] }, [], freshState(), region, '2026-08-28').keptRemoved));
+
+  // 2026-09-13: Roster Form Responses!2 (a new-club response sent 08-31) re-ran after its
+  // 20 girls had been removed on 09-12, and put all 20 back.
+  const nato = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'India', 'Juliet',
+                'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Quebec', 'Romeo', 'Sierra', 'Tango'];
+  const twenty = nato.map((n, i) => girl('Testgirl ' + n, gs.STATUS.INACTIVE, '2026-09-12', 100 + i));
+  const replay = gs.planClub_({ partner, club: moon, names: nato.map(n => 'Testgirl ' + n), duplicates: [], source: SRC,
+                                submitted: '2026-08-31' }, twenty, moonState(), region, '2026-09-13');
+  check('regression, the 2026-09-13 replay: 0 put back, 20 kept removed, one item, nothing minted',
+        !replay.reactivate.length && replay.keptRemoved.length === 20 && replay.issues.length === 1 &&
+        !replay.toAppend.length && !replay.vanished.length && replay.issues[0]?.detail.includes('20 girl(s)'));
+}
 
 console.log('\nclosestNames_');
 check('ranks by shared words', gs.closestNames_('Zibblewick', ['Mary Zibblewick', 'Grace Zibblewick', 'Joy Blorptest']).length === 2);
@@ -586,6 +694,10 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         w.mails[0].replyTo === 'mentor@example.org' && res === 'emailed staff; roster change queued', res);
   check('Audit names the source only (no girl, no typed club, no reply address)',
         w.audits.length === 1 && w.audits[0].endsWith('; ReviewQueue [#Feedback!7]') && clean(w.audits.join('\n')));
+  w = world({ props: STAFF });
+  const textStamp = w.ctx.runResponse_('FEEDBACK', w.sheet('Feedback'), 7, change(), 'FEEDBACK|9/20/2026 8:15:38|GLOW – Club Roster Form|');
+  check('a problem report whose Timestamp is not a date still goes to staff (only the Club Roster Form needs a sent day)',
+        textStamp === 'emailed staff; roster change queued' && w.mails.length === 1, textStamp);
 
   w = world({ props: STAFF, mailFails: 1 });
   let threw = false;
@@ -645,12 +757,178 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         !w.mails.length && w.audits.join() === 'sendSfPendingDigest: 2 open ReviewQueue item(s) (1 new this week), 1 club(s) pending in Salesforce but STAFF_NOTIFY_EMAIL is not set');
 }
 
+console.log('\n  the replay guard in the Club Roster Form handlers (Google services stubbed)');
+{
+  const vm = require('vm');
+  const src = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs']
+      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  // A spreadsheet of plain arrays (tabs[name] = rows, row 1 = header) with what the handlers call.
+  const world = (zone) => {
+    const tabs = {}, mails = [], audits = [], formLog = [], syncs = [];
+    const cell = (name, r, c) => { const t = tabs[name]; while (t.length < r) t.push([]); return t[r - 1]; };
+    const sheet = name => ({
+      getName: () => name,
+      getLastRow: () => tabs[name].length,
+      getLastColumn: () => Math.max(0, ...tabs[name].map(r => r.length)),
+      getRange: (r, c, nr, nc) => ({
+        getValues: () => tabs[name].slice(r - 1, r - 1 + (nr || 1))
+            .map(row => Array.from({ length: nc || 1 }, (_, j) => row[c - 1 + j] ?? '')),
+        setValues: vals => vals.forEach((v, i) => { const row = cell(name, r + i); v.forEach((x, j) => { row[c - 1 + j] = x; }); }),
+        setValue: v => { cell(name, r)[c - 1] = v; },
+        setFontWeight: () => ({}),
+      }),
+      getRangeList: a1s => ({ setValue: v => a1s.forEach(a1 => {
+        const m = /^([A-Z])(\d+)$/.exec(a1);
+        cell(name, +m[2])[m[1].charCodeAt(0) - 65] = v;
+      }) }),
+      appendRow: row => { tabs[name].push(row.slice()); },
+      setFrozenRows: () => {},
+    });
+    const ctx = vm.createContext({
+      console,
+      SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
+                                             insertSheet: n => { tabs[n] = []; return sheet(n); },
+                                             getSpreadsheetTimeZone: () => zone }) },
+      PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
+      MailApp: { sendEmail: o => mails.push(o) },
+      Utilities: { formatDate: (d, z, fmt) => {
+        if (fmt !== 'yyyy-MM-dd') throw new Error('stub: format ' + fmt);
+        return new Intl.DateTimeFormat('en-CA', { timeZone: z, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+      } },
+    });
+    vm.runInContext(src, ctx);
+    ctx.today_ = () => '2026-09-28';
+    ctx.now_ = () => '2026-09-28 09:00:00';
+    ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
+    ctx.formLogAdd_ = (which, row, key, result) => formLog.push(result);
+    ctx.trySyncChoices_ = () => {};
+    ctx.tryNotifySync_ = why => syncs.push(why);
+    const at = iso => vm.runInContext('new Date("' + iso + '")', ctx);   // a Date cell as getValues returns it
+    const C = n => vm.runInContext(n, ctx);
+    tabs.ReviewQueue = [C('REVIEW_COLS').slice()];
+    tabs.ClubRegistry = [C('CLUB_COLS').slice(), ['SUNRISEC', ORG, 'Sunrise Club', '2026-08-26']];
+    tabs.Partners = [C('PARTNER_COLS').slice(), [ORG, 'Africa', '']];
+    const g = (id, name, status, removed) => [id, ORG, 'Sunrise Club', 'Africa', name, name.split(' ').pop(), status, '2026-08-26', removed, 'T!2'];
+    tabs.Roster = [C('ROSTER_COLS').slice(),
+      g('SUNRISEC-ZIBBLEWICK-001', 'Grace Zibblewick', 'inactive', at('2026-09-12T04:00:00Z')),   // a Date cell: 09-12 in New York
+      g('SUNRISEC-BLORPTEST-001', 'Joy Blorptest', 'inactive', at('2026-09-11T02:00:00Z')),       // 09-10 in New York, 09-11 in UTC
+      g('SUNRISEC-ZIBBLEWICK-002', 'Mary Zibblewick', 'active', ''),
+      g('SUNRISEC-ZORBLEWICK-001', 'Lucía Zörblewick', 'inactive', '2026-08-01'),                 // text
+    ];
+    return { ctx, tabs, mails, audits, formLog, syncs, sheet, at };
+  };
+  const RQ = 'Roster Form Responses';
+  const sentOn = day => 'ROSTER|w:' + day + ' 08:00:00.000|' + ORG + '|Sunrise Club';
+  const change = () => ({ [FQ.ACTION]: FQ.ACTION_MOD, [FQ.PARTNER_MOD]: ORG, [FQ.CLUB_PREFIX + ORG + ')']: 'Sunrise Club',
+                          [FQ.ADD]: 'GRACE ZIBBLEWICK\nJoy Blorptest\nLucía Zörblewick', [FQ.REMOVE]: 'Mary Zibblewick',
+                          [FQ.MENTOR_EMAIL_MOD]: 'mentor@example.org' });
+  const isDate = v => Object.prototype.toString.call(v) === '[object Date]';   // a Date from the vm's realm
+  const status = (w, r) => w.tabs.Roster[r - 1][6] + '|' + (isDate(w.tabs.Roster[r - 1][8]) ? 'Date' : w.tabs.Roster[r - 1][8]);
+  const noGirls = s => !/zibblewick|blorptest|z[oö]rblewick/i.test(s);
+
+  let w = world('America/New_York');
+  const rows = w.ctx.loadRoster_().rows;
+  check('loadRoster_: a Date cell becomes its day in the SPREADSHEET\'s zone; text stays text',
+        rows[0].removed_date === '2026-09-12' && rows[1].removed_date === '2026-09-10' &&
+        rows[3].removed_date === '2026-08-01' && rows[2].removed_date === '' && rows[0].added_date === '2026-08-26',
+        rows.map(r => r.removed_date).join(','));
+  check('…the same instant in a UTC spreadsheet is the next day (the zone is the sheet\'s)',
+        world('UTC').ctx.loadRoster_().rows[1].removed_date === '2026-09-11');
+
+  // A roster change sent 09-10 that only runs on 09-28 (a retry, or confirmed in the menu).
+  let result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 5, change(), sentOn('2026-09-10'));
+  check('sent 09-10, run 09-28: removed 09-12 stays removed; removed 09-10 (the sheet\'s zone) and 08-01 come back; ' +
+        'its REMOVE is dated 09-10, the day it was sent',
+        status(w, 2) === 'inactive|Date' && status(w, 3) === 'active|' && status(w, 5) === 'active|' &&
+        status(w, 4) === 'inactive|2026-09-10', [2, 3, 4, 5].map(r => status(w, r)).join(' '));
+  const item = w.tabs.ReviewQueue[1] || [];
+  check('one ReviewQueue row: tagged with the response, Roster row numbers, no name',
+        w.tabs.ReviewQueue.length === 2 && item[1] === 'Removed girls not put back by an older response' &&
+        item[2] === ORG && item[3] === 'Sunrise Club' &&
+        String(item[4]).startsWith(RQ + '!5 (sent 2026-09-10): 1 girl(s)') && String(item[4]).includes('Roster rows 2.') &&
+        String(item[4]).endsWith(' [#' + RQ + '!5]') && noGirls(String(item[4])), String(item[4]));
+  check('FormLog result and Audit: counts, no names',
+        w.formLog[0] === 'Sunrise Club (' + ORG + '): 0 added, 2 reactivated, 1 removed, 1 kept removed' &&
+        w.audits.length === 1 && w.audits[0] === 'rosterChangeForm: ' + result && noGirls(w.audits.join('\n')), w.formLog[0]);
+  const body = (w.mails[0] || { body: '' }).body;
+  const kept = body.split('\n').indexOf('Not added back — they are marked removed on the roster. ' +
+                                        'If one of them has rejoined the club, send the form again to add her:');
+  check('the mentor e-mail lists her as the mentor typed her, under "Not added back"',
+        w.mails.length === 1 && kept !== -1 && body.split('\n')[kept + 1] === '  - GRACE ZIBBLEWICK' &&
+        !body.includes('Grace Zibblewick'), body);
+
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 5, change(), sentOn('2026-09-10'));
+  check('run again: still one ReviewQueue row, she is still removed',
+        w.tabs.ReviewQueue.length === 2 && status(w, 2) === 'inactive|Date' && /1 kept removed/.test(result), result);
+
+  w = world('America/New_York');
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 6, change(), sentOn('2026-09-28'));
+  check('the same change sent today (the trigger): everyone listed comes back, as before; no item, no note',
+        status(w, 2) === 'active|' && status(w, 3) === 'active|' && status(w, 5) === 'active|' &&
+        w.tabs.ReviewQueue.length === 1 && !/kept removed/.test(result) && !w.mails[0].body.includes('Not added back'), result);
+
+  w = world('America/New_York');
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 7, change(), 'ROSTER|9/10/2026 8:00:00|' + ORG + '|Sunrise Club');
+  // Review finding RG-1: run unguarded it put back the girl removed 09-12, while the menu's
+  // warning for old rows (where such a row lands) promises girls removed since stay removed.
+  const refused = w.tabs.ReviewQueue[1] || [];
+  check('a Timestamp that is not a date: no sent day, so refused — Roster untouched, FormLog ERROR, queued, no e-mail',
+        /^ERROR: its Timestamp cell is not a date/.test(result) && w.formLog[0] === result &&
+        status(w, 2) === 'inactive|Date' && status(w, 3) === 'inactive|Date' && status(w, 4) === 'active|' &&
+        status(w, 5) === 'inactive|2026-08-01' && w.tabs.ReviewQueue.length === 2 &&
+        refused[1] === 'Form response could not be processed' &&
+        String(refused[4]).startsWith(RQ + '!7: its Timestamp cell is not a date') &&
+        !w.mails.length && !w.audits.length, result);
+  w = world('America/New_York');
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 8, { [FQ.ACTION]: FQ.ACTION_NEW, [FQ.PARTNER_NEW]: ORG,
+      [FQ.CLUB]: 'Sunrise Club', [FQ.ROSTER]: 'Grace Zibblewick' }, 'ROSTER|8/31/2026 8:00:00|' + ORG + '|Sunrise Club');
+  check('…the new-club branch is refused the same way', /^ERROR: its Timestamp cell is not a date/.test(result) &&
+        status(w, 2) === 'inactive|Date' && w.tabs.ReviewQueue.length === 2, result);
+
+  // The trigger was down (a scope-adding push not yet authorized): responses sent earlier all run
+  // on 09-28 from the menu, in sheet order. Review finding 2026-09-28: if a removal were dated the
+  // day it RAN, a REMOVE and a later-sent ADD for the same girl would keep her removed.
+  const one = (field, name) => ({ [FQ.ACTION]: FQ.ACTION_MOD, [FQ.PARTNER_MOD]: ORG,
+                                  [FQ.CLUB_PREFIX + ORG + ')']: 'Sunrise Club', [field]: name });
+  const at = (day, hh) => 'ROSTER|w:' + day + ' ' + hh + ':00:00.000|' + ORG + '|Sunrise Club';
+  const lateRun = steps => {
+    const x = world('America/New_York');
+    const seen = steps.map(([field, day, hh], i) => {
+      x.ctx.runResponse_('ROSTER', x.sheet(RQ), 10 + i, one(field, 'Mary Zibblewick'), at(day, hh));
+      return status(x, 4);
+    });
+    return { seen, queue: x.tabs.ReviewQueue.length - 1 };
+  };
+  let run = lateRun([[FQ.REMOVE, '2026-09-27', '10'], [FQ.ADD, '2026-09-27', '11']]);
+  check('REMOVE at 10:00 then ADD at 11:00 on 09-27, both run 09-28: dated 09-27, so the ADD wins — she is back, no item',
+        run.seen.join(' → ') === 'inactive|2026-09-27 → active|' && !run.queue, run.seen.join(' → '));
+  run = lateRun([[FQ.REMOVE, '2026-09-26', '10'], [FQ.ADD, '2026-09-27', '10']]);
+  check('REMOVE sent 09-26, ADD sent 09-27, both run 09-28: she is back',
+        run.seen.join(' → ') === 'inactive|2026-09-26 → active|' && !run.queue, run.seen.join(' → '));
+  run = lateRun([[FQ.REMOVE, '2026-09-27', '10'], [FQ.ADD, '2026-09-26', '10']]);
+  check('…but an ADD sent 09-26 that only runs after a REMOVE sent 09-27 (a retry): the later removal wins, one item',
+        run.seen.join(' → ') === 'inactive|2026-09-27 → inactive|2026-09-27' && run.queue === 1, run.seen.join(' → '));
+
+  // The 2026-09-13 case: "Enroll a NEW club" re-sent for a club on file, replayed later.
+  w = world('America/New_York');
+  const enroll = { [FQ.ACTION]: FQ.ACTION_NEW, [FQ.PARTNER_NEW]: ORG, [FQ.CLUB]: 'Sunrise Club', [FQ.REGION]: 'Africa',
+                   [FQ.ROSTER]: 'Grace Zibblewick\nJoy Blorptest\nMary Zibblewick\nLucía Zörblewick',
+                   [FQ.MENTOR_EMAIL]: 'mentor@example.org' };
+  result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 2, enroll, sentOn('2026-08-31'));
+  check('new-club branch, sent 08-31: removed 09-12 and 09-10 stay removed, 08-01 comes back; one item; no mentor e-mail',
+        status(w, 2) === 'inactive|Date' && status(w, 3) === 'inactive|Date' && status(w, 5) === 'active|' &&
+        w.tabs.ReviewQueue.length === 2 && String(w.tabs.ReviewQueue[1][4]).includes('2 girl(s)') &&
+        String(w.tabs.ReviewQueue[1][4]).includes('Roster rows 2, 3.') && !w.mails.length &&
+        result === 'existing club Sunrise Club (' + ORG + '): 0 girls added, 1 reactivated, 2 kept removed, 1 for review',
+        result);
+}
+
 console.log('\n  guards');
 {
   const all = fs.readdirSync(loadGs.GS_DIR).filter(f => f.endsWith('.gs'))
       .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
   const raised = [...new Set([...all.matchAll(/issue: '([^']+)'/g)].map(m => m[1]))].sort();
-  check('every issue the code raises is in REVIEW_ISSUES (8)',
+  check('every issue the code raises is in REVIEW_ISSUES (9)',
         raised.join('|') === pr.REVIEW_ISSUES.slice().sort().join('|'), raised.join(' | '));
   const rb = fs.readFileSync(path.join(REPO, 'docs', 'RUNBOOK.md'), 'utf8');
   const section = (rb.split('## Working the ReviewQueue')[1] || '').split('\n## ')[0];
@@ -659,6 +937,12 @@ console.log('\n  guards');
   const fhSrc = fs.readFileSync(path.join(loadGs.GS_DIR, 'FormHandlers.gs'), 'utf8');
   check('the weekly trigger calls sendSfPendingDigest by name, and it exists',
         /newTrigger\('sendSfPendingDigest'\)/.test(fhSrc) && /^function sendSfPendingDigest\(\)/m.test(fhSrc));
+  const rosterGs = fs.readFileSync(path.join(loadGs.GS_DIR, 'Roster.gs'), 'utf8');
+  const rebuild = rosterGs.slice(rosterGs.indexOf('function rebuildRosterLocked_'), rosterGs.indexOf('function noRegionIssue_'));
+  const offline = fs.readFileSync(path.join(REPO, 'tools', 'build_roster_offline.js'), 'utf8');
+  check('the rebuild and the offline builder pass no submitted: no replay guard there (BACKLOG 39 stays open)',
+        rebuild.includes('planClub_(') && !/submitted/.test(rebuild) && offline.includes('planClub_(') && !/submitted/.test(offline));
+  check('dates are read in the spreadsheet\'s zone everywhere, never the script\'s', !/getScriptTimeZone/.test(all));
   const used = [...new Set(all.match(/\b(?:[A-Z]\w*App|[A-Z]\w*Service|Session|Utilities|Logger|Browser)\b(?=\s*\.)/g) || [])].sort().join(',');
   check('Google services unchanged (a new one adds an OAuth scope: CLAUDE.md rule 11)',
         used === 'FormApp,LockService,MailApp,PropertiesService,ScriptApp,SpreadsheetApp,UrlFetchApp,Utilities', used);
