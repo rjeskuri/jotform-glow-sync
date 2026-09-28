@@ -730,6 +730,18 @@ console.log('\n  the wording');
   check('"Club name" help: the club\'s own name, not the mentor\'s', /club's own name/.test(W.CLUB_HELP) &&
         /not the mentor's name/.test(W.CLUB_HELP) && !/mentors will type/i.test(W.CLUB_HELP));
   check('REMOVE help: copy the spelling from the club\'s attendance form', /exactly as it is spelled on the club's attendance form/.test(W.REMOVE_HELP));
+  // the RUNBOOK's rollback names where each 2026-08 text lives: the planner's own "before" texts
+  const formsSrc = fs.readFileSync(path.join(loadGs.GS_DIR, 'Forms.gs'), 'utf8');
+  const planSrc = formsSrc.slice(formsSrc.indexOf('function planFormWording_'), formsSrc.indexOf('function wordingText_'));
+  const before = [...planSrc.matchAll(/\[(WORDING\.\w+|rosterDescription2026_08_)\b/g)]
+      .map(m => m[1] + (m[1].startsWith('WORDING.') ? '' : '()'));
+  const wordingRb = (fs.readFileSync(path.join(REPO, 'docs', 'RUNBOOK.md'), 'utf8')
+      .split('## Google Forms wording')[1] || '').split('\n## ')[0];
+  const rollback = (wordingRb.split('\n- ').find(b => b.startsWith('Rollback:')) || '').replace(/\s+/g, ' ');
+  check('RUNBOOK rollback: names all four 2026-08 texts where they are, and the two-column read (986a325)',
+        before.length === 4 && before.every(x => rollback.includes('`' + x + '`')) &&
+        rollback.includes('986a325') && /two reply columns/.test(rollback) && !/only removes the menu item/.test(rollback),
+        before.filter(x => !rollback.includes('`' + x + '`')).join(', ') || rollback.slice(0, 80));
 }
 
 console.log('\n  the plan (pure)');

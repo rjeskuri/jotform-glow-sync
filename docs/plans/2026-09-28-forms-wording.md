@@ -132,8 +132,11 @@ text (BACKLOG 40), the attendance forms' "report a problem" link (finding 6). Li
 
 ## Risks
 - **Live write to both Google Forms** (Ryan's go): preview first, lock, re-read before and after,
-  Audit. Rollback: the Forms editor — the 2026-08 texts are in `WORDING` (`*_2026_08`) and git;
+  Audit. Rollback: the Forms editor — the 2026-08 texts are `WORDING.FEEDBACK_INTRO`,
+  `rosterDescription2026_08_()`, `WORDING.CLUB_HELP_2026_08` and `WORDING.REMOVE_HELP_2026_08`;
   a wrongly added question is deleted in the editor (its column stays in the tab, harmless).
+  Never roll `appsscript/` back before 986a325 while the Feedback tab has two reply columns (the
+  two-column read goes with it).
 - **Deploy**: `clasp push` of Forms.gs, Menu.gs and FormHandlers.gs. No new Google service
   (FormApp, LockService, SpreadsheetApp are already used; the services guard test pins the set),
   so no re-authorization and no trigger outage.

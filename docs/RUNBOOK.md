@@ -518,10 +518,18 @@ wording; forms built before 2026-09-28 get it once, from the menu
   in. Never delete, move or retitle response columns.
 - Wording can be edited in the Forms editor, but never a question **title**:
   the handlers read answers by title (`Config.gs` `Q`).
-- Rollback: the Forms editor (the 2026-08 texts are `WORDING.*_2026_08` in
-  `Forms.gs`); a wrongly added question is deleted there, and its column in
-  the tab stays, harmless. Rolling back `appsscript/` changes nothing on the
-  forms; it only removes the menu item.
+- Rollback: the Forms editor. The 2026-08 texts are in `Forms.gs`: the
+  problem form's description `WORDING.FEEDBACK_INTRO`, the Club Roster
+  Form's description `rosterDescription2026_08_()` (ending with the problem
+  form's link), and the help texts `WORDING.CLUB_HELP_2026_08` ("Club name")
+  and `WORDING.REMOVE_HELP_2026_08`. A wrongly added question is deleted
+  there, and its column in the tab stays, harmless. Rolling back
+  `appsscript/` changes nothing on the forms and removes the menu item, but
+  before 986a325 it also reverts the handler's read of two same-titled
+  columns (`responseFromValues_`): with the new reply column left of the old
+  one, every reply address would read blank again. So never roll
+  `appsscript/` back before 986a325 while the Feedback tab has two reply
+  columns.
 
 ## Apps Script deploy
 
