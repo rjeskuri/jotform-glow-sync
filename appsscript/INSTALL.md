@@ -93,8 +93,11 @@ Reload the spreadsheet.
 | **Something isn't working?** | anyone | one-minute problem report (its description sends roster changes to the Club Roster Form; a reply address is optional), emailed to staff; one that asks for a roster change also becomes a ReviewQueue item |
 
 The run installs the triggers and shows both links (again via **Show form
-links**). Responses land in *Roster Form Responses* and *Feedback*; *FormLog*
-records what was done with each.
+links**). Run again, it reuses both forms; if a saved form id does not open
+(another Google account, a Forms outage) it creates nothing and says so —
+new forms would leave the live forms' responses unprocessed. Responses land
+in *Roster Form Responses* and *Feedback*; *FormLog* records what was done
+with each.
 
 Then, in **Project Settings → Script Properties**:
 

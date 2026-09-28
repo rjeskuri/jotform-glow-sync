@@ -64,7 +64,10 @@ two help texts) and returns `{changes, skipped}`:
 **3. The menu item** `GLOW → Google Forms → Update the forms' wording (one-time; previews first)`
 → `migrateFormWording()`:
 1. Needs the sheet UI (refuses from the script editor, like "Process any missed form responses").
-   Either form missing → says to run "Create the Google Forms"; nothing written.
+   Either form missing → says to run "Create the Google Forms"; nothing written. A form whose id
+   is saved but does not open (another Google account, a Forms outage) → "Could not open …;
+   do NOT run Create" (Create would replace the live forms); "Create the Google Forms" itself
+   refuses in that case (review 2026-09-28, F2).
 2. Reads both forms and plans. Nothing to change → "Nothing to change" (+ the skipped list); no
    Audit row. Otherwise one YES/NO dialog lists every change (`now:` / `new:`, the added
    question and "the Feedback tab gets a new column with this title"), then what is left as is,

@@ -103,8 +103,19 @@ function createGlowForms() {
   const ui = SpreadsheetApp.getUi();
   const made = [];
 
-  const feedback = existingForm_(PROP.FEEDBACK_FORM) || createFeedbackForm_(ss, made);
-  const roster = existingForm_(PROP.ROSTER_FORM) || createRosterForm_(ss, feedback, made);
+  // a stored form that does not open is not "no form yet": new forms would
+  // take over its Script Property, and the live form's responses would be
+  // ignored from then on (formKeyForSheet_)
+  const stored = storedGlowForms_();
+  const unopened = unopenedFormsText_(stored);
+  if (unopened) {
+    ui.alert('GLOW forms', 'Nothing was created. ' + unopened + ' New forms would replace ' +
+        'the live ones, and the live forms\' responses would no longer be processed. If a ' +
+        'form was deleted on purpose, delete its Script Property first.', ui.ButtonSet.OK);
+    return;
+  }
+  const feedback = stored[0].form || createFeedbackForm_(ss, made);
+  const roster = stored[1].form || createRosterForm_(ss, feedback, made);
   // each description links to the other form: the problem form's gets its
   // link once the Club Roster Form exists (existing forms: migrateFormWording)
   if (made.indexOf('feedback') !== -1) {
@@ -122,11 +133,41 @@ function createGlowForms() {
       ui.ButtonSet.OK);
 }
 
+/** The form a Script Property names, or null: none saved, or saved but not opening (storedForm_). */
 function existingForm_(propKey) {
-  const id = PropertiesService.getScriptProperties().getProperty(propKey);
-  if (!id) return null;
-  try { return FormApp.openById(id); } catch (err) { return null; }
+  return storedForm_(propKey).form;
 }
+
+/**
+ * The form a Script Property names: {form, stored}. `stored` with no `form`
+ * means an id is saved but does not open (the sheet opened from a Google
+ * account without edit access to the forms, a Forms outage) — never "no form
+ * yet", so never advice to run "Create the Google Forms".
+ */
+function storedForm_(propKey) {
+  const id = PropertiesService.getScriptProperties().getProperty(propKey);
+  if (!id) return { form: null, stored: false };
+  try { return { form: FormApp.openById(id), stored: true }; } catch (err) { return { form: null, stored: true }; }
+}
+
+/** Both forms: [{label, prop, form, stored}] — the problem form first. */
+function storedGlowForms_() {
+  return [['problem form', PROP.FEEDBACK_FORM], ['Club Roster Form', PROP.ROSTER_FORM]]
+      .map(function (n) { return Object.assign({ label: n[0], prop: n[1] }, storedForm_(n[1])); });
+}
+
+/** '' when every saved form opened; else which did not, and what to do (not "Create"). */
+function unopenedFormsText_(stored) {
+  const bad = stored.filter(function (s) { return s.stored && !s.form; });
+  if (!bad.length) return '';
+  return 'Could not open the ' + bad.map(function (s) { return s.label; }).join(' and the ') +
+      ' saved in Script Properties (' + bad.map(function (s) { return s.prop; }).join(', ') +
+      '). Run this from the Google account that owns the forms, or try again later.';
+}
+
+/** The ending for a dialog that could not open a saved form. */
+const DO_NOT_CREATE = 'Do NOT run "Create the Google Forms": it would replace the live forms, ' +
+    'and their responses would no longer be processed.';
 
 function commonSettings_(form, description, confirmation) {
   form.setDescription(description);
@@ -423,9 +464,12 @@ function formLinksText_(roster, feedback) {
 
 function showFormLinks() {
   const ui = SpreadsheetApp.getUi();
-  const a = existingForm_(PROP.ROSTER_FORM), c = existingForm_(PROP.FEEDBACK_FORM);
+  const stored = storedGlowForms_();
+  const c = stored[0].form, a = stored[1].form;
   if (!a || !c) {
-    ui.alert('GLOW forms', 'The forms do not exist yet — run "Create the Google Forms".',
+    const unopened = unopenedFormsText_(stored);
+    ui.alert('GLOW forms', unopened ? unopened + ' ' + DO_NOT_CREATE
+                                    : 'The forms do not exist yet — run "Create the Google Forms".',
              ui.ButtonSet.OK);
     return;
   }
@@ -529,10 +573,13 @@ function migrateFormWording() {
     throw new Error('Run this from the sheet (GLOW → Google Forms → Update the forms\' ' +
                     'wording): it shows what it would change and asks first.');
   }
-  const forms = { FEEDBACK: existingForm_(PROP.FEEDBACK_FORM), ROSTER: existingForm_(PROP.ROSTER_FORM) };
+  const stored = storedGlowForms_();
+  const forms = { FEEDBACK: stored[0].form, ROSTER: stored[1].form };
   if (!forms.FEEDBACK || !forms.ROSTER) {
-    ui.alert('GLOW forms', 'The forms do not exist yet — run "Create the Google Forms"; a ' +
-             'fresh build already has this wording.', ui.ButtonSet.OK);
+    const unopened = unopenedFormsText_(stored);
+    ui.alert('GLOW forms', unopened ? unopened + ' Nothing was changed. ' + DO_NOT_CREATE
+        : 'The forms do not exist yet — run "Create the Google Forms"; a fresh build already ' +
+          'has this wording.', ui.ButtonSet.OK);
     return 0;
   }
   const plan = planFormWording_(readFormWording_(forms.FEEDBACK, forms.ROSTER));

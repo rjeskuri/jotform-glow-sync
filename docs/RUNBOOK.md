@@ -495,6 +495,11 @@ wording; forms built before 2026-09-28 get it once, from the menu
 - "The forms changed since the preview", "the preview was open too long",
   "Another GLOW operation is still running": nothing was changed; run it
   again.
+- "Could not open the … saved in Script Properties": nothing was changed.
+  Run it from the Google account that owns the forms, or later (a Forms
+  outage). **Never** run "Create the Google Forms" to fix this: it would
+  make new forms, and the live forms' responses would no longer be
+  processed (it refuses in that case, "Nothing was created").
 - "Stopped after N of M change(s)": what landed stays; run it again, and it
   makes only the changes still missing.
 - A text left as is: paste the suggested text in the Forms editor if you

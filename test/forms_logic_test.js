@@ -991,6 +991,46 @@ console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and A
   check('a form missing: "run Create the Google Forms", nothing written, no Audit row',
         !w.calls.length && !w.audits.length && /do not exist yet/.test(w.dialogs[0]));
 
+  // a saved form id that does not open (another Google account, a Forms outage) is not "no form yet"
+  const noAccess = x => { x.ctx.FormApp.openById = () => { throw new Error('You do not have permission'); }; };
+  w = world({ props: PROPS, replies: ['YES'] });
+  liveForms(w);
+  noAccess(w);
+  w.ctx.migrateFormWording();
+  check('the saved forms do not open: "could not open", "Do NOT run Create", nothing written, no Audit row',
+        w.dialogs.length === 1 && w.dialogs[0].startsWith('Could not open the problem form and the Club Roster Form ' +
+            'saved in Script Properties (FORM_FEEDBACK_ID, FORM_ROSTER_ID). Run this from the Google account that owns') &&
+        w.dialogs[0].includes('Do NOT run "Create the Google Forms"') && !/do not exist yet/.test(w.dialogs[0]) &&
+        !w.calls.length && !w.audits.length, w.dialogs[0]);
+  w = world({ props: { FORM_ROSTER_ID: 'ROSTER' } });
+  liveForms(w);
+  const openRoster = w.ctx.FormApp.openById;
+  w.ctx.FormApp.openById = id => { if (id === 'ROSTER') throw new Error('Forms service unavailable'); return openRoster(id); };
+  w.ctx.migrateFormWording();
+  check('…one saved form that does not open, the other never saved: the unopened one is named, not "Create"',
+        /^Could not open the Club Roster Form saved in Script Properties \(FORM_ROSTER_ID\)/.test(w.dialogs[0]) &&
+        w.dialogs[0].includes('Do NOT run'), w.dialogs[0]);
+  w = world({ props: PROPS });
+  liveForms(w);
+  noAccess(w);
+  w.ctx.showFormLinks();
+  check('…"Show form links" says the same', /^Could not open the problem form and the Club Roster Form/.test(w.dialogs[0]) &&
+        w.dialogs[0].includes('Do NOT run "Create the Google Forms"'), w.dialogs[0]);
+  w = world({ props: PROPS });
+  liveForms(w);
+  noAccess(w);
+  let createCalled = false;
+  const create = w.ctx.FormApp.create;
+  w.ctx.FormApp.create = t => { createCalled = true; return create(t); };
+  w.ctx.syncFormChoices = () => 0;
+  w.ctx.installTriggers = () => {};
+  w.ctx.linkFormToSheet_ = () => null;
+  w.ctx.createGlowForms();
+  check('…and "Create the Google Forms" refuses: no new form, the saved ids kept, "Nothing was created"',
+        !createCalled && w.props.FORM_FEEDBACK_ID === 'FEEDBACK' && w.props.FORM_ROSTER_ID === 'ROSTER' &&
+        /^Nothing was created\. Could not open the problem form and the Club Roster Form/.test(w.dialogs[0]) &&
+        !w.audits.length, w.dialogs[0]);
+
   w = world({ props: PROPS });
   liveForms(w);
   w.ctx.SpreadsheetApp.getUi = () => { throw new Error('no UI here'); };
