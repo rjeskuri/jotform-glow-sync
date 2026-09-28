@@ -1,7 +1,7 @@
 ---
 title: Problem reports that are roster changes reach the ReviewQueue, and Ryan works it weekly
 author: Claude (with Ryan)
-status: accepted
+status: done
 created: 2026-09-28
 intent: none — the 2026-09-26/27 problem-report review
 ---
@@ -138,4 +138,17 @@ working?" line); partner messages; the Partner-box acronym fix; replay guard; du
 guard.
 
 ## Result
-(filled in after the deploy and the back-fill)
+- 2026-09-28: a four-lens critique of the draft shaped the design (queue before the e-mail; the
+  e-mail never prints name tags, off-file partner/club or non-date cells; the tuned classifier;
+  +7, not +9). The review of the code (four lenses, a skeptic per finding) found the formula
+  guard on typed partner/club could be bypassed with a space — fixed and tested — and six nits,
+  all fixed; each fix's test fails without it. `make check` green; Google services unchanged.
+- Committed `a1dc5d7` on `main`, pushed; deployed 2026-09-28 with Ryan's go (`Pushed 11 files.`,
+  no new OAuth scope).
+- Back-fill with Ryan's go: dry run +7, applied — Feedback 4, 5, 6, 7, 10, 11, 12 on the
+  ReviewQueue, each re-read once, Audit `backfillFeedbackReview`; 8 and 9 are not roster
+  changes; a second run adds 0. The deployed `reviewDigest_` on the live queue: 34 open,
+  7 of them "Roster change sent as a problem report".
+- Still to observe: the Monday e-mail of 2026-10-05 (Audit `sendSfPendingDigest: emailed …:
+  N open ReviewQueue item(s) …`), and the next roster-change report getting its line and the
+  e-mail's staff note.
