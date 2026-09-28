@@ -1,7 +1,7 @@
 ---
 title: Move a club to its real partner (a mistyped partner), first use 2026-09-24
 author: Claude (with Ryan)
-status: accepted (Ryan, 2026-09-24, in conversation: gated tool; blank the typo's Partners row with a note; the raw enrollment response stays as it is)
+status: done (applied 2026-09-28; accepted by Ryan 2026-09-24, in conversation: gated tool; blank the typo's Partners row with a note; the raw enrollment response stays as it is)
 created: 2026-09-24
 intent: none — an operational correction Ryan asked for on 2026-09-24
 ---
@@ -143,3 +143,14 @@ skeptic, plus a completeness critic):
 names and row numbers only; no girls' names or ids); the Audit row; the
 dropdown refresh; `auto_sync` in-sync and `form_status` CLEAN. All pasted in
 the conversation and summarised here when done.
+
+## Result
+Applied 2026-09-28 with Ryan's go, from a session launched with the live flag and the Jotform
+key: dry run first, then `--apply`. Roster rows 4346-4377 (32 cells), ClubRegistry row 233
+(code CLUBGLOW kept), Partners row 24 (`ion bu` blanked, note added; 2 cells), 0 SF Pending
+rows, 1 Audit row — each written and re-read. The tabs before the change are in
+`data/rename_club/2026-09-28T153128/`. No form writes: q352's show rule on the Latin America
+form and the template has no Partner term. Afterwards `auto_sync.py --region "Latin America"`
+(dry run) said in-sync, "nothing to do", and `form_status.py` on 262383455778067 said CLEAN
+(68 conditions, 0 flagged, salesforce yes). Remaining: Ryan's GLOW → Google Forms → Update form
+dropdowns from the Roster, a preview of the Existing-club page, and telling Fundación Kaleidos.
