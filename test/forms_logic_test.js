@@ -179,6 +179,9 @@ console.log('\nthe replay guard: an older response never puts back girls removed
   p = mod(undefined);
   check('…and with no submitted, exactly as before: back on the roster, kept under both lists',
         rowsOf(p.reactivate) === '2,4' && p.keptBoth.join() === 'Grace Zibblewick' && !p.keptRemoved.length && !p.issues.length);
+  check('its removals are dated the day it was sent (both sides of the guard are sent days); never after today; none → today',
+        mod('2026-08-31').removedOn === '2026-08-31' && mod(undefined).removedOn === '2026-09-13' &&
+        mod('2026-09-13').removedOn === '2026-09-13' && mod('2026-09-14').removedOn === '2026-09-13');
   check('every plan carries keptRemoved (uniform shape)',
         Array.isArray(gs.planClub_({ partner, club, names: [], duplicates: [] }, [], freshState(), region, '2026-08-28').keptRemoved) &&
         Array.isArray(gs.planModification_({ partner, club, adds: [], removes: [] }, [], freshState(), region, '2026-08-28').keptRemoved));
@@ -817,9 +820,10 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
 
   // A roster change sent 09-10 that only runs on 09-28 (a retry, or confirmed in the menu).
   let result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 5, change(), sentOn('2026-09-10'));
-  check('sent 09-10, run 09-28: removed 09-12 stays removed; removed 09-10 (the sheet\'s zone) and 08-01 come back',
+  check('sent 09-10, run 09-28: removed 09-12 stays removed; removed 09-10 (the sheet\'s zone) and 08-01 come back; ' +
+        'its REMOVE is dated 09-10, the day it was sent',
         status(w, 2) === 'inactive|Date' && status(w, 3) === 'active|' && status(w, 5) === 'active|' &&
-        status(w, 4) === 'inactive|2026-09-28', [2, 3, 4, 5].map(r => status(w, r)).join(' '));
+        status(w, 4) === 'inactive|2026-09-10', [2, 3, 4, 5].map(r => status(w, r)).join(' '));
   const item = w.tabs.ReviewQueue[1] || [];
   check('one ReviewQueue row: tagged with the response, Roster row numbers, no name',
         w.tabs.ReviewQueue.length === 2 && item[1] === 'Removed girls not put back by an older response' &&
@@ -849,7 +853,31 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
   w = world('America/New_York');
   result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 7, change(), 'ROSTER|9/10/2026 8:00:00|' + ORG + '|Sunrise Club');
   check('a Timestamp that is not a date: no sent day, so today\'s behaviour (the menu asks twice for such rows)',
-        status(w, 2) === 'active|' && w.tabs.ReviewQueue.length === 1, result);
+        status(w, 2) === 'active|' && status(w, 4) === 'inactive|2026-09-28' && w.tabs.ReviewQueue.length === 1, result);
+
+  // The trigger was down (a scope-adding push not yet authorized): responses sent earlier all run
+  // on 09-28 from the menu, in sheet order. Review finding 2026-09-28: if a removal were dated the
+  // day it RAN, a REMOVE and a later-sent ADD for the same girl would keep her removed.
+  const one = (field, name) => ({ [FQ.ACTION]: FQ.ACTION_MOD, [FQ.PARTNER_MOD]: ORG,
+                                  [FQ.CLUB_PREFIX + ORG + ')']: 'Sunrise Club', [field]: name });
+  const at = (day, hh) => 'ROSTER|w:' + day + ' ' + hh + ':00:00.000|' + ORG + '|Sunrise Club';
+  const lateRun = steps => {
+    const x = world('America/New_York');
+    const seen = steps.map(([field, day, hh], i) => {
+      x.ctx.runResponse_('ROSTER', x.sheet(RQ), 10 + i, one(field, 'Mary Zibblewick'), at(day, hh));
+      return status(x, 4);
+    });
+    return { seen, queue: x.tabs.ReviewQueue.length - 1 };
+  };
+  let run = lateRun([[FQ.REMOVE, '2026-09-27', '10'], [FQ.ADD, '2026-09-27', '11']]);
+  check('REMOVE at 10:00 then ADD at 11:00 on 09-27, both run 09-28: dated 09-27, so the ADD wins — she is back, no item',
+        run.seen.join(' → ') === 'inactive|2026-09-27 → active|' && !run.queue, run.seen.join(' → '));
+  run = lateRun([[FQ.REMOVE, '2026-09-26', '10'], [FQ.ADD, '2026-09-27', '10']]);
+  check('REMOVE sent 09-26, ADD sent 09-27, both run 09-28: she is back',
+        run.seen.join(' → ') === 'inactive|2026-09-26 → active|' && !run.queue, run.seen.join(' → '));
+  run = lateRun([[FQ.REMOVE, '2026-09-27', '10'], [FQ.ADD, '2026-09-26', '10']]);
+  check('…but an ADD sent 09-26 that only runs after a REMOVE sent 09-27 (a retry): the later removal wins, one item',
+        run.seen.join(' → ') === 'inactive|2026-09-27 → inactive|2026-09-27' && run.queue === 1, run.seen.join(' → '));
 
   // The 2026-09-13 case: "Enroll a NEW club" re-sent for a club on file, replayed later.
   w = world('America/New_York');

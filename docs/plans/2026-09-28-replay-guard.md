@@ -49,6 +49,12 @@ intent: none — BACKLOG 41, the follow-up named in docs/plans/2026-09-27-formlo
   enrolled"); otherwise mark resolved.` — Roster **row numbers, never names**;
   `dedupeKey: source`, so a retry adds no second row and the Monday e-mail can show the
   response-row tag (`responseRowTag_` already allows `Roster Form Responses!N`).
+- **Both sides are sent days** (review finding, 2026-09-28): `planModification_` returns
+  `removedOn = removedOnDay_(sentDay, today)` — the day the response was sent, never after
+  today — and `applyRosterPlan_` stamps the deactivated rows' `removed_date` with it. Were it
+  the day the removal *ran*, a REMOVE and a later-sent ADD for the same girl, both run late (a
+  trigger outage, then the menu, in sheet order), would keep her removed. A response processed
+  on time is sent today, so on the normal path `removed_date` is today, as before.
 
 **2. `loadRoster_`** — an `added_date` / `removed_date` Date cell becomes `yyyy-MM-dd` in the
 **spreadsheet's** zone (never the script's); text cells are untouched. The other readers
@@ -75,8 +81,10 @@ trigger outage (CLAUDE.md rule 11); the existing guard test pins the service set
 
 ## Files that change
 - `appsscript/RosterOps.gs` — `entry.submitted`, `staysRemoved_`, `dayOf_` / `submittedDay_`
-  helpers, `keptRemoved`, `keptRemovedIssue_`; header comment (plan shape).
-- `appsscript/Roster.gs` — `loadRoster_` normalises the two date columns.
+  / `removedOnDay_` helpers, `keptRemoved`, `removedOn`, `keptRemovedIssue_`; header comment
+  (plan shape).
+- `appsscript/Roster.gs` — `loadRoster_` normalises the two date columns; `applyRosterPlan_`
+  stamps removals with `plan.removedOn` (else today).
 - `appsscript/FormHandlers.gs` — `runResponse_`, `handleNewClub_`, `handleRosterChange_`,
   `sendChangeConfirmation_`, `REVIEW_ISSUES`, header comment, the old-row dialog text.
 - `test/forms_logic_test.js` — pure tests of the guard; `loadRoster_` and both handlers run
@@ -106,7 +114,8 @@ trigger outage (CLAUDE.md rule 11); the existing guard test pins the service set
   re-creating renamed or moved clubs.
 - **An old REMOVE replayed** after the girl was re-added deactivates her again: a reactivation
   clears `removed_date` and records no date (BACKLOG 34, an `updated` column, would allow it).
-- **Same-day replays** still reactivate (`removed_date` is a day).
+- **Same-day replays** still reactivate (`removed_date` is a day): e.g. an ADD that failed and
+  is retried after a REMOVE sent later the same day.
 - The menu's second YES for old rows stays: the guard covers reactivation only.
 
 ## Risks
@@ -120,6 +129,9 @@ trigger outage (CLAUDE.md rule 11); the existing guard test pins the service set
   removal day can land on the other side of the comparison. Only same-day-boundary cases.
 - **A thrown guard error** would log the response as `ERROR:` (retryable); the handlers only
   pass `''` or a day, and a test pins that `''` is accepted.
+- **`removed_date` meaning**: for a Club Roster Form removal run late it is now the day the
+  removal was sent, not the day it ran (Audit still records when it ran). Nothing else reads
+  the column (the Jotform sync reads `status`); on time the two are the same day.
 - **Deploy**: no new Google service → no re-authorization. Rollback: `git checkout e552f55 --
   appsscript && npm run clasp:push` (never before `7a175c4`).
 
@@ -139,6 +151,8 @@ Offline: `make check` — the healthy tail unchanged (`ALL CHECKS PASSED` ×3, `
 - both handlers with Google services stubbed: the Roster cells after the run, the ReviewQueue
   row, the FormLog result / Audit counts, the mentor e-mail's typed names; a fresh submission
   (sent today) reactivates as before;
+- a REMOVE and a later-sent ADD for the same girl, both run late: the removal is dated the
+  day it was sent and the ADD puts her back; the reverse order keeps her removed;
 - guards: 9 issues each with a RUNBOOK action; the service set unchanged; the rebuild and the
   offline builder pass no `submitted`.
 
@@ -157,6 +171,12 @@ Rollback: `git checkout e552f55 -- appsscript && npm run clasp:push`.
   switched off 11 checks fail; without the Date normalisation 6, with UTC instead of the
   sheet's zone 5, with the change handler given no sent day 5, the new-club handler 1, the
   mentor e-mail using the Roster spelling 1.
+- Review (one pass against REVIEW.md): one finding — `removed_date` was the day a removal
+  ran while the guard compares it with the day a response was sent, so a REMOVE and a
+  later-sent ADD both run late would keep the girl removed. Fixed by dating a Club Roster Form
+  removal the day it was sent (`removedOn`, Design 1, last bullet); three handler tests
+  (REMOVE then ADD the same day, on consecutive days, and the reverse order) fail without it
+  (4 checks). Nothing else survived verification.
 - `make check` (also with `CSV=` the 2026-08-24 export: `real data …: parsed 328 clubs, 6210
   girls`, pins and the 6210-name leak scan pass):
   `ALL CHECKS PASSED` ×3, `py: 30 files parse, 18 scripts answer --help`, `OK`,

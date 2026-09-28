@@ -68,6 +68,17 @@ function staysRemoved_(row, sentDay, today) {
 }
 
 /**
+ * The removed_date a response's removals are stamped with: the day it was
+ * SENT (never after today), so both sides of staysRemoved_ are sent days. If
+ * it were the day it ran, a REMOVE and a later ADD for the same girl, both
+ * run late (a trigger outage, then the menu), would keep her removed. A
+ * response processed on time is sent today, so this is today, as before.
+ */
+function removedOnDay_(sentDay, today) {
+  return sentDay && sentDay < today ? sentDay : today;
+}
+
+/**
  * The ReviewQueue item for one response that named girls removed after it
  * was sent: Roster row numbers, never names; tagged with the response row,
  * so a retry adds no second item and the Monday e-mail can show the tag.
@@ -151,7 +162,8 @@ function planClub_(entry, current, state, region, today) {
  * insensitively against the club's ACTIVE girls → deactivated; already
  * inactive → noted, nothing to do; anything that matches nobody is returned
  * with the closest candidates (for staff, via the ReviewQueue — never for the
- * mentor email). Nothing is ever deleted.
+ * mentor email). Nothing is ever deleted. plan.removedOn is the removed_date
+ * the deactivated rows get (removedOnDay_).
  *
  * entry: {partner, club, adds, removes, duplicates, source, submitted (optional)}
  */
@@ -159,6 +171,7 @@ function planModification_(entry, current, state, region, today) {
   const plan = { toAppend: [], reactivate: [], deactivate: [], keptRemoved: [], issues: [],
                  alreadyActive: [], alreadyInactive: [], keptBoth: [], unmatched: [] };
   const sentDay = submittedDay_(entry);
+  plan.removedOn = removedOnDay_(sentDay, today);
   if (entry.duplicates && entry.duplicates.length) plan.issues.push(duplicateNamesIssue_(entry));
 
   const code = clubCode_(state.registry, entry.partner, entry.club);

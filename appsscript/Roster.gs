@@ -267,13 +267,14 @@ function noRegionIssue_(partner) {
 
 /**
  * Write a plan from RosterOps.gs to the Roster tab: append new rows, flip
- * reactivated rows back to active, retire deactivated rows. Rows in
- * `reactivate` / `deactivate` carry _sheetRow from loadRoster_.
+ * reactivated rows back to active, retire deactivated rows (removed_date =
+ * plan.removedOn — the day a Club Roster Form removal was sent — else today).
+ * Rows in `reactivate` / `deactivate` carry _sheetRow from loadRoster_.
  */
 function applyRosterPlan_(ss, plan, today) {
   const sheet = ensureTab_(ss, TAB.ROSTER, ROSTER_COLS);
   setRowsStatus_(sheet, plan.reactivate, STATUS.ACTIVE, '');
-  setRowsStatus_(sheet, plan.deactivate, STATUS.INACTIVE, today);
+  setRowsStatus_(sheet, plan.deactivate, STATUS.INACTIVE, plan.removedOn || today);
   if (plan.toAppend.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, plan.toAppend.length,
                    ROSTER_COLS.length).setValues(plan.toAppend);
