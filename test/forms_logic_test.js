@@ -662,21 +662,29 @@ const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose
   check('matchWords_: folded, dots dropped, split on punctuation, letters from digits',
         dg.matchWords_('Hillside G.L.O.W club , Northfield').join(' ') === 'hillside glow club northfield' &&
         dg.matchWords_('Lubbock GC-2').join(' ') === 'lubbock gc 2' && dg.matchWords_('Club2B').join(' ') === 'club 2 b' &&
-        dg.matchWords_('Fundación  Demo').join(' ') === 'fundacion demo');
+        dg.matchWords_('Fundación  Demo').join(' ') === 'fundacion demo' &&
+        dg.matchWords_("Bishop's B R/C").join(' ') === 'bishops b r c' && dg.matchWords_('Bishop’s').join(' ') === 'bishops');
   check('numberTag_: digits and roman numerals, sorted; none → ""',
         dg.numberTag_(['club', '02']) === '2' && dg.numberTag_(['club', 'ii']) === '2' && dg.numberTag_(['club']) === '' &&
         dg.numberTag_(['constructor']) === '');
   const close = [['BRIGHT GIRLS', 'BRIGHT GIRLS (TESTVILLE SEC SCH)'], ['BRAVEHEART GIRLS', 'BRAVEHAERT GIRLS'],
                  ['Hillside GLOW Club Northfield', 'Hillside G.L.O.W club , Northfield'], ['Riverside', 'Club Glow Riverside'],
                  ['Shining Stars', 'Shinning Stars'], ['Harbor Club', 'Harbor Club 2'], ['Harbor Club 2', 'Harbor Club II'],
-                 ['Las Lomitas', 'Las Lomitas primaria']];
+                 ['Las Lomitas', 'Las Lomitas primaria'], ['BRAVEHEART GIRLS', 'BRAVEHAERT GIRLS (TESTVILLE SEC SCH)'],
+                 ['Orbit', 'Orbit (A)']];
   const apart = [['Harbor Club 1', 'Harbor Club 2'], ['Vision GLOW Club', 'Rise GLOW Club'],
-                 ['Club Glow Chacarita', 'Club Glow Traslasierra'], ['GLOW Club', 'Girls Club'], ['Sunrise Club', 'Starlight Club']];
+                 ['Club Glow Chacarita', 'Club Glow Traslasierra'], ['GLOW Club', 'Girls Club'], ['Sunrise Club', 'Starlight Club'],
+                 ['Harbor Club (1)', 'Harbor Club (2)'], ['SKY GIRLS (TESTVILLE SEC SCH)', 'ROYAL GIRLS (TESTVILLE SEC SCH)'],
+                 ['(TESTVILLE SEC SCH)', '(TESTVILLE PRI SCH)'], ['(TESTVILLE SEC SCH)', '(NORTHFIELD SEC SCH)'],
+                 ['Las Lomitas primaria', 'Las Lomitas secundaria'],
+                 ['SKY GIRLS (TESTVILLE PRI SCH)', 'SKY GIRLS (TESTVILLE SEC SCH)'], ['Orbit (A)', 'Orbit (B)'],
+                 ['Harbor 2 - Club A', 'Harbor 2 - Club B'], ["TESTVILLE'S A R/C JHS GLOW CLUB", "TESTVILLE'S B R/C JHS GLOW CLUB"],
+                 ['FHX Global Glow', 'TMX Global Glow']];
   const wrongClose = close.filter(([a, b]) => !dg.clubNamesClose_(a, b) || !dg.clubNamesClose_(b, a));
   const wrongApart = apart.filter(([a, b]) => dg.clubNamesClose_(a, b) || dg.clubNamesClose_(b, a));
-  check('clubNamesClose_: suffix, typo, punctuation, containment, one number added — close either way round',
+  check('clubNamesClose_: suffix, typo, punctuation, containment, one number added, typo + school — close either way round',
         !wrongClose.length, wrongClose.map(p => p.join(' / ')).join(' | '));
-  check('clubNamesClose_: different numbers, different distinctive words, filler only — apart',
+  check('clubNamesClose_: different numbers, section letters or school levels, different distinctive words, the same school only, filler only — apart',
         !wrongApart.length, wrongApart.map(p => p.join(' / ')).join(' | '));
   const pClose = [['Fundacion Demo', 'Fundación Demo'], ['Demo', 'Fundación Demo'], ['TARN', 'Test Aid Relief Network'],
                   ['Test Aid Relief Network', 'TARN'], ['Test Aid Releif Network', 'Test Aid Relief Network'],

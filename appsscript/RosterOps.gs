@@ -173,9 +173,11 @@ const DUP_GUARD = {
 };
 
 /** Words that say nothing about WHICH club, or which partner, it is. */
-const CLUB_FILLER = /^(?:glow|clubs?|girls?|gc|the|of|and|y|de|del|la|las|los|el|group|sec|secondary|sch|school|pri|primary|primaria|secundaria|escuela|colegio)$/;
+const CLUB_FILLER = /^(?:glow|global|clubs?|girls?|gc|the|of|and|y|de|del|la|las|los|el|group|sec|secondary|sch|school|pri|primary|primaria|secundaria|escuela|colegio)$/;
 const PARTNER_FILLER = /^(?:foundation|fundacion|organi[sz]ation|org|initiative|network|trust|society|association|asociacion|ngo|inc|ltd|the|of|for|and|y|de|del|la|las|los|el|international|community|project|program(?:me)?|group|girls?|glow|club)$/;
 const ROMAN_NUMERALS = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'];
+const SCHOOL_LEVELS = { pri: 'primary', primary: 'primary', primaria: 'primary',
+                        sec: 'secondary', secondary: 'secondary', secundaria: 'secondary' };
 
 /**
  * Why a new-club response should be held for staff instead of imported, as
@@ -268,12 +270,13 @@ function newClubHoldReasons_(entry, rows, partners) {
 }
 
 /**
- * A name as words to compare: case and accents folded, dots dropped (so
- * "G.L.O.W" is "glow"), split on anything that is not a letter, mark or
- * digit, letters split from digits ("GC-2", "Club2" → …, "2").
+ * A name as words to compare: case and accents folded, dots and apostrophes
+ * dropped (so "G.L.O.W" is "glow", "Bishop's" is "bishops"), split on
+ * anything that is not a letter, mark or digit, letters split from digits
+ * ("GC-2", "Club2" → …, "2").
  */
 function matchWords_(s) {
-  return foldKey_(s).replace(/\./g, '')
+  return foldKey_(s).replace(/[.'\u2019`]/g, '')
       .replace(/(\p{L})(?=\p{N})|(\p{N})(?=\p{L})/gu, '$1$2 ')
       .split(/[^\p{L}\p{M}\p{N}]+/u).filter(String);
 }
@@ -287,17 +290,40 @@ function numberTag_(words) {
   }).filter(String).sort().join(' ');
 }
 
+/** The one-letter words of a name — section marks such as "(A)", "Club B" — sorted: '' if none. */
+function letterTag_(words) {
+  const seen = {};
+  words.forEach(function (w) { if (w.length === 1 && /\p{L}/u.test(w)) seen[w] = true; });
+  return Object.keys(seen).sort().join(' ');
+}
+
+/** The school levels in a name's words ("PRI SCH", "primaria" → primary), sorted: '' if none. */
+function levelTag_(words) {
+  const seen = {};
+  words.forEach(function (w) {
+    if (Object.prototype.hasOwnProperty.call(SCHOOL_LEVELS, w)) seen[SCHOOL_LEVELS[w]] = true;
+  });
+  return Object.keys(seen).sort().join(' ');
+}
+
 /**
  * True if two club names may be one club: the same words; or, without the
  * filler words (CLUB_FILLER), one's words all in the other's ("BRIGHT GIRLS"
- * in "BRIGHT GIRLS (TESTVILLE SEC SCH)") or similarity_ ≥ SIMILAR (a typo).
- * Names whose numbers differ ("Harbor Club 1" / "Harbor Club 2") never are.
+ * in "BRIGHT GIRLS (TESTVILLE SEC SCH)") or similarity_ ≥ SIMILAR (a typo) —
+ * also with what is in parentheses left out, so a typo AND an added school
+ * ("BRAVEHAERT GIRLS (TESTVILLE SEC SCH)") is caught. Names whose numbers,
+ * section letters or school levels differ ("Harbor Club 1" / "Harbor Club
+ * (2)", "Orbit (A)" / "Orbit (B)", "Las Lomitas primaria" / "Las Lomitas
+ * secundaria") never are.
  */
 function clubNamesClose_(a, b) {
   const wa = matchWords_(a), wb = matchWords_(b);
-  const na = numberTag_(wa), nb = numberTag_(wb);
-  if (na && nb && na !== nb) return false;
-  return wordsClose_(wa, wb, CLUB_FILLER);
+  const differ = function (tag) { const x = tag(wa), y = tag(wb); return x && y && x !== y; };
+  if (differ(numberTag_) || differ(letterTag_) || differ(levelTag_)) return false;
+  if (wordsClose_(wa, wb, CLUB_FILLER)) return true;
+  const bare = function (s) { return matchWords_(String(s == null ? '' : s).replace(/\([^)]*\)/g, ' ')); };
+  const ba = bare(a), bb = bare(b);
+  return (ba.length < wa.length || bb.length < wb.length) && wordsClose_(ba, bb, CLUB_FILLER);
 }
 
 /**
@@ -317,6 +343,7 @@ function partnersClose_(typed, known) {
 }
 
 function wordsClose_(wa, wb, filler) {
+  if (!wa.length || !wb.length) return false;
   if (wa.join(' ') === wb.join(' ')) return true;
   const keep = function (w) { return !filler.test(w); };
   const da = wa.filter(keep), db = wb.filter(keep);
