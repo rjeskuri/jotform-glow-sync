@@ -27,12 +27,14 @@ import add_feedback_link              # noqa: E402
 import add_language                   # noqa: E402
 import add_translations               # noqa: E402
 import auto_sync                      # noqa: E402
+import fix_roster_order               # noqa: E402
 import form_status                    # noqa: E402
 import rename_club                    # noqa: E402
 import switcher_flags                 # noqa: E402
 import update_static_fields           # noqa: E402
 import worklog                        # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
+from glow import forms as glow_forms  # noqa: E402
 from glow import layout               # noqa: E402
 from glow import links                # noqa: E402
 from glow.text import md5             # noqa: E402
@@ -2282,6 +2284,169 @@ class RosterLayout(unittest.TestCase):
         self.assertEqual(layout.audit_layout(two), ["2 Submit buttons, expected 1"])
         self.assertEqual(layout.summary(qs), {"submit_buttons": 1, "fence": "somethingNotWorking (q443)",
                                               "rosters": 2, "rosters_below": 1, "first_below": "400"})
+
+
+class FixRosterOrderTool(unittest.TestCase):
+    """tools/fix_roster_order.py main() on fake forms (FakeFormClient keeps an
+    order as sent): planning, refusals, snapshot, drift, probe, verify."""
+
+    FIDS = [glow_forms.TEMPLATE, *glow_forms.REGIONALS.values()]
+
+    def run_main(self, fake, *argv):
+        """(exit code or 0, stdout, events): events = 'snap <fid>' / 'write <label>' in order."""
+        import contextlib
+        import io
+        from unittest import mock
+        events, out = [], io.StringIO()
+        post = fake.post_form
+
+        def post_form(path, data, label):
+            events.append("write " + label)
+            return post(path, data, label)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(fix_roster_order, "Client",
+                                                  lambda key, apply=False: fake))
+            stack.enter_context(mock.patch.object(
+                fix_roster_order, "snapshot", lambda fid, client, stamp: events.append("snap " + fid)))
+            stack.enter_context(mock.patch.object(fake, "post_form", post_form))
+            stack.enter_context(mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}))
+            stack.enter_context(mock.patch.object(sys, "argv", ["fix_roster_order.py", *argv]))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            try:
+                fix_roster_order.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue(), events
+
+    def forms(self, **overrides):
+        return {fid: overrides.get(fid) or link_form() for fid in self.FIDS}
+
+    def test_the_template_is_planned_and_written_first(self):
+        self.assertEqual(list(fix_roster_order.FORMS), self.FIDS)
+
+    def test_dry_run_plans_every_form_and_writes_nothing(self):
+        fake = FakeFormClient(self.forms())
+        code, out, events = self.run_main(fake)
+        self.assertEqual((code, events), (0, []))
+        self.assertEqual(out.count("1 of 2 rosters render below somethingNotWorking (q443)"), 5)
+        self.assertIn("1. move submit2 (q2) 11 -> 16", out)
+        self.assertIn("4. move somethingNotWorking (q443) 10 -> 15", out)
+        self.assertNotIn("Girl", out)                 # girls' names never printed
+
+    def test_apply_snapshots_first_probes_then_verifies_and_a_re_run_is_a_no_op(self):
+        fid = glow_forms.TEMPLATE
+        fake = FakeFormClient({fid: link_form(roster=True)})
+        code, out, events = self.run_main(fake, "--form", fid, "--apply")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(events[0], "snap " + fid)
+        self.assertEqual([e.split(" ")[3] for e in events[1:]], ["submit2", "contact_ids", "belowAre",
+                                                                 "somethingNotWorking", "clubRosterFormLink"])
+        self.assertIn("probe: q2 holds order", out)
+        self.assertIn("re-read: verified - every roster above clubRosterFormLink (q460)", out)
+        self.assertEqual(layout.rosters_below(fake.forms[fid]), [])
+        self.assertEqual(layout.audit_layout(fake.forms[fid]), [])
+        code, out, events = self.run_main(fake, "--form", fid, "--apply")
+        self.assertEqual((code, events), (0, []))
+        self.assertIn("nothing to do", out)
+
+    def test_form_limits_what_is_read_and_written(self):
+        fake = FakeFormClient({self.FIDS[1]: link_form()})     # only Africa exists in the fake
+        code, _, events = self.run_main(fake, "--form", self.FIDS[1], "--apply")
+        self.assertEqual(code, 0)
+        self.assertEqual(events[0], "snap " + self.FIDS[1])
+        self.assertTrue(all(self.FIDS[1] in e for e in events))
+
+    def test_a_refusal_on_the_last_form_writes_no_form(self):
+        two = link_form()
+        two["471"] = {"qid": "471", "type": "control_button", "name": "b2", "order": "30"}
+        fake = FakeFormClient(self.forms(**{self.FIDS[-1]: two}))
+        code, _, events = self.run_main(fake, "--apply")
+        self.assertIn("expected one Submit button, found 2", str(code))
+        self.assertEqual(events, [])
+
+    def test_a_form_changed_since_the_preview_is_not_written(self):
+        fid = glow_forms.TEMPLATE
+        fake = FakeFormClient({fid: link_form()})
+        gets = fake.get
+
+        def get(path, **params):
+            if path.endswith("/questions") and not hasattr(fake, "seen"):
+                fake.seen = True
+                return gets(path, **params)
+            fake.forms[fid]["490"] = {"qid": "490", "type": "control_checkbox", "name": "LateClub",
+                                      "hidden": "Yes", "order": "40"}   # the runner, mid-run
+            return gets(path, **params)
+        fake.get = get
+        code, _, events = self.run_main(fake, "--form", fid, "--apply")
+        self.assertIn("changed since the preview - nothing written", str(code))
+        self.assertEqual(events, ["snap " + fid])
+
+    def test_the_probe_stops_the_run_when_jotform_renumbers(self):
+        # a Jotform that renumbers the form 1..N after an order update: the second
+        # target would no longer be an empty slot - stop after the first write
+        class Renumbering(FakeFormClient):
+            def post_form(self, path, data, label):
+                out = super().post_form(path, data, label)
+                fid = re.fullmatch(r"/form/(\d+)/.*", path).group(1)
+                for n, q in enumerate(sorted(self.forms[fid].values(), key=links.render_key), 1):
+                    q["order"] = str(n)
+                return out
+        fake = Renumbering(self.forms())
+        code, out, events = self.run_main(fake, "--apply")
+        self.assertIn("after the first write", str(code))
+        self.assertIn("does not keep an order update as sent", str(code))
+        self.assertEqual([e.split(" ")[0] for e in events], ["snap", "write"])   # the template only
+        tpl = fake.forms[glow_forms.TEMPLATE]
+        names = rendered(tpl)                          # safe: every roster above Submit, the link too
+        self.assertLess(names.index(links.PROBLEM.name), names.index("submit2"))
+        self.assertLess(names.index("MoonriseClub"), names.index("submit2"))
+        for fid in self.FIDS[1:]:
+            self.assertEqual(fake.forms[fid], link_form(), fid)
+
+    def test_a_write_that_changes_anything_else_fails_the_verify_and_stops(self):
+        class Meddling(FakeFormClient):
+            def post_form(self, path, data, label):
+                out = super().post_form(path, data, label)
+                if "somethingNotWorking" in label:                # the last write
+                    fid = re.fullmatch(r"/form/(\d+)/.*", path).group(1)
+                    self.forms[fid]["350"]["options"] = "Girl One|Girl Two|Girl Nine"
+                return out
+        fake = Meddling(self.forms())
+        code, out, _ = self.run_main(fake, "--apply")
+        self.assertIn("MISMATCH after the writes", str(code))
+        self.assertIn("1 question(s) changed apart from their order: q350", str(code))
+        self.assertNotIn("Girl", str(code) + out)       # compared by hash, never printed
+        for fid in self.FIDS[1:]:
+            self.assertEqual(fake.forms[fid], link_form(), fid)
+
+    def test_a_failed_write_says_to_re_run_the_dry_run(self):
+        class Failing(FakeFormClient):
+            def post_form(self, path, data, label):
+                if "belowAre" in label:
+                    raise fix_roster_order.JotformError(label + ": non-JSON response: '<html>504'")
+                return super().post_form(path, data, label)
+        fake = Failing(self.forms())
+        code, _, _ = self.run_main(fake, "--apply")
+        self.assertIn("2 of 4 moves were confirmed", str(code))
+        self.assertIn("Re-run the dry run", str(code))
+        half = fake.forms[glow_forms.TEMPLATE]           # the re-run finishes it identically
+        again = layout.plan_tail_moves(half)
+        self.assertEqual(rendered(move_all(half, again)),
+                         rendered(move_all(link_form(), layout.plan_tail_moves(link_form()))))
+
+    def test_verify_catches_a_roster_left_below_and_changed_rules(self):
+        qs = link_form()
+        moves = layout.plan_tail_moves(qs)
+        after = move_all(qs, moves)
+        self.assertEqual(fix_roster_order.verify(qs, after, [], [], moves), [])
+        rule = [{"id": "1", "type": "field", "link": "Any", "terms": json.dumps([]),
+                 "action": json.dumps([{"visibility": "Show", "field": "350"}])}]
+        self.assertIn("the rules changed", fix_roster_order.verify(qs, after, rule, [], moves))
+        partial = move_all(qs, moves[:1])
+        problems = fix_roster_order.verify(qs, partial, [], [], moves)
+        self.assertTrue(any("hold another order than sent" in p for p in problems), problems)
+        self.assertTrue(any("render below somethingNotWorking" in p for p in problems), problems)
 
 
 class WorkLog(unittest.TestCase):
