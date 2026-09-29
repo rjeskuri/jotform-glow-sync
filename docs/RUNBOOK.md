@@ -316,8 +316,10 @@ replaces the box with a **Partner** dropdown (field name `partnerPicker`). It
 lists the partners whose club name is shared on that form, stays hidden until
 such a name is picked, and is required once shown. It has the Module/Session
 dropdowns' shape, so it is a plain list and only one partner can be chosen.
-The gated rules test it and q331 is hidden. Question 5 (Salesforce) is
-untouched, and the partner choice goes nowhere else. Added once per form;
+The gated rules test it and q331 is hidden; a calculation copies the chosen
+partner into q331, which the staff notification e-mail's "Partner {partner}"
+row and the submissions export's Partner column read. Question 5
+(Salesforce) is untouched. Added once per form;
 from then on every run keeps its options and shape
 (`UPDATE partner picker (N partners: …)`, which the runner applies like a Club
 picker update). A form without it keeps the typed box and exactly today's
@@ -338,8 +340,9 @@ python3 tools/add_translations.py --audit --form 262352490535154                
 ```
 
 The dry run prints `conditions: K kept, N new, D dropped`. Expected: template
-360 / 16 / 16, and Africa (`--region Africa --form 262382821971058`)
-239 / 15 / 15. The rule count does not change (376 and 254), and there are no
+360 / 17 / 16, and Africa (`--region Africa --form 262382821971058`)
+239 / 16 / 15: the partner rules that now test the list, plus the one copy
+into q331. The rule count grows by that copy (377 and 255), and there are no
 roster creates or updates beyond what the same command prints without the
 flag.
 
@@ -358,7 +361,9 @@ Check in the browser (template first, then Africa):
    Network instead: the rosters swap.
 4. Switch the language (e.g. Kiswahili): "Partner" is translated, the
    partner names stay English.
-5. Submit a test on the template: the Club Name field (q5) says "Ruby".
+5. Submit a test on the template: the Club Name field (q5) says "Ruby", and
+   the staff notification e-mail and the submission show the partner chosen
+   in step 3 under Partner.
 
 Rollback, per form. The runner stays paused from the first step to the
 last. The list is found by name, so while it exists a runner apply moves the

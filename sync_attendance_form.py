@@ -164,7 +164,8 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     Club dropdown when the form has one (the rules then key on it and its
     value is copied into the CLUB_NAME textbox for Salesforce); partner_field:
     the field the same-name rules test - the typed Partner box, or the partner
-    list once the form has one."""
+    list once the form has one (its value is then copied into the hidden
+    typed box, which the staff notification e-mail reads)."""
     conds = []
     club_field = picker or CLUB_NAME
 
@@ -207,6 +208,10 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     if picker:  # the picked club -> the textbox Salesforce reads (Account_Name__c)
         conds.append(mk_calc_rule([mk_term(picker, "isFilled")], CLUB_NAME,
                                   picker, "{%s}" % picker, as_text=True))
+    if partner_field != PARTNER:  # the chosen partner -> the hidden typed box (q331), which
+        # the staff notification e-mail's "Partner {partner}" row and the export's Partner read
+        conds.append(mk_calc_rule([mk_term(partner_field, "isFilled")], PARTNER,
+                                  partner_field, "{%s}" % partner_field, as_text=True))
     conds.append(mk_calc_rule([mk_term(YEAR, "isFilled")], YEAR_ID,
                               YEAR, "{%s}" % YEAR))
     for module_qid in MODULES.values():

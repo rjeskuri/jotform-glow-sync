@@ -277,11 +277,25 @@ class ConditionBuilder(unittest.TestCase):
                          sync._norm_rules(self.rules(picker="500", partner_field=sync.PARTNER)))
         fields = {t["field"] for c in self.rules(picker="500") for t in c["terms"]}
         self.assertIn(sync.PARTNER, fields)
+        # the typed box is the partner answer itself: nothing is copied into it
+        self.assertFalse([c for c in self.rules(picker="500") if c["type"] == "calculation"
+                          and c["action"][0]["resultField"] == sync.PARTNER])
 
-    def test_the_partner_list_changes_only_the_partner_field(self):
+    def test_the_partner_list_changes_the_partner_field_and_copies_it_into_q331(self):
         typed = self.rules(picker="500")
         listed = self.rules(picker="500", partner_field="600")
-        self.assertEqual(len(listed), len(typed))           # same rule count
+        # one rule more: the chosen partner is copied into the hidden typed box, which the
+        # staff notification e-mail's "Partner {partner}" row reads (integration review F1)
+        copies = [c for c in listed if c["type"] == "calculation"
+                  and c["action"][0]["resultField"] == sync.PARTNER]
+        self.assertEqual(len(copies), 1)
+        self.assertEqual([(t["field"], t["operator"]) for t in copies[0]["terms"]], [("600", "isFilled")])
+        self.assertEqual((copies[0]["action"][0]["operands"], copies[0]["action"][0]["equation"]),
+                         ("600", "{600}"))
+        self.assertTrue(copies[0]["action"][0]["insertAsText"])
+        self.assertFalse(copies[0]["action"][0]["ignoreHiddenFields"])   # as the q5 copy
+        self.assertEqual(len(listed), len(typed) + 1)
+        listed = [c for c in listed if c is not copies[0]]
         # the gated rules and the reveal rule test / show the list; nothing tests q331
         self.assertFalse([t for c in listed for t in c["terms"] if t["field"] == sync.PARTNER])
         self.assertFalse([a for c in listed for a in c["action"] if a.get("field") == sync.PARTNER])
@@ -326,7 +340,7 @@ class ConditionBuilder(unittest.TestCase):
                      index="99", priority="99") for c in typed]
         self.assertEqual(sync.rule_delta(wire, self.rules(picker="500")), (len(typed), 0, 0))
         listed = self.rules(picker="500", partner_field="600")
-        self.assertEqual(sync.rule_delta(wire, listed), (len(typed) - 3, 3, 3))
+        self.assertEqual(sync.rule_delta(wire, listed), (len(typed) - 3, 4, 3))   # + the q331 copy
         self.assertEqual(sync.rule_delta([], listed), (0, len(listed), 0))
         self.assertEqual(sync.rule_delta([{"terms": "{broken"}], listed), (0, len(listed), 0))
 
@@ -478,9 +492,9 @@ class PartnerPickerFlow(unittest.TestCase):
         code, out = self.run_sync(fake, "--partner-picker")
         self.assertEqual(code, 0)
         self.assertEqual(fake.calls, ["CREATE partner picker (2 partners)",
-                                      f"REPLACE conditions ({len(wire)} rules)",
+                                      f"REPLACE conditions ({len(wire) + 1} rules)",
                                       "HIDE partner textbox (q331: the partner list replaces it)"])
-        self.assertIn(f"conditions: {len(wire) - 3} kept, 3 new, 3 dropped", out)
+        self.assertIn(f"conditions: {len(wire) - 3} kept, 4 new, 3 dropped", out)   # + the q331 copy
         _, _, fields = fake.writes[0]
         self.assertEqual({k: fields[f"question[{k}]"] for k in ("type", "name", "order", "options")},
                          {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME, "order": "7",
@@ -498,16 +512,19 @@ class PartnerPickerFlow(unittest.TestCase):
                          [("POST", "/questions"), ("PUT", "/properties"), ("POST", "/question/331")])
         self.assertEqual(fake.writes[2][2], {"question[hidden]": "Yes", "question[required]": "No"})
         conds = fake.writes[1][2]["properties"]["conditions"]
-        self.assertEqual(len(conds), len(wire))
+        self.assertEqual(len(conds), len(wire) + 1)
         terms = [t for c in conds for t in json.loads(c["terms"])]
         actions = [a for c in conds for a in json.loads(c["action"])]
         self.assertFalse([t for t in terms if t["field"] == sync.PARTNER])
         self.assertFalse([a for a in actions if a.get("field") == sync.PARTNER])
-        self.assertEqual(sorted(t["value"] for t in terms if t["field"] == "600"),
+        self.assertEqual(sorted(t["value"] for t in terms if t["field"] == "600" and t["operator"] == "equals"),
                          ["Partner One", "Partner Two"])
         # question 5 is still filled from the Club picker, exactly as before
         copy = [a for a in actions if a.get("resultField") == sync.CLUB_NAME]
         self.assertEqual([(a["equation"], a["operands"]) for a in copy], [("{500}", "500")])
+        # and the chosen partner reaches the hidden q331, which the staff e-mail's Partner row reads
+        copy = [a for a in actions if a.get("resultField") == sync.PARTNER]
+        self.assertEqual([(a["equation"], a["operands"]) for a in copy], [("{600}", "600")])
         with open(summary, encoding="utf-8") as f:
             self.assertEqual(json.load(f)["partner_picker"], "600")
 
