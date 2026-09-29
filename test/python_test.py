@@ -2139,6 +2139,40 @@ class Links(unittest.TestCase):
         self.assertEqual(links.rules_mentioning(None, "4"), [])
 
 
+class ClubGuardElement(unittest.TestCase):
+    """glow/sync.py: the club guard's warning, its constants and helpers."""
+
+    def test_the_warning_html_is_pinned(self):
+        # a change re-keys its translations (md5 of the stored HTML) and rewrites the
+        # element on every guarded form at the next runner apply
+        self.assertEqual(glow_sync.guard_html(),
+                         '<p style="margin:8px 0;padding:10px 12px;border:1px solid #e0a800;'
+                         'border-radius:6px;background:#fff8e1;font-size:14px">You chose more than '
+                         'one club. Keep only your own club in Club Name, and the Submit button comes '
+                         'back.</p>')
+        self.assertEqual(glow_sync.GUARD_PROPS, {"text": glow_sync.guard_html(), "hidden": "Yes"})
+        self.assertFalse(set("&<>\"") & set(glow_sync.GUARD_SENTENCE))
+        self.assertEqual(glow_sync.GUARD_SENTENCE, glow_sync.GUARD_SENTENCE.strip())
+        self.assertTrue(glow_sync.guard_html("a < b").endswith(">a &lt; b</p>"))
+        self.assertIn(sync.PICKER_TEXT, glow_sync.GUARD_SENTENCE)        # it names the picker's label
+
+    def test_the_constants_and_helpers(self):
+        from unittest import mock
+        self.assertEqual(glow_sync.GUARD_NAME, "clubGuard")
+        self.assertTrue(glow_sync.GUARD_DISABLES_SUBMIT)
+        self.assertTrue(glow_sync.PICKER_CALC_LEADING_EMPTY)    # the single-selects' layout, until proven
+        self.assertEqual(glow_sync.picker_calc_values(["A", "B c"]), "|A|B c")
+        with mock.patch.object(glow_sync, "PICKER_CALC_LEADING_EMPTY", False):
+            self.assertEqual(glow_sync.picker_calc_values(["A", "B c"]), "A|B c")
+        for q, has in (({}, False), ({"calcValues": ""}, False), ({"calcValues": "|||"}, False),
+                       ({"calcValues": "| "}, False), ({"calcValues": "|A|B"}, True)):
+            self.assertEqual(glow_sync.has_calc_values(q), has, q)
+        qs = {"12": {"name": "clubGuard", "type": "control_text"}, "9": {"name": "clubGuard"},
+              "3": {"name": "clubPicker"}}
+        self.assertEqual(glow_sync.club_guards(qs), ["9", "12"])
+        self.assertEqual(glow_sync.club_guards({}), [])
+
+
 class LinkTool(unittest.TestCase):
     """tools/add_feedback_link.py: placement, idempotence, removal, refusals."""
 
@@ -2463,6 +2497,59 @@ class TranslationPlan(unittest.TestCase):
         for lang in ("es", "fr"):
             self.assertEqual(links.href_of(store[lang][md5("text_460")]), new, lang)
             self.assertEqual(links.href_of(store[lang][md5(qs["460"]["text"])]), new, lang)
+
+    @staticmethod
+    def guard_form():
+        qs = link_form(roster=True)
+        qs["700"] = {"qid": "700", "type": "control_text", "name": glow_sync.GUARD_NAME, "order": "3",
+                     **glow_sync.GUARD_PROPS}
+        return qs
+
+    def test_the_guard_sentence_is_translated_for_every_offered_language(self):
+        raw = json.loads(read(os.path.join(REPO, "tools", "translations_additions.json")))
+        entry = raw[glow_sync.GUARD_SENTENCE]
+        self.assertEqual(set(entry) - {"_note"}, self.OFFERED)
+        self.assertIn("not native-reviewed", entry["_note"].lower())
+        # it names the picker by its label in that language, as the mentor sees it
+        label = dict(raw["Club Name"])
+        for lang in ("or", "hi", "fa"):
+            label[lang] = json.loads(read(os.path.join(REPO, "tools", f"translations_{lang}.json")))["Club Name"]
+        for lang in self.OFFERED:
+            text = entry[lang]
+            self.assertIn(label[lang], text, lang)
+            self.assertNotEqual(text, glow_sync.GUARD_SENTENCE, lang)
+            self.assertFalse(set("&<>") & set(text), lang)
+
+    def test_the_guard_is_keyed_by_sentence_element_id_and_html(self):
+        qs = self.guard_form()
+        payload, sources = add_translations.plan_additions(qs, self.store("es", "fa"), self.additions)
+        stored, sentence = qs["700"]["text"], glow_sync.GUARD_SENTENCE
+        for lang in ("es", "fa"):
+            want = self.additions[sentence][lang]
+            html_t = payload[lang][md5("text_700")]
+            self.assertEqual(payload[lang][md5(stored)], html_t)
+            self.assertEqual(payload[lang][md5(sentence)], want)
+            self.assertEqual(html_t, glow_sync.guard_html(want))       # the same box, translated
+        self.assertEqual((sources[md5(sentence)], sources[md5("text_700")], sources[md5(stored)]),
+                         (sentence, "text_700", stored))
+        # the links keep their keys
+        self.assertIn(md5("text_460"), payload["es"])
+        # a form without the warning gets none of its keys
+        payload, sources = add_translations.plan_additions(link_form(roster=True), self.store("es"),
+                                                           self.additions)
+        self.assertNotIn(md5(sentence), set(payload["es"]) | set(sources))
+        # add_language keys it too, beside the links
+        base = {md5("text_700"): "text_700", md5(stored): stored, md5("text_460"): "text_460"}
+        out = add_language.text_element_keys(qs, base, {sentence: "GG", links.ROSTER.sentence: "RR"})
+        self.assertEqual(set(out), {md5("text_700"), md5(stored), md5("text_460")})
+        self.assertEqual(out[md5("text_700")], glow_sync.guard_html("GG"))
+        self.assertEqual(out[md5(stored)], glow_sync.guard_html("GG"))
+
+    def test_only_a_text_element_named_club_guard_is_translated(self):
+        qs = self.guard_form()
+        qs["700"]["type"] = "control_textbox"
+        self.assertEqual([s for _, s in links.translated_elements(qs)],
+                         [links.ROSTER.sentence, links.PROBLEM.sentence])
 
     def test_the_store_backup_is_never_overwritten(self):
         # a same-stamp re-run after a failed POST must keep the true 'before'

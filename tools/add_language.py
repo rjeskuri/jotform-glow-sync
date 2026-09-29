@@ -39,13 +39,13 @@ SPECIAL_NAMES = {"arabic": "Arabic‬‎"}   # as in Jotform's table
 
 
 def text_element_keys(questions, base, words):
-    """{key: translated HTML} for the link elements above Submit (glow/links.py)
+    """{key: translated HTML} for the one-sentence text elements (the links
+    above Submit and the club guard's warning, glow.links.translated_elements)
     whose sentence `words` translates. The runtime looks a text element up by
     its id (`text_<qid>`) and swaps in the whole inner HTML; base may also hold
-    the element's HTML itself. Both keys carry the unchanged link."""
+    the element's HTML itself. Both keys carry the unchanged markup and link."""
     out = {}
-    for q, link in glow_links.elements_on(questions):
-        sentence = link.sentence
+    for q, sentence in glow_links.translated_elements(questions):
         if sentence not in words:
             continue
         text_id = f"text_{q['qid']}"
