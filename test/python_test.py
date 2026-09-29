@@ -2319,6 +2319,29 @@ class RosterLayout(unittest.TestCase):
         moves = layout.plan_tail_moves(quiet)
         self.assertIn("482", [qid for qid, _ in moves])
 
+    def test_the_restore_plan_puts_every_order_back_with_the_links_above_submit(self):
+        for saved in (link_form(), link_form(roster=True), link_form(problem=False)):
+            moves = layout.plan_tail_moves(saved)
+            for n in range(1, len(moves) + 1):           # after a whole or a stopped repair
+                now = move_all(saved, moves[:n])
+                back = layout.plan_restore(now, saved)
+                self.assertEqual(sorted(q for q, _ in back), sorted(q for q, _ in moves[:n]), n)
+                for i in range(len(back) + 1):
+                    part = rendered(move_all(now, back[:i]))
+                    seen = [x for x in part if x in (links.ROSTER.name, links.PROBLEM.name, "submit2")]
+                    self.assertEqual(seen, [x for x in rendered(saved) if x in seen], (n, i))
+                self.assertEqual(move_all(now, back), saved, n)
+            self.assertEqual(layout.plan_restore(saved, saved), [])
+        qs = link_form()
+        repaired = move_all(qs, layout.plan_tail_moves(qs))
+        grown = copy.deepcopy(repaired)
+        grown["490"] = {"qid": "490", "type": "control_checkbox", "name": "LateClub", "order": "9"}
+        shifted = copy.deepcopy(repaired)
+        shifted["400"]["order"] = "99"
+        for name, now in (("a new question", grown), ("a roster moved", shifted)):
+            with self.assertRaises(SystemExit, msg=name):
+                layout.plan_restore(now, qs)
+
     def test_the_audit(self):
         qs = link_form()
         problems = layout.audit_layout(qs)
@@ -2484,6 +2507,42 @@ class FixRosterOrderTool(unittest.TestCase):
         again = layout.plan_tail_moves(half)
         self.assertEqual(rendered(move_all(half, again)),
                          rendered(move_all(link_form(), layout.plan_tail_moves(link_form()))))
+
+    def test_undo_puts_the_snapshot_orders_back_by_the_same_path(self):
+        from unittest import mock
+        fid = glow_forms.TEMPLATE
+        before = link_form(roster=True)
+        fake = FakeFormClient({fid: copy.deepcopy(before)})
+        self.assertEqual(self.run_main(fake, "--form", fid, "--apply")[0], 0)
+        code, _, _ = self.run_main(fake, "--undo", "2026-09-29T100000")
+        self.assertIn("--undo needs --form", str(code))
+        with mock.patch.object(fix_roster_order, "load_snapshot", lambda f, stamp: copy.deepcopy(before)):
+            code, out, events = self.run_main(fake, "--form", fid, "--undo", "2026-09-29T100000")
+            self.assertEqual((code, events), (0, []))                         # a dry run
+            self.assertIn("5 element(s) go back to the snapshot's orders", out)
+            code, out, events = self.run_main(fake, "--form", fid, "--undo", "2026-09-29T100000", "--apply")
+            self.assertEqual(code, 0, out)
+            self.assertEqual(events[0], "snap " + fid)
+            self.assertEqual([e.split(" ")[3] for e in events[1:]], ["clubRosterFormLink", "somethingNotWorking",
+                                                                     "belowAre", "contact_ids", "submit2"])
+            self.assertIn("the 2026-09-29T100000 orders are back", out)
+            self.assertEqual(fake.forms[fid], before)
+            code, out, events = self.run_main(fake, "--form", fid, "--undo", "2026-09-29T100000", "--apply")
+            self.assertEqual((code, events), (0, []))
+            self.assertIn("nothing to do", out)
+
+    def test_undo_reads_the_snapshot_the_tool_names(self):
+        import tempfile
+        from unittest import mock
+        fid = glow_forms.TEMPLATE
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(fix_roster_order, "REPO", tmp):
+            with self.assertRaises(SystemExit) as cm:
+                fix_roster_order.load_snapshot(fid, "2026-09-29T100000")
+            self.assertIn(f"no snapshot backups/{fid}/questions-2026-09-29T100000.json", str(cm.exception.code))
+            os.makedirs(os.path.join(tmp, "backups", fid))
+            with open(os.path.join(tmp, "backups", fid, "questions-2026-09-29T100000.json"), "w") as f:
+                json.dump(link_form(), f)
+            self.assertEqual(fix_roster_order.load_snapshot(fid, "2026-09-29T100000"), link_form())
 
     def test_verify_catches_a_roster_left_below_and_changed_rules(self):
         qs = link_form()

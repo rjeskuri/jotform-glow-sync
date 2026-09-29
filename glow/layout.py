@@ -169,6 +169,43 @@ def _simulate(questions, moves, bottom, shown):
                  "with the rest unchanged - check the form's layout in the builder first")
 
 
+def plan_restore(questions, saved):
+    """[(qid, order)] that put back the orders of `saved` (the questions as
+    snapshotted before the repair): the repair's rollback, for right after
+    it. Only what the repair moves (never a roster) goes back; refuses when
+    the form's questions or a roster's order differ from the snapshot (the
+    form changed since - restore in the builder). Write order: the links
+    top-down, the hidden fields, Submit last - the links stay above Submit
+    at every step; every target must be empty when written."""
+    if set(questions) != set(saved):
+        sys.exit(f"the form's questions differ from the snapshot ({len(set(saved) - set(questions))} "
+                 f"gone, {len(set(questions) - set(saved))} new) - restore the layout in the builder")
+    diff = [qid for qid in questions if links.order_of(questions[qid]) != links.order_of(saved[qid])]
+    rosters = sorted((qid for qid in diff if is_roster(questions[qid])), key=int)
+    if rosters:
+        sys.exit(f"{len(rosters)} roster(s) changed order since the snapshot (first q{rosters[0]}) - "
+                 "the form changed since; restore the layout in the builder")
+    if not diff:
+        return []
+    link_qids = {str(q["qid"]) for q, _ in links.elements_on(questions)}
+    button = {str(q["qid"]) for q in buttons(questions)}
+    ordered = sorted(diff, key=lambda qid: links.render_key(saved[qid]))
+    writes = ([q for q in ordered if q in link_qids]
+              + [q for q in ordered if q not in link_qids and q not in button]
+              + [q for q in ordered if q in button])
+    bottom = _sequence(questions, link_qids | button)
+    state = {k: dict(v) for k, v in questions.items()}
+    for qid in writes:
+        target = links.order_of(saved[qid])
+        if any(links.order_of(q) == target for q in state.values()):
+            sys.exit(f"order {target} is taken - restore the layout in the builder")
+        state[qid]["order"] = str(target)
+        if _sequence(state, set(bottom)) != bottom:
+            sys.exit("putting the orders back would put a link below Submit on the way - "
+                     "restore the layout in the builder")
+    return [(qid, links.order_of(saved[qid])) for qid in writes]
+
+
 def audit_layout(questions):
     """Problem lines for tools/form_status.py ([] = the layout is right):
     exactly one Submit, no roster rendering below the fence, no link below
