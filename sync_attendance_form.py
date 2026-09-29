@@ -9,7 +9,7 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
      one yet (options = the girls' names from the sheet).
   2. Updates the roster options of existing club questions when the sheet
      changed (new girls enrolled, corrections).
-  3. Regenerates ALL conditional logic from scratch, in three categories:
+  3. Regenerates ALL conditional logic from scratch, in four categories:
        A. ROSTER VISIBILITY  - clubName == "<club>" -> show that roster
                                (same-named clubs from different partners are
                                disambiguated with the Partner box, or with the
@@ -18,6 +18,9 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
                                year+module -> session dropdown (8/10/14/15)
        C. SALESFORCE BRIDGE  - one aggregate Contact_IDs calculation +
                                module_id / week_id / year_id copies
+       D. ONE CLUB           - only on a form with the club guard (added
+                               once with --club-guard): several clubs picked
+                               -> show the warning, hide + disable Submit
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -47,11 +50,13 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
 from glow.cli import run            # noqa: E402
 from glow.jotform import Client     # noqa: E402
+from glow.links import submit_button  # noqa: E402
 from glow.sync import (             # noqa: E402  - the parsers and structural ids,
-    CLUB_NAME, CONTACT_IDS,   # shared with the
+    CLUB_NAME, CONTACT_IDS, CONTACT_IDS_SEPARATOR, GUARD_DISABLES_SUBMIT,   # shared with the
+    GUARD_NAME, GUARD_PROPS,
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
-    WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, partner_fields, partner_picker,
-    read_roster_csv, read_sheet, warn,                            # against Config.gs
+    WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, has_calc_values, partner_fields,
+    partner_picker, picker_calc_values, read_roster_csv, read_sheet, warn,  # against Config.gs
 )
 
 # Optional "Club" picker: a required dropdown listing every club on the form,
@@ -141,8 +146,21 @@ def mk_show(field):
     return {"id": f"action_{next_id()}", "visibility": "Show",
             "isError": False, "field": str(field)}
 
+def mk_hide(field):
+    return {"id": f"action_{next_id()}", "visibility": "Hide",
+            "isError": False, "field": str(field)}
+
+def mk_disable(field):
+    """A require-rule action (Jotform's "Enable / Require" rule type)."""
+    return {"id": f"action_{next_id()}", "visibility": "Disable",
+            "isError": False, "field": str(field)}
+
 def mk_field_rule(terms, actions, link="Any"):
     return {"id": next_id(), "type": "field", "link": link,
+            "priority": "0", "index": "0", "terms": terms, "action": actions}
+
+def mk_require_rule(terms, actions, link="Any"):
+    return {"id": next_id(), "type": "require", "link": link,
             "priority": "0", "index": "0", "terms": terms, "action": actions}
 
 def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
@@ -158,20 +176,32 @@ def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
             "priority": "0", "index": "0", "terms": terms, "action": [action]}
 
 def build_conditions(club_questions, partner_of, module_options, picker=None,
-                     partner_field=PARTNER):
+                     partner_field=PARTNER, picker_options=None, guard=None, submit=None):
     """club_questions: {qid: club display name}; partner_of: {qid: partner}
     for clubs whose name is shared by several partners; picker: qid of the
     Club dropdown when the form has one (the rules then key on it and its
     value is copied into the CLUB_NAME textbox for Salesforce); partner_field:
     the field the same-name rules test - the typed Partner box, or the partner
     list once the form has one (its value is then copied into the hidden
-    typed box, which the staff notification e-mail reads)."""
+    typed box, which the staff notification e-mail reads); picker_options:
+    the picker's options exactly as this run writes them (the rules test each
+    club in the picker's spelling); guard / submit: qids of the clubGuard
+    warning and the Submit button on a form with the one-club guard (section
+    D; both, with a picker and its options, or no guard rules at all)."""
     conds = []
     club_field = picker or CLUB_NAME
+    # A picker is a multi-select, where Jotform's "equals" means "this exact
+    # option is selected" - case-sensitively - so a rule spelling the club
+    # differently from the option never fires ("SUPER GIRLS" vs "Super
+    # Girls"): with a picker every club term takes the picker's spelling.
+    spelling = {o.lower(): o for o in picker_options} if picker and picker_options else {}
+
+    def club(name):
+        return spelling.get(name.lower(), name)
 
     # A. roster visibility
-    # ambiguity is judged case-insensitively because Jotform's runtime
-    # "equals" ignores case ("SUPER GIRLS" would also match "Super Girls")
+    # ambiguity is judged case-insensitively: Jotform's runtime "equals"
+    # ignores case on the typed box, and the picker lists such names once
     by_name = defaultdict(list)
     for qid, name in club_questions.items():
         by_name[name.lower()].append(qid)
@@ -179,15 +209,15 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
         if len(by_name[name.lower()]) > 1:
             conds.append(mk_field_rule(
                 [mk_term(partner_field, "equals", partner_of[qid]),
-                 mk_term(club_field, "equals", name)],
+                 mk_term(club_field, "equals", club(name))],
                 [mk_show(qid)], link="All"))
         else:
-            conds.append(mk_field_rule([mk_term(club_field, "equals", name)],
+            conds.append(mk_field_rule([mk_term(club_field, "equals", club(name))],
                                        [mk_show(qid)]))
     for low, qids in sorted(by_name.items()):
         if len(qids) > 1:  # ambiguous name -> reveal the Partner box (or list)
             conds.append(mk_field_rule(
-                [mk_term(club_field, "equals", club_questions[qids[0]])],
+                [mk_term(club_field, "equals", club(club_questions[qids[0]]))],
                 [mk_show(partner_field)]))
 
     # B. curriculum cascade
@@ -220,11 +250,27 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     for week_qid in WEEKS.values():
         conds.append(mk_calc_rule([mk_term(week_qid, "isFilled")], WEEK_ID,
                                   week_qid, "{%s}" % week_qid))
+    guarded = bool(picker and picker_options and guard and submit)
     roster_qids = sorted(club_questions, key=int)
+    # with the guard, a separator between the rosters: two visible rosters
+    # otherwise fuse the last girl of one with the first of the next
+    sep = CONTACT_IDS_SEPARATOR if guarded else ""
     conds.append(mk_calc_rule(
         [mk_term(club_field, "isFilled")], CONTACT_IDS,
-        ",".join(roster_qids), "".join("{%s}" % q for q in roster_qids),
+        ",".join(roster_qids), sep.join("{%s}" % q for q in roster_qids),
         ignore_hidden=True, as_text=True))
+
+    # D. one club per submission: question 5 (the copy of the picker) is not
+    # exactly one of its options -> several clubs are picked: show the
+    # warning, hide Submit, and (a require rule) disable it too, which closes
+    # the desktop Enter key. Appended last, so every other rule keeps its index.
+    if guarded:
+        def terms():
+            return [mk_term(picker, "isFilled")] + \
+                   [mk_term(CLUB_NAME, "notEquals", o) for o in picker_options]
+        conds.append(mk_field_rule(terms(), [mk_show(guard), mk_hide(submit)], link="All"))
+        if GUARD_DISABLES_SUBMIT:
+            conds.append(mk_require_rule(terms(), [mk_disable(submit)], link="All"))
 
     for i, c in enumerate(conds):
         c["index"] = str(i)

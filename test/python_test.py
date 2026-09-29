@@ -366,20 +366,122 @@ class ConditionBuilder(unittest.TestCase):
     def test_generated_rules_mention_only_rosters_and_structural_fields(self):
         # so no other element - the links above Submit included - is ever
         # shown, hidden or computed by the sync's rewrite; with the partner
-        # list (wf/partner-box) the list is the one field added
+        # list (wf/partner-box) the list is the one field added, and with the
+        # club guard (wf5/club-guard) the warning and Submit - only then
         structural = {sync.CLUB_NAME, sync.PARTNER, sync.YEAR, sync.CONTACT_IDS, sync.MODULE_ID,
                       sync.WEEK_ID, sync.YEAR_ID, *sync.MODULES.values(), *sync.WEEKS.values()}
         for picker in (None, "500"):
             for partner_field in (sync.PARTNER, "600"):
-                mentioned = set()
-                for c in self.rules(picker=picker, partner_field=partner_field):
-                    for item in c["terms"] + c["action"]:
-                        mentioned |= {str(item[k]) for k in ("field", "resultField") if k in item}
-                        mentioned |= {o for o in str(item.get("operands", "")).split(",") if o}
-                        mentioned |= set(re.findall(r"\{(\d+)\}", str(item.get("equation", ""))))
-                allowed = structural | {partner_field} | set(self.CLUBS) | ({picker} if picker else set())
-                self.assertLessEqual(mentioned, allowed, mentioned - allowed)
-                self.assertIn(partner_field, mentioned)   # the shared names really are gated
+                for guard in (None, "700"):
+                    mentioned = set()
+                    for c in self.rules(picker=picker, partner_field=partner_field,
+                                        picker_options=self.OPTIONS, guard=guard,
+                                        submit="2" if guard else None):
+                        for item in c["terms"] + c["action"]:
+                            mentioned |= {str(item[k]) for k in ("field", "resultField") if k in item}
+                            mentioned |= {o for o in str(item.get("operands", "")).split(",") if o}
+                            mentioned |= set(re.findall(r"\{(\d+)\}", str(item.get("equation", ""))))
+                    on = bool(picker and guard)
+                    allowed = (structural | {partner_field} | set(self.CLUBS)
+                               | ({picker} if picker else set()) | ({guard, "2"} if on else set()))
+                    self.assertLessEqual(mentioned, allowed, mentioned - allowed)
+                    self.assertIn(partner_field, mentioned)   # the shared names really are gated
+                    self.assertEqual({guard, "2"} <= mentioned, on)
+
+    # ---- one club per submission (docs/plans/2026-09-29-club-guard.md)
+    OPTIONS = ["Alpha Club", "Beta Club", "Stars"]     # the picker's options, as main() writes them
+
+    def guarded(self, **kw):
+        return self.rules(picker="500", picker_options=self.OPTIONS, guard="700", submit="2", **kw)
+
+    def test_without_the_guard_the_rules_are_todays(self):
+        # the picker's options change nothing when their spelling is the rules' own
+        today = self.rules(picker="500")
+        self.assertEqual(sync._norm_rules(self.rules(picker="500", picker_options=self.OPTIONS)),
+                         sync._norm_rules(today))
+        # the guard needs all four: the picker, its options, the warning and Submit
+        for kw in ({"picker": None, "picker_options": self.OPTIONS, "guard": "700", "submit": "2"},
+                   {"picker": "500", "guard": "700", "submit": "2"},
+                   {"picker": "500", "picker_options": self.OPTIONS, "submit": "2"},
+                   {"picker": "500", "picker_options": self.OPTIONS, "guard": "700"}):
+            conds = self.rules(**kw)
+            self.assertFalse([c for c in conds if c["type"] == "require"], kw)
+            self.assertFalse([a for c in conds for a in c["action"]
+                              if a.get("visibility") != "Show" and "resultField" not in a], kw)
+            self.assertFalse([x for c in conds for x in c["terms"] + c["action"]
+                              if x.get("field") in ("2", "700")], kw)
+        self.assertEqual(sync._norm_rules(self.rules(picker="500", guard="700", submit="2")),
+                         sync._norm_rules(today))
+        agg = [c for c in today if c["type"] == "calculation"
+               and c["action"][0]["resultField"] == sync.CONTACT_IDS][0]
+        self.assertEqual(agg["action"][0]["equation"], "{10}{11}{12}{13}")   # no separator today
+
+    def test_the_guard_rules_are_two_rules_at_the_end(self):
+        today = self.rules(picker="500")
+        conds = self.guarded()
+        self.assertEqual(len(conds), len(today) + 2)
+        # every other rule is today's, at the same index (the q18 separator aside)
+        norm = sync._norm_rules(conds)[:-2]
+        base = sync._norm_rules(today)
+        changed = [i for i, (a, b) in enumerate(zip(norm, base)) if a != b]
+        self.assertEqual(len(changed), 1)
+        self.assertIn(sync.CONTACT_IDS, norm[changed[0]][3])
+        show, req = conds[-2:]
+        want_terms = [("500", "isFilled", "")] + [(sync.CLUB_NAME, "notEquals", o) for o in self.OPTIONS]
+        for rule in (show, req):
+            self.assertEqual(rule["link"], "All")
+            self.assertEqual([(t["field"], t["operator"], t["value"]) for t in rule["terms"]], want_terms)
+        self.assertEqual(show["type"], "field")
+        self.assertEqual([(a["visibility"], a["field"]) for a in show["action"]],
+                         [("Show", "700"), ("Hide", "2")])
+        self.assertEqual(req["type"], "require")
+        self.assertEqual([(a["visibility"], a["field"]) for a in req["action"]], [("Disable", "2")])
+        ids = [t["id"] for c in conds for t in c["terms"]] + [a["id"] for c in conds for a in c["action"]]
+        self.assertEqual(len(ids), len(set(ids)))                  # fresh ids, the two rules included
+        self.assertEqual(len({c["id"] for c in conds}), len(conds))
+        self.assertEqual([c["index"] for c in conds], [str(i) for i in range(len(conds))])
+        self.assertEqual([c["priority"] for c in conds], [c["index"] for c in conds])
+        # question 5 is still filled from the picker, exactly as before
+        copy = [c for c in conds if c["type"] == "calculation"
+                and c["action"][0]["resultField"] == sync.CLUB_NAME]
+        self.assertEqual([(c["action"][0]["operands"], c["action"][0]["equation"]) for c in copy],
+                         [("500", "{500}")])
+
+    def test_the_require_rule_follows_its_constant(self):
+        from unittest import mock
+        with mock.patch.object(sync, "GUARD_DISABLES_SUBMIT", False):
+            conds = self.guarded()
+        self.assertEqual(len(conds), len(self.rules(picker="500")) + 1)
+        self.assertEqual(conds[-1]["type"], "field")
+
+    def test_contact_ids_are_separated_only_with_the_guard(self):
+        def agg(conds):
+            return [c["action"][0] for c in conds if c["type"] == "calculation"
+                    and c["action"][0]["resultField"] == sync.CONTACT_IDS][0]
+        self.assertEqual(agg(self.guarded())["equation"], "{10}, {11}, {12}, {13}")
+        self.assertEqual(agg(self.guarded())["operands"], "10,11,12,13")
+        self.assertTrue(agg(self.guarded())["ignoreHiddenFields"])
+        self.assertEqual(sync.CONTACT_IDS_SEPARATOR, ", ")
+        self.assertEqual(agg(self.rules(picker="500", picker_options=self.OPTIONS))["equation"],
+                         "{10}{11}{12}{13}")
+
+    def test_club_terms_take_the_pickers_spelling(self):
+        # two partners' "Stars" / "STARS": the picker lists the name once, and on a
+        # multi-select "equals" is case-sensitive - every club term must be its option
+        clubs = {"10": "Alpha Club", "11": "STARS", "12": "Stars", "13": "Beta Club"}
+        sync._counter[0] = 0
+        conds = sync.build_conditions(clubs, self.PARTNERS, self.MODULES, picker="500",
+                                      picker_options=self.OPTIONS)
+        club_terms = [t["value"] for c in conds if c["type"] == "field"
+                      for t in c["terms"] if t["field"] == "500" and t["operator"] == "equals"]
+        self.assertEqual(sorted(club_terms), ["Alpha Club", "Beta Club", "Stars", "Stars", "Stars"])
+        self.assertLessEqual(set(club_terms), set(self.OPTIONS))
+        # the typed box (no picker) keeps each roster's own spelling: "equals" ignores case there
+        sync._counter[0] = 0
+        typed = sync.build_conditions(clubs, self.PARTNERS, self.MODULES, picker_options=self.OPTIONS)
+        values = sorted(t["value"] for c in typed if c["type"] == "field"
+                        for t in c["terms"] if t["field"] == sync.CLUB_NAME)
+        self.assertEqual(values, ["Alpha Club", "Beta Club", "STARS", "STARS", "Stars"])
 
 
 class FakeForm:
