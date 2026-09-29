@@ -625,11 +625,38 @@ class PartnerListRunbook(unittest.TestCase):
     """docs/RUNBOOK.md "The partner list": the rollback restores a snapshot the
     procedure itself takes, with the runner paused first."""
 
-    def rollback(self):
+    def section(self):
         doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
         section = doc.split("## The partner list", 1)[1].split("\n## ", 1)[0]
         self.assertIn("backup_forms.py --form", section)       # the procedure's backup
-        return section.split("Rollback, per form", 1)[1]
+        return section
+
+    def rollback(self):
+        return self.section().split("Rollback, per form", 1)[1]
+
+    def forward(self):
+        return self.section().split("Rollback, per form", 1)[0]
+
+    def test_the_forward_path_switches_the_runner_back_on_after_the_browser_check(self):
+        # paused for the window; left paused, roster changes stop reaching the forms
+        # (integration review, rollout-safety F3)
+        text = self.forward()
+        self.assertIn("AUTO_SYNC_APPLY=0", text)
+        self.assertIn("AUTO_SYNC_APPLY=1", text)
+        self.assertLess(text.index("5. Submit a test"), text.index("AUTO_SYNC_APPLY=1"))
+        backlog = [l for l in read(os.path.join(REPO, "docs", "BACKLOG.md")).splitlines()
+                   if l.startswith("| 45 |")]
+        self.assertEqual(len(backlog), 1)
+        self.assertIn("then `AUTO_SYNC_APPLY=1`", backlog[0])
+
+    def test_the_translation_audit_is_read_before_and_after_the_apply(self):
+        block = self.forward().split("```bash", 1)[1].split("```", 1)[0]
+        lines = [l for l in block.splitlines() if l.strip()]
+        audits = [i for i, l in enumerate(lines) if "add_translations.py --audit" in l]
+        apply = next(i for i, l in enumerate(lines) if "--partner-picker --apply" in l)
+        self.assertEqual(len(audits), 2)
+        self.assertLess(audits[0], apply)
+        self.assertGreater(audits[1], apply)
 
     def test_the_rollback_restores_a_file_backup_forms_writes(self):
         # backup_forms.py writes questions-/properties-<stamp>.json; only the

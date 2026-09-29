@@ -332,14 +332,16 @@ names; on the others the flag refuses ("nothing to choose").
 
 Order matters: the runner syncs from `main`, and the old code would put the
 rules back on the hidden box. So **merge first**, and keep
-`AUTO_SYNC_APPLY=0` for the window.
+`AUTO_SYNC_APPLY=0` for the window, until both forms pass the browser check
+below.
 
 ```bash
 python3 backup_forms.py --form 262352490535154                                         # note its stamp: the rollback restores it
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker            # dry run
+python3 tools/add_translations.py --audit --form 262352490535154                       # before: note the counts
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker --apply    # add it
 python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv     # "partner picker: q<id>", rules CLEAN
-python3 tools/add_translations.py --audit --form 262352490535154                       # same counts as before the apply (see below)
+python3 tools/add_translations.py --audit --form 262352490535154                       # same counts as the "before" audit (see below)
 ```
 
 The dry run prints `conditions: K kept, N new, D dropped`. Expected: template
@@ -350,7 +352,9 @@ roster creates or updates beyond what the same command prints without the
 flag.
 
 The translation audit prints the same "untranslated" count per language
-after the apply as before it. The list's label "Partner" and its "Please
+after the apply as in the "before" audit, taken just before it (most of the
+count is club names, which change with the roster, so an older reading is no
+baseline). The list's label "Partner" and its "Please
 Select" placeholder are already translated on every form. The audit skips
 the partner names, which stay English. Most of the count is the Club
 picker's club names, which also stay English (215 of Africa's 236 on
@@ -367,6 +371,11 @@ Check in the browser (template first, then Africa):
 5. Submit a test on the template: the Club Name field (q5) says "Ruby", and
    the staff notification e-mail and the submission show the partner chosen
    in step 3 under Partner.
+
+When both forms pass, end the window: set `AUTO_SYNC_APPLY=1`. The next
+SyncLog row for every region reads `in-sync` (or `applied`); a `dry-run` row
+means the runner is still paused, and roster changes are not reaching the
+forms.
 
 Rollback, per form. The runner stays paused from the first step to the
 last. The list is found by name, so while it exists a runner apply moves the
