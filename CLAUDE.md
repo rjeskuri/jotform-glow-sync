@@ -61,4 +61,5 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
     (submissions unprocessed) — push at a quiet moment, authorize immediately, then run
     "Process any missed form responses" and read its preview: only what arrived since the push,
     plus earlier `retry after ERROR` rows (docs/RUNBOOK.md, "Missed form responses"). Never roll
-    `appsscript/` back before `7a175c4`.
+    `appsscript/` back before `7a175c4`, nor before `986a325` once the Feedback tab has two reply
+    columns; deal with held new clubs first (docs/RUNBOOK.md, "Rolling back `appsscript/`").

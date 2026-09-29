@@ -38,6 +38,8 @@ mapping off question 5; writing a translation language without GET + merge first
 - Questions: never deleted by tooling; a wrongly created question is removed in the builder.
 - Sheet tabs: `data/roster_build/previous/<stamp>/` (upload_roster saves them) or the
   `export-all` you took.
-- Apps Script: `git checkout <previous commit> -- appsscript && npm run clasp:push`.
+- Apps Script: `git checkout <previously deployed commit> -- appsscript && npm run clasp:push` —
+  never below the floors in docs/RUNBOOK.md, "Rolling back `appsscript/`" (`7a175c4`; `986a325`
+  once the Feedback tab has two reply columns), and deal with held new clubs first.
 - Automatic sync: repository variable `AUTO_SYNC_APPLY=0`, or clear the Script Properties
   `SYNC_DISPATCH_REPO` / `SYNC_DISPATCH_TOKEN`.
