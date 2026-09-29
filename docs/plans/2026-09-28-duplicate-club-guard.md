@@ -86,10 +86,10 @@ also lists the held rows. `HELD:` results read as "held for review", not "failed
 
 **4. Formula-safe text (BACKLOG 44, `Normalize.gs`).** `sheetText_(v)` = `tidy_(v)` with the
 leading run of `= + - @` and spaces stripped — the rule `feedbackReviewItem_` uses, which now
-calls it. `parseFormRoster_(cell)` = `parseRoster_` + `sheetName_` on every name (and the
-duplicates), re-deduplicated — `sheetName_` = `sheetText_` applied to every word, because the
-last word is filed on its own as `last_name` (review finding F1) — the enrollment import keeps `parseRoster_` unchanged (Python
-parity). Applied to typed Club Roster Form text only: the typed organization, club name,
+calls it. `parseFormRoster_(cell)` = `parseRoster_` + `sheetText_` on every name (and the
+duplicates), re-deduplicated; the last word, filed on its own as `last_name`, is stripped where
+the row is built (`newRosterRow_`) — review finding F1, and the integration review's finding
+below; the enrollment import keeps `parseRoster_` unchanged (Python parity). Applied to typed Club Roster Form text only: the typed organization, club name,
 roster names, mentor name / e-mail / country (SF Pending), ADD names. Dropdown answers
 (partner, existing club) are ours and stay as chosen; REMOVE names are only matched.
 
@@ -153,8 +153,13 @@ DECISIONS.md one row, BACKLOG 11b / 40 / 44.
   - BACKLOG 44: `sheetText_` / `parseFormRoster_`; both Club Roster Form handlers write
     only sheet-safe typed text (a handler run over a stubbed spreadsheet checks every cell).
     Review fix F1: a formula after the first word of a name (`Jane =1+1`) reached
-    `last_name`; names are now stripped word by word (`sheetName_`), tested through both
-    handlers with the formula in a later word.
+    `last_name`; names were then stripped word by word (`sheetName_`), tested through both
+    handlers with the formula in a later word. Integration review (2026-09-29): that made an
+    enrolled name with a standalone `-` or a word starting with `-` differ from its Roster
+    spelling (4 of 6,830 live names), so an ADD or a re-enrollment of that girl added a second
+    active row and a REMOVE typed as enrolled matched no one. Now a name loses only its
+    leading run (`sheetText_`) and `newRosterRow_` strips the `last_name` cell; tested with
+    an ADD, a re-enrollment and a REMOVE of such a name (0 live names change).
   - Review fix F2: releasing an "organization name" hold as typed filed the club under a
     second spelling of a partner on file (a new Partners row with no region, SF Pending
     under the typo). The item now says to set the response's `Partner organization` cell

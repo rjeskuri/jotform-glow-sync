@@ -122,24 +122,19 @@ function sheetText_(s) {
 }
 
 /**
- * sheetText_ for a girl's name, word by word: no word starts with = + - @.
- * Her last word is filed in a cell of its own (Roster last_name, lastName_),
- * so "Jane =1+1" must not leave "=1+1" there.
- */
-function sheetName_(s) {
-  return tidy_(sheetText_(s).replace(/(^|\s)[=+\-@]+/g, '$1'));
-}
-
-/**
  * parseRoster_ for a Google Form answer: every name (and every repeat) also
- * passes sheetName_, and names the strip makes equal count as repeats.
+ * passes sheetText_, and names the strip makes equal count as repeats. Only
+ * the leading run goes: inner words stay as typed ("Ada Ostrivane - Pellucidor"),
+ * so the name still matches the Roster, where enrolled names are unstripped.
+ * Her last word, filed on its own as last_name, is made safe where the row is
+ * built (newRosterRow_).
  */
 function parseFormRoster_(cell) {
   const parsed = parseRoster_(cell);
   const seen = {}, names = [];
-  const duplicates = parsed.duplicates.map(sheetName_).filter(String);
+  const duplicates = parsed.duplicates.map(sheetText_).filter(String);
   parsed.names.forEach(function (n) {
-    const safe = sheetName_(n);
+    const safe = sheetText_(n);
     if (!safe) return;
     if (seen[safe.toLowerCase()]) duplicates.push(safe);
     else { seen[safe.toLowerCase()] = true; names.push(safe); }

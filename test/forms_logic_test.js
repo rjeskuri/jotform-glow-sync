@@ -1072,7 +1072,7 @@ const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose
 
 // ------------------------- Club Roster Form responses (the handlers, stubbed)
 console.log('\nClub Roster Form text is sheet-safe (BACKLOG 44)');
-const nz = loadGs(['sheetText_', 'sheetName_', 'parseFormRoster_', 'parseRoster_', 'foldKey_', 'lastName_']);
+const nz = loadGs(['sheetText_', 'parseFormRoster_', 'parseRoster_', 'foldKey_', 'lastName_', 'newRosterRow_']);
 {
   const leaks = ['=1+1', '= =1+1', '- =x', '@ =A1', '+ + =1', '=\t=x', ' =x', '​=x', '  -@+=x']
       .filter(v => /^[\s=+\-@]/.test(nz.sheetText_(v)) || nz.sheetText_(v) === '');
@@ -1085,16 +1085,24 @@ const nz = loadGs(['sheetText_', 'sheetName_', 'parseFormRoster_', 'parseRoster_
         r.names.join('|') === 'Grace Zibblewick|Mary Zibblewick|Joy Blorptest|Amina Qwertyson Alpha', r.names.join('|'));
   check('parseFormRoster_: a repeat, and names the strip makes equal, are repeats (sheet-safe too)',
         r.duplicates.join('|') === 'Grace Zibblewick|Grace Zibblewick', r.duplicates.join('|'));
-  // the last word is filed on its own (Roster last_name): no word of a name may start with = + - @
-  const w = nz.parseFormRoster_('Ivy =1+1\nJo +HYPERLINK("x")\nHana -A1 @Newperson\nUma = =Newperson\nIvy 1+1\n=Kai -\nMary-Jane Zibble-wick');
-  const wordLeaks = w.names.concat(w.duplicates).flatMap(n => n.split(' ').concat([nz.lastName_(n)]))
-      .filter(x => /^[=+\-@]/.test(x) || x === '');
-  check('parseFormRoster_: no WORD of a name starts with = + - @ (so neither does its last_name)',
-        !wordLeaks.length && w.names.join('|') === 'Ivy 1+1|Jo HYPERLINK("x")|Hana A1 Newperson|Uma Newperson|Kai|Mary-Jane Zibble-wick',
-        w.names.join('|') + ' :: ' + wordLeaks.join(' | '));
-  check('…a name the word strip makes equal is a repeat; inner - and + are left alone',
-        w.duplicates.join('|') === 'Ivy 1+1' && nz.sheetName_(' Ann  O-Neil+1 ') === 'Ann O-Neil+1' && nz.sheetName_('= - @') === '',
-        w.duplicates.join('|'));
+  // Only the start of the name is stripped: inner words stay as typed, so a name like
+  // "Ada Ostrivane - Pellucidor" still matches the Roster, where enrolled names are unstripped
+  // (review finding: the word-by-word strip made her a second active girl). Her last word is
+  // filed on its own as last_name, so newRosterRow_ strips that cell.
+  const w = nz.parseFormRoster_('Ivy =1+1\nJo +HYPERLINK("x")\nHana -A1 @Newperson\nUma = =Newperson\nIvy 1+1\n' +
+                                '=Kai -\nMary-Jane Zibble-wick\nAda Ostrivane - Pellucidor\n=Ada Ostrivane - Pellucidor');
+  check('parseFormRoster_: only the leading run goes; inner words (and a standalone -) stay as typed',
+        w.names.join('|') === 'Ivy =1+1|Jo +HYPERLINK("x")|Hana -A1 @Newperson|Uma = =Newperson|Ivy 1+1|Kai|' +
+            'Mary-Jane Zibble-wick|Ada Ostrivane - Pellucidor' &&
+        w.duplicates.join('|') === 'Ada Ostrivane - Pellucidor' && !w.names.some(n => /^[=+\-@]/.test(n)),
+        w.names.join('|'));
+  const lastCells = w.names.map(n => nz.newRosterRow_({ sequence: {} }, 'EVENINGC', { partner: 'P', club: 'C' },
+                                                       'Africa', n, '2026-09-28'));
+  const cellLeaks = lastCells.flat().map(String).filter(c => /^[=+\-@]/.test(c));
+  check('newRosterRow_: no cell starts with = + - @ — last_name without its leading run, full_name as given',
+        !cellLeaks.length && lastCells.map(r => r[5]).join('|') ===
+            '1+1|HYPERLINK("x")|Newperson|Newperson|1+1|Kai|Zibble-wick|Pellucidor' &&
+        lastCells.every((r, i) => r[4] === w.names[i]), cellLeaks.join(' | '));
   const plain = 'Grace Zibblewick\n2) Mary Zibblewick\n• Joy Blorptest\nmary zibblewick';
   check('parseFormRoster_ = parseRoster_ on ordinary text (the enrollment import keeps parseRoster_)',
         JSON.stringify(nz.parseFormRoster_(plain)) === JSON.stringify(nz.parseRoster_(plain)));
@@ -1213,8 +1221,8 @@ const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
   check('a new club with a formula in a later word of a name: no cell starts with = + - @, last_name included',
         /^new club Evening Club/.test(res3) && !leak3.length &&
         w3.tabs.Roster.slice(1).map(r => r[4] + '/' + r[5]).join('|') ===
-            'Ivy 1+1/1+1|Jo HYPERLINK("x")/HYPERLINK("x")|Hana A1/A1|Uma IMAGE("x")/IMAGE("x")' &&
-        w3.tabs.ReviewQueue.some(r => r[1] === 'Same name listed twice' && r[4].startsWith('Ivy 1+1 —')),
+            'Ivy =1+1/1+1|Jo +HYPERLINK("x")/HYPERLINK("x")|Hana -A1/A1|Uma @=IMAGE("x")/IMAGE("x")|Ivy 1+1/1+1' &&
+        !w3.tabs.ReviewQueue.some(r => r[1] === 'Same name listed twice'),
         res3.slice(0, 40) + ' :: ' + leak3.join(' | '));
   const w4 = sheetWorld(baseTabs(rosterRows('Fixture Partner Alpha', 'Sunrise Club', ['Grace Zibblewick'])));
   w4.ctx.handleRosterChange_({ [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: 'Fixture Partner Alpha',
@@ -1222,8 +1230,35 @@ const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
                                [HQ.ADD]: 'Joy =1+1\nAmina Qwertyson -A1' }, 'Roster Form Responses!44');
   const leak4 = w4.cells().filter(c => /^[=+\-@]/.test(c));
   check('a roster change ADD with a formula in a later word: sheet-safe, last_name included',
-        !leak4.length && w4.tabs.Roster.slice(2).map(r => r[4] + '/' + r[5]).join('|') === 'Joy 1+1/1+1|Amina Qwertyson A1/A1',
+        !leak4.length && w4.tabs.Roster.slice(2).map(r => r[4] + '/' + r[5]).join('|') === 'Joy =1+1/1+1|Amina Qwertyson -A1/A1',
         leak4.join(' | '));
+
+  // Review finding (integration, 2026-09-29): a word-by-word strip made an enrolled name with a
+  // standalone "-" (or a word starting with "-") differ from its Roster spelling, so listing her
+  // again added a second active girl, and a REMOVE typed as enrolled matched no one.
+  const A = 'Fixture Partner Alpha', SUN = 'Sunrise Club';
+  const sunActive = w => w.tabs.Roster.slice(1).filter(r => r[2] === SUN && r[6] === 'active').length;
+  for (const odd of ['Ada Ostrivane - Pellucidor', 'Ada Ostrivane -Pellucidor']) {
+    const shape = odd.includes(' - ') ? '" - "' : '" -Word"';
+    const list = ['Grace Zibblewick', 'Mary Zibblewick', odd];
+    let wa = sheetWorld(baseTabs(rosterRows(A, SUN, list)));
+    const addRes = wa.ctx.handleRosterChange_({ [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: A,
+        [HQ.CLUB_PREFIX + A + ')']: SUN, [HQ.ADD]: odd }, 'Roster Form Responses!45', '2026-09-28');
+    check('an enrolled name with ' + shape + ', listed in ADD as enrolled: already on the roster, no second row',
+          sunActive(wa) === 3 && wa.tabs.Roster.length === 4 && /0 added/.test(addRes), addRes);
+    wa = sheetWorld(baseTabs(rosterRows(A, SUN, list)));
+    const reRes = wa.ctx.handleNewClub_(newClub(A, SUN, list), 'Roster Form Responses!46', KEY41);
+    check('…the club re-sent on "Enroll a NEW club" with its list as enrolled: 0 added, no "Girls missing" item',
+          sunActive(wa) === 3 && /0 girls added/.test(reRes) &&
+          !wa.tabs.ReviewQueue.some(r => r[1] === 'Girls missing from the latest enrollment'), reRes);
+    wa = sheetWorld(baseTabs());
+    wa.ctx.handleNewClub_(newClub(A, SUN, list), 'Roster Form Responses!47', KEY41);
+    const rmRes = wa.ctx.handleRosterChange_({ [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: A,
+        [HQ.CLUB_PREFIX + A + ')']: SUN, [HQ.REMOVE]: odd }, 'Roster Form Responses!48', '2026-09-28');
+    check('…enrolled through the form, then a REMOVE typed the same way: she is removed',
+          wa.tabs.Roster.length === 4 && sunActive(wa) === 2 && /1 removed/.test(rmRes) &&
+          !wa.tabs.ReviewQueue.some(r => r[1] === 'Removal did not match anyone'), rmRes);
+  }
 }
 
 console.log('\nA new club that may duplicate one on file is held, then released by staff (BACKLOG 11b)');

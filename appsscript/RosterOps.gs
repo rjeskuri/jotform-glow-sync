@@ -222,11 +222,16 @@ function planModification_(entry, current, state, region, today) {
   return plan;
 }
 
-/** One new Roster row, ID minted now. */
+/**
+ * One new Roster row, ID minted now. last_name is her last word without a
+ * leading = + - @ ("Jane =1+1" files "1+1"): a cell of its own, so it must not
+ * read as a formula. The ID is unchanged (asciiCode_ drops those anyway), and
+ * Python has no last_name.
+ */
 function newRosterRow_(state, code, entry, region, name, today) {
   return [
     mintGirlId_(state.sequence, code, name), entry.partner, entry.club,
-    region, name, lastName_(name), STATUS.ACTIVE, today, '',
+    region, name, sheetText_(lastName_(name)), STATUS.ACTIVE, today, '',
     entry.source || '',
   ];
 }
