@@ -328,6 +328,16 @@ def partner_choices(club_questions, partner_of, pending=()):
                     out.setdefault(" ".join(p.split()).lower(), p)
     return sorted(out.values(), key=str.lower)
 
+def joined_clashes(options):
+    """[(a, b, c)]: two picker options whose names run together - what
+    question 5 receives when both are picked - equal a third option (as
+    Jotform compares a textbox: case and outer spaces ignored). The club
+    guard cannot tell such a pair from the one club."""
+    by_key = {o.strip().lower(): o for o in options}
+    return [(a, b, by_key[(a + b).strip().lower()])
+            for a in options for b in options
+            if a != b and (a + b).strip().lower() in by_key]
+
 # ------------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -353,6 +363,10 @@ def main():
                          "maintained on every run): club names two partners share are "
                          "told apart by choosing the partner instead of typing it, and "
                          "the typed Partner box is hidden")
+    ap.add_argument("--club-guard", action="store_true",
+                    help="add the one-club-per-submission guard to this form (once; afterwards "
+                         "it is maintained on every run): a warning below the Club picker, and "
+                         "Submit hidden and disabled while several clubs are picked")
     args = ap.parse_args()
     if args.region and not args.roster:
         sys.exit("--region needs --roster (the Roster tab is what carries regions)")
@@ -428,6 +442,31 @@ def main():
               "two partners share)")
         if args.partner_picker:
             print("  - the form already has the partner list; --partner-picker is not needed")
+
+    # the one-club guard: refusals before any write
+    guards = club_guards(questions)
+    if len(guards) > 1:
+        sys.exit(f"{len(guards)} elements are named {GUARD_NAME!r} "
+                 f"({', '.join('q' + g for g in guards)}) - delete the extra one in the builder first")
+    guard_qid = guards[0] if guards else None
+    if guard_qid and questions[guard_qid].get("type") != "control_text":
+        sys.exit(f"q{guard_qid} is named {GUARD_NAME!r} but is a {questions[guard_qid].get('type')}, "
+                 "not a text element - rename or delete it in the builder first")
+    if guard_qid:
+        print(f"Club guard: q{guard_qid} (one club per submission)")
+        if args.club_guard:
+            print("  - the form already has the club guard; --club-guard is not needed")
+    if args.club_guard and picker_qid is None:
+        sys.exit("--club-guard needs the Club picker on the form: add it first (--club-picker), "
+                 "then run --club-guard")
+    if guard_qid and picker_qid is None:
+        warn(f"  ! q{guard_qid} (the club guard) needs the Club picker, which this form lacks - "
+             "no guard rules this run")
+    guard_on = picker_qid is not None and (guard_qid is not None or args.club_guard)
+    submit_qid = None
+    if guard_on:   # found by type; refuses unless there is exactly one (q2 on every form)
+        button = submit_button(questions)
+        submit_qid = next(str(k) for k, q in questions.items() if q is button)
 
     # partner mapping already encoded in the form's current rules
     # (used to match same-named clubs to their existing questions); a rule
@@ -654,7 +693,12 @@ def main():
     picker_names = {}   # one entry per distinct name (same-name clubs share it;
     for name in list(club_questions.values()) + [c for c, _, _, _ in to_create]:
         picker_names.setdefault(name.lower(), name)   # the Partner box tells them apart)
-    picker_options = "|".join(sorted(picker_names.values(), key=str.lower))
+    picker_list = sorted(picker_names.values(), key=str.lower)   # the rules test these spellings
+    picker_options = "|".join(picker_list)
+    if guard_on:
+        for a, b, c in joined_clashes(picker_list):
+            warn(f"  ! picking '{a}' and '{b}' fills Club Name with '{c}', another club on this "
+                 "form - the club guard cannot tell that pair from one club")
     if picker_qid is None and args.club_picker:
         fields = {"question[type]": "control_dropdown", "question[name]": PICKER_NAME,
                   "question[order]": str(questions[CLUB_NAME].get("order", "3")),
@@ -673,6 +717,12 @@ def main():
         drift = {k: v for k, v in PICKER_PROPS.items() if current.get(k) != v}
         if current.get("options") != picker_options:
             drift["options"] = picker_options
+        # calcValues = the options, aligned (the q5 copy reads them): with the guard,
+        # and whenever the picker carries some - unaligned, they would copy a
+        # neighbouring club into question 5 (a guard rolled back, a new club added)
+        calc = picker_calc_values(picker_list)
+        if (guard_on or has_calc_values(current)) and (current.get("calcValues") or "") != calc:
+            drift["calcValues"] = calc
         if drift:
             jf.post_form(f"/question/{picker_qid}",
                          {f"question[{k}]": v for k, v in drift.items()},
@@ -713,12 +763,40 @@ def main():
               "it with a list")
     hide_box = using_list and questions.get(PARTNER, {}).get("hidden") != "Yes"
 
+    # --- the club guard: the warning below the picker, kept in shape ---------
+    guard_field = None
+    if guard_on and guard_qid is None:
+        # a create at a taken order inserts (the picker took q5's order 3, q5 is now
+        # 4): the order after the picker's puts the warning directly below it
+        fields = {"question[type]": "control_text", "question[name]": GUARD_NAME,
+                  "question[order]": str(order_of(questions[picker_qid]) + 1)}
+        fields.update({f"question[{k}]": v for k, v in GUARD_PROPS.items()})
+        content = jf.post_form("/questions", fields, "CREATE club guard (below the Club picker)")
+        if not args.apply:
+            guard_field = "NEW_GUARD"
+        elif isinstance(content, dict) and content.get("qid"):
+            guard_field = guard_qid = str(content["qid"])
+        else:   # the element, hidden, waits for the re-run; no rule may point at nothing
+            warn("  ! the club guard was created but Jotform's answer carried no question id - "
+                 "this run writes no guard rules; run the same command again (it finds the "
+                 "guard by name)")
+    elif guard_on:
+        current = questions[guard_qid]
+        drift = {k: v for k, v in GUARD_PROPS.items() if current.get(k) != v}
+        if drift:
+            jf.post_form(f"/question/{guard_qid}",
+                         {f"question[{k}]": v for k, v in drift.items()},
+                         f"UPDATE club guard ({', '.join(sorted(drift))})")
+        guard_field = guard_qid
+
     # --- regenerate all conditions -----------------------------------------
     # The API stores each condition's terms/action as JSON-encoded STRINGS
     # (that is what GET returns and what the builder saves) - encode them.
     conds = build_conditions(club_questions, partner_of, module_options,
                              picker=picker_qid or ("NEW" if args.club_picker else None),
-                             partner_field=partner_qid or ("NEW_PARTNER" if using_list else PARTNER))
+                             partner_field=partner_qid or ("NEW_PARTNER" if using_list else PARTNER),
+                             picker_options=picker_list, guard=guard_field,
+                             submit=submit_qid if guard_field else None)
     if not (to_create or to_update or to_delete) and \
             same_conditions(props.get("conditions", []), conds):
         print("  (conditions unchanged - skipping the rewrite)")
@@ -759,7 +837,7 @@ def main():
                         for q, c, o in to_update],
             "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
-            "club_picker": picker_qid, "partner_picker": partner_qid,
+            "club_picker": picker_qid, "partner_picker": partner_qid, "club_guard": guard_qid,
             "plan_hash": hashlib.sha1("\n".join(sorted(jf.calls)).encode()).hexdigest(),
         }
         with open(args.summary_json, "w", encoding="utf-8") as f:

@@ -34,6 +34,7 @@ import update_static_fields           # noqa: E402
 import worklog                        # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
 from glow import links                # noqa: E402
+from glow import sync as glow_sync    # noqa: E402
 from glow.text import md5             # noqa: E402
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
@@ -173,8 +174,34 @@ class AutoSyncPlan(unittest.TestCase):
                          "CREATE club picker ({len(picker_names)} clubs)",
                          "UPDATE club picker ({len(picker_names)} clubs: ",
                          "CREATE partner picker ({len(choices)} partners)",
-                         "UPDATE partner picker ({len(choices)} partners: "):
+                         "UPDATE partner picker ({len(choices)} partners: ",
+                         "CREATE club guard (below the Club picker)",
+                         "UPDATE club guard ({', '.join(sorted(drift))})"):
             self.assertIn(fragment, joined, fragment)
+
+    def test_a_club_guard_update_is_a_change_and_parses_from_both_shapes(self):
+        text = ("Roster: 3 active clubs in Asia (40 girls); 300 clubs overall\n"
+                "\nDRY RUN (use --apply to write):\n"
+                "  - UPDATE club picker (96 clubs: calcValues)\n"
+                "  - UPDATE club guard (hidden, text)\n"
+                "  - REPLACE conditions (127 rules)\n")
+        plan = auto_sync.parse_plan(text)
+        self.assertEqual(plan["club_guard"], [{"op": "UPDATE"}])
+        self.assertEqual(plan["picker"], [{"op": "UPDATE", "clubs": 96}])
+        self.assertEqual(auto_sync.changes(plan), 2)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        self.assertEqual(auto_sync.plan_summary(plan), "0 create(s), 0 update(s), 0 delete(s), "
+                                                       "0 warning(s), update club picker, update club guard")
+        summary = {"creates": [], "updates": [], "deletes": [], "rules": 127, "warnings": [],
+                   "calls": ["CREATE club guard (below the Club picker)", "REPLACE conditions (127 rules)"]}
+        plan = auto_sync.plan_from_summary(summary)
+        self.assertEqual(plan["club_guard"], [{"op": "CREATE"}])
+        self.assertEqual(auto_sync.changes(plan), 1)
+        for label in ("CREATE club guard (below the Club picker)", "UPDATE club guard (text)",
+                      "UPDATE club guard (hidden, text)"):
+            self.assertTrue(auto_sync.GUARD_RX.match("  - " + label), label)
+        self.assertFalse(auto_sync.GUARD_RX.match("  - UPDATE club picker (3 clubs: calcValues)"))
+        self.assertFalse(auto_sync.PICKER_RX.match("  - UPDATE club guard (text)"))
 
     def test_a_partner_list_update_is_a_change_and_parses_from_both_shapes(self):
         text = ("Roster: 3 active clubs in Africa (40 girls); 300 clubs overall\n"
@@ -487,7 +514,8 @@ class ConditionBuilder(unittest.TestCase):
 class FakeForm:
     """sync_attendance_form.Jotform stand-in: one form held in memory. Reads
     answer from it; writes are recorded (label + payload) and, with apply, a
-    question create answers `created` (the new question's id, or {})."""
+    question create answers `created` (the new question's id, or {}; a list
+    answers one create each, in order)."""
 
     def __init__(self, questions, conditions, apply=False, created=None):
         self.questions, self.conditions, self.apply = questions, conditions, apply
@@ -506,7 +534,9 @@ class FakeForm:
         self.writes.append((method, path, payload))
         if not self.apply:
             return None
-        return self.created if (method, path) == ("POST", "/questions") else {}
+        if (method, path) != ("POST", "/questions"):
+            return {}
+        return self.created.pop(0) if isinstance(self.created, list) else self.created
 
     def post_form(self, path, data, label):
         return self._write("POST", path, data, label)
@@ -776,6 +806,225 @@ class PartnerListRunbook(unittest.TestCase):
         self.assertIn("AUTO_SYNC_APPLY=0", text)
         self.assertLess(text.index("AUTO_SYNC_APPLY=0"), text.index("restore_conditions.py"))
         self.assertIn("AUTO_SYNC_APPLY=1", text)
+
+
+class ClubGuardFlow(unittest.TestCase):
+    """sync_attendance_form.main() with --club-guard and without, on the fake
+    Africa form of PartnerPickerFlow plus a Submit button (q2) and, when the
+    form has it, the warning (q700). Fictional names."""
+
+    ROSTER, QIDS, MODULES = PartnerPickerFlow.ROSTER, PartnerPickerFlow.QIDS, PartnerPickerFlow.MODULES
+    OPTIONS = ["Alpha Club", "Beta Club", "Stars"]
+    NEW_CLUB = {("Partner One", "Gamma Club"): ["Ada Poe", "Bea Roe"]}
+
+    def setUp(self):
+        PartnerPickerFlow.setUp(self)
+
+    def tearDown(self):
+        PartnerPickerFlow.tearDown(self)
+
+    def run_sync(self, fake, *extra, roster=None):
+        return PartnerPickerFlow.run_sync(self, fake, *extra, roster=roster)
+
+    def form(self, guard=True, calc=True, roster=None, partner_list=None):
+        """(questions, wire conditions) of a form in step with `roster`; guard:
+        the warning q700 and the rules it brings; calc: the picker's calcValues."""
+        roster = self.ROSTER if roster is None else roster
+        qs, _ = PartnerPickerFlow.form(self, roster=roster, partner_list=partner_list)
+        qs["2"] = {"type": "control_button", "text": "Submit", "name": "submit2", "order": "35"}
+        options = qs["500"]["options"].split("|")
+        if calc:
+            qs["500"]["calcValues"] = sync.picker_calc_values(options)
+        if guard:
+            qs["700"] = dict(sync.GUARD_PROPS, type="control_text", name=sync.GUARD_NAME, order="4")
+        clubs = {self.QIDS[k]: k[1] for k in roster}
+        partner_of = {self.QIDS[k]: k[0] for k in roster}
+        conds = sync.build_conditions(clubs, partner_of, {y: o.split("|") for y, o in self.MODULES.items()},
+                                      picker="500", partner_field="600" if partner_list else sync.PARTNER,
+                                      picker_options=options, guard="700" if guard else None,
+                                      submit="2" if guard else None)
+        return qs, [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]
+
+    @staticmethod
+    def guard_rules(conds):
+        return [c for c in conds if any(a.get("visibility") in ("Hide", "Disable")
+                                         for a in (json.loads(c["action"]) if isinstance(c["action"], str)
+                                                   else c["action"]))]
+
+    def test_without_the_guard_nothing_changes(self):
+        fake = FakeForm(*self.form(guard=False, calc=False))
+        code, out = self.run_sync(fake)
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertNotIn("Club guard:", out)
+
+    def test_dry_run_adds_calc_values_the_warning_and_two_rules(self):
+        qs, wire = self.form(guard=False, calc=False)
+        fake = FakeForm(qs, wire)
+        code, out = self.run_sync(fake, "--club-guard")
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.calls, ["UPDATE club picker (3 clubs: calcValues)",
+                                      "CREATE club guard (below the Club picker)",
+                                      f"REPLACE conditions ({len(wire) + 2} rules)"])
+        self.assertIn(f"conditions: {len(wire) - 1} kept, 3 new, 1 dropped", out)   # + the q18 separator
+        self.assertEqual(fake.writes[0][2], {"question[calcValues]": "|Alpha Club|Beta Club|Stars"})
+        _, path, fields = fake.writes[1]
+        self.assertEqual(path, "/questions")
+        self.assertEqual(fields, {"question[type]": "control_text", "question[name]": sync.GUARD_NAME,
+                                  "question[order]": "4",          # the picker's order (3) + 1
+                                  "question[text]": glow_sync.guard_html(), "question[hidden]": "Yes"})
+        conds = fake.writes[2][2]["properties"]["conditions"]
+        self.assertEqual(len(self.guard_rules(conds)), 2)
+        self.assertEqual({a["field"] for c in self.guard_rules(conds) for a in json.loads(c["action"])
+                          if a["visibility"] == "Show"}, {"NEW_GUARD"})
+        self.assertTrue(auto_sync.GUARD_RX.match("  - " + fake.calls[1]))
+        self.assertTrue(auto_sync.PICKER_RX.match("  - " + fake.calls[0]))
+
+    def test_apply_writes_picker_then_warning_then_rules_with_its_qid(self):
+        qs, wire = self.form(guard=False, calc=False)
+        fake = FakeForm(qs, wire, apply=True, created={"qid": 700})
+        summary = os.path.join(self.tmp.name, "plan.json")
+        code, _ = self.run_sync(fake, "--club-guard", "--apply", "--summary-json", summary)
+        self.assertEqual(code, 0)
+        self.assertEqual([(m, p) for m, p, _ in fake.writes],
+                         [("POST", "/question/500"), ("POST", "/questions"), ("PUT", "/properties")])
+        conds = fake.writes[2][2]["properties"]["conditions"]
+        show, req = conds[-2:]
+        self.assertEqual(self.guard_rules(conds), [show, req])
+        self.assertEqual([(a["visibility"], a["field"]) for a in json.loads(show["action"])],
+                         [("Show", "700"), ("Hide", "2")])
+        self.assertEqual((req["type"], [(a["visibility"], a["field"]) for a in json.loads(req["action"])]),
+                         ("require", [("Disable", "2")]))
+        for rule in (show, req):
+            self.assertEqual(rule["link"], "All")
+            self.assertEqual([(t["field"], t["operator"], t["value"]) for t in json.loads(rule["terms"])],
+                             [("500", "isFilled", "")] + [(sync.CLUB_NAME, "notEquals", o) for o in self.OPTIONS])
+        agg = [a for c in conds for a in json.loads(c["action"]) if a.get("resultField") == sync.CONTACT_IDS]
+        self.assertEqual(agg[0]["equation"], "{10}, {11}, {12}, {13}")
+        # question 5 is still filled from the Club picker, exactly as before
+        copy = [a for c in conds for a in json.loads(c["action"]) if a.get("resultField") == sync.CLUB_NAME]
+        self.assertEqual([(a["equation"], a["operands"]) for a in copy], [("{500}", "500")])
+        with open(summary, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["club_guard"], "700")
+
+    def test_a_create_without_a_question_id_writes_no_guard_rules(self):
+        fake = FakeForm(*self.form(guard=False, calc=False), apply=True, created={})
+        code, _ = self.run_sync(fake, "--club-guard", "--apply")
+        self.assertEqual(code, 0)
+        # the rules stay today's (unchanged: no rewrite), the picker got its calcValues
+        self.assertEqual(fake.calls, ["UPDATE club picker (3 clubs: calcValues)",
+                                      "CREATE club guard (below the Club picker)"])
+        self.assertTrue(any("carried no question id" in w for w in sync.WARNINGS))
+
+    def test_a_form_with_the_guard_in_step_needs_nothing(self):
+        fake = FakeForm(*self.form())
+        code, out = self.run_sync(fake)
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertIn("Club guard: q700", out)
+        code, out = self.run_sync(fake, "--club-guard")
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertIn("--club-guard is not needed", out)
+
+    def test_the_warning_and_calc_values_are_kept_in_shape(self):
+        qs, wire = self.form()
+        qs["700"].update(hidden="No", text="<p>edited by hand</p>")
+        qs["500"]["calcValues"] = "|Beta Club|Alpha Club|Stars"
+        fake = FakeForm(qs, wire)
+        code, _ = self.run_sync(fake)
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.calls, ["UPDATE club picker (3 clubs: calcValues)",
+                                      "UPDATE club guard (hidden, text)"])
+        self.assertEqual(fake.writes[1][2], {"question[hidden]": "Yes", "question[text]": glow_sync.guard_html()})
+        self.assertTrue(auto_sync.GUARD_RX.match("  - " + fake.calls[1]))
+
+    def test_a_new_club_joins_the_options_calc_values_and_the_guard_terms(self):
+        sheet = {**self.ROSTER, **self.NEW_CLUB}
+        fake = FakeForm(*self.form())
+        code, _ = self.run_sync(fake, roster=sheet)
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.calls[:2], ["CREATE roster 'Gamma Club' (2 girls)",
+                                          "UPDATE club picker (4 clubs: calcValues, options)"])
+        self.assertEqual(fake.writes[1][2], {"question[options]": "Alpha Club|Beta Club|Gamma Club|Stars",
+                                             "question[calcValues]": "|Alpha Club|Beta Club|Gamma Club|Stars"})
+        conds = fake.writes[2][2]["properties"]["conditions"]
+        for rule in self.guard_rules(conds):
+            values = [t["value"] for t in json.loads(rule["terms"]) if t["operator"] == "notEquals"]
+            self.assertEqual(values, ["Alpha Club", "Beta Club", "Gamma Club", "Stars"])
+
+    def test_calc_values_the_picker_carries_are_kept_aligned_without_the_guard(self):
+        # a guard rolled back with its calcValues left: a new club must not shift them
+        sheet = {**self.ROSTER, **self.NEW_CLUB}
+        fake = FakeForm(*self.form(guard=False, calc=True))
+        self.run_sync(fake, roster=sheet)
+        self.assertIn("UPDATE club picker (4 clubs: calcValues, options)", fake.calls)
+        self.assertFalse(self.guard_rules(fake.writes[-1][2]["properties"]["conditions"]))
+        fake = FakeForm(*self.form(guard=False, calc=False))       # none carried: none written
+        self.run_sync(fake, roster=sheet)
+        self.assertIn("UPDATE club picker (4 clubs: options)", fake.calls)
+
+    def test_refusals_come_before_any_write(self):
+        sheet = {**self.ROSTER, **self.NEW_CLUB}          # an apply would create a roster first
+        qs, wire = self.form(guard=False)
+        del qs["500"]                                     # no Club picker
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--club-guard", "--apply", roster=sheet)
+        self.assertIn("needs the Club picker", str(code))
+        self.assertEqual(fake.writes, [])
+        qs, wire = self.form()
+        qs["701"] = dict(qs["700"])                       # two warnings: which one to show?
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", roster=sheet)       # refused without the flag too
+        self.assertIn("2 elements are named 'clubGuard' (q700, q701)", str(code))
+        self.assertEqual(fake.writes, [])
+        qs, wire = self.form()
+        qs["700"]["type"] = "control_textbox"
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", roster=sheet)
+        self.assertIn("not a text element", str(code))
+        self.assertEqual(fake.writes, [])
+        qs, wire = self.form(guard=False)
+        qs["3"] = dict(qs["2"])                           # two Submit buttons
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--club-guard", "--apply", roster=sheet)
+        self.assertIn("expected one Submit button, found 2", str(code))
+        self.assertEqual(fake.writes, [])
+        code, _ = self.run_sync(FakeForm(qs, wire), roster=sheet)    # without the guard: syncs as ever
+        self.assertEqual(code, 0)
+
+    def test_a_warning_on_a_form_without_the_picker_writes_no_guard_rules(self):
+        qs, wire = self.form()
+        del qs["500"]
+        fake = FakeForm(qs, wire)
+        code, _ = self.run_sync(fake)
+        self.assertEqual(code, 0)
+        self.assertTrue(any("needs the Club picker" in w for w in sync.WARNINGS))
+        self.assertFalse(self.guard_rules(fake.writes[-1][2]["properties"]["conditions"]))
+
+    def test_two_names_joining_into_a_third_are_warned(self):
+        self.assertEqual(sync.joined_clashes(["Star", "light", "Moon", "StarLight"]),
+                         [("Star", "light", "StarLight")])
+        self.assertEqual(sync.joined_clashes(["Alpha Club", "Beta Club", "Stars"]), [])
+        roster = {("Partner One", "Sun"): ["Ada Poe"], ("Partner One", "Rise"): ["Bea Roe"],
+                  ("Partner Two", "SunRise"): ["Cy Soe"]}
+        self.QIDS = {("Partner One", "Sun"): "10", ("Partner One", "Rise"): "11",
+                     ("Partner Two", "SunRise"): "12"}
+        for guard in (False, True):
+            del sync.WARNINGS[:]
+            code, _ = self.run_sync(FakeForm(*self.form(guard=guard, roster=roster)), roster=roster)
+            self.assertEqual(code, 0)
+            self.assertEqual(any("fills Club Name with 'SunRise'" in w for w in sync.WARNINGS), guard)
+
+    def test_with_the_partner_list_in_the_same_run(self):
+        qs, wire = self.form(guard=False, calc=False)
+        fake = FakeForm(qs, wire, apply=True, created=[{"qid": 600}, {"qid": 700}])
+        code, _ = self.run_sync(fake, "--partner-picker", "--club-guard", "--apply")
+        self.assertEqual(code, 0)
+        self.assertEqual([c.split(" (")[0] for c in fake.calls],
+                         ["UPDATE club picker", "CREATE partner picker", "CREATE club guard",
+                          "REPLACE conditions", "HIDE partner textbox"])
+        conds = fake.writes[3][2]["properties"]["conditions"]
+        self.assertEqual(len(conds), len(wire) + 3)       # + the q331 copy + the two guard rules
+        self.assertEqual(sync._norm_rules(conds), sync._norm_rules(
+            self.form(partner_list="Partner One|Partner Two")[1]))
 
 
 class FormStatusAudit(unittest.TestCase):
