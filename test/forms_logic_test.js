@@ -892,6 +892,10 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
         refused[1] === 'Form response could not be processed' &&
         String(refused[4]).startsWith(RQ + '!7: its Timestamp cell is not a date') &&
         !w.mails.length && !w.audits.length, result);
+  // a retry fails the same way, so the item must not send staff to the menu (integration review F2)
+  check('…its item says to enter it fresh and resolve FormLog by hand, not to retry from the menu',
+        String(refused[4]).includes('enter the change fresh') && String(refused[4]).includes('resolved by hand') &&
+        !String(refused[4]).includes('then run "Process any missed'), String(refused[4]).slice(-110));
   w = world('America/New_York');
   result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 8, { [FQ.ACTION]: FQ.ACTION_NEW, [FQ.PARTNER_NEW]: ORG,
       [FQ.CLUB]: 'Sunrise Club', [FQ.ROSTER]: 'Grace Zibblewick' }, 'ROSTER|8/31/2026 8:00:00|' + ORG + '|Sunrise Club');
@@ -1339,7 +1343,9 @@ console.log('\nA new club that may duplicate one on file is held, then released 
         res === 'ERROR: release refused: the organization was typed as "Fundacion Demo", close to Fundación Demo on file. ' +
                 'First, ' + STEP + '.' &&
         JSON.stringify([w.tabs.Roster, w.tabs.ClubRegistry, w.tabs.Partners, w.tabs['SF Pending']]) === untouched &&
-        w.tabs.ReviewQueue.some(r => r[1] === 'Form response could not be processed') && !w.notified.length && !w.mails.length,
+        w.tabs.ReviewQueue.some(r => r[1] === 'Form response could not be processed' &&
+                                    r[4].includes('— fix the cause, then run "Process any missed form responses".')) &&
+        !w.notified.length && !w.mails.length,
         res.slice(0, 60));
   w = sheetWorld(baseTabs(onFile));
   res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, typedOrg({ [HQ.PARTNER_NEW]: 'Fundación Demo' }), KEY, true);

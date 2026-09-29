@@ -278,9 +278,13 @@ function runResponse_(which, sheet, row, answers, responseKey, released) {
     } else result = handleRosterChange_(answers, source, sent);
   } catch (err) {
     result = 'ERROR: ' + err.message;
+    // a text Timestamp fails the same way on every retry: the change is entered fresh instead
     tryReview_([{ issue: 'Form response could not be processed', partner: '', club: '',
-                  detail: source + ': ' + err.message + ' — fix the cause, then run ' +
-                      '"Process any missed form responses".', dedupeKey: source }], source);
+                  detail: source + ': ' + err.message + (err.message === NO_SENT_DAY_ERROR
+                      ? ' — then set its FormLog result to "resolved by hand by <name> <date>" ' +
+                        'so the menu stops offering it.'
+                      : ' — fix the cause, then run "Process any missed form responses".'),
+                  dedupeKey: source }], source);
   }
   formLogAdd_(which, row, responseKey, result);
   return result;
