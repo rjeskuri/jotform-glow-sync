@@ -766,6 +766,56 @@ class FormStatusAudit(unittest.TestCase):
         self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
 
 
+class FormStatusLayout(unittest.TestCase):
+    """tools/form_status.py: the layout audit joins rule_problems (CLEAN needs
+    none, and the runner's verify_report sees a relapse)."""
+
+    class Client:
+        def __init__(self, qs):
+            self.qs = qs
+
+        def get(self, path, **params):
+            if path.endswith("/properties"):
+                return {"conditions": [], "language": [{"options": "English|Español"}],
+                        "integrations": {"salesforceV2": {"on": 1}}}
+            if path.endswith("/questions"):
+                return copy.deepcopy(self.qs)
+            return {"title": "Attendance Form (Template)", "status": "ENABLED", "count": "0"}
+
+    def report(self, qs):
+        return form_status.form_report(glow_forms.TEMPLATE, self.Client(qs), {})
+
+    def layout_problems(self, rep):
+        return [p for p in rep["rule_problems"] if "fix_roster_order" in p or "Submit" in p]
+
+    def test_a_roster_below_the_links_is_a_problem_until_the_repair(self):
+        rep = self.report(link_form())
+        self.assertEqual(self.layout_problems(rep), layout.audit_layout(link_form()))
+        self.assertEqual(len(self.layout_problems(rep)), 1)
+        self.assertEqual(rep["layout"]["rosters_below"], 1)
+        self.assertEqual(form_status.layout_line(rep["layout"]),
+                         "1 of 2 rosters render below somethingNotWorking (q443) (first q400) - "
+                         "run tools/fix_roster_order.py (dry run first)")
+        clean = dict(rep, rule_problems=self.layout_problems(rep), languages=["a"] * 12,
+                     region_check={"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []})
+        problems, _ = auto_sync.verify_report(clean)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("fix_roster_order", problems[0])
+        repaired = move_all(link_form(), layout.plan_tail_moves(link_form()))
+        rep = self.report(repaired)
+        self.assertEqual(self.layout_problems(rep), [])
+        self.assertEqual(form_status.layout_line(rep["layout"]),
+                         "every roster above somethingNotWorking (q443)")
+        self.assertEqual(auto_sync.verify_report(dict(clean, rule_problems=[]))[0], [])
+
+    def test_the_rule_audit_is_unchanged(self):
+        # audit_rules still knows nothing of the layout (its fixtures have no Submit)
+        qs, wire = PartnerPickerFlow.form(PartnerPickerFlow())
+        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
+        self.assertEqual(layout.audit_layout(qs), ["0 Submit buttons, expected 1"])
+        self.assertEqual(form_status.layout_line(layout.summary(qs)), "0 Submit button(s), no link")
+
+
 class TranslationAudit(unittest.TestCase):
     """tools/add_translations.py: what counts as a string a mentor sees."""
 

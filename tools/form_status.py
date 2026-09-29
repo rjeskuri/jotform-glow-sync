@@ -7,7 +7,9 @@ Salesforce integration intact?
 Read-only. Compares every form's club checkboxes against the Roster tab
 (data/roster_build/Roster.csv by default, or --roster <csv>), grouped by
 region, and reports what the Jotform API says about conditions, emails,
-integration, submissions and the enableFuzzy field.
+integration, submissions and the enableFuzzy field, and whether every roster
+renders above the links and the Submit button (glow/layout.py; a roster below
+them makes the form NOT CLEAN - tools/fix_roster_order.py repairs it).
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -24,6 +26,7 @@ from collections import defaultdict
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms as glow_forms       # noqa: E402
+from glow import layout                    # noqa: E402  (rosters above the links and Submit)
 from glow.cli import run                   # noqa: E402
 from glow.jotform import Client            # noqa: E402
 from glow.sync import PICKER_NAME, partner_picker   # noqa: E402  (shared with the sync tool)
@@ -174,6 +177,16 @@ def audit_rules(questions, conditions):
     return problems, summary
 
 
+def layout_line(lo):
+    """The printed report's `layout:` line, from form_report's `layout` field."""
+    if not lo.get("fence"):
+        return f"{lo.get('submit_buttons')} Submit button(s), no link"
+    if lo.get("rosters_below"):
+        return (f"{lo['rosters_below']} of {lo['rosters']} rosters render below {lo['fence']} "
+                f"(first q{lo['first_below']}) - {layout.FIX}")
+    return f"every roster above {lo['fence']}"
+
+
 def form_report(form_id, client, roster_by_region):
     label, region = FORMS.get(form_id) or DEFUNCT.get(form_id) or (form_id, None)
     props = client.get(f"/form/{form_id}/properties", limit=1000)
@@ -198,6 +211,8 @@ def form_report(form_id, client, roster_by_region):
     mentor_email = any(q.get("type") == "control_email" for q in questions.values())
 
     rule_problems, rule_summary = audit_rules(questions, conditions)
+    # a roster rendering below the links / Submit shows a mentor her names under the button
+    rule_problems += layout.audit_layout(questions)
     picker = club_picker(questions)
     if picker:
         listed = {key(o) for o in (questions[picker].get("options") or "").split("|") if o.strip()}
@@ -219,6 +234,7 @@ def form_report(form_id, client, roster_by_region):
                              "resets this; run tools/restore_translations.py")
     rep = {
         "rule_problems": rule_problems, "rule_summary": rule_summary,
+        "layout": layout.summary(questions),
         "languages": languages, "club_picker": picker, "partner_picker": partner_picker(questions),
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
@@ -287,6 +303,7 @@ def main():
         if r.get("partner_picker"):
             print(f"   partner picker: q{r['partner_picker']} (a shared club name: mentors choose "
                   "the partner)")
+        print(f"   layout: {layout_line(r['layout'])}")
         rs = r["rule_summary"]
         print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
               f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "
