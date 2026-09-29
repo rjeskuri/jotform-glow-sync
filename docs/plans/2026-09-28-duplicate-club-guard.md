@@ -134,7 +134,9 @@ DECISIONS.md one row, BACKLOG 11b / 40 / 44.
 - **Live deploy** (`clasp push`, Ryan's go): no new Google service (a test pins the set), so
   no re-authorization; the handler change applies to the next submission. Rollback: push the
   previous `appsscript/` (not before `7a175c4`); a `HELD:` FormLog row then reads as done to
-  the old code (nothing replays it) and its ReviewQueue item stays open for staff.
+  the old code, so a release there imports nothing and closes the item: leave held items
+  unreleased until re-deployed, or enter them by hand and resolve without `release` (RUNBOOK,
+  "Rolling back `appsscript/`"; integration review, 2026-09-29).
 - **Privacy:** reasons, detail, Audit, FormLog and the mentor e-mail carry counts, club and
   partner names only; tests use fictional names and a canary.
 

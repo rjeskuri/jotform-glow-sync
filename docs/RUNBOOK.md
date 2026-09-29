@@ -602,11 +602,30 @@ spreadsheet's time zone changes (File → Settings) — the cause of the
 2026-09-13 replay; they are still recognised under any zone
 ([plans/2026-09-27-formlog-key.md](plans/2026-09-27-formlog-key.md)).
 
-**Rolling back `appsscript/`** to a commit before `7a175c4` brings back the
-old menu item, which cannot read the new keys and would re-run everything
-processed since the deploy, without a preview. Roll back no further than
-`7a175c4` (`git checkout 7a175c4 -- appsscript && npm run clasp:push`); it
-shows rows logged under the new keys as held.
+**Rolling back `appsscript/`** (`git checkout <target> -- appsscript && npm
+run clasp:push`) to a commit before `7a175c4` brings back the old menu item,
+which cannot read the new keys and would re-run everything processed since
+the deploy, without a preview. Roll back no further than `7a175c4`; it shows
+rows logged under the new keys as held. Once the Feedback tab has two reply
+columns, no further than `986a325` ("Google Forms wording", below). To undo
+the 2026-09-28 integration deploy, the target is `986a325`: `main`'s code
+before the merge plus that two-column read.
+
+**Held new clubs and a rollback below the duplicate-club guard.** Code
+without the guard (`git grep -q HOLD_PREFIX <target> -- appsscript/FormHandlers.gs`
+finds nothing: `986a325`, and `main` before the 2026-09-28 integration)
+reads a FormLog `HELD:` row as done. There, `release` followed by **Process
+any missed form responses** imports nothing ("Nothing to process.") and
+still closes the item, after the mentor was told the club would be added.
+Before such a rollback, filter the ReviewQueue for **New club held as a
+possible duplicate** items that are open, or released with no later FormLog
+row for that response (same form and `sheet_row`) whose result starts with
+neither `ERROR:` nor `HELD:`. While rolled back, never write `release` on
+them: after rolling forward, release them and the menu offers them as usual.
+Staying rolled back, handle each really-new club by hand: send "Enroll a NEW
+club" yourself with the response row's answers (the old code imports it),
+then resolve its item `resolved <date> by <name>: entered by hand` (over a
+`release` already there), so a later roll-forward never imports it twice.
 
 ## Working the ReviewQueue
 
@@ -738,8 +757,12 @@ submissions go unprocessed. So: push at a quiet moment, immediately run a
 GLOW menu item and accept the prompt, then **Process any missed form
 responses** and read its preview: it should list only responses that
 arrived since the push, plus any earlier failure shown as `retry after
-ERROR` ("Missed form responses" above). Rollback is a push of the previous
-commit's `appsscript/` — never to before `7a175c4`.
+ERROR` ("Missed form responses" above). Rollback is a push of the
+previously deployed `appsscript/`, not "the previous commit" (after a merge
+that can be the same code). For the 2026-09-28 integration deploy that is
+`git checkout 986a325 -- appsscript && npm run clasp:push`. First read
+"Rolling back `appsscript/`" above: the floors (`7a175c4`, and `986a325`
+once the Feedback tab has two reply columns) and held new clubs.
 
 ## Roster rebuild and upload (offline path)
 

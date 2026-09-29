@@ -1398,6 +1398,17 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
   check('HELD: is its own prefix: not a retry, not done', hd.HOLD_PREFIX === 'HELD:' && hd.isHeldResult_(HELD) &&
         !hd.isRetryResult_(HELD) && !hd.isHeldResult_('ERROR: x') && !hd.isHeldResult_(null) &&
         hd.RETRY_PREFIXES.join() === 'ERROR:');
+  // Code without the guard reads HELD: as done, so a release after a rollback imports nothing
+  // and closes the item (integration review, rollout-safety F1/F2): the RUNBOOK must say so.
+  const rbDoc = fs.readFileSync(path.join(REPO, 'docs', 'RUNBOOK.md'), 'utf8');
+  const heldRb = (rbDoc.split('**Held new clubs and a rollback')[1] || '').split('\n\n')[0].replace(/\s+/g, ' ');
+  check('RUNBOOK: a rollback below the duplicate-club guard names held new clubs and how to find that code',
+        heldRb.includes('`' + hd.HOLD_PREFIX + '`') && heldRb.includes(hd.HOLD_ISSUE) &&
+        heldRb.includes('git grep -q HOLD_PREFIX') && heldRb.includes('never write `release`'), heldRb.slice(0, 60));
+  const deployRb = (rbDoc.split('\n## Apps Script deploy')[1] || '').split('\n## ')[0].replace(/\s+/g, ' ');
+  check('RUNBOOK Apps Script deploy: the rollback names a target that changes something (986a325) and the held caveat',
+        deployRb.includes('git checkout 986a325 -- appsscript') && deployRb.includes('held new clubs') &&
+        !deployRb.includes("previous commit's"), deployRb.slice(-80));
   const a = R(41, '2026-09-21 10:15:30.250', 'Alpha Club');
   const idx = hd.indexFormLog_([['ROSTER', 41, keyOf(a), 'ERROR: incomplete submission: missing roster'],
                                 ['ROSTER', 41, keyOf(a), HELD]]);
