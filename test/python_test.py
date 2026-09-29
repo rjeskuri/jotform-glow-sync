@@ -2026,13 +2026,28 @@ class SyncLeavesTheLinksAlone(unittest.TestCase):
             self.assertEqual(links.rules_mentioning(seen["conditions"], qid), [], qid)
 
 
-class WorkLog(unittest.TestCase):
-    """tools/worklog.py: hours from session transcripts, the log, the invoice (synthetic data)."""
-    TZ = __import__("datetime").timezone(__import__("datetime").timedelta(hours=8))
+import datetime as dt                 # noqa: E402  (the work-log tests below)
+import time                           # noqa: E402
 
-    def at(self, hhmm, day="2026-09-26"):
-        import datetime as dt
-        return dt.datetime.fromisoformat(f"{day}T{hhmm}:00").replace(tzinfo=self.TZ)
+
+class WorkLog(unittest.TestCase):
+    """tools/worklog.py: hours from session transcripts on the zone timeline, the log, the invoice
+    (synthetic data)."""
+    TZ = dt.timezone(dt.timedelta(hours=8))
+    UTC = dt.timezone.utc
+
+    def at(self, hhmm, day="2026-09-26", tz=None):
+        return dt.datetime.fromisoformat(f"{day}T{hhmm}:00").replace(tzinfo=tz or self.TZ)
+
+    def utc(self, text):
+        return dt.datetime.fromisoformat(text).replace(tzinfo=self.UTC)
+
+    def zones(self, *rows):
+        """rows: (since 'yyyy-mm-ddThh:mm' UTC, zone text) -> the timeline read_zones returns."""
+        return [(self.utc(s), worklog.parse_zone(z), z, "") for s, z in rows]
+
+    def plus8(self):
+        return self.zones(("2026-01-01T00:00", "+08:00"))
 
     def entry(self, kind, when_utc, content="x", **extra):
         e = {"type": kind, "timestamp": when_utc, "message": {"content": content}}
@@ -2054,23 +2069,27 @@ class WorkLog(unittest.TestCase):
         evts = [(at("09:00"), True), (at("09:20"), False), (at("09:45"), False),    # block 1: 45 min
                 (at("11:00"), False), (at("11:20"), False),                        # agent alone: not billed
                 (at("14:00"), True), (at("14:10"), False)]                         # block 3: 10 min
-        blocks = worklog.day_blocks(evts)
+        blocks = worklog.day_blocks(evts, self.plus8())
         day = at("09:00").date()
         self.assertEqual(worklog.blocks_text(blocks[day]), "09:00-09:45, 14:00-14:10")
+        self.assertEqual(worklog.zones_text(blocks[day]), "+08:00")
         self.assertEqual(worklog.day_hours(blocks[day]), 1.0)          # 55 min -> 1.00
         # stricter gap: 09:20 is 20 min on, so the 09:00 block is that message alone, and the
         # 09:20-09:45 stretch has no message of Ryan's: not billed
-        self.assertEqual(worklog.day_blocks(evts, gap_minutes=15)[day][0], (at("09:00"), at("09:00")))
+        self.assertEqual(worklog.day_blocks(evts, self.plus8(), gap_minutes=15)[day][0], (at("09:00"), at("09:00")))
 
-    def test_concurrent_sessions_count_once_and_days_split(self):
+    def test_concurrent_sessions_count_once_and_a_session_past_midnight_stays_on_its_first_day(self):
         at = self.at
         one = [(at("10:00"), True), (at("10:40"), False)]
         two = [(at("10:05"), True), (at("10:30"), False)]                   # a second open session
-        blocks = worklog.day_blocks(sorted(one + two))
+        blocks = worklog.day_blocks(sorted(one + two), self.plus8())
         self.assertEqual(worklog.day_hours(blocks[at("10:00").date()]), 0.75)   # 40 min, not 65
-        late = [(at("23:50"), True), (at("00:20", "2026-09-27"), False)]
-        split = worklog.day_blocks(late)
-        self.assertEqual(sorted(d.isoformat() for d in split), ["2026-09-26"])  # 09-27 has no message of Ryan's
+        late = [(at("23:50"), True), (at("00:20", "2026-09-27"), False), (at("01:05", "2026-09-27"), True)]
+        days = worklog.day_blocks(late, self.plus8())
+        self.assertEqual(sorted(d.isoformat() for d in days), ["2026-09-26", "2026-09-27"])
+        self.assertEqual(worklog.blocks_text(days[at("23:50").date()]), "23:50-00:20")   # one block, its start day
+        self.assertEqual(worklog.day_hours(days[at("23:50").date()]), 0.5)
+        self.assertEqual(worklog.blocks_text(days[at("01:05", "2026-09-27").date()]), "01:05-01:05")
 
     def test_rounding(self):
         at = self.at
@@ -2078,33 +2097,222 @@ class WorkLog(unittest.TestCase):
         self.assertEqual(worklog.day_hours([(at("09:00"), at("09:52"))]), 0.75)    # 52 -> 0.75
         self.assertEqual(worklog.day_hours([(at("09:00"), at("09:53"))]), 1.0)     # 53 -> 1.00 (half up)
 
-    def test_events_read_transcripts_in_local_time(self):
+    def transcript(self, folder, stamps):
+        """A transcript file of (UTC stamp, Ryan's?) entries."""
+        path = os.path.join(folder, "s.jsonl")
+        with open(path, "w") as fh:
+            for stamp, ryans in stamps:
+                fh.write(json.dumps(self.entry("user" if ryans else "assistant", stamp, "Go")) + "\n")
+            fh.write(json.dumps({"type": "summary"}) + "\n")
+            fh.write("not json\n")
+        return path
+
+    def test_events_are_utc(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "s.jsonl")
-            with open(path, "w") as fh:
-                for e in [self.entry("user", "2026-09-26T01:00:00.000Z", "Start"),
-                          self.entry("assistant", "2026-09-26T01:30:00.000Z"),
-                          {"type": "summary"}]:
-                    fh.write(json.dumps(e) + "\n")
-                fh.write("not json\n")
-            evts = worklog.events([path])
+            evts = worklog.events([self.transcript(d, [("2026-09-26T01:00:00.000Z", True),
+                                                       ("2026-09-26T01:30:00.000Z", False)])])
         self.assertEqual(len(evts), 2)
         self.assertTrue(evts[0][1] and not evts[1][1])
-        self.assertEqual(evts[1][0] - evts[0][0], __import__("datetime").timedelta(minutes=30))
+        self.assertEqual(evts[0][0], self.utc("2026-09-26T01:00"))
+        self.assertEqual(evts[0][0].utcoffset(), dt.timedelta(0))
+
+    def test_the_same_rows_under_any_process_time_zone(self):
+        """The regression that billed September on the wrong days: the Mac's zone at run time must not matter."""
+        import tempfile
+        stamps = [("2026-09-02T20:45:00.000Z", True), ("2026-09-02T21:12:00.000Z", False),   # 22:45 at +02
+                  ("2026-09-12T17:00:00.000Z", True), ("2026-09-12T17:25:00.000Z", False),   # 20:00 at +03
+                  ("2026-09-12T17:50:00.000Z", False), ("2026-09-12T18:15:00.000Z", False),
+                  ("2026-09-12T18:30:00.000Z", False)]
+        zones = self.zones(("2026-08-28T00:00", "+02:00"), ("2026-09-03T00:00", "+03:00"),
+                           ("2026-09-17T00:00", "+08:00"))
+        saved = os.environ.get("TZ")
+        results = []
+        with tempfile.TemporaryDirectory() as d:
+            path = self.transcript(d, stamps)
+            try:
+                for tz in ("UTC", "Asia/Tokyo", "Pacific/Pago_Pago"):
+                    os.environ["TZ"] = tz
+                    time.tzset()
+                    days = worklog.day_blocks(worklog.events([path]), zones)
+                    results.append({k.isoformat(): (worklog.day_hours(b), worklog.blocks_text(b)) for k, b in days.items()})
+            finally:
+                if saved is None:
+                    os.environ.pop("TZ", None)
+                else:
+                    os.environ["TZ"] = saved
+                time.tzset()
+        self.assertEqual(results[0], {"2026-09-02": (0.5, "22:45-23:12"), "2026-09-12": (1.5, "20:00-21:30")})
+        self.assertTrue(results[0] == results[1] == results[2])
+
+    def test_zone_parsing_and_zone_at(self):
+        self.assertEqual(worklog.parse_zone("+09:00").utcoffset(None), dt.timedelta(hours=9))
+        self.assertEqual(worklog.parse_zone("-03:30").utcoffset(None), -dt.timedelta(hours=3, minutes=30))
+        self.assertEqual(str(worklog.parse_zone("Asia/Tokyo")), "Asia/Tokyo")
+        for bad in ("+15:00", "+09:60", "9", "", "Mars/Base", "+9:00"):
+            with self.assertRaises(ValueError, msg=bad):
+                worklog.parse_zone(bad)
+        self.assertEqual(worklog.parse_instant("2026-09-29T12:37:00Z"), self.utc("2026-09-29T12:37"))
+        with self.assertRaises(ValueError):
+            worklog.parse_instant("2026-09-29T12:37:00")                       # no offset
+        zones = self.zones(("2026-09-17T00:00", "+08:00"), ("2026-09-29T12:37", "Asia/Tokyo"))
+        at = worklog.zone_at
+        self.assertIsNone(at(zones, self.utc("2026-09-16T23:59")))              # before the timeline
+        self.assertEqual(at(zones, self.utc("2026-09-29T12:36")), zones[0][1])
+        self.assertEqual(at(zones, self.utc("2026-09-29T12:37")), zones[1][1])  # since <= t: the switch itself is new
+
+    def test_an_iana_zone_follows_daylight_saving(self):
+        zones = self.zones(("2026-10-01T00:00", "Europe/London"))
+        evts = [(self.utc("2026-10-24T12:00"), True), (self.utc("2026-10-26T12:00"), True)]
+        days = worklog.day_blocks(evts, zones)
+        self.assertEqual(worklog.blocks_text(days[dt.date(2026, 10, 24)]), "13:00-13:00")   # BST
+        self.assertEqual(worklog.blocks_text(days[dt.date(2026, 10, 26)]), "12:00-12:00")   # GMT
+        self.assertEqual(worklog.zones_text(days[dt.date(2026, 10, 24)]), "+01:00")
+
+    def test_a_block_across_a_zone_switch_and_a_travel_day(self):
+        zones = self.zones(("2026-09-17T00:00", "+08:00"), ("2026-09-29T12:37", "Asia/Tokyo"))
+        across = [(self.utc("2026-09-29T12:20"), True), (self.utc("2026-09-29T12:50"), False)]
+        day = worklog.day_blocks(across, zones)[dt.date(2026, 9, 29)]
+        self.assertEqual(worklog.blocks_text(day), "20:20-20:50")      # the end on the start's clock
+        travel = [(self.utc("2026-09-29T03:00"), True), (self.utc("2026-09-29T14:00"), True)]
+        day = worklog.day_blocks(travel, zones)[dt.date(2026, 9, 29)]
+        self.assertEqual(worklog.zones_text(day), "+08:00/+09:00")
+        self.assertEqual(worklog.blocks_text(day), "11:00-11:00 (+08:00), 23:00-23:00 (+09:00)")
+
+    def test_blocks_before_the_timeline_are_left_out(self):
+        zones = self.zones(("2026-09-01T00:00", "+02:00"))
+        evts = [(self.utc("2026-08-20T10:00"), True), (self.utc("2026-09-01T10:00"), True)]
+        self.assertEqual(sorted(worklog.day_blocks(evts, zones)), [dt.date(2026, 9, 1)])
+
+    def test_read_zones_refuses_a_bad_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "tz.csv")
+            for body, why in [("since,zone,evidence\n", "no rows"),
+                              ("since,zone,evidence\n2026-09-02T00:00:00+00:00,+02:00,\n"
+                               "2026-09-01T00:00:00+00:00,+03:00,\n", "time order"),
+                              ("since,zone,evidence\n2026-09-01T00:00:00+00:00,Mars/Base,\n", "line 2"),
+                              ("since,zone,evidence\n2026-09-01T00:00:00,+02:00,\n", "line 2")]:
+                with open(path, "w") as fh:
+                    fh.write(body)
+                with self.assertRaises(ValueError, msg=why) as cm:
+                    worklog.read_zones(path)
+                self.assertIn(why, str(cm.exception))
+            with open(path, "w") as fh:
+                fh.write("since,zone,evidence\n2026-09-01T00:00:00Z,+02:00,commits\n"
+                         "2026-09-29T12:37:00+00:00,Asia/Tokyo,clock\n")
+            zones = worklog.read_zones(path)
+            self.assertEqual([z[2] for z in zones], ["+02:00", "Asia/Tokyo"])
+            with self.assertRaises(ValueError):
+                worklog.read_zones(os.path.join(d, "missing.csv"))
+
+    def test_the_mac_must_be_on_the_timelines_zone(self):
+        from zoneinfo import ZoneInfo
+        zones = self.zones(("2026-09-17T00:00", "+08:00"))
+        now = self.utc("2026-09-30T02:00")
+        evts = [(self.utc("2026-09-28T14:00"), True), (self.utc("2026-09-28T15:55"), False),
+                (self.utc("2026-09-29T13:15"), True), (self.utc("2026-09-30T01:50"), True)]
+        self.assertIsNone(worklog.mac_zone_problem(zones, dt.timezone(dt.timedelta(hours=8)), None, now, evts))
+        tokyo = ZoneInfo("Asia/Tokyo")
+        commits = [self.commit("2026-09-28T14:43", 8)]                          # the last one on the old clock
+        msg = worklog.mac_zone_problem(zones, tokyo, "Asia/Tokyo", now, evts, commits=commits)
+        self.assertIn("--zone Asia/Tokyo", msg)
+        # no clock-change time: the middle of the first idle stretch of 6 h+ after that commit, to the
+        # hour - not the later stretch after a session that was already on the new clock
+        self.assertIn("--since 2026-09-29T02:00+00:00", msg)
+        self.assertIn("abc1234", msg)
+        # the clock-change time, when nobody was working near it
+        msg = worklog.mac_zone_problem(zones, tokyo, "Asia/Tokyo", now, evts, changed=self.utc("2026-09-29T12:37"),
+                                       commits=commits)
+        self.assertIn("--since 2026-09-29T12:37+00:00", msg)
+        # ...but not when it falls inside a session
+        msg = worklog.mac_zone_problem(zones, tokyo, "Asia/Tokyo", now, evts, changed=self.utc("2026-09-29T13:20"),
+                                       commits=commits)
+        self.assertIn("--since 2026-09-29T02:00+00:00", msg)
+        # the same offset under another name is no change
+        zones = self.zones(("2026-09-29T12:37", "Asia/Tokyo"))
+        self.assertIsNone(worklog.mac_zone_problem(zones, dt.timezone(dt.timedelta(hours=9)), None, now, evts))
+
+    def commit(self, when, offset_hours, sha="abc1234", committer="Ryan"):
+        return (self.utc(when), dt.timedelta(hours=offset_hours), sha, "A commit", committer)
+
+    def test_commit_offsets_must_agree_with_the_timeline(self):
+        zones = self.zones(("2026-09-03T00:00", "+03:00"), ("2026-09-17T00:00", "+08:00"))
+        start = self.utc("2026-09-01T00:00")
+        ok = [self.commit("2026-09-12T17:23", 3), self.commit("2026-09-20T05:52", 8)]
+        self.assertEqual(worklog.commit_problems(ok, zones, start), [])
+        missed_trip = ok + [self.commit("2026-09-24T06:00", 9, "def5678")]      # the timeline says +08
+        bad = worklog.commit_problems(missed_trip, zones, start)
+        self.assertEqual(len(bad), 1)
+        self.assertTrue(bad[0].startswith("def5678") and "+09:00" in bad[0] and "+08:00" in bad[0])
+        self.assertEqual(worklog.commit_problems(missed_trip, zones, start, ignore=["def5678"]), [])
+        github = ok + [self.commit("2026-09-24T06:00", 0, "fff0000", committer="GitHub")]
+        self.assertEqual(worklog.commit_problems(github, zones, start), [])
+        old = [self.commit("2026-08-20T10:00", 5)]                               # before the window / timeline
+        self.assertEqual(worklog.commit_problems(old, zones, start), [])
+
+    def test_commit_subjects_are_dated_by_the_timeline(self):
+        zones = self.zones(("2026-09-03T00:00", "+03:00"), ("2026-09-17T00:00", "+08:00"))
+        commits = [(self.utc("2026-09-12T17:23"), dt.timedelta(hours=3), "a", "Evening rollout", "Ryan"),
+                   (self.utc("2026-08-01T10:00"), dt.timedelta(hours=1), "b", "Before the timeline", "Ryan")]
+        self.assertEqual(worklog.subjects_by_day(commits, zones), {"2026-09-12": ["Evening rollout"]})
+
+    def test_where_a_zone_change_may_be_recorded(self):
+        from zoneinfo import ZoneInfo
+        tokyo = ZoneInfo("Asia/Tokyo")
+        zones = self.zones(("2026-09-17T00:00", "+08:00"))
+        now = self.utc("2026-09-30T02:00")
+        evts = [(self.utc("2026-09-28T15:55"), True), (self.utc("2026-09-29T13:15"), True)]
+        commits = [self.commit("2026-09-28T14:43", 8), self.commit("2026-09-29T14:00", 9)]
+        ok = self.utc("2026-09-29T02:00")
+        self.assertEqual(worklog.since_problems(ok, tokyo, zones, evts, commits, now), [])
+        inside = worklog.since_problems(self.utc("2026-09-29T13:30"), tokyo, zones, evts, commits, now)
+        self.assertTrue(any("inside a session" in p for p in inside))
+        early = worklog.since_problems(self.utc("2026-09-28T12:00"), tokyo, zones, evts, commits, now)
+        self.assertTrue(any("old clock" in p for p in early))                   # 14:43 was still +08
+        self.assertTrue(any("future" in p for p in
+                            worklog.since_problems(self.utc("2026-10-02T00:00"), tokyo, zones, evts, commits, now)))
+        self.assertTrue(any("not after the last row" in p for p in
+                            worklog.since_problems(self.utc("2026-09-10T00:00"), tokyo, zones, evts, commits, now)))
+
+    def test_the_day_before_the_window_must_not_move(self):
+        rows = [{"date": "2026-09-01", "hours": "2.25", "blocks": "16:23-17:50", "source": "auto"},
+                {"date": "2026-09-02", "hours": "3.75", "blocks": "x", "source": "auto"}]
+        self.assertIsNone(worklog.edge_problem(rows, {"2026-09-01": (2.25, "16:23-17:50", "+08:00")},
+                                               dt.date(2026, 9, 2)))
+        msg = worklog.edge_problem(rows, {"2026-09-01": (2.75, "10:23-11:50", "+02:00")}, dt.date(2026, 9, 2))
+        self.assertIn("earlier --since", msg)
+        self.assertIn("earlier --since", worklog.edge_problem(rows, {}, dt.date(2026, 9, 2)))       # work vanished
+        # the log never covered the day before (August): no check
+        self.assertIsNone(worklog.edge_problem(rows, {"2026-08-31": (1.0, "x", "+02:00")}, dt.date(2026, 9, 1)))
+
+    def test_stale_rows_go_only_when_recent_and_from_this_repos_transcripts(self):
+        rows = [{"date": "2026-09-05", "hours": "0.75", "source": "auto"},
+                {"date": "2026-09-05", "hours": "1.00", "source": "manual"},
+                {"date": "2026-09-04", "hours": "0.75", "source": "auto"}]
+        computed = {"2026-09-04": (0.75, "20:32-21:15", "+03:00")}
+        since = dt.date(2026, 9, 1)
+        self.assertEqual(worklog.stale_days(rows, computed, since, dt.date(2026, 9, 30), False), (["2026-09-05"], []))
+        # a month later its transcripts may have expired: kept, never dropped
+        self.assertEqual(worklog.stale_days(rows, computed, since, dt.date(2026, 10, 20), False), ([], ["2026-09-05"]))
+        # another transcript folder never drops anything
+        self.assertEqual(worklog.stale_days(rows, computed, since, dt.date(2026, 9, 30), True), ([], ["2026-09-05"]))
 
     def test_merge_keeps_manual_rows_and_written_descriptions(self):
         rows = [{"date": "2026-09-25", "hours": "2.00", "blocks": "x", "description": "Curated text", "source": "auto"},
                 {"date": "2026-09-25", "hours": "1.00", "blocks": "", "description": "Call", "source": "manual"},
+                {"date": "2026-09-05", "hours": "0.75", "blocks": "z", "description": "Moved", "source": "auto"},
                 {"date": "2026-08-30", "hours": "3.00", "blocks": "y", "description": "Old", "source": "auto"}]
-        computed = {"2026-09-25": (2.5, "09:00-11:30"), "2026-09-26": (1.0, "10:00-11:00")}
+        computed = {"2026-09-25": (2.5, "09:00-11:30", "+08:00"), "2026-09-26": (1.0, "10:00-11:00", "+08:00")}
         subjects = {"2026-09-26": ["Second commit", "First commit"]}
-        out = worklog.merge(rows, computed, subjects)
+        out = worklog.merge(rows, computed, subjects, drop=["2026-09-05"])
         by = {(r["date"], r["source"]): r for r in out}
         self.assertEqual(by[("2026-09-25", "auto")]["hours"], "2.50")
+        self.assertEqual(by[("2026-09-25", "auto")]["zone"], "+08:00")
         self.assertEqual(by[("2026-09-25", "auto")]["description"], "Curated text")
         self.assertEqual(by[("2026-09-25", "manual")]["hours"], "1.00")
         self.assertEqual(by[("2026-09-26", "auto")]["description"], "First commit; Second commit")
+        self.assertNotIn(("2026-09-05", "auto"), by)     # dropped as asked
         self.assertIn(("2026-08-30", "auto"), by)        # an expired day is never dropped
         self.assertEqual([r["date"] for r in out], sorted(r["date"] for r in out))
 
@@ -2124,7 +2332,7 @@ class WorkLog(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "w", "log.csv")
             rows = [{"date": "2026-09-25", "hours": "1.00", "blocks": "09:00-10:00",
-                     "description": 'Commas, "quotes"\nand a newline', "source": "auto"}]
+                     "description": 'Commas, "quotes"\nand a newline', "source": "auto", "zone": "+08:00"}]
             worklog.write_log(rows, path)
             self.assertEqual(worklog.read_log(path), rows)
 

@@ -19,7 +19,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 - `python3 sync_attendance_form.py <roster.csv> --roster --region Africa --form 262382821971058`
   — dry run; `--apply` writes. Form ids: `docs/RUNBOOK.md`.
 - `python3 tools/worklog.py update` — hours per day from the session transcripts into
-  `worklog/worklog.csv` (Ryan invoices this work monthly); `export --month yyyy-mm` for the invoice.
+  `worklog/worklog.csv` (Ryan invoices this work monthly), on the Mac's clock at the time
+  (`worklog/timezones.csv`); after travel it refuses until `worklog.py zone --since … --zone …`
+  records the switch (RUNBOOK "Work log and invoices"); `export --month yyyy-mm` for the invoice.
 
 ## Conventions
 - Dry run by default; `--apply` writes; back up before a live write (`backup_forms.py --form`),
@@ -31,7 +33,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 - Work log (contract work, invoiced monthly): at the end of every working session run
   `python3 tools/worklog.py update` and write or refresh that day's `description` in
   `worklog/worklog.csv` — 1-3 plain, client-facing sentences on what was done; no girls' or
-  mentors' names, no jargon. Never edit `hours` of `auto` rows; Ryan adds `manual` rows.
+  mentors' names, no jargon. Never edit `hours` of `auto` rows; Ryan adds `manual` rows. If
+  `update` refuses after a zone change, record it with `worklog.py zone` (check the suggested
+  moment against when Ryan travelled) - never run `update` under a hand-set `TZ` to get past it.
 - Plan mode for anything beyond a one-line fix; the plan is committed under `docs/plans/` first;
   intents in `docs/intent/`, decisions in `docs/DECISIONS.md`. Review against `REVIEW.md`.
 

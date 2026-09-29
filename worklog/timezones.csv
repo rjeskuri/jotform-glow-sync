@@ -1,0 +1,7 @@
+since,zone,evidence
+2026-08-01T00:00:00+00:00,+01:00,clock reading BST on 2026-08-24
+2026-08-26T00:00:00+00:00,+00:00,commit offsets 2026-08-26..27
+2026-08-28T00:00:00+00:00,+02:00,commit offsets 2026-08-28..09-02
+2026-09-03T00:00:00+00:00,+03:00,commit offsets 2026-09-03..09-14
+2026-09-17T00:00:00+00:00,+08:00,commit offsets 2026-09-20..09-28 (HKT/CST clock readings)
+2026-09-29T12:37:00+00:00,Asia/Tokyo,/etc/localtime set to Asia/Tokyo 2026-09-29 12:37Z
