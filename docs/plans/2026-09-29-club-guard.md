@@ -1,0 +1,248 @@
+---
+title: One club per attendance submission (the multi-club guard)
+author: Claude (workflow track "club-guard", 2026-09-29)
+status: proposed         # proposed → accepted (Ryan) → in-progress → done
+created: 2026-09-29
+intent: docs/intent/2026-09-01-club-picker.md (its open question: "confirm a mentor cannot pick two clubs … if two can be picked, add a guard rule")
+---
+
+# Plan: one club per submission
+
+## Problem
+
+The Club picker is Jotform's searchable dropdown (`multipleSelections=Yes`:
+the only mode with a type-to-filter box, on phones too). Its other side: a
+mentor can pick several clubs. Read-only, 2026-09-29 (GET + the public
+runtime `jotform.forms.js`; counts only):
+
+- **20 multi-club submissions since 09-01** (Africa 12: nine with 2 clubs,
+  three with 3; Asia 8: seven with 2, one with 4). The picker's answer is a
+  JSON list; question 5 (the Salesforce `Account_Name__c` field) received the
+  names joined with **no separator** in all 20. Every picked club's roster
+  showed, and the Contact_IDs sum collected ticks from all of them.
+- On Salesforce's side (the other session's read-only investigation) the
+  batch processor matches question 5 to `Account.Name` exactly (ignoring
+  case) and **creates** a Club Account when nothing matches: a fused
+  question 5 would become a junk Account. None exists yet — nothing has
+  reached Salesforce since 2026-03-28 (the connection's user was deactivated
+  09-17) — so the 20 fused submissions must be split or assigned before any
+  back-fill.
+- On a `<select multiple>` Jotform's rules evaluate only `equals`,
+  `notEquals`, `isEmpty`, `isFilled`. `equals` means "this exact option is
+  selected" and is **case-sensitive** on the option's value (the skill's
+  "case-insensitive" holds for other fields). `contains` is silently
+  skipped; there is no count operator, and a calculation cannot count a
+  selection.
+- **Live bug found on the way:** Africa's roster "SUPER GIRLS" (q429) can
+  never appear. Its rule tests `equals "SUPER GIRLS"`, the picker offers
+  "Super Girls". Same on the template. Neither roster has submissions yet.
+- In 5 single-club submissions (Asia 4, Latin America 1) question 5 differs
+  from the picked option by one character (an inserted space, a trailing
+  "."): the stored pick holds the option's value, question 5 copies its
+  visible text, which the browser's page translation altered.
+
+## Design
+
+Nothing changes on a form until a person runs `--club-guard --apply` on it
+(the runner never passes the flag), except the spelling fix (A).
+
+**A. The picker's own spelling (ungated).** When a form has the picker, each
+roster rule and partner-reveal rule tests the club with the picker's own
+spelling (`{o.lower(): o}` over the options the same run writes). Fixes
+SUPER GIRLS: 1 rule changes on Africa and on the template; forms without a
+picker are byte-identical.
+
+**B. Picker `calcValues` = its own club names** (forms with the guard), kept
+in the same `UPDATE club picker (N clubs: calcValues, options)` write as the
+options. The q5 copy then reads `data-calcvalue`, which page translation does
+not change, so question 5 is exactly one option for every single-club pick.
+The layout is one constant, `PICKER_CALC_LEADING_EMPTY` (default: the leading
+empty slot the five live single-select dropdowns carry — `|1|2|3`, rendered
+as `data-calcvalue` 1..3 on the options after "Please Select"). Whether a
+multi-select renders it the same way is **unverified**: the template's
+rendered page (`form_status.py --rendered`: every option's `value` equals
+its `data-calcvalue`) is a **hard stop** before any regional form.
+
+**C. The warning element `clubGuard`:** a hidden `control_text`, found by
+name like `clubPicker` / `partnerPicker`, holding one sentence in a styled
+`<p>` (`glow.sync.guard_html()`, pinned byte for byte because a change
+re-keys its translations). Wording (a constant, `GUARD_SENTENCE`, for Ryan to
+approve): "You chose more than one club. Keep only your own club in Club
+Name, and the Submit button comes back."
+
+**D. Two generated rules** (new section D of `build_conditions`, appended
+after the Contact_IDs sum, so every existing rule keeps its index):
+
+- field rule, link All: terms `{picker isFilled}` + `q5 notEquals <option>`
+  for every picker option; actions Show `clubGuard`, Hide Submit;
+- require rule, link All, the same terms (fresh ids): Disable Submit
+  (constant `GUARD_DISABLES_SUBMIT`; hiding alone lets desktop Enter in the
+  Partner Coordinator Email box submit).
+
+One club picked → q5 equals that option → the rules are false. Two picked →
+q5 is the names run together → equals no option → warning shown, Submit
+hidden and disabled; removing the extra club brings it back. Submit is found
+by type (`glow.links.submit_button`: exactly one, q2 everywhere). Size: +2
+rules of (options + 1) terms: template 337, Africa 217, Asia 97, Latin
+America 40, U.S 13 (options + 1 as read today).
+
+**E. Question 18 separator.** With the guard, the Contact_IDs equation puts
+`CONTACT_IDS_SEPARATOR` (", ") between the roster operands (today: none, so
+with two rosters visible the last girl of one fused with the first of the
+next — once). Gated on the guard like the rest, so it rolls out per form
+with the template-first test submission; the processor drops blank tokens.
+
+**F. `sync_attendance_form.py`.** `mk_hide`, `mk_disable`, `mk_require_rule`
+next to `mk_show` / `mk_field_rule`; `build_conditions(…, picker_options=None,
+guard=None, submit=None)` where `picker_options` is the exact sorted list
+`main()` writes to the picker (clubs created in the same run included). New
+flag `--club-guard`; refusals before any write: no Club picker; two elements
+named `clubGuard`, or one that is not a text element; not exactly one Submit
+button. A warning when two options joined equal a third (0 today: the guard
+could not see that pair). The element is created as "CREATE club guard
+(below the Club picker)", kept in shape as "UPDATE club guard (hidden,
+text)"; a create answered without a qid warns and writes no guard rules this
+run (as the partner list does). Write order: rosters → picker → guard element
+→ conditions. `--summary-json` gains `club_guard`.
+
+**G. `tools/form_status.py`.** Always, on a multi-select picker: every
+`equals` term on it matches one option exactly (flags Africa q429 and the
+template today — the next apply of either fixes it). Whenever the picker
+carries `calcValues`: aligned with the options under the chosen layout. With
+`clubGuard`: a picker exists; one element, a text element, hidden, the
+pinned HTML, rendering directly below the picker; exactly one field rule
+(Show guard + Hide Submit, link All, the full term list — missing and extra
+options reported) and one require rule (Disable Submit, the same terms); no
+other rule shows the guard; the q18 separator. Report line `club guard:
+q<id> (N clubs)` or `club guard: none (a mentor can pick several clubs)`
+(informational: forms stay CLEAN before rollout). `--rendered`: GET the
+public page (curl, like every tool here), compare each picker option's
+`value` with its `data-calcvalue` in memory; counts only.
+
+**H. `tools/auto_sync.py`.** `GUARD_RX` (CREATE|UPDATE club guard), read by
+`parse_plan` and `plan_from_summary`, counted by `changes()`, named by
+`plan_summary()` — like the partner list. `PICKER_RX` already accepts
+`(N clubs: calcValues, options)`.
+
+**I. Translations.** The sentence in the 13 offered languages (es, fr, th,
+ur, te, vi, ne, km, sw, ar, or, hi, fa), reusing each language's "Club Name"
+and Submit wording where the repo has it; written by us, not
+native-reviewed. `glow.links.translated_elements()` generalises the element
+list `add_translations.plan_additions` and `add_language.text_element_keys`
+read, so the guard is keyed like the links: sentence, `text_<qid>`, stored
+HTML.
+
+### Deviations from the approved design (with the reason)
+
+1. **The element is created at the picker's order + 1, not at the picker's
+   order.** The live forms show that a create at a taken order *inserts*
+   (the picker was posted at question 5's order 3; question 5 is now 4 on
+   all five forms), so the picker's own order would put the warning above
+   the picker. At order + 1 it renders directly below the picker when
+   Jotform inserts, and directly after the hidden question 5 (so, visibly,
+   below the picker) if it ever ties. `form_status` checks that nothing a
+   mentor can see renders between the picker and the warning.
+2. **`calcValues` are also kept in step whenever the picker already carries
+   them**, not only with the guard. After a rollback that deletes the
+   element but leaves the `calcValues`, a new club would otherwise shift
+   them, and the q5 copy would send a neighbouring club's name to Salesforce
+   without any error. `form_status` checks the alignment in the same case.
+3. **Two elements named `clubGuard`, or one that is not a text element, are
+   refused on every run** (the runner's included), not only with the flag:
+   the sync cannot tell which one to show; refuse rather than guess, and the
+   runner's ATTENTION names it.
+4. **`CONTACT_IDS_SEPARATOR` is a constant**, so the q18 separator can be
+   switched off in one place if the Salesforce field's length turns out to
+   be a problem (below, Risks).
+
+## Files that change
+- `docs/plans/2026-09-29-club-guard.md` — this plan.
+- `glow/sync.py` — `GUARD_NAME`, `GUARD_SENTENCE`, `GUARD_PROPS`,
+  `guard_html()`, `club_guards()`, `GUARD_DISABLES_SUBMIT`,
+  `PICKER_CALC_LEADING_EMPTY`, `picker_calc_values()`, `has_calc_values()`,
+  `CONTACT_IDS_SEPARATOR`.
+- `glow/links.py` — `translated_elements()`; the docstring's "no generated
+  rule mentions any other element" narrowed to the links.
+- `sync_attendance_form.py` — A, B, D, E, F.
+- `tools/form_status.py` — G.
+- `tools/auto_sync.py` — H.
+- `tools/add_translations.py`, `tools/add_language.py`,
+  `tools/translations_additions.json` — I.
+- `test/python_test.py` — ConditionBuilder, ClubGuardFlow (fake form),
+  FormStatusAudit, AutoSyncPlan, TranslationPlan additions (fictional data).
+- `docs/RUNBOOK.md` ("One club per submission"; the Club picker section's
+  open question), `docs/DECISIONS.md`, `docs/BACKLOG.md`,
+  `docs/ARCHITECTURE.md`, `docs/intent/2026-09-01-club-picker.md`,
+  `.claude/skills/jotform-api/SKILL.md` (multi-select operators and case;
+  create at a taken order inserts; Hide/Disable/require rules; multi-select
+  `calcValues` unverified).
+
+## Order of work
+1. Commit this plan.
+2. `glow/sync.py` constants and helpers; `build_conditions` A, D, E with the
+   ConditionBuilder tests (without the guard: identical rules, normalised).
+3. `main()`: the flag, refusals, calcValues, the element, the summary — the
+   ClubGuardFlow tests on a fake form.
+4. `form_status`, `auto_sync`, the translation tools, with their tests.
+5. Docs. `make check` green after every step; a commit per step on
+   `wf5/club-guard`.
+6. Read-only proof against the live forms (below).
+
+## Risks
+- **The calcValues layout on a multi-select is unverified.** Misaligned
+  values would copy a *neighbouring* club into question 5 — no warning (it
+  is still one option), wrong Account in Salesforce. Mitigation: the
+  template first, and `form_status.py --rendered` there is a hard stop
+  (restore the template's picker with `calcValues` flipped or cleared)
+  before any regional form.
+- **Blocking a single-club mentor** whenever question 5 is not exactly one
+  option: misaligned calcValues, two names that join into a third (warned),
+  or a half-write that left a new club out of the guard's term list (the
+  picker is written before the rules; the runner retries once, then its
+  verify fails on "guard rule misses …" → ATTENTION). The browser check
+  covers the page-translation case.
+- **First Hide / Disable / require rules on these forms, and much larger
+  rules** (template about +60 KB of conditions; a PUT size limit is not
+  proven). The template goes first; the builder's Conditions page must show
+  no error marks.
+- **Question 18 length.** With the separator every submission's q18 carries
+  one ", " per roster (Africa: over 200 rosters, over 400 characters of
+  commas around the ticked names). If `Contact_IDs__c` is a short text field in
+  Salesforce this would overflow: Ryan checks the field type before the
+  regional rollout, or sets `CONTACT_IDS_SEPARATOR = ""`.
+- **The runner reads `main`**: merging changes no form except A on the next
+  applied roster change (Africa's SUPER GIRLS rule; `form_status` flags the
+  bug until then). The guard is per form, by hand, with `AUTO_SYNC_APPLY=0`
+  for the window.
+- **The warning is English until translations are applied** (the next step
+  of the per-form procedure).
+- **Rollback per form**: `AUTO_SYNC_APPLY=0`; `backup_forms.py --form`;
+  `restore_conditions.py --from properties-<stamp>.json` (the pre-guard
+  backup); delete the `clubGuard` element (while it exists the runner
+  regenerates the rules); optionally clear `calcValues` (if kept, the sync
+  keeps them aligned — deviation 2); `form_status` CLEAN; `AUTO_SYNC_APPLY=1`.
+
+## Proof
+- `make check` → `CHECK PASSED` (tail pasted below when done).
+- Read-only against the live forms: the sync's dry run on all five forms
+  needs a Roster export (Ryan's, or refused); `form_status.py` on all five
+  (expected: Africa and the template flag the SUPER GIRLS rule; `club guard:
+  none` everywhere); `form_status.py --rendered` (no `data-calcvalue` yet).
+- Offline replay of the live rules (GETs only, no roster): rebuild
+  `club_questions` / `partner_of` from each form's questions and rules;
+  `build_conditions` without the guard reproduces the live rules except the
+  SUPER GIRLS rule; with the guard: +2 rules of options + 1 terms.
+
+## Rollout (each step Ryan's go; not part of this branch)
+`AUTO_SYNC_APPLY=0`. Template: backup; translation audit (before);
+`--club-guard` dry run (+2 rules; +1 changed while A has not landed);
+`--apply`; `form_status` CLEAN; `form_status --rendered` aligned = **hard
+stop**; `add_translations.py --apply` and the audit. Browser: one club → no
+warning, Submit shown; a second club → warning, Submit gone; remove it →
+both back; desktop Enter with two clubs does not submit; the language switch
+translates the warning; Chrome "Translate page" with one club → no warning;
+the builder's Conditions page has no error marks; one test submission:
+question 5 exactly the club, question 18 filled and comma-separated. Then
+U.S, Latin America, Asia, Africa (smallest first), `--club-guard` and
+`--partner-picker` as separate commands. `AUTO_SYNC_APPLY=1`; `auto_sync.py`
+dry run in-sync.
