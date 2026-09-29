@@ -6,7 +6,8 @@ The Google Sheet (club enrollment responses) is the single source of truth.
 This script reads a CSV export of that sheet and makes the Jotform form match:
 
   1. Creates a hidden roster checkbox question for any club that doesn't have
-     one yet (options = the girls' names from the sheet).
+     one yet (options = the girls' names from the sheet), after the last
+     roster above the links and the Submit button (glow/layout.py).
   2. Updates the roster options of existing club questions when the sheet
      changed (new girls enrolled, corrections).
   3. Regenerates ALL conditional logic from scratch, in three categories:
@@ -47,6 +48,8 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
 from glow.cli import run            # noqa: E402
 from glow.jotform import Client     # noqa: E402
+from glow.layout import label as layout_label, roster_slot   # noqa: E402
+from glow.links import order_of as links_order_of            # noqa: E402
 from glow.sync import (             # noqa: E402  - the parsers and structural ids,
     CLUB_NAME, CONTACT_IDS,   # shared with the
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
@@ -563,21 +566,29 @@ def main():
             sys.exit("--partner-picker: no club name on this form is shared by two partners, "
                      "so there is nothing to choose - the typed Partner box stays as it is")
 
+    # --- where new rosters go: above the links and Submit (glow/layout.py) -
+    # computed before the first write: two Submit buttons are a refusal
+    slot = None
+    if to_create:
+        slot, fence = roster_slot(questions)
+        if fence is None:
+            print(f"New rosters go at order {slot}, the end of the form (no Submit button "
+                  "or link found)")
+        else:
+            print(f"New rosters go at order {slot}, above {layout_label(fence)}")
+            if slot == links_order_of(fence):
+                warn(f"  ! new rosters take the order of {layout_label(fence)} ({slot}): Jotform "
+                     "inserts them there and moves it down; if it ever kept both at that order "
+                     "they would render below it - tools/form_status.py would say so")
+
     # --- prune other regions' clubs (fresh clones only) --------------------
     for qid, club, reg in to_delete:
         jf.delete(f"/question/{qid}", f"DELETE roster '{club}' (q{qid}, belongs to {reg})")
 
     # --- write roster changes ----------------------------------------------
-    def order_of(q):
-        try:
-            return int(float(q.get("order", 0)))
-        except (TypeError, ValueError):
-            return 0
-    max_order = max(order_of(q) for q in questions.values())
     used_names = {q.get("name", "") for q in questions.values()}
     pending = []    # (club, partner) of rosters not created (a dry run)
     for club, partner, options, ambiguous in to_create:
-        max_order += 1
         slug = re.sub(r"[^A-Za-z0-9]", "", club)[:56] or "club"
         n = 1
         while (slug if n == 1 else f"{slug}{n}") in used_names:
@@ -588,7 +599,7 @@ def main():
             "question[type]": "control_checkbox",
             "question[text]": club,
             "question[name]": slug,
-            "question[order]": str(max_order),
+            "question[order]": str(slot),
             "question[hidden]": "Yes",
             "question[options]": options,
         }, f"CREATE roster '{club}' ({options.count('|')+1} girls)")
