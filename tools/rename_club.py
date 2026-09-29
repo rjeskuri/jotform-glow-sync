@@ -62,6 +62,7 @@ import re
 import sys
 import unicodedata
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheets_client as sc  # noqa: E402
@@ -446,6 +447,10 @@ def main():
         print("\nDRY RUN - re-run with --apply to write")
         return
 
+    # the sheet's own zone, read once before anything is written: the Audit `when` and the
+    # Partners note's date are in it, like the Apps Script's (the backup stamp stays local)
+    zone = ZoneInfo(sc.time_zone(svc))
+
     # --- backups: the tabs as they are now, and a snapshot of each form written --
     stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
     out = os.path.join(OUT, stamp)
@@ -467,7 +472,7 @@ def main():
         i_n = hdr.index("notes") if "notes" in hdr else None
         roster = tabs["Roster"]
         club = new if renaming else tidy(cell(roster[plan["Roster"][1][0] - 1], columns(roster)[1]))
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(zone).strftime("%Y-%m-%d")
         writes[PARTNERS] = {}
         for n, spelled, _, notes in retire:
             note = (f"was '{spelled}': its club '{club}' moved to '{target}' on {today} "
@@ -574,7 +579,7 @@ def main():
                  if retire else "")
               + (f"; forms {', '.join(f'{f} q{q}' for f, q in forms)}" if forms else "")
               + ") - tools/rename_club.py")
-    sc.append_rows(svc, "Audit", [[datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    sc.append_rows(svc, "Audit", [[datetime.now(zone).strftime("%Y-%m-%d %H:%M:%S"),
                                    "moveClub" if moving else "renameClub", detail]])
     print("  Audit: 1 row appended")
 

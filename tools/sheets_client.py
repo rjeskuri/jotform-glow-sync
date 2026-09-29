@@ -78,6 +78,13 @@ def _sheets_meta(svc):
         raise
 
 
+def time_zone(svc):
+    """The spreadsheet's own time zone (File > Settings), an IANA name such as
+    "America/New_York". Timestamps written into the sheet are rendered in it."""
+    return svc.spreadsheets().get(spreadsheetId=spreadsheet_id(),
+                                  fields="properties.timeZone").execute()["properties"]["timeZone"]
+
+
 def list_tabs(svc):
     """[(title, used_rows_including_header, grid_rows, grid_cols)] for grid tabs."""
     out = []

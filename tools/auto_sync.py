@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 import time
+from zoneinfo import ZoneInfo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.dirname(os.path.abspath(__file__))
@@ -233,6 +234,16 @@ def slug(region):
     return re.sub(r"[^A-Za-z]", "", region)
 
 
+def sheet_when(instant, zone):
+    """An aware instant as the sheet's own clock shows it: "YYYY-MM-DD HH:MM:SS" in
+    `zone` (an IANA name, from sc.time_zone). SyncLog's `when` is written this way so it
+    reads like the Apps Script's timestamps next to it, whatever zone the runner is on."""
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("sheet_when needs an aware instant (a naive one would be read as "
+                         "the process's local time)")
+    return instant.astimezone(ZoneInfo(zone)).strftime("%Y-%m-%d %H:%M:%S")
+
+
 # ------------------------------------------------------------------- runner
 class Run:
     def __init__(self, args):
@@ -241,9 +252,14 @@ class Run:
         self.attention = []       # (title, detail)
         self.results = []         # SyncLog rows
         self.failed = False
-        now = datetime.datetime.now()
+        # the start instant, aware UTC: SyncLog's `when` is rendered from it in the SHEET's
+        # zone (append_synclog); stamp/when below are the process's local clock, for the
+        # local file names and the log/ATTENTION.md lines (with the offset, so they
+        # cannot be misread as sheet time)
+        self.started = datetime.datetime.now(datetime.timezone.utc)
+        now = self.started.astimezone()
         self.stamp = now.strftime("%Y-%m-%dT%H%M%S")
-        self.when = now.strftime("%Y-%m-%d %H:%M:%S")
+        self.when = now.strftime("%Y-%m-%d %H:%M:%S %z")
         self.mode = "apply" if args.apply else "dry-run"
         self.names = []
         self._rx = None          # set once the roster is loaded; from then on every
@@ -404,6 +420,9 @@ class Run:
             self.log(f"  ! could not write the conditions-only copy: {err}")
 
     def append_synclog(self, svc):
+        when = sheet_when(self.started, sc.time_zone(svc))    # the sheet's zone, not the runner's
+        for row in self.results:
+            row[0] = when
         if not sc._has_tab(svc, SYNC_LOG_TAB) or not sc.read_tab(svc, SYNC_LOG_TAB):
             sc.write_tab(svc, SYNC_LOG_TAB, [SYNC_LOG_COLS])
         sc.append_rows(svc, SYNC_LOG_TAB, self.results)

@@ -109,8 +109,7 @@ def main():
             sys.exit(f"{FEEDBACK_TAB}!{n}: could not read its Timestamp")
         reports.append({"row": n, "values": feedback[n - 1], "day": day})
 
-    zone = svc.spreadsheets().get(spreadsheetId=sc.spreadsheet_id(),
-                                  fields="properties.timeZone").execute()["properties"]["timeZone"]
+    zone = sc.time_zone(svc)
     from zoneinfo import ZoneInfo
     now = dt.datetime.now(ZoneInfo(zone))
     payload = {"header": feedback[0], "reports": reports, "review": review[1:], "clubs": clubs[1:],

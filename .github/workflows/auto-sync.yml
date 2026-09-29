@@ -31,7 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TZ: America/Chicago     # SyncLog times match the sheet's time zone
+      # the tool writes SyncLog's `when` in the sheet's own zone (read from the sheet); TZ
+      # only sets the runner's local file names and log lines - the sheet's zone, so they agree
+      TZ: America/New_York
       JOTFORM_API_KEY: ${{ secrets.JOTFORM_API_KEY }}
       GLOW_SHEET_ID: ${{ secrets.GLOW_SHEET_ID }}
       # the runner context is not allowed in job-level env (that invalidated the

@@ -216,8 +216,10 @@ emails the repository owner) on `attention` (exit 2) and on any failure
 (exit 1).
 
 **SyncLog columns:** `when, trigger, region, mode, creates, updates, rules,
-result, detail, run_url`. `mode` is `dry-run` or `apply`; `result` is one of
-`in-sync`, `dry-run` (would apply), `applied`, `applied-with-problems`,
+result, detail, run_url`. `when` is the run's start in the sheet's own time
+zone (read from the sheet, like the Apps Script's timestamps); the log file
+and ATTENTION.md show the runner's clock with its UTC offset. `mode` is
+`dry-run` or `apply`; `result` is one of `in-sync`, `dry-run` (would apply), `applied`, `applied-with-problems`,
 `applied-unverified`, `attention`, `failed`. `detail` counts the roster
 creates, updates, deletes and warnings, then names a Club-picker or
 partner-list write when there is one (`…, update partner list`): such a
@@ -812,7 +814,7 @@ outside the sheet:
 
 ```bash
 python3 tools/sheets_client.py export-all data/live_<date>
-node tools/build_roster_offline.js data/enrollment_<date>.csv --existing data/live_<date>
+node tools/build_roster_offline.js data/enrollment_<date>.csv --tz America/New_York --existing data/live_<date>
 python3 tools/upload_roster.py                      # preview
 python3 tools/upload_roster.py --apply --replace    # write; previous tabs saved under data/roster_build/previous/
 ```

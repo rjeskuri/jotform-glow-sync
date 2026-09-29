@@ -1639,6 +1639,66 @@ console.log('\n  guards');
         used === 'FormApp,LockService,MailApp,PropertiesService,ScriptApp,SpreadsheetApp,UrlFetchApp,Utilities', used);
 }
 
+console.log('\n  the offline builder dates in the sheet\'s zone (--tz), never this machine\'s');
+{
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const builder = path.join(REPO, 'tools', 'build_roster_offline.js');
+  const fixture = path.join(REPO, 'test', 'fixtures', 'enrollment_sample.csv');
+  // every run gets its own empty --out under a fresh tmpdir: never the default
+  // data/roster_build/ (real data), and an --out without Roster.csv means no existing state
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'glow-offline-'));
+  let runs = 0;
+  const build = (extra, processTz) => {
+    const out = path.join(tmp, 'run' + (++runs));
+    fs.mkdirSync(out);
+    const before = Date.now();
+    const r = spawnSync(process.execPath, [builder, fixture, '--out', out, ...extra],
+                        { env: Object.assign({}, process.env, { TZ: processTz }), encoding: 'utf8' });
+    const files = fs.readdirSync(out);
+    const read = name => fs.readFileSync(path.join(out, name + '.csv'), 'utf8');
+    return { status: r.status, stderr: r.stderr || '', files, read, before, after: Date.now() };
+  };
+  const dayIn = (zone, ms) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric',
+                                                                 month: '2-digit', day: '2-digit' }).format(new Date(ms));
+  const TABS = ['Roster', 'ClubRegistry', 'Partners', 'ReviewQueue'];
+  try {
+    for (const [label, extra] of [['no --tz', []], ['--tz as the last argument (no value)', ['--tz']],
+                                  ['an unknown zone', ['--tz', 'Mars/Olympus_Mons']]]) {
+      const r = build(extra, 'UTC');
+      check('refuses ' + label + ', writes nothing, says where to look',
+            r.status !== 0 && r.stderr.includes('which zone is the sheet on? pass --tz') &&
+            r.stderr.includes('File → Settings → Time zone') && !r.files.length,
+            'exit ' + r.status + ', wrote [' + r.files.join(', ') + ']');
+    }
+    // the two sides of the date line are 25 h apart: their dates always differ, so a
+    // builder reading the process's clock (the other zone) cannot pass
+    const days = {};
+    for (const [zone, processTz] of [['Pacific/Kiritimati', 'Pacific/Pago_Pago'],
+                                     ['Pacific/Pago_Pago', 'Pacific/Kiritimati']]) {
+      const r = build(['--tz', zone], processTz);
+      const want = new Set([dayIn(zone, r.before), dayIn(zone, r.after)]);
+      const found = r.status === 0 ? new Set(['Audit', ...TABS].flatMap(t => r.read(t).match(/\d{4}-\d\d-\d\d/g) || [])) : new Set();
+      const when = r.status === 0 ? r.read('Audit').split('\n')[1].split(',')[0] : '';
+      days[zone] = when.slice(0, 10);
+      check('--tz ' + zone + ' under TZ=' + processTz + ': every date written is ' + zone + '\'s',
+            r.status === 0 && found.size === 1 && want.has([...found][0]) &&
+            /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(when) && want.has(days[zone]),
+            'exit ' + r.status + ' ' + r.stderr.trim() + ' found ' + [...found].join(',') + ' want ' + [...want].join('|'));
+    }
+    check('…and the two builds are dated a day or two apart', days['Pacific/Kiritimati'] > days['Pacific/Pago_Pago'],
+          JSON.stringify(days));
+    // the same --tz, two process zones: the same tabs (unless New York's day turned in between)
+    const a = build(['--tz', 'America/New_York'], 'UTC'), b = build(['--tz', 'America/New_York'], 'Asia/Tokyo');
+    const sameDay = dayIn('America/New_York', a.before) === dayIn('America/New_York', b.after);
+    check('--tz America/New_York under TZ=UTC and TZ=Asia/Tokyo: identical tabs, Audit on the same day',
+          a.status === 0 && b.status === 0 && (!sameDay || (TABS.every(t => a.read(t) === b.read(t)) &&
+            a.read('Audit').split('\n')[1].slice(0, 10) === b.read('Audit').split('\n')[1].slice(0, 10))));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 // ------------------------------- the Google Forms' wording (backlog 43)
 console.log('\nGoogle Forms wording: the one-time migration and fresh builds (Forms.gs)');
 const fw = loadGs(['Q', 'WORDING', 'WORDING_LABELS', 'feedbackDescription_', 'rosterDescription_',

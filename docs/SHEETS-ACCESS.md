@@ -44,7 +44,7 @@ CSV export.
 | `python3 tools/sheets_client.py export "Enrollment Responses" data/enrollment_<date>.csv` | Export the imported responses tab |
 | `python3 tools/sheets_client.py import "Enrollment Responses" data/enrollment_<date>.csv` | One-time import of the original form's responses (refuses to overwrite) |
 | `python3 tools/sheets_client.py export-all data/live_<date>` | Every tab, for rebuilding against the live state |
-| `node tools/build_roster_offline.js data/enrollment_<date>.csv [--existing data/live_<date>]` | Builds the five tabs locally in `data/roster_build/` using the *same* code that runs inside the sheet |
+| `node tools/build_roster_offline.js data/enrollment_<date>.csv --tz America/New_York [--existing data/live_<date>]` | Builds the five tabs locally in `data/roster_build/` using the *same* code that runs inside the sheet, dated in the sheet's zone (`--tz`: File → Settings → Time zone) |
 | `python3 tools/upload_roster.py [--apply] [--replace]` | Writes them to the spreadsheet — Roster and ClubRegistry replaced, Partners merged (staff edits win), ReviewQueue and Audit appended |
 | `python3 tools/auto_sync.py` | Reads the Roster tab in-process and appends to SyncLog (see `RUNBOOK.md`) |
 | `python3 tools/needs_attention.py data/enrollment_<date>.csv` | The list of clubs and names that need a human to chase down |
@@ -55,7 +55,7 @@ CSV export.
 and build against them, so IDs minted in the sheet are never re-minted:
 
     python3 tools/sheets_client.py export-all data/live_<date>
-    node tools/build_roster_offline.js data/enrollment_<date>.csv --existing data/live_<date>
+    node tools/build_roster_offline.js data/enrollment_<date>.csv --tz America/New_York --existing data/live_<date>
     python3 tools/upload_roster.py --apply --replace
 
 `upload_roster.py` refuses to run if the sheet holds a girl ID the local build

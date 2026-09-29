@@ -22,8 +22,13 @@
  * state. Before uploading over a sheet that has been edited, export its live
  * tabs (sheets_client.py export-all DIR) and pass --existing DIR.
  *
+ * Every date it writes (Roster dates, ClubRegistry created, ReviewQueue
+ * raised, the Audit when) is the SHEET's wall clock, the text Roster.gs's
+ * today_/now_ write: --tz names the sheet's zone (File > Settings > Time
+ * zone), whatever zone this machine is on.
+ *
  * Usage:
- *   node tools/build_roster_offline.js data/enrollment_2026-08-24.csv [--out data/roster_build] [--existing DIR]
+ *   node tools/build_roster_offline.js data/enrollment_2026-08-24.csv --tz America/New_York [--out data/roster_build] [--existing DIR]
  */
 const fs = require('fs');
 const path = require('path');
@@ -33,7 +38,7 @@ const REPO = path.resolve(__dirname, '..');
 // ---------------------------------------------------------------- arguments
 const argv = process.argv.slice(2);
 if (!argv.length) {
-  console.error('usage: node tools/build_roster_offline.js <enrollment.csv> [--out DIR] [--existing DIR]');
+  console.error('usage: node tools/build_roster_offline.js <enrollment.csv> --tz <IANA zone> [--out DIR] [--existing DIR]');
   process.exit(2);
 }
 const csvPath = argv[0];
@@ -44,11 +49,32 @@ function opt(name, dflt) {
 const outDir = path.resolve(REPO, opt('--out', 'data/roster_build'));
 const existingDir = opt('--existing', fs.existsSync(path.join(outDir, 'Roster.csv')) ? outDir : null);
 
-// local-time stamps, same text format Roster.gs writes (today_ / now_)
-function pad(n) { return (n < 10 ? '0' : '') + n; }
-const nowDate = new Date();
-const TODAY = nowDate.getFullYear() + '-' + pad(nowDate.getMonth() + 1) + '-' + pad(nowDate.getDate());
-const NOW = TODAY + ' ' + pad(nowDate.getHours()) + ':' + pad(nowDate.getMinutes()) + ':' + pad(nowDate.getSeconds());
+// The sheet's wall clock, in the text Roster.gs's today_ / now_ write: they format
+// in the SPREADSHEET's time zone, so this machine's own zone must not leak in. No
+// default: a wrong guess would date every new row a day off.
+const TZ_HELP = 'which zone is the sheet on? pass --tz (the sheet\'s File → Settings → Time zone; ' +
+  'America/New_York since 2026-09-02)';
+const tz = opt('--tz');          // undefined when missing, or when --tz is the last argument
+if (!tz) {
+  console.error(TZ_HELP);
+  process.exit(2);
+}
+let clock;
+try {
+  // hourCycle h23, never hour12:false (that can print midnight as 24)
+  clock = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date());
+} catch (err) {
+  if (!(err instanceof RangeError)) throw err;
+  console.error('--tz ' + JSON.stringify(tz) + ': ' + err.message + '\n' + TZ_HELP);
+  process.exit(2);
+}
+const at = {};
+for (const p of clock) at[p.type] = p.value;
+const TODAY = at.year + '-' + at.month + '-' + at.day;
+const NOW = TODAY + ' ' + at.hour + ':' + at.minute + ':' + at.second;
 
 // ------------------------------------------------ load the real .gs code
 // Only the pure-logic files; Roster.gs/Menu.gs call SpreadsheetApp.

@@ -233,6 +233,62 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertEqual(sync.PARTNER_PICKER_PROPS["subLabel"], "")
 
 
+class SheetWhen(unittest.TestCase):
+    """auto_sync.sheet_when: SyncLog's `when` is the sheet's wall clock, whatever the
+    process zone (the Actions runner's TZ, or the Mac's)."""
+
+    def test_new_york_wall_time_under_any_process_zone(self):
+        import datetime as dt
+        import time
+        utc = dt.timezone.utc
+        cases = [(dt.datetime(2026, 9, 30, 10, 0, 0, tzinfo=utc), "2026-09-30 06:00:00"),    # EDT, -4
+                 (dt.datetime(2026, 12, 1, 3, 30, 15, tzinfo=utc), "2026-11-30 22:30:15"),   # EST, -5
+                 (dt.datetime(2026, 9, 30, 19, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=9))),
+                  "2026-09-30 06:00:00")]                     # the same EDT instant, given in JST
+        saved = os.environ.get("TZ")
+        try:
+            for tz in ("UTC", "Asia/Tokyo"):
+                os.environ["TZ"] = tz
+                time.tzset()
+                for instant, want in cases:
+                    self.assertEqual(auto_sync.sheet_when(instant, "America/New_York"), want, tz)
+        finally:
+            if saved is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = saved
+            time.tzset()
+
+    def test_a_naive_instant_is_refused(self):
+        import datetime as dt
+        with self.assertRaises(ValueError):
+            auto_sync.sheet_when(dt.datetime(2026, 9, 30, 6, 0, 0), "America/New_York")
+
+    def test_the_synclog_rows_get_the_sheets_zone(self):
+        import datetime as dt
+        import tempfile
+        import types
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as out:
+            args = types.SimpleNamespace(apply=False, out=out, trigger="test", run_url="")
+            run = auto_sync.Run(args)
+        self.assertIsNotNone(run.started.utcoffset())
+        run.started = dt.datetime(2026, 9, 30, 3, 30, 0, tzinfo=dt.timezone.utc)
+        with mock.patch("builtins.print"):
+            run.result("Asia", None, "in-sync", "")
+        appended = []
+        with mock.patch.object(auto_sync.sc, "time_zone", lambda svc: "America/New_York"), \
+                mock.patch.object(auto_sync.sc, "_has_tab", lambda svc, t: True), \
+                mock.patch.object(auto_sync.sc, "read_tab", lambda svc, t: [auto_sync.SYNC_LOG_COLS]), \
+                mock.patch.object(auto_sync.sc, "append_rows",
+                                  lambda svc, t, rows: appended.extend((t, list(r)) for r in rows)), \
+                mock.patch("builtins.print"):
+            run.append_synclog(object())
+        self.assertEqual([(t, r[0], r[2]) for t, r in appended],
+                         [("SyncLog", "2026-09-29 23:30:00", "Asia")])
+        self.assertRegex(run.when, r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4}$")   # local, with offset
+
+
 class ConditionBuilder(unittest.TestCase):
     CLUBS = {"10": "Alpha Club", "11": "Stars", "12": "Stars", "13": "Beta Club"}
     PARTNERS = {"11": "Partner One", "12": "Partner Two"}
@@ -1248,7 +1304,8 @@ class RenameClub(unittest.TestCase):
             "Audit": [["when", "action", "detail"]],
         }, before_read)
 
-    def run_main(self, argv, sheet, client=None, key=None):
+    def run_main(self, argv, sheet, client=None, key=None, clock=None):
+        """(exit code, stdout). `clock` stands in for datetime (its now(tz=None))."""
         import contextlib
         import io
         import tempfile
@@ -1261,6 +1318,8 @@ class RenameClub(unittest.TestCase):
                 mock.patch.object(rename_club.sc, "append_rows", sheet.append_rows), \
                 mock.patch.object(rename_club.sc, "spreadsheet_id", lambda: "SHEET"), \
                 mock.patch.object(rename_club.sc, "sa_email", lambda: "robot"), \
+                mock.patch.object(rename_club.sc, "time_zone", lambda svc: "America/New_York"), \
+                mock.patch.object(rename_club, "datetime", clock or rename_club.datetime), \
                 mock.patch.object(rename_club, "Client", lambda api_key, apply=False: client), \
                 mock.patch.dict(os.environ, env), \
                 mock.patch.object(sys, "argv", ["rename_club.py"] + argv), \
@@ -1301,6 +1360,26 @@ class RenameClub(unittest.TestCase):
         self.assertEqual(audit[1], "moveClub")
         self.assertIn("2 Roster rows, ClubRegistry SUNRISEC kept", audit[2])
         self.assertIn("GLOW -> Google Forms -> Update form dropdowns", out)
+
+    def test_move_dates_the_audit_and_the_note_in_the_sheets_zone(self):
+        # 03:30 UTC on 09-30 is still 09-29 in New York (the patched sheet zone), whatever
+        # zone this process is on; the backup folder's stamp stays the process's own clock
+        import datetime as dt
+        instant = dt.datetime(2026, 9, 30, 3, 30, 0, tzinfo=dt.timezone.utc)
+
+        class Clock:
+            @staticmethod
+            def now(tz=None):
+                return instant.astimezone(tz) if tz else instant.astimezone().replace(tzinfo=None)
+        sheet = self.move_sheet()
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test",
+                                  clock=Clock)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sheet.tabs["Audit"][-1][0], "2026-09-29 23:30:00")
+        self.assertIn("moved to 'Asociación Demo' on 2026-09-29 (tools/rename_club.py)",
+                      sheet.tabs["Partners"][2][2])
+        local = instant.astimezone().strftime("%Y-%m-%dT%H%M%S")
+        self.assertIn(local, out)
 
     def test_move_refuses_a_partner_gated_rule_and_sheet_only_apply(self):
         sheet = self.move_sheet()
