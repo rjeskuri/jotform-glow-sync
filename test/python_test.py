@@ -1072,18 +1072,24 @@ class FakeSheet:
 
 
 class FakeJotform:
-    """The two GETs a move makes; q352 is the club's roster, q444 the picker."""
+    """The two GETs a move makes; q352 is the club's roster, q444 the picker.
+    gated: True = its rule tests the typed Partner box (q331); "list" = the form
+    has the partner list (q600) and the rule tests that instead."""
 
     def __init__(self, gated=False):
         self.gated = gated
 
     def get(self, path, **params):
         if path.endswith("/questions"):
-            return {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
-                    "444": {"type": "control_dropdown", "text": "Club Name"}}
+            qs = {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
+                  "444": {"type": "control_dropdown", "text": "Club Name"}}
+            if self.gated == "list":
+                qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
+            return qs
         terms = [{"field": "444", "operator": "equals", "value": "Sunrise Club"}]
         if self.gated:
-            terms.insert(0, {"field": sync.PARTNER, "operator": "equals", "value": "asoc demo"})
+            field = "600" if self.gated == "list" else sync.PARTNER
+            terms.insert(0, {"field": field, "operator": "equals", "value": "asoc demo"})
         return {"conditions": [{"id": "1", "type": "field", "terms": json.dumps(terms),
                                 "action": json.dumps([{"visibility": "Show", "field": "352"}])}]}
 
@@ -1298,9 +1304,10 @@ class RenameClub(unittest.TestCase):
 
     def test_move_refuses_a_partner_gated_rule_and_sheet_only_apply(self):
         sheet = self.move_sheet()
-        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(gated=True), key="test")
-        self.assertIn("given Partner", str(code))
-        self.assertEqual(sheet.batches, [])
+        for gated in (True, "list"):   # the typed box, or the partner list (main() passes its fields)
+            code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(gated), key="test")
+            self.assertIn("given Partner", str(code), gated)
+            self.assertEqual(sheet.batches, [], gated)
         code, _ = self.run_main(self.MOVE + ["--sheet-only", "--apply"], sheet)
         self.assertIn("drop --sheet-only", str(code))
         self.assertEqual(sheet.batches, [])

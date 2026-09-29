@@ -868,7 +868,8 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
                                         'If one of them has rejoined the club, send the form again to add her:');
   check('the mentor e-mail lists her as the mentor typed her, under "Not added back"',
         w.mails.length === 1 && kept !== -1 && body.split('\n')[kept + 1] === '  - GRACE ZIBBLEWICK' &&
-        !body.includes('Grace Zibblewick'), body);
+        !body.includes('Grace Zibblewick'),
+        w.mails.length + ' mail(s), heading at line ' + kept + ', ' + body.split('\n').length + ' lines');
 
   result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 5, change(), sentOn('2026-09-10'));
   check('run again: still one ReviewQueue row, she is still removed',
@@ -1155,7 +1156,8 @@ function sheetWorld(tabs, opts) {
                                            insertSheet: n => { tabs[n] = []; return sheet(n); },
                                            getSpreadsheetTimeZone: () => 'America/New_York' }) },
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
-    MailApp: { sendEmail: o => { if (opts.mailFails) throw new Error('quota'); out.mails.push(o); } },
+    // a failing send names its recipient, as MailApp's "Invalid email: …" does
+    MailApp: { sendEmail: o => { if (opts.mailFails) throw new Error('Invalid email: ' + o.to); out.mails.push(o); } },
   });
   vm.runInContext(handlerSrc, ctx);
   ctx.today_ = () => '2026-09-28';
@@ -1369,7 +1371,8 @@ console.log('\nA new club that may duplicate one on file is held, then released 
   res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, suffixed(), KEY);
   check('the e-mail failing: still held; Audit says so without the address',
         res.startsWith('HELD:') && w.tabs.ReviewQueue.length === 2 &&
-        w.audits.some(a => a === 'sendHoldNotice_: could not e-mail the mentor about ' + SRC + ': quota') && clean(w.audits.join('\n')));
+        w.audits.some(a => a === 'sendHoldNotice_: could not e-mail the mentor about ' + SRC + ': Invalid email: <e-mail>') &&
+        clean(w.audits.join('\n')));
 
   console.log('\n  a repeated trigger does not hold twice');
   w = sheetWorld(baseTabs(onFile));
