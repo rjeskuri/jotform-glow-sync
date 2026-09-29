@@ -1102,6 +1102,169 @@ class FormStatusAudit(unittest.TestCase):
         qs, wire = self.form()
         self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
 
+    # ---- the Club picker's spelling and calcValues; the club guard
+    def guard_form(self, **kw):
+        return ClubGuardFlow.form(ClubGuardFlow(), **kw)
+
+    @staticmethod
+    def edit(wire, pred, **change):
+        """wire with change(rule) applied to the rules pred(rule) selects."""
+        return [dict(c, **{k: f(c) for k, f in change.items()}) if pred(c) else c for c in wire]
+
+    def test_the_guard_form_is_clean(self):
+        qs, wire = self.guard_form()
+        self.assertEqual(form_status.audit_rules(qs, wire), ([], {"clubs": 4, "show_rules": 4,
+                                                                  "aggregate_rosters": 4}))
+        qs, wire = self.guard_form(partner_list="Partner One|Partner Two")
+        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
+        qs, wire = self.guard_form(guard=False, calc=False)          # before the rollout: clean too
+        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
+
+    def test_a_picker_term_spelled_unlike_its_option_never_fires(self):
+        # Africa's SUPER GIRLS (read 2026-09-29): the rule tests "SUPER GIRLS", the picker offers
+        # "Super Girls", and a multi-select's equals is case-sensitive
+        qs, wire = self.guard_form(guard=False, calc=False)
+        wire = self.edit(wire, lambda c: '"field": "11"' in c["action"],
+                         terms=lambda c: c["terms"].replace('"Stars"', '"STARS"'))
+        problems = form_status.audit_rules(qs, wire)[0]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("equals 'STARS', which is not one of its options (it has 'Stars'", problems[0])
+        qs["500"]["multipleSelections"] = "No"      # a single-select compares without case
+        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
+
+    def test_calc_values_must_be_the_options_in_order(self):
+        for guard in (True, False):                  # checked whenever the picker carries them
+            qs, wire = self.guard_form(guard=guard)
+            qs["500"]["calcValues"] = "|Beta Club|Alpha Club|Stars"
+            problems = form_status.audit_rules(qs, wire)[0]
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn("calcValues are not its 3 options in order", problems[0])
+        qs, wire = self.guard_form()
+        del qs["500"]["calcValues"]                  # the guard needs them
+        self.assertTrue(any("calcValues" in p for p in form_status.audit_rules(qs, wire)[0]))
+
+    def test_each_guard_check_fires_on_its_broken_form(self):
+        def problems(qs, wire):
+            return form_status.audit_rules(qs, wire)[0]
+
+        def only(qs, wire, fragment, n=1):
+            found = problems(qs, wire)
+            self.assertEqual(sum(fragment in p for p in found), n, found)
+            return found
+
+        shows_guard = lambda c: '"Show", "isError": false, "field": "700"' in c["action"]   # noqa: E731
+        requires = lambda c: c["type"] == "require"                                        # noqa: E731
+        qs, wire = self.guard_form()
+        qs["700"]["hidden"] = "No"
+        only(qs, wire, "is not hidden: every mentor sees the warning")
+        qs, wire = self.guard_form()
+        qs["700"]["text"] = "<p>edited by hand</p>"
+        only(qs, wire, "text is not glow.sync.guard_html()")
+        qs, wire = self.guard_form()
+        qs["700"]["type"] = "control_textbox"
+        only(qs, wire, "is a control_textbox, not a text element")
+        qs, wire = self.guard_form()
+        qs["701"] = dict(qs["700"])
+        only(qs, wire, "2 elements are named 'clubGuard' (q700, q701)")
+        qs, wire = self.guard_form()
+        del qs["500"]
+        self.assertIn("club guard (q700) but no Club picker: nothing can show it", problems(qs, wire))
+        qs, wire = self.guard_form()
+        qs["700"]["order"] = "2"                     # above the picker (order 3)
+        only(qs, wire, "renders above the Club picker (q500)")
+        qs, wire = self.guard_form()
+        qs["700"]["order"] = "20"                    # below the year and module dropdowns
+        only(qs, wire, "is not directly below the Club picker (q500)")
+        qs, wire = self.guard_form()
+        qs["3"] = dict(qs["2"])
+        only(qs, wire, "2 Submit buttons, expected 1")
+        # the rules: one missing, one doubled, the wrong link, a club left out, a stray value
+        qs, wire = self.guard_form()
+        only(qs, [c for c in wire if not shows_guard(c)], "0 rule(s) show the club guard, expected 1")
+        only(qs, [c for c in wire if not requires(c)], "0 rule(s) disable Submit, expected 1")
+        only(qs, wire + [c for c in wire if requires(c)], "2 rule(s) disable Submit, expected 1")
+        only(qs, self.edit(wire, shows_guard, link=lambda c: "Any"), "linking its terms with Any")
+        only(qs, self.edit(wire, shows_guard, action=lambda c: c["action"].replace('"Hide"', '"Show"')),
+             "its actions are not Hide q2 + Show q700")
+        drop = lambda c: json.dumps([t for t in json.loads(c["terms"]) if t["value"] != "Beta Club"])  # noqa: E731
+        only(qs, self.edit(wire, lambda c: shows_guard(c) or requires(c), terms=drop),
+             "misses 1 club(s) - their mentors cannot submit: ['Beta Club']", n=2)
+        add = lambda c: json.dumps(json.loads(c["terms"]) + [{"field": "5", "operator": "notEquals",  # noqa: E731
+                                                               "value": "Old Club"}])
+        only(qs, self.edit(wire, requires, terms=add), "tests 1 value(s) that are not the picker's options")
+        filled = lambda c: json.dumps([t for t in json.loads(c["terms"]) if t["operator"] != "isFilled"])  # noqa: E731
+        only(qs, self.edit(wire, requires, terms=filled), "does not test that the Club picker is filled")
+        # the q18 separator the guard brings
+        unsep = lambda c: c["action"].replace("}, {", "}{")                                # noqa: E731
+        only(qs, self.edit(wire, lambda c: '"resultField": "18"' in c["action"], action=unsep),
+             "joins the rosters without the ', '")
+
+    def test_rendered_calc_values_are_counted_never_printed(self):
+        page = ('<select id="input_500" name="q500_clubPicker[]" multiple="">'
+                '<option data-calcvalue="Alpha Club" value="Alpha Club">Alpha Club</option>'
+                '<option value="Beta &amp; Co" data-calcvalue="Beta &amp; Co">Beta &amp; Co</option>'
+                '<option data-calcvalue="Alpha Club" value="Stars">Stars</option>'
+                '<option value="Moon">Moon</option></select>'
+                '<select name="q15_week8"><option value="">Please Select</option>'
+                '<option data-calcvalue="1" value="Session 1">Session 1</option></select>')
+        self.assertEqual(form_status.rendered_calc_values(page, "500"),
+                         {"options": 4, "aligned": 2, "differ": 1, "missing": 1})
+        placeholder = page.replace('multiple="">', 'multiple=""><option value="">Please Select</option>')
+        self.assertEqual(form_status.rendered_calc_values(placeholder, "500")["options"], 4)
+        self.assertIsNone(form_status.rendered_calc_values(page, "444"))
+        self.assertIsNone(form_status.rendered_calc_values("", "500"))
+
+    def test_the_report_names_the_guard_and_the_rendered_check(self):
+        import contextlib
+        import io
+        import tempfile
+        from unittest import mock
+        from glow import forms as glow_forms
+        qs, wire = self.guard_form()
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+
+        class Fake:
+            def get(self, path, **params):
+                if path.endswith("/questions"):
+                    return copy.deepcopy(qs)
+                if path.endswith("/properties"):
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
+                return {"title": "t", "status": "ENABLED", "count": "0"}
+
+        aligned = ('<select name="q500_clubPicker[]" multiple="">'
+                   + "".join(f'<option data-calcvalue="{o}" value="{o}">{o}</option>'
+                             for o in ClubGuardFlow.OPTIONS) + "</select>")
+        shifted = aligned.replace('data-calcvalue="Beta Club"', 'data-calcvalue="Stars"')
+
+        def report(roster, *extra, page=None):
+            out = io.StringIO()
+            with mock.patch.object(form_status, "Client", lambda key: Fake()), \
+                    mock.patch.object(form_status, "public_page", lambda fid: page), \
+                    mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                    mock.patch.object(sys, "argv", ["form_status.py", "--form", glow_forms.TEMPLATE,
+                                                    "--roster", roster, *extra]), \
+                    contextlib.redirect_stdout(out):
+                form_status.main()
+            return out.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = os.path.join(tmp, "roster.csv")
+            with open(roster, "w", encoding="utf-8") as f:
+                f.write("partner,club,full_name,status,region\n")
+            good, bad = report(roster, "--rendered", page=aligned), report(roster, "--rendered", page=shifted)
+            self.assertIn("club guard: q700 (3 clubs)", good)
+            self.assertIn("rendered picker: 3 options, 3 with data-calcvalue = value, 0 different, "
+                          "0 without", good)
+            self.assertIn("→ CLEAN", good)
+            self.assertIn("rendered picker: 3 options, 2 with data-calcvalue = value, 1 different", bad)
+            self.assertIn("would send another club's name", bad)
+            self.assertNotIn("CLEAN", bad)
+            self.assertNotIn("rendered picker", report(roster))          # only with --rendered
+            del qs["700"]
+            wire[:] = self.guard_form(guard=False)[1]
+            self.assertIn("club guard: none (a mentor can pick several clubs)", report(roster))
+
 
 class TranslationAudit(unittest.TestCase):
     """tools/add_translations.py: what counts as a string a mentor sees."""
