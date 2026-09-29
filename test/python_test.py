@@ -88,6 +88,7 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertEqual(auto_sync.changes(plan), 0)
         self.assertEqual(plan["rules"], 40)
         self.assertEqual(auto_sync.check_bands(plan), [])
+        self.assertEqual(auto_sync.plan_summary(plan), "0 create(s), 0 update(s), 0 delete(s), 0 warning(s)")
 
     def test_summary_json_gives_the_same_shape(self):
         summary = {"creates": [{"club": "A", "partner": "P", "girls": 2}],
@@ -101,6 +102,8 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertEqual(plan["picker"], [{"op": "UPDATE", "clubs": 2}])
         self.assertEqual(auto_sync.changes(plan), 3)
         self.assertEqual(plan["warnings"], ["? 'B' (q7) is on the form"])
+        self.assertEqual(auto_sync.plan_summary(plan),
+                         "1 create(s), 1 update(s), 0 delete(s), 1 warning(s), update club picker")
 
     def test_bands_refuse_deletes_big_waves_and_replaced_rosters(self):
         plan = auto_sync.parse_plan(DRY_RUN)
@@ -183,6 +186,22 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertEqual(plan["picker"], [])
         self.assertEqual(auto_sync.changes(plan), 1)
         self.assertEqual(auto_sync.check_bands(plan), [])
+        # applied unattended, so the SyncLog detail must say what was written (integration review F2)
+        self.assertEqual(auto_sync.plan_summary(plan),
+                         "0 create(s), 0 update(s), 0 delete(s), 0 warning(s), update partner list")
+        # …and the runner's row uses it (a dry run here: "would apply: …")
+        import tempfile
+        import types
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as out:
+            args = types.SimpleNamespace(apply=False, out=out, max_creates=5, max_updates=20,
+                                         trigger="test", run_url="")
+            run = auto_sync.Run(args)
+            with mock.patch.object(run, "sync", lambda *a, **k: types.SimpleNamespace(
+                    returncode=0, stdout=text, stderr="")), mock.patch("builtins.print"):
+                run.region("Africa", os.path.join(out, "roster.csv"))
+        self.assertEqual([r[7:9] for r in run.results],
+                         [["dry-run", "would apply: " + auto_sync.plan_summary(plan)]])
         summary = {"creates": [], "updates": [], "deletes": [], "rules": 254, "warnings": [],
                    "calls": ["CREATE partner picker (9 partners)", "REPLACE conditions (254 rules)"]}
         self.assertEqual(auto_sync.plan_from_summary(summary)["partner_picker"],

@@ -218,7 +218,10 @@ emails the repository owner) on `attention` (exit 2) and on any failure
 **SyncLog columns:** `when, trigger, region, mode, creates, updates, rules,
 result, detail, run_url`. `mode` is `dry-run` or `apply`; `result` is one of
 `in-sync`, `dry-run` (would apply), `applied`, `applied-with-problems`,
-`applied-unverified`, `attention`, `failed`. The Audit tab additionally gets
+`applied-unverified`, `attention`, `failed`. `detail` counts the roster
+creates, updates, deletes and warnings, then names a Club-picker or
+partner-list write when there is one (`…, update partner list`): such a
+write is applied like a roster change. The Audit tab additionally gets
 a `syncRequested … → HTTP 204` row every time the sheet sends the event.
 
 **Switches:**

@@ -135,6 +135,16 @@ def changes(plan):
             + len(plan.get("picker", [])) + len(plan.get("partner_picker", [])))
 
 
+def plan_summary(plan):
+    """One line for the SyncLog detail and the attention title: the roster counts, then each
+    Club-picker or partner-list write by name (only when planned), so a list-only apply
+    does not read as "0 create(s), 0 update(s)"."""
+    return (f"{len(plan['creates'])} create(s), {len(plan['updates'])} update(s), "
+            f"{len(plan['deletes'])} delete(s), {len(plan['warnings'])} warning(s)"
+            + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
+            + "".join(f", {m['op'].lower()} partner list" for m in plan.get("partner_picker", [])))
+
+
 def check_bands(plan, max_creates=5, max_updates=20):
     """Reasons NOT to apply this plan unattended (empty = within the bands)."""
     reasons = []
@@ -313,8 +323,7 @@ class Run:
         if n == 0:
             self.result(region, plan, "in-sync", "")
             return
-        summary = (f"{len(plan['creates'])} create(s), {len(plan['updates'])} update(s), "
-                   f"{len(plan['deletes'])} delete(s), {len(plan['warnings'])} warning(s)")
+        summary = plan_summary(plan)
         reasons = check_bands(plan, a.max_creates, a.max_updates)
         if reasons:
             self.attention.append((f"{region}: not applied - {summary}",
