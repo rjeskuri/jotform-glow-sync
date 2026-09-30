@@ -1,7 +1,7 @@
 ---
 title: Every roster renders above the links and the Submit button
 author: Claude (workflow track wf5/rosters-above-submit, 2026-09-29)
-status: proposed         # Ryan accepts before merge; every live step needs his go
+status: done             # accepted by Ryan 2026-09-30; merged (3ed68b2) and applied to all five forms the same day (Result)
 created: 2026-09-29
 intent: none — BACKLOG 47 (found 2026-09-28 while building the Club Roster Form link); design read-only on 2026-09-29
 ---
@@ -315,3 +315,31 @@ docs-links: ok (46 relative links resolve, 0 absolute paths)
 fixtures: up to date
 CHECK PASSED
 ```
+
+## Result (2026-09-30, with Ryan's go)
+`AUTO_SYNC_APPLY=0`, merged into `main` as a fast forward (`3ed68b2`, pushed), then:
+
+| Form | Rosters below q443 before | Moved to | Probe (after writing Submit) | Rollback stamp |
+|---|---|---|---|---|
+| template 262352490535154 | 123 of 342 | 368–376 | q2 holds 369 as sent; no other order changed | `2026-09-30T140906` |
+| Africa 262382821971058 | 98 of 221 | 247–255 | q2 holds 248 as sent; no other order changed | `2026-09-30T141020` |
+| Asia 262383129464057 | 17 of 96 | 122–130 | q2 holds 123 as sent; no other order changed | `2026-09-30T141020` |
+| Latin America 262383455778067 | 26 of 39 | 65–73 | q2 holds 66 as sent; no other order changed | `2026-09-30T141020` |
+| U.S 262382706852058 | 5 of 12 | 38–46 | q2 holds 39 as sent; no other order changed | `2026-09-30T141020` |
+
+- Each form: `re-read: verified - every roster above somethingNotWorking (q443), 9 orders as sent,
+  nothing else changed`. Jotform keeps a posted `question[order]` exactly (recorded in the
+  jotform-api skill).
+- The public pages (curl, parsed in memory, counts only): 0 rosters below q443 or Submit on all
+  five; the newer rosters (qid ≥ 333) all above Submit (Africa 98, Asia 17, Latin America 26, U.S 5).
+- The new-roster slot, live: the template's catch-up sync (23 creates, 13 updates, backup
+  `backup_forms.py --form 262352490535154` first) printed `New rosters go at order 367, above
+  somethingNotWorking (q443)`; the page shows all 23 (q459–q481) above Submit; a second dry run
+  `nothing to do`.
+- `form_status.py --roster` (fresh export): `layout: every roster above somethingNotWorking (q443)`
+  and CLEAN on all five (after Africa's one-rule SUPER GIRLS apply, BACKLOG 48).
+- `AUTO_SYNC_APPLY=1`; a manual runner apply (GitHub run 36672683641): Africa, Latin America,
+  U.S in-sync, Asia `applied - 0 create(s), 1 update(s) … verified clean`; `auto_sync.py` dry run
+  in-sync everywhere.
+
+Next: re-count BACKLOG 35's empty submissions for two weeks (to 2026-10-14).

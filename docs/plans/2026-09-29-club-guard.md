@@ -1,7 +1,7 @@
 ---
 title: One club per attendance submission (the multi-club guard)
 author: Claude (workflow track "club-guard", 2026-09-29)
-status: proposed         # proposed → accepted (Ryan) → in-progress → done
+status: accepted         # by Ryan 2026-09-30 (the wording, GUARD_DISABLES_SUBMIT = True); merged 3ed68b2; the rollout is a later window
 created: 2026-09-29
 intent: docs/intent/2026-09-01-club-picker.md (its open question: "confirm a mentor cannot pick two clubs … if two can be picked, add a guard rule")
 ---
@@ -66,8 +66,8 @@ its `data-calcvalue`) is a **hard stop** before any regional form.
 **C. The warning element `clubGuard`:** a hidden `control_text`, found by
 name like `clubPicker` / `partnerPicker`, holding one sentence in a styled
 `<p>` (`glow.sync.guard_html()`, pinned byte for byte because a change
-re-keys its translations). Wording (a constant, `GUARD_SENTENCE`, for Ryan to
-approve): "You chose more than one club. Keep only your own club in Club
+re-keys its translations). Wording (a constant, `GUARD_SENTENCE`; approved by
+Ryan 2026-09-30): "You chose more than one club. Keep only your own club in Club
 Name, and the Submit button comes back."
 
 **D. Two generated rules** (new section D of `build_conditions`, appended

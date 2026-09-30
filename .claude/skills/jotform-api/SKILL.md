@@ -53,9 +53,11 @@ unless `--apply`.
   five forms; Africa 2026-09-12 the same, the shift stopping at a gap). Adding at an empty order
   moves nothing. Equal orders render in creation order (qid), so code must be right under both
   (`glow/layout.py`; the club guard's warning is created at the picker's order + 1).
-- Moving an existing question by posting `question[order]` is unobserved until the roster-order
-  repair (`tools/fix_roster_order.py` writes only to empty orders and probes after its first
-  write); record here what the template repair shows.
+- Moving an existing question by posting `question[order]` to an EMPTY order keeps exactly the
+  value sent and moves nothing else (verified 2026-09-30 by the roster-order repair on all five
+  forms: 45 writes, each probe `q2 holds order N as sent; no other order changed`, each re-read
+  verified). The public page renders by the new order at once. Posting onto a TAKEN order is
+  still unobserved — `tools/fix_roster_order.py` writes only to empty orders.
 - Dropdown `calcValues` has a leading empty slot for the placeholder on a single-select:
   `len(calcValues.split('|')) == len(options.split('|')) + 1`. A multi-select renders no
   placeholder; whether it still wants the slot is **unverified** — `form_status.py --rendered`

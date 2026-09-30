@@ -673,7 +673,9 @@ roster must render above the links and the Submit button. Until 2026-09-29
 the sync created each new roster at the form's highest order + 1 — after
 Submit — and every roster created since the 2026-08-24 overhaul rendered
 under the button (Africa 98 of 221 on 2026-09-29; BACKLOG 47). Two parts
-(`glow/layout.py`, [plan](plans/2026-09-29-rosters-above-submit.md)):
+(`glow/layout.py`, [plan](plans/2026-09-29-rosters-above-submit.md)). The
+repair ran on all five forms on 2026-09-30; the steps below stay for a
+relapse (`form_status` names it) or a new regional form:
 
 - **The sync** gives a new roster the order of the last roster rendering
   above the first link (or above Submit when there is no link). Jotform
