@@ -456,3 +456,60 @@ club and partner names only.
   before, now with 6 and 1 `! … its rule tests …` lines; the runner read `in-sync` with no
   ATTENTION before the fixes and reads `attention` ("N roster rule(s) test a name the Club
   picker does not list") after.
+
+## Integration — `wf6/integration` (2026-09-30)
+
+Part 1 (`wf6/same-name-forms`) and Part 2 (`wf6/same-name-intake`, build notes:
+[2026-09-30-same-name-intake.md](2026-09-30-same-name-intake.md)) merged onto `main` as it
+stood after Step 0 and the Salesforce club accounts (`c8a0feb`). Not merged into `main`, not
+pushed, nothing written to Jotform, the sheet, Apps Script or Salesforce.
+
+- **Conflicts** (Part 1 against `main`'s newer doc commits; both sides kept): DECISIONS (the
+  delete exception and the Salesforce club accounts, then the same-name rule), BACKLOG 26 and 27
+  (every active club has its account; a new one is named by `sf_names`), this plan (Result —
+  Step 0, then the build notes). Part 2 merged without a conflict. The Python files are Part 1's
+  and `appsscript/` is Part 2's, byte for byte.
+- **Added here**: `PythonAppsScriptParity` parses `Config.gs` for `SF_NAME_SEP` (CLAUDE.md rule 7)
+  and runs both sides over one fictional Roster, the `.gs` side in Node through
+  `test/load_gs.js`: which names are shared (`shared_club_names(active_only=True)` ↔
+  `sharedClubNames_`), each club's name (`sf_club_name` ↔ `sfClubName_`), and which new club's
+  name is in use (the sync's check ↔ `newClubHoldReasons_`, kind `samename`); `SameNameFlow`
+  compares the switched form's `sf_names` with `sfClubName_`. Each fails when either side's rule
+  is changed alone (checked with three mutants). `make check` green: 297 Python tests.
+- **One divergence met and left** (rule 10): `newClubHoldReasons_` reads a Roster row's status
+  exactly (`active`), as the rest of `RosterOps.gs`; `sharedClubNames_` and Python ignore case
+  and spacing. A status typed by hand as `Active` would make the intake treat that club as
+  having no active girl. The sheet's own code only ever writes `active` / `inactive`; listed in
+  ARCHITECTURE "Known divergences" (and the intake notes, deviation 6).
+
+### The read-only proof on the integrated code (about 18:50-19:00 JST)
+A fresh Roster export (6,963 rows, 6,857 active; 364 clubs, 362 with an active girl), kept in
+the session's scratch directory and deleted afterwards. Jotform: GETs and dry runs only.
+
+| Form | Without any flag | With `--same-name-switch` |
+|---|---|---|
+| Template | no question-5 change; two ordinary roster updates (q277, q278: changes the runner already applied on their regional form) and the rules rewrite that goes with them (396 kept, 0 new, 0 dropped) | 7 `!` lines (q150, q173, q234, q334, q335, q411, q420); picker 358 → 362; 384 kept, 9 new, 12 dropped; 393 rules; the Partner-box hide |
+| Africa | nothing to do | 6 (q173, q234, q334, q335, q411, q420); 215 → 218; 241 kept, 8 new, 11 dropped; 249 rules; the hide |
+| Asia | the Partner-box hide only | 1 (q150); 95 → 95; 123 kept, 3 new, 3 dropped; 126 rules; the hide |
+| Latin America, U.S | the Partner-box hide only | "nothing to switch"; the hide only |
+
+- The seven new texts equal the table in "The 7 Salesforce names", character for character
+  (compared by the script, not by eye), and so do the seven long names `sfClubName_` gives
+  over the same export; for all 362 active clubs the two sides give the same name.
+- `form_status` (plain and `--rendered`) on all five: CLEAN, 0 conditions flagged, Salesforce
+  integration present, every picker option's `data-calcvalue` equal to its value (358 / 215 /
+  95 / 38 / 11), regions 0 missing, 0 differ.
+- `auto_sync.py` dry run: Africa, Asia, Latin America, U.S `in-sync`; exit 2 for the one
+  ATTENTION the switch resolves (three names sent by more than one club).
+- A fictional new `Ruby` under a fictional third partner, on a scratch copy: refused by the
+  sync on the template and on Africa, with and without the flag (`not added: give it a
+  different name`, both partners named), the two existing Rubys (q173, q411) untouched and the
+  plan otherwise identical to the run without it; held by the intake check too (`samename`,
+  both clubs named), as is a club named `Ruby - Binti Network`.
+- The switch simulated in memory on each form's live data (never `--apply`): afterwards
+  `form_status` CLEAN with 7 / 6 / 1 / 0 / 0 long-named rosters, guard terms = picker entries,
+  q331 hidden; the next run, with or without the flag, plans nothing; the cross-region check
+  finds no clash; `restore_conditions.py` would refuse each switched form's earlier conditions.
+
+The template's dry run will show the two roster updates beside the switch's own calls until
+the template is next synced: expected, and not a question-5 change.

@@ -135,6 +135,12 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
   when it has to create the roster (a retired club whose question was
   deleted) and takes up a roster that is still there. RUNBOOK "Working the
   ReviewQueue" has the way out for that one false hold.
+- A Roster row's status: the Python readers (`read_roster_csv`,
+  `roster_pairs`) and `sharedClubNames_` ignore capitals and spacing
+  (`Active` is active); the rest of `RosterOps.gs`, the intake check
+  (`newClubHoldReasons_`) included, compares the cell exactly. The sheet's
+  own code only writes `active` / `inactive`; a status typed by hand in
+  another case reaches the forms and reads as not active at intake.
 - `read_roster_csv` matches `--region` case-insensitively; `form_status.py`
   matches the region string exactly.
 - `parse_roster` splits on every Unicode line break (`str.splitlines`:
