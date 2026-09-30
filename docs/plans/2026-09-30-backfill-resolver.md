@@ -124,6 +124,47 @@ or the ticks sat in a roster question deleted since (see the first finding below
   `updated_at` is null throughout. `orderby` / `direction` did not give an ascending list, so
   the paging relies on the default order and the count check (design 2).
 
+## Review of 2026-09-30: eight findings, all fixed (what changes)
+The branch was reviewed after the first proof; every finding was reproduced offline with
+fictional data. None changed a number of the first proof. What each fix does:
+
+1. **A club the sync does not claim keeps its partner and code** (design 5, `retired_club`).
+   The sync names a partner only for a roster of the region's *active* export, or one whose
+   rule names it (a long name). For a plain-named roster that is on the form but retired, or
+   whose rows now carry another or no region, it says `''`. The resolver then asks the Roster
+   export, any status, all regions, who has a club of that name (`glow.sync.club_partners`, the
+   sync's own helper): exactly one partner - the row gets that partner and its code;
+   `retired_club` only if that pair has no active row. Two or more partners - null, as before
+   (no guess). No new flag: the row resolves fully, and the loader refuses a flag it does not
+   know. The report prints how many rows took their partner this way.
+2. **`sf_account_name` is the live Club picker's spelling** (design 3). The sync records no
+   change for a respelling that is equal under `glow.text.key`, so its value could be the
+   Roster's spelling (planned), not the picker entry's (sent today). The resolver now takes the
+   live picker option: the exact one, else the one equal by key; when the picker has none, null
+   and `no_account_name`. A form without a picker (typed) is left as the sync says.
+3. **A cut-off answer is never quoted** (`glow/jotform.py`). A submissions page cut off in
+   transfer is a JSON prefix that starts with a submission's id and the submitter's IP address;
+   the client's error quoted its first 200 characters. It now says how many characters came and
+   shows none of them; an HTML error page is still quoted, and a 401/429 still gives Jotform's
+   message. Fixed in the shared client, where the quote is made, so every tool has it.
+4. **The checkout is recognised by file identity** (design 7), not by how its path is spelled:
+   on a case-insensitive disk another spelling of the path is the same folder. The closing line
+   says `data/ is git-ignored` only when the files are under this checkout's `data/`.
+5. **Two flags added for the loader** (a deviation from the brief's list of flag strings): the
+   loader holds a session on `name_unknown_to_roster` and the resolver is the only tool that
+   reads the Roster. Beside `name_not_on_roster_now:<n>` (unchanged) a row now carries
+   `name_unknown_to_roster:<u>` - of those names, the ones the Roster has no row for under that
+   partner and club, any status (`glow.sync.roster_names`, compared by `glow.text.key`: an accent
+   or a letter differs, capitals and spaces do not) - and `name_left_roster:<l>` - the rest: the
+   Roster knows her, she is not an option today. Each only when above zero; u + l = n. A row
+   with no partner (a deleted question, a name two partners have) counts all as unknown.
+6. **`--region` does not overwrite the loader's file**: a run that does not cover all four
+   regions refuses to write the default path and asks for `--out`.
+7. **Refusals say "no result written"**: the raw copies of the regions fetched so far are
+   already overwritten when a later step refuses (they are kept on purpose: the raw copy is
+   where the refused answer can be looked at), so "nothing written" was not true.
+8. **A region named twice is read once** (it doubled the rows and failed the ledger).
+
 ## Order of work
 1. This plan. 2. The tool and its tests (`make check`). 3. The docs. 4. The read-only proof on
 the live forms, recorded below.
