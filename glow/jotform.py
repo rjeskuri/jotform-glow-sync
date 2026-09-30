@@ -62,8 +62,12 @@ class Client:
             try:
                 resp = json.loads(out.stdout)
             except json.JSONDecodeError:
-                last = JotformError(f"{label}: non-JSON response: "
-                                    f"{out.stdout[:200]!r} {out.stderr[:200]}")
+                # a cut-off JSON answer is API content (a page of submissions starts with a
+                # submission's id and the submitter's IP address): say how much came, never
+                # quote it. Anything else (an HTML 504 page) is quoted as before.
+                shown = (f"a cut-off JSON answer, {len(out.stdout)} characters, not shown"
+                         if out.stdout.lstrip()[:1] in ("{", "[") else repr(out.stdout[:200]))
+                last = JotformError(f"{label}: non-JSON response: {shown} {out.stderr[:200]}")
             else:
                 if resp.get("responseCode") == 200:
                     return resp["content"]

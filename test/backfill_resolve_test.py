@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import unittest
+import subprocess
 from unittest import mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,6 +21,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import backfill_resolve as br         # noqa: E402
 from glow import forms as glow_forms  # noqa: E402
+from glow import jotform as glow_jotform   # noqa: E402
 from glow.sync import PICKER_NAME     # noqa: E402
 
 AFRICA, ASIA = glow_forms.REGIONALS["Africa"], glow_forms.REGIONALS["Asia"]
@@ -27,18 +29,42 @@ PICKER = "500"
 AMARA, BEA, CHIARA = "Amara Fennwhistle", "Beatrice Marrowgate", "Chiara Ostrivane"
 DALIA, ESTHER, FATIMA = "Dalia Pellucidor", "Esther Thornquibble", "Fatima Umberlash"
 GRACE, HANA, INES = "Grace Wrenfoldy", "Hana Yexleyton", "Ines Grimboltz"
+KAVYA, LEILA, MAYA = "Kavya Ixworthing", "Leila Jubbleton", "Maya Kestrelby"
+NADIA, OLIVIA, PRIYA = "Nadia Nimbleford", "Olivia Quillstrand", "Priya Vexmoorish"
+STRANGER, STRANGER2 = "Joy Halverquist", "Keza Lorrimane"      # ticked, and in no Roster row
 MENTOR = "mentor1@example.org"
 PHOTO = "https://www.example.org/uploads/group-photo.jpg"
-# qid -> (club, partner in the Roster, what the sync says it sends, its girls today)
+IP = "192.0.2.1"
+# qid -> (club, the partner the sync names - '' = none -, what the sync says it sends, its girls today)
 ROSTERS = {
     "10": ("Alpha Club", "Partner One", "Alpha Club", [AMARA, BEA, CHIARA]),
     "11": ("Stars", "Partner One", "Stars - Partner One", [DALIA, ESTHER]),
     "12": ("Stars", "Partner Two", "Stars - Partner Two", [FATIMA, GRACE]),
     "13": ("Old Club", "Partner Two", "Old Club", [HANA]),       # on the form; its Roster rows inactive
-    "14": ("Lost Club", "", "Lost Club", [INES]),                # on the form; the sync names no partner
+    "14": ("Lost Club", "", "Lost Club", [INES]),                # on the form; no partner named, no Roster row
+    # plain-named rosters the region's active export does not hold: the sync names no partner
+    # (17, 18 and 19 are the date, the Contact IDs and the photo)
+    "20": ("Quiet Club", "", "Quiet Club", [KAVYA]),             # Roster: one partner's, every row inactive
+    "21": ("Far Club", "", "Far Club", [LEILA]),                 # Roster: one partner's, active, another region
+    "22": ("Adrift Club", "", "Adrift Club", [MAYA]),            # Roster: one partner's, active, no region
+    "23": ("Twin Club", "", "Twin Club", [OLIVIA]),              # Roster: two partners have had one
 }
-CODES = {"10": "ALPHACLU", "11": "STARS", "12": "STARS2", "13": "OLDCLUB"}
-EVERY_NAME = [AMARA, BEA, CHIARA, DALIA, ESTHER, FATIMA, GRACE, HANA, INES]
+# the Roster export: (club code, partner, club, region, status, girls)
+SHEET = [
+    ("ALPHACLU", "Partner One", "Alpha Club", "Africa", "active", [AMARA, BEA, CHIARA]),
+    ("ALPHACLU", "Partner One", "Alpha Club", "Africa", "inactive", [NADIA]),     # she left the club
+    ("STARS", "Partner One", "Stars", "Africa", "active", [DALIA, ESTHER]),
+    ("STARS2", "Partner Two", "Stars", "Africa", "active", [FATIMA, GRACE]),
+    ("OLDCLUB", "Partner Two", "Old Club", "Africa", "inactive", [HANA]),
+    ("QUIETCLU", "Partner Two", "Quiet Club", "Africa", "inactive", [KAVYA]),
+    ("FARCLUB", "Partner One", "Far Club", "Asia", "active", [LEILA]),
+    ("ADRIFTCL", "Partner Two", "Adrift Club", "", "active", [MAYA]),
+    ("TWINCLUB", "Partner One", "Twin Club", "Africa", "inactive", [OLIVIA]),
+    ("TWINCLU2", "Partner Two", "Twin Club", "Africa", "inactive", [PRIYA]),
+]
+SHEET_ROWS = sum(len(girls) for *_, girls in SHEET)
+EVERY_NAME = [AMARA, BEA, CHIARA, DALIA, ESTHER, FATIMA, GRACE, HANA, INES, KAVYA, LEILA, MAYA,
+              NADIA, OLIVIA, PRIYA, STRANGER, STRANGER2]
 
 
 def questions():
@@ -97,7 +123,7 @@ def submission(sid, ticks, created="2026-09-10 08:00:00", q5="Alpha Club", q18=A
     put("105", MENTOR)
     put(PICKER, list(picks))
     answers.update(extra or {})
-    return {"id": sid, "form_id": form, "ip": "192.0.2.1", "created_at": created, "status": status,
+    return {"id": sid, "form_id": form, "ip": IP, "created_at": created, "status": status,
             "new": "1", "flag": "0", "notes": "", "updated_at": None, "answers": answers}
 
 
@@ -127,12 +153,10 @@ class BackfillResolve(unittest.TestCase):
         with open(cls.roster_csv, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["girl_id", "partner", "club", "region", "full_name", "last_name", "status"])
-            for qid, (club, partner, _, girls) in ROSTERS.items():
-                if not partner:
-                    continue
+            for code, partner, club, region, status, girls in SHEET:
                 for n, girl in enumerate(girls, 1):      # ids are built here, never written out
-                    w.writerow([f"{CODES[qid]}-{girl.split()[-1].upper()[:12]}-{n:03d}", partner, club,
-                                "Africa", girl, girl.split()[-1], "inactive" if qid == "13" else "active"])
+                    w.writerow([f"{code}-{girl.split()[-1].upper()[:12]}-{n:03d}", partner, club,
+                                region, girl, girl.split()[-1], status])
         cls.roster = br.read_roster(cls.roster_csv)
 
     @classmethod
@@ -259,11 +283,60 @@ class BackfillResolve(unittest.TestCase):
         self.assertEqual((row["club"], row["partner"], row["club_code"], row["sf_account_name"]),
                          ("Old Club", "Partner Two", "OLDCLUB", "Old Club"))
         self.assertEqual(row["flags"], ["retired_club"])
-        # on the form, and the sync names no partner for it: no Roster row is looked up
+        # on the form, the sync names no partner for it and the Roster has no club of that name
         row, = self.one({"14": [INES]}, q5="Lost Club", picks=("Lost Club",))
         self.assertEqual((row["club"], row["partner"], row["club_code"], row["sf_account_name"]),
                          ("Lost Club", None, None, "Lost Club"))
         self.assertEqual(row["flags"], ["retired_club"])
+
+    def test_a_club_the_sync_names_no_partner_for_takes_the_roster_s_only_holder(self):
+        # the sync names a partner only for a roster of the region's ACTIVE export (or a
+        # long-named one): for a plain-named club that retired, or whose rows carry another
+        # region or none, it says ''. The Roster export still holds the club: one partner
+        # has (or had) a club of that name -> that partner and its code
+        cases = {"20": ("Quiet Club", "Partner Two", "QUIETCLU", ["retired_club"]),   # every row inactive
+                 "21": ("Far Club", "Partner One", "FARCLUB", []),                    # active, region Asia
+                 "22": ("Adrift Club", "Partner Two", "ADRIFTCL", [])}                # active, no region
+        for qid, (club, partner, code, flags) in cases.items():
+            with self.subTest(club=club):
+                self.assertEqual(br.rosters_today(plan())[qid], (club, None, club))   # the sync's word
+                rows, _, counts = self.resolve([submission("9001", {qid: ROSTERS[qid][3]}, q5=club,
+                                                           picks=(club,))])
+                row, = rows
+                self.assertEqual((row["club"], row["partner"], row["club_code"], row["sf_account_name"]),
+                                 (club, partner, code, club))
+                self.assertEqual(row["flags"], flags)
+                self.assertEqual(counts["partner_from_roster"], 1)
+        # two partners have had a club of that name: whose it is cannot be told - no guess
+        rows, _, counts = self.resolve([submission("9001", {"23": [OLIVIA]}, q5="Twin Club",
+                                                   picks=("Twin Club",))])
+        row, = rows
+        self.assertEqual((row["partner"], row["club_code"], row["sf_account_name"]), (None, None, "Twin Club"))
+        self.assertEqual(row["flags"], ["retired_club"])
+        self.assertEqual(counts["partner_from_roster"], 0)
+        # a partner the sync does name is never replaced
+        rows, _, counts = self.resolve([submission("9001", {"10": [AMARA]})])
+        self.assertEqual((rows[0]["partner"], counts["partner_from_roster"]), ("Partner One", 0))
+
+    def test_the_club_name_is_the_live_picker_s_spelling(self):
+        # the Roster respells a club by capitals only: the sync records no change for that
+        # (equal under glow.text.key), so its value is the Roster's spelling - what the roster
+        # SENDS today is the live Club picker's entry
+        respelled = plan()
+        respelled["sf_names"][0]["value"] = "ALPHA  CLUB"
+        rows, _, _ = self.resolve([submission("9001", {"10": [AMARA]})], the_plan=respelled)
+        self.assertEqual((rows[0]["sf_account_name"], rows[0]["flags"]), ("Alpha Club", []))
+        # the picker has no entry for what the sync says the roster sends: it sends nothing today
+        absent = plan()
+        absent["sf_names"][0]["value"] = "Alpha Club - Partner One"
+        rows, _, _ = self.resolve([submission("9001", {"10": [AMARA]})], the_plan=absent)
+        self.assertEqual((rows[0]["sf_account_name"], rows[0]["club"], rows[0]["partner"]),
+                         (None, "Alpha Club", "Partner One"))
+        self.assertEqual(rows[0]["flags"], ["q5_differs", "no_account_name"])
+        # a form without the Club picker (the name is typed): the sync's word is kept
+        no_picker = {q: v for q, v in questions().items() if q != PICKER}
+        rows, _, _ = self.resolve([submission("9001", {"10": [AMARA]})], qs=no_picker, the_plan=respelled)
+        self.assertEqual(rows[0]["sf_account_name"], "ALPHA  CLUB")
 
     def test_an_answer_to_a_deleted_roster_question_that_still_says_what_it_was(self):
         gone = {"158": {"name": "roster158", "order": "9", "text": " Gone  Club ",
@@ -274,8 +347,9 @@ class BackfillResolve(unittest.TestCase):
         self.assertEqual((row["roster_qid"], row["club"], row["partner"], row["club_code"],
                           row["sf_account_name"], row["names"]),
                          ("158", "Gone Club", None, None, None, [AMARA, BEA]))
+        # no partner, so no Roster rows to look the names up in: all count as unknown (held)
         self.assertEqual(row["flags"], ["q5_differs", "retired_club", "no_account_name",
-                                        "name_not_on_roster_now:2"])
+                                        "name_not_on_roster_now:2", "name_unknown_to_roster:2"])
 
     def test_date_flags(self):
         for date, iso, flags in ((("2026", "09", "01"), "2026-09-01", []),
@@ -290,22 +364,50 @@ class BackfillResolve(unittest.TestCase):
                 self.assertEqual((row["attendance_date"], row["flags"]), (iso, flags))
 
     def test_name_flags(self):
-        stranger, comma = "Joy Halverquist", "Marrowgate, Beatrice"
-        row, = self.one({"10": [AMARA, stranger, "Keza Lorrimane"]})
-        self.assertEqual(row["flags"], ["name_not_on_roster_now:2"])
-        self.assertEqual(row["names"], [AMARA, stranger, "Keza Lorrimane"])       # still listed
-        row, = self.one({"10": [AMARA.upper()]})                    # an option is compared exactly
-        self.assertEqual(row["flags"], ["name_not_on_roster_now:1"])
+        comma = "Marrowgate, Beatrice"
+        row, = self.one({"10": [AMARA, STRANGER, STRANGER2]})
+        self.assertEqual(row["flags"], ["name_not_on_roster_now:2", "name_unknown_to_roster:2"])
+        self.assertEqual(row["names"], [AMARA, STRANGER, STRANGER2])       # still listed
         row, = self.one({"10": [AMARA, comma]}, q18=f"{AMARA}, {comma}")
-        self.assertEqual(row["flags"], ["q18_differs", "name_not_on_roster_now:1", "name_has_comma"])
+        self.assertEqual(row["flags"], ["q18_differs", "name_not_on_roster_now:1",
+                                        "name_unknown_to_roster:1", "name_has_comma"])
         row, = self.one({"10": [AMARA, BEA, AMARA]})
         self.assertEqual(row["flags"], ["name_repeats"])
+
+    def test_a_name_that_is_no_option_today_is_unknown_to_the_roster_or_left_it(self):
+        # the loader holds a session on name_unknown_to_roster (Salesforce would create a new
+        # Contact for a mistyped or renamed girl) and sends a girl who left the club
+        def flags(*names):
+            row, = self.one({"10": list(names)})
+            return row["flags"]
+        # she left: the Roster still has her row for this partner and club, inactive
+        self.assertEqual(flags(AMARA, NADIA), ["name_not_on_roster_now:1", "name_left_roster:1"])
+        # the Roster never had that name for this club
+        self.assertEqual(flags(AMARA, STRANGER), ["name_not_on_roster_now:1", "name_unknown_to_roster:1"])
+        # both in one row: the two counts add up to name_not_on_roster_now's
+        self.assertEqual(flags(NADIA, STRANGER, AMARA, STRANGER2),
+                         ["name_not_on_roster_now:3", "name_unknown_to_roster:2", "name_left_roster:1"])
+        # an option is compared exactly; the Roster by capitals and spaces only - a letter differs
+        self.assertEqual(flags(AMARA.upper()), ["name_not_on_roster_now:1", "name_left_roster:1"])
+        self.assertEqual(flags(AMARA.replace("whistle", "whistel")),
+                         ["name_not_on_roster_now:1", "name_unknown_to_roster:1"])
+        # a girl of ANOTHER club is unknown to this one
+        self.assertEqual(flags(DALIA), ["name_not_on_roster_now:1", "name_unknown_to_roster:1"])
+        # a roster whose partner cannot be told (two partners have the name): all unknown
+        row, = self.one({"23": [OLIVIA, PRIYA]}, q5="Twin Club", picks=("Twin Club",))
+        self.assertEqual(row["flags"], ["retired_club", "name_not_on_roster_now:1", "name_unknown_to_roster:1"])
+        # counted per form by the bare name, like every flag
+        _, _, counts = self.resolve([submission("9001", {"10": [NADIA, STRANGER]}),
+                                     submission("9002", {"10": [NADIA]})])
+        self.assertEqual([counts["flags"][f] for f in ("name_not_on_roster_now", "name_unknown_to_roster",
+                                                       "name_left_roster")], [2, 1, 2])
 
     def test_the_flag_list_is_the_contract(self):
         self.assertEqual(br.FLAGS, [
             "multi_club", "q5_differs", "q18_empty", "q18_differs", "typed_era", "bare_shared_name",
             "retired_club", "no_account_name", "date_before_2026_09", "date_missing",
-            "name_not_on_roster_now", "name_has_comma", "name_repeats"])
+            "name_not_on_roster_now", "name_unknown_to_roster", "name_left_roster",    # the loader's two
+            "name_has_comma", "name_repeats"])
 
     # ---- no ticks, the range, the ledger
     def test_no_tick_means_no_row_and_the_id_is_listed(self):
@@ -339,7 +441,7 @@ class BackfillResolve(unittest.TestCase):
 
     def test_a_ledger_that_does_not_balance_stops_the_run(self):
         twice = [submission("9001", {"10": [AMARA]}), submission("9001", {"10": [AMARA]})]
-        self.refused(lambda: self.resolve(twice), "the ledger does not balance", "Nothing written")
+        self.refused(lambda: self.resolve(twice), "the ledger does not balance", "No result written")
         twice = [submission("9001", {}), submission("9001", {})]
         self.refused(lambda: self.resolve(twice), "the ledger does not balance")
 
@@ -351,7 +453,7 @@ class BackfillResolve(unittest.TestCase):
         today = br.rosters_today(changing)
         self.assertEqual(today["10"], ("Alpha Club", "Partner One", "Alpha Club"))
         self.assertEqual(today["14"], ("Lost Club", None, "Lost Club"))
-        self.assertEqual(sorted(today, key=int), ["10", "11", "12", "13", "14"])    # no club still to create
+        self.assertEqual(sorted(today, key=int), sorted(ROSTERS, key=int))          # no club still to create
 
     def test_the_sync_is_run_as_a_dry_run_and_its_output_is_not_echoed(self):
         seen = {}
@@ -389,13 +491,17 @@ class BackfillResolve(unittest.TestCase):
                      "not a dry run's plan")
 
     def test_club_codes_come_from_the_girl_ids(self):
-        rows, active, codes = self.roster
-        self.assertEqual(rows, 8)
+        rows, active, codes, holders, known = self.roster
+        self.assertEqual(rows, SHEET_ROWS)
         self.assertEqual(codes[("partner one", "stars")], ["STARS"])
         self.assertEqual(codes[("partner two", "old club")], ["OLDCLUB"])
         self.assertIn(("partner two", "stars"), active)
         self.assertNotIn(("partner two", "old club"), active)
-        two = (rows, active, {**codes, ("partner one", "alpha club"): ["ALPHA2", "ALPHACLU"]})
+        # who has, or had, a club of each name (any status, any region) and every girl it held
+        self.assertEqual(holders["quiet club"], {"partner two": "Partner Two"})
+        self.assertEqual(sorted(holders["twin club"]), ["partner one", "partner two"])
+        self.assertEqual(len(known[("partner one", "alpha club")]), 4)
+        two = self.roster._replace(codes={**codes, ("partner one", "alpha club"): ["ALPHA2", "ALPHACLU"]})
         self.refused(lambda: br.resolve("Africa", AFRICA, [submission("9001", {"10": [AMARA]})],
                                         questions(), br.rosters_today(plan()), two),
                      "'Alpha Club' (Partner One)", "2 different club codes (ALPHA2, ALPHACLU)")
@@ -458,7 +564,7 @@ class BackfillResolve(unittest.TestCase):
                                         "no_ticks", "rows"])
         self.assertRegex(result["fetched_at_utc"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertRegex(result["resolver_commit"], r"^([0-9a-f]{7,}(-dirty)?|unknown)$")
-        self.assertEqual(result["roster_export"]["rows"], 8)
+        self.assertEqual(result["roster_export"]["rows"], SHEET_ROWS)
         self.assertEqual(list(result["forms"]), list(glow_forms.REGIONALS))
         a = result["forms"]["Africa"]
         self.assertEqual({k: a[k] for k in ("form_id", "submissions", "pre_launch", "rows", "no_ticks")},
@@ -500,15 +606,22 @@ class BackfillResolve(unittest.TestCase):
         self.assertIn("LEDGER: 6 submissions in range = 5 with rows (6 rows) + 1 with no tick - balanced; "
                       "1 pre-launch left out", out)
         self.assertIn("== U.S  form " + glow_forms.REGIONALS["U.S"], out)
+        # the files went outside this checkout: the closing line does not call the place git-ignored
+        self.assertIn("they hold girls' names", out)
+        self.assertIn("outside this checkout's data/", out)
+        self.assertNotIn("git-ignored", out)
 
     def test_main_refusals_write_no_result(self):
         subs = {AFRICA: [submission("9001", {"10": [AMARA]}), submission("9002", {"10": {"0": BEA}})]}
         out, code, result = self.run_main(FakeJotform(subs))
         self.assertIn("submission 9002", code)
-        self.assertIn("nothing written", code)
         self.assertIsNone(result)
         for private in EVERY_NAME:
             self.assertNotIn(private, out + code)
+        # what it says is what happened: no result, but this region's raw copy is the new fetch
+        self.assertIn("no result written (the raw copies fetched so far are overwritten", code)
+        self.assertNotIn("nothing written", code.lower())
+        self.assertEqual(os.listdir(os.path.join(self.out_dir.name, "raw")), ["Africa.json"])
         # fewer submissions fetched than the form itself reports
         out, code, result = self.run_main(FakeJotform({AFRICA: subs[AFRICA][:1]}, count=3))
         self.assertIn("Africa: fetched 1 submissions but the form reports 3", code)
@@ -521,6 +634,77 @@ class BackfillResolve(unittest.TestCase):
         self.assertEqual(result["forms"]["Africa"]["fetched"], 2)
         self.assertIn("1 of 4 regions", out)
 
+    def test_a_region_named_twice_is_read_once(self):
+        subs = {AFRICA: [submission("9001", {"10": [AMARA]})], ASIA: [submission("9101", {"10": [BEA]}, form=ASIA)]}
+        client = FakeJotform(subs)
+        out, code, result = self.run_main(client, "--region", "Asia", "--region", "Africa", "--region", "Asia")
+        self.assertIsNone(code, out)                       # it doubled Asia's rows and failed the ledger
+        self.assertEqual(list(result["forms"]), ["Asia", "Africa"])
+        self.assertEqual([r["submission_id"] for r in result["rows"]], ["9101", "9001"])
+        self.assertEqual([path for path, _ in client.asked if path.endswith("/submissions")],
+                         [f"/form/{ASIA}/submissions", f"/form/{AFRICA}/submissions"])
+        self.assertEqual(out.count("== Asia"), 1)
+
+    def test_a_run_of_some_regions_never_lands_on_the_loader_s_file(self):
+        # the default path is the file the loader reads, with all four forms: --region without
+        # --out would replace it with a part (the loader would re-plan from a quarter of the data)
+        default = os.path.join(self.out_dir.name, "default", "resolved.json")
+        subs = {AFRICA: [submission("9001", {"10": [AMARA]})]}
+        with mock.patch.object(br, "DEFAULT_OUT", default):
+            for argv in (["--region", "Asia"], ["--region", "Asia", "--region", "Africa"],
+                         ["--region", "Asia", "--out", default]):
+                with self.subTest(argv=len(argv)):
+                    client = FakeJotform(subs)
+                    with self.assertRaises(SystemExit) as stop:
+                        br.main(["--roster", self.roster_csv, *argv], client=client)
+                    self.assertIn("--region gives a result without the other forms", str(stop.exception.code))
+                    self.assertIn("--out", str(stop.exception.code))
+                    self.assertEqual(client.asked, [])             # refused before anything is fetched
+            self.assertFalse(os.path.exists(default))
+            # all four, named or not, write the default path
+            every = [a for region in glow_forms.REGIONALS for a in ("--region", region)]
+            for argv in (every, []):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    br.main(["--roster", self.roster_csv, *argv], client=FakeJotform(subs),
+                            plan_of=lambda *a: plan())
+                with open(default, encoding="utf-8") as f:
+                    self.assertEqual(list(json.load(f)["forms"]), list(glow_forms.REGIONALS))
+                os.remove(default)
+
+    # ---- a failed fetch says nothing of what it fetched
+    def test_a_cut_off_submissions_page_is_never_quoted(self):
+        # a page cut off in transfer is a JSON prefix that starts with a submission's id and
+        # the submitter's IP address (then the answers): glow.jotform.Client quoted its start
+        page = json.dumps({"responseCode": 200, "message": "success",
+                           "content": [submission("9001", {"10": [AMARA, BEA]})]})
+        cut = page[:page.index(BEA) + len(BEA)]
+        self.assertIn(IP, cut[:200])
+
+        def curl(stdout, stderr="", code=0):
+            return lambda argv, **kw: subprocess.CompletedProcess(argv, code, stdout=stdout, stderr=stderr)
+
+        def fetch(answer):
+            client = glow_jotform.Client("KEY", retries=3, backoff=0, sleep=lambda s: None)
+            out = io.StringIO()
+            with mock.patch.object(glow_jotform.subprocess, "run", answer), contextlib.redirect_stdout(out):
+                with self.assertRaises(glow_jotform.JotformError) as stop:
+                    br.fetch_submissions(client, AFRICA, "Africa")
+            return str(stop.exception) + out.getvalue()
+
+        said = fetch(curl(cut, "curl: (18) transfer closed with outstanding read data remaining", 18))
+        for private in (IP, "9001", AMARA, BEA, MENTOR, "responseCode"):
+            self.assertNotIn(private, said)
+        self.assertIn(f"GET /form/{AFRICA}/submissions: non-JSON response: a cut-off JSON answer, "
+                      f"{len(cut)} characters, not shown", said)
+        self.assertIn("curl: (18)", said)                  # curl's own word is the diagnosis
+        self.assertEqual(said.count("retrying"), 2)
+        # what is not API content is still quoted, and Jotform's own refusal still reads as it did
+        self.assertIn("non-JSON response: '<html>504 Gateway Time-out</html>'",
+                      fetch(curl("<html>504 Gateway Time-out</html>")))
+        self.assertIn("401 You're not authorized",
+                      fetch(curl(json.dumps({"responseCode": 401, "message": "You're not authorized"}))))
+
     def test_the_result_may_not_land_in_the_repository_outside_data(self):
         for argv in (["--out", os.path.join(REPO, "resolved.json")],
                      ["--out", os.path.join(REPO, "docs", "backfill", "resolved.json")],
@@ -532,6 +716,32 @@ class BackfillResolve(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(REPO, "resolved.json")))
         self.assertEqual(br.private_place(os.path.join(REPO, "data", "backfill_2026-09", "resolved.json"), "x"),
                          os.path.realpath(br.DEFAULT_OUT))
+        self.assertTrue(br.under_data(os.path.realpath(br.DEFAULT_OUT)))
+        self.assertFalse(br.under_data(os.path.realpath(os.path.join(self.out_dir.name, "resolved.json"))))
+        self.assertFalse(br.under_data(os.path.realpath(REPO)))
+
+    def test_the_checkout_is_known_by_what_it_is_not_by_how_its_path_is_spelled(self):
+        # on a disk that ignores case (the Mac's) another spelling of the checkout's path is
+        # the same folder; comparing path strings let names into a tracked directory
+        other = os.path.join(os.path.dirname(REPO).swapcase(), os.path.basename(REPO))
+        if other == REPO or not os.path.exists(other) or not os.path.samefile(other, REPO):
+            self.skipTest("this disk tells capitals apart: there is no second spelling of the checkout")
+
+        def refused_at(*steps):
+            with self.assertRaises(SystemExit) as stop:
+                br.private_place(os.path.join(*steps), "The result")
+            self.assertIn("holds girls' names", str(stop.exception.code))
+            self.assertIn("outside data/", str(stop.exception.code))
+
+        refused_at(other, "docs", "x", "resolved.json")             # --out in the other spelling
+        refused_at(other)                                           # --raw-dir: the checkout's root
+        refused_at(other, "test", "raw")
+        self.assertTrue(br.under_data(br.private_place(os.path.join(other, "data", "x", "resolved.json"), "x")))
+        self.assertFalse(os.path.exists(os.path.join(REPO, "docs", "x")))
+        # the tool itself started by the other spelling (REPO keeps what was typed), a plain path
+        with mock.patch.object(br, "REPO", other):
+            refused_at(REPO, "docs", "x", "resolved.json")
+            self.assertTrue(br.under_data(br.private_place(os.path.join(REPO, "data", "x.json"), "x")))
         with self.assertRaises(SystemExit) as stop:
             br.main(["--roster", os.path.join(self.out_dir.name, "missing.csv")], client=FakeJotform())
         self.assertIn("No Roster export", str(stop.exception.code))

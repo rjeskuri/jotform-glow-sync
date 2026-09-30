@@ -12,13 +12,14 @@ nothing here matches clubs a second time.
 
     python3 tools/sheets_client.py export Roster data/roster_<date>.csv
     python3 tools/backfill_resolve.py --roster data/roster_<date>.csv
-    python3 tools/backfill_resolve.py --roster data/roster_<date>.csv --region Asia   # one region
+    python3 tools/backfill_resolve.py --roster data/roster_<date>.csv --region Asia \
+        --out data/backfill_2026-09/asia/resolved.json      # one region: never the loader's file
 
 A submission with no tick gets no row: its id is listed under no_ticks. Submissions created
 before 2026-09-01 00:00 US Eastern (Jotform's clock) are left out and counted. Every submission
-in range is accounted for, or the tool exits with an error; it also exits, writing no result,
-when an answer cannot be resolved honestly (a shape it does not know, a ticked roster it
-cannot identify).
+in range is accounted for, or the tool exits with an error; it also exits, writing no result
+(the raw copies fetched so far stay, overwritten), when an answer cannot be resolved honestly
+(a shape it does not know, a ticked roster it cannot identify).
 
 The output and the raw copies (raw/<region>.json beside it) hold girls' names and mentors'
 contact details: they stay under data/ (git-ignored). What is printed is counts only.
@@ -33,7 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, namedtuple
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -41,7 +42,8 @@ from glow import forms                  # noqa: E402
 from glow.cli import run                # noqa: E402
 from glow.jotform import Client         # noqa: E402
 from glow.sync import (                 # noqa: E402
-    CLUB_NAME, CONTACT_IDS, MODULE_ID, PICKER_NAME, SF_NAME_SEP, WEEK_ID, YEAR_ID, roster_pairs)
+    CLUB_NAME, CONTACT_IDS, MODULE_ID, PICKER_NAME, SF_NAME_SEP, WEEK_ID, YEAR_ID, club_partners,
+    roster_names, roster_pairs)
 from glow.text import key               # noqa: E402
 
 SINCE = "2026-09-01 00:00:00"           # created_at, as Jotform gives it: US Eastern
@@ -49,12 +51,15 @@ MONTH_START = "2026-09-01"              # an attendance date before it is flagge
 DATE, PHOTO, CREATOR = "17", "19", "105"
 PAGE = 100                              # submissions per request (Jotform allows up to 1000)
 DEFAULT_OUT = os.path.join(REPO, "data", "backfill_2026-09", "resolved.json")
-# every flag a row can carry, in the order a row lists them; the last one is written with
-# its count on the row ("name_not_on_roster_now:3")
-NOT_ON_ROSTER = "name_not_on_roster_now"
+# every flag a row can carry, in the order a row lists them. The three about names that are
+# not an option of the roster today are written with their count on the row
+# ("name_not_on_roster_now:3"): UNKNOWN + LEFT = NOT_ON_ROSTER. The loader holds a session on
+# UNKNOWN (the Roster has no row of that name for the club: Salesforce would create a Contact)
+# and sends LEFT (the Roster knows her; she is not an option today).
+NOT_ON_ROSTER, UNKNOWN, LEFT = "name_not_on_roster_now", "name_unknown_to_roster", "name_left_roster"
 FLAGS = ["multi_club", "q5_differs", "q18_empty", "q18_differs", "typed_era", "bare_shared_name",
          "retired_club", "no_account_name", "date_before_2026_09", "date_missing", NOT_ON_ROSTER,
-         "name_has_comma", "name_repeats"]
+         UNKNOWN, LEFT, "name_has_comma", "name_repeats"]
 CREATED = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 GIRL_ID = re.compile(r"([A-Z0-9]+)-[A-Z0-9]+-\d+")      # CLUBCODE-LASTCODE-NNN (appsscript/Ids.gs)
 
@@ -64,12 +69,19 @@ def qid_order(qid):
 
 
 # ------------------------------------------------------------------ the Roster
+Roster = namedtuple("Roster", "rows active codes holders known")
+
+
 def read_roster(path):
-    """(rows, active, codes) of a Roster export: how many rows it has; the
+    """A Roster export as (rows, active, codes, holders, known): how many rows it has; the
     (key(partner), key(club)) of every club with an active girl (glow.sync.roster_pairs);
-    and {(key(partner), key(club)): [club code, ...]} - the prefix of the girl ids of that
-    club's rows, any status (one code per club, normally)."""
-    active = {(key(p), key(c)) for (p, c), on in roster_pairs(path).items() if on}
+    {(key(partner), key(club)): [club code, ...]} - the prefix of the girl ids of that
+    club's rows, any status (one code per club, normally); {key(club): {key(partner):
+    partner}} - who has or had a club of each name, any status, all regions
+    (glow.sync.club_partners); and {(key(partner), key(club)): {key(full name)}} - every girl
+    the Roster has ever held for that club (glow.sync.roster_names)."""
+    pairs = roster_pairs(path)
+    active = {(key(p), key(c)) for (p, c), on in pairs.items() if on}
     with open(path, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     if "girl_id" not in rows[0]:
@@ -80,7 +92,8 @@ def read_roster(path):
         found = GIRL_ID.fullmatch((r["girl_id"] or "").strip())
         if found and key(r["partner"]) and key(r["club"]):
             codes[(key(r["partner"]), key(r["club"]))].add(found.group(1))
-    return len(rows), active, {k: sorted(v) for k, v in codes.items()}
+    return Roster(len(rows), active, {k: sorted(v) for k, v in codes.items()},
+                  club_partners(pairs), roster_names(path))
 
 
 # --------------------------------------------------- what each roster is, today
@@ -108,7 +121,11 @@ def sync_plan(roster_csv, region, form_id, runner=subprocess.run):
 def rosters_today(plan):
     """{qid: (club, partner or None, the Club Name it sends today)} from the sync's plan.
     sf_names holds what each roster sends AFTER the plan; where the plan would change it
-    (sf_name_changes), today's value is the change's `old`."""
+    (sf_name_changes), today's value is the change's `old`. The sync records no change for
+    a respelling that is equal under glow.text.key, so the SPELLING may still be the
+    Roster's: resolve() takes the live Club picker's. The partner is None for a roster the
+    region's active export does not hold, unless its rule names one: resolve() asks the
+    Roster who has a club of that name."""
     old = {str(c["qid"]): c["old"] for c in plan.get("sf_name_changes") or []}
     out = {}
     for n in plan["sf_names"]:
@@ -148,8 +165,9 @@ def fetch_submissions(client, form_id, region):
 
 
 def refuse(sub, what):
-    sys.exit(f"submission {sub.get('id')} (form {sub.get('form_id')}): {what} - nothing written; "
-             "this tool does not guess (docs/plans/2026-09-30-backfill-resolver.md)")
+    sys.exit(f"submission {sub.get('id')} (form {sub.get('form_id')}): {what} - no result written "
+             "(the raw copies fetched so far are overwritten; an earlier resolved.json is left as it "
+             "was); this tool does not guess (docs/plans/2026-09-30-backfill-resolver.md)")
 
 
 def answer_of(sub, qid):
@@ -248,11 +266,18 @@ def is_long(value, club):
 def resolve(region, form_id, submissions, questions, today, roster):
     """(rows, no_ticks, counts) for one form. submissions: as fetched, any status, any
     date; questions: the form today; today: rosters_today(); roster: read_roster()."""
-    _, active, codes = roster
+    active, codes = roster.active, roster.codes
     picker = next((qid for qid, q in questions.items() if q.get("type") == "control_dropdown"
                    and q.get("name") == PICKER_NAME), None)
     options = {qid: {o.strip() for o in (q.get("options") or "").split("|") if o.strip()}
                for qid, q in questions.items() if q.get("type") == "control_checkbox"}
+    # the live Club picker's entries: exactly, and by key (the first spelling, as the sync reads it)
+    entries, entry_of = set(), {}
+    for o in (questions[picker].get("options") or "").split("|") if picker else ():
+        if o.strip():
+            entries.add(o.strip())
+            entry_of.setdefault(key(o), o.strip())
+    from_roster = 0                                   # rows whose partner the Roster gave, not the sync
     rows, no_ticks, q18_only = [], [], []
     other_status, flag_rows, flag_subs = Counter(), Counter(), Counter()
     pre_launch = 0
@@ -296,6 +321,19 @@ def resolve(region, form_id, submissions, questions, today, roster):
         for qid, found, names in rosters:
             if qid in today:
                 club, partner, sends = today[qid]
+                if picker and sends is not None and sends not in entries:
+                    # what it sends TODAY is the picker entry as the form spells it (the sync's
+                    # value can be the Roster's spelling); the picker has none: it sends nothing
+                    sends = entry_of.get(key(sends))
+                if not partner:
+                    # the sync names no partner for a plain-named roster outside the region's
+                    # active export (retired, or its rows carry another region or none): when
+                    # ONE partner has, or had, a club of that name it is that club - the rule
+                    # by which the sync claims a question; two or more: not told apart here
+                    who = roster.holders.get(key(club), {})
+                    if len(who) == 1:
+                        partner, = who.values()
+                        from_roster += 1
             elif qid in questions:
                 refuse(sub, f"roster q{qid} is on the form but not in the sync's plan (a club "
                             "added a moment ago?) - run it again")
@@ -319,9 +357,14 @@ def resolve(region, form_id, submissions, questions, today, roster):
                 flags.add("retired_club")
             if sends is None:
                 flags.add("no_account_name")
-            missing = sum(1 for n in names if n not in options.get(qid, ()))
+            counted = {}
+            missing = [n for n in names if n not in options.get(qid, ())]
             if missing:
-                flags.add(NOT_ON_ROSTER)
+                # no partner: no Roster rows to look the names up in - all unknown (held)
+                known = roster.known.get(pair, ()) if partner else ()
+                unknown = sum(1 for n in missing if key(n) not in known)
+                counted = {NOT_ON_ROSTER: len(missing), UNKNOWN: unknown, LEFT: len(missing) - unknown}
+                flags |= {f for f, n in counted.items() if n}
             if any("," in n for n in names):
                 flags.add("name_has_comma")
             if len(set(names)) < len(names):
@@ -336,7 +379,7 @@ def resolve(region, form_id, submissions, questions, today, roster):
                 "module": answer_of(sub, MODULE_ID), "module_week": answer_of(sub, WEEK_ID),
                 "module_year": answer_of(sub, YEAR_ID), "creator": answer_of(sub, CREATOR),
                 "photo_urls": photo_urls(sub), "q5": q5,
-                "flags": [f"{f}:{missing}" if f == NOT_ON_ROSTER else f for f in FLAGS if f in flags],
+                "flags": [f"{f}:{counted[f]}" if f in counted else f for f in FLAGS if f in flags],
             })
         flag_subs.update(seen_flags)
     # the ledger: every submission in range has rows or is listed as having no tick - once
@@ -347,7 +390,7 @@ def resolve(region, form_id, submissions, questions, today, roster):
         sys.exit(f"{region}: the ledger does not balance - {len(submissions)} fetched, "
                  f"{sum(other_status.values())} not active, {pre_launch} before the launch, "
                  f"{in_range} in range, but {len(with_rows)} with rows and {len(set(no_ticks))} with "
-                 "no tick (a submission id twice?). Nothing written")
+                 "no tick (a submission id twice?). No result written")
     with_ticks = len(with_rows)
     dates = sorted({r["attendance_date"] for r in rows if r["attendance_date"]})
     again = Counter((r["roster_qid"], r["attendance_date"]) for r in rows)
@@ -369,6 +412,9 @@ def resolve(region, form_id, submissions, questions, today, roster):
         # no tick on any roster of today's form, yet question 18 holds names: the ticks were
         # taken back, or sat in a question deleted since (Jotform does not serve its answers)
         "no_ticks_but_q18": q18_only,
+        # rows whose partner (and so code) is the Roster's only holder of the club's name,
+        # because the sync names none: retired, or its rows carry another region or none
+        "partner_from_roster": from_roster,
     }
     return rows, no_ticks, counts
 
@@ -395,6 +441,10 @@ def report(region, c):
         print(f"   ! {len(c['no_ticks_but_q18'])} submission(s) with no tick carry names in question "
               f"{CONTACT_IDS} (ticks taken back, or in a roster question deleted since - look at "
               "them): " + ", ".join(c["no_ticks_but_q18"]))
+    if c["partner_from_roster"]:
+        print(f"   {c['partner_from_roster']} row(s) of clubs the sync names no partner for (retired, or "
+              "their Roster rows carry another region or none): partner and code are the Roster's "
+              "only club of that name")
     print("   flags                    rows  submissions")
     for flag in FLAGS:
         print(f"     {flag:<24}{c['flags'][flag]:>5}{c['flag_submissions'][flag]:>13}")
@@ -416,20 +466,42 @@ def resolver_commit():
         return "unknown"
 
 
+def below_checkout(full):
+    """The steps from this checkout down to `full` (a real path; [] = the checkout itself),
+    or None when it is not inside it. The checkout is recognised by WHAT it is
+    (os.path.samefile), not by how its path is spelled: on a disk that ignores case, the
+    Mac's, another spelling of the path is the same folder. The walk goes up from the
+    target, so the part of it that does not exist yet is just steps."""
+    steps, at = [], full
+    while not (os.path.exists(at) and os.path.samefile(at, REPO)):
+        parent = os.path.dirname(at)
+        if parent == at:
+            return None
+        steps.append(os.path.basename(at))
+        at = parent
+    return steps[::-1]
+
+
+def under_data(full):
+    """`full` (a real path) is under this checkout's data/, which git ignores."""
+    return (below_checkout(full) or [""])[0] == "data"
+
+
 def private_place(path, what):
     """The output holds girls' names: inside this checkout it may only go under data/
     (git-ignored). Anywhere outside the checkout is the operator's choice."""
     full = os.path.realpath(path)
-    repo, data = os.path.realpath(REPO), os.path.realpath(os.path.join(REPO, "data"))
-    if (full + os.sep).startswith(repo + os.sep) and not (full + os.sep).startswith(data + os.sep):
+    steps = below_checkout(full)
+    if steps is not None and steps[:1] != ["data"]:
         sys.exit(f"{what} holds girls' names and may not be written inside the repository outside "
-                 f"data/ (git-ignored): {os.path.relpath(full, repo)}")
+                 f"data/ (git-ignored): {os.path.join(*steps) if steps else 'the checkout itself'}")
     return full
 
 
 def shown(path):
     full = os.path.realpath(path)
-    return os.path.relpath(full, REPO) if full.startswith(os.path.realpath(REPO) + os.sep) else full
+    steps = below_checkout(full)
+    return os.path.join(*steps) if steps else full
 
 
 def write_json(path, payload):
@@ -444,8 +516,9 @@ def main(argv=None, client=None, plan_of=sync_plan):
     ap.add_argument("--roster", required=True, metavar="CSV",
                     help="a fresh export of the Roster tab (tools/sheets_client.py export Roster <path>)")
     ap.add_argument("--region", action="append", choices=sorted(forms.REGIONALS),
-                    help="only this region (repeatable; default: all four - the loader wants all four)")
-    ap.add_argument("--out", default=DEFAULT_OUT, metavar="PATH",
+                    help="only this region (repeatable; default: all four - the loader wants all "
+                         "four, so a run of fewer needs --out)")
+    ap.add_argument("--out", metavar="PATH",
                     help="the result (default data/backfill_2026-09/resolved.json); it holds names")
     ap.add_argument("--raw-dir", metavar="DIR",
                     help="where the raw copies go, <region>.json each, overwritten (default: raw/ "
@@ -453,7 +526,15 @@ def main(argv=None, client=None, plan_of=sync_plan):
     args = ap.parse_args(argv)
     if not os.path.exists(args.roster):
         sys.exit(f"No Roster export at {args.roster} - python3 tools/sheets_client.py export Roster <path>")
-    out = private_place(args.out, "The result")
+    regions = list(dict.fromkeys(args.region or forms.REGIONALS))      # one named twice is read once
+    out = private_place(args.out or DEFAULT_OUT, "The result")
+    default = os.path.realpath(DEFAULT_OUT)
+    is_default = out == default or (os.path.exists(out) and os.path.exists(default)
+                                    and os.path.samefile(out, default))
+    if len(regions) < len(forms.REGIONALS) and is_default:
+        sys.exit("--region gives a result without the other forms, and the default path is the file "
+                 "the loader reads, with all four: add --out <another path under data/>, or run it "
+                 "without --region")
     raw_dir = private_place(args.raw_dir or os.path.join(os.path.dirname(out), "raw"), "A raw copy")
     if client is None:
         api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
@@ -467,7 +548,7 @@ def main(argv=None, client=None, plan_of=sync_plan):
     result = {"fetched_at_utc": stamp, "resolver_commit": resolver_commit(),
               "roster_export": {"path": shown(args.roster), "rows": roster[0]},
               "forms": {}, "no_ticks": {}, "rows": []}
-    for region in args.region or list(forms.REGIONALS):
+    for region in regions:
         form_id = forms.REGIONALS[region]
         submissions = fetch_submissions(client, form_id, region)
         write_json(os.path.join(raw_dir, f"{region}.json"),
@@ -491,13 +572,15 @@ def main(argv=None, client=None, plan_of=sync_plan):
     total = {k: sum(c[k] for c in result["forms"].values())
              for k in ("submissions", "pre_launch", "with_ticks", "no_ticks", "rows")}
     if total["with_ticks"] + total["no_ticks"] != total["submissions"] or total["rows"] != len(result["rows"]):
-        sys.exit("The ledger does not balance over the forms - nothing written")
+        sys.exit("The ledger does not balance over the forms - no result written")
     write_json(out, result)
     print(f"\nLEDGER: {total['submissions']} submissions in range = {total['with_ticks']} with rows "
           f"({total['rows']} rows) + {total['no_ticks']} with no tick - balanced; "
           f"{total['pre_launch']} pre-launch left out")
     print(f"Wrote {shown(out)} and {len(result['forms'])} raw copies under {shown(raw_dir)} - they "
-          "hold girls' names: keep them where they are (data/ is git-ignored)")
+          "hold girls' names: "
+          + ("keep them where they are (data/ is git-ignored)" if under_data(out) and under_data(raw_dir)
+             else "they are outside this checkout's data/ - keep them out of any repository"))
     if len(result["forms"]) < len(forms.REGIONALS):
         print(f"   note: {len(result['forms'])} of {len(forms.REGIONALS)} regions - the loader wants "
               "the file with all four (run it without --region)")
