@@ -484,7 +484,7 @@ python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.
 python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --rendered   # HARD STOP: N options, N with data-calcvalue = value
 python3 tools/add_translations.py --form 262352490535154                               # dry run: the warning's entries appear
 python3 tools/add_translations.py --form 262352490535154 --apply
-python3 tools/add_translations.py --audit --form 262352490535154                       # the same counts as the "before" audit
+python3 tools/add_translations.py --audit --form 262352490535154                       # the "before" counts plus one per club this apply created (see below); any other rise: stop
 ```
 
 The dry run prints `UPDATE club picker (N clubs: calcValues)`, `CREATE club
@@ -496,6 +496,13 @@ Asia 96, 125 → 127. Africa (216 clubs, 255 → 257) and the template show
 `3 new, 1 dropped` while the SUPER GIRLS rule has not landed. The template
 also carries the roster creates and updates it is behind on (35 that day,
 the same ones the dry run without the flag plans).
+
+The translation audit counts every Club-picker option as an untranslated
+string (club names stay English), so after the apply it reads the "before"
+counts plus one per language for each club the apply created: the dry run's
+`CREATE roster` lines, 23 on the template on 2026-09-30, none on a form in
+step. The warning itself adds nothing once `add_translations.py --apply` has
+run: it is translated in every language the forms offer.
 
 **The `--rendered` check is a hard stop on the template.** How a
 multi-select lays out `calcValues` is unverified: a leading empty slot, as
