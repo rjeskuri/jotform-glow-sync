@@ -363,9 +363,13 @@ class Run:
         if applied.returncode != 0:
             self.failed = True
             self.attention.append((f"{region}: APPLY FAILED - the form may be half-synced",
-                                   f"Run by hand: python3 sync_attendance_form.py <roster.csv> --roster "
-                                   f"--region '{region}' --form {form} (dry run first), or restore the "
-                                   f"conditions from backups/{form}/ with restore_conditions.py.\n\n"
+                                   f"Run by hand now: python3 sync_attendance_form.py <roster.csv> --roster "
+                                   f"--region '{region}' --form {form} (dry run first, then --apply), or "
+                                   f"restore the conditions from backups/{form}/ with restore_conditions.py. "
+                                   "Until then later runs report this form in-sync: when only the rules "
+                                   "are stale (a new roster's show rule and Contact_IDs operand; on a form "
+                                   "with the club guard, its club list, which blocks that club's mentors), "
+                                   "the difference is not a change to the runner.\n\n"
                                    + (applied.stderr or "").strip()[-500:]))
             self.result(region, plan, "failed", "apply exited " + str(applied.returncode))
             return

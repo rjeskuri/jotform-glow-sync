@@ -217,9 +217,15 @@ HTML.
 - **Blocking a single-club mentor** whenever question 5 is not exactly one
   option: misaligned calcValues, two names that join into a third (warned),
   or a half-write that left a new club out of the guard's term list (the
-  picker is written before the rules; the runner retries once, then its
-  verify fails on "guard rule misses …" → ATTENTION). The browser check
-  covers the page-translation case.
+  picker is written before the rules). The runner retries once; if the
+  retry fails too, ATTENTION says "APPLY FAILED" (now: "later runs report
+  this form in-sync"), and every later run reports `in-sync` until someone
+  applies the sync by hand, because a rules-only difference is not a change
+  to the runner. That gap already exists on `main` for the new club's
+  roster rule (RUNBOOK, "rules-only difference"); the guard makes it a
+  blocked Submit rather than a missing roster. `form_status`'s "guard rule
+  misses …" catches it only when the PUT was accepted but altered. The
+  browser check covers the page-translation case.
 - **First Hide / Disable / require rules on these forms, and much larger
   rules.** Measured in the dry runs (the would-be conditions PUT, bytes):
   template 141,922 → 239,585 (+69%, with the 23 clubs it would create),

@@ -433,10 +433,16 @@ the browser's "Translate page" cannot alter (it altered 5 single-club picks,
 by one character). The Contact_IDs (q18) sum is left exactly as it is: with
 Submit shown, only one roster is visible.
 
-Added once per form. From then on every run, the runner's included, keeps the
-warning, both rules, the club list in the rules and the `calcValues` in step
-(`UPDATE club guard (…)`, counted and named by the runner like a picker
-update). A form without the element keeps exactly today's rules, except the
+Added once per form. From then on every apply, the runner's included, keeps
+the warning, both rules, the club list in the rules and the `calcValues` in
+step (`UPDATE club guard (…)`, counted and named by the runner like a picker
+update). The runner applies only when something besides the rules changed:
+if an apply stops after the picker write and its retry fails too (ATTENTION
+"APPLY FAILED"), the new club is on the picker but not in the guard rules,
+so its mentors cannot submit, and every later run reports `in-sync` (a
+rules-only difference is not a change to the runner, as on a form without
+the guard, where the new roster never shows). **Do the dry run and
+`--apply` by hand straight away** after any APPLY FAILED. A form without the element keeps exactly today's rules, except the
 spelling fix below. **Status:** built 2026-09-29 on `wf5/club-guard`, not
 deployed.
 

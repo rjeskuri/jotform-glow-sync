@@ -240,6 +240,38 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertFalse(auto_sync.PARTNER_PICKER_RX.match(
             "  - HIDE partner textbox (q331: the partner list replaces it)"))
 
+    def test_a_failed_apply_says_later_runs_will_not_repair_it(self):
+        # a half-write (the roster and picker written, the conditions PUT failed twice)
+        # leaves only the rules stale, and a rules-only difference is not a change to
+        # the runner: every later run reports in-sync while the new club's roster never
+        # shows and, on a guarded form, its mentors cannot submit. ATTENTION says so.
+        import tempfile
+        import types
+        from unittest import mock
+        dry = ("Roster: 3 active clubs in Africa (40 girls); 300 clubs overall\n"
+               "\nDRY RUN (use --apply to write):\n"
+               "  - CREATE roster 'Gamma Club' (2 girls)\n"
+               "  - REPLACE conditions (25 rules)\n")
+        results = iter([types.SimpleNamespace(returncode=0, stdout=dry, stderr="")]
+                       + [types.SimpleNamespace(returncode=1, stdout="", stderr="PUT /properties: 502")] * 2)
+        with tempfile.TemporaryDirectory() as out:
+            args = types.SimpleNamespace(apply=True, out=out, max_creates=5, max_updates=20,
+                                         trigger="test", run_url="")
+            run = auto_sync.Run(args)
+            with mock.patch.object(run, "sync", lambda *a, **k: next(results)), \
+                    mock.patch.object(run, "cmd", lambda *a, **k: types.SimpleNamespace(
+                        returncode=0, stdout="", stderr="")), \
+                    mock.patch.object(run, "save_conditions", lambda form: None), \
+                    mock.patch("builtins.print"):
+                run.region("Africa", os.path.join(out, "roster.csv"))
+        self.assertTrue(run.failed)
+        self.assertEqual([r[7] for r in run.results], ["failed"])
+        (title, detail), = run.attention
+        self.assertIn("APPLY FAILED", title)
+        self.assertIn("later runs report this form in-sync", detail)
+        self.assertIn("--apply", detail)
+        self.assertIn("PUT /properties: 502", detail)
+
     def test_picker_shape_is_the_searchable_component(self):
         self.assertEqual(sync.PICKER_PROPS["multipleSelections"], "Yes")   # Jotform's type-to-filter dropdown
         self.assertEqual(sync.PICKER_PROPS["required"], "Yes")
