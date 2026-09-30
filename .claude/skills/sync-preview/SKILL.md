@@ -14,5 +14,7 @@ disable-model-invocation: true
 4. Report: the `Roster:` line, every `CREATE` / `UPDATE` / `DELETE` line, the `REPLACE` rule
    count, and every `!` / `?` warning verbatim (they contain club names only). Say whether
    `tools/auto_sync.py`'s bands would allow it (≤ 5 creates, ≤ 20 updates, no deletes, no
-   "shares NO names").
+   "shares NO names", no "Club Name (question 5, what Salesforce reads) changes" — that one is a
+   Salesforce Account rename and is only ever applied by hand). A "not added: give it a
+   different name" line is a new club refused for its name: say so, it needs a human.
 5. Do not add `--apply`. Applying is Ryan's decision (`.claude/skills/live-systems`).
