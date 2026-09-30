@@ -2892,6 +2892,14 @@ class GlowClient(unittest.TestCase):
         self.assertIsNone(self.bodies[2])                        # a GET sends nothing
         self.assertEqual(c.calls, ["REPLACE conditions", "POST translations"])
 
+    def test_a_retry_sends_the_body_again(self):
+        from unittest import mock
+        c = self.gj.Client("KEY", apply=True, retries=3, backoff=0, sleep=lambda s: None)
+        with mock.patch.object(self.gj.subprocess, "run",
+                               self.fake(["<html>504</html>", "<html>504</html>", self.ok()])):
+            self.assertEqual(c.put_json("/form/1/properties", {"a": "é"}, "REPLACE y"), {"x": 1})
+        self.assertEqual(self.bodies, [json.dumps({"a": "é"})] * 3)
+
     def test_an_argument_too_large_for_a_command_line_is_refused_not_tried(self):
         from unittest import mock
         c = self.gj.Client("KEY", apply=True)
@@ -2901,6 +2909,10 @@ class GlowClient(unittest.TestCase):
             self.assertIn("cannot go on a command line", str(e.exception))
             self.assertNotIn("nnnn", str(e.exception))
             self.assertEqual(self.spawned, [])                   # curl was never started
+            dry = self.gj.Client("KEY")                          # a dry run refuses it as well
+            with self.assertRaises(self.gj.JotformError):
+                dry.post_form("/form/1/question/5", {"question[options]": "n" * 130_000}, "UPDATE q5")
+            self.assertEqual((dry.calls, self.spawned), ([], []))
             self.assertEqual(c.post_form("/form/1/question/5", {"question[options]": "n" * 90_000},
                                          "UPDATE q5"), {"x": 1})
 

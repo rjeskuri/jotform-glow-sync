@@ -59,22 +59,22 @@ class Client:
         """Run curl with `args`; `body`, when given, is sent on curl's standard input
         (the argument list then says "--data-binary @-"). Writes are gated on
         self.apply; see the module doc."""
+        big = max((len(str(a).encode("utf-8")) for a in args), default=0)
+        if big > MAX_ARG_BYTES:           # before the gate: a dry run must refuse what an apply would
+            raise JotformError(f"{label}: an argument of {big} bytes cannot go on a command line "
+                               f"(Linux allows 131,072) - send it as the body")
         if is_write(args):
             self.calls.append(label)
             if not self.apply:
                 return None
-        big = max((len(str(a).encode("utf-8")) for a in args), default=0)
-        if big > MAX_ARG_BYTES:
-            raise JotformError(f"{label}: an argument of {big} bytes cannot go on a command line "
-                               f"(Linux allows 131,072) - send it as the body")
         if self.max_time is not None:
             args = ["--max-time", str(self.max_time)] + list(args)
         extra = {} if body is None else {"input": body}
         last = None
         for attempt in range(1, self.retries + 1):
             try:
-                out = subprocess.run(["curl", "-sS"] + list(args),
-                                     capture_output=True, text=True, **extra)
+                out = subprocess.run(["curl", "-sS"] + list(args), capture_output=True,
+                                     text=True, encoding="utf-8", **extra)
             except OSError as e:          # e.g. E2BIG: never a half-made request
                 raise JotformError(f"{label}: curl could not be started: {e.strerror or e}")
             try:
