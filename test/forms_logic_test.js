@@ -1161,6 +1161,11 @@ const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose
         kinds(r) === 'club,partner', kinds(r));
   r = same('Fundacion Demo', 'Alpha Club', fresh, true);
   check('…but another partner\'s name under a retyped organization is both', kinds(r) === 'samename,partner', kinds(r));
+  r = dg.newClubHoldReasons_({ partner: 'Fundacion Demo', club: 'Comet Club', names: fresh, typedPartner: true }, file,
+                             [P1, P2, P3, 'Fundación Demo', 'Fundacion Demo']);
+  check('…and once staff add that organization to the Partners tab (another partner after all), its name is another ' +
+        'partner\'s: the exception cannot let a namesake through',
+        kinds(r) === 'samename' && texts(r) === 'the club name is already used by Comet Club (Fundación Demo)', texts(r));
   check('a brand-new organization typed with a name in use: held (samename)',
         kinds(same('Moonbeam Collective', 'Alpha Club', fresh, true)) === 'samename');
   const crowd = dg.newClubHoldReasons_({ partner: P3, club: 'Stars', names: fresh },
@@ -1663,6 +1668,12 @@ console.log('\nA new club with a name another partner\'s club has is held until 
   check('…and a release with neither fixed is refused for both',
         res === 'ERROR: release refused: the club name is already used by Stars (Partner One); the organization was typed as ' +
                 '"Fundacion Demo", close to Fundación Demo on file. First, ' + STEP + '; and ' + ORG_STEP + '.', res);
+  w = sheetWorld(tabs());
+  w.tabs.Partners.push(['Fundacion Demo', 'Asia', 'another organization']);
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, typedOrg('Stars'), KEY, true);
+  check('…the organization added to the Partners tab, the name unchanged: still refused, for the name alone',
+        res === 'ERROR: release refused: the club name is already used by Stars (Partner One). First, ' + STEP + '.' &&
+        !w.tabs.Roster.some(r => r[1] === 'Fundacion Demo'), res);
   w = sheetWorld(tabs());
   res = w.ctx.handleNewClub_(sent('Stars - Partner One'), SRC, KEY);
   check('a new club typed as "<club> - <partner>" of a club on file: held with the same issue',

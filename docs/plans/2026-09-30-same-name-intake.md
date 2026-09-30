@@ -153,7 +153,9 @@ Alpha Club).
   same name): by design — it costs one question to the partner. Nothing is
   lost; the response stays on its row.
 - **Staff release without renaming:** refused, offered again, plus a "Form
-  response could not be processed" item to close — a little noise.
+  response could not be processed" item to close — a little noise. The same
+  happens when the organization was added to the Partners tab but the name
+  was left (tested).
 - **Rollback of this push** to the code before it: same-name holds stay held
   (the older code lists them as "no ReviewQueue item for this row and time"
   and never imports them); new same-name clubs are imported again and the
@@ -192,5 +194,39 @@ Alpha Club).
    want other words; afterwards open items keep the old text.
 
 ## Proof
-See the end of this file once the branch is finished: `make check` and the
-read-only run of the new functions over a fresh Roster export.
+`make check CSV=<the main checkout>/data/enrollment_2026-08-24.csv` on
+`wf6/same-name-intake` (2026-09-30), the healthy lines:
+
+```
+real data (…/data/enrollment_2026-08-24.csv): parsed 328 clubs, 6210 girls
+ALL CHECKS PASSED          (×3: parity, forms logic, dispatch)
+py: 34 files parse, 20 scripts answer --help
+Ran 221 tests … OK
+gs: 10 files parse
+secrets: clean (136 files scanned)
+docs-links: ok (59 relative links resolve, 0 absolute paths)
+fixtures: up to date
+CHECK PASSED
+```
+
+Read-only, the same day, after the two duplicate clubs were retired: the
+real `.gs` functions run in Node over a fresh export of the Roster and SF
+Pending tabs (scratch files, deleted afterwards; counts, club and partner
+names only were printed; nothing was written anywhere, no Jotform or
+Salesforce call).
+- Roster: 6,946 rows, 6,847 active; 364 clubs on file, 362 active.
+- `sharedClubNames_`: 3 names shared by active clubs; `sfClubName_` gives 7
+  long names, character for character the 7 of the plan's table.
+- Any status: 5 names, 11 clubs — the set the intake check protects. Had
+  each club on file arrived as a new club today, exactly those 11 would
+  have been held for their name, none of the other 353.
+- A fictional new club with one of the shared names under a third partner:
+  held (`samename`), every club of that name listed. Each club that has the
+  name, sending its own list with one new girl: not held.
+- No active club's own re-enrollment is held for its name (0 of 362). No
+  club on file has a name that reads as another club's `<club> - <partner>`;
+  no club or partner name contains `|`, `{` or `}`.
+- SF Pending: 36 rows, all pending; with the new lines none starts with a
+  long name and none carries "NAME SHARED", so the next Monday e-mail's
+  Salesforce section differs from last week's only in its first sentence.
+  Every pending club has active girls on the Roster.
