@@ -815,6 +815,15 @@ class FormStatusLayout(unittest.TestCase):
         self.assertEqual(layout.audit_layout(qs), ["0 Submit buttons, expected 1"])
         self.assertEqual(form_status.layout_line(layout.summary(qs)), "0 Submit button(s), no link")
 
+    def test_two_submit_buttons_are_not_reported_as_no_link(self):
+        qs = link_form(roster=True)                   # two links on it
+        qs["471"] = {"qid": "471", "type": "control_button", "name": "b2", "order": "30"}
+        rep = self.report(qs)
+        self.assertIn("2 Submit buttons, expected 1", rep["rule_problems"])
+        line = form_status.layout_line(rep["layout"])
+        self.assertNotIn("no link", line)
+        self.assertEqual(line, "2 Submit buttons, expected 1 - rosters not checked")
+
 
 class TranslationAudit(unittest.TestCase):
     """tools/add_translations.py: what counts as a string a mentor sees."""
@@ -2248,6 +2257,14 @@ class RosterLayout(unittest.TestCase):
                     for qid in new:
                         self.assertLess(order.index(qid), order.index(fence), (behaviour, n))
                     self.assertEqual([q["qid"] for q in layout.rosters_below(qs)], ["400"])
+                    # where among the rosters (RUNBOOK "Rosters above Submit"): inserted,
+                    # just above the last roster above the fence, newest first; tied,
+                    # just after it, in creation order
+                    i = order.index("350")
+                    if behaviour == "insert":
+                        self.assertEqual(order[i - n:i], new[::-1], n)
+                    else:
+                        self.assertEqual(order[i + 1:i + 1 + n], new, n)
 
     def test_the_tail_plan(self):
         qs = link_form()
@@ -2341,6 +2358,23 @@ class RosterLayout(unittest.TestCase):
         for name, now in (("a new question", grown), ("a roster moved", shifted)):
             with self.assertRaises(SystemExit, msg=name):
                 layout.plan_restore(now, qs)
+
+    def test_the_restore_plan_refuses_a_snapshot_with_a_tie_and_says_why(self):
+        # the Club Roster Form link placed before the repair: plan_insert moves
+        # q443 and Submit one down, so Submit shares the next hidden field's order
+        qs = link_form()
+        order, moves = links.plan_insert(qs, links.ROSTER)
+        linked = move_all(qs, moves)
+        linked["460"] = {"qid": "460", "type": "control_text", "name": links.ROSTER.name,
+                         "order": str(order)}
+        self.assertEqual(links.order_of(linked["2"]), links.order_of(linked["103"]))
+        repaired = move_all(linked, layout.plan_tail_moves(linked))
+        self.assertEqual(layout.audit_layout(repaired), [])           # the repair itself is fine
+        with self.assertRaises(SystemExit) as cm:                      # its undo refuses, and says why
+            layout.plan_restore(repaired, linked)
+        self.assertIn(f"the snapshot holds more than one question at order {links.order_of(linked['2'])}",
+                      str(cm.exception.code))
+        self.assertIn("Revision History", str(cm.exception.code))
 
     def test_the_audit(self):
         qs = link_form()
@@ -2476,6 +2510,44 @@ class FixRosterOrderTool(unittest.TestCase):
         self.assertLess(names.index("MoonriseClub"), names.index("submit2"))
         for fid in self.FIDS[1:]:
             self.assertEqual(fake.forms[fid], link_form(), fid)
+        # the message says what the re-read shows, and no longer that only one
+        # element moved - with a roster renumbered, --undo refuses (it says so)
+        self.assertIn("other question(s) changed order", str(code))
+        self.assertNotIn("only that element moved", str(code))
+        self.assertIn("the re-read shows every roster above Submit", str(code))
+        self.assertIn("--undo (below) refuses: a roster's order changed too (q400)", str(code))
+        self.assertIn("Revision History", str(code))
+        with self.assertRaises(SystemExit) as cm:
+            layout.plan_restore(tpl, link_form())
+        self.assertIn("roster(s) changed order since the snapshot", str(cm.exception.code))
+
+    def test_a_probe_that_finds_only_the_written_order_off_says_undo_puts_it_back(self):
+        # a Jotform that ignores the order sent: nothing else moved - and the
+        # re-read is measured, not assumed safe (the roster is still below Submit)
+        class Ignoring(FakeFormClient):
+            def post_form(self, path, data, label):
+                self.writes.append(label)
+                return {}
+        fid = glow_forms.TEMPLATE
+        fake = Ignoring({fid: link_form()})
+        code, _, events = self.run_main(fake, "--form", fid, "--apply")
+        self.assertEqual([e.split(" ")[0] for e in events], ["snap", "write"])
+        self.assertIn("q2 holds 11, sent 16", str(code))
+        self.assertNotIn("other question(s) changed order", str(code))
+        self.assertIn("no other order changed, so --undo (below) puts that element back", str(code))
+        self.assertIn("the re-read shows 1 roster(s) below Submit", str(code))
+        self.assertRegex(str(code), rf"--form {fid} --undo \d{{4}}-\d\d-\d\dT\d{{6}}")
+
+        class Nudging(FakeFormClient):              # another (non-roster) order moves as well
+            def post_form(self, path, data, label):
+                self.forms[fid]["103"]["order"] = "112"
+                return super().post_form(path, data, label)
+        fake = Nudging({fid: link_form()})
+        code, _, _ = self.run_main(fake, "--form", fid, "--apply")
+        self.assertIn("1 other question(s) changed order, e.g. q103 12 -> 112", str(code))
+        self.assertIn("the --undo dry run (below) plans the way back or refuses", str(code))
+        self.assertEqual(move_all(fake.forms[fid], layout.plan_restore(fake.forms[fid], link_form())),
+                         link_form())                # here it plans it
 
     def test_a_write_that_changes_anything_else_fails_the_verify_and_stops(self):
         class Meddling(FakeFormClient):
@@ -2507,6 +2579,70 @@ class FixRosterOrderTool(unittest.TestCase):
         again = layout.plan_tail_moves(half)
         self.assertEqual(rendered(move_all(half, again)),
                          rendered(move_all(link_form(), layout.plan_tail_moves(link_form()))))
+
+    def test_after_a_stop_the_stopped_runs_stamp_stays_the_rollback(self):
+        # run 1 stops part-way; its stop repeats its stamp, and the re-run's
+        # plan says the form is part-way, so the re-run's snapshot (of the
+        # part-way form) is not taken for the form before the repair
+        fid = glow_forms.TEMPLATE
+
+        class Failing(FakeFormClient):
+            def post_form(self, path, data, label):
+                if "belowAre" in label:
+                    raise fix_roster_order.JotformError(label + ": non-JSON response: '<html>504'")
+                return super().post_form(path, data, label)
+        fake = Failing({fid: link_form()})
+        code, out, _ = self.run_main(fake, "--form", fid, "--apply")
+        stamp = re.search(r"--undo (\S+)\)", out).group(1)
+        self.assertIn(f"the rollback to this form as this run found it: --form {fid} --undo {stamp}",
+                      str(code))
+        code, out, events = self.run_main(FakeFormClient(fake.forms), "--form", fid)   # the dry run
+        self.assertEqual((code, events), (0, []))
+        self.assertIn("part-way: 2 element(s) already render after the last roster", out)
+        self.assertIn("the --undo stamp that run printed", out)
+        _, fresh, _ = self.run_main(FakeFormClient({fid: link_form()}), "--form", fid)
+        self.assertNotIn("part-way", fresh)
+        # nothing written (a changed form, or an error before the first POST): no rollback line
+        for fail in ("drift", "read"):
+            class Reading(FakeFormClient):
+                gets = 0
+
+                def get(self, path, **params):
+                    if path.endswith("/questions"):
+                        self.gets += 1
+                        if self.gets == 2 and fail == "read":
+                            raise fix_roster_order.JotformError(path + ": non-JSON response: '<html>504'")
+                        if self.gets == 2:
+                            self.forms[fid]["490"] = {"qid": "490", "type": "control_checkbox",
+                                                      "name": "LateClub", "hidden": "Yes", "order": "40"}
+                    return super().get(path, **params)
+            code, _, events = self.run_main(Reading({fid: link_form()}), "--form", fid, "--apply")
+            self.assertEqual(events, ["snap " + fid], fail)
+            self.assertNotIn("--undo", str(code), fail)
+        self.assertIn("nothing was written to it", str(code))
+
+    def test_a_failed_re_read_stops_with_the_count_and_what_was_not_verified(self):
+        # a 504 on the probe's GET or on the verify's: stop() with the count, not
+        # a bare API error - after the last write the dry run says "nothing to do"
+        fid = glow_forms.TEMPLATE
+        for writes, confirmed in ((1, "1 of 4"), (4, "4 of 4")):
+            class Failing(FakeFormClient):
+                failed = False
+
+                def get(self, path, **params):
+                    if path.endswith("/questions") and len(self.writes) == writes and not self.failed:
+                        self.failed = True
+                        raise fix_roster_order.JotformError(path + ": non-JSON response: '<html>504'")
+                    return super().get(path, **params)
+            fake = Failing({fid: link_form()})
+            code, _, events = self.run_main(fake, "--form", fid, "--apply")
+            self.assertEqual(len(events), 1 + writes, writes)             # the snapshot, then the writes
+            self.assertIn(f"{confirmed} moves were confirmed; the re-read that verifies the form "
+                          "did not run", str(code))
+            self.assertNotIn("can hide a completed write", str(code))    # every POST answered
+            self.assertIn(f"tools/form_status.py --form {fid}", str(code))
+            self.assertIn("Re-run the dry run", str(code))
+            self.assertRegex(str(code), rf"--form {fid} --undo \S+")
 
     def test_undo_puts_the_snapshot_orders_back_by_the_same_path(self):
         from unittest import mock
@@ -2556,6 +2692,32 @@ class FixRosterOrderTool(unittest.TestCase):
         problems = fix_roster_order.verify(qs, partial, [], [], moves)
         self.assertTrue(any("hold another order than sent" in p for p in problems), problems)
         self.assertTrue(any("render below somethingNotWorking" in p for p in problems), problems)
+
+
+class RosterRepairRunbook(unittest.TestCase):
+    """docs/RUNBOOK.md "Rosters above Submit": the runner is paused before the
+    merge (the form_status check ships with it), and the procedures whose
+    checks expect CLEAN come after the repair."""
+
+    def section(self):
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        return doc.split("## Rosters above Submit", 1)[1].split("\n## ", 1)[0]
+
+    def test_the_runner_is_paused_before_the_merge(self):
+        text = self.section()
+        self.assertNotIn("Before the first `--apply`", text)
+        self.assertRegex(text, r"AUTO_SYNC_APPLY=0`?,? (set )?before (merging|the merge)")
+        self.assertIn("then back to `1`", text)
+
+    def test_what_expects_clean_waits_for_the_repair(self):
+        backlog = {l.split("|")[1].strip(): l for l in read(os.path.join(REPO, "docs", "BACKLOG.md"))
+                   .splitlines() if re.match(r"\| 4[56] \|", l)}
+        self.assertLess(backlog["45"].index("after 47's repair"), backlog["45"].index("`AUTO_SYNC_APPLY=0`"))
+        self.assertIn("after 47's repair", backlog["46"])
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        partner = doc.split("## The partner list", 1)[1].split("```bash", 1)[0]
+        self.assertIn('("Rosters above Submit")', partner)
+        self.assertIn("the partner list", self.section())
 
 
 class WorkLog(unittest.TestCase):

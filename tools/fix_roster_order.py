@@ -23,15 +23,20 @@ and re-plan (a form changed since the preview is not written), Submit first
 the first write a re-read checks Jotform kept the order as sent and moved
 nothing else, and after the last a re-read verifies the whole form (the same
 questions, identical apart from `order`, the orders as sent, every roster
-above the links and Submit, the rules unchanged). Anything unexpected stops
-the run: later forms stay untouched. Re-running is safe: it re-plans from
-what the form holds, and a finished form says "nothing to do".
+above the links and Submit, the rules unchanged). Anything unexpected -
+an API error on any read or write included - stops the run: later forms
+stay untouched. Re-running is safe: it re-plans from what the form holds, a
+form an earlier run left part-way says so, and a finished form says
+"nothing to do".
 
 The rollback is --form <id> --undo <stamp> (the stamp printed with the
-snapshot): the orders of the snapshot taken before the writes go back, by
-the same path - dry run first, planned before written, probed, verified.
-It refuses once the form's questions or a roster's order have changed since
-(then the builder, or Jotform's Revision History).
+snapshot, and again when the run stops): the orders of the snapshot taken
+before this run's writes go back, by the same path - dry run first, planned
+before written, probed, verified. After a stop and a re-run, the stopped
+run's stamp is the form before the repair; the re-run's is the part-way
+form. It refuses once the form's questions or a roster's order have changed
+since, or when the snapshot holds two questions at one order (then the
+builder, or Jotform's Revision History).
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -54,7 +59,7 @@ from glow import forms as glow_forms               # noqa: E402
 from glow import layout                            # noqa: E402
 from glow.cli import run                           # noqa: E402
 from glow.jotform import Client, JotformError      # noqa: E402
-from glow.links import order_of                    # noqa: E402
+from glow.links import order_of, render_key        # noqa: E402
 from sync_attendance_form import same_conditions   # noqa: E402
 
 # the template first: it is repaired (and looked at) before any live form
@@ -74,11 +79,21 @@ def plan_form(questions, conditions):
     at = layout.fence(questions)
     if not moves:
         return [], [f"nothing to do - every roster renders above {layout.label(at)}"]
-    rosters = sum(1 for q in questions.values() if layout.is_roster(q))
+    rosters = [q for q in questions.values() if layout.is_roster(q)]
     below = layout.rosters_below(questions, at)
-    notes = [f"{len(below)} of {rosters} rosters render below {layout.label(at)}; "
+    notes = [f"{len(below)} of {len(rosters)} rosters render below {layout.label(at)}; "
              f"{len(moves)} element(s) move to orders {min(o for _, o in moves)}-"
              f"{max(o for _, o in moves)}"]
+    # unrepaired, the last element is the newest roster; the first write of a
+    # repair lands after it - so this is what a stopped run leaves
+    last = max(rosters, key=render_key)
+    ahead = [q for q in questions.values()
+             if not layout.is_roster(q) and render_key(q) > render_key(last)]
+    if ahead:
+        notes.append(f"part-way: {len(ahead)} element(s) already render after the last roster "
+                     "- an earlier --apply stopped here (or a hand edit); the rollback to the "
+                     "form before the repair is the --undo stamp that run printed, not the "
+                     "snapshot this run takes")
     return _steps(questions, moves), notes
 
 
@@ -107,23 +122,56 @@ def fingerprint(q):
     return hashlib.sha1(json.dumps(rest, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def moved_others(before, after, done):
+    """The qids not written by `done` ([(qid, order)]) whose order changed."""
+    sent = dict(done)
+    return sorted((qid for qid in before if qid not in sent and qid in after
+                   and order_of(after[qid]) != order_of(before[qid])), key=int)
+
+
 def check_orders(before, after, done):
     """Problems with the orders on a re-read form: an element moved by `done`
     ([(qid, order)]) holding another order than sent, or any other question's
     order changed. qids and orders only."""
-    sent = dict(done)
     problems = []
     wrong = [f"q{qid} holds {order_of(after[qid])}, sent {o}" for qid, o in done
              if qid in after and order_of(after[qid]) != o]
     if wrong:
         problems.append("moved element(s) hold another order than sent: " + "; ".join(wrong))
-    moved = sorted((qid for qid in before if qid not in sent and qid in after
-                    and order_of(after[qid]) != order_of(before[qid])), key=int)
+    moved = moved_others(before, after, done)
     if moved:
         problems.append(f"{len(moved)} other question(s) changed order, e.g. "
                         + "; ".join(f"q{q} {order_of(before[q])} -> {order_of(after[q])}"
                                     for q in moved[:5]))
     return problems
+
+
+def probe_stop(before, now, done):
+    """The stop message when the probe after the first write finds the orders
+    not as planned: what it found, what the re-read shows of the rosters and
+    Submit (measured, not assumed), and the way back that works in that case.
+    qids, orders and counts only."""
+    found = layout.buttons(now)
+    if len(found) == 1:
+        n = len(layout.rosters_below(now, found[0]))
+        seen = (f"the re-read shows {n} roster(s) below Submit" if n
+                else "the re-read shows every roster above Submit")
+    else:
+        seen = f"the re-read shows {len(found)} Submit buttons"
+    msg = ("after the first write: " + "; ".join(check_orders(before, now, done))
+           + " - Jotform does not keep an order update as sent")
+    others = moved_others(before, now, done)
+    if not others:
+        return (msg + "; nothing more was written to it and no other order changed, so --undo "
+                "(below) puts that element back; " + seen + ". Record this in the jotform-api skill")
+    rosters = [q for q in others if layout.is_roster(now[q])]
+    back = (f"--undo (below) refuses: a roster's order changed too (q{rosters[0]}) - go back in "
+            "the builder, or with Jotform's Revision History" if rosters else
+            "the --undo dry run (below) plans the way back or refuses (then the builder, or "
+            "Jotform's Revision History)")
+    return (msg + ", or another writer changed the form; nothing more was written to it; "
+            + seen + ". Other orders changed too: open the form; " + back
+            + "; rule out another writer before recording this in the jotform-api skill")
 
 
 def verify(before, after, rules_before, rules_after, done, restored=None):
@@ -202,47 +250,56 @@ def main():
 
     written = []
 
-    def stop(form_id, msg):
+    def stop(form_id, msg, wrote=False):
         done = f"; written before it: {', '.join(written)}" if written else ""
+        # this run's stamp: after an earlier stop, that run's stamp is the form
+        # before the repair (the part-way note in the plan says so)
+        back = (f"\n   the rollback to this form as this run found it: --form {form_id} "
+                f"--undo {stamp} (dry run first)" if wrote else "")
         sys.exit(f"   ! {targets[form_id]} {form_id}: {msg}\nstopped - the forms after it are "
-                 f"untouched{done}. Re-run the dry run before anything else.")
+                 f"untouched{done}. Re-run the dry run before anything else.{back}")
 
     for form_id, steps in planned.items():
         if not steps:
             continue
         print(f"\n== writing {targets[form_id]} {form_id}")
-        snapshot(form_id, client, stamp)                  # the rollback path, before any write
-        print(f"   snapshot: backups/{form_id}/questions-{stamp}.json "
-              f"(the rollback: --form {form_id} --undo {stamp})")
-        before, rules_before = read(form_id)              # the form may have changed since the preview
-        again, _ = plan(form_id, before, rules_before)
-        if [s["label"] for s in again] != [s["label"] for s in steps]:
-            stop(form_id, "the form changed since the preview - nothing written to it")
-        done = []
-        for step in steps:
-            try:
+        sent, done = [], []      # POSTs sent / confirmed ([(qid, order)])
+        # an API error on any read or write stops the run here: a 504 on the
+        # probe or the verify re-read must not skip the verify unannounced
+        try:
+            snapshot(form_id, client, stamp)              # the rollback path, before any write
+            print(f"   snapshot: backups/{form_id}/questions-{stamp}.json (the rollback to the "
+                  f"form as this run found it: --form {form_id} --undo {stamp})")
+            before, rules_before = read(form_id)          # the form may have changed since the preview
+            again, _ = plan(form_id, before, rules_before)
+            if [s["label"] for s in again] != [s["label"] for s in steps]:
+                stop(form_id, "the form changed since the preview - nothing written to it")
+            for step in steps:
+                sent.append(step["qid"])
                 client.post_form(f"/form/{form_id}/question/{step['qid']}",
                                  {"question[order]": str(step["order"])},
                                  f"{form_id} {step['label']}")
-            except JotformError as err:
-                stop(form_id, f"{err} - {len(done)} of {len(steps)} moves were confirmed (a "
-                              "gateway 504 can hide a completed write)")
-            done.append((step["qid"], step["order"]))
-            if len(done) == 1:
-                # the plan assumes a stored order is kept as sent and nothing else
-                # moves; one re-read proves it before the second write
-                problems = check_orders(before, client.get(f"/form/{form_id}/questions"), done)
-                if problems:
-                    stop(form_id, "after the first write: " + "; ".join(problems)
-                         + " - Jotform does not keep an order update as sent; the form is "
-                         "safe (only that element moved); record this in the jotform-api skill")
-                print(f"   probe: q{step['qid']} holds order {step['order']} as sent; "
-                      "no other order changed")
-        after, rules_after = read(form_id)
+                done.append((step["qid"], step["order"]))
+                if len(done) == 1:
+                    # the plan assumes a stored order is kept as sent and nothing else
+                    # moves; one re-read proves it before the second write
+                    now = client.get(f"/form/{form_id}/questions")
+                    if check_orders(before, now, done):
+                        stop(form_id, probe_stop(before, now, done), wrote=True)
+                    print(f"   probe: q{step['qid']} holds order {step['order']} as sent; "
+                          "no other order changed")
+            after, rules_after = read(form_id)
+        except JotformError as err:
+            if not sent:
+                stop(form_id, f"{err} - nothing was written to it")
+            stop(form_id, f"{err} - {len(done)} of {len(steps)} moves were confirmed"
+                 + (" (a gateway 504 can hide a completed write)" if len(done) < len(sent) else "")
+                 + "; the re-read that verifies the form did not run - after the dry run, "
+                 f"python3 tools/form_status.py --form {form_id} --roster data/roster_<date>.csv",
+                 wrote=True)
         problems = verify(before, after, rules_before, rules_after, done, saved.get(form_id))
         if problems:
-            stop(form_id, "MISMATCH after the writes: " + "; ".join(problems)
-                 + f" - backups/{form_id}/questions-{stamp}.json holds the orders before this run")
+            stop(form_id, "MISMATCH after the writes: " + "; ".join(problems), wrote=True)
         written.append(targets[form_id])
         if args.undo:
             print(f"   re-read: verified - the {args.undo} orders are back, nothing else changed")

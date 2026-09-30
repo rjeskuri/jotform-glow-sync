@@ -179,6 +179,9 @@ def audit_rules(questions, conditions):
 
 def layout_line(lo):
     """The printed report's `layout:` line, from form_report's `layout` field."""
+    n = lo.get("submit_buttons") or 0
+    if n > 1:                    # layout.summary finds no fence then: the links are not looked at
+        return f"{n} Submit buttons, expected 1 - rosters not checked"
     if not lo.get("fence"):
         return f"{lo.get('submit_buttons')} Submit button(s), no link"
     if lo.get("rosters_below"):

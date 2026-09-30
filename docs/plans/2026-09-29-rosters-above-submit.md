@@ -114,12 +114,17 @@ question by posting a new `order` has never been observed.
 - **A probe after the first write on each form** (not in the design): one
   re-read checks that the moved element took exactly its planned order and no
   other question's order changed; otherwise the tool stops — nothing more is
-  written to that form or any later one — and says what Jotform stored. The
-  targets assume a stored `order` is kept as sent (or inserted into an empty
-  slot, which shifts nothing); if Jotform renumbered the form on an update or
-  ignored the value, a later link could land below Submit. After the first
-  write the form is in a safe state (Submit at the end: every roster above
-  it, the links still above it). Cost: one GET per form (7 GETs + 9 POSTs).
+  written to that form or any later one — and says what Jotform stored and
+  what the re-read shows (every roster above Submit, or how many below:
+  measured, not assumed). If other orders changed too (a renumber, or
+  another writer) it says to open the form, and that `--undo` refuses when a
+  roster's order changed; if only the written element is off, that `--undo`
+  puts it back. The targets assume a stored `order` is kept as sent (or
+  inserted into an empty slot, which shifts nothing); if Jotform renumbered
+  the form on an update or ignored the value, a later link could land below
+  Submit. When the first write lands as sent the form is in a safe state
+  (Submit at the end: every roster above it, the links still above it).
+  Cost: one GET per form (7 GETs + 9 POSTs).
 - **The template first, and the run stops at the first form that does not
   verify** (the design's rollout, enforced by the tool): the default target
   order is template, Africa, Asia, Latin America, U.S; a systemic surprise
@@ -137,9 +142,16 @@ question by posting a new `order` has never been observed.
   first (top-down), then the hidden fields, Submit last, so the links stay
   above Submit at every step and every target is empty when written. It
   refuses once the form's questions or a roster's order differ from the
-  snapshot (the sync created or moved something since): then the builder, or
-  Jotform's Revision History. Hand-posting orders under pressure is where a
-  link would land below Submit.
+  snapshot (the sync created or moved something since), and when the
+  snapshot holds two questions at an order it would write back (a tie: the
+  Club Roster Form link placed before the repair leaves Submit sharing the
+  next hidden field's order) — writing onto a taken order would rest on
+  unobserved semantics; then the builder, or Jotform's Revision History.
+  Hand-posting orders under pressure is where a link would land below
+  Submit. After a stop and a re-run, the stopped run's stamp stays the
+  rollback to the form before the repair: the re-run's plan says
+  `part-way: …`, and every stop that follows a write repeats its own run's
+  `--undo` line.
 - The repair is a separate tool, never part of the runner: 45 order writes
   on five live forms want a person watching, a snapshot, and a browser check.
 - Translations (keyed by text or `text_<qid>`), the rules, the e-mails
@@ -160,7 +172,10 @@ question by posting a new `order` has never been observed.
 - `test/python_test.py` — `RosterLayout` (fence, slot, both Jotform
   behaviours, the tail plan and its refusals, re-runs, the audit),
   `FixRosterOrderTool` (dry run, refusal before any write, snapshot first,
-  drift, probe, verify, `--form`, `--undo`), `SyncLeavesTheLinksAlone` extended (the
+  drift, probe and its messages, API errors on the re-reads, the part-way
+  note, verify, `--form`, `--undo`), `RosterRepairRunbook` (the runner
+  paused before the merge; 45 and 46 after the repair),
+  `SyncLeavesTheLinksAlone` extended (the
   CREATE's order renders above the links under both behaviours),
   `PartnerPickerFlow` (no Submit: still highest + 1), form_status and
   `verify_report` wiring. Fictional clubs and girls only.
@@ -201,8 +216,11 @@ question by posting a new `order` has never been observed.
 
 Rollback per form: `python3 tools/fix_roster_order.py --form <id> --undo
 <stamp>` (dry run; `--apply` writes) with the stamp the tool printed with
-its snapshot (`backups/<id>/questions-<stamp>.json`), or Jotform's Revision
-History. Nothing but `order` changed.
+its snapshot (`backups/<id>/questions-<stamp>.json`) — after a stop and a
+re-run, the stopped run's stamp (the re-run's snapshot holds the part-way
+form) — or Jotform's Revision History. `--undo` is for right after the
+repair, before the Club Roster Form link is placed. Nothing but `order`
+changed.
 
 ## Risks
 - **Order-update semantics unobserved.** Empty target slots make set and
@@ -211,9 +229,12 @@ History. Nothing but `order` changed.
 - **The runner creating a roster mid-repair.** Paused first (step 1); the
   tool re-reads and re-plans right before writing and refuses on drift; the
   verify catches a change during the writes.
-- **A gateway 504 hiding a completed write.** The tool stops on any error and
-  says to re-run the dry run first — the re-plan starts from what the form
-  holds, and a stop anywhere ends in the same layout.
+- **A gateway 504 hiding a completed write.** The tool stops on any API
+  error — a write, the snapshot, the probe's or the verify's re-read — with
+  how many moves were confirmed and, when the verify did not run, a
+  `form_status --form <id>` to run after the dry run; it says to re-run the
+  dry run first — the re-plan starts from what the form holds, and a stop
+  anywhere ends in the same layout.
 - **Jotform ignoring the order.** The probe or the verify says so; form_status
   keeps the form NOT CLEAN.
 - **The new check turns every form NOT CLEAN at merge** until the repair —
@@ -273,9 +294,12 @@ written to any form or the sheet). Counts, qids and orders only.
    `order` differs. With the Club Roster Form link (46): placed before the
    repair (then 10 moves) or after it, the form ends clean, and a partner
    list inserted at order 7 (45) plus a new roster afterwards still leave
-   every roster above.
+   every roster above. Placed before the repair, `plan_insert` leaves Submit
+   sharing the next hidden field's order, so `--undo` refuses that snapshot
+   (the tie) and the rollback is Revision History; placed after it (the
+   order of the live steps), `--undo` works until the link is placed.
 
-`make check` (with the real export via `CSV=`):
+`make check` (with the real export via `CSV=`; after the review fixes of 2026-09-30):
 
 ```
 real data (../../../data/enrollment_2026-08-24.csv): parsed 328 clubs, 6210 girls
@@ -283,7 +307,7 @@ ALL CHECKS PASSED
 ALL CHECKS PASSED
 ALL CHECKS PASSED
 py: 34 files parse, 20 scripts answer --help
-Ran 153 tests in 0.140s
+Ran 160 tests in 0.155s
 OK
 gs: 10 files parse
 secrets: clean (130 files scanned)

@@ -174,9 +174,14 @@ def plan_restore(questions, saved):
     snapshotted before the repair): the repair's rollback, for right after
     it. Only what the repair moves (never a roster) goes back; refuses when
     the form's questions or a roster's order differ from the snapshot (the
-    form changed since - restore in the builder). Write order: the links
-    top-down, the hidden fields, Submit last - the links stay above Submit
-    at every step; every target must be empty when written."""
+    form changed since - restore in the builder), and when the snapshot
+    holds another question at an order to be written back (a tie, e.g. the
+    Club Roster Form link placed before the repair leaves Submit sharing the
+    next field's order): that cannot be rebuilt by writing to empty orders,
+    and writing onto a taken one would rest on unobserved semantics. Write
+    order: the links top-down, the hidden fields, Submit last - the links
+    stay above Submit at every step; every target must be empty when
+    written."""
     if set(questions) != set(saved):
         sys.exit(f"the form's questions differ from the snapshot ({len(set(saved) - set(questions))} "
                  f"gone, {len(set(questions) - set(saved))} new) - restore the layout in the builder")
@@ -193,6 +198,13 @@ def plan_restore(questions, saved):
     writes = ([q for q in ordered if q in link_qids]
               + [q for q in ordered if q not in link_qids and q not in button]
               + [q for q in ordered if q in button])
+    for qid in writes:
+        target = links.order_of(saved[qid])
+        tied = sorted((k for k in saved if k != qid and links.order_of(saved[k]) == target), key=int)
+        if tied:
+            sys.exit(f"the snapshot holds more than one question at order {target} (q{qid}, "
+                     f"q{tied[0]}) - --undo writes only to empty orders, so it cannot rebuild "
+                     "that; restore with Jotform's Revision History (or the builder)")
     bottom = _sequence(questions, link_qids | button)
     state = {k: dict(v) for k, v in questions.items()}
     for qid in writes:

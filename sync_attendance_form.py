@@ -6,8 +6,9 @@ The Google Sheet (club enrollment responses) is the single source of truth.
 This script reads a CSV export of that sheet and makes the Jotform form match:
 
   1. Creates a hidden roster checkbox question for any club that doesn't have
-     one yet (options = the girls' names from the sheet), after the last
-     roster above the links and the Submit button (glow/layout.py).
+     one yet (options = the girls' names from the sheet), at the order of
+     the last roster above the links and the Submit button, so it renders
+     above them (glow/layout.py).
   2. Updates the roster options of existing club questions when the sheet
      changed (new girls enrolled, corrections).
   3. Regenerates ALL conditional logic from scratch, in three categories:
