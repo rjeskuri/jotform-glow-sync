@@ -681,6 +681,103 @@ class ConditionBuilder(unittest.TestCase):
         self.assertEqual(values, ["Alpha Club", "Beta Club", "STARS", "STARS", "Stars"])
 
 
+class SameNameRule(unittest.TestCase):
+    """glow.sync: which club names two partners share, and the one string such a
+    club sends to question 5 (docs/plans/2026-09-30-same-name-clubs.md).
+    Fictional names."""
+
+    HEADER = "girl_id,partner,club,full_name,status,region\n"
+
+    def pairs(self, rows):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "roster.csv")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.HEADER)
+                for n, (partner, club, status, region) in enumerate(rows):
+                    name = "" if status == "blank" else f"Girl Number{n}"
+                    status = "active" if status == "blank" else status
+                    f.write(f'DEMOCLUB-SAMPLE-{n:03d},"{partner}","{club}",{name},{status},{region}\n')
+            return glow_sync.roster_pairs(path)
+
+    def test_the_separator_is_pinned(self):
+        self.assertEqual(glow_sync.SF_NAME_SEP, " - ")       # ASCII space, hyphen-minus, space
+        self.assertEqual(glow_sync.sf_club_name("Stars", "Partner One", True), "Stars - Partner One")
+        self.assertEqual(glow_sync.sf_club_name("Stars", "Partner One", False), "Stars")
+        # whitespace is collapsed, nothing else is touched: no case change, no accent folding
+        self.assertEqual(glow_sync.sf_club_name(" STARS  Club ", "Partner   Óne (P1)", True),
+                         "STARS Club - Partner Óne (P1)")
+        with self.assertRaises(SystemExit) as refused:        # a long name needs its partner
+            glow_sync.sf_club_name("Stars", "  ", True)
+        self.assertIn("needs its partner", str(refused.exception))
+        self.assertEqual(glow_sync.sf_club_name("Stars", "", False), "Stars")
+
+    def test_roster_pairs_are_every_club_of_every_status_and_region(self):
+        pairs = self.pairs([("Partner One", "Stars", "active", "Africa"),
+                            ("Partner One", "Stars", "inactive", "Africa"),
+                            ("Partner Two", " Stars ", "inactive", "Asia"),       # never active
+                            ("Partner Two", "Beta  Club", "inactive", "Asia"),
+                            ("Partner Two", "Beta Club", "active", "Asia"),       # …now active
+                            ("partner two", "BETA CLUB", "active", "Asia"),       # the same club
+                            ("", "Orphan", "active", "Asia"),                     # no partner: no form
+                            ("Partner One", "", "active", "Africa"),
+                            ("Partner Three", "Nameless", "blank", "U.S")])       # a row with no girl
+        self.assertEqual(pairs, {("Partner One", "Stars"): True, ("Partner Two", "Stars"): False,
+                                 ("Partner Two", "Beta Club"): True,
+                                 ("Partner Three", "Nameless"): False})
+        # …in read_roster_csv's own spelling for an active club (its first active row)
+        self.assertIn(("Partner Two", "Beta Club"), pairs)
+        with self.assertRaises(SystemExit):
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "not_a_roster.csv")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("a,b\n1,2\n")
+                glow_sync.roster_pairs(path)
+
+    def test_a_name_is_shared_when_two_partners_have_it(self):
+        pairs = {("Partner One", "Stars"): True, ("Partner Two", "STARS"): True,
+                 ("Partner One", "Alpha Club"): True, ("partner one", "Alpha  Club"): True,
+                 ("Partner Two", "Alpha Club - Juniors"): True,
+                 ("Partner One", "Moon"): True, ("Partner Three", "Moon"): False}
+        # compared by glow.text.key: case and spacing ignored; one partner written twice is
+        # one partner; a club whose own name holds " - " is its own name
+        self.assertEqual(glow_sync.shared_club_names(pairs), {"stars", "moon"})
+        # the one-time switch goes by ACTIVE clubs; a NEW club is checked against every club
+        self.assertEqual(glow_sync.shared_club_names(pairs, active_only=True), {"stars"})
+        self.assertEqual(glow_sync.club_partners(pairs)["moon"],
+                         {"partner one": "Partner One", "partner three": "Partner Three"})
+        self.assertEqual(glow_sync.club_partners(pairs)["alpha club"], {"partner one": "Partner One"})
+        self.assertEqual(glow_sync.shared_club_names({}), set())
+
+    def test_the_partner_is_read_back_by_stripping_the_clubs_own_text(self):
+        partners = {"partner one": "Partner One", "partner two": "Partner Two"}
+        read = glow_sync.long_name_partner
+        self.assertEqual(read("Stars - Partner One", "Stars", partners), "Partner One")
+        self.assertEqual(read("stars  -  PARTNER two", "STARS", partners), "Partner Two")
+        self.assertIsNone(read("Stars", "Stars", partners))                     # the plain name
+        self.assertIsNone(read("Stars - Partner Nine", "Stars", partners))      # not the Roster's
+        self.assertIsNone(read("Stars - Partner One", "Stars", None))
+        # never split on the separator: "Alpha Club - Juniors" renamed to "Alpha Club" still tests
+        # its old name until the sync runs, and "Juniors" is no partner
+        self.assertIsNone(read("Alpha Club - Juniors", "Alpha Club", {"partner one": "Partner One"}))
+        self.assertEqual(read("Alpha Club - Juniors - Partner One", "Alpha Club - Juniors", partners),
+                         "Partner One")
+        self.assertIsNone(read("Starship - Partner One", "Stars", partners))
+
+    def test_two_clubs_sending_one_name_are_a_clash(self):
+        clash = glow_sync.sf_name_clashes
+        self.assertEqual(clash([("Stars", "a"), ("Alpha Club", "b"), ("Beta Club", "c")]), [])
+        # compared as Salesforce matches an Account: case ignored
+        self.assertEqual(clash([("Stars", ("Africa", "11")), ("STARS", ("Asia", "20")),
+                                ("Alpha Club", ("Asia", "21"))]),
+                         [("Stars", [("Africa", "11"), ("Asia", "20")])])
+        # a club named like another club's long name; the same club seen twice is one club
+        self.assertEqual(clash([("Stars - Partner One", "x"), ("stars - partner one", "y"),
+                                ("Stars - Partner One", "x")]),
+                         [("Stars - Partner One", ["x", "y"])])
+
+
 class FakeForm:
     """sync_attendance_form.Jotform stand-in: one form held in memory. Reads
     answer from it; writes are recorded (label + payload) and, with apply, a
