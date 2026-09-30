@@ -53,6 +53,7 @@ ROSTERS = {
 SHEET = [
     ("ALPHACLU", "Partner One", "Alpha Club", "Africa", "active", [AMARA, BEA, CHIARA]),
     ("ALPHACLU", "Partner One", "Alpha Club", "Africa", "inactive", [NADIA]),     # she left the club
+    ("ALPHACLU", "Partner One", "Alpha Club", "Africa", "inactive", [BEA]),       # left, and came back: two rows
     ("STARS", "Partner One", "Stars", "Africa", "active", [DALIA, ESTHER]),
     ("STARS2", "Partner Two", "Stars", "Africa", "active", [FATIMA, GRACE]),
     ("OLDCLUB", "Partner Two", "Old Club", "Africa", "inactive", [HANA]),
@@ -349,7 +350,7 @@ class BackfillResolve(unittest.TestCase):
                          ("158", "Gone Club", None, None, None, [AMARA, BEA]))
         # no partner, so no Roster rows to look the names up in: all count as unknown (held)
         self.assertEqual(row["flags"], ["q5_differs", "retired_club", "no_account_name",
-                                        "name_not_on_roster_now:2", "name_unknown_to_roster:2"])
+                                        "name_unknown_to_roster:2"])
 
     def test_date_flags(self):
         for date, iso, flags in ((("2026", "09", "01"), "2026-09-01", []),
@@ -366,47 +367,68 @@ class BackfillResolve(unittest.TestCase):
     def test_name_flags(self):
         comma = "Marrowgate, Beatrice"
         row, = self.one({"10": [AMARA, STRANGER, STRANGER2]})
-        self.assertEqual(row["flags"], ["name_not_on_roster_now:2", "name_unknown_to_roster:2"])
+        self.assertEqual(row["flags"], ["name_unknown_to_roster:2"])
         self.assertEqual(row["names"], [AMARA, STRANGER, STRANGER2])       # still listed
         row, = self.one({"10": [AMARA, comma]}, q18=f"{AMARA}, {comma}")
-        self.assertEqual(row["flags"], ["q18_differs", "name_not_on_roster_now:1",
-                                        "name_unknown_to_roster:1", "name_has_comma"])
+        self.assertEqual(row["flags"], ["q18_differs", "name_unknown_to_roster:1", "name_has_comma"])
         row, = self.one({"10": [AMARA, BEA, AMARA]})
         self.assertEqual(row["flags"], ["name_repeats"])
 
     def test_a_name_that_is_no_option_today_is_unknown_to_the_roster_or_left_it(self):
         # the loader holds a session on name_unknown_to_roster (Salesforce would create a new
-        # Contact for a mistyped or renamed girl) and sends a girl who left the club
-        def flags(*names):
-            row, = self.one({"10": list(names)})
-            return row["flags"]
-        # she left: the Roster still has her row for this partner and club, inactive
-        self.assertEqual(flags(AMARA, NADIA), ["name_not_on_roster_now:1", "name_left_roster:1"])
+        # Contact for a mistyped or renamed girl) and sends a girl who left the club. These two
+        # are the only name flags, and the only flags written with a count
+        def flags(*names, qid="10", **kw):
+            rows, _, counts = self.resolve([submission("9001", {qid: list(names)}, **kw)])
+            return rows[0]["flags"], counts["names_active_not_an_option"]
+        # an option of the roster today is never flagged
+        self.assertEqual(flags(AMARA, BEA, CHIARA), ([], 0))
+        # she left: the club's only Roster row of that name is inactive
+        self.assertEqual(flags(AMARA, NADIA), (["name_left_roster:1"], 0))
         # the Roster never had that name for this club
-        self.assertEqual(flags(AMARA, STRANGER), ["name_not_on_roster_now:1", "name_unknown_to_roster:1"])
-        # both in one row: the two counts add up to name_not_on_roster_now's
+        self.assertEqual(flags(AMARA, STRANGER), (["name_unknown_to_roster:1"], 0))
+        # both in one row, each with its own count, 'left' first
         self.assertEqual(flags(NADIA, STRANGER, AMARA, STRANGER2),
-                         ["name_not_on_roster_now:3", "name_unknown_to_roster:2", "name_left_roster:1"])
-        # an option is compared exactly; the Roster by capitals and spaces only - a letter differs
-        self.assertEqual(flags(AMARA.upper()), ["name_not_on_roster_now:1", "name_left_roster:1"])
-        self.assertEqual(flags(AMARA.replace("whistle", "whistel")),
-                         ["name_not_on_roster_now:1", "name_unknown_to_roster:1"])
+                         (["name_left_roster:1", "name_unknown_to_roster:2"], 0))
+        # an option is compared exactly, the Roster by capitals and spaces only. A tick spelled
+        # unlike today's option that way is an ACTIVE girl of the club: no flag, but counted
+        self.assertEqual(flags(AMARA.upper()), ([], 1))
+        self.assertEqual(flags(NADIA.upper().replace(" ", "   ")), (["name_left_roster:1"], 0))
+        # a letter differs: unknown
+        self.assertEqual(flags(AMARA.replace("whistle", "whistel")), (["name_unknown_to_roster:1"], 0))
+        # she left and came back (an inactive row and an active one): she has not left
+        self.assertEqual(flags(BEA.lower(), NADIA), (["name_left_roster:1"], 1))
         # a girl of ANOTHER club is unknown to this one
-        self.assertEqual(flags(DALIA), ["name_not_on_roster_now:1", "name_unknown_to_roster:1"])
-        # a roster whose partner cannot be told (two partners have the name): all unknown
-        row, = self.one({"23": [OLIVIA, PRIYA]}, q5="Twin Club", picks=("Twin Club",))
-        self.assertEqual(row["flags"], ["retired_club", "name_not_on_roster_now:1", "name_unknown_to_roster:1"])
-        # counted per form by the bare name, like every flag
-        _, _, counts = self.resolve([submission("9001", {"10": [NADIA, STRANGER]}),
-                                     submission("9002", {"10": [NADIA]})])
-        self.assertEqual([counts["flags"][f] for f in ("name_not_on_roster_now", "name_unknown_to_roster",
-                                                       "name_left_roster")], [2, 1, 2])
+        self.assertEqual(flags(DALIA), (["name_unknown_to_roster:1"], 0))
+        # a club with no active row at all: a name that is no option today left with the rest
+        self.assertEqual(flags(HANA.upper(), qid="13", q5="Old Club", picks=("Old Club",)),
+                         (["retired_club", "name_left_roster:1"], 0))
+        # a roster whose partner cannot be told (two partners have the name): no Roster rows
+        # to ask, so a name that is no option today is unknown
+        self.assertEqual(flags(OLIVIA, PRIYA, qid="23", q5="Twin Club", picks=("Twin Club",)),
+                         (["retired_club", "name_unknown_to_roster:1"], 0))
+        # counted per form by the bare name, like every flag; the old wider flag is gone
+        rows, _, counts = self.resolve([submission("9001", {"10": [NADIA, STRANGER]}),
+                                        submission("9002", {"10": [NADIA]})])
+        self.assertEqual([counts["flags"][f] for f in ("name_left_roster", "name_unknown_to_roster")], [2, 1])
+        self.assertNotIn("name_not_on_roster_now", counts["flags"])
+        self.assertNotIn("name_not_on_roster_now", json.dumps(rows))
+        self.assertNotIn("name_not_on_roster_now", br.FLAGS)
+        # the unflagged case is printed, as a count, only when there is one
+        def said(subs):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                br.report("Africa", self.resolve(subs)[2])
+            return out.getvalue()
+        line = "ticked name(s) are not an option of their roster today but an ACTIVE girl"
+        self.assertIn("   2 " + line, said([submission("9001", {"10": [AMARA.upper(), BEA.lower()]})]))
+        self.assertNotIn(line, said([submission("9001", {"10": [AMARA, NADIA]})]))
 
     def test_the_flag_list_is_the_contract(self):
         self.assertEqual(br.FLAGS, [
             "multi_club", "q5_differs", "q18_empty", "q18_differs", "typed_era", "bare_shared_name",
             "retired_club", "no_account_name", "date_before_2026_09", "date_missing",
-            "name_not_on_roster_now", "name_unknown_to_roster", "name_left_roster",    # the loader's two
+            "name_left_roster", "name_unknown_to_roster",          # the only two written with ":<n>"
             "name_has_comma", "name_repeats"])
 
     # ---- no ticks, the range, the ledger
@@ -491,7 +513,7 @@ class BackfillResolve(unittest.TestCase):
                      "not a dry run's plan")
 
     def test_club_codes_come_from_the_girl_ids(self):
-        rows, active, codes, holders, known = self.roster
+        rows, active, codes, holders, known, on = self.roster
         self.assertEqual(rows, SHEET_ROWS)
         self.assertEqual(codes[("partner one", "stars")], ["STARS"])
         self.assertEqual(codes[("partner two", "old club")], ["OLDCLUB"])
@@ -501,6 +523,9 @@ class BackfillResolve(unittest.TestCase):
         self.assertEqual(holders["quiet club"], {"partner two": "Partner Two"})
         self.assertEqual(sorted(holders["twin club"]), ["partner one", "partner two"])
         self.assertEqual(len(known[("partner one", "alpha club")]), 4)
+        # ... and the ones with an active row: she who left is not one, she who came back is
+        self.assertEqual(len(on[("partner one", "alpha club")]), 3)
+        self.assertNotIn(("partner two", "old club"), on)
         two = self.roster._replace(codes={**codes, ("partner one", "alpha club"): ["ALPHA2", "ALPHACLU"]})
         self.refused(lambda: br.resolve("Africa", AFRICA, [submission("9001", {"10": [AMARA]})],
                                         questions(), br.rosters_today(plan()), two),
@@ -601,7 +626,8 @@ class BackfillResolve(unittest.TestCase):
         self.assertIn("created_at (US Eastern) 2026-09-10 08:00:00 .. 2026-09-20 10:00:00", out)
         self.assertIn("several clubs picked in the Club picker: 1 submissions (1 of them with ticks)", out)
         self.assertRegex(out, r"multi_club +2 +1\n")
-        self.assertRegex(out, r"name_not_on_roster_now +0 +0\n")
+        self.assertRegex(out, r"name_unknown_to_roster +0 +0\n")
+        self.assertNotIn("name_not_on_roster_now", out + json.dumps(result))
         self.assertIn("ledger: 4 with rows + 1 no ticks = 5 in range - balanced", out)
         self.assertIn("LEDGER: 6 submissions in range = 5 with rows (6 rows) + 1 with no tick - balanced; "
                       "1 pre-launch left out", out)

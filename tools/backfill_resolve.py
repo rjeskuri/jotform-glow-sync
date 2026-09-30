@@ -51,15 +51,15 @@ MONTH_START = "2026-09-01"              # an attendance date before it is flagge
 DATE, PHOTO, CREATOR = "17", "19", "105"
 PAGE = 100                              # submissions per request (Jotform allows up to 1000)
 DEFAULT_OUT = os.path.join(REPO, "data", "backfill_2026-09", "resolved.json")
-# every flag a row can carry, in the order a row lists them. The three about names that are
-# not an option of the roster today are written with their count on the row
-# ("name_not_on_roster_now:3"): UNKNOWN + LEFT = NOT_ON_ROSTER. The loader holds a session on
-# UNKNOWN (the Roster has no row of that name for the club: Salesforce would create a Contact)
-# and sends LEFT (the Roster knows her; she is not an option today).
-NOT_ON_ROSTER, UNKNOWN, LEFT = "name_not_on_roster_now", "name_unknown_to_roster", "name_left_roster"
+# every flag a row can carry, in the order a row lists them. The two about a ticked name that
+# is not an option of the roster today are the only ones written with a count on the row
+# ("name_left_roster:2"). The loader sends LEFT (the club's Roster rows of that name are all
+# inactive: a girl who left) and holds a session on UNKNOWN (the Roster has no row of that name
+# for the club: Salesforce would create a Contact).
+LEFT, UNKNOWN = "name_left_roster", "name_unknown_to_roster"
 FLAGS = ["multi_club", "q5_differs", "q18_empty", "q18_differs", "typed_era", "bare_shared_name",
-         "retired_club", "no_account_name", "date_before_2026_09", "date_missing", NOT_ON_ROSTER,
-         UNKNOWN, LEFT, "name_has_comma", "name_repeats"]
+         "retired_club", "no_account_name", "date_before_2026_09", "date_missing", LEFT, UNKNOWN,
+         "name_has_comma", "name_repeats"]
 CREATED = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 GIRL_ID = re.compile(r"([A-Z0-9]+)-[A-Z0-9]+-\d+")      # CLUBCODE-LASTCODE-NNN (appsscript/Ids.gs)
 
@@ -69,17 +69,18 @@ def qid_order(qid):
 
 
 # ------------------------------------------------------------------ the Roster
-Roster = namedtuple("Roster", "rows active codes holders known")
+Roster = namedtuple("Roster", "rows active codes holders known on")
 
 
 def read_roster(path):
-    """A Roster export as (rows, active, codes, holders, known): how many rows it has; the
+    """A Roster export as (rows, active, codes, holders, known, on): how many rows it has; the
     (key(partner), key(club)) of every club with an active girl (glow.sync.roster_pairs);
     {(key(partner), key(club)): [club code, ...]} - the prefix of the girl ids of that
     club's rows, any status (one code per club, normally); {key(club): {key(partner):
     partner}} - who has or had a club of each name, any status, all regions
-    (glow.sync.club_partners); and {(key(partner), key(club)): {key(full name)}} - every girl
-    the Roster has ever held for that club (glow.sync.roster_names)."""
+    (glow.sync.club_partners); {(key(partner), key(club)): {key(full name)}} - every girl
+    the Roster has ever held for that club (glow.sync.roster_names); and the same for the
+    girls with an ACTIVE row ('active' as glow.sync.roster_pairs reads the status)."""
     pairs = roster_pairs(path)
     active = {(key(p), key(c)) for (p, c), on in pairs.items() if on}
     with open(path, newline="", encoding="utf-8-sig") as f:
@@ -87,13 +88,18 @@ def read_roster(path):
     if "girl_id" not in rows[0]:
         sys.exit("Not a Roster export: no girl_id column (the club codes are read from it) - "
                  "python3 tools/sheets_client.py export Roster <path>")
-    codes = defaultdict(set)
+    codes, on = defaultdict(set), defaultdict(set)
     for r in rows:
+        pair = (key(r["partner"]), key(r["club"]))
+        if not all(pair):
+            continue
         found = GIRL_ID.fullmatch((r["girl_id"] or "").strip())
-        if found and key(r["partner"]) and key(r["club"]):
-            codes[(key(r["partner"]), key(r["club"]))].add(found.group(1))
+        if found:
+            codes[pair].add(found.group(1))
+        if key(r["status"]) == "active" and key(r["full_name"]):
+            on[pair].add(key(r["full_name"]))
     return Roster(len(rows), active, {k: sorted(v) for k, v in codes.items()},
-                  club_partners(pairs), roster_names(path))
+                  club_partners(pairs), roster_names(path), dict(on))
 
 
 # --------------------------------------------------- what each roster is, today
@@ -278,6 +284,7 @@ def resolve(region, form_id, submissions, questions, today, roster):
             entries.add(o.strip())
             entry_of.setdefault(key(o), o.strip())
     from_roster = 0                                   # rows whose partner the Roster gave, not the sync
+    respelled = 0                                     # ticked names: no option today, an ACTIVE Roster row
     rows, no_ticks, q18_only = [], [], []
     other_status, flag_rows, flag_subs = Counter(), Counter(), Counter()
     pre_launch = 0
@@ -358,12 +365,19 @@ def resolve(region, form_id, submissions, questions, today, roster):
             if sends is None:
                 flags.add("no_account_name")
             counted = {}
-            missing = [n for n in names if n not in options.get(qid, ())]
-            if missing:
+            # a ticked name that is an option today is what the form offers and sends: no flag.
+            # Any other is looked up in the Roster's rows of this partner and club
+            strangers = [n for n in names if n not in options.get(qid, ())]
+            if strangers:
                 # no partner: no Roster rows to look the names up in - all unknown (held)
                 known = roster.known.get(pair, ()) if partner else ()
-                unknown = sum(1 for n in missing if key(n) not in known)
-                counted = {NOT_ON_ROSTER: len(missing), UNKNOWN: unknown, LEFT: len(missing) - unknown}
+                on = roster.on.get(pair, ()) if partner else ()
+                unknown = sum(1 for n in strangers if key(n) not in known)
+                # an active row of that name: she is on the roster (the tick is spelled unlike
+                # today's option in capitals or spaces, or the form is behind) - no flag, counted
+                still = sum(1 for n in strangers if key(n) in on)      # `on` is part of `known`
+                respelled += still
+                counted = {LEFT: len(strangers) - unknown - still, UNKNOWN: unknown}
                 flags |= {f for f, n in counted.items() if n}
             if any("," in n for n in names):
                 flags.add("name_has_comma")
@@ -415,6 +429,9 @@ def resolve(region, form_id, submissions, questions, today, roster):
         # rows whose partner (and so code) is the Roster's only holder of the club's name,
         # because the sync names none: retired, or its rows carry another region or none
         "partner_from_roster": from_roster,
+        # ticked names that are no option of their roster today but an ACTIVE Roster row of
+        # the club (respelled in capitals or spaces, or the form is behind): not flagged
+        "names_active_not_an_option": respelled,
     }
     return rows, no_ticks, counts
 
@@ -445,6 +462,10 @@ def report(region, c):
         print(f"   {c['partner_from_roster']} row(s) of clubs the sync names no partner for (retired, or "
               "their Roster rows carry another region or none): partner and code are the Roster's "
               "only club of that name")
+    if c["names_active_not_an_option"]:
+        print(f"   {c['names_active_not_an_option']} ticked name(s) are not an option of their roster "
+              "today but an ACTIVE girl of the club in the Roster (spelled unlike the option in "
+              "capitals or spaces, or the form is behind the Roster): no flag")
     print("   flags                    rows  submissions")
     for flag in FLAGS:
         print(f"     {flag:<24}{c['flags'][flag]:>5}{c['flag_submissions'][flag]:>13}")
