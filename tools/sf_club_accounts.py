@@ -362,6 +362,9 @@ def bodies(args, paths):
     elif state != "open":
         sys.exit(f"batch {args.batch} is {state or 'not prechecked'}: bodies are printed for the open "
                  "batch only (`precheck` first; a closed batch is never written again); --preview to read them")
+    if not args.preview and unconfirmed(read_created(paths), args.batch):
+        sys.exit(f"batch {args.batch} has rows that are not confirmed (created_accounts.csv): nothing is "
+                 "written until `verify` no longer reports them")
     done = set() if args.preview else {r["club_code"] for r in read_created(paths)}
     for i in items:
         if i["club_code"] in done:
@@ -455,6 +458,12 @@ def write_created(paths, created):
 def made_count(created):
     """The Club accounts the run has added to Salesforce, by the rollback file."""
     return sum(r["action"] not in ("link", "gone") for r in created)
+
+
+def unconfirmed(created, batch):
+    """The rows of a batch that say something is wrong: not a plain create or link, or noted."""
+    return sorted(r["sf_account_id"] for r in created if str(r["batch"]) == str(batch)
+                  and r["action"] != "gone" and (r["action"] not in ("create", "link") or r["note"]))
 
 
 def read_before(paths):
@@ -664,9 +673,16 @@ def verify(args, paths):
     wanted = {key(i["name"]) for i in items}
     described = {i["body"]["Description"]: i for i in all_items(paths) if i["action"] == "create"}
     blank = {"batch": n, "seq": "", "region": "", "club_code": "", "action": "create"}
+    created = read_created(paths)
+    rows_by_id = {r["sf_account_id"]: r for r in created}
     bad, good = [], []                                 # good: (item, record, action, note)
     for rec in recs:                                   # under a name this batch did not send
         if key(rec["Name"]) in wanted:
+            continue
+        known = rows_by_id.get(rec["Id"])
+        if known and str(known["batch"]) != str(n):    # an earlier batch's account: its row is left alone
+            bad.append(f"{rec['Id']}: recorded for batch {known['batch']} and in this read (the ids "
+                       "file of another batch?)")
             continue
         item = described.get(rec.get("Description"))
         if item or rec["Id"] in returned:
@@ -720,10 +736,9 @@ def verify(args, paths):
                        f"accounts of this run: returned but not read {sorted(returned - have)}, read "
                        f"but not returned {sorted(have - returned)}")
         for sf_id in sorted(returned - have):          # it exists somewhere: the rollback file knows it
-            good.append((blank, {"Id": sf_id, "Name": ""}, "returned-unread",
-                         "returned by the connector; read again with `soql --batch N --ids`"))
-    created = read_created(paths)
-    rows_by_id = {r["sf_account_id"]: r for r in created}
+            if sf_id not in rows_by_id:                # a row it has already is never blanked
+                good.append((blank, {"Id": sf_id, "Name": ""}, "returned-unread",
+                             "returned by the connector; read again with `soql --batch N --ids`"))
     stamp = now()
     for i, rec, action, note in good:
         was = before.get(rec["Id"], {})
@@ -745,6 +760,9 @@ def verify(args, paths):
             row["note"] = f"was {row['action']}; not in the read of {stamp}"
             row["action"] = "gone"
     write_created(paths, created)
+    if unconfirmed(created, n):                        # a batch never closes over an unresolved row
+        bad.append(f"created_accounts.csv has rows of this batch that are not confirmed "
+                   f"({', '.join(unconfirmed(created, n))}) - STOP")
     made, gone = made_count(created), sum(r["action"] == "gone" for r in created)
     if args.club_count is not None and args.club_count != BASELINE_CLUBS + made:
         diff = args.club_count - BASELINE_CLUBS - made

@@ -1,7 +1,7 @@
 ---
 title: Club accounts in Salesforce, linked to their partners
 author: Claude (with Ryan)
-status: proposed
+status: in-progress (accepted by Ryan 2026-09-30: the 345 creates and 8 links, then the two released clubs)
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-29/30 ("assign the clubs to a partner", then "create all clubs")
 ---
@@ -190,8 +190,11 @@ written again, record by record, only after a fresh read of that one name shows 
 Club count equals 10 plus the recorded accounts. When a create returned no id but the fresh read
 shows the account with this plan's Description and the count agrees, the batch is closed with
 `verify --no-ids`; the same recovers the ids when the session died between a write and `verify`.
-An account written twice is recorded twice; the twin is removed only with Ryan's go, and its row
-stays in the file as "gone".
+An account written twice is recorded twice; the twin is removed only with Ryan's go, the batch is
+then verified with `--no-ids`, and its row stays in the file as "gone". A batch never closes, and
+`bodies` prints nothing, while one of its rows is unresolved (`returned-unread`,
+`found-unconfirmed`, or a row with a note): an account stored under another name than the one sent
+is renamed (one update, with Ryan's go), never written a second time.
 
 **If a state file is lost.** `run_log.csv`, `created_accounts.csv` and `write_set.json` must tell
 one story; the tool stops when they do not. Nothing is worked around: the file is restored (Time

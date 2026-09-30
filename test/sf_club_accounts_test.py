@@ -412,6 +412,36 @@ class SalesforceClubAccounts(unittest.TestCase):
         self.assertEqual([(r["sf_account_id"], r["action"], r["club_code"]) for r in self.created()[2:]],
                          [(C, "create", "NINASCLU")])
 
+    def open_batch_3(self):
+        self.open_batch_2()
+        self.verify(2, [PARENTS[P1], self.made(2, C)], ids=self.ids_file(C), club_count=12)
+        self.precheck(3, [PARENTS[P1], PARENTS[P2]])
+        return [PARENTS[P1], PARENTS[P2]], self.made(3, D, 0), self.made(3, E, 1)
+
+    def test_a_batch_never_closes_over_an_unresolved_row(self):
+        parents, d, e = self.open_batch_3()
+        out, stop = self.verify(3, parents + [dict(d, Name="Alias Clup"), e], ids=self.ids_file(D, E), club_count=14)
+        self.assertIn("stored under another Name", stop)
+        # the name is written again (a second account) and only the new id is handed over
+        again = self.made(3, Z, 0)
+        out, stop = self.verify(3, parents + [again, e], ids=self.ids_file(Z, E), club_count=15)
+        self.assertIn(f"rows of this batch that are not confirmed ({D}) - STOP", stop)
+        self.assertEqual(self.state(3), "open")
+        self.assertIn("has rows that are not confirmed", self.bodies(3)[1])
+
+    def test_the_ids_of_another_batch_never_damage_its_rows(self):
+        parents, d, e = self.open_batch_3()
+        before = self.created()
+        out, stop = self.verify(3, parents + [d, e], ids=self.ids_file(C), club_count=14)
+        self.assertIn(f"returned but not read ['{C}']", stop)
+        self.assertEqual(self.created()[:3], before)               # batch 2's row is as it was
+        out, stop = self.verify(3, parents + [d, e, self.made(2, C)], ids=self.ids_file(D, E), club_count=14)
+        self.assertIn(f"{C}: recorded for batch 2 and in this read", stop)
+        self.assertEqual(self.created()[:3], before)
+        out, stop = self.verify(3, parents + [d, e], ids=self.ids_file(D, E), club_count=14)
+        self.assertIsNone(stop)
+        self.assertEqual(self.state(3), "closed")
+
     def test_a_double_write_is_recorded_twice_and_fails(self):
         self.build()
         self.precheck(0, [PARENTS[P1]])
