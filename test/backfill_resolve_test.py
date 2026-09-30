@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 import backfill_resolve as br         # noqa: E402
 from glow import forms as glow_forms  # noqa: E402
 from glow import jotform as glow_jotform   # noqa: E402
-from glow.sync import PICKER_NAME     # noqa: E402
+from glow.sync import MODULES, PICKER_NAME, SESSION_OVERRIDES, WEEKS, YEAR   # noqa: E402
 
 AFRICA, ASIA = glow_forms.REGIONALS["Africa"], glow_forms.REGIONALS["Asia"]
 PICKER = "500"
@@ -33,6 +33,13 @@ KAVYA, LEILA, MAYA = "Kavya Ixworthing", "Leila Jubbleton", "Maya Kestrelby"
 NADIA, OLIVIA, PRIYA = "Nadia Nimbleford", "Olivia Quillstrand", "Priya Vexmoorish"
 STRANGER, STRANGER2 = "Joy Halverquist", "Keza Lorrimane"      # ticked, and in no Roster row
 MENTOR = "mentor1@example.org"
+# the curriculum cascade as the sync builds it: a module dropdown per year (no calcValues: the
+# calculation into question 98 copies the option's visible text) and a session dropdown per
+# number of sessions (calcValues: the calculation into question 100 copies the number)
+MODULE_OPTIONS = {"1": ["Relationships 101", "Decision Making"],
+                  "2": ["Relationships 201", "Elective - Healthy GLOW", "Elective - Girl Boss Basics"],
+                  "3": ["Power of Girls 301", "Elective - Girl Boss Pro"]}
+TRANSLATED = "Toma de decisiones"          # "Decision Making" as a browser's page translation shows it
 PHOTO = "https://www.example.org/uploads/group-photo.jpg"
 IP = "192.0.2.1"
 # qid -> (club, the partner the sync names - '' = none -, what the sync says it sends, its girls today)
@@ -41,9 +48,10 @@ ROSTERS = {
     "11": ("Stars", "Partner One", "Stars - Partner One", [DALIA, ESTHER]),
     "12": ("Stars", "Partner Two", "Stars - Partner Two", [FATIMA, GRACE]),
     "13": ("Old Club", "Partner Two", "Old Club", [HANA]),       # on the form; its Roster rows inactive
-    "14": ("Lost Club", "", "Lost Club", [INES]),                # on the form; no partner named, no Roster row
+    "24": ("Lost Club", "", "Lost Club", [INES]),                # on the form; no partner named, no Roster row
     # plain-named rosters the region's active export does not hold: the sync names no partner
-    # (17, 18 and 19 are the date, the Contact IDs and the photo)
+    # (14 and 15 are the first module and session dropdowns; 17, 18 and 19 the date, the
+    # Contact IDs and the photo)
     "20": ("Quiet Club", "", "Quiet Club", [KAVYA]),             # Roster: one partner's, every row inactive
     "21": ("Far Club", "", "Far Club", [LEILA]),                 # Roster: one partner's, active, another region
     "22": ("Adrift Club", "", "Adrift Club", [MAYA]),            # Roster: one partner's, active, no region
@@ -74,12 +82,21 @@ def questions():
           "17": {"type": "control_datetime", "name": "date", "text": "Date"},
           "18": {"type": "control_textarea", "name": "contact_ids", "text": "Contact IDs"},
           "19": {"type": "control_fileupload", "name": "photo", "text": "Group Photo"},
+          YEAR: {"type": "control_dropdown", "name": "module94", "text": "GLOW Club Year",
+                 "options": "1|2|3", "calcValues": "|1|2|3"},
           "98": {"type": "control_textbox", "name": "module_id", "text": "module"},
           "100": {"type": "control_number", "name": "week_id", "text": "week"},
           "102": {"type": "control_number", "name": "year_id", "text": "year"},
           "105": {"type": "control_textbox", "name": "creator", "text": "creator"},
           PICKER: {"type": "control_dropdown", "name": PICKER_NAME, "text": "Club Name",
                    "options": "|".join(sorted({sends for _, _, sends, _ in ROSTERS.values()}))}}
+    for year, qid in MODULES.items():
+        qs[qid] = {"type": "control_dropdown", "name": "module" + year, "text": "Module",
+                   "options": "|".join(MODULE_OPTIONS[year]), "calcValues": ""}
+    for sessions, qid in WEEKS.items():
+        qs[qid] = {"type": "control_dropdown", "name": f"week{sessions}", "text": "Session",
+                   "options": "|".join(f"Session {n}" for n in range(1, sessions + 1)),
+                   "calcValues": "|" + "|".join(str(n) for n in range(1, sessions + 1))}
     for qid, (club, _, _, girls) in ROSTERS.items():
         qs[qid] = {"type": "control_checkbox", "name": "roster" + qid, "text": club,
                    "options": "|".join(girls)}
@@ -99,15 +116,20 @@ AUTO = object()
 
 def submission(sid, ticks, created="2026-09-10 08:00:00", q5="Alpha Club", q18=AUTO,
                date=("2026", "09", "09"), picks=("Alpha Club",), status="ACTIVE", form=AFRICA,
-               photo=(PHOTO,), extra=None):
+               photo=(PHOTO,), extra=None, year="1", module="Decision Making", week="Session 3",
+               q98=AUTO, q100=AUTO, q102=AUTO):
     """One submission in Jotform's shape: every question of today's form is listed with
     its name/text/type, and carries `answer` only when it was answered. ticks: {qid:
-    [names]}; q18 defaults to what the form's calculation writes; extra: raw answers added."""
+    [names]}; q18 defaults to what the form's calculation writes; extra: raw answers added.
+    year / module / week are picked in the dropdowns the form shows for them (the module
+    dropdown of that year, the session dropdown of that module); q98 / q100 / q102 default to
+    what the form's calculations copy from them (the module's text, the session's number, the
+    year)."""
     answers = {qid: {"name": q["name"], "order": "1", "text": q["text"], "type": q["type"]}
                for qid, q in questions().items()}
 
     def put(qid, value):
-        if value not in (None, "", [], ()):
+        if qid in answers and value not in (None, "", [], ()):
             answers[qid]["answer"] = value
 
     for qid, names in ticks.items():     # a list of names; anything else is passed through as it is
@@ -118,9 +140,12 @@ def submission(sid, ticks, created="2026-09-10 08:00:00", q5="Alpha Club", q18=A
     put("18", q18)
     put("19", list(photo))
     put("17", dict(zip(("year", "month", "day"), date), datetime="x") if date else None)
-    put("98", "Core 1")
-    put("100", "3")
-    put("102", "1")
+    put(YEAR, year)
+    put(MODULES.get(year), module)
+    put(WEEKS[8 if year == "1" else SESSION_OVERRIDES.get(module, 8)], week)
+    put("98", module if q98 is AUTO else q98)
+    put("100", (week or "").split(" ")[-1] if q100 is AUTO else q100)
+    put("102", year if q102 is AUTO else q102)
     put("105", MENTOR)
     put(PICKER, list(picks))
     answers.update(extra or {})
@@ -210,7 +235,7 @@ class BackfillResolve(unittest.TestCase):
             "region": "Africa", "form_id": AFRICA, "submission_id": "9001",
             "created_at": "2026-09-10 08:00:00", "roster_qid": "10", "club_code": "ALPHACLU",
             "club": "Alpha Club", "partner": "Partner One", "sf_account_name": "Alpha Club",
-            "attendance_date": "2026-09-09", "names": [AMARA, CHIARA], "module": "Core 1",
+            "attendance_date": "2026-09-09", "names": [AMARA, CHIARA], "module": "Decision Making",
             "module_week": "3", "module_year": "1", "creator": MENTOR, "photo_urls": [PHOTO],
             "q5": "Alpha Club", "flags": []}])
 
@@ -285,7 +310,7 @@ class BackfillResolve(unittest.TestCase):
                          ("Old Club", "Partner Two", "OLDCLUB", "Old Club"))
         self.assertEqual(row["flags"], ["retired_club"])
         # on the form, the sync names no partner for it and the Roster has no club of that name
-        row, = self.one({"14": [INES]}, q5="Lost Club", picks=("Lost Club",))
+        row, = self.one({"24": [INES]}, q5="Lost Club", picks=("Lost Club",))
         self.assertEqual((row["club"], row["partner"], row["club_code"], row["sf_account_name"]),
                          ("Lost Club", None, None, "Lost Club"))
         self.assertEqual(row["flags"], ["retired_club"])
@@ -378,6 +403,120 @@ class BackfillResolve(unittest.TestCase):
                 # a missing date is no attendance date of the form's summary
                 self.assertEqual((counts["attendance_dates"], counts["attendance_first"]), (0, None))
 
+    # ---- the module: the dropdown the submission used, not the copy in question 98
+    def test_the_module_is_the_answer_of_the_module_dropdown_the_year_names(self):
+        # question 98 is a calculation's copy of the option's VISIBLE text (the module dropdowns
+        # have no calcValues), which a browser's page translation rewrites; the dropdown's own
+        # answer is the option's value
+        def module(**kw):
+            row, = self.one({"10": [AMARA]}, **kw)
+            return row["module"], row["flags"]
+        self.assertEqual(module(), ("Decision Making", []))
+        self.assertEqual(module(q98=TRANSLATED), ("Decision Making", ["module_translated"]))
+        # each year has its own dropdown
+        self.assertEqual(module(year="2", module="Relationships 201"), ("Relationships 201", []))
+        self.assertEqual(module(year="3", module="Elective - Girl Boss Pro", q98="Optativa - Girl Boss Pro"),
+                         ("Elective - Girl Boss Pro", ["module_translated"]))
+        # any difference counts, an empty copy too - the row still gets the dropdown's answer
+        self.assertEqual(module(q98=None), ("Decision Making", ["module_translated"]))
+        self.assertEqual(module(q98="decision making"), ("Decision Making", ["module_translated"]))
+        # a dropdown hidden again keeps its answer (the forms do not clear hidden fields): the
+        # year says which one the mentor saw - here year 2, with year 1's answer still there
+        # and last copied into question 98
+        stale = {"14": {"name": "module1", "order": "1", "text": "Module", "type": "control_dropdown",
+                        "answer": "Decision Making"}}
+        self.assertEqual(module(year="2", module="Relationships 201", q98="Decision Making", extra=stale),
+                         ("Relationships 201", ["module_translated"]))
+        # the week and the year stay what questions 100 and 102 hold, whatever their sources say
+        row, = self.one({"10": [AMARA]}, q98=TRANSLATED, q100="7", q102="3")
+        self.assertEqual((row["module"], row["module_week"], row["module_year"], row["flags"]),
+                         ("Decision Making", "7", "3", ["module_translated"]))
+        # every row of a submission carries it, after the name flags
+        rows = self.one({"10": [AMARA, AMARA], "11": [DALIA]}, q98=TRANSLATED, q5="Alpha ClubStars - Partner One",
+                        picks=("Alpha Club", "Stars - Partner One"))
+        self.assertEqual([r["flags"] for r in rows],
+                         [["multi_club", "q5_differs", "name_repeats", "module_translated"],
+                          ["multi_club", "q5_differs", "module_translated"]])
+        self.assertEqual({r["module"] for r in rows}, {"Decision Making"})
+
+    def test_a_module_that_cannot_be_told_stays_question_98_and_is_flagged(self):
+        # no guess: the row keeps question 98 as submitted and carries module_unresolved (the
+        # loader holds it)
+        def answer(qid, value):
+            return {qid: dict(questions()[qid], order="1", answer=value)}
+        cases = {
+            "no year picked": dict(year=None, extra=answer("14", "Decision Making")),
+            "the year names no dropdown": dict(extra=answer(YEAR, "4")),
+            "that year's dropdown has no answer": dict(year="2", module=None, extra=answer("14", "Decision Making")),
+            "the answer is no option of the dropdown today": dict(module="Retired Module"),
+            "the answer is another year's module": dict(module="Relationships 201"),
+            "the answer is not text": dict(extra=answer("14", ["Decision Making"])),
+            "the answer is the translated text": dict(module=TRANSLATED),
+        }
+        for what, kw in cases.items():
+            with self.subTest(what):
+                row, = self.one({"10": [AMARA]}, **dict({"q98": TRANSLATED}, **kw))
+                self.assertEqual((row["module"], row["flags"]), (TRANSLATED, ["module_unresolved"]))
+        # nothing in question 98 either: null, never a made-up text
+        row, = self.one({"10": [AMARA]}, year=None, module=None, q98=None)
+        self.assertEqual((row["module"], row["flags"]), (None, ["module_unresolved"]))
+        # a form without that module dropdown
+        gone = {q: v for q, v in questions().items() if q != "14"}
+        rows, _, _ = self.resolve([submission("9001", {"10": [AMARA]})], qs=gone)
+        self.assertEqual((rows[0]["module"], rows[0]["flags"]), ("Decision Making", ["module_unresolved"]))
+
+    def test_week_and_year_are_compared_with_their_dropdowns_and_only_counted(self):
+        # questions 100 and 102 are copies too (of the session dropdown's and the year
+        # dropdown's calcValue): compared the same way, reported per form, never flagged
+        def verdicts(**kw):
+            rows, _, counts = self.resolve([submission("9001", {"10": [AMARA]}, **kw)])
+            self.assertEqual(rows[0]["flags"], [f for f in ("module_translated", "module_unresolved")
+                                                if f in rows[0]["flags"]])          # no flag of their own
+            got = {f: [v for v, n in c.items() if n] for f, c in counts["copied_fields"].items()}
+            self.assertEqual(counts["copied_fields"], counts["copied_fields_with_ticks"])
+            return got["module"], got["week"], got["year"], rows[0]["module_week"], rows[0]["module_year"]
+        self.assertEqual(verdicts(), (["same"], ["same"], ["same"], "3", "1"))
+        self.assertEqual(verdicts(q100="4", q102="2"), (["same"], ["differ"], ["differ"], "4", "2"))
+        self.assertEqual(verdicts(q100="Session 3"), (["same"], ["differ"], ["same"], "Session 3", "1"))
+        self.assertEqual(verdicts(q100=None, q102=None), (["same"], ["differ"], ["differ"], None, None))
+        self.assertEqual(verdicts(q98=TRANSLATED)[:3], (["differ"], ["same"], ["same"]))
+        # the session dropdown is the one the form shows for the year and the module
+        for year, module, qid in (("1", "Relationships 101", "15"), ("2", "Relationships 201", "15"),
+                                  ("2", "Elective - Healthy GLOW", "96"), ("2", "Elective - Girl Boss Basics", "95"),
+                                  ("3", "Elective - Girl Boss Pro", "97"), ("3", "Power of Girls 301", "15")):
+            with self.subTest(module=module):
+                self.assertEqual(br.session_dropdown(year, module), qid)
+                self.assertEqual(verdicts(year=year, module=module, week="Session 8")[:3], (["same"],) * 3)
+                self.assertEqual(verdicts(year=year, module=module, week="Session 8", q100="2")[1], ["differ"])
+        # no source to compare with: counted apart
+        stray = {"95": dict(questions()["95"], order="1", answer="Session 9")}
+        self.assertEqual(verdicts(week=None, q100="9", extra=stray)[:3], (["same"], ["undetermined"], ["same"]))
+        self.assertEqual(verdicts(week="Session 99")[1], ["undetermined"])
+        self.assertEqual(verdicts(year=None, module=None)[:3], (["undetermined"],) * 3)
+        self.assertEqual(verdicts(year="2", module=None)[:3], (["undetermined"], ["undetermined"], ["same"]))
+        self.assertEqual(verdicts(year="1", module=None)[:3], (["undetermined"], ["same"], ["same"]))
+        # counted over every submission in range, and apart for the ones with ticks
+        rows, _, counts = self.resolve([submission("9001", {"10": [AMARA]}, q98=TRANSLATED),
+                                        submission("9002", {}, q98=TRANSLATED, q100="5"),
+                                        submission("9003", {"10": [BEA]}, q102="3"),
+                                        submission("9004", {"10": [BEA]}, created="2026-08-30 10:00:00", q102="3")])
+        self.assertEqual(counts["copied_fields"], {
+            "module": {"same": 1, "differ": 2, "undetermined": 0},
+            "week": {"same": 2, "differ": 1, "undetermined": 0},
+            "year": {"same": 2, "differ": 1, "undetermined": 0}})
+        self.assertEqual(counts["copied_fields_with_ticks"], {
+            "module": {"same": 1, "differ": 1, "undetermined": 0},
+            "week": {"same": 2, "differ": 0, "undetermined": 0},
+            "year": {"same": 1, "differ": 1, "undetermined": 0}})
+        self.assertEqual((counts["flags"]["module_translated"], counts["flags"]["module_unresolved"]), (1, 0))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            br.report("Africa", counts)
+        self.assertRegex(out.getvalue(), r"module \(question 98\) +same +1 \(1\) +differ +2 \(1\) +source not determined +0 \(0\)\n")
+        self.assertRegex(out.getvalue(), r"session \(question 100\) +same +2 \(2\) +differ +1 \(0\) +source not determined +0 \(0\)\n")
+        self.assertRegex(out.getvalue(), r"year \(question 102\) +same +2 \(1\) +differ +1 \(1\) +source not determined +0 \(0\)\n")
+        self.assertNotIn(TRANSLATED, out.getvalue())
+
     def test_name_flags(self):
         comma = "Marrowgate, Beatrice"
         row, = self.one({"10": [AMARA, STRANGER, STRANGER2]})
@@ -443,7 +582,7 @@ class BackfillResolve(unittest.TestCase):
             "multi_club", "q5_differs", "q18_empty", "q18_differs", "typed_era", "bare_shared_name",
             "retired_club", "no_account_name", "date_before_2026_09", "date_missing",
             "name_left_roster", "name_unknown_to_roster",          # the only two written with ":<n>"
-            "name_has_comma", "name_repeats"])
+            "name_has_comma", "name_repeats", "module_translated", "module_unresolved"])
 
     # ---- no ticks, the range, the ledger
     def test_no_tick_means_no_row_and_the_id_is_listed(self):
@@ -488,7 +627,7 @@ class BackfillResolve(unittest.TestCase):
         changing["sf_names"][0]["value"] = "Alpha Club - Partner One"
         today = br.rosters_today(changing)
         self.assertEqual(today["10"], ("Alpha Club", "Partner One", "Alpha Club"))
-        self.assertEqual(today["14"], ("Lost Club", None, "Lost Club"))
+        self.assertEqual(today["24"], ("Lost Club", None, "Lost Club"))
         self.assertEqual(sorted(today, key=int), sorted(ROSTERS, key=int))          # no club still to create
 
     def test_the_sync_is_run_as_a_dry_run_and_its_output_is_not_echoed(self):

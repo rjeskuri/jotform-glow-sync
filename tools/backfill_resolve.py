@@ -8,7 +8,9 @@ the resolver"). The club of a row is the roster the mentor TICKED girls in, neve
 September's question 5 was typed, run together from several picked clubs, altered by page
 translation, or a bare name two clubs shared. What each roster is (club, partner, the Club Name
 it sends today) comes from the sync's own dry run (sync_attendance_form.py --summary-json), so
-nothing here matches clubs a second time.
+nothing here matches clubs a second time. The module of a row is likewise the answer of the
+module dropdown the submission used, not question 98: that is a calculation's copy of the
+option's visible text, which a browser's page translation rewrote.
 
     python3 tools/sheets_client.py export Roster data/roster_<date>.csv
     python3 tools/backfill_resolve.py --roster data/roster_<date>.csv
@@ -42,8 +44,8 @@ from glow import forms                  # noqa: E402
 from glow.cli import run                # noqa: E402
 from glow.jotform import Client         # noqa: E402
 from glow.sync import (                 # noqa: E402
-    CLUB_NAME, CONTACT_IDS, MODULE_ID, PICKER_NAME, SF_NAME_SEP, WEEK_ID, YEAR_ID, club_partners,
-    roster_names, roster_pairs)
+    CLUB_NAME, CONTACT_IDS, MODULE_ID, MODULES, PICKER_NAME, SESSION_OVERRIDES, SF_NAME_SEP, WEEK_ID,
+    WEEKS, YEAR, YEAR_ID, club_partners, has_calc_values, roster_names, roster_pairs)
 from glow.text import key               # noqa: E402
 
 SINCE = "2026-09-01 00:00:00"           # created_at, as Jotform gives it: US Eastern
@@ -59,7 +61,11 @@ DEFAULT_OUT = os.path.join(REPO, "data", "backfill_2026-09", "resolved.json")
 LEFT, UNKNOWN = "name_left_roster", "name_unknown_to_roster"
 FLAGS = ["multi_club", "q5_differs", "q18_empty", "q18_differs", "typed_era", "bare_shared_name",
          "retired_club", "no_account_name", "date_before_2026_09", "date_missing", LEFT, UNKNOWN,
-         "name_has_comma", "name_repeats"]
+         "name_has_comma", "name_repeats", "module_translated", "module_unresolved"]
+# questions 98, 100 and 102 (module, session, year: what Salesforce reads) are each a
+# calculation's copy of a dropdown; how a copy compares with its source, per submission
+COPIES = ("module", "week", "year")
+VERDICTS = ("same", "differ", "undetermined")
 CREATED = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 GIRL_ID = re.compile(r"([A-Z0-9]+)-[A-Z0-9]+-\d+")      # CLUBCODE-LASTCODE-NNN (appsscript/Ids.gs)
 
@@ -264,6 +270,57 @@ def picked(sub, picker):
     return [v for v in value if v.strip()]
 
 
+def stored_option(sub, questions, qid):
+    """(the stored answer of dropdown `qid`, what a calculation copies from it) when the
+    answer is exactly one of the dropdown's options today; (None, None) when it is not, or
+    there is no such dropdown on the form, or no answer. The stored answer is the option's
+    value, which a browser's page translation leaves alone. The copy is the option's
+    calcValue when the dropdown has calcValues (they start with an empty slot for the
+    placeholder: .claude/skills/jotform-api), else its text; None when the calcValues do not
+    line up with the options."""
+    question, answer = questions.get(qid) or {}, answer_of(sub, qid) if qid else None
+    options = [o.strip() for o in (question.get("options") or "").split("|")]
+    if question.get("type") != "control_dropdown" or not isinstance(answer, str) \
+            or not answer or answer not in options:
+        return None, None
+    if not has_calc_values(question):
+        return answer, answer
+    values = [v.strip() for v in question["calcValues"].split("|")]
+    if len(values) == len(options) + 1:
+        values = values[1:]
+    if len(values) != len(options):
+        return answer, None
+    return answer, values[options.index(answer)] or answer
+
+
+def session_dropdown(year, module):
+    """The session dropdown the form shows for a year and a module (the sync's curriculum
+    cascade, build_conditions section B): the 8-session one for year 1, for another year
+    the one of the module (SESSION_OVERRIDES, else 8). None when that cannot be said."""
+    if year == "1":
+        return WEEKS[8]
+    if year in MODULES and module is not None:
+        return WEEKS.get(SESSION_OVERRIDES.get(module, 8))
+    return None
+
+
+def copied_fields(sub, questions):
+    """(module, verdicts) of one submission. module: the CANONICAL module - the stored
+    answer of the module dropdown the Year answer names (glow.sync.MODULES; the form shows
+    that one, and a dropdown hidden again can keep an answer, so any other is ignored) - or
+    None when it cannot be told: no guess. verdicts: {module | week | year: same | differ |
+    undetermined} - whether question 98 / 100 / 102 as submitted is exactly what its
+    source dropdown holds (the module's value; the session's and the year's calcValue)."""
+    year, year_copy = stored_option(sub, questions, YEAR)
+    module, _ = stored_option(sub, questions, MODULES.get(year))
+    _, week_copy = stored_option(sub, questions, session_dropdown(year, module))
+
+    def verdict(qid, source):
+        return "undetermined" if source is None else "same" if answer_of(sub, qid) == source else "differ"
+    return module, {"module": verdict(MODULE_ID, module), "week": verdict(WEEK_ID, week_copy),
+                    "year": verdict(YEAR_ID, year_copy)}
+
+
 def is_long(value, club):
     """The Club Name is '<club> - <something>' (glow.sync.SF_NAME_SEP; never split on it)."""
     return bool(value) and key(value) != key(club) and key(value).startswith(key(club) + SF_NAME_SEP)
@@ -289,6 +346,7 @@ def resolve(region, form_id, submissions, questions, today, roster):
     other_status, flag_rows, flag_subs = Counter(), Counter(), Counter()
     pre_launch = 0
     several = Counter()                               # with ticks or not -> picked 2+ clubs
+    copies = {ticked: {c: Counter() for c in COPIES} for ticked in (False, True)}
     created = []                                      # created_at of every submission in range
     for sub in sorted(submissions, key=lambda s: (str(s.get("created_at")), str(s.get("id")))):
         if sub.get("status") != "ACTIVE":
@@ -305,6 +363,9 @@ def resolve(region, form_id, submissions, questions, today, roster):
         q5, q18 = text_of(sub, CLUB_NAME), text_of(sub, CONTACT_IDS)
         date, picks = attendance_date(sub), picked(sub, picker)
         several[bool(rosters)] += len(picks) > 1
+        module, verdicts = copied_fields(sub, questions)
+        for copy, verdict in verdicts.items():
+            copies[bool(rosters)][copy][verdict] += 1
         if not rosters:
             no_ticks.append(sub["id"])
             if (q18 or "").strip():     # names reached question 18, no roster of today's form has a tick
@@ -324,6 +385,10 @@ def resolve(region, form_id, submissions, questions, today, roster):
             shared.append("date_missing")
         elif date < MONTH_START:
             shared.append("date_before_2026_09")
+        if verdicts["module"] != "same":
+            # question 98 is not the module the dropdown holds (a browser's page translation
+            # rewrote the copied text), or the dropdown cannot be told: the row then keeps 98
+            shared.append("module_translated" if module is not None else "module_unresolved")
         seen_flags = set()
         for qid, found, names in rosters:
             if qid in today:
@@ -390,7 +455,8 @@ def resolve(region, form_id, submissions, questions, today, roster):
                 "created_at": when, "roster_qid": qid, "club_code": code[0] if code else None,
                 "club": club, "partner": partner, "sf_account_name": sends,
                 "attendance_date": date, "names": names,
-                "module": answer_of(sub, MODULE_ID), "module_week": answer_of(sub, WEEK_ID),
+                "module": answer_of(sub, MODULE_ID) if module is None else module,
+                "module_week": answer_of(sub, WEEK_ID),
                 "module_year": answer_of(sub, YEAR_ID), "creator": answer_of(sub, CREATOR),
                 "photo_urls": photo_urls(sub), "q5": q5,
                 "flags": [f"{f}:{counted[f]}" if f in counted else f for f in FLAGS if f in flags],
@@ -432,6 +498,10 @@ def resolve(region, form_id, submissions, questions, today, roster):
         # ticked names that are no option of their roster today but an ACTIVE Roster row of
         # the club (respelled in capitals or spaces, or the form is behind): not flagged
         "names_active_not_an_option": respelled,
+        # questions 98 / 100 / 102 as submitted against the dropdown each is a copy of, by
+        # submission in range, and the same for the ones with ticks (the rows)
+        "copied_fields": {c: {v: copies[False][c][v] + copies[True][c][v] for v in VERDICTS} for c in COPIES},
+        "copied_fields_with_ticks": {c: {v: copies[True][c][v] for v in VERDICTS} for c in COPIES},
     }
     return rows, no_ticks, counts
 
@@ -469,6 +539,13 @@ def report(region, c):
     print("   flags                    rows  submissions")
     for flag in FLAGS:
         print(f"     {flag:<24}{c['flags'][flag]:>5}{c['flag_submissions'][flag]:>13}")
+    print("   questions 98 / 100 / 102 as submitted against the dropdown each is a copy of - "
+          "submissions in range (of them with ticks):")
+    for copy, label in zip(COPIES, ("module (question 98)", "session (question 100)", "year (question 102)")):
+        every, ticked = c["copied_fields"][copy], c["copied_fields_with_ticks"][copy]
+        print(f"     {label:<23}" + "".join(
+            f"{word} {every[v]:>4} ({ticked[v]}){'   ' if v != VERDICTS[-1] else ''}"
+            for v, word in zip(VERDICTS, ("same", "differ", "source not determined"))))
     print(f"   ledger: {c['with_ticks']} with rows + {c['no_ticks']} no ticks = "
           f"{c['submissions']} in range - balanced")
 
