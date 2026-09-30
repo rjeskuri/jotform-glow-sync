@@ -353,16 +353,30 @@ class BackfillResolve(unittest.TestCase):
                                         "name_unknown_to_roster:2"])
 
     def test_date_flags(self):
+        # attendance_date is always text: zero-padded yyyy-mm-dd, or "" (never null) with
+        # date_missing when question 17 is missing or is not a date
         for date, iso, flags in ((("2026", "09", "01"), "2026-09-01", []),
                                  (("2026", "08", "31"), "2026-08-31", ["date_before_2026_09"]),
                                  (("2026", "2", "9"), "2026-02-09", ["date_before_2026_09"]),
                                  (("2026", "10", "2"), "2026-10-02", []),
-                                 (("2026", "13", "01"), None, ["date_missing"]),
-                                 (("", "", ""), None, ["date_missing"]),
-                                 (None, None, ["date_missing"])):
+                                 (("2026", "13", "01"), "", ["date_missing"]),
+                                 (("2026", "02", "30"), "", ["date_missing"]),
+                                 (("2026", "09", "x"), "", ["date_missing"]),
+                                 (("", "", ""), "", ["date_missing"]),
+                                 (None, "", ["date_missing"])):
             with self.subTest(date=date):
                 row, = self.one({"10": [AMARA]}, date=date)
                 self.assertEqual((row["attendance_date"], row["flags"]), (iso, flags))
+                self.assertIsInstance(row["attendance_date"], str)
+        # question 17 answered with something that is not {year, month, day}
+        for odd in ("2026-09-09", ["2026", "09", "09"], {"year": "2026", "month": "09"}):
+            with self.subTest(odd=type(odd).__name__):
+                sub = submission("9001", {"10": [AMARA]})
+                sub["answers"]["17"]["answer"] = odd
+                rows, _, counts = self.resolve([sub])
+                self.assertEqual((rows[0]["attendance_date"], rows[0]["flags"]), ("", ["date_missing"]))
+                # a missing date is no attendance date of the form's summary
+                self.assertEqual((counts["attendance_dates"], counts["attendance_first"]), (0, None))
 
     def test_name_flags(self):
         comma = "Marrowgate, Beatrice"

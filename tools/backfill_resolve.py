@@ -230,15 +230,15 @@ def ticked_rosters(sub, questions):
 
 
 def attendance_date(sub):
-    """yyyy-mm-dd from question 17 (Jotform: {year, month, day}), None when missing or
-    not a date."""
+    """Question 17 (Jotform: {year, month, day}) as zero-padded yyyy-mm-dd text; "" - never
+    None: the loader reads text - when it is missing or is not a date."""
     value = answer_of(sub, DATE)
     if not isinstance(value, dict):
-        return None
+        return ""
     try:
         return datetime.date(int(value["year"]), int(value["month"]), int(value["day"])).isoformat()
     except (KeyError, TypeError, ValueError):
-        return None
+        return ""
 
 
 def photo_urls(sub):
@@ -320,7 +320,7 @@ def resolve(region, form_id, submissions, questions, today, roster):
             shared.append("q18_differs")
         if not picks:
             shared.append("typed_era")
-        if date is None:
+        if not date:
             shared.append("date_missing")
         elif date < MONTH_START:
             shared.append("date_before_2026_09")
