@@ -388,6 +388,7 @@ def form_report(form_id, client, roster_by_region):
         "club_guard": ({"qid": guards[0], "clubs": len(picker_options(questions, picker)) if picker else 0}
                        if guards else None),
         "picker_calc_values": bool(picker and has_calc_values(questions[picker])),
+        "picker_options": len(picker_options(questions, picker)) if picker else 0,
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -447,13 +448,21 @@ def main():
             if counts is None:
                 r["rule_problems"].append("--rendered: the public page has no Club picker select "
                                           "(page not served, or its layout changed)")
-            elif r["picker_calc_values"] and (counts["differ"] or counts["missing"]
-                                              or counts["aligned"] != counts["options"]):
+                continue
+            if not r["picker_calc_values"]:
+                continue                     # before the rollout the counts are only printed
+            if counts["differ"] or counts["missing"] or counts["aligned"] != counts["options"]:
                 r["rule_problems"].append(
                     f"rendered page: {counts['differ']} of {counts['options']} picker options carry a "
                     f"data-calcvalue other than their value, {counts['missing']} none - the copy "
                     "into question 5 would send another club's name (RUNBOOK, One club per "
                     "submission: stop and restore)")
+            # an option the parser could not read is one the check cannot vouch for
+            if counts["options"] != r["picker_options"]:
+                r["rule_problems"].append(
+                    f"rendered page lists {counts['options']} of the picker's {r['picker_options']} "
+                    "options - a page served from before the apply (re-run in a few minutes) or a "
+                    "layout this check cannot read: do not treat it as aligned")
     if args.json:
         print(json.dumps(reports, indent=1))
         return

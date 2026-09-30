@@ -134,7 +134,9 @@ other rule shows the guard. Report line `club guard:
 q<id> (N clubs)` or `club guard: none (a mentor can pick several clubs)`
 (informational: forms stay CLEAN before rollout). `--rendered`: GET the
 public page (curl, like every tool here), compare each picker option's
-`value` with its `data-calcvalue` in memory; counts only.
+`value` with its `data-calcvalue` in memory, and (with `calcValues`) flag a
+page whose option count differs from the picker's, so a page it cannot
+read never passes; counts only.
 
 **H. `tools/auto_sync.py`.** `GUARD_RX` (CREATE|UPDATE club guard), read by
 `parse_plan` and `plan_from_summary`, counted by `changes()`, named by

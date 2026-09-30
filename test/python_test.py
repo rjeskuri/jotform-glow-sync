@@ -1255,9 +1255,29 @@ class FormStatusAudit(unittest.TestCase):
             self.assertIn("would send another club's name", bad)
             self.assertNotIn("CLEAN", bad)
             self.assertNotIn("rendered picker", report(roster))          # only with --rendered
+            # the hard stop never passes on a page it could not read in full: no
+            # options, only a placeholder, attributes it does not parse, a subset
+            empty = '<select name="q500_clubPicker[]" multiple=""></select>'
+            unread = {"empty": empty,
+                      "placeholder": empty.replace('""></select>', '""><option value="">…</option></select>'),
+                      "single quotes": aligned.replace('"', "'").replace("name='q500_clubPicker[]'",
+                                                                         'name="q500_clubPicker[]"'),
+                      "one of three": aligned.replace('<option data-calcvalue="Beta Club" value="Beta Club">'
+                                                      'Beta Club</option>', "").replace(
+                          '<option data-calcvalue="Stars" value="Stars">Stars</option>', "")}
+            for what, page in unread.items():
+                out = report(roster, "--rendered", page=page)
+                n = 1 if what == "one of three" else 0
+                self.assertIn(f"rendered page lists {n} of the picker's 3 options", out, what)
+                self.assertNotIn("CLEAN", out, what)
             del qs["700"]
             wire[:] = self.guard_form(guard=False)[1]
             self.assertIn("club guard: none (a mentor can pick several clubs)", report(roster))
+            # before the rollout (no calcValues on the picker) the count is only printed
+            del qs["500"]["calcValues"]
+            out = report(roster, "--rendered", page=empty)
+            self.assertIn("rendered picker: 0 options", out)
+            self.assertIn("→ CLEAN", out)
 
 
 class TranslationAudit(unittest.TestCase):

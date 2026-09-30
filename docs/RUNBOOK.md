@@ -489,7 +489,10 @@ single-selects have, or none (`glow/sync.py PICKER_CALC_LEADING_EMPTY`). If
 the check reports any option whose `data-calcvalue` differs from its value,
 question 5 would receive a neighbouring club's name, with no warning.
 Restore the template's conditions, delete the element, clear the
-`calcValues` (below), flip the constant, and start again. (All options
+`calcValues` (below), flip the constant, and start again. The check also
+refuses to pass when the page lists a different number of options than the
+picker has ("rendered page lists N of the picker's M options"): an option it
+could not read is one it cannot vouch for. (All options
 "without" a `data-calcvalue` right after the apply can be a page served from
 before it: re-run the check a few minutes later before calling it a
 failure.) No regional form
