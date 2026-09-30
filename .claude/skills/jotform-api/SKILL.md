@@ -17,21 +17,45 @@ unless `--apply`.
   condition's `terms` and `action` must be **JSON-encoded strings**. Writing the key replaces the
   whole array; other property keys are untouched. Ids: unique 13-digit numeric strings; keep
   `index` and `priority` sequential and equal (`build_conditions` does).
-- Runtime `equals` is case-insensitive and trims outer whitespace (`JotForm.checkValueByOperator`).
+- Runtime `equals` is case-insensitive and trims outer whitespace (`JotForm.checkValueByOperator`)
+  — on a text box or single-select. **A multi-select dropdown** (the Club picker,
+  `<select multiple>`) is different (read 2026-09-29 in the runtime, build ef085979a40): only
+  `equals` ("this exact option is selected", exact and **case-sensitive** on the option's value),
+  `notEquals`, `isEmpty`, `isFilled` are evaluated; `contains`, `lessThan` and the rest are
+  silently skipped; there is no count-selected operator. A rule spelling a club unlike its
+  option never fires (Africa's "SUPER GIRLS" vs "Super Girls"), so the sync writes every
+  picker term in the picker's own spelling and `form_status` flags any other.
+- Rule types: `field` rules Show/Hide (Hide works on the Submit button, `control_button`;
+  several Hide rules on one field combine — Show does not re-show it while another Hide is
+  true); `require` rules Require/Unrequire/Enable/Disable (Disable greys `<button>`). No custom
+  error action. Hiding Submit alone does not stop desktop Enter in a text box from submitting —
+  the club guard also disables it (runtime reading; first used by `--club-guard`, verified in
+  the browser on the template before any regional form).
 - Calculations: text concatenates at top level, `[brackets]` = math; `ignoreHiddenFields: true`
   makes hidden fields contribute "" in text context (that is how one aggregate over every roster
   yields only the visible club's ticks). `operands` must list every `{qid}` in the equation or
   changes do not re-trigger. `insertAsText` / `newCalculationType` are builder-side flags.
-- A field filled by a calculation can be the source of another rule (the Club picker → q5 copy).
+- A field filled by a calculation can be the source of another rule (the Club picker → q5 copy);
+  a calculation writing a text box fires keyup, so a rule testing q5 re-evaluates after each copy.
+- The calculation reader, in text context, joins a multi-select's selected options with **no
+  separator**, taking each option's `data-calcvalue` if it has one, else its visible text (which
+  the browser's page translation can alter). So two clubs picked reach q5 run together, and a
+  calculation cannot count a selection (only math/date functions exist).
 
 ## Questions
 - `POST /form/{id}/question/{qid}` form-urlencoded `question[key]=value` **merges** properties.
 - `POST /form/{id}/questions` adds; only `question[type]` is required; `control_email` needs
   `question[validation]=Email`. The response `content` is usually the new question (with `qid`),
   but can be a list — read defensively.
-- Adding a question does not shift other orders; equal orders render in creation order.
-- Dropdown `calcValues` has a leading empty slot for the placeholder:
-  `len(calcValues.split('|')) == len(options.split('|')) + 1`.
+- Adding a question at an order another question holds **inserts** it and shifts the block below
+  by one (the Club picker was posted at q5's order 3 and q5 is now 4 on all five forms; the
+  2026-09-01/09-12 snapshots show the shift). Equal orders, where they occur, render in creation
+  order (qid).
+- Dropdown `calcValues` has a leading empty slot for the placeholder on a single-select:
+  `len(calcValues.split('|')) == len(options.split('|')) + 1`. A multi-select renders no
+  placeholder; whether it still wants the slot is **unverified** — `form_status.py --rendered`
+  on the template (every option's `value` = its `data-calcvalue`) decides before a regional
+  form gets the club guard (`glow/sync.py PICKER_CALC_LEADING_EMPTY`).
 - Dropdown with `multipleSelections=Yes` renders Jotform's own searchable component (the
   `searchText` property is its placeholder, `visibleOptions` the rows shown). `maxSelection` /
   `minSelection` are checkbox-only and are silently dropped on dropdowns.
