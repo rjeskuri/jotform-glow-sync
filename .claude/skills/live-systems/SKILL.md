@@ -34,11 +34,17 @@ rollback files: docs/RUNBOOK.md, "Club accounts in Salesforce".
 ## Never
 `--prune` on a form with submissions (it refuses anyway); deleting questions or rows (deactivate
 instead); hand-made conditions (the sync regenerates all of them); re-pointing the Salesforce
-mapping off question 5; writing a translation language without GET + merge first.
+mapping off question 5; changing what an existing club sends to question 5 (its Salesforce
+Account name: a rename, a respelled partner of a `<club> - <partner>` club) without renaming the
+Account first — the sync refuses it without `--q5-change-ok`; `sync_attendance_form.py --apply`
+from a checkout without the same-name code once a form is switched (older code puts it back on
+the plain names); writing a translation language without GET + merge first.
 
 ## Rollback
 - Conditions: `restore_conditions.py --form <id> [--from <snapshot>] --apply`; Jotform Revision
-  History as the second path.
+  History as the second path. It refuses a snapshot whose rules test clubs the Club picker no
+  longer offers (any from before a form's `--same-name-switch`, or before a rename): run the
+  sync instead (docs/RUNBOOK.md, "Club names two partners share", has the switch's own rollback).
 - Questions: never deleted by tooling; a wrongly created question is removed in the builder.
 - Sheet tabs: `data/roster_build/previous/<stamp>/` (upload_roster saves them) or the
   `export-all` you took.

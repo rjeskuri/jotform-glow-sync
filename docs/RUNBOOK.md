@@ -83,6 +83,11 @@ What to know:
   always in the plan); "changed" means a `CREATE`, `UPDATE` or `DELETE` line.
 - Never `--prune` a live form. It deletes questions and is for fresh clones
   only; the sync refuses it on any form with submissions.
+- A `!` line saying Club Name (question 5) **changes** for an existing club
+  is a change of its Salesforce Account name: `--apply` refuses it without
+  `--q5-change-ok`. A `!` line saying a new club was **not added** means
+  another partner's club has its name. Both: "Club names two partners
+  share".
 - Active roster rows with a **blank region** reach no form and no tool warns
   except `auto_sync.py` (ATTENTION) and the sheet's ReviewQueue. Fill in the
   Partners tab, then **GLOW → Refresh regions from the Partners tab**. Since
@@ -104,10 +109,37 @@ then let the sync rewrite the picker options and the rules:
 python3 tools/rename_club.py --partner "<partner>" --old "<current name>" --new "<new name>"   # dry run
 python3 tools/rename_club.py --partner "<partner>" --old "<current name>" --new "<new name>" --apply
 python3 tools/sheets_client.py export Roster data/roster_<date>.csv
-python3 sync_attendance_form.py data/roster_<date>.csv --roster --region <region> --form <id>   # then --apply
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --region <region> --form <id>   # dry run: the '!' line; then --apply --q5-change-ok
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154         # template, same
 python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv                        # CLEAN
 ```
+
+The club's name is what question 5 sends, so a rename changes the name
+Salesforce looks its Account up by. The sync's dry run lists it (`! '<new
+name>' (q…): Club Name (question 5, what Salesforce reads) changes from
+'<old>' to '<new>'`), refuses `--apply` without `--q5-change-ok`, and the
+runner never applies it (ATTENTION, region "not applied"). After the
+Salesforce reconnect: **rename the club's Account to the new text first**,
+then apply with the flag in the same sitting — otherwise the club's next
+submission makes Salesforce create a second Account with new Contacts for
+every girl. The new name may not be one another partner's club has. The
+tool cannot rename one of the clubs that share a name ("Club names two
+partners share": two questions carry the old name, and it refuses).
+
+The one exception to "never the sheet alone": a **new club the sync did not
+add** because its name was in use has no question on any form. The tool
+finds a question by its text, and the question of that name is the other
+partner's — so it refuses (a question named like the club that holds
+another club's girls), and the club is renamed with `--sheet-only`:
+
+```bash
+python3 tools/rename_club.py --partner "<partner>" --old "<name in use>" --new "<new name>" --sheet-only           # dry run
+python3 tools/rename_club.py --partner "<partner>" --old "<name in use>" --new "<new name>" --sheet-only --apply
+```
+
+The next sync run then creates its roster under the new name. No Salesforce
+Account is renamed and no `--q5-change-ok` is needed: the club sent nothing
+yet.
 
 The club keeps its `club_code`, so the girls' ids do not change (`Ids.gs`).
 `--apply` saves the tabs under `data/rename_club/<stamp>/` and snapshots the
@@ -156,7 +188,11 @@ What the tool does and guards:
   Pending rows, all in one batch. Roster and ClubRegistry must never disagree,
   because `Ids.gs` looks a code up by partner + club: a mismatch mints a
   second code on the next submission. A part-moved club looks like two
-  same-named clubs to the sync, which then Partner-gates both roster questions.
+  clubs of one name to the sync: it keeps the club's question for one half
+  (the roster shrinks to that half's girls, a change the automatic run
+  applies) and does not add the other half (a new club whose name is in
+  use: ATTENTION, "new club(s) NOT added"), so those girls are on no
+  attendance form until the move is finished.
   So never do this by hand with Find & Replace, and never sort the Roster
   (the attendance forms list each club's girls in Roster row order, and this
   tool and the form handlers address cells by row number).
@@ -184,9 +220,11 @@ While a club is missing from its partner's list, tell the partner **not** to
 use "Enroll a NEW club": the Existing-club page's help text ("Not listed? Your
 organization has no enrolled clubs yet — go back and choose …") points there,
 and it would
-enroll the club a second time with new ids and gate its roster behind the
-Partner box. Until the move, they can reach the club through Existing club →
-the typo's name.
+enroll the club a second time with new ids — and the second club would
+reach no attendance form: the sync does not add a new club whose name
+another partner's club (here the typo's) already has ("Club names two
+partners share"). Until the move, they can reach the club through Existing
+club → the typo's name.
 
 The raw Enrollment Responses keep the typo (the tab is append-only), so a
 rebuild from them brings it back — see the warning under "Roster rebuild and
@@ -209,11 +247,38 @@ tab ("Run workflow", optional region).
 at most 5 new clubs and 20 roster updates; never a delete; not when a roster
 would be replaced by one sharing no names with the current one; not when the
 export looks truncated (fewer than 1,000 active rows, or many clubs on the
-form missing from the export). Outside the bands nothing is written, the
-region is logged as `attention`, and `data/auto_sync/ATTENTION.md` (kept as
-a workflow artifact) says what to do. The workflow fails visibly (GitHub
-emails the repository owner) on `attention` (exit 2) and on any failure
-(exit 1).
+form missing from the export); never a change of what an existing club
+sends to question 5, its Salesforce Account name (a renamed club, a
+respelled partner — "Club names two partners share"), which stops the
+region even when nothing else is planned. Outside the bands nothing is
+written, the region is logged as `attention`, and
+`data/auto_sync/ATTENTION.md` (kept as a workflow artifact) says what to do.
+Two more things raise ATTENTION without stopping a region: a new club that
+was not added to its form because another partner's club has its name (the
+rest of the region is applied as usual; the SyncLog `detail` says "N new
+club(s) not added (name in use)"), and, once per run, any name that two
+clubs of the regions synced send to question 5. Until a club that was not
+added is renamed, every apply in its region reads `applied-with-problems`,
+with a second ATTENTION ("applied, but the form still has problems"): the
+verify step goes by club name, so its "still missing from the form: <club>"
+line (the namesake is on another region's form) or "roster(s) still differ
+from the sheet: <club>" line (the namesake is on this form) counts the club
+that was not added. By itself that line does not say the existing club's
+roster is out of date.
+
+One thing reads `attention` where it used to read `in-sync`: **roster rules
+that test a name the Club picker does not list** (a conditions backup
+restored over newer picker entries, a hand apply that stopped between the
+picker write and the rules write). Those clubs' rosters do not show and,
+with the club guard, their mentors cannot submit. The sync's dry run says
+so per roster (`! '<club>' (q…): its rule tests '<X>', which the Club picker
+does not list …`) and plans only `REPLACE conditions`, which the runner does
+not count as a change and never applies on its own: run the dry run and
+`--apply` by hand. When the same region also has a roster change, the
+runner's ordinary apply rewrites the rules and nothing more is needed.
+
+The workflow fails visibly (GitHub emails the repository owner) on any
+ATTENTION (exit 2) and on any failure (exit 1).
 
 **SyncLog columns:** `when, trigger, region, mode, creates, updates, rules,
 result, detail, run_url`. `when` is the run's start in the sheet's own time
@@ -227,8 +292,11 @@ its UTC offset. `mode` is
 `dry-run` or `apply`; `result` is one of `in-sync`, `dry-run` (would apply), `applied`, `applied-with-problems`,
 `applied-unverified`, `attention`, `failed`. `detail` counts the roster
 creates, updates, deletes and warnings, then names a Club-picker or
-partner-list write when there is one (`…, update partner list`): such a
-write is applied like a roster change. The Audit tab additionally gets
+club-guard write when there is one (`…, update club picker`): such a
+write is applied like a roster change. The Partner-box hide (`HIDE partner
+textbox`, "Club names two partners share") is neither counted nor named in
+`detail`: it only ever rides along with a counted change, and the run's log
+(the row's `run_url`, or `data/auto_sync/<stamp>.log`) shows the line. The Audit tab additionally gets
 a `syncRequested … → HTTP 204` row every time the sheet sends the event.
 
 **Switches:**
@@ -265,7 +333,10 @@ conditions-only file `backups/<form>/conditions-<stamp>.json` (that file —
 no staff e-mails, no integration settings, no rosters — is what the workflow
 keeps as an artifact for 30 days);
 `python3 restore_conditions.py --form <id> --from conditions-<stamp>.json --apply`
-puts the conditions back. Questions are never deleted by the runner. To stop
+puts the conditions back. It refuses a snapshot whose rules test a club the
+Club picker does not offer today (one from before a form's same-name switch,
+or before a rename): restored, those clubs' rosters would never show — run
+the sync instead. Questions are never deleted by the runner. To stop
 the automation: `AUTO_SYNC_APPLY=0` (or clear the two Script Properties).
 
 ## The Club picker (mentors choose their club instead of typing it)
@@ -275,7 +346,9 @@ A required **Club** dropdown in Jotform's searchable mode (type to filter,
 on phones too) listing every club on the form; the roster rules key on it,
 and a calculation copies the pick into the (now hidden) Club Name textbox,
 question 5, which is what the Salesforce mapping reads — so `Account_Name__c`
-still receives the plain club name. Added once per form; from then on every
+receives the picked entry: the club's name, or `<club> - <partner>` for a
+club whose name another partner's club shares ("Club names two partners
+share"). Added once per form; from then on every
 sync run keeps its option list and properties in the shape `PICKER_PROPS`
 defines (`UPDATE club picker (N clubs: options, subLabel…)` in the plan).
 **Status:** rolled out to the template and all four regional forms on
@@ -313,109 +386,237 @@ can hide a completed write: re-run the dry run, and "0 new" means it landed.
 Club names (the picker's options and the roster labels) are deliberately
 never translated — they display in English in every language.
 
-## The partner list (club names two partners share)
+## Club names two partners share
 
-Plan: [plans/2026-09-28-partner-box.md](plans/2026-09-28-partner-box.md).
-When two partners each have a club of the same name ("Ruby", "Angels Club"…),
-the Club picker lists the name once, and the form asks for the partner. Until
-now that was the typed **Partner** box (q331), and the roster appeared only
-when the typed text equalled the partner's full name as the Roster spells it,
-so "HAFAI" for Health Aid For All Initiative showed nothing. `--partner-picker`
-replaces the box with a **Partner** dropdown (field name `partnerPicker`). It
-lists the partners whose club name is shared on that form, stays hidden until
-such a name is picked, and is required once shown. It has the Module/Session
-dropdowns' shape, so it is a plain list and only one partner can be chosen.
-The gated rules test it and q331 is hidden; a calculation copies the chosen
-partner into q331, which the staff notification e-mail's "Partner {partner}"
-row and the submissions export's Partner column read. Question 5
-(Salesforce) is untouched. Added once per form;
-from then on every run keeps its options and shape
-(`UPDATE partner picker (N partners: …)`, which the runner applies like a Club
-picker update). A form without it keeps the typed box and exactly today's
-rules. **Status:** built 2026-09-28, not deployed. Today only Africa (8
-partners, 10 rosters) and the template (9 partners, 11 rosters) have shared
-names; on the others the flag refuses ("nothing to choose").
+Plan: [plans/2026-09-30-same-name-clubs.md](plans/2026-09-30-same-name-clubs.md).
+Salesforce finds a club's Account by question 5, exactly apart from case, in
+one org for every region, and creates an Account when nothing matches. So a
+club whose name another partner's club also has sends `<club> - <partner>`
+(Ryan, 2026-09-30). That one string is the club's entry in the Club picker,
+its `calcValue`, what its roster rule and the club guard test, question 5,
+and the name of its Salesforce Account. The roster question's own text (the
+heading above the names) stays the plain club name. Nothing ever splits a
+name on " - ": club names contain it. The seven clubs, once every form is
+switched (below):
 
-Order matters: the runner syncs from `main`, and the old code would put the
-rules back on the hidden box. So **merge first**, and keep
-`AUTO_SYNC_APPLY=0` for the window, until both forms pass the browser check
-below. Repair the roster order first ("Rosters above Submit"): until then
-`form_status` also shows a `layout:` problem on every form, which is not
-this procedure's.
+| Picker entry = question 5 = Salesforce Account | Form |
+|---|---|
+| `Angels Club - Abaana Community Outreach (ACO) Africa` | Africa |
+| `Angels Club - Ready for Reading` | Africa |
+| `Ruby - Binti Network` | Africa |
+| `Ruby - Health Aid For All Initiative` | Africa |
+| `Shining Stars - Seeds of Hope Foundation` | Asia |
+| `Shining Stars - World Economy Skills and Agro Development (WESAD)` | Africa |
+| `Shining Stars - Youth and Women Opportunities Uganda (YWOU)` | Africa |
+
+Every other club sends its plain name, `Shinning Stars` (Ready for Reading)
+and `Super Girls` (Feminature Uganda Limited) included: their namesakes were
+retired on 2026-09-30. The sync's `--summary-json` lists what every roster
+sends (`sf_names`: qid, partner, club, value); the Salesforce Accounts are
+named from those values, character for character.
+
+**Status:** built 2026-09-30 (Part 1, the forms), not deployed. Until a form
+is switched its same-name rosters stay on one entry and are told apart by
+the typed Partner box (q331), as before.
+
+What the sync keeps to, on every run:
+
+1. **Each roster keeps the form it has.** The sync reads back what every
+   roster's rule tests — its text, or its text + " - " + a partner the Roster
+   has for that club — and never flips one between plain and long on its own.
+   A namesake going inactive, or a new one arriving, changes nothing for an
+   existing club. When the rules are older than the picker (a restored
+   backup, an apply that stopped half-way), the picker's entries say what a
+   club sends, and the run says so for each such roster
+   (`! '<club>' (q…): its rule tests '<X>', which the Club picker does not list …`):
+   until an `--apply` rewrites the rules that roster does not show. The
+   runner raises ATTENTION for it and never reads such a form as `in-sync`
+   ("Automatic sync").
+   A plain roster's rule names no partner. When the Roster has another
+   partner's club of that name (a retired one, or a new one that was not
+   added), the roster's owner is read from the Roster's rows of any status:
+   the partner whose rows list the most of the girls the question holds —
+   at least half of them, and more than any other partner's. So a retired
+   club's question is never handed to another partner's new club, and an
+   existing club keeps its question whatever its new roster is. A tie (the
+   same girls under two partners) or no evidence (the old rows deleted, the
+   girls respelled in place) names no owner, and the club is matched by its
+   girls as before.
+2. **A new club may not take a name that is in use.** A club to be created
+   whose name another partner's club has — in any region, whatever its
+   status — is not created:
+   `! new club '<club>' (<partner>) has the name of <other partner>'s club - not added: give it a different name`.
+   The rest of the run goes on. The runner raises ATTENTION for it and keeps
+   syncing the region. The same when the club of that name is retired and
+   its question is still on the form: the newcomer never takes that
+   question over. Ask the partner for a different name and rename the club
+   in the sheet with
+   `tools/rename_club.py --partner … --old … --new … --sheet-only`
+   (`--sheet-only` because the club has no question on any form, and the
+   question of that name is the other partner's: without it the tool
+   refuses; "Renaming a club"). The next run creates it. Until then it is
+   on no attendance form, and every apply in its region reads
+   `applied-with-problems` ("Automatic sync"). (The Club Roster Form
+   handler is to hold such a club before it reaches the Roster — Part 2 of
+   the plan; this is the backstop.)
+3. **Any other change of what an existing club sends is made by hand.** A
+   renamed club, a respelled partner of a long-named club, a rule edited by
+   hand: the dry run lists
+   `! '<club>' (q…): Club Name (question 5, what Salesforce reads) changes from 'X' to 'Y' - rename its Salesforce account first; an --apply needs --q5-change-ok`,
+   `--apply` refuses without `--q5-change-ok`, and the runner never applies
+   that region (ATTENTION "not applied", even when nothing else is planned).
+   After the Salesforce reconnect: rename the Account to the new text, then
+   apply by hand with the flag, in one sitting.
+
+It refuses, before any write: `|` or `{…}` in an entry; two rosters that
+would share one entry without the Partner box telling them apart (the way
+out is `--same-name-switch`, or deleting a leftover question); a roster
+becoming long whose long name is another club's own name; `--partner-picker`
+and a form carrying a partner list (both retired 2026-09-30, never
+deployed); `--same-name-switch` on a form without the Club picker; and
+`--same-name-switch` when a roster that is not in the Roster export (a
+retired club's question left on the form) would be alone on the plain entry
+beside the long ones (`q… would keep the plain Club picker entry '<club>'
+beside the long ones`): a mentor picking the familiar name would get the
+retired club's girls. Delete that leftover question in the builder first.
+
+**The typed Partner box (q331)** has nothing left to do once no rule shows
+it, and unhidden every mentor sees an optional box: on a form with the Club
+picker the sync hides it (`HIDE partner textbox (q331: no rule shows it; …)`,
+written after the rules). It is still submitted, blank, so the staff
+notification e-mail's "Partner" row is empty from then on. The runner does
+not count the hide as a change: it rides along with the next roster change
+it applies on that form, or a hand apply, and that run's SyncLog `detail`
+does not name it (the run's log does: `HIDE partner textbox`). Today no
+rule shows it on Asia, Latin America and U.S, so their next apply hides it,
+switch or not.
+
+### The one-time switch (`--same-name-switch`)
+
+By hand, once per form; the runner never passes it. Every roster on the
+form whose club name two or more partners' **active** clubs share — in any
+region: Asia's Shining Stars shares its name with Africa's — gets its long
+entry. Order matters: the runner syncs from `main`, and code from before
+this change puts a switched form back on the plain names unattended (read
+2026-09-30, in memory: it plans `UPDATE club picker` and the rules, within
+the bands). So **merge first**, keep `AUTO_SYNC_APPLY=0` for the window, and
+from then on never run `sync_attendance_form.py --apply` from a checkout
+without this code. Each step needs Ryan's go. Before the first form: no
+open "new club(s) NOT added" ATTENTION in any region (a club that was not
+added sits active in the Roster until it is renamed; one on this form's own
+list is left out of the switch, one in another region counts as a namesake
+and would make an existing one-of-a-kind club long). The template first,
+then Asia, Africa (each with its `--region`), then U.S and Latin America,
+which have nothing to switch and only get q331 hidden (no flag needed):
 
 ```bash
-python3 backup_forms.py --form 262352490535154                                         # note its stamp: the rollback restores it
-python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker            # dry run
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+python3 backup_forms.py --form 262352490535154                                         # the state before
 python3 tools/add_translations.py --audit --form 262352490535154                       # before: note the counts
-python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --partner-picker --apply    # add it
-python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv     # "partner picker: q<id>", rules CLEAN
-python3 tools/add_translations.py --audit --form 262352490535154                       # same counts as the "before" audit (see below)
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --same-name-switch            # dry run: the '!' lines
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --same-name-switch --apply
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154                               # nothing to do, no '!' line
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv              # CLEAN; same-name clubs: 7; partner box: q331 hidden
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --rendered   # N options, N with data-calcvalue = value
+python3 tools/add_translations.py --audit --form 262352490535154                       # the "before" counts + the entries added
 ```
 
-The dry run prints `conditions: K kept, N new, D dropped`. Expected: template
-360 / 17 / 16, and Africa (`--region Africa --form 262382821971058`)
-239 / 16 / 15: the partner rules that now test the list, plus the one copy
-into q331. The rule count grows by that copy (377 and 255), and there are no
-roster creates or updates beyond what the same command prints without the
-flag.
+The dry run lists one `! '<club>' (q…): Club Name (question 5, what
+Salesforce reads) changes from '<club>' to '<club> - <partner>'` per roster
+(no `--q5-change-ok` needed for these), then `UPDATE club picker (N clubs:
+calcValues, options)`, `REPLACE conditions`, and `HIDE partner textbox`.
+Read on 2026-09-30, after the two retirements:
 
-The translation audit prints the same "untranslated" count per language
-after the apply as in the "before" audit, taken just before it (most of the
-count is club names, which change with the roster, so an older reading is no
-baseline). The list's label "Partner" and its "Please
-Select" placeholder are already translated on every form. The audit skips
-the partner names, which stay English. Most of the count is the Club
-picker's club names, which also stay English (215 of Africa's 236 on
-2026-09-28).
+| Form | `!` lines | Picker entries | `conditions:` | Rules after |
+|---|---|---|---|---|
+| Template | 7 | 358 → 362 | 384 kept, 9 new, 12 dropped | 393 |
+| Asia | 1 | 95 (one renamed) | 123 kept, 3 new, 3 dropped | 126 |
+| Africa | 6 | 215 → 218 | 241 kept, 8 new, 11 dropped | 249 |
+| Latin America, U.S | 0 | 38, 11 | unchanged | the hide only |
 
-Check in the browser (template first, then Africa):
+The number of `!` lines must equal the table (or today's count of such
+clubs): **one more means stop** — a club is being made long that should
+not be. The switch is never the answer to a refused new club; that is a
+rename (rule 2).
 
-1. Pick a unique club: no Partner question.
-2. Pick "Ruby": Partner appears, required, listing the partners.
-3. Choose Health Aid For All Initiative: its roster appears. Choose Binti
-   Network instead: the rosters swap.
-4. Switch the language (e.g. Kiswahili): "Partner" is translated, the
-   partner names stay English.
-5. Submit a test on the template: the Club Name field (q5) says "Ruby", and
-   the staff notification e-mail and the submission show the partner chosen
-   in step 3 under Partner.
+The new rules are the switched rosters' and the two club-guard rules (their
+club lists); the dropped ones are those plus the "show the Partner box"
+rule of each name. Between the picker write and the rules write (seconds)
+the switched clubs' rosters do not show and their Submit is hidden: apply
+each region in its quiet hours, and if an apply stops there, run the same
+command again at once (the picker already lists the long names, and the
+run finishes the rules; it prints one `! … its rule tests '<club>', which
+the Club picker does not list …` per switched roster, and no question-5
+line). Left alone, the runner raises ATTENTION for a regional form in that
+state on its next run; it does not finish the rules itself, and nothing
+watches the template. The translation audit counts picker entries as
+untranslated strings, so it rises by the entries added (template 4, Africa
+3, Asia 0).
 
-When both forms pass, end the window: set `AUTO_SYNC_APPLY=1`. The next
-SyncLog row for every region reads `in-sync` (or `applied`); a `dry-run` row
-means the runner is still paused, and roster changes are not reaching the
-forms.
+Check in the browser (the template, then Africa):
 
-Rollback, per form. The runner stays paused from the first step to the
-last. The list is found by name, so while it exists a runner apply moves the
-rules back onto it and hides q331 again. If the list is then deleted, the
-shared-name rosters can never show. No later run repairs that: a
-rules-only difference is not a change to the runner.
+1. Type "Ruby": two entries, each with its partner. Pick one: only that
+   club's roster shows, and no Partner question appears.
+2. Pick a second club: the club guard's warning, Submit gone.
+3. Chrome "Translate page" with one long-named club picked: no warning,
+   Submit shows.
+4. At phone width, the two long "Shining Stars" entries can be told apart.
+5. The template only: one test submission with a long name. Question 5
+   holds it exactly, and question 18 lists the ticked names.
 
-1. Set `AUTO_SYNC_APPLY=0`, then `python3 backup_forms.py --form <id>` (the
-   state being rolled back).
-2. `python3 restore_conditions.py --form <id> --from properties-<stamp>.json`
-   (dry run), then with `--apply`. The rules test q331 again. `<stamp>` is
-   the backup taken just before the `--partner-picker --apply` (first command
-   above). Do not use the default `properties-latest.json`: every later backup,
-   step 1's included, overwrites it with the list's rules.
-3. Un-hide q331 in the builder (or `question[hidden]=No`). It was not required
-   before (either form, 2026-09-28). `questions-<stamp>.json` from the same
-   backup shows how it was.
-4. Delete the Partner dropdown in the builder.
-5. The sync dry run without the flag (`… --roster --form <id>`, Africa with
-   `--region Africa`). With no list on the form, it builds the rules on q331
-   exactly as before the list. It prints "nothing to do" unless roster changes
-   were applied after the snapshot, which the restored rules lack. In that case
-   it plans `REPLACE conditions`: back up and `--apply`.
-6. `tools/form_status.py --form <id> --roster …`: rules CLEAN and no "partner
-   picker" line. Then `AUTO_SYNC_APPLY=1`.
+Then `python3 tools/auto_sync.py` (dry run): every region `in-sync` and no
+ATTENTION, and `AUTO_SYNC_APPLY=1`. Until every form is switched the runner
+reports, once per run, the names more than one club sends ("N Salesforce
+name(s) are sent by more than one club"): that is this procedure's job.
 
-Do not revert the merge. With no list on a form, the merged code keeps the
-typed box and the same rules (unit-tested). While another form still has its
-list, the old code would put that form's rules back on its hidden q331.
+### Afterwards
 
-Until it is deployed, a mentor of a shared-name club must type the partner's
-full name exactly as the Club Roster Form lists it.
+- **A new club with a name in use** is refused (rule 2). `auto_sync`'s
+  ATTENTION names the club and whose name it has. Rename it with
+  `tools/rename_club.py … --sheet-only`; until then each apply in that
+  region reads `applied-with-problems`, and the "missing" or "differ" line
+  of that name counts the club that was not added.
+- **Renaming a club** is a question-5 change (rule 3, "Renaming a club"
+  above). `tools/rename_club.py` cannot rename one of the seven: it refuses a
+  form with two questions of the old name (BACKLOG).
+- **Renaming a partner** that has a long-named club changes that club's
+  entry ("Ruby - <partner>"): the same rule 3. Rename the Salesforce Account
+  first. The sync recognises the club by its girls and keeps its roster.
+- **A namesake retired later** changes nothing: the club that is left keeps
+  its long name (its Salesforce Account keeps its history).
+- **Restoring conditions.** `restore_conditions.py` refuses a snapshot
+  whose rules test a club the picker no longer offers — every backup from
+  before a form's switch, and any from before a rename. Restored, those
+  clubs' rosters would never show and the club guard would block their
+  mentors. Run the sync instead. `--force` restores anyway: run the sync by
+  hand straight after (dry run, then `--apply`), which rebuilds the rules
+  on the picker's entries. The runner does not apply a rules-only
+  difference: it raises ATTENTION ("roster rule(s) test a name the Club
+  picker does not list") on every run until that apply, or until a roster
+  change in that region makes it apply.
+
+### Rollback
+
+All forms together, the runner paused from the first step to the last, and
+**only before the Salesforce reconnect**. Afterwards plain "Ruby" would
+reach Salesforce and put two clubs on one Account: fix forward, or rename
+the seven Accounts first.
+
+1. `AUTO_SYNC_APPLY=0`, then `python3 backup_forms.py` (every form).
+2. Revert the merge on `main`.
+3. With the reverted code, each switched form (the template, Asia, Africa):
+   the sync dry run, then `--apply`. It matches the same-name rosters by
+   their girls and plans `UPDATE club picker (… calcValues, options)` and
+   `REPLACE conditions`, which put back the plain names and the Partner-box
+   rules (read 2026-09-30, in memory, on all three). A second dry run says
+   nothing to do.
+4. Un-hide q331 (`question[hidden]=No`, or the builder) on the template and
+   Africa, where rules show it again, and on the others if the box is
+   wanted back.
+5. `tools/form_status.py`: every form CLEAN. Then `AUTO_SYNC_APPLY=1`.
+
+`restore_conditions.py` is not a rollback here: it leaves the picker on the
+long names while the old rules test the plain ones.
 
 ## One club per submission (the club guard)
 
@@ -558,7 +759,10 @@ so the element goes before the runner resumes.
 1. `AUTO_SYNC_APPLY=0`, then `python3 backup_forms.py --form <id>`.
 2. `python3 restore_conditions.py --form <id> --from properties-<stamp>.json`
    (dry run, then `--apply`). `<stamp>` is the backup taken just before the
-   `--club-guard --apply`, not `properties-latest.json`.
+   `--club-guard --apply`, not `properties-latest.json`. On a form switched
+   to the long same-name entries since, that snapshot is refused (its rules
+   test the plain names): add `--force`, and do step 5's apply straight
+   after — it rebuilds the rules on the picker's entries, without the guard.
 3. Delete the `clubGuard` element in the builder.
 4. Clear the picker's `calcValues` (its calculation values in the builder, or
    `question[calcValues]` via the API; re-read to confirm it took — an empty
@@ -654,7 +858,7 @@ native-reviewed. "Club Roster Form" stays in English in every language: the
 Google Form it opens is English-only.
 
 The sync never touches these elements: it writes roster checkboxes, the Club
-picker, the partner list, the club guard's warning, the hidden flags of q5
+picker, the club guard's warning, the hidden flags of q5
 and q331, and the conditions, and no generated rule mentions a link element
 (both test-pinned; the club guard's two rules mention only its warning and
 Submit). A rule
@@ -709,8 +913,8 @@ form is NOT CLEAN for `form_status`, so a runner apply would end
 `applied-with-problems` — then back to `1`. Run the repair in the same
 sitting as the merge: until a form is repaired, `form_status` shows the
 `layout` problem on it, so no other procedure's "CLEAN" can pass there (the
-manual loop, renaming or moving a club, the Club picker, the partner list,
-the club guard). That line is this section's job, not theirs.
+manual loop, renaming or moving a club, the Club picker, the same-name
+switch, the club guard). That line is this section's job, not theirs.
 
 The tool plans all five forms before it writes any and refuses — on every
 form — rather than guess: two Submit buttons, a page break, a field a mentor can

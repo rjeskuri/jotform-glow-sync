@@ -46,6 +46,19 @@ out to the four regional forms.
   iframe widgets.
 - Same-name clubs under two partners keep working (the Partner box).
 
+**Amended 2026-09-30 (Ryan's decision;
+[plan](../plans/2026-09-30-same-name-clubs.md)).** Two of the constraints
+above changed:
+
+- Question 5 still is the field Salesforce reads, but its value is the
+  club's **Salesforce name**: the plain club name, or `<club> - <partner>`
+  for a club whose name another partner's club also has. Salesforce could
+  not tell two clubs of one name apart, and it matches on this field alone.
+- Same-name clubs no longer use the Partner box. Each is its own entry in
+  the list (`Ruby - Binti Network`), so there is nothing to type: with the
+  box, 8 of the 10 such submissions since launch reached no roster. The box
+  is hidden on every form. A new club may not take a name that is in use.
+
 ## Open questions
 
 - Jotform's plain dropdown only jumps to the first letter (Ryan's test);

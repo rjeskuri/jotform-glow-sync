@@ -10,6 +10,9 @@ import csv
 import html
 import re
 import sys
+from collections import defaultdict
+
+from glow.text import key
 
 # ---------------------------------------------------------------- sheet layout
 # Column headers in the enrollment sheet (matched loosely, case-insensitive).
@@ -21,7 +24,10 @@ COL_ROSTER = "please list the full name"
 # Structural fields of the master form. If the form is ever rebuilt from
 # scratch, update these ids (GET /form/{id}/questions to look them up).
 CLUB_NAME = "5"      # Club Name textbox (Salesforce Account_Name__c reads it)
-PARTNER = "331"      # Partner textbox (shown only for ambiguous club names)
+PARTNER = "331"      # Partner textbox. With the Club picker it is hidden once no rule shows it
+                     # (a club name two partners share is its own picker entry, SF_NAME_SEP
+                     # below) and only the staff notification e-mail reads it; without the
+                     # picker it is typed, and shown for an ambiguous club name
 YEAR = "94"          # GLOW Club Year dropdown (1|2|3)
 MODULES = {"1": "14", "2": "92", "3": "93"}       # year -> module dropdown qid
 WEEKS = {8: "15", 10: "95", 14: "96", 15: "97"}   # session count -> dropdown qid
@@ -32,9 +38,12 @@ CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID = "18", "98", "100", "102"
 # tools/form_status.py).
 PICKER_NAME = "clubPicker"
 
-# The partner list that replaces the typed Partner box for club names two
-# partners share (created by sync_attendance_form.py --partner-picker,
-# docs/plans/2026-09-28-partner-box.md). Recognised by name, like the picker.
+# The partner list (docs/plans/2026-09-28-partner-box.md) was built, never
+# deployed, and is RETIRED (2026-09-30, docs/plans/2026-09-30-same-name-clubs.md):
+# the sync refuses --partner-picker and a form carrying one. The name stays so
+# that refusal, the audit and the other tools still recognise such a question;
+# the rest of the partner-list code is dead and waits for its clean-up
+# (docs/BACKLOG.md).
 PARTNER_PICKER_NAME = "partnerPicker"
 
 
@@ -122,6 +131,123 @@ WARNINGS = []
 def warn(msg):
     WARNINGS.append(msg)
     print(msg)
+
+
+# ------------------------------------------------- clubs that share a name
+# Salesforce finds a club's Account by question 5, exactly apart from case, in
+# ONE org for every region, and creates an Account when nothing matches. A club
+# whose name another partner's club also has therefore sends "<club> - <partner>"
+# (Ryan, 2026-09-30; docs/plans/2026-09-30-same-name-clubs.md): that text is the
+# club's Club-picker option, its calcValue, what its roster rule and the club
+# guard test, question 5, and the Salesforce Account name - one string. The
+# roster question's own text stays the plain club name. Which clubs send the
+# long name is read back from each form (sync_attendance_form.py: an existing
+# roster never flips on its own); these functions only say what the Roster
+# holds. Names are compared with glow.text.key (whitespace collapsed, case
+# ignored), at least as broad as Salesforce's comparison. NEVER split a value on
+# the separator: club names contain it ("Alpha Club - Juniors").
+SF_NAME_SEP = " - "     # ASCII space, hyphen-minus, space
+
+
+def roster_pairs(csv_path):
+    """{(partner, club): active} for EVERY Roster row that has both cells - any
+    status, all regions (read_roster_csv keeps active rows only). `active` is
+    True when the club has at least one active girl. Spellings are whitespace-
+    collapsed; one entry per key(partner) + key(club), in the spelling of its
+    first active row (what read_roster_csv returns), else of its first row."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    needed = {"partner", "club", "full_name", "status", "region"}
+    if not rows or not needed <= set(rows[0]):
+        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
+    found = {}                       # (key, key) -> [partner, club, active]
+    for r in rows:
+        partner, club = " ".join(r["partner"].split()), " ".join(r["club"].split())
+        if not (partner and club):
+            continue
+        active = key(r["status"]) == "active" and bool(r["full_name"].strip())
+        entry = found.setdefault((key(partner), key(club)), [partner, club, False])
+        if active and not entry[2]:
+            entry[:] = [partner, club, True]
+    return {(p, c): active for p, c, active in found.values()}
+
+
+def roster_names(csv_path):
+    """{(key(partner), key(club)): {key(full_name), ...}} over EVERY Roster row
+    that has all three cells - any status, all regions: every girl the Roster
+    has ever held for that club. It is how a roster question whose rule names
+    no partner (a plain name) is told to be one partner's club and not a
+    same-named club of another (sync_attendance_form.py, the owner read-back):
+    roster_pairs says who has a club of a name, this says whose girls a
+    question holds. Python only - the Apps Script side has no such read."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    needed = {"partner", "club", "full_name", "status", "region"}
+    if not rows or not needed <= set(rows[0]):
+        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
+    out = defaultdict(set)
+    for r in rows:
+        partner, club, name = key(r["partner"]), key(r["club"]), key(r["full_name"])
+        if partner and club and name:
+            out[(partner, club)].add(name)
+    return dict(out)
+
+
+def club_partners(pairs):
+    """{key(club): {key(partner): partner}}: who has a club of each name."""
+    out = defaultdict(dict)
+    for partner, club in pairs:
+        out[key(club)].setdefault(key(partner), partner)
+    return dict(out)
+
+
+def shared_club_names(pairs, active_only=False):
+    """key(club) of every club name that two or more partners (compared by
+    key) have. active_only: count only clubs with an active girl - what the
+    one-time --same-name-switch goes by; the default counts every club the
+    Roster has ever held, which is what a NEW club's name is checked against."""
+    who = defaultdict(set)
+    for (partner, club), active in pairs.items():
+        if active or not active_only:
+            who[key(club)].add(key(partner))
+    return {name for name, partners in who.items() if len(partners) > 1}
+
+
+def sf_club_name(club, partner, long):
+    """What question 5 sends for this club, and so its Salesforce Account name:
+    the club's own name, or (long) "<club> - <partner>", both as the Roster
+    spells them (whitespace collapsed, nothing else changed)."""
+    club, partner = " ".join(str(club).split()), " ".join(str(partner or "").split())
+    if not long:
+        return club
+    if not partner:
+        sys.exit(f"'{club}' needs its partner for the name it sends to Salesforce "
+                 f"('{club}{SF_NAME_SEP}<partner>'), and the sheet has none for it - fill in "
+                 "the partner first")
+    return f"{club}{SF_NAME_SEP}{partner}"
+
+
+def long_name_partner(value, club, partners):
+    """The partner inside `value` when it is `club` + SF_NAME_SEP + one of
+    `partners` ({key(partner): partner}: the partners the Roster has for that
+    club), compared by key; None otherwise. The club's own text is stripped as
+    a prefix - the value is never split on the separator."""
+    head, value = key(club) + SF_NAME_SEP, key(value)
+    if not value.startswith(head):
+        return None
+    return (partners or {}).get(value[len(head):])
+
+
+def sf_name_clashes(names):
+    """names: (value, who) pairs - what a club sends to question 5, and any
+    hashable id of that club. Returns [(value, [who, ...])], sorted, for every
+    value (compared by key, as Salesforce matches Accounts) that two or more
+    different clubs send: Salesforce would put them on one Account."""
+    by = defaultdict(list)
+    for value, who in names:
+        if who not in [w for _, w in by[key(value)]]:
+            by[key(value)].append((value, who))
+    return sorted((group[0][0], [w for _, w in group]) for group in by.values() if len(group) > 1)
 
 
 # -------------------------------------------------------------- sheet parsing

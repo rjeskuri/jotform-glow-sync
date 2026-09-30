@@ -61,8 +61,10 @@ backlog, and the intent → spec → plan trail under `docs/intent`, `docs/specs
 ## How the form logic is organized
 
 Every sync run writes three cleanly separated groups of rules: **roster visibility** (one per
-club — `IF Club equals "<club>" SHOW <roster>`; same-name clubs additionally require the Partner
-box), the **curriculum cascade** (Year → Module → Session dropdowns; sessions per elective
+club — `IF Club equals "<club>" SHOW <roster>`; a club whose name another partner's club shares
+has its own picker entry, `<club> - <partner>`, and its rule tests that entry; only rosters that
+still share one entry — a form without the picker, or one not switched yet — also require the
+Partner box), the **curriculum cascade** (Year → Module → Session dropdowns; sessions per elective
 module come from `SESSION_OVERRIDES`), and the **Salesforce bridge** (year/module/session copies
 into hidden fields, the picked club copied into the Club Name field Salesforce reads, and one
 aggregate `Contact_IDs` calculation over every roster with "ignore hidden fields" on, so exactly

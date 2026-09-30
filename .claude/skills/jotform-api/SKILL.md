@@ -117,7 +117,17 @@ unless `--apply`.
 ## Salesforce
 - Native Salesforce V2 integration, 8 mapping rows keyed to question ids
   (5, 17, 18, 98, 100, 102, 105, 109 + photo 19), byte-identical across the forms; it survives a
-  clone. The club name is read from q5 and matching happens inside Salesforce.
+  clone. The club name is read from q5 and matching happens inside Salesforce. q5 is the picked
+  option's text, so an option IS the Account name: a club's own name, or `<club> - <partner>`
+  for a name two partners share (2026-09-30; never split it on " - ", club names contain it).
+  The typed Partner box (q331) is not in the mapping (the live `salesforceV2` action map, read
+  for the 2026-09-30 same-name design); only the staff notification e-mail's `{partner}` row and
+  the submissions table read it.
+- A question with `hidden` unset that no rule targets is shown to every mentor: q331 on Asia,
+  Latin America and U.S had neither on 2026-09-30 (API read; the same design's review saw the
+  box on Asia's public page). On the template and Africa the rules that Show it for a shared name
+  are what kept it out of sight; with those rules gone it would appear, so the sync sets
+  `hidden=Yes` once no generated rule shows it, after the conditions write.
 
 ## Rate and failure modes
 - Big forms (Africa: ~3,900 checkbox options) make `questions` GETs slow; back up only the form

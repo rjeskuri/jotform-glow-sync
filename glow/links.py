@@ -9,7 +9,7 @@ tools/translations_additions.json translates. Every tool finds an element by
 its unique name, never by qid (the qid differs per form).
 
 The sync never touches them: sync_attendance_form.py writes roster checkboxes,
-the Club picker and the partner list, the hidden flags of q5 and q331, the
+the Club picker, the hidden flags of q5 and q331, the
 club guard's warning and the conditions, and no generated rule mentions a link
 element (test/python_test.py, SyncLeavesTheLinksAlone). The club guard's two
 rules are the only generated rules that mention an element other than the

@@ -30,6 +30,7 @@ import auto_sync                      # noqa: E402
 import fix_roster_order               # noqa: E402
 import form_status                    # noqa: E402
 import rename_club                    # noqa: E402
+import restore_conditions             # noqa: E402
 import switcher_flags                 # noqa: E402
 import update_static_fields           # noqa: E402
 import worklog                        # noqa: E402
@@ -177,11 +178,253 @@ class AutoSyncPlan(unittest.TestCase):
                          auto_sync.NO_SHARED_NAMES, "--summary-json",
                          "CREATE club picker ({len(picker_names)} clubs)",
                          "UPDATE club picker ({len(picker_names)} clubs: ",
-                         "CREATE partner picker ({len(choices)} partners)",
-                         "UPDATE partner picker ({len(choices)} partners: ",
                          "CREATE club guard (below the Club picker)",
-                         "UPDATE club guard ({', '.join(sorted(drift))})"):
+                         "UPDATE club guard ({', '.join(sorted(drift))})",
+                         # the three same-name warnings the runner acts on
+                         f'Q5_CHANGES = "{auto_sync.SF_NAME_CHANGE}"',
+                         f'NOT_ADDED = "{auto_sync.SAME_NAME_REFUSED}"',
+                         f'RULES_OLDER = "{auto_sync.RULES_OLDER}"',
+                         "{Q5_CHANGES} from '{c['old']}' to '{c['new']}'", "- {NOT_ADDED}",
+                         "its rule tests '{value}', {RULES_OLDER} "):
             self.assertIn(fragment, joined, fragment)
+        # the partner list is retired: the sync writes no such line any more (the runner's
+        # pattern for it stays until the dead code is cleaned up, docs/BACKLOG.md)
+        self.assertNotIn("partner picker (", joined)
+
+    SAME_NAME_DRY_RUN = (
+        "Roster: 3 active clubs in Africa (40 girls); 300 clubs overall\n"
+        "  ! new club 'Stars' (Partner Three) has the name of Partner One's club - not added: "
+        "give it a different name\n"
+        "  ! 'Beta Club 2' (q13): Club Name (question 5, what Salesforce reads) changes from "
+        "'Beta Club' to 'Beta Club 2' - rename its Salesforce account first; an --apply needs "
+        "--q5-change-ok\n"
+        "\nDRY RUN (use --apply to write):\n"
+        "  - REPLACE conditions (25 rules)\n")
+
+    def run_region(self, text, apply=False, summary=None, region_check=None):
+        """auto_sync.Run.region("Africa") over a fabricated dry run; with apply, every
+        later step (backup, apply, verify) answers ok and a clean form_status report -
+        or one whose region check says `region_check`."""
+        import tempfile
+        import types
+        from unittest import mock
+        clean = {"error_conditions": 0, "salesforce": True, "rule_problems": [], "languages": ["a"] * 12,
+                 "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": [],
+                                  **(region_check or {})}}
+        with tempfile.TemporaryDirectory() as out:
+            args = types.SimpleNamespace(apply=apply, out=out, max_creates=5, max_updates=20,
+                                         trigger="test", run_url="")
+            run = auto_sync.Run(args)
+            run.synced = []
+
+            def sync_(csv_path, region, form, apply, summary_path=None):
+                run.synced.append(apply)
+                if summary is not None and summary_path:
+                    with open(summary_path, "w", encoding="utf-8") as f:
+                        json.dump(summary, f)
+                return types.SimpleNamespace(returncode=0, stdout=text, stderr="")
+
+            with mock.patch.object(run, "sync", sync_), \
+                    mock.patch.object(run, "cmd", lambda *a, **k: types.SimpleNamespace(
+                        returncode=0, stdout=json.dumps([clean]), stderr="")), \
+                    mock.patch.object(run, "save_conditions", lambda form: None), \
+                    mock.patch("builtins.print"):
+                run.region("Africa", os.path.join(out, "roster.csv"))
+        return run
+
+    def test_a_question_5_change_is_never_in_sync_and_never_applied(self):
+        # a rules-only plan (no roster, picker or guard write) used to read "in-sync"; one that
+        # changes what an existing club sends to Salesforce must stop the region instead
+        text = "\n".join(l for l in self.SAME_NAME_DRY_RUN.splitlines() if "new club" not in l) + "\n"
+        plan = auto_sync.parse_plan(text)
+        self.assertEqual((auto_sync.changes(plan), len(auto_sync.q5_changes(plan))), (0, 1))
+        reasons = auto_sync.check_bands(plan)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("question 5 (what Salesforce reads) would change for 1 existing club(s)", reasons[0])
+        self.assertIn("--q5-change-ok", reasons[0])
+        for apply in (False, True):
+            run = self.run_region(text, apply=apply)
+            self.assertEqual([r[7] for r in run.results], ["attention"], apply)
+            self.assertEqual(run.synced, [False])                     # the dry run only, never an apply
+            (title, detail), = run.attention
+            self.assertIn("Africa: not applied", title)
+            self.assertIn("changes from 'Beta Club' to 'Beta Club 2'", detail)
+        # with other changes planned too: still nothing is applied for the region
+        busy = text.replace("  - REPLACE", "  - CREATE roster 'Gamma Club' (2 girls)\n  - REPLACE")
+        run = self.run_region(busy, apply=True)
+        self.assertEqual(([r[7] for r in run.results], run.synced), (["attention"], [False]))
+
+    def test_a_refused_new_club_raises_attention_and_the_rest_goes_on(self):
+        text = "\n".join(l for l in self.SAME_NAME_DRY_RUN.splitlines() if "Beta Club 2" not in l) + "\n"
+        plan = auto_sync.parse_plan(text)
+        self.assertEqual(len(auto_sync.refused_clubs(plan)), 1)
+        self.assertEqual(auto_sync.check_bands(plan), [])              # not a band: nothing is held back
+        # nothing else planned: in-sync, and ATTENTION all the same (exit 2 in main)
+        run = self.run_region(text)
+        self.assertEqual([r[7:9] for r in run.results],
+                         [["in-sync", "1 new club(s) not added (name in use)"]])
+        (title, detail), = run.attention
+        self.assertIn("Africa: 1 new club(s) NOT added to the form", title)
+        self.assertIn("new club 'Stars' (Partner Three) has the name of Partner One's club", detail)
+        # the way out it names is the one that works for a club with no question of its own:
+        # without --sheet-only the rename would relabel the OTHER partner's roster question
+        self.assertIn("tools/rename_club.py --partner … --old … --new … --sheet-only", detail)
+        # with a roster change in the same plan: that change is applied, the refusal reported.
+        # form_status's region check goes by club name, so after the apply it counts the
+        # refused club against its namesake on the form ("differ"; "missing" when the
+        # namesake is on another region's form): applied-with-problems, until the rename
+        busy = text.replace("  - REPLACE", "  - CREATE roster 'Gamma Club' (2 girls)\n  - REPLACE")
+        for check, line in (({"rosters_out_of_date": [["Stars", 2, 0]]},
+                             "- 1 roster(s) still differ from the sheet: Stars"),
+                            ({"missing_from_form": ["Stars"]},
+                             "- 1 club(s) still missing from the form: Stars")):
+            run = self.run_region(busy, apply=True, region_check=check)
+            self.assertEqual(run.synced, [False, True])
+            self.assertEqual([r[7] for r in run.results], ["applied-with-problems"])
+            self.assertIn("1 new club(s) not added (name in use)", run.results[0][8])
+            (refusal, _), (title, detail) = run.attention
+            self.assertIn("1 new club(s) NOT added to the form", refusal)
+            self.assertIn("Africa: applied, but the form still has problems", title)
+            self.assertIn(line, detail)
+            self.assertIn("naming a club listed above as NOT added is expected until that club is renamed",
+                          detail)
+        # (a refused club whose girls all sit on its namesake's roster would verify clean)
+        run = self.run_region(busy, apply=True)
+        self.assertEqual(([r[7] for r in run.results], len(run.attention)), (["applied"], 1))
+        # and without a refused club the verify problems carry no such note
+        plain = "\n".join(l for l in busy.splitlines() if "new club" not in l) + "\n"
+        run = self.run_region(plain, apply=True, region_check={"missing_from_form": ["Stars"]})
+        (title, detail), = run.attention
+        self.assertNotIn("NOT added", detail)
+        # the summary file gives the same warnings
+        summary = {"creates": [], "updates": [], "deletes": [], "rules": 25, "calls": [],
+                   "warnings": [l for l in text.splitlines() if l.startswith("  ! ")]}
+        self.assertEqual(len(auto_sync.refused_clubs(auto_sync.plan_from_summary(summary))), 1)
+
+    STALE_RULES_DRY_RUN = (
+        "Roster: 3 active clubs in Africa (40 girls); 300 clubs overall\n"
+        "  ! 'Stars' (q11): its rule tests 'Stars', which the Club picker does not list (it lists "
+        "'Stars - Partner One') - the rules and the picker are out of step (a restored backup, an "
+        "apply that stopped half-way?): until an --apply rewrites the rules this roster does not show\n"
+        "  conditions: 18 kept, 2 new, 3 dropped\n"
+        "\nDRY RUN (use --apply to write):\n"
+        "  - REPLACE conditions (20 rules)\n")
+
+    def test_rules_older_than_the_picker_are_never_in_sync(self):
+        # a conditions backup from before the same-name switch restored over the switched
+        # picker, or a hand apply that stopped after the picker write: the sync plans only
+        # REPLACE conditions (no question-5 change: the picker says what the club sends), which
+        # is no change to the runner - it read "in-sync" on every run while those clubs'
+        # rosters never showed and the club guard blocked their mentors
+        plan = auto_sync.parse_plan(self.STALE_RULES_DRY_RUN)
+        self.assertEqual((auto_sync.changes(plan), auto_sync.q5_changes(plan), len(auto_sync.stale_rules(plan))),
+                         (0, [], 1))
+        self.assertEqual(auto_sync.check_bands(plan), [])      # no band: see the last case
+        for apply in (False, True):
+            run = self.run_region(self.STALE_RULES_DRY_RUN, apply=apply)
+            self.assertEqual([r[7] for r in run.results], ["attention"], apply)
+            self.assertIn("1 roster rule(s) test a name the Club picker does not list", run.results[0][8])
+            self.assertEqual(run.synced, [False])              # a rules-only write is never unattended
+            (title, detail), = run.attention
+            self.assertIn("Africa: 1 roster rule(s) test a name the Club picker does not list", title)
+            self.assertIn("- ! 'Stars' (q11): its rule tests 'Stars'", detail)
+            self.assertIn("--apply", detail)
+            self.assertIn(auto_sync.REGIONAL_FORMS["Africa"], detail)
+        # the summary file gives the same
+        summary = {"creates": [], "updates": [], "deletes": [], "rules": 20,
+                   "calls": ["REPLACE conditions (20 rules)"],
+                   "warnings": [l for l in self.STALE_RULES_DRY_RUN.splitlines() if l.startswith("  ! ")]}
+        run = self.run_region(self.STALE_RULES_DRY_RUN, summary=summary)
+        self.assertEqual([r[7] for r in run.results], ["attention"])
+        # a rules-only plan with no such line stays in-sync, as ever
+        quiet = "\n".join(l for l in self.STALE_RULES_DRY_RUN.splitlines() if "its rule tests" not in l) + "\n"
+        run = self.run_region(quiet)
+        self.assertEqual(([r[7] for r in run.results], run.attention), (["in-sync"], []))
+        # with a roster change in the same plan the ordinary apply rewrites the rules - the
+        # repair that already existed - so this is no band and holds nothing back
+        busy = self.STALE_RULES_DRY_RUN.replace("  - REPLACE", "  - CREATE roster 'Gamma Club' (2 girls)\n  - REPLACE")
+        run = self.run_region(busy, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results], run.attention), ([False, True], ["applied"], []))
+
+    def test_main_checks_the_names_across_the_regions_and_exits_2(self):
+        # each region alone is in-sync; the two send one Salesforce name between them. Only
+        # main() sees both: it must make the cross-region check, write ATTENTION.md and exit 2
+        import tempfile
+        import types
+        from unittest import mock
+        sent = {"Africa": {"qid": "11", "partner": "Partner One", "club": "Stars", "value": "Stars"},
+                "Asia": {"qid": "20", "partner": "Partner Three", "club": "Stars", "value": "STARS"}}
+
+        def sync_(run, csv_path, region, form, apply, summary_path=None):
+            with open(summary_path, "w", encoding="utf-8") as f:
+                json.dump({"creates": [], "updates": [], "deletes": [], "rules": 25, "warnings": [],
+                           "calls": [], "sf_names": [sent[region]]}, f)
+            return types.SimpleNamespace(returncode=0, stderr="", stdout=(
+                f"Roster: 1 active clubs in {region} (1 girls); 2 clubs overall\n\nDRY RUN (use --apply "
+                "to write):\n  nothing to do - form already matches the sheet\n"))
+
+        def run_main(regions):
+            with tempfile.TemporaryDirectory() as tmp:
+                roster = os.path.join(tmp, "roster.csv")
+                with open(roster, "w", encoding="utf-8") as f:
+                    f.write("girl_id,partner,club,full_name,status,region\n"
+                            "DEMOCLUB-SAMPLE-001,Partner One,Stars,Ann Poe,active,Africa\n"
+                            "DEMOCLUB-SAMPLE-002,Partner Three,Stars,Sue Moe,active,Asia\n")
+                argv = ["auto_sync.py", "--roster", roster, "--out", tmp, "--min-active", "1"]
+                for region in regions:
+                    argv += ["--region", region]
+                code = 0
+                with mock.patch.object(sys, "argv", argv), \
+                        mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                        mock.patch.object(auto_sync.Run, "sync", sync_), mock.patch("builtins.print"):
+                    try:
+                        auto_sync.main()
+                    except SystemExit as e:
+                        code = e.code
+                path = os.path.join(tmp, "ATTENTION.md")
+                return code, read(path) if os.path.exists(path) else ""
+
+        code, attention = run_main(["Africa", "Asia"])
+        self.assertEqual(code, 2)
+        self.assertIn("## 1 Salesforce name(s) are sent by more than one club", attention)
+        self.assertIn("- 'Stars': Stars (Partner One, Africa); Stars (Partner Three, Asia)", attention)
+        self.assertNotIn("Ann Poe", attention)
+        # one region alone has nothing to clash with: exit 0, no ATTENTION file
+        self.assertEqual(run_main(["Africa"]), (0, ""))
+
+    def test_no_two_clubs_of_any_region_may_send_one_salesforce_name(self):
+        africa = [{"qid": "11", "partner": "Partner One", "club": "Stars", "value": "Stars - Partner One"},
+                  {"qid": "12", "partner": "Partner Two", "club": "Stars", "value": "Stars - Partner Two"},
+                  {"qid": "10", "partner": "Partner One", "club": "Alpha Club", "value": "Alpha Club"},
+                  {"qid": None, "partner": "Partner One", "club": "Gamma Club", "value": "Gamma Club"}]
+        asia = [{"qid": "20", "partner": "Partner Three", "club": "Stars", "value": "Stars - Partner Three"},
+                {"qid": "21", "partner": "Partner Three", "club": "Beta Club", "value": "Beta Club"}]
+        self.assertEqual(auto_sync.name_clashes({"Africa": africa, "Asia": asia}), [])
+        self.assertEqual(auto_sync.name_clashes({"Africa": africa, "Asia": None}), [])   # no summary file
+        # before the switch: three clubs send "Stars", in two regions; case is ignored
+        plain = [dict(e, value=e["club"]) for e in africa]
+        asia[0]["value"] = "STARS"
+        self.assertEqual(auto_sync.name_clashes({"Africa": plain, "Asia": asia}),
+                         [("Stars", ["Stars (Partner One, Africa)", "Stars (Partner Two, Africa)",
+                                     "Stars (Partner Three, Asia)"])])
+        # a leftover question for the same club is told apart by its qid when the form names no partner
+        twice = [{"qid": "30", "partner": "", "club": "Moon", "value": "Moon"},
+                 {"qid": "31", "partner": "", "club": "Moon", "value": "Moon"}]
+        self.assertEqual(auto_sync.name_clashes({"U.S": twice}),
+                         [("Moon", ["Moon (q30, U.S)", "Moon (q31, U.S)"])])
+        # the runner reports it once for the whole run, after the regions
+        text = ("Roster: 3 active clubs in Africa (40 girls); 300 clubs overall\n"
+                "\nDRY RUN (use --apply to write):\n  nothing to do - form already matches the sheet\n")
+        run = self.run_region(text, summary={"creates": [], "updates": [], "deletes": [], "rules": 25,
+                                             "warnings": [], "calls": [], "sf_names": plain})
+        self.assertEqual(([r[7] for r in run.results], run.attention), (["in-sync"], []))
+        from unittest import mock
+        with mock.patch("builtins.print"):
+            run.check_names()
+        (title, detail), = run.attention
+        self.assertIn("1 Salesforce name(s) are sent by more than one club", title)
+        self.assertIn("- 'Stars': Stars (Partner One, Africa); Stars (Partner Two, Africa)", detail)
+        self.assertIn("--same-name-switch", detail)
 
     def test_a_club_guard_update_is_a_change_and_parses_from_both_shapes(self):
         text = ("Roster: 3 active clubs in Asia (40 girls); 300 clubs overall\n"
@@ -682,6 +925,106 @@ class ConditionBuilder(unittest.TestCase):
         self.assertEqual(values, ["Alpha Club", "Beta Club", "STARS", "STARS", "Stars"])
 
 
+class SameNameRule(unittest.TestCase):
+    """glow.sync: which club names two partners share, and the one string such a
+    club sends to question 5 (docs/plans/2026-09-30-same-name-clubs.md).
+    Fictional names."""
+
+    HEADER = "girl_id,partner,club,full_name,status,region\n"
+
+    def pairs(self, rows):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "roster.csv")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.HEADER)
+                for n, (partner, club, status, region) in enumerate(rows):
+                    name = "" if status == "blank" else f"Girl Number{n}"
+                    status = "active" if status == "blank" else status
+                    f.write(f'DEMOCLUB-SAMPLE-{n:03d},"{partner}","{club}",{name},{status},{region}\n')
+            return glow_sync.roster_pairs(path)
+
+    def test_the_separator_is_pinned(self):
+        self.assertEqual(glow_sync.SF_NAME_SEP, " - ")       # ASCII space, hyphen-minus, space
+        self.assertEqual(glow_sync.sf_club_name("Stars", "Partner One", True), "Stars - Partner One")
+        self.assertEqual(glow_sync.sf_club_name("Stars", "Partner One", False), "Stars")
+        # whitespace is collapsed, nothing else is touched: no case change, no accent folding
+        self.assertEqual(glow_sync.sf_club_name(" STARS  Club ", "Partner   Óne (P1)", True),
+                         "STARS Club - Partner Óne (P1)")
+        with self.assertRaises(SystemExit) as refused:        # a long name needs its partner
+            glow_sync.sf_club_name("Stars", "  ", True)
+        self.assertIn("needs its partner", str(refused.exception))
+        self.assertEqual(glow_sync.sf_club_name("Stars", "", False), "Stars")
+
+    def test_roster_pairs_are_every_club_of_every_status_and_region(self):
+        pairs = self.pairs([("Partner One", "Stars", "active", "Africa"),
+                            ("Partner One", "Stars", "inactive", "Africa"),
+                            ("Partner Two", " Stars ", "inactive", "Asia"),       # never active
+                            ("Partner Two", "Beta  Club", "inactive", "Asia"),
+                            ("Partner Two", "Beta Club", "active", "Asia"),       # …now active
+                            ("partner two", "BETA CLUB", "active", "Asia"),       # the same club
+                            ("", "Orphan", "active", "Asia"),                     # no partner: no form
+                            ("Partner One", "", "active", "Africa"),
+                            ("Partner Three", "Nameless", "blank", "U.S")])       # a row with no girl
+        self.assertEqual(pairs, {("Partner One", "Stars"): True, ("Partner Two", "Stars"): False,
+                                 ("Partner Two", "Beta Club"): True,
+                                 ("Partner Three", "Nameless"): False})
+        # …in read_roster_csv's own spelling for an active club (its first active row)
+        self.assertIn(("Partner Two", "Beta Club"), pairs)
+        with self.assertRaises(SystemExit):
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "not_a_roster.csv")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("a,b\n1,2\n")
+                glow_sync.roster_pairs(path)
+
+    def test_a_name_is_shared_when_two_partners_have_it(self):
+        pairs = {("Partner One", "Stars"): True, ("Partner Two", "STARS"): True,
+                 ("Partner One", "Alpha Club"): True, ("partner one", "Alpha  Club"): True,
+                 ("Partner Two", "Alpha Club - Juniors"): True,
+                 ("Partner One", "Moon"): True, ("Partner Three", "Moon"): False}
+        # compared by glow.text.key: case and spacing ignored; one partner written twice is
+        # one partner; a club whose own name holds " - " is its own name
+        self.assertEqual(glow_sync.shared_club_names(pairs), {"stars", "moon"})
+        # the one-time switch goes by ACTIVE clubs; a NEW club is checked against every club
+        self.assertEqual(glow_sync.shared_club_names(pairs, active_only=True), {"stars"})
+        self.assertEqual(glow_sync.club_partners(pairs)["moon"],
+                         {"partner one": "Partner One", "partner three": "Partner Three"})
+        self.assertEqual(glow_sync.club_partners(pairs)["alpha club"], {"partner one": "Partner One"})
+        self.assertEqual(glow_sync.shared_club_names({}), set())
+
+    def test_the_partner_is_read_back_by_stripping_the_clubs_own_text(self):
+        partners = {"partner one": "Partner One", "partner two": "Partner Two"}
+        read = glow_sync.long_name_partner
+        self.assertEqual(read("Stars - Partner One", "Stars", partners), "Partner One")
+        self.assertEqual(read("stars  -  PARTNER two", "STARS", partners), "Partner Two")
+        self.assertIsNone(read("Stars", "Stars", partners))                     # the plain name
+        self.assertIsNone(read("Stars - Partner Nine", "Stars", partners))      # not the Roster's
+        self.assertIsNone(read("Stars - Partner One", "Stars", None))
+        # never split on the separator: "Alpha Club - Juniors" renamed to "Alpha Club" still tests
+        # its old name until the sync runs, and "Juniors" is no partner
+        self.assertIsNone(read("Alpha Club - Juniors", "Alpha Club", {"partner one": "Partner One"}))
+        self.assertEqual(read("Alpha Club - Juniors - Partner One", "Alpha Club - Juniors", partners),
+                         "Partner One")
+        # nor is the partner's own " - " split: only the club's text is stripped
+        self.assertEqual(read("Stars - Partner One - East", "Stars",
+                              {"partner one - east": "Partner One - East"}), "Partner One - East")
+        self.assertIsNone(read("Starship - Partner One", "Stars", partners))
+
+    def test_two_clubs_sending_one_name_are_a_clash(self):
+        clash = glow_sync.sf_name_clashes
+        self.assertEqual(clash([("Stars", "a"), ("Alpha Club", "b"), ("Beta Club", "c")]), [])
+        # compared as Salesforce matches an Account: case ignored
+        self.assertEqual(clash([("Stars", ("Africa", "11")), ("STARS", ("Asia", "20")),
+                                ("Alpha Club", ("Asia", "21"))]),
+                         [("Stars", [("Africa", "11"), ("Asia", "20")])])
+        # a club named like another club's long name; the same club seen twice is one club
+        self.assertEqual(clash([("Stars - Partner One", "x"), ("stars - partner one", "y"),
+                                ("Stars - Partner One", "x")]),
+                         [("Stars - Partner One", ["x", "y"])])
+
+
 class FakeForm:
     """sync_attendance_form.Jotform stand-in: one form held in memory. Reads
     answer from it; writes are recorded (label + payload) and, with apply, a
@@ -719,9 +1062,12 @@ class FakeForm:
         return self._write("DELETE", path, None, label)
 
 
-class PartnerPickerFlow(unittest.TestCase):
-    """sync_attendance_form.main() with --partner-picker and without, on a fake
-    Africa form: two partners share the club name "Stars". Fictional names."""
+class SameNameFlow(unittest.TestCase):
+    """sync_attendance_form.main() on a fake Africa form where two partners each
+    have a club named "Stars": before the one-time --same-name-switch (the typed
+    Partner box tells the two rosters apart), during it, and after (each has its
+    own Club picker entry, "Stars - <partner>", which is what question 5 sends).
+    docs/plans/2026-09-30-same-name-clubs.md. Fictional names."""
 
     ROSTER = {("Partner One", "Alpha Club"): ["Jane Doe", "Mary Roe"],
               ("Partner One", "Stars"): ["Ann Poe", "Kay Loe"],
@@ -730,6 +1076,9 @@ class PartnerPickerFlow(unittest.TestCase):
     QIDS = {("Partner One", "Alpha Club"): "10", ("Partner One", "Stars"): "11",
             ("Partner Two", "Stars"): "12", ("Partner Two", "Beta Club"): "13"}
     MODULES = {"1": "Core 1", "2": "Core 2|Elective - Healthy GLOW", "3": "Core 3"}
+    LONG = ["Alpha Club", "Beta Club", "Stars - Partner One", "Stars - Partner Two"]
+    CHANGE = "'Stars' (q{qid}): Club Name (question 5, what Salesforce reads) changes from 'Stars' to '{new}'"
+    HIDE = "HIDE partner textbox (q331: no rule shows it; clubs that share a name have their own Club picker entry)"
 
     def setUp(self):
         import tempfile
@@ -740,10 +1089,33 @@ class PartnerPickerFlow(unittest.TestCase):
         self.tmp.cleanup()
         del sync.WARNINGS[:]
 
-    def form(self, roster=None, partner_list=None, rules_on=None, box_hidden=None):
-        """(questions, wire conditions) of a form in step with `roster`;
-        partner_list: the list's options when the form has one (q600);
-        rules_on: the field the live gated rules test (default: the list if any)."""
+    def texts(self, roster, switched=False, long=()):
+        """({qid: the text its rule tests}, {qid: partner} for the rosters the
+        typed Partner box still tells apart). switched: every club whose name
+        another roster on the form shares has its long entry; long: the clubs
+        ((partner, club)) that have it whatever the form holds."""
+        from collections import Counter
+        names = Counter(club.lower() for _, club in roster)
+        option_of, plain = {}, Counter()
+        for partner, club in roster:
+            qid = self.QIDS[(partner, club)]
+            if (partner, club) in long or (switched and names[club.lower()] > 1):
+                option_of[qid] = f"{club} - {partner}"
+            else:
+                option_of[qid] = club
+                plain[club.lower()] += 1
+        partner_of = {self.QIDS[(p, c)]: p for p, c in roster
+                      if option_of[self.QIDS[(p, c)]] == c and plain[c.lower()] > 1}
+        return option_of, partner_of
+
+    def form(self, roster=None, switched=False, long=(), rules_switched=None, picker=True,
+             box_hidden=None, partner_list=None):
+        """(questions, wire conditions) of a form in step with `roster`.
+        switched / long: see texts(); rules_switched: the state the RULES are in
+        when it differs from the picker's (a restored backup, a half apply);
+        picker=False: mentors type the club name (rules on question 5);
+        box_hidden: q331's hidden flag (default: hidden once no rule shows it);
+        partner_list: the options of a retired partner list left on the form (q600)."""
         roster = self.ROSTER if roster is None else roster
         qs = {"5": {"type": "control_textbox", "text": "Club Name", "order": "4", "hidden": "Yes"},
               "331": {"type": "control_textbox", "text": "Partner", "order": "7", "name": "partner"},
@@ -755,39 +1127,49 @@ class PartnerPickerFlow(unittest.TestCase):
             qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n)}
         for q in (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID):
             qs[q] = {"type": "control_textbox", "text": "bridge", "order": "30"}
-        clubs, partner_of = {}, {}
         for (partner, club), names in roster.items():
             qid = self.QIDS[(partner, club)]
             qs[qid] = {"type": "control_checkbox", "text": club, "options": "|".join(names),
                        "order": str(40 + int(qid))}
-            clubs[qid] = club
-            partner_of[qid] = partner
-        qs["500"] = dict(sync.PICKER_PROPS, type="control_dropdown", name=sync.PICKER_NAME, order="3",
-                         options="|".join(sorted(set(clubs.values()), key=str.lower)))
+        option_of, partner_of = self.texts(roster, switched, long)
+        if picker:
+            qs["500"] = dict(sync.PICKER_PROPS, type="control_dropdown", name=sync.PICKER_NAME, order="3",
+                             options="|".join(sorted(set(option_of.values()), key=str.lower)))
+        else:
+            qs["5"]["hidden"] = "No"
         if partner_list is not None:
             qs["600"] = dict(sync.PARTNER_PICKER_PROPS, type="control_dropdown",
                              name=sync.PARTNER_PICKER_NAME, order="7", options=partner_list)
+        if picker and not partner_of:
             qs["331"]["hidden"] = "Yes"
+        if rules_switched is not None:
+            option_of, partner_of = self.texts(roster, rules_switched, long)
+        modules = {y: o.split("|") for y, o in self.MODULES.items()}
+        conds = sync.build_conditions(option_of, partner_of, modules, picker="500" if picker else None)
         if box_hidden is not None:
             qs["331"]["hidden"] = box_hidden
-        field = rules_on or ("600" if partner_list is not None else sync.PARTNER)
-        modules = {y: o.split("|") for y, o in self.MODULES.items()}
-        conds = sync.build_conditions(clubs, partner_of, modules, picker="500", partner_field=field)
         wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]
         return qs, wire
 
-    def run_sync(self, fake, *extra, roster=None):
+    def run_sync(self, fake, *extra, roster=None, regions=None, inactive=None, region="Africa"):
+        """(exit code, stdout) of main() on `fake` with a Roster export holding
+        `roster` (active; region Africa unless `regions` says otherwise for a
+        club) and `inactive` ({(partner, club): [names]}, rows of another status)."""
         import contextlib
+        import csv
         import io
         from unittest import mock
         roster = self.ROSTER if roster is None else roster
         path = os.path.join(self.tmp.name, "roster.csv")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("girl_id,partner,club,full_name,status,region\n")
-            for (partner, club), names in roster.items():
-                for n, name in enumerate(names):
-                    f.write(f"DEMOCLUB-SAMPLE-{n:03d},{partner},{club},{name},active,Africa\n")
-        argv = ["sync_attendance_form.py", path, "--roster", "--region", "Africa", "--form", "999",
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["girl_id", "partner", "club", "full_name", "status", "region"])
+            for status, clubs in (("active", roster), ("inactive", inactive or {})):
+                for (partner, club), names in clubs.items():
+                    for n, name in enumerate(names):
+                        w.writerow([f"DEMOCLUB-SAMPLE-{n:03d}", partner, club, name, status,
+                                    (regions or {}).get((partner, club), "Africa")])
+        argv = ["sync_attendance_form.py", path, "--roster", "--region", region, "--form", "999",
                 *extra]
         out = io.StringIO()
         with mock.patch.object(sync, "Jotform", lambda key, form, apply_changes: fake), \
@@ -800,119 +1182,802 @@ class PartnerPickerFlow(unittest.TestCase):
                 code = e.code
         return code, out.getvalue()
 
-    def test_without_the_list_nothing_changes_and_the_plan_says_why(self):
-        fake = FakeForm(*self.form())
-        code, out = self.run_sync(fake)
-        self.assertEqual((code, fake.calls), (0, []))
-        self.assertIn("nothing to do", out)
-        self.assertIn("Partner box: 2 partners share club names", out)
-        self.assertNotIn("Partner picker:", out)
+    def summary(self, fake, *extra, **kw):
+        path = os.path.join(self.tmp.name, "plan.json")
+        code, out = self.run_sync(fake, *extra, "--summary-json", path, **kw)
+        self.assertEqual(code, 0, code)
+        with open(path, encoding="utf-8") as f:
+            return json.load(f), out
 
-    def test_dry_run_creates_the_list_rewrites_the_rules_then_hides_the_box(self):
+    @staticmethod
+    def rules(payload):
+        """[(rule, terms, actions)] of a conditions write."""
+        return [(c, json.loads(c["terms"]), json.loads(c["action"]))
+                for c in payload["properties"]["conditions"]]
+
+    def shows(self, payload, qid):
+        """The terms of the one rule that shows roster `qid`: [(field, operator, value)]."""
+        found = [[(t["field"], t["operator"], t["value"]) for t in terms]
+                 for _, terms, actions in self.rules(payload)
+                 if any(a.get("visibility") == "Show" and a.get("field") == qid for a in actions)]
+        self.assertEqual(len(found), 1, qid)
+        return found[0]
+
+    # ---- before the switch: nothing changes on its own
+    def test_without_the_flag_a_form_told_apart_by_the_partner_box_is_left_as_it_is(self):
+        fake = FakeForm(*self.form())
+        summary, out = self.summary(fake)
+        self.assertEqual(fake.calls, [])                      # no rule, option or q331 write
+        self.assertIn("nothing to do", out)
+        self.assertIn("(conditions unchanged - skipping the rewrite)", out)
+        self.assertIn("Partner box: 2 rosters share a Club picker entry", out)
+        self.assertNotIn("Same-name clubs:", out)
+        self.assertEqual(sync.WARNINGS, [])
+        self.assertEqual((summary["sf_name_changes"], summary["same_name_refused"]), ([], []))
+        self.assertEqual([(n["qid"], n["partner"], n["club"], n["value"]) for n in summary["sf_names"]],
+                         [("10", "Partner One", "Alpha Club", "Alpha Club"),
+                          ("11", "Partner One", "Stars", "Stars"), ("12", "Partner Two", "Stars", "Stars"),
+                          ("13", "Partner Two", "Beta Club", "Beta Club")])
+        self.assertIsNone(summary["partner_picker"])
+
+    def test_the_partner_is_read_back_from_the_rules_on_the_typed_box(self):
+        # Partner Two's Stars gets an all-new roster: only the partner in the live
+        # rules ties it to its question - roster overlap cannot
+        sheet = {**self.ROSTER, ("Partner Two", "Stars"): ["Uma Umberlash", "Valeria Wrenfoldy"]}
+        fake = FakeForm(*self.form())
+        code, _ = self.run_sync(fake, roster=sheet)
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.calls[0], "UPDATE roster 'Stars' (q12, 2 girls)")
+        self.assertFalse([c for c in fake.calls if c.startswith("CREATE roster")])
+        self.assertEqual(sync.WARNINGS, [])
+
+    def test_a_form_with_no_shared_name_only_gets_the_partner_box_hidden(self):
+        # Asia, Latin America and U.S today: no rule shows q331 and it is not hidden,
+        # so every mentor sees an optional box that does nothing (Ryan, 2026-09-30: hide it)
+        roster = {k: v for k, v in self.ROSTER.items() if k != ("Partner Two", "Stars")}
+        qs, wire = self.form(roster=roster, box_hidden="No")
+        fake = FakeForm(qs, wire, apply=True)
+        code, out = self.run_sync(fake, "--apply", roster=roster)
+        self.assertEqual((code, fake.calls), (0, [self.HIDE]))
+        self.assertEqual(fake.writes, [("POST", "/question/331",
+                                        {"question[hidden]": "Yes", "question[required]": "No"})])
+        self.assertIn("(conditions unchanged - skipping the rewrite)", out)
+        self.assertEqual(sync.WARNINGS, [])
+        # the runner does not count it as a change (it rides along with the next roster change),
+        # and its label is not mistaken for a partner-list write
+        self.assertEqual(auto_sync.changes(auto_sync.parse_plan("\nDRY RUN:\n  - " + self.HIDE + "\n")), 0)
+        self.assertFalse(auto_sync.PARTNER_PICKER_RX.match("  - " + self.HIDE))
+        # already hidden: nothing at all
+        fake = FakeForm(*self.form(roster=roster))
+        self.assertEqual((self.run_sync(fake, roster=roster)[0], fake.calls), (0, []))
+
+    # ---- the one-time switch
+    def test_the_switch_dry_run_lists_each_change_and_plans_picker_rules_then_the_box(self):
         qs, wire = self.form()
         fake = FakeForm(qs, wire)
-        code, out = self.run_sync(fake, "--partner-picker")
-        self.assertEqual(code, 0)
-        self.assertEqual(fake.calls, ["CREATE partner picker (2 partners)",
-                                      f"REPLACE conditions ({len(wire) + 1} rules)",
-                                      "HIDE partner textbox (q331: the partner list replaces it)"])
-        self.assertIn(f"conditions: {len(wire) - 3} kept, 4 new, 3 dropped", out)   # + the q331 copy
-        _, _, fields = fake.writes[0]
-        self.assertEqual({k: fields[f"question[{k}]"] for k in ("type", "name", "order", "options")},
-                         {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME, "order": "7",
-                          "options": "Partner One|Partner Two"})
-        for k, v in sync.PARTNER_PICKER_PROPS.items():
-            self.assertEqual(fields[f"question[{k}]"], v, k)
+        summary, out = self.summary(fake, "--same-name-switch")
+        self.assertEqual(fake.calls, ["UPDATE club picker (4 clubs: options)",
+                                      f"REPLACE conditions ({len(wire) - 1} rules)", self.HIDE])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "|".join(self.LONG)})
+        self.assertEqual(sync.WARNINGS,
+                         ["  ! " + self.CHANGE.format(qid="11", new="Stars - Partner One"),
+                          "  ! " + self.CHANGE.format(qid="12", new="Stars - Partner Two")])
+        for w in sync.WARNINGS:
+            self.assertIn(auto_sync.SF_NAME_CHANGE, w)
+        self.assertIn("Same-name clubs: 2 roster(s) on this form send '<club> - <partner>'", out)
+        self.assertNotIn("Partner box:", out)
+        # each Stars rule is one term on the picker; nothing tests or shows the Partner box
+        self.assertEqual(self.shows(fake.writes[1][2], "11"), [("500", "equals", "Stars - Partner One")])
+        self.assertEqual(self.shows(fake.writes[1][2], "12"), [("500", "equals", "Stars - Partner Two")])
+        self.assertEqual(self.shows(fake.writes[1][2], "10"), [("500", "equals", "Alpha Club")])
+        for c, terms, actions in self.rules(fake.writes[1][2]):
+            self.assertFalse([x for x in terms + actions if x.get("field") == sync.PARTNER], c)
+        self.assertIn(f"conditions: {len(wire) - 3} kept, 2 new, 3 dropped", out)   # 2 rosters, - the reveal
+        # question 5 is still the picker's copy, so it receives the long name exactly
+        copies = [a for _, _, actions in self.rules(fake.writes[1][2]) for a in actions
+                  if a.get("resultField") == sync.CLUB_NAME]
+        self.assertEqual([(a["operands"], a["equation"]) for a in copies], [("500", "{500}")])
+        self.assertEqual(summary["sf_name_changes"],
+                         [{"qid": "11", "club": "Stars", "old": "Stars", "new": "Stars - Partner One",
+                           "switch": True},
+                          {"qid": "12", "club": "Stars", "old": "Stars", "new": "Stars - Partner Two",
+                           "switch": True}])
+        self.assertEqual([n["value"] for n in summary["sf_names"]],
+                         ["Alpha Club", "Stars - Partner One", "Stars - Partner Two", "Beta Club"])
+        # the runner's patterns still read the plan
+        self.assertTrue(auto_sync.PICKER_RX.match("  - " + fake.calls[0]))
+        self.assertTrue(auto_sync.REPLACE_RX.match("  - " + fake.calls[1]))
 
-    def test_apply_points_the_rules_at_the_new_list_and_hides_the_box_last(self):
-        qs, wire = self.form()
-        fake = FakeForm(qs, wire, apply=True)
-        summary = os.path.join(self.tmp.name, "plan.json")
-        code, _ = self.run_sync(fake, "--partner-picker", "--apply", "--summary-json", summary)
+    def test_the_switch_apply_needs_no_other_flag_and_hides_the_box_last(self):
+        fake = FakeForm(*self.form(), apply=True)
+        code, _ = self.run_sync(fake, "--same-name-switch", "--apply")
         self.assertEqual(code, 0)
         self.assertEqual([(m, p) for m, p, _ in fake.writes],
-                         [("POST", "/questions"), ("PUT", "/properties"), ("POST", "/question/331")])
+                         [("POST", "/question/500"), ("PUT", "/properties"), ("POST", "/question/331")])
         self.assertEqual(fake.writes[2][2], {"question[hidden]": "Yes", "question[required]": "No"})
-        conds = fake.writes[1][2]["properties"]["conditions"]
-        self.assertEqual(len(conds), len(wire) + 1)
-        terms = [t for c in conds for t in json.loads(c["terms"])]
-        actions = [a for c in conds for a in json.loads(c["action"])]
-        self.assertFalse([t for t in terms if t["field"] == sync.PARTNER])
-        self.assertFalse([a for a in actions if a.get("field") == sync.PARTNER])
-        self.assertEqual(sorted(t["value"] for t in terms if t["field"] == "600" and t["operator"] == "equals"),
-                         ["Partner One", "Partner Two"])
-        # question 5 is still filled from the Club picker, exactly as before
-        copy = [a for a in actions if a.get("resultField") == sync.CLUB_NAME]
-        self.assertEqual([(a["equation"], a["operands"]) for a in copy], [("{500}", "500")])
-        # and the chosen partner reaches the hidden q331, which the staff e-mail's Partner row reads
-        copy = [a for a in actions if a.get("resultField") == sync.PARTNER]
-        self.assertEqual([(a["equation"], a["operands"]) for a in copy], [("{600}", "600")])
-        with open(summary, encoding="utf-8") as f:
-            self.assertEqual(json.load(f)["partner_picker"], "600")
+        # …and what it wrote is the switched form: the next run, with or without the flag, is a no-op
+        qs, wire = self.form(switched=True)
+        self.assertEqual(sync._norm_rules(fake.writes[1][2]["properties"]["conditions"]),
+                         sync._norm_rules(wire))
+        self.assertEqual(fake.writes[0][2]["question[options]"], qs["500"]["options"])
 
-    def test_a_create_without_a_question_id_keeps_this_run_on_the_typed_box(self):
-        qs, wire = self.form()
-        fake = FakeForm(qs, wire, apply=True, created={})
-        code, out = self.run_sync(fake, "--partner-picker", "--apply")
-        self.assertEqual(code, 0)
-        self.assertEqual(fake.calls, ["CREATE partner picker (2 partners)"])   # rules unchanged, box stays
-        self.assertTrue(any("carried no question id" in w for w in sync.WARNINGS))
+    def test_the_switched_form_needs_nothing_and_stays_switched(self):
+        for extra in ((), ("--same-name-switch",)):
+            del sync.WARNINGS[:]
+            fake = FakeForm(*self.form(switched=True))
+            summary, out = self.summary(fake, *extra)
+            self.assertEqual(fake.calls, [], extra)
+            self.assertEqual(sync.WARNINGS, [], extra)
+            self.assertIn("Same-name clubs: 2 roster(s)", out)
+            self.assertEqual("nothing to switch" in out, bool(extra))
+            self.assertEqual(summary["sf_name_changes"], [])
+            self.assertEqual([n["partner"] for n in summary["sf_names"]],
+                             ["Partner One", "Partner One", "Partner Two", "Partner Two"])
 
-    def test_a_form_with_the_list_in_step_needs_nothing(self):
-        fake = FakeForm(*self.form(partner_list="Partner One|Partner Two"))
-        code, out = self.run_sync(fake)
-        self.assertEqual((code, fake.calls), (0, []))
-        self.assertIn("Partner picker: q600", out)
-        self.assertNotIn("Partner box:", out)
-        code, out = self.run_sync(fake, "--partner-picker")
-        self.assertEqual((code, fake.calls), (0, []))
-        self.assertIn("--partner-picker is not needed", out)
-
-    def test_the_list_is_kept_in_shape_and_the_box_kept_hidden(self):
-        fake = FakeForm(*self.form(partner_list="Old Partner|Partner One"))
-        self.run_sync(fake)
-        self.assertEqual(fake.calls, ["UPDATE partner picker (2 partners: options)"])
-        self.assertEqual(fake.writes[0][2], {"question[options]": "Partner One|Partner Two"})
-        qs, wire = self.form(partner_list="Partner One|Partner Two", box_hidden="No")
-        qs["600"]["required"] = "No"
-        fake = FakeForm(qs, wire)
-        self.run_sync(fake)
-        self.assertEqual(fake.calls, ["UPDATE partner picker (2 partners: required)",
-                                      "HIDE partner textbox (q331: the partner list replaces it)"])
-
-    def test_rules_left_on_the_typed_box_are_read_back_and_moved_to_the_list(self):
-        # a run that created the list but failed before the rules write
-        fake = FakeForm(*self.form(partner_list="Partner One|Partner Two", rules_on=sync.PARTNER,
-                                   box_hidden="No"))
-        code, out = self.run_sync(fake)
-        self.assertEqual(code, 0)
-        self.assertEqual([c.split(" (")[0] for c in fake.calls],
-                         ["REPLACE conditions", "HIDE partner textbox"])
-        self.assertIn("conditions: ", out)
-        self.assertEqual(sync.WARNINGS, [])        # every roster matched its partner: no new roster
-
-    def test_the_partner_is_read_back_from_rules_on_the_list(self):
-        # Partner Two's Stars gets an all-new roster: only the partner in the live
-        # rules (on the list) ties it to its question - roster overlap cannot
+    def test_on_the_switched_form_the_partner_is_read_back_from_the_long_name(self):
+        # a wholly replaced roster still updates its own question: without the read-back it
+        # would fall to roster overlap, find none, and be taken for a new club
         sheet = {**self.ROSTER, ("Partner Two", "Stars"): ["Uma Umberlash", "Valeria Wrenfoldy"]}
-        for kw in ({"partner_list": "Partner One|Partner Two"}, {}):
-            fake = FakeForm(*self.form(**kw))
+        fake = FakeForm(*self.form(switched=True))
+        code, _ = self.run_sync(fake, roster=sheet)
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.calls, ["UPDATE roster 'Stars' (q12, 2 girls)",
+                                      f"REPLACE conditions ({len(self.form(switched=True)[1])} rules)"])
+        self.assertEqual(sync.WARNINGS, [])
+
+    def test_a_namesake_in_another_region_counts(self):
+        # Salesforce is one org: Partner Two's Stars lives on the Asia form, and the
+        # Africa form's only Stars still gets its long name - with no partner term
+        roster = dict(self.ROSTER)
+        regions = {("Partner Two", "Stars"): "Asia", ("Partner Two", "Beta Club"): "Asia"}
+        on_africa = {k: v for k, v in roster.items() if k not in regions}
+        fake = FakeForm(*self.form(roster=on_africa))
+        code, _ = self.run_sync(fake, roster=roster, regions=regions)
+        self.assertEqual((code, fake.calls, sync.WARNINGS), (0, [], []))       # sticky: plain it stays
+        fake = FakeForm(*self.form(roster=on_africa))
+        code, _ = self.run_sync(fake, "--same-name-switch", roster=roster, regions=regions)
+        self.assertEqual(code, 0)
+        self.assertEqual(sync.WARNINGS, ["  ! " + self.CHANGE.format(qid="11", new="Stars - Partner One")])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "Alpha Club|Stars - Partner One"})
+        self.assertEqual(self.shows(fake.writes[1][2], "11"), [("500", "equals", "Stars - Partner One")])
+        # switched, the next run reads the partner back and needs nothing
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(roster=on_africa, long=[("Partner One", "Stars")]))
+        code, _ = self.run_sync(fake, roster=roster, regions=regions)
+        self.assertEqual((code, fake.calls, sync.WARNINGS), (0, [], []))
+
+    def test_only_active_clubs_count_for_the_switch(self):
+        # Partner Two's Stars was retired before the switch: Partner One's is the one Stars
+        # left and keeps its plain name (the sheet's two retired duplicates, 2026-09-30)
+        on_form = {k: v for k, v in self.ROSTER.items() if k != ("Partner Two", "Stars")}
+        fake = FakeForm(*self.form(roster=on_form))
+        code, out = self.run_sync(fake, "--same-name-switch", roster=on_form,
+                                  inactive={("Partner Two", "Stars"): ["Sue Moe", "Liz Noe"]})
+        self.assertEqual((code, fake.calls, sync.WARNINGS), (0, [], []))
+        self.assertIn("--same-name-switch: nothing to switch", out)
+
+    def test_the_switch_refuses_to_leave_a_retired_namesake_on_the_plain_entry(self):
+        # three Stars on the form, told apart by the Partner box; Partner Three's was retired
+        # and its question is still there. Switched, q11 and q12 get their long entries and
+        # q20 - not in the export - would keep "Stars", now alone on it: the familiar name,
+        # first in the list, showing a retired club's girls and sending plain "Stars"
+        three = {**self.ROSTER, ("Partner Three", "Stars"): ["Uma Umberlash", "Valeria Wrenfoldy"]}
+        self.QIDS = {**self.QIDS, ("Partner Three", "Stars"): "20"}
+        gone = {("Partner Three", "Stars"): three[("Partner Three", "Stars")]}
+        for extra in (("--same-name-switch",), ("--same-name-switch", "--apply")):   # the dry run too
+            fake = FakeForm(*self.form(roster=three), apply="--apply" in extra)
+            code, _ = self.run_sync(fake, *extra, inactive=gone)
+            self.assertIn("q20 would keep the plain Club picker entry 'Stars' beside the long ones", str(code))
+            self.assertIn("Delete the leftover question in the builder first", str(code))
+            self.assertEqual(fake.calls, [], extra)
+        # without the flag nothing is switched, so nothing is refused: the form stays as it is
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(roster=three))
+        code, out = self.run_sync(fake, inactive=gone)
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertIn("Partner box: 3 rosters share a Club picker entry", out)
+        # …also on a form that is already that way (switched by hand, the leftover on its
+        # plain entry): the refusal is the switch's alone, never the unattended runner's
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(roster=three, long=[("Partner One", "Stars"), ("Partner Two", "Stars")]))
+        code, _ = self.run_sync(fake, inactive=gone)
+        self.assertEqual((code, fake.calls), (0, []))
+        # all three active: all three go long
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(roster=three))
+        summary, _ = self.summary(fake, "--same-name-switch", roster=three)
+        self.assertEqual(sorted((c["qid"], c["new"], c["switch"]) for c in summary["sf_name_changes"]),
+                         [("11", "Stars - Partner One", True), ("12", "Stars - Partner Two", True),
+                          ("20", "Stars - Partner Three", True)])
+
+    def test_a_refused_newcomer_does_not_make_an_existing_club_long(self):
+        # Partner Three's new Alpha Club was refused (Partner One has that name) and sits,
+        # active, in the Roster until someone renames it. It is on no form: a later
+        # --same-name-switch must not count it and turn Partner One's one-of-a-kind Alpha
+        # Club into "Alpha Club - Partner One" - an existing club's name never changes
+        sheet = {**self.ROSTER, ("Partner Three", "Alpha Club"): ["Uma Umberlash", "Valeria Wrenfoldy"]}
+        refused = ("  ! new club 'Alpha Club' (Partner Three) has the name of Partner One's club - "
+                   "not added: give it a different name")
+        fake = FakeForm(*self.form(switched=True))
+        summary, out = self.summary(fake, "--same-name-switch", roster=sheet)
+        self.assertEqual((fake.calls, summary["sf_name_changes"], sync.WARNINGS), ([], [], [refused]))
+        self.assertIn("--same-name-switch: nothing to switch", out)
+        # on a form not switched yet: the two Stars and nothing else
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form())
+        summary, _ = self.summary(fake, "--same-name-switch", roster=sheet)
+        self.assertEqual([(c["qid"], c["new"]) for c in summary["sf_name_changes"]],
+                         [("11", "Stars - Partner One"), ("12", "Stars - Partner Two")])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "|".join(self.LONG)})
+        self.assertEqual(sync.WARNINGS[0], refused)
+
+    # ---- after the switch: sticky
+    def test_a_namesake_going_inactive_changes_nothing(self):
+        gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
+        sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
+        for switched in (True, False):
+            del sync.WARNINGS[:]
+            fake = FakeForm(*self.form(switched=switched))
+            summary, _ = self.summary(fake, roster=sheet, inactive=gone)
+            self.assertEqual(fake.calls, [], switched)               # both rosters keep what they send
+            self.assertEqual(summary["sf_name_changes"], [], switched)
+            self.assertEqual(len(sync.WARNINGS), 1, sync.WARNINGS)   # q12: on the form, not in the export
+            self.assertIn("'Stars' (q12)", sync.WARNINGS[0])
+            self.assertEqual([n["value"] for n in summary["sf_names"]][1:3],
+                             ["Stars - Partner One", "Stars - Partner Two"] if switched else ["Stars", "Stars"])
+
+    def test_the_picker_says_what_a_club_sends_when_the_rules_are_older(self):
+        # a conditions backup from before the switch restored over the switched picker (or an
+        # apply that stopped between the picker and the rules): the rules test "Stars" with
+        # the Partner box, the picker lists the long names. The run rebuilds the rules on
+        # the long names; it never takes the picker back to "Stars", and nothing changes
+        # for Salesforce
+        qs, wire = self.form(switched=True, rules_switched=False)
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake)
+        self.assertEqual(fake.calls, [f"REPLACE conditions ({len(wire) - 1} rules)"])
+        self.assertEqual(sync._norm_rules(fake.writes[0][2]["properties"]["conditions"]),
+                         sync._norm_rules(self.form(switched=True)[1]))
+        self.assertEqual(summary["sf_name_changes"], [])
+        # …but it says so, per roster: until the rules are rewritten those two rosters never
+        # show (and the club guard blocks their mentors), and the conditions rewrite alone is
+        # no change to the runner - which must not read this form as in-sync
+        self.assertEqual(sync.WARNINGS, [
+            f"  ! 'Stars' (q{q}): its rule tests 'Stars', which the Club picker does not list (it "
+            f"lists 'Stars - {p}') - the rules and the picker are out of step (a restored backup, "
+            "an apply that stopped half-way?): until an --apply rewrites the rules this roster does "
+            "not show" for q, p in (("11", "Partner One"), ("12", "Partner Two"))])
+        for w in sync.WARNINGS:
+            self.assertIn(auto_sync.RULES_OLDER, w)
+        self.assertNotIn(auto_sync.SF_NAME_CHANGE, " ".join(sync.WARNINGS))
+        plan = auto_sync.plan_from_summary(summary)
+        self.assertEqual((auto_sync.changes(plan), len(auto_sync.stale_rules(plan))), (0, 2))
+        # the hand apply writes the rules, and the next run has nothing to say
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply")
+        self.assertEqual((code, [(m, p) for m, p, _ in fake.writes]), (0, [("PUT", "/properties")]))
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(switched=True))
+        self.assertEqual((self.run_sync(fake)[0], fake.calls, sync.WARNINGS), (0, [], []))
+
+    def test_a_roster_left_without_its_rule_by_a_failed_apply_is_finished_not_refused(self):
+        # an apply that created the roster (and perhaps updated the picker) and then failed on
+        # the rules write: the re-run - the runner's own retry too - must complete it. A roster
+        # with no rule has nothing it "sends today", so this is no question-5 change
+        sheet = {**self.ROSTER, ("Partner One", "Gamma Club"): ["Amara Pellucidor"]}
+        self.QIDS = {**self.QIDS, ("Partner One", "Gamma Club"): "20"}       # 14 is a module dropdown
+        for picker_written in (True, False):
+            del sync.WARNINGS[:]
+            qs, _ = self.form(roster=sheet, switched=True)
+            _, wire = self.form(switched=True)                 # the rules from before the new club
+            if not picker_written:
+                qs["500"]["options"] = "|".join(self.LONG)
+            fake = FakeForm(qs, wire, apply=True)
+            code, _ = self.run_sync(fake, "--apply", roster=sheet)
+            self.assertEqual(code, 0, code)
+            self.assertEqual(sync.WARNINGS, [])
+            self.assertEqual([(m, p) for m, p, _ in fake.writes],
+                             ([] if picker_written else [("POST", "/question/500")]) + [("PUT", "/properties")])
+            self.assertEqual(self.shows(fake.writes[-1][2], "20"), [("500", "equals", "Gamma Club")])
+
+    def test_a_roster_created_by_an_apply_gets_its_rule_in_the_same_run(self):
+        # the commonest unattended write: a new club. Its question's id is only known once
+        # Jotform answers the create, and the same run must give it its picker entry, its
+        # show rule, its Contact_IDs operand and its line in sf_names
+        sheet = {**self.ROSTER, ("Partner Three", "Gamma Club"): ["Amara Pellucidor"]}
+        for switched in (True, False):
+            del sync.WARNINGS[:]
+            fake = FakeForm(*self.form(switched=switched), apply=True, created={"qid": 600})
+            summary, _ = self.summary(fake, "--apply", roster=sheet)
+            self.assertEqual([(m, p) for m, p, _ in fake.writes],
+                             [("POST", "/questions"), ("POST", "/question/500"), ("PUT", "/properties")])
+            self.assertIn("Gamma Club", fake.writes[1][2]["question[options]"].split("|"))
+            self.assertEqual(self.shows(fake.writes[-1][2], "600"), [("500", "equals", "Gamma Club")])
+            agg, = [a for _, _, actions in self.rules(fake.writes[-1][2]) for a in actions
+                    if a.get("resultField") == sync.CONTACT_IDS]
+            self.assertEqual((agg["equation"], agg["operands"]), ("{10}{11}{12}{13}{600}", "10,11,12,13,600"))
+            self.assertEqual(summary["sf_names"][-1], {"qid": "600", "partner": "Partner Three",
+                                                       "club": "Gamma Club", "value": "Gamma Club"})
+
+    # ---- a new club may not take a name in use
+    def test_a_new_club_with_a_name_in_use_is_not_created_and_the_run_goes_on(self):
+        sheet = {**self.ROSTER, ("Partner Three", "Stars"): ["Uma Umberlash"],
+                 ("Partner Three", "ALPHA  club"): ["Valeria Wrenfoldy"],
+                 ("Partner Three", "Gamma Club"): ["Amara Pellucidor"],
+                 ("Partner One", "Alpha Club"): ["Jane Doe", "Mary Roe", "Zoe Quillfeather"]}
+        for switched in (True, False):
+            del sync.WARNINGS[:]
+            qs, wire = self.form(switched=switched)
+            fake = FakeForm(qs, wire)
+            summary, _ = self.summary(fake, roster=sheet)
+            # the two are refused; the unrelated new club and the roster update still go through
+            self.assertEqual(fake.calls[:2], ["CREATE roster 'Gamma Club' (1 girls)",
+                                              "UPDATE roster 'Alpha Club' (q10, 3 girls)"], switched)
+            self.assertEqual([c for c in fake.calls if "CREATE roster" in c], fake.calls[:1])
+            self.assertEqual(sync.WARNINGS, [
+                "  ! new club 'ALPHA club' (Partner Three) has the name of Partner One's club - "
+                "not added: give it a different name",
+                "  ! new club 'Stars' (Partner Three) has the name of Partner One's club and "
+                "Partner Two's club - not added: give it a different name"])
+            for w in sync.WARNINGS:
+                self.assertIn(auto_sync.SAME_NAME_REFUSED, w)
+            self.assertEqual(summary["same_name_refused"],
+                             [{"club": "ALPHA club", "partner": "Partner Three", "others": ["Partner One"]},
+                              {"club": "Stars", "partner": "Partner Three",
+                               "others": ["Partner One", "Partner Two"]}])
+            self.assertEqual([c["club"] for c in summary["creates"]], ["Gamma Club"])
+            # both existing clubs of that name are untouched: same entries, same question 5
+            self.assertEqual(summary["sf_name_changes"], [])
+            options = fake.writes[2][2]["question[options]"].split("|")
+            self.assertEqual(options, sorted(qs["500"]["options"].split("|") + ["Gamma Club"], key=str.lower))
+            self.assertEqual([n["value"] for n in summary["sf_names"]][-1], "Gamma Club")
+            self.assertIsNone(summary["sf_names"][-1]["qid"])          # a dry run: not created yet
+
+    def test_the_name_may_be_in_use_in_another_region_or_by_a_retired_club(self):
+        base = {k: v for k, v in self.ROSTER.items() if k[1] != "Stars"}
+        for where in ({"regions": {("Partner Two", "Stars"): "Asia"},
+                       "roster": {**base, ("Partner One", "Stars"): ["Ann Poe"],
+                                  ("Partner Two", "Stars"): ["Sue Moe"]}},
+                      {"inactive": {("Partner Two", "Stars"): ["Sue Moe"]},
+                       "roster": {**base, ("Partner One", "Stars"): ["Ann Poe"]}}):
+            del sync.WARNINGS[:]
+            fake = FakeForm(*self.form(roster=base))          # no Stars on this form yet
+            code, _ = self.run_sync(fake, **where)
+            self.assertEqual(code, 0)
+            self.assertEqual(fake.calls, [], where)
+            self.assertEqual(sync.WARNINGS, ["  ! new club 'Stars' (Partner One) has the name of Partner "
+                                             "Two's club - not added: give it a different name"])
+        # the same partner bringing its own retired club back is no clash
+        fake = FakeForm(*self.form(roster=base))
+        del sync.WARNINGS[:]
+        code, _ = self.run_sync(fake, roster={**base, ("Partner One", "Stars"): ["Ann Poe"]},
+                                inactive={("Partner One", "Stars"): ["Kay Loe"]})
+        self.assertEqual((code, fake.calls[0], sync.WARNINGS), (0, "CREATE roster 'Stars' (1 girls)", []))
+
+    def test_a_new_club_named_like_a_long_entry_is_not_created(self):
+        sheet = {**self.ROSTER, ("Partner Three", "Stars - Partner One"): ["Uma Umberlash"]}
+        fake = FakeForm(*self.form(switched=True))
+        code, _ = self.run_sync(fake, roster=sheet)
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertEqual(sync.WARNINGS, ["  ! new club 'Stars - Partner One' (Partner Three) has the name of "
+                                         "what q11 sends as its Club Name - not added: give it a different name"])
+        # …nor on a form not switched yet, where no roster sends that text: it is the long
+        # name Partner One's Stars gets at the switch
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form())
+        code, _ = self.run_sync(fake, roster=sheet)
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertEqual(sync.WARNINGS, ["  ! new club 'Stars - Partner One' (Partner Three) has the name of "
+                                         "what Partner One's club 'Stars' sends as its Club Name - not added: "
+                                         "give it a different name"])
+
+    def test_a_new_club_named_like_a_question_the_roster_no_longer_explains_is_not_created(self):
+        # both Stars left the Roster altogether (rows deleted, not retired) and their
+        # questions, each on its long entry, are still on the form. Partner Three's new Stars
+        # has no namesake in the Roster and is what no roster sends - but q11's text is "Stars"
+        sheet = {k: v for k, v in self.ROSTER.items() if k[1] != "Stars"}
+        sheet[("Partner Three", "Stars")] = ["Uma Umberlash"]
+        fake = FakeForm(*self.form(switched=True))
+        summary, _ = self.summary(fake, roster=sheet)
+        self.assertEqual(fake.calls, [])
+        self.assertIn("  ! new club 'Stars' (Partner Three) has the name of another club on this form "
+                      "(q11) - not added: give it a different name", sync.WARNINGS)
+        self.assertEqual([n["value"] for n in summary["sf_names"]][1:3],
+                         ["Stars - Partner One", "Stars - Partner Two"])
+
+    def test_a_different_partners_club_never_takes_over_a_long_roster(self):
+        # the Africa form's only Stars is Partner One's (long: Partner Two's is in Asia);
+        # Partner One's goes inactive and Partner Three enrols a Stars with other girls
+        regions = {("Partner Two", "Stars"): "Asia", ("Partner Two", "Beta Club"): "Asia"}
+        on_africa = {k: v for k, v in self.ROSTER.items() if k not in regions}
+        gone = {("Partner One", "Stars"): self.ROSTER[("Partner One", "Stars")]}
+        # …also when the newcomer's name merely contains the other's ("Partner One Trust"):
+        # the partner in the rule is, exactly, a partner the Roster has for that club
+        for newcomer in ("Partner Three", "Partner One Trust"):
+            del sync.WARNINGS[:]
+            sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
+            sheet[(newcomer, "Stars")] = ["Uma Umberlash", "Valeria Wrenfoldy"]
+            fake = FakeForm(*self.form(roster=on_africa, long=[("Partner One", "Stars")]))
+            summary, _ = self.summary(fake, roster=sheet, regions=regions, inactive=gone)
+            self.assertEqual(fake.calls, [], newcomer)            # q11 keeps its girls and its long name
+            self.assertEqual([r["partner"] for r in summary["same_name_refused"]], [newcomer])
+            self.assertEqual(summary["sf_name_changes"], [])
+            self.assertEqual(summary["sf_names"][1]["value"], "Stars - Partner One")
+        # Partner One's Stars, still active, was moved to Asia, and "Partner One Trust" has a
+        # Stars in Africa: the question's region is its own partner's (exactly), though the
+        # name also fits the other loosely
+        del sync.WARNINGS[:]
+        on_form = {("Partner One", "Alpha Club"): self.ROSTER[("Partner One", "Alpha Club")],
+                   ("Partner One", "Stars"): self.ROSTER[("Partner One", "Stars")]}
+        fake = FakeForm(*self.form(roster=on_form, long=[("Partner One", "Stars")]))
+        code, _ = self.run_sync(fake, regions={("Partner One", "Stars"): "Asia"},
+                                roster={**on_form, ("Partner One Trust", "Stars"): ["Uma Umberlash"]})
+        self.assertEqual((code, fake.calls), (0, []))
+        self.assertIn("  ! 'Stars' (q11) belongs to Asia - kept (use --prune on a fresh clone to remove it)",
+                      sync.WARNINGS)
+        # a partner's acronym in an old hand-made rule is still the same partner ("WESAD")
+        qs, wire = self.form()
+        wire = [dict(c, terms=c["terms"].replace('"Partner Two"', '"Two"')) for c in wire]
+        fake = FakeForm(qs, wire)
+        code, _ = self.run_sync(fake, roster={**self.ROSTER, ("Partner Two", "Stars"): ["Uma Umberlash"]})
+        self.assertEqual((code, fake.calls[0]), (0, "UPDATE roster 'Stars' (q12, 1 girls)"))
+
+    # ---- a plain roster names no partner in its rule: its owner is read from the Roster's rows
+    OLD_STARS = ["Ann Poe", "Kay Loe", "Sue Moe", "Liz Noe"]
+    PLAIN = {("Partner One", "Alpha Club"): ["Jane Doe", "Mary Roe"],
+             ("Partner One", "Stars"): OLD_STARS,                  # q11, the only Stars: plain
+             ("Partner Two", "Beta Club"): ["Eve Hoe", "Ida Toe"]}
+    REFUSED = ("  ! new club 'Stars' ({0}) has the name of {1}'s club - not added: give it a "
+               "different name")
+
+    def test_a_different_partners_club_never_takes_over_a_retired_plain_roster(self):
+        # Partner One's Stars is retired (its rows inactive, its question still on the form, as
+        # always) and Partner Three enrols a new Stars in the same region. One sheet entry, one
+        # question, no partner in the rule: the newcomer used to take q11 - its girls on
+        # Partner One's question, their attendance on Partner One's Salesforce Account
+        gone = {("Partner One", "Stars"): self.OLD_STARS}
+        base = {k: v for k, v in self.PLAIN.items() if k not in gone}
+        for newcomer in (["Ann Poe", "Uma Umberlash", "Valeria Wrenfoldy", "Amara Pellucidor"],   # one name
+                         ["Uma Umberlash", "Valeria Wrenfoldy", "Amara Pellucidor"]):             # …or none
+            del sync.WARNINGS[:]
+            fake = FakeForm(*self.form(roster=self.PLAIN), apply=True)
+            summary, _ = self.summary(fake, "--apply", roster={**base, ("Partner Three", "Stars"): newcomer},
+                                      inactive=gone)
+            self.assertEqual((fake.calls, fake.writes), ([], []), newcomer)     # q11 keeps its girls
+            self.assertEqual([r["partner"] for r in summary["same_name_refused"]], ["Partner Three"])
+            self.assertEqual(sync.WARNINGS, [
+                "  ? 'Stars' (q11) is on the form but not in the sheet export - keeping its current roster",
+                self.REFUSED.format("Partner Three", "Partner One")])
+            # q11 still sends "Stars"; the partner read from the Roster's rows is not the
+            # form's own word, so sf_names names none for it (the cross-region check tells such
+            # a question apart by its id, as before)
+            self.assertEqual(summary["sf_names"][1], {"qid": "11", "partner": "", "club": "Stars",
+                                                      "value": "Stars"})
+            # …and the runner sees a refusal, not a change it would apply
+            plan = auto_sync.plan_from_summary(summary)
+            self.assertEqual((auto_sync.changes(plan), len(auto_sync.refused_clubs(plan))), (0, 1))
+
+    def test_the_owner_of_a_plain_roster_keeps_it_whatever_its_new_roster_is(self):
+        # Partner One's own Stars, three of its four girls replaced (the three now inactive
+        # rows): its question, with or without a namesake in the Roster
+        new = ["Ann Poe", "Bea Quillon", "Cyd Rennick", "Dot Sallow"]
+        left = {("Partner One", "Stars"): self.OLD_STARS[1:]}
+        sheet = {**self.PLAIN, ("Partner One", "Stars"): new}
+        update = "UPDATE roster 'Stars' (q11, 4 girls)"
+        # a retired namesake (the two live clubs of this shape: their next cohort must go through)
+        fake = FakeForm(*self.form(roster=self.PLAIN))
+        summary, _ = self.summary(fake, roster=sheet,
+                                  inactive={**left, ("Partner Two", "Stars"): ["Gia Hollowmere"]})
+        self.assertEqual((fake.calls[0], sync.WARNINGS, summary["same_name_refused"]), (update, [], []))
+        # a new namesake that was refused and sits in the Roster until someone renames it: the
+        # name has two sheet entries and one question, and roster overlap alone (1 of 4) used
+        # to refuse BOTH - the existing club as "new" - and leave q11 stale
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(roster=self.PLAIN))
+        summary, _ = self.summary(fake, inactive=left,
+                                  roster={**sheet, ("Partner Three", "Stars"): ["Uma Umberlash", "Valeria Wrenfoldy"]})
+        self.assertEqual(fake.calls[0], update)
+        self.assertEqual(sync.WARNINGS, [self.REFUSED.format("Partner Three", "Partner One")])
+        self.assertEqual([r["partner"] for r in summary["same_name_refused"]], ["Partner Three"])
+        self.assertEqual(summary["sf_names"][1], {"qid": "11", "partner": "Partner One", "club": "Stars",
+                                                  "value": "Stars"})
+
+    def test_a_duplicate_under_a_partner_that_sorts_first_does_not_take_the_question(self):
+        # Beta Club is Partner Two's (q13). The same club enrolled again under Partner One,
+        # which sorts first, with half the same girls: taken in sheet order it got q13, and
+        # the existing club was the one reported as "new club … not added"
+        sheet = {**self.ROSTER, ("Partner One", "Beta Club"): ["Eve Hoe", "Uma Umberlash"]}
+        fake = FakeForm(*self.form(switched=True))
+        summary, _ = self.summary(fake, roster=sheet)
+        self.assertEqual(fake.calls, [])
+        self.assertEqual(sync.WARNINGS, ["  ! new club 'Beta Club' (Partner One) has the name of Partner "
+                                         "Two's club - not added: give it a different name"])
+        self.assertEqual(summary["sf_names"][3], {"qid": "13", "partner": "Partner Two", "club": "Beta Club",
+                                                  "value": "Beta Club"})
+
+    def test_a_tie_names_no_owner_and_a_moved_club_keeps_its_question(self):
+        # the club moved to another partner with the same girls (the old partner's rows
+        # inactive): both partners' rows list every girl q11 holds, so the Roster names no
+        # owner and the club's one entry claims its question, as it always did
+        gone = {("Partner One", "Stars"): self.OLD_STARS}
+        base = {k: v for k, v in self.PLAIN.items() if k not in gone}
+        fake = FakeForm(*self.form(roster=self.PLAIN))
+        summary, _ = self.summary(fake, inactive=gone,
+                                  roster={**base, ("Partner Three", "Stars"): self.OLD_STARS + ["Uma Umberlash"]})
+        self.assertEqual((fake.calls[0], sync.WARNINGS), ("UPDATE roster 'Stars' (q11, 5 girls)", []))
+        self.assertEqual((summary["same_name_refused"], summary["sf_names"][1]["partner"]), ([], "Partner Three"))
+        # moved with three of its four girls: the Roster's rows give q11 to Partner One, the
+        # girls are mostly the same - the same club, and the line says where the owner came from
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(roster=self.PLAIN))
+        moved = self.OLD_STARS[:3] + ["Uma Umberlash", "Valeria Wrenfoldy"]
+        summary, _ = self.summary(fake, inactive=gone, roster={**base, ("Partner Three", "Stars"): moved})
+        self.assertEqual(fake.calls[0], "UPDATE roster 'Stars' (q11, 5 girls)")
+        self.assertEqual(sync.WARNINGS, ["  ! 'Stars' (q11): the Roster's earlier rows give it to the partner "
+                                         "'Partner One', the sheet says 'Partner Three' - the same girls, so the "
+                                         "same club (the club was moved, or the partner respelled?)"])
+        self.assertEqual(summary["same_name_refused"], [])
+        # the same club enrolled twice with the same girls, under two partners: nothing says
+        # whose the question is, so no owner is made up from the order of the Roster's rows
+        # (Partner Three's come first here) - the first partner in name order keeps it, as before
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(roster=self.PLAIN))
+        summary, _ = self.summary(fake, roster={("Partner Three", "Stars"): self.OLD_STARS, **self.PLAIN})
+        self.assertEqual(fake.calls, [])
+        self.assertEqual(sync.WARNINGS, [self.REFUSED.format("Partner Three", "Partner One")])
+        self.assertEqual(summary["sf_names"][1]["partner"], "Partner One")
+
+    def test_less_than_half_the_girls_is_no_evidence_of_an_owner(self):
+        # Partner One's Stars got a wholly new roster (its old rows respelled in place: no
+        # history), and one of q11's four girls once sat in Partner Two's retired Stars. One
+        # name is no owner: Partner One's club keeps its question, with the usual warning -
+        # it is not refused as "a new club with the name of Partner Two's club"
+        new = ["Bea Quillon", "Cyd Rennick", "Dot Sallow"]
+        fake = FakeForm(*self.form(roster=self.PLAIN))
+        summary, _ = self.summary(fake, roster={**self.PLAIN, ("Partner One", "Stars"): new},
+                                  inactive={("Partner Two", "Stars"): ["Ann Poe", "Gia Hollowmere"]})
+        self.assertEqual(fake.calls[0], "UPDATE roster 'Stars' (q11, 3 girls)")
+        self.assertEqual(summary["same_name_refused"], [])
+        self.assertEqual(len(sync.WARNINGS), 1)
+        self.assertIn(auto_sync.NO_SHARED_NAMES, sync.WARNINGS[0])      # the runner's band holds it
+
+    def test_without_an_owner_the_best_overlap_takes_the_question_not_the_first_partner(self):
+        # Partner Two's Beta Club (q13) held four girls. Two of their rows are gone from the
+        # Roster (deleted by hand: no history) and sit, with two others, in a Beta Club under
+        # Partner One: each partner's rows list two of q13's girls - a tie, no owner. The club
+        # whose roster is wholly on the question keeps it, not the partner that sorts first
+        on_form = {("Partner One", "Alpha Club"): ["Jane Doe", "Mary Roe"],
+                   ("Partner Two", "Beta Club"): ["Eve Hoe", "Ida Toe", "Sue Moe", "Liz Noe"]}
+        sheet = {**on_form, ("Partner Two", "Beta Club"): ["Eve Hoe", "Ida Toe"],
+                 ("Partner One", "Beta Club"): ["Sue Moe", "Liz Noe", "Bea Quillon", "Cyd Rennick"]}
+        fake = FakeForm(*self.form(roster=on_form))
+        summary, _ = self.summary(fake, roster=sheet)
+        self.assertEqual(fake.calls[0], "UPDATE roster 'Beta Club' (q13, 2 girls)")
+        self.assertEqual([r["partner"] for r in summary["same_name_refused"]], ["Partner One"])
+        self.assertEqual(summary["sf_names"][1], {"qid": "13", "partner": "Partner Two", "club": "Beta Club",
+                                                  "value": "Beta Club"})
+
+    # ---- any other change of what an existing club sends is by hand
+    def renamed(self):
+        """Beta Club renamed to Beta Club 2 as tools/rename_club.py leaves it: the
+        Roster rows and the question's label renamed, the rule still on the old name."""
+        sheet = {k: v for k, v in self.ROSTER.items() if k[1] != "Beta Club"}
+        sheet[("Partner Two", "Beta Club 2")] = self.ROSTER[("Partner Two", "Beta Club")]
+        qs, wire = self.form(switched=True)
+        qs["13"]["text"] = "Beta Club 2"
+        return sheet, qs, wire
+
+    def test_a_renamed_club_is_listed_and_refused_on_apply_without_the_ok(self):
+        sheet, qs, wire = self.renamed()
+        line = ("  ! 'Beta Club 2' (q13): Club Name (question 5, what Salesforce reads) changes from "
+                "'Beta Club' to 'Beta Club 2' - rename its Salesforce account first; an --apply needs "
+                "--q5-change-ok")
+        fake = FakeForm(qs, wire)
+        summary, _ = self.summary(fake, roster=sheet)
+        self.assertEqual(sync.WARNINGS, [line])
+        self.assertIn(auto_sync.SF_NAME_CHANGE, line)
+        self.assertEqual(summary["sf_name_changes"], [{"qid": "13", "club": "Beta Club 2", "old": "Beta Club",
+                                                       "new": "Beta Club 2", "switch": False}])
+        self.assertEqual([c.split(" (")[0] for c in fake.calls], ["UPDATE club picker", "REPLACE conditions"])
+        for extra in (("--apply",), ("--apply", "--same-name-switch")):   # the switch flag is no consent
+            fake = FakeForm(qs, wire, apply=True)
+            code, _ = self.run_sync(fake, *extra, roster=sheet)
+            self.assertIn("Refusing: question 5 (what Salesforce reads) would change for 1 existing club",
+                          str(code))
+            self.assertIn("--q5-change-ok", str(code))
+            self.assertEqual(fake.writes, [], extra)                       # before any write
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", "--q5-change-ok", roster=sheet)
+        self.assertEqual(code, 0)
+        self.assertEqual([(m, p) for m, p, _ in fake.writes], [("POST", "/question/500"), ("PUT", "/properties")])
+        self.assertEqual(self.shows(fake.writes[1][2], "13"), [("500", "equals", "Beta Club 2")])
+
+    def test_a_respelled_partner_keeps_its_roster_and_is_a_q5_change(self):
+        # Partner Two becomes "Second Partner" in the sheet (no spelling contains the other)
+        sheet = {k: v for k, v in self.ROSTER.items() if k[0] != "Partner Two"}
+        sheet[("Second Partner", "Stars")] = self.ROSTER[("Partner Two", "Stars")]
+        sheet[("Second Partner", "Beta Club")] = self.ROSTER[("Partner Two", "Beta Club")]
+        fake = FakeForm(*self.form(switched=True))
+        summary, _ = self.summary(fake, roster=sheet)
+        self.assertFalse([c for c in fake.calls if "roster" in c], fake.calls)     # no second roster
+        self.assertEqual(summary["sf_name_changes"],
+                         [{"qid": "12", "club": "Stars", "old": "Stars - Partner Two",
+                           "new": "Stars - Second Partner", "switch": False}])
+        self.assertEqual(summary["same_name_refused"], [])
+        # long to long is not the switch's own change: --same-name-switch is no consent to it
+        fake = FakeForm(*self.form(switched=True), apply=True)
+        code, _ = self.run_sync(fake, "--apply", "--same-name-switch", roster=sheet)
+        self.assertIn("Refusing: question 5 (what Salesforce reads) would change for 1 existing club",
+                      str(code))
+        self.assertEqual(fake.writes, [])
+        # the same on a form where it is the only roster of that name (its namesake in Asia)
+        del sync.WARNINGS[:]
+        regions = {("Partner One", "Stars"): "Asia", ("Partner One", "Alpha Club"): "Asia"}
+        was = {k: v for k, v in self.ROSTER.items() if k not in regions}
+        fake = FakeForm(*self.form(roster=was, long=[("Partner Two", "Stars")]))
+        summary, _ = self.summary(fake, roster={**sheet, **{k: self.ROSTER[k] for k in regions}},
+                                  regions=regions)
+        self.assertFalse([c for c in fake.calls if "roster" in c], fake.calls)
+        self.assertEqual([(c["qid"], c["new"]) for c in summary["sf_name_changes"]],
+                         [("12", "Stars - Second Partner")])
+        # …and when the old spelling is still in the Roster (its rows inactive, the girls
+        # re-entered under the new one): the rule's partner is a real one, the girls are the
+        # same - the question is reused, never doubled
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(roster=was, long=[("Partner Two", "Stars")]))
+        summary, _ = self.summary(fake, roster={**sheet, **{k: self.ROSTER[k] for k in regions}},
+                                  regions=regions,
+                                  inactive={("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]})
+        self.assertFalse([c for c in fake.calls if "roster" in c], fake.calls)
+        self.assertEqual([(c["qid"], c["new"]) for c in summary["sf_name_changes"]],
+                         [("12", "Stars - Second Partner")])
+        self.assertEqual(summary["same_name_refused"], [])
+        self.assertTrue(any("the same girls, so the same club" in w for w in sync.WARNINGS))
+
+    def test_the_exact_partner_is_matched_before_the_loose_one(self):
+        # "Partner One" is contained in "Partner One Trust", and both have a Stars: two
+        # partners, each keeps its own question whatever its new roster is
+        roster = {("Partner One", "Stars"): ["Ann Poe", "Kay Loe"],
+                  ("Partner One Trust", "Stars"): ["Sue Moe", "Liz Noe"]}
+        self.QIDS = {("Partner One Trust", "Stars"): "11", ("Partner One", "Stars"): "12"}
+        sheet = {("Partner One", "Stars"): ["Uma Umberlash"],
+                 ("Partner One Trust", "Stars"): ["Valeria Wrenfoldy", "Amara Pellucidor"]}
+        updates = ["UPDATE roster 'Stars' (q11, 2 girls)", "UPDATE roster 'Stars' (q12, 1 girls)"]
+        for switched in (True, False):
+            del sync.WARNINGS[:]
+            fake = FakeForm(*self.form(roster=roster, switched=switched))
             code, _ = self.run_sync(fake, roster=sheet)
             self.assertEqual(code, 0)
-            self.assertEqual(fake.calls[0], "UPDATE roster 'Stars' (q12, 2 girls)", kw)
-            self.assertFalse([c for c in fake.calls if c.startswith("CREATE roster")], kw)
-            del sync.WARNINGS[:]
+            self.assertEqual(sorted(c for c in fake.calls if "roster" in c), updates)
+            self.assertEqual(sync.WARNINGS, [])
+        # the order of the two passes: q11's rule names a spelling the Roster does not have
+        # ("Partner One Trus", an old hand-made rule), which loosely matches BOTH entries.
+        # Matched loosely first, Partner One (sorted first) would take q11, q12 would match
+        # no partner and Partner One Trust's club would be refused as new
+        qs, wire = self.form(roster=roster, switched=False)
+        wire = [dict(c, terms=c["terms"].replace('"Partner One Trust"', '"Partner One Trus"')) for c in wire]
+        self.assertEqual(sum('"Partner One Trus"' in c["terms"] for c in wire), 1)   # the rule is there
+        del sync.WARNINGS[:]
+        fake = FakeForm(qs, wire)
+        code, _ = self.run_sync(fake, roster=sheet)
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(c for c in fake.calls if "roster" in c), updates)
+        self.assertEqual(sync.WARNINGS, [])
 
-    def test_refuses_before_any_write_when_no_name_is_shared(self):
-        on_form = {k: v for k, v in self.ROSTER.items() if k != ("Partner Two", "Stars")}
-        fake = FakeForm(*self.form(roster=on_form), apply=True)
-        # the sheet also has a new club, which an apply would otherwise create first
-        sheet = {**on_form, ("Partner Two", "Gamma Club"): ["Sue Moe", "Liz Noe"]}
-        code, _ = self.run_sync(fake, "--partner-picker", "--apply", roster=sheet)
-        self.assertIn("nothing to choose", str(code))
+    def test_a_club_renamed_out_of_a_dash_name_gets_no_made_up_partner(self):
+        # "Beta Club - Juniors" renamed to "Beta Club": its rule still tests the old name, and
+        # "Juniors" is no partner of Beta Club - no second roster, a plain name, one q5 change
+        roster = {k: v for k, v in self.ROSTER.items() if k[1] != "Beta Club"}
+        roster[("Partner Two", "Beta Club - Juniors")] = ["Eve Hoe", "Ida Toe"]
+        self.QIDS = {**self.QIDS, ("Partner Two", "Beta Club - Juniors"): "13"}
+        qs, wire = self.form(roster=roster, switched=True)
+        qs["13"]["text"] = "Beta Club"
+        fake = FakeForm(qs, wire)
+        summary, _ = self.summary(fake, roster={**self.ROSTER, ("Partner Two", "Beta Club"): ["Uma Umberlash"]})
+        self.assertEqual([c.split(" (")[0] for c in fake.calls],
+                         ["UPDATE roster 'Beta Club'", "UPDATE club picker", "REPLACE conditions"])
+        self.assertEqual([(c["old"], c["new"]) for c in summary["sf_name_changes"]],
+                         [("Beta Club - Juniors", "Beta Club")])
+
+    # ---- refusals, before any write
+    def test_the_partner_list_is_retired(self):
+        fake = FakeForm(*self.form(), apply=True)
+        code, _ = self.run_sync(fake, "--partner-picker", "--apply")
+        self.assertIn("retired 2026-09-30", str(code))
         self.assertEqual(fake.writes, [])
-        code, _ = self.run_sync(FakeForm(*self.form(roster=on_form)), roster=sheet)
-        self.assertEqual(code, 0)                    # without the flag the same sheet syncs as ever
+        fake = FakeForm(*self.form(partner_list="Partner One|Partner Two"), apply=True)
+        code, _ = self.run_sync(fake, "--apply")
+        self.assertIn("q600 is a partner list", str(code))
+        self.assertIn("retired 2026-09-30", str(code))
+        self.assertEqual(fake.writes, [])
+
+    def test_the_switch_needs_the_picker(self):
+        fake = FakeForm(*self.form(picker=False), apply=True)
+        code, _ = self.run_sync(fake, "--same-name-switch", "--apply")
+        self.assertIn("--same-name-switch needs the Club picker", str(code))
+        self.assertEqual(fake.writes, [])
+
+    def test_an_entry_may_not_hold_the_option_separator_or_a_field_reference(self):
+        new = {("Partner Three", "Gamma Club"): ["Amara Pellucidor"]}     # an apply would create it first
+        for partner, fragment in (("Partner|Two", "'Stars - Partner|Two'"),
+                                  ("Partner {5} Two", "'Stars - Partner {5} Two'")):
+            roster = {(partner if k == ("Partner Two", "Stars") else k[0], k[1]): v
+                      for k, v in self.ROSTER.items()}
+            self.QIDS = {**SameNameFlow.QIDS, (partner, "Stars"): "12"}
+            fake = FakeForm(*self.form(roster=roster), apply=True)
+            code, _ = self.run_sync(fake, "--same-name-switch", "--apply", roster={**roster, **new})
+            self.assertIn("may not contain '|'", str(code))
+            self.assertIn(fragment, str(code))
+            self.assertEqual(fake.writes, [])
+        # a new club's own name too
+        fake = FakeForm(*self.form(), apply=True)
+        code, _ = self.run_sync(fake, "--apply", roster={**self.ROSTER, ("Partner Three", "Gamma {Club}"): ["Amara Pellucidor"]})
+        self.assertIn("'Gamma {Club}'", str(code))
+        self.assertEqual(fake.writes, [])
+
+    def test_two_rosters_on_one_entry_are_refused_unless_the_partner_box_tells_them_apart(self):
+        new = {("Partner Three", "Gamma Club"): ["Amara Pellucidor"]}
+        # today's form, with the box hidden and its rules gone: nothing tells the two Stars apart
+        qs, wire = self.form()
+        wire = [c for c in wire if '"field": "331"' not in c["terms"] and '"field": "331"' not in c["action"]]
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", roster={**self.ROSTER, **new})
+        self.assertIn("2 rosters (q11, q12) would share the Club picker entry 'Stars'", str(code))
+        self.assertIn("--same-name-switch", str(code))
+        self.assertEqual(fake.writes, [])
+        code, _ = self.run_sync(FakeForm(qs, wire), "--same-name-switch")     # …which is the way out
+        self.assertEqual(code, 0)
+
+    def test_a_long_name_equal_to_another_clubs_name_is_refused(self):
+        # Partner Three already has a club literally named "Stars - Partner One" (another region)
+        sheet = {**self.ROSTER, ("Partner Three", "Stars - Partner One"): ["Uma Umberlash"]}
+        fake = FakeForm(*self.form(), apply=True)
+        code, _ = self.run_sync(fake, "--same-name-switch", "--apply", roster=sheet,
+                                regions={("Partner Three", "Stars - Partner One"): "Asia"})
+        self.assertIn("would send 'Stars - Partner One' to question 5, which is the name of Partner "
+                      "Three's club", str(code))
+        self.assertEqual(fake.writes, [])
+
+    # ---- a form without the Club picker keeps today's rules
+    def test_a_form_without_the_picker_keeps_its_rules_byte_for_byte(self):
+        qs, wire = self.form(picker=False)
+        self.assertTrue(any('"field": "331"' in c["terms"] for c in wire))       # told apart by the box
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake)
+        self.assertEqual((fake.calls, sync.WARNINGS), ([], []))
+        self.assertIn("(conditions unchanged - skipping the rewrite)", out)
+        self.assertEqual([n["value"] for n in summary["sf_names"]], ["Alpha Club", "Stars", "Stars", "Beta Club"])
+        # with a roster update the rewrite happens, and is the same rules
+        sheet = {**self.ROSTER, ("Partner One", "Alpha Club"): ["Jane Doe"]}
+        fake = FakeForm(qs, wire)
+        code, _ = self.run_sync(fake, roster=sheet)
+        self.assertEqual(code, 0)
+        self.assertEqual(sync._norm_rules(fake.writes[1][2]["properties"]["conditions"]), sync._norm_rules(wire))
+        self.assertNotIn(self.HIDE, fake.calls)               # the typed box is how they are told apart
+        # …and stays visible on such a form when no name is shared and no rule shows it:
+        # without the picker a mentor types the club, and may have to type the partner later
+        alone = {k: v for k, v in self.ROSTER.items() if k != ("Partner Two", "Stars")}
+        qs1, wire1 = self.form(roster=alone, picker=False)
+        self.assertFalse(any('"331"' in c["terms"] + c["action"] for c in wire1))
+        self.assertNotEqual(qs1["331"].get("hidden"), "Yes")
+        fake = FakeForm(qs1, wire1, apply=True)
+        self.assertEqual((self.run_sync(fake, "--apply", roster=alone)[0], fake.calls), (0, []))
+        # a new club with a name in use is refused there too
+        del sync.WARNINGS[:]
+        fake = FakeForm(qs, wire)
+        code, _ = self.run_sync(fake, roster={**self.ROSTER, ("Partner Three", "Stars"): ["Uma Umberlash"]})
+        self.assertEqual((code, fake.calls, len(sync.WARNINGS)), (0, [], 1))
+        # two questions of one name whose rules name no partner, one of them a retired club's:
+        # still the refusal it always was - a partner read from the Roster's rows is never
+        # written into a typed-Partner rule
+        bare = [c for c in wire if '"field": "331"' not in c["terms"] and '"field": "331"' not in c["action"]]
+        gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
+        fake = FakeForm(qs, bare, apply=True)
+        code, _ = self.run_sync(fake, "--apply", inactive=gone,
+                                roster={k: v for k, v in self.ROSTER.items() if k not in gone})
+        self.assertIn("Cannot disambiguate 'Stars' (q12): no partner in the sheet or the form's current rules",
+                      str(code))
+        self.assertEqual(fake.writes, [])
 
     def test_without_submit_or_a_link_a_new_roster_still_goes_at_the_end(self):
         qs, wire = self.form()
@@ -925,96 +1990,39 @@ class PartnerPickerFlow(unittest.TestCase):
         self.assertEqual(fake.writes[0][2]["question[order]"], str(end))
         self.assertIn(f"New rosters go at order {end}, the end of the form", out)
 
-    def test_refuses_before_any_write_a_partner_name_with_the_option_separator(self):
-        roster = dict(self.ROSTER)
-        roster[("Partner|Two", "Stars")] = roster.pop(("Partner Two", "Stars"))
-        self.QIDS = {**self.QIDS, ("Partner|Two", "Stars"): "12"}
-        fake = FakeForm(*self.form(roster=roster), apply=True)
-        code, _ = self.run_sync(fake, "--partner-picker", "--apply", roster=roster)
-        self.assertIn("option separator", str(code))
-        self.assertEqual(fake.writes, [])
-
-
-class PartnerListRunbook(unittest.TestCase):
-    """docs/RUNBOOK.md "The partner list": the rollback restores a snapshot the
-    procedure itself takes, with the runner paused first."""
-
-    def section(self):
-        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
-        section = doc.split("## The partner list", 1)[1].split("\n## ", 1)[0]
-        self.assertIn("backup_forms.py --form", section)       # the procedure's backup
-        return section
-
-    def rollback(self):
-        return self.section().split("Rollback, per form", 1)[1]
-
-    def forward(self):
-        return self.section().split("Rollback, per form", 1)[0]
-
-    def test_the_forward_path_switches_the_runner_back_on_after_the_browser_check(self):
-        # paused for the window; left paused, roster changes stop reaching the forms
-        # (integration review, rollout-safety F3)
-        text = self.forward()
-        self.assertIn("AUTO_SYNC_APPLY=0", text)
-        self.assertIn("AUTO_SYNC_APPLY=1", text)
-        self.assertLess(text.index("5. Submit a test"), text.index("AUTO_SYNC_APPLY=1"))
-        backlog = [l for l in read(os.path.join(REPO, "docs", "BACKLOG.md")).splitlines()
-                   if l.startswith("| 45 |")]
-        self.assertEqual(len(backlog), 1)
-        self.assertIn("then `AUTO_SYNC_APPLY=1`", backlog[0])
-
-    def test_the_translation_audit_is_read_before_and_after_the_apply(self):
-        block = self.forward().split("```bash", 1)[1].split("```", 1)[0]
-        lines = [l for l in block.splitlines() if l.strip()]
-        audits = [i for i, l in enumerate(lines) if "add_translations.py --audit" in l]
-        apply = next(i for i, l in enumerate(lines) if "--partner-picker --apply" in l)
-        self.assertEqual(len(audits), 2)
-        self.assertLess(audits[0], apply)
-        self.assertGreater(audits[1], apply)
-
-    def test_the_rollback_restores_a_file_backup_forms_writes(self):
-        # backup_forms.py writes questions-/properties-<stamp>.json; only the
-        # runner (in the Actions workspace) writes conditions-<stamp>.json
-        self.assertIn('for part in ("questions", "properties")', read(os.path.join(REPO, "backup_forms.py")))
-        sources = re.findall(r"restore_conditions\.py[^`]*--from ([\w.<>-]+)", self.rollback())
-        self.assertTrue(sources)
-        for src in sources:
-            self.assertRegex(src, r"^properties-<stamp>\.json$")
-
-    def test_the_rollback_pauses_the_runner_before_the_first_write(self):
-        # a runner apply in the middle would move the rules back onto the list
-        # and hide q331 again (PartnerPickerFlow, rules left on the typed box)
-        text = self.rollback()
-        self.assertIn("AUTO_SYNC_APPLY=0", text)
-        self.assertLess(text.index("AUTO_SYNC_APPLY=0"), text.index("restore_conditions.py"))
-        self.assertIn("AUTO_SYNC_APPLY=1", text)
-
 
 class ClubGuardFlow(unittest.TestCase):
     """sync_attendance_form.main() with --club-guard and without, on the fake
-    Africa form of PartnerPickerFlow plus a Submit button (q2) below the rosters
-    (the layout after the roster-order repair, glow/layout.py) and, when the
-    form has it, the warning (q700). Every question carries its qid, as
-    Jotform's GET does (the layout code orders by it). Fictional names."""
+    Africa form of SameNameFlow - switched: each of the two Stars has its own
+    picker entry, as on the live forms after the 2026-09-30 rollout - plus a
+    Submit button (q2) below the rosters (the layout after the roster-order
+    repair, glow/layout.py) and, when the form has it, the warning (q700).
+    Every question carries its qid, as Jotform's GET does (the layout code
+    orders by it). Fictional names."""
 
-    ROSTER, QIDS, MODULES = PartnerPickerFlow.ROSTER, PartnerPickerFlow.QIDS, PartnerPickerFlow.MODULES
-    OPTIONS = ["Alpha Club", "Beta Club", "Stars"]
+    ROSTER, QIDS, MODULES = SameNameFlow.ROSTER, SameNameFlow.QIDS, SameNameFlow.MODULES
+    OPTIONS = SameNameFlow.LONG        # Alpha Club, Beta Club, Stars - Partner One, Stars - Partner Two
+    CALC = "|" + "|".join(OPTIONS)
     NEW_CLUB = {("Partner One", "Gamma Club"): ["Amara Pellucidor", "Beatrice Marrowgate"]}
+    WITH_NEW = "Alpha Club|Beta Club|Gamma Club|Stars - Partner One|Stars - Partner Two"
+    texts = SameNameFlow.texts
 
     def setUp(self):
-        PartnerPickerFlow.setUp(self)
+        SameNameFlow.setUp(self)
 
     def tearDown(self):
-        PartnerPickerFlow.tearDown(self)
+        SameNameFlow.tearDown(self)
 
     def run_sync(self, fake, *extra, roster=None):
-        return PartnerPickerFlow.run_sync(self, fake, *extra, roster=roster)
+        return SameNameFlow.run_sync(self, fake, *extra, roster=roster)
 
-    def form(self, guard=True, calc=True, roster=None, partner_list=None):
+    def form(self, guard=True, calc=True, roster=None, switched=True):
         """(questions, wire conditions) of a form in step with `roster`; guard:
-        the warning q700 and the rules it brings; calc: the picker's calcValues."""
+        the warning q700 and the rules it brings; calc: the picker's calcValues;
+        switched=False: the form before --same-name-switch (the two Stars on one
+        entry, told apart by the typed Partner box)."""
         roster = self.ROSTER if roster is None else roster
-        qs, _ = PartnerPickerFlow.form(self, roster=roster, partner_list=partner_list)
+        qs, _ = SameNameFlow.form(self, roster=roster, switched=switched)
         qs["2"] = {"type": "control_button", "text": "Submit", "name": "submit2", "order": "60"}
         options = qs["500"]["options"].split("|")
         if calc:
@@ -1023,11 +2031,9 @@ class ClubGuardFlow(unittest.TestCase):
             qs["700"] = dict(sync.GUARD_PROPS, type="control_text", name=sync.GUARD_NAME, order="4")
         for q_id, q in qs.items():
             q.setdefault("qid", q_id)
-        clubs = {self.QIDS[k]: k[1] for k in roster}
-        partner_of = {self.QIDS[k]: k[0] for k in roster}
-        conds = sync.build_conditions(clubs, partner_of, {y: o.split("|") for y, o in self.MODULES.items()},
-                                      picker="500", partner_field="600" if partner_list else sync.PARTNER,
-                                      picker_options=options, guard="700" if guard else None,
+        option_of, partner_of = self.texts(roster, switched)
+        conds = sync.build_conditions(option_of, partner_of, {y: o.split("|") for y, o in self.MODULES.items()},
+                                      picker="500", picker_options=options, guard="700" if guard else None,
                                       submit="2" if guard else None)
         return qs, [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]
 
@@ -1048,11 +2054,11 @@ class ClubGuardFlow(unittest.TestCase):
         fake = FakeForm(qs, wire)
         code, out = self.run_sync(fake, "--club-guard")
         self.assertEqual(code, 0)
-        self.assertEqual(fake.calls, ["UPDATE club picker (3 clubs: calcValues)",
+        self.assertEqual(fake.calls, ["UPDATE club picker (4 clubs: calcValues)",
                                       "CREATE club guard (below the Club picker)",
                                       f"REPLACE conditions ({len(wire) + 2} rules)"])
         self.assertIn(f"conditions: {len(wire)} kept, 2 new, 0 dropped", out)   # the two guard rules only
-        self.assertEqual(fake.writes[0][2], {"question[calcValues]": "|Alpha Club|Beta Club|Stars"})
+        self.assertEqual(fake.writes[0][2], {"question[calcValues]": self.CALC})
         _, path, fields = fake.writes[1]
         self.assertEqual(path, "/questions")
         self.assertEqual(fields, {"question[type]": "control_text", "question[name]": sync.GUARD_NAME,
@@ -1110,7 +2116,7 @@ class ClubGuardFlow(unittest.TestCase):
         code, _ = self.run_sync(fake, "--club-guard", "--apply")
         self.assertEqual(code, 0)
         # the rules stay today's (unchanged: no rewrite), the picker got its calcValues
-        self.assertEqual(fake.calls, ["UPDATE club picker (3 clubs: calcValues)",
+        self.assertEqual(fake.calls, ["UPDATE club picker (4 clubs: calcValues)",
                                       "CREATE club guard (below the Club picker)"])
         self.assertTrue(any("carried no question id" in w for w in sync.WARNINGS))
 
@@ -1126,11 +2132,11 @@ class ClubGuardFlow(unittest.TestCase):
     def test_the_warning_and_calc_values_are_kept_in_shape(self):
         qs, wire = self.form()
         qs["700"].update(hidden="No", text="<p>edited by hand</p>")
-        qs["500"]["calcValues"] = "|Beta Club|Alpha Club|Stars"
+        qs["500"]["calcValues"] = self.CALC.replace("|Alpha Club|Beta Club", "|Beta Club|Alpha Club")
         fake = FakeForm(qs, wire)
         code, _ = self.run_sync(fake)
         self.assertEqual(code, 0)
-        self.assertEqual(fake.calls, ["UPDATE club picker (3 clubs: calcValues)",
+        self.assertEqual(fake.calls, ["UPDATE club picker (4 clubs: calcValues)",
                                       "UPDATE club guard (hidden, text)"])
         self.assertEqual(fake.writes[1][2], {"question[hidden]": "Yes", "question[text]": glow_sync.guard_html()})
         self.assertTrue(auto_sync.GUARD_RX.match("  - " + fake.calls[1]))
@@ -1141,13 +2147,13 @@ class ClubGuardFlow(unittest.TestCase):
         code, _ = self.run_sync(fake, roster=sheet)
         self.assertEqual(code, 0)
         self.assertEqual(fake.calls[:2], ["CREATE roster 'Gamma Club' (2 girls)",
-                                          "UPDATE club picker (4 clubs: calcValues, options)"])
-        self.assertEqual(fake.writes[1][2], {"question[options]": "Alpha Club|Beta Club|Gamma Club|Stars",
-                                             "question[calcValues]": "|Alpha Club|Beta Club|Gamma Club|Stars"})
+                                          "UPDATE club picker (5 clubs: calcValues, options)"])
+        self.assertEqual(fake.writes[1][2], {"question[options]": self.WITH_NEW,
+                                             "question[calcValues]": "|" + self.WITH_NEW})
         conds = fake.writes[2][2]["properties"]["conditions"]
         for rule in self.guard_rules(conds):
             values = [t["value"] for t in json.loads(rule["terms"]) if t["operator"] == "notEquals"]
-            self.assertEqual(values, ["Alpha Club", "Beta Club", "Gamma Club", "Stars"])
+            self.assertEqual(values, self.WITH_NEW.split("|"))
 
     def test_a_new_club_with_the_guard_goes_above_submit_and_the_warning_below_the_picker(self):
         # both tracks' creates in one run (integration of wf5/rosters-above-submit and
@@ -1170,11 +2176,11 @@ class ClubGuardFlow(unittest.TestCase):
         sheet = {**self.ROSTER, **self.NEW_CLUB}
         fake = FakeForm(*self.form(guard=False, calc=True))
         self.run_sync(fake, roster=sheet)
-        self.assertIn("UPDATE club picker (4 clubs: calcValues, options)", fake.calls)
+        self.assertIn("UPDATE club picker (5 clubs: calcValues, options)", fake.calls)
         self.assertFalse(self.guard_rules(fake.writes[-1][2]["properties"]["conditions"]))
         fake = FakeForm(*self.form(guard=False, calc=False))       # none carried: none written
         self.run_sync(fake, roster=sheet)
-        self.assertIn("UPDATE club picker (4 clubs: options)", fake.calls)
+        self.assertIn("UPDATE club picker (5 clubs: options)", fake.calls)
 
     def test_refusals_come_before_any_write(self):
         sheet = {**self.ROSTER, **self.NEW_CLUB}          # an apply would create a roster first
@@ -1233,94 +2239,154 @@ class ClubGuardFlow(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(any("fills Club Name with 'SunRise'" in w for w in sync.WARNINGS), guard)
 
-    def test_with_the_partner_list_in_the_same_run(self):
-        qs, wire = self.form(guard=False, calc=False)
-        fake = FakeForm(qs, wire, apply=True, created=[{"qid": 600}, {"qid": 700}])
-        code, _ = self.run_sync(fake, "--partner-picker", "--club-guard", "--apply")
+    def test_the_same_name_switch_on_a_guarded_form(self):
+        # the live forms on 2026-09-30: the guard and calcValues on, the two Stars still on
+        # one entry. One string everywhere: option = calcValue = roster rule = guard term
+        qs, wire = self.form(switched=False)
+        self.assertEqual(qs["500"]["options"], "Alpha Club|Beta Club|Stars")
+        fake = FakeForm(qs, wire, apply=True)
+        code, out = self.run_sync(fake, "--same-name-switch", "--apply")
         self.assertEqual(code, 0)
-        self.assertEqual([c.split(" (")[0] for c in fake.calls],
-                         ["UPDATE club picker", "CREATE partner picker", "CREATE club guard",
-                          "REPLACE conditions", "HIDE partner textbox"])
-        conds = fake.writes[3][2]["properties"]["conditions"]
-        self.assertEqual(len(conds), len(wire) + 3)       # + the q331 copy + the two guard rules
-        self.assertEqual(sync._norm_rules(conds), sync._norm_rules(
-            self.form(partner_list="Partner One|Partner Two")[1]))
+        self.assertEqual(fake.calls, ["UPDATE club picker (4 clubs: calcValues, options)",
+                                      f"REPLACE conditions ({len(wire) - 1} rules)", SameNameFlow.HIDE])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "|".join(self.OPTIONS),
+                                             "question[calcValues]": self.CALC})
+        conds = fake.writes[1][2]["properties"]["conditions"]
+        for rule in self.guard_rules(conds):
+            self.assertEqual([t["value"] for t in json.loads(rule["terms"]) if t["operator"] == "notEquals"],
+                             self.OPTIONS)
+        # 2 roster rules and the 2 guard rules are new; theirs and the Partner-box rule go
+        self.assertIn(f"conditions: {len(wire) - 5} kept, 4 new, 5 dropped", out)
+        self.assertEqual(sync._norm_rules(conds), sync._norm_rules(self.form()[1]))   # = the switched form
+        agg = [a for c in conds for a in json.loads(c["action"]) if a.get("resultField") == sync.CONTACT_IDS]
+        self.assertEqual(agg[0]["equation"], "{10}{11}{12}{13}")        # q18 exactly as before
+        # before the switch, without the flag: nothing, the guard included
+        fake = FakeForm(qs, wire)
+        self.assertEqual((self.run_sync(fake)[0], fake.calls), (0, []))
 
 
 class FormStatusAudit(unittest.TestCase):
     """tools/form_status.py audit_rules on forms built by the sync's own rules."""
 
+    PARTNERS = {"stars": {"partner one": "Partner One", "partner two": "Partner Two"},
+                "alpha club": {"partner one": "Partner One"},
+                "beta club": {"partner two": "Partner Two"}}       # the Roster's, as load_partners gives
+
     def form(self, **kw):
-        return PartnerPickerFlow.form(PartnerPickerFlow(), **kw)
+        return SameNameFlow.form(SameNameFlow(), **kw)
 
     def test_the_typed_box_form_is_clean(self):
-        problems, summary = form_status.audit_rules(*self.form())
-        self.assertEqual(problems, [])
-        self.assertEqual(summary["clubs"], 4)
+        # before --same-name-switch: two rosters test "Stars", told apart by the Partner box
+        for partners in (None, self.PARTNERS):
+            problems, summary = form_status.audit_rules(*self.form(), partners)
+            self.assertEqual(problems, [])
+            self.assertEqual((summary["clubs"], summary["long_names"]), (4, 0))
 
-    def test_the_partner_list_form_is_clean(self):
-        qs, wire = self.form(partner_list="Partner One|Partner Two")
-        self.assertEqual(form_status.audit_rules(qs, wire), ([], {"clubs": 4, "show_rules": 4,
-                                                                  "aggregate_rosters": 4}))
+    def test_the_switched_form_is_clean(self):
+        # each Stars tests its own long name: one roster per tested text, no Partner term
+        qs, wire = self.form(switched=True)
+        for partners in (None, self.PARTNERS):
+            self.assertEqual(form_status.audit_rules(qs, wire, partners),
+                             ([], {"clubs": 4, "show_rules": 4, "aggregate_rosters": 4, "long_names": 2}))
+        self.assertEqual(form_status.tested_values(qs, wire),
+                         {"10": "Alpha Club", "11": "Stars - Partner One", "12": "Stars - Partner Two",
+                          "13": "Beta Club"})
 
-    def test_the_partner_list_checks(self):
-        # rules still on the typed box while the list exists, and the box visible
-        qs, wire = self.form(partner_list="Partner One|Partner Two", rules_on=sync.PARTNER,
-                             box_hidden="No")
-        problems, _ = form_status.audit_rules(qs, wire)
-        self.assertEqual(sum("not the partner list (q600)" in p for p in problems), 2)
-        self.assertTrue(any("typed Partner box (q331) is still visible" in p for p in problems))
-        # a tested partner missing from the list, one listed that no rule tests, not required
-        qs, wire = self.form(partner_list="Partner One|Someone Else")
-        qs["600"]["required"] = "No"
-        problems, _ = form_status.audit_rules(qs, wire)
-        self.assertTrue(any("misses 1 partner(s) a rule tests: ['Partner Two']" in p for p in problems))
-        self.assertTrue(any("offers 1 partner(s) no rule tests: ['Someone Else']" in p for p in problems))
-        self.assertTrue(any("(q600) is not required" in p for p in problems))
-        self.assertEqual(len(problems), 3)
-        # an unshared name with a Partner term on the list is still flagged as before
-        qs, wire = self.form(partner_list="Partner One|Partner Two")
+    def test_a_tested_text_must_be_the_rosters_own_or_its_long_name(self):
+        def retest(wire, qid, old, new):
+            return [dict(c, terms=c["terms"].replace(f'"{old}"', f'"{new}"'))
+                    if f'"field": "{qid}"' in c["action"] else c for c in wire]
+
+        # a long name whose partner the Roster does not have for that club
+        qs, wire = self.form(switched=True)
+        qs["500"]["options"] = qs["500"]["options"].replace("Stars - Partner Two", "Stars - Partner Nine")
+        wire = retest(wire, "12", "Stars - Partner Two", "Stars - Partner Nine")
+        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])           # no Roster given: any partner
+        problems = form_status.audit_rules(qs, wire, self.PARTNERS)[0]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("'Stars' (q12): its rule tests 'Stars - Partner Nine', but the Roster has no "
+                      "partner of that name with a club 'Stars'", problems[0])
+        # another club's text, or the separator with nothing after it, is never a roster's own
+        for value in ("Alpha Club", "Beta Club - ", "Beta Clubs - Partner Two"):
+            qs, wire = self.form(switched=True)
+            found = form_status.audit_rules(qs, retest(wire, "13", "Beta Club", value), self.PARTNERS)[0]
+            self.assertTrue(any("'Beta Club' (q13): show-rule does not test the club field (q500) == its "
+                                "text or its text + ' - ' + its partner" in p for p in found), (value, found))
+        # without the picker the club name is typed: a long name is not accepted there
+        qs, wire = self.form(picker=False)
+        found = form_status.audit_rules(qs, retest(wire, "13", "Beta Club", "Beta Club - Partner Two"))[0]
+        self.assertEqual(found, ["'Beta Club' (q13): show-rule does not test the club field (q5) == its text"])
+
+    def test_rosters_are_grouped_by_the_text_they_test(self):
+        # two rosters on one text with no Partner term: only one could ever show
+        qs, wire = self.form(switched=True)
+        same = [dict(c, terms=c["terms"].replace("Stars - Partner Two", "Stars - Partner One")) for c in wire]
+        problems = form_status.audit_rules(qs, same)[0]
+        self.assertEqual(sum("tests the same text as another roster ('Stars - Partner One') but its rule "
+                             "has no Partner term" in p for p in problems), 2, problems)
+        # a roster alone on its text must not ask for a partner
+        qs, wire = self.form(switched=True)
         wire = [dict(c) for c in wire]
         for c in wire:
             if '"field": "10"' in c["action"]:
-                c["terms"] = json.dumps([{"field": "600", "operator": "equals", "value": "Partner One"},
+                c["terms"] = json.dumps([{"field": "331", "operator": "equals", "value": "Partner One"},
                                          {"field": "500", "operator": "equals", "value": "Alpha Club"}])
-        problems, _ = form_status.audit_rules(qs, wire)
-        self.assertEqual(problems, ["'Alpha Club' (q10) is unique but its rule needs a Partner"])
+        self.assertEqual(form_status.audit_rules(qs, wire)[0],
+                         ["'Alpha Club' (q10) is unique but its rule needs a Partner"])
 
-    @staticmethod
-    def reveals(c, field):
-        return any(a.get("visibility") == "Show" and str(a.get("field")) == field
-                   for a in json.loads(c["action"]))
+    def test_a_partner_list_left_on_a_form_is_a_problem(self):
+        qs, wire = self.form(partner_list="Partner One|Partner Two")
+        problems = form_status.audit_rules(qs, wire)[0]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("partner list (q600) on the form: the partner list was retired 2026-09-30", problems[0])
 
-    def test_the_partner_list_is_hidden_and_shown_only_for_shared_names(self):
-        # (a) the list visible to everyone: every mentor must pick a partner to submit
-        qs, wire = self.form(partner_list="Partner One|Partner Two")
-        qs["600"]["hidden"] = "No"
-        self.assertEqual(form_status.audit_rules(qs, wire)[0],
-                         ["partner list (q600) is not hidden: every mentor is asked for a partner"])
-        # (b) nothing shows the list for "Stars": its two rosters can never appear
-        qs, wire = self.form(partner_list="Partner One|Partner Two")
-        wire = [c for c in wire if not self.reveals(c, "600")]
-        self.assertEqual(form_status.audit_rules(qs, wire)[0],
-                         ["'Stars' is shared, but no rule shows the partner list (q600) for it"])
-        # (c) the rule shows the hidden typed box instead of the list
-        qs, wire = self.form(partner_list="Partner One|Partner Two")
-        wire = [dict(c, action=c["action"].replace('"600"', '"331"')) if self.reveals(c, "600") else c
-                for c in wire]
-        problems, _ = form_status.audit_rules(qs, wire)
-        self.assertEqual(len(problems), 2, problems)
-        self.assertIn("'Stars' is shared, but no rule shows the partner list (q600) for it", problems)
-        self.assertTrue(any("show the typed Partner box (q331)" in p for p in problems), problems)
-        # (d) the list shown for a name no two rosters share: that mentor must pick a partner
-        qs, wire = self.form(partner_list="Partner One|Partner Two")
-        wire = wire + [dict(c, terms=c["terms"].replace('"Stars"', '"Alpha Club"'))
-                       for c in wire if self.reveals(c, "600")]
-        self.assertEqual(form_status.audit_rules(qs, wire)[0],
-                         ["the partner list (q600) is shown for 'Alpha Club', which no two rosters share"])
-        # a form without the list is audited exactly as before, whatever shows q331
-        qs, wire = self.form()
-        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
+    def report(self, qs, wire, partners=None):
+        class Fake:
+            def get(self, path, **params):
+                if path.endswith("/questions"):
+                    return copy.deepcopy(qs)
+                if path.endswith("/properties"):
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
+                return {"title": "t", "status": "ENABLED", "count": "0"}
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+        return form_status.form_report(glow_forms.TEMPLATE, Fake(), {}, partners)
+
+    def picker_problems(self, rep):
+        return [p for p in rep["rule_problems"] if p.startswith("club picker")]
+
+    def test_the_pickers_options_are_the_texts_the_rules_test(self):
+        for switched in (True, False):
+            rep = self.report(*self.form(switched=switched), self.PARTNERS)
+            self.assertEqual(self.picker_problems(rep), [], switched)
+            self.assertEqual(rep["same_name_rosters"], 2 if switched else 0)
+            # two questions named "Stars" are duplicates only while they share one picker entry
+            self.assertEqual(rep["duplicate_club_questions"], [] if switched else ["Stars"])
+        # the switched rules with the old options: both Stars are missing, "Stars" shows nothing
+        qs, wire = self.form(switched=True)
+        qs["500"]["options"] = "Alpha Club|Beta Club|Stars"
+        self.assertEqual(self.picker_problems(self.report(qs, wire)),
+                         ["club picker misses 1 club(s): ['Stars']",
+                          "club picker lists 1 name(s) with no roster: ['Stars']"])
+        # …and the other way round (a conditions backup restored over the switched picker)
+        qs, wire = self.form(switched=True, rules_switched=False)
+        self.assertEqual(self.picker_problems(self.report(qs, wire)),
+                         ["club picker misses 1 club(s): ['Stars']",
+                          "club picker lists 2 name(s) with no roster: ['Stars - Partner One', "
+                          "'Stars - Partner Two']"])
+
+    def test_the_report_says_how_many_long_names_and_what_the_partner_box_does(self):
+        def lines(rep):
+            return (rep["same_name_rosters"], form_status.partner_box_line(rep["partner_box"], rep["club_picker"]))
+
+        self.assertEqual(lines(self.report(*self.form())),
+                         (0, "q331 shown by 1 rule(s): rosters that share a text are told apart by the "
+                             "typed partner"))
+        self.assertEqual(lines(self.report(*self.form(switched=True))),
+                         (2, "q331 hidden, no rule shows it"))
+        self.assertEqual(lines(self.report(*self.form(switched=True, box_hidden="No"))),
+                         (2, "q331 VISIBLE to every mentor, and no rule uses it - the next sync apply "
+                             "hides it"))
 
     # ---- the Club picker's spelling and calcValues; the club guard
     def guard_form(self, **kw):
@@ -1333,32 +2399,34 @@ class FormStatusAudit(unittest.TestCase):
 
     def test_the_guard_form_is_clean(self):
         qs, wire = self.guard_form()
-        self.assertEqual(form_status.audit_rules(qs, wire), ([], {"clubs": 4, "show_rules": 4,
-                                                                  "aggregate_rosters": 4}))
-        qs, wire = self.guard_form(partner_list="Partner One|Partner Two")
-        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
-        qs, wire = self.guard_form(guard=False, calc=False)          # before the rollout: clean too
+        self.assertEqual(form_status.audit_rules(qs, wire, self.PARTNERS),
+                         ([], {"clubs": 4, "show_rules": 4, "aggregate_rosters": 4, "long_names": 2}))
+        qs, wire = self.guard_form(switched=False)                   # before the same-name switch
+        self.assertEqual(form_status.audit_rules(qs, wire, self.PARTNERS)[0], [])
+        qs, wire = self.guard_form(guard=False, calc=False)          # before the guard's rollout: clean too
         self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
 
     def test_a_picker_term_spelled_unlike_its_option_never_fires(self):
         # Africa's SUPER GIRLS (read 2026-09-29): the rule tests "SUPER GIRLS", the picker offers
-        # "Super Girls", and a multi-select's equals is case-sensitive
-        qs, wire = self.guard_form(guard=False, calc=False)
-        wire = self.edit(wire, lambda c: '"field": "11"' in c["action"],
-                         terms=lambda c: c["terms"].replace('"Stars"', '"STARS"'))
-        problems = form_status.audit_rules(qs, wire)[0]
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("equals 'STARS', which is not one of its options (it has 'Stars'", problems[0])
-        qs["500"]["multipleSelections"] = "No"      # a single-select compares without case
-        self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
+        # "Super Girls", and a multi-select's equals is case-sensitive - a long name too
+        for switched, old, new in ((False, "Stars", "STARS"),
+                                   (True, "Stars - Partner One", "Stars - PARTNER ONE")):
+            qs, wire = self.guard_form(guard=False, calc=False, switched=switched)
+            wire = self.edit(wire, lambda c: '"field": "11"' in c["action"],
+                             terms=lambda c: c["terms"].replace(f'"{old}"', f'"{new}"'))
+            problems = form_status.audit_rules(qs, wire, self.PARTNERS)[0]
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn(f"equals '{new}', which is not one of its options (it has '{old}'", problems[0])
+            qs["500"]["multipleSelections"] = "No"      # a single-select compares without case
+            self.assertEqual(form_status.audit_rules(qs, wire, self.PARTNERS)[0], [])
 
     def test_calc_values_must_be_the_options_in_order(self):
         for guard in (True, False):                  # checked whenever the picker carries them
             qs, wire = self.guard_form(guard=guard)
-            qs["500"]["calcValues"] = "|Beta Club|Alpha Club|Stars"
+            qs["500"]["calcValues"] = ClubGuardFlow.CALC.replace("|Alpha Club|Beta Club", "|Beta Club|Alpha Club")
             problems = form_status.audit_rules(qs, wire)[0]
             self.assertEqual(len(problems), 1, problems)
-            self.assertIn("calcValues are not its 3 options in order", problems[0])
+            self.assertIn("calcValues are not its 4 options in order", problems[0])
         qs, wire = self.guard_form()
         del qs["500"]["calcValues"]                  # the guard needs them
         self.assertTrue(any("calcValues" in p for p in form_status.audit_rules(qs, wire)[0]))
@@ -1451,7 +2519,7 @@ class FormStatusAudit(unittest.TestCase):
         aligned = ('<select name="q500_clubPicker[]" multiple="">'
                    + "".join(f'<option data-calcvalue="{o}" value="{o}">{o}</option>'
                              for o in ClubGuardFlow.OPTIONS) + "</select>")
-        shifted = aligned.replace('data-calcvalue="Beta Club"', 'data-calcvalue="Stars"')
+        shifted = aligned.replace('data-calcvalue="Beta Club"', 'data-calcvalue="Alpha Club"')
 
         def report(roster, *extra, page=None):
             out = io.StringIO()
@@ -1468,12 +2536,16 @@ class FormStatusAudit(unittest.TestCase):
             roster = os.path.join(tmp, "roster.csv")
             with open(roster, "w", encoding="utf-8") as f:
                 f.write("partner,club,full_name,status,region\n")
+                for (partner, club), names in ClubGuardFlow.ROSTER.items():
+                    f.write(f"{partner},{club},{names[0]},active,Africa\n")
             good, bad = report(roster, "--rendered", page=aligned), report(roster, "--rendered", page=shifted)
-            self.assertIn("club guard: q700 (3 clubs)", good)
-            self.assertIn("rendered picker: 3 options, 3 with data-calcvalue = value, 0 different, "
+            self.assertIn("club guard: q700 (4 clubs)", good)
+            self.assertIn("rendered picker: 4 options, 4 with data-calcvalue = value, 0 different, "
                           "0 without", good)
+            self.assertIn("same-name clubs: 2 rosters send '<club> - <partner>'", good)
+            self.assertIn("partner box: q331 hidden, no rule shows it", good)
             self.assertIn("→ CLEAN", good)
-            self.assertIn("rendered picker: 3 options, 2 with data-calcvalue = value, 1 different", bad)
+            self.assertIn("rendered picker: 4 options, 3 with data-calcvalue = value, 1 different", bad)
             self.assertIn("would send another club's name", bad)
             self.assertNotIn("CLEAN", bad)
             self.assertNotIn("rendered picker", report(roster))          # only with --rendered
@@ -1484,14 +2556,23 @@ class FormStatusAudit(unittest.TestCase):
                       "placeholder": empty.replace('""></select>', '""><option value="">…</option></select>'),
                       "single quotes": aligned.replace('"', "'").replace("name='q500_clubPicker[]'",
                                                                          'name="q500_clubPicker[]"'),
-                      "one of three": aligned.replace('<option data-calcvalue="Beta Club" value="Beta Club">'
-                                                      'Beta Club</option>', "").replace(
-                          '<option data-calcvalue="Stars" value="Stars">Stars</option>', "")}
+                      "one of four": empty.replace("</select>", '<option data-calcvalue="Alpha Club" '
+                                                                'value="Alpha Club">Alpha Club</option></select>')}
             for what, page in unread.items():
                 out = report(roster, "--rendered", page=page)
-                n = 1 if what == "one of three" else 0
-                self.assertIn(f"rendered page lists {n} of the picker's 3 options", out, what)
+                n = 1 if what == "one of four" else 0
+                self.assertIn(f"rendered page lists {n} of the picker's 4 options", out, what)
                 self.assertNotIn("CLEAN", out, what)
+            # a long name is checked against the Roster given: without Partner Two's Stars in it,
+            # "Stars - Partner Two" is not a name the sync would write
+            other = os.path.join(tmp, "other.csv")
+            with open(other, "w", encoding="utf-8") as f:
+                f.write("partner,club,full_name,status,region\nPartner One,Stars,Ann Poe,inactive,Asia\n")
+            out = report(other)
+            self.assertIn("its rule tests 'Stars - Partner Two', but the Roster has no partner of that name",
+                          out)
+            self.assertNotIn("'Stars - Partner One'", out)          # any status, any region counts
+            self.assertNotIn("CLEAN", out)
             del qs["700"]
             wire[:] = self.guard_form(guard=False)[1]
             self.assertIn("club guard: none (a mentor can pick several clubs)", report(roster))
@@ -1500,6 +2581,100 @@ class FormStatusAudit(unittest.TestCase):
             out = report(roster, "--rendered", page=empty)
             self.assertIn("rendered picker: 0 options", out)
             self.assertIn("→ CLEAN", out)
+
+
+class RestoreConditionsGuard(unittest.TestCase):
+    """restore_conditions.py: a snapshot whose rules test clubs the Club picker no
+    longer offers is refused - restored, those clubs' rosters never show and the
+    club guard blocks their mentors (every backup from before a form's
+    --same-name-switch is one)."""
+
+    def test_stale_club_terms(self):
+        stale = restore_conditions.stale_club_terms
+        before, after = ClubGuardFlow.form(ClubGuardFlow(), switched=False), ClubGuardFlow.form(ClubGuardFlow())
+        self.assertEqual(stale(after[1], after[0]), [])
+        self.assertEqual(stale(before[1], before[0]), [])
+        # the pre-switch rules on the switched form: "Stars" in two roster rules, the Partner-box
+        # rule and both guard rules - named once
+        self.assertEqual(stale(before[1], after[0]), ["Stars"])
+        # …and the other way round (the switched rules over a picker taken back by hand)
+        self.assertEqual(stale(after[1], before[0]), ["Stars - Partner One", "Stars - Partner Two"])
+        # the guard's list alone is enough (the roster rules dropped)
+        guard_only = [c for c in before[1] if c["type"] == "require"]
+        self.assertEqual(stale(guard_only, after[0]), ["Stars"])
+        # …and so are the roster rules alone: a snapshot from before the guard existed (and
+        # before the switch) has no guard list, only "Club picker equals Stars"
+        unguarded = SameNameFlow.form(SameNameFlow(), switched=False)[1]
+        self.assertFalse([c for c in unguarded if c["type"] == "require"])
+        self.assertEqual(stale(unguarded, after[0]), ["Stars"])
+        # a multi-select compares case: another spelling is not the option
+        respelt = [dict(c, terms=c["terms"].replace('"Alpha Club"', '"ALPHA CLUB"')) for c in after[1]]
+        self.assertEqual(stale(respelt, after[0]), ["ALPHA CLUB"])
+        # a snapshot taken before a club was ADDED still fits; parsed or wire terms alike
+        older = ClubGuardFlow.form(ClubGuardFlow(), roster={k: v for k, v in ClubGuardFlow.ROSTER.items()
+                                                            if k[1] != "Beta Club"})
+        self.assertEqual(stale(older[1], after[0]), [])
+        self.assertEqual(stale([dict(c, terms=json.loads(c["terms"])) for c in before[1]], after[0]), ["Stars"])
+        # without the Club picker nothing is checked (mentors type the club name)
+        typed = SameNameFlow.form(SameNameFlow(), picker=False)
+        self.assertEqual(stale(before[1], typed[0]), [])
+
+    def run_restore(self, snapshot, questions, *extra):
+        import contextlib
+        import io
+        import tempfile
+        from unittest import mock
+        puts = []
+
+        class Fake:
+            def __init__(self, key, apply=False):
+                pass
+
+            def get(self, path):
+                if path.endswith("/questions"):
+                    return copy.deepcopy(questions)
+                return {"conditions": puts[-1] if puts else [{"id": "live"}]}
+
+            def put_json(self, path, payload, label):
+                puts.append(payload["properties"]["conditions"])
+
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "backups", "999"))
+            with open(os.path.join(tmp, "backups", "999", "properties-latest.json"), "w",
+                      encoding="utf-8") as f:
+                json.dump({"conditions": snapshot}, f)
+            with mock.patch.object(restore_conditions, "REPO", tmp), \
+                    mock.patch.object(restore_conditions, "Client", Fake), \
+                    mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                    mock.patch.object(sys, "argv", ["restore_conditions.py", "--form", "999", *extra]), \
+                    contextlib.redirect_stdout(out):
+                try:
+                    restore_conditions.main()
+                    code = 0
+                except SystemExit as e:
+                    code = e.code
+        return code, out.getvalue(), puts
+
+    def test_a_snapshot_from_before_the_switch_is_refused_unless_forced(self):
+        before, after = ClubGuardFlow.form(ClubGuardFlow(), switched=False), ClubGuardFlow.form(ClubGuardFlow())
+        for extra in ((), ("--apply",)):                       # the dry run says so too
+            code, _, puts = self.run_restore(before[1], after[0], *extra)
+            self.assertIn("Refusing: the snapshot's rules test 1 club name(s) the Club picker does not "
+                          "offer today ('Stars')", str(code))
+            self.assertIn("--force", str(code))
+            self.assertEqual(puts, [])
+        code, out, puts = self.run_restore(before[1], after[0], "--apply", "--force")
+        self.assertEqual((code, puts), (0, [before[1]]))
+        self.assertIn("! --force:", out)
+        self.assertIn("Run the sync (dry run, then --apply) straight after", out)
+        # a snapshot that fits is restored as ever
+        code, out, puts = self.run_restore(after[1], after[0], "--apply")
+        self.assertEqual((code, puts), (0, [after[1]]))
+        self.assertIn("matches snapshot", out)
+        code, out, puts = self.run_restore(after[1], after[0])
+        self.assertEqual((code, puts), (0, []))
+        self.assertIn("DRY RUN", out)
 
 
 class FormStatusLayout(unittest.TestCase):
@@ -1546,7 +2721,7 @@ class FormStatusLayout(unittest.TestCase):
 
     def test_the_rule_audit_is_unchanged(self):
         # audit_rules still knows nothing of the layout (its fixtures have no Submit)
-        qs, wire = PartnerPickerFlow.form(PartnerPickerFlow())
+        qs, wire = SameNameFlow.form(SameNameFlow())
         self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
         self.assertEqual(layout.audit_layout(qs), ["0 Submit buttons, expected 1"])
         self.assertEqual(form_status.layout_line(layout.summary(qs)), "0 Submit button(s), no link")
@@ -1566,7 +2741,7 @@ class TranslationAudit(unittest.TestCase):
 
     def test_partner_names_are_not_strings_to_translate(self):
         import add_translations
-        qs, _ = PartnerPickerFlow.form(PartnerPickerFlow(), partner_list="Partner One|Partner Two")
+        qs, _ = SameNameFlow.form(SameNameFlow(), partner_list="Partner One|Partner Two")
         strings = add_translations.visible_strings(qs)
         # the list's label is (already translated everywhere); its options stay English,
         # so adding the list does not grow the audit's "untranslated" count
@@ -2019,13 +3194,97 @@ class RenameClub(unittest.TestCase):
 
             def get(self, path, **params):
                 return self.qs
-        qs = {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
+        qs = {"352": {"type": "control_checkbox", "text": "Sunrise Club", "options": "A Girl|B  Girl"},
               "353": {"type": "control_checkbox", "text": "New Name"}}
         self.assertEqual(rename_club.form_questions(Client(qs), "1", "sunrise club", "New Name"),
-                         (["352"], ["353"], {sync.PARTNER}))
+                         (["352"], ["353"], {sync.PARTNER}, {"352": {"a girl", "b girl"}}))
         qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
         self.assertEqual(rename_club.form_questions(Client(qs), "1", "Sunrise Club", "x")[2],
                          {sync.PARTNER, "600"})
+
+    # --- renaming a club the sync did not add (its name was another partner's club's) ---
+    def stars_sheet(self):
+        """Partner One's Stars is on the forms (q352, its two girls); Partner Three's new
+        Stars is in the Roster and the registry, and on no form: the sync refused it."""
+        return FakeSheet({
+            "Roster": [self.HDR,
+                       ["DEMOCLUB-SAMPLE-001", "Partner One", "Stars", "Africa", "Ann Poe", "active"],
+                       ["DEMOCLUB-SAMPLE-002", "Partner One", "Stars", "Africa", "Kay Loe", "active"],
+                       ["DEMOCLUB-SAMPLE-003", "Partner One", "Stars", "Africa", "Sue Moe", "inactive"],
+                       ["SUNRISEC-SAMPLE-001", "Partner Three", "Stars", "Africa", "Uma Umberlash", "active"],
+                       ["SUNRISEC-SAMPLE-002", "Partner Three", "Stars", "Africa", "Ann Poe", "active"]],
+            "ClubRegistry": [["club_code", "partner", "club", "created"],
+                             ["STARS", "Partner One", "Stars", "2026-08-26"],
+                             ["STARS2", "Partner Three", "Stars", "2026-09-30"]],
+            "SF Pending": [["added", "partner", "club", "region"],
+                           ["2026-09-30", "Partner Three", "Stars", "Africa"]],
+            "Audit": [["when", "action", "detail"]],
+        })
+
+    class StarsForms:
+        """Both forms hold one roster question named Stars: Partner One's."""
+
+        def __init__(self, options="Ann Poe|Kay Loe|Sue Moe"):
+            self.options, self.gets, self.posts = options, [], []
+
+        def get(self, path, **params):
+            self.gets.append(path)
+            return {"352": {"type": "control_checkbox", "text": "Stars", "options": self.options},
+                    "444": {"type": "control_dropdown", "text": "Club Name"}}
+
+        def post_form(self, path, data, label):
+            self.posts.append((path, data))
+
+    def test_a_club_the_sync_did_not_add_is_renamed_in_the_sheet_only(self):
+        # the documented way out of "new club … not added": rename it. The tool finds a
+        # club's question by its text, and the only question named Stars is Partner One's:
+        # it used to plan (and, applied, write) "q352: 'Stars' -> 'Stars Juniors'" on the
+        # region's form and the template - the other partner's roster relabelled
+        rename = ["--partner", "Partner Three", "--old", "Stars", "--new", "Stars Juniors"]
+        for extra in ([], ["--apply"]):
+            sheet, forms = self.stars_sheet(), self.StarsForms()
+            code, out = self.run_main(rename + extra, sheet, forms, key="test")
+            self.assertIn("q352 is named 'Stars' but holds another club's girls", str(code), out)
+            self.assertIn("--sheet-only", str(code))
+            self.assertIn("'Partner One'", str(code))
+            self.assertNotIn("Ann Poe", str(code) + out)                 # counts, never names
+            self.assertEqual((sheet.batches, forms.posts, self.written), ([], [], []), extra)
+            self.assertEqual(len(sheet.tabs["Audit"]), 1)
+        # --sheet-only: the sheet cells and the Audit row, no Jotform call, and next steps that
+        # fit a club the next sync CREATES (no Account to rename, no --q5-change-ok)
+        sheet = self.stars_sheet()
+        code, out = self.run_main(rename + ["--sheet-only", "--apply"], sheet)
+        self.assertEqual(code, 0, out)
+        self.assertEqual([r[2] for r in sheet.tabs["Roster"][1:]],
+                         ["Stars", "Stars", "Stars", "Stars Juniors", "Stars Juniors"])
+        self.assertEqual([r[:3] for r in sheet.tabs["ClubRegistry"][1:]],
+                         [["STARS", "Partner One", "Stars"], ["STARS2", "Partner Three", "Stars Juniors"]])
+        self.assertEqual(sheet.tabs["SF Pending"][1][2], "Stars Juniors")
+        self.assertEqual(sheet.tabs["Audit"][-1][1], "renameClub")
+        self.assertNotIn("--apply --q5-change-ok", out)
+        self.assertNotIn("rename the club's Account to the new name FIRST", out)
+        self.assertIn("no roster question was renamed", out)
+        self.assertIn("CREATE roster 'Stars Juniors'", out)
+        # the owner of the question renames its own club as ever, namesake or not: the
+        # question's girls are its Roster rows' (any status)
+        sheet, forms = self.stars_sheet(), self.StarsForms()
+        code, out = self.run_main(["--partner", "Partner One", "--old", "Stars", "--new", "North Stars"],
+                                  sheet, forms, key="test")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count("q352: text 'Stars' -> 'North Stars'"), 2)   # the region's form, the template
+        self.assertIn("DRY RUN", out)
+
+    def test_two_questions_of_the_old_name_say_how_to_rename_a_club_that_is_on_no_form(self):
+        class Two(self.StarsForms):
+            def get(self, path, **params):
+                qs = super().get(path, **params)
+                return {**qs, "353": dict(qs["352"], options="Eve Hoe|Ida Toe")}
+        sheet, forms = self.stars_sheet(), Two()
+        code, _ = self.run_main(["--partner", "Partner Three", "--old", "Stars", "--new", "Stars Juniors"],
+                                sheet, forms, key="test")
+        self.assertIn("2 questions named 'Stars' (q352, q353)", str(code))
+        self.assertIn("--sheet-only", str(code))
+        self.assertEqual(sheet.batches, [])
 
     def test_late_rows_finds_the_club_appended_after_the_read(self):
         rows = self.move_rows()
@@ -3104,8 +4363,8 @@ class RosterLayout(unittest.TestCase):
         self.assertEqual([q["qid"] for q in layout.rosters_below(qs)], ["400"])
         slot, fence = layout.roster_slot(qs)
         self.assertEqual((slot, fence["qid"]), (links.order_of(qs["350"]), "443"))
-        # no Submit and no link (the PartnerPickerFlow form): the end of the form, as before
-        pp, _ = PartnerPickerFlow.form(PartnerPickerFlow())
+        # no Submit and no link (the SameNameFlow form): the end of the form, as before
+        pp, _ = SameNameFlow.form(SameNameFlow())
         self.assertEqual(layout.roster_slot(pp), (max(links.order_of(q) for q in pp.values()) + 1, None))
         # no roster above the fence: the fence's own order
         qs["350"]["order"] = "99"
@@ -3581,13 +4840,101 @@ class RosterRepairRunbook(unittest.TestCase):
 
     def test_what_expects_clean_waits_for_the_repair(self):
         backlog = {l.split("|")[1].strip(): l for l in read(os.path.join(REPO, "docs", "BACKLOG.md"))
-                   .splitlines() if re.match(r"\| 4[56] \|", l)}
-        self.assertLess(backlog["45"].index("after 47's repair"), backlog["45"].index("`AUTO_SYNC_APPLY=0`"))
+                   .splitlines() if re.match(r"\| (~~45~~|46) \|", l)}
         self.assertIn("after 47's repair", backlog["46"])
+        # the partner list (45) was retired before it was deployed; what took its place
+        # (the same-name switch, RUNBOOK "Club names two partners share") expects CLEAN too
+        self.assertIn("superseded 2026-09-30", backlog["~~45~~"])
+        self.assertIn("the same-name switch", " ".join(self.section().split()))
+
+
+class SameNameRunbook(unittest.TestCase):
+    """docs/RUNBOOK.md "Club names two partners share": the one-time switch is
+    backed up, previewed and verified, the runner paused around it; the rollback
+    is for before the Salesforce reconnect; the quoted warnings are the code's."""
+
+    def section(self):
         doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
-        partner = doc.split("## The partner list", 1)[1].split("```bash", 1)[0]
-        self.assertIn('("Rosters above Submit")', partner)
-        self.assertIn("the partner list", self.section())
+        self.assertNotIn("## The partner list", doc)           # replaced by this section
+        return doc.split("## Club names two partners share", 1)[1].split("\n## ", 1)[0]
+
+    def test_the_switch_is_backed_up_previewed_applied_and_verified_in_that_order(self):
+        switch = self.section().split("### The one-time switch", 1)[1].split("\n### ", 1)[0]
+        block = switch.split("```bash", 1)[1].split("```", 1)[0]
+        lines = [l for l in block.splitlines() if l.strip()]
+
+        def at(fragment, after=-1):
+            return next(i for i, l in enumerate(lines) if i > after and fragment in l)
+
+        backup = at("backup_forms.py --form")
+        dry = at("--same-name-switch ")
+        self.assertNotIn("--apply", lines[dry])
+        apply = at("--same-name-switch --apply")
+        again = at("sync_attendance_form.py", after=apply)
+        self.assertNotIn("--apply", lines[again])
+        self.assertNotIn("--same-name-switch", lines[again])     # the form stays switched without it
+        status, rendered = at("tools/form_status.py", after=apply), at("--rendered", after=apply)
+        self.assertEqual(sorted([backup, dry, apply, again, status, rendered]),
+                         [backup, dry, apply, again, status, rendered])
+        # the runner is paused for the window, merged code first, and switched back on at the end
+        text = " ".join(switch.split())
+        self.assertIn("**merge first**", text)
+        self.assertLess(text.index("AUTO_SYNC_APPLY=0"), text.index("```bash"))
+        self.assertGreater(text.index("AUTO_SYNC_APPLY=1"), text.index("```bash"))
+        self.assertNotIn("--q5-change-ok --apply", text)         # the switch needs no second flag
+
+    def test_the_rollback_is_all_forms_with_the_runner_paused_and_only_before_the_reconnect(self):
+        text = " ".join(self.section().split("### Rollback", 1)[1].split())
+        self.assertIn("only before the Salesforce reconnect", text)
+        self.assertLess(text.index("AUTO_SYNC_APPLY=0"), text.index("Revert the merge"))
+        self.assertLess(text.index("Revert the merge"), text.index("AUTO_SYNC_APPLY=1"))
+        self.assertIn("`restore_conditions.py` is not a rollback here", text)
+
+    def test_the_quoted_warnings_and_flags_are_the_tools_own(self):
+        text = " ".join(self.section().split())
+        self.assertIn(auto_sync.SF_NAME_CHANGE, text)
+        self.assertIn(auto_sync.SAME_NAME_REFUSED, text)
+        self.assertIn(glow_sync.SF_NAME_SEP.join(("`<club>", "<partner>`")), text)
+        src = read(os.path.join(REPO, "sync_attendance_form.py"))
+        for flag in ("--same-name-switch", "--q5-change-ok", "--partner-picker"):
+            self.assertIn(flag, text)
+            self.assertIn(f'"{flag}"', src)
+        self.assertIn("HIDE partner textbox (q331: no rule shows it;", text)
+        self.assertIn("HIDE partner textbox (q{PARTNER}: no rule shows it;", src)
+        # CLAUDE.md rule 5 and the rename procedure carry the Salesforce step
+        self.assertIn("--q5-change-ok", read(os.path.join(REPO, "CLAUDE.md")))
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        rename = " ".join(doc.split("## Renaming a club", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn("rename the club's Account to the new text first", rename)
+        self.assertIn("--apply --q5-change-ok", rename)
+
+    def test_what_the_runbook_says_the_runner_and_the_tools_do_is_what_they_do(self):
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        text = " ".join(self.section().split())
+        src = read(os.path.join(REPO, "sync_attendance_form.py"))
+        # rules older than the picker: the sync's own line, and ATTENTION - not a repair the
+        # runner makes ("the next sync run then rebuilds the rules" read as if it did)
+        runner = " ".join(doc.split("## Automatic sync", 1)[1].split("\n## ", 1)[0].split())
+        for where in (text, runner):
+            self.assertIn(auto_sync.RULES_OLDER, where)
+        self.assertNotIn("the next sync run then rebuilds", text)
+        self.assertIn("The runner does not apply a rules-only difference: it raises ATTENTION", text)
+        # a refused new club: the rename that works, and what the verify step then says
+        self.assertIn("tools/rename_club.py --partner … --old … --new … --sheet-only", text)
+        rename = " ".join(doc.split("## Renaming a club", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn("--sheet-only --apply", rename)
+        self.assertIn("applied-with-problems", runner)
+        self.assertIn("counts the club that was not added", runner)
+        # the switch: its refusal is the tool's, and the count is checked before applying
+        self.assertIn("would keep the plain Club picker entry", text)
+        self.assertIn("would keep the plain Club picker entry", src)
+        self.assertIn("**one more means stop**", text)
+        # the Partner-box hide rides along and is not in SyncLog's detail
+        self.assertIn("neither counted nor named in `detail`", runner)
+        # the retired design is gone from the prose: no roster is Partner-gated for a part move
+        self.assertNotIn("Partner-gates both roster questions", doc)
+        self.assertNotIn("same-name clubs additionally require the Partner box",
+                         " ".join(read(os.path.join(REPO, "README.md")).split()))
 
 
 import datetime as dt                 # noqa: E402  (the work-log tests below)
