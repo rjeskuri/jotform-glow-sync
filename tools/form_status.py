@@ -489,7 +489,8 @@ def main():
     print("Roster (active girls):", {r: len(c) for r, c in roster.items()}, "clubs per region\n")
     for r in reports:
         print(f"== {r['label']}  {r['id']}  \"{r['title']}\"  [{r['status']}]")
-        print(f"   submissions {r['submissions']} (last {r['last_submission']})   "
+        last = f"{r['last_submission']} US Eastern" if r["last_submission"] else "none"  # Jotform's clock
+        print(f"   submissions {r['submissions']} (last {last})   "
               f"questions {r['questions']}   club questions {r['club_questions']} "
               f"({r['options_total']} girl options)")
         print(f"   conditions {r['conditions']} ({r['error_conditions']} flagged as error)   "
