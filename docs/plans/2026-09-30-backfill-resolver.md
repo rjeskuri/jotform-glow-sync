@@ -95,23 +95,21 @@ is only compared (`q5_differs`).
   that partner and club in any region (`glow.sync.roster_pairs`). A club whose rows are active
   under another region, or none, while its question is still on this form is therefore not
   `retired_club`.
-- `name_not_on_roster_now:<count>` compares each ticked name, trimmed, with the roster's options
-  today exactly. In the per-form `flags` table its key is `name_not_on_roster_now`.
-- `name_unknown_to_roster:<count>` and `name_left_roster:<count>` (added for the loader; review,
-  point 5) split that count: unknown = the Roster has no row of that name (by `glow.text.key`)
-  for the row's partner and club under any status; left = it has one. "Left" therefore also
-  covers a tick that differs from today's option only in capitals or spaces.
+- The name flags, the module flags, `attendance_date` and `flag_vocabulary` are as the contract
+  changes below say (2026-09-30); `name_not_on_roster_now` no longer exists.
 - Every flag is a key of `forms.<region>.flags`, with 0 when no row has it; the numbers are rows.
 - `resolver_commit` gets `-dirty` when tracked files differ from that commit.
-- `sf_account_name`, `partner`, `club_code`, `attendance_date`, `q5`, `module*`, `creator`: null
-  when there is none; never an empty string made up by the tool.
+- `sf_account_name`, `partner`, `club_code`, `q5`, `module*`, `creator`: null when there is
+  none; never an empty string made up by the tool. `attendance_date` is the one exception: `""`.
 
 ## Additions beyond the contract (the loader can ignore them)
 Per form, beside `form_id / submissions / pre_launch / rows / no_ticks / flags`: `fetched`,
 `not_active` (by status), `with_ticks`, `flag_submissions` (each flag counted by submission),
 `picked_several` and `picked_several_with_ticks` (the Club picker's answer holds more than one
 club), `clubs`, `attendance_dates`, `attendance_first/last`, `created_first/last`,
-`same_club_and_date` (groups and rows: kept, never collapsed) and `no_ticks_but_q18`.
+`same_club_and_date` (groups and rows: kept, never collapsed), `no_ticks_but_q18`,
+`partner_from_roster`, and with the contract changes `names_active_not_an_option` and
+`copied_fields`.
 
 `no_ticks_but_q18` lists submissions with no tick whose question 18 still holds names. They get
 no row, as the contract says, and stay in `no_ticks`; they are printed with a `!` because there
@@ -178,6 +176,61 @@ fictional data. None changed a number of the first proof. What each fix does:
    already overwritten when a later step refuses (they are kept on purpose: the raw copy is
    where the refused answer can be looked at), so "nothing written" was not true.
 8. **A region named twice is read once** (it doubled the rows and failed the ledger).
+
+## Contract changes of 2026-09-30 (agreed by the two sessions after the build started)
+Four, each with a test that fails without it. They replace what the sections above say where
+the two differ; the proofs recorded further down are left as they were run.
+
+1. **`name_not_on_roster_now` is dropped.** Two name flags remain, and they are the only flags
+   written with a count (`<flag>:<n>`). A ticked name that is an option of its roster today
+   (exactly, trimmed) is never flagged: it is what the form offers and sends. For each other
+   ticked name the Roster export is asked, by `glow.text.key` (capitals and spaces do not
+   count, a letter or an accent does), about the row's partner and club:
+   - `name_unknown_to_roster:<n>` - no Roster row of that club has the name, under any status.
+     A row with no partner (a deleted question, a name two partners have) has no Roster rows to
+     ask: every such name counts here. The loader holds the session.
+   - `name_left_roster:<n>` - the club has a Roster row of that name and none of them is
+     active: a girl who left. The loader sends her.
+   - the club has an **active** row of that name (the tick is spelled unlike today's option in
+     capitals or spaces only, or the form is behind the Roster): no flag - she is on the
+     roster. Counted per form as `names_active_not_an_option` and printed when it is not 0,
+     so the case cannot go unseen now that the wider flag is gone.
+2. **`attendance_date`** is a zero-padded `yyyy-mm-dd` string, or `""` - never null - when
+   question 17 is missing or is not a date; the row then carries `date_missing`.
+3. **`module` is the canonical module**, not question 98.
+   - *How the three hidden fields are filled* (the sync's section C, `build_conditions`; read
+     on all four live forms 2026-09-30, identical): question 102 (`year_id`) is the calculation
+     `{94}` - the Year dropdown, options `1|2|3` with calcValues `|1|2|3`. Question 98
+     (`module_id`) has three calculation rules, `{14}`, `{92}` and `{93}`, each firing when its
+     module dropdown is filled; the form shows the dropdown of the year picked
+     (`glow.sync.MODULES`). Question 100 (`week_id`) has four, `{15}`, `{95}`, `{96}`, `{97}`
+     (8, 10, 14 and 15 sessions, `glow.sync.WEEKS`), each dropdown with calcValues `|1|2|…`;
+     the form shows the 8-session one for year 1 and, for years 2 and 3, the one of the module
+     (`SESSION_OVERRIDES`, else 8).
+   - *Why 98 can be wrong*: the module dropdowns have no calcValues, so the calculation copies
+     the option's **visible text**, which a browser's page translation rewrites. The dropdown's
+     own submitted answer is the option's value, which it does not touch.
+   - *Which dropdown applies*: the one the Year answer (question 94) names. `clearFieldOnHide`
+     is `disable` on the forms, so a dropdown hidden again can keep an answer; an answer in
+     another module dropdown is therefore ignored. (In the 484 submissions in range exactly
+     one module dropdown and one session dropdown is answered, the ones the year picks.)
+   - *The rule*: `module` = the stored answer of that dropdown, when it is one of the
+     dropdown's options today. `module_translated` when question 98 as submitted is not exactly
+     that value (an empty 98 included). When there is no Year answer, the year names no
+     dropdown of the form, that dropdown has no answer, or the answer is not one of its options
+     today: `module` stays question 98 as submitted and the row carries `module_unresolved`
+     (the loader holds it) - no guess from the other dropdowns.
+   - `module_week` and `module_year` stay questions 100 and 102 as submitted. They are compared
+     with their sources the same way - 100 with the calcValue of the answer of the session
+     dropdown the form shows for that year and canonical module, 102 with the calcValue of the
+     Year answer - and the per-form counts (same / differ / source not determined, by
+     submission in range and of them with ticks) are printed and kept under `copied_fields`.
+     No flag.
+4. **`flag_vocabulary`**, top level: the sorted list of every flag name the resolver can emit
+   (the two name flags without their `:<n>`). A test pins what the resolver emits to exactly
+   `multi_club, q5_differs, q18_empty, q18_differs, typed_era, bare_shared_name, retired_club,
+   no_account_name, date_before_2026_09, date_missing, name_left_roster, name_unknown_to_roster,
+   name_has_comma, name_repeats, module_translated, module_unresolved`.
 
 ## Order of work
 1. This plan. 2. The tool and its tests (`make check`). 3. The docs. 4. The read-only proof on
