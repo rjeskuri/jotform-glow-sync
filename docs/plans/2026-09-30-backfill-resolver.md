@@ -41,8 +41,9 @@ is only compared (`q5_differs`).
    --summary-json <tmp>` as a subprocess, never with `--apply`, and reads `sf_names`. Nothing is
    matched a second time. `sf_names` is what each roster sends *after* the plan; where the plan
    would change it (`sf_name_changes`) the row takes the change's `old`, which is what it sends
-   today. The sync's output is captured and not echoed (it is not redacted). A form with no
-   submission at all gets no dry run.
+   today. Its spelling is the live Club picker's entry (the exact one, else the one equal under
+   `glow.text.key`; the picker has none: null - review, point 2). The sync's output is captured
+   and not echoed (it is not redacted). A form with no submission at all gets no dry run.
 4. **Ticked rosters**: a roster is a `control_checkbox` question of the form as it is today. An
    answer to a question that is no longer on the form counts when the answer itself says it was
    a checkbox and carries its text (row: `retired_club`, `no_account_name`, club = that text,
@@ -50,18 +51,22 @@ is only compared (`q5_differs`).
    itself is refused.
 5. **Club code**: the prefix of the girl ids (`CLUBCODE-LASTCODE-NNN`, `appsscript/Ids.gs`) of
    the Roster rows, any status, whose partner and club are the ones the sync names (compared by
-   `glow.text.key`). No row, or no partner named by the sync: null. Two different prefixes for one
-   club: the tool stops.
+   `glow.text.key`). Where the sync names no partner (a plain-named roster outside the region's
+   active export), the partner is the Roster's only holder of that club name, any status, any
+   region (review, point 1); no such single holder, or no row: null. Two different prefixes
+   for one club: the tool stops.
 6. **The ledger**: per form, fetched = not active + pre-launch + in range, and in range = with
    rows + no ticks, by submission id, each once. It is checked per form and over the forms; a
    miss exits before the result is written.
 7. **Privacy**: the result and the raw copies hold girls' names and mentors' contact details.
    Inside the checkout the tool writes them only under `data/` (git-ignored) and refuses any
-   other place in the repository; outside the checkout is the operator's choice. What is
+   other place in the repository - the checkout being recognised by file identity, however its
+   path is spelled (review, point 4); outside the checkout is the operator's choice. What is
    printed is counts, dates, flags, form ids and submission ids. A refusal names the submission
-   id and the question id, never a value.
+   id and the question id, never a value; a failed fetch never quotes a cut-off answer (review,
+   point 3).
 
-## Refusals (exit non-zero, no result written)
+## Refusals (exit non-zero, no result written; raw copies fetched before the refusal stay)
 - a checkbox answer that is not a list of strings; question 5 or 18 that is not text; a photo
   or Club-picker answer of another shape; `created_at` not `yyyy-mm-dd hh:mm:ss`; the answers
   not a table by question id;
@@ -71,7 +76,9 @@ is only compared (`q5_differs`).
 - the sync's dry run failing, or its summary not being a dry run's;
 - fewer submissions fetched than the form reports; a ledger that does not balance;
 - one club with two club codes; a Roster export without `girl_id`;
-- `--out` or `--raw-dir` inside the repository outside `data/`.
+- `--out` or `--raw-dir` inside the repository outside `data/`;
+- a run that does not cover all four regions (`--region`) writing the default path, which is
+  the loader's file.
 
 ## Readings of the contract (where its words left a choice)
 - `q18_differs` is set only when question 18 is not empty: an empty one is `q18_empty` alone, so
@@ -83,10 +90,17 @@ is only compared (`q5_differs`).
 - `bare_shared_name`: question 5 equals the roster's own plain club name (compared by
   `glow.text.key`) and the roster sends `<club> - <something>` today. The "more than one club has
   or had it" part is implied by the long name and is not looked up again.
-- `retired_club`: the question is gone, or the sync names no partner for the roster, or the
-  Roster has no active row for that partner and club (`glow.sync.roster_pairs`).
+- `retired_club`: the question is gone, or no partner can be named for the roster (neither by
+  the sync nor as the Roster's only holder of the name), or the Roster has no active row for
+  that partner and club in any region (`glow.sync.roster_pairs`). A club whose rows are active
+  under another region, or none, while its question is still on this form is therefore not
+  `retired_club`.
 - `name_not_on_roster_now:<count>` compares each ticked name, trimmed, with the roster's options
   today exactly. In the per-form `flags` table its key is `name_not_on_roster_now`.
+- `name_unknown_to_roster:<count>` and `name_left_roster:<count>` (added for the loader; review,
+  point 5) split that count: unknown = the Roster has no row of that name (by `glow.text.key`)
+  for the row's partner and club under any status; left = it has one. "Left" therefore also
+  covers a tick that differs from today's option only in capitals or spaces.
 - Every flag is a key of `forms.<region>.flags`, with 0 when no row has it; the numbers are rows.
 - `resolver_commit` gets `-dirty` when tracked files differ from that commit.
 - `sf_account_name`, `partner`, `club_code`, `attendance_date`, `q5`, `module*`, `creator`: null

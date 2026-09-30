@@ -1287,7 +1287,8 @@ python3 tools/backfill_resolve.py --roster data/roster_<date>.csv       # GET on
   Name the roster sends today are the sync's own dry run's word. Each row carries the ticked
   names as a list, the attendance date, module, week, year, creator, photo links, question 5 as
   submitted, and its flags. `raw/<region>.json` beside it is the submissions as fetched. Every
-  run overwrites all of them.
+  run overwrites all of them. `--region <name>` reads one form only and then needs `--out`
+  (another path under `data/`): the default path is the loader's file and always holds all four.
 - **They hold girls' names and mentors' contact details**: they stay under `data/`
   (git-ignored). The tool refuses any other place inside the repository. Never paste from them;
   what the tool prints is counts only, and that is what goes into a plan or a message.
@@ -1300,11 +1301,17 @@ python3 tools/backfill_resolve.py --roster data/roster_<date>.csv       # GET on
 - **Flags** (on a row, and counted per form): `multi_club`, `q5_differs`, `q18_empty`,
   `q18_differs`, `typed_era`, `bare_shared_name`, `retired_club`, `no_account_name`,
   `date_before_2026_09`, `date_missing`, `name_not_on_roster_now:<count>`, `name_has_comma`,
-  `name_repeats` - what each means is in the design's "Readings of the contract".
+  `name_repeats` - what each means is in the design's "Readings of the contract". The names that
+  are not an option today are also split for the loader: `name_unknown_to_roster:<count>` (the
+  Roster has no such girl for that club under any status - the loader holds the session) and
+  `name_left_roster:<count>` (the Roster knows her - sent). `retired_club` is not set for a club
+  whose Roster rows are active under another region, or none, while its question is on the form.
 - **When it stops** it names a submission id and a question id and writes no result: an answer
   of a shape it does not know, a ticked roster it cannot identify, the sync's dry run failing
   (run that command by hand), fewer submissions fetched than the form reports (run it again).
-  It never guesses.
+  It never guesses. The raw copies of the forms fetched before it stopped are already the new
+  ones (look at the refused answer there); `resolved.json` is still the earlier run's - each
+  file says when it was fetched (`fetched_at_utc`).
 
 ## Work log and invoices
 
