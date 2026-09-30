@@ -551,8 +551,10 @@ so the element goes before the runner resumes.
    on this code, which keeps them aligned with the options. Required before
    anything older syncs the form: older code shifts them on the next new club.
 5. The sync dry run without the flag: `nothing to do`, or a `REPLACE
-   conditions` for roster changes applied after the snapshot (back up, then
-   `--apply`).
+   conditions` for what the snapshot predates. That means roster changes
+   applied since it was taken, and on Africa and the template the SUPER
+   GIRLS spelling rule (`1 new, 1 dropped` with no roster change) unless an
+   apply had already landed it. Back up, then `--apply`.
 6. `tools/form_status.py --form <id> --roster …`: rules CLEAN, `club guard:
    none`. Then `AUTO_SYNC_APPLY=1`.
 
