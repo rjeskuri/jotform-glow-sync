@@ -1,7 +1,7 @@
 ---
 title: Clubs that share a name send "<club> - <partner>" to Salesforce
 author: Claude (design workflow + two adversarial reviews, 2026-09-30)
-status: accepted         # by Ryan 2026-09-30 (plan approval); every live step needs his go
+status: in-progress      # accepted by Ryan 2026-09-30; Step 0 and the forms (Part 1) are live (Results below); open: the Apps Script push (Part 2), the seven Salesforce Accounts
 created: 2026-09-30
 intent: docs/intent/2026-09-01-club-picker.md (its constraint "question 5 stays the plain club name" is amended by Ryan's decision of 2026-09-30)
 ---
@@ -513,3 +513,30 @@ the session's scratch directory and deleted afterwards. Jotform: GETs and dry ru
 
 The template's dry run will show the two roster updates beside the switch's own calls until
 the template is next synced: expected, and not a question-5 change.
+
+## Result — the forms (2026-09-30, with Ryan's go)
+`AUTO_SYNC_APPLY=0` → fast-forward merge of `wf6/integration` into `main` (`d238b43`, pushed, GitHub
+check green; `make check` 297 tests) → a fresh Roster export → per form: backup, dry run, `--apply`, a
+second dry run (`nothing to do`), `form_status --rendered`.
+
+| Form | Backup before | Long names | Picker | Rules | After |
+|---|---|---|---|---|---|
+| template 262352490535154 | `properties-2026-09-30T1913.json` | 7 (q150, q173, q234, q334, q335, q411, q420) | 358 → 362 | 396 → 393 | CLEAN, 362 aligned, q331 hidden |
+| Asia 262383129464057 | `properties-2026-09-30T1915.json` | 1 (q150) | 95 (one renamed) | 126 | CLEAN, 95 aligned, q331 hidden |
+| Africa 262382821971058 | `properties-2026-09-30T1915.json` | 6 (q173, q234, q334, q335, q411, q420) | 215 → 218 | 252 → 249 | CLEAN, 218 aligned, q331 hidden |
+| U.S 262382706852058 | taken before the hide | 0 | 11 | 42 | CLEAN, q331 hidden (the only write) |
+| Latin America 262383455778067 | taken before the hide | 0 | 38 | 69 | CLEAN, q331 hidden (the only write) |
+
+- The template's two ordinary roster updates (q277, q278) were applied by a plain sync first, so the
+  switch plan carried only its own three calls. Each dry run listed exactly the expected `!` lines.
+- The live pickers list the seven names exactly as in the table above ("The 7 Salesforce names"); no
+  plain "Angels Club", "Ruby" or "Shining Stars" entry is left on any form; no picker has two equal
+  entries. The template's translation audit rose by 4 per language (the four added entries).
+- Ryan's browser check on the template: typing "Ruby" shows the two entries, picking one shows only
+  that roster with no Partner question, the guard still works. Typing a partner's name in the search
+  does not find the entry (the search matches from the start of an entry) — accepted.
+- `auto_sync.py` dry run: every region in-sync, no ATTENTION (exit 0). `AUTO_SYNC_APPLY=1`; runner
+  apply run 36701947322 in-sync. The Salesforce session has the seven strings.
+- Open: the Apps Script push (Part 2); the seven Salesforce Accounts; one template test submission
+  with a long name (none was sent yet); an independent read-only verification was started after the
+  switch (its result is recorded with the next commit).

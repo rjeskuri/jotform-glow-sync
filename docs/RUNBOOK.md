@@ -415,9 +415,11 @@ retired on 2026-09-30. The sync's `--summary-json` lists what every roster
 sends (`sf_names`: qid, partner, club, value); the Salesforce Accounts are
 named from those values, character for character.
 
-**Status:** built 2026-09-30 (Part 1, the forms), not deployed. Until a form
-is switched its same-name rosters stay on one entry and are told apart by
-the typed Partner box (q331), as before.
+**Status:** live on all five forms since 2026-09-30 (the template, Asia and
+Africa switched; q331 hidden on all five). The intake hold (Part 2, Apps
+Script) is merged but not pushed yet. A form that is not switched (a new
+regional clone) keeps its same-name rosters on one entry, told apart by the
+typed Partner box (q331), until its own switch.
 
 What the sync keeps to, on every run:
 
