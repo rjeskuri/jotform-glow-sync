@@ -89,7 +89,7 @@ Reload the spreadsheet.
 
 | Form | Who uses it | What happens on submit |
 |---|---|---|
-| **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section. **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to **SF Pending**, anything odd goes to the ReviewQueue — unless it may duplicate a club already on file (names already in one club, a close club name, a typed organization close to a partner on file, or a re-enrollment with another list): then nothing is imported, it is **held** for staff (a ReviewQueue item, FormLog `HELD: …`) and the mentor is told it is being checked. **Add or remove girls**: partner → only that partner's clubs → ADD / REMOVE lists → girls are added, reactivated (never by a response sent before their removal: they stay removed and the ReviewQueue says so), or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints; the mentor gets a confirmation email echoing only the names they typed |
+| **Club Roster Form** | partners and mentors | Page 1 asks *what would you like to do?* and jumps to the right section. **Enroll a NEW club**: partner (a "not listed" choice asks for the organization's name), club, roster, mentor → club + girls go into the Roster with IDs, the club is added to **SF Pending**, anything odd goes to the ReviewQueue — unless it may duplicate a club already on file (names already in one club, a close club name, a typed organization close to a partner on file, or a re-enrollment with another list), or its club name is one another partner's club already has: then nothing is imported, it is **held** for staff (a ReviewQueue item, FormLog `HELD: …`) and the mentor is told it is being checked. **Add or remove girls**: partner → only that partner's clubs → ADD / REMOVE lists → girls are added, reactivated (never by a response sent before their removal: they stay removed and the ReviewQueue says so), or marked inactive, **never deleted**; names that match nobody are queued for staff with "closest name" hints; the mentor gets a confirmation email echoing only the names they typed |
 | **Something isn't working?** | anyone | one-minute problem report (its description sends roster changes to the Club Roster Form; a reply address is optional), emailed to staff; one that asks for a roster change also becomes a ReviewQueue item |
 
 The run installs the triggers and shows both links (again via **Show form
@@ -102,8 +102,10 @@ with each.
 Then, in **Project Settings → Script Properties**:
 
 - `STAFF_NOTIFY_EMAIL` — receives problem reports and the Monday e-mail:
-  the open ReviewQueue items and the clubs pending in Salesforce (sent only
-  when there is something to report).
+  the open ReviewQueue items and the clubs pending in Salesforce, each with
+  the exact account name to create — the club name, or `<club> - <partner>`
+  when another partner's club has the same name (sent only when there is
+  something to report).
 - `SYNC_DISPATCH_REPO` and `SYNC_DISPATCH_TOKEN` — switch on the automatic
   Jotform sync (`docs/RUNBOOK.md`, "Automatic sync"); unset, the sheet sends
   nothing. Test with **GLOW → Google Forms → Request Jotform sync now**.
@@ -123,7 +125,9 @@ Things to know:
   (`RosterOps.gs newRosterRow_`).
 - A held new club stays held until staff start its ReviewQueue item's
   `resolved` cell with `release`; **Process any missed form responses**
-  then imports it (`docs/RUNBOOK.md`, "Working the ReviewQueue").
+  then imports it (`docs/RUNBOOK.md`, "Working the ReviewQueue"). One held
+  because another partner's club has its name is released only once the
+  response row's `Club name` cell has a name nobody else uses.
 - If a trigger ever fails (quota, timeout, an incomplete submission), nothing
   is lost: FormLog records `ERROR: …`, the ReviewQueue gets a line, and
   **Process any missed form responses** lists every response that has not

@@ -10,7 +10,8 @@ master enrollment Google Sheet ── tab "Roster Form Responses"
    │  installable on-form-submit trigger
    ▼
 appsscript/FormHandlers.gs  onAnyFormSubmit → processResponseRow_ (FormLog dedupe)
-   ├─ handleNewClub_      → RosterOps.gs newClubHoldReasons_ (a possible duplicate → HELD for staff) / planClub_
+   ├─ handleNewClub_      → RosterOps.gs newClubHoldReasons_ (a possible duplicate, or a club name another
+   │                        partner's club has → HELD for staff) / planClub_
    └─ handleRosterChange_ → RosterOps.gs planModification_
    ▼
 Roster.gs applyRosterPlan_ → tab "Roster"  (ONE ROW PER GIRL = the source of truth)
@@ -73,6 +74,7 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
 | Live form ids | `tools/auto_sync.py REGIONAL_FORMS`, `tools/form_status.py FORMS`, `backup_forms.py FORMS`, `tools/add_*.py`, `tools/clone_regional.py` | `Config.gs FORMS` |
 | Structural question ids (club name 5, partner 331, year 94, modules 14/92/93, sessions 15/95/96/97, bridge 18/98/100/102, enableFuzzy 109) | `sync_attendance_form.py` top, `tools/form_status.py` | `Config.gs QID` |
 | `SESSION_OVERRIDES` (sessions per elective module) | `sync_attendance_form.py` | `Config.gs` |
+| `SF_NAME_SEP` (`" - "` between club and partner in the name of a club whose name two partners share: club-list entry = question 5 = Salesforce account) | `glow/sync.py` | `Config.gs` |
 | Roster tab columns | `read_roster_csv` needs `partner, club, full_name, status, region`; `upload_roster.py` positional | `Config.gs ROSTER_COLS` |
 | Response-tab header fragments | `sync_attendance_form.py COL_*` | `Config.gs RESPONSE_COLS` |
 | SyncLog columns | `tools/auto_sync.py SYNC_LOG_COLS` | `Roster.gs SYNC_LOG_COLS` |
@@ -91,6 +93,15 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
    trip (upload, then run the sheet's rebuild and expect no change) is the
    check.
 3. The constants table above — `test/python_test.py` parses `Config.gs`.
+4. `RosterOps.gs sharedClubNames_` / `sfClubName_` ↔ `glow/sync.py`
+   `shared_club_names` / `sf_club_name` — which clubs are
+   `<club> - <partner>` (a name that active clubs of two or more partners
+   have, all regions). Python decides what the forms send (the one-time
+   `--same-name-switch`; afterwards a form's long or plain name is sticky);
+   Apps Script uses the rule for the Monday e-mail's Salesforce lines only.
+   Each side is tested on its own, with fictional names
+   (`test/forms_logic_test.js`, `test/python_test.py`); there is no
+   cross-language run.
 
 ## Known divergences (documented, not fixed — see the backlog)
 
@@ -98,6 +109,27 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
 - `parseRoster_` strips `•` and `*` bullets; `parse_roster` strips only `-`.
 - `parse_roster` strips invisible characters from roster lines only;
   `tidy_` strips them from partner and club cells too.
+- "The same club name": `sharedClubNames_` and the intake check
+  (`newClubHoldReasons_`, kind `samename`) compare with `key_`, which drops
+  invisible characters; Python's `shared_club_names` and the sync's own
+  check compare with `glow.text.key`, which keeps them. A club cell with a
+  zero-width character inside is the same name in Apps Script and a
+  different one in Python (the intake errs toward holding). Cells the form
+  handlers write never hold one (likewise a girl's name cell with only
+  such characters is no name in Apps Script). Also: the intake check counts
+  Roster rows of any status, with a girl's name or not (as `roster_pairs`),
+  the Monday e-mail's names follow today's active rows that have a girl's
+  name (as `shared_club_names(active_only=True)`), and on a form the long
+  or plain name is sticky once switched — so the e-mail can print a plain
+  name for a club whose form entry is still `<club> - <partner>` after its
+  namesake left.
+- A club on file with no active girl, sent again on "Enroll a NEW club" by
+  its own partner while another partner's club has its name, is held at
+  intake (`newClubHoldReasons_`) whether or not its roster is still on the
+  form — Apps Script cannot see the form. The sync refuses such a club only
+  when it has to create the roster (a retired club whose question was
+  deleted) and takes up a roster that is still there. RUNBOOK "Working the
+  ReviewQueue" has the way out for that one false hold.
 - `read_roster_csv` matches `--region` case-insensitively; `form_status.py`
   matches the region string exactly.
 - `parse_roster` splits on every Unicode line break (`str.splitlines`:

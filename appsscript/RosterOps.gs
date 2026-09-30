@@ -281,14 +281,34 @@ const SCHOOL_LEVELS = { pri: 'primary', primary: 'primary', primaria: 'primary',
  *
  *   reenroll  the (partner, club) is on file, but fewer than half of the names
  *             sent are on its roster AND fewer than half of its active girls
- *             are in the list (the 2026-08-31 case: another club's list). No
- *             other check runs for a club on file.
+ *             are in the list (the 2026-08-31 case: another club's list). The
+ *             only other check for a club on file is samename, and only when
+ *             it has no active girl.
  *   names     at least half of the names sent, and at least MIN_SHARED, are
  *             active in ONE existing club — of any partner
  *   club      the club name is close to a club of the same partner, or of a
  *             partner the typed organization is close to (clubNamesClose_)
  *   partner   "My organization is not in this list" was chosen and the name
  *             typed is not a partner on file but is close to one (partnersClose_)
+ *   samename  the club name is one ANOTHER partner's club already has — any
+ *             status, any region (compared with key_) — or is the
+ *             "<club> - <partner>" of a club on file (sfLongName_). A new club
+ *             may not take a name in use: the attendance forms and Salesforce
+ *             tell clubs apart by name (docs/plans/2026-09-30-same-name-clubs.md).
+ *             A partner the typed organization is close to is not "another":
+ *             that case is the club + partner reasons. Listed first; a
+ *             release never skips it (handleNewClub_).
+ *             The partner's OWN club on file is not a new club and is never
+ *             held for its name — unless it has no active girl and another
+ *             partner's club has the name: a retired club sent again (the
+ *             2026-09-30 duplicates) has no roster on the forms any more, so
+ *             the sync would treat it as a new club and refuse to add it.
+ *             Held with its own text, alone; a release is refused like any
+ *             samename (docs/RUNBOOK.md has the one false hold this makes).
+ *             Who "has the name" is every Roster row with a partner and a
+ *             club, a girl's name or not — Python's roster_pairs, which the
+ *             sync's own check goes by; the other reasons count only rows
+ *             with a girl's name, as before.
  *
  * entry:    {partner, club, names, typedPartner} as the handler would file it
  * rows:     the Roster (loadRoster_().rows): {partner, club, full_name, status}
@@ -296,10 +316,13 @@ const SCHOOL_LEVELS = { pri: 'primary', primary: 'primary', primaria: 'primary',
  */
 function newClubHoldReasons_(entry, rows, partners) {
   const clubs = Object.create(null), activeIn = Object.create(null);
+  const holders = Object.create(null);   // every (partner, club) the Roster has: who has a club name
   rows.forEach(function (r) {
     const p = tidy_(r.partner), c = tidy_(r.club), n = foldKey_(r.full_name);
-    if (!p || !c || !n) return;
+    if (!p || !c) return;
     const ck = key_(p) + '||' + key_(c);
+    if (!holders[ck]) holders[ck] = { partner: p, club: c };
+    if (!n) return;
     const club = clubs[ck] ||
         (clubs[ck] = { partner: p, club: c, all: Object.create(null), active: Object.create(null) });
     club.all[n] = true;
@@ -316,11 +339,23 @@ function newClubHoldReasons_(entry, rows, partners) {
     return items.slice(0, DUP_GUARD.MAX_LISTED).join('; ') +
         (items.length > DUP_GUARD.MAX_LISTED ? ' and ' + (items.length - DUP_GUARD.MAX_LISTED) + ' more' : '');
   };
-  const pk = key_(entry.partner);
+  const pk = key_(entry.partner), name = key_(entry.club);
+  // a club as the hold texts name it: the spelling of its rows with a girl's name, if it has any
+  const named = function (ck) { const x = clubs[ck] || holders[ck]; return x.club + ' (' + x.partner + ')'; };
 
-  const own = clubs[pk + '||' + key_(entry.club)];
+  const own = clubs[pk + '||' + name];
   if (own) {
     const onFile = count(names, own.all), active = Object.keys(own.active);
+    if (!active.length) {
+      // retired, and the name is another partner's club's: on the forms it would be a new club
+      const others = Object.keys(holders).sort().filter(function (ck) {
+        return key_(holders[ck].club) === name && key_(holders[ck].partner) !== pk;
+      });
+      if (others.length) {
+        return [{ kind: 'samename', text: 'this club is on file with no active girl, and the club name ' +
+                  'is already used by ' + listed(others.map(named)) }];
+      }
+    }
     const kept = count(active, sent);
     if (onFile < names.length * DUP_GUARD.REENROLL_SHARE && kept < active.length * DUP_GUARD.REENROLL_SHARE) {
       return [{ kind: 'reenroll', text: 'this club is already enrolled, but only ' + onFile + ' of the ' +
@@ -330,17 +365,6 @@ function newClubHoldReasons_(entry, rows, partners) {
     return [];
   }
 
-  const reasons = [];
-  const shared = Object.create(null);
-  names.forEach(function (n) {
-    (activeIn[n] || []).forEach(function (ck) { shared[ck] = (shared[ck] || 0) + 1; });
-  });
-  const best = Object.keys(shared).sort(function (x, y) { return shared[y] - shared[x] || x.localeCompare(y); })[0];
-  if (best && shared[best] >= DUP_GUARD.MIN_SHARED && shared[best] >= names.length * DUP_GUARD.NAME_SHARE) {
-    reasons.push({ kind: 'names', text: shared[best] + ' of the ' + names.length + ' names sent are active in ' +
-                   clubs[best].club + ' (' + clubs[best].partner + ')' });
-  }
-
   const onFile = Object.create(null);   // key_(partner) → its spelling on file
   (partners || []).concat(Object.keys(clubs).map(function (ck) { return clubs[ck].partner; }))
       .forEach(function (p) { if (tidy_(p) && !onFile[key_(p)]) onFile[key_(p)] = tidy_(p); });
@@ -348,14 +372,39 @@ function newClubHoldReasons_(entry, rows, partners) {
       ? Object.keys(onFile).sort().filter(function (k) { return partnersClose_(entry.partner, onFile[k]); })
       : [];
 
+  const reasons = [];
+  const taken = Object.keys(holders).sort().filter(function (ck) {
+    const k = key_(holders[ck].partner);
+    return key_(holders[ck].club) === name && k !== pk && related.indexOf(k) === -1;
+  });
+  const listedAs = Object.keys(holders).sort().filter(function (ck) {
+    return key_(sfLongName_(holders[ck].club, holders[ck].partner)) === name;
+  });
+  if (taken.length || listedAs.length) {
+    reasons.push({ kind: 'samename', text: [
+      taken.length ? 'the club name is already used by ' + listed(taken.map(named)) : '',
+      listedAs.length ? 'the club name reads as ' + listed(listedAs.map(named)) + ' ("<club>' + SF_NAME_SEP +
+          '<partner>" is how a club whose name two partners share is listed)' : '',
+    ].filter(String).join('; ') });
+  }
+
+  const shared = Object.create(null);
+  names.forEach(function (n) {
+    (activeIn[n] || []).forEach(function (ck) { shared[ck] = (shared[ck] || 0) + 1; });
+  });
+  const best = Object.keys(shared).sort(function (x, y) { return shared[y] - shared[x] || x.localeCompare(y); })[0];
+  if (best && shared[best] >= DUP_GUARD.MIN_SHARED && shared[best] >= names.length * DUP_GUARD.NAME_SHARE) {
+    reasons.push({ kind: 'names', text: shared[best] + ' of the ' + names.length + ' names sent are active in ' +
+                   named(best) });
+  }
+
   const near = Object.keys(clubs).sort().filter(function (ck) {
     const k = key_(clubs[ck].partner);
     return (k === pk || related.indexOf(k) !== -1) && clubNamesClose_(entry.club, clubs[ck].club);
   });
   if (near.length) {
-    reasons.push({ kind: 'club', text: 'the club name is close to ' + listed(near.map(function (ck) {
-      return clubs[ck].club + ' (' + clubs[ck].partner + ')';
-    })) + ', already enrolled' });
+    reasons.push({ kind: 'club', text: 'the club name is close to ' + listed(near.map(named)) +
+                   ', already enrolled' });
   }
   if (related.length) {
     reasons.push({ kind: 'partner', text: 'the organization was typed as "' + entry.partner +
@@ -476,6 +525,71 @@ function matchingChars_(a, b) {
   if (!best) return 0;
   return best + matchingChars_(a.slice(0, endA - best), b.slice(0, endB - best)) +
       matchingChars_(a.slice(endA), b.slice(endB));
+}
+
+// ------------------------------------------ clubs that share a name
+// Salesforce finds a club by its name alone (question 5 of the attendance
+// form, exact apart from case) and creates an account when none matches. So
+// a club whose name another partner's club also has is "<club> - <partner>"
+// in Salesforce, in the forms' club list and in question 5
+// (docs/plans/2026-09-30-same-name-clubs.md). The forms are switched by
+// sync_attendance_form.py --same-name-switch (glow/sync.py shared_club_names
+// / sf_club_name); these mirror that rule for the Monday e-mail, and
+// newClubHoldReasons_ keeps the set from growing (kind 'samename').
+//
+// Known divergences from the Python side (CLAUDE.md rule 10: documented here
+// and in docs/ARCHITECTURE.md, not fixed on one side):
+//  - key_ also drops invisible characters (Normalize.gs INVISIBLE), which
+//    glow.text.key keeps: a name with a zero-width character inside is the
+//    same name here and a different one there (BACKLOG 28). Cells the form
+//    handlers write never hold one; a cell typed or pasted by hand can.
+//  - On a form the long or plain name is sticky: once switched, a club keeps
+//    "<club> - <partner>" when its namesake goes inactive, and keeps its
+//    plain name when a namesake turns up later (the sync refuses to add
+//    that one). Nothing here can see the form, so these follow today's
+//    ACTIVE rows (the switch's rule), and the Monday e-mail asks staff to
+//    check a shared name against the form's club list (sfPendingLines_).
+
+/**
+ * The club names that ACTIVE clubs of two or more partners have, in any
+ * region: {key_(club): true}. rows: the Roster (loadRoster_().rows). A row
+ * with no partner, no club or no girl's name reaches no form and is ignored
+ * (a club is active when it has an active girl: Python's roster_pairs);
+ * status compares as the Python reader does (spacing and case ignored).
+ */
+function sharedClubNames_(rows) {
+  const partnersOf = Object.create(null);
+  rows.forEach(function (r) {
+    if (key_(r.status) !== STATUS.ACTIVE) return;
+    const p = key_(r.partner), c = key_(r.club);
+    if (!p || !c || !tidy_(r.full_name)) return;
+    (partnersOf[c] = partnersOf[c] || Object.create(null))[p] = true;
+  });
+  const shared = Object.create(null);
+  Object.keys(partnersOf).forEach(function (c) {
+    if (Object.keys(partnersOf[c]).length > 1) shared[c] = true;
+  });
+  return shared;
+}
+
+/** "<club> - <partner>", both as spelled (tidied): no case change, no accent folding. */
+function sfLongName_(club, partner) {
+  return tidy_(club) + SF_NAME_SEP + tidy_(partner);
+}
+
+/**
+ * The name a club's Salesforce account must have — what the attendance form
+ * sends as its Club Name: the club's own name, or "<club> - <partner>" when
+ * `shared` (sharedClubNames_) has the name. A shared name with no partner
+ * is refused, never guessed.
+ */
+function sfClubName_(club, partner, shared) {
+  if (!tidy_(club)) throw new Error('sfClubName_: no club name');
+  if (shared[key_(club)] !== true) return tidy_(club);   // === true: a club called "constructor" is no member of {}
+  if (!tidy_(partner)) {
+    throw new Error('sfClubName_: "' + tidy_(club) + '" is a name two partners share, so it needs its partner');
+  }
+  return sfLongName_(club, partner);
 }
 
 // -------------------------------------------------------------- regions

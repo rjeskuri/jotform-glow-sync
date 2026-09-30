@@ -637,7 +637,7 @@ console.log('\n  the weekly e-mail\'s ReviewQueue section');
 console.log('\n  the handler and the weekly e-mail, run with Google services stubbed');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']
+  const src = ['Config.gs', 'Normalize.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs']
       .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
   // A spreadsheet of plain arrays: tabs[name] = rows (row 1 = header).
   const world = (opts) => {
@@ -738,11 +738,12 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         !w.mails[0].body.includes('Staff note'));
 
   // the weekly e-mail
-  const weekly = (reviewRows, sfRows, props) => {
-    const x = world({ props });
+  const weekly = (reviewRows, sfRows, props, roster, down) => {
+    const x = world({ props, down });
     x.tabs.ReviewQueue = x.tabs.ReviewQueue.concat(reviewRows.map(r => r(x.ctx)));
     x.tabs.ClubRegistry = [['club_code', 'partner', 'club', 'created'], ['BRIGHTST', 'Fixture Partner Alpha', 'Bright Stars', '2026-08-26']];
     x.tabs['SF Pending'] = [vm.runInContext('SF_PENDING_COLS', x.ctx).slice()].concat(sfRows);
+    x.tabs.Roster = [vm.runInContext('ROSTER_COLS', x.ctx).slice()].concat(roster || []);
     x.ctx.sendSfPendingDigest();
     return x;
   };
@@ -768,6 +769,54 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
   w = weekly(openRows, [sfRow], {});
   check('STAFF_NOTIFY_EMAIL unset: no e-mail, an Audit row with both counts',
         !w.mails.length && w.audits.join() === 'sendSfPendingDigest: 2 open ReviewQueue item(s) (1 new this week), 1 club(s) pending in Salesforce but STAFF_NOTIFY_EMAIL is not set');
+
+  // the Salesforce lines start with the exact account name (docs/plans/2026-09-30-same-name-clubs.md)
+  let seq = 0;
+  const girl = (p, c, region, status) => ['W' + (++seq), p, c, region, 'Girl ' + seq + ' Testling', 'Testling', status || 'active', '2026-08-26', '', 'x'];
+  const pend = (p, c, region) => ['2026-09-20', p, c, region, 12, 'Mentor Testperson', 'mentor@example.org', '', 'pending', ''];
+  const sfLines = x => x.mails[0].body.split('\n').filter(l => l.startsWith('- '));
+  const twoStars = [girl('Partner One', 'Stars', 'Africa'), girl('Partner Two', 'STARS', 'Asia'),
+                    girl('Partner One', 'Alpha Club', 'Africa'), girl('Partner Three', 'Beta Club', 'Africa')];
+  w = weekly([], [pend('Partner One', 'Stars', 'Africa'), pend('Partner Two', 'STARS', 'Asia'),
+                  pend('Partner One', 'Alpha Club', 'Africa')], STAFF, twoStars);
+  const CHECK_FORM = ' | NAME SHARED with another partner\'s club: before creating the account, find this club in the ' +
+                     'attendance form\'s club list and use exactly that text';
+  check('a pending club whose name another partner\'s active club has (any region): "<club> - <partner>", its own spelling, ' +
+        'and "check the form\'s club list" (a form\'s name is sticky); others plain, as before',
+        sfLines(w).join('\n') ===
+            '- Stars - Partner One | Partner One | Africa | 12 girls | mentor Mentor Testperson <mentor@example.org> | added 2026-09-20' + CHECK_FORM + '\n' +
+            '- STARS - Partner Two | Partner Two | Asia | 12 girls | mentor Mentor Testperson <mentor@example.org> | added 2026-09-20' + CHECK_FORM + '\n' +
+            '- Alpha Club | Partner One | Africa | 12 girls | mentor Mentor Testperson <mentor@example.org> | added 2026-09-20',
+        sfLines(w).join(' / '));
+  check('…and the section says the first item is the exact Salesforce account name',
+        w.mails[0].body.includes('3 new club(s) are waiting to be created in Salesforce (tab "SF Pending"). Each line ' +
+            'starts with the exact Salesforce account name: create it character for character') &&
+        w.mails[0].body.includes('is "<club> - <partner>"). Set status to "done" once created.'));
+  w = weekly([], [pend('Partner One', 'Stars', 'Africa')], STAFF,
+             [girl('Partner One', 'Stars', 'Africa'), girl('Partner Two', 'Stars', 'Asia', 'inactive')]);
+  check('the namesake has no active girl (retired): the plain name, as the forms\' one-time switch counts active clubs',
+        sfLines(w).join() === '- Stars | Partner One | Africa | 12 girls | mentor Mentor Testperson <mentor@example.org> | added 2026-09-20',
+        sfLines(w).join(' / '));
+  w = weekly([], [pend('Partner One', 'Stars', 'Africa'), pend('', 'Stars', 'Africa'), pend('', 'Alpha Club', 'Africa'),
+                  pend('Partner One', ' ', 'Africa')], STAFF, twoStars);
+  check('a shared name with no partner, or no club name: said so, never a guessed name; the e-mail still goes out',
+        sfLines(w)[0].startsWith('- Stars - Partner One | ') &&
+        sfLines(w)[1].startsWith('- (a shared club name, and no partner in this row: fix it first) |  | Africa') &&
+        sfLines(w)[1].endsWith(CHECK_FORM) &&
+        sfLines(w)[3].startsWith('- (no club name in this row: fix it first) | Partner One | Africa'), sfLines(w)[1]);
+  check('…a name nobody shares needs no partner: the club name, as before',
+        sfLines(w)[2] === '- Alpha Club |  | Africa | 12 girls | mentor Mentor Testperson <mentor@example.org> | added 2026-09-20',
+        sfLines(w)[2]);
+  // the Roster has rows here: with only its header, loadRoster_ returns before the read that fails
+  let rosterRead = '';
+  try { w = weekly(openRows, [], STAFF, twoStars, 'Roster'); } catch (e) { rosterRead = e.message; w = { mails: [] }; }
+  check('nothing pending: the Roster is not read (the ReviewQueue e-mail does not depend on it)',
+        !rosterRead && w.mails.length === 1 && w.mails[0].subject === 'GLOW weekly: 2 open ReviewQueue item(s)', rosterRead);
+  let unread = '';
+  try { weekly(openRows, [pend('Partner One', 'Stars', 'Africa')], STAFF, twoStars, 'Roster'); } catch (e) { unread = e.message; }
+  check('…and that check can fail: with a club pending, the same unreadable Roster stops the e-mail',
+        unread === 'sheet unavailable', unread);
+  check('no girl and no Roster row reaches the e-mail', !/Testling|W\d+ /.test(weekly([], [pend('Partner One', 'Stars', 'Africa')], STAFF, twoStars).mails[0].body));
 }
 
 console.log('\n  the replay guard in the Club Roster Form handlers (Google services stubbed)');
@@ -1022,9 +1071,11 @@ const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose
   check('a typo of a club on file: held (club)', kinds(r) === 'club' && texts(r).includes('BRAVEHEART GIRLS'), texts(r));
   r = hold(A, 'Hillside G.L.O.W club , Northfield', fresh);
   check('stray punctuation and spacing: held (club)', kinds(r) === 'club', texts(r));
-  check('a numbered sibling, a different name, the same name under another partner: imported',
-        !hold(A, 'Harbor Club 2', fresh).length && !hold(A, 'Rise GLOW Club', fresh).length &&
-        !hold('Other Partner Beta', 'BRIGHT GIRLS', fresh).length);
+  check('a numbered sibling, a different name: imported',
+        !hold(A, 'Harbor Club 2', fresh).length && !hold(A, 'Rise GLOW Club', fresh).length);
+  r = hold('Other Partner Beta', 'BRIGHT GIRLS', fresh);
+  check('the same name under another partner: held (samename) since 2026-09-30, that club named',
+        kinds(r) === 'samename' && texts(r) === 'the club name is already used by BRIGHT GIRLS (Fixture Partner Alpha)', texts(r));
   r = hold(A, 'Starlight Club', sunrise.slice(0, 3).concat(['Hana Newperson']));
   check('3 of 4 names active in one club: held (names), with the counts and that club',
         kinds(r) === 'names' && texts(r) === '3 of the 4 names sent are active in Sunrise Club (Fixture Partner Alpha)', texts(r));
@@ -1073,6 +1124,167 @@ const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose
   check('at most MAX_LISTED candidates named, then "and N more"',
         texts(many) === 'the club name is close to Star 1 (Fixture Partner Alpha); Star 2 (Fixture Partner Alpha); ' +
         'Star 3 (Fixture Partner Alpha) and 1 more, already enrolled', texts(many));
+
+  console.log('\n  a new club may not take a name another partner\'s club has (docs/plans/2026-09-30-same-name-clubs.md)');
+  const P1 = 'Partner One', P2 = 'Partner Two', P3 = 'Partner Three';
+  const G = (p, c, n, status, region) => Array.from({ length: n }, (_, i) =>
+      ({ partner: p, club: c, region: region || 'Africa', full_name: first[i] + ' ' + c.replace(/\W/g, '') + 'ling', status: status || 'active' }));
+  const file = [].concat(G(P1, 'Stars', 4), G(P2, 'STARS', 3, 'active', 'Asia'), G(P1, 'Alpha Club', 3),
+                         G(P2, 'Beta Club', 3, 'inactive'), G(P1, 'Alpha Club - Juniors', 2),
+                         G('Fundación Demo', 'Comet Club', 3, 'active', 'Latin America'));
+  const same = (partner, club, names, typed) =>
+      dg.newClubHoldReasons_({ partner, club, names: names || fresh, typedPartner: !!typed }, file, [P1, P2, P3, 'Fundación Demo']);
+  r = same(P3, 'Alpha Club');
+  check('a third partner sends a name one partner\'s club has: held (samename), the club and its partner named',
+        kinds(r) === 'samename' && texts(r) === 'the club name is already used by Alpha Club (Partner One)', texts(r));
+  r = same(P3, '  stars ');
+  check('a name two partners already share, typed in another case and spacing: held, every club of that name listed (any region)',
+        kinds(r) === 'samename' && texts(r) === 'the club name is already used by Stars (Partner One); STARS (Partner Two)', texts(r));
+  r = same(P3, 'Beta Club');
+  check('the club on file has no active girl (any Roster status counts): held', kinds(r) === 'samename' &&
+        texts(r) === 'the club name is already used by Beta Club (Partner Two)', texts(r));
+  check('key_ drops invisible characters, so a zero-width twin is the same name here (glow.text.key keeps it: a known divergence)',
+        kinds(same(P3, 'Alpha\u200B Club')) === 'samename');
+  check('the partner\'s own club with active girls, sent again, is an existing club, not a new one: never held for its name ' +
+        '(either holder of "Stars")',
+        !same(P1, 'Stars', G(P1, 'Stars', 4).map(x => x.full_name)).length &&
+        !same(P2, 'stars', G(P2, 'STARS', 3).map(x => x.full_name)).length &&
+        kinds(same(P1, 'Stars')) === 'reenroll');
+  // a retired club (no active girl) whose name another partner's club has: its roster is off the
+  // forms, so the sync would treat it as a new club and refuse it (the two clubs retired 2026-09-30)
+  const retired = G(P2, 'Stars', 3, 'inactive');
+  const again = (partner, club, names, rows) =>
+      dg.newClubHoldReasons_({ partner, club, names: names || fresh, typedPartner: false }, rows, [P1, P2, P3]);
+  const withRetired = G(P1, 'Stars', 4).concat(retired, G(P2, 'Beta Club', 3, 'inactive'), G(P3, 'Gamma Club', 2, 'inactive'),
+                                               G(P1, 'Gamma Club', 2, 'inactive'));
+  const RETIRED_TEXT = 'this club is on file with no active girl, and the club name is already used by Stars (Partner One)';
+  r = again(P2, 'stars', retired.map(x => x.full_name), withRetired);
+  check('the partner\'s own club with NO active girl, its name another partner\'s club\'s: held (samename) with its own text — ' +
+        'its old list…', kinds(r) === 'samename' && texts(r) === RETIRED_TEXT, texts(r));
+  r = again(P2, 'Stars', fresh, withRetired);
+  check('…or a brand-new list (one reason, never a reenroll next to it)', kinds(r) === 'samename' && texts(r) === RETIRED_TEXT, texts(r));
+  check('…whatever the namesake\'s status: both retired, the first one back is held too',
+        kinds(again(P3, 'Gamma Club', fresh, withRetired)) === 'samename' &&
+        texts(again(P3, 'Gamma Club', fresh, withRetired)).endsWith('already used by Gamma Club (Partner One)'));
+  check('a retired club whose name nobody else has is reactivated as before (no hold, and no reenroll: it has no active girl)',
+        !again(P2, 'Beta Club', fresh, withRetired).length &&
+        !again(P2, 'Beta Club', G(P2, 'Beta Club', 3).map(x => x.full_name), withRetired).length);
+  check('one active girl is enough: the club still has its roster on the forms, so its own enrollment runs as before',
+        !again(P2, 'Stars', retired.map(x => x.full_name),
+               withRetired.concat(G(P2, 'Stars', 4).slice(3))).length);
+  // who "has the name": every Roster row with a partner and a club (Python roster_pairs), a girl's name or not
+  const nameless = (p, c, status) => ({ partner: p, club: c, region: 'Africa', full_name: '', status: status || 'inactive' });
+  r = again(P3, 'Stars', fresh, [nameless(P1, 'Stars')]);
+  check('a club on file whose only Roster row has no girl\'s name still has its name: held, as the sync would refuse it',
+        kinds(r) === 'samename' && texts(r) === 'the club name is already used by Stars (Partner One)', texts(r));
+  check('…its "<club> - <partner>" too; and for a retired club sent again it is a namesake like any other',
+        kinds(again(P3, 'stars - partner one', fresh, [nameless(P1, 'Stars')])) === 'samename' &&
+        texts(again(P2, 'Stars', fresh, retired.concat([nameless(P1, 'STARS', 'active')]))) ===
+            'this club is on file with no active girl, and the club name is already used by STARS (Partner One)');
+  check('…but such a row changes no other check: the same partner\'s nameless club is neither "on file" nor a close name, ' +
+        'and a partner known only from it is not a partner on file',
+        !again(P1, 'Stars', fresh, [nameless(P1, 'Stars')]).length && !again(P1, 'Stars 2', fresh, [nameless(P1, 'Stars')]).length &&
+        kinds(dg.newClubHoldReasons_({ partner: 'Partner Onee', club: 'Comet Club', names: fresh, typedPartner: true },
+                                     [nameless(P1, 'Stars')], [])) === '' &&
+        kinds(dg.newClubHoldReasons_({ partner: 'Partner Onee', club: 'Comet Club', names: fresh, typedPartner: true },
+                                     G(P1, 'Stars', 1), [])) === 'partner');
+  check('a club named with its rows that have a girl\'s name, when it has any (the spelling the other reasons print)',
+        texts(again(P3, 'Stars', fresh, [nameless(P1, 'STARS')].concat(G(P1, 'Stars', 2)))) ===
+            'the club name is already used by Stars (Partner One)');
+  check('a different name — a plural, a typo, a number — under another partner is not the same name: imported',
+        !same(P3, 'Star').length && !same(P3, 'Starrs').length && !same(P3, 'Stars 2').length && !same(P3, 'Alpha Clubs').length);
+  r = same(P3, 'alpha club - partner one');
+  check('a name that reads as a club on file with its partner ("<club> - <partner>", how shared names are listed): held',
+        kinds(r) === 'samename' && texts(r) === 'the club name reads as Alpha Club (Partner One) ("<club> - <partner>" is how ' +
+        'a club whose name two partners share is listed)', texts(r));
+  check('…also when it is that partner sending it (next to its close-name reason); a name with " - " in it is otherwise just a name',
+        kinds(same(P1, 'Stars - Partner One')) === 'samename,club' && !same(P3, 'Gamma Club - Seniors').length &&
+        kinds(same(P3, 'Alpha Club - Juniors')) === 'samename' &&
+        texts(same(P3, 'Alpha Club - Juniors')) === 'the club name is already used by Alpha Club - Juniors (Partner One)');
+  r = same(P3, 'Stars', G(P1, 'Stars', 4).map(x => x.full_name).slice(0, 3));
+  check('the name AND the girls of another partner\'s club (that club, sent under the wrong partner?): both reasons, the name first',
+        kinds(r) === 'samename,names' && texts(r).includes('3 of the 3 names sent are active in Stars (Partner One)'), texts(r));
+  r = same('Fundacion Demo', 'Comet Club', fresh, true);
+  check('an organization typed close to the partner that has the name is not "another partner": club + partner, as before',
+        kinds(r) === 'club,partner', kinds(r));
+  r = same('Fundacion Demo', 'Alpha Club', fresh, true);
+  check('…but another partner\'s name under a retyped organization is both', kinds(r) === 'samename,partner', kinds(r));
+  r = dg.newClubHoldReasons_({ partner: 'Fundacion Demo', club: 'Comet Club', names: fresh, typedPartner: true }, file,
+                             [P1, P2, P3, 'Fundación Demo', 'Fundacion Demo']);
+  check('…and once staff add that organization to the Partners tab (another partner after all), its name is another ' +
+        'partner\'s: the exception cannot let a namesake through',
+        kinds(r) === 'samename' && texts(r) === 'the club name is already used by Comet Club (Fundación Demo)', texts(r));
+  check('a brand-new organization typed with a name in use: held (samename)',
+        kinds(same('Moonbeam Collective', 'Alpha Club', fresh, true)) === 'samename');
+  const crowd = dg.newClubHoldReasons_({ partner: P3, club: 'Stars', names: fresh },
+      ['Org A', 'Org B', 'Org C', 'Org D'].flatMap(p => G(p, 'Stars', 1)), []);
+  check('more than MAX_LISTED namesakes: three named, then "and N more"',
+        texts(crowd) === 'the club name is already used by Stars (Org A); Stars (Org B); Stars (Org C) and 1 more', texts(crowd));
+  check('a same-name reason names clubs and partners, never a girl',
+        !/ling\b|Newperson/.test([same(P3, 'Stars'), same(P3, 'Stars', G(P1, 'Stars', 4).map(x => x.full_name)),
+                                   same(P3, 'Alpha Club - Partner One')].map(texts).join(' ')));
+}
+
+console.log('\nClub names two partners share (RosterOps.gs sharedClubNames_ / sfClubName_, Config.gs SF_NAME_SEP)');
+{
+  const sn = loadGs(['SF_NAME_SEP', 'sharedClubNames_', 'sfClubName_', 'sfLongName_', 'key_']);
+  const row = (partner, club, status, region) => ({ partner, club, region: region || 'Africa', full_name: 'x', status: status || 'active' });
+  const P1 = 'Partner One', P2 = 'Partner Two', P3 = 'Partner Three';
+  const keys = rows => Object.keys(sn.sharedClubNames_(rows)).sort().join('|');
+  const base = [row(P1, 'Stars'), row(P1, 'Stars'), row(P2, 'Stars'), row(P1, 'Alpha Club'), row(P2, 'Beta Club')];
+  check('SF_NAME_SEP is space, hyphen-minus, space (glow/sync.py has the same constant)', sn.SF_NAME_SEP === ' - ');
+  check('Stars under Partner One and Partner Two is shared; Alpha Club and Beta Club are not', keys(base) === 'stars');
+  const shared = sn.sharedClubNames_(base);
+  check('a shared name: "<club> - <partner>"; any other club: its own name',
+        sn.sfClubName_('Stars', P1, shared) === 'Stars - Partner One' && sn.sfClubName_('Stars', P2, shared) === 'Stars - Partner Two' &&
+        sn.sfClubName_('Alpha Club', P1, shared) === 'Alpha Club');
+  check('a club called "constructor" or "toString" is not shared by accident (whatever object the caller passes)',
+        sn.sfClubName_('constructor', P1, {}) === 'constructor' && sn.sfClubName_('toString', P1, shared) === 'toString' &&
+        keys([row(P1, 'constructor'), row(P2, 'toString')]) === '' &&
+        keys([row(P1, 'constructor'), row(P2, 'Constructor')]) === 'constructor');
+  const cased = sn.sharedClubNames_([row(P1, 'Stars'), row(P2, 'STARS')]);
+  check('STARS and Stars are one name, and each club keeps its own spelling in its long name',
+        Object.keys(cased).join() === 'stars' && sn.sfClubName_('STARS', P2, cased) === 'STARS - Partner Two' &&
+        sn.sfClubName_('Stars', P1, cased) === 'Stars - Partner One');
+  check('one partner written in two cases (or spacings) is one partner: not shared',
+        keys([row(P1, 'Stars'), row('PARTNER  one', 'Stars')]) === '');
+  check('only ACTIVE rows count (the same rule as the forms\' one-time switch): an inactive namesake does not make a name shared',
+        keys([row(P1, 'Stars'), row(P2, 'Stars', 'inactive')]) === '' &&
+        keys([row(P1, 'Stars'), row(P2, 'Stars', 'inactive'), row(P2, 'Stars')]) === 'stars');
+  check('status compares as the Python reader does: spacing and case ignored',
+        keys([row(P1, 'Stars', ' Active '), row(P2, 'Stars', 'ACTIVE')]) === 'stars');
+  check('all regions: an Africa club and an Asia club share a name',
+        keys([row(P1, 'Stars', 'active', 'Africa'), row(P2, 'Stars', 'active', 'Asia')]) === 'stars');
+  check('a row with no partner or no club is ignored', keys([row(P1, 'Stars'), row('', 'Stars'), row(P2, '')]) === '');
+  const blank = (partner, club, name) => ({ partner, club, region: 'Africa', full_name: name == null ? '' : name, status: 'active' });
+  check('…and so is a row with no girl\'s name: a club is active when it has an active girl (Python roster_pairs), ' +
+        'so an "active" row without one shares nothing',
+        keys([blank(P1, 'Comet Club'), blank(P2, 'Comet Club')]) === '' &&
+        keys([row(P1, 'Comet Club'), blank(P2, 'Comet Club')]) === '' &&
+        keys([row(P1, 'Comet Club'), blank(P2, 'Comet Club', '   ')]) === '' &&
+        keys([row(P1, 'Comet Club'), blank(P2, 'Comet Club'), row(P2, 'Comet Club')]) === 'comet club');
+  check('three partners: still one shared name, three long names',
+        keys(base.concat([row(P3, 'Stars')])) === 'stars' && sn.sfClubName_('Stars', P3, shared) === 'Stars - Partner Three');
+  check('a unique club whose own name has " - " in it stays as it is (names are never split on the separator)',
+        sn.sfClubName_('Alpha Club - Juniors', P1, shared) === 'Alpha Club - Juniors');
+  check('whitespace is collapsed, nothing else changes: no case change, no accent folding',
+        sn.sfClubName_('  Stars ', ' Partner   One ', shared) === 'Stars - Partner One' &&
+        sn.sfLongName_('Étoiles', 'Fundación Demo') === 'Étoiles - Fundación Demo' &&
+        sn.sfClubName_('Alpha  Club', P1, shared) === 'Alpha Club');
+  let refused = '';
+  try { sn.sfClubName_('Stars', ' ', shared); } catch (e) { refused = e.message; }
+  let noClub = '';
+  try { sn.sfClubName_('', P1, shared); } catch (e) { noClub = e.message; }
+  check('a shared name with no partner, or no club name at all, is refused — never guessed',
+        /needs its partner/.test(refused) && /no club name/.test(noClub), refused + ' | ' + noClub);
+  check('the known divergence, pinned: key_ drops invisible characters, so a zero-width twin shares the name here',
+        keys([row(P1, 'Stars'), row(P2, 'Sta\u200Brs')]) === 'stars' && sn.key_('Sta\u200Brs') === 'stars');
+  // documented, not fixed on one side (CLAUDE.md rule 10)
+  const arch = fs.readFileSync(path.join(REPO, 'docs', 'ARCHITECTURE.md'), 'utf8');
+  const divergences = (arch.split('## Known divergences')[1] || '').split('\n## ')[0].replace(/\s+/g, ' ');
+  check('docs/ARCHITECTURE.md lists that divergence, and SF_NAME_SEP among the constants on both sides',
+        divergences.includes('sharedClubNames_') && divergences.includes('invisible') &&
+        (arch.split('## Constants that exist on both sides')[1] || '').split('\n## ')[0].includes('`SF_NAME_SEP`'));
 }
 
 // ------------------------- Club Roster Form responses (the handlers, stubbed)
@@ -1386,8 +1598,219 @@ console.log('\nA new club that may duplicate one on file is held, then released 
         firstRun && !secondRun && w.mails.length === 1 && w.formLog.length === 1 && w.formLog[0][2] === KEY);
 }
 
+console.log('\nA new club with a name another partner\'s club has is held until it has a name of its own (2026-09-30)');
+{
+  const SN = loadGs(['SAME_NAME_ISSUE'], ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']).SAME_NAME_ISSUE;
+  const P1 = 'Partner One', P2 = 'Partner Two', P3 = 'Partner Three';
+  const PET = 'Hope Fennwhistle';   // a fictional girl: must never reach FormLog, Audit, an e-mail or a detail
+  const starGirls = ['Ada Marrowgate', 'Bea Marrowgate', 'Cora Marrowgate'];
+  const onFile = rosterRows(P1, 'Stars', starGirls).concat(rosterRows(P2, 'Alpha Club', ['Grace Zibblewick', 'Mary Zibblewick']));
+  const tabs = () => {
+    const t = baseTabs(onFile);
+    t.Partners.push([P1, 'Africa', ''], [P2, 'Asia', ''], [P3, 'Africa', '']);
+    return t;
+  };
+  const sent = (club, extra) => newClub(P3, club, [PET, 'Ivy Newperson', 'Jo Newperson'], extra);
+  const SRC = 'Roster Form Responses!41';
+  const KEY = 'ROSTER|w:2026-09-21 10:15:30.250|' + P3 + '|Stars';
+  const STEP = 'ask the partner for a different name and set the response row\'s "' + HQ.CLUB + '" cell to it';
+  const clean = s => !/Fennwhistle|Marrowgate|Zibblewick|Newperson|example\.org/.test(s);
+  const imported = w => JSON.stringify([w.tabs.Roster, w.tabs.ClubRegistry, w.tabs.Partners, w.tabs['SF Pending']]);
+
+  console.log('\n  held');
+  let w = sheetWorld(tabs());
+  const before = imported(w);
+  let res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, sent('Stars'), KEY);
+  const item = w.tabs.ReviewQueue[1] || [];
+  check('FormLog: HELD, saying the name is in use (not "possible duplicate"), with the ReviewQueue tag',
+        res === 'HELD: club name already used by another partner — ReviewQueue [#' + SRC + ']' &&
+        w.formLog.length === 1 && w.formLog[0][3] === res && w.ctx.isHeldResult_(res), res);
+  check('nothing imported: Roster, ClubRegistry, Partners and SF Pending unchanged; no dropdown refresh, no Jotform sync',
+        imported(w) === before && !w.synced && !w.notified.length);
+  check('one ReviewQueue item with the new issue: partner and club as sent, the club that has the name, the tag last',
+        w.tabs.ReviewQueue.length === 2 && item[1] === SN && item[2] === P3 && item[3] === 'Stars' &&
+        item[4].startsWith(SRC + ' (sent 2026-09-21 10:15:30): nothing imported; the mentor was told it is being checked. ' +
+                           'Why: the club name is already used by Stars (Partner One). ') &&
+        item[4].endsWith('[#' + SRC + ']') && clean(item[4]), item[4]);
+  check('…it says to rule out that club sent under the wrong partner, then to ask for a different name, and how to release',
+        item[4].includes('That club, sent under the wrong partner (or another club on file): enter only its new girls on "' +
+                         HQ.ACTION_MOD + '" for the club on file, then resolve. ') &&
+        item[4].includes('A new club: it may not take a name another partner\'s club has (the attendance form and Salesforce ' +
+                         'tell clubs apart by name) — ' + STEP + ', then resolved "release <date> by <name>: …" and run ' +
+                         '"Process any missed form responses" (a release under the old name is refused).'), item[4]);
+  check('…and, between the two, what to do when it is the club on file that is under the wrong partner: move it, then release',
+        item[4].includes('for the club on file, then resolve. That club, and the Roster has it under the wrong partner (or it ' +
+                         'has moved to this one): move the club on file first (docs/RUNBOOK.md, "Moving a club to another ' +
+                         'partner"), then resolved "release <date> by <name>: …" with the name unchanged and run "Process ' +
+                         'any missed form responses". A new club: it may not take'), item[4]);
+  check('the mentor gets the same short note as any held club — the club and partner they sent, no club or partner on file',
+        w.mails.length === 1 && w.mails[0].to === 'mentor@example.org' && w.mails[0].subject === 'GLOW enrollment received – Stars' &&
+        w.mails[0].body.includes('We received the enrollment of Stars (Partner Three).') &&
+        !/Partner One|already used|Fennwhistle/.test(w.mails[0].body));
+  check('Audit: the source and the reason kind only',
+        w.audits.join() === 'newClubForm: held ' + SRC + ' for review (another partner\'s club name); nothing imported');
+
+  console.log('\n  released: only under a name no other partner\'s club has');
+  w = sheetWorld(tabs());
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, sent('Stars'), KEY, true);
+  check('released with the name unchanged: refused as ERROR (the menu offers it again), nothing imported',
+        res === 'ERROR: release refused: the club name is already used by Stars (Partner One). First, ' + STEP + '.' &&
+        imported(w) === before && !w.notified.length && !w.mails.length &&
+        w.tabs.ReviewQueue.some(r => r[1] === 'Form response could not be processed' && r[4].startsWith(SRC + ': release refused')),
+        res);
+  w = sheetWorld(tabs());
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, sent(' ALPHA  club'), KEY, true);
+  check('…or changed to a name yet another partner\'s club has: refused, that club named',
+        res === 'ERROR: release refused: the club name is already used by Alpha Club (Partner Two). First, ' + STEP + '.' &&
+        imported(w) === before, res);
+  w = sheetWorld(tabs());
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, sent('Comet Club'), KEY, true);
+  check('the response row\'s club cell set to the new name, then released: imported under it, queued for Salesforce, synced',
+        /^new club Comet Club \(Partner Three\): 3 girls added, 0 reactivated, 0 for review \(released from hold by staff\)$/.test(res) &&
+        w.tabs.Roster.slice(-3).every(r => r[1] === P3 && r[2] === 'Comet Club') &&
+        w.tabs['SF Pending'][1].slice(1, 4).join('|') === 'Partner Three|Comet Club|Africa' &&
+        !w.tabs.Roster.some(r => r[1] === P3 && r[2] === 'Stars') && w.notified.join() === 'newClubForm', res);
+
+  console.log('\n  from the hold to the release, through FormLog, the ReviewQueue and the menu\'s plan');
+  w = sheetWorld(tabs());
+  w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, sent('Stars'), KEY);
+  const stamp = cellAt('2026-09-21 10:15:30.250', -240);
+  const planFor = (club, resolved) => {
+    w.tabs.ReviewQueue[1][5] = resolved;
+    const holds = w.ctx.holdDecisions_(w.tabs.ReviewQueue.slice(1).map((r, i) =>
+        ({ row: i + 2, issue: r[1], detail: r[4], resolved: r[5] })));
+    return w.ctx.planMissedRun_([{ which: 'ROSTER', row: 41, tab: 'Roster Form Responses', stamp, answers: sent(club) }],
+                                w.ctx.indexFormLog_(w.formLog), '2026-09-28', 7, holds);
+  };
+  let p = planFor('Stars', '');
+  check('open: the menu lists it as waiting for staff, never runs it',
+        p.waiting.length === 1 && p.waiting[0].note === 'waiting for staff: ReviewQueue row 2' && !p.run.length && !p.released.length);
+  p = planFor('Comet Club', 'release 2026-09-28 by Ryan: the partner renamed it');
+  check('the club cell edited and the item released: offered as released, under the new name (found by its Timestamp, not its key)',
+        p.released.length === 1 && p.released[0].what === 'Comet Club (Partner Three)' &&
+        p.released[0].note === 'released in ReviewQueue row 2' && !p.waiting.length && !p.run.length,
+        p.released.map(i => i.what).join());
+  p = planFor('Stars', 'resolved 2026-09-28 by Ryan: sent again as Comet Club');
+  check('sent again under the new name instead, the item resolved without "release": never run, named as closed',
+        p.closed.length === 1 && !p.released.length && !p.waiting.length && !p.run.length);
+
+  console.log('\n  clubs already on file, and a name in use together with other reasons');
+  w = sheetWorld(tabs());
+  res = w.ctx.handleNewClub_(newClub(P1, 'Stars', starGirls.concat(['Ivy Newperson'])), SRC, KEY);
+  check('a club that already has the name sends its list again with a new girl: an existing club, added as before',
+        /^existing club Stars \(Partner One\): 1 girls added/.test(res) && !w.mails.length &&
+        !w.tabs.ReviewQueue.some(r => r[1] === SN), res);
+  w = sheetWorld(tabs());
+  w.tabs.Roster = w.tabs.Roster.concat(rosterRows(P2, 'STARS', ['Dina Thornquibble', 'Eva Thornquibble']));
+  res = w.ctx.handleNewClub_(newClub(P2, 'Stars', ['Dina Thornquibble', 'Eva Thornquibble', 'Ivy Newperson']), SRC, KEY);
+  check('…and so does each of two clubs that share a name today: their names never change',
+        /^existing club Stars \(Partner Two\): 1 girls added/.test(res) && !w.tabs.ReviewQueue.some(r => r[1] === SN), res);
+  // a retired club (no active girl) with another partner's club's name: its roster is off the
+  // attendance forms, so the sync would refuse to add it back — held, never quietly reactivated
+  const retiredGirls = ['Dina Thornquibble', 'Eva Thornquibble'];
+  const retiredTabs = () => {
+    const t = tabs();
+    // removed before the response was sent (2026-09-21), so the replay guard lets a release bring them back
+    t.Roster = t.Roster.concat(rosterRows(P2, 'Stars', retiredGirls, 'inactive').map(r => (r[8] = '2026-09-10', r)));
+    return t;
+  };
+  const RETIRED_WHY = 'this club is on file with no active girl, and the club name is already used by Stars (Partner One)';
+  const KEY2 = 'ROSTER|w:2026-09-21 10:15:30.250|' + P2 + '|Stars';
+  for (const [label, list] of [['its old list and a new girl', retiredGirls.concat(['Ivy Newperson'])],
+                               ['a brand-new list', ['Ivy Newperson', 'Jo Newperson', 'Kim Newperson']]]) {
+    w = sheetWorld(retiredTabs());
+    const was = imported(w);
+    res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, newClub(P2, 'Stars', list), KEY2);
+    const held = w.tabs.ReviewQueue[1] || [];
+    check('a retired club sent again by its own partner (' + label + '), its name another partner\'s club\'s: held, ' +
+          'one item saying why, nobody reactivated, nothing queued for Salesforce, no sync',
+          res === 'HELD: club name already used by another partner — ReviewQueue [#' + SRC + ']' &&
+          w.tabs.ReviewQueue.length === 2 && held[1] === SN && held[2] === P2 && held[3] === 'Stars' &&
+          held[4].includes('Why: ' + RETIRED_WHY + '. That club, sent under the wrong partner (or another club on file): ') &&
+          clean(held[4]) && imported(w) === was && !w.notified.length && !w.synced, res);
+  }
+  w = sheetWorld(retiredTabs());
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, newClub(P2, 'Stars', retiredGirls), KEY2, true);
+  check('…released with the name unchanged: refused, its girls stay inactive',
+        res === 'ERROR: release refused: ' + RETIRED_WHY + '. First, ' + STEP + '.' &&
+        w.tabs.Roster.filter(r => r[1] === P2 && r[2] === 'Stars').every(r => r[6] === 'inactive') && !w.notified.length, res);
+  w = sheetWorld(retiredTabs());
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, newClub(P2, 'Comet Club', retiredGirls), KEY2, true);
+  check('…released under a name of its own: a new club (queued for Salesforce); the retired one stays retired',
+        /^new club Comet Club \(Partner Two\): 2 girls added, 0 reactivated, 0 for review \(released from hold by staff\)$/.test(res) &&
+        w.tabs['SF Pending'].length === 2 &&
+        w.tabs.Roster.filter(r => r[1] === P2 && r[2] === 'Stars').every(r => r[6] === 'inactive'), res);
+  w = sheetWorld(retiredTabs());
+  w.tabs.Roster.find(r => r[1] === P2 && r[4] === retiredGirls[0])[6] = 'active';
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41,
+                           newClub(P2, 'Stars', retiredGirls.concat(['Ivy Newperson'])), KEY2, true);
+  check('the one false hold (a club that only lost every girl and still has its roster on the form): once Ryan has set ' +
+        'one of its girls active, the release runs it as the existing club',
+        res === 'existing club Stars (Partner Two): 1 girls added, 1 reactivated, 0 for review (released from hold by staff)' &&
+        w.tabs['SF Pending'].length === 1, res);
+
+  // the club on file is the one under the wrong partner (or it has moved): moved first, a release
+  // with the name unchanged runs the held response as that existing club
+  w = sheetWorld(tabs());
+  const movedList = newClub(P3, 'Stars', starGirls.concat(['Ivy Newperson']));
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, movedList, KEY);
+  const heldRoster = JSON.stringify(w.tabs.Roster);
+  const unmoved = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, movedList, KEY, true);
+  check('a club on file under Partner One sent as new under Partner Three with its girls: held; released as it is: refused',
+        res.startsWith('HELD: club name already used by another partner; possible duplicate (names on file)') &&
+        unmoved.startsWith('ERROR: release refused: the club name is already used by Stars (Partner One). ') &&
+        JSON.stringify(w.tabs.Roster) === heldRoster, res + ' / ' + unmoved);
+  // what rename_club.py --new-partner writes (fresh rows: the fixture's are shared between worlds)
+  w.tabs.Roster = w.tabs.Roster.map(r => (r[1] === P1 && r[2] === 'Stars' ? [r[0], P3].concat(r.slice(2)) : r));
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, movedList, KEY, true);
+  check('…the club on file moved to Partner Three, then the same release: the existing club, its new girl added, ' +
+        'no second club and no Salesforce line',
+        res === 'existing club Stars (Partner Three): 1 girls added, 0 reactivated, 0 for review (released from hold by staff)' &&
+        w.tabs.Roster.filter(r => r[2] === 'Stars').length === 4 && w.tabs.Roster.every(r => !(r[1] === P1 && r[2] === 'Stars')) &&
+        w.tabs['SF Pending'].length === 1, res);
+
+  w = sheetWorld(tabs());
+  res = w.ctx.handleNewClub_(newClub(P3, 'Stars', starGirls), SRC, KEY);
+  const both = (w.tabs.ReviewQueue[1] || []);
+  check('the name and the girls of another partner\'s club: one item, the new issue, both reasons; FormLog says both',
+        res === 'HELD: club name already used by another partner; possible duplicate (names on file) — ReviewQueue [#' + SRC + ']' &&
+        w.tabs.ReviewQueue.length === 2 && both[1] === SN &&
+        both[4].includes('Why: the club name is already used by Stars (Partner One); 3 of the 3 names sent are active in Stars (Partner One). ' +
+                         'That club, sent under the wrong partner') && clean(both[4]) &&
+        w.audits.join() === 'newClubForm: held ' + SRC + ' for review (another partner\'s club name, names on file); nothing imported', res);
+  const typedOrg = club => newClub(fh.OTHER_PARTNER, club, ['Ivy Newperson', 'Jo Newperson'], { [HQ.NEW_PARTNER]: 'Fundacion Demo' });
+  const ORG_STEP = 'if it is that partner, set the response row\'s "' + HQ.PARTNER_NEW + '" cell to it exactly as the ' +
+                   'Partners tab spells it; if it is another organization, add it to the Partners tab with its region';
+  w = sheetWorld(tabs());
+  res = w.ctx.handleNewClub_(typedOrg('Stars'), SRC, KEY);
+  check('a name in use under an organization typed close to a partner on file: the item gives both steps, the organization first',
+        res.startsWith('HELD: club name already used by another partner; possible duplicate (organization name)') &&
+        (w.tabs.ReviewQueue[1] || [])[1] === SN &&
+        (w.tabs.ReviewQueue[1] || [])[4].includes('— first, ' + ORG_STEP + '; then ' + STEP + ', then resolved "release <date>'), res);
+  w = sheetWorld(tabs());
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, typedOrg('Stars'), KEY, true);
+  check('…and a release with neither fixed is refused for both',
+        res === 'ERROR: release refused: the club name is already used by Stars (Partner One); the organization was typed as ' +
+                '"Fundacion Demo", close to Fundación Demo on file. First, ' + STEP + '; and ' + ORG_STEP + '.', res);
+  w = sheetWorld(tabs());
+  w.tabs.Partners.push(['Fundacion Demo', 'Asia', 'another organization']);
+  res = w.ctx.runResponse_('ROSTER', w.sheet('Roster Form Responses'), 41, typedOrg('Stars'), KEY, true);
+  check('…the organization added to the Partners tab, the name unchanged: still refused, for the name alone',
+        res === 'ERROR: release refused: the club name is already used by Stars (Partner One). First, ' + STEP + '.' &&
+        !w.tabs.Roster.some(r => r[1] === 'Fundacion Demo'), res);
+  w = sheetWorld(tabs());
+  res = w.ctx.handleNewClub_(sent('Stars - Partner One'), SRC, KEY);
+  check('a new club typed as "<club> - <partner>" of a club on file: held with the same issue',
+        res.startsWith('HELD: club name already used by another partner — ') && (w.tabs.ReviewQueue[1] || [])[1] === SN &&
+        (w.tabs.ReviewQueue[1] || [])[4].includes('Why: the club name reads as Stars (Partner One) ('), res);
+  w = sheetWorld(tabs());
+  res = w.ctx.handleNewClub_(sent('Comet Club'), SRC, KEY);
+  check('a new club with a name of its own: imported as before', /^new club Comet Club \(Partner Three\): 3 girls added/.test(res) &&
+        !w.mails.length && w.tabs.ReviewQueue.length === 1, res);
+}
+
 console.log('\n  FormLog, the ReviewQueue decision and the menu plan');
-const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_ISSUES', 'isHeldResult_', 'isRetryResult_',
+const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'SAME_NAME_ISSUE', 'HOLD_ISSUES', 'RETRY_PREFIXES', 'REVIEW_ISSUES', 'isHeldResult_', 'isRetryResult_',
                    'heldForReview_', 'indexFormLog_', 'holdDecisions_', 'planMissedRun_', 'missedPreviewText_',
                    'responseKeyOf_', 'responseDone_', 'sentAtOfKey_', 'sentAtOfStamp_', 'releasedBy_',
                    'heldClubReviewItem_', 'reviewDigest_', 'closedHoldsText_'],
@@ -1405,9 +1828,13 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
   // and closes the item (integration review, rollout-safety F1/F2): the RUNBOOK must say so.
   const rbDoc = fs.readFileSync(path.join(REPO, 'docs', 'RUNBOOK.md'), 'utf8');
   const heldRb = (rbDoc.split('**Held new clubs and a rollback')[1] || '').split('\n\n')[0].replace(/\s+/g, ' ');
-  check('RUNBOOK: a rollback below the duplicate-club guard names held new clubs and how to find that code',
-        heldRb.includes('`' + hd.HOLD_PREFIX + '`') && heldRb.includes(hd.HOLD_ISSUE) &&
+  check('RUNBOOK: a rollback below the duplicate-club guard names held new clubs (both issues) and how to find that code',
+        heldRb.includes('`' + hd.HOLD_PREFIX + '`') && heldRb.includes(hd.HOLD_ISSUE) && heldRb.includes(hd.SAME_NAME_ISSUE) &&
         heldRb.includes('git grep -q HOLD_PREFIX') && heldRb.includes('never write `release`'), heldRb.slice(0, 60));
+  const sameRb = (rbDoc.split('**Same-name holds and a rollback')[1] || '').split('\n\n')[0].replace(/\s+/g, ' ');
+  check('RUNBOOK: a rollback below the same-name check says how to find that code and what it does to those holds',
+        sameRb.includes('git grep -q SAME_NAME_ISSUE') && sameRb.includes(hd.SAME_NAME_ISSUE) &&
+        sameRb.includes('never imports') && sameRb.includes('imported again'), sameRb.slice(0, 60));
   const deployRb = (rbDoc.split('\n## Apps Script deploy')[1] || '').split('\n## ')[0].replace(/\s+/g, ' ');
   check('RUNBOOK Apps Script deploy: the rollback names a target that changes something (986a325) and the held caveat',
         deployRb.includes('git checkout 986a325 -- appsscript') && deployRb.includes('held new clubs') &&
@@ -1430,6 +1857,12 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
                                       [{ kind: 'club', text: 'the club name is close to X' }]);
   check('the hold item\'s issue is HOLD_ISSUE, first in REVIEW_ISSUES (a club waiting to be enrolled is the most urgent)',
         item.issue === hd.HOLD_ISSUE && hd.REVIEW_ISSUES[0] === hd.HOLD_ISSUE && item.dedupeKey === tab + '!41');
+  const sameItem = hd.heldClubReviewItem_('Partner Three', 'Stars', tab + '!52', '2026-09-23 09:00:00',
+                                          [{ kind: 'samename', text: 'the club name is already used by Stars (Partner One)' }]);
+  check('a hold for a name in use has SAME_NAME_ISSUE, second in REVIEW_ISSUES; both are hold issues',
+        sameItem.issue === hd.SAME_NAME_ISSUE && hd.REVIEW_ISSUES[1] === hd.SAME_NAME_ISSUE && sameItem.dedupeKey === tab + '!52' &&
+        hd.HOLD_ISSUES.join('|') === hd.HOLD_ISSUE + '|' + hd.SAME_NAME_ISSUE &&
+        hd.SAME_NAME_ISSUE === 'Club name already used by another partner — ask for a different name');
   const rq = (row, issue, detail, resolved) => ({ row, issue, detail, resolved: resolved || '' });
   const detail = (r, sent) => r + ' (sent ' + sent + '): nothing imported … [#' + r + ']';
   const decisions = hd.holdDecisions_([
@@ -1441,6 +1874,9 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
     rq(10, hd.HOLD_ISSUE, detail(tab + '!46', '2026-09-22 11:00:00') + ' typed after the tag', 'release'),
     rq(11, hd.HOLD_ISSUE, detail(tab + '!47', '2026-09-22 11:30:00'), 'resolved: not a club'),
     rq(12, hd.HOLD_ISSUE, detail(tab + '!47', '2026-09-22 11:30:00'), ' RELEASE: checked with the partner'),
+    rq(16, hd.SAME_NAME_ISSUE, detail(tab + '!52', '2026-09-23 09:00:00')),
+    rq(17, hd.SAME_NAME_ISSUE, detail(tab + '!53', '2026-09-23 09:30:00'), 'release 2026-09-28 by Ryan: renamed by the partner'),
+    rq(18, hd.SAME_NAME_ISSUE, detail(tab + '!54', '2026-09-23 10:00:00'), 'resolved 2026-09-28 by Ryan: sent again under a new name'),
   ]);
   const st = t => decisions[tab + '!' + t] && decisions[tab + '!' + t].state;
   check('holdDecisions_: empty → open; "release …" → release; any other text → closed ("released" is not "release")',
@@ -1448,6 +1884,27 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
   check('holdDecisions_: other issues, and an item typed after its tag, are ignored; the last item wins',
         !decisions[tab + '!45'] && !decisions[tab + '!46'] && st(47) === 'release' && decisions[tab + '!47'].row === 12 &&
         decisions[tab + '!41'].sentAt === '2026-09-21 10:15:30');
+  check('holdDecisions_: a same-name hold is decided the same way (open, release, closed)',
+        st(52) === 'open' && st(53) === 'release' && st(54) === 'closed' && decisions[tab + '!53'].row === 17);
+  // an item added back by hand (docs/RUNBOOK.md "Missed form responses", item 5) is typed: no long dash on a keyboard
+  const typed = [hd.SAME_NAME_ISSUE.replace(' — ', ' - '), hd.SAME_NAME_ISSUE.replace(' — ', ' -- '),
+                 hd.SAME_NAME_ISSUE.replace(' — ', ' – '), hd.SAME_NAME_ISSUE.replace(' — ', '-'),
+                 hd.SAME_NAME_ISSUE.toLowerCase().replace(' — ', ' - '), '  ' + hd.SAME_NAME_ISSUE.replace(/ /g, '  ') + ' ',
+                 hd.HOLD_ISSUE.toLowerCase(), hd.HOLD_ISSUE.toUpperCase()];
+  const byHand = hd.holdDecisions_(typed.map((issue, i) =>
+      rq(30 + i, issue, detail(tab + '!' + (60 + i), '2026-09-24 09:00:00'), 'release 2026-09-28 by Ryan: item restored')));
+  check('holdDecisions_: a hold issue typed by hand — a hyphen, two, an en dash, no spaces round it, other capitals or ' +
+        'spacing — is still that hold issue',
+        typed.every((_, i) => (byHand[tab + '!' + (60 + i)] || {}).state === 'release'),
+        typed.filter((_, i) => !byHand[tab + '!' + (60 + i)]).join(' | '));
+  const notHolds = hd.holdDecisions_(['Club name already used by another partner', 'ask for a different name',
+                                      'New club held', hd.SAME_NAME_ISSUE.replace('partner', 'partners'), hd.HOLD_ISSUE + ' - released']
+      .map((issue, i) => rq(40 + i, issue, detail(tab + '!' + (70 + i), '2026-09-24 09:00:00'), 'release')));
+  check('…but only the whole issue: half of one, or one with other words, is no hold item; the tag and "release" are still needed',
+        !Object.keys(notHolds).length &&
+        !Object.keys(hd.holdDecisions_([rq(50, typed[0], 'typed without its tag', 'release')])).length &&
+        (hd.holdDecisions_([rq(51, typed[0], detail(tab + '!80', '2026-09-24 09:00:00'), 'ok release')])[tab + '!80'] || {}).state === 'closed',
+        Object.keys(notHolds).join());
 
   const rows = [R(41, '2026-09-21 10:15:30.250', 'Alpha Club'), R(42, '2026-09-22 09:00:00.100', 'Bravo Club'),
                 R(43, '2026-09-22 09:30:00.100', 'Charlie Club'), R(44, '2026-09-22 10:00:00.100', 'Delta Club'),
@@ -1502,6 +1959,18 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'RETRY_PREFIXES', 'REVIEW_I
   check('the Monday e-mail lists a hold first, with its response row; the new club is not on file so it is masked',
         digest.lines[2] === hd.HOLD_ISSUE + ': 1 open, 1 new, oldest 6 day(s)' &&
         digest.lines[3] === '  - row 5 · raised 2026-09-22 · Fixture Partner Alpha / (club not on file) · ' + tab + '!41', digest.lines[3]);
+  const digest2 = hd.reviewDigest_([
+      { row: 9, raised: '2026-09-24', issue: 'Removal did not match anyone', partner: 'Partner One', club: 'Stars', detail: 'x', resolved: '' },
+      { row: 16, raised: '2026-09-23', issue: hd.SAME_NAME_ISSUE, partner: 'Partner Three', club: 'Stars',
+        detail: detail(tab + '!52', '2026-09-23 09:00:00'), resolved: '' },
+      { row: 5, raised: '2026-09-22', issue: hd.HOLD_ISSUE, partner: 'Partner One', club: 'Comet Club',
+        detail: detail(tab + '!41', '2026-09-21 10:15:30'), resolved: '' }], today,
+      { partners: { 'partner one': 'Partner One', 'partner three': 'Partner Three' }, clubs: { stars: 'Stars' } });
+  const issueLines = digest2.lines.filter(l => / open/.test(l) && !l.startsWith('3 open'));
+  check('…and a name-in-use hold right after it, like any other item: its row, partner, the name (on file, under the other partner), the response row',
+        issueLines.join('|') === hd.HOLD_ISSUE + ': 1 open, 1 new, oldest 6 day(s)|' +
+            hd.SAME_NAME_ISSUE + ': 1 open, 1 new, oldest 5 day(s)|Removal did not match anyone: 1 open, 1 new, oldest 4 day(s)' &&
+        digest2.lines.includes('  - row 16 · raised 2026-09-23 · Partner Three / Stars · ' + tab + '!52'), issueLines.join(' | '));
 }
 
 console.log('\n  the menu run with held rows (processMissedResponses, runConfirmed_; Google services stubbed)');
@@ -1625,6 +2094,16 @@ console.log('\n  guards');
   const section = (rb.split('## Working the ReviewQueue')[1] || '').split('\n## ')[0];
   const missing = pr.REVIEW_ISSUES.filter(i => !section.includes('**' + i + '**'));
   check('docs/RUNBOOK.md "Working the ReviewQueue" has a staff action for each', !missing.length, missing.join(' | '));
+  const SAME = loadGs(['SAME_NAME_ISSUE'], ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']).SAME_NAME_ISSUE;
+  const sameRow = (section.split('\n').find(l => l.startsWith('| **' + SAME + '**')) || '').replace(/\s+/g, ' ');
+  check('…the same-name row covers a club on file under the wrong partner (move, then release unchanged) and a club on ' +
+        'file with no active girl sent again (held; the one false hold and Ryan\'s way out)',
+        sameRow.includes('"Moving a club to another partner"') && sameRow.includes('runs as that existing club') &&
+        sameRow.includes('this club is on file with no active girl') && sameRow.includes('have active girls are not affected'),
+        sameRow.slice(0, 80));
+  const missedRb = (rb.split('## Missed form responses')[1] || '').split('\n## ')[0].replace(/\s+/g, ' ');
+  check('docs/RUNBOOK.md "Missed form responses" says how exactly a hand-restored hold item\'s issue must be typed',
+        missedRb.includes('add the item back by hand with its issue') && missedRb.includes('any dash will do'), '');
   const fhSrc = fs.readFileSync(path.join(loadGs.GS_DIR, 'FormHandlers.gs'), 'utf8');
   check('the weekly trigger calls sendSfPendingDigest by name, and it exists',
         /newTrigger\('sendSfPendingDigest'\)/.test(fhSrc) && /^function sendSfPendingDigest\(\)/m.test(fhSrc));
