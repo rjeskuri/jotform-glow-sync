@@ -645,6 +645,9 @@ def main(argv=None, client=None, plan_of=sync_plan):
     print(f"Roster: {roster[0]} rows ({shown(args.roster)})   fetched {stamp}")
     result = {"fetched_at_utc": stamp, "resolver_commit": resolver_commit(),
               "roster_export": {"path": shown(args.roster), "rows": roster[0]},
+              # every flag a row of this file can carry (the two name flags without ":<n>"),
+              # for the loader to check its own lists against
+              "flag_vocabulary": sorted(FLAGS),
               "forms": {}, "no_ticks": {}, "rows": []}
     for region in regions:
         form_id = forms.REGIONALS[region]

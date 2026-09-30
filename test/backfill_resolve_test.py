@@ -577,12 +577,49 @@ class BackfillResolve(unittest.TestCase):
         self.assertIn("   2 " + line, said([submission("9001", {"10": [AMARA.upper(), BEA.lower()]})]))
         self.assertNotIn(line, said([submission("9001", {"10": [AMARA, NADIA]})]))
 
-    def test_the_flag_list_is_the_contract(self):
-        self.assertEqual(br.FLAGS, [
-            "multi_club", "q5_differs", "q18_empty", "q18_differs", "typed_era", "bare_shared_name",
-            "retired_club", "no_account_name", "date_before_2026_09", "date_missing",
-            "name_left_roster", "name_unknown_to_roster",          # the only two written with ":<n>"
-            "name_has_comma", "name_repeats", "module_translated", "module_unresolved"])
+    def test_the_flag_vocabulary_is_the_contract_and_exactly_what_is_emitted(self):
+        # the loader refuses a flag it does not know, so the words are pinned here, and the
+        # file says them itself (flag_vocabulary); only the two name flags carry ":<n>"
+        contract = ["multi_club", "q5_differs", "q18_empty", "q18_differs", "typed_era", "bare_shared_name",
+                    "retired_club", "no_account_name", "date_before_2026_09", "date_missing",
+                    "name_left_roster", "name_unknown_to_roster", "name_has_comma", "name_repeats",
+                    "module_translated", "module_unresolved"]
+        self.assertEqual(br.FLAGS, contract)                # the order a row lists them in
+        gone = {"158": {"name": "roster158", "order": "9", "text": "Gone Club",
+                        "type": "control_checkbox", "answer": [AMARA]}}
+        comma = "Marrowgate, Beatrice"
+        subs = [submission("9001", {"10": [BEA], "11": [DALIA]}, q5="Alpha ClubStars - Partner One",
+                           picks=("Alpha Club", "Stars - Partner One"), q18=f"{BEA}{DALIA}"),
+                submission("9002", {"12": [FATIMA]}, q5="stars", picks=(), q18=""),
+                submission("9003", {"13": [HANA]}, q5="Old Club", picks=("Old Club",), date=("2026", "08", "20")),
+                submission("9004", {}, q5="Gone Club", picks=("Gone Club",), q18=AMARA, extra=gone, date=None),
+                submission("9005", {"10": [NADIA, STRANGER, comma, AMARA, AMARA]}, q98=TRANSLATED),
+                submission("9006", {"10": [CHIARA]}, year=None)]
+        out, code, result = self.run_main(FakeJotform({AFRICA: subs}))
+        self.assertIsNone(code, out)
+        self.assertEqual(result["flag_vocabulary"], sorted(contract))
+        self.assertEqual(list(result), ["fetched_at_utc", "resolver_commit", "roster_export", "flag_vocabulary",
+                                        "forms", "no_ticks", "rows"])
+        emitted = [flag for row in result["rows"] for flag in row["flags"]]
+        self.assertEqual(sorted({flag.split(":")[0] for flag in emitted}), result["flag_vocabulary"])
+        counted = {"name_left_roster", "name_unknown_to_roster"}
+        for flag in emitted:
+            name, colon, n = flag.partition(":")
+            with self.subTest(flag=flag):
+                self.assertEqual(bool(colon), name in counted)
+                if colon:
+                    self.assertRegex(n, r"^[1-9][0-9]*$")
+        self.assertIn("name_left_roster:1", emitted)
+        self.assertIn("name_unknown_to_roster:2", emitted)
+        # a row lists its flags in the contract's order
+        for row in result["rows"]:
+            names = [flag.split(":")[0] for flag in row["flags"]]
+            self.assertEqual(names, [f for f in contract if f in names])
+        # the per-form tables count exactly these words, every one of them, by the bare name
+        for region, form in result["forms"].items():
+            for table in ("flags", "flag_submissions"):
+                self.assertEqual(sorted(form[table]), result["flag_vocabulary"], (region, table))
+        self.assertTrue(all(n > 0 for n in result["forms"]["Africa"]["flags"].values()))
 
     # ---- no ticks, the range, the ledger
     def test_no_tick_means_no_row_and_the_id_is_listed(self):
@@ -738,8 +775,8 @@ class BackfillResolve(unittest.TestCase):
         self.assertEqual(pages, [{"limit": 2, "offset": n} for n in (0, 2, 4, 6)])
         self.assertFalse([a for a in dir(client) if a.startswith(("post", "put", "delete"))])
 
-        self.assertEqual(list(result), ["fetched_at_utc", "resolver_commit", "roster_export", "forms",
-                                        "no_ticks", "rows"])
+        self.assertEqual(list(result), ["fetched_at_utc", "resolver_commit", "roster_export", "flag_vocabulary",
+                                        "forms", "no_ticks", "rows"])
         self.assertRegex(result["fetched_at_utc"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertRegex(result["resolver_commit"], r"^([0-9a-f]{7,}(-dirty)?|unknown)$")
         self.assertEqual(result["roster_export"]["rows"], SHEET_ROWS)
