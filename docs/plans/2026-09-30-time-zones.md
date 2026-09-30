@@ -194,3 +194,25 @@ None of these is in the other session's set: `sync_attendance_form.py`, `form_st
 ## Live-system note
 - Nothing here writes to Jotform, the sheet or Salesforce during the work.
 - The `auto_sync.py` and workflow changes reach the live runner only when `main` is pushed. They change only how SyncLog `when` and local log names are written. They get pushed only with Ryan's go.
+
+## As built (2026-09-30) - deviations from the plan above
+- The Asia/Tokyo row starts at 2026-09-29T12:37Z (when `/etc/localtime` changed), not 00:00Z: the
+  same activity-free gap, and the stronger evidence.
+- The commit check covers every committer except "GitHub" (merges made on github.com), not only
+  the local git user: the August evidence was committed under another name. `--ignore-commit`
+  is the escape for a commit not made on this Mac.
+- After the review (31 agents, 20 confirmed findings):
+  - the recount moved into `update_rows()` so its refusals are tested;
+  - the default window reaches back to the last logged day when the log is behind, and every
+    unrecomputed day from the log's start (last 29 days) is checked, not only the day before `--since`;
+  - rows older than 29 days, or read from another folder, are held unless `--rewrite-old`;
+  - the switch suggestion is bounded by the last old-clock and first new-clock commits (`zone`
+    refuses either side), uses the idle stretch before the session holding the clock change,
+    and never falls back to "now";
+  - commit subjects go to the day of the block they were made in;
+  - `append_zone` never merges rows;
+  - `read_zones` refuses a row with extra columns;
+  - `tools/upload_roster.py`'s rebuild hint passes `--tz`.
+- The September recount under the final rules equals the one above (20.50 h for Sep 1-28);
+  the descriptions of 09-01, 09-02, 09-04, 09-12 and 09-13 were redrafted per day and reviewed.
+

@@ -115,7 +115,7 @@ def main():
         sys.exit(f"Live tabs already hold data: {busy}.\nEither maintain the "
                  "roster from the sheet's own GLOW menu, or export the live tabs "
                  "(sheets_client.py export-all DIR), rebuild with "
-                 "build_roster_offline.js --existing DIR, and re-run with --replace.")
+                 "build_roster_offline.js --existing DIR --tz <the sheet's zone>, and re-run with --replace.")
 
     # staleness check: every ID in the sheet must be in the local build
     if live_rows["Roster"]:

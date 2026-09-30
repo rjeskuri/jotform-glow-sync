@@ -35,7 +35,8 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   `worklog/worklog.csv` — 1-3 plain, client-facing sentences on what was done; no girls' or
   mentors' names, no jargon. Never edit `hours` of `auto` rows; Ryan adds `manual` rows. If
   `update` refuses after a zone change, record it with `worklog.py zone` (check the suggested
-  moment against when Ryan travelled) - never run `update` under a hand-set `TZ` to get past it.
+  moment against when Ryan travelled). `--drop-stale` / `--rewrite-old` only when Ryan's
+  correction calls for them (RUNBOOK "Work log and invoices").
 - Plan mode for anything beyond a one-line fix; the plan is committed under `docs/plans/` first;
   intents in `docs/intent/`, decisions in `docs/DECISIONS.md`. Review against `REVIEW.md`.
 

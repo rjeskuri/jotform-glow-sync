@@ -748,10 +748,11 @@ Code's session transcripts: all sessions merged into one timeline, cut into bloc
 nothing happened for 30 minutes, a block counting only if Ryan wrote in it (an agent working
 alone is not billed), each block on the day it **started** (a session past midnight stays on its
 first day), each day rounded to the quarter hour. It keeps a written description, fills an empty
-one from that day's commits, never touches `manual` rows, and recomputes only the last 14 days
-unless given `--since` — Claude Code deletes a session's transcript about 30 days after its last
-activity, so run `update` at the end of every session (CLAUDE.md asks Claude to). Work outside
-Claude Code: `python3 tools/worklog.py add --date 2026-09-29 --hours 1.5 --description "…"`.
+one from the commits made during that day's blocks, and never touches `manual` rows. It
+recomputes the last 14 days, reaching back to the last logged day when the log is behind (never
+past 29 days), or from `--since`. Claude Code deletes a session's transcript about 30 days after
+its last activity, so run `update` at the end of every session (CLAUDE.md asks Claude to). Work
+outside Claude Code: `python3 tools/worklog.py add --date 2026-09-29 --hours 1.5 --description "…"`.
 At month end: `python3 tools/worklog.py export --month 2026-09 [--rate 60] --out invoice-2026-09.csv`.
 
 **Time zones.** Days are counted on the clock the Mac showed at the time, which moves when Ryan
@@ -762,19 +763,29 @@ does. `update` refuses in two cases, and says what to run:
 - the Mac's own zone (read from `/etc/localtime`, whatever `TZ` the shell sets) is not the
   timeline's zone now → record the switch:
   `python3 tools/worklog.py zone --since <instant> --zone <IANA name>`. Any moment between the
-  last session on the old clock and the first on the new one gives the same hours; the tool
-  suggests the clock-change time or the first long idle stretch after the last commit on the old
-  clock, and refuses a moment inside a session or before a commit made on the old clock. Prefer
+  last session on the old clock and the first on the new one gives the same hours. The tool
+  bounds it by the last commit made on the old clock and the first made on the new one, and
+  suggests the clock-change time (or the idle stretch just before the session after it, or the
+  longest idle stretch) - check it against when you actually travelled. `zone` refuses a moment
+  before a commit made on the old clock, after one made on the new clock, or inside a session
+  (unless the clock changed during that session: then any moment between its two commits). Prefer
   the IANA name: it follows daylight saving;
-- a commit's recorded offset disagrees with the timeline (a trip that was never recorded) → fix
-  the timeline, or leave one stray commit out with `--ignore-commit HASH`.
+- a commit's recorded offset disagrees with the timeline → a trip was never recorded. If the Mac
+  went away and came back, add both switches to `worklog/timezones.csv` by hand, in time order
+  (`zone` records only a switch after the last row). `--ignore-commit HASH` is only for a commit
+  not made on this Mac.
 
 `python3 tools/worklog.py zone` (no arguments) shows the timeline, the Mac's zone and the commit
-offsets since the last row. When a correction moves work to another day, `update` refuses to
-drop the row that lost all its work until `--drop-stale` is given (only for days of the last 29
-days read from this repo's transcripts — an older day may just have expired, and is kept); move
-its written description to the new day by hand, and refresh the descriptions of the days whose
-blocks changed. The 2026-09-30 correction (`docs/plans/2026-09-30-time-zones.md`) re-cut
+offsets since the last row.
+
+**What `update` will not do without being asked.** It refuses when a day before the window would
+change (work that moved across the window's edge, or a day never logged) and names the `--since`
+to use. It refuses to drop a row that lost all its work until `--drop-stale` is given (then move
+that row's written description to the new day by hand, and refresh the descriptions of the days
+whose blocks changed). A row older than 29 days, or any row when reading another folder with
+`--transcripts`, is never dropped and never changed - one of its sessions may have expired - and
+is reported as kept; `--rewrite-old` lets a deliberate correction through when the transcripts are
+known to be complete. The 2026-09-30 correction (`docs/plans/2026-09-30-time-zones.md`) re-cut
 September this way: Sep 1-14 had been counted at +08:00 although the Mac was on +02:00/+03:00.
 
 ## Apps Script deploy

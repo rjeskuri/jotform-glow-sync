@@ -2330,11 +2330,78 @@ class WorkLog(unittest.TestCase):
         old = [self.commit("2026-08-20T10:00", 5)]                               # before the window / timeline
         self.assertEqual(worklog.commit_problems(old, zones, start), [])
 
+    def in_zones(self, fn, zones=("UTC", "Asia/Tokyo", "Pacific/Pago_Pago")):
+        """fn() under each process TZ (restored afterwards) -> the list of results."""
+        saved, out = os.environ.get("TZ"), []
+        try:
+            for tz in zones:
+                os.environ["TZ"] = tz
+                time.tzset()
+                out.append(fn())
+        finally:
+            if saved is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = saved
+            time.tzset()
+        return out
+
     def test_commit_subjects_are_dated_by_the_timeline(self):
         zones = self.zones(("2026-09-03T00:00", "+03:00"), ("2026-09-17T00:00", "+08:00"))
         commits = [(self.utc("2026-09-12T17:23"), dt.timedelta(hours=3), "a", "Evening rollout", "Ryan"),
-                   (self.utc("2026-08-01T10:00"), dt.timedelta(hours=1), "b", "Before the timeline", "Ryan")]
-        self.assertEqual(worklog.subjects_by_day(commits, zones), {"2026-09-12": ["Evening rollout"]})
+                   (self.utc("2026-09-12T22:30"), dt.timedelta(hours=3), "b", "After midnight", "Ryan"),
+                   # recorded at +09 but the timeline says +08: the timeline wins (23:30 on 09-20, not 00:30 on 09-21)
+                   (self.utc("2026-09-20T15:30"), dt.timedelta(hours=9), "c", "Late", "Ryan"),
+                   (self.utc("2026-08-01T10:00"), dt.timedelta(hours=1), "d", "Before the timeline", "Ryan")]
+        want = {"2026-09-12": ["Evening rollout"], "2026-09-13": ["After midnight"], "2026-09-20": ["Late"]}
+        for got in self.in_zones(lambda: worklog.subjects_by_day(commits, zones)):
+            self.assertEqual(got, want)
+
+    def test_a_commit_goes_to_the_day_its_block_started(self):
+        zones = self.zones(("2026-09-29T00:00", "+09:00"))
+        evts = [(self.utc("2026-09-29T13:15"), True), (self.utc("2026-09-29T15:36"), False)]   # 22:15-00:36 JST
+        for step in range(15, 141, 15):                                                         # one long session
+            evts.append((self.utc("2026-09-29T13:15") + dt.timedelta(minutes=step), False))
+        days = worklog.day_blocks(sorted(evts), zones)
+        commit = (self.utc("2026-09-29T15:40"), dt.timedelta(hours=9), "e", "Past midnight", "Ryan")   # 00:40 on 09-30
+        self.assertEqual(worklog.subjects_by_day([commit], zones, days), {"2026-09-29": ["Past midnight"]})
+        self.assertEqual(worklog.subjects_by_day([commit], zones), {"2026-09-30": ["Past midnight"]})
+
+    def test_events_stay_utc_under_any_process_time_zone(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = self.transcript(d, [("2026-09-26T01:00:00.000Z", True), ("2026-09-26T20:00:00.000Z", True)])
+            runs = self.in_zones(lambda: worklog.events([path]))
+            after, end = self.utc("2026-09-26T00:00"), self.utc("2026-09-27T12:00")
+            picks = self.in_zones(lambda: worklog.suggest_since(worklog.events([path]), after, end))
+        for evts in runs:
+            self.assertTrue(all(t.utcoffset() == dt.timedelta(0) for t, _ in evts))
+            self.assertIs(evts[0][0].tzinfo, dt.timezone.utc)
+        self.assertTrue(picks[0] == picks[1] == picks[2])
+
+    def test_system_zone_reads_etc_localtime_not_the_shell(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            link = os.path.join(d, "localtime")
+            os.symlink("/var/db/timezone/zoneinfo/Europe/London", link)       # need not exist
+            stamp = 1790000000
+            os.utime(link, (stamp, stamp), follow_symlinks=False)
+            plain = os.path.join(d, "plain")
+            open(plain, "w").close()
+            odd = os.path.join(d, "odd")
+            os.symlink("/nowhere/Asia/Tokyo", odd)
+            saved = worklog.LOCALTIME
+            try:
+                worklog.LOCALTIME = link
+                tz, name, changed = self.in_zones(worklog.system_zone, ("Asia/Tokyo",))[0]
+                self.assertEqual((str(tz), name), ("Europe/London", "Europe/London"))
+                self.assertEqual(changed, dt.datetime.fromtimestamp(stamp, dt.timezone.utc))
+                for fallback in (plain, odd):
+                    worklog.LOCALTIME = fallback
+                    _, name, changed = worklog.system_zone()
+                    self.assertEqual((name, changed), (None, None))
+            finally:
+                worklog.LOCALTIME = saved
 
     def test_where_a_zone_change_may_be_recorded(self):
         from zoneinfo import ZoneInfo
@@ -2342,28 +2409,164 @@ class WorkLog(unittest.TestCase):
         zones = self.zones(("2026-09-17T00:00", "+08:00"))
         now = self.utc("2026-09-30T02:00")
         evts = [(self.utc("2026-09-28T15:55"), True), (self.utc("2026-09-29T13:15"), True)]
-        commits = [self.commit("2026-09-28T14:43", 8), self.commit("2026-09-29T14:00", 9)]
-        ok = self.utc("2026-09-29T02:00")
-        self.assertEqual(worklog.since_problems(ok, tokyo, zones, evts, commits, now), [])
-        inside = worklog.since_problems(self.utc("2026-09-29T13:30"), tokyo, zones, evts, commits, now)
+        commits = [self.commit("2026-09-28T14:43", 8), self.commit("2026-09-29T14:00", 9, "fff1111")]
+        check = worklog.since_problems
+        self.assertEqual(check(self.utc("2026-09-29T02:00"), tokyo, zones, evts, commits, now), [])
+        old = check(self.utc("2026-09-28T12:00"), tokyo, zones, evts, commits, now)
+        self.assertTrue(any("old clock" in p for p in old))                          # 14:43 was still +08
+        new = check(self.utc("2026-09-29T14:30"), tokyo, zones, evts, commits, now)
+        self.assertTrue(any("new clock" in p and "fff1111" in p for p in new))       # 14:00 was already +09
+        # inside a session with no commits around it: refused
+        quiet = [self.commit("2026-09-20T01:00", 8)]
+        inside = check(self.utc("2026-09-29T13:30"), tokyo, zones, evts, quiet, now)
         self.assertTrue(any("inside a session" in p for p in inside))
-        early = worklog.since_problems(self.utc("2026-09-28T12:00"), tokyo, zones, evts, commits, now)
-        self.assertTrue(any("old clock" in p for p in early))                   # 14:43 was still +08
-        self.assertTrue(any("future" in p for p in
-                            worklog.since_problems(self.utc("2026-10-02T00:00"), tokyo, zones, evts, commits, now)))
+        # ...but a clock change during a session, between its old- and new-clock commits, is fine
+        busy = [(self.utc("2026-10-05T10:00"), True)] + [
+            (self.utc("2026-10-05T10:00") + dt.timedelta(minutes=m), False) for m in range(10, 121, 10)]
+        mid = [self.commit("2026-10-05T10:30", 8), self.commit("2026-10-05T11:30", 9, "fff2222")]
+        self.assertEqual(check(self.utc("2026-10-05T11:00"), tokyo, zones, busy, mid, self.utc("2026-10-06T00:00")), [])
+        self.assertTrue(any("future" in p for p in check(self.utc("2026-10-02T00:00"), tokyo, zones, evts, commits, now)))
         self.assertTrue(any("not after the last row" in p for p in
-                            worklog.since_problems(self.utc("2026-09-10T00:00"), tokyo, zones, evts, commits, now)))
+                            check(self.utc("2026-09-10T00:00"), tokyo, zones, evts, commits, now)))
 
-    def test_the_day_before_the_window_must_not_move(self):
-        rows = [{"date": "2026-09-01", "hours": "2.25", "blocks": "16:23-17:50", "source": "auto"},
-                {"date": "2026-09-02", "hours": "3.75", "blocks": "x", "source": "auto"}]
-        self.assertIsNone(worklog.edge_problem(rows, {"2026-09-01": (2.25, "16:23-17:50", "+08:00")},
-                                               dt.date(2026, 9, 2)))
-        msg = worklog.edge_problem(rows, {"2026-09-01": (2.75, "10:23-11:50", "+02:00")}, dt.date(2026, 9, 2))
-        self.assertIn("earlier --since", msg)
-        self.assertIn("earlier --since", worklog.edge_problem(rows, {}, dt.date(2026, 9, 2)))       # work vanished
-        # the log never covered the day before (August): no check
-        self.assertIsNone(worklog.edge_problem(rows, {"2026-08-31": (1.0, "x", "+02:00")}, dt.date(2026, 9, 1)))
+    def test_the_suggested_switch_is_one_zone_accepts_and_update_then_passes(self):
+        from zoneinfo import ZoneInfo
+        tokyo = ZoneInfo("Asia/Tokyo")
+        zones = self.zones(("2026-09-17T00:00", "+08:00"))
+        u = self.utc
+
+        def session(start, minutes, ryan=True):
+            t0 = u(start)
+            return [(t0, ryan)] + [(t0 + dt.timedelta(minutes=m), False) for m in range(10, minutes + 1, 10)]
+
+        def accepted(evts, commits, now, changed=None):
+            msg = worklog.mac_zone_problem(zones, tokyo, "Asia/Tokyo", now, evts, changed, commits=commits)
+            m = re.search(r"--since (\S+)\+00:00", msg)
+            self.assertIsNotNone(m, msg)
+            since = u(m.group(1))
+            self.assertEqual(worklog.since_problems(since, tokyo, zones, evts, commits, now), [], msg)
+            timeline = zones + [(since, tokyo, "Asia/Tokyo", "")]
+            self.assertEqual(worklog.commit_problems(commits, timeline, zones[0][0]), [])
+            return since
+
+        # the clock changed 5 min before an arrival session that commits on the new clock (a short hop)
+        evts = session("2026-10-05T08:00", 120) + session("2026-10-05T15:00", 120)
+        commits = [self.commit("2026-10-05T10:00", 8), self.commit("2026-10-05T16:30", 9, "fff3333")]
+        since = accepted(evts, commits, u("2026-10-05T18:00"), changed=u("2026-10-05T14:55"))
+        self.assertTrue(u("2026-10-05T10:00") < since < u("2026-10-05T15:00"))
+        # the clock changed 10 min before a session; a session with no commits sat before the flight:
+        # the switch is after that session, not the night before it
+        evts = session("2026-10-05T08:00", 120) + session("2026-10-06T00:00", 115) + session("2026-10-06T16:10", 60)
+        commits = [self.commit("2026-10-05T10:00", 8)]
+        since = accepted(evts, commits, u("2026-10-06T17:30"), changed=u("2026-10-06T16:00"))
+        self.assertEqual(since, u("2026-10-06T09:00"))
+        # no clock-change time: the longest idle stretch, never "now"
+        since = accepted(evts, commits, u("2026-10-06T17:30"))
+        self.assertTrue(u("2026-10-06T01:55") < since < u("2026-10-06T16:10"))
+        # the clock changed during a session with commits on both clocks: no idle moment, no command
+        evts = session("2026-10-05T10:00", 120)
+        commits = [self.commit("2026-10-05T10:30", 8), self.commit("2026-10-05T11:30", 9, "fff4444")]
+        msg = worklog.mac_zone_problem(zones, tokyo, "Asia/Tokyo", u("2026-10-05T12:00"), evts, commits=commits)
+        self.assertIn("pick one by hand", msg)
+        self.assertNotRegex(msg, r"--since \d")
+
+    def test_a_switch_date_means_midnight_on_the_new_clock(self):
+        switch = worklog.parse_switch
+        self.assertEqual(switch("2026-10-02", "Europe/London")[0], self.utc("2026-10-01T23:00"))   # BST
+        self.assertEqual(switch("2026-10-02", "+09:00")[0], self.utc("2026-10-01T15:00"))
+        self.assertEqual(switch("2026-10-02", "-03:00")[0], self.utc("2026-10-02T03:00"))
+        self.assertEqual(switch("2026-10-02T12:37:00Z", "Asia/Tokyo")[0], self.utc("2026-10-02T12:37"))
+        for bad in [("2026-10-02T12:37", "Asia/Tokyo"), ("2026-10-02", "Mars/Base"), ("", "+09:00")]:
+            with self.assertRaises(ValueError, msg=bad):
+                switch(*bad)
+        plus8, tokyo = worklog.parse_zone("+08:00"), worklog.parse_zone("Asia/Tokyo")
+        self.assertEqual(worklog.first_day(self.utc("2026-09-29T15:30"), plus8, tokyo), dt.date(2026, 9, 29))
+        self.assertEqual(worklog.first_day(self.utc("2026-09-29T16:30"), plus8, tokyo), dt.date(2026, 9, 30))
+
+    def test_append_zone_keeps_rows_apart(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "tz.csv")
+            with open(path, "w") as fh:
+                fh.write("since,zone,evidence\n2026-09-17T00:00:00+00:00,+08:00,commits")      # no final newline
+            worklog.append_zone(self.utc("2026-09-29T12:37"), "Asia/Tokyo", "clock", path)
+            zones = worklog.read_zones(path)
+            self.assertEqual([z[2] for z in zones], ["+08:00", "Asia/Tokyo"])
+            with open(path, "rb") as fh:
+                self.assertNotIn(b"\r", fh.read())
+            with open(path, "w") as fh:
+                fh.write("since,zone,evidence\n2026-09-17T00:00:00+00:00,+08:00,commits2026-09-29T12:37:00+00:00,"
+                         "Asia/Tokyo,clock\n")                                              # two rows run together
+            with self.assertRaises(ValueError) as cm:
+                worklog.read_zones(path)
+            self.assertIn("more than 3 columns", str(cm.exception))
+
+    def recount(self, rows, evts, today, since, **kw):
+        return worklog.update_rows(rows, evts, [], self.plus8(), since, today, **kw)
+
+    def test_update_refuses_or_drops_a_stale_row_only_as_asked(self):
+        evts = [(self.at("09:00", "2026-09-26"), True), (self.at("09:30", "2026-09-26"), False)]
+        rows = [{"date": "2026-09-25", "hours": "0.75", "blocks": "10:00-10:45", "description": "Moved", "source": "auto"},
+                {"date": "2026-09-25", "hours": "1.00", "blocks": "", "description": "Call", "source": "manual"}]
+        today, since = dt.date(2026, 9, 30), dt.date(2026, 9, 20)
+        with self.assertRaises(SystemExit) as cm:
+            self.recount(rows, evts, today, since)
+        self.assertIn("--drop-stale", str(cm.exception.code))
+        new, computed, dropped, kept, held = self.recount(rows, evts, today, since, drop_stale=True)
+        self.assertEqual(dropped, ["2026-09-25"])
+        self.assertEqual([(r["date"], r["source"]) for r in new], [("2026-09-25", "manual"), ("2026-09-26", "auto")])
+        # 40 days on, the row may just have lost its transcripts: kept, whatever the flag
+        old_evts = [(self.at("09:00", "2026-11-05"), True)]
+        new, *_, kept, held = self.recount(rows, old_evts, dt.date(2026, 11, 5), since, drop_stale=True)
+        self.assertEqual(kept, ["2026-09-25"])
+        self.assertIn(("2026-09-25", "auto"), [(r["date"], r["source"]) for r in new])
+        # another transcript folder never drops a row
+        new, _, dropped, kept, _ = self.recount(rows, evts, today, since, drop_stale=True, custom_folder=True)
+        self.assertEqual((dropped, kept), ([], ["2026-09-25"]))
+
+    def test_update_refuses_work_before_the_timeline(self):
+        zones = self.zones(("2026-09-26T00:00", "+08:00"))
+        evts = [(self.utc("2026-09-25T20:00"), True)]                      # 2026-09-26 04:00 at +08
+        with self.assertRaises(SystemExit) as cm:
+            worklog.update_rows([], evts, [], zones, dt.date(2026, 9, 26), dt.date(2026, 9, 30))
+        self.assertIn("predates", str(cm.exception.code))
+
+    def test_an_old_or_partial_recount_never_lowers_a_logged_row(self):
+        evts = [(self.at("09:00", "2026-09-01"), True), (self.at("09:30", "2026-09-01"), False)]
+        rows = [{"date": "2026-09-01", "hours": "2.75", "blocks": "08:00-10:45", "description": "Kept", "source": "auto"}]
+        since = dt.date(2026, 9, 1)
+        # a month later a session of that day may have expired: the row stays, reported as held
+        new, computed, _, _, held = self.recount(rows, evts, dt.date(2026, 10, 31), since)
+        self.assertEqual((held, new[0]["hours"]), (["2026-09-01"], "2.75"))
+        # another folder: held too
+        new, _, _, _, held = self.recount(rows, evts, dt.date(2026, 9, 10), since, custom_folder=True)
+        self.assertEqual((held, new[0]["hours"]), (["2026-09-01"], "2.75"))
+        # a recent day recounts; --rewrite-old lets a deliberate correction of an old one through
+        new, *_, held = self.recount(rows, evts, dt.date(2026, 9, 10), since)
+        self.assertEqual((held, new[0]["hours"]), ([], "0.50"))
+        new, *_, held = self.recount(rows, evts, dt.date(2026, 10, 31), since, rewrite_old=True)
+        self.assertEqual((held, new[0]["hours"]), ([], "0.50"))
+
+    def test_days_before_the_window_must_not_change_and_a_missed_day_is_found(self):
+        rows = [{"date": "2026-10-01", "hours": "1.00", "blocks": "10:00-11:00", "source": "auto"},
+                {"date": "2026-10-03", "hours": "1.00", "blocks": "10:00-11:00", "source": "auto"}]
+        computed = {"2026-10-01": (1.0, "10:00-11:00", "+09:00"), "2026-10-03": (1.0, "10:00-11:00", "+09:00"),
+                    "2026-10-04": (2.0, "10:00-12:00", "+09:00"), "2026-10-20": (1.0, "10:00-11:00", "+09:00")}
+        today = dt.date(2026, 10, 20)
+        # the default window reaches back to the last logged day when the log is behind
+        self.assertEqual(worklog.default_since(rows, today), dt.date(2026, 10, 3))
+        self.assertEqual(worklog.default_since(rows, dt.date(2026, 10, 10)), dt.date(2026, 9, 26))  # not behind
+        self.assertEqual(worklog.default_since(rows, dt.date(2026, 11, 30)), dt.date(2026, 11, 1))  # never past 29 days
+        self.assertIsNone(worklog.window_problems(rows, computed, dt.date(2026, 10, 3), today))
+        # an explicit --since past a never-logged day refuses and names it
+        msg = worklog.window_problems(rows, computed, dt.date(2026, 10, 6), today)
+        self.assertIn("2026-10-04: no row -> 2.00 h", msg)
+        self.assertIn("--since 2026-10-04", msg)
+        # a logged day whose work vanished (recent) refuses; the log's own start and expired days do not
+        self.assertIn("no work", worklog.window_problems(rows, {}, dt.date(2026, 10, 2), today))
+        self.assertIsNone(worklog.window_problems(rows, {}, dt.date(2026, 10, 2), dt.date(2026, 12, 1)))
+        self.assertIsNone(worklog.window_problems(rows, {"2026-09-30": (1.0, "x", "+09:00")}, dt.date(2026, 10, 1), today))
+        self.assertIsNone(worklog.window_problems(rows, {}, dt.date(2026, 10, 2), today, earliest=dt.date(2026, 10, 2)))
 
     def test_stale_rows_go_only_when_recent_and_from_this_repos_transcripts(self):
         rows = [{"date": "2026-09-05", "hours": "0.75", "source": "auto"},
