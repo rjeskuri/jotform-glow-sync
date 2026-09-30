@@ -1271,6 +1271,41 @@ when nothing matches it creates a new, partner-less Club account.
   7 same-name clubs), `link_targets_before.json` (the pilot accounts as they were). A created account may be deleted only while it has no Contacts
   and no attendance, and only with Ryan's go.
 
+## September back-fill: the resolver
+
+No attendance reached Salesforce in September, so it is loaded afterwards from the forms'
+submissions. The first step is read-only ([design](plans/2026-09-30-backfill-resolver.md)):
+
+```bash
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv     # a fresh export, every time
+python3 tools/backfill_resolve.py --roster data/roster_<date>.csv       # GET only; a few minutes (Africa)
+```
+
+- **What it writes**: `data/backfill_2026-09/resolved.json` - one row per (submission, ticked
+  roster) of the four regional forms, created from 2026-09-01 00:00 US Eastern on, no end date.
+  The club is the roster the mentor ticked girls in, never question 5; club, partner and the Club
+  Name the roster sends today are the sync's own dry run's word. Each row carries the ticked
+  names as a list, the attendance date, module, week, year, creator, photo links, question 5 as
+  submitted, and its flags. `raw/<region>.json` beside it is the submissions as fetched. Every
+  run overwrites all of them.
+- **They hold girls' names and mentors' contact details**: they stay under `data/`
+  (git-ignored). The tool refuses any other place inside the repository. Never paste from them;
+  what the tool prints is counts only, and that is what goes into a plan or a message.
+- **Read the report**: per form `submissions in range = with ticks + no ticks` and the `LEDGER`
+  line say every submission is accounted for. A submission with no tick has no row; its id is
+  under `no_ticks`. Nothing is collapsed (one club, one date, two submissions = two rows) and
+  nothing already delivered is dropped - both are the loader's decisions. A `!` line lists
+  submissions with no tick whose Contact IDs field still holds names: look at each in Jotform
+  (ticks taken back, or a roster question deleted since).
+- **Flags** (on a row, and counted per form): `multi_club`, `q5_differs`, `q18_empty`,
+  `q18_differs`, `typed_era`, `bare_shared_name`, `retired_club`, `no_account_name`,
+  `date_before_2026_09`, `date_missing`, `name_not_on_roster_now:<count>`, `name_has_comma`,
+  `name_repeats` - what each means is in the design's "Readings of the contract".
+- **When it stops** it names a submission id and a question id and writes no result: an answer
+  of a shape it does not know, a ticked roster it cannot identify, the sync's dry run failing
+  (run that command by hand), fewer submissions fetched than the form reports (run it again).
+  It never guesses.
+
 ## Work log and invoices
 
 This is contract work, invoiced monthly from `worklog/worklog.csv` (date, hours, blocks,
