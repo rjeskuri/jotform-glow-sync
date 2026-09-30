@@ -456,6 +456,14 @@ included); not exactly one Submit button. A warning (not a refusal): two club
 names that, run together, equal a third club. The guard cannot tell that
 pair from the one club (none today).
 
+Order matters: the runner syncs from `main`, and older code rewrites the
+picker's options but not its `calcValues`, and drops the guard rules. After
+the next new club, question 5 would get the neighbouring club's name with no
+warning (every one is still a valid club, so nothing blocks it). So **merge
+first**, and never run `sync_attendance_form.py --apply` from a checkout
+without this code (rebase such a branch first) while any Club picker carries
+`calcValues`.
+
 Rollout, with `AUTO_SYNC_APPLY=0` for the whole window. Each step needs
 Ryan's go. The template goes first; after it, U.S, Latin America, Asia, then
 Africa (smallest first), each with its `--region`:
@@ -524,15 +532,20 @@ so the element goes before the runner resumes.
    (dry run, then `--apply`). `<stamp>` is the backup taken just before the
    `--club-guard --apply`, not `properties-latest.json`.
 3. Delete the `clubGuard` element in the builder.
-4. Optional: clear the picker's `calcValues` (its calculation values in the
-   builder, or `question[calcValues]` via the API; re-read to confirm it took —
-   an empty value through the API is untested). If kept, the sync keeps them
-   aligned with the options.
+4. Clear the picker's `calcValues` (its calculation values in the builder, or
+   `question[calcValues]` via the API; re-read to confirm it took — an empty
+   value through the API is untested). Optional while the form keeps syncing
+   on this code, which keeps them aligned with the options. Required before
+   anything older syncs the form: older code shifts them on the next new club.
 5. The sync dry run without the flag: `nothing to do`, or a `REPLACE
    conditions` for roster changes applied after the snapshot (back up, then
    `--apply`).
 6. `tools/form_status.py --form <id> --roster …`: rules CLEAN, `club guard:
    none`. Then `AUTO_SYNC_APPLY=1`.
+
+Do not revert the merge while any Club picker carries `calcValues`: clear
+them first (step 4) and re-read to confirm. The old code would keep the
+stale `calcValues` and send the neighbouring club's name to question 5.
 
 Before any Salesforce back-fill, split or assign the 20 fused question-5
 submissions by hand (BACKLOG 48). Nothing has reached Salesforce since

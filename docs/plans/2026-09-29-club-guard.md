@@ -232,7 +232,12 @@ HTML.
 - **The runner reads `main`**: merging changes no form except A on the next
   applied roster change (Africa's SUPER GIRLS rule; `form_status` flags the
   bug until then). The guard is per form, by hand, with `AUTO_SYNC_APPLY=0`
-  for the window.
+  for the window. `main` must carry this code before any `--club-guard
+  --apply`, and the merge must not be reverted while a picker carries
+  `calcValues`: older code rewrites the options, not the `calcValues`, so a
+  new club shifts question 5 by one with no warning, and it drops the guard
+  rules (reproduced offline with `main`'s sync on the test's fake form). The
+  same holds for a manual `--apply` from a checkout without this code.
 - **Merging with `wf5/rosters-above-submit`** (both fork from `0c095c0`):
   that branch removes `main()`'s local `order_of`, so the guard's create
   takes the picker's order from `glow.links.order_of`, imported as
@@ -245,8 +250,10 @@ HTML.
 - **Rollback per form**: `AUTO_SYNC_APPLY=0`; `backup_forms.py --form`;
   `restore_conditions.py --from properties-<stamp>.json` (the pre-guard
   backup); delete the `clubGuard` element (while it exists the runner
-  regenerates the rules); optionally clear `calcValues` (if kept, the sync
-  keeps them aligned — deviation 2); `form_status` CLEAN; `AUTO_SYNC_APPLY=1`.
+  regenerates the rules); clear `calcValues` (optional only while the form
+  keeps syncing on this code, which keeps them aligned — deviation 2;
+  required before anything older syncs it); `form_status` CLEAN;
+  `AUTO_SYNC_APPLY=1`.
 
 ## Proof
 - `make check` → `CHECK PASSED` (tail below).
@@ -313,7 +320,8 @@ CHECK PASSED
 ```
 
 ## Rollout (each step Ryan's go; not part of this branch)
-`AUTO_SYNC_APPLY=0`. Template: backup; translation audit (before);
+Merge to `main` first (Risks, "The runner reads `main`"). `AUTO_SYNC_APPLY=0`.
+Template: backup; translation audit (before);
 `--club-guard` dry run (+2 rules; +1 changed while A has not landed);
 `--apply`; `form_status` CLEAN; `form_status --rendered` aligned = **hard
 stop**; `add_translations.py --apply` and the audit. Browser: one club → no
