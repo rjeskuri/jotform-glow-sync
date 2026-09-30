@@ -29,7 +29,14 @@ unless `--apply`.
 - `POST /form/{id}/questions` adds; only `question[type]` is required; `control_email` needs
   `question[validation]=Email`. The response `content` is usually the new question (with `qid`),
   but can be a list — read defensively.
-- Adding a question does not shift other orders; equal orders render in creation order.
+- Adding a question at an order another question holds **inserts** it there: that question and
+  the block below it move down by one, up to the first gap (seen in the snapshots: the Club
+  picker created at 3 on the template 2026-09-01 moved 351 questions; Africa 2026-09-12 the
+  same, the shift stopping at a gap). Adding at an empty order moves nothing. Equal orders
+  render in creation order (qid), so code must be right under both (`glow/layout.py`).
+- Moving an existing question by posting `question[order]` is unobserved until the roster-order
+  repair (`tools/fix_roster_order.py` writes only to empty orders and probes after its first
+  write); record here what the template repair shows.
 - Dropdown `calcValues` has a leading empty slot for the placeholder:
   `len(calcValues.split('|')) == len(options.split('|')) + 1`.
 - Dropdown with `multipleSelections=Yes` renders Jotform's own searchable component (the
