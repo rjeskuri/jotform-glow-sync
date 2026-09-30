@@ -661,7 +661,7 @@ def main():
             by_offset = {}
             for when, offset, *_ in recent:
                 by_offset.setdefault(offset_text(when.astimezone(dt.timezone(offset))), []).append(when)
-            print(f"Commit offsets since the last row: "
+            print("Commit offsets since the last row: "
                   + (", ".join(f"{o} x{len(w)} ({min(w):%m-%d}..{max(w):%m-%d})" for o, w in by_offset.items())
                      or "no commits yet"))
             if zone_at(zones, now) is not None and now.astimezone(zone_at(zones, now)).utcoffset() == mac.utcoffset():
