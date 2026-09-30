@@ -1331,15 +1331,25 @@ class SameNameFlow(unittest.TestCase):
         # Partner One's goes inactive and Partner Three enrols a Stars with other girls
         regions = {("Partner Two", "Stars"): "Asia", ("Partner Two", "Beta Club"): "Asia"}
         on_africa = {k: v for k, v in self.ROSTER.items() if k not in regions}
-        sheet = {k: v for k, v in self.ROSTER.items() if k != ("Partner One", "Stars")}
-        sheet[("Partner Three", "Stars")] = ["Uma Umberlash", "Valeria Wrenfoldy"]
-        fake = FakeForm(*self.form(roster=on_africa, long=[("Partner One", "Stars")]))
-        summary, _ = self.summary(fake, roster=sheet, regions=regions,
-                                  inactive={("Partner One", "Stars"): self.ROSTER[("Partner One", "Stars")]})
-        self.assertEqual(fake.calls, [])                      # q11 keeps its girls and its long name
-        self.assertEqual(len(summary["same_name_refused"]), 1)
-        self.assertEqual(summary["sf_name_changes"], [])
-        self.assertEqual(summary["sf_names"][1]["value"], "Stars - Partner One")
+        gone = {("Partner One", "Stars"): self.ROSTER[("Partner One", "Stars")]}
+        # …also when the newcomer's name merely contains the other's ("Partner One Trust"):
+        # the partner in the rule is, exactly, a partner the Roster has for that club
+        for newcomer in ("Partner Three", "Partner One Trust"):
+            del sync.WARNINGS[:]
+            sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
+            sheet[(newcomer, "Stars")] = ["Uma Umberlash", "Valeria Wrenfoldy"]
+            fake = FakeForm(*self.form(roster=on_africa, long=[("Partner One", "Stars")]))
+            summary, _ = self.summary(fake, roster=sheet, regions=regions, inactive=gone)
+            self.assertEqual(fake.calls, [], newcomer)            # q11 keeps its girls and its long name
+            self.assertEqual([r["partner"] for r in summary["same_name_refused"]], [newcomer])
+            self.assertEqual(summary["sf_name_changes"], [])
+            self.assertEqual(summary["sf_names"][1]["value"], "Stars - Partner One")
+        # a partner's acronym in an old hand-made rule is still the same partner ("WESAD")
+        qs, wire = self.form()
+        wire = [dict(c, terms=c["terms"].replace('"Partner Two"', '"Two"')) for c in wire]
+        fake = FakeForm(qs, wire)
+        code, _ = self.run_sync(fake, roster={**self.ROSTER, ("Partner Two", "Stars"): ["Uma Umberlash"]})
+        self.assertEqual((code, fake.calls[0]), (0, "UPDATE roster 'Stars' (q12, 1 girls)"))
 
     # ---- any other change of what an existing club sends is by hand
     def renamed(self):
@@ -1906,6 +1916,8 @@ class FormStatusAudit(unittest.TestCase):
             rep = self.report(*self.form(switched=switched), self.PARTNERS)
             self.assertEqual(self.picker_problems(rep), [], switched)
             self.assertEqual(rep["same_name_rosters"], 2 if switched else 0)
+            # two questions named "Stars" are duplicates only while they share one picker entry
+            self.assertEqual(rep["duplicate_club_questions"], [] if switched else ["Stars"])
         # the switched rules with the old options: both Stars are missing, "Stars" shows nothing
         qs, wire = self.form(switched=True)
         qs["500"]["options"] = "Alpha Club|Beta Club|Stars"

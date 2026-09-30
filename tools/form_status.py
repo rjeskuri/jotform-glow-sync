@@ -402,9 +402,14 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
             text = " ".join(q["text"].split())
             opts = {name_key(o) for o in (q.get("options") or "").split("|") if o.strip()}
             clubs.setdefault(key(text), []).append((text, opts, q["qid"]))
-    dup_clubs = [v[0][0] for v in clubs.values() if len(v) > 1]
 
     conditions = props.get("conditions") or []
+    # two questions with one text are duplicates unless each has its own picker entry
+    # (two partners' clubs of one name: "<club> - <partner>"); rosters the typed Partner
+    # box still tells apart test one text and are still listed
+    tested = tested_values(questions, conditions)
+    dup_clubs = [v[0][0] for v in clubs.values()
+                 if len(v) > len({key(tested.get(str(qid), text)) for text, _, qid in v})]
     errored = sum(1 for c in conditions if str(c.get("isError", "")).lower() in ("1", "true"))
     emails = props.get("emails") or []
     autorespond = sum(1 for e in emails if e.get("type") == "autorespond")
@@ -422,8 +427,7 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
         # name, or its long name "<club> - <partner>"), no more and no fewer; a
         # roster with no readable rule counts by its own text
         listed = {key(o): o for o in (questions[picker].get("options") or "").split("|") if o.strip()}
-        tested = tested_values(questions, conditions)
-        wanted = {str(qid): tested.get(str(qid), text) for v in clubs.values() for text, _, qid in v}
+        wanted ={str(qid): tested.get(str(qid), text) for v in clubs.values() for text, _, qid in v}
         missing = sorted({text for v in clubs.values() for text, _, qid in v
                           if key(wanted[str(qid)]) not in listed})
         extra = sorted(o for k, o in listed.items() if k not in {key(w) for w in wanted.values()})

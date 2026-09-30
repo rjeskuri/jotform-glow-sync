@@ -581,6 +581,14 @@ def main():
     def same_partner(a, b):
         return key(a) == key(b)
 
+    def loosely(club_key):
+        """partner_matches for the rosters of one club name - but never when
+        the partner in the rule is, exactly, a partner the Roster has for
+        that name: then "Partner One" inside "Partner One Trust" is two
+        partners' clubs, not one partner spelled two ways."""
+        known = holders.get(club_key, {})
+        return lambda theirs, partner: key(theirs) not in known and partner_matches(theirs, partner)
+
     def roster_overlap(qid, roster):
         have = {norm(o).lower() for o in questions[qid]["options"].split("|") if o}
         want = {n.lower() for n in roster}
@@ -650,7 +658,7 @@ def main():
                 continue
             qid = qids[0]
             theirs = current_partner_of.get(qid)
-            if not theirs or same_partner(theirs, partner) or partner_matches(theirs, partner):
+            if not theirs or same_partner(theirs, partner) or loosely(low)(theirs, partner):
                 claim(qid, partner, club, roster, check_names=True)
             elif roster_overlap(qid, roster) >= 0.5:
                 # another partner in its rule, the same girls: the same club,
@@ -674,7 +682,7 @@ def main():
         # exactly. Entries left over are new clubs.
         entries = sorted(entries)
         unclaimed, taken = list(qids), {}
-        for test in (same_partner, partner_matches):
+        for test in (same_partner, loosely(low)):
             for i, (partner, club, roster) in enumerate(entries):
                 if i in taken:
                     continue
