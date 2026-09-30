@@ -17,6 +17,10 @@ Salesforce V2 integration.
 clasp:push` / `npx clasp push`. Anything else is read-only (GET) or writes only under `data/` and
 `backups/`.
 
+Salesforce (production) is written only through the write connector, one record per call, by the
+main session, with Ryan's explicit go - the hook below does not see those calls. Procedure and
+rollback files: docs/RUNBOOK.md, "Club accounts in Salesforce".
+
 ## The ritual
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).
 2. Back up the exact thing you will write: `backup_forms.py --form <id>`,

@@ -509,12 +509,12 @@ class SalesforceClubAccounts(unittest.TestCase):
 
     def test_totals_counts_every_club_account(self):
         clubs = self.close_all()
-        out, stop = self.run_tool(sfc.totals, result=[self.save(clubs)])
+        out, stop = self.run_tool(sfc.totals, also=None, result=[self.save(clubs)])
         self.assertIsNone(stop)
         self.assertIn("totals ok", out)
         self.assertIn("Example Partner: 4/4", out)
         self.assertIn(f"created accounts: 4 owned by {ME}, created by {ME}", out)
-        self.assertIsNone(self.run_tool(sfc.totals, result=[self.save(clubs[:3]), self.save(clubs[3:])])[1])
+        self.assertIsNone(self.run_tool(sfc.totals, also=None, result=[self.save(clubs[:3]), self.save(clubs[3:])])[1])
         stray = {"Id": Z, "Name": "Typed By Hand", "RecordTypeId": sfc.CLUB_RECORD_TYPE}
         wrong = {
             "is not in the write set": clubs + [stray],
@@ -528,16 +528,36 @@ class SalesforceClubAccounts(unittest.TestCase):
         }
         for message, recs in wrong.items():
             with self.subTest(message):
-                self.assertIn(message, self.run_tool(sfc.totals, result=[self.save(recs)])[1])
+                self.assertIn(message, self.run_tool(sfc.totals, also=None, result=[self.save(recs)])[1])
         everything = [PARENTS[P1], PARENTS[P2]] + clubs[:5]
         self.assertIn("all names ok after the run", self.precheck_all(everything, after=True)[0])
         twin = dict(PARENTS[P2], Id=Z, Name="Sunrise Club")          # a household of a club's name
         self.assertIn("SUNRISEC: the accounts of that name are",
                       self.precheck_all(everything + [twin], after=True)[1])
 
+    def test_totals_accepts_a_later_round_only_from_its_rollback_file(self):
+        clubs = self.close_all()
+        late = {"Id": Z, "Name": "Late Club", "RecordTypeId": sfc.CLUB_RECORD_TYPE, "ParentId": P2}
+        self.assertIn("is not in the write set",
+                      self.run_tool(sfc.totals, also=None, result=[self.save(clubs + [late])])[1])
+        round2 = os.path.join(self.tmp.name, "created_accounts_round2.csv")
+        with open(round2, "w", encoding="utf-8", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=sfc.CREATED_COLS)
+            w.writeheader()
+            w.writerow(dict.fromkeys(sfc.CREATED_COLS, "") | {
+                "action": "create", "club_code": "LATECLUB", "sf_account_id": Z, "sf_account_name": "Late Club",
+                "parent_id": P2})
+        out, stop = self.run_tool(sfc.totals, also=[round2], result=[self.save(clubs + [late])])
+        self.assertIsNone(stop)
+        self.assertIn("later rounds: 1", out)
+        self.assertIn("differs from its rollback file",
+                      self.run_tool(sfc.totals, also=[round2], result=[self.save(clubs + [dict(late, ParentId=P1)])])[1])
+        self.assertIn("is not among the Club accounts",
+                      self.run_tool(sfc.totals, also=[round2], result=[self.save(clubs)])[1])
+
     def test_totals_wants_every_batch_closed(self):
         self.close_batch_0()
-        self.assertIn("batch 1 is not closed", self.run_tool(sfc.totals, result=[self.save([self.made(0, A)])])[1])
+        self.assertIn("batch 1 is not closed", self.run_tool(sfc.totals, also=None, result=[self.save([self.made(0, A)])])[1])
 
     # ---- the live pickers (a fake client)
     def test_pickers_compare_names_calc_values_and_unknown_options(self):

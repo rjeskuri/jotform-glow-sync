@@ -794,6 +794,13 @@ def totals(args, paths):
     held = hold_codes(paths)
     untouched = ON_HOLD_ACCOUNTS | {r["already_in_sf"] for r in rows(paths)
                                     if r["club_code"] in held and r["already_in_sf"].strip()}
+    later = {}                   # accounts of later rounds (their own rollback files): checked, not matched
+    for path in args.also or []:
+        with open(path, encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            if reader.fieldnames != CREATED_COLS:
+                sys.exit(f"{path}: not a rollback file (its header is not created_accounts.csv's)")
+            later.update({r["sf_account_id"]: r for r in reader})
     matched, problems = 0, []
     sf_partner, sf_region = collections.Counter(), collections.Counter()
     owners = collections.Counter()
@@ -810,6 +817,11 @@ def totals(args, paths):
         if rec["Id"] in untouched:
             if rec.get("ParentId"):
                 problems.append(f"pilot account {rec['Id']} (on hold) has a parent now")
+            continue
+        if rec["Id"] in later:
+            row = later[rec["Id"]]
+            if rec["Name"] != row["sf_account_name"] or (rec.get("ParentId") or "") != row["parent_id"]:
+                problems.append(f"{row['club_code']}: a later round's account differs from its rollback file")
             continue
         item = want.get(key(rec["Name"]))
         if not item:
@@ -837,17 +849,21 @@ def totals(args, paths):
                  if key(i["name"]) not in names]
     problems += [f"created_accounts.csv id {i} is not a Club account any more"
                  for i in live if i not in by_id]
+    problems += [f"{r['club_code']}: a later round's account {i} is not among the Club accounts"
+                 for i, r in later.items() if i not in by_id]
     problems += [f"created_accounts.csv row {r['club_code'] or r['sf_account_id']} is {r['action']} ({r['note']})"
                  for r in live.values() if r["action"] not in ("create", "link") or r["note"]]
     if len(owners) > 1 or any(None in pair for pair in owners):
         problems.append(f"the created accounts have {len(owners)} owner/creator pairs (want one, both read)")
-    if len(recs) != len(items) + len(untouched):
-        problems.append(f"{len(recs)} Club accounts; the write set plus the {len(untouched)} "
-                        f"left alone is {len(items) + len(untouched)}")
+    expected = len(items) + len(untouched) + len(later)
+    if len(recs) != expected:
+        problems.append(f"{len(recs)} Club accounts; the write set, the {len(untouched)} left alone and "
+                        f"the {len(later)} of later rounds are {expected}")
     csv_partner = collections.Counter(i["parent_id"] for i in items)
     csv_region = collections.Counter(i["region"] for i in items)
     print(f"Club accounts in Salesforce: {len(recs)} | in the write set: {len(items)} | "
-          f"matched: {matched} | recorded ids: {len(live)} | gone: {len(created) - len(live)}")
+          f"matched: {matched} | recorded ids: {len(live)} | gone: {len(created) - len(live)}"
+          + (f" | later rounds: {len(later)}" if later else ""))
     for (owner, creator), n in owners.items():
         print(f"created accounts: {n} owned by {owner}, created by {creator}")
     print("by region (Salesforce/CSV):",
@@ -974,6 +990,7 @@ def main():
     p.set_defaults(fn=verify)
     p = sub.add_parser("totals")
     p.add_argument("--result", required=True, nargs="+", help="the saved read(s) of `soql --totals`")
+    p.add_argument("--also", nargs="*", help="rollback files of later rounds (clubs added after this run)")
     p.set_defaults(fn=totals)
     args = ap.parse_args()
     args.fn(args, Paths(args.dir))

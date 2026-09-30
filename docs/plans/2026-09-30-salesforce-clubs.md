@@ -1,7 +1,7 @@
 ---
 title: Club accounts in Salesforce, linked to their partners
 author: Claude (with Ryan)
-status: in-progress (accepted by Ryan 2026-09-30: the 345 creates and 8 links, then the two released clubs)
+status: in-progress (accounts written and verified 2026-09-30; open: the morning-after read, the seven same-name clubs, the SF Pending rows)
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-29/30 ("assign the clubs to a partner", then "create all clubs")
 ---
@@ -308,6 +308,42 @@ organisation is the default view; it must also slice or filter by foundation, pa
 show that those links work. It needs attendance to be flowing first (and the partner link this plan
 creates), so it is its own step with its own go: how the report is created (the connector writes
 records, not reports), which object it sits on, and what "foundation" maps to are settled then.
+
+## Result (2026-09-30)
+Ryan gave the go for the 345 creates and 8 links, and for the two released clubs after them. He
+did not answer the sign-up page question separately; the go was taken as accepting that the club
+names are readable there until the list is filtered, and he was told so.
+
+- **The run**: 18 batches, 08:07-08:38 UTC, no error and no retry. 345 accounts created, 8 pilot
+  accounts linked. Every batch was prechecked (names, parents, Club count), written, read back by
+  name and by returned id, and verified before the next one started.
+- **The three single records** behaved as hoped: the apostrophe and the accented letter were stored
+  character for character; the first account was a Club owned and created by Ryan's user with no
+  Contacts, no child accounts and one owner share; the first link kept its name, owner, record
+  type, Contacts and sharing, and Opportunity sharing (126 / 228) and the NPSP error records (16)
+  did not move. The same held after the last seven links.
+- **End checks**: `totals ok` (355 Club accounts: 345 new, 8 linked pilots, the two on hold without
+  a parent; by region Africa 210, Asia 94, Latin America 38, U.S 11; by partner 49 of 49 equal);
+  `all names ok after the run` (each of the 353 names is carried by exactly one Account of any
+  record type); Household Account still 82; attendance batches (11, last 2026-03-28) and the
+  Jotform access tokens unchanged; the four signal counts 0; `pickers ok`.
+- **Round 2, the two released clubs** (08:40 UTC, same checks by hand): "Shinning Stars" under
+  Ready for Reading and "Super Girls" under Feminature Uganda Limited, names read from the live
+  Africa picker after the forms' side retired the two duplicates. Recorded in their own rollback
+  file, `created_accounts_round2.csv`; `totals --also` that file is ok with 357 Club accounts.
+- **The tool on the way**: the connector's answers were copied out of the session transcript by
+  the exact text of each request; two review rounds and a final break-test found no way to create
+  a wrong record and several ways the rollback file could have missed one after a failed write,
+  all closed and tested before the batches (29 tests).
+- **Found and passed on, not changed**: the public sign-up page's unfiltered account list and two
+  partner-portal items (Ryan, for whoever maintains the portal); Reach All has five pairs of clubs
+  that look like one club enrolled twice (a plain name and the same name with its school) - both
+  of each pair are active in the sheet and got an account; one Asia club's code is derived from
+  its former name.
+- **Still open**: the read after the first nightly rollup (step 11); the 36 "pending" rows of the
+  SF Pending tab (Ryan, before Monday 2026-10-05); the seven "<club> - <partner>" accounts, once
+  the forms send those names; then the reconnect, the September entries Ryan wants moved over
+  afterwards, and the test report.
 
 ## Proof
 - `python3 tools/sf_club_accounts.py build` → `write set: 345 create + 8 link = 353 writes in 18 batches; 11 same-name rows held`

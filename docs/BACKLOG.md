@@ -70,7 +70,7 @@ when the form is filled". Kills Africa's 3,900-checkbox weight and the
 | 24 | Prefilled attendance links per club (`?clubName=…&mentorEmail=…`) in the partner handover emails |
 | 25 | Spanish-language mentor confirmation email for Latin America |
 | 26 | Monthly three-way reconciliation report: Roster ↔ forms ↔ Salesforce |
-| 27 | Salesforce REST auto-creation of Accounts for new clubs (replaces the SF Pending section of the Monday e-mail; keep `sendSfPendingDigest`, its trigger and its ReviewQueue section) |
+| 27 | Salesforce REST auto-creation of Accounts for new clubs (replaces the SF Pending section of the Monday e-mail; keep `sendSfPendingDigest`, its trigger and its ReviewQueue section). **Since 2026-09-30 every active club has its account** ([plan](plans/2026-09-30-salesforce-clubs.md), RUNBOOK "Club accounts in Salesforce"): this item is now only about clubs added or renamed afterwards - the account must be named as the picker sends it and linked to the partner |
 | 28 | Close the Python ↔ Apps Script parity gaps (partner-less rows, `•`/`*` bullets, invisible characters in partner/club cells, region case) — `docs/intent/2026-09-01-parity-partnerless-rows.md` |
 | 29 | Move `backup_forms.py` / `restore_conditions.py` into `tools/` (doc references only) |
 | 30 | A daily drift check with a read-only key that writes intents on a band breach; agent evals in CI — `docs/intent/2026-09-01-ci-and-evals.md` |

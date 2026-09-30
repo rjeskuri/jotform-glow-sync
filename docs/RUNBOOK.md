@@ -1008,6 +1008,37 @@ wording; forms built before 2026-09-28 get it once, from the menu
   `appsscript/` back before 986a325 while the Feedback tab has two reply
   columns.
 
+## Club accounts in Salesforce
+
+Since 2026-09-30 every active club has a **Club account** in Salesforce (production), named
+exactly as its attendance form sends it and linked to its partner account through the parent
+account field ([plan and result](plans/2026-09-30-salesforce-clubs.md)). The attendance
+processor matches the submitted club name against every account name, ignoring capitals only;
+when nothing matches it creates a new, partner-less Club account.
+
+- **Never edit a club's name in Salesforce.** A rename starts in the sheet ("Renaming a club"),
+  and the account is then renamed to the new picker text - with Ryan's go.
+- **A new club** reaches the forms automatically but not Salesforce (BACKLOG 27). It shows in the
+  SF Pending tab and the Monday e-mail; its account is created by hand or as a further round of
+  the procedure below, before its first attendance if possible.
+- **Signals** (read-only queries, all expected as stated):
+  - Club accounts without a parent: exactly the two pilot accounts that are on hold. One more
+    means a form sent a name no account carries.
+  - Contacts on Club accounts that are not girls (role other than Participant), Contacts on Club
+    accounts marked as portal sign-ups, Monthly Reports on Club accounts, programme-income
+    records on Club accounts: all 0.
+  - `python3 tools/sf_club_accounts.py soql --totals`, then
+    `totals --result <saved answer> --also data/sf_prep_2026-09-30/created_accounts_round2.csv`
+    → `totals ok`.
+- **Writing to Salesforce** is not covered by the live gate: the only gate is Ryan's go in the
+  conversation. Records are written one per call through the write connector, never by a
+  subagent; `tools/sf_club_accounts.py` (which never calls Salesforce) cuts the batches, checks
+  each saved answer and keeps the rollback files.
+- **Rollback files** (never committed): `data/sf_prep_2026-09-30/created_accounts.csv` (345
+  created, 8 linked), `created_accounts_round2.csv` (2 created), `link_targets_before.json` (the
+  pilot accounts as they were). A created account may be deleted only while it has no Contacts
+  and no attendance, and only with Ryan's go.
+
 ## Work log and invoices
 
 This is contract work, invoiced monthly from `worklog/worklog.csv` (date, hours, blocks,
