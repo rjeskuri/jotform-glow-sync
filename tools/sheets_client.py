@@ -19,6 +19,7 @@ import csv
 import json
 import os
 import sys
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CRED_DIR = os.path.join(REPO, "credentials")
@@ -58,13 +59,12 @@ def sa_email():
     return json.load(open(KEY_FILE)).get("client_email", "?")
 
 
-def _sheets_meta(svc):
+def _get(svc, fields):
+    """spreadsheets.get of `fields`. A 403 or 404 exits with what to fix: SystemExit is not an
+    Exception, so auto_sync's with_retry does not retry it and the caller fails fast."""
     from googleapiclient.errors import HttpError
     try:
-        return svc.spreadsheets().get(
-            spreadsheetId=spreadsheet_id(),
-            fields="sheets(properties(title,sheetId,sheetType,gridProperties))"
-        ).execute()["sheets"]
+        return svc.spreadsheets().get(spreadsheetId=spreadsheet_id(), fields=fields).execute()
     except HttpError as err:
         if err.resp.status == 403:
             sys.exit("Google says the robot may not open this spreadsheet (403).\n"
@@ -78,11 +78,27 @@ def _sheets_meta(svc):
         raise
 
 
+def _sheets_meta(svc):
+    return _get(svc, "sheets(properties(title,sheetId,sheetType,gridProperties))")["sheets"]
+
+
+def named_zone(name):
+    """ZoneInfo(name) for the sheet's time zone, or exit: the Sheets API can hand back a
+    custom string such as "GMT-07:00" that is no IANA name, and a timestamp is not guessed."""
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        sys.exit(f"the sheet's time zone {name!r} is not an IANA zone name - set "
+                 "File > Settings > Time zone to a named zone")
+
+
 def time_zone(svc):
     """The spreadsheet's own time zone (File > Settings), an IANA name such as
-    "America/New_York". Timestamps written into the sheet are rendered in it."""
-    return svc.spreadsheets().get(spreadsheetId=spreadsheet_id(),
-                                  fields="properties.timeZone").execute()["properties"]["timeZone"]
+    "America/New_York". Timestamps written into the sheet are rendered in it.
+    Exits (with what to fix) on a 403/404 or a zone that is not a named IANA zone."""
+    name = _get(svc, "properties.timeZone")["properties"]["timeZone"]
+    named_zone(name)
+    return name
 
 
 def list_tabs(svc):

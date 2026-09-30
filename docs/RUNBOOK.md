@@ -217,8 +217,13 @@ emails the repository owner) on `attention` (exit 2) and on any failure
 
 **SyncLog columns:** `when, trigger, region, mode, creates, updates, rules,
 result, detail, run_url`. `when` is the run's start in the sheet's own time
-zone (read from the sheet, like the Apps Script's timestamps); the log file
-and ATTENTION.md show the runner's clock with its UTC offset. `mode` is
+zone (read from the sheet, like the Apps Script's timestamps). The cut-over:
+rows written before commit d9b4f6b reached the runner on GitHub carry the
+runner's America/Chicago time (one hour behind the sheet and the Audit tab;
+before 2026-09-02, when the sheet was on UTC, five hours), and a Mac
+`--synclog` run before then wrote the Mac's clock; the row's `run_url` gives
+the true time. The log file and ATTENTION.md show the runner's clock with
+its UTC offset. `mode` is
 `dry-run` or `apply`; `result` is one of `in-sync`, `dry-run` (would apply), `applied`, `applied-with-problems`,
 `applied-unverified`, `attention`, `failed`. `detail` counts the roster
 creates, updates, deletes and warnings, then names a Club-picker or
@@ -641,8 +646,13 @@ then resolve its item `resolved <date> by <name>: entered by hand` (over a
 ## Working the ReviewQueue
 
 The **ReviewQueue** tab holds every question the scripts could not decide.
-**Owner: Ryan.** The Monday e-mail (08:00, to `STAFF_NOTIFY_EMAIL`) lists the
-open items by issue, with their ReviewQueue row; work them that week.
+**Owner: Ryan.** The Monday e-mail (to `STAFF_NOTIFY_EMAIL`) lists the
+open items by issue, with their ReviewQueue row; work them that week. It
+arrives between 09:00 and 10:00 New York time. Apps Script writes every
+timestamp in the sheet's zone (America/New_York); the one exception is this
+trigger's hour, which follows the script project's zone
+(`appsscript/appsscript.json`: America/Chicago), so `atHour(8)` fires
+08:00-09:00 Chicago time, 09:00-10:00 in the sheet's zone.
 
 - An item is open while **resolved** is empty. The e-mail's "new" means raised since the previous Monday e-mail. Close it with
   `resolved <yyyy-mm-dd> by <name>: <what was done>` — by reference (counts,

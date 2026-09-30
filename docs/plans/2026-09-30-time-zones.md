@@ -46,7 +46,9 @@ under five TZ values, all green: nothing in the suite would notice. It found:
   - The workflow's comment claims the times match the sheet.
   - `tools/rename_club.py` writes the Audit `when` and the Partners-note date in Mac time.
   - `tools/build_roster_offline.js` writes Roster, ClubRegistry, ReviewQueue and Audit dates in Mac time.
-- **Apps Script is sound.** It uses the sheet's zone everywhere, and the 09-27 key fix holds.
+- **Apps Script is sound.** It writes every timestamp in the sheet's zone, and the 09-27 key fix holds.
+  - The one exception is the Monday e-mail trigger's **hour**: `atHour(8)` follows the script project's zone (`appsscript.json`: America/Chicago), so the e-mail fires 09:00–10:00 in the sheet's zone (America/New_York). No timestamp is affected; docs/RUNBOOK.md says when it arrives.
+  - Possible follow-up, not done here: `installTriggers` could add `.inTimezone(ss.getSpreadsheetTimeZone())` so the hour follows the sheet. That is an `appsscript/` change with its own approval and `clasp push`, and the trigger must be reinstalled.
 - **Retention.** Transcripts are deleted about 30 days after a file's last activity. The earliest September deletion is 2026-10-25; Sep 1–13 lasts until at least 10-28.
 
 **Outcome:**
@@ -147,17 +149,20 @@ under five TZ values, all green: nothing in the suite would notice. It found:
 
 ## B. Timestamps written into the sheet use the sheet's zone
 - **`tools/sheets_client.py`:** `time_zone(svc)` reads `properties.timeZone`. `tools/backfill_feedback_review.py` switches to it; it already does this inline.
+  - Review fix: `time_zone` and `_sheets_meta` share `_get(svc, fields)`, so a 403 or 404 exits with what to fix (share the sheet with the robot; check the ID). `SystemExit` is not an `Exception`, so `auto_sync`'s `with_retry` fails fast instead of retrying for about 35 s.
+  - Review fix: a zone that is not an IANA name (the Sheets API can return a custom `GMT-07:00`) exits via `named_zone`, asking for a named zone in File → Settings.
 - **`tools/auto_sync.py`:**
   - `Run` keeps the start instant as aware UTC.
   - `append_synclog(svc)` reads the zone inside the existing retry/try (only with `--synclog`, so dry runs stay credential-free) and rewrites each row's `when` with a pure `sheet_when(instant, zone)`.
   - The first log line and the ATTENTION.md header gain `%z`.
   - `.github/workflows/auto-sync.yml` sets `TZ: America/New_York`, the sheet's zone, so the runner's local files agree, and gets a corrected comment.
 - **`tools/rename_club.py`:** reads the zone once, right after the dry-run return and before backups and writes, for the Audit `when` and the Partners-note date. The backup file stamp stays local. `RenameClub.run_main` in the tests patches `sc.time_zone`.
+  - Review fix: it converts with `sc.named_zone`, so an unknown zone refuses. A test pins that a failed or unknown zone read stops a move before the backup folder, the batch and the Audit row.
 - **`tools/build_roster_offline.js`:**
   - Requires `--tz <IANA>`. A missing or trailing flag, or a bad zone (`RangeError`), exits with a message pointing to the sheet's File → Settings (America/New_York since 09-02).
   - Formats with `Intl.DateTimeFormat(...).formatToParts` and `hourCycle: 'h23'`. `TODAY` also feeds `planClub_`, so the Roster dates follow `--tz`.
   - Its usage lines, docs/RUNBOOK.md and docs/SHEETS-ACCESS.md (two commands) gain `--tz America/New_York`.
-  - Test (forms_logic_test.js): run it as a child process with `--out <tmpdir>` on `test/fixtures/enrollment_sample.csv`, never the default `data/roster_build/`. It must refuse without `--tz`, and its dates must follow `--tz` under any process `TZ`.
+  - Test (forms_logic_test.js): run it as a child process with `--out <tmpdir>` on `test/fixtures/enrollment_sample.csv`, never the default `data/roster_build/`. It must refuse without `--tz`, and its dates must follow `--tz` under any process `TZ`. Review fix: the Audit time of day must also fall between the run's start and end on the `--tz` wall clock.
 
 **Not changed (cosmetic, reported):**
 - backup and log file-name stamps (`backup_forms.py`, `switcher_flags.py`, `upload_roster.py`)

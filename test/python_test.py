@@ -289,6 +289,87 @@ class SheetWhen(unittest.TestCase):
         self.assertRegex(run.when, r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4}$")   # local, with offset
 
 
+class SheetsClientGet(unittest.TestCase):
+    """tools/sheets_client.py's spreadsheets.get on a fake service: a 403/404 exits with what
+    to fix, for the tab list and the sheet's zone alike (SystemExit, which auto_sync's
+    with_retry does not retry), and the zone must be a named IANA zone."""
+
+    class HttpError(Exception):
+        """googleapiclient.errors.HttpError's shape (err.resp.status); the real package is
+        not installed where `make check` runs in CI."""
+
+        def __init__(self, status):
+            super().__init__(f"HTTP {status}")
+            self.resp = type("Resp", (), {"status": status, "reason": ""})()
+
+    class Svc:
+        """spreadsheets().get(...).execute() answers `answer`, or raises it."""
+
+        def __init__(self, answer):
+            self.answer, self.fields = answer, []
+
+        def spreadsheets(self):
+            return self
+
+        def get(self, spreadsheetId, fields):
+            self.fields.append(fields)
+            return self
+
+        def execute(self):
+            if isinstance(self.answer, BaseException):
+                raise self.answer
+            return self.answer
+
+    def call(self, fn, svc):
+        import types
+        from unittest import mock
+        errors = types.ModuleType("googleapiclient.errors")
+        errors.HttpError = self.HttpError
+        pkg = types.ModuleType("googleapiclient")
+        pkg.errors = errors
+        sc = auto_sync.sc
+        with mock.patch.dict(sys.modules, {"googleapiclient": pkg, "googleapiclient.errors": errors}), \
+                mock.patch.object(sc, "spreadsheet_id", lambda: "SHEET"), \
+                mock.patch.object(sc, "sa_email", lambda: "the-robot"):
+            return fn(svc)
+
+    def test_403_and_404_exit_with_what_to_fix(self):
+        sc = auto_sync.sc
+        for fn in (sc.time_zone, sc._sheets_meta):
+            with self.assertRaises(SystemExit) as cm:
+                self.call(fn, self.Svc(self.HttpError(403)))
+            self.assertIn("Share the sheet with the-robot as Editor",
+                          str(cm.exception.code), fn.__name__)
+            with self.assertRaises(SystemExit) as cm:
+                self.call(fn, self.Svc(self.HttpError(404)))
+            self.assertIn("No spreadsheet with ID SHEET (404)", str(cm.exception.code), fn.__name__)
+            with self.assertRaises(self.HttpError):       # anything else stays retryable
+                self.call(fn, self.Svc(self.HttpError(503)))
+
+    def test_with_retry_does_not_retry_the_exit(self):
+        import tempfile
+        import types
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as out:
+            run = auto_sync.Run(types.SimpleNamespace(apply=False, out=out, trigger="test", run_url=""))
+        svc = self.Svc(self.HttpError(403))
+        with mock.patch.object(auto_sync.time, "sleep", side_effect=AssertionError("retried")), \
+                self.assertRaises(SystemExit):
+            run.with_retry(lambda: self.call(auto_sync.sc.time_zone, svc), "SyncLog")
+        self.assertEqual(svc.fields, ["properties.timeZone"])     # one request, no waiting
+
+    def test_the_zone_must_be_a_named_iana_zone(self):
+        sc = auto_sync.sc
+        with self.assertRaises(SystemExit) as cm:        # a custom zone the Sheets API can return
+            self.call(sc.time_zone, self.Svc({"properties": {"timeZone": "GMT-07:00"}}))
+        self.assertEqual(cm.exception.code,
+                         "the sheet's time zone 'GMT-07:00' is not an IANA zone name - set "
+                         "File > Settings > Time zone to a named zone")
+        svc = self.Svc({"properties": {"timeZone": "America/New_York"}})
+        self.assertEqual(self.call(sc.time_zone, svc), "America/New_York")
+        self.assertEqual(svc.fields, ["properties.timeZone"])
+
+
 class ConditionBuilder(unittest.TestCase):
     CLUBS = {"10": "Alpha Club", "11": "Stars", "12": "Stars", "13": "Beta Club"}
     PARTNERS = {"11": "Partner One", "12": "Partner Two"}
@@ -1304,8 +1385,10 @@ class RenameClub(unittest.TestCase):
             "Audit": [["when", "action", "detail"]],
         }, before_read)
 
-    def run_main(self, argv, sheet, client=None, key=None, clock=None):
-        """(exit code, stdout). `clock` stands in for datetime (its now(tz=None))."""
+    def run_main(self, argv, sheet, client=None, key=None, clock=None, zone=None):
+        """(exit code, stdout). `clock` stands in for datetime (its now(tz=None)); `zone` for
+        sc.time_zone (default: a sheet on America/New_York). self.written: what the run left
+        in OUT (the backup folder), listed before the temp dir goes."""
         import contextlib
         import io
         import tempfile
@@ -1318,7 +1401,7 @@ class RenameClub(unittest.TestCase):
                 mock.patch.object(rename_club.sc, "append_rows", sheet.append_rows), \
                 mock.patch.object(rename_club.sc, "spreadsheet_id", lambda: "SHEET"), \
                 mock.patch.object(rename_club.sc, "sa_email", lambda: "robot"), \
-                mock.patch.object(rename_club.sc, "time_zone", lambda svc: "America/New_York"), \
+                mock.patch.object(rename_club.sc, "time_zone", zone or (lambda svc: "America/New_York")), \
                 mock.patch.object(rename_club, "datetime", clock or rename_club.datetime), \
                 mock.patch.object(rename_club, "Client", lambda api_key, apply=False: client), \
                 mock.patch.dict(os.environ, env), \
@@ -1329,6 +1412,8 @@ class RenameClub(unittest.TestCase):
                 code = 0
             except SystemExit as e:
                 code = e.code
+            finally:
+                self.written = sorted(os.listdir(d))
         return code, out.getvalue()
 
     def test_move_dry_run_writes_nothing_and_says_what_it_would_do(self):
@@ -1380,6 +1465,26 @@ class RenameClub(unittest.TestCase):
                       sheet.tabs["Partners"][2][2])
         local = instant.astimezone().strftime("%Y-%m-%dT%H%M%S")
         self.assertIn(local, out)
+
+    def test_move_reads_the_sheets_zone_before_any_write(self):
+        # the zone read failing (RuntimeError stands in for an HttpError) or answering a zone
+        # that is no IANA name stops the run before the backup folder, the batch, the Audit row
+        def broken(svc):
+            raise RuntimeError("the zone read failed")
+        audit = copy.deepcopy(self.move_sheet().tabs["Audit"])
+        sheet = self.move_sheet()
+        with self.assertRaises(RuntimeError):
+            self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test", zone=broken)
+        self.assertEqual((sheet.batches, sheet.tabs["Audit"], self.written), ([], audit, []))
+        sheet = self.move_sheet()
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test",
+                                  zone=lambda svc: "Mars/Base")
+        self.assertIn("the sheet's time zone 'Mars/Base' is not an IANA zone name", str(code))
+        self.assertEqual((sheet.batches, sheet.tabs["Audit"], self.written), ([], audit, []))
+        sheet = self.move_sheet()                        # the control: a named zone writes all three
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
+        self.assertEqual(code, 0, out)
+        self.assertEqual((len(sheet.batches), len(sheet.tabs["Audit"]), len(self.written)), (1, 2, 1))
 
     def test_move_refuses_a_partner_gated_rule_and_sheet_only_apply(self):
         sheet = self.move_sheet()

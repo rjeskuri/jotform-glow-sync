@@ -62,7 +62,6 @@ import re
 import sys
 import unicodedata
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheets_client as sc  # noqa: E402
@@ -447,9 +446,10 @@ def main():
         print("\nDRY RUN - re-run with --apply to write")
         return
 
-    # the sheet's own zone, read once before anything is written: the Audit `when` and the
-    # Partners note's date are in it, like the Apps Script's (the backup stamp stays local)
-    zone = ZoneInfo(sc.time_zone(svc))
+    # the sheet's own zone, read once before anything is written (backups included): the
+    # Audit `when` and the Partners note's date are in it, like the Apps Script's (the backup
+    # stamp stays local). A zone that is no IANA name refuses here, with nothing written.
+    zone = sc.named_zone(sc.time_zone(svc))
 
     # --- backups: the tabs as they are now, and a snapshot of each form written --
     stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")

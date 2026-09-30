@@ -1661,6 +1661,17 @@ console.log('\n  the offline builder dates in the sheet\'s zone (--tz), never th
   };
   const dayIn = (zone, ms) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric',
                                                                  month: '2-digit', day: '2-digit' }).format(new Date(ms));
+  // 'YYYY-MM-DD HH:MM:SS' on `zone`'s wall clock (hourCycle h23: midnight is 00, never 24),
+  // truncated to the second like the builder's NOW, so before <= NOW <= after compares as text
+  const wallIn = (zone, ms) => {
+    const p = {};
+    for (const { type, value } of new Intl.DateTimeFormat('en-CA', {
+      timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms))) {
+      p[type] = value;
+    }
+    return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute + ':' + p.second;
+  };
   const TABS = ['Roster', 'ClubRegistry', 'Partners', 'ReviewQueue'];
   try {
     for (const [label, extra] of [['no --tz', []], ['--tz as the last argument (no value)', ['--tz']],
@@ -1685,6 +1696,10 @@ console.log('\n  the offline builder dates in the sheet\'s zone (--tz), never th
             r.status === 0 && found.size === 1 && want.has([...found][0]) &&
             /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(when) && want.has(days[zone]),
             'exit ' + r.status + ' ' + r.stderr.trim() + ' found ' + [...found].join(',') + ' want ' + [...want].join('|'));
+      // the time of day too: the other zone is 25 h off, so its clock falls outside the run
+      const [lo, hi] = [wallIn(zone, r.before), wallIn(zone, r.after)];
+      check('…and the Audit time is ' + zone + '\'s wall clock during the run',
+            r.status === 0 && lo <= when && when <= hi, 'Audit ' + when + ', run ' + lo + ' .. ' + hi);
     }
     check('…and the two builds are dated a day or two apart', days['Pacific/Kiritimati'] > days['Pacific/Pago_Pago'],
           JSON.stringify(days));
