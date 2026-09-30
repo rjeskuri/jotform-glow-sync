@@ -61,6 +61,7 @@ REPLACE_RX = re.compile(r"^  - REPLACE conditions \((?P<rules>\d+) rules")
 PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs(?::[^)]*)?\)$")
 PARTNER_PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) partner picker "
                                r"\((?P<partners>\d+) partners(?::[^)]*)?\)$")
+GUARD_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club guard \([^)]*\)$")
 ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) girls\); "
                        r"(?P<all>\d+) clubs overall")
 NOT_IN_EXPORT = "is on the form but not in the sheet export"
@@ -75,7 +76,8 @@ def key(s):
 def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
     plan = {"creates": [], "updates": [], "deletes": [], "picker": [], "partner_picker": [],
-            "rules": None, "warnings": [], "roster_clubs": None, "roster_girls": None}
+            "club_guard": [], "rules": None, "warnings": [], "roster_clubs": None,
+            "roster_girls": None}
     for line in text.splitlines():
         m = PICKER_RX.match(line)
         if m:
@@ -84,6 +86,10 @@ def parse_plan(text):
         m = PARTNER_PICKER_RX.match(line)
         if m:
             plan["partner_picker"].append({"op": m["op"], "partners": int(m["partners"])})
+            continue
+        m = GUARD_RX.match(line)
+        if m:
+            plan["club_guard"].append({"op": m["op"]})
             continue
         m = CREATE_RX.match(line)
         if m:
@@ -122,6 +128,8 @@ def plan_from_summary(summary):
             "partner_picker": [{"op": m["op"], "partners": int(m["partners"])}
                                for m in (PARTNER_PICKER_RX.match("  - " + c)
                                          for c in summary.get("calls", [])) if m],
+            "club_guard": [{"op": m["op"]} for m in (GUARD_RX.match("  - " + c)
+                                                     for c in summary.get("calls", [])) if m],
             "rules": summary.get("rules"),
             "warnings": [w.strip() for w in summary.get("warnings", [])],
             "roster_clubs": summary.get("roster_clubs"),
@@ -129,21 +137,23 @@ def plan_from_summary(summary):
 
 
 def changes(plan):
-    """Roster creates/updates/deletes plus a Club-picker or partner-list update (never a
-    create: the runner passes neither --club-picker nor --partner-picker, so a CREATE here
-    means someone else did)."""
+    """Roster creates/updates/deletes plus a Club-picker, partner-list or club-guard update
+    (never a create: the runner passes none of --club-picker, --partner-picker and
+    --club-guard, so a CREATE here means someone else did)."""
     return (len(plan["creates"]) + len(plan["updates"]) + len(plan["deletes"])
-            + len(plan.get("picker", [])) + len(plan.get("partner_picker", [])))
+            + len(plan.get("picker", [])) + len(plan.get("partner_picker", []))
+            + len(plan.get("club_guard", [])))
 
 
 def plan_summary(plan):
     """One line for the SyncLog detail and the attention title: the roster counts, then each
-    Club-picker or partner-list write by name (only when planned), so a list-only apply
-    does not read as "0 create(s), 0 update(s)"."""
+    Club-picker, partner-list or club-guard write by name (only when planned), so a list-only
+    apply does not read as "0 create(s), 0 update(s)"."""
     return (f"{len(plan['creates'])} create(s), {len(plan['updates'])} update(s), "
             f"{len(plan['deletes'])} delete(s), {len(plan['warnings'])} warning(s)"
             + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
-            + "".join(f", {m['op'].lower()} partner list" for m in plan.get("partner_picker", [])))
+            + "".join(f", {m['op'].lower()} partner list" for m in plan.get("partner_picker", []))
+            + "".join(f", {m['op'].lower()} club guard" for m in plan.get("club_guard", [])))
 
 
 def check_bands(plan, max_creates=5, max_updates=20):
@@ -369,9 +379,13 @@ class Run:
         if applied.returncode != 0:
             self.failed = True
             self.attention.append((f"{region}: APPLY FAILED - the form may be half-synced",
-                                   f"Run by hand: python3 sync_attendance_form.py <roster.csv> --roster "
-                                   f"--region '{region}' --form {form} (dry run first), or restore the "
-                                   f"conditions from backups/{form}/ with restore_conditions.py.\n\n"
+                                   f"Run by hand now: python3 sync_attendance_form.py <roster.csv> --roster "
+                                   f"--region '{region}' --form {form} (dry run first, then --apply), or "
+                                   f"restore the conditions from backups/{form}/ with restore_conditions.py. "
+                                   "Until then later runs report this form in-sync: when only the rules "
+                                   "are stale (a new roster's show rule and Contact_IDs operand; on a form "
+                                   "with the club guard, its club list, which blocks that club's mentors), "
+                                   "the difference is not a change to the runner.\n\n"
                                    + (applied.stderr or "").strip()[-500:]))
             self.result(region, plan, "failed", "apply exited " + str(applied.returncode))
             return

@@ -11,7 +11,7 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
      above them (glow/layout.py).
   2. Updates the roster options of existing club questions when the sheet
      changed (new girls enrolled, corrections).
-  3. Regenerates ALL conditional logic from scratch, in three categories:
+  3. Regenerates ALL conditional logic from scratch, in four categories:
        A. ROSTER VISIBILITY  - clubName == "<club>" -> show that roster
                                (same-named clubs from different partners are
                                disambiguated with the Partner box, or with the
@@ -20,6 +20,9 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
                                year+module -> session dropdown (8/10/14/15)
        C. SALESFORCE BRIDGE  - one aggregate Contact_IDs calculation +
                                module_id / week_id / year_id copies
+       D. ONE CLUB           - only on a form with the club guard (added
+                               once with --club-guard): several clubs picked
+                               -> show the warning, hide + disable Submit
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -50,12 +53,13 @@ sys.path.insert(0, REPO)
 from glow.cli import run            # noqa: E402
 from glow.jotform import Client     # noqa: E402
 from glow.layout import label as layout_label, roster_slot   # noqa: E402
-from glow.links import order_of as links_order_of            # noqa: E402
+from glow.links import order_of as links_order_of, submit_button  # noqa: E402
 from glow.sync import (             # noqa: E402  - the parsers and structural ids,
-    CLUB_NAME, CONTACT_IDS,   # shared with the
+    CLUB_NAME, CONTACT_IDS, GUARD_DISABLES_SUBMIT,   # shared with the
+    GUARD_NAME, GUARD_PROPS,
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
-    WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, partner_fields, partner_picker,
-    read_roster_csv, read_sheet, warn,                            # against Config.gs
+    WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, has_calc_values, partner_fields,
+    partner_picker, picker_calc_values, read_roster_csv, read_sheet, warn,  # against Config.gs
 )
 
 # Optional "Club" picker: a required dropdown listing every club on the form,
@@ -145,8 +149,21 @@ def mk_show(field):
     return {"id": f"action_{next_id()}", "visibility": "Show",
             "isError": False, "field": str(field)}
 
+def mk_hide(field):
+    return {"id": f"action_{next_id()}", "visibility": "Hide",
+            "isError": False, "field": str(field)}
+
+def mk_disable(field):
+    """A require-rule action (Jotform's "Enable / Require" rule type)."""
+    return {"id": f"action_{next_id()}", "visibility": "Disable",
+            "isError": False, "field": str(field)}
+
 def mk_field_rule(terms, actions, link="Any"):
     return {"id": next_id(), "type": "field", "link": link,
+            "priority": "0", "index": "0", "terms": terms, "action": actions}
+
+def mk_require_rule(terms, actions, link="Any"):
+    return {"id": next_id(), "type": "require", "link": link,
             "priority": "0", "index": "0", "terms": terms, "action": actions}
 
 def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
@@ -162,20 +179,32 @@ def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
             "priority": "0", "index": "0", "terms": terms, "action": [action]}
 
 def build_conditions(club_questions, partner_of, module_options, picker=None,
-                     partner_field=PARTNER):
+                     partner_field=PARTNER, picker_options=None, guard=None, submit=None):
     """club_questions: {qid: club display name}; partner_of: {qid: partner}
     for clubs whose name is shared by several partners; picker: qid of the
     Club dropdown when the form has one (the rules then key on it and its
     value is copied into the CLUB_NAME textbox for Salesforce); partner_field:
     the field the same-name rules test - the typed Partner box, or the partner
     list once the form has one (its value is then copied into the hidden
-    typed box, which the staff notification e-mail reads)."""
+    typed box, which the staff notification e-mail reads); picker_options:
+    the picker's options exactly as this run writes them (the rules test each
+    club in the picker's spelling); guard / submit: qids of the clubGuard
+    warning and the Submit button on a form with the one-club guard (section
+    D; both, with a picker and its options, or no guard rules at all)."""
     conds = []
     club_field = picker or CLUB_NAME
+    # A picker is a multi-select, where Jotform's "equals" means "this exact
+    # option is selected" - case-sensitively - so a rule spelling the club
+    # differently from the option never fires ("SUPER GIRLS" vs "Super
+    # Girls"): with a picker every club term takes the picker's spelling.
+    spelling = {o.lower(): o for o in picker_options} if picker and picker_options else {}
+
+    def club(name):
+        return spelling.get(name.lower(), name)
 
     # A. roster visibility
-    # ambiguity is judged case-insensitively because Jotform's runtime
-    # "equals" ignores case ("SUPER GIRLS" would also match "Super Girls")
+    # ambiguity is judged case-insensitively: Jotform's runtime "equals"
+    # ignores case on the typed box, and the picker lists such names once
     by_name = defaultdict(list)
     for qid, name in club_questions.items():
         by_name[name.lower()].append(qid)
@@ -183,15 +212,15 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
         if len(by_name[name.lower()]) > 1:
             conds.append(mk_field_rule(
                 [mk_term(partner_field, "equals", partner_of[qid]),
-                 mk_term(club_field, "equals", name)],
+                 mk_term(club_field, "equals", club(name))],
                 [mk_show(qid)], link="All"))
         else:
-            conds.append(mk_field_rule([mk_term(club_field, "equals", name)],
+            conds.append(mk_field_rule([mk_term(club_field, "equals", club(name))],
                                        [mk_show(qid)]))
     for low, qids in sorted(by_name.items()):
         if len(qids) > 1:  # ambiguous name -> reveal the Partner box (or list)
             conds.append(mk_field_rule(
-                [mk_term(club_field, "equals", club_questions[qids[0]])],
+                [mk_term(club_field, "equals", club(club_questions[qids[0]]))],
                 [mk_show(partner_field)]))
 
     # B. curriculum cascade
@@ -224,11 +253,27 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     for week_qid in WEEKS.values():
         conds.append(mk_calc_rule([mk_term(week_qid, "isFilled")], WEEK_ID,
                                   week_qid, "{%s}" % week_qid))
+    guarded = bool(picker and picker_options and guard and submit)
     roster_qids = sorted(club_questions, key=int)
+    # no separator between the rosters, guard or not: only one roster can be
+    # visible when Submit is (the guard's rules), and a literal ", " would be
+    # written between every pair of operands, hidden ones included
     conds.append(mk_calc_rule(
         [mk_term(club_field, "isFilled")], CONTACT_IDS,
         ",".join(roster_qids), "".join("{%s}" % q for q in roster_qids),
         ignore_hidden=True, as_text=True))
+
+    # D. one club per submission: question 5 (the copy of the picker) is not
+    # exactly one of its options -> several clubs are picked: show the
+    # warning, hide Submit, and (a require rule) disable it too, which closes
+    # the desktop Enter key. Appended last, so every other rule keeps its index.
+    if guarded:
+        def terms():
+            return [mk_term(picker, "isFilled")] + \
+                   [mk_term(CLUB_NAME, "notEquals", o) for o in picker_options]
+        conds.append(mk_field_rule(terms(), [mk_show(guard), mk_hide(submit)], link="All"))
+        if GUARD_DISABLES_SUBMIT:
+            conds.append(mk_require_rule(terms(), [mk_disable(submit)], link="All"))
 
     for i, c in enumerate(conds):
         c["index"] = str(i)
@@ -286,6 +331,16 @@ def partner_choices(club_questions, partner_of, pending=()):
                     out.setdefault(" ".join(p.split()).lower(), p)
     return sorted(out.values(), key=str.lower)
 
+def joined_clashes(options):
+    """[(a, b, c)]: two picker options whose names run together - what
+    question 5 receives when both are picked - equal a third option (as
+    Jotform compares a textbox: case and outer spaces ignored). The club
+    guard cannot tell such a pair from the one club."""
+    by_key = {o.strip().lower(): o for o in options}
+    return [(a, b, by_key[(a + b).strip().lower()])
+            for a in options for b in options
+            if a != b and (a + b).strip().lower() in by_key]
+
 # ------------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -311,6 +366,10 @@ def main():
                          "maintained on every run): club names two partners share are "
                          "told apart by choosing the partner instead of typing it, and "
                          "the typed Partner box is hidden")
+    ap.add_argument("--club-guard", action="store_true",
+                    help="add the one-club-per-submission guard to this form (once; afterwards "
+                         "it is maintained on every run): a warning below the Club picker, and "
+                         "Submit hidden and disabled while several clubs are picked")
     args = ap.parse_args()
     if args.region and not args.roster:
         sys.exit("--region needs --roster (the Roster tab is what carries regions)")
@@ -386,6 +445,31 @@ def main():
               "two partners share)")
         if args.partner_picker:
             print("  - the form already has the partner list; --partner-picker is not needed")
+
+    # the one-club guard: refusals before any write
+    guards = club_guards(questions)
+    if len(guards) > 1:
+        sys.exit(f"{len(guards)} elements are named {GUARD_NAME!r} "
+                 f"({', '.join('q' + g for g in guards)}) - delete the extra one in the builder first")
+    guard_qid = guards[0] if guards else None
+    if guard_qid and questions[guard_qid].get("type") != "control_text":
+        sys.exit(f"q{guard_qid} is named {GUARD_NAME!r} but is a {questions[guard_qid].get('type')}, "
+                 "not a text element - rename or delete it in the builder first")
+    if guard_qid:
+        print(f"Club guard: q{guard_qid} (one club per submission)")
+        if args.club_guard:
+            print("  - the form already has the club guard; --club-guard is not needed")
+    if args.club_guard and picker_qid is None:
+        sys.exit("--club-guard needs the Club picker on the form: add it first (--club-picker), "
+                 "then run --club-guard")
+    if guard_qid and picker_qid is None:
+        warn(f"  ! q{guard_qid} (the club guard) needs the Club picker, which this form lacks - "
+             "no guard rules this run")
+    guard_on = picker_qid is not None and (guard_qid is not None or args.club_guard)
+    submit_qid = None
+    if guard_on:   # found by type; refuses unless there is exactly one (q2 on every form)
+        button = submit_button(questions)
+        submit_qid = next(str(k) for k, q in questions.items() if q is button)
 
     # partner mapping already encoded in the form's current rules
     # (used to match same-named clubs to their existing questions); a rule
@@ -620,7 +704,12 @@ def main():
     picker_names = {}   # one entry per distinct name (same-name clubs share it;
     for name in list(club_questions.values()) + [c for c, _, _, _ in to_create]:
         picker_names.setdefault(name.lower(), name)   # the Partner box tells them apart)
-    picker_options = "|".join(sorted(picker_names.values(), key=str.lower))
+    picker_list = sorted(picker_names.values(), key=str.lower)   # the rules test these spellings
+    picker_options = "|".join(picker_list)
+    if guard_on:
+        for a, b, c in joined_clashes(picker_list):
+            warn(f"  ! picking '{a}' and '{b}' fills Club Name with '{c}', another club on this "
+                 "form - the club guard cannot tell that pair from one club")
     if picker_qid is None and args.club_picker:
         fields = {"question[type]": "control_dropdown", "question[name]": PICKER_NAME,
                   "question[order]": str(questions[CLUB_NAME].get("order", "3")),
@@ -639,6 +728,12 @@ def main():
         drift = {k: v for k, v in PICKER_PROPS.items() if current.get(k) != v}
         if current.get("options") != picker_options:
             drift["options"] = picker_options
+        # calcValues = the options, aligned (the q5 copy reads them): with the guard,
+        # and whenever the picker carries some - unaligned, they would copy a
+        # neighbouring club into question 5 (a guard rolled back, a new club added)
+        calc = picker_calc_values(picker_list)
+        if (guard_on or has_calc_values(current)) and (current.get("calcValues") or "") != calc:
+            drift["calcValues"] = calc
         if drift:
             jf.post_form(f"/question/{picker_qid}",
                          {f"question[{k}]": v for k, v in drift.items()},
@@ -679,12 +774,41 @@ def main():
               "it with a list")
     hide_box = using_list and questions.get(PARTNER, {}).get("hidden") != "Yes"
 
+    # --- the club guard: the warning below the picker, kept in shape ---------
+    guard_field = None
+    if guard_on and guard_qid is None:
+        # a create at a taken order inserts (the picker took q5's order 3, q5 is now
+        # 4): the order after the picker's puts the warning directly below it.
+        # glow.links.order_of, the one form_status checks the placement with
+        fields = {"question[type]": "control_text", "question[name]": GUARD_NAME,
+                  "question[order]": str(links_order_of(questions[picker_qid]) + 1)}
+        fields.update({f"question[{k}]": v for k, v in GUARD_PROPS.items()})
+        content = jf.post_form("/questions", fields, "CREATE club guard (below the Club picker)")
+        if not args.apply:
+            guard_field = "NEW_GUARD"
+        elif isinstance(content, dict) and content.get("qid"):
+            guard_field = guard_qid = str(content["qid"])
+        else:   # the element, hidden, waits for the re-run; no rule may point at nothing
+            warn("  ! the club guard was created but Jotform's answer carried no question id - "
+                 "this run writes no guard rules; run the same command again (it finds the "
+                 "guard by name)")
+    elif guard_on:
+        current = questions[guard_qid]
+        drift = {k: v for k, v in GUARD_PROPS.items() if current.get(k) != v}
+        if drift:
+            jf.post_form(f"/question/{guard_qid}",
+                         {f"question[{k}]": v for k, v in drift.items()},
+                         f"UPDATE club guard ({', '.join(sorted(drift))})")
+        guard_field = guard_qid
+
     # --- regenerate all conditions -----------------------------------------
     # The API stores each condition's terms/action as JSON-encoded STRINGS
     # (that is what GET returns and what the builder saves) - encode them.
     conds = build_conditions(club_questions, partner_of, module_options,
                              picker=picker_qid or ("NEW" if args.club_picker else None),
-                             partner_field=partner_qid or ("NEW_PARTNER" if using_list else PARTNER))
+                             partner_field=partner_qid or ("NEW_PARTNER" if using_list else PARTNER),
+                             picker_options=picker_list, guard=guard_field,
+                             submit=submit_qid if guard_field else None)
     if not (to_create or to_update or to_delete) and \
             same_conditions(props.get("conditions", []), conds):
         print("  (conditions unchanged - skipping the rewrite)")
@@ -725,7 +849,7 @@ def main():
                         for q, c, o in to_update],
             "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
-            "club_picker": picker_qid, "partner_picker": partner_qid,
+            "club_picker": picker_qid, "partner_picker": partner_qid, "club_guard": guard_qid,
             "plan_hash": hashlib.sha1("\n".join(sorted(jf.calls)).encode()).hexdigest(),
         }
         with open(args.summary_json, "w", encoding="utf-8") as f:

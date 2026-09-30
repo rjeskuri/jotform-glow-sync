@@ -166,5 +166,21 @@
  "Other": {
   "_note": "only Urdu lacked it on the Asia form (2026-09-20); the other languages already carry Jotform's own entry - never overwrite those",
   "ur": "دیگر"
+ },
+ "You chose more than one club. Keep only your own club in Club Name, and the Submit button comes back.": {
+  "_note": "the club guard's warning below the Club picker (glow/sync.py GUARD_SENTENCE, docs/plans/2026-09-29-club-guard.md). Written by us and NOT native-reviewed (like the Odia, Hindi and Persian sets) - corrections go here and are re-applied with tools/add_translations.py --apply. 'Club Name' and the Submit button are named with each language's own wording on the live forms (read 2026-09-29), so the warning names what the mentor sees. hi and fa reach the Asia form only",
+  "es": "Elegiste más de un club. Deja solo tu propio club en “Nombre del club” y el botón “Enviar” volverá a aparecer.",
+  "fr": "Vous avez choisi plus d’un club. Ne gardez que votre propre club dans « Nom du club », et le bouton « Soumettre » réapparaîtra.",
+  "th": "คุณเลือกมากกว่าหนึ่งชมรม ให้เหลือเฉพาะชมรมของคุณในช่อง “ชื่อชมรม” แล้วปุ่ม “ส่ง” จะกลับมา",
+  "ur": "آپ نے ایک سے زیادہ کلب منتخب کیے ہیں۔ “کلب کا نام” میں صرف اپنا کلب رہنے دیں، تو “جمع کروائیں” کا بٹن واپس آ جائے گا۔",
+  "te": "మీరు ఒకటి కంటే ఎక్కువ క్లబ్‌లను ఎంచుకున్నారు. “క్లబ్ పేరు”లో మీ క్లబ్‌ను మాత్రమే ఉంచండి, అప్పుడు “సమర్పించండి” బటన్ మళ్లీ కనిపిస్తుంది.",
+  "vi": "Bạn đã chọn nhiều hơn một câu lạc bộ. Chỉ giữ lại câu lạc bộ của bạn trong “Tên câu lạc bộ”, nút “Gửi” sẽ hiện lại.",
+  "ne": "तपाईंले एकभन्दा बढी क्लब छान्नुभयो। “क्लबको नाम” मा आफ्नो क्लब मात्र राख्नुहोस्, अनि “पेश गर्नुहोस्” बटन फेरि देखिनेछ।",
+  "km": "អ្នកបានជ្រើសរើសក្លឹបច្រើនជាងមួយ។ សូមទុកតែក្លឹបរបស់អ្នកនៅក្នុង “ឈ្មោះក្លឹប” នោះប៊ូតុង “ដាក់ស្នើ” នឹងបង្ហាញឡើងវិញ។",
+  "sw": "Umechagua klabu zaidi ya moja. Acha klabu yako pekee kwenye “Jina la klabu”, na kitufe cha “Wasilisha” kitarudi.",
+  "ar": "لقد اخترت أكثر من نادٍ واحد. أبقِ ناديك فقط في «اسم النادي»، وسيعود زر «تأكيد».",
+  "or": "ଆପଣ ଗୋଟିଏରୁ ଅଧିକ କ୍ଲବ ବାଛିଛନ୍ତି। “କ୍ଲବ ନାମ” ରେ କେବଳ ଆପଣଙ୍କ ନିଜ କ୍ଲବ ରଖନ୍ତୁ, ତାହାହେଲେ “ଦାଖଲ କରନ୍ତୁ” ବଟନ୍ ପୁଣି ଦେଖାଯିବ।",
+  "hi": "आपने एक से ज़्यादा क्लब चुने हैं। “क्लब का नाम” में सिर्फ़ अपना क्लब रहने दें, तो “जमा करें” बटन फिर से दिखेगा।",
+  "fa": "شما بیش از یک باشگاه انتخاب کرده‌اید. در «نام باشگاه» فقط باشگاه خودتان را نگه دارید تا دکمهٔ «ارسال» دوباره نمایش داده شود."
  }
 }

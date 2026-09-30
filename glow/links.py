@@ -9,17 +9,28 @@ tools/translations_additions.json translates. Every tool finds an element by
 its unique name, never by qid (the qid differs per form).
 
 The sync never touches them: sync_attendance_form.py writes roster checkboxes,
-the Club picker, q5's hidden flag and the conditions, and no generated rule
-mentions any other element (test/python_test.py, SyncLeavesTheLinksAlone).
+the Club picker and the partner list, the hidden flags of q5 and q331, the
+club guard's warning and the conditions, and no generated rule mentions a link
+element (test/python_test.py, SyncLeavesTheLinksAlone). The club guard's two
+rules are the only generated rules that mention an element other than the
+rosters and the structural fields: its warning and the Submit button
+(docs/plans/2026-09-29-club-guard.md).
+
 Where the rosters sit relative to these elements and Submit - the order the
 sync gives a new roster, the one-time repair, the form_status check - is
 glow/layout.py, built on the render-order helpers here.
+
+The translation tools key every one-sentence text element the same way; the
+club guard's warning (glow/sync.py) is one too - translated_elements() lists
+them all.
 """
 import html
 import json
 import re
 import sys
 from collections import namedtuple
+
+from .sync import GUARD_SENTENCE, club_guards
 
 # The public "fill in" links of the two Google Forms (docs/LAUNCH.md; the test
 # suite pins them to it). Never an edit link: those are for the owner only.
@@ -92,6 +103,16 @@ def elements_on(questions):
     """[(question, Link)] for the link elements present on a form."""
     return [(q, BY_NAME[q["name"]]) for q in questions.values()
             if q.get("type") == "control_text" and q.get("name") in BY_NAME]
+
+
+def translated_elements(questions):
+    """[(question, English sentence)] for every one-sentence text element on a
+    form that the translation tools key by sentence, element id (`text_<qid>`)
+    and stored HTML: the links above Submit and the club guard's warning."""
+    out = [(q, link.sentence) for q, link in elements_on(questions)]
+    out += [(questions[qid], GUARD_SENTENCE) for qid in club_guards(questions)
+            if questions[qid].get("type") == "control_text"]
+    return out
 
 
 def submit_button(questions):

@@ -29,6 +29,8 @@ Jotform native Salesforce V2 integration → Attendance_Batch__c
    Account_Name__c ← qid 5 (club), Contact_IDs__c ← qid 18 (ONE aggregate calculation over every
    roster, "ignore hidden fields" on, so only the visible club's ticked names arrive),
    Module__c / Module_Week__c / Module_Year__c ← qids 98 / 100 / 102
+   (with the club guard: Submit is hidden and disabled unless q5 is exactly one picker option,
+   so only one roster is visible when a mentor submits — docs/plans/2026-09-29-club-guard.md)
 ```
 
 The legacy path still exists for the template form: a CSV export of the raw
@@ -38,7 +40,7 @@ enrollment responses → `sync_attendance_form.py read_sheet` (no `--roster`).
 
 | Where | What | Talks to |
 |---|---|---|
-| `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge), and keeps the Club picker and the partner list (found by field name, `clubPicker` / `partnerPicker`, added once by `--club-picker` / `--partner-picker`) in shape. New rosters are created above the links and Submit (`glow/layout.py`). Dry run by default, `--apply` writes, `--summary-json` for the runner | Jotform API via `curl` |
+| `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge, and — on a form with the club guard — the one-club rules), and keeps the Club picker, the partner list and the club guard's warning (found by field name, `clubPicker` / `partnerPicker` / `clubGuard`, added once by `--club-picker` / `--partner-picker` / `--club-guard`) in shape. New rosters are created above the links and Submit (`glow/layout.py`). Dry run by default, `--apply` writes, `--summary-json` for the runner | Jotform API via `curl` |
 | `backup_forms.py`, `restore_conditions.py` | Snapshot and rollback (conditions only) | Jotform API |
 | `tools/form_status.py` | Read-only audit of every form vs the Roster export, rule by rule; `--json` | Jotform API |
 | `tools/auto_sync.py` | The unattended loop (export → plan → bands → backup → apply → verify → SyncLog) | Sheets API, the tools above |

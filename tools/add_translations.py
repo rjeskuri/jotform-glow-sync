@@ -23,7 +23,8 @@ to base/en too (merged; base already holds every roster name, which is why
 it is never rebuilt from scratch here).
 
 Text elements (the links above Submit, glow/links.py: the problem-report
-link and the Club Roster Form link) are keyed three ways: the plain sentence,
+link and the Club Roster Form link; and the club guard's warning below the
+Club picker, glow/sync.py) are keyed three ways: the plain sentence,
 the element id `text_<qid>` (what the runtime looks up first; its value
 replaces the whole inner HTML) and the stored HTML - the HTML variants carry
 the link around the translated sentence. So this runs AFTER
@@ -107,9 +108,10 @@ def plan_additions(questions, store, additions):
     is visible on this form, in the languages the form's store has; sources =
     {md5 key: English} for base and en (the runtime resolves a text to its key
     through base, so a translation whose source is missing never applies).
-    Each link element (glow/links.py) on the form is also keyed by its element
-    id `text_<qid>` and by its stored HTML, both carrying the translated
-    sentence inside the unchanged link."""
+    Each one-sentence text element on the form (glow.links.translated_elements:
+    the links above Submit and the club guard's warning) is also keyed by its
+    element id `text_<qid>` and by its stored HTML, both carrying the
+    translated sentence inside the unchanged markup (and link)."""
     strings = visible_strings(questions)
     payload, sources = {}, {}
     for english, per_lang in additions.items():
@@ -119,8 +121,8 @@ def plan_additions(questions, store, additions):
         for lang, text in per_lang.items():
             if lang in store and lang not in SOURCE_KEYS:
                 payload.setdefault(lang, {})[md5(english)] = text
-    for q, link in glow_links.elements_on(questions):
-        sentence, stored = link.sentence, q.get("text", "")
+    for q, sentence in glow_links.translated_elements(questions):
+        stored = q.get("text", "")
         if sentence not in stored or sentence not in additions:
             continue
         text_id = f"text_{q['qid']}"

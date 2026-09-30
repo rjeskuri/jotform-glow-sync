@@ -285,10 +285,9 @@ The wording follows the training guide — label **Club Name**, sublabel
 change it there, never in the builder (the sync reverts hand edits). The same
 day `tools/update_static_fields.py` renamed the mentor email field to
 "Partner Coordinator Email" and opened the Group Photo question (one photo,
-faces visible, 10 MB, HEIC accepted). Still to confirm in the browser: that
-the searchable component lets a mentor pick only one club (Jotform ignores
-`maxSelection` on dropdowns); if two can be picked, the sync must add a
-guard rule.
+faces visible, 10 MB, HEIC accepted). The searchable component does let a
+mentor pick several clubs (20 submissions since 09-01; Jotform ignores
+`maxSelection` on dropdowns): the guard is "One club per submission" below.
 
 ```bash
 python3 backup_forms.py --form 262352490535154
@@ -418,6 +417,168 @@ list, the old code would put that form's rules back on its hidden q331.
 Until it is deployed, a mentor of a shared-name club must type the partner's
 full name exactly as the Club Roster Form lists it.
 
+## One club per submission (the club guard)
+
+Plan: [plans/2026-09-29-club-guard.md](plans/2026-09-29-club-guard.md).
+The Club picker is a multi-select (its searchable mode), so a mentor can pick
+several clubs: 20 submissions did between 09-01 and 09-29 (Africa 12, Asia
+8). Question 5, the Salesforce field, then receives the names run together
+with no separator; Salesforce would create a junk Club Account from it. The
+guard stops that on the form. `--club-guard` adds a hidden text element named
+`clubGuard` directly below the picker ("You chose more than one club. Keep
+only your own club in Club Name, and the Submit button comes back."). It also
+generates two rules, whose terms are "the picker is filled" plus "question 5
+is not <club>" for every club on the picker:
+
+- a field rule shows the warning and hides Submit;
+- a require rule disables Submit, which stops desktop Enter in a text box from
+  submitting.
+
+One club picked: question 5 is exactly that club, and the rules stay off. Two
+picked: question 5 is no club, and the warning shows while Submit goes away.
+Removing the extra club brings Submit back. On a guarded form the picker's
+`calcValues` are its own club names, so the copy into question 5 reads a value
+the browser's "Translate page" cannot alter (it altered 5 single-club picks,
+by one character). The Contact_IDs (q18) sum is left exactly as it is: with
+Submit shown, only one roster is visible.
+
+Added once per form. From then on every apply, the runner's included, keeps
+the warning, both rules, the club list in the rules and the `calcValues` in
+step (`UPDATE club guard (…)`, counted and named by the runner like a picker
+update). The runner applies only when something besides the rules changed:
+if an apply stops after the picker write and its retry fails too (ATTENTION
+"APPLY FAILED"), the new club is on the picker but not in the guard rules,
+so its mentors cannot submit, and every later run reports `in-sync` (a
+rules-only difference is not a change to the runner, as on a form without
+the guard, where the new roster never shows). **Do the dry run and
+`--apply` by hand straight away** after any APPLY FAILED. A form without the element keeps exactly today's rules, except the
+spelling fix below. **Status:** built 2026-09-29 on `wf5/club-guard`, not
+deployed.
+
+The spelling fix is not gated. On a multi-select, Jotform's `equals` is
+case-sensitive, so a roster rule spelled unlike the picker's option never
+fires. Africa's "SUPER GIRLS" roster (and the template's) can never appear
+today. With a picker, every rule now uses the picker's own spelling.
+`form_status` flags the old rule ("… which is not one of its options") until
+the next apply on that form. The runner does not apply a rules-only
+difference, so the fix waits for a roster change in Africa, or for an apply
+by hand.
+
+Refusals, before any write: no Club picker on the form (add it first with
+`--club-picker`, then run `--club-guard` separately); two elements named
+`clubGuard`, or one that is not a text element (on every run, the runner's
+included); not exactly one Submit button. A warning (not a refusal): two club
+names that, run together, equal a third club. The guard cannot tell that
+pair from the one club (none today).
+
+Order matters: the runner syncs from `main`, and older code rewrites the
+picker's options but not its `calcValues`, and drops the guard rules. After
+the next new club, question 5 would get the neighbouring club's name with no
+warning (every one is still a valid club, so nothing blocks it). So **merge
+first**, and never run `sync_attendance_form.py --apply` from a checkout
+without this code (rebase such a branch first) while any Club picker carries
+`calcValues`.
+
+Rollout, with `AUTO_SYNC_APPLY=0` for the whole window. Each step needs
+Ryan's go. Only on a form the roster-order repair has finished ("Rosters
+above Submit": `form_status` says `layout: every roster above …`) — the
+CLEAN below needs it, and the warning's create moves the rosters' orders, so
+the repair's `--undo` refuses from then on. The template goes first; after
+it, U.S, Latin America, Asia, then Africa (smallest first), each with its
+`--region`:
+
+```bash
+python3 backup_forms.py --form 262352490535154                                         # note its stamp: the rollback restores it
+python3 tools/add_translations.py --audit --form 262352490535154                       # before: note the counts
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-guard            # dry run
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-guard --apply    # add it
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154                         # "Club guard: q<id>", nothing to do (else Jotform altered what was written: stop)
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv              # "club guard: q<id> (N clubs)", rules CLEAN
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --rendered   # HARD STOP: N options, N with data-calcvalue = value
+python3 tools/add_translations.py --form 262352490535154                               # dry run: the warning's entries appear
+python3 tools/add_translations.py --form 262352490535154 --apply
+python3 tools/add_translations.py --audit --form 262352490535154                       # the "before" counts plus one per club this apply created (see below); any other rise: stop
+```
+
+The dry run prints `UPDATE club picker (N clubs: calcValues)`, `CREATE club
+guard (below the Club picker)` and `REPLACE conditions (M + 2 rules)`, with
+`conditions: K kept, 2 new, 0 dropped`: the 2 new are the two guard rules;
+every other rule, the Contact_IDs sum included, is unchanged. Read on
+2026-09-29: U.S 12 clubs, 41 → 43 rules; Latin America 39, 68 → 70;
+Asia 96, 125 → 127. Africa (216 clubs, 255 → 257) and the template show
+`3 new, 1 dropped` while the SUPER GIRLS rule has not landed. The template
+also carries the roster creates and updates it is behind on (35 that day,
+the same ones the dry run without the flag plans).
+
+The translation audit counts every Club-picker option as an untranslated
+string (club names stay English), so after the apply it reads the "before"
+counts plus one per language for each club the apply created: the dry run's
+`CREATE roster` lines, 23 on the template on 2026-09-30, none on a form in
+step. The warning itself adds nothing once `add_translations.py --apply` has
+run: it is translated in every language the forms offer.
+
+**The `--rendered` check is a hard stop on the template.** How a
+multi-select lays out `calcValues` is unverified: a leading empty slot, as
+single-selects have, or none (`glow/sync.py PICKER_CALC_LEADING_EMPTY`). If
+the check reports any option whose `data-calcvalue` differs from its value,
+question 5 would receive a neighbouring club's name, with no warning.
+Restore the template's conditions, delete the element, clear the
+`calcValues` (below), flip the constant, and start again. The check also
+refuses to pass when the page lists a different number of options than the
+picker has ("rendered page lists N of the picker's M options"): an option it
+could not read is one it cannot vouch for. (All options
+"without" a `data-calcvalue` right after the apply can be a page served from
+before it: re-run the check a few minutes later before calling it a
+failure.) No regional form
+gets the guard until the template's rendered check is aligned.
+
+Check in the browser (the template, then each regional form):
+
+1. Pick one club: no warning; its roster and Submit show.
+2. Pick a second club: the warning appears below the picker and Submit is
+   gone. Remove it: the warning goes and Submit comes back, not greyed out
+   (the require rule's Disable must lift too).
+3. With two clubs picked, press Enter in the Partner Coordinator Email box
+   on a desktop: the form does not submit.
+4. Switch the language (e.g. Español): the warning is translated.
+5. Chrome "Translate page" with one club picked: no warning, Submit shows.
+6. The builder's Conditions page shows no error marks.
+7. The template only: one test submission. Question 5 holds exactly the
+   club, and question 18 lists the ticked names.
+
+When every form passes, set `AUTO_SYNC_APPLY=1`. Then an `auto_sync.py` dry
+run shows every region `in-sync`.
+
+Rollback, per form (the runner paused from the first step to the last).
+While the `clubGuard` element exists, any apply regenerates the guard rules,
+so the element goes before the runner resumes.
+
+1. `AUTO_SYNC_APPLY=0`, then `python3 backup_forms.py --form <id>`.
+2. `python3 restore_conditions.py --form <id> --from properties-<stamp>.json`
+   (dry run, then `--apply`). `<stamp>` is the backup taken just before the
+   `--club-guard --apply`, not `properties-latest.json`.
+3. Delete the `clubGuard` element in the builder.
+4. Clear the picker's `calcValues` (its calculation values in the builder, or
+   `question[calcValues]` via the API; re-read to confirm it took — an empty
+   value through the API is untested). Optional while the form keeps syncing
+   on this code, which keeps them aligned with the options. Required before
+   anything older syncs the form: older code shifts them on the next new club.
+5. The sync dry run without the flag: `nothing to do`, or a `REPLACE
+   conditions` for what the snapshot predates. That means roster changes
+   applied since it was taken, and on Africa and the template the SUPER
+   GIRLS spelling rule (`1 new, 1 dropped` with no roster change) unless an
+   apply had already landed it. Back up, then `--apply`.
+6. `tools/form_status.py --form <id> --roster …`: rules CLEAN, `club guard:
+   none`. Then `AUTO_SYNC_APPLY=1`.
+
+Do not revert the merge while any Club picker carries `calcValues`: clear
+them first (step 4) and re-read to confirm. The old code would keep the
+stale `calcValues` and send the neighbouring club's name to question 5.
+
+Before any Salesforce back-fill, split or assign the 20 fused question-5
+submissions by hand (BACKLOG 48). Nothing has reached Salesforce since
+2026-03-28, so none of them has created an Account yet.
+
 ## Header logo
 
 The logo above the form title is the `image` field (q13 on every form), and
@@ -491,8 +652,10 @@ native-reviewed. "Club Roster Form" stays in English in every language: the
 Google Form it opens is English-only.
 
 The sync never touches these elements: it writes roster checkboxes, the Club
-picker, q5's hidden flag and the conditions, and no generated rule mentions
-anything but rosters and the structural fields (both test-pinned). A rule
+picker, the partner list, the club guard's warning, the hidden flags of q5
+and q331, and the conditions, and no generated rule mentions a link element
+(both test-pinned; the club guard's two rules mention only its warning and
+Submit). A rule
 hand-made on an element would be dropped by the next sync, and the tool
 flags one. Rollback: `--remove --apply` (the order gap it leaves is
 harmless), the old orders in `backups/<id>/questions-<stamp>.json`, or
@@ -542,8 +705,8 @@ form is NOT CLEAN for `form_status`, so a runner apply would end
 `applied-with-problems` — then back to `1`. Run the repair in the same
 sitting as the merge: until a form is repaired, `form_status` shows the
 `layout` problem on it, so no other procedure's "CLEAN" can pass there (the
-manual loop, renaming or moving a club, the Club picker, the partner list).
-That line is this section's job, not theirs.
+manual loop, renaming or moving a club, the Club picker, the partner list,
+the club guard). That line is this section's job, not theirs.
 
 The tool plans all five forms before it writes any and refuses — on every
 form — rather than guess: two Submit buttons, a page break, a field a mentor can
@@ -577,7 +740,9 @@ then the first stamp, still gets back).
 Submit, or not exactly one Submit makes the form NOT CLEAN — and the
 runner's verify sees it. Rollback: `--undo <stamp>` puts the snapshot's
 orders back by the same path (planned, probed, verified). It is for right
-after the repair, before the Club Roster Form link is placed: it refuses
+after the repair, before the Club Roster Form link or the club guard is
+placed (the guard's warning is created at the picker's order + 1, which
+moves the rosters below it down by one, up to the first gap): it refuses
 once the form's questions or a roster's order have changed since, and when
 the snapshot holds two questions at one order (the link placed before the
 repair leaves Submit sharing the next field's order) — then the builder, or

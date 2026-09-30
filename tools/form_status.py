@@ -18,8 +18,11 @@ Usage:
 """
 import argparse
 import csv
+import html
 import json
 import os
+import re
+import subprocess
 import sys
 from collections import defaultdict
 
@@ -29,7 +32,10 @@ from glow import forms as glow_forms       # noqa: E402
 from glow import layout                    # noqa: E402  (rosters above the links and Submit)
 from glow.cli import run                   # noqa: E402
 from glow.jotform import Client            # noqa: E402
-from glow.sync import PICKER_NAME, partner_picker   # noqa: E402  (shared with the sync tool)
+from glow.links import order_of, shown_by_rules   # noqa: E402
+from glow.sync import (                    # noqa: E402  (shared with the sync tool)
+    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, PICKER_NAME,
+    club_guards, has_calc_values, partner_picker, picker_calc_values)
 from glow.text import key, name_key        # noqa: E402
 
 FORMS = {glow_forms.TEMPLATE: ("template", None),
@@ -61,6 +67,163 @@ def club_picker(questions):
     """qid of the Club dropdown, or None when mentors type the club name."""
     return next((qid for qid, q in questions.items()
                  if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
+
+
+def picker_options(questions, picker):
+    """The picker's options exactly as stored (what a multi-select's rules compare)."""
+    return [o for o in (questions[picker].get("options") or "").split("|") if o]
+
+
+def _parsed(conditions):
+    """[(rule, terms, actions)] for the rules whose terms/action parse."""
+    out = []
+    for c in conditions or []:
+        try:
+            terms = json.loads(c["terms"]) if isinstance(c["terms"], str) else c["terms"]
+            actions = json.loads(c["action"]) if isinstance(c["action"], str) else c["action"]
+        except (KeyError, ValueError, TypeError):
+            continue
+        out.append((c, terms or [], actions or []))
+    return out
+
+
+def audit_picker(questions, conditions):
+    """The Club picker's own checks: on a multi-select, `equals` is exact and
+    case-sensitive, so every rule term testing the picker must be one of its
+    options as spelled (else that roster never shows); and calcValues, when
+    the picker carries them, must be its options in order (the copy into
+    question 5 reads them - misaligned, it sends another club's name)."""
+    picker = club_picker(questions)
+    if not picker:
+        return []
+    problems = []
+    options = picker_options(questions, picker)
+    if questions[picker].get("multipleSelections") == "Yes":
+        exact, lower = set(options), {o.lower(): o for o in options}
+        for c, terms, _ in _parsed(conditions):
+            for t in terms:
+                if str(t.get("field")) == picker and t.get("operator") == "equals" \
+                        and t.get("value") not in exact:
+                    hint = lower.get(str(t.get("value")).lower())
+                    problems.append(f"rule {c.get('id')} tests the Club picker (q{picker}) equals "
+                                    f"{t.get('value')!r}, which is not one of its options"
+                                    + (f" (it has {hint!r}; a multi-select compares case)" if hint else "")
+                                    + " - that rule never fires; the next sync apply fixes it")
+    if has_calc_values(questions[picker]) or club_guards(questions):
+        have = questions[picker].get("calcValues") or ""
+        if have != picker_calc_values(options):
+            problems.append(f"club picker (q{picker}) calcValues are not its {len(options)} options in "
+                            f"order ({len(have.split('|')) if have else 0} values) - the copy into "
+                            "question 5 would send another club's name; the next sync run realigns them")
+    return problems
+
+
+def audit_club_guard(questions, conditions):
+    """The one-club-per-submission guard (glow.sync.GUARD_NAME), when a form
+    has it: its element, its placement directly below the picker, its two
+    rules with the full term list. [] on a form without it
+    (docs/plans/2026-09-29-club-guard.md)."""
+    guards = club_guards(questions)
+    if not guards:
+        return []
+    problems = []
+    if len(guards) > 1:
+        problems.append(f"{len(guards)} elements are named {GUARD_NAME!r} "
+                        f"({', '.join('q' + g for g in guards)}) - delete the extra one")
+    gid = guards[0]
+    g = questions[gid]
+    label = f"club guard (q{gid})"
+    if g.get("type") != "control_text":
+        problems.append(f"{label} is a {g.get('type')}, not a text element")
+    if g.get("hidden") != "Yes":
+        problems.append(f"{label} is not hidden: every mentor sees the warning")
+    if g.get("text") != GUARD_PROPS["text"]:
+        problems.append(f"{label} text is not glow.sync.guard_html() - the next sync run rewrites it")
+    picker = club_picker(questions)
+    if not picker:
+        return problems + [f"{label} but no Club picker: nothing can show it"]
+    options = picker_options(questions, picker)
+    # directly below the picker: nothing a mentor can see renders between them
+    shown = shown_by_rules(conditions)
+    rank = {qid: (order_of(q), int(qid)) for qid, q in questions.items()}
+    if rank[gid] < rank[picker]:
+        problems.append(f"{label} renders above the Club picker (q{picker})")
+    else:
+        between = [qid for qid, q in questions.items() if rank[picker] < rank[qid] < rank[gid]
+                   and (q.get("hidden") != "Yes" or q.get("type") == "control_checkbox" or qid in shown)]
+        if between:
+            problems.append(f"{label} is not directly below the Club picker (q{picker}): "
+                            f"{len(between)} element(s) a mentor can see sit between them")
+    buttons = [qid for qid, q in questions.items() if q.get("type") == "control_button"]
+    if len(buttons) != 1:
+        return problems + [f"{len(buttons)} Submit buttons, expected 1 - the guard hides and "
+                           "disables one"]
+    submit = buttons[0]
+    want = {(picker, "isFilled", "")} | {(CLUB_NAME_QID, "notEquals", o) for o in options}
+    rules = _parsed(conditions)
+    shows = [(c, t, a) for c, t, a in rules
+             if any(x.get("visibility") == "Show" and str(x.get("field")) == gid for x in a)]
+    disables = [(c, t, a) for c, t, a in rules if c.get("type") == "require"
+                and any(x.get("visibility") == "Disable" and str(x.get("field")) == submit for x in a)]
+
+    def check(found, what, rule_type, actions):
+        if len(found) != 1:
+            problems.append(f"{len(found)} rule(s) {what}, expected 1")
+        for c, terms, acts in found[:1]:
+            rid = c.get("id")
+            if c.get("type") != rule_type or c.get("link") != "All":
+                problems.append(f"guard rule {rid} is a {c.get('type')} rule linking its terms with "
+                                f"{c.get('link')}, expected a {rule_type} rule with All")
+            if sorted((str(x.get("visibility")), str(x.get("field"))) for x in acts) != sorted(actions):
+                problems.append(f"guard rule {rid} ({what}): its actions are not "
+                                + " + ".join(f"{v} q{f}" for v, f in actions))
+            have = {(str(t.get("field")), t.get("operator"), str(t.get("value") or "")) for t in terms}
+            missing = [o for o in options if (CLUB_NAME_QID, "notEquals", o) not in have]
+            extra = sorted(v or f"q{f} {op}" for f, op, v in have - want)
+            if (picker, "isFilled", "") not in have:
+                problems.append(f"guard rule {rid} does not test that the Club picker is filled")
+            if missing:
+                problems.append(f"guard rule {rid} misses {len(missing)} club(s) - their mentors "
+                                f"cannot submit: {missing[:5]}")
+            if extra:
+                problems.append(f"guard rule {rid} tests {len(extra)} value(s) that are not the "
+                                f"picker's options: {extra[:5]}")
+    check(shows, "show the club guard", "field", [("Hide", submit), ("Show", gid)])
+    if GUARD_DISABLES_SUBMIT:
+        check(disables, "disable Submit", "require", [("Disable", submit)])
+    return problems
+
+
+def rendered_calc_values(page, picker):
+    """Counts, from the public page's HTML (kept in memory, never printed or
+    saved - it lists every roster), of the picker's options whose
+    data-calcvalue equals their value: {"options", "aligned", "differ",
+    "missing"}; None when the page has no such select."""
+    m = re.search(r'<select\b[^>]*\bname="q%s_[^"]*"[^>]*>(.*?)</select>' % re.escape(str(picker)),
+                  page or "", re.S)
+    if not m:
+        return None
+    counts = {"options": 0, "aligned": 0, "differ": 0, "missing": 0}
+    for attrs in re.findall(r"<option\b([^>]*)>", m.group(1)):
+        value = re.search(r'(?<![\w-])value="([^"]*)"', attrs)
+        calc = re.search(r'\bdata-calcvalue="([^"]*)"', attrs)
+        if not value or not value.group(1):
+            continue                         # a placeholder, if the page has one
+        counts["options"] += 1
+        if not calc:
+            counts["missing"] += 1
+        elif html.unescape(calc.group(1)) == html.unescape(value.group(1)):
+            counts["aligned"] += 1
+        else:
+            counts["differ"] += 1
+    return counts
+
+
+def public_page(form_id):
+    """The form as a mentor's browser receives it (curl, like every call here)."""
+    out = subprocess.run(["curl", "-sSL", "--max-time", "90", f"https://form.jotform.com/{form_id}"],
+                         capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else ""
 
 
 def audit_rules(questions, conditions):
@@ -172,6 +335,7 @@ def audit_rules(questions, conditions):
             problems.append(f"Contact_IDs aggregate misses {len(missing)} roster(s): {sorted(missing, key=int)[:5]}")
         if extra:
             problems.append(f"Contact_IDs aggregate includes {len(extra)} non-roster question(s): {sorted(extra)[:5]}")
+    problems += audit_picker(questions, conditions) + audit_club_guard(questions, conditions)
     summary = {"clubs": len(clubs), "show_rules": sum(len(v) for v in shown_by.values()),
                "aggregate_rosters": len(aggregate_operands or [])}
     return problems, summary
@@ -235,10 +399,15 @@ def form_report(form_id, client, roster_by_region):
     if len(languages) < 2:
         rule_problems.append(f"only {languages or ['no']} language(s) offered - the API clone "
                              "resets this; run tools/restore_translations.py")
+    guards = club_guards(questions)
     rep = {
         "rule_problems": rule_problems, "rule_summary": rule_summary,
         "layout": layout.summary(questions),
         "languages": languages, "club_picker": picker, "partner_picker": partner_picker(questions),
+        "club_guard": ({"qid": guards[0], "clubs": len(picker_options(questions, picker)) if picker else 0}
+                       if guards else None),
+        "picker_calc_values": bool(picker and has_calc_values(questions[picker])),
+        "picker_options": len(picker_options(questions, picker)) if picker else 0,
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -277,6 +446,10 @@ def main():
     ap.add_argument("--roster", default=os.path.join(REPO, "data", "roster_build", "Roster.csv"))
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--defunct", action="store_true", help="include the retired forms")
+    ap.add_argument("--rendered", action="store_true",
+                    help="also read each form's public page and check that every Club picker "
+                         "option's data-calcvalue equals its value (counts only; the page is "
+                         "never printed or saved)")
     args = ap.parse_args()
     if args.defunct:
         FORMS.update(DEFUNCT)
@@ -285,6 +458,30 @@ def main():
     roster = load_roster(args.roster)
 
     reports = [form_report(f, client, roster) for f in (args.form or FORMS)]
+    if args.rendered:
+        for r in reports:
+            if not r["club_picker"]:
+                continue
+            counts = rendered_calc_values(public_page(r["id"]), r["club_picker"])
+            r["rendered"] = counts
+            if counts is None:
+                r["rule_problems"].append("--rendered: the public page has no Club picker select "
+                                          "(page not served, or its layout changed)")
+                continue
+            if not r["picker_calc_values"]:
+                continue                     # before the rollout the counts are only printed
+            if counts["differ"] or counts["missing"] or counts["aligned"] != counts["options"]:
+                r["rule_problems"].append(
+                    f"rendered page: {counts['differ']} of {counts['options']} picker options carry a "
+                    f"data-calcvalue other than their value, {counts['missing']} none - the copy "
+                    "into question 5 would send another club's name (RUNBOOK, One club per "
+                    "submission: stop and restore)")
+            # an option the parser could not read is one the check cannot vouch for
+            if counts["options"] != r["picker_options"]:
+                r["rule_problems"].append(
+                    f"rendered page lists {counts['options']} of the picker's {r['picker_options']} "
+                    "options - a page served from before the apply (re-run in a few minutes) or a "
+                    "layout this check cannot read: do not treat it as aligned")
     if args.json:
         print(json.dumps(reports, indent=1))
         return
@@ -307,6 +504,15 @@ def main():
             print(f"   partner picker: q{r['partner_picker']} (a shared club name: mentors choose "
                   "the partner)")
         print(f"   layout: {layout_line(r['layout'])}")
+        if r["club_picker"]:
+            g = r.get("club_guard")
+            print(f"   club guard: q{g['qid']} ({g['clubs']} clubs)" if g
+                  else "   club guard: none (a mentor can pick several clubs)")
+        if "rendered" in r:
+            c = r["rendered"]
+            print("   rendered picker: " + ("not found on the public page" if c is None else
+                  f"{c['options']} options, {c['aligned']} with data-calcvalue = value, "
+                  f"{c['differ']} different, {c['missing']} without"))
         rs = r["rule_summary"]
         print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
               f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "

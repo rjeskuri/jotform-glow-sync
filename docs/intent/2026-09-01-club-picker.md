@@ -59,3 +59,7 @@ out to the four regional forms.
   mass update with other features (Ryan). Before that: apply the queued
   translations, and confirm a mentor cannot pick two clubs (Jotform ignores
   `maxSelection` on dropdowns; if two can be picked, add a guard rule).
+  **Answered 2026-09-29:** two can be picked — 20 submissions since 09-01
+  sent question 5 several club names run together. The guard rule is
+  `--club-guard` ([plan](../plans/2026-09-29-club-guard.md); RUNBOOK "One
+  club per submission"), proposed, not deployed.

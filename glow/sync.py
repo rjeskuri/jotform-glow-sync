@@ -7,6 +7,7 @@ appsscript/Config.gs; test/parity_test.js and test/python_test.py keep the
 two sides honest. Known divergences: docs/ARCHITECTURE.md.
 """
 import csv
+import html
 import re
 import sys
 
@@ -49,6 +50,60 @@ def partner_fields(questions):
     once the form has it, the partner list."""
     pp = partner_picker(questions)
     return {PARTNER, pp} if pp else {PARTNER}
+
+
+# ------------------------------------------------- one club per submission
+# The Club picker is a multi-select (its searchable mode), so a mentor can
+# pick several clubs, and question 5 then receives their names run together.
+# On a form carrying the warning element below (added once per form by
+# sync_attendance_form.py --club-guard, docs/plans/2026-09-29-club-guard.md)
+# two generated rules show it and hide and disable Submit whenever question 5
+# is not exactly one of the picker's options. Recognised by name, like the
+# pickers; tools/form_status.py audits it.
+GUARD_NAME = "clubGuard"
+# the English sentence: its translations are keyed by it in
+# tools/translations_additions.json, so a change needs them re-written
+GUARD_SENTENCE = ("You chose more than one club. Keep only your own club in Club Name, "
+                  "and the Submit button comes back.")
+# hiding Submit alone leaves desktop Enter in a text box able to submit
+GUARD_DISABLES_SUBMIT = True
+# On a guarded form the picker's calcValues are its own options, so the copy
+# into question 5 reads a value the browser's page translation cannot alter.
+# A single-select stores a leading empty slot for its "Please Select" (|1|2|3,
+# read on the live forms); a multi-select renders no placeholder, and whether
+# it still wants the slot is UNVERIFIED: the template's rendered page decides
+# (tools/form_status.py --rendered) before any regional form gets the guard.
+PICKER_CALC_LEADING_EMPTY = True
+
+
+def guard_html(sentence=GUARD_SENTENCE):
+    """The warning element's HTML: one sentence in a styled paragraph (the
+    links' box, glow/links.py, in amber). Pinned byte for byte in the tests:
+    a change re-keys its translations (md5 of the stored HTML)."""
+    return ('<p style="margin:8px 0;padding:10px 12px;border:1px solid #e0a800;'
+            'border-radius:6px;background:#fff8e1;font-size:14px">'
+            f'{html.escape(sentence, quote=False)}</p>')
+
+
+# the element's shape, kept on every run: hidden until the guard rule shows it
+GUARD_PROPS = {"text": guard_html(), "hidden": "Yes"}
+
+
+def club_guards(questions):
+    """qids of every question named GUARD_NAME, in qid order (normally zero
+    or one; any type, so a misnamed element is refused rather than missed)."""
+    return sorted((str(qid) for qid, q in questions.items() if q.get("name") == GUARD_NAME),
+                  key=int)
+
+
+def picker_calc_values(options):
+    """The picker's calcValues for these options (PICKER_CALC_LEADING_EMPTY)."""
+    return ("|" if PICKER_CALC_LEADING_EMPTY else "") + "|".join(options)
+
+
+def has_calc_values(question):
+    """Whether a dropdown carries calcValues (more than empty slots)."""
+    return bool((question.get("calcValues") or "").replace("|", "").strip())
 
 # Sessions per module. Modules not listed default to 8 sessions.
 # EDIT HERE when the curriculum changes; the cascade rules are generated
