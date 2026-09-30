@@ -129,6 +129,16 @@ unless `--apply`.
   are what kept it out of sight; with those rules gone it would appear, so the sync sets
   `hidden=Yes` once no generated rule shows it, after the conditions write.
 
+- The `integrations` property is READ-ONLY through the API (verified 2026-09-30 on the template):
+  a JSON `PUT /form/{id}/properties` of `{"properties": {"integrations": {...}}}` and a
+  form-encoded `POST` of `properties[integrations][salesforceV2][...]` both answer 200 with
+  `{"formID": ...}` and change nothing. The integration is set up per form in the builder;
+  `tools/integration_status.py` checks the result. Removing a connected account in Jotform
+  removes the integration from EVERY form that used it (all ten, 2026-09-30).
+- In the builder's field list the Club picker and question 5 are both called "Club Name":
+  `Account_Name__c` must read question 5 (the hidden text field), and the picker's id differs
+  per form.
+
 ## Rate and failure modes
 - Big forms (Africa: ~3,900 checkbox options) make `questions` GETs slow; back up only the form
   you are about to write. Gateway 504s can hide a completed write — re-GET before retrying.

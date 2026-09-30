@@ -1,7 +1,7 @@
 ---
 title: Jotform to Salesforce reconnected - the integration restored on the forms
 author: Claude (with Ryan)
-status: in-progress (Ryan's go 2026-09-30: restore through the API, the template first)
+status: in-progress (the API cannot write the integration; Ryan sets it in the builder per form, the tool checks)
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-30 ("get the Jotform data flowing into Salesforce")
 ---
@@ -35,46 +35,56 @@ that `Account_Name__c` reads the Club picker (question 444) instead of question 
 labelled "Club Name". Question 5 is the one every form shares and the one Salesforce must read
 (CLAUDE.md, rule 5); the picker's id differs per form.
 
+## What the API cannot do (tried 2026-09-30, with Ryan's go, on the template)
+The plan was to write the integration through the API. Jotform does not allow it: a JSON `PUT` of
+the `integrations` property and a form-encoded `POST` of it both answer 200 and change nothing
+(the template's integration was read before and after each try and was unchanged). So the
+integration is set up **in the form builder, per form**, and the tool only checks the result.
+
 ## Files that change
-- `tools/restore_integration.py` - new, gated like every writer (dry run by default, `--apply`):
-  it copies the template's live Salesforce integration to one form with `Account_Name__c` read
-  from question 5, refuses anything but the known mapping, and re-reads after the write.
-- `test/restore_integration_test.py`, one import line in `test/python_test.py`.
-- `.claude/skills/live-systems/SKILL.md` (the writers' list), `docs/RUNBOOK.md`, this plan.
+- `tools/integration_status.py` - new, read-only: for each form, is the Salesforce integration the
+  one known action, with `Account_Name__c` read from question 5 and all live forms on one
+  connection? `test/integration_status_test.py`, one import line in `test/python_test.py`.
+- `.claude/skills/jotform-api/SKILL.md` (the integration is read-only through the API; removing a
+  connected account removes it from every form), `docs/RUNBOOK.md`, this plan.
 
 ## Order of work
-1. **Template**: `backup_forms.py --form <template>`, then
-   `tools/restore_integration.py --form <template>` (dry run), then `--apply`. It rewrites the
-   template's own integration with question 5 as the source of `Account_Name__c`, and proves
-   whether an integration written through the API is stored as the builder stores it.
+1. **Template** (Ryan, in the builder): change the source of "Account Name" to the other
+   "Club Name" entry - the hidden text field, not the dropdown. `integration_status.py --form
+   <template>` says which one Jotform stored.
 2. **Controlled test on the template** (Ryan submits in a browser; an API-made submission
    triggers no integration): a batch with status Success, its attendance rows, the photo on the
    batch, the token's use count going up. Then the test records are removed, with Ryan's go.
-3. **The four regional forms**, one at a time, U.S first (no submissions yet): backup, dry run,
-   `--apply`, re-read. From that moment new submissions flow by themselves.
-4. **Watch** the first real submission of each form; a Club account without a parent means a
+3. **The four regional forms** (Ryan, in the builder, U.S first - it has no submissions yet):
+   Settings → Integrations → Salesforce → the existing connection → Create a New Record →
+   `Attendance_Batch` → the eight fields of the table above → the Group Photo as upload. After
+   each form: `integration_status.py --form <id>` → `ok`. From that moment the form's new
+   submissions flow by themselves.
+4. **All five**: `python3 tools/integration_status.py` → `integration: ok` (one connection, the
+   old forms without), `form_status.py` → `salesforce yes`.
+5. **Watch** the first real submission of each form; a Club account without a parent means a
    form sent a name no account carries.
-5. The five old forms stay disconnected; disabling them is a separate step with Ryan's go.
+6. The five old forms stay disconnected; disabling them is a separate step with Ryan's go.
 
 ## Risks
-- **A property written through the API may not be what makes the integration run.** Jotform may
-  keep more than the form property. Step 2 is the proof; until it passes no regional form is
-  written. If it fails, Ryan sets the action in the builder per form and the tool only verifies.
-- **The write replaces the `integrations` property.** The tool merges into what is there and
-  refuses a form that carries another integration it does not know.
+- **The two "Club Name" entries.** The builder's field list shows the Club picker and question 5
+  under one label. The tool names which one a form uses; the wrong one is corrected in the
+  builder before the form's first submission.
 - **Live flow starts with step 3.** A first submission from a large club creates one Contact per
   girl in one transaction (proven up to 22, the largest club has 62); a page opened before the
   same-name switch can still send a plain shared name. Both show in Salesforce (no batch, or a
   partner-less Club account) and neither loses the Jotform submission.
-- **Rollback**: the backup taken in step 1 or 3 holds the form's `integrations` as it was; putting
-  that value back, or removing the integration in the builder, undoes the write.
+- **The connection runs as Ryan's own user** for now: if that user is deactivated the flow stops
+  silently, as it did on 2026-09-17. A dedicated integration user is the follow-up (the org
+  shows one free full licence and four free integration licences).
+- **Rollback**: removing the integration from a form in the builder stops its flow; nothing else
+  on the form is touched.
 
 ## Not in this plan
 The September submissions (their own plan: they carry the girls' names), the test report, the
 dedicated integration user, disabling the old forms.
 
 ## Proof
-- `python3 tools/restore_integration.py --form <id>` → `would write` and the mapping table
-- `python3 tools/restore_integration.py --form <id> --apply` → `verified: ... question 5`
+- `python3 tools/integration_status.py` → `integration: ok`
 - `python3 tools/form_status.py --form <id> --roster …` → `salesforce yes`
 - `make check` → `CHECK PASSED`
