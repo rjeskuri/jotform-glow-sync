@@ -40,6 +40,7 @@ sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
 import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily inside it)
 from glow import forms as glow_forms  # noqa: E402
+from glow.sync import sf_name_clashes  # noqa: E402  (standard library only, like this file)
 
 # The live regional forms (one source: glow/forms.py, parity-tested against
 # appsscript/Config.gs by test/python_test.py).
@@ -66,6 +67,11 @@ ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) 
                        r"(?P<all>\d+) clubs overall")
 NOT_IN_EXPORT = "is on the form but not in the sheet export"
 NO_SHARED_NAMES = "shares NO names with the current one"
+# Clubs that share a name (docs/plans/2026-09-30-same-name-clubs.md): what an existing
+# club sends to question 5 is its Salesforce Account name, so a change of it is never
+# applied unattended; and a new club whose name another partner's club has is not created
+SF_NAME_CHANGE = "Club Name (question 5, what Salesforce reads) changes"
+SAME_NAME_REFUSED = "not added: give it a different name"
 
 
 def key(s):
@@ -77,7 +83,7 @@ def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
     plan = {"creates": [], "updates": [], "deletes": [], "picker": [], "partner_picker": [],
             "club_guard": [], "rules": None, "warnings": [], "roster_clubs": None,
-            "roster_girls": None}
+            "roster_girls": None, "sf_names": None}     # sf_names: only the summary file has them
     for line in text.splitlines():
         m = PICKER_RX.match(line)
         if m:
@@ -133,7 +139,38 @@ def plan_from_summary(summary):
             "rules": summary.get("rules"),
             "warnings": [w.strip() for w in summary.get("warnings", [])],
             "roster_clubs": summary.get("roster_clubs"),
-            "roster_girls": summary.get("roster_girls")}
+            "roster_girls": summary.get("roster_girls"),
+            "sf_names": summary.get("sf_names")}
+
+
+def q5_changes(plan):
+    """The warnings saying an existing club's question 5 would change."""
+    return [w for w in plan["warnings"] if SF_NAME_CHANGE in w]
+
+
+def refused_clubs(plan):
+    """The warnings saying a new club was not added because its name is in use."""
+    return [w for w in plan["warnings"] if SAME_NAME_REFUSED in w]
+
+
+def name_clashes(sf_names_by_region):
+    """{region: the sync summary's sf_names} -> [(name, [club, ...])] for every name
+    two different clubs of the regions synced send to question 5 (compared as
+    Salesforce matches an Account: case ignored). Salesforce is one org for
+    every region, so it would put those clubs' attendance on one Account. A
+    club is "<club> (<partner>, <region>)"; one whose partner the form does not
+    say is told apart by its question."""
+    names, label = [], {}
+    for region, entries in sf_names_by_region.items():
+        for e in entries or []:
+            partner, club = e.get("partner") or "", e.get("club") or ""
+            if not e.get("value"):
+                continue
+            who = (key(partner), key(club)) if partner else (region, str(e.get("qid")), key(club))
+            label.setdefault(who, f"{club} ({partner}, {region})" if partner
+                             else f"{club} (q{e.get('qid')}, {region})")
+            names.append((e["value"], who))
+    return [(value, [label[w] for w in clubs]) for value, clubs in sf_name_clashes(names)]
 
 
 def changes(plan):
@@ -171,6 +208,12 @@ def check_bands(plan, max_creates=5, max_updates=20):
     if any(NO_SHARED_NAMES in w for w in plan["warnings"]):
         reasons.append("a roster would be replaced by one that shares no names with the current "
                        "one - confirm it is the same club before applying")
+    changed = q5_changes(plan)
+    if changed:
+        reasons.append(f"question 5 (what Salesforce reads) would change for {len(changed)} existing "
+                       "club(s) - rename each Salesforce account named in the warnings first, then "
+                       "apply this region by hand with --q5-change-ok (docs/RUNBOOK.md, \"Club names "
+                       "two partners share\")")
     stale = sum(1 for w in plan["warnings"] if NOT_IN_EXPORT in w)
     n = plan["roster_clubs"] or 0
     if stale > max(5, n // 10):
@@ -271,6 +314,7 @@ class Run:
         self.stamp = now.strftime("%Y-%m-%dT%H%M%S")
         self.when = now.strftime("%Y-%m-%d %H:%M:%S %z")
         self.mode = "apply" if args.apply else "dry-run"
+        self.sf_names = {}        # region -> what each of its rosters sends to question 5
         self.names = []
         self._rx = None          # set once the roster is loaded; from then on every
                                  # logged line is redacted BEFORE it reaches stdout
@@ -345,11 +389,28 @@ class Run:
         if os.path.exists(summary_path):
             with open(summary_path, encoding="utf-8") as f:
                 plan = plan_from_summary(json.load(f))
+        self.sf_names[region] = plan.get("sf_names")
+        # a new club whose name another partner's club has: the sync did not create it
+        # and went on with the rest, so this never stops the region - it needs a human
+        refused = refused_clubs(plan)
+        if refused:
+            self.attention.append((f"{region}: {len(refused)} new club(s) NOT added to the form - "
+                                   "the name is another club's",
+                                   "A new club may not take a name that is in use (its attendance "
+                                   "would land on the other club's Salesforce account). Ask the partner "
+                                   "for a different name and rename the club in the sheet "
+                                   "(tools/rename_club.py); until then it is on no attendance form. "
+                                   "docs/RUNBOOK.md, \"Club names two partners share\".\n\n"
+                                   + "\n".join("- " + w for w in refused)))
+        note = f"{len(refused)} new club(s) not added (name in use)" if refused else ""
         n = changes(plan)
-        if n == 0:
-            self.result(region, plan, "in-sync", "")
+        # a change of what an existing club sends to question 5 stops the region even
+        # when nothing else is planned: a rules-only difference is not a "change" here,
+        # and this one must never read as in-sync
+        if n == 0 and not q5_changes(plan):
+            self.result(region, plan, "in-sync", note)
             return
-        summary = plan_summary(plan)
+        summary = plan_summary(plan) + (f"; {note}" if note else "")
         reasons = check_bands(plan, a.max_creates, a.max_updates)
         if reasons:
             self.attention.append((f"{region}: not applied - {summary}",
@@ -415,6 +476,23 @@ class Run:
             self.result(region, plan, "applied-with-problems", summary + "; " + "; ".join(problems))
         else:
             self.result(region, plan, "applied", summary + "; verified clean")
+
+    def check_names(self):
+        """Across the regions of this run: no two clubs may send the same name to
+        question 5 (Salesforce is one org). Reported, never blocking: the forms are
+        already that way when this fires."""
+        clashes = name_clashes(self.sf_names)
+        if not clashes:
+            return
+        self.attention.append((f"{len(clashes)} Salesforce name(s) are sent by more than one club",
+                               "Salesforce matches question 5 to an Account by name, in one org for "
+                               "every region, so these clubs' attendance would land on one Account. "
+                               "Clubs of two partners: sync_attendance_form.py --same-name-switch on "
+                               "each form concerned, by hand (docs/RUNBOOK.md, \"Club names two "
+                               "partners share\"). Two questions for one club: delete the leftover.\n\n"
+                               + "\n".join(f"- '{name}': " + "; ".join(clubs) for name, clubs in clashes)))
+        self.log(f"  ! {len(clashes)} name(s) are sent to question 5 by more than one club: "
+                 + ", ".join(f"'{name}'" for name, _ in clashes[:8]))
 
     def save_conditions(self, form):
         """A conditions-only rollback file next to the full snapshot.
@@ -519,6 +597,7 @@ def main():
 
     for region in args.region or list(REGIONAL_FORMS):
         run.region(region, csv_path)
+    run.check_names()
 
     if args.synclog and run.results:
         try:
