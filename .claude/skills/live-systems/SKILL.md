@@ -13,7 +13,7 @@ Salesforce V2 integration.
 ## Writers
 `sync_attendance_form.py --apply`, `restore_conditions.py --apply`, `tools/add_*.py --apply`,
 `tools/restore_translations.py --apply`, `tools/clone_regional.py --apply`,
-`tools/fix_roster_order.py --apply`, `tools/auto_sync.py --apply`, `tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run
+`tools/fix_roster_order.py --apply`, `tools/restore_integration.py --apply`, `tools/auto_sync.py --apply`, `tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run
 clasp:push` / `npx clasp push`. Anything else is read-only (GET) or writes only under `data/` and
 `backups/`.
 
