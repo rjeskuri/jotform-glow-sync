@@ -27,7 +27,9 @@ existing club sends to question 5 (its Salesforce Account name) stops that
 region and raises ATTENTION, even when nothing else is planned; a new club
 the sync did not add because its name is in use, and a name two clubs send,
 raise ATTENTION without stopping anything (docs/RUNBOOK.md, "Club names two
-partners share").
+partners share"). A conditions rewrite alone is not a change to it, so roster
+rules that test a name the Club picker does not list (a restored backup, a
+half-finished hand apply) are never "in-sync": ATTENTION, apply by hand.
 """
 import argparse
 import csv
@@ -78,6 +80,9 @@ NO_SHARED_NAMES = "shares NO names with the current one"
 # applied unattended; and a new club whose name another partner's club has is not created
 SF_NAME_CHANGE = "Club Name (question 5, what Salesforce reads) changes"
 SAME_NAME_REFUSED = "not added: give it a different name"
+# a roster's rule tests a text the picker does not list: that roster does not show, and
+# only a conditions rewrite - which the runner does not count as a change - repairs it
+RULES_OLDER = "which the Club picker does not list"
 
 
 def key(s):
@@ -157,6 +162,11 @@ def q5_changes(plan):
 def refused_clubs(plan):
     """The warnings saying a new club was not added because its name is in use."""
     return [w for w in plan["warnings"] if SAME_NAME_REFUSED in w]
+
+
+def stale_rules(plan):
+    """The warnings saying a roster's rule tests a text the Club picker does not list."""
+    return [w for w in plan["warnings"] if RULES_OLDER in w]
 
 
 def name_clashes(sf_names_by_region):
@@ -404,9 +414,14 @@ class Run:
                                    "the name is another club's",
                                    "A new club may not take a name that is in use (its attendance "
                                    "would land on the other club's Salesforce account). Ask the partner "
-                                   "for a different name and rename the club in the sheet "
-                                   "(tools/rename_club.py); until then it is on no attendance form. "
-                                   "docs/RUNBOOK.md, \"Club names two partners share\".\n\n"
+                                   "for a different name and rename the club in the sheet with "
+                                   "tools/rename_club.py --partner … --old … --new … --sheet-only "
+                                   "(--sheet-only: the club has no question on any form, and the "
+                                   "question of that name is the other partner's); the next run then "
+                                   "creates it. Until then it is on no attendance form, and every "
+                                   "apply in this region reads applied-with-problems (the verify step "
+                                   "counts the club as missing from the form, or its name's roster as "
+                                   "differing). docs/RUNBOOK.md, \"Club names two partners share\".\n\n"
                                    + "\n".join("- " + w for w in refused)))
         note = f"{len(refused)} new club(s) not added (name in use)" if refused else ""
         n = changes(plan)
@@ -414,6 +429,29 @@ class Run:
         # when nothing else is planned: a rules-only difference is not a "change" here,
         # and this one must never read as in-sync
         if n == 0 and not q5_changes(plan):
+            # …nor may rules that test a name the picker does not list: those clubs' rosters
+            # do not show (with the club guard their mentors cannot submit), and the
+            # conditions rewrite that repairs it is not applied unattended
+            stale = stale_rules(plan)
+            if stale:
+                self.attention.append((f"{region}: {len(stale)} roster rule(s) test a name the Club "
+                                       "picker does not list - those rosters do not show",
+                                       "The form's rules are out of step with its Club picker (a "
+                                       "conditions backup restored over newer picker entries, or a "
+                                       "hand apply that stopped between the picker write and the "
+                                       "rules write). Until the rules are rewritten those clubs' "
+                                       "rosters never show and, with the club guard, their mentors "
+                                       "cannot submit. The runner does not apply a rules-only "
+                                       "difference: run by hand now, python3 sync_attendance_form.py "
+                                       f"<roster.csv> --roster --region '{region}' --form {form} (the "
+                                       "dry run plans only REPLACE conditions and no question-5 "
+                                       "change), then --apply, then tools/form_status.py. "
+                                       "docs/RUNBOOK.md, \"Club names two partners share\".\n\n"
+                                       + "\n".join("- " + w for w in stale)))
+                self.result(region, plan, "attention",
+                            f"{len(stale)} roster rule(s) test a name the Club picker does not list - "
+                            "apply by hand" + (f"; {note}" if note else ""))
+                return
             self.result(region, plan, "in-sync", note)
             return
         summary = plan_summary(plan) + (f"; {note}" if note else "")
@@ -478,7 +516,16 @@ class Run:
             self.log("  note: " + note)
         if problems:
             self.attention.append((f"{region}: applied, but the form still has problems",
-                                   "\n".join("- " + p for p in problems)))
+                                   "\n".join("- " + p for p in problems)
+                                   # the region check goes by club name, so a club the sync did not
+                                   # add shows up here until it is renamed: say so, never filter it
+                                   # (the same line would hide a real drift of its namesake's roster)
+                                   + ("\n\nA 'missing from the form' or 'differ from the sheet' line "
+                                      "naming a club listed above as NOT added is expected until that "
+                                      "club is renamed: the check goes by club name, so it counts the "
+                                      "club that was not added. By itself it does not say the existing "
+                                      "club's roster is out of date."
+                                      if refused else "")))
             self.result(region, plan, "applied-with-problems", summary + "; " + "; ".join(problems))
         else:
             self.result(region, plan, "applied", summary + "; verified clean")

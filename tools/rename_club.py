@@ -31,7 +31,12 @@ What --apply writes:
 
 It refuses when the club is not in the Roster, has no single ClubRegistry
 row, when the partner already has a club with the new name (sheet or form),
-or when a form holds more than one question with the old name. A move also
+or when a form holds more than one question with the old name. A question is
+found by its text alone, so when another partner also has a club of the old
+name a rename refuses a question that holds that other club's girls: this
+club then has no question on the form (the sync does not add a new club whose
+name is in use) and is renamed with --sheet-only, after which the next sync
+creates its roster under the new name. A move also
 refuses a target that is not in the Partners tab or sits in another region,
 a club whose current name another partner's club shares, and a club whose
 show rule tests the Partner box (so a move's --apply needs the Jotform key).
@@ -179,6 +184,21 @@ def sharing_partners(rows, partners, names):
                    and cell_key(cell(r, i_p)) not in skip})
 
 
+def club_girls(rows, partner, club):
+    """cell_key of every full name a tab (header first; the Roster) holds for
+    this partner's club - any status: every girl it has ever had."""
+    if not rows:
+        return set()
+    hdr = [key(h) for h in rows[0]]
+    if "full_name" not in hdr:
+        sys.exit("Roster: expected a 'full_name' column; found: " + ", ".join(rows[0]))
+    i_p, i_c, _ = columns(rows)
+    i_n = hdr.index("full_name")
+    return {cell_key(cell(r, i_n)) for r in rows[1:]
+            if cell_key(cell(r, i_p)) == cell_key(partner) and cell_key(cell(r, i_c)) == cell_key(club)
+            and cell_key(cell(r, i_n))}
+
+
 def partner_rows(rows, name):
     """The Partners tab's rows (header first) for `name`, compared as key_ does
     after Unicode NFC: [(sheet row, partner as the tab spells it, region, notes)]."""
@@ -235,17 +255,18 @@ def describe_rows(rows):
 
 def form_questions(client, form_id, old, new):
     """([qids of roster questions named old], [qids named new], the form's
-    partner fields) on one form."""
+    partner fields, {qid named old: cell_key of each girl it lists}) on one form."""
     questions = client.get(f"/form/{form_id}/questions")
-    hits, clashes = [], []
+    hits, clashes, girls = [], [], {}
     for qid, q in questions.items():
         if q.get("type") != "control_checkbox":
             continue
         if key(q.get("text")) == key(old):
             hits.append(qid)
+            girls[qid] = {cell_key(o) for o in str(q.get("options") or "").split("|") if cell_key(o)}
         elif key(q.get("text")) == key(new):
             clashes.append(qid)
-    return hits, clashes, partner_fields(questions)
+    return hits, clashes, partner_fields(questions), girls
 
 
 def trimmed(row):
@@ -409,28 +430,49 @@ def main():
                 sys.exit(f"unknown region {region!r} - fix the Partners tab first "
                          f"(one of {', '.join(glow_forms.REGIONS)})")
             ids = [glow_forms.REGIONALS[region], glow_forms.TEMPLATE]
+        # a question is found by its text alone. When another partner also has a club of
+        # that name, the one question may be THAT club's - this club then has none (the sync
+        # does not add a new club whose name is in use): never relabel another club's roster
+        namesakes = sharing_partners(tabs["Roster"], (partner,), {old}) if renaming else []
+        own = club_girls(tabs["Roster"], partner, old) if namesakes else set()
         for fid in ids:
-            hits, clashes, pfields = form_questions(client, fid, old, new)
+            hits, clashes, pfields, girls = form_questions(client, fid, old, new)
             label = glow_forms.LABELS.get(fid, fid)
             if clashes:
                 sys.exit(f"form {fid}: a roster question named {new!r} already exists "
                          f"(q{', q'.join(clashes)}) - not merging two clubs")
             if len(hits) > 1:
                 sys.exit(f"form {fid}: {len(hits)} questions named {old!r} "
-                         f"(q{', q'.join(hits)}) - fix the form first")
+                         f"(q{', q'.join(hits)}) - fix the form first. (A club that is on no "
+                         "form yet, because the sync did not add it while its name was in use, "
+                         "is renamed with --sheet-only)")
             if not hits:
                 print(f"  form {fid}: no roster question named {old!r} - nothing to "
                       f"{'rename' if renaming else 'check'} there"
                       + (f" (the next sync creates {new!r})" if renaming else ""))
                 continue
+            if namesakes:
+                # the sync's own measure (its owner read-back): at least half of the girls
+                # the question holds are this club's Roster rows, of any status
+                have = girls[hits[0]]
+                mine = len(have & own)
+                if not have or mine * 2 < len(have):
+                    sys.exit(f"form {fid}: q{hits[0]} is named {old!r} but holds another club's "
+                             f"girls - {mine} of its {len(have)} are in the Roster under "
+                             f"{partner!r}, and {', '.join(map(repr, namesakes))} also "
+                             f"ha{'s' if len(namesakes) == 1 else 've'} a club of that name. "
+                             f"{partner!r}'s club has no roster question on this form (the sync "
+                             "does not add a new club whose name is in use). Nothing written: "
+                             "rename it in the sheet only - run again with --sheet-only - and the "
+                             "next sync creates its roster under the new name")
             if moving:
                 props = client.get(f"/form/{fid}/properties", limit=1000)
                 gated = partner_gated(props.get("conditions") or [], {hits[0]}, pfields)
                 if gated:
                     sys.exit(f"form {fid}: rule {', '.join(gated)} shows q{hits[0]} only for a "
                              "given Partner (typed or chosen from the partner list) - the name "
-                             "is shared on this form, so a move would "
-                             "make the next sync create a Partner-gated duplicate; sync the "
+                             "is shared on this form, and a move would leave that rule on the "
+                             "old partner until the next sync; sync the "
                              "form and check form_status first")
             if renaming:
                 forms.append((fid, hits[0]))
@@ -606,11 +648,25 @@ def main():
               "sent that way is skipped and never retried -")
         print(f"    ReviewQueue 'Roster change for a club not on file' under {partner!r} = ask "
               "the partner to send it again)")
+    elif not forms:
+        # nothing was renamed on a form (--sheet-only, or no form has a question of the old
+        # name): the next sync CREATES the club's roster - no Account to rename, no flag
+        print("\nNext (docs/RUNBOOK.md, \"Club names two partners share\"): no roster question "
+              "was renamed, so the next")
+        print("  sync creates this club's roster under its new name. Salesforce: the club sent "
+              "nothing yet - if an Account was")
+        print("  already made for it under the old name, rename that Account; no --q5-change-ok "
+              "is involved.")
+        print("  If the club DOES have its own roster question under the old name, stop and run "
+              "this again without --sheet-only.")
     else:
         print("\nNext (docs/RUNBOOK.md, \"Renaming a club\"): the sync rewrites the picker "
               "options and the rules -")
     print("  python3 tools/sheets_client.py export Roster data/roster_<date>.csv")
-    if renaming:
+    if renaming and not forms:
+        print(f"  python3 tools/auto_sync.py --region {region!r}     # dry run: CREATE roster {new!r}, "
+              "and no 'not added' line for it")
+    elif renaming:
         # the club's name is what question 5 sends to Salesforce: the sync lists the change
         # and applies it only with --q5-change-ok (docs/plans/2026-09-30-same-name-clubs.md)
         print("  Salesforce: rename the club's Account to the new name FIRST (the dry run's "

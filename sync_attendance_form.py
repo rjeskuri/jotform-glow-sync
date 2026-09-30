@@ -75,7 +75,8 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
     SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners,
     has_calc_values, long_name_partner, partner_fields, partner_picker, picker_calc_values,
-    read_roster_csv, read_sheet, roster_pairs, sf_club_name, shared_club_names, warn,  # against Config.gs
+    read_roster_csv, read_sheet, roster_names, roster_pairs, sf_club_name,   # against Config.gs
+    shared_club_names, warn,
 )
 from glow.text import key           # noqa: E402
 
@@ -125,6 +126,12 @@ PARTNER_PICKER_PROPS = {
 # a new club was not added because its name is in use.
 Q5_CHANGES = "Club Name (question 5, what Salesforce reads) changes"
 NOT_ADDED = "not added: give it a different name"
+# A third: a roster's rule tests a text the Club picker does not list (a
+# conditions backup restored over a switched picker, an apply that stopped
+# between the picker write and the rules write). Until the rules are rewritten
+# that club's roster never shows and the club guard blocks its mentors; the
+# runner, which does not apply a rules-only difference, raises ATTENTION.
+RULES_OLDER = "which the Club picker does not list"
 
 # SESSION_OVERRIDES (sessions per elective module) lives in glow/sync.py -
 # edit it THERE when the curriculum changes, and mirror appsscript/Config.gs.
@@ -425,6 +432,7 @@ def main():
         sheet, all_clubs, region_of = read_roster_csv(args.csv, args.region)
         dup_names = {}
         pairs = roster_pairs(args.csv)      # every club the Roster holds: any status, all regions
+        ever = roster_names(args.csv)       # ...and every girl it has ever held for each
         print(f"Roster: {len(sheet)} active clubs"
               f"{' in ' + args.region if args.region else ''} "
               f"({sum(len(v) for v in sheet.values())} girls); "
@@ -432,6 +440,7 @@ def main():
     else:
         sheet, dup_names = read_sheet(args.csv)
         pairs = {k: True for k in sheet}
+        ever = {}                           # an enrollment export has no history: no owner is read from it
         print(f"Sheet: {len(sheet)} clubs "
               f"({sum(len(v) for v in sheet.values())} girls total)")
     holders = club_partners(pairs)      # key(club) -> the partners that have a club of that name
@@ -561,6 +570,35 @@ def main():
             partner = long_name_partner(value, form_text[qid], holders.get(key(form_text[qid])))
             if partner:
                 current_partner_of[qid] = partner
+    # A roster whose rule names no partner (a plain name) is still one club's.
+    # When the Roster has more than one partner with a club of that name - a
+    # retired namesake, or a new club that was refused and sits in the Roster
+    # until someone renames it - its owner is read from the Roster's rows of
+    # ANY status: the partner whose rows list the most of the girls the
+    # question holds today, when that is at least half of them and more than
+    # any other partner's. Without it the matching below goes by the NEW
+    # roster alone: another partner's new club took over a retired club's
+    # question (its girls on that club's Salesforce Account), and an existing
+    # club with a mostly new roster was refused as "new". A tie, or no
+    # evidence (the old rows deleted, the girls respelled in place), names no
+    # owner and the matching goes on as it did. `inferred` is never `gated`:
+    # the rule itself names no partner.
+    inferred = set()
+    for qid, text in form_text.items():
+        who = holders.get(key(text), {})
+        if qid in current_partner_of or len(who) < 2:
+            continue
+        have = {key(o) for o in (questions[qid].get("options") or "").split("|") if o.strip()}
+        fits = sorted(((len(have & ever.get((pk, key(text)), set())), partner)
+                       for pk, partner in who.items()), key=lambda f: -f[0])
+        if have and fits[0][0] * 2 >= len(have) and fits[0][0] > fits[1][0]:
+            current_partner_of[qid] = fits[0][1]
+            inferred.add(qid)
+
+    def rule_partner(qid):
+        """The partner the form's own rules name for this roster ("" when they
+        name none - an owner read from the Roster's rows is not the form's word)."""
+        return "" if qid in inferred else current_partner_of.get(qid, "")
 
     # the picker's options as the form holds them: what a mentor can pick today
     listed = {}
@@ -581,6 +619,11 @@ def main():
         for cand in ([sf_club_name(form_text[qid], partner, True)] if partner else []) \
                 + [form_text[qid]]:
             if key(cand) in listed:
+                if value:   # a roster with no rule at all (a failed apply's new club) is no such case
+                    warn(f"  ! '{form_text[qid]}' (q{qid}): its rule tests '{value}', {RULES_OLDER} "
+                         f"(it lists '{listed[key(cand)]}') - the rules and the picker are out of "
+                         "step (a restored backup, an apply that stopped half-way?): until an "
+                         "--apply rewrites the rules this roster does not show")
                 return listed[key(cand)]
         return value
 
@@ -600,12 +643,15 @@ def main():
         known = holders.get(club_key, {})
         return lambda theirs, partner: key(theirs) not in known and partner_matches(theirs, partner)
 
-    def roster_overlap(qid, roster):
+    def shared_names(qid, roster):
+        """(how many of this roster's names the question holds, the smaller of the two sizes)."""
         have = {norm(o).lower() for o in questions[qid]["options"].split("|") if o}
         want = {n.lower() for n in roster}
-        if not have or not want:
-            return 0.0
-        return len(have & want) / min(len(have), len(want))
+        return len(have & want), min(len(have), len(want))
+
+    def roster_overlap(qid, roster):
+        shared, smaller = shared_names(qid, roster)
+        return shared / smaller if smaller else 0.0
 
     def foreign_region(qid):
         """The region the FULL roster gives this form question's club, when
@@ -672,11 +718,17 @@ def main():
             if not theirs or same_partner(theirs, partner) or loosely(low)(theirs, partner):
                 claim(qid, partner, club, roster, check_names=True)
             elif roster_overlap(qid, roster) >= 0.5:
-                # another partner in its rule, the same girls: the same club,
-                # its partner respelled - never a second roster for it
-                warn(f"  ! '{club}' (q{qid}): its rule names the partner '{theirs}', the sheet "
-                     f"says '{partner}' - the same girls, so the same club (the partner was "
-                     "respelled?)")
+                # another partner in its rule (or, for a plain roster, in the
+                # Roster's earlier rows), the same girls: the same club, its
+                # partner respelled or the club moved - never a second roster
+                if qid in inferred:
+                    warn(f"  ! '{club}' (q{qid}): the Roster's earlier rows give it to the partner "
+                         f"'{theirs}', the sheet says '{partner}' - the same girls, so the same "
+                         "club (the club was moved, or the partner respelled?)")
+                else:
+                    warn(f"  ! '{club}' (q{qid}): its rule names the partner '{theirs}', the sheet "
+                         f"says '{partner}' - the same girls, so the same club (the partner was "
+                         "respelled?)")
                 claim(qid, partner, club, roster)
             else:
                 # the same name, a DIFFERENT partner's club: the existing roster
@@ -687,10 +739,12 @@ def main():
 
         # the same club name under several partners (or several questions):
         # match each sheet entry to an existing question by, in order, (1) the
-        # partner its rule names, exactly; (2) that partner, loosely; (3)
-        # roster similarity. Each step runs over every entry before the next,
-        # so a loose match never takes a question another entry matches
-        # exactly. Entries left over are new clubs.
+        # partner its rule names (or, for a plain roster, the Roster's rows
+        # give it to), exactly; (2) that partner, loosely; (3) roster
+        # similarity, the best match first over every entry and question still
+        # open - never first come in partner order. Each step runs over every
+        # entry before the next, so a loose match never takes a question
+        # another entry matches exactly. Entries left over are new clubs.
         entries = sorted(entries)
         unclaimed, taken = list(qids), {}
         for test in (same_partner, loosely(low)):
@@ -702,13 +756,14 @@ def main():
                 if qid is not None:
                     taken[i] = qid
                     unclaimed.remove(qid)
+        scored = sorted(((roster_overlap(q, roster), shared_names(q, roster)[0], -i, q)
+                         for i, (_, _, roster) in enumerate(entries) if i not in taken
+                         for q in unclaimed), reverse=True)
+        for score, _, i, q in scored:         # a tie goes to the first entry, as before
+            if score >= 0.5 and -i not in taken and q in unclaimed:
+                taken[-i] = q
+                unclaimed.remove(q)
         for i, (partner, club, roster) in enumerate(entries):
-            if i not in taken:
-                scored = sorted(((roster_overlap(q, roster), q)
-                                 for q in unclaimed), reverse=True)
-                if scored and scored[0][0] >= 0.5:
-                    taken[i] = scored[0][1]
-                    unclaimed.remove(scored[0][1])
             if i in taken:
                 claim(taken[i], partner, club, roster)
             else:
@@ -748,6 +803,17 @@ def main():
     # the texts stay the club names and the Partner box tells them apart.
     option_of = dict(club_questions)
     sf_changes = []      # {qid, club, old, new, switch}: an existing club's question 5 changes
+    # a new club this run is about to refuse below (another partner has its
+    # name) is on no form, and sits active in the Roster until someone renames
+    # it: it never makes an existing club long in the switch. (One refused on
+    # ANOTHER region's form cannot be told from a real namesake there: the
+    # RUNBOOK's check before the switch - no open "not added" ATTENTION.)
+    newcomers = {(key(p), key(c)) for c, p, _ in to_create
+                 if any(k != key(p) for k in holders.get(key(c), {}))}
+    if newcomers:
+        shared_active = shared_club_names(
+            {pc: active for pc, active in pairs.items() if (key(pc[0]), key(pc[1])) not in newcomers},
+            active_only=True)
     if has_picker:
         for qid in club_questions:
             text = form_text[qid]
@@ -830,7 +896,7 @@ def main():
             # rosters still sharing one entry: only the ones the typed Partner
             # box already tells apart (before --same-name-switch) stay that way
             for qid in qids:
-                partner_of[qid] = pair_of[qid][0] if qid in pair_of else current_partner_of.get(qid, "")
+                partner_of[qid] = pair_of[qid][0] if qid in pair_of else rule_partner(qid)
             if not all(q in gated and partner_of[q] for q in qids):
                 sys.exit(f"{len(qids)} rosters ({', '.join('q' + q for q in sorted(qids, key=int))}) "
                          f"would share the Club picker entry '{option_of[qids[0]]}', and one "
@@ -851,6 +917,20 @@ def main():
         gated_now = sorted((q for q in partner_of), key=int)
         long_qids = [q for q, o in option_of.items() if key(o) != key(form_text[q])
                      and key(o).startswith(key(form_text[q]) + SF_NAME_SEP)]
+        if args.same_name_switch:
+            # a roster that is not in the export (a retired club's question left on
+            # the form) keeps what it sends: beside long-named rosters of its text it
+            # would be alone on the plain entry - the familiar name, first in the
+            # list, showing a retired club's girls and sending the plain name
+            long_texts = {key(form_text[q]) for q in long_qids}
+            left = sorted((q for q, o in option_of.items() if q not in pair_of
+                           and key(o) == key(form_text[q]) and key(o) in long_texts), key=int)
+            if left:
+                sys.exit(f"{', '.join('q' + q for q in left)} would keep the plain Club picker entry "
+                         f"'{option_of[left[0]]}' beside the long ones: it is not in the Roster "
+                         "export (a retired club's leftover question?), and a mentor picking the "
+                         "familiar name would get its girls. Delete the leftover question in the "
+                         "builder first, then run the switch again")
         if long_qids:
             print(f"Same-name clubs: {len(long_qids)} roster(s) on this form send "
                   "'<club> - <partner>' to question 5 (each has its own Club picker entry)")
@@ -871,8 +951,7 @@ def main():
         for low, qids in name_groups.items():
             if len(qids) > 1:
                 for qid in qids:
-                    partner_of[qid] = pair_of[qid][0] if qid in pair_of \
-                        else current_partner_of.get(qid, "")
+                    partner_of[qid] = pair_of[qid][0] if qid in pair_of else rule_partner(qid)
                     if not partner_of[qid]:
                         sys.exit(f"Cannot disambiguate '{club_questions[qid]}' "
                                  f"(q{qid}): no partner in the sheet or the "
@@ -1053,7 +1132,7 @@ def main():
     # --- what each club sends to Salesforce, for --summary-json --------------
     spelled = {o.lower(): o for o in picker_list} if has_picker else {}
     sf_names = [{"qid": q, "club": club_questions[q], "value": spelled.get(o.lower(), o),
-                 "partner": pair_of[q][0] if q in pair_of else current_partner_of.get(q, "")}
+                 "partner": pair_of[q][0] if q in pair_of else rule_partner(q)}
                 for q, o in sorted(option_of.items(), key=lambda kv: int(kv[0]))]
     sf_names += [{"qid": None, "club": c, "value": c, "partner": p} for c, p in pending]
 

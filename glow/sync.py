@@ -172,6 +172,27 @@ def roster_pairs(csv_path):
     return {(p, c): active for p, c, active in found.values()}
 
 
+def roster_names(csv_path):
+    """{(key(partner), key(club)): {key(full_name), ...}} over EVERY Roster row
+    that has all three cells - any status, all regions: every girl the Roster
+    has ever held for that club. It is how a roster question whose rule names
+    no partner (a plain name) is told to be one partner's club and not a
+    same-named club of another (sync_attendance_form.py, the owner read-back):
+    roster_pairs says who has a club of a name, this says whose girls a
+    question holds. Python only - the Apps Script side has no such read."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    needed = {"partner", "club", "full_name", "status", "region"}
+    if not rows or not needed <= set(rows[0]):
+        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
+    out = defaultdict(set)
+    for r in rows:
+        partner, club, name = key(r["partner"]), key(r["club"]), key(r["full_name"])
+        if partner and club and name:
+            out[(partner, club)].add(name)
+    return dict(out)
+
+
 def club_partners(pairs):
     """{key(club): {key(partner): partner}}: who has a club of each name."""
     out = defaultdict(dict)
