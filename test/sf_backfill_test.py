@@ -237,7 +237,7 @@ class SalesforceBackfill(Harness, unittest.TestCase):
             "Account_Name__c": "Sunrise Club", "Attendance_Date__c": "2026-09-05",
             "Contact_IDs__c": "Amara Zibblewick, Beatrice Quornstead, Chiara Vexholm",
             "Module__c": "Self Advocacy", "Module_Week__c": 3, "Module_Year__c": 1,
-            "Creator__c": "Jotform back-fill 5001", "enable_fuzzy_matching__c": False})
+            "Creator__c": f"Jotform back-fill {SUNRISE} 5001", "enable_fuzzy_matching__c": False})
         self.assertIn("to send: 1 batches, 3 attendance rows, up to 3 new girls, 1 clubs", out)
         self.assertIn("1 submissions with nobody ticked (never sent)", out)
         self.assertNotIn("Zibblewick", out + self.text_of("held.csv"))
@@ -880,9 +880,57 @@ class SalesforceBackfillEdges(Harness, unittest.TestCase):
 
     def test_a_date_decision_answers_the_resolver_s_missing_date(self):
         self.write([row("1", date="", created="2026-09-10 10:00:00", flags=["date_missing"])],
-                   decisions=[[f"{SUNRISE}|", "date 2026-09-09"]])
+                   decisions=[[f"{SUNRISE}||1", "date 2026-09-09"]])
         _, sessions, held = self.plan()
         self.assertEqual(([s["attendance_date"] for s in sessions], held), (["2026-09-09"], []))
+
+    def test_undated_reports_are_decided_one_by_one_and_use_on_a_moved_onto_day_is_refused(self):
+        rows = [row("1", date="", created="2026-09-06 10:00:00", names=GIRLS[:1]),
+                row("2", date="", created="2026-09-13 10:00:00", names=GIRLS[1:])]
+        self.write(rows)
+        self.assertEqual(sorted(h["key"] for h in self.plan()[2]), [f"{SUNRISE}||1", f"{SUNRISE}||2"])
+        self.write(rows, decisions=[[f"{SUNRISE}||1", "date 2026-09-06"], [f"{SUNRISE}||2", "date 2026-09-13"]])
+        self.assertEqual([(s["attendance_date"], s["submissions"]) for s in self.plan()[1]],
+                         [("2026-09-06", ["1"]), ("2026-09-13", ["2"])])
+        self.write(rows, decisions=[[f"{SUNRISE}||1", "date 2026-09-06"], [f"{SUNRISE}|2026-09-06", "use 1"]])
+        self.assertIn("'use' on this line reaches none of them", self.run_tool("plan")[1])
+
+    def test_a_report_sent_under_one_club_is_not_sent_again_under_another(self):
+        self.write([row("1")])
+        self.plan()
+        self.assertIsNone(self.send()[1])
+        _, sessions, held = self.replan([row("1", club="River Club")])       # the same report now leads to another club
+        self.assertEqual((sessions, [h["reasons"] for h in held]), ([], ["submission_already_sent"]))
+
+    def test_the_two_clubs_of_one_submission_have_their_own_markers(self):
+        rows = [row("1", names=GIRLS[:1]), row("1", club="River Club", names=GIRLS[1:])]
+        decisions = [[K, "accept several_rosters_ticked"], [f"{RIVER}|2026-09-05", "accept several_rosters_ticked"]]
+        self.write(rows, decisions=decisions)
+        self.plan()
+        self.assertIsNone(self.send("--limit", "1")[1])
+        self.replan(rows, decisions=decisions)
+        real_insert = self.org.insert
+
+        def nothing_saved(sobject, body):
+            self.org.inserts.append(body)
+            return 0, None
+        self.org.insert = nothing_saved
+        self.assertIn("A BATCH MAY BE IN SALESFORCE", self.send()[1])     # the first club's batch is not taken for it
+        self.assertEqual((self.states()[-2:], self.ledger()[-1]["batch_id"]), (["sending", "unknown"], ""))
+        self.org.insert = real_insert
+        out, stop = self.send()
+        self.assertIn("Salesforce saved nothing", out)
+        self.assertEqual(len({b["Creator__c"] for b in self.org.inserts}), 2)
+
+    def test_an_empty_ledger_file_gets_its_header_and_one_without_it_is_refused(self):
+        self.write([row("1")])
+        self.plan()
+        open(self.path("ledger.csv"), "w").close()
+        self.assertIsNone(self.send()[1])
+        self.assertTrue(self.text_of("ledger.csv").startswith("when_utc,done_utc,key,"))
+        with open(self.path("ledger.csv"), "w", encoding="utf-8") as fh:
+            fh.write("2026-09-30T15:00:00Z,,k,Africa\n")
+        self.assertIn("does not start with its header line", self.run_tool("status")[1])
 
     def test_a_fetch_time_in_the_future_is_refused(self):
         self.write([row("1")], fetched="2031-01-01T00:00:00Z")

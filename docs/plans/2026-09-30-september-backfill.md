@@ -43,7 +43,7 @@ Salesforce from the Mac, Jotform re-authorised on the five forms, and only then 
 
 ## Files that change
 - `tools/sf_backfill.py` - new: `snapshot`, `plan`, `send`, `close`, `status`.
-  `test/sf_backfill_test.py` (60 offline tests, a fake org that follows the processor's rules),
+  `test/sf_backfill_test.py` (64 offline tests, a fake org that follows the processor's rules),
   one import line in `test/python_test.py`.
 - `tools/backfill_resolve.py` and its tests - new, by session jotform-glow-sync-54.
 - `docs/RUNBOOK.md` ("Back-fill of attendance into Salesforce"; the connector bullet under "Club
@@ -85,7 +85,7 @@ committed, owner-only; `resolved.json`, `plan.json` and `sent_names.json` hold g
    - Access: the Salesforce CLI's stored login; the token goes to curl on stdin (`-q`, no
      proxy), never onto a command line or disk. `--apply` is caught by the live gate like every
      other writer; both live commands also refuse without `--vpn-off`.
-   - Each batch carries `Creator__c` "Jotform back-fill <submission ids>" (the processor never
+   - Each batch carries `Creator__c` "Jotform back-fill <account id> <submission ids>" (the processor never
      reads that field; live batches say "Jotform"), fuzzy matching off, no photo. A Salesforce
      status message is never printed or stored, only its kind: it can quote a girl's name.
 
@@ -143,12 +143,13 @@ guessed, and what is doubtful is left out rather than chased.
   the rule is Report only.
 - **Back-filled batches carry the day they were sent as created date**; the attendance date is
   the session's.
-- **The tool was reviewed twice by independent reviewers** (the first review led to a rewrite,
-  the second to 16 fixes and 26 more tests); what it cannot rule out is met by the pre-check
+- **The tool was reviewed three times by independent reviewers** (the first review led to a
+  rewrite, the second to 16 fixes and 26 more tests, the third to 6 fixes and 4 more tests, among
+  them a marker that names the club as well as the reports); what it cannot rule out is met by the pre-check
   before and the read-back after every single batch, and by stopping at the first surprise.
 
 ## Proof
 - `python3 tools/sf_backfill.py plan` → the counts; `send` → `dry run: nothing was sent`
 - after the run: `status` → batches = the plan's, every ledger row `ok`; Salesforce counts of
   batches and attendance rows equal the ledger's
-- `make check` → `CHECK PASSED` (60 offline tests of the loader, fictional data)
+- `make check` → `CHECK PASSED` (64 offline tests of the loader, fictional data)

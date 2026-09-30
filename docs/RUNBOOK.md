@@ -1321,7 +1321,7 @@ Everything is in `data/backfill_2026-09/` (never committed; owner-only files).
     Ryan, then `send --apply --vpn-off --retry <key>`.
   - `unknown` - **"A BATCH MAY BE IN SALESFORCE"**: the answer or the read-back was lost.
     Nothing more is sent; the next `send --apply --vpn-off` looks the batch up by its own marker
-    (`Creator__c` "Jotform back-fill <submission ids>") before anything else, and calls it
+    (`Creator__c` "Jotform back-fill <account id> <submission ids>") before anything else, and calls it
     "saved nothing" only ten minutes after the request, when Salesforce can no longer be working
     on it.
   - `CHECK` - **"is in Salesforce but not as planned"**: the batch exists and may hold part of

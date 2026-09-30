@@ -390,10 +390,14 @@ def read_decisions(path):
 
 
 def read_ledger(path):
-    if not os.path.exists(path):
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
         return []
     with open(path, encoding="utf-8", newline="") as fh:
-        return list(csv.DictReader(fh))
+        reader = csv.DictReader(fh)
+        if reader.fieldnames != LEDGER_COLS:
+            raise Refused("ledger.csv does not start with its header line - restore it before anything else: "
+                          + ",".join(LEDGER_COLS))
+        return list(reader)
 
 
 def last_rows(ledger):
@@ -528,13 +532,16 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
 
     # 1. every row to its club; a `date` decision moves a whole reported day BEFORE the days are
     #    grouped, so a moved report joins (or collides with) what that day already has
-    groups, origins = {}, set()
+    groups, origins, clubs_of = {}, set(), {}    # clubs_of: submission -> the clubs its rows lead to today
     for row in resolved["rows"]:
         acc, why = resolve_account(row.get("sf_account_name"), by_name)
         if why:
             hold([why], [row])
             continue
+        clubs_of.setdefault(row["submission_id"], set()).add(acc["Id"])
         origin = f"{acc['Id']}|{row.get('attendance_date') or ''}"
+        if not row.get("attendance_date"):   # no date says nothing about the day: one line per report,
+            origin += "|" + row["submission_id"]     # never one line for all the club's undated reports
         origins.add(origin)
         moved = (decisions.get(origin) or {}).get("date")
         key = f"{acc['Id']}|{moved}" if moved else origin
@@ -548,6 +555,9 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
         if came and (decisions.get(key) or {}).get("date"):
             raise Refused(f"decisions.csv: {key}: reports were moved onto this day from {', '.join(came)}; a 'date' "
                           "on this line does not move them - change the date on their own line instead")
+        if key not in group["origins"] and (decisions.get(key) or {}).get("use"):
+            raise Refused(f"decisions.csv: {key}: every report of this day was moved onto it from {', '.join(came)}; "
+                          "'use' on this line reaches none of them - put it on their own line instead")
     unknown = sorted(set(decisions) - origins - set(groups))
     if unknown:
         raise Refused("decisions.csv names sessions that do not exist: " + ", ".join(unknown)
@@ -581,10 +591,12 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
         if any(d["skip"] for d in mine):
             skipped.append({"key": key, "reason": "skip_decided"})
             continue
-        elsewhere = sorted({k for s in subs for k in sent_under.get(s, ()) if k != key and k.split("|")[0] == acc["Id"]})
+        # sent under another key: only another club this same report still ticks girls of is no obstacle
+        elsewhere = sorted({k for s in subs for k in sent_under.get(s, ()) if k != key
+                            and (k.split("|")[0] == acc["Id"] or k.split("|")[0] not in clubs_of[s])})
         if elsewhere:
             stop(["submission_already_sent"], "already sent under " + ", ".join(elsewhere)
-                 + " (was its date changed in Jotform?)")
+                 + " (was its date or its club changed since?)")
             continue
         there, n_rows = batches_on.get((acc["Id"], date), []), rows_on.get((acc["Id"], date), 0)
         if there or n_rows:
@@ -767,8 +779,9 @@ def cmd_plan(args, paths):
 
 # ---- send ----------------------------------------------------------------------------------------
 def marker(session_or_row):
+    """What marks a batch as this tool's and as this session's: the club and the reports it carries."""
     subs = session_or_row["submissions"]
-    return f"{CREATOR} {'+'.join(subs) if isinstance(subs, list) else subs}"[:255]
+    return f"{CREATOR} {session_or_row['account_id']} {'+'.join(subs) if isinstance(subs, list) else subs}"[:255]
 
 
 def body_of(session):
@@ -779,10 +792,9 @@ def body_of(session):
 
 
 def append_ledger(path, row, ledger=None):
-    new = not os.path.exists(path)
     with open_private(path, "a") as fh:
         writer = csv.DictWriter(fh, fieldnames=LEDGER_COLS, lineterminator="\n")
-        if new:
+        if os.fstat(fh.fileno()).st_size == 0:     # new, or left empty by a run that died right here
             writer.writeheader()
         writer.writerow({col: row.get(col, "") for col in LEDGER_COLS})
         fh.flush()
