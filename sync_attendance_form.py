@@ -783,8 +783,9 @@ def main():
     # Ryan, 2026-09-30: an existing club's name never changes, so a club to be
     # CREATED whose name another partner's club already has - in any region,
     # whatever its status - is not created; the rest of the run goes on, and
-    # the runner raises ATTENTION (the Club Roster Form handler holds such a
-    # club before it reaches the Roster; this is the backstop). The same for
+    # the runner raises ATTENTION (the plan's Part 2 has the Club Roster Form
+    # handler hold such a club before it reaches the Roster; this is the
+    # backstop, and the only check until then). The same for
     # a name a roster on this form already carries or sends, and for a name
     # that is the long name of a club whose name is shared ("Stars - Partner
     # One" as a club's own name).
