@@ -287,3 +287,67 @@ partner); every submission lists exactly the form's questions of today (244 / 12
 ### Clean-up
 The scratch directory with the Roster export, the result and the raw copies was deleted after
 the run; nothing holding a name was written inside the repository.
+
+## Proof after the review's fixes (2026-09-30)
+
+### Each finding, before and after
+Every one of the eight has a test that failed on the code as reviewed (`a8e1f1a`) and passes
+now: the three clubs the sync names no partner for came out with partner and code null; the
+respelled club with the Roster's spelling and `q5_differs`; the cut-off page's error quoted the
+submission id and the IP address; the other spelling of the checkout's path was let through;
+the two name flags were absent; `--region Asia` was not refused; the refusals said "nothing
+written"; a region named twice failed the ledger. The first two were also run once against the
+real sync (`sync_attendance_form.main()` on the test suite's fake form, fictional data, in
+scratch): a plain-named club with every row inactive, with its rows under another region, and
+with no region gets its partner and code (`retired_club` only in the first case); the same
+name inactive under two partners stays null; a club respelled in capitals in the Roster is
+reported with the live picker's spelling while the sync plans 2 writes and records no change.
+
+### Offline
+`make check`: `ALL CHECKS PASSED` ×3, `py: 40 files parse, 23 scripts answer --help`,
+`Ran 335 tests … OK` (34 of them `BackfillResolve`), `gs: 10 files parse`, `secrets: clean`,
+`docs-links: ok`, `fixtures: up to date`, `CHECK PASSED`.
+
+### Live, read-only (fetched 13:30 UTC, at commit `f048412`)
+A fresh Roster export (6963 rows), the result and the raw copies in a scratch directory outside
+the repository, deleted afterwards. GETs and four dry runs of the sync only; no form out of
+step with the export. **Every number of the first proof is unchanged**: fetched 144 / 230 /
+113 / 0; in range 143 / 230 / 111 / 0 = 484; with ticks 115 / 212 / 93 = 420; no ticks 28 /
+18 / 18 = 64; rows 116 / 212 / 93 = 421; pre-launch 1 / 0 / 2; clubs 49 / 77 / 28; every flag
+count of the table above; the same first and last `created_at`. New:
+
+| | Africa | Asia | Latin America | all rows |
+|---|---|---|---|---|
+| `name_not_on_roster_now` | 1 | 4 | 0 | 5 (7 names) |
+| `name_unknown_to_roster` | 0 | 0 | 0 | **0** |
+| `name_left_roster` | 1 | 4 | 0 | 5 (7 names) |
+| rows whose partner came from the Roster, not the sync | 0 | 0 | 0 | 0 |
+
+`LEDGER: 484 submissions in range = 420 with rows (421 rows) + 64 with no tick - balanced; 3
+pre-launch left out`. The closing line said the files were outside the checkout's `data/`.
+
+Checked apart from the tool, on the output and the live forms (counts only): all 421 rows have
+a partner, a club code and an `sf_account_name` that is exactly an entry of that form's live
+Club picker (49 of 218, 77 of 95, 28 of 38 entries in use); every row's club is its roster
+question's text today; the counted name flags equal a second count made from the Roster export
+read on its own (0 rows differ); the 7 names are all rows of that partner and club with
+status inactive - girls who left, which the loader sends. So today nothing is held for an
+unknown name.
+
+### Open between the two tools (for the loader's session; not changed here)
+- The loader as it stands in the main checkout (uncommitted `tools/sf_backfill.py`, read but
+  not touched) knows `name_unknown_to_roster` and `name_left_roster` and **does not know
+  `name_not_on_roster_now`**: its `check_resolved` refuses the file on the first of the 5 rows
+  ("carries a flag this tool does not know"). Tried in memory: with that one flag taken off the
+  rows the file is accepted, and 0 rows carry a flag it holds on. The resolver keeps the flag
+  because its brief fixes that string; one of the two has to give: `name_not_on_roster_now`
+  into the loader's pass list (one word), or out of the resolver (one line and its tests).
+- The loader also lists `module_unresolved` and `module_translated`. The resolver's brief has
+  the module, week and year "as submitted" and no such flags; it emits neither.
+- A `resolved.json` written by `--region` holds fewer than four forms. The resolver no longer
+  writes one to the default path; the loader does not look at `forms` and could refuse a file
+  whose `forms` are not all four.
+
+### Clean-up
+The scratch directory (Roster export, result, raw copies, report, the checking scripts) was
+deleted after the run; no file holding a name was written in either checkout.
