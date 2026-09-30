@@ -498,7 +498,8 @@ Check in the browser (the template, then each regional form):
 
 1. Pick one club: no warning; its roster and Submit show.
 2. Pick a second club: the warning appears below the picker and Submit is
-   gone. Remove it: the warning goes and Submit comes back.
+   gone. Remove it: the warning goes and Submit comes back, not greyed out
+   (the require rule's Disable must lift too).
 3. With two clubs picked, press Enter in the Partner Coordinator Email box
    on a desktop: the form does not submit.
 4. Switch the language (e.g. Español): the warning is translated.

@@ -223,15 +223,59 @@ HTML.
   keeps them aligned — deviation 2); `form_status` CLEAN; `AUTO_SYNC_APPLY=1`.
 
 ## Proof
-- `make check` → `CHECK PASSED` (tail pasted below when done).
-- Read-only against the live forms: the sync's dry run on all five forms
-  needs a Roster export (Ryan's, or refused); `form_status.py` on all five
-  (expected: Africa and the template flag the SUPER GIRLS rule; `club guard:
-  none` everywhere); `form_status.py --rendered` (no `data-calcvalue` yet).
-- Offline replay of the live rules (GETs only, no roster): rebuild
-  `club_questions` / `partner_of` from each form's questions and rules;
-  `build_conditions` without the guard reproduces the live rules except the
-  SUPER GIRLS rule; with the guard: +2 rules of options + 1 terms.
+- `make check` → `CHECK PASSED` (tail below).
+- Read-only against the live forms, 2026-09-30 (GETs and dry runs only; a
+  fresh Roster export read with `sheets_client.py export`, kept in the
+  session's scratch directory and deleted afterwards; counts only):
+  - The sync's dry run, `main` vs this branch, **without the flag**: U.S,
+    Latin America and Asia identical (`conditions unchanged`, nothing to
+    do); Africa and the template change exactly one rule each (`1 new, 1
+    dropped`: the SUPER GIRLS spelling); the template's 35 roster calls are
+    the same on both (it is synced by hand and was behind).
+  - **With `--club-guard`** (dry run): every form plans `UPDATE club picker
+    (N clubs: calcValues)`, `CREATE club guard (below the Club picker)` and
+    `REPLACE conditions` with two more rules — U.S 12 clubs, 41 → 43 rules,
+    `40 kept, 3 new, 1 dropped`; Latin America 39, 68 → 70; Asia 96,
+    125 → 127; Africa 216, 255 → 257 (`4 new, 2 dropped` with the spelling
+    fix); the template 359 (23 of them created in the same run), 376 → 378.
+    The 3 new rules are the two guard rules and the Contact_IDs sum with its
+    separator. No "two names join into a third" warning on any form.
+  - `form_status.py` (this branch, `--rendered`): the SUPER GIRLS rule
+    flagged on Africa and the template only ("it has 'Super Girls'; a
+    multi-select compares case"); `club guard: none` everywhere; errors 0,
+    Salesforce yes on all five; the public page's picker found on all five
+    with no `data-calcvalue` yet (template 336 options, Africa 216, Asia 96,
+    Latin America 39, U.S 12). `main`'s `form_status` reports no rule
+    problem on any form.
+  - `auto_sync.py` dry run on this branch (the same export, `--roster`,
+    `--out` in scratch; no `--synclog`): Africa, Asia and U.S `in-sync` —
+    Africa's one-rule spelling difference is not a change to the runner, so
+    merging does not write it. Latin America `would apply: 1 update`: the
+    live form changed between the two runs (a roster write after the
+    export, presumably the runner's); `main`'s dry run on the same export
+    now plans the same update, and with `--club-guard` the plan is
+    otherwise as above.
+- The planned offline replay of the live rules without a roster was not
+  needed: the dry runs above compare the generated rules with the live ones
+  on every form.
+
+`make check` (2026-09-30, with `CSV=` pointing at the 2026-08-24 enrollment
+export for the real-data parity):
+
+```
+real data (…/enrollment_2026-08-24.csv): parsed 328 clubs, 6210 girls
+ALL CHECKS PASSED
+ALL CHECKS PASSED
+ALL CHECKS PASSED
+py: 32 files parse, 19 scripts answer --help
+Ran 152 tests in 0.176s
+OK
+gs: 10 files parse
+secrets: clean (128 files scanned)
+docs-links: ok (46 relative links resolve, 0 absolute paths)
+fixtures: up to date
+CHECK PASSED
+```
 
 ## Rollout (each step Ryan's go; not part of this branch)
 `AUTO_SYNC_APPLY=0`. Template: backup; translation audit (before);
