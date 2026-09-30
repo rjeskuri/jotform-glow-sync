@@ -1173,8 +1173,9 @@ function reviewDigest_(rows, today, known) {
  * line starts with the exact name the club's Salesforce account must have
  * (sfClubName_): the club name, or "<club> - <partner>" for a name two
  * partners' active clubs share — worked out now, never stored, so a renamed
- * club or partner cannot leave it stale. A row with no club or no partner
- * says so instead of guessing. A shared name also says to check the form:
+ * club or partner cannot leave it stale. A row with no club name, or a
+ * shared name with no partner, says so instead of guessing (sfClubName_
+ * would refuse). A shared name also says to check the form:
  * there the long or plain name is sticky (RosterOps.gs, "clubs that share a
  * name"), and an account named otherwise than the form sends gets a stray
  * twin in Salesforce at the club's first attendance.
@@ -1188,11 +1189,13 @@ function sfPendingLines_(rows, shared) {
                  'that name; a club whose name another partner\'s club also has is "<club>' +
                  SF_NAME_SEP + '<partner>"). Set status to "done" once created.', ''];
   rows.forEach(function (r) {
-    const known = tidy_(r[2]) && tidy_(r[1]);
-    const name = known ? sfClubName_(r[2], r[1], shared) : '(no club or partner in this row: fix it first)';
+    const club = tidy_(r[2]), isShared = !!club && shared[key_(club)] === true;
+    const name = !club ? '(no club name in this row: fix it first)'
+        : isShared && !tidy_(r[1]) ? '(a shared club name, and no partner in this row: fix it first)'
+        : sfClubName_(club, r[1], shared);
     lines.push('- ' + name + ' | ' + r[1] + ' | ' + (r[3] || 'region?') + ' | ' + r[4] +
                ' girls | mentor ' + r[5] + ' <' + r[6] + '> | added ' + r[0] +
-               (known && shared[key_(r[2])] === true ? ' | ' + SF_SHARED_NOTE : ''));
+               (isShared ? ' | ' + SF_SHARED_NOTE : ''));
   });
   return lines;
 }

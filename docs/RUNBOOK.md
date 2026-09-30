@@ -863,7 +863,8 @@ until you confirm:
    listed as "no ReviewQueue item for this row and time" lost its item (row
    deleted, text typed after the `[#…]` tag, or the tab sorted so the item's
    `(sent …)` no longer matches the row's Timestamp): add the item back by
-   hand with that issue, detail `Roster Form Responses!N (sent <yyyy-mm-dd
+   hand with its issue (the one of the two above that its FormLog `HELD:`
+   row names), detail `Roster Form Responses!N (sent <yyyy-mm-dd
    hh:mm:ss from the row's Timestamp>): … [#Roster Form Responses!N]`.
 
 The run takes the document lock one row at a time (form submissions keep

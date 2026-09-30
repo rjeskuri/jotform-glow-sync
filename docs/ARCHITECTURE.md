@@ -97,7 +97,7 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
    have, all regions). Python decides what the forms send (the one-time
    `--same-name-switch`; afterwards a form's long or plain name is sticky);
    Apps Script uses the rule for the Monday e-mail's Salesforce lines only.
-   Each side is tested with the same fictional cases
+   Each side is tested on its own, with fictional names
    (`test/forms_logic_test.js`, `test/python_test.py`); there is no
    cross-language run.
 

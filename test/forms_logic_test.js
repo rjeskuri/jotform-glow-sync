@@ -797,10 +797,16 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
   check('the namesake has no active girl (retired): the plain name, as the forms\' one-time switch counts active clubs',
         sfLines(w).join() === '- Stars | Partner One | Africa | 12 girls | mentor Mentor Testperson <mentor@example.org> | added 2026-09-20',
         sfLines(w).join(' / '));
-  w = weekly([], [pend('Partner One', 'Stars', 'Africa'), pend('', 'Stars', 'Africa')], STAFF, twoStars);
-  check('a pending row with no partner: said so, never a guessed name; the e-mail still goes out',
+  w = weekly([], [pend('Partner One', 'Stars', 'Africa'), pend('', 'Stars', 'Africa'), pend('', 'Alpha Club', 'Africa'),
+                  pend('Partner One', ' ', 'Africa')], STAFF, twoStars);
+  check('a shared name with no partner, or no club name: said so, never a guessed name; the e-mail still goes out',
         sfLines(w)[0].startsWith('- Stars - Partner One | ') &&
-        sfLines(w)[1].startsWith('- (no club or partner in this row: fix it first) |  | Africa'), sfLines(w)[1]);
+        sfLines(w)[1].startsWith('- (a shared club name, and no partner in this row: fix it first) |  | Africa') &&
+        sfLines(w)[1].endsWith(CHECK_FORM) &&
+        sfLines(w)[3].startsWith('- (no club name in this row: fix it first) | Partner One | Africa'), sfLines(w)[1]);
+  check('…a name nobody shares needs no partner: the club name, as before',
+        sfLines(w)[2] === '- Alpha Club |  | Africa | 12 girls | mentor Mentor Testperson <mentor@example.org> | added 2026-09-20',
+        sfLines(w)[2]);
   w = weekly(openRows, [], STAFF, null, 'Roster');
   check('nothing pending: the Roster is not read (the ReviewQueue e-mail does not depend on it)',
         w.mails.length === 1 && w.mails[0].subject === 'GLOW weekly: 2 open ReviewQueue item(s)');
