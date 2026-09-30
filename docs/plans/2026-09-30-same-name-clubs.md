@@ -549,3 +549,22 @@ second dry run (`nothing to do`), `form_status --rendered`.
   name on the four live pickers has exactly one Account of that name; none is named plain "Angels
   Club", "Ruby" or "Shining Stars".
 - Open: one template test submission with a long name, before the Jotform → Salesforce reconnect.
+
+## Verification after the switch (2026-09-30, two independent read-only verifiers)
+- **Rules and runtime** (GETs at 10:25 and 10:36 UTC, the rules simulated for every picker entry on all
+  five forms against Jotform's served runtime): all good. Every entry picked alone shows exactly one
+  roster with Submit enabled and question 5 equal to the entry (362 / 218 / 95 / 38 / 11); any two
+  entries together trip the guard; both guard rules list exactly the picker's entries; no rule names
+  q331 or a deleted question; the seven strings are byte-exact in the API and on the pages.
+- **Submissions** (snapshot 12:17 UTC): 16 since the switch (Asia 15, Latin America 1), question 5
+  exactly one current entry in all 16, no plain shared name, no fused pick (20 before the guard, 0
+  since), the one-character page-translation defect 0 of 34 since the guard (6 before).
+- **Not yet proven by a submission:** none of the seven long-named clubs has submitted since the
+  switch (Africa had no submission that day by 12:17 UTC). Watch the first ones: question 5 must
+  equal the long entry. A page opened before the switch can still send a plain "Angels Club",
+  "Ruby" or "Shining Stars", which Salesforce (reconnected 12:05 UTC) would store as an Account
+  without a partner — correct such a record by hand.
+- **Watch:** the one club with a comma in its name (Rukmini Foundation's Setidevi club, Sokhel, q418
+  on Asia) has sent three submissions with no girl ticked, one of them after the switch. The rule and
+  the rendered page are correct and the runtime quotes the entry when it looks it up; a browser
+  check of that club's roster is Ryan's, then a follow-up with its coordinator.
