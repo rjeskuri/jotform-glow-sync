@@ -1,7 +1,7 @@
 ---
 title: Club accounts in Salesforce, linked to their partners
 author: Claude (with Ryan)
-status: in-progress (accounts written and verified 2026-09-30; open: the morning-after read, the seven same-name clubs, the SF Pending rows)
+status: in-progress (all accounts written and verified 2026-09-30, the seven same-name clubs included; open: the morning-after read, the SF Pending rows)
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-29/30 ("assign the clubs to a partner", then "create all clubs")
 ---
@@ -331,6 +331,12 @@ names are readable there until the list is filtered, and he was told so.
   Ready for Reading and "Super Girls" under Feminature Uganda Limited, names read from the live
   Africa picker after the forms' side retired the two duplicates. Recorded in their own rollback
   file, `created_accounts_round2.csv`; `totals --also` that file is ok with 357 Club accounts.
+- **Round 3, the seven same-name clubs** (10:35 UTC, Ryan's go, same checks): after the forms were
+  switched, "Angels Club - <partner>" (2), "Ruby - <partner>" (2) and "Shining Stars - <partner>"
+  (3) were created under their partners, each name an exact option of its live picker and equal to
+  the approved list. Recorded in `created_accounts_round3.csv`. `totals --also` both later files
+  is ok with 364 Club accounts (10 pilot, 345 + 2 + 7 new), no name on two accounts, two without a
+  parent (the on-hold pilots). No Account is named with a plain shared name.
 - **The tool on the way**: the connector's answers were copied out of the session transcript by
   the exact text of each request; two review rounds and a final break-test found no way to create
   a wrong record and several ways the rollback file could have missed one after a failed write,
@@ -341,9 +347,9 @@ names are readable there until the list is filtered, and he was told so.
   of each pair are active in the sheet and got an account; one Asia club's code is derived from
   its former name.
 - **Still open**: the read after the first nightly rollup (step 11); the 36 "pending" rows of the
-  SF Pending tab (Ryan, before Monday 2026-10-05); the seven "<club> - <partner>" accounts, once
-  the forms send those names; then the reconnect, the September entries Ryan wants moved over
-  afterwards, and the test report.
+  SF Pending tab (Ryan, before Monday 2026-10-05); then the reconnect, the September entries Ryan
+  wants moved over afterwards (470 submissions on the four live forms by 2026-09-30), and the test
+  report.
 
 ## Proof
 - `python3 tools/sf_club_accounts.py build` → `write set: 345 create + 8 link = 353 writes in 18 batches; 11 same-name rows held`

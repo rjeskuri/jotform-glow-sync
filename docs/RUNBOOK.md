@@ -1260,15 +1260,15 @@ when nothing matches it creates a new, partner-less Club account.
     accounts marked as portal sign-ups, Monthly Reports on Club accounts, programme-income
     records on Club accounts: all 0.
   - `python3 tools/sf_club_accounts.py soql --totals`, then
-    `totals --result <saved answer> --also data/sf_prep_2026-09-30/created_accounts_round2.csv`
-    → `totals ok`.
+    `totals --result <saved answer> --also data/sf_prep_2026-09-30/created_accounts_round2.csv
+    data/sf_prep_2026-09-30/created_accounts_round3.csv` → `totals ok` (364 Club accounts).
 - **Writing to Salesforce** is not covered by the live gate: the only gate is Ryan's go in the
   conversation. Records are written one per call through the write connector, never by a
   subagent; `tools/sf_club_accounts.py` (which never calls Salesforce) cuts the batches, checks
   each saved answer and keeps the rollback files.
 - **Rollback files** (never committed): `data/sf_prep_2026-09-30/created_accounts.csv` (345
-  created, 8 linked), `created_accounts_round2.csv` (2 created), `link_targets_before.json` (the
-  pilot accounts as they were). A created account may be deleted only while it has no Contacts
+  created, 8 linked), `created_accounts_round2.csv` (2 created), `created_accounts_round3.csv` (the
+  7 same-name clubs), `link_targets_before.json` (the pilot accounts as they were). A created account may be deleted only while it has no Contacts
   and no attendance, and only with Ryan's go.
 
 ## Work log and invoices
