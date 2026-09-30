@@ -100,8 +100,13 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
    `--same-name-switch`; afterwards a form's long or plain name is sticky);
    Apps Script uses the rule for the Monday e-mail's Salesforce lines only.
    Each side is tested on its own, with fictional names
-   (`test/forms_logic_test.js`, `test/python_test.py`); there is no
-   cross-language run.
+   (`test/forms_logic_test.js`, `test/python_test.py`), and
+   `PythonAppsScriptParity` runs both over one fictional Roster (the `.gs`
+   side in Node, through `test/load_gs.js`): the separator, which names are
+   shared, each club's name, and — for the two checkers, the sync's and the
+   intake's `newClubHoldReasons_` — which new club's name is in use.
+   `SameNameFlow` does the same for the switch itself: the `sf_names` the
+   switched form sends are the names `sfClubName_` prints.
 
 ## Known divergences (documented, not fixed — see the backlog)
 

@@ -7,8 +7,10 @@ Offline Python tests (standard library unittest; run by `make py`):
   - the enrollment parser on the synthetic fixture (numbers pinned in
     test/fixtures/expected.json) and its edge cases;
   - the constants that exist in BOTH Python and appsscript/Config.gs /
-    Roster.gs - form ids, qids, SESSION_OVERRIDES, SyncLog columns - so a
-    change on one side fails here until the other side follows.
+    Roster.gs - form ids, qids, SESSION_OVERRIDES, SF_NAME_SEP, SyncLog
+    columns - so a change on one side fails here until the other side
+    follows; and the same-name rule itself, run on both sides over one
+    fictional Roster (the Apps Script side in Node, through test/load_gs.js).
 
     python3 test/python_test.py
 """
@@ -71,6 +73,40 @@ def gs_block(src, name):
     m = re.search(r"const %s = [\{\[](.*?)\n?[\}\]];" % re.escape(name), src, re.S)
     assert m, name
     return m.group(1)
+
+
+def apps_script_same_name(rows, pairs=(), probes=()):
+    """What appsscript/ makes of a Roster, run in Node exactly as the JS tests run
+    it (test/load_gs.js; no Google API): {"sep": Config.gs SF_NAME_SEP, "shared":
+    the sorted names of RosterOps.gs sharedClubNames_(rows), "names":
+    [sfClubName_(club, partner, shared) for each (partner, club) of `pairs`],
+    "held": [True when newClubHoldReasons_ holds a new club (partner, club) of
+    `probes` for its name (kind samename)]}. rows: dicts with partner, club,
+    full_name, status, region - Roster rows as loadRoster_ hands them over. The
+    probe's girls are on nobody's roster, so no other hold reason can fire.
+    None when Node is not installed (make check runs the JS tests first, so
+    there it always is)."""
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        return None
+    script = """
+const gs = require(process.argv[1])(['SF_NAME_SEP', 'sharedClubNames_', 'sfClubName_', 'newClubHoldReasons_']);
+const inp = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const shared = gs.sharedClubNames_(inp.rows);
+process.stdout.write(JSON.stringify({
+  sep: gs.SF_NAME_SEP,
+  shared: Object.keys(shared).sort(),
+  names: inp.pairs.map(p => gs.sfClubName_(p[1], p[0], shared)),
+  held: inp.probes.map(p => gs.newClubHoldReasons_(
+      { partner: p[0], club: p[1], names: ['Probe Girlone', 'Probe Girltwo'], typedPartner: false },
+      inp.rows, []).some(r => r.kind === 'samename')),
+}));"""
+    done = subprocess.run(["node", "-e", script, os.path.join(REPO, "test", "load_gs.js")],
+                          input=json.dumps({"rows": rows, "pairs": list(pairs), "probes": list(probes)}),
+                          capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
 
 
 class AutoSyncPlan(unittest.TestCase):
@@ -1287,6 +1323,21 @@ class SameNameFlow(unittest.TestCase):
         # the runner's patterns still read the plan
         self.assertTrue(auto_sync.PICKER_RX.match("  - " + fake.calls[0]))
         self.assertTrue(auto_sync.REPLACE_RX.match("  - " + fake.calls[1]))
+
+    def test_the_switch_sends_the_names_apps_script_prints_for_salesforce(self):
+        # the whole path, both languages, one Roster: what the switched form sends to question 5
+        # for each club (--summary-json sf_names) is the account name the Monday e-mail prints
+        # for it (RosterOps.gs sharedClubNames_ / sfClubName_, run in Node)
+        rows = [{"partner": partner, "club": club, "full_name": name, "status": "active", "region": "Africa"}
+                for (partner, club), names in self.ROSTER.items() for name in names]
+        gs = apps_script_same_name(rows, pairs=list(self.ROSTER))
+        if gs is None:
+            self.skipTest("node is not installed: the Apps Script side cannot run")
+        summary, _ = self.summary(FakeForm(*self.form()), "--same-name-switch")
+        self.assertEqual(gs["shared"], ["stars"])
+        self.assertEqual({(n["partner"], n["club"]): n["value"] for n in summary["sf_names"]},
+                         dict(zip(self.ROSTER, gs["names"])))
+        self.assertEqual(sorted(gs["names"], key=str.lower), self.LONG)
 
     def test_the_switch_apply_needs_no_other_flag_and_hides_the_box_last(self):
         fake = FakeForm(*self.form(), apply=True)
@@ -2977,6 +3028,131 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertEqual(pairs, sync.SESSION_OVERRIDES)
         self.assertEqual(len(pairs), block.count(":"))   # every entry was parsed
 
+    def test_the_same_name_separator(self):
+        # "<club> - <partner>" is one string on both sides: the forms' Club picker entry and
+        # question 5 (Python), the Monday e-mail's Salesforce account name and the intake
+        # check (Apps Script). CLAUDE.md rule 7: change both
+        found = re.findall(r"^const SF_NAME_SEP = '([^'\n]*)';", self.config, re.M)
+        self.assertEqual(found, [glow_sync.SF_NAME_SEP])
+        self.assertEqual([ord(c) for c in glow_sync.SF_NAME_SEP], [0x20, 0x2D, 0x20])   # no long dash
+        # one definition per side, used by name everywhere else
+        self.assertIs(sync.SF_NAME_SEP, glow_sync.SF_NAME_SEP)
+        self.assertIs(form_status.SF_NAME_SEP, glow_sync.SF_NAME_SEP)
+        for name in sorted(os.listdir(os.path.join(REPO, "appsscript"))):
+            if name.endswith(".gs") and name != "Config.gs":
+                self.assertNotRegex(read(os.path.join(REPO, "appsscript", name)),
+                                    r"(?:const|let|var)\s+SF_NAME_SEP\b", name)
+
+    # One fictional Roster for both sides: (partner, club, full_name, status, region)
+    SAME_NAME_ROSTER = [
+        ("Partner One", "Stars", "Ann Poe", "active", "Africa"),
+        ("Partner One", "Stars", "Kay Loe", "inactive", "Africa"),
+        ("Partner Two", "Stars", "Sue Moe", "active", "Asia"),            # another region: one Salesforce org
+        ("Partner Four", "STARS", "Liz Noe", " Active ", "U.S"),          # capitals; the status as typed
+        ("Partner One", "Alpha Club", "Jane Doe", "active", "Africa"),
+        ("partner  one", "Alpha  Club", "Mary Roe", "active", "Africa"),  # one partner written twice
+        ("Partner Two", "Beta Club", "Eve Hoe", "active", "Asia"),
+        ("Partner Three", "Beta Club", "Ida Toe", "inactive", "U.S"),     # a retired namesake
+        ("Partner One", "Comet Club", "Uma Roe", "active", "Africa"),
+        ("Partner Two", "Comet Club", "", "active", "Asia"),              # a row with no girl
+        ("Partner Two", "Alpha Club - Juniors", "Amy Foe", "active", "Asia"),   # its own " - "
+        ("Partner Two", "Étoiles", "Bea Goe", "active", "Asia"),
+        ("Fundación Demo", "étoiles", "Cy Joe", "active", "Latin America"),     # accents kept, case not
+        ("Partner Three", "Moon", "Dee Koe", "inactive", "U.S"),          # nobody's active club
+        ("", "Stars", "Fay Low", "active", "Africa"),                     # no partner: reaches no form
+        ("Partner Three", "", "Gia Mow", "active", "U.S"),                # no club
+    ]
+
+    def same_name_sides(self, probes=()):
+        """(Python's roster_pairs of SAME_NAME_ROSTER, its active clubs, what Apps
+        Script makes of the same rows)."""
+        import csv
+        import tempfile
+        cols = ["partner", "club", "full_name", "status", "region"]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "roster.csv")
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["girl_id"] + cols)
+                for n, row in enumerate(self.SAME_NAME_ROSTER):
+                    w.writerow([f"DEMOCLUB-SAMPLE-{n:03d}", *row])
+            pairs = glow_sync.roster_pairs(path)
+        active = sorted(pc for pc, is_active in pairs.items() if is_active)
+        gs = apps_script_same_name([dict(zip(cols, row)) for row in self.SAME_NAME_ROSTER],
+                                   pairs=active, probes=probes)
+        if gs is None:
+            self.skipTest("node is not installed: the Apps Script side cannot run")
+        return pairs, active, gs
+
+    def test_the_switch_rule_agrees_with_apps_script(self):
+        # which clubs are "<club> - <partner>": Python decides it for the forms
+        # (sync_attendance_form.py --same-name-switch goes by shared_club_names(active_only=True)),
+        # Apps Script for the Monday e-mail's Salesforce account names (sharedClubNames_ /
+        # sfClubName_). Both run here, on the same rows
+        from glow.text import key
+        pairs, active, gs = self.same_name_sides()
+        shared = glow_sync.shared_club_names(pairs, active_only=True)
+        self.assertEqual(gs["sep"], glow_sync.SF_NAME_SEP)
+        self.assertEqual(gs["shared"], sorted(shared))
+        self.assertEqual(sorted(shared), ["stars", "étoiles"])     # pinned: neither side is empty
+        names = [glow_sync.sf_club_name(club, partner, key(club) in shared) for partner, club in active]
+        self.assertEqual(gs["names"], names)
+        self.assertEqual(dict(zip(active, names)), {
+            ("Fundación Demo", "étoiles"): "étoiles - Fundación Demo",
+            ("Partner Four", "STARS"): "STARS - Partner Four",             # its own spelling kept
+            ("Partner One", "Alpha Club"): "Alpha Club",                   # one partner, written twice
+            ("Partner One", "Comet Club"): "Comet Club",                   # its namesake has no girl
+            ("Partner One", "Stars"): "Stars - Partner One",
+            ("Partner Two", "Alpha Club - Juniors"): "Alpha Club - Juniors",
+            ("Partner Two", "Beta Club"): "Beta Club",                     # its namesake is retired
+            ("Partner Two", "Stars"): "Stars - Partner Two",
+            ("Partner Two", "Étoiles"): "Étoiles - Partner Two"})
+        # no two clubs end up with one Salesforce name, on either side
+        self.assertEqual(glow_sync.sf_name_clashes(zip(gs["names"], active)), [])
+
+    def test_a_name_in_use_is_the_same_on_both_sides(self):
+        # Ryan's decision 2: a NEW club may not take a name another partner's club has - any
+        # status, any region, a girl on the row or not. The sync refuses to create it
+        # (sync_attendance_form.py: glow.sync.club_partners over roster_pairs); the Club Roster
+        # Form handler holds it before it reaches the Roster (newClubHoldReasons_, kind samename)
+        from glow.text import key
+        clubs = ["Stars", "stars", "Beta Club", "Comet Club", "Moon", "Alpha Club", "Étoiles",
+                 "Alpha Club - Juniors", "Brand New Club", "Star"]
+        probes = [(partner, club) for club in clubs
+                  for partner in ("Partner Nine", "Partner One", "Partner Three")]
+        pairs, _, gs = self.same_name_sides(probes)
+        holders = glow_sync.club_partners(pairs)
+        active = {(key(p), key(c)) for (p, c), is_active in pairs.items() if is_active}
+        held = dict(zip(probes, gs["held"]))
+
+        def on_file(partner, club):
+            return key(partner) in holders.get(key(club), {})
+
+        def taken(partner, club):
+            return any(k != key(partner) for k in holders.get(key(club), {}))
+
+        new = [p for p in probes if not on_file(*p)]
+        self.assertEqual(len(new), 24)
+        self.assertEqual({p: held[p] for p in new}, {p: taken(*p) for p in new})
+        self.assertTrue(held[("Partner Nine", "Stars")])
+        self.assertTrue(held[("Partner Nine", "stars")])                # capitals do not make a new name
+        self.assertTrue(held[("Partner Nine", "Moon")])                 # a retired club's name is in use
+        self.assertTrue(held[("Partner Three", "Comet Club")])          # ...and one a row with no girl holds
+        self.assertTrue(held[("Partner One", "Alpha Club - Juniors")])  # a club's own " - " is its name
+        self.assertFalse(held[("Partner Nine", "Brand New Club")])
+        self.assertFalse(held[("Partner Nine", "Star")])                # a different name
+        # a club the partner has on file with an active girl is no new club on either side:
+        # the sync matches it to its roster, the handler runs it as that club
+        own = [p for p in probes if (key(p[0]), key(p[1])) in active]
+        self.assertEqual(sorted(own), [("Partner One", "Alpha Club"), ("Partner One", "Comet Club"),
+                                       ("Partner One", "Stars"), ("Partner One", "stars")])
+        self.assertEqual([held[p] for p in own], [False] * 4)
+        # the documented divergence (docs/ARCHITECTURE.md, Known divergences): a club on file
+        # with NO active girl whose name another partner's club has is held at intake; the
+        # sync refuses it only when its roster question is gone and it would be created
+        self.assertTrue(held[("Partner Three", "Beta Club")])
+        self.assertFalse(held[("Partner Three", "Moon")])               # retired, and nobody else's name
+
     def test_synclog_columns(self):
         m = re.search(r"const SYNC_LOG_COLS = \[(.*?)\];", read(ROSTER_GS), re.S)
         self.assertEqual(re.findall(r"'([a-z0-9_]+)'", m.group(1)), auto_sync.SYNC_LOG_COLS)
@@ -3010,7 +3186,7 @@ class PythonAppsScriptParity(unittest.TestCase):
             self.assertEqual(row.count("|"), 4, row)
         firsts = [row.split("|")[1] for row in rows]
         for constant in ("Live form ids", "Structural question ids", "SESSION_OVERRIDES",
-                         "Roster tab columns", "SyncLog columns"):
+                         "`SF_NAME_SEP`", "Roster tab columns", "SyncLog columns"):
             self.assertEqual(sum(constant in f for f in firsts), 1, constant)
 
 
