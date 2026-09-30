@@ -4307,13 +4307,73 @@ class RosterRepairRunbook(unittest.TestCase):
 
     def test_what_expects_clean_waits_for_the_repair(self):
         backlog = {l.split("|")[1].strip(): l for l in read(os.path.join(REPO, "docs", "BACKLOG.md"))
-                   .splitlines() if re.match(r"\| 4[56] \|", l)}
-        self.assertLess(backlog["45"].index("after 47's repair"), backlog["45"].index("`AUTO_SYNC_APPLY=0`"))
+                   .splitlines() if re.match(r"\| (~~45~~|46) \|", l)}
         self.assertIn("after 47's repair", backlog["46"])
+        # the partner list (45) was retired before it was deployed; what took its place
+        # (the same-name switch, RUNBOOK "Club names two partners share") expects CLEAN too
+        self.assertIn("superseded 2026-09-30", backlog["~~45~~"])
+        self.assertIn("the same-name switch", " ".join(self.section().split()))
+
+
+class SameNameRunbook(unittest.TestCase):
+    """docs/RUNBOOK.md "Club names two partners share": the one-time switch is
+    backed up, previewed and verified, the runner paused around it; the rollback
+    is for before the Salesforce reconnect; the quoted warnings are the code's."""
+
+    def section(self):
         doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
-        partner = doc.split("## The partner list", 1)[1].split("```bash", 1)[0]
-        self.assertIn('("Rosters above Submit")', partner)
-        self.assertIn("the partner list", self.section())
+        self.assertNotIn("## The partner list", doc)           # replaced by this section
+        return doc.split("## Club names two partners share", 1)[1].split("\n## ", 1)[0]
+
+    def test_the_switch_is_backed_up_previewed_applied_and_verified_in_that_order(self):
+        switch = self.section().split("### The one-time switch", 1)[1].split("\n### ", 1)[0]
+        block = switch.split("```bash", 1)[1].split("```", 1)[0]
+        lines = [l for l in block.splitlines() if l.strip()]
+
+        def at(fragment, after=-1):
+            return next(i for i, l in enumerate(lines) if i > after and fragment in l)
+
+        backup = at("backup_forms.py --form")
+        dry = at("--same-name-switch ")
+        self.assertNotIn("--apply", lines[dry])
+        apply = at("--same-name-switch --apply")
+        again = at("sync_attendance_form.py", after=apply)
+        self.assertNotIn("--apply", lines[again])
+        self.assertNotIn("--same-name-switch", lines[again])     # the form stays switched without it
+        status, rendered = at("tools/form_status.py", after=apply), at("--rendered", after=apply)
+        self.assertEqual(sorted([backup, dry, apply, again, status, rendered]),
+                         [backup, dry, apply, again, status, rendered])
+        # the runner is paused for the window, merged code first, and switched back on at the end
+        text = " ".join(switch.split())
+        self.assertIn("**merge first**", text)
+        self.assertLess(text.index("AUTO_SYNC_APPLY=0"), text.index("```bash"))
+        self.assertGreater(text.index("AUTO_SYNC_APPLY=1"), text.index("```bash"))
+        self.assertNotIn("--q5-change-ok --apply", text)         # the switch needs no second flag
+
+    def test_the_rollback_is_all_forms_with_the_runner_paused_and_only_before_the_reconnect(self):
+        text = " ".join(self.section().split("### Rollback", 1)[1].split())
+        self.assertIn("only before the Salesforce reconnect", text)
+        self.assertLess(text.index("AUTO_SYNC_APPLY=0"), text.index("Revert the merge"))
+        self.assertLess(text.index("Revert the merge"), text.index("AUTO_SYNC_APPLY=1"))
+        self.assertIn("`restore_conditions.py` is not a rollback here", text)
+
+    def test_the_quoted_warnings_and_flags_are_the_tools_own(self):
+        text = " ".join(self.section().split())
+        self.assertIn(auto_sync.SF_NAME_CHANGE, text)
+        self.assertIn(auto_sync.SAME_NAME_REFUSED, text)
+        self.assertIn(glow_sync.SF_NAME_SEP.join(("`<club>", "<partner>`")), text)
+        src = read(os.path.join(REPO, "sync_attendance_form.py"))
+        for flag in ("--same-name-switch", "--q5-change-ok", "--partner-picker"):
+            self.assertIn(flag, text)
+            self.assertIn(f'"{flag}"', src)
+        self.assertIn("HIDE partner textbox (q331: no rule shows it;", text)
+        self.assertIn("HIDE partner textbox (q{PARTNER}: no rule shows it;", src)
+        # CLAUDE.md rule 5 and the rename procedure carry the Salesforce step
+        self.assertIn("--q5-change-ok", read(os.path.join(REPO, "CLAUDE.md")))
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        rename = " ".join(doc.split("## Renaming a club", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn("rename the club's Account to the new text first", rename)
+        self.assertIn("--apply --q5-change-ok", rename)
 
 
 import datetime as dt                 # noqa: E402  (the work-log tests below)

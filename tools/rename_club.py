@@ -611,8 +611,12 @@ def main():
               "options and the rules -")
     print("  python3 tools/sheets_client.py export Roster data/roster_<date>.csv")
     if renaming:
+        # the club's name is what question 5 sends to Salesforce: the sync lists the change
+        # and applies it only with --q5-change-ok (docs/plans/2026-09-30-same-name-clubs.md)
+        print("  Salesforce: rename the club's Account to the new name FIRST (the dry run's "
+              "'!' line gives the exact text)")
         print(f"  python3 sync_attendance_form.py data/roster_<date>.csv --roster "
-              f"--region {region!r} --form {region_form}      # dry run, then --apply")
+              f"--region {region!r} --form {region_form}      # dry run, then --apply --q5-change-ok")
         print(f"  python3 sync_attendance_form.py data/roster_<date>.csv --roster "
               f"--form {glow_forms.TEMPLATE}                       # the template, same")
     else:

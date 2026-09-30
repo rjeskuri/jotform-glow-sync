@@ -26,7 +26,9 @@ four regional Jotform attendance forms   (one hidden checkbox question per club 
    │  mentor ticks the girls present
    ▼
 Jotform native Salesforce V2 integration → Attendance_Batch__c
-   Account_Name__c ← qid 5 (club), Contact_IDs__c ← qid 18 (ONE aggregate calculation over every
+   Account_Name__c ← qid 5 (the club's Salesforce name: its own name, or "<club> - <partner>" when
+   another partner's club has that name — the club's Club-picker entry, copied by a calculation),
+   Contact_IDs__c ← qid 18 (ONE aggregate calculation over every
    roster, "ignore hidden fields" on, so only the visible club's ticked names arrive),
    Module__c / Module_Week__c / Module_Year__c ← qids 98 / 100 / 102
    (with the club guard: Submit is hidden and disabled unless q5 is exactly one picker option,
@@ -40,10 +42,10 @@ enrollment responses → `sync_attendance_form.py read_sheet` (no `--roster`).
 
 | Where | What | Talks to |
 |---|---|---|
-| `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge, and — on a form with the club guard — the one-club rules), and keeps the Club picker, the partner list and the club guard's warning (found by field name, `clubPicker` / `partnerPicker` / `clubGuard`, added once by `--club-picker` / `--partner-picker` / `--club-guard`) in shape. New rosters are created above the links and Submit (`glow/layout.py`). Dry run by default, `--apply` writes, `--summary-json` for the runner | Jotform API via `curl` |
-| `backup_forms.py`, `restore_conditions.py` | Snapshot and rollback (conditions only) | Jotform API |
-| `tools/form_status.py` | Read-only audit of every form vs the Roster export, rule by rule; `--json` | Jotform API |
-| `tools/auto_sync.py` | The unattended loop (export → plan → bands → backup → apply → verify → SyncLog) | Sheets API, the tools above |
+| `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge, and — on a form with the club guard — the one-club rules), and keeps the Club picker and the club guard's warning (found by field name, `clubPicker` / `clubGuard`, added once by `--club-picker` / `--club-guard`) in shape. A club whose name another partner's club shares has its own picker entry, `<club> - <partner>` — the text question 5 sends to Salesforce (`glow/sync.py` `SF_NAME_SEP`, `sf_club_name`): each roster keeps the form its rule has (read back, never flipped), `--same-name-switch` makes the shared names long by hand, a new club with a name in use is not created, and any other change of an existing club's question 5 needs `--q5-change-ok`. New rosters are created above the links and Submit (`glow/layout.py`). Dry run by default, `--apply` writes, `--summary-json` for the runner (its `sf_names`: what every roster sends) | Jotform API via `curl` |
+| `backup_forms.py`, `restore_conditions.py` | Snapshot and rollback (conditions only; a snapshot whose rules test clubs the Club picker no longer offers is refused) | Jotform API |
+| `tools/form_status.py` | Read-only audit of every form vs the Roster export, rule by rule (rosters grouped by the text their rule tests; the picker's options are those texts); `--json` | Jotform API |
+| `tools/auto_sync.py` | The unattended loop (export → plan → bands → backup → apply → verify → SyncLog). ATTENTION also for a question-5 change of an existing club (the region is not applied), a new club refused for its name, and a name two clubs send | Sheets API, the tools above |
 | `tools/sheets_client.py` | Service-account access to the sheet; importable (`read_tab`, `append_rows`, `write_tab`) | Sheets API |
 | `tools/upload_roster.py`, `tools/build_roster_offline.js` | Rebuild the Roster tabs offline with the *same* `.gs` code, upload them | local, Sheets API |
 | `tools/rename_club.py` | Rename a club in place: Roster/ClubRegistry/SF Pending cells (code kept) and the question label on the region's form and the template; the sync then follows. `--new-partner` moves a club filed under a mistyped partner: the same tabs' partner cells in one batch, and the typo's Partners row blanked with a note; the forms are only read (checked for a Partner-gated rule) unless `--new` renames too | Sheets API, Jotform API |
