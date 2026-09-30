@@ -1,7 +1,7 @@
 ---
 title: The intake checker for club names two partners share (Part 2 of the same-name plan)
 author: Claude (workflow track wf6/same-name-intake, 2026-09-30)
-status: accepted         # Part 2 of plans/2026-09-30-same-name-clubs.md, accepted by Ryan 2026-09-30 with that plan; built on branch wf6/same-name-intake — not merged, not pushed to Apps Script (each needs Ryan's go)
+status: done             # Part 2 of plans/2026-09-30-same-name-clubs.md, accepted by Ryan 2026-09-30 with that plan; merged (d238b43) and pushed to Apps Script 2026-09-30 10:38 UTC (Result at the end)
 created: 2026-09-30
 intent: none — build notes for Part 2 of [plans/2026-09-30-same-name-clubs.md](2026-09-30-same-name-clubs.md), which stays the authority (its intent: docs/intent/2026-09-01-club-picker.md, amended 2026-09-30)
 ---
@@ -299,3 +299,18 @@ Salesforce call).
   long name and none carries "NAME SHARED", so the next Monday e-mail's
   Salesforce section differs from last week's only in its first sentence.
   Every pending club has active girls on the Roster.
+
+## Result (2026-09-30, with Ryan's go)
+- Before the push, a `clasp pull` into a scratch folder showed the deployed script equal to `a1dc5d7`
+  (the 2026-09-28 deploy), so this push also carried the four changes merged on 2026-09-29 and never
+  pushed: the duplicate-club hold (BACKLOG 11b), the replay guard (41), sheet-safe Club Roster Form
+  text (44) and the one-time wording menu item (43). Ryan was asked and chose to push all of it.
+- `make gs` (10 files parse), `npm run clasp:push` at 10:38 UTC: 11 files pushed. A second pull: all
+  ten `.gs` files equal `main` (`8436cb4` is the last commit touching `appsscript/`). The scratch copies
+  were deleted. No new Google service, no re-authorisation.
+- Rollback: `git checkout 986a325 -- appsscript && npm run clasp:push` (the 2026-09-28 script plus the
+  two-reply-column read; safe whether or not the wording migration has run), after dealing with held
+  new clubs (RUNBOOK "Rolling back `appsscript/`" and "Apps Script deploy").
+- Still Ryan's: GLOW → Google Forms → "Process any missed form responses" and read its preview (it
+  should list only responses that arrived since 10:38 UTC, plus earlier `retry after ERROR` rows);
+  the one-time wording menu item when he chooses.

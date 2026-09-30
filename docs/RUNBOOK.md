@@ -417,7 +417,7 @@ named from those values, character for character.
 
 **Status:** live on all five forms since 2026-09-30 (the template, Asia and
 Africa switched; q331 hidden on all five). The intake hold (Part 2, Apps
-Script) is merged but not pushed yet. A form that is not switched (a new
+Script) was pushed the same day. A form that is not switched (a new
 regional clone) keeps its same-name rosters on one entry, told apart by the
 typed Partner box (q331), until its own switch.
 
@@ -1337,7 +1337,11 @@ arrived since the push, plus any earlier failure shown as `retry after
 ERROR` ("Missed form responses" above). Rollback is a push of the
 previously deployed `appsscript/`, not "the previous commit" (after a merge
 that can be the same code). For the 2026-09-28 integration deploy that is
-`git checkout 986a325 -- appsscript && npm run clasp:push`. First read
+`git checkout 986a325 -- appsscript && npm run clasp:push`. (That deploy went
+out with the same-name push on 2026-09-30 10:38 UTC; the script live before it
+was the 2026-09-28 one, `a1dc5d7`, confirmed by a `clasp pull` compare.
+`986a325` is that script plus the two-reply-column read, so it is the rollback
+target whether or not the wording migration has run.) First read
 "Rolling back `appsscript/`" above: the floors (`7a175c4`, and `986a325`
 once the Feedback tab has two reply columns) and held new clubs.
 

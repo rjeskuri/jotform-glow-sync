@@ -1,7 +1,7 @@
 ---
 title: Clubs that share a name send "<club> - <partner>" to Salesforce
 author: Claude (design workflow + two adversarial reviews, 2026-09-30)
-status: in-progress      # accepted by Ryan 2026-09-30; Step 0 and the forms (Part 1) are live (Results below); open: the Apps Script push (Part 2), the seven Salesforce Accounts
+status: done             # accepted by Ryan 2026-09-30; Step 0, the forms (Part 1) and the Apps Script push (Part 2) are live, the seven Salesforce Accounts exist (Results below); open: one template test submission
 created: 2026-09-30
 intent: docs/intent/2026-09-01-club-picker.md (its constraint "question 5 stays the plain club name" is amended by Ryan's decision of 2026-09-30)
 ---
@@ -540,3 +540,12 @@ second dry run (`nothing to do`), `form_status --rendered`.
 - Open: the Apps Script push (Part 2); the seven Salesforce Accounts; one template test submission
   with a long name (none was sent yet); an independent read-only verification was started after the
   switch (its result is recorded with the next commit).
+
+## Result — Part 2 and Salesforce (2026-09-30, with Ryan's go)
+- Apps Script pushed at 10:38 UTC (details: [the intake plan's Result](2026-09-30-same-name-intake.md));
+  the deployed script equals `main`.
+- The seven Salesforce Club accounts were created by the Salesforce session at 10:35 UTC from a fresh
+  read of the live pickers ([plans/2026-09-30-salesforce-clubs.md](2026-09-30-salesforce-clubs.md)): every
+  name on the four live pickers has exactly one Account of that name; none is named plain "Angels
+  Club", "Ruby" or "Shining Stars".
+- Open: one template test submission with a long name, before the Jotform → Salesforce reconnect.
