@@ -58,6 +58,10 @@ unless `--apply`.
   forms: 45 writes, each probe `q2 holds order N as sent; no other order changed`, each re-read
   verified). The public page renders by the new order at once. Posting onto a TAKEN order is
   still unobserved — `tools/fix_roster_order.py` writes only to empty orders.
+- A request body never goes on curl's command line: Linux refuses one argument over 131,072
+  bytes and a form's rules pass that (Africa about 153 KB, the template 244 KB since the club
+  guard). `glow/jotform.py` sends JSON bodies on standard input (`--data-binary @-`); the Mac
+  has no per-argument limit, so only the GitHub runner would have failed.
 - Dropdown `calcValues` has a leading empty slot for the placeholder on a single-select:
   `len(calcValues.split('|')) == len(options.split('|')) + 1`. A multi-select renders no
   placeholder but still wants the slot: with `PICKER_CALC_LEADING_EMPTY = True`

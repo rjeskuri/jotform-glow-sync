@@ -9,6 +9,12 @@ always run. A mislabelled write can therefore never slip through the gate.
 Failures raise JotformError with the label; retries (add_language.py's
 behaviour) and allow_fail (clone_regional.py's) are per-client / per-call
 options. glow.cli.run(main) turns the error into a clean sys.exit message.
+
+A JSON body goes to curl on standard input ("--data-binary @-"), never as an
+argument: Linux refuses any single argument over 131,072 bytes ("Argument
+list too long"), and a form's rules pass that (Africa's conditions are about
+153 KB since the club guard, 2026-09-30) - on the Mac such a call works, on
+the GitHub runner it would not.
 """
 import json
 import subprocess
@@ -16,6 +22,8 @@ import time
 
 API_BASE = "https://api.jotform.com"
 _WRITE_METHODS = {"POST", "PUT", "DELETE"}
+# Linux: one argument may not exceed 131,072 bytes (MAX_ARG_STRLEN); stay clear of it.
+MAX_ARG_BYTES = 120_000
 
 
 class JotformError(RuntimeError):
@@ -47,18 +55,28 @@ class Client:
         extra = "".join(f"&{k}={v}" for k, v in params.items())
         return f"{API_BASE}{path}?apiKey={self.key}{extra}"
 
-    def call(self, args, label, *, allow_fail=False):
-        """Run curl with `args`. Writes are gated on self.apply; see the module doc."""
+    def call(self, args, label, *, allow_fail=False, body=None):
+        """Run curl with `args`; `body`, when given, is sent on curl's standard input
+        (the argument list then says "--data-binary @-"). Writes are gated on
+        self.apply; see the module doc."""
+        big = max((len(str(a).encode("utf-8")) for a in args), default=0)
+        if big > MAX_ARG_BYTES:           # before the gate: a dry run must refuse what an apply would
+            raise JotformError(f"{label}: an argument of {big} bytes cannot go on a command line "
+                               f"(Linux allows 131,072) - send it as the body")
         if is_write(args):
             self.calls.append(label)
             if not self.apply:
                 return None
         if self.max_time is not None:
             args = ["--max-time", str(self.max_time)] + list(args)
+        extra = {} if body is None else {"input": body}
         last = None
         for attempt in range(1, self.retries + 1):
-            out = subprocess.run(["curl", "-sS"] + list(args),
-                                 capture_output=True, text=True)
+            try:
+                out = subprocess.run(["curl", "-sS"] + list(args), capture_output=True,
+                                     text=True, encoding="utf-8", **extra)
+            except OSError as e:          # e.g. E2BIG: never a half-made request
+                raise JotformError(f"{label}: curl could not be started: {e.strerror or e}")
             try:
                 resp = json.loads(out.stdout)
             except json.JSONDecodeError:
@@ -93,13 +111,13 @@ class Client:
         """JSON POST (translations - REPLACES each posted language)."""
         return self.call(["-X", "POST", self.url(path),
                           "-H", "Content-Type: application/json",
-                          "--data-binary", json.dumps(payload)], label)
+                          "--data-binary", "@-"], label, body=json.dumps(payload))
 
     def put_json(self, path, payload, label):
         """JSON PUT (properties update)."""
         return self.call(["-X", "PUT", self.url(path),
                           "-H", "Content-Type: application/json",
-                          "--data-binary", json.dumps(payload)], label)
+                          "--data-binary", "@-"], label, body=json.dumps(payload))
 
     def delete(self, path, label):
         return self.call(["-X", "DELETE", self.url(path)], label)
