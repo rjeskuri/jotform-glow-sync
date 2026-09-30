@@ -893,7 +893,7 @@ class PartnerPickerFlow(unittest.TestCase):
     def test_the_partner_is_read_back_from_rules_on_the_list(self):
         # Partner Two's Stars gets an all-new roster: only the partner in the live
         # rules (on the list) ties it to its question - roster overlap cannot
-        sheet = {**self.ROSTER, ("Partner Two", "Stars"): ["Uma Zoe", "Val Yoe"]}
+        sheet = {**self.ROSTER, ("Partner Two", "Stars"): ["Uma Umberlash", "Valeria Wrenfoldy"]}
         for kw in ({"partner_list": "Partner One|Partner Two"}, {}):
             fake = FakeForm(*self.form(**kw))
             code, _ = self.run_sync(fake, roster=sheet)
@@ -915,7 +915,7 @@ class PartnerPickerFlow(unittest.TestCase):
 
     def test_without_submit_or_a_link_a_new_roster_still_goes_at_the_end(self):
         qs, wire = self.form()
-        sheet = {**self.ROSTER, ("Partner Two", "Gamma Club"): ["Uma Zoe"]}
+        sheet = {**self.ROSTER, ("Partner Two", "Gamma Club"): ["Uma Umberlash"]}
         fake = FakeForm(qs, wire)
         code, out = self.run_sync(fake, roster=sheet)
         self.assertEqual(code, 0)
@@ -998,7 +998,7 @@ class ClubGuardFlow(unittest.TestCase):
 
     ROSTER, QIDS, MODULES = PartnerPickerFlow.ROSTER, PartnerPickerFlow.QIDS, PartnerPickerFlow.MODULES
     OPTIONS = ["Alpha Club", "Beta Club", "Stars"]
-    NEW_CLUB = {("Partner One", "Gamma Club"): ["Ada Poe", "Bea Roe"]}
+    NEW_CLUB = {("Partner One", "Gamma Club"): ["Amara Pellucidor", "Beatrice Marrowgate"]}
 
     def setUp(self):
         PartnerPickerFlow.setUp(self)
@@ -1222,8 +1222,8 @@ class ClubGuardFlow(unittest.TestCase):
         self.assertEqual(sync.joined_clashes(["Star", "light", "Moon", "StarLight"]),
                          [("Star", "light", "StarLight")])
         self.assertEqual(sync.joined_clashes(["Alpha Club", "Beta Club", "Stars"]), [])
-        roster = {("Partner One", "Sun"): ["Ada Poe"], ("Partner One", "Rise"): ["Bea Roe"],
-                  ("Partner Two", "SunRise"): ["Cy Soe"]}
+        roster = {("Partner One", "Sun"): ["Amara Pellucidor"], ("Partner One", "Rise"): ["Beatrice Marrowgate"],
+                  ("Partner Two", "SunRise"): ["Chiara Ostrivane"]}
         self.QIDS = {("Partner One", "Sun"): "10", ("Partner One", "Rise"): "11",
                      ("Partner Two", "SunRise"): "12"}
         for guard in (False, True):

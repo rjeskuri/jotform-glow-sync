@@ -36,7 +36,8 @@ service-account*.json
 .claude/worktrees/
 
 # Per-checkout Python environment: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/
+# (no trailing slash: a worktree links .venv to the main checkout's)
+.venv
 venv/
 __pycache__/
 *.py[cod]
