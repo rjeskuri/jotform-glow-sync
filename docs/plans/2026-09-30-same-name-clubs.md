@@ -154,3 +154,19 @@ against the live forms (after Step 0). No live writes, no merge into `main` with
   Rubys untouched.
 - After rollout: every form CLEAN, `--rendered` aligned, the 7 strings equal the Salesforce account
   names character for character, runner in-sync.
+
+## Result — Step 0 (2026-09-30, with Ryan's go)
+- Pre-check `plan_retire.py YW-SHINING RA-SUPER`: 35 rows OK, no drift. Sheet backup
+  `data/live_2026-09-30/`. Roster `G5090:G5104` and `G5164:G5183` set `inactive`, `I…` = 2026-09-30
+  (70 cells written and re-read identical), two Audit `deactivateRows` rows.
+- Form backups `questions-` / `properties-2026-09-30T1550.json` on all five. Nine questions deleted
+  (each re-checked first: type, text, option count, the partner its rule named, 0 answers in every
+  submission): q422, q429, q158 on the template and Africa; q158 on Asia, Latin America and U.S.
+- Sync by hand on all five, straight after: pickers template 359 → 358, Africa 216 → 215, Asia
+  96 → 95, Latin America 39 → 38, U.S 12 → 11; rules 401 → 396, 257 → 252, 127 → 126, 70 → 69,
+  43 → 42. "Shinning Stars" (Ready for Reading, q421) and "Super Girls" (Feminature Uganda Limited,
+  q428) are single rosters now, without the Partner-box gate. A second dry run: nothing to do.
+- `form_status --rendered`: every form CLEAN, every picker option aligned, rosters = the Roster's
+  clubs (362 / 218 / 95 / 38 / 11). `AUTO_SYNC_APPLY=1`; runner apply run 36680865174 in-sync.
+- Left on the forms sharing a name: Angels Club ×2, Ruby ×2, Shining Stars ×2 (Africa) + ×1 (Asia)
+  = the 7 of this plan.

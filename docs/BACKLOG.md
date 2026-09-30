@@ -64,7 +64,7 @@ when the form is filled". Kills Africa's 3,900-checkbox weight and the
 
 | # | Item |
 |---|---|
-| 21 | Resolve the `RENAMED_ON_FORM` clubs (Otra Cosa ×3) and the "Setidevi G.L.O.W club , Sokhel" stray-space spelling so each club has one question; then delete the orphan questions from the template and regionals |
+| 21 | Resolve the `RENAMED_ON_FORM` clubs (Otra Cosa ×3) and the "Setidevi G.L.O.W club , Sokhel" stray-space spelling so each club has one question; then delete the orphan questions from the template and regionals — **Setidevi done 2026-09-30**: the orphan q158 (old spelling, 0 answers) deleted from all five forms, the picker entry gone (DECISIONS 2026-09-30); Otra Cosa's three remain |
 | 22 | Decide what to do with "Queens of Baleng" (on the Africa form with 20 girls, in no enrollment) — enroll it via the New Club form or drop it |
 | 23 | `tools/form_status.py`: don't flag partner-disambiguated same-name clubs as "duplicates" |
 | 24 | Prefilled attendance links per club (`?clubName=…&mentorEmail=…`) in the partner handover emails |
