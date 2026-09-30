@@ -130,6 +130,16 @@ question by posting a new `order` has never been observed.
   sync prints `  ! …` (a warning the runner counts, not a refusal — a missing
   roster is worse than a misplaced one) and form_status flags any roster that
   does land below.
+- **A rollback command, `--undo <stamp>`** (not in the design, which had the
+  old orders re-posted from the snapshot by hand): `plan_restore` puts back
+  the orders of `backups/<id>/questions-<stamp>.json` by the same path as the
+  repair — dry run first, planned before written, probed, verified — links
+  first (top-down), then the hidden fields, Submit last, so the links stay
+  above Submit at every step and every target is empty when written. It
+  refuses once the form's questions or a roster's order differ from the
+  snapshot (the sync created or moved something since): then the builder, or
+  Jotform's Revision History. Hand-posting orders under pressure is where a
+  link would land below Submit.
 - The repair is a separate tool, never part of the runner: 45 order writes
   on five live forms want a person watching, a snapshot, and a browser check.
 - Translations (keyed by text or `text_<qid>`), the rules, the e-mails
@@ -139,22 +149,25 @@ question by posting a new `order` has never been observed.
 
 ## Files that change
 - `glow/layout.py` (new) — `fence`, `rosters_below`, `roster_slot`,
-  `plan_tail_moves`, `audit_layout`.
+  `plan_tail_moves`, `plan_restore` (the undo), `audit_layout`, `summary`
+  (form_status `--json`).
 - `glow/links.py` — docstring: the layout helpers live in `glow/layout.py`.
 - `sync_attendance_form.py` — the roster slot (above), the plain line, the
   tie warning.
-- `tools/fix_roster_order.py` (new) — the repair tool.
+- `tools/fix_roster_order.py` (new) — the repair tool and its `--undo`.
 - `tools/form_status.py` — `audit_layout` into `rule_problems`, `layout` in
   the JSON, a `layout:` line.
 - `test/python_test.py` — `RosterLayout` (fence, slot, both Jotform
   behaviours, the tail plan and its refusals, re-runs, the audit),
   `FixRosterOrderTool` (dry run, refusal before any write, snapshot first,
-  drift, probe, verify, `--form`), `SyncLeavesTheLinksAlone` extended (the
+  drift, probe, verify, `--form`, `--undo`), `SyncLeavesTheLinksAlone` extended (the
   CREATE's order renders above the links under both behaviours),
   `PartnerPickerFlow` (no Submit: still highest + 1), form_status and
   `verify_report` wiring. Fictional clubs and girls only.
 - `.claude/skills/jotform-api/SKILL.md` — inserting at a taken order shifts
   the block below; an order update is unobserved until the template repair.
+  `.claude/skills/live-systems/SKILL.md` — the tool's `--apply` among the
+  writers.
 - `docs/RUNBOOK.md` ("Rosters above Submit", a note in "Links above
   Submit"), `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `docs/BACKLOG.md`
   (47), `README.md` (the tools table).
@@ -186,9 +199,10 @@ question by posting a new `order` has never been observed.
 7. Then the Club Roster Form link (46) and the partner list (45), whose
    checks assume a repaired layout.
 
-Rollback per form: re-post the old orders from
-`backups/<id>/questions-<stamp>.json` (the tool's snapshot), or Jotform's
-Revision History. Nothing else changed.
+Rollback per form: `python3 tools/fix_roster_order.py --form <id> --undo
+<stamp>` (dry run; `--apply` writes) with the stamp the tool printed with
+its snapshot (`backups/<id>/questions-<stamp>.json`), or Jotform's Revision
+History. Nothing but `order` changed.
 
 ## Risks
 - **Order-update semantics unobserved.** Empty target slots make set and
@@ -204,10 +218,76 @@ Revision History. Nothing else changed.
   keeps the form NOT CLEAN.
 - **The new check turns every form NOT CLEAN at merge** until the repair —
   hence the paused runner and the repair straight after the merge.
+- **A verify false alarm.** The verify compares every question apart from
+  `order` by hash; should Jotform add or normalise a property on a question
+  whose order is posted, the template stops with `MISMATCH` after its nine
+  writes — the layout is then finished, the other forms untouched, and the
+  tool needs a look before the regionals. The template going first is what
+  makes this cheap.
 - **Cosmetic:** the builder and the submissions table list fields in `order`;
   the tail's hidden fields move to the end with it.
 - **Both tracks touch `sync_attendance_form.py` and `tools/form_status.py`**
   (the club-guard track too): the integration branch merges them.
 
 ## Proof
-(filled in when the track is done)
+Read-only, 2026-09-30 (GET only; the key from the environment; nothing
+written to any form or the sheet). Counts, qids and orders only.
+
+| Form | Rosters | Below the fence | Fence (q443) | New-roster order now | Repair targets | New-roster order after |
+|---|---|---|---|---|---|---|
+| template 262352490535154 | 342 | 123 | 236 | 235 | 368–376 | 367 |
+| Africa 262382821971058 | 221 | 98 | 140 | 139 | 247–255 | 246 |
+| Asia 262383129464057 | 96 | 17 | 96 | 95 | 122–130 | 121 |
+| Latin America 262383455778067 | 39 | 26 | 30 | 29 | 65–73 | 64 |
+| U.S 262382706852058 | 12 | 5 | 24 | 23 | 38–46 | 37 |
+
+1. `python3 tools/fix_roster_order.py` (dry run, all five forms): on each,
+   `N of M rosters render below somethingNotWorking (q443); 9 element(s)
+   move to orders …` and the nine moves — Submit first, the seven hidden
+   fields bottom-up, q443 last (Africa: `move submit2 (q2) 141 -> 248` …
+   `move somethingNotWorking (q443) 140 -> 247`). Two runs ten minutes
+   apart printed the same plan.
+2. `python3 tools/form_status.py --roster <a fresh Roster export>`: every
+   form `layout: N of M rosters render below somethingNotWorking (q443)
+   (first q…) - run tools/fix_roster_order.py (dry run first)` and `1
+   PROBLEM(S)` (that line), with `0 flagged as error` and `salesforce yes`;
+   first roster below: q333 (template, Africa), q401 (Asia), q348 (Latin
+   America), q371 (U.S). Also, not from this track: each regional form
+   reports 1 club "on form but not in roster" (q158, a roster whose label
+   differs from the Roster's spelling of the club by one space).
+3. The sync's dry run per region on that export
+   (`tools/sheets_client.py export Roster`, a read): all four `nothing to
+   do - form already matches the sheet`, so no order line (it prints only
+   when there is a roster to create). On a scratch copy with one fictional
+   club added per region: `New rosters go at order 139, above
+   somethingNotWorking (q443)` (Africa), 95 (Asia), 29 (Latin America), 23
+   (U.S); each plans `CREATE roster '…' (1 girls)` in the unchanged wording,
+   an `UPDATE club picker` and `REPLACE conditions`, and no new warning.
+4. An offline simulation over the same reads (a scratch script, not
+   committed): on every form one and two creates at the order above land
+   above q443 whether Jotform inserts or ties; the nine moves leave no
+   layout problem, no roster below, the sequence a mentor sees unchanged
+   and a re-plan empty; a stop after any of the first eight moves, re-run,
+   ends in the same render sequence; after the repair a create lands above
+   under both behaviours; the undo plan restores every order; nothing but
+   `order` differs. With the Club Roster Form link (46): placed before the
+   repair (then 10 moves) or after it, the form ends clean, and a partner
+   list inserted at order 7 (45) plus a new roster afterwards still leave
+   every roster above.
+
+`make check` (with the real export via `CSV=`):
+
+```
+real data (../../../data/enrollment_2026-08-24.csv): parsed 328 clubs, 6210 girls
+ALL CHECKS PASSED
+ALL CHECKS PASSED
+ALL CHECKS PASSED
+py: 34 files parse, 20 scripts answer --help
+Ran 153 tests in 0.140s
+OK
+gs: 10 files parse
+secrets: clean (130 files scanned)
+docs-links: ok (46 relative links resolve, 0 absolute paths)
+fixtures: up to date
+CHECK PASSED
+```
