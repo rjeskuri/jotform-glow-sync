@@ -202,9 +202,14 @@ HTML.
   verify fails on "guard rule misses …" → ATTENTION). The browser check
   covers the page-translation case.
 - **First Hide / Disable / require rules on these forms, and much larger
-  rules** (template about +60 KB of conditions; a PUT size limit is not
-  proven). The template goes first; the builder's Conditions page must show
-  no error marks.
+  rules.** Measured in the dry runs (the would-be conditions PUT, bytes):
+  template 141,922 → 239,585 (+69%, with the 23 clubs it would create),
+  Africa 98,066 → 157,115 (+60%), Asia → 76,215, Latin America 28,969 →
+  40,362, U.S → 23,313 — the two guard rules repeat the full club list
+  (Africa 217 terms each). A size limit on the PUT is not proven. The
+  template, the largest, goes first; the builder's Conditions page must show
+  no error marks. If the size bites, `GUARD_DISABLES_SUBMIT = False` halves
+  the addition (and gives up the desktop Enter-key block).
 - **Question 18 length.** With the separator every submission's q18 carries
   one ", " per roster (Africa: over 200 rosters, over 400 characters of
   commas around the ticked names). If `Contact_IDs__c` is a short text field in
@@ -240,6 +245,10 @@ HTML.
     fix); the template 359 (23 of them created in the same run), 376 → 378.
     The 3 new rules are the two guard rules and the Contact_IDs sum with its
     separator. No "two names join into a third" warning on any form.
+    Measured in-process on the same dry runs (writes recorded, never sent):
+    each guard rule has clubs + 1 terms (U.S 13, Latin America 40, Asia 97,
+    Africa 217, template 360), the `calcValues` carry clubs + 1 slots, and
+    the conditions PUT grows by 60-69% on the two largest forms (Risks).
   - `form_status.py` (this branch, `--rendered`): the SUPER GIRLS rule
     flagged on Africa and the template only ("it has 'Super Girls'; a
     multi-select compares case"); `club guard: none` everywhere; errors 0,
