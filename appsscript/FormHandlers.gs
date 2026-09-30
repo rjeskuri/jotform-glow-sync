@@ -741,7 +741,7 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
   return summary;
 }
 
-/** How a hold reason reads in FormLog and Audit. */
+/** How a hold reason reads in Audit, and (all but samename) in FormLog: holdSummary_. */
 const HOLD_KINDS = { reenroll: 're-enrollment list', names: 'names on file', club: 'club name',
                      partner: 'organization name', samename: 'another partner\'s club name' };
 /** What staff do before releasing an 'organization name' hold (its item, and a refused release). */
