@@ -168,8 +168,10 @@ HTML.
    without any error. `form_status` checks the alignment in the same case.
 3. **Two elements named `clubGuard`, or one that is not a text element, are
    refused on every run** (the runner's included), not only with the flag:
-   the sync cannot tell which one to show; refuse rather than guess, and the
-   runner's ATTENTION names it.
+   the sync cannot tell which one to show; refuse rather than guess. In the
+   runner the dry run then fails: the SyncLog `failed` row carries the
+   refusal text and the job exits 1 (no ATTENTION item: the runner adds
+   none for a failed dry run).
 4. **No q18 separator** (section E): dropped after review, 2026-09-30. The
    design's reason for it came from multi-club picks, which the guard now
    blocks; its cost fell on every guarded submission.
