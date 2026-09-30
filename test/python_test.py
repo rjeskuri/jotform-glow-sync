@@ -2810,13 +2810,15 @@ class GlowClient(unittest.TestCase):
         import glow.jotform as gj
         self.gj = gj
         self.spawned = []
+        self.bodies = []
 
     def fake(self, outputs):
         """subprocess.run replacement yielding the given stdout strings in order."""
         import subprocess as sp
 
-        def runner(argv, capture_output=True, text=True):
+        def runner(argv, capture_output=True, text=True, **kw):
             self.spawned.append(argv)
+            self.bodies.append(kw.get("input"))
             out = outputs[min(len(self.spawned) - 1, len(outputs) - 1)]
             return sp.CompletedProcess(argv, 0, stdout=out, stderr="")
         return runner
@@ -2870,6 +2872,48 @@ class GlowClient(unittest.TestCase):
             with self.assertRaises(self.gj.JotformError):
                 c1.get("/x")
             self.assertIsNone(c1.call([c1.url("/x")], "GET /x", allow_fail=True))
+
+    def test_a_json_body_goes_on_standard_input_never_as_an_argument(self):
+        # Linux refuses one argument over 131,072 bytes; Africa's rules are about 153 KB
+        from unittest import mock
+        rules = [{"id": str(i), "terms": "x" * 900} for i in range(250)]       # > 200 KB as JSON
+        payload = {"properties": {"conditions": rules}}
+        self.assertGreater(len(json.dumps(payload)), 200_000)
+        c = self.gj.Client("KEY", apply=True)
+        with mock.patch.object(self.gj.subprocess, "run", self.fake([self.ok()])):
+            self.assertEqual(c.put_json("/form/1/properties", payload, "REPLACE conditions"), {"x": 1})
+            self.assertEqual(c.post_json("/form/1/translations", payload, "POST translations"), {"x": 1})
+            c.get("/form/1/questions")
+        for argv, body in zip(self.spawned[:2], self.bodies[:2]):
+            self.assertEqual(argv[argv.index("--data-binary") + 1], "@-")
+            self.assertEqual(json.loads(body), payload)
+            self.assertLess(max(len(a.encode()) for a in argv), 131_072)
+            self.assertTrue(self.gj.is_write(argv[2:]))
+        self.assertIsNone(self.bodies[2])                        # a GET sends nothing
+        self.assertEqual(c.calls, ["REPLACE conditions", "POST translations"])
+
+    def test_an_argument_too_large_for_a_command_line_is_refused_not_tried(self):
+        from unittest import mock
+        c = self.gj.Client("KEY", apply=True)
+        with mock.patch.object(self.gj.subprocess, "run", self.fake([self.ok()])):
+            with self.assertRaises(self.gj.JotformError) as e:
+                c.post_form("/form/1/question/5", {"question[options]": "n" * 130_000}, "UPDATE q5")
+            self.assertIn("cannot go on a command line", str(e.exception))
+            self.assertNotIn("nnnn", str(e.exception))
+            self.assertEqual(self.spawned, [])                   # curl was never started
+            self.assertEqual(c.post_form("/form/1/question/5", {"question[options]": "n" * 90_000},
+                                         "UPDATE q5"), {"x": 1})
+
+    def test_a_curl_that_cannot_start_is_a_clean_error(self):
+        from unittest import mock
+
+        def boom(argv, **kw):
+            raise OSError(7, "Argument list too long")
+        c = self.gj.Client("KEY")
+        with mock.patch.object(self.gj.subprocess, "run", boom):
+            with self.assertRaises(self.gj.JotformError) as e:
+                c.get("/x")
+        self.assertIn("curl could not be started", str(e.exception))
 
     def test_is_write_catches_every_shape(self):
         w = self.gj.is_write
