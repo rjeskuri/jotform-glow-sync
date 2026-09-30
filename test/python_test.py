@@ -4907,6 +4907,34 @@ class SameNameRunbook(unittest.TestCase):
         self.assertIn("rename the club's Account to the new text first", rename)
         self.assertIn("--apply --q5-change-ok", rename)
 
+    def test_what_the_runbook_says_the_runner_and_the_tools_do_is_what_they_do(self):
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        text = " ".join(self.section().split())
+        src = read(os.path.join(REPO, "sync_attendance_form.py"))
+        # rules older than the picker: the sync's own line, and ATTENTION - not a repair the
+        # runner makes ("the next sync run then rebuilds the rules" read as if it did)
+        runner = " ".join(doc.split("## Automatic sync", 1)[1].split("\n## ", 1)[0].split())
+        for where in (text, runner):
+            self.assertIn(auto_sync.RULES_OLDER, where)
+        self.assertNotIn("the next sync run then rebuilds", text)
+        self.assertIn("The runner does not apply a rules-only difference: it raises ATTENTION", text)
+        # a refused new club: the rename that works, and what the verify step then says
+        self.assertIn("tools/rename_club.py --partner … --old … --new … --sheet-only", text)
+        rename = " ".join(doc.split("## Renaming a club", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn("--sheet-only --apply", rename)
+        self.assertIn("applied-with-problems", runner)
+        self.assertIn("counts the club that was not added", runner)
+        # the switch: its refusal is the tool's, and the count is checked before applying
+        self.assertIn("would keep the plain Club picker entry", text)
+        self.assertIn("would keep the plain Club picker entry", src)
+        self.assertIn("**one more means stop**", text)
+        # the Partner-box hide rides along and is not in SyncLog's detail
+        self.assertIn("neither counted nor named in `detail`", runner)
+        # the retired design is gone from the prose: no roster is Partner-gated for a part move
+        self.assertNotIn("Partner-gates both roster questions", doc)
+        self.assertNotIn("same-name clubs additionally require the Partner box",
+                         " ".join(read(os.path.join(REPO, "README.md")).split()))
+
 
 import datetime as dt                 # noqa: E402  (the work-log tests below)
 import time                           # noqa: E402

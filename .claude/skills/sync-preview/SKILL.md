@@ -16,5 +16,8 @@ disable-model-invocation: true
    `tools/auto_sync.py`'s bands would allow it (≤ 5 creates, ≤ 20 updates, no deletes, no
    "shares NO names", no "Club Name (question 5, what Salesforce reads) changes" — that one is a
    Salesforce Account rename and is only ever applied by hand). A "not added: give it a
-   different name" line is a new club refused for its name: say so, it needs a human.
+   different name" line is a new club refused for its name: say so, it needs a human. An "its
+   rule tests '…', which the Club picker does not list" line means the rules are out of step with
+   the picker (that roster does not show): the runner raises ATTENTION and the rewrite is applied
+   by hand.
 5. Do not add `--apply`. Applying is Ryan's decision (`.claude/skills/live-systems`).

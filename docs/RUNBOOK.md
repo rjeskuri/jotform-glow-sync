@@ -126,6 +126,21 @@ every girl. The new name may not be one another partner's club has. The
 tool cannot rename one of the clubs that share a name ("Club names two
 partners share": two questions carry the old name, and it refuses).
 
+The one exception to "never the sheet alone": a **new club the sync did not
+add** because its name was in use has no question on any form. The tool
+finds a question by its text, and the question of that name is the other
+partner's — so it refuses (a question named like the club that holds
+another club's girls), and the club is renamed with `--sheet-only`:
+
+```bash
+python3 tools/rename_club.py --partner "<partner>" --old "<name in use>" --new "<new name>" --sheet-only           # dry run
+python3 tools/rename_club.py --partner "<partner>" --old "<name in use>" --new "<new name>" --sheet-only --apply
+```
+
+The next sync run then creates its roster under the new name. No Salesforce
+Account is renamed and no `--q5-change-ok` is needed: the club sent nothing
+yet.
+
 The club keeps its `club_code`, so the girls' ids do not change (`Ids.gs`).
 `--apply` saves the tabs under `data/rename_club/<stamp>/` and snapshots the
 forms first; the rollback is those CSVs and `restore_conditions.py`. Then, in
@@ -173,7 +188,11 @@ What the tool does and guards:
   Pending rows, all in one batch. Roster and ClubRegistry must never disagree,
   because `Ids.gs` looks a code up by partner + club: a mismatch mints a
   second code on the next submission. A part-moved club looks like two
-  same-named clubs to the sync, which then Partner-gates both roster questions.
+  clubs of one name to the sync: it keeps the club's question for one half
+  (the roster shrinks to that half's girls, a change the automatic run
+  applies) and does not add the other half (a new club whose name is in
+  use: ATTENTION, "new club(s) NOT added"), so those girls are on no
+  attendance form until the move is finished.
   So never do this by hand with Find & Replace, and never sort the Roster
   (the attendance forms list each club's girls in Roster row order, and this
   tool and the form handlers address cells by row number).
@@ -238,9 +257,28 @@ Two more things raise ATTENTION without stopping a region: a new club that
 was not added to its form because another partner's club has its name (the
 rest of the region is applied as usual; the SyncLog `detail` says "N new
 club(s) not added (name in use)"), and, once per run, any name that two
-clubs of the regions synced send to question 5. The workflow fails visibly
-(GitHub emails the repository owner) on any ATTENTION (exit 2) and on any
-failure (exit 1).
+clubs of the regions synced send to question 5. Until a club that was not
+added is renamed, every apply in its region reads `applied-with-problems`,
+with a second ATTENTION ("applied, but the form still has problems"): the
+verify step goes by club name, so its "still missing from the form: <club>"
+line (the namesake is on another region's form) or "roster(s) still differ
+from the sheet: <club>" line (the namesake is on this form) counts the club
+that was not added. By itself that line does not say the existing club's
+roster is out of date.
+
+One thing reads `attention` where it used to read `in-sync`: **roster rules
+that test a name the Club picker does not list** (a conditions backup
+restored over newer picker entries, a hand apply that stopped between the
+picker write and the rules write). Those clubs' rosters do not show and,
+with the club guard, their mentors cannot submit. The sync's dry run says
+so per roster (`! '<club>' (q…): its rule tests '<X>', which the Club picker
+does not list …`) and plans only `REPLACE conditions`, which the runner does
+not count as a change and never applies on its own: run the dry run and
+`--apply` by hand. When the same region also has a roster change, the
+runner's ordinary apply rewrites the rules and nothing more is needed.
+
+The workflow fails visibly (GitHub emails the repository owner) on any
+ATTENTION (exit 2) and on any failure (exit 1).
 
 **SyncLog columns:** `when, trigger, region, mode, creates, updates, rules,
 result, detail, run_url`. `when` is the run's start in the sheet's own time
@@ -255,7 +293,10 @@ its UTC offset. `mode` is
 `applied-unverified`, `attention`, `failed`. `detail` counts the roster
 creates, updates, deletes and warnings, then names a Club-picker or
 club-guard write when there is one (`…, update club picker`): such a
-write is applied like a roster change. The Audit tab additionally gets
+write is applied like a roster change. The Partner-box hide (`HIDE partner
+textbox`, "Club names two partners share") is neither counted nor named in
+`detail`: it only ever rides along with a counted change, and the run's log
+(the row's `run_url`, or `data/auto_sync/<stamp>.log`) shows the line. The Audit tab additionally gets
 a `syncRequested … → HTTP 204` row every time the sheet sends the event.
 
 **Switches:**
@@ -386,17 +427,38 @@ What the sync keeps to, on every run:
    A namesake going inactive, or a new one arriving, changes nothing for an
    existing club. When the rules are older than the picker (a restored
    backup, an apply that stopped half-way), the picker's entries say what a
-   club sends.
+   club sends, and the run says so for each such roster
+   (`! '<club>' (q…): its rule tests '<X>', which the Club picker does not list …`):
+   until an `--apply` rewrites the rules that roster does not show. The
+   runner raises ATTENTION for it and never reads such a form as `in-sync`
+   ("Automatic sync").
+   A plain roster's rule names no partner. When the Roster has another
+   partner's club of that name (a retired one, or a new one that was not
+   added), the roster's owner is read from the Roster's rows of any status:
+   the partner whose rows list the most of the girls the question holds —
+   at least half of them, and more than any other partner's. So a retired
+   club's question is never handed to another partner's new club, and an
+   existing club keeps its question whatever its new roster is. A tie (the
+   same girls under two partners) or no evidence (the old rows deleted, the
+   girls respelled in place) names no owner, and the club is matched by its
+   girls as before.
 2. **A new club may not take a name that is in use.** A club to be created
    whose name another partner's club has — in any region, whatever its
    status — is not created:
    `! new club '<club>' (<partner>) has the name of <other partner>'s club - not added: give it a different name`.
    The rest of the run goes on. The runner raises ATTENTION for it and keeps
-   syncing the region. Ask the partner for a different name and rename the
-   club in the sheet (`tools/rename_club.py`); the next run creates it.
-   Until then it is on no attendance form. (The Club Roster Form handler is
-   to hold such a club before it reaches the Roster — Part 2 of the plan;
-   this is the backstop.)
+   syncing the region. The same when the club of that name is retired and
+   its question is still on the form: the newcomer never takes that
+   question over. Ask the partner for a different name and rename the club
+   in the sheet with
+   `tools/rename_club.py --partner … --old … --new … --sheet-only`
+   (`--sheet-only` because the club has no question on any form, and the
+   question of that name is the other partner's: without it the tool
+   refuses; "Renaming a club"). The next run creates it. Until then it is
+   on no attendance form, and every apply in its region reads
+   `applied-with-problems` ("Automatic sync"). (The Club Roster Form
+   handler is to hold such a club before it reaches the Roster — Part 2 of
+   the plan; this is the backstop.)
 3. **Any other change of what an existing club sends is made by hand.** A
    renamed club, a respelled partner of a long-named club, a rule edited by
    hand: the dry run lists
@@ -411,7 +473,12 @@ would share one entry without the Partner box telling them apart (the way
 out is `--same-name-switch`, or deleting a leftover question); a roster
 becoming long whose long name is another club's own name; `--partner-picker`
 and a form carrying a partner list (both retired 2026-09-30, never
-deployed); `--same-name-switch` on a form without the Club picker.
+deployed); `--same-name-switch` on a form without the Club picker; and
+`--same-name-switch` when a roster that is not in the Roster export (a
+retired club's question left on the form) would be alone on the plain entry
+beside the long ones (`q… would keep the plain Club picker entry '<club>'
+beside the long ones`): a mentor picking the familiar name would get the
+retired club's girls. Delete that leftover question in the builder first.
 
 **The typed Partner box (q331)** has nothing left to do once no rule shows
 it, and unhidden every mentor sees an optional box: on a form with the Club
@@ -419,8 +486,10 @@ picker the sync hides it (`HIDE partner textbox (q331: no rule shows it; …)`,
 written after the rules). It is still submitted, blank, so the staff
 notification e-mail's "Partner" row is empty from then on. The runner does
 not count the hide as a change: it rides along with the next roster change
-it applies on that form, or a hand apply. Today no rule shows it on Asia,
-Latin America and U.S, so their next apply hides it, switch or not.
+it applies on that form, or a hand apply, and that run's SyncLog `detail`
+does not name it (the run's log does: `HIDE partner textbox`). Today no
+rule shows it on Asia, Latin America and U.S, so their next apply hides it,
+switch or not.
 
 ### The one-time switch (`--same-name-switch`)
 
@@ -432,9 +501,13 @@ this change puts a switched form back on the plain names unattended (read
 2026-09-30, in memory: it plans `UPDATE club picker` and the rules, within
 the bands). So **merge first**, keep `AUTO_SYNC_APPLY=0` for the window, and
 from then on never run `sync_attendance_form.py --apply` from a checkout
-without this code. Each step needs Ryan's go. The template first, then Asia,
-Africa (each with its `--region`), then U.S and Latin America, which have
-nothing to switch and only get q331 hidden (no flag needed):
+without this code. Each step needs Ryan's go. Before the first form: no
+open "new club(s) NOT added" ATTENTION in any region (a club that was not
+added sits active in the Roster until it is renamed; one on this form's own
+list is left out of the switch, one in another region counts as a namesake
+and would make an existing one-of-a-kind club long). The template first,
+then Asia, Africa (each with its `--region`), then U.S and Latin America,
+which have nothing to switch and only get q331 hidden (no flag needed):
 
 ```bash
 python3 tools/sheets_client.py export Roster data/roster_<date>.csv
@@ -461,13 +534,22 @@ Read on 2026-09-30, after the two retirements:
 | Africa | 6 | 215 → 218 | 241 kept, 8 new, 11 dropped | 249 |
 | Latin America, U.S | 0 | 38, 11 | unchanged | the hide only |
 
+The number of `!` lines must equal the table (or today's count of such
+clubs): **one more means stop** — a club is being made long that should
+not be. The switch is never the answer to a refused new club; that is a
+rename (rule 2).
+
 The new rules are the switched rosters' and the two club-guard rules (their
 club lists); the dropped ones are those plus the "show the Partner box"
 rule of each name. Between the picker write and the rules write (seconds)
 the switched clubs' rosters do not show and their Submit is hidden: apply
 each region in its quiet hours, and if an apply stops there, run the same
 command again at once (the picker already lists the long names, and the
-run finishes the rules). The translation audit counts picker entries as
+run finishes the rules; it prints one `! … its rule tests '<club>', which
+the Club picker does not list …` per switched roster, and no question-5
+line). Left alone, the runner raises ATTENTION for a regional form in that
+state on its next run; it does not finish the rules itself, and nothing
+watches the template. The translation audit counts picker entries as
 untranslated strings, so it rises by the entries added (template 4, Africa
 3, Asia 0).
 
@@ -490,7 +572,10 @@ name(s) are sent by more than one club"): that is this procedure's job.
 ### Afterwards
 
 - **A new club with a name in use** is refused (rule 2). `auto_sync`'s
-  ATTENTION names the club and whose name it has.
+  ATTENTION names the club and whose name it has. Rename it with
+  `tools/rename_club.py … --sheet-only`; until then each apply in that
+  region reads `applied-with-problems`, and the "missing" or "differ" line
+  of that name counts the club that was not added.
 - **Renaming a club** is a question-5 change (rule 3, "Renaming a club"
   above). `tools/rename_club.py` cannot rename one of the seven: it refuses a
   form with two questions of the old name (BACKLOG).
@@ -503,8 +588,12 @@ name(s) are sent by more than one club"): that is this procedure's job.
   whose rules test a club the picker no longer offers — every backup from
   before a form's switch, and any from before a rename. Restored, those
   clubs' rosters would never show and the club guard would block their
-  mentors. Run the sync instead; `--force` restores anyway, and the next
-  sync run then rebuilds the rules on the picker's entries.
+  mentors. Run the sync instead. `--force` restores anyway: run the sync by
+  hand straight after (dry run, then `--apply`), which rebuilds the rules
+  on the picker's entries. The runner does not apply a rules-only
+  difference: it raises ATTENTION ("roster rule(s) test a name the Club
+  picker does not list") on every run until that apply, or until a roster
+  change in that region makes it apply.
 
 ### Rollback
 

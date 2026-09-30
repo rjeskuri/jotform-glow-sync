@@ -186,8 +186,11 @@ Salesforce. `make check` green; 249 Python tests.
    name, else its plain one) is what the club sends today. Without it, a conditions backup
    restored over a switched picker, or a switch apply that stopped between the picker write and
    the rules write, would have made the next unattended run take the picker back to the plain
-   names (a picker update is a change the runner applies). With it that run only rebuilds the
-   rules. Test: `test_the_picker_says_what_a_club_sends_when_the_rules_are_older`.
+   names (a picker update is a change the runner applies). With it the sync plans only the
+   rules rewrite - which the runner does not apply on its own: it raises ATTENTION (review
+   fixes, below), and the rules are rebuilt by a hand `--apply`, or by the runner's next apply
+   for a roster change in that region. Test:
+   `test_the_picker_says_what_a_club_sends_when_the_rules_are_older`.
 2. **A long name whose partner the Roster no longer has** stays long only when the club's name is
    one two partners have ever had (the partner was respelled: a question-5 change, listed);
    otherwise the roster is plain (a club renamed from "X - Y" to "X").
@@ -240,7 +243,8 @@ Salesforce. `make check` green; 249 Python tests.
   GitHub's failure e-mail per run until then.
 - **A refused new club after a runner apply**: the verify step then reports the club as missing
   from the form (or its name's roster as differing), so that region reads `applied-with-problems`
-  on top of the refusal's own ATTENTION until the club is renamed.
+  on top of the refusal's own ATTENTION until the club is renamed (the RUNBOOK and both
+  ATTENTION texts say so since the review fixes; the way out is `rename_club.py --sheet-only`).
 - **A form built from scratch cannot create the seven rosters** (each is "a new club whose name
   another partner's club has"): build a form by cloning the template (BACKLOG 51).
 - **`form_status` without `--roster`** judges long names against the stale default Roster
@@ -312,3 +316,127 @@ run and then plans nothing (q331 stays hidden: un-hide it by hand).
 Not proved here, because it needs a browser or a write: how the long entries look and search in
 the picker (phone width, typing the partner), Chrome "Translate page" on a long name, and one
 test submission's question 5 — the rollout's browser checks.
+
+## Review fixes — Part 1 (2026-09-30, after three adversarial reviews and their verification)
+
+On the same branch, Python only. Nothing was written to Jotform, the sheet or Salesforce.
+`make check` green; 264 Python tests. Every fix has a test that fails without it (checked by
+removing each fix on a scratch copy: 30 single-line mutants, all caught).
+
+### What changed, and why
+1. **A plain roster's owner is read from the Roster** (a deviation: the plan has each roster's
+   partner read from its rule only). A plain roster's rule names no partner, so the matching
+   went by the NEW roster alone. Two things followed. A retired club's question stays on the
+   form, and another partner's new club of that name — one sheet entry, one question — simply
+   took it over: its girls on the retired club's question, their attendance on that club's
+   Salesforce Account, no "not added" line, and with a single shared name no warning at all
+   (decision 2's check only looked at clubs to be created). And while a refused namesake sat in
+   the Roster, an existing club whose roster changed by more than half was itself refused as
+   "new". Now, for a roster whose rule names no partner and whose name two or more partners
+   have in the Roster (any status), the owner is the partner whose rows of ANY status list the
+   most of the girls the question holds — at least half of them, and more than any other
+   partner's (`glow.sync.roster_names`; `inferred` in `main()`). The owner's entry claims the
+   question whatever its new roster is; another partner's entry goes to the same-name check
+   unless it lists at least half the same girls (the same club moved: claimed, with a line that
+   says where the owner came from). A tie, or no evidence, names no owner and everything goes
+   on as before. The owner is never written into a rule, into `sf_names`, or into a
+   typed-Partner rule on a form without the picker (that path still refuses, byte for byte).
+2. **The roster-similarity step takes the best match first** over every open entry and question
+   (overlap, then shared names), not the first partner in name order: a duplicate enrolment
+   under a partner that sorts first no longer takes the existing club's question.
+3. **Rules older than the picker are said, and are ATTENTION for the runner.** Deviation 1 made
+   such a form plan only `REPLACE conditions`, which the runner does not count: it read
+   `in-sync` on every run while those clubs' rosters never showed and the club guard blocked
+   their mentors. The sync now prints, per roster, `! '<club>' (q…): its rule tests '<X>', which
+   the Club picker does not list …` (never for a roster with no rule at all: a failed apply's
+   new club is finished silently, as before), and the runner reads such a region as `attention`
+   instead of `in-sync`. It still applies no rules-only write on its own, and it is no band: a
+   region with a roster change is applied as usual, which rewrites the rules.
+4. **`--same-name-switch` refuses to leave a retired namesake on the plain entry.** A roster not
+   in the export keeps what it sends; beside two rosters going long it would be alone on the
+   familiar name, showing a retired club's girls. The switch (dry run too) exits and names the
+   question; the runner, which never passes the flag, is unaffected.
+5. **A new club about to be refused does not count toward the switch.** It sits active in the
+   Roster until it is renamed, and made an existing one-of-a-kind club long for nothing.
+6. **`tools/rename_club.py` never relabels another partner's roster question.** The documented
+   way out of a refusal was "rename it with `rename_club.py`" — which finds a question by its
+   text and so planned to relabel the OTHER partner's question on the region's form and the
+   template (before this branch the newcomer had its own, partner-gated question). Now, when
+   another partner has a club of the old name, a question at least half of whose girls are not
+   this club's Roster rows (any status) is refused, with `--sheet-only` named as the way; the
+   printed next steps fit a club the next sync creates. The RUNBOOK and the runner's ATTENTION
+   give the command with `--sheet-only`.
+7. **Docs that described the retired design or promised a repair the runner does not make**:
+   RUNBOOK (the part-moved club, "Restoring conditions", the refusal's `applied-with-problems`,
+   the Partner-box hide not named in SyncLog, the checks before the switch), BACKLOG 40 / 50 /
+   51, ARCHITECTURE, DECISIONS, README (one sentence: outside the plan's doc list), the
+   partner-box plan's status (superseded), the `sync-preview` skill.
+8. **Test pins the reviews asked for** (no production change): exact before loose on a rule
+   whose partner the Roster does not have; a roster created by an apply gets its picker entry,
+   rule, Contact_IDs operand and `sf_names` line in the same run; a partner's own " - " is
+   never split; `main()` makes the cross-region check and exits 2; and five single guards
+   (no hide on a picker-less form, the switch flag is no consent to a long-to-long change, the
+   checker's two extra branches, a pre-guard snapshot in `restore_conditions`, the question's
+   own partner's region).
+
+### Proposed and not taken
+- Refusing in the single branch whenever another partner has the name and the new roster
+  overlaps by less than half: it would refuse an owner's own club at its next cohort (the two
+  live plain clubs with a retired namesake).
+- Counting the rules-only rewrite as a change the runner applies: its first unattended
+  rules-only write, on an inference. ATTENTION instead.
+- Dropping a verify line whose club name a refusal lists: the check goes by name, so it would
+  also hide a real drift of the existing namesake's roster. The ATTENTION explains the line
+  instead.
+- Giving the switch's leftover its long name from the partner in its rule: the tool would
+  pick a Salesforce name for a club that is not in the export. The refusal is complete on its
+  own.
+- Naming the Partner-box hide in SyncLog's `detail` (parsing code for a one-time, hand-applied
+  transition): the RUNBOOK says where the line is.
+- README's refusal example ("an ambiguous club name with no partner information anywhere"):
+  still true of a form without the picker; left.
+
+### Known behaviour after the fixes
+- **No evidence, no owner.** When the girls a question holds are not in the Roster under any
+  partner's club of that name (rows deleted, names respelled in place), the old matching
+  applies: an existing club with a mostly new roster AND a namesake in the same region can
+  still be refused as new, and a club whose retired namesake's rows were deleted is simply the
+  only club of that name. Fewer than half the girls is no evidence either.
+- **The same girls under two partners** (a full duplicate enrolment) tie: the first partner in
+  name order keeps the question, as before. No form write follows from the tie; the "new club"
+  line may name the wrong one of the two.
+- **An owner read from the Roster is not the form's word**: `sf_names` gives no partner for a
+  question that is not in the export and whose rule names none, so the cross-region check
+  still tells such a question apart by its id.
+- **A refused club of another region still counts toward a regional form's switch** (one run
+  cannot tell it from a real namesake on another form): the RUNBOOK's check before the switch.
+  On the template, and for a refused club of the form's own region, it is left out. One of the
+  seven whose question were missing from a form would be left out the same way: the `!` count
+  is then one short of the table, which is a stop.
+- **The enrollment-CSV mode** (no `--roster`) has no history and reads no owner.
+
+### The read-only proof of the fixes (2026-09-30, about 18:30 JST)
+A fresh Roster export (6,946 rows, 6,847 active; 364 clubs, 362 active), the five forms read
+once each (GETs), and every run in memory (the sync's dry run against a stand-in that holds
+that read); all of it in the session's scratch directory and deleted afterwards. Counts, qids,
+club and partner names only.
+
+- **Today's data: nothing changes.** All ten plans (each form, with and without
+  `--same-name-switch`) are identical to the branch before the fixes — calls, warnings,
+  `sf_names`, `sf_name_changes`, `same_name_refused`: template 7 `!` lines, Africa 6, Asia 1,
+  Latin America and U.S 0; without the flag nothing on the template and Africa, the
+  Partner-box hide alone on the other three.
+- **Fictional variants of the Africa form** (rows of a fictional partner added to a scratch
+  copy of the export; `Shinning Stars`, q421, plain, with its retired namesake):
+  | Variant | Before the fixes | After |
+  |---|---|---|
+  | its owner's rows inactive + a fictional partner's new club of that name, no shared name | `UPDATE roster … (q421, 12 girls)`, the "shares NO names" band only | no call; the new club "not added"; q421 kept |
+  | the same, one shared name | `UPDATE roster … (q421, 13 girls)`, no warning: applied unattended | no call; "not added"; q421 kept |
+  | a refused namesake in the Roster + 13 of the owner's 20 girls replaced (old rows inactive) | no call; BOTH clubs "not added"; q421 "matched no partner" | `UPDATE roster … (q421, 20 girls)`; only the fictional club "not added" |
+  | the owner's whole roster replaced, only the retired namesake beside it | `UPDATE`, "shares NO names" | the same |
+  | a fictional new club named like a one-of-a-kind Africa club, `--same-name-switch` | 7 question-5 changes on Africa, 8 on the template | 6 and 7; the new club "not added" |
+- **A half-applied switch** (the picker's write applied in memory, the rules not), Africa and
+  Asia: the sync plans `REPLACE conditions` (and the hide) with no question-5 change, as
+  before, now with 6 and 1 `! … its rule tests …` lines; the runner read `in-sync` with no
+  ATTENTION before the fixes and reads `attention` ("N roster rule(s) test a name the Club
+  picker does not list") after.
