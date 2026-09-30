@@ -17,9 +17,12 @@ Salesforce V2 integration.
 clasp:push` / `npx clasp push`. Anything else is read-only (GET) or writes only under `data/` and
 `backups/`.
 
-Salesforce (production) is written only through the write connector, one record per call, by the
-main session, with Ryan's explicit go - the hook below does not see those calls. Procedure and
-rollback files: docs/RUNBOOK.md, "Club accounts in Salesforce".
+Salesforce (production) is written in two ways only, both with Ryan's explicit go: through the
+write connector, one record per call, by the main session (the hook below does not see those
+calls; docs/RUNBOOK.md, "Club accounts in Salesforce"), and by `tools/sf_backfill.py send --apply`
+(attendance batches, which carry girls' names and so never pass through the conversation; the
+hook catches it; docs/RUNBOOK.md, "Back-fill of attendance into Salesforce"). No Salesforce
+CLI or API call from the Mac while a VPN is on: Salesforce freezes the user (2026-09-30).
 
 ## The ritual
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).

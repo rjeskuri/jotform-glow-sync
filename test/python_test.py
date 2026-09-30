@@ -44,6 +44,7 @@ from glow import sync as glow_sync    # noqa: E402
 from glow.text import md5             # noqa: E402
 from sf_club_accounts_test import SalesforceClubAccounts  # noqa: E402,F401  (its own file; run here)
 from integration_status_test import IntegrationStatus     # noqa: E402,F401  (its own file; run here)
+from sf_backfill_test import SalesforceBackfill, SalesforceBackfillEdges   # noqa: E402,F401  (its own file; run here)
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
 EXPECTED = os.path.join(REPO, "test", "fixtures", "expected.json")
