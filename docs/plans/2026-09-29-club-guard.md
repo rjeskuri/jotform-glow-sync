@@ -309,8 +309,8 @@ HTML.
   needed: the dry runs above compare the generated rules with the live ones
   on every form.
 
-`make check` (2026-09-30, with `CSV=` pointing at the 2026-08-24 enrollment
-export for the real-data parity):
+`make check` (2026-09-30, after the review fixes, with `CSV=` pointing at the
+2026-08-24 enrollment export for the real-data parity):
 
 ```
 real data (…/enrollment_2026-08-24.csv): parsed 328 clubs, 6210 girls
@@ -318,7 +318,7 @@ ALL CHECKS PASSED
 ALL CHECKS PASSED
 ALL CHECKS PASSED
 py: 32 files parse, 19 scripts answer --help
-Ran 152 tests in 0.176s
+Ran 154 tests in 0.221s
 OK
 gs: 10 files parse
 secrets: clean (128 files scanned)
