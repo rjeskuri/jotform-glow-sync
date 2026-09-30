@@ -32,8 +32,8 @@ alias or spelling (21 create rows): Angelo Patri School, Girls Leader Forum and 
 School District were confirmed by Ryan on 2026-09-30, and Development Consortium and Fundacion
 Bibliotec differ from the sheet in capitals or an accent only.
 
-Read on 2026-09-30, before anything was written (a read-only review by seven independent checks,
-each finding challenged by a second reader):
+Read on 2026-09-30, before anything was written (two read-only reviews; every finding was
+challenged by a second reader):
 - Account has one required field (`Name`) and no duplicate rule; validation rules cannot be read
   through the connector. Record types: Club (`012RP000002uklNYAQ`), Household Account (every
   partner account), Organization (unused). 92 accounts: 10 Club, 82 Household Account. No account
@@ -44,16 +44,17 @@ each finding challenged by a second reader):
 - Automation on Account: the NPSP trigger `TDTM_Account` (insert, update, delete), the Mailchimp
   package trigger `MC4SF.Account` (before insert, before and after update), and one active
   record-triggered flow, on **update** only ("Opportunity Account Owner Update / remove Access 2",
-  activated 2026-09-14). Its eleven elements only read the account's Opportunities and rewrite
-  their sharing; Club accounts have no Opportunities. Nothing found creates, renames, e-mails or
-  sends anything out for a Club account. Its entry criteria could not be read, which is why the
-  first link is written alone.
+  activated 2026-09-14). Going by their names, its eleven elements only read the account's
+  Opportunities and rewrite their sharing; Club accounts have no Opportunities. Nothing found
+  creates, renames, e-mails or sends anything out for a Club account. The flow's entry criteria
+  could not be read, which is why the first link is written alone.
 - The nightly NPSP rollup (21:00 UTC, run by another administrator) sets the rollup fields of each
-  new account from empty to 0 on its first night. "Last modified" on the new accounts then shows
-  that administrator. Expected.
-- The write tools act as Ryan's System Administrator user, so the new accounts are owned by him
-  (the pilot accounts are owned by a former staff administrator). Ownership does not affect the
-  processor's match. Administrators and eight staff users see the clubs; one staff user does not.
+  new account from empty to 0 on its first night: the first update a new account gets. "Last
+  modified" then shows that administrator. Expected.
+- The write tools act as Ryan's System Administrator user (checked in step 1 and on the first
+  record), so the new accounts are owned by him; the pilot accounts are owned by a former staff
+  administrator. Ownership does not affect the processor's match. Administrators and eight staff
+  users see the clubs; one staff user does not.
 - All 353 names of the write set are options of their region's live Club picker, character for
   character, and every picker's `calcValues` equal its options (`sf_club_accounts.py pickers`).
 - The Jotform connection is not running: 11 attendance batches ever, the last on 2026-03-28, and
@@ -81,7 +82,7 @@ Script, not the Salesforce connector. The gate here is Ryan's explicit go in the
 the connector's own permission prompt. Only the create and update tools are used; the delete and
 "related record" tools are never called under this plan (a rollback needs its own go). The writes
 are made by the main session, never by a subagent or a workflow, and the write tools are not added
-to any allow list.
+to any allow list by Claude.
 
 ## Files that change
 - `docs/plans/2026-09-30-salesforce-clubs.md` - this plan, then its Result.
@@ -90,73 +91,92 @@ to any allow list.
   the rollback file. `test/sf_club_accounts_test.py` (fictional data) and one import line in
   `test/python_test.py`.
 - When the work is done: `docs/RUNBOOK.md` (a "Club accounts in Salesforce" section),
-  `docs/DECISIONS.md`, `docs/BACKLOG.md` (item 27), the live-systems skill (Salesforce as a writer).
+  `docs/DECISIONS.md`, `docs/BACKLOG.md` (item 27), the live-systems skill (Salesforce as a
+  writer), and a line for Ryan to add to `CLAUDE.md` rule 1.
 - Generated in `data/sf_prep_2026-09-30/`, never committed: `write_set.json`, `run_log.csv`,
-  `link_targets_before.json`, `created_accounts.csv`. Saved reads (they carry club names and an
-  owner id) stay in that folder or the session scratchpad.
+  `link_targets_before.json`, `created_accounts.csv`.
+- A read is never retyped. Each answer is copied out of the session's own transcript by the exact
+  text of its request (the query `soql` printed, the body `bodies` printed) and saved with the time
+  it arrived; a request that differs by one character is not found. Saved reads carry club names
+  and owner ids and stay in the session scratchpad.
 
 ## Order of work
 1. **Preflight, read-only.** The write tools are present; the user is Ryan's administrator; the org
-   is production; the other sessions have confirmed the main checkout is free. Baseline, to be
-   repeated right after the go and at the end - any difference means stop:
+   is production; the other sessions have confirmed the main checkout is free. Baseline, repeated
+   right after the go and at the end - any difference other than the Club accounts this plan
+   creates means stop:
    - attendance batches by status (one row: Success, 11, latest 2026-03-28);
    - the Jotform access tokens (two, both of an inactive user, last used 2026-03-28);
-   - accounts by record type (Club 10, Household Account 82).
+   - accounts by record type (Club 10, Household Account 82);
+   - NPSP error records (16) and the four signal counts of step 10 (all 0).
 2. **Build the write set**: `python3 tools/sf_club_accounts.py build`. It refuses on a blank or
    duplicated name (case-insensitive, across all 364 rows and the plain names of the held clubs),
-   edge, double or invisible whitespace, a name that differs from the sheet's club name, a region
-   that is no form region, a malformed Account id, one partner with two ids, or an on-hold account
-   as a parent or a link target. 18 batches: three single records (a create with an apostrophe
-   under an exact-match partner; a link on the pilot account with the least history; a create with
-   an accented letter), then the other 343 creates in batches of 25 or fewer (by region, then
-   partner), then the other seven links. The CSV's checksum is stored; a changed CSV or a rebuild
-   that would move the batches after the run started is refused.
+   a club named like a partner account, edge, double or invisible whitespace, a name that differs
+   from the sheet's club name, a region that is no form region, a malformed Account id, one partner
+   with two ids, or an on-hold account as a parent or a link target. 18 batches: three single
+   records (a create with an apostrophe under an exact-match partner; a link on the pilot account
+   with the least history; a create with an accented letter), then the other 343 creates in
+   batches of 25 or fewer (by region, then partner), then the other seven links. The CSV's
+   checksum and the hold list are sealed in the write set; once the run has started the batches
+   cannot change. `hold_codes.txt` (club codes to leave out) is not used in this run; after the
+   first write a club cannot be held - if something is wrong, the run stops.
 3. **Compare with the live forms**: `python3 tools/sf_club_accounts.py pickers` (GET only). Every
    name must be an option of its region's Club picker, `calcValues` must be the options in order,
    and the picker may offer nothing this list does not know. Repeated right before the first write
-   and at the end (the runner may add or rename a club meanwhile).
+   and at the end. If it fails after the go: stop and show Ryan; accounts already written stay.
 4. **Compare with Salesforce, read-only.**
-   - `soql --all` → `precheck --all`: for all 353 names, exactly the eight link targets exist, each
-     a Club with no parent.
+   - `soql --all` → `precheck --all` (one saved read per chunk, each with its parents): for all
+     353 names, exactly the eight link targets exist, each a Club with no parent.
    - `soql --parents` → `parents`: the 49 parents exist, are partner accounts, carry the name the
      CSV says, have no parent, are not on hold.
    - The two on-hold accounts are read and left alone.
-5. **Show Ryan** the counts and ten sample rows, and the two decisions below; wait for his go.
-   Status becomes `accepted`. The plan and the tool are committed before the first write, as soon
-   as the other session's window in the main checkout is closed.
-   - The public partner sign-up page lists every Account (Risks): Ryan looks at its organisation
-     field once, submitting nothing, and accepts the club names in it or has the list filtered first.
+5. **Show Ryan** the counts and ten sample rows (the three first records, alias partners, the
+   unusual spellings), and the decisions below; wait for his go. Status becomes `accepted`.
+   - The public partner sign-up page (Risks). From the first write on, any visitor of that site
+     can fetch the id and name of every Account, the new clubs included, whatever the page's
+     organisation field shows. Ryan accepts that until the Apex list is filtered, or has it
+     filtered first; his answer goes into the Result and `docs/DECISIONS.md`. He also looks at the
+     organisation field once, submitting nothing: that tells how easily a partner could pick a club.
    - Nobody re-authorises the Jotform connection until the Result is written.
-6. **One create** (batch 0). Re-read it by the id the connector returned and by name: Name
-   character for character (the apostrophe), RecordType Club, ParentId set, Description as sent.
-   Count what else appeared: Contacts and child accounts on it (0), NPSP error records (16 before,
-   16 after). Anything unexpected, or an error from the call: stop, do not retry.
-7. **One link** (batch 1). Read just before: the account, its sharing rows (one, the owner), its
-   Contact count, Opportunity sharing rows by cause (126 manual, 228 owner), NPSP error records
-   (16). Write `ParentId`. Read again: `ParentId` set; Name, owner and record type as before; the
-   other four reads unchanged. A changed owner is a hard stop (the pilot accounts' owner is an
-   inactive user and could probably not be set back). An error from the call means nothing was
-   saved: stop, do not retry.
+6. **One create** (batch 0). Batches 0, 1 and 2 follow the batch procedure of step 9, in that
+   order; a write made before its `precheck` cannot be recorded afterwards. On top of it: the
+   record is re-read by the id the connector returned - Name character for character (the
+   apostrophe), RecordType Club, ParentId set, Description as sent, owner and creator Ryan's user -
+   and what else appeared is counted: Contacts and child accounts on it (0), NPSP error records
+   (still 16). Anything unexpected, or an error from the call: stop, do not retry.
+7. **One link** (batch 1). Read just before (`precheck --batch 1` saves the account as it was),
+   and also: its sharing rows (one, the owner), its Contact count, Opportunity sharing rows by
+   cause (126 manual, 228 owner), NPSP error records (16). Write `ParentId`. Read again: `ParentId`
+   set; Name, owner and record type as before; the other four reads unchanged. A changed owner is
+   a hard stop (the pilot accounts' owner is an inactive user and could probably not be set back).
+   An error from the call means nothing was saved: stop, do not retry.
 8. **One accented create** (batch 2), re-read by returned id and by name, character for character.
-9. **The rest, batch by batch.** For every batch:
-   - read it (`soql --batch N`: its names and its parents) and run `precheck`, which opens the batch
-     in `run_log.csv`. It refuses an empty, cut, foreign or stale read, a batch already written, a
-     batch out of order, an existing name, a changed parent;
-   - write its records, pasting each body from `bodies --batch N` unchanged, and keep the returned ids;
-   - read the batch again and the number of Club accounts (`soql --count`), and run
-     `verify --ids … --club-count …`. It demands exactly one Account per name, the Name character
-     for character, RecordType, ParentId and Description as sent, the returned ids to be the ones
-     found by name, and the Club count to be 10 plus what the run has recorded - so an account
-     stored under another name, a double write or a stranger's account stops the run. It records
-     the ids in `created_accounts.csv` and closes the batch.
+9. **The rest, batch by batch** (the procedure batches 0-2 used). For every batch, 0 to 17:
+   - read it (`soql --batch N`: its names and its parents) and the number of Club accounts
+     (`soql --count`), and run `precheck --club-count …`, which opens the batch in `run_log.csv`.
+     It refuses an empty, cut, foreign or stale read, a read without the fields, a batch already
+     written, a batch out of order, an existing name, a changed parent, and a Club count that is
+     not 10 plus what the run has recorded;
+   - write its records, each body pasted from `bodies --batch N` unchanged (it prints the open
+     batch only, and never a club that is recorded already), and keep the returned ids;
+   - read the batch again, now also by the returned ids (`soql --batch N --ids …`), and the count,
+     and run `verify --ids … --club-count …`. It demands exactly one Account per name, the Name
+     character for character, RecordType, ParentId and Description as sent, the returned ids to be
+     the ones found, and the Club count to be 10 plus what the run has recorded. An account stored
+     under another name, a double write or a stranger's account stops the run - and whatever this
+     run made is recorded in `created_accounts.csv` under whatever name it is stored. Then it
+     closes the batch.
    - Not between 20:50 and 21:10 UTC (the nightly rollup).
+   - After batch 17 (seven links under two partners the first link did not exercise): Opportunity
+     sharing rows by cause again (126 / 228).
 10. **Totals, read-only**: `soql --totals` → `totals` (all Club accounts against the write set, the
-    rollback file and the link targets' before-images: by region and by partner, no two Club
-    accounts with one name, the two on-hold accounts present and without a parent, 355 in all);
-    the step-1 baseline again; `pickers` again; and four counts that must be 0 now and stay 0:
-    Contacts on Club accounts that are not girls (role other than Participant), Contacts on Club
-    accounts marked as portal sign-ups, Monthly Reports on Club accounts, programme-income records
-    on Club accounts.
+    rollback file, the run log and the link targets' before-images: by region and by partner, no
+    two Club accounts with one name, one owner and creator for the new accounts, the two on-hold
+    accounts present and without a parent, 355 in all); `soql --all` → `precheck --all --after`
+    (every name is carried by exactly one Account of any record type, the recorded one); the
+    step-1 baseline; `pickers`; and four counts that must be 0 now and stay 0: Contacts on Club
+    accounts that are not girls (role other than Participant), Contacts on Club accounts marked as
+    portal sign-ups, Monthly Reports on Club accounts, programme-income records on Club accounts.
 11. **The morning after** (first session after 21:00 UTC): all 345 new accounts show the rollup
     fields at 0, NPSP error records still 16, `totals` again on a fresh read.
 12. **Record**: Result below, RUNBOOK section, decisions, backlog, memory, work log; commit; push
@@ -164,11 +184,19 @@ to any allow list.
     are set to "done" by Ryan in the sheet (or with a separate go) before the Monday e-mail of
     2026-10-05 - only those whose account is in `created_accounts.csv`.
 
-A call whose outcome is unknown (an error, a timeout, no id returned) is **never repeated blind**.
+**A call whose outcome is unknown** (an error, a timeout, no id returned) is never repeated blind.
 The batch is read again and `verify` run: it records what exists. A name it reports missing is
 written again, record by record, only after a fresh read of that one name shows nothing **and** the
-Club count equals 10 plus the recorded accounts. If the session dies between a write and `verify`,
-the same read and `verify --no-ids` recover the ids.
+Club count equals 10 plus the recorded accounts. When a create returned no id but the fresh read
+shows the account with this plan's Description and the count agrees, the batch is closed with
+`verify --no-ids`; the same recovers the ids when the session died between a write and `verify`.
+An account written twice is recorded twice; the twin is removed only with Ryan's go, and its row
+stays in the file as "gone".
+
+**If a state file is lost.** `run_log.csv`, `created_accounts.csv` and `write_set.json` must tell
+one story; the tool stops when they do not. Nothing is worked around: the file is restored (Time
+Machine, or by hand from `soql --totals` - the Club accounts created on or after the run's start
+with this plan's Description are this plan's) before any further write.
 
 ## Verification
 - Per record: the connector returns the new id; `verify` compares a fresh read with what was sent.
@@ -176,7 +204,8 @@ the same read and `verify --no-ids` recover the ids.
   cannot start.
 - At the end: `totals ok`; Club accounts = 10 pilot + 345 new = 355; Household Account still 82;
   353 Club accounts have a parent, the two on-hold accounts have none; `created_accounts.csv` has
-  353 rows (345 create, 8 link); the baseline is unchanged; the four signal counts are 0.
+  353 rows (345 create, 8 link); attendance batches, access tokens and NPSP error records as in the
+  baseline; the four signal counts are 0.
 - Nothing in Jotform, the sheet or Apps Script is written by this plan.
 
 ## Rollback
@@ -185,8 +214,8 @@ the same read and `verify --no-ids` recover the ids.
 - A **created** account is deleted by id, and only if a fresh read shows it is this plan's: its
   Description is still the one written, it was created by Ryan's user on or after the run's start,
   and it has no Contacts, attendance, attendance batches, Monthly Reports, programme-income records
-  or child accounts. Anything else is listed for Ryan, not deleted. A deleted account stays in the
-  Recycle Bin for 15 days and comes back with the same id.
+  or child accounts. Anything else is listed for Ryan, not deleted. A deleted account goes to the
+  Recycle Bin; restoring it is Ryan's step in Salesforce (the connector cannot undelete).
 - Once attendance has arrived for a club, its account is no longer deleted: deleting a club
   account takes its girls' Contacts and their attendance with it.
 - A **linked** pilot account gets the `ParentId` it had before (`previous_parent_id`; all eight
@@ -204,14 +233,20 @@ the same read and `verify --no-ids` recover the ids.
   misspellings, a space before a comma).
 - **The public partner sign-up page.** The Apex behind it (`signupController`, open to the site's
   guest user) returns every Account, unfiltered: 92 today including the ten pilot clubs, 437 after
-  this plan. A partner who chose a club there would be filed under the Club account, and their
-  Monthly Reports would be saved against the club. Whether the page shows the list as a choice
-  list could not be read; Ryan looks once (step 5). The lasting fix is an Apex change outside this
-  plan: leave Club accounts out of that list and out of the sign-up lookup. The same clubs would
-  join the list anyway on their first submission. The Monthly Report page itself lists no accounts.
+  this plan. Two things follow.
+  - Exposure: from the day they are written, the id and name of every Club account can be fetched
+    by any visitor, whatever the page shows. Club names are not personal data but are not meant
+    for public places (each region's names are, however, already options of the Club picker on
+    the forms' public pages). Without this plan the clubs would join the list only on their first
+    submission after the reconnect, so this plan brings it forward: Ryan's decision at step 5.
+  - Mis-filing: a partner who chose or typed a club there would be filed under the Club account,
+    and their Monthly Reports would be saved against the club. Whether the page shows the list as
+    a choice list could not be read. The signal counts of step 10 would show it.
+  The lasting fix is an Apex change outside this plan: leave Club accounts out of that list and
+  out of the sign-up lookup. The Monthly Report page itself lists no accounts.
 - **Two daily QuickBooks imports** book a payment on any Account whose name equals the payee. No
-  club name equals a partner or payee account today; the programme-income count on Club accounts
-  (step 10) is the signal.
+  club name equals an existing Account name; the payee names themselves could not be read. The
+  programme-income count on Club accounts (step 10) is the signal.
 - **The held same-name clubs are not created here.** Until their names are settled and the forms
   send them, two clubs of one name resolve to one account: on the same date the second submission
   is rejected, on different dates the two rosters mix. The forms' side settled the scheme on
@@ -226,11 +261,15 @@ the same read and `verify --no-ids` recover the ids.
 - **Drift after today.** A club renamed or added in the sheet reaches the forms automatically but
   not Salesforce (BACKLOG 27). Until then the SF Pending tab and the Monday e-mail are how a new
   club is noticed.
-- **The update flow and the triggers.** Steps 6-8 write one record each and read everything back.
+- **The update flow and the triggers.** Steps 6-8 write one record each and read everything back;
+  the first update of a new account is the nightly rollup (step 11).
 - **The run assumes a dead connection and a quiet picker.** Both are read before, right after the
-  go and at the end; the Club count in every `verify` would show an account made by a submission.
-- **A partial batch.** `verify` reports the missing ones; the rule above says how they are written.
-- **Salesforce API limits.** About 350 writes and 80 reads, far below the org's daily limit.
+  go and at the end; the Club count in every `precheck` and `verify` would show an account made by
+  a submission or by somebody else.
+- **The connector's session can expire in the middle of a batch.** That is a call of unknown
+  outcome: the rule above applies.
+- **Salesforce API limits.** About 350 writes and 150 reads in a day; the org's daily limit was
+  not read, a production Enterprise org's is far above that.
 - **Privacy.** No Contact is read or written; queries select Account fields and counts of children.
   One Africa club's name also appears as a line of its own roster (club code ASPIRING, a roster
   artefact for the sheet's ReviewQueue): the account is a club.
@@ -247,8 +286,11 @@ Found by this plan's review and carried over:
   rest follow: the processor creates one Contact per girl in one transaction, the pilot proved 22,
   and 37 clubs are larger;
 - the Contact duplicate rule's action is read;
-- two guest-facing portal methods are hardened by whoever maintains the partner portal (details
-  given to Ryan on 2026-09-30, not repeated here), before girls' Contacts arrive in volume.
+- after the first submission from a club with an apostrophe or an accented letter: no partner-less
+  Club account appeared (the picker comparison proves the option text, not what the connection
+  transmits);
+- two partner-portal items reported to Ryan on 2026-09-30 are closed by whoever maintains the
+  portal (details kept outside this repository), before girls' Contacts arrive in volume.
 
 ## Not in this plan (on hold)
 - The two pilot accounts `001RP00000nMZXfYAO` and `001RP00000mgVVMYA2` (Ryan is checking them).
@@ -268,5 +310,5 @@ records, not reports), which object it sits on, and what "foundation" maps to ar
 - `python3 tools/sf_club_accounts.py build` → `write set: 345 create + 8 link = 353 writes in 18 batches; 11 same-name rows held`
 - `python3 tools/sf_club_accounts.py pickers` → per region `not on the picker 0`, `options this list does not know 0`, Africa `also a roster line 1 ['ASPIRING']`, then `pickers ok`
 - `precheck --all` → `precheck of all names ok`; `parents` → `parents ok: 49 partner accounts`
-- after the last batch: `python3 tools/sf_club_accounts.py totals --result <saved read>` → `totals ok`
-- `make check` → `CHECK PASSED`
+- after the last batch: `totals` → `totals ok`; `precheck --all --after` → `all names ok after the run`
+- `make check` (with the files staged: the secrets and link scans read `git ls-files`) → `CHECK PASSED`
