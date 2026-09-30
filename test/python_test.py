@@ -1263,6 +1263,26 @@ class SameNameFlow(unittest.TestCase):
                          sync._norm_rules(self.form(switched=True)[1]))
         self.assertEqual((sync.WARNINGS, summary["sf_name_changes"]), ([], []))
 
+    def test_a_roster_left_without_its_rule_by_a_failed_apply_is_finished_not_refused(self):
+        # an apply that created the roster (and perhaps updated the picker) and then failed on
+        # the rules write: the re-run - the runner's own retry too - must complete it. A roster
+        # with no rule has nothing it "sends today", so this is no question-5 change
+        sheet = {**self.ROSTER, ("Partner One", "Gamma Club"): ["Amara Pellucidor"]}
+        self.QIDS = {**self.QIDS, ("Partner One", "Gamma Club"): "20"}       # 14 is a module dropdown
+        for picker_written in (True, False):
+            del sync.WARNINGS[:]
+            qs, _ = self.form(roster=sheet, switched=True)
+            _, wire = self.form(switched=True)                 # the rules from before the new club
+            if not picker_written:
+                qs["500"]["options"] = "|".join(self.LONG)
+            fake = FakeForm(qs, wire, apply=True)
+            code, _ = self.run_sync(fake, "--apply", roster=sheet)
+            self.assertEqual(code, 0, code)
+            self.assertEqual(sync.WARNINGS, [])
+            self.assertEqual([(m, p) for m, p, _ in fake.writes],
+                             ([] if picker_written else [("POST", "/question/500")]) + [("PUT", "/properties")])
+            self.assertEqual(self.shows(fake.writes[-1][2], "20"), [("500", "equals", "Gamma Club")])
+
     # ---- a new club may not take a name in use
     def test_a_new_club_with_a_name_in_use_is_not_created_and_the_run_goes_on(self):
         sheet = {**self.ROSTER, ("Partner Three", "Stars"): ["Uma Umberlash"],

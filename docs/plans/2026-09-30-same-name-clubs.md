@@ -159,7 +159,7 @@ against the live forms (after Step 0). No live writes, no merge into `main` with
 
 Built 2026-09-30 on branch `wf6/same-name-forms` (Python only; `appsscript/` and
 `test/forms_logic_test.js` untouched — Part 2's). Nothing was written to Jotform, the sheet or
-Salesforce. `make check` green; 248 Python tests.
+Salesforce. `make check` green; 249 Python tests.
 
 ### What is where
 - `glow/sync.py`: `SF_NAME_SEP`, `roster_pairs` (`{(partner, club): active}`, any status, all
@@ -250,7 +250,7 @@ Salesforce. `make check` green; 248 Python tests.
   which one the mirror follows rather than fixing either side silently). The switch goes by
   ACTIVE clubs; the new-club check by every club, any status.
 
-### The read-only proof (2026-09-30, about 16:45-18:15 JST)
+### The read-only proof (2026-09-30, about 16:45-17:15 JST)
 A fresh Roster export each time (6,946 rows, 6,847 active; 364 clubs, 362 active; read after the
 two duplicates were retired), kept in the session's scratch directory and deleted afterwards.
 Jotform: GETs and the tools' dry runs only. Counts, qids, club and partner names only.

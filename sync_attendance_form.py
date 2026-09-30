@@ -38,6 +38,17 @@ Usage:
     # for a fresh clone (refused on any form that has submissions):
     python3 sync_attendance_form.py roster.csv --roster --region Africa --prune --form <CLONE_ID> --apply
 
+    # By hand, once per form (docs/RUNBOOK.md, "Club names two partners share"):
+    # each roster whose club name two partners' active clubs share gets its own
+    # Club picker entry "<club> - <partner>" - the text question 5 then sends
+    python3 sync_attendance_form.py roster.csv --roster --region Africa --form <ID> --same-name-switch
+
+A change of what an existing club sends to question 5 is a change of its
+Salesforce Account name: every run lists it ("! ... Club Name (question 5,
+what Salesforce reads) changes from 'X' to 'Y'"), and --apply refuses it
+unless it is --same-name-switch's own or --q5-change-ok is given. A NEW club
+whose name another partner's club already has is not created.
+
 Getting enrollment.csv: in Google Sheets, File > Download > Comma Separated
 Values (.csv) on the responses tab. Getting roster.csv:
     python3 tools/sheets_client.py export Roster data/roster_<date>.csv

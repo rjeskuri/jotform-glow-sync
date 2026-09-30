@@ -21,7 +21,13 @@ data/auto_sync/<stamp>.log are redacted (girls' names never appear). Exit
 
 It never passes --prune, never deletes a question, and refuses to apply when
 one region would create more than --max-creates clubs or update more than
---max-updates rosters at once, or when the export looks truncated.
+--max-updates rosters at once, or when the export looks truncated. It never
+passes --same-name-switch or --q5-change-ok either: a change of what an
+existing club sends to question 5 (its Salesforce Account name) stops that
+region and raises ATTENTION, even when nothing else is planned; a new club
+the sync did not add because its name is in use, and a name two clubs send,
+raise ATTENTION without stopping anything (docs/RUNBOOK.md, "Club names two
+partners share").
 """
 import argparse
 import csv
