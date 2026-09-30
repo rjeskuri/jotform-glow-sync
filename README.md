@@ -36,6 +36,7 @@ every operational procedure, with its dry-run and apply forms, in
 | `tools/sheets_client.py`, `tools/upload_roster.py`, `tools/build_roster_offline.js` | Sheet access; rebuilding and uploading the Roster tabs offline with the same `.gs` code |
 | `tools/needs_attention.py`, `tools/derive_partner_regions.py` | Data-quality report; partner → region derivation (generates `appsscript/Regions.gs`) |
 | `tools/add_translations.py`, `add_language.py`, `restore_translations.py`, `add_feedback_link.py`, `clone_regional.py` | Languages, the links above Submit (problem report, Club Roster Form), building a regional form |
+| `tools/fix_roster_order.py` | One-time repair: every roster above the links and Submit (moves the links, Submit and the hidden fields after the last roster; `--undo` rolls back) |
 | `appsscript/` | The scripts bound to the sheet: roster ids, form handlers, generated Google Forms, the sync notification — deployed with `npm run clasp:push` ([appsscript/INSTALL.md](appsscript/INSTALL.md)) |
 | `test/`, `scripts/`, `Makefile` | `make check`: parity between the Python and Apps Script parsers, roster-change logic, the runner's decisions, `.gs` parsing, secrets/PII and dead-link scans |
 | `.claude/` | Claude Code guardrails: hooks that block live-system writes and PII/secret edits, skills encoding the Jotform API and privacy policy, review agents |

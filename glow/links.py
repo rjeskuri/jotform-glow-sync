@@ -11,6 +11,9 @@ its unique name, never by qid (the qid differs per form).
 The sync never touches them: sync_attendance_form.py writes roster checkboxes,
 the Club picker, q5's hidden flag and the conditions, and no generated rule
 mentions any other element (test/python_test.py, SyncLeavesTheLinksAlone).
+Where the rosters sit relative to these elements and Submit - the order the
+sync gives a new roster, the one-time repair, the form_status check - is
+glow/layout.py, built on the render-order helpers here.
 """
 import html
 import json

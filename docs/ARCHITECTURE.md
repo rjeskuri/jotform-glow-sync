@@ -38,7 +38,7 @@ enrollment responses → `sync_attendance_form.py read_sheet` (no `--roster`).
 
 | Where | What | Talks to |
 |---|---|---|
-| `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge), and keeps the Club picker and the partner list (found by field name, `clubPicker` / `partnerPicker`, added once by `--club-picker` / `--partner-picker`) in shape. Dry run by default, `--apply` writes, `--summary-json` for the runner | Jotform API via `curl` |
+| `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge), and keeps the Club picker and the partner list (found by field name, `clubPicker` / `partnerPicker`, added once by `--club-picker` / `--partner-picker`) in shape. New rosters are created above the links and Submit (`glow/layout.py`). Dry run by default, `--apply` writes, `--summary-json` for the runner | Jotform API via `curl` |
 | `backup_forms.py`, `restore_conditions.py` | Snapshot and rollback (conditions only) | Jotform API |
 | `tools/form_status.py` | Read-only audit of every form vs the Roster export, rule by rule; `--json` | Jotform API |
 | `tools/auto_sync.py` | The unattended loop (export → plan → bands → backup → apply → verify → SyncLog) | Sheets API, the tools above |
@@ -49,6 +49,7 @@ enrollment responses → `sync_attendance_form.py read_sheet` (no `--roster`).
 | `tools/worklog.py` | The work log behind the monthly invoice: hours per day from the session transcripts on the Mac's clock at the time (`worklog/timezones.csv`, `zone`), descriptions, `export --month` | local files |
 | `tools/needs_attention.py`, `tools/derive_partner_regions.py` | Data-quality report; partner → region derivation (generates `appsscript/Regions.gs`) | local snapshots |
 | `tools/add_translations.py`, `add_language.py`, `restore_translations.py`, `switcher_flags.py`, `add_feedback_link.py`, `clone_regional.py` | Languages, switcher flags for languages Jotform has none for (`injectCSS`), the links above Submit (problem report, Club Roster Form — `glow/links.py`), building a regional form | Jotform API |
+| `tools/fix_roster_order.py` | One-time repair (BACKLOG 47): the links, Submit and the hidden bridge fields move to empty orders after the last roster, so every roster renders above them; `glow/layout.py` holds the plan, the order the sync gives a new roster, and the `form_status` layout check | Jotform API |
 | `tools/update_static_fields.py` | The fields the sync never touches: label wording, the Group Photo limits, and the header logo (`--image-src`, since the API cannot upload an asset). Declarative — wanted properties per field name, re-read and compared after every write | Jotform API |
 | `appsscript/*.gs` | Bound to the sheet: config, normalization, ids, roster ops, form generation, submission handlers, menu, dispatch | Google services |
 | `test/`, `scripts/`, `Makefile` | The offline feedback loop (`make check`) | nothing |
