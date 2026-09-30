@@ -155,6 +155,17 @@ const SESSION_OVERRIDES = {
 
 const STATUS = { ACTIVE: 'active', INACTIVE: 'inactive' };
 
+/**
+ * Between club and partner in the Salesforce account name of a club whose
+ * name another partner's club also has: "<club> - <partner>" (ASCII space,
+ * hyphen-minus, space). It is also what that club's entry in the attendance
+ * forms' club list says and what question 5 sends, so the same constant is
+ * in glow/sync.py (SF_NAME_SEP) — change both, never one
+ * (docs/plans/2026-09-30-same-name-clubs.md). Club names may contain it
+ * themselves: never split a name on it.
+ */
+const SF_NAME_SEP = ' - ';
+
 function getApiKey_() {
   const key = PropertiesService.getScriptProperties()
       .getProperty('JOTFORM_API_KEY');

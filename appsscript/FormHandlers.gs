@@ -23,7 +23,10 @@
  * A new-club response that may duplicate a club on file is HELD instead
  * (FormLog "HELD: …", a ReviewQueue item, nothing imported): not done, never
  * offered by the menu item until staff start that item's resolved cell with
- * "release" (docs/plans/2026-09-28-duplicate-club-guard.md).
+ * "release" (docs/plans/2026-09-28-duplicate-club-guard.md). So is a new
+ * club whose name another partner's club already has (SAME_NAME_ISSUE): a
+ * release of that one is refused until the response row's club name is one
+ * nobody else has (docs/plans/2026-09-30-same-name-intake.md).
  */
 
 const FORM_LOG_COLS = ['when', 'form', 'sheet_row', 'response_key', 'result'];
@@ -32,6 +35,9 @@ const SF_PENDING_COLS = ['added', 'partner', 'club', 'region', 'girls', 'mentor_
 const RETRY_PREFIXES = ['ERROR:'];   // FormLog results that mean "not done: try again"
 const HOLD_PREFIX = 'HELD:';         // "not done: held for staff" — offered only once released
 const HOLD_ISSUE = 'New club held as a possible duplicate';   // its ReviewQueue issue
+/** …or, when its name is another partner's club's: a new club may not take a name in use. */
+const SAME_NAME_ISSUE = 'Club name already used by another partner — ask for a different name';
+const HOLD_ISSUES = [HOLD_ISSUE, SAME_NAME_ISSUE];   // the items a held response is released by
 /** Why runResponse_ refuses a Club Roster Form response with no sent day (FormLog ERROR, queued). */
 const NO_SENT_DAY_ERROR = 'its Timestamp cell is not a date, so the day it was sent is unknown ' +
     'and the replay guard cannot run: enter the change fresh on the Club Roster Form instead ' +
@@ -115,9 +121,9 @@ function processMissedResponses() {
       'Not run — FormLog already has these as processed under a different key ' +
       '(docs/RUNBOOK.md, "Missed form responses"):', plan.held, MISSED.MAX_LISTED) : '') +
       (plan.waiting.length ? '\n\n' + missedPreviewText_(
-      'Not run — new clubs held for review as possible duplicates, until staff start the ' +
-      'ReviewQueue item\'s resolved cell with "release" (docs/RUNBOOK.md, "Working the ' +
-      'ReviewQueue"):', plan.waiting, MISSED.MAX_LISTED) : '') +
+      'Not run — new clubs held for review (a possible duplicate, or a club name another ' +
+      'partner\'s club has), until staff start the ReviewQueue item\'s resolved cell with ' +
+      '"release" (docs/RUNBOOK.md, "Working the ReviewQueue"):', plan.waiting, MISSED.MAX_LISTED) : '') +
       (plan.closed.length ? '\n\n' + closedHoldsText_(plan.closed, MISSED.MAX_LISTED) : '');
   const sources = function (items) {
     return items.map(function (it) { return it.source; }).join(', ') || 'none';
@@ -145,7 +151,7 @@ function processMissedResponses() {
   ask(plan.released, 'New clubs held for review that staff released in the ReviewQueue',
       'Run them now, as sent? Each runs against TODAY\'s roster (girls removed since it was ' +
       'sent stay removed); the duplicate check is skipped (an organization typed close to a ' +
-      'partner on file is still refused).');
+      'partner on file, or a club name another partner\'s club has, is still refused).');
   ask(plan.old, 'Club Roster Form responses sent more than ' + MISSED.OLD_AFTER_DAYS +
           ' days ago and never processed',
       'Running one now applies it to TODAY\'s roster: girls removed since it was sent stay ' +
@@ -263,8 +269,9 @@ function processResponseRow_(which, sheet, row) {
  * the guard it could put them back, and the menu's warning for old rows
  * promises it cannot (the rule submittedDay_ follows).
  * released: staff released this held new-club response (the duplicate check
- * is skipped, except a typed organization close to a partner on file: see
- * handleNewClub_); the replay guard still applies.
+ * is skipped, except a typed organization close to a partner on file and a
+ * club name another partner's club has: see handleNewClub_); the replay
+ * guard still applies.
  */
 function runResponse_(which, sheet, row, answers, responseKey, released) {
   const source = sheet.getName() + '!' + row;
@@ -365,7 +372,7 @@ function isRetryResult_(result) {
   return RETRY_PREFIXES.some(function (p) { return text.indexOf(p) === 0; });
 }
 
-/** True if a FormLog result means "not done: held for staff" (the duplicate-club guard). */
+/** True if a FormLog result means "not done: held for staff" (a possible duplicate, or a name in use). */
 function isHeldResult_(result) {
   return String(result == null ? '' : result).indexOf(HOLD_PREFIX) === 0;
 }
@@ -644,7 +651,9 @@ function keptRemovedNote_(plan) {
 // sheet (a leading = would be a formula); the partner dropdown's value is
 // ours and is used as chosen. A response that may duplicate a club on file
 // is held for staff (newClubHoldReasons_) unless they released it; a release
-// still refuses (ERROR) a typed organization close to a partner on file.
+// still refuses (ERROR) a typed organization close to a partner on file, and
+// a club name another partner's club has (a new club may not take a name in
+// use: docs/plans/2026-09-30-same-name-clubs.md, Ryan's decision 2).
 /** submitted: 'yyyy-MM-dd' the response was sent ('' = no guard: runResponse_ refuses first). */
 function handleNewClub_(a, source, responseKey, released, submitted) {
   const ss = SpreadsheetApp.getActive();
@@ -669,9 +678,14 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
   } else {
     // a release skips the check, except the typed organization: run as typed
     // it would file the club under a second spelling of a partner on file
-    // (no region, a second form section — the "ion bu" case, 2026-09-24)
-    const org = reasons.filter(function (r) { return r.kind === 'partner'; })[0];
-    if (org) throw new Error('release refused: ' + org.text + '. First, ' + orgHoldStep_() + '.');
+    // (no region, a second form section — the "ion bu" case, 2026-09-24) —
+    // and except a name another partner's club has: imported, the Jotform
+    // sync would refuse to add the club and the forms would never show it
+    const blocking = reasons.filter(function (r) { return !!RELEASE_STEPS[r.kind]; });
+    if (blocking.length) {
+      throw new Error('release refused: ' + blocking.map(function (r) { return r.text; }).join('; ') +
+          '. First, ' + blocking.map(function (r) { return RELEASE_STEPS[r.kind](); }).join('; and ') + '.');
+    }
   }
 
   const formRegion = canonicalRegion_(a[Q.REGION]);   // '' unless exactly one of REGIONS
@@ -729,12 +743,33 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
 
 /** How a hold reason reads in FormLog and Audit. */
 const HOLD_KINDS = { reenroll: 're-enrollment list', names: 'names on file', club: 'club name',
-                     partner: 'organization name' };
+                     partner: 'organization name', samename: 'another partner\'s club name' };
 /** What staff do before releasing an 'organization name' hold (its item, and a refused release). */
 function orgHoldStep_() {
   return 'if it is that partner, set the response row\'s "' + Q.PARTNER_NEW + '" cell to it ' +
       'exactly as the Partners tab spells it; if it is another organization, add it to the ' +
       'Partners tab with its region';
+}
+/** What staff do before releasing a same-name hold (its item, and a refused release). */
+function sameNameHoldStep_() {
+  return 'ask the partner for a different name and set the response row\'s "' + Q.CLUB +
+      '" cell to it';
+}
+/** The reasons a release never skips → what staff do first. */
+const RELEASE_STEPS = { partner: orgHoldStep_, samename: sameNameHoldStep_ };
+/** True if a hold is (also) for a club name another partner's club has. */
+function isSameNameHold_(reasons) {
+  return reasons.some(function (r) { return r.kind === 'samename'; });
+}
+/**
+ * A hold in FormLog, after HOLD_PREFIX: 'possible duplicate (<kinds>)',
+ * 'club name already used by another partner', or both — never a name.
+ */
+function holdSummary_(reasons) {
+  const kinds = reasons.filter(function (r) { return r.kind !== 'samename'; })
+      .map(function (r) { return HOLD_KINDS[r.kind] || r.kind; }).join(', ');
+  return [isSameNameHold_(reasons) ? 'club name already used by another partner' : '',
+          kinds ? 'possible duplicate (' + kinds + ')' : ''].filter(String).join('; ');
 }
 
 /**
@@ -750,7 +785,7 @@ function holdNewClub_(a, source, responseKey, partner, club, reasons) {
   if (to) sendHoldNotice_(to, club, partner, source);
   const kinds = reasons.map(function (r) { return HOLD_KINDS[r.kind] || r.kind; }).join(', ');
   audit_('newClubForm', 'held ' + source + ' for review (' + kinds + '); nothing imported');
-  return HOLD_PREFIX + ' possible duplicate (' + kinds + ') — ReviewQueue [#' + source + ']';
+  return HOLD_PREFIX + ' ' + holdSummary_(reasons) + ' — ReviewQueue [#' + source + ']';
 }
 
 /**
@@ -942,7 +977,7 @@ function tryReview_(items, source) {
 
 /** Every issue the ReviewQueue can hold, in the order the weekly e-mail lists them. */
 const REVIEW_ISSUES = [
-  HOLD_ISSUE, 'Roster change sent as a problem report', 'Removal did not match anyone',
+  HOLD_ISSUE, SAME_NAME_ISSUE, 'Roster change sent as a problem report', 'Removal did not match anyone',
   'Removed girls not put back by an older response',
   'Same name listed twice', 'Partner says two girls share a name',
   'Girls missing from the latest enrollment', 'Roster change for a club not on file',
@@ -1003,18 +1038,36 @@ function feedbackReviewItem_(a, source, sentDay, reason) {
  * counts, never a girl. "(sent …)" and the tag are how holdDecisions_ finds
  * it again — staff must not edit them. An 'organization name' hold also says
  * what to fix before a release (orgHoldStep_; handleNewClub_ refuses until then).
+ * A hold for a name another partner's club has (alone or with other reasons)
+ * is SAME_NAME_ISSUE: it may still be that club sent under the wrong partner,
+ * so the item says that first, then the new name a release needs.
  */
 function heldClubReviewItem_(partner, club, source, sentAt, reasons) {
   const org = reasons.some(function (r) { return r.kind === 'partner'; });
+  const head = source + ' (sent ' + (sentAt || '?') + '): nothing imported; the mentor was told it ' +
+      'is being checked. Why: ' + reasons.map(function (r) { return r.text; }).join('; ') + '. ';
+  const release = 'resolved "release <date> by <name>: …"';
+  if (isSameNameHold_(reasons)) {
+    return {
+      issue: 'Club name already used by another partner — ask for a different name',
+      partner: partner, club: club,
+      detail: head + 'That club, sent under the wrong partner (or another club on file): enter ' +
+          'only its new girls on "' + Q.ACTION_MOD + '" for the club on file, then resolve. ' +
+          'A new club: it may not take a name another partner\'s club has (the attendance form ' +
+          'and Salesforce tell clubs apart by name) — ' +
+          (org ? 'first, ' + orgHoldStep_() + '; then ' : '') + sameNameHoldStep_() + ', then ' +
+          release + ' and run "Process any missed form responses" (a release under the old ' +
+          'name is refused).',
+      dedupeKey: source,
+    };
+  }
   return {
     issue: 'New club held as a possible duplicate',
     partner: partner, club: club,
-    detail: source + ' (sent ' + (sentAt || '?') + '): nothing imported; the mentor was told it ' +
-        'is being checked. Why: ' + reasons.map(function (r) { return r.text; }).join('; ') +
-        '. Same club: enter only its new girls on "' + Q.ACTION_MOD + '" for the club on file, ' +
+    detail: head + 'Same club: enter only its new girls on "' + Q.ACTION_MOD + '" for the club on file, ' +
         'then resolve. Really new (or the list is right): ' +
         (org ? 'first, ' + orgHoldStep_() + '; then ' : '') +
-        'resolved "release <date> by <name>: …", then run "Process any missed form responses".',
+        release + ', then run "Process any missed form responses".',
     dedupeKey: source,
   };
 }
@@ -1022,14 +1075,14 @@ function heldClubReviewItem_(partner, club, source, sentAt, reasons) {
 /**
  * What staff decided about each held new-club response. rows: ReviewQueue
  * rows {row, issue, detail, resolved}. Returns {'<tab>!<row>': {row, state,
- * sentAt}} from the LAST HOLD_ISSUE item tagged with that response row:
+ * sentAt}} from the LAST hold item (HOLD_ISSUES) tagged with that response row:
  * state 'open' (resolved empty), 'release' (resolved starts with the word
  * "release") or 'closed' (any other text); sentAt from its "(sent …)".
  */
 function holdDecisions_(rows) {
   const out = {};
   rows.forEach(function (r) {
-    if (tidy_(r.issue) !== HOLD_ISSUE) return;
+    if (HOLD_ISSUES.indexOf(tidy_(r.issue)) === -1) return;
     const detail = String(r.detail == null ? '' : r.detail);
     const tag = detail.match(/\[#([^\]]*)\]\s*$/), sent = detail.match(/\(sent ([^)]*)\)/);
     if (!tag) return;
@@ -1114,22 +1167,44 @@ function reviewDigest_(rows, today, known) {
   return { open: open.length, fresh: fresh, lines: lines };
 }
 
-/** The weekly e-mail's Salesforce section (as before; 'added' now as yyyy-MM-dd). rows: pending SF Pending rows. */
-function sfPendingLines_(rows) {
+/**
+ * The weekly e-mail's Salesforce section. rows: pending SF Pending rows
+ * ('added' as yyyy-MM-dd); shared: sharedClubNames_ over the Roster. Each
+ * line starts with the exact name the club's Salesforce account must have
+ * (sfClubName_): the club name, or "<club> - <partner>" for a name two
+ * partners' active clubs share — worked out now, never stored, so a renamed
+ * club or partner cannot leave it stale. A row with no club or no partner
+ * says so instead of guessing. A shared name also says to check the form:
+ * there the long or plain name is sticky (RosterOps.gs, "clubs that share a
+ * name"), and an account named otherwise than the form sends gets a stray
+ * twin in Salesforce at the club's first attendance.
+ */
+function sfPendingLines_(rows, shared) {
   if (!rows.length) return [];
+  shared = shared || Object.create(null);
   const lines = [rows.length + ' new club(s) are waiting to be created in Salesforce ' +
-                 '(tab "' + TAB.SF_PENDING + '"). Set status to "done" once created.', ''];
+                 '(tab "' + TAB.SF_PENDING + '"). Each line starts with the exact Salesforce ' +
+                 'account name: create it character for character (the attendance form sends ' +
+                 'that name; a club whose name another partner\'s club also has is "<club>' +
+                 SF_NAME_SEP + '<partner>"). Set status to "done" once created.', ''];
   rows.forEach(function (r) {
-    lines.push('- ' + r[2] + ' | ' + r[1] + ' | ' + (r[3] || 'region?') + ' | ' + r[4] +
-               ' girls | mentor ' + r[5] + ' <' + r[6] + '> | added ' + r[0]);
+    const known = tidy_(r[2]) && tidy_(r[1]);
+    const name = known ? sfClubName_(r[2], r[1], shared) : '(no club or partner in this row: fix it first)';
+    lines.push('- ' + name + ' | ' + r[1] + ' | ' + (r[3] || 'region?') + ' | ' + r[4] +
+               ' girls | mentor ' + r[5] + ' <' + r[6] + '> | added ' + r[0] +
+               (known && shared[key_(r[2])] === true ? ' | ' + SF_SHARED_NOTE : ''));
   });
   return lines;
 }
+/** Ends the Salesforce line of a club whose name another partner's active club has. */
+const SF_SHARED_NOTE = 'NAME SHARED with another partner\'s club: before creating the account, find ' +
+    'this club in the attendance form\'s club list and use exactly that text';
 
 // ------------------------------------------------------- the weekly e-mail
 /**
  * Weekly (Monday 08:00): the open ReviewQueue items, then the clubs still
- * waiting to become Salesforce Accounts, in one e-mail to STAFF_NOTIFY_EMAIL.
+ * waiting to become Salesforce Accounts — each with the exact account name
+ * (sfPendingLines_) — in one e-mail to STAFF_NOTIFY_EMAIL.
  * Nothing open and nothing pending → no e-mail. The installed trigger calls
  * this BY NAME (installTriggers): renaming it stops the e-mail until
  * "Install triggers" is run again.
@@ -1149,8 +1224,10 @@ function sendSfPendingDigest() {
   const subject = [review.open ? review.open + ' open ReviewQueue item(s)' : '',
                    pending.length ? pending.length + ' club(s) pending in Salesforce' : '']
       .filter(String).join(' · ');
+  // the Roster is read only when a club is pending: its names decide the account names
+  const shared = pending.length ? sharedClubNames_(loadRoster_().rows) : Object.create(null);
   MailApp.sendEmail({ to: staff, subject: 'GLOW weekly: ' + subject,
-                      body: review.lines.concat(sfPendingLines_(pending)).join('\n') });
+                      body: review.lines.concat(sfPendingLines_(pending, shared)).join('\n') });
   audit_('sendSfPendingDigest', 'emailed ' + staff + ': ' + counts);
 }
 

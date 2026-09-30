@@ -802,8 +802,9 @@ must also be written to `base` and `en` or its translations never apply
 **GLOW → Google Forms → Process any missed form responses** runs the Club
 Roster Form responses and problem reports that were never processed (a
 trigger failed, e.g. between a scope-adding push and the re-authorization),
-that failed (FormLog `ERROR: …`), or that the duplicate-club guard held and
-staff have since released (FormLog `HELD: …`, item 5). It changes nothing
+that failed (FormLog `ERROR: …`), or that were held as a new club — a
+possible duplicate, or a club name another partner's club has — and staff
+have since released (FormLog `HELD: …`, item 5). It changes nothing
 until you confirm:
 
 1. One dialog per group lists what it would run — problem reports not yet
@@ -840,7 +841,9 @@ until you confirm:
 5. **Held for review** rows are "Enroll a NEW club" responses the
    duplicate-club guard held (FormLog `HELD: possible duplicate (…)`, a
    **New club held as a possible duplicate** item on the ReviewQueue,
-   nothing imported). They are listed with the result, never run, until the
+   nothing imported), or that were held because another partner's club
+   already has the club name (FormLog `HELD: club name already used by
+   another partner`, a **Club name already used by another partner — ask for a different name** item). They are listed with the result, never run, until the
    item's `resolved` cell starts with the word `release` ("Working the
    ReviewQueue"). The next run then asks about them in a dialog of their
    own, "New clubs held for review that staff released": YES imports each
@@ -849,7 +852,9 @@ until you confirm:
    an organization typed close to a partner on file, which fails
    `ERROR: release refused: …` until the response row's `Partner
    organization` cell names that partner, or the Partners tab has the new
-   organization ("Working the ReviewQueue"). An item
+   organization, and except a club name another partner's club has, which
+   fails the same way until the response row's `Club name` cell has a name
+   nobody else uses ("Working the ReviewQueue"). An item
    resolved any other way is never run: its row is only named on the
    preview's last line, "Not imported — … resolved without "release"", as
    `row N (ReviewQueue row M)`. A club meant to be imported but resolved
@@ -892,7 +897,8 @@ reads a FormLog `HELD:` row as done. There, `release` followed by **Process
 any missed form responses** imports nothing ("Nothing to process.") and
 still closes the item, after the mentor was told the club would be added.
 Before such a rollback, filter the ReviewQueue for **New club held as a
-possible duplicate** items that are open, or released with no later FormLog
+possible duplicate** and **Club name already used by another partner — ask for a different name**
+items that are open, or released with no later FormLog
 row for that response (same form and `sheet_row`) whose result starts with
 neither `ERROR:` nor `HELD:`. While rolled back, never write `release` on
 them: after rolling forward, release them and the menu offers them as usual.
@@ -900,6 +906,23 @@ Staying rolled back, handle each really-new club by hand: send "Enroll a NEW
 club" yourself with the response row's answers (the old code imports it),
 then resolve its item `resolved <date> by <name>: entered by hand` (over a
 `release` already there), so a later roll-forward never imports it twice.
+For a club held for its name, send it under the new name the partner gave.
+
+**Same-name holds and a rollback below the same-name check.** Code that has
+the duplicate-club guard but not the same-name check (`git grep -q
+SAME_NAME_ISSUE <target> -- appsscript/FormHandlers.gs` finds nothing, `git
+grep -q HOLD_PREFIX …` finds the guard: `main` from the 2026-09-28
+integration up to the same-name push) keeps a response held for its name
+held: it does not know a **Club name already used by another partner — ask for a different name** item, so the menu lists that
+row as "no ReviewQueue item for this row and time" and never imports it,
+whatever the item says. Nothing is lost: release it after rolling forward.
+While rolled back, a new club whose name another partner's club has is
+imported again, as before the push: the automatic sync then refuses to add
+it to the forms and says so (ATTENTION, "not added: give it a different
+name"), and the Monday e-mail's Salesforce lines show the plain club name
+for every club — for a club that shares its name, the account name is the
+text of its entry in the attendance form's club list
+([plans/2026-09-30-same-name-clubs.md](plans/2026-09-30-same-name-clubs.md)).
 
 ## Working the ReviewQueue
 
@@ -936,6 +959,7 @@ trigger's hour, which follows the script project's zone
 | Issue | What to do |
 |---|---|
 | **New club held as a possible duplicate** | "Enroll a NEW club" was sent for what may be a club already on file: nothing was imported, and the mentor was told it is being checked. Detail says why — names already active in one club, a club name close to one of the partner's, a typed organization close to a partner on file, or a re-enrollment whose list is mostly not the club's — and names the club(s) on file. Compare the response row (the tag) with those clubs' Roster rows. **Same club:** enter only its new girls on "Add or remove girls" for the club on file (REMOVE anyone who has left), then `resolved <date> by <name>: same club as <club>`. **A new club after all, or the new list is right:** `release <date> by <name>: <why>` (`release` must be the first word), then run **Process any missed form responses**: it asks about released rows separately and imports each as sent. **If the reason says "the organization was typed as …, close to … on file"**, fix that first, or the club is filed under a second spelling of the partner (no region, a second form section — the `ion bu` case): if it is that partner, set the response row's `Partner organization` cell to the partner exactly as the Partners tab spells it (the row stays matched to its item by its Timestamp, and the release preview shows the corrected partner); if it really is another organization, add it to the Partners tab with its region. Until then the release run refuses it (`ERROR: release refused: …`, offered again by the next run). **Sent by mistake:** `resolved …: not imported`. Never ask the partner to send it again, and never edit the `(sent …)` or the `[#…]` tag in detail: the menu matches both to the response row. |
+| **Club name already used by another partner — ask for a different name** | "Enroll a NEW club" was sent with a club name that another partner's club already has — any status, any region; capitals and spacing are ignored, a plural or a typo is a different name — or that reads as a club on file followed by its partner (`<club> - <partner>`). Nothing was imported, and the mentor got the same "it is being checked" note as any held club. A new club may not take a name in use: the attendance forms and Salesforce tell clubs apart by name, and the sync would refuse to add it ([plans/2026-09-30-same-name-clubs.md](plans/2026-09-30-same-name-clubs.md)). Detail names the club(s) that have the name. **First rule out a mix-up:** compare the response row (the tag) with that club's Roster rows — it may be that club, sent under the wrong partner — and, when detail gives more reasons (names on file, a close club name), with the other clubs it names. **Same club:** enter only its new girls on "Add or remove girls" for the club on file, then `resolved <date> by <name>: same club as <club> (<partner>)`. **A new club:** ask the partner for a different name (the school or the place added is enough: `Stars (Testville Sec Sch)`). Then either **(a) release it under the new name:** set the response row's `Club name` cell to the new name (the row stays matched to its item by its Timestamp), write `release <date> by <name>: renamed to <new name>` (`release` must be the first word), and run **Process any missed form responses** — its preview shows the new name, and YES imports the club as sent otherwise; or **(b) have it sent again:** the partner (or you, from the response row's answers) sends "Enroll a NEW club" under the new name, and you close this item `resolved <date> by <name>: sent again as <new name>` — the held response is then never run. A release with the name unchanged, or changed to another name in use, is refused (`ERROR: release refused: …`, offered again by the next run) and adds a **Form response could not be processed** item: fix the cell, run it again, then close that item. **If detail also says "the organization was typed as …, close to … on file"**, fix that first, as in the row above. Never edit the `(sent …)` or the `[#…]` tag in detail. The clubs that already share a name are not affected: their own enrollments and roster changes run as always. |
 | **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added by `tools/backfill_feedback_review.py`). |
 | **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. REMOVE only a match that is clearly her; otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). |
 | **Removed girls not put back by an older response** | A Club Roster Form response ran after some girls it lists had been removed — a retry, or an old response confirmed in "Missed form responses" — so they stayed removed instead of coming back (the 2026-09-13 replay cannot recur). Detail names the response row, the day it was sent and the Roster rows; the mentor's confirmation (roster changes) listed the names the mentor typed under "Not added back". Usually nothing to do: `resolved …: stayed removed`. If a girl really has rejoined since her removal (ask the partner), ADD her as above: the same ID comes back. |
@@ -944,7 +968,7 @@ trigger's hour, which follows the script project's zone
 | **Girls missing from the latest enrollment** | "Enroll a NEW club" was sent for a club already on file; the girls not in that list stay active. Ask the partner who has left and REMOVE them as above. If the new list was not this club's at all (Radiant Girls, 2026-08-31), REMOVE the rows it added as above: the names whose Roster `source` is that response row (Ryan's go). |
 | **Roster change for a club not on file** | Nothing changed, the mentor got no confirmation, and it is never retried. Find the club under another name or partner ("Renaming a club", "Moving a club to another partner"), run **GLOW → Google Forms → Update form dropdowns from the Roster**, then enter the change from the response row (or ask the partner) and tell the mentor. A truly new club uses "Enroll a NEW club". |
 | **Partner has no region** | Its girls reach no attendance form. A misspelled partner → "Moving a club to another partner". Otherwise set the Partners-tab region (`Africa`, `Asia`, `Latin America`, `U.S`), run **GLOW → Refresh regions from the Partners tab**, and check that the region's next SyncLog row says `applied`. |
-| **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old, or one refused because its Timestamp cell is not a date (a retry fails the same way): enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result starts with neither `ERROR:` nor `HELD:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. A retry the duplicate-club guard held (`HELD:`) continues as its **New club held as a possible duplicate** item: close this one. |
+| **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old, or one refused because its Timestamp cell is not a date (a retry fails the same way): enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result starts with neither `ERROR:` nor `HELD:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. A retry that was held (`HELD:`) continues as its **New club held as a possible duplicate** or **Club name already used by another partner — ask for a different name** item: close this one. |
 
 ## Google Forms wording
 
@@ -1077,6 +1101,27 @@ that can be the same code). For the 2026-09-28 integration deploy that is
 `git checkout 986a325 -- appsscript && npm run clasp:push`. First read
 "Rolling back `appsscript/`" above: the floors (`7a175c4`, and `986a325`
 once the Feedback tab has two reply columns) and held new clubs.
+
+**The same-name push (2026-09-30, Part 2 of
+[plans/2026-09-30-same-name-clubs.md](plans/2026-09-30-same-name-clubs.md);
+build notes: [plans/2026-09-30-same-name-intake.md](plans/2026-09-30-same-name-intake.md))**
+is a normal push: no new Google service, so no new scope and no
+re-authorisation (`make check` guards the list of services). Nothing runs
+at the push and no menu item is needed after it. From the next "Enroll a NEW
+club" response on, a club name another partner's club has is held
+("Working the ReviewQueue"); from the next Monday e-mail on, each "waiting
+to be created in Salesforce" line starts with the exact account name — the
+club name, or `<club> - <partner>` when another partner's active club has
+the same name. That name is worked out from the Roster when the e-mail is
+sent. On a form the long or plain name is sticky (a club keeps `<club> -
+<partner>` after its namesake leaves, and keeps its plain name when a
+namesake turns up later), so the form's club list is the authority: a line
+with a shared name ends "NAME SHARED … use exactly that text" — look the
+club up in its attendance form's club list before creating the account. An
+account named otherwise than the form sends gets a stray twin in Salesforce
+at the club's first attendance. To undo the push, push the
+`appsscript/` that was deployed before it ("Same-name holds and a rollback
+below the same-name check", above).
 
 ## Roster rebuild and upload (offline path)
 
