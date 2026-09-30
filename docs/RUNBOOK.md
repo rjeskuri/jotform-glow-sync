@@ -452,8 +452,8 @@ so its mentors cannot submit, and every later run reports `in-sync` (a
 rules-only difference is not a change to the runner, as on a form without
 the guard, where the new roster never shows). **Do the dry run and
 `--apply` by hand straight away** after any APPLY FAILED. A form without the element keeps exactly today's rules, except the
-spelling fix below. **Status:** built 2026-09-29 on `wf5/club-guard`, not
-deployed.
+spelling fix below. **Status:** live on all five forms since 2026-09-30
+(template q482, U.S q445, Latin America q453, Asia q456, Africa q462).
 
 The spelling fix is not gated. On a multi-select, Jotform's `equals` is
 case-sensitive, so a roster rule spelled unlike the picker's option never
@@ -540,7 +540,9 @@ Check in the browser (the template, then each regional form):
    (the require rule's Disable must lift too).
 3. With two clubs picked, press Enter in the Partner Coordinator Email box
    on a desktop: the form does not submit.
-4. Switch the language (e.g. Español): the warning is translated.
+4. Switch the language (e.g. Español): the warning is translated. Every
+   form saves the chosen language in the browser (`saveUserLanguage`), so
+   the next form opened there starts in it too; switch back to English.
 5. Chrome "Translate page" with one club picked: no warning, Submit shows.
 6. The builder's Conditions page shows no error marks.
 7. The template only: one test submission. Question 5 holds exactly the

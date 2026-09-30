@@ -1,7 +1,7 @@
 ---
 title: One club per attendance submission (the multi-club guard)
 author: Claude (workflow track "club-guard", 2026-09-29)
-status: accepted         # by Ryan 2026-09-30 (the wording, GUARD_DISABLES_SUBMIT = True); merged 3ed68b2; the rollout is a later window
+status: done             # accepted by Ryan 2026-09-30 (the wording, GUARD_DISABLES_SUBMIT = True); merged 3ed68b2; live on all five forms the same day (Result)
 created: 2026-09-29
 intent: docs/intent/2026-09-01-club-picker.md (its open question: "confirm a mentor cannot pick two clubs … if two can be picked, add a guard rule")
 ---
@@ -341,3 +341,28 @@ question 5 exactly the club, question 18 lists the ticked names. Then
 U.S, Latin America, Asia, Africa (smallest first), `--club-guard` and
 `--partner-picker` as separate commands. `AUTO_SYNC_APPLY=1`; `auto_sync.py`
 dry run in-sync.
+
+## Result (2026-09-30, with Ryan's go)
+`AUTO_SYNC_APPLY=0`; per form, smallest first after the template: `backup_forms.py`, the translation
+audit, the `--club-guard` dry run (`UPDATE club picker (N clubs: calcValues)`, `CREATE club guard`,
+`REPLACE conditions (M+2 rules)`, `K kept, 2 new, 0 dropped`, no roster change), `--apply`, a second dry
+run (`nothing to do`), `form_status --rendered`, `add_translations.py --apply`, the audit again.
+
+| Form | Conditions backup | Guard | Rules | `--rendered` | Warning translated |
+|---|---|---|---|---|---|
+| template 262352490535154 | `properties-2026-09-30T1429.json` | q482 | 399 → 401 | 359 options, 359 aligned | 11 languages (33 entries; a 504 that landed) |
+| U.S 262382706852058 | `properties-2026-09-30T1446.json` | q445 | 41 → 43 | 12 / 12 | 11 languages |
+| Latin America 262383455778067 | `properties-2026-09-30T1447.json` | q453 | 68 → 70 | 39 / 39 | 11 languages |
+| Asia 262383129464057 | `properties-2026-09-30T1449.json` | q456 | 125 → 127 | 96 / 96 | 13 languages (39 entries; a 504 that landed) |
+| Africa 262382821971058 | `properties-2026-09-30T1450.json` | q462 | 255 → 257 | 216 / 216 | 11 languages |
+
+- `PICKER_CALC_LEADING_EMPTY = True` is right for the multi-select (the hard stop passed on the template
+  before any regional form). `form_status` CLEAN on all five; every audit after = before (no club created).
+- Ryan's browser checks passed on all five forms (one club: Submit shows; two: the warning and no
+  Submit; removed: both back). A chosen language carries to the next form in the same browser
+  (`saveUserLanguage` on every form; not a change of ours — the form properties differ from the
+  backups only in `lastQuestionID`).
+- `AUTO_SYNC_APPLY=1`; a manual runner apply (GitHub run 36675680617): every region in-sync.
+- Still open: a template test submission (question 5 exactly the club, question 18 the ticked names);
+  BACKLOG 48's remaining items (the 20 fused submissions before any Salesforce back-fill; the 16
+  empty Contact_IDs; the stale-rules follow-up).

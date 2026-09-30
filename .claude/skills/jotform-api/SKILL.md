@@ -60,9 +60,10 @@ unless `--apply`.
   still unobserved — `tools/fix_roster_order.py` writes only to empty orders.
 - Dropdown `calcValues` has a leading empty slot for the placeholder on a single-select:
   `len(calcValues.split('|')) == len(options.split('|')) + 1`. A multi-select renders no
-  placeholder; whether it still wants the slot is **unverified** — `form_status.py --rendered`
-  on the template (every option's `value` = its `data-calcvalue`) decides before a regional
-  form gets the club guard (`glow/sync.py PICKER_CALC_LEADING_EMPTY`).
+  placeholder but still wants the slot: with `PICKER_CALC_LEADING_EMPTY = True`
+  (`glow/sync.py`) every rendered option's `data-calcvalue` equals its `value` — verified
+  2026-09-30 by `form_status.py --rendered` on all five forms (359/12/39/96/216 options, 0
+  different). The calculation copy into question 5 then reads the calcValue.
 - Dropdown with `multipleSelections=Yes` renders Jotform's own searchable component (the
   `searchText` property is its placeholder, `visibleOptions` the rows shown). `maxSelection` /
   `minSelection` are checkbox-only and are silently dropped on dropdowns.

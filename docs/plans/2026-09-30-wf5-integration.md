@@ -1,7 +1,7 @@
 ---
 title: Rosters above Submit and the club guard, merged together (wf5 integration)
 author: Claude (workflow integrator, wf5/integration, 2026-09-30)
-status: in-progress      # accepted by Ryan 2026-09-30 with both plans below; merged + the roster-order repair done (Result); the club guard rollout is a later window
+status: done             # accepted by Ryan 2026-09-30 with both plans below; merged, the roster-order repair and the club guard live on all five forms the same day (Result)
 created: 2026-09-30
 intent: none — integrates [plans/2026-09-29-rosters-above-submit.md](2026-09-29-rosters-above-submit.md) (BACKLOG 47) and [plans/2026-09-29-club-guard.md](2026-09-29-club-guard.md) (BACKLOG 48)
 ---
@@ -152,3 +152,8 @@ Africa's rules-only apply (`conditions: 254 kept, 1 new, 1 dropped`: the SUPER G
 update, verified clean) → `auto_sync.py` in-sync everywhere. Details in the rosters plan's Result.
 Remaining: the club guard window (live steps 8–10 above, template first with the `--rendered`
 hard stop), then BACKLOG 46 and 45 on the repaired forms.
+
+## Result (2026-09-30, second window)
+The club guard on all five forms the same day (template first with the `--rendered` hard stop, then
+U.S, Latin America, Asia, Africa), Ryan's browser checks passed, `AUTO_SYNC_APPLY=1`, runner in-sync.
+Details in the club-guard plan's Result.
