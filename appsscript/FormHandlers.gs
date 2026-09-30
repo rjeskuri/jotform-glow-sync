@@ -38,6 +38,14 @@ const HOLD_ISSUE = 'New club held as a possible duplicate';   // its ReviewQueue
 /** …or, when its name is another partner's club's: a new club may not take a name in use. */
 const SAME_NAME_ISSUE = 'Club name already used by another partner — ask for a different name';
 const HOLD_ISSUES = [HOLD_ISSUE, SAME_NAME_ISSUE];   // the items a held response is released by
+/**
+ * An issue as holdDecisions_ compares it: capitals and spacing ignored, and
+ * any dash (a hyphen, two hyphens, an en or em dash) is one dash — an item
+ * added back by hand is typed on a keyboard that has no long dash.
+ */
+function issueKey_(s) {
+  return key_(s).replace(/\s*[-\u2010-\u2015\u2212]+\s*/g, ' - ');
+}
 /** Why runResponse_ refuses a Club Roster Form response with no sent day (FormLog ERROR, queued). */
 const NO_SENT_DAY_ERROR = 'its Timestamp cell is not a date, so the day it was sent is unknown ' +
     'and the replay guard cannot run: enter the change fresh on the Club Roster Form instead ' +
@@ -1040,7 +1048,9 @@ function feedbackReviewItem_(a, source, sentDay, reason) {
  * what to fix before a release (orgHoldStep_; handleNewClub_ refuses until then).
  * A hold for a name another partner's club has (alone or with other reasons)
  * is SAME_NAME_ISSUE: it may still be that club sent under the wrong partner,
- * so the item says that first, then the new name a release needs.
+ * so the item says that first — and that a club on file under the wrong
+ * partner is moved, then released with its name unchanged (the response
+ * then runs as that existing club) — then the new name a release needs.
  */
 function heldClubReviewItem_(partner, club, source, sentAt, reasons) {
   const org = reasons.some(function (r) { return r.kind === 'partner'; });
@@ -1053,6 +1063,10 @@ function heldClubReviewItem_(partner, club, source, sentAt, reasons) {
       partner: partner, club: club,
       detail: head + 'That club, sent under the wrong partner (or another club on file): enter ' +
           'only its new girls on "' + Q.ACTION_MOD + '" for the club on file, then resolve. ' +
+          'That club, and the Roster has it under the wrong partner (or it has moved to this ' +
+          'one): move the club on file first (docs/RUNBOOK.md, "Moving a club to another ' +
+          'partner"), then ' + release + ' with the name unchanged and run "Process any ' +
+          'missed form responses". ' +
           'A new club: it may not take a name another partner\'s club has (the attendance form ' +
           'and Salesforce tell clubs apart by name) — ' +
           (org ? 'first, ' + orgHoldStep_() + '; then ' : '') + sameNameHoldStep_() + ', then ' +
@@ -1078,11 +1092,13 @@ function heldClubReviewItem_(partner, club, source, sentAt, reasons) {
  * sentAt}} from the LAST hold item (HOLD_ISSUES) tagged with that response row:
  * state 'open' (resolved empty), 'release' (resolved starts with the word
  * "release") or 'closed' (any other text); sentAt from its "(sent …)".
+ * The issue is matched as issueKey_ reads it (an item restored by hand); the
+ * tag and the sent time stay exact.
  */
 function holdDecisions_(rows) {
-  const out = {};
+  const out = {}, issues = HOLD_ISSUES.map(issueKey_);
   rows.forEach(function (r) {
-    if (HOLD_ISSUES.indexOf(tidy_(r.issue)) === -1) return;
+    if (issues.indexOf(issueKey_(r.issue)) === -1) return;
     const detail = String(r.detail == null ? '' : r.detail);
     const tag = detail.match(/\[#([^\]]*)\]\s*$/), sent = detail.match(/\(sent ([^)]*)\)/);
     if (!tag) return;

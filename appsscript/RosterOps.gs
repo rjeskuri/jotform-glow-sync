@@ -281,8 +281,9 @@ const SCHOOL_LEVELS = { pri: 'primary', primary: 'primary', primaria: 'primary',
  *
  *   reenroll  the (partner, club) is on file, but fewer than half of the names
  *             sent are on its roster AND fewer than half of its active girls
- *             are in the list (the 2026-08-31 case: another club's list). No
- *             other check runs for a club on file.
+ *             are in the list (the 2026-08-31 case: another club's list). The
+ *             only other check for a club on file is samename, and only when
+ *             it has no active girl.
  *   names     at least half of the names sent, and at least MIN_SHARED, are
  *             active in ONE existing club — of any partner
  *   club      the club name is close to a club of the same partner, or of a
@@ -297,6 +298,17 @@ const SCHOOL_LEVELS = { pri: 'primary', primary: 'primary', primaria: 'primary',
  *             A partner the typed organization is close to is not "another":
  *             that case is the club + partner reasons. Listed first; a
  *             release never skips it (handleNewClub_).
+ *             The partner's OWN club on file is not a new club and is never
+ *             held for its name — unless it has no active girl and another
+ *             partner's club has the name: a retired club sent again (the
+ *             2026-09-30 duplicates) has no roster on the forms any more, so
+ *             the sync would treat it as a new club and refuse to add it.
+ *             Held with its own text, alone; a release is refused like any
+ *             samename (docs/RUNBOOK.md has the one false hold this makes).
+ *             Who "has the name" is every Roster row with a partner and a
+ *             club, a girl's name or not — Python's roster_pairs, which the
+ *             sync's own check goes by; the other reasons count only rows
+ *             with a girl's name, as before.
  *
  * entry:    {partner, club, names, typedPartner} as the handler would file it
  * rows:     the Roster (loadRoster_().rows): {partner, club, full_name, status}
@@ -304,10 +316,13 @@ const SCHOOL_LEVELS = { pri: 'primary', primary: 'primary', primaria: 'primary',
  */
 function newClubHoldReasons_(entry, rows, partners) {
   const clubs = Object.create(null), activeIn = Object.create(null);
+  const holders = Object.create(null);   // every (partner, club) the Roster has: who has a club name
   rows.forEach(function (r) {
     const p = tidy_(r.partner), c = tidy_(r.club), n = foldKey_(r.full_name);
-    if (!p || !c || !n) return;
+    if (!p || !c) return;
     const ck = key_(p) + '||' + key_(c);
+    if (!holders[ck]) holders[ck] = { partner: p, club: c };
+    if (!n) return;
     const club = clubs[ck] ||
         (clubs[ck] = { partner: p, club: c, all: Object.create(null), active: Object.create(null) });
     club.all[n] = true;
@@ -324,11 +339,23 @@ function newClubHoldReasons_(entry, rows, partners) {
     return items.slice(0, DUP_GUARD.MAX_LISTED).join('; ') +
         (items.length > DUP_GUARD.MAX_LISTED ? ' and ' + (items.length - DUP_GUARD.MAX_LISTED) + ' more' : '');
   };
-  const pk = key_(entry.partner);
+  const pk = key_(entry.partner), name = key_(entry.club);
+  // a club as the hold texts name it: the spelling of its rows with a girl's name, if it has any
+  const named = function (ck) { const x = clubs[ck] || holders[ck]; return x.club + ' (' + x.partner + ')'; };
 
-  const own = clubs[pk + '||' + key_(entry.club)];
+  const own = clubs[pk + '||' + name];
   if (own) {
     const onFile = count(names, own.all), active = Object.keys(own.active);
+    if (!active.length) {
+      // retired, and the name is another partner's club's: on the forms it would be a new club
+      const others = Object.keys(holders).sort().filter(function (ck) {
+        return key_(holders[ck].club) === name && key_(holders[ck].partner) !== pk;
+      });
+      if (others.length) {
+        return [{ kind: 'samename', text: 'this club is on file with no active girl, and the club name ' +
+                  'is already used by ' + listed(others.map(named)) }];
+      }
+    }
     const kept = count(active, sent);
     if (onFile < names.length * DUP_GUARD.REENROLL_SHARE && kept < active.length * DUP_GUARD.REENROLL_SHARE) {
       return [{ kind: 'reenroll', text: 'this club is already enrolled, but only ' + onFile + ' of the ' +
@@ -344,16 +371,14 @@ function newClubHoldReasons_(entry, rows, partners) {
   const related = entry.typedPartner && !onFile[pk]
       ? Object.keys(onFile).sort().filter(function (k) { return partnersClose_(entry.partner, onFile[k]); })
       : [];
-  const named = function (ck) { return clubs[ck].club + ' (' + clubs[ck].partner + ')'; };
 
   const reasons = [];
-  const name = key_(entry.club);
-  const taken = Object.keys(clubs).sort().filter(function (ck) {
-    const k = key_(clubs[ck].partner);
-    return key_(clubs[ck].club) === name && k !== pk && related.indexOf(k) === -1;
+  const taken = Object.keys(holders).sort().filter(function (ck) {
+    const k = key_(holders[ck].partner);
+    return key_(holders[ck].club) === name && k !== pk && related.indexOf(k) === -1;
   });
-  const listedAs = Object.keys(clubs).sort().filter(function (ck) {
-    return key_(sfLongName_(clubs[ck].club, clubs[ck].partner)) === name;
+  const listedAs = Object.keys(holders).sort().filter(function (ck) {
+    return key_(sfLongName_(holders[ck].club, holders[ck].partner)) === name;
   });
   if (taken.length || listedAs.length) {
     reasons.push({ kind: 'samename', text: [
@@ -528,15 +553,16 @@ function matchingChars_(a, b) {
 /**
  * The club names that ACTIVE clubs of two or more partners have, in any
  * region: {key_(club): true}. rows: the Roster (loadRoster_().rows). A row
- * with no partner or no club reaches no form and is ignored; status compares
- * as the Python reader does (spacing and case ignored).
+ * with no partner, no club or no girl's name reaches no form and is ignored
+ * (a club is active when it has an active girl: Python's roster_pairs);
+ * status compares as the Python reader does (spacing and case ignored).
  */
 function sharedClubNames_(rows) {
   const partnersOf = Object.create(null);
   rows.forEach(function (r) {
     if (key_(r.status) !== STATUS.ACTIVE) return;
     const p = key_(r.partner), c = key_(r.club);
-    if (!p || !c) return;
+    if (!p || !c || !tidy_(r.full_name)) return;
     (partnersOf[c] = partnersOf[c] || Object.create(null))[p] = true;
   });
   const shared = Object.create(null);

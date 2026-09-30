@@ -113,11 +113,21 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
   check compare with `glow.text.key`, which keeps them. A club cell with a
   zero-width character inside is the same name in Apps Script and a
   different one in Python (the intake errs toward holding). Cells the form
-  handlers write never hold one. Also: the intake check counts Roster rows
-  of any status, the Monday e-mail's names follow today's active rows, and
-  on a form the long or plain name is sticky once switched — so the e-mail
-  can print a plain name for a club whose form entry is still
-  `<club> - <partner>` after its namesake left.
+  handlers write never hold one (likewise a girl's name cell with only
+  such characters is no name in Apps Script). Also: the intake check counts
+  Roster rows of any status, with a girl's name or not (as `roster_pairs`),
+  the Monday e-mail's names follow today's active rows that have a girl's
+  name (as `shared_club_names(active_only=True)`), and on a form the long
+  or plain name is sticky once switched — so the e-mail can print a plain
+  name for a club whose form entry is still `<club> - <partner>` after its
+  namesake left.
+- A club on file with no active girl, sent again on "Enroll a NEW club" by
+  its own partner while another partner's club has its name, is held at
+  intake (`newClubHoldReasons_`) whether or not its roster is still on the
+  form — Apps Script cannot see the form. The sync refuses such a club only
+  when it has to create the roster (a retired club whose question was
+  deleted) and takes up a roster that is still there. RUNBOOK "Working the
+  ReviewQueue" has the way out for that one false hold.
 - `read_roster_csv` matches `--region` case-insensitively; `form_status.py`
   matches the region string exactly.
 - `parse_roster` splits on every Unicode line break (`str.splitlines`:

@@ -64,13 +64,24 @@ Alpha Club).
   a plural, a typo or an added number is a different name — the
   close-name check of 2026-09-28 stays a same-partner check).
 - **Which clubs count.** Every Roster row with a partner and a club, any
-  status, any region. A partner the typed organization is *close to*
-  ("not in this list" + a retyped partner) is not "another partner": that
-  case stays the club + organization hold of 2026-09-28, so staff are not
-  told to ask for a new name when it is the same partner, retyped.
-- **Never an existing club.** A (partner, club) already on file is not a new
-  club: its own "Enroll a NEW club" runs as before (today's 7 same-name
-  clubs included). An existing club's name never changes.
+  status, any region, with a girl's name or not (Python's `roster_pairs`,
+  which the sync's own check goes by). A partner the typed organization is
+  *close to* ("not in this list" + a retyped partner) is not "another
+  partner": that case stays the club + organization hold of 2026-09-28, so
+  staff are not told to ask for a new name when it is the same partner,
+  retyped.
+- **Never an existing club with active girls.** A (partner, club) on file
+  that has an active girl is not a new club: its own "Enroll a NEW club"
+  runs as before (today's 7 same-name clubs included). An existing club's
+  name never changes.
+- **A club on file with no active girl is held** when another partner's
+  club has its name (review fix, 2026-09-30): the reason reads "this club is
+  on file with no active girl, and the club name is already used by …", the
+  item and the refused release are those of any same-name hold. A retired
+  club's roster is off the forms, so the sync would treat it as a club to
+  create and refuse it; unheld, its girls went active on the Roster and
+  reached no form, with nothing in the ReviewQueue. A retired club whose
+  name nobody else has is reactivated as before.
 - **Also held:** a new club whose name reads as a club on file followed by
   its partner (`Stars - Partner One` while Partner One has `Stars`) — the
   sync refuses a club-list entry equal to another club's entry (second
@@ -83,14 +94,20 @@ Alpha Club).
   (names on file) — …`.
 - **The e-mail's name** is worked out from the Roster when the e-mail is
   sent, never stored (a renamed club or partner cannot leave it stale):
-  active rows only, status read as the Python reader reads it.
+  active rows that have a girl's name only (a club is active when it has an
+  active girl, as `shared_club_names(active_only=True)`), status read as
+  the Python reader reads it.
 
 ## What the push changes for staff
 - A new club with a name in use no longer lands on the Roster. It shows up
   on the ReviewQueue and in the Monday e-mail under the new issue; the
   RUNBOOK row says what to do (same club → add its girls to the club on
-  file; new club → ask for a different name, then edit the cell and
-  `release`, or have it sent again).
+  file; the club on file is under the wrong partner or has moved → move it,
+  then `release` with the name unchanged; new club → ask for a different
+  name, then edit the cell and `release`, or have it sent again).
+- The same happens to "Enroll a NEW club" sent for the partner's own club
+  that has no active girl left, when another partner's club has its name —
+  today the two clubs retired on 2026-09-30, and no other.
 - The "Process any missed form responses" dialogs mention the second kind
   of hold; a released same-name club runs only once its name is free.
 - The Monday e-mail's "waiting to be created in Salesforce" section says
@@ -128,6 +145,15 @@ Alpha Club).
    will be true after the merge with Part 1; the parity test comes with the
    integration.
 
+8. **A hold item restored by hand is matched loosely on its issue**
+   (`issueKey_`: capitals, spacing and the kind of dash ignored). The issue
+   literal has a long dash no keyboard types; the `[#…]` tag, the
+   `(sent …)` time and the word `release` stay exact.
+9. **The item's text has a third action**: the club on file is under the
+   wrong partner, or has moved — move it (RUNBOOK "Moving a club to another
+   partner"), then release with the name unchanged; the response then runs
+   as that existing club.
+
 ## Known divergences (documented, not fixed — CLAUDE.md rule 10)
 - `key_` drops invisible characters; `glow.text.key` keeps them. A club cell
   with a zero-width character inside is the same name for the intake check
@@ -137,16 +163,23 @@ Alpha Club).
 - The intake counts rows of any status; the e-mail's names follow active
   rows; a form's name is sticky. Deviation 5 covers the one case that
   matters.
+- The intake holds a club on file with no active girl whose name another
+  partner's club has, whether or not its roster is still on the form (Apps
+  Script cannot see the form); the sync refuses only a roster it would have
+  to create. The one false hold: a same-name club that merely lost every
+  girl and re-enrolls. None today; RUNBOOK "Working the ReviewQueue" has
+  Ryan's way out (one of its girls set active by hand, then a release).
 
 ## Not done here
 - A club or partner name with `|` or `{…}` (the sync refuses such a
   club-list entry) is not checked at intake. None on file today (proof).
 - The Club Roster Form's "Club name" help is unchanged (a wording migration
   is its own push and menu run).
-- A club on file with **no active girl** that is sent again by its own
-  partner is reactivated, as today, even when another partner's club has
-  its name (the two clubs retired on 2026-09-30 are such clubs). The sync
-  then refuses to add it and raises ATTENTION (Part 1). Decision below.
+- A club on file with only Roster rows that have **no girl's name** (none
+  today; it takes a hand-typed row) counts for the name check only: it is
+  not "the partner's own club on file", its name is not a close name, and
+  its partner is not a partner on file — the 2026-09-28 checks are
+  unchanged.
 
 ## Risks
 - **A wrong hold** (a legitimate second club of another partner wanting the
@@ -185,13 +218,48 @@ Alpha Club).
    uses this name — please reply with a different one", saving staff the
    first message. It would tell whoever typed an address into a public form
    that a club of that name exists. Built: the neutral note.
-2. **A retired same-name club sent again by its own partner** (see "Not done
-   here"): hold it for staff as well? Built: not held (an existing club's
-   name never changes).
+2. **A retired same-name club sent again by its own partner:** hold it for
+   staff as well? Built first: not held. **Changed by the review
+   (2026-09-30): held** — unheld, the club's girls went active on the
+   Roster, no attendance form showed them (the sync refuses to create the
+   club and raises ATTENTION on every run), and staff saw nothing in the
+   ReviewQueue or the Monday e-mail. Still yours to decide: the alternative
+   is to import it and only raise a ReviewQueue item, which brings back the
+   duplicate retired on 2026-09-30 and leaves the runner failing until the
+   club is renamed.
 3. **`|` and `{…}` in a new club's name at intake:** hold, strip, or leave
    to the sync's refusal? Built: left to the sync.
 4. **Issue text** as built (deviation 1) — change it before the push if you
    want other words; afterwards open items keep the old text.
+
+## Review fixes (2026-09-30, second pass)
+Five verified findings, each with a test that fails without its fix:
+- **intake-ops-1 (important).** A retired same-name club sent again by its
+  own partner passed the intake and was refused by the sync: now held (the
+  rule above; decision 2).
+- **intake-2.** A Roster row with no girl's name counted differently from
+  Python: `sharedClubNames_` now ignores it (a club is active when it has
+  an active girl), and the intake's "who has the name" now counts it (as
+  `roster_pairs`). Both functions are new on this branch, so neither is a
+  one-sided fix of deployed behaviour; 0 such rows on the live Roster.
+- **intake-ops-2.** No staff action for "the club on file is under the
+  wrong partner, or has moved": the item's text and the RUNBOOK row now
+  give it (deviation 9); the path itself already worked and is now tested.
+- **intake-ops-3.** A hold item restored by hand was matched on the exact
+  issue literal, long dash included: matched loosely now (deviation 8).
+- **intake-1.** The test "nothing pending: the Roster is not read" passed
+  whatever the code did (a Roster with only its header is never read): it
+  now has Roster rows, and a twin check shows the unreadable Roster does
+  stop the e-mail when a club is pending.
+
+Read-only re-run over a fresh Roster export after the fixes (scratch file,
+deleted; counts, club and partner names only): 6,946 rows, 6,847 active, 0
+rows with a partner and club but no girl's name; 364 clubs on file, 362
+with an active girl; 3 names shared by active clubs, 7 long names. Each
+club sending its own list with one new girl: **2 held** for their name —
+the two clubs retired on 2026-09-30 — and none of the 362 with active
+girls. A fictional new "Ruby" under a third partner: held, both Rubys
+listed.
 
 ## Proof
 `make check CSV=<the main checkout>/data/enrollment_2026-08-24.csv` on
@@ -222,7 +290,8 @@ Salesforce call).
   have been held for their name, none of the other 353.
 - A fictional new club with one of the shared names under a third partner:
   held (`samename`), every club of that name listed. Each club that has the
-  name, sending its own list with one new girl: not held.
+  name and an active girl, sending its own list with one new girl: not held
+  (since the review fixes the two retired clubs are: see above).
 - No active club's own re-enrollment is held for its name (0 of 362). No
   club on file has a name that reads as another club's `<club> - <partner>`;
   no club or partner name contains `|`, `{` or `}`.
