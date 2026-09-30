@@ -50,7 +50,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
 from glow.cli import run            # noqa: E402
 from glow.jotform import Client     # noqa: E402
-from glow.links import submit_button  # noqa: E402
+from glow.links import order_of as links_order_of, submit_button  # noqa: E402
 from glow.sync import (             # noqa: E402  - the parsers and structural ids,
     CLUB_NAME, CONTACT_IDS, GUARD_DISABLES_SUBMIT,   # shared with the
     GUARD_NAME, GUARD_PROPS,
@@ -767,9 +767,11 @@ def main():
     guard_field = None
     if guard_on and guard_qid is None:
         # a create at a taken order inserts (the picker took q5's order 3, q5 is now
-        # 4): the order after the picker's puts the warning directly below it
+        # 4): the order after the picker's puts the warning directly below it. The
+        # module's order_of (form_status checks the placement with it), not main()'s
+        # local helper, which wf5/rosters-above-submit removes
         fields = {"question[type]": "control_text", "question[name]": GUARD_NAME,
-                  "question[order]": str(order_of(questions[picker_qid]) + 1)}
+                  "question[order]": str(links_order_of(questions[picker_qid]) + 1)}
         fields.update({f"question[{k}]": v for k, v in GUARD_PROPS.items()})
         content = jf.post_form("/questions", fields, "CREATE club guard (below the Club picker)")
         if not args.apply:

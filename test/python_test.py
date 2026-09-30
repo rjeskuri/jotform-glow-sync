@@ -877,6 +877,19 @@ class ClubGuardFlow(unittest.TestCase):
         self.assertTrue(auto_sync.GUARD_RX.match("  - " + fake.calls[1]))
         self.assertTrue(auto_sync.PICKER_RX.match("  - " + fake.calls[0]))
 
+    def test_the_warning_is_placed_with_the_modules_order_of(self):
+        # the create takes the picker's order from glow.links.order_of (what form_status
+        # checks the placement with), not from main()'s local helper, which the parallel
+        # branch wf5/rosters-above-submit removes: after both merge that was a NameError
+        # between the picker write and the rules
+        from unittest import mock
+        fake = FakeForm(*self.form(guard=False, calc=False))
+        with mock.patch.object(sync, "links_order_of", side_effect=links.order_of) as spy:
+            code, _ = self.run_sync(fake, "--club-guard")
+        self.assertEqual(code, 0)
+        self.assertTrue(spy.called)
+        self.assertEqual(fake.writes[1][2]["question[order]"], "4")         # the picker's 3 + 1
+
     def test_apply_writes_picker_then_warning_then_rules_with_its_qid(self):
         qs, wire = self.form(guard=False, calc=False)
         fake = FakeForm(qs, wire, apply=True, created={"qid": 700})

@@ -233,6 +233,13 @@ HTML.
   applied roster change (Africa's SUPER GIRLS rule; `form_status` flags the
   bug until then). The guard is per form, by hand, with `AUTO_SYNC_APPLY=0`
   for the window.
+- **Merging with `wf5/rosters-above-submit`** (both fork from `0c095c0`):
+  that branch removes `main()`'s local `order_of`, so the guard's create
+  takes the picker's order from `glow.links.order_of`, imported as
+  `links_order_of` as that branch does (drop the duplicate import when
+  merging). Whoever merges second still adapts the ClubGuardFlow fixtures to
+  the layout code: its fake questions need a `qid`, and the layout's own
+  "expected one Submit button" refusal comes before the guard's.
 - **The warning is English until translations are applied** (the next step
   of the per-form procedure).
 - **Rollback per form**: `AUTO_SYNC_APPLY=0`; `backup_forms.py --form`;
