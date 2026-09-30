@@ -74,9 +74,6 @@ GUARD_DISABLES_SUBMIT = True
 # it still wants the slot is UNVERIFIED: the template's rendered page decides
 # (tools/form_status.py --rendered) before any regional form gets the guard.
 PICKER_CALC_LEADING_EMPTY = True
-# between the roster operands of the Contact_IDs (q18) sum on a guarded form
-# ("" switches it off): the processor splits q18 on commas, drops blank tokens
-CONTACT_IDS_SEPARATOR = ", "
 
 
 def guard_html(sentence=GUARD_SENTENCE):

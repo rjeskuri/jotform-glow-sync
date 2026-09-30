@@ -86,11 +86,28 @@ by type (`glow.links.submit_button`: exactly one, q2 everywhere). Size: +2
 rules of (options + 1) terms: template 337, Africa 217, Asia 97, Latin
 America 40, U.S 13 (options + 1 as read today).
 
-**E. Question 18 separator.** With the guard, the Contact_IDs equation puts
-`CONTACT_IDS_SEPARATOR` (", ") between the roster operands (today: none, so
-with two rosters visible the last girl of one fused with the first of the
-next — once). Gated on the guard like the rest, so it rolls out per form
-with the template-first test submission; the processor drops blank tokens.
+**E. Question 18 is left as it is (a separator was considered and
+dropped, 2026-09-30).** Without a separator, two visible rosters fuse the
+last girl of one with the first of the next (once, in a multi-club
+submission). On a guarded form that cannot reach a submission: Submit is
+hidden and disabled unless question 5 is exactly one option, a shared club
+name is partner-gated (a single-select, so one roster), and
+`ignoreHiddenFields` turns every other roster into "". The review read the
+five live forms' rules, 2026-09-30: no picker option plus partner shows two
+rosters. A separator in the equation, on the other hand, is written unconditionally
+(the runtime's `calculate()` appends every literal): (rosters − 1) × 2
+characters of ", , , …" on every guarded submission, ticks or none (Africa
+about 440, the template about 680). That text would go to `Contact_IDs__c`
+(its length unconfirmed), into the staff notification and the mentor's
+autoresponder (both print q18), and would make q18 never empty once a club
+is picked, which hides the 16 "girls ticked but empty Contact_IDs"
+submissions and rules out an `isEmpty` rule on q18 (BACKLOG 35). The guard
+rollout therefore leaves the q18 calculation byte-identical. If defence in
+depth is ever wanted for the two theoretical gaps (two picked names that
+join into a third, warned today; two same-partner clubs differing only in
+case), the sync should refuse those, or each roster option carry a
+calcValue with its own trailing comma — its own plan, after
+`Contact_IDs__c`'s length is confirmed.
 
 **F. `sync_attendance_form.py`.** `mk_hide`, `mk_disable`, `mk_require_rule`
 next to `mk_show` / `mk_field_rule`; `build_conditions(…, picker_options=None,
@@ -113,7 +130,7 @@ carries `calcValues`: aligned with the options under the chosen layout. With
 pinned HTML, rendering directly below the picker; exactly one field rule
 (Show guard + Hide Submit, link All, the full term list — missing and extra
 options reported) and one require rule (Disable Submit, the same terms); no
-other rule shows the guard; the q18 separator. Report line `club guard:
+other rule shows the guard. Report line `club guard:
 q<id> (N clubs)` or `club guard: none (a mentor can pick several clubs)`
 (informational: forms stay CLEAN before rollout). `--rendered`: GET the
 public page (curl, like every tool here), compare each picker option's
@@ -151,19 +168,18 @@ HTML.
    refused on every run** (the runner's included), not only with the flag:
    the sync cannot tell which one to show; refuse rather than guess, and the
    runner's ATTENTION names it.
-4. **`CONTACT_IDS_SEPARATOR` is a constant**, so the q18 separator can be
-   switched off in one place if the Salesforce field's length turns out to
-   be a problem (below, Risks).
+4. **No q18 separator** (section E): dropped after review, 2026-09-30. The
+   design's reason for it came from multi-club picks, which the guard now
+   blocks; its cost fell on every guarded submission.
 
 ## Files that change
 - `docs/plans/2026-09-29-club-guard.md` — this plan.
 - `glow/sync.py` — `GUARD_NAME`, `GUARD_SENTENCE`, `GUARD_PROPS`,
   `guard_html()`, `club_guards()`, `GUARD_DISABLES_SUBMIT`,
-  `PICKER_CALC_LEADING_EMPTY`, `picker_calc_values()`, `has_calc_values()`,
-  `CONTACT_IDS_SEPARATOR`.
+  `PICKER_CALC_LEADING_EMPTY`, `picker_calc_values()`, `has_calc_values()`.
 - `glow/links.py` — `translated_elements()`; the docstring's "no generated
   rule mentions any other element" narrowed to the links.
-- `sync_attendance_form.py` — A, B, D, E, F.
+- `sync_attendance_form.py` — A, B, D, F.
 - `tools/form_status.py` — G.
 - `tools/auto_sync.py` — H.
 - `tools/add_translations.py`, `tools/add_language.py`,
@@ -179,8 +195,9 @@ HTML.
 
 ## Order of work
 1. Commit this plan.
-2. `glow/sync.py` constants and helpers; `build_conditions` A, D, E with the
-   ConditionBuilder tests (without the guard: identical rules, normalised).
+2. `glow/sync.py` constants and helpers; `build_conditions` A, D with the
+   ConditionBuilder tests (without the guard: identical rules, normalised;
+   with it: the same rules plus the two guard rules at the end).
 3. `main()`: the flag, refusals, calcValues, the element, the summary — the
    ClubGuardFlow tests on a fake form.
 4. `form_status`, `auto_sync`, the translation tools, with their tests.
@@ -210,11 +227,6 @@ HTML.
   template, the largest, goes first; the builder's Conditions page must show
   no error marks. If the size bites, `GUARD_DISABLES_SUBMIT = False` halves
   the addition (and gives up the desktop Enter-key block).
-- **Question 18 length.** With the separator every submission's q18 carries
-  one ", " per roster (Africa: over 200 rosters, over 400 characters of
-  commas around the ticked names). If `Contact_IDs__c` is a short text field in
-  Salesforce this would overflow: Ryan checks the field type before the
-  regional rollout, or sets `CONTACT_IDS_SEPARATOR = ""`.
 - **The runner reads `main`**: merging changes no form except A on the next
   applied roster change (Africa's SUPER GIRLS rule; `form_status` flags the
   bug until then). The guard is per form, by hand, with `AUTO_SYNC_APPLY=0`
@@ -239,16 +251,21 @@ HTML.
     the same on both (it is synced by hand and was behind).
   - **With `--club-guard`** (dry run): every form plans `UPDATE club picker
     (N clubs: calcValues)`, `CREATE club guard (below the Club picker)` and
-    `REPLACE conditions` with two more rules — U.S 12 clubs, 41 → 43 rules,
-    `40 kept, 3 new, 1 dropped`; Latin America 39, 68 → 70; Asia 96,
-    125 → 127; Africa 216, 255 → 257 (`4 new, 2 dropped` with the spelling
-    fix); the template 359 (23 of them created in the same run), 376 → 378.
-    The 3 new rules are the two guard rules and the Contact_IDs sum with its
-    separator. No "two names join into a third" warning on any form.
+    `REPLACE conditions` with two more rules — U.S 12 clubs, 41 → 43 rules;
+    Latin America 39, 68 → 70; Asia 96, 125 → 127; Africa 216, 255 → 257;
+    the template 359 (23 of them created in the same run), 376 → 378. These
+    runs still had the q18 separator (section E, dropped afterwards), so
+    they printed `40 kept, 3 new, 1 dropped` (Africa and the template `4
+    new, 2 dropped` with the spelling fix). Without it the Contact_IDs sum
+    is unchanged and each count is one lower: `41 kept, 2 new, 0 dropped`,
+    the 2 new being the guard rules (`3 new, 1 dropped` on Africa and the
+    template) — pinned in the ClubGuardFlow tests, not re-run live. No "two
+    names join into a third" warning on any form.
     Measured in-process on the same dry runs (writes recorded, never sent):
     each guard rule has clubs + 1 terms (U.S 13, Latin America 40, Asia 97,
     Africa 217, template 360), the `calcValues` carry clubs + 1 slots, and
-    the conditions PUT grows by 60-69% on the two largest forms (Risks).
+    the conditions PUT grows by 60-69% on the two largest forms (Risks;
+    measured with the separator, which added under 700 bytes per form).
   - `form_status.py` (this branch, `--rendered`): the SUPER GIRLS rule
     flagged on Africa and the template only ("it has 'Super Girls'; a
     multi-select compares case"); `club guard: none` everywhere; errors 0,
@@ -295,7 +312,7 @@ warning, Submit shown; a second club → warning, Submit gone; remove it →
 both back; desktop Enter with two clubs does not submit; the language switch
 translates the warning; Chrome "Translate page" with one club → no warning;
 the builder's Conditions page has no error marks; one test submission:
-question 5 exactly the club, question 18 filled and comma-separated. Then
+question 5 exactly the club, question 18 lists the ticked names. Then
 U.S, Latin America, Asia, Africa (smallest first), `--club-guard` and
 `--partner-picker` as separate commands. `AUTO_SYNC_APPLY=1`; `auto_sync.py`
 dry run in-sync.

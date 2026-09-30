@@ -430,8 +430,8 @@ picked: question 5 is no club, and the warning shows while Submit goes away.
 Removing the extra club brings Submit back. On a guarded form the picker's
 `calcValues` are its own club names, so the copy into question 5 reads a value
 the browser's "Translate page" cannot alter (it altered 5 single-club picks,
-by one character). The Contact_IDs (q18) sum also puts ", " between the
-rosters.
+by one character). The Contact_IDs (q18) sum is left exactly as it is: with
+Submit shown, only one roster is visible.
 
 Added once per form. From then on every run, the runner's included, keeps the
 warning, both rules, the club list in the rules and the `calcValues` in step
@@ -475,11 +475,11 @@ python3 tools/add_translations.py --audit --form 262352490535154                
 
 The dry run prints `UPDATE club picker (N clubs: calcValues)`, `CREATE club
 guard (below the Club picker)` and `REPLACE conditions (M + 2 rules)`, with
-`conditions: K kept, 3 new, 1 dropped`. The 3 new are the two guard rules and
-the Contact_IDs sum with its separator, and the 1 dropped is the old sum.
-Read on 2026-09-29: U.S 12 clubs, 41 → 43 rules; Latin America 39, 68 → 70;
+`conditions: K kept, 2 new, 0 dropped`: the 2 new are the two guard rules;
+every other rule, the Contact_IDs sum included, is unchanged. Read on
+2026-09-29: U.S 12 clubs, 41 → 43 rules; Latin America 39, 68 → 70;
 Asia 96, 125 → 127. Africa (216 clubs, 255 → 257) and the template show
-`4 new, 2 dropped` while the SUPER GIRLS rule has not landed. The template
+`3 new, 1 dropped` while the SUPER GIRLS rule has not landed. The template
 also carries the roster creates and updates it is behind on (35 that day,
 the same ones the dry run without the flag plans).
 
@@ -507,7 +507,7 @@ Check in the browser (the template, then each regional form):
 5. Chrome "Translate page" with one club picked: no warning, Submit shows.
 6. The builder's Conditions page shows no error marks.
 7. The template only: one test submission. Question 5 holds exactly the
-   club, and question 18 lists the ticked names, comma-separated.
+   club, and question 18 lists the ticked names.
 
 When every form passes, set `AUTO_SYNC_APPLY=1`. Then an `auto_sync.py` dry
 run shows every region `in-sync`.

@@ -30,7 +30,7 @@ Jotform native Salesforce V2 integration → Attendance_Batch__c
    roster, "ignore hidden fields" on, so only the visible club's ticked names arrive),
    Module__c / Module_Week__c / Module_Year__c ← qids 98 / 100 / 102
    (with the club guard: Submit is hidden and disabled unless q5 is exactly one picker option,
-   and q18 puts ", " between the rosters — docs/plans/2026-09-29-club-guard.md)
+   so only one roster is visible when a mentor submits — docs/plans/2026-09-29-club-guard.md)
 ```
 
 The legacy path still exists for the template form: a CSV export of the raw

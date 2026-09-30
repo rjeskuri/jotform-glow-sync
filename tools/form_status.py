@@ -31,7 +31,7 @@ from glow.cli import run                   # noqa: E402
 from glow.jotform import Client            # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
-    CONTACT_IDS_SEPARATOR, GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, PICKER_NAME,
+    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, PICKER_NAME,
     club_guards, has_calc_values, partner_picker, picker_calc_values)
 from glow.text import key, name_key        # noqa: E402
 
@@ -118,8 +118,8 @@ def audit_picker(questions, conditions):
 def audit_club_guard(questions, conditions):
     """The one-club-per-submission guard (glow.sync.GUARD_NAME), when a form
     has it: its element, its placement directly below the picker, its two
-    rules with the full term list, and the Contact_IDs separator. [] on a
-    form without it (docs/plans/2026-09-29-club-guard.md)."""
+    rules with the full term list. [] on a form without it
+    (docs/plans/2026-09-29-club-guard.md)."""
     guards = club_guards(questions)
     if not guards:
         return []
@@ -188,14 +188,6 @@ def audit_club_guard(questions, conditions):
     check(shows, "show the club guard", "field", [("Hide", submit), ("Show", gid)])
     if GUARD_DISABLES_SUBMIT:
         check(disables, "disable Submit", "require", [("Disable", submit)])
-    if CONTACT_IDS_SEPARATOR:
-        for c, _, acts in rules:
-            for x in acts:
-                if str(x.get("resultField")) == CONTACT_IDS_QID:
-                    gaps = re.findall(r"\}(.*?)\{", str(x.get("equation", "")))
-                    if any(gap != CONTACT_IDS_SEPARATOR for gap in gaps):
-                        problems.append(f"the Contact_IDs calculation joins the rosters without the "
-                                        f"{CONTACT_IDS_SEPARATOR!r} the guard brings")
     return problems
 
 

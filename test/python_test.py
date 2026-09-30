@@ -447,12 +447,8 @@ class ConditionBuilder(unittest.TestCase):
         today = self.rules(picker="500")
         conds = self.guarded()
         self.assertEqual(len(conds), len(today) + 2)
-        # every other rule is today's, at the same index (the q18 separator aside)
-        norm = sync._norm_rules(conds)[:-2]
-        base = sync._norm_rules(today)
-        changed = [i for i, (a, b) in enumerate(zip(norm, base)) if a != b]
-        self.assertEqual(len(changed), 1)
-        self.assertIn(sync.CONTACT_IDS, norm[changed[0]][3])
+        # every other rule is today's, at the same index, the Contact_IDs sum included
+        self.assertEqual(sync._norm_rules(conds)[:-2], sync._norm_rules(today))
         show, req = conds[-2:]
         want_terms = [("500", "isFilled", "")] + [(sync.CLUB_NAME, "notEquals", o) for o in self.OPTIONS]
         for rule in (show, req):
@@ -481,16 +477,18 @@ class ConditionBuilder(unittest.TestCase):
         self.assertEqual(len(conds), len(self.rules(picker="500")) + 1)
         self.assertEqual(conds[-1]["type"], "field")
 
-    def test_contact_ids_are_separated_only_with_the_guard(self):
+    def test_the_guard_leaves_the_contact_ids_sum_as_it_is(self):
+        # q18 is what Salesforce reads (Contact_IDs__c) and the e-mails print: a
+        # literal between the operands would be written once per roster pair,
+        # hidden rosters included, on every guarded submission. With the guard
+        # only one roster is visible while Submit is, so nothing can fuse.
         def agg(conds):
             return [c["action"][0] for c in conds if c["type"] == "calculation"
                     and c["action"][0]["resultField"] == sync.CONTACT_IDS][0]
-        self.assertEqual(agg(self.guarded())["equation"], "{10}, {11}, {12}, {13}")
-        self.assertEqual(agg(self.guarded())["operands"], "10,11,12,13")
-        self.assertTrue(agg(self.guarded())["ignoreHiddenFields"])
-        self.assertEqual(sync.CONTACT_IDS_SEPARATOR, ", ")
-        self.assertEqual(agg(self.rules(picker="500", picker_options=self.OPTIONS))["equation"],
-                         "{10}{11}{12}{13}")
+        unguarded = agg(self.rules(picker="500", picker_options=self.OPTIONS))
+        self.assertEqual(agg(self.guarded()), unguarded)
+        self.assertEqual((unguarded["equation"], unguarded["operands"]), ("{10}{11}{12}{13}", "10,11,12,13"))
+        self.assertTrue(unguarded["ignoreHiddenFields"])
 
     def test_club_terms_take_the_pickers_spelling(self):
         # two partners' "Stars" / "STARS": the picker lists the name once, and on a
@@ -865,7 +863,7 @@ class ClubGuardFlow(unittest.TestCase):
         self.assertEqual(fake.calls, ["UPDATE club picker (3 clubs: calcValues)",
                                       "CREATE club guard (below the Club picker)",
                                       f"REPLACE conditions ({len(wire) + 2} rules)"])
-        self.assertIn(f"conditions: {len(wire) - 1} kept, 3 new, 1 dropped", out)   # + the q18 separator
+        self.assertIn(f"conditions: {len(wire)} kept, 2 new, 0 dropped", out)   # the two guard rules only
         self.assertEqual(fake.writes[0][2], {"question[calcValues]": "|Alpha Club|Beta Club|Stars"})
         _, path, fields = fake.writes[1]
         self.assertEqual(path, "/questions")
@@ -899,7 +897,7 @@ class ClubGuardFlow(unittest.TestCase):
             self.assertEqual([(t["field"], t["operator"], t["value"]) for t in json.loads(rule["terms"])],
                              [("500", "isFilled", "")] + [(sync.CLUB_NAME, "notEquals", o) for o in self.OPTIONS])
         agg = [a for c in conds for a in json.loads(c["action"]) if a.get("resultField") == sync.CONTACT_IDS]
-        self.assertEqual(agg[0]["equation"], "{10}, {11}, {12}, {13}")
+        self.assertEqual(agg[0]["equation"], "{10}{11}{12}{13}")        # q18 exactly as before
         # question 5 is still filled from the Club picker, exactly as before
         copy = [a for c in conds for a in json.loads(c["action"]) if a.get("resultField") == sync.CLUB_NAME]
         self.assertEqual([(a["equation"], a["operands"]) for a in copy], [("{500}", "500")])
@@ -1194,10 +1192,6 @@ class FormStatusAudit(unittest.TestCase):
         only(qs, self.edit(wire, requires, terms=add), "tests 1 value(s) that are not the picker's options")
         filled = lambda c: json.dumps([t for t in json.loads(c["terms"]) if t["operator"] != "isFilled"])  # noqa: E731
         only(qs, self.edit(wire, requires, terms=filled), "does not test that the Club picker is filled")
-        # the q18 separator the guard brings
-        unsep = lambda c: c["action"].replace("}, {", "}{")                                # noqa: E731
-        only(qs, self.edit(wire, lambda c: '"resultField": "18"' in c["action"], action=unsep),
-             "joins the rosters without the ', '")
 
     def test_rendered_calc_values_are_counted_never_printed(self):
         page = ('<select id="input_500" name="q500_clubPicker[]" multiple="">'

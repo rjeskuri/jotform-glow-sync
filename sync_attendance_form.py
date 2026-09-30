@@ -52,7 +52,7 @@ from glow.cli import run            # noqa: E402
 from glow.jotform import Client     # noqa: E402
 from glow.links import submit_button  # noqa: E402
 from glow.sync import (             # noqa: E402  - the parsers and structural ids,
-    CLUB_NAME, CONTACT_IDS, CONTACT_IDS_SEPARATOR, GUARD_DISABLES_SUBMIT,   # shared with the
+    CLUB_NAME, CONTACT_IDS, GUARD_DISABLES_SUBMIT,   # shared with the
     GUARD_NAME, GUARD_PROPS,
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
     WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, has_calc_values, partner_fields,
@@ -252,12 +252,12 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
                                   week_qid, "{%s}" % week_qid))
     guarded = bool(picker and picker_options and guard and submit)
     roster_qids = sorted(club_questions, key=int)
-    # with the guard, a separator between the rosters: two visible rosters
-    # otherwise fuse the last girl of one with the first of the next
-    sep = CONTACT_IDS_SEPARATOR if guarded else ""
+    # no separator between the rosters, guard or not: only one roster can be
+    # visible when Submit is (the guard's rules), and a literal ", " would be
+    # written between every pair of operands, hidden ones included
     conds.append(mk_calc_rule(
         [mk_term(club_field, "isFilled")], CONTACT_IDS,
-        ",".join(roster_qids), sep.join("{%s}" % q for q in roster_qids),
+        ",".join(roster_qids), "".join("{%s}" % q for q in roster_qids),
         ignore_hidden=True, as_text=True))
 
     # D. one club per submission: question 5 (the copy of the picker) is not
