@@ -465,6 +465,7 @@ python3 backup_forms.py --form 262352490535154                                  
 python3 tools/add_translations.py --audit --form 262352490535154                       # before: note the counts
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-guard            # dry run
 python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-guard --apply    # add it
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154                         # "Club guard: q<id>", nothing to do (else Jotform altered what was written: stop)
 python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv              # "club guard: q<id> (N clubs)", rules CLEAN
 python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --rendered   # HARD STOP: N options, N with data-calcvalue = value
 python3 tools/add_translations.py --form 262352490535154                               # dry run: the warning's entries appear
