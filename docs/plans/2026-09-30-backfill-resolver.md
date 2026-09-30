@@ -140,4 +140,95 @@ the live forms, recorded below.
   (first finding). None exists today; `no_ticks_but_q18` would show it.
 
 ## Proof
-Recorded after the live run (below).
+
+### Offline
+`make check CSV=<the 2026-08-24 enrollment export>`: `real data …: parsed 328 clubs, 6210 girls`,
+`ALL CHECKS PASSED` ×3, `py: 40 files parse, 23 scripts answer --help`, `Ran 328 tests … OK`
+(27 of them `BackfillResolve`), `gs: 10 files parse`, `secrets: clean`, `docs-links: ok`,
+`fixtures: up to date`, `CHECK PASSED`.
+
+### Live, read-only (2026-09-30, fetched 12:57 UTC, at commit `11ba51c`)
+A fresh Roster export (6963 rows), the result and the raw copies went to a scratch directory
+outside the repository (`--out`, `--raw-dir`) and were deleted afterwards. The only calls were
+GETs, and four dry runs of the sync (no `--apply`); no form was out of step with the export
+(no "planned writes" note).
+
+| | Africa | Asia | Latin America | U.S | all |
+|---|---|---|---|---|---|
+| fetched (all `ACTIVE`) | 144 | 230 | 113 | 0 | 487 |
+| pre-launch, left out | 1 | 0 | 2 | 0 | 3 |
+| **submissions in range** | 143 | 230 | 111 | 0 | **484** |
+| with ticks | 115 | 212 | 93 | 0 | 420 |
+| no ticks | 28 | 18 | 18 | 0 | 64 |
+| **rows** | 116 | 212 | 93 | 0 | **421** |
+| distinct clubs | 49 | 77 | 28 | 0 | 154 |
+| distinct attendance dates | 26 | 28 | 28 | 0 | |
+| attendance dates from .. to | 2026-06-09 .. 09-29 | 2026-06-09 .. 09-30 | 2026-02-09 .. 09-30 | | |
+| created_at (US Eastern) from | 09-05 06:40:13 | 09-01 02:56:21 | 09-02 07:25:43 | | |
+| created_at (US Eastern) to | 09-30 08:36:40 | 09-30 08:44:02 | 09-30 07:42:18 | | |
+| several clubs picked (of them with ticks) | 12 (9) | 8 (8) | 0 | 0 | 20 (17) |
+| one club + one date more than once: groups / rows, all kept | 6 / 12 | 15 / 31 | 10 / 21 | 0 | 31 / 64 |
+| no tick but names in question 18 | 0 | 0 | 0 | 0 | 0 |
+
+Flags, rows (submissions):
+
+| flag | Africa | Asia | Latin America | all rows |
+|---|---|---|---|---|
+| `multi_club` | 2 (1) | 0 | 0 | 2 |
+| `q5_differs` | 15 (14) | 17 | 10 | 42 |
+| `q18_empty` | 6 | 9 | 2 | 17 |
+| `q18_differs` | 10 (9) | 6 | 0 | 16 |
+| `typed_era` | 19 | 10 | 40 | 69 |
+| `bare_shared_name` | 2 | 0 | 0 | 2 |
+| `retired_club` | 0 | 0 | 0 | 0 |
+| `no_account_name` | 0 | 0 | 0 | 0 |
+| `date_before_2026_09` | 1 | 3 | 5 | 9 |
+| `date_missing` | 0 | 0 | 0 | 0 |
+| `name_not_on_roster_now` | 1 | 4 | 0 | 5 |
+| `name_has_comma` | 0 | 0 | 0 | 0 |
+| `name_repeats` | 0 | 0 | 0 | 0 |
+
+`LEDGER: 484 submissions in range = 420 with rows (421 rows) + 64 with no tick - balanced; 3
+pre-launch left out`.
+
+### Checked independently of the tool
+A second script, written apart from the resolver and reading the raw copies and the live forms,
+found for every form: the ids with rows and the ids with no tick are exactly the active
+submissions in range, none in both; the rows are exactly the (submission, ticked checkbox)
+pairs; each row's names are that checkbox's ticks in order; `created_at` and `q5` as Jotform
+gave them; every `sf_account_name` is an option of that form's Club picker today (49 / 77 / 28
+distinct names); every row's club is its roster question's text today; every `club_code` is the
+single girl-id prefix the Roster has for that partner and club (no row without a code or a
+partner); every submission lists exactly the form's questions of today (244 / 121 / 64).
+
+### Against the numbers known beforehand
+| known on 2026-09-30 | the resolver |
+|---|---|
+| Africa 143, Asia about 229, Latin America 113, U.S 0 submissions | 144, 230, 113, 0 fetched (one more each on Africa and Asia since) |
+| about 20 submissions picked several clubs | 20 (12 Africa, 8 Asia). Only **one** of them ticked girls in two rosters, so `multi_club` is 1 submission, 2 rows; 16 ticked in one roster (one row, `q5_differs`), 3 ticked nothing |
+| 17 with ticks and an empty question 18 | 17 (`q18_empty`: 6 + 9 + 2) |
+| about 56 with no tick | **64**. All 64 have an empty question 18 and a photo. 8 of them are Africa submissions whose question 5 is a bare name two clubs share (Ruby 5, Super Girls 2, Shining Stars 1), which the earlier count seems to have set apart: 64 - 8 = 56 |
+| 10 Africa submissions with a bare shared name | 10 by question 5 (Ruby 7, Super Girls 2, Shining Stars 1), but only **2** have ticks - both Ruby, both `bare_shared_name`. The other 8 have no tick and therefore no row |
+
+### What the numbers say (for the loader and for Ryan)
+- **64 submissions have no ticked girl** and get no row. Each still has a date, a module and a
+  photo. Whether a session with nobody ticked is loaded at all is not the resolver's decision.
+- **8 of those are the shared-name clubs** (Ruby, Super Girls, Shining Stars). The likely cause
+  (not proven here): in those weeks such a roster showed only when the typed Partner box
+  matched, so the mentor saw no roster to tick. Which girls attended is not in Jotform for these.
+- **`q18_differs`, 15 submissions**: 12 differ from the ticked names only by spaces inside a
+  name; 3 really differ (the one two-roster submission, and two Asia submissions whose question
+  18 holds more names than are ticked).
+- **`q5_differs`, 42 rows**: 18 are the several-clubs-picked ones; 21 differ only in capitals or
+  spaces (16 typed, 5 picked); 3 are other single-club differences.
+- **`date_before_2026_09`, 9 rows**: attendance dates as early as February and June 2026 on
+  submissions created in September - likely a wrong month or year picked.
+- **Pre-launch, 3**: two of 2026-08-28 (one Africa, one Latin America, each with a tick) and one
+  Latin America submission of 2026-08-31 22:49:40 US Eastern, 70 minutes before the range
+  starts, with no tick.
+- **One club and one date more than once: 31 groups, 64 rows** - all kept.
+- No retired club, no roster without an account name, no name with a comma, none twice in a row.
+
+### Clean-up
+The scratch directory with the Roster export, the result and the raw copies was deleted after
+the run; nothing holding a name was written inside the repository.
