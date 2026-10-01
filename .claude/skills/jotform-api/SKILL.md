@@ -32,8 +32,8 @@ unless `--apply`.
   the club guard also disables it (runtime reading; first used by `--club-guard`, verified in
   the browser on the template before any regional form).
 - **The rule walk** (read 2026-09-30 in `jotform.forms.js`, md5 `841dc566a7`, byte-identical in
-  builds `9e75d6f1d83`, `772a1982daf`, `962dcbe2fa6` and `cca53a3a639`, the four the forms were
-  served on by 2026-10-01): `setConditions` reverses the rules array, and each field's listener
+  builds `9e75d6f1d83`, `772a1982daf`, `962dcbe2fa6`, `cca53a3a639` and `2dd4239c231`, the five
+  the forms were served on by 2026-10-01): `setConditions` reverses the rules array, and each field's listener
   walks the rules that test it in that reversed order, so **the rule at index 0 runs last**.
   Showing or hiding a field never re-runs a calculation (only a section or multi-field action
   with `clearFieldOnHide=enable` does), and **nothing recalculates at submit**. A calculation over

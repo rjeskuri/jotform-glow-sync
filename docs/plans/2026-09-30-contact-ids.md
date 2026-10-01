@@ -196,3 +196,24 @@ blocked; counts only), and fixed in the docs and tests; nothing in the code's be
 - *`--rendered` with the constants off.* A test now serves a page built under each of the eight
   combinations and reads it clean under the same combination, plus a page without question 18's
   calculation (three mutants of `rendered_problems` that survived the suite fail it).
+
+**Proof again after the review fixes, read-only (2026-10-01, from the branch).** A fresh Roster
+export (7,045 rows) in the session's scratch folder, deleted afterwards. The sync's dry run:
+
+| Form | Calls | Rules | Required |
+|---|---|---|---|
+| U.S | 12 | `REPLACE conditions (42 rules)`: 41 kept, 1 new, 1 dropped | 11 `REQUIRED roster` |
+| Latin America | 39 | 69: 68 kept, 1 new, 1 dropped | 38 |
+| Asia | 96 | 126: 125 kept, 1 new, 1 dropped | 95 |
+| Africa | 221 | 251: 250 kept, 1 new, 1 dropped | 220 |
+| template | 366 | 393 (+~2 once its new rosters exist): 390 kept, 3 new, 3 dropped | 358, plus 4 `UPDATE roster … ; required: Yes` |
+
+The template's backlog moved with the Roster (4 roster updates now, so one roster fewer on its
+own); the regional forms are as before, each with the one question-18 warning. `form_status
+--rendered` read all five NOT CLEAN with the same six problems each, every picker's
+`data-calcvalue` aligned and 0 roster boxes with `validate[required]`. Africa is now served on build
+`2dd4239c231`: `jotform.forms.js` is the same file (md5 `841dc566a7`), and its
+`formTranslation.v2.js` (the template's, which skips a missing `base` entry instead of filing it
+under "undefined") also translates only through `base`, so BACKLOG 57 holds there. `auto_sync.py`
+as a dry run on the export put all four regions at `attention` with the question-18 reason, the
+one the RUNBOOK's merge check reads. `make check`: CHECK PASSED, 434 Python tests.

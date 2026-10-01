@@ -839,7 +839,7 @@ one of two clubs, or clearing and re-picking a club, left question 18 equal to
 the visible ticks; with the old order it did not. Jotform's runtime file
 (`jotform.forms.js`, md5 `841dc566a7`) is byte-identical in every build the
 five forms were served on 2026-10-01 (`9e75d6f1d83` U.S, Latin America, Asia;
-`962dcbe2fa6` Africa; `cca53a3a639` template). A required checkbox has never
+`962dcbe2fa6`, later `2dd4239c231`, Africa; `cca53a3a639` template). A required checkbox has never
 been rendered by Jotform's server on these forms: the browser proof imitated
 the markup. The template's `--rendered` check after its write is a **hard
 stop**.
