@@ -2809,6 +2809,23 @@ class ContactIds(unittest.TestCase):
             self.assertIn(name, page)
             self.assertNotIn(name, json.dumps(self.rendered(page.replace("validate[required]", ""), qs)))
 
+    def test_the_served_page_follows_the_constants_in_every_combination(self):
+        # a form rolled back (all off) or with the operand alone off (the RUNBOOK's fallback)
+        # must pass the --rendered hard stop under the constants it was built with
+        import itertools
+        for combo in itertools.product((True, False), repeat=3):
+            qs, wire = self.form(combo)
+            with constants(*combo):
+                self.assertEqual(self.rendered(served_rules_and_rosters(qs, wire, required=combo[2]), qs)[0],
+                                 [], combo)
+        # both arrays served, but no calculation of question 18 in them: never vouched for
+        qs, wire = self.form()
+        page = served_rules_and_rosters(qs, [c for c in wire if '"resultField": "18"' not in c["action"]])
+        problems, r = self.rendered(page, qs)
+        self.assertIsNone(r["rendered_rules"]["position"])
+        self.assertEqual(problems, ["rendered page: no calculation of question 18 in JotForm.setConditions (page "
+                                    "not served, or its layout changed) - the served order cannot be vouched for"])
+
     def test_the_page_helpers(self):
         self.assertEqual(form_status.page_array("x JotForm.setConditions(  [1, {\"a\": 2}]);", "setConditions"),
                          [1, {"a": 2}])
@@ -5808,12 +5825,71 @@ class ContactIdsRunbook(unittest.TestCase):
         self.assertGreater(flat.rindex("`AUTO_SYNC_APPLY=1`"), flat.index("```bash"))   # back on at the end
         self.assertIn("**hard stop**", flat)
 
+    def test_the_rollout_merges_right_after_the_template(self):
+        # the runner syncs from main, and older code puts a rolled-out form back in the old
+        # order with its next roster change and reads CLEAN: the merge is a step of its own,
+        # between the template and the first regional form, before the runner is switched on
+        flat = " ".join(self.section().split())
+        m = flat.index("**merge and push**")
+        self.assertLess(flat.index("The template goes first"), m)
+        self.assertLess(m, flat.index("Then U.S, Latin America, Asia and Africa"))
+        self.assertLess(m, flat.index("```bash"))
+        self.assertLess(m, flat.rindex("`AUTO_SYNC_APPLY=1`"))
+        self.assertIn("nobody applies the template from another checkout", flat)
+        # proven with the runner's own refusal, which older code never gives
+        plan = auto_sync.parse_plan("DRY RUN (use --apply to write):\n  - REPLACE conditions (40 rules)\n"
+                                    f"  ! {auto_sync.CONTACT_IDS_STALE}: rule 39 of 40\n")
+        (reason,) = auto_sync.check_bands(plan)
+        quoted = flat.split("with the reason \"", 1)[1].split("\"", 1)[0]
+        for part in quoted.split(" … "):
+            self.assertIn(part, reason)
+        skill = " ".join(read(os.path.join(REPO, ".claude", "skills", "live-systems", "SKILL.md")).split())
+        self.assertIn("so merge right after the template's rollout", skill)
+
+    def test_the_required_message_is_english_on_four_forms(self):
+        # only U.S's translation store holds the `base` entry of Jotform's required text
+        # (read 2026-10-01): the rollout's Español check must not read English as a failure
+        flat = " ".join(self.section().split())
+        self.assertNotIn("in the form's language", flat)
+        self.assertNotIn("in the form's language", " ".join(read(os.path.join(REPO, "glow", "sync.py")).split()))
+        step7 = flat.split(" 7. ", 1)[1].split("`equal: false`", 1)[0]
+        self.assertIn("Spanish on U.S only", step7)
+        self.assertIn("template, Africa, Asia and Latin America it stays English", step7)
+        self.assertIn("not a failure", step7)
+        backlog = read(os.path.join(REPO, "docs", "BACKLOG.md"))
+        item = next(l for l in backlog.splitlines() if l.startswith("| 57 |"))
+        self.assertIn(f"`{md5('This field is required.')[:8]}…`", item)      # the key, cut (check_secrets)
+        self.assertIn("`base`", item)
+
+    def test_the_back_step_cannot_pass_from_the_browsers_memory(self):
+        # a default Chrome restores the page from its back-forward cache, where the old rules
+        # pass too: the step makes Chrome load it again and reads Jotform's own flag
+        flat = " ".join(self.section().split())
+        step6 = flat.split(" 6. ", 1)[1].split(" 7. ", 1)[0]
+        self.assertIn("addEventListener('unload', () => {})", step6)
+        self.assertIn("`bf: false`", step6)
+        self.assertIn("--disable-features=BackForwardCache", step6)
+        self.assertLess(step6.index("addEventListener"), step6.index("Back"))
+
+    def test_the_language_switcher_residual_says_what_the_required_flag_does(self):
+        flat = " ".join(self.section().split())
+        residual = flat.split("**Two clubs picked, then the form's own language switcher**", 1)[1]
+        for fragment in ("higher in the picker's list", "every shown roster has a tick",
+                         "Ticks in one roster only are refused", "Ticks in both still go through",
+                         "clears the picker and picks her club again"):
+            self.assertIn(fragment, residual)
+        backlog = read(os.path.join(REPO, "docs", "BACKLOG.md"))
+        item = next(l for l in backlog.splitlines() if l.startswith("| 56 |"))
+        self.assertIn("ticks in one roster only are refused", item)
+        self.assertIn("higher in the list", item)
+
     def test_the_console_check_prints_counts_only(self):
         js = self.section().split("```js", 1)[1].split("```", 1)[0].strip()
         returned = js.split("return {", 1)[1].split("};", 1)[0]
-        self.assertEqual(re.findall(r"(\w+):", returned), ["shown", "ticked", "q18", "equal", "flagged"])
+        self.assertEqual(re.findall(r"(\w+):", returned), ["shown", "ticked", "q18", "equal", "flagged", "bf"])
         self.assertNotIn("console.log", js)
         self.assertIn("input_18", js)
+        self.assertIn("JotForm.fromBFCache", js)
 
     def test_the_rollback_is_generated(self):
         rollback = " ".join(self.section().split("**Rollback**", 1)[1].split())
@@ -5821,6 +5897,12 @@ class ContactIdsRunbook(unittest.TestCase):
         self.assertIn("REQUIRED roster '<club>' (q…: No)", rollback)
         self.assertIn("restore_conditions.py", rollback)
         self.assertLess(rollback.index("`False`"), rollback.index("restore_conditions.py"))   # the second path
+        # the runner runs main's constants: merged only once every form is rolled back
+        self.assertIn("Once every form is rolled back, merge the constants-off commit to `main`, and only then "
+                      "set `AUTO_SYNC_APPLY=1`", rollback)
+        self.assertIn("Never merge a constants-off commit while any form is still rolled out", rollback)
+        skill = " ".join(read(os.path.join(REPO, ".claude", "skills", "live-systems", "SKILL.md")).split())
+        self.assertIn("merge the constants-off commit only once every form is rolled back", skill)
 
 
 import datetime as dt                 # noqa: E402  (the work-log tests below)

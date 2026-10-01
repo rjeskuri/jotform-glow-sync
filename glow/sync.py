@@ -147,7 +147,9 @@ CONTACT_IDS_PICKER_OPERAND = True
 # At least one girl: every roster carries Jotform's own `required` flag. Jotform
 # validates only the roster that is shown (a roster a rule hides is skipped at
 # submit: its <li> carries form-field-hidden), one ticked box satisfies it, and
-# the error is Jotform's own "This field is required." in the form's language.
+# the error is Jotform's own "This field is required.", translated only where the
+# form's translation store has the `base` entry for that text (read 2026-10-01:
+# U.S only; English on the template, Africa, Asia and Latin America: BACKLOG 57).
 # Without it 64 of September's submissions sent no girl at all, each stored in
 # Salesforce as an empty Success batch that blocks the club's real one for the
 # day. Proven in headless Chrome on local copies of the Asia, U.S and Africa pages

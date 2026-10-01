@@ -145,6 +145,12 @@ unless `--apply`.
 - Keys are the md5 of the plain English text; the runtime resolves element text → key through
   `base`, so a new string must be added to `base` and `en` (md5 → English) as well, or its
   translations never apply. Re-POST `properties[pagetitle]` to force a re-render.
+- Jotform's own runtime texts (`JotForm.texts`, e.g. the required message "This field is
+  required.") are translated the same way: `formTranslation.v2.js` builds its dictionary as
+  `dictionary[lang][base[md5]]`, so without the `base` entry nothing translates, whatever the
+  languages hold. Read 2026-10-01: key `9303c9bd…` is in 11 languages on every form but in `base`
+  on U.S only, so the message is English on the other four (BACKLOG 57). The server never
+  localises it (the served `JotForm.texts.required` is English with any `Accept-Language`).
 - Text elements (`control_text`) are translated by element id: key `text_<qid>`, value = the
   translated inner HTML.
 

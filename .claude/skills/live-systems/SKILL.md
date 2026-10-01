@@ -43,7 +43,8 @@ Account first — the sync refuses it without `--q5-change-ok`; `sync_attendance
 from a checkout without the same-name code once a form is switched (older code puts it back on
 the plain names), or without the question-18 code once a form is rolled out (older code puts
 the Contact_IDs sum back after the roster rules: docs/RUNBOOK.md, "The names list sent to
-Salesforce"); writing a translation language without GET + merge first.
+Salesforce"; so merge right after the template's rollout, before the first regional form);
+writing a translation language without GET + merge first.
 
 ## Rollback
 - Conditions: `restore_conditions.py --form <id> [--from <snapshot>] --apply`; Jotform Revision
@@ -53,7 +54,10 @@ Salesforce"); writing a translation language without GET + merge first.
 - Question 18's rule order and operand and the rosters' required flag: generated, so the rollback
   is `glow/sync.py`'s `CONTACT_IDS_FIRST` / `CONTACT_IDS_PICKER_OPERAND` / `ROSTERS_REQUIRED`
   turned off on a branch and the sync applied by hand per form (docs/RUNBOOK.md, "The names list
-  sent to Salesforce"); `restore_conditions.py` is the second path for the rules only.
+  sent to Salesforce"); `restore_conditions.py` is the second path for the rules only. The runner
+  runs `main`'s constants: merge the constants-off commit only once every form is rolled back, then
+  `AUTO_SYNC_APPLY=1`; never while any form is still rolled out (the runner would put the old rule
+  order back on it with its next roster change).
 - Questions: never deleted by tooling; a wrongly created question is removed in the builder.
 - Sheet tabs: `data/roster_build/previous/<stamp>/` (upload_roster saves them) or the
   `export-all` you took.

@@ -167,3 +167,32 @@ builds served: template `cca53a3a639`, Africa `962dcbe2fa6`, Asia, Latin America
 `jotform.forms.js` is byte-identical (md5 `841dc566a7`) in those three and in `772a1982daf`.
 `auto_sync.py` as a dry run on the export (no SyncLog) put all four regions at `attention`, exit 2,
 "not applied", with both reasons. `make check`: CHECK PASSED, 429 Python tests (21 new).
+
+**After the reviews (2026-10-01).** Each finding reproduced, read only (the translation stores
+through the API, a local copy of the U.S page in headless Chrome with the network to Jotform
+blocked; counts only), and fixed in the docs and tests; nothing in the code's behaviour changed.
+- *The required message is English on four forms.* "In the form's language" (What changes, 1) and
+  the Español check of rollout step 2 hold on U.S only: the translation stores of the template,
+  Africa, Asia and Latin America hold "This field is required." in 11 languages but not in `base`,
+  and the runtime translates through `base` only (U.S has it; Odia has no entry anywhere). The
+  RUNBOOK's browser step 7 expects English on those four: not a failure. The `base` entry is
+  BACKLOG 57, independent of this rollout (`add_translations.py` posts only a question's visible
+  text, so it needs a small change first).
+- *Merge right after the template.* Rollout step 3 was missing from the RUNBOOK, whose only safety
+  net assumed it: older code on `main` puts a rolled-out form back in the old order with its next
+  roster change and reads it CLEAN, and its dry run reads `in-sync`. The RUNBOOK now numbers the
+  merge between the template and the first regional form and proves it with one runner dry run by
+  hand (every region `attention` with the question-18 reason). The live-systems skill says so.
+- *Back in a default Chrome proved nothing.* The back-forward cache restores the page from memory,
+  where the old rules pass too. Browser step 6 now adds an `unload` listener first and reads
+  Jotform's own `fromBFCache` (`bf` in the console check). On the U.S copy, Back then gave
+  `q18: 0` with three ticks on the old rules and `q18: 3` on the new ones.
+- *Two clubs, then the language switcher.* With required rosters, ticks in the kept club's roster
+  only are refused with the message on the other club's roster (and the reverse); ticks in both
+  still go through under the kept club, the one higher in the list. The residual, BACKLOG 56 and
+  a support line say so.
+- *The rollback and `main`.* The runner runs `main`'s constants: a constants-off commit is merged
+  only once every form is rolled back, never while one is still rolled out.
+- *`--rendered` with the constants off.* A test now serves a page built under each of the eight
+  combinations and reads it clean under the same combination, plus a page without question 18's
+  calculation (three mutants of `rendered_problems` that survived the suite fail it).
