@@ -540,3 +540,74 @@ call was made here.
 ### Clean-up
 The scratch directory (Roster export, result, raw copies, the forms' questions, the checking
 scripts) was deleted after the run; no file holding a name was written in either checkout.
+
+## The loader's review of 2026-10-01 (LF-1 to LF-4)
+
+The loader's session reviewed the two tools together. Each finding was reproduced here first
+(read-only: the live forms by GET, the loader's Salesforce snapshot file read, its code imported
+from main in memory, nothing written outside a scratch directory).
+
+| | finding | reproduced | whose code | here |
+|---|---|---|---|---|
+| LF-1 | an empty `Success` batch from a submission with no tick blocks its club and day, and neither tool says so | yes: on the 2026-10-01 11:31 UTC snapshot the one batch dated from 2026-09-01 that matches no session of the plan is `BATCH-000018` (Maejan, 2026-09-30, `Success`, 0 attendance rows); Asia submission 6665871621424784389 (question 5 `Maejan`, date 2026-09-30, no tick, question 18 empty) is in the resolver's `no_ticks` | the loader's `plan` | open, for the loader's session |
+| LF-2 | the loader never reads `flag_vocabulary` | yes: `check_resolved` accepts the file without it, with `["bogus"]`, and without `module_unresolved` | the loader's `check_resolved` | open, for the loader's session; the test tying `FLAGS` to `HOLD_FLAGS \| PASS_FLAGS` comes after the merge |
+| LF-3 | the result and the raw copies are written readable by everyone | yes: with umask 022 a fresh folder came out 0755 and every file 0644; the live `data/backfill_2026-09/raw/Latin America.json` is 0644 now (its folder is 0700) | this tool's `write_json` | **fixed** |
+| LF-4 | the loader's `plan` calls the resolver's rows "club sessions" | yes: it prints 429 "club sessions"; they are 429 rows from 428 submissions, of which the plan forms 395 sessions | the loader's `cmd_plan` | open, for the loader's session |
+
+**LF-3, the fix.** `write_json` opens the file with `os.open(..., 0o600)` and `fchmod` (a file
+that was there 0644 becomes 0600 when it is overwritten, as the loader's `open_private` does).
+`private_folder` creates every missing level of a folder 0700 (`os.makedirs` leaves the levels
+above the last one to the umask) and sets an existing folder to 0700 when it is under the
+checkout's `data/` (the loader's folder, which the loader keeps owner-only too). An existing
+folder outside `data/` is the operator's choice and is left as it is; the files in it are 0600
+all the same. The test fails on the code before it (folders `0o755`).
+
+### Offline
+`make check`: `ALL CHECKS PASSED` ×3, `py: 40 files parse, 23 scripts answer --help`,
+`Ran 339 tests … OK`, `gs: 10 files parse`, `secrets: clean`, `docs-links: ok`,
+`fixtures: up to date`, `CHECK PASSED`.
+
+### Live, read-only (fetched 11:41 UTC, at commit `7db98f2`)
+A fresh Roster export (7001 rows), the result and the raw copies in a scratch directory outside
+the repository, written with the umask at 022: every folder came out 0700, every file 0600.
+Since the 15:34 UTC run of 2026-09-30: three Africa submissions and one Latin America.
+
+| | Africa | Asia | Latin America | U.S | all |
+|---|---|---|---|---|---|
+| fetched (all `ACTIVE`) | 148 | 234 | 114 | 0 | 496 |
+| pre-launch, left out | 1 | 0 | 2 | 0 | 3 |
+| **submissions in range** | 147 | 234 | 112 | 0 | **493** |
+| with ticks | 119 | 215 | 94 | 0 | 428 |
+| no ticks | 28 | 19 | 18 | 0 | 65 |
+| **rows** | 120 | 215 | 94 | 0 | **429** |
+| distinct clubs | 50 | 77 | 29 | 0 | 156 |
+
+Flags on rows: `q5_differs` 42, `typed_era` 69, `q18_empty` 17, `q18_differs` 16,
+`module_translated` 25 (all Latin America), `date_before_2026_09` 9, `name_left_roster` 5 rows
+(7 names), `multi_club` 2, `bare_shared_name` 2; every other flag 0. Question 98 differs from
+its dropdown on 30 Latin America submissions (25 with ticks); questions 100 and 102 never
+differ. Checked on the file apart from the tool: `flag_vocabulary` is the sixteen words, every
+`attendance_date` is `yyyy-mm-dd`, every row has names, a partner, a club code and an account
+name, the 25 rows whose `module` is not question 98 are exactly the 25 flagged, and per form the
+ids with rows and the ids with no tick are exactly the active submissions in range.
+
+The loader's own check (main's `sf_backfill`, imported in memory): `check_resolved` **accepts
+the file, 429 rows**; `flag_vocabulary` and this tool's `FLAGS` both equal `HOLD_FLAGS |
+PASS_FLAGS`; 0 rows carry a hold flag. `build_plan` on its snapshot of 11:31 UTC with its
+`decisions.csv` and `--dup-rule-ok` forms 395 sessions: 347 to send (4,398 attendance rows, 139
+clubs), 28 held (`club_has_earlier_contacts` 20, `more_new_girls_than_proven` 8; none on a
+resolver flag), 20 skipped (`skip_decided` 10, `already_in_salesforce` 10). Nothing was written
+by it: its plan, held list and ledger were not touched.
+
+### Open between the two tools
+- LF-1, LF-2 and LF-4 are the loader's (above). For LF-1 the loader can list the unmatched
+  batches without anything new from this file; tying such a batch to its submission would need
+  this file to carry question 5 and the date of each no-tick submission - a contract change,
+  not made here.
+- The live `data/backfill_2026-09/raw/Latin America.json` stays 0644 until the resolver from
+  this branch writes it again (or `chmod 600` by hand); its folder is 0700, so no one else can
+  reach it meanwhile. The loader's `keep_private` does not go into `raw/`.
+
+### Clean-up
+The scratch directory (Roster export, result, raw copies, the checking script) was deleted
+after the run; no file holding a name was written in either checkout.
