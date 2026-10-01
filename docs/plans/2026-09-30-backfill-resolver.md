@@ -388,6 +388,8 @@ status inactive - girls who left, which the loader sends. So today nothing is he
 unknown name.
 
 ### Open between the two tools (for the loader's session; not changed here)
+*Settled since by the contract changes above - the list that stands is at the end of this file.*
+
 - The loader as it stands in the main checkout (uncommitted `tools/sf_backfill.py`, read but
   not touched) knows `name_unknown_to_roster` and `name_left_roster` and **does not know
   `name_not_on_roster_now`**: its `check_resolved` refuses the file on the first of the 5 rows
@@ -404,3 +406,137 @@ unknown name.
 ### Clean-up
 The scratch directory (Roster export, result, raw copies, report, the checking scripts) was
 deleted after the run; no file holding a name was written in either checkout.
+
+## Proof after the contract changes (2026-09-30)
+
+### Each change, before and after
+Every change has tests that fail on the code before it (run once against the tool as it was):
+1. `name_not_on_roster_now` was on the rows, in the per-form tables and in the report; a girl
+   who left and came back, and one spelled in capitals, were `name_left_roster`.
+2. `attendance_date` was null for a missing, an impossible (month 13, 30 February) and a
+   mis-shaped question 17.
+3. `module` was question 98 (the translated text in the fixture); neither module flag existed;
+   there was no comparison of the three copies.
+4. `flag_vocabulary` was absent. The pin test runs the whole tool over six fictional
+   submissions that raise all sixteen flags and compares what the rows carry with the list.
+
+### Offline
+`make check`: `ALL CHECKS PASSED` ×3, `py: 40 files parse, 23 scripts answer --help`,
+`Ran 338 tests … OK` (37 of them `BackfillResolve`), `gs: 10 files parse`, `secrets: clean`,
+`docs-links: ok`, `fixtures: up to date`, `CHECK PASSED`.
+
+### Live, read-only (fetched 15:34 UTC, at commit `3a865ad`)
+A fresh Roster export (6963 rows), the result and the raw copies in a scratch directory outside
+the repository, deleted afterwards. GETs and four dry runs of the sync only; no form out of
+step with the export. Five submissions have arrived since the 13:30 run (one Africa, four
+Asia).
+
+| | Africa | Asia | Latin America | U.S | all |
+|---|---|---|---|---|---|
+| fetched (all `ACTIVE`) | 145 | 234 | 113 | 0 | 492 |
+| pre-launch, left out | 1 | 0 | 2 | 0 | 3 |
+| **submissions in range** | 144 | 234 | 111 | 0 | **489** |
+| with ticks | 116 | 215 | 93 | 0 | 424 |
+| no ticks | 28 | 19 | 18 | 0 | 65 |
+| **rows** | 117 | 215 | 93 | 0 | **425** |
+| distinct clubs | 49 | 77 | 28 | 0 | 154 |
+
+Flags, rows (submissions where that differs):
+
+| flag | Africa | Asia | Latin America | all rows |
+|---|---|---|---|---|
+| `multi_club` | 2 (1) | 0 | 0 | 2 |
+| `q5_differs` | 15 (14) | 17 | 10 | 42 |
+| `q18_empty` | 6 | 9 | 2 | 17 |
+| `q18_differs` | 10 (9) | 6 | 0 | 16 |
+| `typed_era` | 19 | 10 | 40 | 69 |
+| `bare_shared_name` | 2 | 0 | 0 | 2 |
+| `retired_club` | 0 | 0 | 0 | 0 |
+| `no_account_name` | 0 | 0 | 0 | 0 |
+| `date_before_2026_09` | 1 | 3 | 5 | 9 |
+| `date_missing` | 0 | 0 | 0 | 0 |
+| `name_left_roster` | 1 | 4 | 0 | 5 (7 names) |
+| `name_unknown_to_roster` | 0 | 0 | 0 | 0 |
+| `name_has_comma` | 0 | 0 | 0 | 0 |
+| `name_repeats` | 0 | 0 | 0 | 0 |
+| `module_translated` | 0 | 0 | 25 | **25** |
+| `module_unresolved` | 0 | 0 | 0 | **0** |
+
+Questions 98 / 100 / 102 as submitted against the dropdown each is a copy of, submissions in
+range (of them with ticks):
+
+| | Africa | Asia | Latin America |
+|---|---|---|---|
+| module (98): same | 144 (116) | 234 (215) | 81 (68) |
+| module (98): differ | 0 | 0 | **30 (25)** |
+| module (98): source not determined | 0 | 0 | 0 |
+| session (100): same / differ / not determined | 144 / 0 / 0 | 234 / 0 / 0 | 111 / 0 / 0 |
+| year (102): same / differ / not determined | 144 / 0 / 0 | 234 / 0 / 0 | 111 / 0 / 0 |
+
+`LEDGER: 489 submissions in range = 424 with rows (425 rows) + 65 with no tick - balanced; 3
+pre-launch left out`. No ticked name was an active girl spelled unlike her option
+(`names_active_not_an_option` 0 on every form).
+
+So the 30 Latin America submissions with a Spanish question 98 are all found; 25 of them have
+ticks and their rows now carry the English module of the dropdown; the other 5 have no tick
+and no row. Week and year never differ from their dropdowns: they are copies of calcValues
+(numbers), which page translation does not reach.
+
+Checked apart from the tool, on the output, the raw copies, the forms' questions and the Roster
+export read on their own (counts only): the top-level keys are the contract's with
+`flag_vocabulary` equal to the sixteen words; every flag on a row is one of them, none carries
+`:<n>` but the two name flags, `name_not_on_roster_now` is nowhere in the file; all 425
+`attendance_date` are `yyyy-mm-dd` text and all `created_at` as Jotform gives them; every row
+has a non-empty list of names, a partner, a club code and an account name; every row's
+`module` is the answer of the dropdown its Year answer names and an option of the form today
+(17 distinct modules where question 98 holds 24 spellings); the 25 rows whose module is not
+question 98 are exactly the 25 flagged, all on Latin America, and their question 98 is no
+English option; `module_week` and `module_year` are questions 100 and 102 on all 425; the name
+flags equal a second count made from the Roster export (7 names with inactive rows only, 0
+with no row, 0 rows differ); per form the ids with rows and the ids with no tick are exactly
+the active submissions in range.
+
+### Handed to the loader's own check (in memory; its file read and imported, not copied)
+`sf_backfill.check_resolved`, as it stands on main, **accepts the file: 425 rows**. The
+resolver's `flag_vocabulary` is exactly the union of the loader's `HOLD_FLAGS` and
+`PASS_FLAGS` - no word on one side only. Rows it would hold on a resolver flag: **0**
+(`no_account_name`, `date_missing`, `name_has_comma`, `name_unknown_to_roster`,
+`module_unresolved` are all 0). Rows carrying a flag it lets pass: `q5_differs` 42,
+`typed_era` 69, `q18_empty` 17, `q18_differs` 16, `module_translated` 25,
+`date_before_2026_09` 9, `name_left_roster` 5, `multi_club` 2, `bare_shared_name` 2. Its own
+rules that need no Salesforce state, tried with its helpers on these rows: all 425 dates read
+as dates; 9 rows are dated before September and 2 are the rows of the one submission with two
+rosters (its `date_before_september` and `several_rosters_ticked`, which it holds until
+accepted); no row after its submission day; `module_not_usable` 0. What it holds for reasons
+that need Salesforce (accounts, earlier contacts, similar names) was not run: no Salesforce
+call was made here.
+
+### Open between the two tools
+- **Nothing blocks the hand-over**: the file is accepted and no row is held on a flag.
+- The loader does not read `flag_vocabulary`. It refuses an unknown flag only when a row
+  carries one; checking the list against its own two sets would refuse a file from a resolver
+  that has learned a new word before any row happens to have it.
+- `module_translated` means "question 98 is not the dropdown's answer", whatever the cause; in
+  today's data all 30 are translations. The loader lets it pass, which is right as long as it
+  sends the row's `module` (it does).
+- One club and one date more than once: 31 groups (64 rows), 16 of them with different
+  module / session / year between their rows - 1 Africa, 5 Asia, 10 Latin America. The
+  canonical module does not change that number (16 by question 98 as well): they are real
+  differences, which the loader holds as `same_day_different_module` until a `use` decision.
+- Week and year have no flag by agreement. A `differ` there shows only in the resolver's
+  report and in `forms.<region>.copied_fields`; the loader's `module_not_usable` catches a
+  week or year that is no number, not one that is the wrong number. Today: 0 and 0.
+- A ticked name that is an active girl spelled unlike her option is not flagged
+  (`names_active_not_an_option`, today 0): the loader sees the name as ticked.
+- A `resolved.json` written by `--region` holds fewer than four forms; the resolver does not
+  write one to the default path, and the loader still does not look at `forms`.
+- The loader's file must be fresh when it sends. The proof's file is deleted; the real one is
+  made by running the resolver from a checkout that has this branch, which is not merged.
+- **The branch is behind main** (the loader and the Jotform client's body-on-stdin change
+  landed there meanwhile). A trial merge, made without touching either branch, conflicts in
+  `docs/RUNBOOK.md` and `test/python_test.py` (both sides added at the same spot: keep both);
+  `glow/jotform.py` merges by itself, and `make check` has not been run on the merged tree.
+
+### Clean-up
+The scratch directory (Roster export, result, raw copies, the forms' questions, the checking
+scripts) was deleted after the run; no file holding a name was written in either checkout.
