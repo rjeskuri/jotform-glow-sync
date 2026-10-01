@@ -1291,8 +1291,12 @@ python3 tools/backfill_resolve.py --roster data/roster_<date>.csv       # GET on
   submissions as fetched. Every run overwrites all of them. `--region <name>` reads one form only and then needs `--out`
   (another path under `data/`): the default path is the loader's file and always holds all four.
 - **They hold girls' names and mentors' contact details**: they stay under `data/`
-  (git-ignored). The tool refuses any other place inside the repository. Never paste from them;
-  what the tool prints is counts only, and that is what goes into a plan or a message.
+  (git-ignored). The tool refuses any other place inside the repository. It writes them for
+  their owner only: every file 0600 (also one that was there with a wider mode), every folder it
+  creates 0700, and the result's and the raw copies' folders under `data/` set to 0700 when they
+  were already there (outside `data/` a folder that was already there is left as it is). Never
+  paste from them; what the tool prints is counts only, and that is what goes into a plan or a
+  message.
 - **Read the report**: per form `submissions in range = with ticks + no ticks` and the `LEDGER`
   line say every submission is accounted for. A submission with no tick has no row; its id is
   under `no_ticks`. Nothing is collapsed (one club, one date, two submissions = two rows) and

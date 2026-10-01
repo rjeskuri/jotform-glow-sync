@@ -24,7 +24,8 @@ in range is accounted for, or the tool exits with an error; it also exits, writi
 (a shape it does not know, a ticked roster it cannot identify).
 
 The output and the raw copies (raw/<region>.json beside it) hold girls' names and mentors'
-contact details: they stay under data/ (git-ignored). What is printed is counts only.
+contact details: they stay under data/ (git-ignored), and are written for their owner only
+(files 0600; folders 0700 - see private_folder). What is printed is counts only.
 The key comes from JOTFORM_API_KEY.
 """
 import argparse
@@ -602,9 +603,36 @@ def shown(path):
     return os.path.join(*steps) if steps else full
 
 
+def private_folder(folder):
+    """`folder` exists and only its owner can open it, as far as it is this tool's to say:
+    every level of it this tool creates is made 0700 (os.makedirs would make the levels
+    above the last one by the umask: 0755 on this Mac), and a folder that was already there
+    is set to 0700 when it is under this checkout's data/ - the loader's folder, which the
+    loader keeps owner-only too. A folder outside data/ that was already there is the
+    operator's choice and is left as it is; the files written into it are 0600 all the same."""
+    folder = os.path.abspath(folder)
+    missing, at = [], folder
+    while not os.path.isdir(at):
+        missing.append(at)
+        parent = os.path.dirname(at)
+        if parent == at:
+            break
+        at = parent
+    for level in reversed(missing):
+        os.mkdir(level, 0o700)
+        os.chmod(level, 0o700)            # the umask only takes bits away; this says it plainly
+    if not missing and under_data(os.path.realpath(folder)):
+        os.chmod(folder, 0o700)
+
+
 def write_json(path, payload):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    """The file as only its owner can read it (0600, also when it was there with a wider
+    mode: the loader's open_private does the same), in a private_folder(): it holds girls'
+    names and mentors' contact details."""
+    private_folder(os.path.dirname(path))
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=1)
         f.write("\n")
 

@@ -850,6 +850,52 @@ class BackfillResolve(unittest.TestCase):
         self.assertEqual(result["forms"]["Africa"]["fetched"], 2)
         self.assertIn("1 of 4 regions", out)
 
+    def test_what_it_writes_only_its_owner_can_read(self):
+        # the result and the raw copies hold girls' names and mentors' contact details: with the
+        # Mac's umask (022) a plain open() made them 0644 and os.makedirs the folders 0755
+        def mode(*steps):
+            return oct(os.stat(os.path.join(*steps)).st_mode & 0o777)
+
+        def run(out, *argv):
+            client = FakeJotform({AFRICA: [submission("9001", {"10": [AMARA]})]})
+            with contextlib.redirect_stdout(io.StringIO()):
+                br.main(["--roster", self.roster_csv, "--out", out, *argv], client=client,
+                        plan_of=lambda *a: plan())
+
+        self.addCleanup(os.umask, os.umask(0o022))
+        base = self.out_dir.name
+        # every folder it creates, the ones above the last too, and every file: the owner's only
+        fresh = os.path.join(base, "made", "here")
+        run(os.path.join(fresh, "resolved.json"))
+        self.assertEqual([mode(base, "made"), mode(fresh), mode(fresh, "raw")], ["0o700"] * 3)
+        self.assertEqual({f: mode(fresh, "raw", f) for f in os.listdir(os.path.join(fresh, "raw"))},
+                         {f"{r}.json": "0o600" for r in glow_forms.REGIONALS})
+        self.assertEqual(mode(fresh, "resolved.json"), "0o600")
+        # a file that was there with a wider mode is tightened when it is overwritten; a folder
+        # outside the checkout's data/ that was there already is the operator's: left as it was
+        for path, wide in ((fresh, 0o755), (os.path.join(fresh, "raw"), 0o755),
+                           (os.path.join(fresh, "resolved.json"), 0o644),
+                           (os.path.join(fresh, "raw", "Asia.json"), 0o644)):
+            os.chmod(path, wide)
+        run(os.path.join(fresh, "resolved.json"))
+        self.assertEqual([mode(fresh, "resolved.json"), mode(fresh, "raw", "Asia.json")], ["0o600"] * 2)
+        self.assertEqual([mode(fresh), mode(fresh, "raw")], ["0o755"] * 2)
+        # under the checkout's data/ (the loader's folder) a folder already there is tightened too;
+        # data/ itself is not this tool's
+        checkout = os.path.join(base, "checkout")
+        loader = os.path.join(checkout, "data", "backfill_2026-09")
+        os.makedirs(os.path.join(loader, "raw"))
+        for path in (os.path.join(checkout, "data"), loader, os.path.join(loader, "raw")):
+            os.chmod(path, 0o755)
+        with open(os.path.join(loader, "raw", "Africa.json"), "w", encoding="utf-8") as f:
+            f.write("{}\n")
+        os.chmod(os.path.join(loader, "raw", "Africa.json"), 0o644)
+        with mock.patch.object(br, "REPO", checkout):
+            run(os.path.join(loader, "resolved.json"))
+        self.assertEqual([mode(loader), mode(loader, "raw"), mode(loader, "resolved.json"),
+                          mode(loader, "raw", "Africa.json")], ["0o700", "0o700", "0o600", "0o600"])
+        self.assertEqual(mode(checkout, "data"), "0o755")
+
     def test_a_region_named_twice_is_read_once(self):
         subs = {AFRICA: [submission("9001", {"10": [AMARA]})], ASIA: [submission("9101", {"10": [BEA]}, form=ASIA)]}
         client = FakeJotform(subs)
