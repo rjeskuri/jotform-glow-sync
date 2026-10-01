@@ -29,7 +29,11 @@ the sync did not add because its name is in use, and a name two clubs send,
 raise ATTENTION without stopping anything (docs/RUNBOOK.md, "Club names two
 partners share"). A conditions rewrite alone is not a change to it, so roster
 rules that test a name the Club picker does not list (a restored backup, a
-half-finished hand apply) are never "in-sync": ATTENTION, apply by hand.
+half-finished hand apply) are never "in-sync": ATTENTION, apply by hand. Rules
+that calculate question 18 (the names sent to Salesforce) the old way, and the
+required flag written on a roster that has no other change, stop the region
+(ATTENTION): both are rolled out by hand, one form at a time (docs/RUNBOOK.md,
+"The names list sent to Salesforce").
 """
 import argparse
 import csv
@@ -64,7 +68,11 @@ DEFAULT_OUT = os.path.join(REPO, "data", "auto_sync")
 # The sync tool's plan lines (sync_attendance_form.py; test/python_test.py
 # checks these formats still exist there).
 CREATE_RX = re.compile(r"^  - CREATE roster '(?P<club>.+)' \((?P<girls>\d+) girls\)$")
-UPDATE_RX = re.compile(r"^  - UPDATE roster '(?P<club>.+)' \(q(?P<qid>\d+), (?P<girls>\d+) girls\)$")
+# an options update may carry the roster's required flag in the same write
+UPDATE_RX = re.compile(r"^  - UPDATE roster '(?P<club>.+)' \(q(?P<qid>\d+), (?P<girls>\d+) girls"
+                       r"(?:; required: (?P<required>Yes|No))?\)$")
+# ...else it is written on its own: never applied unattended (check_bands)
+REQUIRED_RX = re.compile(r"^  - REQUIRED roster '(?P<club>.+)' \(q(?P<qid>\d+): (?P<required>Yes|No)\)$")
 DELETE_RX = re.compile(r"^  - DELETE roster '(?P<club>.+)' \(q(?P<qid>\d+), belongs to (?P<region>.+)\)$")
 REPLACE_RX = re.compile(r"^  - REPLACE conditions \((?P<rules>\d+) rules")
 PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs(?::[^)]*)?\)$")
@@ -83,6 +91,11 @@ SAME_NAME_REFUSED = "not added: give it a different name"
 # a roster's rule tests a text the picker does not list: that roster does not show, and
 # only a conditions rewrite - which the runner does not count as a change - repairs it
 RULES_OLDER = "which the Club picker does not list"
+# the live rules calculate question 18 (the names Salesforce stores) the old way: the
+# rewrite is rolled out by hand, one form at a time, so the region is never applied here
+# (docs/plans/2026-09-30-contact-ids.md) - nor the required flag on rosters that have no
+# other change (REQUIRED roster lines: on a form not rolled out yet, every roster)
+CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
 
 
 def key(s):
@@ -92,10 +105,15 @@ def key(s):
 # ------------------------------------------------------------ pure functions
 def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
-    plan = {"creates": [], "updates": [], "deletes": [], "picker": [], "partner_picker": [],
-            "club_guard": [], "rules": None, "warnings": [], "roster_clubs": None,
-            "roster_girls": None, "sf_names": None}     # sf_names: only the summary file has them
+    plan = {"creates": [], "updates": [], "deletes": [], "requires": [], "picker": [],
+            "partner_picker": [], "club_guard": [], "rules": None, "warnings": [],
+            "roster_clubs": None, "roster_girls": None,
+            "sf_names": None}     # sf_names: only the summary file has them
     for line in text.splitlines():
+        m = REQUIRED_RX.match(line)
+        if m:
+            plan["requires"].append({"qid": m["qid"], "club": m["club"], "required": m["required"]})
+            continue
         m = PICKER_RX.match(line)
         if m:
             plan["picker"].append({"op": m["op"], "clubs": int(m["clubs"])})
@@ -140,6 +158,8 @@ def plan_from_summary(summary):
                         for u in summary.get("updates", [])],
             "deletes": [{"qid": d["qid"], "club": d["club"], "region": d["region"]}
                         for d in summary.get("deletes", [])],
+            "requires": [{"qid": r["qid"], "club": r["club"], "required": r["required"]}
+                         for r in summary.get("requires", [])],
             "picker": [{"op": m["op"], "clubs": int(m["clubs"])}
                        for m in (PICKER_RX.match("  - " + c) for c in summary.get("calls", [])) if m],
             "partner_picker": [{"op": m["op"], "partners": int(m["partners"])}
@@ -169,6 +189,11 @@ def stale_rules(plan):
     return [w for w in plan["warnings"] if RULES_OLDER in w]
 
 
+def contact_ids_stale(plan):
+    """The warnings saying the live rules calculate question 18 the old way."""
+    return [w for w in plan["warnings"] if CONTACT_IDS_STALE in w]
+
+
 def name_clashes(sf_names_by_region):
     """{region: the sync summary's sf_names} -> [(name, [club, ...])] for every name
     two different clubs of the regions synced send to question 5 (compared as
@@ -190,20 +215,24 @@ def name_clashes(sf_names_by_region):
 
 
 def changes(plan):
-    """Roster creates/updates/deletes plus a Club-picker, partner-list or club-guard update
-    (never a create: the runner passes none of --club-picker, --partner-picker and
-    --club-guard, so a CREATE here means someone else did)."""
+    """Roster creates/updates/deletes, required flags written on their own, plus a Club-picker,
+    partner-list or club-guard update (never a create: the runner passes none of --club-picker,
+    --partner-picker and --club-guard, so a CREATE here means someone else did)."""
     return (len(plan["creates"]) + len(plan["updates"]) + len(plan["deletes"])
+            + len(plan.get("requires", []))
             + len(plan.get("picker", [])) + len(plan.get("partner_picker", []))
             + len(plan.get("club_guard", [])))
 
 
 def plan_summary(plan):
-    """One line for the SyncLog detail and the attention title: the roster counts, then each
-    Club-picker, partner-list or club-guard write by name (only when planned), so a list-only
-    apply does not read as "0 create(s), 0 update(s)"."""
+    """One line for the SyncLog detail and the attention title: the roster counts, then the
+    required flags written on their own and each Club-picker, partner-list or club-guard write
+    by name (only when planned), so a list-only apply does not read as "0 create(s), 0 update(s)"."""
+    requires = plan.get("requires", [])
+    values = sorted({r["required"] for r in requires})
     return (f"{len(plan['creates'])} create(s), {len(plan['updates'])} update(s), "
             f"{len(plan['deletes'])} delete(s), {len(plan['warnings'])} warning(s)"
+            + (f", required: {'/'.join(values)} on {len(requires)} roster(s)" if requires else "")
             + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
             + "".join(f", {m['op'].lower()} partner list" for m in plan.get("partner_picker", []))
             + "".join(f", {m['op'].lower()} club guard" for m in plan.get("club_guard", [])))
@@ -230,6 +259,17 @@ def check_bands(plan, max_creates=5, max_updates=20):
                        "club(s) - rename each Salesforce account named in the warnings first, then "
                        "apply this region by hand with --q5-change-ok (docs/RUNBOOK.md, \"Club names "
                        "two partners share\")")
+    if contact_ids_stale(plan):
+        reasons.append("the form's rules calculate question 18 (Contact_IDs, the names sent to "
+                       "Salesforce) the old way - the new rules are rolled out by hand, one form at a "
+                       "time, with the browser checks (docs/RUNBOOK.md, \"The names list sent to "
+                       "Salesforce\"); nothing applied here, roster changes included")
+    requires = plan.get("requires", [])
+    if requires:
+        reasons.append(f"would write the required flag on {len(requires)} roster(s) that have no other "
+                       "change - never unattended: the first rollout is by hand (docs/RUNBOOK.md, \"The "
+                       "names list sent to Salesforce\"), and afterwards a roster that lost the flag was "
+                       "edited in the builder")
     stale = sum(1 for w in plan["warnings"] if NOT_IN_EXPORT in w)
     n = plan["roster_clubs"] or 0
     if stale > max(5, n // 10):
@@ -427,8 +467,8 @@ class Run:
         n = changes(plan)
         # a change of what an existing club sends to question 5 stops the region even
         # when nothing else is planned: a rules-only difference is not a "change" here,
-        # and this one must never read as in-sync
-        if n == 0 and not q5_changes(plan):
+        # and this one must never read as in-sync - nor question 18's rules the old way
+        if n == 0 and not q5_changes(plan) and not contact_ids_stale(plan):
             # …nor may rules that test a name the picker does not list: those clubs' rosters
             # do not show (with the club guard their mentors cannot submit), and the
             # conditions rewrite that repairs it is not applied unattended
@@ -462,6 +502,8 @@ class Run:
                                    "\n".join(f"- CREATE {c['club']} ({c['girls']} girls)" for c in plan["creates"]) +
                                    "\n".join(f"\n- UPDATE {u['club']} (q{u['qid']}, {u['girls']} girls)" for u in plan["updates"]) +
                                    "\n".join(f"\n- DELETE {d['club']} (q{d['qid']})" for d in plan["deletes"]) +
+                                   (f"\n- REQUIRED on {len(plan['requires'])} roster(s) with no other change"
+                                    if plan.get("requires") else "") +
                                    ("\n\nWarnings:\n" + "\n".join("- " + w for w in plan["warnings"]) if plan["warnings"] else "")))
             self.result(region, plan, "attention", "; ".join(reasons))
             return

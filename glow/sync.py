@@ -8,6 +8,7 @@ two sides honest. Known divergences: docs/ARCHITECTURE.md.
 """
 import csv
 import html
+import json
 import re
 import sys
 from collections import defaultdict
@@ -113,6 +114,115 @@ def picker_calc_values(options):
 def has_calc_values(question):
     """Whether a dropdown carries calcValues (more than empty slots)."""
     return bool((question.get("calcValues") or "").replace("|", "").strip())
+
+
+# ------------------------------------------- the names list sent to Salesforce
+# Question 18 (CONTACT_IDS) is the list of girls Salesforce stores as present:
+# ONE calculation over every roster, hidden rosters ignored, so only the shown
+# club's ticks arrive (docs/plans/2026-09-30-contact-ids.md). Every reader of
+# these three constants - build_conditions, the sync's warning, form_status's
+# audits, the runner through them - reads them from this module at run time, so
+# turning one off (the generated rollback) changes the rules and what counts as
+# clean together.
+#
+# Jotform's runtime (jotform.forms.js, read 2026-09-30, builds 9e75d6f1d83 and
+# 772a1982daf) reverses the rules array and each field's listener walks the
+# rules that test it in that reversed order: the rule at index 0 runs LAST. Showing or
+# hiding a roster never re-runs a calculation, and nothing recalculates at
+# submit. With the sum after the roster rules (the shape until 2026-10), a change
+# of club calculated question 18 over the rosters as they were BEFORE the change:
+# another club's girls sent, or none at all while three were ticked (2 + 17
+# September submissions). On a form with the Club picker the sum is rule 0, its
+# ids minted first. Order is the fix: it also holds for a form the browser
+# restores (Back), where the only thing that re-shows the roster is Jotform's own
+# delayed runAllConditions().
+CONTACT_IDS_FIRST = True
+# ...and the picker is one of the sum's operands (never in its equation, or the
+# club's name would land in question 18): the picker's own change event, which
+# bubbles to its <li> after every rule ran, re-runs the sum as well. Only a
+# supplement: the delayed runAllConditions() after a restored page dispatches
+# an event that does not bubble, so the operand alone left question 18 empty
+# there in the browser, and the order alone did not.
+CONTACT_IDS_PICKER_OPERAND = True
+# At least one girl: every roster carries Jotform's own `required` flag. Jotform
+# validates only the roster that is shown (a roster a rule hides is skipped at
+# submit: its <li> carries form-field-hidden), one ticked box satisfies it, and
+# the error is Jotform's own "This field is required." in the form's language.
+# Without it 64 of September's submissions sent no girl at all, each stored in
+# Salesforce as an empty Success batch that blocks the club's real one for the
+# day. Proven in headless Chrome on local copies of the Asia, U.S and Africa pages
+# (2026-10-01); the server's markup for a required checkbox is read on the
+# template after the first write (form_status.py --rendered). The sync writes
+# the flag on every roster it creates and, where a roster on the form lacks it, as
+# an update; off, it writes "No" (the generated rollback).
+ROSTERS_REQUIRED = True
+
+
+def _rule_parts(rule):
+    """(terms, actions) of one rule, wire (JSON strings) or parsed; None when they do not parse."""
+    try:
+        terms = json.loads(rule["terms"]) if isinstance(rule.get("terms"), str) else rule.get("terms")
+        action = json.loads(rule["action"]) if isinstance(rule.get("action"), str) else rule.get("action")
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return None
+    if isinstance(action, dict):
+        action = [action]
+    return terms or [], action or []
+
+
+def contact_ids_layout(conditions, rosters):
+    """Where question 18's calculation sits among `conditions` (in the order the
+    form holds and serves them) and what the rules that show a roster test.
+    rosters: qids of the roster questions. Returns {"count": rules,
+    "calc_rules": [positions of every rule calculating question 18],
+    "position": the first of them or None, "terms": {fields its terms test},
+    "operands": [its operands], "equation": str, "roster_rules": [positions of
+    the rules showing a roster], "roster_rule_fields": {field: rules testing it}}."""
+    rosters = {str(q) for q in rosters}
+    out = {"count": len(conditions or []), "calc_rules": [], "position": None, "terms": set(),
+           "operands": [], "equation": "", "roster_rules": [], "roster_rule_fields": {}}
+    for pos, rule in enumerate(conditions or []):
+        parts = _rule_parts(rule)
+        if parts is None:
+            continue
+        terms, actions = parts
+        for a in actions:
+            if str(a.get("resultField")) == CONTACT_IDS:
+                out["calc_rules"].append(pos)
+                if out["position"] is None:
+                    out.update(position=pos, equation=str(a.get("equation") or ""),
+                               terms={str(t.get("field")) for t in terms},
+                               operands=[x for x in str(a.get("operands") or "").split(",") if x])
+        if any(a.get("visibility") == "Show" and str(a.get("field")) in rosters for a in actions):
+            out["roster_rules"].append(pos)
+            for t in terms:
+                f = str(t.get("field"))
+                out["roster_rule_fields"][f] = out["roster_rule_fields"].get(f, 0) + 1
+    return out
+
+
+def contact_ids_stale(conditions, rosters, picker):
+    """How the live rules miss the shape the constants above ask for, on a form
+    with the Club picker: "order" when question 18's calculation comes after a
+    rule that shows a roster (CONTACT_IDS_FIRST), "operand" when the picker is not
+    one of its operands (CONTACT_IDS_PICKER_OPERAND). [] on a form without the
+    picker or without that calculation (nothing to compare: the rewrite adds it)."""
+    if not picker:
+        return []
+    shape = contact_ids_layout(conditions, rosters)
+    if shape["position"] is None:
+        return []
+    stale = []
+    if CONTACT_IDS_FIRST and any(p < shape["position"] for p in shape["roster_rules"]):
+        stale.append("order")
+    if CONTACT_IDS_PICKER_OPERAND and str(picker) not in shape["operands"]:
+        stale.append("operand")
+    return stale
+
+
+def roster_required():
+    """The `required` value every roster question carries (ROSTERS_REQUIRED)."""
+    return "Yes" if ROSTERS_REQUIRED else "No"
 
 # Sessions per module. Modules not listed default to 8 sessions.
 # EDIT HERE when the curriculum changes; the cascade rules are generated

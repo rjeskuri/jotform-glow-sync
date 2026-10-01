@@ -8,9 +8,12 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
   1. Creates a hidden roster checkbox question for any club that doesn't have
      one yet (options = the girls' names from the sheet), at the order of
      the last roster above the links and the Submit button, so it renders
-     above them (glow/layout.py).
+     above them (glow/layout.py). Every roster is required (glow/sync.py
+     ROSTERS_REQUIRED): Jotform refuses a submission whose shown roster has
+     no girl ticked; a roster a rule hides is not checked.
   2. Updates the roster options of existing club questions when the sheet
-     changed (new girls enrolled, corrections).
+     changed (new girls enrolled, corrections), and the required flag where
+     a roster lacks it.
   3. Regenerates ALL conditional logic from scratch, in four categories:
        A. ROSTER VISIBILITY  - clubName == "<club>" -> show that roster.
                                With the Club picker, a club whose name another
@@ -23,7 +26,10 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
        B. CURRICULUM CASCADE - GLOW year -> module dropdown;
                                year+module -> session dropdown (8/10/14/15)
        C. SALESFORCE BRIDGE  - one aggregate Contact_IDs calculation +
-                               module_id / week_id / year_id copies
+                               module_id / week_id / year_id copies; with
+                               the Club picker the Contact_IDs sum is rule 0
+                               and lists the picker as an operand, so it is
+                               recalculated after the rosters show or hide
        D. ONE CLUB           - only on a form with the club guard (added
                                once with --club-guard): several clubs picked
                                -> show the warning, hide + disable Submit
@@ -78,6 +84,9 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
     read_roster_csv, read_sheet, roster_names, roster_pairs, sf_club_name,   # against Config.gs
     shared_club_names, warn,
 )
+from glow import sync as glow_sync  # noqa: E402  - CONTACT_IDS_FIRST, CONTACT_IDS_PICKER_OPERAND and
+#                                     ROSTERS_REQUIRED are read through the module at run time, so
+#                                     the generated rollback (and a test) is one switch for every reader
 from glow.text import key           # noqa: E402
 
 # Optional "Club" picker: a required dropdown listing every club on the form,
@@ -132,6 +141,13 @@ NOT_ADDED = "not added: give it a different name"
 # that club's roster never shows and the club guard blocks its mentors; the
 # runner, which does not apply a rules-only difference, raises ATTENTION.
 RULES_OLDER = "which the Club picker does not list"
+# A fourth: the live rules calculate question 18 (the names Salesforce stores)
+# the old way - after the rosters' rules, or without the Club picker among its
+# operands (glow/sync.py CONTACT_IDS_FIRST / CONTACT_IDS_PICKER_OPERAND). The
+# rewrite is one REPLACE conditions per form, rolled out by hand: the runner
+# raises ATTENTION and does not apply that region (docs/plans/2026-09-30-
+# contact-ids.md).
+CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
 
 # SESSION_OVERRIDES (sessions per elective module) lives in glow/sync.py -
 # edit it THERE when the curriculum changes, and mirror appsscript/Config.gs.
@@ -224,7 +240,13 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     the picker's options exactly as this run writes them (the rules test each
     club in the picker's spelling); guard / submit: qids of the clubGuard
     warning and the Submit button on a form with the one-club guard (section
-    D; both, with a picker and its options, or no guard rules at all)."""
+    D; both, with a picker and its options, or no guard rules at all).
+
+    On a form with the picker the Contact_IDs sum (section C) is rule 0, built
+    before every other rule so its ids are the lowest, and lists the picker
+    among its operands (glow/sync.py CONTACT_IDS_FIRST and
+    CONTACT_IDS_PICKER_OPERAND; each off gives the shape before 2026-10). A
+    form without the picker keeps its rules byte for byte."""
     conds = []
     club_field = picker or CLUB_NAME
     # A picker is a multi-select, where Jotform's "equals" means "this exact
@@ -235,6 +257,27 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
 
     def club(name):
         return spelling.get(name.lower(), name)
+
+    roster_qids = sorted(club_questions, key=int)
+
+    def contact_ids():
+        # no separator between the rosters, guard or not: only one roster can be
+        # visible when Submit is (the guard's rules), and a literal ", " would be
+        # written between every pair of operands, hidden ones included. The
+        # picker is an operand only: in the equation its club name would be sent
+        # to Salesforce as a girl
+        operands = ([picker] if picker and glow_sync.CONTACT_IDS_PICKER_OPERAND else []) + roster_qids
+        return mk_calc_rule(
+            [mk_term(club_field, "isFilled")], CONTACT_IDS,
+            ",".join(operands), "".join("{%s}" % q for q in roster_qids),
+            ignore_hidden=True, as_text=True)
+
+    # Jotform walks a field's rules last to first, so rule 0 runs after every
+    # roster is shown or hidden (glow/sync.py CONTACT_IDS_FIRST); minted first,
+    # its ids are the lowest, so id order and index still agree
+    first = bool(picker and glow_sync.CONTACT_IDS_FIRST)
+    if first:
+        conds.append(contact_ids())
 
     # A. roster visibility
     # ambiguity is judged case-insensitively: Jotform's runtime "equals"
@@ -288,14 +331,8 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
         conds.append(mk_calc_rule([mk_term(week_qid, "isFilled")], WEEK_ID,
                                   week_qid, "{%s}" % week_qid))
     guarded = bool(picker and picker_options and guard and submit)
-    roster_qids = sorted(club_questions, key=int)
-    # no separator between the rosters, guard or not: only one roster can be
-    # visible when Submit is (the guard's rules), and a literal ", " would be
-    # written between every pair of operands, hidden ones included
-    conds.append(mk_calc_rule(
-        [mk_term(club_field, "isFilled")], CONTACT_IDS,
-        ",".join(roster_qids), "".join("{%s}" % q for q in roster_qids),
-        ignore_hidden=True, as_text=True))
+    if not first:
+        conds.append(contact_ids())
 
     # D. one club per submission: question 5 (the copy of the picker) is not
     # exactly one of its options -> several clubs are picked: show the
@@ -599,6 +636,21 @@ def main():
         """The partner the form's own rules name for this roster ("" when they
         name none - an owner read from the Roster's rows is not the form's word)."""
         return "" if qid in inferred else current_partner_of.get(qid, "")
+
+    # question 18 the old way (glow/sync.py CONTACT_IDS_FIRST / _PICKER_OPERAND):
+    # the rewrite below fixes it, but only by hand - the runner reads this line
+    stale_ids = glow_sync.contact_ids_stale(props.get("conditions", []), form_text, picker_qid)
+    if stale_ids:
+        shape = glow_sync.contact_ids_layout(props.get("conditions", []), form_text)
+        why = []
+        if "order" in stale_ids:
+            why.append(f"its calculation is rule {shape['position'] + 1} of {shape['count']}, after "
+                       "the rosters' rules, so a change of club calculates it before the rosters "
+                       "show or hide")
+        if "operand" in stale_ids:
+            why.append(f"the Club picker (q{picker_qid}) is not one of its operands")
+        warn(f"  ! {CONTACT_IDS_STALE}: {'; '.join(why)} - the rewrite puts it right; apply this "
+             "form by hand (docs/RUNBOOK.md, \"The names list sent to Salesforce\")")
 
     # the picker's options as the form holds them: what a mentor can pick today
     listed = {}
@@ -1003,14 +1055,18 @@ def main():
             n += 1
         slug = slug if n == 1 else f"{slug}{n}"
         used_names.add(slug)
-        content = jf.post_form("/questions", {
+        fields = {
             "question[type]": "control_checkbox",
             "question[text]": club,
             "question[name]": slug,
             "question[order]": str(slot),
             "question[hidden]": "Yes",
             "question[options]": options,
-        }, f"CREATE roster '{club}' ({options.count('|')+1} girls)")
+        }
+        if glow_sync.ROSTERS_REQUIRED:      # off: Jotform's default, "No"
+            fields["question[required]"] = "Yes"
+        content = jf.post_form("/questions", fields,
+                               f"CREATE roster '{club}' ({options.count('|')+1} girls)")
         if content:
             qid = str(content["qid"])  # API returns new qids as integers
             club_questions[qid] = club
@@ -1018,10 +1074,25 @@ def main():
             pair_of[qid] = (partner, club)
         else:
             pending.append((club, partner))
+    # the required flag (glow/sync.py ROSTERS_REQUIRED): with an options update in
+    # the same write (the POST merges), else on its own, LAST in the run (below) - a
+    # line the runner never applies unattended, so making every roster required is a
+    # hand apply per form
+    want_required = glow_sync.roster_required()
+
+    def required_differs(qid):
+        return (questions[qid].get("required") or "No") != want_required
+
     for qid, club, options in to_update:
-        jf.post_form(f"/question/{qid}", {"question[options]": options},
-                     f"UPDATE roster '{club}' (q{qid}, "
-                     f"{options.count('|')+1} girls)")
+        fields, also = {"question[options]": options}, ""
+        if required_differs(qid):
+            fields["question[required]"] = want_required
+            also = f"; required: {want_required}"
+        jf.post_form(f"/question/{qid}", fields,
+                     f"UPDATE roster '{club}' (q{qid}, {options.count('|')+1} girls{also})")
+    updated = {q for q, _, _ in to_update}
+    to_require = [(qid, club_questions[qid]) for qid in sorted(club_questions, key=int)
+                  if qid in questions and qid not in updated and required_differs(qid)]
 
     # --- the Club picker: its options are always exactly what the rosters' rules test ---
     picker_names = {}   # one entry per distinct text (rosters still told apart by the
@@ -1129,6 +1200,13 @@ def main():
                      f"HIDE partner textbox (q{PARTNER}: no rule shows it; clubs that share a "
                      "name have their own Club picker entry)")
 
+    # the required flag alone, one write per roster (the first rollout: every roster on the
+    # form - Africa 220, the template 359), after everything else: a run that stops in this
+    # tail leaves no new roster without its rule, and its re-run lists only what is left
+    for qid, club in to_require:
+        jf.post_form(f"/question/{qid}", {"question[required]": want_required},
+                     f"REQUIRED roster '{club}' (q{qid}: {want_required})")
+
     # --- what each club sends to Salesforce, for --summary-json --------------
     spelled = {o.lower(): o for o in picker_list} if has_picker else {}
     sf_names = [{"qid": q, "club": club_questions[q], "value": spelled.get(o.lower(), o),
@@ -1154,6 +1232,8 @@ def main():
             "updates": [{"qid": q, "club": c, "girls": o.count("|") + 1}
                         for q, c, o in to_update],
             "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
+            # rosters whose required flag alone is written (no other change to them)
+            "requires": [{"qid": q, "club": c, "required": want_required} for q, c in to_require],
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
             "club_picker": picker_qid, "partner_picker": partner_qid, "club_guard": guard_qid,
             # what every roster on the form sends to question 5 after this plan = the

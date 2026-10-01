@@ -224,8 +224,21 @@ class AutoSyncPlan(unittest.TestCase):
                          f'NOT_ADDED = "{auto_sync.SAME_NAME_REFUSED}"',
                          f'RULES_OLDER = "{auto_sync.RULES_OLDER}"',
                          "{Q5_CHANGES} from '{c['old']}' to '{c['new']}'", "- {NOT_ADDED}",
-                         "its rule tests '{value}', {RULES_OLDER} "):
+                         "its rule tests '{value}', {RULES_OLDER} ",
+                         # question 18 the old way, and the required flag (docs/plans/2026-09-30-contact-ids.md)
+                         f'CONTACT_IDS_STALE = "{auto_sync.CONTACT_IDS_STALE}"', "{CONTACT_IDS_STALE}: ",
+                         "UPDATE roster '{club}' (q{qid}, {options.count('|')+1} girls{also})",
+                         'also = f"; required: {want_required}"',
+                         "REQUIRED roster '{club}' (q{qid}: {want_required})"):
             self.assertIn(fragment, joined, fragment)
+        for line, rx in (("UPDATE roster 'A' (q1, 2 girls)", auto_sync.UPDATE_RX),
+                         ("UPDATE roster 'A' (q1, 2 girls; required: Yes)", auto_sync.UPDATE_RX),
+                         ("UPDATE roster 'A' (q1, 2 girls; required: No)", auto_sync.UPDATE_RX),
+                         ("REQUIRED roster 'A' (q1: Yes)", auto_sync.REQUIRED_RX),
+                         ("REQUIRED roster 'Club (B)' (q1: No)", auto_sync.REQUIRED_RX)):
+            self.assertTrue(rx.match("  - " + line), line)
+        self.assertFalse(auto_sync.UPDATE_RX.match("  - UPDATE roster 'A' (q1, 2 girls; required: Maybe)"))
+        self.assertFalse(auto_sync.REQUIRED_RX.match("  - UPDATE roster 'A' (q1, 2 girls; required: Yes)"))
         # the partner list is retired: the sync writes no such line any more (the runner's
         # pattern for it stays until the dead code is cleaned up, docs/BACKLOG.md)
         self.assertNotIn("partner picker (", joined)
@@ -942,7 +955,8 @@ class ConditionBuilder(unittest.TestCase):
                     and c["action"][0]["resultField"] == sync.CONTACT_IDS][0]
         unguarded = agg(self.rules(picker="500", picker_options=self.OPTIONS))
         self.assertEqual(agg(self.guarded()), unguarded)
-        self.assertEqual((unguarded["equation"], unguarded["operands"]), ("{10}{11}{12}{13}", "10,11,12,13"))
+        # the picker is an operand (glow.sync.CONTACT_IDS_PICKER_OPERAND), never in the equation
+        self.assertEqual((unguarded["equation"], unguarded["operands"]), ("{10}{11}{12}{13}", "500,10,11,12,13"))
         self.assertTrue(unguarded["ignoreHiddenFields"])
 
     def test_club_terms_take_the_pickers_spelling(self):
@@ -1168,8 +1182,9 @@ class SameNameFlow(unittest.TestCase):
             qs[q] = {"type": "control_textbox", "text": "bridge", "order": "30"}
         for (partner, club), names in roster.items():
             qid = self.QIDS[(partner, club)]
+            # in step: the required flag the sync writes (glow.sync.ROSTERS_REQUIRED)
             qs[qid] = {"type": "control_checkbox", "text": club, "options": "|".join(names),
-                       "order": str(40 + int(qid))}
+                       "order": str(40 + int(qid)), "hidden": "Yes", "required": glow_sync.roster_required()}
         option_of, partner_of = self.texts(roster, switched, long)
         if picker:
             qs["500"] = dict(sync.PICKER_PROPS, type="control_dropdown", name=sync.PICKER_NAME, order="3",
@@ -1549,7 +1564,10 @@ class SameNameFlow(unittest.TestCase):
             self.assertEqual(self.shows(fake.writes[-1][2], "600"), [("500", "equals", "Gamma Club")])
             agg, = [a for _, _, actions in self.rules(fake.writes[-1][2]) for a in actions
                     if a.get("resultField") == sync.CONTACT_IDS]
-            self.assertEqual((agg["equation"], agg["operands"]), ("{10}{11}{12}{13}{600}", "10,11,12,13,600"))
+            self.assertEqual((agg["equation"], agg["operands"]), ("{10}{11}{12}{13}{600}", "500,10,11,12,13,600"))
+            self.assertEqual(json.loads(fake.writes[-1][2]["properties"]["conditions"][0]["action"])[0]
+                             ["resultField"], sync.CONTACT_IDS)             # rule 0, the new roster in it
+            self.assertEqual(fake.writes[0][2]["question[required]"], "Yes")   # created required
             self.assertEqual(summary["sf_names"][-1], {"qid": "600", "partner": "Partner Three",
                                                        "club": "Gamma Club", "value": "Gamma Club"})
 
@@ -2319,6 +2337,546 @@ class ClubGuardFlow(unittest.TestCase):
         self.assertEqual((self.run_sync(fake)[0], fake.calls), (0, []))
 
 
+def constants(first=True, operand=True, required=True):
+    """glow.sync's three question-18 constants patched together (every reader takes them
+    from the module at run time: build_conditions, the sync's warning and required
+    writes, form_status, restore_conditions)."""
+    import contextlib
+    from unittest import mock
+    stack = contextlib.ExitStack()
+    for name, value in (("CONTACT_IDS_FIRST", first), ("CONTACT_IDS_PICKER_OPERAND", operand),
+                        ("ROSTERS_REQUIRED", required)):
+        stack.enter_context(mock.patch.object(glow_sync, name, value))
+    return stack
+
+
+class ContactIds(unittest.TestCase):
+    """Question 18 (Contact_IDs, the names Salesforce stores) is recalculated after
+    the rosters show or hide, and at least one girl is ticked
+    (docs/plans/2026-09-30-contact-ids.md): the rule order and operand, the
+    required rosters, the sync's warning and writes, the runner's refusal, the
+    audits in every combination of the constants. Fictional names."""
+
+    CLUBS, PARTNERS = ConditionBuilder.CLUBS, ConditionBuilder.PARTNERS
+    OPTIONS = ConditionBuilder.OPTIONS
+    ROSTERS = ["10", "11", "12", "13"]
+    # SameNameFlow's fake Africa form (form(), run_sync() and summary() below use it)
+    ROSTER, QIDS, MODULES, texts = SameNameFlow.ROSTER, SameNameFlow.QIDS, SameNameFlow.MODULES, SameNameFlow.texts
+
+    def setUp(self):
+        SameNameFlow.setUp(self)
+
+    def tearDown(self):
+        SameNameFlow.tearDown(self)
+
+    def build(self, picker="500", guard=True, **kw):
+        sync._counter[0] = 0
+        extra = dict(picker_options=self.OPTIONS, guard="700", submit="2") if guard and picker else {}
+        return sync.build_conditions(self.CLUBS, self.PARTNERS, ConditionBuilder.MODULES, picker=picker,
+                                     **extra, **kw)
+
+    @staticmethod
+    def sum_at(conds):
+        """(position, action) of the rule that calculates question 18."""
+        (pos, action), = [(i, c["action"][0]) for i, c in enumerate(conds)
+                          if c["type"] == "calculation" and c["action"][0]["resultField"] == sync.CONTACT_IDS]
+        return pos, action
+
+    # ---- build_conditions
+    def test_the_sum_is_rule_0_with_its_ids_minted_first_and_the_picker_an_operand(self):
+        conds = self.build()
+        pos, sum_ = self.sum_at(conds)
+        self.assertEqual(pos, 0)
+        self.assertEqual((sum_["operands"], sum_["equation"]), ("500,10,11,12,13", "{10}{11}{12}{13}"))
+        self.assertEqual((sum_["ignoreHiddenFields"], sum_["insertAsText"], sum_["readOnly"]), (True, True, False))
+        self.assertEqual([(t["field"], t["operator"]) for t in conds[0]["terms"]], [("500", "isFilled")])
+        # minted first: its term, action and rule carry the three lowest ids, and id order is index order
+        base = sync.ID_BASE
+        self.assertEqual((conds[0]["terms"][0]["id"], sum_["id"], conds[0]["id"]),
+                         (f"term_{base + 1}", f"action_{base + 2}", str(base + 3)))
+        ids = [int(c["id"]) for c in conds]
+        self.assertEqual(ids, sorted(ids))
+        self.assertEqual([c["index"] for c in conds], [str(i) for i in range(len(conds))])
+        self.assertEqual([c["priority"] for c in conds], [c["index"] for c in conds])
+        # the guard's two rules are still the last two
+        self.assertEqual([c["type"] for c in conds[-2:]], ["field", "require"])
+        self.assertEqual([a["field"] for a in conds[-1]["action"]], ["2"])
+        # every other rule is the old shape's, in the old order
+        with constants(first=False, operand=False):
+            old = self.build()
+        old_pos, old_sum = self.sum_at(old)
+        self.assertEqual(old_pos, len(old) - 3)            # before 2026-10: after the copies, before the guard
+        self.assertEqual(old_sum["operands"], "10,11,12,13")
+        new, before = sync._norm_rules(conds), sync._norm_rules(old)
+        self.assertEqual(new[1:], before[:old_pos] + before[old_pos + 1:])
+        self.assertEqual(json.loads(new[0][3])[0]["operands"], "500,10,11,12,13")
+        self.assertEqual({k: v for k, v in json.loads(new[0][3])[0].items() if k != "operands"},
+                         {k: v for k, v in json.loads(before[old_pos][3])[0].items() if k != "operands"})
+        self.assertEqual(new[0][:3], before[old_pos][:3])  # same type, link and terms
+
+    def test_each_constant_alone(self):
+        for first, operand in ((True, False), (False, True), (False, False)):
+            with constants(first=first, operand=operand):
+                conds = self.build()
+            pos, sum_ = self.sum_at(conds)
+            self.assertEqual(pos, 0 if first else len(conds) - 3, (first, operand))
+            self.assertEqual(sum_["operands"], ("500," if operand else "") + "10,11,12,13", (first, operand))
+            self.assertEqual(sum_["equation"], "{10}{11}{12}{13}")      # the picker is never in it
+            ids = [int(c["id"]) for c in conds]
+            self.assertEqual(ids, sorted(ids), (first, operand))
+        # no guard: the sum is rule 0 all the same, and last in the old shape
+        self.assertEqual(self.sum_at(self.build(guard=False))[0], 0)
+        with constants(first=False):
+            conds = self.build(guard=False)
+        self.assertEqual(self.sum_at(conds)[0], len(conds) - 1)
+
+    def test_a_form_without_the_picker_is_unchanged_byte_for_byte(self):
+        shapes = set()
+        for first in (True, False):
+            for operand in (True, False):
+                with constants(first=first, operand=operand):
+                    shapes.add(json.dumps(self.build(picker=None)))
+        self.assertEqual(len(shapes), 1)                  # ids included: no constant touches it
+        conds = json.loads(shapes.pop())
+        pos, sum_ = self.sum_at(conds)
+        self.assertEqual((pos, sum_["operands"]), (len(conds) - 1, "10,11,12,13"))
+
+    def test_the_new_order_is_a_rewrite_of_one_rule(self):
+        new = self.build()
+        for first, operand, delta in ((False, False, (len(new) - 1, 1, 1)),   # moved and one operand more
+                                      (True, False, (len(new) - 1, 1, 1)),    # the operand only
+                                      (False, True, (len(new), 0, 0))):       # the order only
+            with constants(first=first, operand=operand):
+                old = self.build()
+            live = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in old]
+            self.assertFalse(sync.same_conditions(live, new), (first, operand))   # order counts
+            self.assertEqual(sync.rule_delta(live, new), delta, (first, operand))
+        self.assertTrue(sync.same_conditions([dict(c, terms=json.dumps(c["terms"]),
+                                                   action=json.dumps(c["action"])) for c in new], new))
+
+    def test_glow_sync_reads_the_live_rules(self):
+        rosters = set(self.ROSTERS)
+        with constants(first=False, operand=False):
+            old = self.build()
+        new = self.build()
+        self.assertEqual(glow_sync.contact_ids_stale(old, rosters, "500"), ["order", "operand"])
+        self.assertEqual(glow_sync.contact_ids_stale(new, rosters, "500"), [])
+        with constants(operand=False):
+            self.assertEqual(glow_sync.contact_ids_stale(old, rosters, "500"), ["order"])
+        with constants(first=False):
+            self.assertEqual(glow_sync.contact_ids_stale(old, rosters, "500"), ["operand"])
+        with constants(first=False, operand=False):
+            self.assertEqual(glow_sync.contact_ids_stale(old, rosters, "500"), [])
+        self.assertEqual(glow_sync.contact_ids_stale(old, rosters, None), [])     # no picker: nothing asked
+        self.assertEqual(glow_sync.contact_ids_stale([], rosters, "500"), [])      # nothing to compare
+        wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in old]
+        shape = glow_sync.contact_ids_layout(wire + [{"terms": "{broken"}], rosters)
+        self.assertEqual((shape["position"], shape["count"], len(shape["roster_rules"])),
+                         (len(old) - 3, len(old) + 1, 4))
+        self.assertEqual(shape["roster_rule_fields"], {"500": 4, sync.PARTNER: 2})
+        self.assertEqual(glow_sync.roster_required(), "Yes")
+        with constants(required=False):
+            self.assertEqual(glow_sync.roster_required(), "No")
+
+    # ---- the sync on a fake form
+    def form(self, built=(True, True, True), **kw):
+        """SameNameFlow's switched form (ClubGuardFlow's with the guard), its rules and
+        required flags as the sync generates them under `built` (first, operand, required)."""
+        with constants(*built):
+            return ClubGuardFlow.form(ClubGuardFlow(), **kw)
+
+    def run_sync(self, fake, *extra, roster=None):
+        return SameNameFlow.run_sync(self, fake, *extra, roster=roster)
+
+    def summary(self, fake, *extra, **kw):
+        return SameNameFlow.summary(self, fake, *extra, **kw)
+
+    def test_old_rules_warn_and_plan_one_rewrite_then_nothing(self):
+        for built, why in (((False, False, True), ("is rule ", "is not one of its operands")),
+                           ((True, False, True), ("is not one of its operands",)),
+                           ((False, True, True), ("is rule ",))):
+            del sync.WARNINGS[:]
+            qs, wire = self.form(built)
+            fake = FakeForm(qs, wire)
+            summary, out = self.summary(fake)
+            self.assertEqual(fake.calls, [f"REPLACE conditions ({len(wire)} rules)"], built)
+            (warning,) = sync.WARNINGS
+            self.assertTrue(warning.startswith(f"  ! {sync.CONTACT_IDS_STALE}: "), warning)
+            for fragment in why:
+                self.assertIn(fragment, warning)
+            self.assertEqual("is rule " in warning, not built[0], built)       # only what is stale
+            self.assertEqual("operands" in warning, not built[1], built)
+            self.assertIn('docs/RUNBOOK.md, "The names list sent to Salesforce"', warning)
+            if built[1]:      # the order only: every rule is kept, one moves
+                self.assertIn(f"conditions: {len(wire)} kept, 0 new, 0 dropped", out)
+            else:
+                self.assertIn(f"conditions: {len(wire) - 1} kept, 1 new, 1 dropped", out)
+            plan = auto_sync.plan_from_summary(summary)
+            self.assertEqual((auto_sync.changes(plan), len(auto_sync.contact_ids_stale(plan))), (0, 1))
+        qs, wire = self.form((False, False, True))
+        self.assertIn(f"is rule {len(wire) - 2} of {len(wire)}, after the rosters' rules",
+                      self.run_sync(FakeForm(qs, wire))[1])
+        # the hand apply writes the new rules; the next run has nothing to say
+        fake = FakeForm(qs, wire, apply=True)
+        self.assertEqual(self.run_sync(fake, "--apply")[0], 0)
+        written = fake.writes[-1][2]["properties"]["conditions"]
+        self.assertEqual(sync._norm_rules(written), sync._norm_rules(self.form()[1]))
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form())
+        self.assertEqual((self.run_sync(fake)[0], fake.calls, sync.WARNINGS), (0, [], []))
+
+    def test_the_rollback_is_generated_by_the_constants(self):
+        # the live form in the new shape; the constants off: the sync plans the old rules and
+        # "No" on every roster, warns nothing, and the old form then needs nothing
+        qs, wire = self.form()
+        with constants(False, False, False):
+            fake = FakeForm(qs, wire)
+            summary, out = self.summary(fake)
+            self.assertEqual(sync.WARNINGS, [])
+            # the rules first, the flags last (a run that stops in the tail leaves no rule stale)
+            self.assertEqual(fake.calls, [f"REPLACE conditions ({len(wire)} rules)"]
+                             + [f"REQUIRED roster '{c}' (q{q}: No)" for q, c in
+                                (("10", "Alpha Club"), ("11", "Stars"), ("12", "Stars"), ("13", "Beta Club"))])
+            self.assertIn(f"conditions: {len(wire) - 1} kept, 1 new, 1 dropped", out)
+            self.assertEqual(sync._norm_rules(fake.writes[0][2]["properties"]["conditions"]),
+                             sync._norm_rules(self.form((False, False, False))[1]))
+            self.assertEqual([r["required"] for r in summary["requires"]], ["No"] * 4)
+            fake = FakeForm(*self.form((False, False, False)))
+            self.assertEqual((self.run_sync(fake)[0], fake.calls), (0, []))
+        # the rules alone (the required flag kept)
+        with constants(False, False, True):
+            fake = FakeForm(qs, wire)
+            self.run_sync(fake)
+            self.assertEqual(fake.calls, [f"REPLACE conditions ({len(wire)} rules)"])
+
+    def test_a_form_without_the_picker_gets_no_warning_and_no_rewrite(self):
+        for built in ((True, True, True), (False, False, True)):
+            del sync.WARNINGS[:]
+            with constants(*built):
+                qs, wire = SameNameFlow.form(self, picker=False)
+            fake = FakeForm(qs, wire)
+            self.assertEqual((self.run_sync(fake)[0], fake.calls, sync.WARNINGS), (0, [], []), built)
+
+    # ---- at least one girl: the required rosters
+    def test_a_roster_without_the_flag_gets_it_alone_or_with_its_update(self):
+        qs, wire = self.form()
+        for q in self.ROSTERS:
+            qs[q]["required"] = "No"
+        del qs["13"]["required"]                         # absent reads as "No", as Jotform's default
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake)
+        want = [f"REQUIRED roster '{c}' (q{q}: Yes)" for q, c in
+                (("10", "Alpha Club"), ("11", "Stars"), ("12", "Stars"), ("13", "Beta Club"))]
+        self.assertEqual(fake.calls, want)                # rules in step: no rewrite
+        self.assertIn("(conditions unchanged - skipping the rewrite)", out)
+        self.assertEqual({w[2]["question[required]"] for w in fake.writes}, {"Yes"})
+        self.assertEqual([len(w[2]) for w in fake.writes], [1] * 4)        # the flag and nothing else
+        for call in fake.calls:
+            m = auto_sync.REQUIRED_RX.match("  - " + call)
+            self.assertTrue(m, call)
+            self.assertFalse(auto_sync.UPDATE_RX.match("  - " + call))
+        self.assertEqual(summary["requires"], [{"qid": q, "club": c, "required": "Yes"} for q, c in
+                                               (("10", "Alpha Club"), ("11", "Stars"), ("12", "Stars"),
+                                                ("13", "Beta Club"))])
+        plan = auto_sync.parse_plan(out)
+        self.assertEqual((len(plan["requires"]), auto_sync.changes(plan)), (4, 4))
+        self.assertEqual(auto_sync.plan_from_summary(summary)["requires"], plan["requires"])
+        # a roster with an options update takes the flag in the same write
+        sheet = {**ClubGuardFlow.ROSTER, ("Partner One", "Alpha Club"): ["Jane Doe", "Mary Roe", "Zoe Quillfeather"]}
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake, roster=sheet)
+        self.assertEqual(fake.calls[0], "UPDATE roster 'Alpha Club' (q10, 3 girls; required: Yes)")
+        self.assertEqual(fake.writes[0][2], {"question[options]": "Jane Doe|Mary Roe|Zoe Quillfeather",
+                                             "question[required]": "Yes"})
+        self.assertEqual(fake.calls[1:], [f"REPLACE conditions ({len(wire)} rules)"] + want[1:])   # flags last
+        m = auto_sync.UPDATE_RX.match("  - " + fake.calls[0])
+        self.assertEqual((m["club"], m["qid"], m["girls"], m["required"]), ("Alpha Club", "10", "3", "Yes"))
+        self.assertEqual([r["qid"] for r in summary["requires"]], ["11", "12", "13"])
+        # in step: an update writes its options only, with the line it always had
+        qs, wire = self.form()
+        fake = FakeForm(qs, wire)
+        self.run_sync(fake, roster=sheet)
+        self.assertEqual(fake.calls[0], "UPDATE roster 'Alpha Club' (q10, 3 girls)")
+        self.assertEqual(fake.writes[0][2], {"question[options]": "Jane Doe|Mary Roe|Zoe Quillfeather"})
+        self.assertFalse([c for c in fake.calls if c.startswith("REQUIRED")])
+
+    def test_a_new_roster_is_created_required(self):
+        sheet = {**ClubGuardFlow.ROSTER, **ClubGuardFlow.NEW_CLUB}
+        for required in (True, False):
+            with constants(required=required):
+                fake = FakeForm(*self.form((True, True, required)))
+                self.run_sync(fake, roster=sheet)
+            label, (_, path, fields) = fake.calls[0], fake.writes[0]
+            self.assertEqual((label, path), ("CREATE roster 'Gamma Club' (2 girls)", "/questions"))
+            self.assertEqual(fields.get("question[required]"), "Yes" if required else None)
+            self.assertEqual(fields["question[hidden]"], "Yes")
+            self.assertEqual(set(fields) - {"question[required]"},
+                             {"question[type]", "question[text]", "question[name]", "question[order]",
+                              "question[hidden]", "question[options]"})       # otherwise today's payload
+            self.assertFalse([c for c in fake.calls if c.startswith("REQUIRED")])
+
+    # ---- the runner
+    STALE_DRY_RUN = (
+        "Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n"
+        f"  ! {sync.CONTACT_IDS_STALE}: its calculation is rule 22 of 23, after the rosters' rules, so a "
+        "change of club calculates it before the rosters show or hide; the Club picker (q500) is not "
+        "one of its operands - the rewrite puts it right; apply this form by hand (docs/RUNBOOK.md, "
+        "\"The names list sent to Salesforce\")\n"
+        "  conditions: 22 kept, 1 new, 1 dropped\n"
+        "\nDRY RUN (use --apply to write):\n"
+        "  - REPLACE conditions (23 rules)\n")
+
+    def run_region(self, text, apply=False, summary=None):
+        return AutoSyncPlan.run_region(self, text, apply=apply, summary=summary)
+
+    def test_the_runner_never_applies_a_region_whose_question_18_is_the_old_way(self):
+        self.assertEqual(auto_sync.CONTACT_IDS_STALE, sync.CONTACT_IDS_STALE)
+        plan = auto_sync.parse_plan(self.STALE_DRY_RUN)
+        self.assertEqual((auto_sync.changes(plan), len(auto_sync.contact_ids_stale(plan))), (0, 1))
+        (reason,) = auto_sync.check_bands(plan)
+        self.assertIn("calculate question 18 (Contact_IDs, the names sent to Salesforce) the old way", reason)
+        self.assertIn("by hand", reason)
+        busy = self.STALE_DRY_RUN.replace("  - REPLACE", "  - CREATE roster 'Gamma Club' (2 girls)\n  - REPLACE")
+        summary = {"creates": [], "updates": [], "deletes": [], "rules": 23, "calls": ["REPLACE conditions (23 rules)"],
+                   "warnings": [l for l in self.STALE_DRY_RUN.splitlines() if l.startswith("  ! ")]}
+        for text, apply, summ in ((self.STALE_DRY_RUN, False, None), (self.STALE_DRY_RUN, True, None),
+                                  (busy, True, None), (self.STALE_DRY_RUN, True, summary)):
+            run = self.run_region(text, apply=apply, summary=summ)
+            self.assertEqual(run.synced, [False], text)               # never an apply: not even with a new club
+            self.assertEqual([r[7] for r in run.results], ["attention"])
+            self.assertIn("the old way", run.results[0][8])
+            (title, detail), = run.attention
+            self.assertIn("Africa: not applied", title)
+            self.assertIn(sync.CONTACT_IDS_STALE, detail)
+        # in step: a rules-only plan is in-sync as ever
+        quiet = "\n".join(l for l in self.STALE_DRY_RUN.splitlines() if "! " not in l) + "\n"
+        run = self.run_region(quiet)
+        self.assertEqual(([r[7] for r in run.results], run.attention), (["in-sync"], []))
+
+    def test_the_runner_writes_the_required_flag_only_with_a_change_it_already_makes(self):
+        text = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n"
+                "\nDRY RUN (use --apply to write):\n"
+                "  - UPDATE roster 'Alpha Club' (q10, 3 girls; required: Yes)\n"
+                "  - CREATE roster 'Gamma Club' (2 girls)\n")
+        plan = auto_sync.parse_plan(text)
+        self.assertEqual([(u["qid"], u["girls"]) for u in plan["updates"]], [("10", 3)])
+        self.assertEqual((plan["requires"], auto_sync.check_bands(plan)), ([], []))
+        run = self.run_region(text, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results]), ([False, True], ["applied"]))
+        # one roster's flag on its own is never applied unattended - nor 200 of them
+        for n in (1, 200):
+            alone = text + "".join(f"  - REQUIRED roster 'Club {i}' (q{100 + i}: Yes)\n" for i in range(n))
+            plan = auto_sync.parse_plan(alone)
+            self.assertEqual(len(plan["requires"]), n)
+            self.assertIn(f"required: Yes on {n} roster(s)", auto_sync.plan_summary(plan))
+            (reason,) = auto_sync.check_bands(plan, max_updates=1000)
+            self.assertIn(f"would write the required flag on {n} roster(s) that have no other change", reason)
+            run = self.run_region(alone, apply=True)
+            self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+            self.assertIn(f"- REQUIRED on {n} roster(s) with no other change", run.attention[0][1])
+            # …the rollback's "No" too
+            plan = auto_sync.parse_plan(alone.replace(": Yes)", ": No)"))
+            self.assertIn("required: No on", auto_sync.plan_summary(plan))
+            self.assertEqual(len(auto_sync.check_bands(plan, max_updates=1000)), 1)
+        # nothing else planned: never in-sync
+        only = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to "
+                "write):\n  - REQUIRED roster 'Alpha Club' (q10: Yes)\n")
+        run = self.run_region(only, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+
+    # ---- form_status: every combination of the constants
+    def audit(self, qs, wire):
+        return form_status.audit_rules(qs, wire)[0]
+
+    def test_the_audits_follow_the_constants_in_every_combination(self):
+        import itertools
+        expect = {  # (constant, expected value, built value) -> the problem a form shows
+            (0, True): "is calculated by rule ",
+            (1, True): "is not one of question 18's operands",
+            (1, False): "Contact_IDs aggregate includes 1 non-roster question(s): ['500']",
+            (2, True): "4 of 4 roster(s) not required (first q10)",
+            (2, False): "4 of 4 roster(s) required (first q10) although glow/sync.py ROSTERS_REQUIRED is off",
+        }
+        for combo in itertools.product((True, False), repeat=3):
+            qs, wire = self.form(combo)
+            with constants(*combo):
+                self.assertEqual(self.audit(qs, wire), [], combo)          # what the sync writes is clean
+                for i in range(3):
+                    flipped = list(combo)
+                    flipped[i] = not combo[i]
+                    found = self.audit(*self.form(tuple(flipped)))
+                    fragment = expect.get((i, combo[i]))
+                    if fragment is None:           # q18 first while the order is off: never harmful
+                        self.assertEqual(found, [], (combo, i))
+                        continue
+                    self.assertEqual(len(found), 1, (combo, i, found))
+                    self.assertIn(fragment, found[0], (combo, i))
+            # the typed club name (no picker): nothing about the order or operand, ever
+            with constants(*combo):
+                typed = SameNameFlow.form(self, picker=False)
+                self.assertEqual(self.audit(*typed), [], combo)
+
+    def test_each_question_18_check_fires_on_its_broken_form(self):
+        qs, wire = self.form()
+        sum_rule = lambda c: '"resultField": "18"' in c["action"]          # noqa: E731
+
+        def edit(**change):
+            return FormStatusAudit.edit(wire, sum_rule, **change)
+
+        def only(rules, fragment, n=1):
+            found = self.audit(qs, rules)
+            self.assertEqual(sum(fragment in p for p in found), n, found)
+            return found
+
+        only(edit(action=lambda c: c["action"].replace('"{10}{11}', '"{500}{10}{11}')),
+             "question 18's equation is not one {qid} per roster: 5 field(s) for 4 roster(s), 1 not a roster")
+        only(edit(action=lambda c: c["action"].replace('{10}{11}', '{10}, {11}')), ", text between them")
+        only(edit(action=lambda c: c["action"].replace('{10}{11}', '{10}{10}{11}')), "1 twice")
+        found = only(edit(action=lambda c: c["action"].replace('{10}{11}', '{11}')
+                          .replace('"500,10,11', '"500,11')), "misses 1 roster(s): ['10']")
+        self.assertTrue(any("3 field(s) for 4 roster(s)" in p for p in found), found)
+        only(wire + [c for c in wire if sum_rule(c)], "2 rules calculate question 18 (Contact_IDs), expected 1")
+        moved = wire[1:3] + wire[:1] + wire[3:]             # after two roster rules
+        only(moved, "is calculated by rule 3 of")
+        only(moved, "after 2 rule(s) that show a roster")
+        # a roster rule on another field than the picker: question 18's rule must test it too
+        gated = FormStatusAudit.edit(wire, lambda c: '"field": "10"' in c["action"],
+                                     terms=lambda c: json.dumps(json.loads(c["terms"]) + [
+                                         {"field": "94", "operator": "equals", "value": "1"}]))
+        only(gated, "1 rule(s) that show a roster test q94, which question 18's rule does not test")
+        with constants(first=False):                         # without the order: as an operand
+            only(gated, "test q94, which question 18's rule does not list as an operand")
+            only(FormStatusAudit.edit(gated, sum_rule, action=lambda c: c["action"].replace('"500,', '"500,94,')),
+                 "test q94", n=0)
+        only(FormStatusAudit.edit(gated, sum_rule, terms=lambda c: json.dumps(json.loads(c["terms"]) + [
+            {"field": "94", "operator": "isFilled", "value": ""}])), "test q94", n=0)
+        self.assertEqual(self.audit(qs, [c for c in wire if not sum_rule(c)]),
+                         ["no Contact_IDs aggregate calculation found"])
+
+    # ---- form_status --rendered
+    def rendered(self, page, qs=None, select=True, **report):
+        """form_status.rendered_problems on `page`, with the picker's <select> (its
+        calcValues aligned) in front of it unless `select` is False."""
+        qs = qs or self.form()[0]
+        rosters = sorted((q for q, v in qs.items() if v.get("type") == "control_checkbox"), key=int)
+        r = {"club_picker": "500", "picker_calc_values": True, "picker_options": 4,
+             "roster_qids": rosters, **report}
+        if select:
+            page = ('<select name="q500_clubPicker[]" multiple="">'
+                    + "".join(f'<option data-calcvalue="{o}" value="{o}">{o}</option>'
+                              for o in qs["500"]["options"].split("|")) + "</select>\n" + page)
+        return form_status.rendered_problems(r, page), r
+
+    def test_the_served_page_is_read_for_the_order_the_operand_and_the_required_boxes(self):
+        qs, wire = self.form()
+        page = served_rules_and_rosters(qs, wire)
+        problems, r = self.rendered(page, qs)
+        self.assertEqual(problems, [])
+        self.assertEqual(r["build"], "9e75d6f1d83")
+        self.assertEqual(r["rendered_rules"], {"rules": len(wire), "position": 0, "roster_rules": 4,
+                                               "first_roster_rule": 1, "operands": ["500", "10", "11", "12", "13"]})
+        self.assertEqual(r["rendered_required"], {"rosters": 4, "required": 4, "boxes": 8, "boxes_required": 8})
+        # the old rules served
+        old_qs, old = self.form((False, False, True))
+        problems, _ = self.rendered(served_rules_and_rosters(old_qs, old), qs)
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn(f"rendered page: question 18 is rule {len(old) - 2} of {len(old)} in JotForm.setConditions, "
+                      "after the rosters' rules - the old order", problems[0])
+        self.assertIn("does not list the Club picker (q500)", problems[1])
+        # Jotform dropped the operand it was sent
+        (problem,), _ = self.rendered(served_rules_and_rosters(qs, wire, operands="10,11,12,13"), qs)
+        self.assertIn("question 18's entry in JotForm.setCalculations does not list the Club picker (q500)",
+                      problem)
+        # boxes without validate[required], and the other way round once the constant is off
+        problems, _ = self.rendered(served_rules_and_rosters(qs, wire, required=False), qs)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("4 of 4 rosters carry no validate[required] on their boxes", problems[0])
+        with constants(required=False):
+            self.assertEqual(self.rendered(served_rules_and_rosters(qs, wire, required=False), qs)[0], [])
+            (problem,) = self.rendered(page, qs)[0]
+            self.assertIn("4 rosters still carry validate[required] although", problem)
+        # a page it cannot read is never vouched for
+        problems, r = self.rendered("<html></html>", qs, select=False)
+        self.assertEqual(r["build"], None)
+        self.assertTrue(any("no Club picker select" in p for p in problems))
+        self.assertTrue(any("no calculation of question 18 in JotForm.setConditions" in p for p in problems))
+        self.assertTrue(any("shows boxes for 0 of the form's 4 rosters" in p for p in problems))
+        # only the order and operand checks need the picker
+        problems, _ = self.rendered(served_rules_and_rosters(old_qs, old), qs, club_picker=None)
+        self.assertEqual(problems, [])
+        # nothing it says carries a girl's name
+        for name in ("Jane Doe", "Ann Poe", "Sue Moe", "Eve Hoe"):
+            self.assertIn(name, page)
+            self.assertNotIn(name, json.dumps(self.rendered(page.replace("validate[required]", ""), qs)))
+
+    def test_the_page_helpers(self):
+        self.assertEqual(form_status.page_array("x JotForm.setConditions(  [1, {\"a\": 2}]);", "setConditions"),
+                         [1, {"a": 2}])
+        self.assertIsNone(form_status.page_array("JotForm.setConditions({});", "setConditions"))
+        self.assertIsNone(form_status.page_array("JotForm.setConditions([1,", "setConditions"))
+        self.assertIsNone(form_status.page_array(None, "setConditions"))
+        self.assertEqual(form_status.runtime_build('<script src="https://cdn.jotfor.ms/s/static/772a1982daf/js/x.js">'),
+                         "772a1982daf")
+        self.assertIsNone(form_status.runtime_build(""))
+        # a box's attributes in any order; boxes of other questions are not counted
+        page = ('<input required="" value="Ann Poe" class="form-checkbox validate[required]" id="input_10_0" '
+                'type="checkbox"><input type="checkbox" class="form-checkbox" id="input_10_1">'
+                '<input type="checkbox" class="form-checkbox validate[required]" id="input_99_0">'
+                '<input type="text" class="validate[required]" id="input_11_0">')
+        self.assertEqual(form_status.rendered_required(page, ["10", "11"]),
+                         {"rosters": 1, "required": 1, "boxes": 2, "boxes_required": 1})
+        # several validations in one class (the runtime's own join), and none that is "required"
+        page = ('<input type="checkbox" class="form-checkbox validate[required,minSelection]" id="input_10_0">'
+                '<input type="checkbox" class="form-checkbox validate[minSelection]" id="input_11_0">')
+        self.assertEqual(form_status.rendered_required(page, ["10", "11"]),
+                         {"rosters": 2, "required": 1, "boxes": 2, "boxes_required": 1})
+
+    # ---- restore_conditions: the second rollback path says what follows
+    def test_restoring_an_old_snapshot_says_the_form_will_read_not_clean(self):
+        qs, wire = self.form()
+        old = self.form((False, False, True))[1]
+        note = restore_conditions.contact_ids_note(old, qs)
+        self.assertIn("calculates question 18 (Contact_IDs) the old way (after the rosters' rules and without "
+                      "the Club picker as an operand)", note)
+        self.assertIn("the runner does not apply its region", note)
+        self.assertIsNone(restore_conditions.contact_ids_note(wire, qs))
+        with constants(first=False, operand=False):
+            self.assertIsNone(restore_conditions.contact_ids_note(old, qs))
+        code, out, puts = RestoreConditionsGuard.run_restore(self, old, qs, "--apply")
+        self.assertEqual((code, len(puts)), (0, 1))
+        self.assertIn("the old way", out)
+
+
+def served_rules_and_rosters(qs, wire, required=True, build="9e75d6f1d83", operands=None):
+    """The parts of a public page that form_status --rendered reads besides the
+    picker's <select>, shaped as Jotform serves them (read from the U.S page
+    2026-10-01): the runtime script, every roster's boxes (validate[required]
+    and required="" on each when `required`), JotForm.setConditions with the
+    rules parsed, JotForm.setCalculations with each calculation's action and its
+    conditionId. operands: replace question 18's operands as served (Jotform
+    dropping one). Fictional names, as the fixtures'."""
+    import html as html_mod
+    parts = [f'<script src="https://cdn.jotfor.ms/s/static/{build}/static/jotform.forms.js"></script>']
+    for qid, q in sorted(qs.items(), key=lambda kv: int(kv[0])):
+        if q.get("type") != "control_checkbox":
+            continue
+        cls = "form-checkbox validate[required]" if required else "form-checkbox"
+        attr = ' required=""' if required else ""
+        for i, name in enumerate(o for o in q.get("options", "").split("|") if o):
+            parts.append(f'<input type="checkbox" class="{cls}" id="input_{qid}_{i}" name="q{qid}_club[]" '
+                         f'value="{html_mod.escape(name)}"{attr} />')
+    rules = [dict(c, terms=json.loads(c["terms"]) if isinstance(c["terms"], str) else c["terms"],
+                  action=json.loads(c["action"]) if isinstance(c["action"], str) else c["action"])
+             for c in wire]
+    calcs = [dict(a, conditionId=c["id"], conditionTrue=False) for c in rules if c["type"] == "calculation"
+             for a in c["action"]]
+    if operands is not None:
+        calcs = [dict(a, operands=operands) if a["resultField"] == sync.CONTACT_IDS else a for a in calcs]
+    parts.append("<script>JotForm.setCalculations(" + json.dumps(calcs) + ");")
+    parts.append("JotForm.setConditions(" + json.dumps(rules) + ");</script>")
+    return "\n".join(parts)
+
+
 class FormStatusAudit(unittest.TestCase):
     """tools/form_status.py audit_rules on forms built by the sync's own rules."""
 
@@ -2329,19 +2887,34 @@ class FormStatusAudit(unittest.TestCase):
     def form(self, **kw):
         return SameNameFlow.form(SameNameFlow(), **kw)
 
+    COVERAGE = ("2 rule(s) that show a roster test q331, which question 18's rule does not test: when "
+                "q331 shows or hides a roster, question 18 is not recalculated")
+
     def test_the_typed_box_form_is_clean(self):
-        # before --same-name-switch: two rosters test "Stars", told apart by the Partner box
+        # before --same-name-switch: two rosters test "Stars", told apart by the Partner box. Every
+        # same-name rule passed - only question 18's rule does not test the box, so typing the
+        # partner re-shows a roster without re-running it (none of the live forms is in this
+        # state since 2026-09-30; flagged, not generated: docs/plans/2026-09-30-contact-ids.md)
         for partners in (None, self.PARTNERS):
             problems, summary = form_status.audit_rules(*self.form(), partners)
-            self.assertEqual(problems, [])
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn(self.COVERAGE, problems[0])
             self.assertEqual((summary["clubs"], summary["long_names"]), (4, 0))
+        # in the shape before 2026-10 (both constants off) nothing is expected of question 18
+        from unittest import mock
+        with mock.patch.object(glow_sync, "CONTACT_IDS_FIRST", False), \
+                mock.patch.object(glow_sync, "CONTACT_IDS_PICKER_OPERAND", False):
+            self.assertEqual(form_status.audit_rules(*self.form())[0], [])
+
+    SUMMARY = {"clubs": 4, "show_rules": 4, "aggregate_rosters": 4, "long_names": 2,
+               "contact_ids_rule": 1, "contact_ids_picker_operand": True, "required_rosters": 4}
 
     def test_the_switched_form_is_clean(self):
         # each Stars tests its own long name: one roster per tested text, no Partner term
         qs, wire = self.form(switched=True)
         for partners in (None, self.PARTNERS):
             self.assertEqual(form_status.audit_rules(qs, wire, partners),
-                             ([], {"clubs": 4, "show_rules": 4, "aggregate_rosters": 4, "long_names": 2}))
+                             ([], dict(self.SUMMARY, rules=len(wire))))
         self.assertEqual(form_status.tested_values(qs, wire),
                          {"10": "Alpha Club", "11": "Stars - Partner One", "12": "Stars - Partner Two",
                           "13": "Beta Club"})
@@ -2385,11 +2958,13 @@ class FormStatusAudit(unittest.TestCase):
             if '"field": "10"' in c["action"]:
                 c["terms"] = json.dumps([{"field": "331", "operator": "equals", "value": "Partner One"},
                                          {"field": "500", "operator": "equals", "value": "Alpha Club"}])
-        self.assertEqual(form_status.audit_rules(qs, wire)[0],
-                         ["'Alpha Club' (q10) is unique but its rule needs a Partner"])
+        problems = form_status.audit_rules(qs, wire)[0]
+        self.assertEqual(problems[0], "'Alpha Club' (q10) is unique but its rule needs a Partner")
+        self.assertEqual(len(problems), 2, problems)          # …and question 18 does not test q331
+        self.assertIn(self.COVERAGE.replace("2 rule(s)", "1 rule(s)"), problems[1])
 
     def test_a_partner_list_left_on_a_form_is_a_problem(self):
-        qs, wire = self.form(partner_list="Partner One|Partner Two")
+        qs, wire = self.form(partner_list="Partner One|Partner Two", switched=True)
         problems = form_status.audit_rules(qs, wire)[0]
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("partner list (q600) on the form: the partner list was retired 2026-09-30", problems[0])
@@ -2454,9 +3029,11 @@ class FormStatusAudit(unittest.TestCase):
     def test_the_guard_form_is_clean(self):
         qs, wire = self.guard_form()
         self.assertEqual(form_status.audit_rules(qs, wire, self.PARTNERS),
-                         ([], {"clubs": 4, "show_rules": 4, "aggregate_rosters": 4, "long_names": 2}))
+                         ([], dict(self.SUMMARY, rules=len(wire))))
         qs, wire = self.guard_form(switched=False)                   # before the same-name switch
-        self.assertEqual(form_status.audit_rules(qs, wire, self.PARTNERS)[0], [])
+        problems = form_status.audit_rules(qs, wire, self.PARTNERS)[0]
+        self.assertEqual(len(problems), 1, problems)                 # only the Partner box's rules
+        self.assertIn(self.COVERAGE, problems[0])
         qs, wire = self.guard_form(guard=False, calc=False)          # before the guard's rollout: clean too
         self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
 
@@ -2468,11 +3045,13 @@ class FormStatusAudit(unittest.TestCase):
             qs, wire = self.guard_form(guard=False, calc=False, switched=switched)
             wire = self.edit(wire, lambda c: '"field": "11"' in c["action"],
                              terms=lambda c: c["terms"].replace(f'"{old}"', f'"{new}"'))
-            problems = form_status.audit_rules(qs, wire, self.PARTNERS)[0]
+            # (before the switch question 18's rule does not test the Partner box: one more line)
+            problems = [p for p in form_status.audit_rules(qs, wire, self.PARTNERS)[0] if self.COVERAGE not in p]
             self.assertEqual(len(problems), 1, problems)
             self.assertIn(f"equals '{new}', which is not one of its options (it has '{old}'", problems[0])
             qs["500"]["multipleSelections"] = "No"      # a single-select compares without case
-            self.assertEqual(form_status.audit_rules(qs, wire, self.PARTNERS)[0], [])
+            self.assertEqual([p for p in form_status.audit_rules(qs, wire, self.PARTNERS)[0]
+                              if self.COVERAGE not in p], [])
 
     def test_calc_values_must_be_the_options_in_order(self):
         for guard in (True, False):                  # checked whenever the picker carries them
@@ -2570,15 +3149,18 @@ class FormStatusAudit(unittest.TestCase):
                     return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
                 return {"title": "t", "status": "ENABLED", "count": "0"}
 
-        aligned = ('<select name="q500_clubPicker[]" multiple="">'
-                   + "".join(f'<option data-calcvalue="{o}" value="{o}">{o}</option>'
-                             for o in ClubGuardFlow.OPTIONS) + "</select>")
+        select = ('<select name="q500_clubPicker[]" multiple="">'
+                  + "".join(f'<option data-calcvalue="{o}" value="{o}">{o}</option>'
+                            for o in ClubGuardFlow.OPTIONS) + "</select>")
+        aligned = select + "\n<!--rest-->"
         shifted = aligned.replace('data-calcvalue="Beta Club"', 'data-calcvalue="Alpha Club"')
 
         def report(roster, *extra, page=None):
+            # the rules and rosters the page serves follow the form as it is at the call
+            served = None if page is None else page.replace("<!--rest-->", served_rules_and_rosters(qs, wire))
             out = io.StringIO()
             with mock.patch.object(form_status, "Client", lambda key: Fake()), \
-                    mock.patch.object(form_status, "public_page", lambda fid: page), \
+                    mock.patch.object(form_status, "public_page", lambda fid: served), \
                     mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
                     mock.patch.object(sys, "argv", ["form_status.py", "--form", glow_forms.TEMPLATE,
                                                     "--roster", roster, *extra]), \
@@ -2598,7 +3180,15 @@ class FormStatusAudit(unittest.TestCase):
                           "0 without", good)
             self.assertIn("same-name clubs: 2 rosters send '<club> - <partner>'", good)
             self.assertIn("partner box: q331 hidden, no rule shows it", good)
+            self.assertIn(f"question 18: rule 1 of {len(wire)}, the Club picker an operand: yes   "
+                          "rosters required: 4 of 4", good)
+            self.assertIn("runtime build: 9e75d6f1d83", good)
+            self.assertIn(f"rendered rules: question 18 is rule 1 of {len(wire)}, the first roster rule 2; "
+                          "its operands list the picker: yes", good)
+            self.assertIn("rendered rosters: 4 with boxes, 4 with validate[required] (8 of 8 boxes)", good)
             self.assertIn("→ CLEAN", good)
+            for name in ("Jane Doe", "Ann Poe", "Sue Moe"):         # counts only, never a girl
+                self.assertNotIn(name, good)
             self.assertIn("rendered picker: 4 options, 3 with data-calcvalue = value, 1 different", bad)
             self.assertIn("would send another club's name", bad)
             self.assertNotIn("CLEAN", bad)
@@ -2632,7 +3222,7 @@ class FormStatusAudit(unittest.TestCase):
             self.assertIn("club guard: none (a mentor can pick several clubs)", report(roster))
             # before the rollout (no calcValues on the picker) the count is only printed
             del qs["500"]["calcValues"]
-            out = report(roster, "--rendered", page=empty)
+            out = report(roster, "--rendered", page=empty + "\n<!--rest-->")
             self.assertIn("rendered picker: 0 options", out)
             self.assertIn("→ CLEAN", out)
 
@@ -2775,7 +3365,7 @@ class FormStatusLayout(unittest.TestCase):
 
     def test_the_rule_audit_is_unchanged(self):
         # audit_rules still knows nothing of the layout (its fixtures have no Submit)
-        qs, wire = SameNameFlow.form(SameNameFlow())
+        qs, wire = SameNameFlow.form(SameNameFlow(), switched=True)
         self.assertEqual(form_status.audit_rules(qs, wire)[0], [])
         self.assertEqual(layout.audit_layout(qs), ["0 Submit buttons, expected 1"])
         self.assertEqual(form_status.layout_line(layout.summary(qs)), "0 Submit button(s), no link")
@@ -5170,6 +5760,67 @@ class SameNameRunbook(unittest.TestCase):
         self.assertNotIn("Partner-gates both roster questions", doc)
         self.assertNotIn("same-name clubs additionally require the Partner box",
                          " ".join(read(os.path.join(REPO, "README.md")).split()))
+
+
+class ContactIdsRunbook(unittest.TestCase):
+    """docs/RUNBOOK.md "The names list sent to Salesforce": what it quotes is the
+    code's own, the rollout is backed up, previewed, applied and verified in that
+    order with the runner paused, the console check prints counts only, and the
+    rollback is the constants."""
+
+    def section(self):
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        return doc.split("## The names list sent to Salesforce", 1)[1].split("\n## ", 1)[0]
+
+    def test_the_quoted_lines_are_the_tools_own(self):
+        text = " ".join(self.section().split())
+        self.assertIn(sync.CONTACT_IDS_STALE, text)
+        self.assertIn("REQUIRED roster '<club>' (q…: Yes)", text)
+        self.assertIn("UPDATE roster '<club>' (q…, N girls; required: Yes)", text)
+        for name in ("CONTACT_IDS_FIRST", "CONTACT_IDS_PICKER_OPERAND", "ROSTERS_REQUIRED"):
+            self.assertIn(name, text)
+            self.assertTrue(hasattr(glow_sync, name), name)
+        self.assertIn("question 18: rule 1 of N, the Club picker an operand: yes", text)
+        runner = " ".join(read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+                          .split("## Automatic sync", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn(auto_sync.CONTACT_IDS_STALE, runner)
+        self.assertIn("`REQUIRED roster` line", runner)
+
+    def test_the_rollout_is_backed_up_previewed_applied_and_verified(self):
+        text = self.section()
+        block = text.split("```bash", 1)[1].split("```", 1)[0]
+        lines = [l for l in block.splitlines() if l.strip()]
+
+        def at(fragment, after=-1):
+            return next(i for i, l in enumerate(lines) if i > after and fragment in l)
+
+        backup = at("backup_forms.py --form")
+        dry = at("sync_attendance_form.py")
+        apply = at("--apply")
+        again = at("sync_attendance_form.py", after=apply)
+        status = at("tools/form_status.py", after=apply)
+        rendered = at("--rendered", after=apply)
+        self.assertEqual(sorted([backup, dry, apply, again, status, rendered]),
+                         [backup, dry, apply, again, status, rendered])
+        self.assertNotIn("--apply", lines[dry] + lines[again])
+        flat = " ".join(text.split())
+        self.assertLess(flat.index("AUTO_SYNC_APPLY=0"), flat.index("```bash"))
+        self.assertGreater(flat.rindex("`AUTO_SYNC_APPLY=1`"), flat.index("```bash"))   # back on at the end
+        self.assertIn("**hard stop**", flat)
+
+    def test_the_console_check_prints_counts_only(self):
+        js = self.section().split("```js", 1)[1].split("```", 1)[0].strip()
+        returned = js.split("return {", 1)[1].split("};", 1)[0]
+        self.assertEqual(re.findall(r"(\w+):", returned), ["shown", "ticked", "q18", "equal", "flagged"])
+        self.assertNotIn("console.log", js)
+        self.assertIn("input_18", js)
+
+    def test_the_rollback_is_generated(self):
+        rollback = " ".join(self.section().split("**Rollback**", 1)[1].split())
+        self.assertIn("`False`", rollback)
+        self.assertIn("REQUIRED roster '<club>' (q…: No)", rollback)
+        self.assertIn("restore_conditions.py", rollback)
+        self.assertLess(rollback.index("`False`"), rollback.index("restore_conditions.py"))   # the second path
 
 
 import datetime as dt                 # noqa: E402  (the work-log tests below)

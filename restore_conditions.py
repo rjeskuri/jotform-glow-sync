@@ -15,6 +15,11 @@ picker says "Ruby - <partner>"), and any taken before a club was renamed. Run
 the sync instead; --force overrides (then run the sync dry run and --apply
 straight away: it rebuilds the rules on what the picker lists).
 
+A snapshot from before question 18's rules were rebuilt (Contact_IDs first,
+the picker an operand: docs/plans/2026-09-30-contact-ids.md) restores with a
+note: the form then reads NOT CLEAN and the runner stops its region until the
+sync is applied by hand or glow/sync.py's constants are turned off.
+
 Usage:
     export JOTFORM_API_KEY=...
     python3 restore_conditions.py --form 262352490535154                    # dry run
@@ -30,7 +35,28 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
 from glow.cli import run          # noqa: E402
 from glow.jotform import Client   # noqa: E402
+from glow import sync as glow_sync             # noqa: E402
 from glow.sync import CLUB_NAME, PICKER_NAME   # noqa: E402
+
+
+def contact_ids_note(conditions, questions):
+    """A line for a snapshot whose rules calculate question 18 the way glow/sync.py's
+    constants no longer generate (before docs/plans/2026-09-30-contact-ids.md): it
+    restores, but form_status reports the form NOT CLEAN and the runner stops its
+    region until the sync is applied by hand - or the constants are turned off, the
+    generated rollback. None when the snapshot is in the current shape."""
+    picker = next((str(qid) for qid, q in questions.items()
+                   if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
+    rosters = {str(qid) for qid, q in questions.items() if q.get("type") == "control_checkbox"}
+    stale = glow_sync.contact_ids_stale(conditions, rosters, picker)
+    if not stale:
+        return None
+    return ("  ! the snapshot calculates question 18 (Contact_IDs) the old way ("
+            + " and ".join({"order": "after the rosters' rules",
+                            "operand": "without the Club picker as an operand"}[s] for s in stale)
+            + "): restored, form_status reports this form NOT CLEAN and the runner does not apply its "
+              "region until the sync is applied by hand, or glow/sync.py's CONTACT_IDS_* constants "
+              "are off (the generated rollback, docs/RUNBOOK.md \"The names list sent to Salesforce\")")
 
 
 def stale_club_terms(conditions, questions):
@@ -88,7 +114,11 @@ def main():
           f"conditions; snapshot has {len(conditions)}")
     print(f"snapshot: {os.path.relpath(path, REPO)}")
 
-    stale = stale_club_terms(conditions, client.get(f"/form/{args.form}/questions"))
+    questions = client.get(f"/form/{args.form}/questions")
+    note = contact_ids_note(conditions, questions)
+    if note:
+        print(note)
+    stale = stale_club_terms(conditions, questions)
     if stale:
         msg = (f"the snapshot's rules test {len(stale)} club name(s) the Club picker does not offer "
                f"today ({', '.join(repr(s) for s in stale[:5])}{', …' if len(stale) > 5 else ''}): "

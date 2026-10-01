@@ -9,7 +9,11 @@ Read-only. Compares every form's club checkboxes against the Roster tab
 region, and reports what the Jotform API says about conditions, emails,
 integration, submissions and the enableFuzzy field, and whether every roster
 renders above the links and the Submit button (glow/layout.py; a roster below
-them makes the form NOT CLEAN - tools/fix_roster_order.py repairs it).
+them makes the form NOT CLEAN - tools/fix_roster_order.py repairs it), and
+whether question 18 (Contact_IDs, the names sent to Salesforce) is calculated
+after the rosters show or hide and every roster is required - as glow/sync.py's
+constants say (docs/plans/2026-09-30-contact-ids.md). --rendered reads the public
+page as well (counts only).
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -30,6 +34,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms as glow_forms       # noqa: E402
 from glow import layout                    # noqa: E402  (rosters above the links and Submit)
+from glow import sync as glow_sync         # noqa: E402  (question 18's constants, read at run time)
 from glow.cli import run                   # noqa: E402
 from glow.jotform import Client            # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
@@ -234,6 +239,130 @@ def rendered_calc_values(page, picker):
     return counts
 
 
+def page_array(page, name):
+    """The JSON array the public page hands to JotForm.<name>(…), parsed (in memory
+    only); None when the page has no such call or it does not parse."""
+    call = f"JotForm.{name}("
+    i = (page or "").find(call)
+    if i < 0:
+        return None
+    start = i + len(call)
+    while start < len(page) and page[start].isspace():
+        start += 1
+    try:
+        value, _ = json.JSONDecoder().raw_decode(page, start)
+    except ValueError:
+        return None
+    return value if isinstance(value, list) else None
+
+
+def runtime_build(page):
+    """The build id of Jotform's runtime the page loads (cdn.jotfor.ms/s/static/<build>/…),
+    or None. The rule walk question 18 relies on is that runtime's behaviour, not a
+    contract: a new build is worth a browser check."""
+    m = (re.search(r"/s/static/([0-9a-f]+)/static/jotform\.forms\.js", page or "")
+         or re.search(r"/s/static/([0-9a-f]+)/", page or ""))
+    return m.group(1) if m else None
+
+
+def rendered_rules(page, rosters):
+    """Question 18 as the page serves it (counts and qids only): {"rules": how many
+    JotForm.setConditions holds, "position": the 0-based place of question 18's
+    calculation in it (None: not there), "roster_rules": rules showing a roster,
+    "first_roster_rule": the place of the first, "operands": question 18's operands
+    in JotForm.setCalculations (None: no entry)}. None when the page has neither array."""
+    conds, calcs = page_array(page, "setConditions"), page_array(page, "setCalculations")
+    if conds is None or calcs is None:
+        return None
+    shape = glow_sync.contact_ids_layout(conds, rosters)
+    calc = next((c for c in calcs if isinstance(c, dict)
+                 and str(c.get("resultField")) == CONTACT_IDS_QID), None)
+    return {"rules": len(conds), "position": shape["position"], "roster_rules": len(shape["roster_rules"]),
+            "first_roster_rule": min(shape["roster_rules"]) if shape["roster_rules"] else None,
+            "operands": None if calc is None else [x for x in str(calc.get("operands") or "").split(",") if x]}
+
+
+def rendered_required(page, rosters):
+    """The roster checkboxes on the page, counted (never printed: their values are
+    girls' names): {"rosters": rosters with a box, "required": rosters with at least
+    one box whose class carries validate[required] - what Jotform checks at submit,
+    the whole roster at once - "boxes", "boxes_required"}."""
+    rosters = {str(q) for q in rosters}
+    per = {}
+    for tag in re.findall(r"<input\b[^>]*>", page or ""):
+        if not re.search(r'\btype="checkbox"', tag):
+            continue
+        m = re.search(r'\bid="input_(\d+)_\d+"', tag)
+        if not m or m.group(1) not in rosters:
+            continue
+        cls = re.search(r'\bclass="([^"]*)"', tag)
+        # the runtime joins a field's validations in one class: validate[required,Email]
+        per.setdefault(m.group(1), []).append(
+            bool(cls and re.search(r"validate\[[^\]]*\brequired\b", cls.group(1))))
+    return {"rosters": len(per), "required": sum(1 for v in per.values() if any(v)),
+            "boxes": sum(len(v) for v in per.values()), "boxes_required": sum(sum(v) for v in per.values())}
+
+
+def rendered_problems(r, page):
+    """--rendered: what the served page says against what the API audit expects,
+    each expectation from glow/sync.py's constants. Adds r["build"], r["rendered_rules"],
+    r["rendered_required"] (and r["rendered"], the picker's calcValues) and returns problems."""
+    problems = []
+    r["build"] = runtime_build(page)
+    picker = r["club_picker"]
+    if picker:
+        counts = rendered_calc_values(page, picker)
+        r["rendered"] = counts
+        if counts is None:
+            problems.append("--rendered: the public page has no Club picker select "
+                            "(page not served, or its layout changed)")
+        elif r["picker_calc_values"]:            # before the rollout the counts are only printed
+            if counts["differ"] or counts["missing"] or counts["aligned"] != counts["options"]:
+                problems.append(
+                    f"rendered page: {counts['differ']} of {counts['options']} picker options carry a "
+                    f"data-calcvalue other than their value, {counts['missing']} none - the copy "
+                    "into question 5 would send another club's name (RUNBOOK, One club per "
+                    "submission: stop and restore)")
+            # an option the parser could not read is one the check cannot vouch for
+            if counts["options"] != r["picker_options"]:
+                problems.append(
+                    f"rendered page lists {counts['options']} of the picker's {r['picker_options']} "
+                    "options - a page served from before the apply (re-run in a few minutes) or a "
+                    "layout this check cannot read: do not treat it as aligned")
+        rules = rendered_rules(page, r["roster_qids"])
+        r["rendered_rules"] = rules
+        if rules is None or rules["position"] is None:
+            problems.append("rendered page: no calculation of question 18 in JotForm.setConditions (page "
+                            "not served, or its layout changed) - the served order cannot be vouched for")
+        else:
+            if glow_sync.CONTACT_IDS_FIRST and rules["first_roster_rule"] is not None \
+                    and rules["first_roster_rule"] < rules["position"]:
+                problems.append(f"rendered page: question 18 is rule {rules['position'] + 1} of {rules['rules']} "
+                                "in JotForm.setConditions, after the rosters' rules - the old order (a page "
+                                "served from before the apply: re-run in a few minutes; else stop, RUNBOOK "
+                                "\"The names list sent to Salesforce\")")
+            if glow_sync.CONTACT_IDS_PICKER_OPERAND and str(picker) not in (rules["operands"] or []):
+                problems.append(f"rendered page: question 18's entry in JotForm.setCalculations does not list "
+                                f"the Club picker (q{picker}) - Jotform dropped the operand, or the page is from "
+                                "before the apply (RUNBOOK \"The names list sent to Salesforce\")")
+    req = rendered_required(page, r["roster_qids"])
+    r["rendered_required"] = req
+    if glow_sync.ROSTERS_REQUIRED:
+        if req["rosters"] != len(r["roster_qids"]):
+            problems.append(f"rendered page shows boxes for {req['rosters']} of the form's "
+                            f"{len(r['roster_qids'])} rosters - a page this check cannot read: do not "
+                            "treat the rosters as required")
+        elif req["required"] != req["rosters"]:
+            problems.append(f"rendered page: {req['rosters'] - req['required']} of {req['rosters']} rosters "
+                            "carry no validate[required] on their boxes - Jotform would not refuse a "
+                            "submission with no girl ticked there (a page from before the apply: re-run in "
+                            "a few minutes; else stop, RUNBOOK \"The names list sent to Salesforce\")")
+    elif req["required"]:
+        problems.append(f"rendered page: {req['required']} rosters still carry validate[required] although "
+                        "glow/sync.py ROSTERS_REQUIRED is off")
+    return problems
+
+
 def public_page(form_id):
     """The form as a mentor's browser receives it (curl, like every call here)."""
     out = subprocess.run(["curl", "-sSL", "--max-time", "90", f"https://form.jotform.com/{form_id}"],
@@ -284,7 +413,6 @@ def audit_rules(questions, conditions, partners_of=None):
     clubs = {qid: " ".join(q["text"].split()) for qid, q in questions.items()
              if q.get("type") == "control_checkbox"}
     shown_by = defaultdict(list)     # club qid -> [rule ids that show it]
-    aggregate_operands = None
     for c in conditions:
         try:
             terms = json.loads(c["terms"]) if isinstance(c["terms"], str) else c["terms"]
@@ -301,11 +429,6 @@ def audit_rules(questions, conditions, partners_of=None):
                 problems.append(f"rule {c.get('id')}: action refers to missing question {f}")
             if a.get("visibility") == "Show" and str(a.get("field")) in clubs:
                 shown_by[str(a["field"])].append((c.get("id"), terms))
-            if str(a.get("resultField")) == CONTACT_IDS_QID:
-                aggregate_operands = {x for x in str(a.get("operands", "")).split(",") if x}
-                for op in aggregate_operands:
-                    if op not in qids:
-                        problems.append(f"Contact_IDs aggregate refers to missing question {op}")
     # Every club roster has exactly one show-rule, whose club term is the text
     # the roster sends to question 5: its own text, or - with the Club picker -
     # its long name, "<text> - <partner>" (docs/plans/2026-09-30-same-name-
@@ -349,19 +472,99 @@ def audit_rules(questions, conditions, partners_of=None):
         problems.append(f"partner list (q{plist}) on the form: the partner list was retired "
                         "2026-09-30 and the sync refuses a form carrying one - delete it in the "
                         "builder")
-    if aggregate_operands is None:
-        problems.append("no Contact_IDs aggregate calculation found")
-    else:
-        missing = set(clubs) - aggregate_operands
-        extra = aggregate_operands - set(clubs)
-        if missing:
-            problems.append(f"Contact_IDs aggregate misses {len(missing)} roster(s): {sorted(missing, key=int)[:5]}")
-        if extra:
-            problems.append(f"Contact_IDs aggregate includes {len(extra)} non-roster question(s): {sorted(extra)[:5]}")
+    ids_problems, shape = audit_contact_ids(questions, conditions)
+    problems += ids_problems
     problems += audit_picker(questions, conditions) + audit_club_guard(questions, conditions)
     summary = {"clubs": len(clubs), "show_rules": sum(len(v) for v in shown_by.values()),
-               "aggregate_rosters": len(aggregate_operands or []), "long_names": long_names}
+               "aggregate_rosters": len(set(clubs) & set(shape["operands"])), "long_names": long_names,
+               # question 18's rule, 1-based (None: no such rule), and whether it lists the picker
+               "contact_ids_rule": None if shape["position"] is None else shape["position"] + 1,
+               "rules": shape["count"],
+               "contact_ids_picker_operand": bool(picker and picker in shape["operands"]),
+               "required_rosters": sum(1 for q in clubs if questions[q].get("required") == "Yes")}
     return problems, summary
+
+
+def audit_contact_ids(questions, conditions):
+    """Question 18 (Contact_IDs, the names Salesforce stores as present) and the
+    at-least-one-girl guard, each expectation derived from glow/sync.py's
+    constants, so a fallback or the generated rollback (a constant off) is clean
+    once applied (docs/plans/2026-09-30-contact-ids.md). Returns (problems,
+    glow.sync.contact_ids_layout of the rules)."""
+    picker = club_picker(questions)
+    rosters = {qid for qid, q in questions.items() if q.get("type") == "control_checkbox"}
+    shape = glow_sync.contact_ids_layout(conditions, rosters)
+    problems = []
+    want = glow_sync.roster_required()
+    off = sorted((q for q in rosters if (questions[q].get("required") or "No") != want), key=int)
+    if off and want == "Yes":
+        problems.append(f"{len(off)} of {len(rosters)} roster(s) not required (first q{off[0]}): a mentor "
+                        "can send her club with no girl ticked - Salesforce stores an empty batch that "
+                        "blocks the club's day; a sync apply by hand sets the flag")
+    elif off:
+        problems.append(f"{len(off)} of {len(rosters)} roster(s) required (first q{off[0]}) although "
+                        "glow/sync.py ROSTERS_REQUIRED is off - a sync apply by hand clears the flag")
+    if shape["position"] is None:
+        return problems + ["no Contact_IDs aggregate calculation found"], shape
+    if len(shape["calc_rules"]) > 1:
+        problems.append(f"{len(shape['calc_rules'])} rules calculate question 18 (Contact_IDs), expected 1")
+    operands = set(shape["operands"])
+    for op in sorted(operands - set(questions)):
+        problems.append(f"Contact_IDs aggregate refers to missing question {op}")
+    allowed = rosters | ({picker} if picker and glow_sync.CONTACT_IDS_PICKER_OPERAND else set())
+    missing, extra = rosters - operands, (operands & set(questions)) - allowed
+    if missing:
+        problems.append(f"Contact_IDs aggregate misses {len(missing)} roster(s): {sorted(missing, key=int)[:5]}")
+    if extra:
+        problems.append(f"Contact_IDs aggregate includes {len(extra)} non-roster question(s): {sorted(extra)[:5]}")
+    # the equation: one {qid} per roster and nothing else - a picker in it would send the
+    # club's name as a girl, a literal would be written between hidden rosters too
+    tokens = re.findall(r"\{([^{}]*)\}", shape["equation"])
+    rest = re.sub(r"\{[^{}]*\}", "", shape["equation"])
+    if rest or sorted(tokens) != sorted(rosters):
+        problems.append(f"question 18's equation is not one {{qid}} per roster: {len(tokens)} field(s) for "
+                        f"{len(rosters)} roster(s)"
+                        + (f", {len(set(tokens) - rosters)} not a roster" if set(tokens) - rosters else "")
+                        + (f", {len(tokens) - len(set(tokens))} twice" if len(tokens) != len(set(tokens)) else "")
+                        + (", text between them" if rest else "")
+                        + " - the next sync apply rewrites it")
+    if not picker:            # the typed club name: question 18's rule keeps its shape (byte for byte)
+        return problems, shape
+    if glow_sync.CONTACT_IDS_FIRST:
+        before = [p for p in shape["roster_rules"] if p < shape["position"]]
+        if before:
+            problems.append(f"question 18 (Contact_IDs) is calculated by rule {shape['position'] + 1} of "
+                            f"{shape['count']}, after {len(before)} rule(s) that show a roster: on a change "
+                            "of club Jotform calculates it before the rosters show or hide (another club's "
+                            "girls sent, or none) - a sync apply by hand puts it first")
+    if glow_sync.CONTACT_IDS_PICKER_OPERAND and picker not in operands:
+        problems.append(f"the Club picker (q{picker}) is not one of question 18's operands - a sync apply "
+                        "by hand adds it")
+    # every field a roster rule tests must make question 18 re-run after the rosters: as a
+    # term of its rule (then Jotform's walk for that field ends with it: the order), else -
+    # with the order off - as an operand
+    if glow_sync.CONTACT_IDS_FIRST:
+        covered, how = shape["terms"], "test"
+    elif glow_sync.CONTACT_IDS_PICKER_OPERAND:      # (the picker's own operand: the check above)
+        covered, how = operands | {picker}, "list as an operand"
+    else:
+        covered, how = None, ""
+    for field, n in sorted((shape["roster_rule_fields"] if covered is not None else {}).items()):
+        if field not in covered:
+            problems.append(f"{n} rule(s) that show a roster test q{field}, which question 18's rule does "
+                            f"not {how}: when q{field} shows or hides a roster, question 18 is not "
+                            "recalculated (a rule on another field than the Club picker needs it in "
+                            "question 18's rule too - not generated by the sync)")
+    return problems, shape
+
+
+def contact_ids_line(summary, picker):
+    """The printed report's `question 18:` line, from audit_rules' summary."""
+    if summary.get("contact_ids_rule") is None:
+        return "no calculation"
+    return (f"rule {summary['contact_ids_rule']} of {summary['rules']}"
+            + (f", the Club picker an operand: {'yes' if summary['contact_ids_picker_operand'] else 'no'}"
+               if picker else ""))
 
 
 def partner_box_line(box, picker):
@@ -465,6 +668,8 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
+        # the rosters a mentor can tick a girl on (qids only): what --rendered counts on the page
+        "roster_qids": sorted((str(qid) for v in clubs.values() for _, opts, qid in v if opts), key=int),
         "duplicate_club_questions": dup_clubs,
         "options_total": sum(len(o) for v in clubs.values() for _, o, _ in v),
         "conditions": len(conditions), "error_conditions": errored,
@@ -501,9 +706,11 @@ def main():
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--defunct", action="store_true", help="include the retired forms")
     ap.add_argument("--rendered", action="store_true",
-                    help="also read each form's public page and check that every Club picker "
-                         "option's data-calcvalue equals its value (counts only; the page is "
-                         "never printed or saved)")
+                    help="also read each form's public page (counts only; the page is never "
+                         "printed or saved) and check what it serves: every Club picker option's "
+                         "data-calcvalue equals its value, question 18's calculation comes before "
+                         "the rosters' rules and lists the picker, every roster's boxes carry "
+                         "validate[required]; prints the runtime build")
     args = ap.parse_args()
     if args.defunct:
         FORMS.update(DEFUNCT)
@@ -515,28 +722,7 @@ def main():
     reports = [form_report(f, client, roster, partners_of) for f in (args.form or FORMS)]
     if args.rendered:
         for r in reports:
-            if not r["club_picker"]:
-                continue
-            counts = rendered_calc_values(public_page(r["id"]), r["club_picker"])
-            r["rendered"] = counts
-            if counts is None:
-                r["rule_problems"].append("--rendered: the public page has no Club picker select "
-                                          "(page not served, or its layout changed)")
-                continue
-            if not r["picker_calc_values"]:
-                continue                     # before the rollout the counts are only printed
-            if counts["differ"] or counts["missing"] or counts["aligned"] != counts["options"]:
-                r["rule_problems"].append(
-                    f"rendered page: {counts['differ']} of {counts['options']} picker options carry a "
-                    f"data-calcvalue other than their value, {counts['missing']} none - the copy "
-                    "into question 5 would send another club's name (RUNBOOK, One club per "
-                    "submission: stop and restore)")
-            # an option the parser could not read is one the check cannot vouch for
-            if counts["options"] != r["picker_options"]:
-                r["rule_problems"].append(
-                    f"rendered page lists {counts['options']} of the picker's {r['picker_options']} "
-                    "options - a page served from before the apply (re-run in a few minutes) or a "
-                    "layout this check cannot read: do not treat it as aligned")
+            r["rule_problems"] += rendered_problems(r, public_page(r["id"]))
     if args.json:
         print(json.dumps(reports, indent=1))
         return
@@ -567,12 +753,27 @@ def main():
             g = r.get("club_guard")
             print(f"   club guard: q{g['qid']} ({g['clubs']} clubs)" if g
                   else "   club guard: none (a mentor can pick several clubs)")
+        rs = r["rule_summary"]
+        print(f"   question 18: {contact_ids_line(rs, r['club_picker'])}   "
+              f"rosters required: {rs['required_rosters']} of {rs['clubs']}")
+        if "build" in r:
+            print(f"   runtime build: {r['build'] or 'not found on the public page'}")
         if "rendered" in r:
             c = r["rendered"]
             print("   rendered picker: " + ("not found on the public page" if c is None else
                   f"{c['options']} options, {c['aligned']} with data-calcvalue = value, "
                   f"{c['differ']} different, {c['missing']} without"))
-        rs = r["rule_summary"]
+        if "rendered_rules" in r:
+            g = r["rendered_rules"]
+            print("   rendered rules: " + ("question 18 not found on the public page"
+                                           if g is None or g["position"] is None else
+                  f"question 18 is rule {g['position'] + 1} of {g['rules']}, the first roster rule "
+                  f"{'-' if g['first_roster_rule'] is None else g['first_roster_rule'] + 1}; its operands "
+                  f"list the picker: {'yes' if str(r['club_picker']) in (g['operands'] or []) else 'no'}"))
+        if "rendered_required" in r:
+            q = r["rendered_required"]
+            print(f"   rendered rosters: {q['rosters']} with boxes, {q['required']} with validate[required] "
+                  f"({q['boxes_required']} of {q['boxes']} boxes)")
         print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
               f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "
               f"{'CLEAN' if not r['rule_problems'] else str(len(r['rule_problems'])) + ' PROBLEM(S)'}")
