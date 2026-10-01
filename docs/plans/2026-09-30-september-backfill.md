@@ -105,11 +105,14 @@ Held, never sent without Ryan's line in `decisions.csv`:
 | `batch_outcome_open`, `earlier_session_held` | this run has a batch for the session whose outcome is open; an earlier session of the club is held | settle, close, or decide the earlier one | - |
 | account problems, bad names, a missing date or module | never expected; refused rather than guessed | fix the cause | 0 |
 
-The Contact duplicate rule "First & Last & Account" (read 2026-09-30): on insert it **allows**
+The Contact duplicate rule "First & Last & Account" (read 2026-09-30): on insert it **allowed**
 with **Alert** and Report. An alert refuses an insert made by code, so a girl whose first name
-resembles a club-mate's with the same last name makes the processor fail mid-batch - in the
-back-fill and in the live flow alike. `similar_names` is therefore held; switching the rule to
-Report only (Ryan's decision, in Setup) removes the cause for both.
+resembles a club-mate's with the same last name made the processor fail mid-batch - in the
+back-fill and in the live flow alike. On Ryan's go it was switched to **Report only** on
+2026-10-01 11:26 UTC (deploy 0AfRP000002foFp0AI; read back: Allow, Report, no alert; proven with
+two similar fictional test contacts on the test account: both saved, one duplicate reported, both
+deleted). From then on `plan --dup-rule-ok`: two similar names are two girls, and a pair that is
+really one girl spelled twice is listed in Salesforce's duplicate reports, not refused.
 
 ## Order of work
 1. Ryan is unfrozen; VPN off; Jotform re-authorised; `integration_status.py` and a live
