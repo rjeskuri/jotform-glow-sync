@@ -172,7 +172,8 @@ class Harness:
         return os.path.join(self.dir, name)
 
     def write(self, rows, no_ticks=None, decisions=None, fetched=None, read_at="2026-09-30T13:00:00Z", raw=None):
-        resolved = {"fetched_at_utc": fetched or bf.now(), "forms": {}, "rows": rows, "no_ticks": no_ticks or {}}
+        resolved = {"fetched_at_utc": fetched or bf.now(), "forms": {}, "rows": rows, "no_ticks": no_ticks or {},
+                    "flag_vocabulary": sorted(bf.HOLD_FLAGS | bf.PASS_FLAGS)}
         for name, data in (("resolved.json", raw if raw is not None else resolved),
                            ("sf_state.json", self.org.state(read_at))):
             with open(self.path(name), "w", encoding="utf-8") as fh:
@@ -239,7 +240,7 @@ class SalesforceBackfill(Harness, unittest.TestCase):
             "Module__c": "Self Advocacy", "Module_Week__c": 3, "Module_Year__c": 1,
             "Creator__c": f"Jotform back-fill {SUNRISE} 5001", "enable_fuzzy_matching__c": False})
         self.assertIn("to send: 1 batches, 3 attendance rows, up to 3 new girls, 1 clubs", out)
-        self.assertIn("1 submissions with nobody ticked (never sent)", out)
+        self.assertIn("resolver: 1 rows from 1 submissions with girls ticked (1 club days), 1 submissions with nobody ticked", out)
         self.assertNotIn("Zibblewick", out + self.text_of("held.csv"))
         self.assertEqual((self.mode("plan.json"), self.mode("held.csv")), (0o600, 0o600))
 
@@ -279,7 +280,9 @@ class SalesforceBackfill(Harness, unittest.TestCase):
                 self.write(rows)
                 self.assertIn(message, self.run_tool("plan")[1])
         for raw in ({"rows": "x"}, [], {"fetched_at_utc": "yesterday", "rows": []},
-                    {"fetched_at_utc": bf.now(), "rows": [], "no_ticks": ["1"]}):
+                    {"fetched_at_utc": bf.now(), "rows": [], "no_ticks": ["1"], "flag_vocabulary": sorted(bf.HOLD_FLAGS | bf.PASS_FLAGS)},
+                    {"fetched_at_utc": bf.now(), "rows": []}, {"fetched_at_utc": bf.now(), "rows": [], "flag_vocabulary": ["bogus"]},
+                    {"fetched_at_utc": bf.now(), "rows": [], "flag_vocabulary": sorted(bf.HOLD_FLAGS | bf.PASS_FLAGS)[1:]}):
             with self.subTest(str(raw)[:30]):
                 self.write([], raw=raw)
                 self.assertIn("resolved.json:", self.run_tool("plan")[1])
@@ -411,6 +414,11 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         out, sessions, held = self.plan()
         self.assertEqual((sessions, [h["reasons"] for h in held]), ([], ["salesforce_has_empty_or_failed_batch"] * 2))
         self.assertNotIn("already_in_salesforce", out)
+        self.write([row("5", date="2026-09-28")], decisions=[])       # no report for those days at all: still shown
+        out = self.plan()[0]
+        self.assertIn("Salesforce holds 2 batch(es) from 2026-09-01 on without any attendance", out)
+        self.assertIn("BATCH-000001 Success Sunrise Club / 2026-09-19", out)
+        self.assertIn("BATCH-000002 Failed Sunrise Club / 2026-09-26", out)
 
     def test_new_girls_are_counted_per_club_in_date_order_and_a_large_batch_holds_the_rest(self):
         many = [f"Girl{i:02d} Quornstead{i:02d}" for i in range(30)]

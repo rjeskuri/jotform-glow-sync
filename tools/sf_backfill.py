@@ -299,6 +299,8 @@ def check_resolved(resolved):
         bad("fetched_at_utc is not a UTC time like 2026-09-30T12:00:00Z")
     if fetched > datetime.datetime.utcnow() + datetime.timedelta(minutes=5):
         bad("fetched_at_utc is in the future")
+    if resolved.get("flag_vocabulary") != sorted(HOLD_FLAGS | PASS_FLAGS):
+        bad("its flag_vocabulary is not the list of flags this tool knows")
     no_ticks = resolved.get("no_ticks") or {}
     if not isinstance(no_ticks, dict) or not all(isinstance(ids, list) for ids in no_ticks.values()):
         bad("no_ticks is not {region: [submission ids]}")
@@ -745,10 +747,22 @@ def cmd_plan(args, paths):
         writer = csv.DictWriter(fh, fieldnames=HELD_COLS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(sorted(held, key=lambda h: (h["reasons"], h["region"], h["account_name"], h["attendance_date"])))
-    print(f"resolver: {len(resolved['rows'])} club sessions reported with girls ticked, "
+    days = {(r.get("sf_account_name"), r.get("attendance_date")) for r in resolved["rows"]}
+    print(f"resolver: {len(resolved['rows'])} rows from {len({r['submission_id'] for r in resolved['rows']})} "
+          f"submissions with girls ticked ({len(days)} club days), "
           f"{sum(len(ids) for ids in (resolved.get('no_ticks') or {}).values())} submissions with nobody ticked "
           f"(never sent), fetched {resolved['fetched_at_utc']}")
     print(f"Salesforce as of {state['read_at_utc']}: {len(state['batches'])} batches")
+    names = {a["Id"]: a["Name"] for a in state["accounts"]}
+    rows_on = {(a["Account__c"], a["Attendance_Date__c"]): a["n"] for a in state["attendance"]}
+    empty = sorted((names.get(b.get("Account__c"), "?"), b.get("Attendance_Date__c") or "", b["Name"], b["Processing_Status__c"])
+                   for b in state["batches"] if (b.get("Attendance_Date__c") or "") >= str(SCOPE_START)
+                   and not rows_on.get((b.get("Account__c"), b.get("Attendance_Date__c"))))
+    if empty:
+        print(f"Salesforce holds {len(empty)} batch(es) from {SCOPE_START} on without any attendance for their club and "
+              "day - each blocks that day for a later batch:")
+        for club, day, name, status in empty:
+            print(f"  {name} {status} {club} / {day}")
     print(f"decisions: {notes['decisions_read']} read and applied"
           + (f"; {notes['set_aside']} report(s) set aside by 'use'" if notes["set_aside"] else "")
           + (f"; {notes['unused_accepts']} 'accept' that no longer applies" if notes["unused_accepts"] else ""))
