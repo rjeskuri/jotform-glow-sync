@@ -69,4 +69,7 @@ Partner box), the **curriculum cascade** (Year → Module → Session dropdowns;
 module come from `SESSION_OVERRIDES`), and the **Salesforce bridge** (year/module/session copies
 into hidden fields, the picked club copied into the Club Name field Salesforce reads, and one
 aggregate `Contact_IDs` calculation over every roster with "ignore hidden fields" on, so exactly
-the visible club's ticked names come through). Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+the visible club's ticked names come through; with the Club picker it is the first rule and lists
+the picker, so it is recalculated after the rosters show or hide). Every roster is required:
+Jotform refuses a submission whose shown roster has no girl ticked. Details:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

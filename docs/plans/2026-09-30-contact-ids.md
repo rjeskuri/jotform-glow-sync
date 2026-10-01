@@ -91,3 +91,79 @@ sequence of club picks and ticks and for a restored page in Chrome; iOS Safari a
 are untested, and the language switcher case above stays open. The daily comparison is the alarm.
 The rule walk order is Jotform's internal behaviour, not a contract (`form_status --rendered` prints
 the runtime build).
+
+## Build notes
+Built 2026-10-01 on branch `wf8/contact-ids` (a worktree), parts 2 and 3 of "What changes" and
+part 1 in its lead design. Nothing was written to any form, the sheet or Salesforce.
+
+**The browser proof came first and passed** (2026-10-01, another part of the same workflow: local
+copies of the Asia, U.S and Africa pages in headless Chrome, network to Jotform blocked, every
+submit intercepted). Required rosters: one club and no tick is refused on all three forms with
+Jotform's own message, 0 hidden rosters flagged, the picker not flagged, Submit still visible; one
+tick goes through with question 18 equal to the ticks; refused on club A, switched to B and one
+tick, it goes through (the stale error on hidden A does not block). New order: removing one of two
+clubs, and clear-then-re-pick, both leave question 18 equal to the visible ticks (the old order:
+other club's girls, and an empty question 18). Two clubs and Enter: no submit in any shape. Jotform's
+own `requireField` on the U.S page sets exactly `validate[required]` on all 155 boxes. So the
+**fallback rule (hide Submit while question 18 is empty) is not built.**
+
+**Deviations and decisions made in the build**
+- **The order and the operand apply on a form with the Club picker only**; a form without it keeps
+  its rules byte for byte, in every combination of the constants (a test). Every live form has the
+  picker; the typed club name is the legacy path. `form_status`'s order, operand and coverage
+  checks are likewise picker-only.
+- **The required flag is on every roster of every form** (a question property, not a rule). Off
+  (`ROSTERS_REQUIRED = False`), the sync writes `"No"` where a roster has `"Yes"`: the rollback is
+  generated both ways, and `form_status` then flags a required roster.
+- **Labels.** The flag alone: `REQUIRED roster '<club>' (q<qid>: Yes)` (new `REQUIRED_RX`, plan key
+  `requires`, summary-JSON `requires`). With an options update, one write and the existing label
+  extended: `UPDATE roster '<club>' (q<qid>, N girls; required: Yes)` (`UPDATE_RX` takes the
+  optional suffix; the runner counts it as an update). `CREATE roster` is unchanged; its payload
+  gains `question[required]=Yes`. The flag-alone writes come **last** in a run, after the rules and
+  the Partner-box hide: on the template they are 359 writes, and a run stopping among them must
+  not leave a new roster without its rule.
+- **The runner refuses more than the plan said**: any plan with the `CONTACT_IDS_STALE` warning, roster
+  changes included (a `check_bands` reason, so a rules-only plan is `attention`, never `in-sync`),
+  and any `REQUIRED roster` line at all, one or 220 (not a band size). After a form's rollout the
+  runner still creates required rosters and applies `UPDATE … ; required: Yes`.
+- **The constants are read through the module** (`glow_sync.CONTACT_IDS_FIRST`, …) by the sync,
+  `form_status`, `restore_conditions` and the shared helpers `contact_ids_layout` /
+  `contact_ids_stale` / `roster_required` in `glow/sync.py`: one patch, one rollback switch.
+- **Coverage audit, per critique 1**: with the order on, a field a roster rule tests must be a
+  *term* of question 18's rule (that puts the sum in that field's rule walk); with only the operand
+  on, an operand. A form whose roster rules test the Partner box (before the same-name switch; none
+  live since 2026-09-30) is therefore NOT CLEAN: flagged, not generated (the design's choice). The
+  unswitched-form tests were updated to expect exactly that one line.
+- With the order off, question 18 at rule 0 is not flagged (never harmful); with the operand off, the
+  picker among its operands is ("includes 1 non-roster question").
+- Added on the way: two rules calculating question 18 is a problem; the equation check also catches a
+  literal between the fields and a field twice; `aggregate_rosters` counts rosters only (critique 2);
+  `restore_conditions.py` prints a note when its snapshot calculates question 18 the old way;
+  `--rendered` reads every form's page (not only picker forms) and prints the runtime build.
+- **No template test submission** (critique 2): the console checks prove the same, and a delivered one
+  is a real batch for a real club. The RUNBOOK's rollout drops it.
+- The live-systems skill's "Never" list gains "an apply from a checkout without this code once a form
+  is rolled out", and its rollback list the generated path.
+
+**Proof, read-only (2026-10-01, from the branch).** A fresh Roster export (7,041 rows) in the
+session's scratch folder, deleted afterwards. The sync's dry run on each form:
+
+| Form | Calls | Rules | Required |
+|---|---|---|---|
+| U.S | 12 | `REPLACE conditions (42 rules)`: 41 kept, 1 new, 1 dropped | 11 `REQUIRED roster` |
+| Latin America | 39 | 69: 68 kept, 1 new, 1 dropped | 38 |
+| Asia | 96 | 126: 125 kept, 1 new, 1 dropped | 95 |
+| Africa | 221 | 251: 250 kept, 1 new, 1 dropped | 220 |
+| template | 366 | 393 (+~2 once its new rosters exist): 390 kept, 3 new, 3 dropped | 359, plus 3 `UPDATE roster … ; required: Yes` |
+
+Each regional form also warned once with `question 18 (Contact_IDs) is not recalculated after the
+rosters change` (rule 40 of 42, 67 of 69, 124 of 126, 249 of 251; the picker not an operand). The
+template also plans its backlog: 2 `CREATE roster`, 3 roster updates, `UPDATE club picker (364 clubs:
+calcValues, options)`; its 3 new rules are the sum and the guard's two (the picker gains two clubs).
+`form_status --rendered` read all five NOT CLEAN, with the same six problems on each: not required,
+the order, the operand, and their three rendered counterparts. Every picker's `data-calcvalue` was
+aligned, and 0 roster boxes carried `validate[required]` (6,857 / 4,264 / 1,636 / 869 / 155). Runtime
+builds served: template `cca53a3a639`, Africa `962dcbe2fa6`, Asia, Latin America and U.S `9e75d6f1d83`;
+`jotform.forms.js` is byte-identical (md5 `841dc566a7`) in those three and in `772a1982daf`.
+`auto_sync.py` as a dry run on the export (no SyncLog) put all four regions at `attention`, exit 2,
+"not applied", with both reasons. `make check`: CHECK PASSED, 429 Python tests (21 new).

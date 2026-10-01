@@ -19,5 +19,8 @@ disable-model-invocation: true
    different name" line is a new club refused for its name: say so, it needs a human. An "its
    rule tests '…', which the Club picker does not list" line means the rules are out of step with
    the picker (that roster does not show): the runner raises ATTENTION and the rewrite is applied
-   by hand.
+   by hand. A "question 18 (Contact_IDs) is not recalculated after the rosters change" line, or
+   any `REQUIRED roster '…' (q…: Yes)` line, means the form is not rolled out to the names-list
+   rules yet: the runner applies nothing in that region (docs/RUNBOOK.md, "The names list sent to
+   Salesforce"); count the `REQUIRED roster` lines instead of listing them.
 5. Do not add `--apply`. Applying is Ryan's decision (`.claude/skills/live-systems`).

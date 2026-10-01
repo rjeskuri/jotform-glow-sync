@@ -1,6 +1,6 @@
 ---
 name: jotform-api
-description: Verified Jotform API semantics for this project — conditions as JSON-string terms/action via PUT properties, question POST merges, translations POST replaces a language, clone resets the language list, dropdown/multi-select properties, 504-but-created. Load before writing or reviewing any code that calls api.jotform.com or reasons about how the forms behave at runtime.
+description: Verified Jotform API semantics for this project — conditions as JSON-string terms/action via PUT properties, question POST merges, translations POST replaces a language, clone resets the language list, dropdown/multi-select properties, the rule walk (index 0 runs last, no recalculation at submit), required + hidden fields, the checkbox calculation reader, the loop limit, 504-but-created. Load before writing or reviewing any code that calls api.jotform.com or reasons about how the forms behave at runtime.
 ---
 
 # Jotform API — what is verified (2026-08-24 → 2026-09-01)
@@ -31,10 +31,36 @@ unless `--apply`.
   error action. Hiding Submit alone does not stop desktop Enter in a text box from submitting —
   the club guard also disables it (runtime reading; first used by `--club-guard`, verified in
   the browser on the template before any regional form).
+- **The rule walk** (read 2026-09-30 in `jotform.forms.js`, md5 `841dc566a7`, byte-identical in
+  builds `9e75d6f1d83`, `772a1982daf`, `962dcbe2fa6` and `cca53a3a639`, the four the forms were
+  served on by 2026-10-01): `setConditions` reverses the rules array, and each field's listener
+  walks the rules that test it in that reversed order, so **the rule at index 0 runs last**.
+  Showing or hiding a field never re-runs a calculation (only a section or multi-field action
+  with `clearFieldOnHide=enable` does), and **nothing recalculates at submit**. A calculation over
+  fields that rules show or hide must therefore come before those rules and test the fields they
+  test: the Contact_IDs sum is rule 0 on a picker form (`glow/sync.py` `CONTACT_IDS_FIRST`; with it
+  after the roster rules, a change of club calculated question 18 over the previous club's
+  rosters). 1.5 s after init, `prePopulations` runs `runAllConditions()` with an event that does
+  not bubble: on a page the browser restores (Back) that is the only thing that re-shows the
+  roster, so only the rule order covers it, not an operand listener.
+- **Loop limit**: a rule checked more than `19 * (rules / 100 + 1)` times in one half-second (at
+  most 100; 3 with `clearFieldOnHide=enable`) is skipped: today U.S 27, Asia 43, Africa 66, the
+  template 94. Calculation rules are exempt unless an operand (or `baseField`) is a time, date,
+  text or "mixed" field; the picker is a dropdown and the rosters are checkboxes.
 - Calculations: text concatenates at top level, `[brackets]` = math; `ignoreHiddenFields: true`
   makes hidden fields contribute "" in text context (that is how one aggregate over every roster
-  yields only the visible club's ticks). `operands` must list every `{qid}` in the equation or
-  changes do not re-trigger. `insertAsText` / `newCalculationType` are builder-side flags.
+  yields only the visible club's ticks; "hidden" is the `form-field-hidden` class on the field's
+  `<li>` or section, tested at each run). `operands` must list every `{qid}` in the equation or
+  changes do not re-trigger: each operand gets a `change` listener on its `<li>`, which fires by
+  bubbling after the field's rules ran. An operand need not be in the equation (the Club picker
+  on the Contact_IDs sum, `CONTACT_IDS_PICKER_OPERAND`); whether Jotform keeps such an operand
+  is proven on the template by the second dry run and `form_status --rendered`.
+  `insertAsText` / `newCalculationType` are builder-side flags.
+- **A checkbox operand is read box by box**: for each ticked box, its `data-calcvalue`, else
+  `FormTranslation.translate(value)` (the form's own translation dictionary, keyed by the
+  whitespace-collapsed `base` text: a stale `en` entry with a double space alters a girl's name in
+  question 18), else `value`; never the label. One checkbox's ticks are joined with `", "`;
+  operands are joined with nothing (two visible rosters fuse one token).
 - A field filled by a calculation can be the source of another rule (the Club picker → q5 copy);
   a calculation writing a text box fires keyup, so a rule testing q5 re-evaluates after each copy.
 - The calculation reader, in text context, joins a multi-select's selected options with **no
@@ -73,6 +99,20 @@ unless `--apply`.
   `minSelection` are checkbox-only and are silently dropped on dropdowns.
 - Hidden fields (`hidden=Yes`) are still submitted and still reach the integrations; validation
   (`required`) is skipped while a field is hidden.
+- **Required + hidden** (each question has `required` "Yes"/"No"; `POST /question/{qid}` with
+  `question[required]=Yes` merges, or it goes in the create payload). Read in the runtime
+  2026-09-30 and proven in headless Chrome 2026-10-01 on local copies of three forms (nothing
+  submitted): `init` puts `novalidate` on the form, so the HTML `required` attribute is inert. At
+  submit `validateAll` runs `validateInput` on every `[class*="validate"]` input, and that returns
+  true without checking when the field's `<li>` (or its section) carries `always-hidden` or
+  `form-field-hidden` (`showField` removes both): a roster a rule hides is never checked. A
+  checkbox fails only when no box of its `<li>` is ticked, so one tick satisfies a required roster,
+  and a change on a box re-validates, so the error goes with the first tick. Served markup of a
+  required field: `<li class="form-line jf-required …">`, the label's `*`, each input
+  `validate[required]` plus `required=""`. Live precedent: the module and session dropdowns are
+  hidden + required and submissions arrive with them hidden, so the server takes a hidden
+  required field empty. A required **checkbox** had not been rendered on these forms before
+  2026-10: `form_status --rendered` counts the roster boxes carrying `validate[required]`.
 
 ## Images and other assets
 - There is NO upload endpoint: `control_image`'s `src` can only point at an already-hosted file
