@@ -1,7 +1,7 @@
 ---
 title: September back-fill - the Jotform attendance that never reached Salesforce
 author: Claude (with Ryan)
-status: in-progress (loader rewritten after review and tested offline; Ryan unfrozen, CLI login made; nothing sent)
+status: done for 355 batches (2026-10-02); open: 5 large sessions (a limit), 12 held sessions, the test report
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-30 ("bring in all submissions for the month of September for all forms")
 ---
@@ -156,3 +156,29 @@ guessed, and what is doubtful is left out rather than chased.
 - after the run: `status` → batches = the plan's, every ledger row `ok`; Salesforce counts of
   batches and attendance rows equal the ledger's
 - `make check` → `CHECK PASSED` (64 offline tests of the loader, fictional data)
+
+## Result (2026-10-02)
+Sent after the zero-girl guard and the question-18 rule order were live on all five forms
+(checked here with `form_status.py`: all CLEAN, every roster required), with the resolver from
+main (fetched 02:16 UTC, roster export of 02:15) and the delegated decisions in `decisions.csv`.
+
+- **Pass 1** (02:17-02:38 UTC): 327 batches, 4,170 attendance rows, 1,905 new girls, 131 clubs,
+  all Success, no stop.
+- **Pass 2**: the 26 sessions of clubs whose girls the live flow had made (`accept
+  club_has_earlier_contacts`; only 18 of 299 girls were new, so the spellings matched), then the
+  sessions with more than 22 new girls: two with 23 went through; **Vision GLOW Club 2026-09-07
+  (27 new girls) was refused** with HTTP 400 CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY and nothing was
+  saved (checked: no batch, no contact for that club). The run stopped there as designed.
+- **In Salesforce now** (reconciled with the ledger): 355 back-fill batches, 4,515 attendance
+  rows, 1,969 new participants, 145 clubs; 364 Club accounts, still only the 2 known ones without
+  a partner. The duplicate rule (Report only since 10-01) logged 17 similar pairs instead of
+  failing them.
+- **Waiting**: Vision GLOW Club (4 sessions) and San Carlos (2 sessions: 29 and 47 girls) - more
+  new girls than one batch can create; 10 sessions in the five pilot clubs (spelling of the pilot
+  contacts unknown); Queens of Quest's 2 sessions (13 roster options the live form still alters).
+- **Not sent by decision**: 9 sessions dated before September, 17 reports set aside by `use`, one
+  submission's second club; 67 submissions with nobody ticked.
+- **Learned for October**: a club's first live submission that creates more than about 25 girls
+  at once fails in the processor the same way, and the Jotform action then errors with nothing in
+  Salesforce. Most active clubs now have their girls; big clubs that never submitted in September
+  are the ones at risk.
