@@ -6298,8 +6298,20 @@ class FixNameTranslations(unittest.TestCase):
         code, out = self.run_main(self.fake(mode="partial"), "--form", self.AFRICA, "--apply")
         self.assertIn("re-read: PARTIAL (en: 0 entr(ies) missing, 1 that should be gone, 0 changed)", out)
         self.assertIn(f"--form {self.AFRICA} --restore backups/translations/{self.AFRICA}-", str(code))
-        self.assertIn("non-JSON", fix_name_translations.get.__doc__ + "non-JSON")    # (a read failure: below)
         from glow.jotform import JotformError
+        # the re-read itself fails: it never says "nothing written", and it names the saved store
+        fake = self.fake()
+        real_get = fake.get
+
+        def get_after_post(path, **params):
+            if fake.writes and path.endswith("/translations"):
+                raise JotformError("GET: a cut-off JSON answer, 900 characters, not shown")
+            return real_get(path, **params)
+        fake.get = get_after_post
+        code, _ = self.run_main(fake, "--form", self.AFRICA, "--apply")
+        self.assertIn("the write may or may not have happened", str(code))
+        self.assertIn(f"the store before the POST is backups/translations/{self.AFRICA}-", str(code))
+        self.assertNotIn("nothing written", str(code))
 
         class Failing:
             def get(self, path, **params):

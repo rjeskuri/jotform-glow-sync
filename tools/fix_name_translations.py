@@ -204,16 +204,21 @@ def outcome(before, after, want):
     return "partial", "; ".join(detail)
 
 
-def post_sources(client, fid, before, want, label):
-    """POST base and en (want), then re-read and compare. Returns (outcome, detail, after)."""
+def post_sources(client, fid, before, want, label, saved):
+    """POST base and en (want), then re-read and compare. Returns (outcome, detail, after).
+    saved: the store saved before the POST (named if the re-read fails)."""
     lost = False
     try:
         client.post_json(f"/form/{fid}/translations", {lang: want[lang] for lang in SOURCES}, label)
     except JotformError:
         lost = True              # never echoed; the re-read says what happened
         print("   ! Jotform's answer to the POST was lost or not JSON - re-reading the store")
-    after = get(client, f"/form/{fid}/translations", "the store after the POST (the write may or may not "
-                "have happened: compare by hand with the saved store")
+    try:
+        after = client.get(f"/form/{fid}/translations")
+    except JotformError:
+        sys.exit("Could not re-read the store after the POST (an error or a non-JSON answer from Jotform): "
+                 "the write may or may not have happened. Run the dry run (it reads the store again); "
+                 f"the store before the POST is {shown(saved)} (--restore it with --apply if needed)")
     state, detail = outcome(before, after, want)
     print(f"   re-read: {state.upper()}" + (f" ({detail})" if detail else "")
           + (" - despite the lost answer" if lost and state == "applied" else ""))
@@ -283,7 +288,7 @@ def apply_form(client, fid, store, plan, options, stamp, page_of=public_page, sl
     print(f"   store saved: {shown(path)} (mode 600; the rollback: --restore)")
     want = {lang: {k: v for k, v in store[lang].items() if k not in keys} for lang in SOURCES}
     state, _, after = post_sources(client, fid, store, want,
-                                   f"{fid} POST base and en without {len(keys)} key(s)")
+                                   f"{fid} POST base and en without {len(keys)} key(s)", path)
     if state != "applied":
         sys.exit(f"Stopped: the store reads {state} after the POST. "
                  + ("Nothing was written; run again." if state == "unchanged" else
@@ -351,7 +356,8 @@ def restore(client, fid, path, apply, options, stamp, page_of=public_page, sleep
         return
     saved_now = add_translations.save_store(fid, current, stamp)
     print(f"   current store saved: {shown(saved_now)} (mode 600)")
-    state, _, _ = post_sources(client, fid, current, want, f"{fid} POST base and en with {len(back)} key(s) back")
+    state, _, _ = post_sources(client, fid, current, want, f"{fid} POST base and en with {len(back)} key(s) back",
+                               saved_now)
     if state != "applied":
         sys.exit(f"Stopped: the store reads {state} after the restore POST - compare it with "
                  f"{shown(saved_now)}")
