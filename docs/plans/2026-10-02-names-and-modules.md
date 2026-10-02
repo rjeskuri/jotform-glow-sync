@@ -72,3 +72,81 @@ entry (made in the builder) is flagged, not prevented.
 Names: `fix_name_translations.py --form <id> --restore <saved store> --apply`. Module: set the
 constant off and apply (the sync clears the `calcValues`), or restore the question from the backup.
 Neither touches rosters, the rules, question 5 or the integration.
+
+## Build notes
+
+Built 2026-10-02 on `wf9/names-and-modules` (worktree), nothing written to any form, sheet or
+Salesforce. `make check` passes.
+
+**What was built.**
+- `glow/translation_lookup.py`: the runtime's dictionary rebuilt and looked up exactly as
+  `formTranslation.v2.js` does (`setDictionary`, `setSimplifiedDictionary`, `trimMultiSpaces`,
+  `sanitizeKeys` with their snapshot semantics, `translateUncached` with the no-break-space retry
+  and the fall-back through the other languages), JavaScript's whitespace and key order, both
+  runtime builds (`BUILDS`), and the removal plan (`removal`: round after round, only the
+  entries behind an alteration; refused when another language is involved or no entry explains
+  it). It re-implements the reviewer's `emu.py` and reproduces it on the live stores: 55 / 49 /
+  5 / 1 / 0 options altered (template, Africa, Asia, Latin America, U.S), identical counts.
+- `tools/fix_name_translations.py`, as planned: dry run, `--form`, `--apply`, `--restore`
+  (also needs `--apply`), the refusals, the store saved mode 600 before the POST, `base`+`en`
+  only, re-read and compare, an audit of the re-read store, the public page read (three reads
+  20 s apart) and re-rendered once with the unchanged `pagetitle` if it lags, a lost or non-JSON
+  answer re-read and classed `UNCHANGED` / `APPLIED` / `PARTIAL`. Jotform's answers are never
+  echoed.
+- The module values: `glow/sync.py` `MODULE_CALC_VALUES`, `aligned_calc_values`,
+  `module_calc_values`; the sync writes `UPDATE module dropdown (q14, year 1: calcValues = its 5
+  options)` (or `… calcValues cleared)` with the constant off), and its `--summary-json` lists
+  them (`module_values`).
+- The runner parses the line (`MODULE_RX`), counts it as a change, names it in SyncLog's detail
+  and **never applies it unattended** (`check_bands`), roster changes of that region included.
+- `tools/form_status.py`: `audit_module_values` and `audit_names` in `form_report` (not in
+  `audit_rules`, whose fixtures stay as they were), one GET more per form; `--rendered` reads
+  the module `<select>`s and the embedded store against the roster boxes served. A store that
+  cannot be read is `not checked`, a note in the runner's verify step.
+- `tools/add_translations.save_store` writes every saved store mode 600.
+
+**Decided while building (each in the RUNBOOK section and DECISIONS).**
+1. *Only those*: 55 keys per form, not the 98 that look stale. Entries spelled with U+200E in
+   both `base` and `en` keep the mark in their key and alter nothing, so they stay. Every form's
+   store loses the same 55 keys (the stores were cloned), the U.S store included: all five
+   forms' options count.
+2. *Languages audited*: every language the store holds a dictionary for (a superset of the
+   offered ones that can alter anything: a language without one alters nothing). Today only
+   `en` alters, on every form; no other language's entry is involved, so no refusal.
+3. *The fall-back order* is the runtime's own languages map (`RUNTIME_LANGUAGE_ORDER`, read
+   from build `62a8b57dd95`), not the page's `allTranslations.languages` (a different map the
+   runtime does not walk). It only matters when two languages' entries match one name.
+4. *`--restore` puts back*, in the saved order, every `base`/`en` entry of the saved store that
+   the form no longer has, and keeps entries changed or added since (a wholesale restore would
+   drop a later `add_translations.py` addition). The current store is saved first.
+5. *`--apply` takes exactly one `--form`*: the rollout is one form at a time, template first.
+6. *Module lines are never applied by the runner*, like a `REQUIRED roster` line: the first
+   rollout is by hand, template first, and afterwards a difference means a builder edit of a
+   curriculum dropdown, which a human reads first. Until the rollout ends every region reads
+   `attention` (the safety net if `AUTO_SYNC_APPLY` were left on).
+7. *Builds*: the five forms were served `formTranslation.v2.js` builds `62a8b57dd95` (regional)
+   and `fc726a121d4` (template) on 2026-10-02, byte-identical; against the runtime
+   investigation's `9e75d6f1d83` only `setDictionary` differs (it now skips an entry missing in
+   `en` or `base` instead of filing it under "undefined"). The audits run both; BACKLOG 60 is
+   the watch for the next build.
+
+**Read-only proof, 2026-10-02** (GETs through `glow.jotform.Client`, the public pages by curl;
+no POST, PUT or DELETE):
+- Names tool dry run, all five forms: 55 keys to remove on each (base 55, en 55); options
+  altered today → after the removal (emulated, every language held, both builds): template 55
+  → 0 (29 clubs), Africa 49 → 0 (23 clubs), Asia 5 → 0 (5 clubs), Latin America 1 → 0 (1
+  club), U.S 0 → 0. No refusal. Stores: `base` 4,416 (U.S 6,079), `en` 4,424 (U.S 4,468).
+- The module lines: 3 per form on all five (q14: 5 options, q92: 7, q93: 8), read with the
+  sync's own comparison in a scratch script; the module dropdowns are single-selects without
+  `calcValues`, the year dropdown carries `|1|2|3` (the same layout).
+- `form_status.py --rendered`: NOT CLEAN on all five on the new checks only: template, Africa,
+  Asia, Latin America 8 problems each (3 module + 1 names through the API, the same 4 on the
+  served page, whose embedded store gives the same counts); U.S 6 (the modules). Question 18,
+  the picker, the guard and the required rosters read clean as before.
+- **Not run: the sync's own dry run on the five forms.** The fresh Roster export it needs was
+  refused by this session's permission check (it needs the sheet's service account), so the
+  roster changes that arrived since are unknown here. Run it before the rollout: it must plan
+  the three module lines plus only those roster changes.
+
+**Left for the rollout (plan step 1 onwards):** the three adversarial reviews, the sync dry run
+with a fresh export, and the browser checks on the template.

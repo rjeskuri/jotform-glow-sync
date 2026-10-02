@@ -13,7 +13,8 @@ Salesforce V2 integration.
 ## Writers
 `sync_attendance_form.py --apply`, `restore_conditions.py --apply`, `tools/add_*.py --apply`,
 `tools/restore_translations.py --apply`, `tools/clone_regional.py --apply`,
-`tools/fix_roster_order.py --apply`, `tools/auto_sync.py --apply`, `tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run
+`tools/fix_roster_order.py --apply`, `tools/fix_name_translations.py --apply` (also with `--restore`),
+`tools/auto_sync.py --apply`, `tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run
 clasp:push` / `npx clasp push`. Anything else is read-only (GET) or writes only under `data/` and
 `backups/`.
 
@@ -58,6 +59,12 @@ writing a translation language without GET + merge first.
   runs `main`'s constants: merge the constants-off commit only once every form is rolled back, then
   `AUTO_SYNC_APPLY=1`; never while any form is still rolled out (the runner would put the old rule
   order back on it with its next roster change).
+- The names dictionary (`base`/`en` of a form's translation store): `tools/fix_name_translations.py
+  --form <id> --restore backups/translations/<id>-<stamp>-before.json`, a dry run, then `--apply`
+  (puts back the entries the form no longer has). The module dropdowns' `calcValues`: generated,
+  so `glow/sync.py` `MODULE_CALC_VALUES = False` on a branch and the sync applied by hand per form;
+  the runner never applies those lines (docs/RUNBOOK.md, "The names dictionary and the module
+  values").
 - Questions: never deleted by tooling; a wrongly created question is removed in the builder.
 - Sheet tabs: `data/roster_build/previous/<stamp>/` (upload_roster saves them) or the
   `export-all` you took.

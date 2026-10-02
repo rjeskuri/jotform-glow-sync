@@ -1,6 +1,6 @@
 ---
 name: jotform-api
-description: Verified Jotform API semantics for this project — conditions as JSON-string terms/action via PUT properties, question POST merges, translations POST replaces a language, clone resets the language list, dropdown/multi-select properties, the rule walk (index 0 runs last, no recalculation at submit), required + hidden fields, the checkbox calculation reader, the loop limit, 504-but-created. Load before writing or reviewing any code that calls api.jotform.com or reasons about how the forms behave at runtime.
+description: Verified Jotform API semantics for this project — conditions as JSON-string terms/action via PUT properties, question POST merges, translations POST replaces a language, clone resets the language list, dropdown/multi-select properties, the rule walk (index 0 runs last, no recalculation at submit), required + hidden fields, the checkbox calculation reader and the translation-dictionary lookup it runs ticked names through, module dropdown calcValues, the loop limit, 504-but-created. Load before writing or reviewing any code that calls api.jotform.com or reasons about how the forms behave at runtime.
 ---
 
 # Jotform API — what is verified (2026-08-24 → 2026-09-01)
@@ -57,10 +57,27 @@ unless `--apply`.
   is proven on the template by the second dry run and `form_status --rendered`.
   `insertAsText` / `newCalculationType` are builder-side flags.
 - **A checkbox operand is read box by box**: for each ticked box, its `data-calcvalue`, else
-  `FormTranslation.translate(value)` (the form's own translation dictionary, keyed by the
-  whitespace-collapsed `base` text: a stale `en` entry with a double space alters a girl's name in
-  question 18), else `value`; never the label. One checkbox's ticks are joined with `", "`;
-  operands are joined with nothing (two visible rosters fuse one token).
+  `FormTranslation.translate(value)` when that is not empty, else `value`; never the label. One
+  checkbox's ticks are joined with `", "`; operands are joined with nothing (two visible rosters
+  fuse one token).
+- **The dictionary lookup in a calculation** (`formTranslation.v2.js`, read 2026-10-02 in builds
+  `62a8b57dd95` and `fc726a121d4`, byte-identical; emulated by `glow/translation_lookup.py`,
+  which `tools/fix_name_translations.py` and `form_status.py` run). `setDictionary`: the original
+  language is `base`; `dictionary.base` maps each entry's `en` text to its `base` text, and every
+  other language L maps the `base` text, trimmed, to L's text, trimmed (an entry missing in
+  `en`/`base` is skipped; the older build `9e75d6f1d83` files it under "undefined"). Then
+  `trimMultiSpaces` and `sanitizeKeys` move every key whose whitespace runs collapse (JavaScript's
+  `\s`: tab, newline, U+00A0 and the other Unicode spaces, U+FEFF; not U+200E) onto the
+  collapsed key, **overwriting** the entry there: a stale `Amara  Fennwhistle` beats the exact
+  `Amara Fennwhistle` in either order. `translate(word)` simplifies the word (`&amp;`, `<br>`,
+  tabs, double spaces…), returns `dictionary[to][word]` when truthy, else retries with no-break
+  spaces replaced, else walks the other languages in the runtime's own order for an entry whose
+  simplified text equals the word and returns `to`'s entry for that key, else the word. `to` is
+  the language the form shows (the primary `en`, or the mentor's browser language: the forms
+  detect it). So a stale `base`/`en` spelling of a girl's name replaces her exact name in
+  question 18: 55 options on 2026-10-02 (Africa 49, Asia 5, Latin America 1), removed by the tool.
+  The page embeds the same store (`window.allTranslations.translations`, equal to the API's,
+  key order included); `form_status --rendered` audits that copy.
 - A field filled by a calculation can be the source of another rule (the Club picker → q5 copy);
   a calculation writing a text box fires keyup, so a rule testing q5 re-evaluates after each copy.
 - The calculation reader, in text context, joins a multi-select's selected options with **no
@@ -89,7 +106,13 @@ unless `--apply`.
   guard). `glow/jotform.py` sends JSON bodies on standard input (`--data-binary @-`); the Mac
   has no per-argument limit, so only the GitHub runner would have failed.
 - Dropdown `calcValues` has a leading empty slot for the placeholder on a single-select:
-  `len(calcValues.split('|')) == len(options.split('|')) + 1`. A multi-select renders no
+  `len(calcValues.split('|')) == len(options.split('|')) + 1`; the served `<option value="">Please
+  Select</option>` carries no `data-calcvalue` and every other option the next value (the year
+  dropdown q94 `|1|2|3`, the session dropdowns `|1|…|8`). **The module dropdowns** (q14, q92, q93,
+  single-selects) get their own options in that layout from the sync (`glow/sync.py`
+  `MODULE_CALC_VALUES`, 2026-10-02): question 98's copy then reads the `data-calcvalue`, which a
+  browser's "Translate page" does not rewrite (it rewrote the visible text in 30 of Latin
+  America's 111 September submissions). A multi-select renders no
   placeholder but still wants the slot: with `PICKER_CALC_LEADING_EMPTY = True`
   (`glow/sync.py`) every rendered option's `data-calcvalue` equals its `value` — verified
   2026-09-30 by `form_status.py --rendered` on all five forms (359/12/39/96/216 options, 0
@@ -145,6 +168,9 @@ unless `--apply`.
 - Keys are the md5 of the plain English text; the runtime resolves element text → key through
   `base`, so a new string must be added to `base` and `en` (md5 → English) as well, or its
   translations never apply. Re-POST `properties[pagetitle]` to force a re-render.
+- The `base`/`en` entries are also what a ticked girl's name passes through on its way into
+  question 18 (above): a stale spelling there is a defect in Salesforce, not a cosmetic one. A
+  saved store holds every girl's name: save it mode 600 (`add_translations.save_store`).
 - Jotform's own runtime texts (`JotForm.texts`, e.g. the required message "This field is
   required.") are translated the same way: `formTranslation.v2.js` builds its dictionary as
   `dictionary[lang][base[md5]]`, so without the `base` entry nothing translates, whatever the
