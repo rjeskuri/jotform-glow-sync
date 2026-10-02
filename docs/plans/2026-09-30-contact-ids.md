@@ -243,6 +243,12 @@ one the RUNBOOK's merge check reads. `make check`: CHECK PASSED, 434 Python test
   `62a8b57dd95`).
 - `auto_sync.py` dry run: every region in-sync, exit 0. `AUTO_SYNC_APPLY=1` (02:05 UTC); GitHub run
   36953976708 on `1fb8cfb`: every region in-sync.
-- Open: the browser scenarios on the four regional pages (a different runtime build from the
-  template's) — run right after, recorded with the next commit; BACKLOG 56 (language switcher with
-  two clubs) and 57 (the required message's translation).
+- **Browser, on the four live regional pages** (headless Chrome, runtime build `62a8b57dd95`,
+  every submit request intercepted and aborted — a deliberate one-tick submit on U.S proved the
+  interception first): on U.S, Latin America, Asia and Africa (and on Africa with the entry
+  'Ruby - Binti Network') no tick is refused with only the visible roster flagged; one tick sends
+  q18 = the tick and q5 = the picker entry exactly; two clubs are blocked by the guard and, with
+  one removed, q18 = the remaining visible ticks; pick-clear-re-pick and Back give q18 = the
+  visible ticks; Back with no tick is refused. All passed. Served rules: question 18 at index 0 on
+  every form (last in the picker's walk), the picker among its operands.
+- Open: BACKLOG 56 (language switcher with two clubs) and 57 (the required message's translation).
