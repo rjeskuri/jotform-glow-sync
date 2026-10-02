@@ -1,7 +1,7 @@
 ---
 title: The names list sent to Salesforce is never empty and never another club's
 author: Claude (read-only investigation of Jotform's runtime and of all September submissions, a design and two adversarial reviews, 2026-09-30)
-status: accepted         # Ryan 2026-09-30: "Go on all 4 fixes"; then "Guard first, then back-fill" — this plan is fixes 2 and 3; every live step needs his go
+status: done             # Ryan 2026-09-30: "Go on all 4 fixes"; then "Guard first, then back-fill"; rolled out on all five forms 2026-10-01/02 with his go (Result)
 created: 2026-09-30
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends the right girls for the right club)
 ---
@@ -217,3 +217,32 @@ own); the regional forms are as before, each with the one question-18 warning. `
 under "undefined") also translates only through `base`, so BACKLOG 57 holds there. `auto_sync.py`
 as a dry run on the export put all four regions at `attention` with the question-18 reason, the
 one the RUNBOOK's merge check reads. `make check`: CHECK PASSED, 434 Python tests.
+
+## Result (2026-10-01/02, with Ryan's go: "You have my go push things")
+- `AUTO_SYNC_APPLY=0` (16:32 UTC, no run in progress). The branch had `main` merged in first
+  (`1fb8cfb`, `make check` 434 tests with real data), so the template was applied from exactly the
+  code that then landed on `main`.
+- **Template** (backup `properties-2026-10-02T0132.json`), applied 16:33–16:37 UTC on 10-01: 364
+  roster writes (2 created and 10 updated from its backlog, 352 made required), the Club picker (364
+  clubs), 395 rules. Second dry run `nothing to do`; `form_status --rendered` CLEAN: question 18 rule
+  1 of 395 with the picker an operand, 364 of 364 rosters required, 6,924 of 6,924 boxes carry
+  `validate[required]`. **Browser, on the live page** (headless Chrome, runtime build
+  `fc726a121d4`, every submit request intercepted and aborted): all ten scenarios passed — no club and
+  no tick refused; one tick sends q18 = the tick; two clubs blocked by the guard (Enter included);
+  two clubs then one removed, pick-clear-re-pick, 20 rapid changes, and Back each give q18 = the
+  visible ticks; Español refused (the message stays English, BACKLOG 57); a same-name entry sends
+  its name exactly.
+- **Merge and push**: `main` = `1fb8cfb` on origin, check green; a manual runner dry run (GitHub run
+  36952279243) put all four regions at `attention` with the question-18 reason — the runner was on
+  the new code before any regional form was touched.
+- **Regional forms** from `main`, fresh Roster export `roster_2026-10-02T0144Z`: U.S 01:44 UTC (11
+  rosters required, 42 rules), Latin America 02:01 (38, 69), Asia 02:02 (95, 126), Africa 02:04 (220,
+  251; with it 10 roster updates that arrived while the runner was paused). Each: backup, dry run
+  (only the rule move and the required flags), `--apply`, second dry run `nothing to do`,
+  `form_status --rendered` CLEAN with every box required and question 18 first (runtime build
+  `62a8b57dd95`).
+- `auto_sync.py` dry run: every region in-sync, exit 0. `AUTO_SYNC_APPLY=1` (02:05 UTC); GitHub run
+  36953976708 on `1fb8cfb`: every region in-sync.
+- Open: the browser scenarios on the four regional pages (a different runtime build from the
+  template's) — run right after, recorded with the next commit; BACKLOG 56 (language switcher with
+  two clubs) and 57 (the required message's translation).
