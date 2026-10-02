@@ -277,14 +277,19 @@ not count as a change and never applies on its own: run the dry run and
 `--apply` by hand. When the same region also has a roster change, the
 runner's ordinary apply rewrites the rules and nothing more is needed.
 
-Two things **stop a region** even when a roster change is planned
+Three things **stop a region** even when a roster change is planned
 (`attention`, nothing applied). First, the sync's warning that **question 18
 is calculated the old way** (`question 18 (Contact_IDs) is not recalculated
 after the rosters change`). Second, a **`REQUIRED roster` line**: the required
 flag written on a roster that has no other change. Both are rolled out by
 hand, one form at a time ("The names list sent to Salesforce"). Once a form
 is rolled out, the runner creates rosters required and applies an options
-update that also sets the flag (`UPDATE roster … ; required: Yes`).
+update that also sets the flag (`UPDATE roster … ; required: Yes`). Third, an
+**`UPDATE module dropdown` line**: a module dropdown's `calcValues`, rolled
+out by hand, template first, and afterwards only a builder edit brings it
+back ("The names dictionary and the module values"). After every apply the
+verify step also audits the form's names dictionary; a store it could not
+read is a note in the log, not `applied-unverified`.
 
 The workflow fails visibly (GitHub emails the repository owner) on any
 ATTENTION (exit 2) and on any failure (exit 1).
@@ -962,9 +967,9 @@ page came back from the browser's memory, below):
    not a failure. Switch back to English.
 
 `equal: false` with `q18` equal to `ticked` is the names-dictionary defect
-(about 55 roster names whose spelling the forms' own translation dictionary
-alters, its own plan after the back-fill), not this one. Pick a club it does
-not affect for these checks. Each form's page can be served on its own
+(55 roster names whose spelling the forms' own translation dictionary alters:
+"The names dictionary and the module values" below), not this one. Until a
+form's dictionary is fixed, pick a club it does not affect for these checks. Each form's page can be served on its own
 runtime build, so steps 2 and 5 are repeated on every regional form. No test
 submission: a delivered one creates a real batch for a real club, and the
 console checks prove the same thing.
@@ -1020,6 +1025,177 @@ she meant. Ticks in both still go through, all under the club kept: the daily
 question-18 comparison stays the alarm. Support: a mentor told "required" on
 a club she did not pick clears the picker and picks her club again; she never
 ticks a girl of a club she does not hold.
+
+## The names dictionary and the module values
+
+Plan: [plans/2026-10-02-names-and-modules.md](plans/2026-10-02-names-and-modules.md)
+(fixes 1 and 4). Salesforce stores what question 18 (the girls' names) and
+question 98 (`module_id`) say, and finds a girl by her exact name. Two things
+on the forms changed that text after the mentor ticked it:
+
+- **The names dictionary.** Each form's translation store (`base`, `en` and
+  one dictionary per offered language, cloned from the template) is built
+  into a lookup in the browser, and the calculation that fills question 18
+  passes every ticked name through it (the box's `data-calcvalue`, else the
+  lookup, else the value). Building the lookup collapses every whitespace run
+  in a key, so a stale entry that spells a girl's name with a double space, a
+  tab or a no-break space lands on her exact name and replaces it: 55 roster
+  options read 2026-10-02 (Africa 49, Asia 5, Latin America 1, U.S 0; 29
+  clubs), each a second Contact in Salesforce on the girl's first live
+  submission. `glow/translation_lookup.py` rebuilds the lookup exactly as
+  Jotform's `formTranslation.v2.js` does (both runtime builds) and is what the
+  tool and the audits below run.
+- **The module.** The module dropdowns (q14, q92, q93) had no `calcValues`, so
+  question 98 copied the option's visible text, which a browser's "Translate
+  page" rewrites (30 of Latin America's 111 September submissions sent a
+  Spanish module). The sync now gives each its own options as `calcValues`,
+  after the empty slot of a single-select's "Please Select" (the year
+  dropdown's `|1|2|3` layout), and keeps them in step on every apply
+  (`glow/sync.py` `MODULE_CALC_VALUES`). Question 98 then copies the
+  `data-calcvalue`, which page translation does not touch.
+
+The September back-fill sent the exact roster text and the canonical module,
+so once both fixes are live the live flow and the back-filled data agree.
+
+**`tools/fix_name_translations.py`** (dry run by default) reads the roster
+options of all five forms (a girl who moves region, or a namesake, must not
+bring an entry back) and each form's store, and removes from `base` and `en`
+exactly the entries whose lookup alters one of them, round after round until
+none does (removing one can uncover an older spelling of the same name).
+Removal, not correction: a name with no entry is the normal state and comes
+out exact. It prints counts and club names, never a girl's name:
+
+```
+== Africa 262382821971058
+   store: base 4416, en 4424, 11 other language(s)
+   altered today: 49 of this form's 4264 roster options, in 23 club(s); its dictionary alters 55 option text(s) of the five forms (en 55; on template 55, U.S 0, Latin America 1, Asia 5, Africa 49)
+   clubs: …
+   keys to remove: 55 (base 55, en 55) - only the entries behind those alterations
+   after the removal (emulated, 12 language(s), both runtime builds): 0 option(s) altered
+```
+
+Every form's store holds the same 55 keys (they were cloned), so each form
+loses 55 entries in `base` and `en`, the U.S store included. With `--form <id>
+--apply` (one form per run) it saves the whole store to
+`backups/translations/<id>-<stamp>-before.json` (mode 600: it holds every
+girl's name), POSTs `base` and `en` without those keys (no other language is
+posted, CLAUDE.md rule 9), re-reads the store and compares every entry
+(`re-read: APPLIED`), audits the re-read store (0 altered), then reads the
+public page and counts the removed keys it still embeds (`public page: 0
+removed keys still served`). If some are still served after three reads 20 s
+apart, it makes ONE more write, the form's `pagetitle` posted back unchanged
+(the dry run prints it), which makes Jotform re-render the page, and reads it
+again. A lost or non-JSON answer to the POST is re-read and reported as
+`UNCHANGED` (nothing written: run again), `APPLIED` or `PARTIAL` (restore,
+below). It refuses, writing nothing: a store without `base` or `en`, with
+fewer than 1,000 entries in either (a truncated read), or with an entry that
+is not text; a key to remove that another language translates, or an
+alteration another language's entry makes; more than 300 keys; anything still
+altered after the removal; `--apply` without exactly one `--form`. A second
+dry run on a fixed form says `nothing to remove`.
+
+**The sync** plans one line per module dropdown without the values:
+`UPDATE module dropdown (q14, year 1: calcValues = its 5 options)` (q92: 7,
+q93: 8; the same on all five forms, read 2026-10-02). After the apply the next
+dry run has nothing to say about them. A module added or reordered in the
+builder later makes the line come back: the realignment is one more hand apply.
+
+**`tools/form_status.py`** reports a form NOT CLEAN when a module dropdown's
+`calcValues` are missing or out of line with its options (`module values: q14
+aligned (5 options), …`), and when the form's own dictionary alters any
+roster option in any language its store holds (`names dictionary: 0 of 4264
+roster options altered (12 language(s) checked)`; one GET more per form).
+`--rendered` checks the served page as well: each module option's
+`data-calcvalue` equals its value, and the store the page embeds alters none
+of the roster boxes it serves. A store that cannot be read is reported, not
+guessed (`names dictionary: not checked (…)`), and the runner's verify step
+logs it as a note. A stale entry made in the builder later is flagged after
+the next apply (or by hand), not prevented.
+
+**The runner never applies a module line unattended** (`check_bands`: "would
+write the calcValues of 3 module dropdown(s) (q14, q92, q93) - never
+unattended"): the region reads `attention`, its roster changes included,
+until the form is rolled out by hand. After the rollout a module line means a
+module dropdown was edited in the builder: apply that form by hand after
+reading its dry run. The names tool is never run by the runner.
+
+Read on 2026-10-02 (dry runs from the branch, nothing written):
+
+| Form | Names: altered today → after | Keys to remove (base, en) | Sync: module lines | `form_status --rendered` |
+|---|---|---|---|---|
+| template | 55 → 0 (29 clubs) | 55 (55, 55) | 3 | NOT CLEAN: 8 problems (3 + 1 API, 3 + 1 page) |
+| U.S | 0 → 0 | 55 (55, 55) | 3 | NOT CLEAN: 6 (the modules only) |
+| Latin America | 1 → 0 (1 club) | 55 (55, 55) | 3 | NOT CLEAN: 8 |
+| Asia | 5 → 0 (5 clubs) | 55 (55, 55) | 3 | NOT CLEAN: 8 |
+| Africa | 49 → 0 (23 clubs) | 55 (55, 55) | 3 | NOT CLEAN: 8 |
+
+**Rollout**, each write Ryan's go, template first. Wait for one runner run
+with all four regions `in-sync`, then set `AUTO_SYNC_APPLY=0` for the whole
+window and confirm it (no run in progress). Close every builder tab on these
+forms. Nobody applies the sync to a form from a checkout without this code
+while the window is open.
+
+1. The template, from the branch (no `--region`: its Roster export is the
+   whole tab; its own roster backlog, if any, rides along: read it first):
+
+```bash
+python3 backup_forms.py --form 262352490535154                                           # the questions as they are (calcValues "" today)
+python3 tools/fix_name_translations.py --form 262352490535154                            # dry run: 55 keys, after the removal 0
+python3 tools/fix_name_translations.py --form 262352490535154 --apply                    # store saved (note the file), POST, re-read: APPLIED, page: 0
+python3 tools/fix_name_translations.py --form 262352490535154                            # "nothing to remove"
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154            # dry run: the three module lines (+ its roster backlog)
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --apply    # three question writes
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154            # "nothing to do"
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --rendered   # CLEAN: names 0 altered, module values aligned, rendered too
+```
+
+   Then in a real browser on the template's public page, without submitting
+   (every submit intercepted, as for the browser steps above): pick a club the
+   tool listed, tick every girl, and run the console check of "The names list
+   sent to Salesforce": `equal: true` (it was `false` before the fix). Pick a
+   year and a module, then Chrome's "Translate page" to Spanish: the console
+   line `document.getElementById('input_98').value` still prints the English
+   module. Open the builder's Translations page and close it without saving:
+   the names tool's dry run still says `nothing to remove`.
+2. **Merge and push**, `AUTO_SYNC_APPLY` still `0`. One runner run by hand
+   (Actions, "Run workflow", apply unticked): every region reads `attention`
+   with "would write the calcValues of 3 module dropdown(s)". A region without
+   it means the runner runs older code: stop.
+3. U.S, Latin America, Asia, Africa, smallest first, each with its `--region`
+   and the same commands: backup, names tool dry run, `--apply`, dry run again;
+   sync dry run (the three module lines and the roster changes since), `--apply`,
+   `nothing to do`; `form_status --rendered` CLEAN; the console check on one
+   affected club (Africa, Asia, Latin America) and the "Translate page" check.
+4. With all five CLEAN under `--rendered`: one `auto_sync.py` dry run, every
+   region `in-sync`, then `AUTO_SYNC_APPLY=1`.
+5. Tell the Salesforce session: the forms send the exact names and the
+   canonical module; the held sessions and the stale-spelling duplicates can
+   be handled.
+
+Stopped half-way, the runner stays at `0`: every region not rolled out reads
+`attention` (the module lines), and a hand apply of its sync also rolls its
+modules out; its names dictionary needs the tool run separately. A mentor with
+the form already open keeps the old page until she reloads.
+
+**Rollback**, per form, the runner paused:
+
+- Names: `python3 tools/fix_name_translations.py --form <id> --restore
+  backups/translations/<id>-<stamp>-before.json` (a dry run: the entries it
+  puts back, per dictionary), then the same with `--apply`. It puts back every
+  `base`/`en` entry of the saved store that the form no longer has, in the
+  saved order; entries changed or added since are kept. It saves the store as
+  it is first, re-reads and compares, and reads the page. Rolling back
+  re-opens the defect: only if something else broke.
+- Modules (generated): set `MODULE_CALC_VALUES = False` in `glow/sync.py` on
+  a branch. The sync's dry run then plans `UPDATE module dropdown (q14, year 1:
+  calcValues cleared)` for each dropdown that carries them; apply it by hand,
+  and `form_status` is CLEAN under the constant. The runner refuses those
+  lines as it refuses the others, so a constants-off commit on `main` rolls
+  nothing back unattended; as with question 18, merge it only once every form
+  is rolled back. The second path is the questions file `backup_forms.py`
+  wrote (`calcValues` was `""` on every module dropdown before the rollout).
+
+Neither touches the rosters, the rules, question 5 or the integration.
 
 ## Header logo
 
@@ -1235,7 +1411,11 @@ the same two `add_language.py` commands minus `--form`.
 Jotform's `POST /form/{id}/translations` replaces a language's whole
 dictionary — the tools always GET, merge, then POST. A new English string
 must also be written to `base` and `en` or its translations never apply
-(details: `.claude/skills/jotform-api/SKILL.md`).
+(details: `.claude/skills/jotform-api/SKILL.md`). The `base`/`en` entries also
+decide what question 18 sends for a ticked girl: `tools/fix_name_translations.py`
+removes the stale spellings that alter a name, and `form_status.py` flags any
+("The names dictionary and the module values"). Saved stores
+(`backups/translations/`) are mode 600.
 
 ## Missed form responses
 

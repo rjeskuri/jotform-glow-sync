@@ -33,6 +33,9 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
        D. ONE CLUB           - only on a form with the club guard (added
                                once with --club-guard): several clubs picked
                                -> show the warning, hide + disable Submit
+  4. Keeps each module dropdown's calcValues equal to its own options
+     (glow/sync.py MODULE_CALC_VALUES), so question 98 (module_id) copies the
+     module itself, never the text a browser's page translation shows.
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -80,7 +83,8 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
     GUARD_NAME, GUARD_PROPS,
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
     SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners,
-    has_calc_values, long_name_partner, partner_fields, partner_picker, picker_calc_values,
+    dropdown_options, has_calc_values, long_name_partner, partner_fields, partner_picker,
+    picker_calc_values,
     read_roster_csv, read_sheet, roster_names, roster_pairs, sf_club_name,   # against Config.gs
     shared_club_names, warn,
 )
@@ -1161,6 +1165,24 @@ def main():
                          f"UPDATE club guard ({', '.join(sorted(drift))})")
         guard_field = guard_qid
 
+    # --- the module dropdowns' calcValues (glow/sync.py MODULE_CALC_VALUES) --
+    # their own options, so question 98 (module_id, what Salesforce stores) copies
+    # the option itself, never its visible text, which a browser's page translation
+    # rewrites. Kept in step on every run; off, they are cleared. The runner never
+    # applies these lines unattended: the first rollout is by hand, template first,
+    # and afterwards a difference means a module dropdown was edited in the builder
+    module_values = []
+    for year, mqid in MODULES.items():
+        current = questions[mqid]
+        options = dropdown_options(current)
+        want = glow_sync.module_calc_values(options)
+        if (current.get("calcValues") or "") == want or (not want and not has_calc_values(current)):
+            continue
+        module_values.append({"qid": mqid, "year": year, "modules": len(options) if want else 0})
+        jf.post_form(f"/question/{mqid}", {"question[calcValues]": want},
+                     f"UPDATE module dropdown (q{mqid}, year {year}: calcValues "
+                     + (f"= its {len(options)} options)" if want else "cleared)"))
+
     # --- regenerate all conditions -----------------------------------------
     # The API stores each condition's terms/action as JSON-encoded STRINGS
     # (that is what GET returns and what the builder saves) - encode them.
@@ -1234,6 +1256,8 @@ def main():
             "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
             # rosters whose required flag alone is written (no other change to them)
             "requires": [{"qid": q, "club": c, "required": want_required} for q, c in to_require],
+            # module dropdowns whose calcValues are written (modules: 0 = cleared)
+            "module_values": module_values,
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
             "club_picker": picker_qid, "partner_picker": partner_qid, "club_guard": guard_qid,
             # what every roster on the form sends to question 5 after this plan = the

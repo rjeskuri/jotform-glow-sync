@@ -30,10 +30,13 @@ raise ATTENTION without stopping anything (docs/RUNBOOK.md, "Club names two
 partners share"). A conditions rewrite alone is not a change to it, so roster
 rules that test a name the Club picker does not list (a restored backup, a
 half-finished hand apply) are never "in-sync": ATTENTION, apply by hand. Rules
-that calculate question 18 (the names sent to Salesforce) the old way, and the
-required flag written on a roster that has no other change, stop the region
-(ATTENTION): both are rolled out by hand, one form at a time (docs/RUNBOOK.md,
-"The names list sent to Salesforce").
+that calculate question 18 (the names sent to Salesforce) the old way, the
+required flag written on a roster that has no other change, and a module
+dropdown's calcValues, stop the region (ATTENTION): each is rolled out by hand,
+one form at a time, template first (docs/RUNBOOK.md, "The names list sent to
+Salesforce" and "The names dictionary and the module values"). The verify step's
+form_status also audits the form's names dictionary; a store it could not read
+is a note.
 """
 import argparse
 import csv
@@ -79,6 +82,11 @@ PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+)
 PARTNER_PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) partner picker "
                                r"\((?P<partners>\d+) partners(?::[^)]*)?\)$")
 GUARD_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club guard \([^)]*\)$")
+# a module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES): never applied unattended
+# (check_bands) - the first rollout is by hand, template first; afterwards a difference means
+# the dropdown was edited in the builder (docs/plans/2026-10-02-names-and-modules.md)
+MODULE_RX = re.compile(r"^  - UPDATE module dropdown \(q(?P<qid>\d+), year (?P<year>\d+): calcValues "
+                       r"(?:= its (?P<modules>\d+) options|cleared)\)$")
 ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) girls\); "
                        r"(?P<all>\d+) clubs overall")
 NOT_IN_EXPORT = "is on the form but not in the sheet export"
@@ -103,16 +111,25 @@ def key(s):
 
 
 # ------------------------------------------------------------ pure functions
+def module_entry(m):
+    """A MODULE_RX match -> {"qid", "year", "modules"} (modules: 0 = the calcValues cleared)."""
+    return {"qid": m["qid"], "year": m["year"], "modules": int(m["modules"] or 0)}
+
+
 def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
     plan = {"creates": [], "updates": [], "deletes": [], "requires": [], "picker": [],
-            "partner_picker": [], "club_guard": [], "rules": None, "warnings": [],
+            "partner_picker": [], "club_guard": [], "modules": [], "rules": None, "warnings": [],
             "roster_clubs": None, "roster_girls": None,
             "sf_names": None}     # sf_names: only the summary file has them
     for line in text.splitlines():
         m = REQUIRED_RX.match(line)
         if m:
             plan["requires"].append({"qid": m["qid"], "club": m["club"], "required": m["required"]})
+            continue
+        m = MODULE_RX.match(line)
+        if m:
+            plan["modules"].append(module_entry(m))
             continue
         m = PICKER_RX.match(line)
         if m:
@@ -167,6 +184,8 @@ def plan_from_summary(summary):
                                          for c in summary.get("calls", [])) if m],
             "club_guard": [{"op": m["op"]} for m in (GUARD_RX.match("  - " + c)
                                                      for c in summary.get("calls", [])) if m],
+            "modules": [module_entry(m) for m in (MODULE_RX.match("  - " + c)
+                                                  for c in summary.get("calls", [])) if m],
             "rules": summary.get("rules"),
             "warnings": [w.strip() for w in summary.get("warnings", [])],
             "roster_clubs": summary.get("roster_clubs"),
@@ -215,24 +234,28 @@ def name_clashes(sf_names_by_region):
 
 
 def changes(plan):
-    """Roster creates/updates/deletes, required flags written on their own, plus a Club-picker,
-    partner-list or club-guard update (never a create: the runner passes none of --club-picker,
-    --partner-picker and --club-guard, so a CREATE here means someone else did)."""
+    """Roster creates/updates/deletes, required flags written on their own, module dropdowns'
+    calcValues, plus a Club-picker, partner-list or club-guard update (never a create: the runner
+    passes none of --club-picker, --partner-picker and --club-guard, so a CREATE here means
+    someone else did)."""
     return (len(plan["creates"]) + len(plan["updates"]) + len(plan["deletes"])
-            + len(plan.get("requires", []))
+            + len(plan.get("requires", [])) + len(plan.get("modules", []))
             + len(plan.get("picker", [])) + len(plan.get("partner_picker", []))
             + len(plan.get("club_guard", [])))
 
 
 def plan_summary(plan):
     """One line for the SyncLog detail and the attention title: the roster counts, then the
-    required flags written on their own and each Club-picker, partner-list or club-guard write
-    by name (only when planned), so a list-only apply does not read as "0 create(s), 0 update(s)"."""
+    required flags written on their own, the module dropdowns' calcValues, and each Club-picker,
+    partner-list or club-guard write by name (only when planned), so a list-only apply does not
+    read as "0 create(s), 0 update(s)"."""
     requires = plan.get("requires", [])
     values = sorted({r["required"] for r in requires})
+    modules = plan.get("modules", [])
     return (f"{len(plan['creates'])} create(s), {len(plan['updates'])} update(s), "
             f"{len(plan['deletes'])} delete(s), {len(plan['warnings'])} warning(s)"
             + (f", required: {'/'.join(values)} on {len(requires)} roster(s)" if requires else "")
+            + (f", module values on {len(modules)} dropdown(s)" if modules else "")
             + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
             + "".join(f", {m['op'].lower()} partner list" for m in plan.get("partner_picker", []))
             + "".join(f", {m['op'].lower()} club guard" for m in plan.get("club_guard", [])))
@@ -270,6 +293,13 @@ def check_bands(plan, max_creates=5, max_updates=20):
                        "change - never unattended: the first rollout is by hand (docs/RUNBOOK.md, \"The "
                        "names list sent to Salesforce\"), and afterwards a roster that lost the flag was "
                        "edited in the builder")
+    modules = plan.get("modules", [])
+    if modules:
+        reasons.append(f"would write the calcValues of {len(modules)} module dropdown(s) "
+                       f"({', '.join('q' + m['qid'] for m in modules)}) - never unattended: the first "
+                       "rollout is by hand, template first (docs/RUNBOOK.md, \"The names dictionary and "
+                       "the module values\"), and afterwards a difference means a module dropdown was "
+                       "edited in the builder; nothing applied here, roster changes included")
     stale = sum(1 for w in plan["warnings"] if NOT_IN_EXPORT in w)
     n = plan["roster_clubs"] or 0
     if stale > max(5, n // 10):
@@ -317,6 +347,12 @@ def verify_report(rep, min_languages=MIN_LANGUAGES):
                          "(kept, as always): " + ", ".join(rc["not_in_roster"][:5]))
     if rep.get("duplicate_club_questions"):
         notes.append("duplicate club questions: " + ", ".join(rep["duplicate_club_questions"][:5]))
+    # the names dictionary (docs/plans/2026-10-02-names-and-modules.md): an option it alters is
+    # one of rule_problems; a store that could not be read is a note, not an unverified apply
+    names = rep.get("names_dictionary")
+    if names is not None and not names.get("checked"):
+        notes.append(f"names dictionary not checked ({names.get('why') or 'store not read'}) - "
+                     "run tools/form_status.py for this form by hand")
     return problems, notes
 
 
@@ -504,6 +540,9 @@ class Run:
                                    "\n".join(f"\n- DELETE {d['club']} (q{d['qid']})" for d in plan["deletes"]) +
                                    (f"\n- REQUIRED on {len(plan['requires'])} roster(s) with no other change"
                                     if plan.get("requires") else "") +
+                                   "".join(f"\n- MODULE values q{m['qid']} (year {m['year']}: "
+                                           + (f"{m['modules']} modules)" if m["modules"] else "cleared)")
+                                           for m in plan.get("modules", [])) +
                                    ("\n\nWarnings:\n" + "\n".join("- " + w for w in plan["warnings"]) if plan["warnings"] else "")))
             self.result(region, plan, "attention", "; ".join(reasons))
             return

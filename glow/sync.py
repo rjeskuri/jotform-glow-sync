@@ -116,6 +116,38 @@ def has_calc_values(question):
     return bool((question.get("calcValues") or "").replace("|", "").strip())
 
 
+# ------------------------------------------------ the module Salesforce stores
+# Question 98 (MODULE_ID, module_id) copies the module dropdown the mentor used
+# (q14, q92 or q93, MODULES). Without calcValues the copy reads the option's
+# visible text, which a browser's "Translate page" rewrites: 30 of Latin
+# America's 111 September submissions sent a Spanish module, which Salesforce
+# keeps as text. With calcValues the copy reads each option's data-calcvalue,
+# which page translation does not touch (the year and session dropdowns have
+# carried them from the start; the Club picker since the club guard). The sync
+# writes each module dropdown's calcValues as its own options, with the leading
+# empty slot of a single-select's "Please Select" (the year dropdown's |1|2|3,
+# read 2026-10-02), and keeps them in step on every apply. Off: the sync clears
+# them (the generated rollback). docs/plans/2026-10-02-names-and-modules.md
+MODULE_CALC_VALUES = True
+
+
+def aligned_calc_values(options):
+    """A single-select dropdown's calcValues equal to its own options: an empty slot
+    for "Please Select", then each option ("" for a dropdown without options)."""
+    return "|" + "|".join(options) if options else ""
+
+
+def module_calc_values(options):
+    """The calcValues the sync gives a module dropdown with these options
+    (MODULE_CALC_VALUES): aligned_calc_values, or "" (none) when off."""
+    return aligned_calc_values(options) if MODULE_CALC_VALUES else ""
+
+
+def dropdown_options(question):
+    """A dropdown's options as stored, empty ones dropped (what its calcValues line up with)."""
+    return [o for o in (question.get("options") or "").split("|") if o]
+
+
 # ------------------------------------------- the names list sent to Salesforce
 # Question 18 (CONTACT_IDS) is the list of girls Salesforce stores as present:
 # ONE calculation over every roster, hidden rosters ignored, so only the shown

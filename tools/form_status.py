@@ -12,8 +12,14 @@ renders above the links and the Submit button (glow/layout.py; a roster below
 them makes the form NOT CLEAN - tools/fix_roster_order.py repairs it), and
 whether question 18 (Contact_IDs, the names sent to Salesforce) is calculated
 after the rosters show or hide and every roster is required - as glow/sync.py's
-constants say (docs/plans/2026-09-30-contact-ids.md). --rendered reads the public
-page as well (counts only).
+constants say (docs/plans/2026-09-30-contact-ids.md) - and, for what Salesforce
+stores (docs/plans/2026-10-02-names-and-modules.md), whether each module dropdown
+carries calcValues equal to its options (MODULE_CALC_VALUES: question 98 then
+copies the module, not the text a translated page shows) and whether the form's
+own translation dictionary alters any roster option (the runtime's lookup
+emulated, glow/translation_lookup.py, in every language the store holds: question
+18 would send another spelling of that girl's name; counts and club names only).
+--rendered reads the public page as well (counts only).
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -34,14 +40,15 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms as glow_forms       # noqa: E402
 from glow import layout                    # noqa: E402  (rosters above the links and Submit)
-from glow import sync as glow_sync         # noqa: E402  (question 18's constants, read at run time)
+from glow import sync as glow_sync         # noqa: E402  (question 18's and the modules' constants, read at run time)
+from glow import translation_lookup as tl  # noqa: E402  (the runtime's names dictionary, emulated)
 from glow.cli import run                   # noqa: E402
-from glow.jotform import Client            # noqa: E402
+from glow.jotform import Client, JotformError     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
-    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, PICKER_NAME, SF_NAME_SEP,
-    club_guards, club_partners, has_calc_values, long_name_partner, partner_picker,
-    picker_calc_values)
+    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PICKER_NAME, SF_NAME_SEP,
+    aligned_calc_values, club_guards, club_partners, dropdown_options, has_calc_values,
+    long_name_partner, partner_picker, picker_calc_values)
 from glow.text import key, name_key        # noqa: E402
 
 FORMS = {glow_forms.TEMPLATE: ("template", None),
@@ -214,6 +221,120 @@ def audit_club_guard(questions, conditions):
     return problems
 
 
+MODULE_FIX = ("question 98 (module_id, what Salesforce stores) copies the visible text, which a "
+              "browser's page translation rewrites; a sync apply by hand writes them (RUNBOOK \"The "
+              "names dictionary and the module values\")")
+
+
+def audit_module_values(questions):
+    """The module dropdowns (glow.sync.MODULES), as glow/sync.py MODULE_CALC_VALUES says:
+    on, each carries calcValues equal to its own options after the single-select's empty
+    slot; off, none - or, if it still carries some, aligned ones (misaligned, question
+    98 would send a neighbouring module). Returns (problems, {qid: {"options", "aligned"}})."""
+    problems, summary = [], {}
+    for year, qid in MODULES.items():
+        q = questions.get(qid)
+        if q is None:
+            problems.append(f"module dropdown q{qid} (year {year}) is not on the form")
+            continue
+        options = dropdown_options(q)
+        have = q.get("calcValues") or ""
+        aligned = bool(options) and have == aligned_calc_values(options)
+        summary[qid] = {"options": len(options), "aligned": aligned}
+        if glow_sync.MODULE_CALC_VALUES and not aligned and options:
+            problems.append(f"module dropdown q{qid} (year {year}): "
+                            + (f"calcValues out of line with its {len(options)} options "
+                               f"({len(have.split('|'))} values) - question 98 would send another "
+                               "module; " if has_calc_values(q) else "no calcValues - ")
+                            + MODULE_FIX)
+        elif not glow_sync.MODULE_CALC_VALUES and has_calc_values(q) and not aligned:
+            problems.append(f"module dropdown q{qid} (year {year}): calcValues out of line with its "
+                            f"{len(options)} options - question 98 would send another module; a sync "
+                            "apply by hand clears them (glow/sync.py MODULE_CALC_VALUES is off)")
+    return problems, summary
+
+
+NAMES_FIX = "tools/fix_name_translations.py --form {form} (dry run first; RUNBOOK \"The names dictionary and the module values\")"
+
+
+def roster_options(questions):
+    """[(roster qid, club, option)] for every roster question's options."""
+    return [(str(qid), " ".join(str(q.get("text") or "").split()), o)
+            for qid, q in questions.items() if q.get("type") == "control_checkbox"
+            for o in (q.get("options") or "").split("|") if o]
+
+
+def audit_names(form_id, options, store, primary=tl.PRIMARY):
+    """The form's own translation dictionary against its roster options, emulated as the
+    runtime builds and uses it (glow/translation_lookup.py), in every language it holds
+    and both runtime builds: question 18 sends what the lookup returns for a ticked girl.
+    options: roster_options(). Returns (problems, summary); summary has counts and club
+    names only - never a girl's name. A store that cannot be emulated is not checked
+    (summary["checked"] False, a note for the runner), never guessed."""
+    why = store if isinstance(store, str) else tl.check_store(store)
+    if why:
+        return [], {"checked": False, "why": why}
+    hit = tl.altered(store, {o for _, _, o in options}, primary)
+    found = [(qid, club, hit[o]) for qid, club, o in options if o in hit]
+    langs = {}
+    for _, _, ls in found:
+        for lang in ls:
+            langs[lang] = langs.get(lang, 0) + 1
+    clubs = sorted({club for _, club, _ in found}, key=str.lower)
+    summary = {"checked": True, "options": len(options), "altered": len(found), "clubs": clubs,
+               "languages": len(tl.target_languages(store)), "by_language": langs}
+    problems = []
+    if found:
+        problems.append(f"names dictionary: {len(found)} roster option(s) in {len(clubs)} club(s) are "
+                        "altered by the form's own translation dictionary ("
+                        + ", ".join(f"{lang} {n}" for lang, n in sorted(langs.items()))
+                        + ") - question 18 would send another spelling of those girls' names "
+                        f"(a second Contact in Salesforce): {NAMES_FIX.format(form=form_id)}")
+    return problems, summary
+
+
+def read_store(client, form_id):
+    """The form's translation store, or a short reason it could not be read (never the
+    answer itself: it holds every girl's name)."""
+    try:
+        store = client.get(f"/form/{form_id}/translations")
+    except JotformError:
+        return "the store could not be read (an error or a non-JSON answer from Jotform)"
+    return store
+
+
+def embedded_store(page):
+    """(the translation store the public page embeds - window.allTranslations.translations -,
+    the primaryLanguage of its FormTranslation.init) in memory only; (None, None) when the
+    page has none."""
+    i = (page or "").find("window.allTranslations")
+    j = page.find("{", i) if i >= 0 else -1
+    if j < 0:
+        return None, None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(page, j)
+    except ValueError:
+        return None, None
+    store = value.get("translations") if isinstance(value, dict) else None
+    m = re.search(r'FormTranslation\.init\(\{[^<]*?"primaryLanguage"\s*:\s*"([^"]+)"', page)
+    return (store if isinstance(store, dict) else None), (m.group(1) if m else tl.PRIMARY)
+
+
+def rendered_options(page, rosters):
+    """[(roster qid, "q<qid>", value)] of the roster checkboxes the page serves (the values
+    stay in memory: they are girls' names)."""
+    rosters = {str(q) for q in rosters}
+    out = []
+    for tag in re.findall(r"<input\b[^>]*>", page or ""):
+        if not re.search(r'\btype="checkbox"', tag):
+            continue
+        m = re.search(r'\bid="input_(\d+)_\d+"', tag)
+        v = re.search(r'(?<![\w-])value="([^"]*)"', tag)
+        if m and v and m.group(1) in rosters:
+            out.append((m.group(1), f"q{m.group(1)}", html.unescape(v.group(1))))
+    return out
+
+
 def rendered_calc_values(page, picker):
     """Counts, from the public page's HTML (kept in memory, never printed or
     saved - it lists every roster), of the picker's options whose
@@ -360,7 +481,58 @@ def rendered_problems(r, page):
     elif req["required"]:
         problems.append(f"rendered page: {req['required']} rosters still carry validate[required] although "
                         "glow/sync.py ROSTERS_REQUIRED is off")
+    return problems + rendered_module_problems(r, page) + rendered_names_problems(r, page)
+
+
+def rendered_module_problems(r, page):
+    """--rendered: each module dropdown's options and their data-calcvalue, as glow/sync.py
+    MODULE_CALC_VALUES says (adds r["rendered_modules"]: {qid: counts or None})."""
+    problems, seen = [], {}
+    for year, qid in MODULES.items():
+        counts = rendered_calc_values(page, qid)
+        seen[qid] = counts
+        want = ((r.get("module_values") or {}).get(qid) or {}).get("options")
+        if counts is None:
+            problems.append(f"rendered page: no select for module dropdown q{qid} (page not served, or its "
+                            "layout changed) - its values cannot be vouched for")
+        elif glow_sync.MODULE_CALC_VALUES and (counts["differ"] or counts["missing"]
+                                               or counts["aligned"] != counts["options"]):
+            problems.append(f"rendered page: module dropdown q{qid}: {counts['missing']} of {counts['options']} "
+                            f"options carry no data-calcvalue, {counts['differ']} one other than their value "
+                            "(a page from before the apply: re-run in a few minutes) - " + MODULE_FIX)
+        elif glow_sync.MODULE_CALC_VALUES and want is not None and counts["options"] != want:
+            problems.append(f"rendered page lists {counts['options']} of module dropdown q{qid}'s {want} options "
+                            "- a page from before the apply or a layout this check cannot read: do not treat "
+                            "it as aligned")
+        elif not glow_sync.MODULE_CALC_VALUES and counts["differ"]:
+            problems.append(f"rendered page: module dropdown q{qid}: {counts['differ']} of {counts['options']} "
+                            "options carry a data-calcvalue other than their value - question 98 would send "
+                            "another module")
+    r["rendered_modules"] = seen
     return problems
+
+
+def rendered_names_problems(r, page):
+    """--rendered: the names dictionary the page embeds against the roster boxes it serves,
+    emulated (adds r["rendered_names"], counts only)."""
+    store, primary = embedded_store(page)
+    if store is None:
+        r["rendered_names"] = {"checked": False, "why": "the page embeds no translation store"}
+        return ["rendered page: no embedded translation store (window.allTranslations) - the names "
+                "dictionary it serves cannot be vouched for"]
+    options = rendered_options(page, r.get("roster_qids") or [])
+    _, summary = audit_names(r.get("id", ""), options, store, primary)
+    r["rendered_names"] = {k: v for k, v in summary.items() if k != "clubs"}
+    if not summary.get("checked"):
+        return [f"rendered page: its translation store cannot be emulated ({summary.get('why')})"]
+    if summary["altered"]:
+        rosters = len({c for c in summary["clubs"]})
+        r["rendered_names"]["rosters"] = rosters
+        return [f"rendered page: the embedded dictionary alters {summary['altered']} of the {summary['options']} "
+                f"roster options it serves ({rosters} roster(s)) - question 18 would send another spelling "
+                "(a page from before the fix: re-run in a few minutes; else "
+                + NAMES_FIX.format(form=r.get("id", "<id>")) + ")"]
+    return []
 
 
 def public_page(form_id):
@@ -567,6 +739,28 @@ def contact_ids_line(summary, picker):
                if picker else ""))
 
 
+def module_values_line(summary):
+    """The printed report's `module values:` line, from form_report's `module_values`."""
+    if not summary:
+        return "no module dropdown on the form"
+    return ", ".join(f"q{qid} {'aligned' if s['aligned'] else 'none or out of line'} ({s['options']} options)"
+                     for qid, s in summary.items())
+
+
+def names_line(summary):
+    """The printed report's `names dictionary:` line, from form_report's `names_dictionary`
+    (counts and club names only)."""
+    if not summary or not summary.get("checked"):
+        return f"not checked ({(summary or {}).get('why') or 'store not read'})"
+    line = (f"{summary['altered']} of {summary['options']} roster options altered "
+            f"({summary['languages']} language(s) checked)")
+    if summary["altered"]:
+        clubs = summary["clubs"]
+        line += (f" in {len(clubs)} club(s): " + "; ".join(clubs[:8])
+                 + (f"; and {len(clubs) - 8} more" if len(clubs) > 8 else ""))
+    return line
+
+
 def partner_box_line(box, picker):
     """The printed report's `partner box:` line, from form_report's `partner_box`."""
     if not box:
@@ -624,6 +818,16 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
     rule_problems, rule_summary = audit_rules(questions, conditions, partners_of)
     # a roster rendering below the links / Submit shows a mentor her names under the button
     rule_problems += layout.audit_layout(questions)
+    # question 98's module: each module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES)
+    module_problems, module_summary = audit_module_values(questions)
+    rule_problems += module_problems
+    # question 18's names: the form's own translation dictionary must alter no roster option
+    # (one more GET; a store that cannot be read or emulated is reported, not a problem)
+    lang = props.get("language")
+    lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
+    names_problems, names_summary = audit_names(form_id, roster_options(questions), read_store(client, form_id),
+                                                lang.get("primaryLanguage") or tl.PRIMARY)
+    rule_problems += names_problems
     picker = club_picker(questions)
     if picker:
         # the picker's options are the texts the rosters' rules test (a club's own
@@ -642,8 +846,6 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
             rule_problems.append("club picker is not required")
         if questions.get(CLUB_NAME_QID, {}).get("hidden") != "Yes":
             rule_problems.append("club picker present but the Club Name textbox is still visible")
-    lang = props.get("language")
-    lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
     languages = [x for x in str(lang.get("options", "")).split("|") if x]
     if len(languages) < 2:
         rule_problems.append(f"only {languages or ['no']} language(s) offered - the API clone "
@@ -665,6 +867,9 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
                        if guards else None),
         "picker_calc_values": bool(picker and has_calc_values(questions[picker])),
         "picker_options": len(picker_options(questions, picker)) if picker else 0,
+        # {module qid: {"options": n, "aligned": calcValues = its options}}; the names
+        # dictionary: counts and club names only ("checked": False when the store was not read)
+        "module_values": module_summary, "names_dictionary": names_summary,
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -710,7 +915,9 @@ def main():
                          "printed or saved) and check what it serves: every Club picker option's "
                          "data-calcvalue equals its value, question 18's calculation comes before "
                          "the rosters' rules and lists the picker, every roster's boxes carry "
-                         "validate[required]; prints the runtime build")
+                         "validate[required], every module dropdown option's data-calcvalue equals "
+                         "its value, and the translation store the page embeds alters no roster "
+                         "box it serves; prints the runtime build")
     args = ap.parse_args()
     if args.defunct:
         FORMS.update(DEFUNCT)
@@ -756,6 +963,8 @@ def main():
         rs = r["rule_summary"]
         print(f"   question 18: {contact_ids_line(rs, r['club_picker'])}   "
               f"rosters required: {rs['required_rosters']} of {rs['clubs']}")
+        print(f"   module values: {module_values_line(r.get('module_values'))}")
+        print(f"   names dictionary: {names_line(r.get('names_dictionary'))}")
         if "build" in r:
             print(f"   runtime build: {r['build'] or 'not found on the public page'}")
         if "rendered" in r:
@@ -774,6 +983,15 @@ def main():
             q = r["rendered_required"]
             print(f"   rendered rosters: {q['rosters']} with boxes, {q['required']} with validate[required] "
                   f"({q['boxes_required']} of {q['boxes']} boxes)")
+        if "rendered_modules" in r:
+            print("   rendered modules: " + ", ".join(
+                f"q{qid} " + ("not found" if c is None else
+                              f"{c['options']} options, {c['aligned']} with data-calcvalue = value")
+                for qid, c in r["rendered_modules"].items()))
+        if "rendered_names" in r:
+            n = r["rendered_names"]
+            print("   rendered names: " + (f"not checked ({n.get('why')})" if not n.get("checked") else
+                  f"the embedded dictionary alters {n['altered']} of the {n['options']} roster options served"))
         print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
               f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "
               f"{'CLEAN' if not r['rule_problems'] else str(len(r['rule_problems'])) + ' PROBLEM(S)'}")

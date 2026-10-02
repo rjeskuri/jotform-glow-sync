@@ -29,6 +29,7 @@ import add_feedback_link              # noqa: E402
 import add_language                   # noqa: E402
 import add_translations               # noqa: E402
 import auto_sync                      # noqa: E402
+import fix_name_translations          # noqa: E402
 import fix_roster_order               # noqa: E402
 import form_status                    # noqa: E402
 import rename_club                    # noqa: E402
@@ -41,6 +42,7 @@ from glow import forms as glow_forms  # noqa: E402
 from glow import layout               # noqa: E402
 from glow import links                # noqa: E402
 from glow import sync as glow_sync    # noqa: E402
+from glow import translation_lookup as tl   # noqa: E402
 from glow.text import md5             # noqa: E402
 from sf_club_accounts_test import SalesforceClubAccounts  # noqa: E402,F401  (its own file; run here)
 from integration_status_test import IntegrationStatus     # noqa: E402,F401  (its own file; run here)
@@ -1174,8 +1176,10 @@ class SameNameFlow(unittest.TestCase):
               "331": {"type": "control_textbox", "text": "Partner", "order": "7", "name": "partner"},
               "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9"}}
         for n, (year, mq) in enumerate(sync.MODULES.items()):
+            # in step: the calcValues the sync writes (glow.sync.MODULE_CALC_VALUES)
             qs[mq] = {"type": "control_dropdown", "text": "Module", "options": self.MODULES[year],
-                      "order": str(10 + n)}
+                      "order": str(10 + n),
+                      "calcValues": glow_sync.module_calc_values(self.MODULES[year].split("|"))}
         for n, wq in enumerate(sync.WEEKS.values()):
             qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n)}
         for q in (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID):
@@ -2864,16 +2868,59 @@ class ContactIds(unittest.TestCase):
         self.assertIn("the old way", out)
 
 
-def served_rules_and_rosters(qs, wire, required=True, build="9e75d6f1d83", operands=None):
+def served_store(qs, extra=None):
+    """A translation store as the forms hold one: an exact base/en entry (key = md5 of
+    the text) for every roster option and module, a UI string translated in Spanish;
+    extra: {key: (base text, en text)} added (a stale spelling, say)."""
+    texts = [o for q in qs.values() if q.get("type") in ("control_checkbox", "control_dropdown")
+             for o in (q.get("options") or "").split("|") if o] + ["Club Name"]
+    store = {"base": {md5(t): t for t in texts}, "en": {md5(t): t for t in texts},
+             "es": {md5("Club Name"): "Nombre del club"}}
+    for k, (b, e) in (extra or {}).items():
+        store["base"][k], store["en"][k] = b, e
+    return store
+
+
+def served_modules_and_store(qs, store=None):
+    """The module dropdowns' <select>s as Jotform serves a single-select (read from the U.S
+    page 2026-10-02: a "Please Select" placeholder, then each option with a data-calcvalue
+    when the question carries calcValues, the leading slot being the placeholder's), and
+    the store the page embeds (window.allTranslations, FormTranslation.init)."""
+    import html as html_mod
+    parts = []
+    for year, q in sync.MODULES.items():
+        if q not in qs:
+            continue
+        options = [o for o in (qs[q].get("options") or "").split("|") if o]
+        calc = (qs[q].get("calcValues") or "").split("|")
+        parts.append(f'<select class="form-dropdown validate[required]" id="input_{q}" name="q{q}_module{year}" '
+                     'data-component="dropdown"><option value="">Please Select</option>')
+        for i, o in enumerate(options):
+            cv = calc[i + 1] if i + 1 < len(calc) and calc[i + 1] else None
+            attr = f' data-calcvalue="{html_mod.escape(cv)}"' if cv else ""
+            parts.append(f'<option{attr} value="{html_mod.escape(o)}">{html_mod.escape(o)}</option>')
+        parts.append("</select>")
+    store = served_store(qs) if store is None else store
+    parts.append('<script>window.allTranslations = {"acceptLanguage":null,"languages":{"English (US)":"en",'
+                 '"Español":"es"},"translations":' + json.dumps(store) + "};\n"
+                 'FormTranslation.init({"options":"English (US)|Español","primaryLanguage":"en","version":"2"});'
+                 "</script>")
+    return "\n".join(parts)
+
+
+def served_rules_and_rosters(qs, wire, required=True, build="9e75d6f1d83", operands=None, store=None):
     """The parts of a public page that form_status --rendered reads besides the
     picker's <select>, shaped as Jotform serves them (read from the U.S page
     2026-10-01): the runtime script, every roster's boxes (validate[required]
     and required="" on each when `required`), JotForm.setConditions with the
     rules parsed, JotForm.setCalculations with each calculation's action and its
-    conditionId. operands: replace question 18's operands as served (Jotform
+    conditionId; and (2026-10-02) the module dropdowns and the embedded store
+    (served_modules_and_store; store: the one the page embeds, default a clean
+    served_store). operands: replace question 18's operands as served (Jotform
     dropping one). Fictional names, as the fixtures'."""
     import html as html_mod
-    parts = [f'<script src="https://cdn.jotfor.ms/s/static/{build}/static/jotform.forms.js"></script>']
+    parts = [f'<script src="https://cdn.jotfor.ms/s/static/{build}/static/jotform.forms.js"></script>',
+             served_modules_and_store(qs, store)]
     for qid, q in sorted(qs.items(), key=lambda kv: int(kv[0])):
         if q.get("type") != "control_checkbox":
             continue
@@ -5907,6 +5954,699 @@ class ContactIdsRunbook(unittest.TestCase):
 
 import datetime as dt                 # noqa: E402  (the work-log tests below)
 import time                           # noqa: E402
+
+
+def name_store(entries, others=None, pad=0):
+    """A translation store as Jotform holds one: [(base text, en text or None)] keyed by
+    the md5 of the base text, other languages as {lang: {base text: translation}}, and
+    `pad` UI strings ("Label 0001", ...) exact in base and en. Fictional names only."""
+    store = {"base": {}, "en": {}}
+    for i in range(pad):
+        text = f"Label {i:04d}"
+        store["base"][md5(text)] = store["en"][md5(text)] = text
+    for b, e in entries:
+        store["base"][md5(b)] = b
+        if e is not None:
+            store["en"][md5(b)] = e
+    for lang, d in (others or {}).items():
+        store[lang] = {md5(b): t for b, t in d.items()}
+    return store
+
+
+class TranslationLookup(unittest.TestCase):
+    """glow/translation_lookup.py: the runtime's names dictionary (formTranslation.v2.js:
+    setDictionary, trimMultiSpaces, sanitizeKeys, translate's fall-back) and the removal
+    plan, on fictional names (docs/plans/2026-10-02-names-and-modules.md)."""
+
+    NAME = "Amara Fennwhistle"
+
+    def test_javascripts_whitespace_simplify_and_key_order(self):
+        self.assertEqual(tl.js_trim("﻿　 Amara  "), "Amara")
+        self.assertEqual(tl.js_trim("\x85Amara\x1c"), "\x85Amara\x1c")      # whitespace to Python only
+        self.assertEqual("\x85Amara\x1c".strip(), "Amara")
+        self.assertEqual(tl.simplify(" Amara &amp; Grace<br>Fennwhistle\t\t &gt; "), "Amara & Grace Fennwhistle >")
+        # the ideographic space is replaced AFTER the double spaces: one double space survives
+        self.assertEqual(tl.simplify("Amara　 Fennwhistle"), "Amara  Fennwhistle")
+        self.assertEqual(tl.replace_nbsp("Amara Grace Fennwhistle"), "Amara Grace Fennwhistle")
+        self.assertEqual(tl.js_order({"b": 1, "10": 2, "a": 3, "2": 4, "01": 5}), ["2", "10", "b", "a", "01"])
+
+    def test_a_stale_spelling_in_base_and_en_alters_the_exact_name(self):
+        for variant in ("Amara  Fennwhistle", "Amara\tFennwhistle", "Amara Fennwhistle",
+                        "Amara   Fennwhistle", "Amara\nFennwhistle"):
+            store = name_store([(self.NAME, self.NAME), (variant, variant)])
+            for skip in tl.BUILDS:
+                lookup = tl.Lookup(store, skip_missing=skip)
+                result, hits = lookup.trace(self.NAME, "en")
+                self.assertEqual(result, variant, repr(variant))
+                self.assertEqual(lookup.sources(hits), {md5(variant)}, repr(variant))
+            self.assertEqual(tl.altered(store, {self.NAME}), {self.NAME: ["en"]})
+            self.assertEqual(tl.removal(store, {self.NAME}), ({md5(variant)}, None))      # only that entry
+            self.assertEqual(tl.altered(tl.without(store, {md5(variant)}), {self.NAME}), {})
+
+    def test_an_invisible_mark_is_no_whitespace(self):
+        lrm = "Amara‎ Fennwhistle"
+        # in base and en alike, its key keeps the mark: the exact name never lands on it
+        store = name_store([(self.NAME, self.NAME), (lrm, lrm)])
+        self.assertEqual(tl.altered(store, {self.NAME}), {})
+        self.assertEqual(tl.removal(store, {self.NAME}), (set(), None))         # nothing that alters no name
+        # the exact name in base, the mark in en: sent with the mark
+        store = name_store([(self.NAME, lrm)])
+        self.assertEqual(tl.altered(store, {self.NAME}), {self.NAME: ["en"]})
+        self.assertEqual(tl.removal(store, {self.NAME}), ({md5(self.NAME)}, None))
+
+    def test_the_stale_spelling_wins_in_either_order_and_two_take_two_rounds(self):
+        double, tab = "Amara  Fennwhistle", "Amara\tFennwhistle"
+        for entries in ([(self.NAME, self.NAME), (double, double)], [(double, double), (self.NAME, self.NAME)]):
+            self.assertEqual(tl.Lookup(name_store(entries)).translate(self.NAME, "en"), double)
+        store = name_store([(self.NAME, self.NAME), (double, double), (tab, tab)])
+        self.assertEqual(tl.Lookup(store).translate(self.NAME, "en"), tab)           # the later one
+        self.assertEqual(tl.removal(store, {self.NAME}), ({md5(double), md5(tab)}, None))
+
+    def test_an_exact_entry_or_none_leaves_a_name_alone(self):
+        store = name_store([(self.NAME, self.NAME), ("Grace Marrowgate  ", "Grace Marrowgate  ")], pad=3)
+        self.assertEqual(tl.altered(store, {self.NAME, "Grace Marrowgate", "Priya Ostrivane"}), {})
+        self.assertEqual(tl.removal(store, {self.NAME, "Grace Marrowgate"}), (set(), None))
+        # no `en` at all: the runtime builds no dictionary
+        self.assertEqual(tl.Lookup({"base": {md5(self.NAME): "Amara  Fennwhistle"}}).dictionary, {})
+
+    def test_a_ui_string_is_never_picked(self):
+        store = name_store([(self.NAME, self.NAME), ("Please  Select", "Please  Select"), ("Club Name", "Club Name")],
+                           {"es": {"Club Name": "Nombre del club", "Please  Select": "Seleccione"}})
+        self.assertEqual(tl.removal(store, {self.NAME}), (set(), None))
+        self.assertEqual(tl.Lookup(store).translate("Please Select", "es"), "Seleccione")    # the runtime's own business
+
+    def test_another_languages_entry_is_never_removed(self):
+        double = "Amara  Fennwhistle"
+        # the stale key translated in Spanish: removing it would orphan the translation
+        store = name_store([(self.NAME, self.NAME), (double, double)], {"es": {double: "Amara Fennwhistle (es)"}})
+        keys, why = tl.removal(store, {self.NAME})
+        self.assertIsNone(keys)
+        self.assertIn("another language's entries (es: ", why)
+        # a name translated in a language: base/en removal cannot fix it
+        store = name_store([(self.NAME, self.NAME)], {"fr": {self.NAME: "Amara Fennwhistle-fr"}})
+        self.assertEqual(tl.altered(store, {self.NAME}), {self.NAME: ["fr"]})
+        self.assertIn("(fr: ", tl.removal(store, {self.NAME})[1])
+        # the fall-back: a Spanish text equal to the name returns its English source
+        store = name_store([("Welcome", "Welcome")], {"es": {"Welcome": self.NAME}})
+        result, hits = tl.Lookup(store).trace(self.NAME, "en")
+        self.assertEqual((result, [h[:2] for h in hits]), ("Welcome", [("match", "es"), ("value", "en")]))
+        self.assertIsNone(tl.removal(store, {self.NAME})[0])
+        self.assertEqual(tl.target_languages(store), ["en", "es"])                # never base
+        # removing base/en entries leaves every other language as it was
+        cut = tl.without(store, {md5("Welcome")})
+        self.assertEqual((cut["es"], cut["base"], cut["en"]), (store["es"], {}, {}))
+
+    def test_the_two_runtime_builds_differ_on_an_entry_missing_in_en_or_base(self):
+        store = name_store([(self.NAME, self.NAME), ("Only In Base", None)], {"es": {"Not In Base": "No en la base"}})
+        new, old = tl.Lookup(store, skip_missing=True), tl.Lookup(store, skip_missing=False)
+        self.assertNotIn("undefined", new.dictionary["base"])
+        self.assertEqual(old.dictionary["base"]["undefined"], "Only In Base")
+        self.assertNotIn("undefined", new.dictionary["es"])
+        self.assertEqual(old.dictionary["es"]["undefined"], "No en la base")
+        # the audits run both builds
+        self.assertEqual(tl.altered(store, {"undefined"}, builds=(True,)), {})
+        self.assertEqual(tl.altered(store, {"undefined"}), {"undefined": ["es"]})
+
+    def test_what_cannot_be_emulated_or_removed_is_refused(self):
+        self.assertIn("not a translation store", tl.check_store({"base": "x"}))
+        self.assertIn("no 'base'", tl.check_store({"en": {}}))
+        self.assertIn("1 entry is not text", tl.check_store({"base": {"k": 1}, "en": {}}))
+        self.assertIsNone(tl.check_store(name_store([(self.NAME, self.NAME)])))
+        with self.assertRaises(ValueError):
+            tl.Lookup({"en": {}})
+        # a no-break space in the option itself: no entry to remove makes it exact
+        keys, why = tl.removal(name_store([(self.NAME, self.NAME)]), {"Amara Fennwhistle"})
+        self.assertIsNone(keys)
+        self.assertIn("no dictionary entry", why)
+
+
+class FakeStoreClient:
+    """glow.jotform.Client stand-in for tools/fix_name_translations.py: the five forms'
+    questions, translation stores and properties in memory. A POST /translations
+    replaces each posted language, as Jotform's does. mode "lose": written, the answer
+    lost; "nothing": not written, an error; "partial": one removed entry comes back.
+    before_post(): called at the POST (what was on disk by then)."""
+
+    def __init__(self, questions, stores, mode=None, before_post=None, primary="en"):
+        self.questions, self.stores, self.mode, self.before_post = questions, stores, mode, before_post
+        self.props = {fid: {"pagetitle": f"{glow_forms.LIVE[fid]} title",
+                            "language": [{"primaryLanguage": primary, "options": "English (US)|Español"}]}
+                      for fid in questions}
+        self.writes = []
+
+    def get(self, path, **params):
+        fid, what = path.split("/")[2], path.rsplit("/", 1)[1]
+        return copy.deepcopy({"questions": self.questions, "translations": self.stores,
+                              "properties": self.props}[what][fid])
+
+    def post_json(self, path, payload, label):
+        from glow.jotform import JotformError
+        fid = path.split("/")[2]
+        if self.before_post:
+            self.before_post()
+        self.writes.append((path, copy.deepcopy(payload), label))
+        if self.mode == "nothing":
+            raise JotformError(f"{label}: non-JSON response")
+        before = copy.deepcopy(self.stores[fid])
+        for lang, d in payload.items():
+            self.stores[fid][lang] = copy.deepcopy(d)
+        if self.mode == "partial":
+            gone = next(k for k in before["en"] if k not in payload["en"])
+            self.stores[fid]["en"][gone] = before["en"][gone]
+        if self.mode == "lose":
+            raise JotformError(f"{label}: non-JSON response")
+        return {}
+
+    def post_form(self, path, data, label):
+        self.writes.append((path, dict(data), label))
+        return {}
+
+
+def served_page(store):
+    """The part of a public page tools/fix_name_translations.py reads: the embedded store."""
+    return ('<script>window.allTranslations = {"acceptLanguage":null,"translations":'
+            + json.dumps(store) + '};\nFormTranslation.init({"primaryLanguage":"en"});</script>')
+
+
+class FixNameTranslations(unittest.TestCase):
+    """tools/fix_name_translations.py on five fake forms whose stores (cloned, as the live
+    ones) hold one stale spelling of an Africa girl's name: what the dry run says, every
+    refusal, the write (store saved first, base and en only, re-read, audited, the page
+    read and re-rendered), a lost answer, and the rollback. Fictional names; none of them
+    may be printed."""
+
+    NAME, DOUBLE = "Amara Fennwhistle", "Amara  Fennwhistle"
+    CLUBS = {"Africa": ("Sunrise Club", ["Amara Fennwhistle", "Beatrice Wrenfoldy"]),
+             "Asia": ("Lotus Club", ["Grace Marrowgate"]),
+             "Latin America": ("Andes Club", ["Priya Ostrivane"]),
+             "U.S": ("Liberty Club", ["Hope Thornquibble"])}
+    AFRICA = glow_forms.REGIONALS["Africa"]
+    GIRLS = [g for _, girls in CLUBS.values() for g in girls]
+
+    def setUp(self):
+        import tempfile
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = mock.patch.object(add_translations, "REPO", self.tmp.name)
+        self.repo.start()
+
+    def tearDown(self):
+        self.repo.stop()
+        self.tmp.cleanup()
+
+    def questions(self):
+        out = {}
+        for fid in fix_name_translations.ORDER:
+            region = glow_forms.LIVE[fid]
+            clubs = list(self.CLUBS.values()) if region == "template" else [self.CLUBS[region]]
+            out[fid] = {str(10 + i): {"type": "control_checkbox", "text": club, "options": "|".join(girls)}
+                        for i, (club, girls) in enumerate(clubs)}
+            out[fid]["2"] = {"type": "control_button", "text": "Submit"}
+        return out
+
+    def store(self, extra=()):
+        return name_store([(g, g) for g in self.GIRLS] + [("Club Name", "Club Name"), (self.DOUBLE, self.DOUBLE)]
+                          + list(extra), {"es": {"Club Name": "Nombre del club"}},
+                          pad=fix_name_translations.STORE_FLOOR)
+
+    def fake(self, **kw):
+        return FakeStoreClient(self.questions(), {fid: self.store() for fid in fix_name_translations.ORDER}, **kw)
+
+    def run_main(self, fake, *argv, page=None):
+        """(exit code or message, stdout) of main() on `fake`; page(fid): the public page."""
+        import contextlib
+        import io
+        from unittest import mock
+        out = io.StringIO()
+        page = page or (lambda fid: served_page(fake.stores[fid]))
+        with mock.patch.object(fix_name_translations, "Client", lambda key, apply=False: fake), \
+                mock.patch.object(fix_name_translations, "public_page", page), \
+                mock.patch.object(fix_name_translations.time, "sleep", lambda s: None), \
+                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                mock.patch.object(sys, "argv", ["fix_name_translations.py", *argv]), \
+                contextlib.redirect_stdout(out):
+            try:
+                fix_name_translations.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        for name in self.GIRLS + [self.DOUBLE]:          # counts and club names only, ever
+            self.assertNotIn(name, out.getvalue() + str(code))
+        return code, out.getvalue()
+
+    def saved(self):
+        folder = os.path.join(self.tmp.name, "backups", "translations")
+        return sorted(os.path.join(folder, f) for f in os.listdir(folder)) if os.path.isdir(folder) else []
+
+    def test_the_dry_run_counts_and_names_clubs_never_girls(self):
+        fake = self.fake()
+        code, out = self.run_main(fake)
+        self.assertEqual((code, fake.writes), (0, []))
+        self.assertIn("Roster options read from all five forms: template 5, U.S 1, Latin America 1, Asia 1, "
+                      "Africa 2 (5 distinct texts)", out)
+        africa = out.split(f"== Africa {self.AFRICA}", 1)[1]
+        self.assertIn("altered today: 1 of this form's 2 roster options, in 1 club(s); its dictionary alters 1 "
+                      "option text(s) of the five forms (en 1; on template 1, U.S 0, Latin America 0, Asia 0, "
+                      "Africa 1)", africa)
+        self.assertIn("clubs: Sunrise Club", africa)
+        self.assertEqual(out.count("keys to remove: 1 (base 1, en 1)"), 5)      # every form: all five count
+        self.assertEqual(out.count("both runtime builds): 0 option(s) altered"), 5)
+        us = out.split("== U.S", 1)[1].split("==", 1)[0]
+        self.assertIn("altered today: 0 of this form's 1 roster options;", us)
+        self.assertIn("properties[pagetitle] = 'Africa title'", africa)
+        self.assertIn("DRY RUN", out)
+        # the other forms' options are what make the U.S store's entry go
+        options = {fid: opts for fid, opts in fix_name_translations.read_options(fake).items()
+                   if glow_forms.LIVE[fid] == "U.S"}
+        self.assertEqual(fix_name_translations.plan_form(self.store(), options)["keys"], set())
+
+    def test_every_refusal_writes_nothing(self):
+        from unittest import mock
+        options = fix_name_translations.read_options(self.fake())
+
+        def refusals(store):
+            return " | ".join(fix_name_translations.plan_form(store, options)["refusals"])
+
+        good = self.store()
+        self.assertEqual(refusals(good), "")
+        self.assertIn("no 'en' dictionary", refusals({k: v for k, v in good.items() if k != "en"}))
+        self.assertIn("no 'base' dictionary", refusals({k: v for k, v in good.items() if k != "base"}))
+        self.assertIn("below 1000 (a truncated read?)", refusals(name_store([(self.DOUBLE, self.DOUBLE)])))
+        bad = copy.deepcopy(good)
+        bad["es"]["x"] = 7
+        self.assertIn("1 entry is not text", refusals(bad))
+        translated = copy.deepcopy(good)
+        translated["es"][md5(self.DOUBLE)] = "Amara (es)"
+        self.assertIn("another language's entries", refusals(translated))
+        with mock.patch.object(fix_name_translations, "MAX_KEYS", 0):
+            self.assertIn("1 keys to remove, more than 0", refusals(good))
+        with mock.patch.object(fix_name_translations.tl, "removal", lambda *a, **k: (set(), None)):
+            self.assertIn("1 option(s) would still be altered after the removal", refusals(good))
+        # through main: refused forms are named, nothing is written, --apply included
+        fake = self.fake()
+        fake.stores[self.AFRICA]["es"][md5(self.DOUBLE)] = "Amara (es)"
+        for argv in ((), ("--form", self.AFRICA, "--apply")):
+            code, out = self.run_main(fake, *argv)
+            self.assertIn("Refused, nothing written: ", str(code))
+            self.assertIn("REFUSED: ", out)
+            self.assertEqual(fake.writes, [])
+        for argv, says in (((("--apply",)), "exactly one --form"),
+                           (("--form", self.AFRICA, "--form", glow_forms.TEMPLATE, "--apply"), "exactly one --form"),
+                           (("--restore", "x.json"), "exactly one --form"),
+                           (("--form", "123"), "Not one of the five forms: 123")):
+            code, _ = self.run_main(self.fake(), *argv)
+            self.assertIn(says, str(code), argv)
+        code, _ = self.run_main(self.fake(primary="es"), "--form", self.AFRICA)
+        self.assertIn("primaryLanguage is 'es'", str(code))
+
+    def test_the_write_saves_the_store_first_posts_base_and_en_only_and_verifies(self):
+        on_disk = []
+        fake = self.fake(before_post=lambda: on_disk.append(self.saved()))
+        before = copy.deepcopy(fake.stores[self.AFRICA])
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--apply")
+        self.assertEqual(code, 0, out)
+        (path, payload, label), = fake.writes
+        self.assertEqual(path, f"/form/{self.AFRICA}/translations")
+        self.assertEqual(set(payload), {"base", "en"})                       # no other language posted
+        for lang in ("base", "en"):
+            self.assertEqual(payload[lang], {k: v for k, v in before[lang].items() if k != md5(self.DOUBLE)})
+        self.assertEqual(fake.stores[self.AFRICA]["es"], before["es"])
+        # saved before the POST, whole, readable by its owner only
+        self.assertEqual(len(on_disk[0]), 1)
+        with open(on_disk[0][0], encoding="utf-8") as f:
+            self.assertEqual(json.load(f), before)
+        self.assertEqual(os.stat(on_disk[0][0]).st_mode & 0o777, 0o600)
+        self.assertTrue(os.path.basename(on_disk[0][0]).startswith(f"{self.AFRICA}-"))
+        for line in ("re-read: APPLIED", "audit of the re-read store: 0 of this form's roster options altered",
+                     "public page: 0 removed keys still served"):
+            self.assertIn(line, out)
+        # the other forms are untouched; a second run has nothing to remove on this one
+        self.assertEqual(fake.stores[glow_forms.TEMPLATE], self.store())
+        code, out = self.run_main(fake, "--form", self.AFRICA)
+        self.assertIn("nothing to remove", out)
+
+    def test_a_lost_or_failed_answer_is_re_read_never_guessed(self):
+        code, out = self.run_main(self.fake(mode="lose"), "--form", self.AFRICA, "--apply")
+        self.assertEqual(code, 0)
+        self.assertIn("answer to the POST was lost or not JSON - re-reading", out)
+        self.assertIn("re-read: APPLIED - despite the lost answer", out)
+        fake = self.fake(mode="nothing")
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--apply")
+        self.assertIn("re-read: UNCHANGED", out)
+        self.assertIn("the store reads unchanged after the POST. Nothing was written; run again.", str(code))
+        self.assertEqual(fake.stores[self.AFRICA], self.store())
+        code, out = self.run_main(self.fake(mode="partial"), "--form", self.AFRICA, "--apply")
+        self.assertIn("re-read: PARTIAL (en: 0 entr(ies) missing, 1 that should be gone, 0 changed)", out)
+        self.assertIn(f"--form {self.AFRICA} --restore backups/translations/{self.AFRICA}-", str(code))
+        self.assertIn("non-JSON", fix_name_translations.get.__doc__ + "non-JSON")    # (a read failure: below)
+        from glow.jotform import JotformError
+
+        class Failing:
+            def get(self, path, **params):
+                raise JotformError("GET: a cut-off JSON answer")
+        with self.assertRaises(SystemExit) as cm:
+            fix_name_translations.get(Failing(), "/form/1/translations", "the store")
+        self.assertEqual(str(cm.exception.code), "Could not read the store (an error or a non-JSON answer from "
+                                                 "Jotform) - nothing written; run again")
+
+    def test_a_page_still_serving_a_removed_key_is_re_rendered_once(self):
+        fake = self.fake()
+        old = copy.deepcopy(fake.stores[self.AFRICA])
+        reads = []
+
+        def page(fid):          # Jotform's cache: the old store for PAGE_TRIES reads
+            reads.append(fid)
+            return served_page(old if len(reads) <= fix_name_translations.PAGE_TRIES else fake.stores[fid])
+
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--apply", page=page)
+        self.assertEqual(code, 0, out)
+        self.assertEqual([w[0] for w in fake.writes], [f"/form/{self.AFRICA}/translations",
+                                                       f"/form/{self.AFRICA}/properties"])
+        self.assertEqual(fake.writes[1][1], {"properties[pagetitle]": "Africa title"})
+        for line in ("public page: 1 removed keys still served - re-rendering it", "pagetitle re-read: unchanged",
+                     "public page: 0 removed keys still served"):
+            self.assertIn(line, out)
+        # a page that never follows, or cannot be read: the write stands, the run says to check
+        for page, says in ((lambda fid: served_page(old), "public page: 1 removed keys still served"),
+                           (lambda fid: "<html></html>", "could not read its embedded store")):
+            code, out = self.run_main(self.fake(), "--form", self.AFRICA, "--apply", page=page)
+            self.assertIn("could not be shown to serve it", str(code))
+            self.assertIn(says, out)
+
+    def test_the_restore_puts_back_what_was_removed_in_the_saved_order(self):
+        fake = self.fake()
+        original = copy.deepcopy(fake.stores[self.AFRICA])
+        self.assertEqual(self.run_main(fake, "--form", self.AFRICA, "--apply")[0], 0)
+        (saved,) = self.saved()
+        fake.stores[self.AFRICA]["en"]["k-new"] = "Added Since"            # kept by the restore
+        fake.writes.clear()
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--restore", saved)
+        self.assertEqual((code, fake.writes), (0, []))
+        self.assertIn("base: 1 entr(ies) put back; 0 changed since and 0 added since", out)
+        self.assertIn("en: 1 entr(ies) put back; 0 changed since and 1 added since", out)
+        self.assertIn("after the restore: 1 of this form's roster options altered again, in 1 club(s)", out)
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--restore", saved, "--apply")
+        self.assertEqual(code, 0, out)
+        (_, payload, _), = fake.writes
+        self.assertEqual(set(payload), {"base", "en"})
+        self.assertEqual(list(payload["base"]), list(original["base"]))
+        self.assertEqual(list(payload["en"]), list(original["en"]) + ["k-new"])
+        self.assertIn("public page: 0 restored keys not yet served", out)
+        self.assertEqual(len(self.saved()), 2)                               # the store before the restore too
+        # refusals: another form's file, a truncated one
+        other = os.path.join(os.path.dirname(saved), f"{glow_forms.TEMPLATE}-x-before.json")
+        with open(other, "w", encoding="utf-8") as f:
+            json.dump(original, f)
+        code, _ = self.run_main(self.fake(), "--form", self.AFRICA, "--restore", other, "--apply")
+        self.assertIn("is not a saved store of form", str(code))
+        short = os.path.join(os.path.dirname(saved), f"{self.AFRICA}-short-before.json")
+        with open(short, "w", encoding="utf-8") as f:
+            json.dump(name_store([(self.DOUBLE, self.DOUBLE)]), f)
+        code, _ = self.run_main(self.fake(), "--form", self.AFRICA, "--restore", short, "--apply")
+        self.assertIn("below 1000", str(code))
+
+
+class ModuleValues(unittest.TestCase):
+    """The module dropdowns' calcValues (glow/sync.py MODULE_CALC_VALUES): their own options
+    after a single-select's empty slot, written and kept in step by the sync, cleared by
+    the generated rollback, never applied by the runner unattended; on SameNameFlow's
+    fake Africa form."""
+
+    ROSTER, QIDS, MODULES, texts = SameNameFlow.ROSTER, SameNameFlow.QIDS, SameNameFlow.MODULES, SameNameFlow.texts
+    LINES = ["UPDATE module dropdown (q14, year 1: calcValues = its 1 options)",
+             "UPDATE module dropdown (q92, year 2: calcValues = its 2 options)",
+             "UPDATE module dropdown (q93, year 3: calcValues = its 1 options)"]
+
+    def setUp(self):
+        SameNameFlow.setUp(self)
+
+    def tearDown(self):
+        SameNameFlow.tearDown(self)
+
+    def run_sync(self, fake, *extra, roster=None):
+        return SameNameFlow.run_sync(self, fake, *extra, roster=roster)
+
+    def summary(self, fake, *extra, **kw):
+        return SameNameFlow.summary(self, fake, *extra, **kw)
+
+    def form(self, calc=True):
+        qs, wire = SameNameFlow.form(self, switched=True)
+        if not calc:
+            for q in sync.MODULES.values():
+                del qs[q]["calcValues"]
+        return qs, wire
+
+    def test_the_layout_is_the_year_dropdowns(self):
+        self.assertEqual(glow_sync.module_calc_values(["Core 2", "Elective - Healthy GLOW"]),
+                         "|Core 2|Elective - Healthy GLOW")
+        self.assertEqual(glow_sync.module_calc_values(["Core 1"]).split("|"), ["", "Core 1"])   # the |1|2|3 shape
+        self.assertEqual(glow_sync.aligned_calc_values([]), "")
+        self.assertEqual(glow_sync.dropdown_options({"options": "A||B|"}), ["A", "B"])
+        from unittest import mock
+        with mock.patch.object(glow_sync, "MODULE_CALC_VALUES", False):
+            self.assertEqual(glow_sync.module_calc_values(["Core 1"]), "")
+
+    def test_a_form_without_them_gets_one_write_per_dropdown_then_nothing(self):
+        qs, wire = self.form(calc=False)
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake)
+        self.assertEqual(fake.calls, self.LINES)
+        self.assertIn("(conditions unchanged - skipping the rewrite)", out)
+        self.assertEqual([w[1:] for w in fake.writes],
+                         [("/question/14", {"question[calcValues]": "|Core 1"}),
+                          ("/question/92", {"question[calcValues]": "|Core 2|Elective - Healthy GLOW"}),
+                          ("/question/93", {"question[calcValues]": "|Core 3"})])
+        want = [{"qid": "14", "year": "1", "modules": 1}, {"qid": "92", "year": "2", "modules": 2},
+                {"qid": "93", "year": "3", "modules": 1}]
+        self.assertEqual(summary["module_values"], want)
+        plan = auto_sync.parse_plan(out)
+        self.assertEqual((plan["modules"], auto_sync.plan_from_summary(summary)["modules"]), (want, want))
+        self.assertEqual(auto_sync.changes(plan), 3)
+        # applied, the form is in step: nothing more
+        fake = FakeForm(qs, wire, apply=True)
+        self.assertEqual(self.run_sync(fake, "--apply")[0], 0)
+        fake = FakeForm(*self.form())
+        self.assertEqual((self.run_sync(fake)[0], fake.calls), (0, []))
+
+    def test_a_dropdown_edited_in_the_builder_is_realigned(self):
+        for calc in ("|Elective - Healthy GLOW|Core 2", "|Core 2", "|||", ""):
+            qs, wire = self.form()
+            qs["92"]["calcValues"] = calc
+            fake = FakeForm(qs, wire)
+            self.run_sync(fake)
+            self.assertEqual(fake.calls, [self.LINES[1]], calc)
+        qs, wire = self.form()
+        qs["92"]["options"] += "|Elective - STEM"                         # a module added in the builder
+        fake = FakeForm(qs, wire)
+        self.run_sync(fake)
+        self.assertIn("UPDATE module dropdown (q92, year 2: calcValues = its 3 options)", fake.calls)
+        self.assertEqual(fake.writes[0][2], {"question[calcValues]": "|Core 2|Elective - Healthy GLOW|Elective - STEM"})
+
+    def test_the_rollback_clears_them(self):
+        from unittest import mock
+        carrying = self.form()                                             # built with the constant on
+        with mock.patch.object(glow_sync, "MODULE_CALC_VALUES", False):
+            fake = FakeForm(*carrying)
+            summary, out = self.summary(fake)
+            self.assertEqual(fake.calls, [l.split(": calcValues")[0] + ": calcValues cleared)" for l in self.LINES])
+            self.assertEqual({w[2]["question[calcValues]"] for w in fake.writes}, {""})
+            self.assertEqual([m["modules"] for m in auto_sync.parse_plan(out)["modules"]], [0, 0, 0])
+            fake = FakeForm(*self.form(calc=False))
+            self.assertEqual((self.run_sync(fake)[0], fake.calls), (0, []))
+
+    def test_the_runner_never_applies_them(self):
+        text = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
+                + "".join(f"  - {l}\n" for l in self.LINES))
+        plan = auto_sync.parse_plan(text)
+        self.assertIn(", module values on 3 dropdown(s)", auto_sync.plan_summary(plan))
+        (reason,) = auto_sync.check_bands(plan)
+        self.assertIn("would write the calcValues of 3 module dropdown(s) (q14, q92, q93) - never unattended", reason)
+        busy = text + "  - CREATE roster 'Gamma Club' (2 girls)\n"
+        for t in (text, busy):
+            run = AutoSyncPlan.run_region(self, t, apply=True)
+            self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+            self.assertIn("- MODULE values q92 (year 2: 2 modules)", run.attention[0][1])
+        cleared = text.replace("= its 1 options)", "cleared)")
+        self.assertIn("- MODULE values q14 (year 1: cleared)", AutoSyncPlan.run_region(self, cleared, apply=True)
+                      .attention[0][1])
+        self.assertFalse(auto_sync.MODULE_RX.match("  - UPDATE module dropdown (q14, year 1: calcValues)"))
+        # the line is the sync's own
+        joined = re.sub(r'"\s*\n\s*"', "", read(os.path.join(REPO, "sync_attendance_form.py")))
+        for fragment in ('f"UPDATE module dropdown (q{mqid}, year {year}: calcValues "',
+                         '(f"= its {len(options)} options)" if want else "cleared)")'):
+            self.assertIn(fragment, joined)
+
+
+class ModuleAndNamesAudit(unittest.TestCase):
+    """tools/form_status.py: the module dropdowns' calcValues (as MODULE_CALC_VALUES says)
+    and the form's names dictionary (emulated), through the API and on the served page;
+    the runner's verify step reads both. Fictional names; counts and club names only."""
+
+    def form(self):
+        return SameNameFlow.form(SameNameFlow(), switched=True)
+
+    def test_the_module_audit_follows_the_constant(self):
+        from unittest import mock
+        qs, _ = self.form()
+        problems, summary = form_status.audit_module_values(qs)
+        self.assertEqual(problems, [])
+        self.assertEqual(summary, {"14": {"options": 1, "aligned": True}, "92": {"options": 2, "aligned": True},
+                                   "93": {"options": 1, "aligned": True}})
+        bare = copy.deepcopy(qs)
+        for q in sync.MODULES.values():
+            bare[q]["calcValues"] = ""
+        shifted = copy.deepcopy(qs)
+        shifted["92"]["calcValues"] = "|Elective - Healthy GLOW|Core 2"
+        problems = form_status.audit_module_values(bare)[0]
+        self.assertEqual(len(problems), 3)
+        self.assertIn("module dropdown q14 (year 1): no calcValues - question 98 (module_id, what Salesforce "
+                      "stores) copies the visible text", problems[0])
+        (problem,) = form_status.audit_module_values(shifted)[0]
+        self.assertIn("q92 (year 2): calcValues out of line with its 2 options (3 values) - question 98 would "
+                      "send another module", problem)
+        gone = copy.deepcopy(qs)
+        del gone["93"]
+        self.assertEqual(form_status.audit_module_values(gone)[0], ["module dropdown q93 (year 3) is not on the form"])
+        with mock.patch.object(glow_sync, "MODULE_CALC_VALUES", False):
+            self.assertEqual((form_status.audit_module_values(bare)[0], form_status.audit_module_values(qs)[0]),
+                             ([], []))
+            (problem,) = form_status.audit_module_values(shifted)[0]
+            self.assertIn("a sync apply by hand clears them", problem)
+        self.assertEqual(form_status.module_values_line(summary),
+                         "q14 aligned (1 options), q92 aligned (2 options), q93 aligned (1 options)")
+
+    def test_the_names_audit_counts_and_names_clubs_never_girls(self):
+        qs, _ = self.form()
+        options = form_status.roster_options(qs)
+        self.assertEqual(len(options), 8)
+        clean = served_store(qs)
+        self.assertEqual(form_status.audit_names("999", options, clean)[0], [])
+        stale = served_store(qs, {md5("Jane  Doe"): ("Jane  Doe", "Jane  Doe")})
+        (problem,), summary = form_status.audit_names("999", options, stale)
+        self.assertIn("names dictionary: 1 roster option(s) in 1 club(s) are altered by the form's own "
+                      "translation dictionary (en 1)", problem)
+        self.assertIn("tools/fix_name_translations.py --form 999", problem)
+        self.assertEqual((summary["altered"], summary["clubs"], summary["by_language"]), (1, ["Alpha Club"], {"en": 1}))
+        self.assertNotIn("Jane", problem + json.dumps(summary))
+        self.assertEqual(form_status.names_line(summary),
+                         "1 of 8 roster options altered (2 language(s) checked) in 1 club(s): Alpha Club")
+        problems, summary = form_status.audit_names("999", options, "the store could not be read")
+        self.assertEqual((problems, summary), ([], {"checked": False, "why": "the store could not be read"}))
+        self.assertEqual(form_status.names_line(summary), "not checked (the store could not be read)")
+
+    def test_the_report_and_the_runners_verify_read_both(self):
+        qs, wire = self.form()
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+        stale = served_store(qs, {md5("Jane  Doe"): ("Jane  Doe", "Jane  Doe")})
+
+        def report(store):
+            class Fake:
+                def get(self, path, **params):
+                    if path.endswith("/questions"):
+                        return copy.deepcopy(qs)
+                    if path.endswith("/properties"):
+                        return {"conditions": wire, "language": [{"options": "English (US)|Español",
+                                                                   "primaryLanguage": "en"}]}
+                    if path.endswith("/translations"):
+                        if isinstance(store, Exception):
+                            raise store
+                        return copy.deepcopy(store)
+                    return {"title": "t", "status": "ENABLED", "count": "0"}
+            return form_status.form_report(glow_forms.TEMPLATE, Fake(), {})
+
+        clean = {"error_conditions": 0, "salesforce": True, "languages": ["a"] * 12,
+                 "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []}}
+        rep = report(stale)
+        self.assertEqual(rep["names_dictionary"]["altered"], 1)
+        self.assertEqual([p for p in rep["rule_problems"] if p.startswith("names dictionary")],
+                         [p for p in rep["rule_problems"] if "fix_name_translations" in p])
+        problems, notes = auto_sync.verify_report(dict(clean, **{k: rep[k] for k in ("rule_problems", "names_dictionary")}))
+        self.assertTrue(any("names dictionary: 1 roster option(s)" in p for p in problems))
+        rep = report(served_store(qs))
+        self.assertEqual((rep["names_dictionary"]["altered"], [p for p in rep["rule_problems"] if "names" in p]), (0, []))
+        from glow.jotform import JotformError
+        rep = report(JotformError("GET: a cut-off JSON answer, 900 characters, not shown"))
+        self.assertFalse(rep["names_dictionary"]["checked"])
+        problems, notes = auto_sync.verify_report(dict(clean, rule_problems=[], names_dictionary=rep["names_dictionary"]))
+        self.assertEqual(problems, [])                                # a note, never applied-unverified
+        self.assertIn("names dictionary not checked (the store could not be read", notes[0])
+        self.assertNotIn("cut-off", json.dumps(rep["names_dictionary"]))
+
+    def test_the_served_page_is_read_for_the_module_values_and_the_names(self):
+        from unittest import mock
+        qs, _ = self.form()
+        rosters = sorted((q for q, v in qs.items() if v.get("type") == "control_checkbox"), key=int)
+        summary = form_status.audit_module_values(qs)[1]
+
+        def rendered(page, qs_=qs):
+            r = {"id": "999", "roster_qids": rosters, "module_values": form_status.audit_module_values(qs_)[1]}
+            boxes = "".join(f'<input type="checkbox" id="input_{q}_{i}" value="{o}">'
+                            for q in rosters for i, o in enumerate(qs[q]["options"].split("|")))
+            return form_status.rendered_module_problems(r, page) + form_status.rendered_names_problems(r, boxes + page), r
+
+        problems, r = rendered(served_modules_and_store(qs))
+        self.assertEqual(problems, [])
+        self.assertEqual(r["rendered_modules"]["92"], {"options": 2, "aligned": 2, "differ": 0, "missing": 0})
+        self.assertEqual(r["rendered_names"], {"checked": True, "options": 8, "altered": 0, "languages": 2,
+                                               "by_language": {}})
+        bare = copy.deepcopy(qs)
+        for q in sync.MODULES.values():
+            bare[q]["calcValues"] = ""
+        problems, _ = rendered(served_modules_and_store(bare))
+        self.assertEqual(len(problems), 3)
+        self.assertIn("rendered page: module dropdown q14: 1 of 1 options carry no data-calcvalue", problems[0])
+        with mock.patch.object(glow_sync, "MODULE_CALC_VALUES", False):
+            self.assertEqual(rendered(served_modules_and_store(bare), bare)[0], [])
+        more = copy.deepcopy(qs)
+        more["92"]["options"] += "|Elective - STEM"
+        more["92"]["calcValues"] += "|Elective - STEM"
+        (problem,), _ = rendered(served_modules_and_store(qs), more)
+        self.assertIn("rendered page lists 2 of module dropdown q92's 3 options", problem)
+        # the embedded dictionary, not the API's: a page from before the fix is caught
+        stale = served_store(qs, {md5("Jane  Doe"): ("Jane  Doe", "Jane  Doe")})
+        (problem,), r = rendered(served_modules_and_store(qs, stale))
+        self.assertIn("rendered page: the embedded dictionary alters 1 of the 8 roster options it serves (1 "
+                      "roster(s))", problem)
+        self.assertNotIn("Jane", problem + json.dumps(r))
+        problems, r = rendered("<html></html>")
+        self.assertEqual(len(problems), 4)                        # never vouched for: three selects, the store
+        self.assertIn("no select for module dropdown q14", problems[0])
+        self.assertIn("no embedded translation store", problems[3])
+        self.assertFalse(r["rendered_names"]["checked"])
+        self.assertEqual(summary["14"]["options"], 1)
+
+
+class NamesAndModulesRunbook(unittest.TestCase):
+    """docs/RUNBOOK.md "The names dictionary and the module values": the commands and
+    lines it quotes are the tools' own, the rollout is template first with the runner
+    paused, and both rollbacks are there."""
+
+    def section(self):
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        return " ".join(doc.split("## The names dictionary and the module values", 1)[1].split("\n## ", 1)[0].split())
+
+    def test_the_quoted_lines_and_flags_are_the_tools_own(self):
+        text = self.section()
+        tool = read(os.path.join(REPO, "tools", "fix_name_translations.py"))
+        for fragment in ("keys to remove:", "after the removal", "re-read: APPLIED", "public page: 0 removed keys",
+                         "nothing to remove"):
+            self.assertIn(fragment, text)
+            self.assertIn(fragment.split(":")[0], tool)
+        self.assertIn("UPDATE module dropdown (q14, year 1: calcValues = its 5 options)", text)
+        self.assertTrue(auto_sync.MODULE_RX.match("  - UPDATE module dropdown (q14, year 1: calcValues = its 5 options)"))
+        for flag in ("--restore", "--apply", "--form"):
+            self.assertIn(flag, text)
+        self.assertIn("MODULE_CALC_VALUES", text)
+        self.assertIn("AUTO_SYNC_APPLY=0", text)
+        self.assertIn(f"fix_name_translations.py --form {glow_forms.TEMPLATE} --apply", text)
+        # template first, merged, then the regional forms; the runner back on last
+        order = [text.index(s) for s in ("1. The template", "2. **Merge and push**",
+                                         "3. U.S, Latin America, Asia, Africa, smallest first",
+                                         "then `AUTO_SYNC_APPLY=1`")]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("never unattended", text)
+        self.assertIn("--restore backups/translations/<id>-<stamp>-before.json", text)
 
 
 class WorkLog(unittest.TestCase):
