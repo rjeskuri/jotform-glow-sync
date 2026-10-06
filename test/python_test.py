@@ -6097,7 +6097,9 @@ class FakeStoreClient:
     """glow.jotform.Client stand-in for tools/fix_name_translations.py: the five forms'
     questions, translation stores and properties in memory. A POST /translations
     replaces each posted language, as Jotform's does. mode "lose": written, the answer
-    lost; "nothing": not written, an error; "partial": one removed entry comes back.
+    lost; "nothing": not written, an error; "partial": one removed entry comes back;
+    "clobber": written, and Spanish emptied (another language changed by the POST);
+    "notstore": written, and the store re-read after it is no store.
     before_post(): called at the POST (what was on disk by then)."""
 
     def __init__(self, questions, stores, mode=None, before_post=None, primary="en"):
@@ -6109,6 +6111,8 @@ class FakeStoreClient:
 
     def get(self, path, **params):
         fid, what = path.split("/")[2], path.rsplit("/", 1)[1]
+        if self.mode == "notstore" and self.writes and what == "translations":
+            return []
         return copy.deepcopy({"questions": self.questions, "translations": self.stores,
                               "properties": self.props}[what][fid])
 
@@ -6126,6 +6130,8 @@ class FakeStoreClient:
         if self.mode == "partial":
             gone = next(k for k in before["en"] if k not in payload["en"])
             self.stores[fid]["en"][gone] = before["en"][gone]
+        if self.mode == "clobber":
+            self.stores[fid]["es"] = {}
         if self.mode == "lose":
             raise JotformError(f"{label}: non-JSON response")
         return {}
@@ -6358,6 +6364,65 @@ class FixNameTranslations(unittest.TestCase):
             self.assertIn("could not be shown to serve it", str(code))
             self.assertIn(says, out)
 
+    def test_a_re_read_with_another_language_changed_or_no_store_is_partial(self):
+        # CLAUDE.md rule 9: a POST that changed a language it was not sent is never "applied"
+        fake = self.fake(mode="clobber")
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--apply")
+        self.assertIn("re-read: PARTIAL (other languages changed: es)", out)
+        self.assertIn(f"Stopped: the store reads partial after the POST. Put it back: --form {self.AFRICA} "
+                      f"--restore backups/translations/{self.AFRICA}-", str(code))
+        self.assertNotIn("audit of the re-read store", out)
+        code, out = self.run_main(self.fake(mode="notstore"), "--form", self.AFRICA, "--apply")
+        self.assertIn("re-read: PARTIAL (the re-read store is not a translation store)", out)
+        self.assertIn("Stopped: the store reads partial after the POST", str(code))
+        # the restore's POST too
+        fake, earlier = self.fake(), set(self.saved())
+        self.assertEqual(self.run_main(fake, "--form", self.AFRICA, "--apply")[0], 0)
+        (saved,) = set(self.saved()) - earlier
+        fake.mode = "clobber"
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--restore", saved, "--apply")
+        self.assertIn("re-read: PARTIAL (other languages changed: es)", out)
+        self.assertIn("Stopped: the store reads partial after the restore POST - compare it with "
+                      f"backups/translations/{self.AFRICA}-", str(code))
+        self.assertNotIn("public page:", out)
+
+    def test_the_audit_of_the_re_read_store_stops_the_run(self):
+        import contextlib
+        import io
+        # a plan that missed a stale spelling (the tab one): the POST lands as planned, the
+        # audit of the re-read store still finds the name altered and stops before the page
+        tab = "Amara\tFennwhistle"
+        fake = self.fake()
+        store = self.store(extra=[(tab, tab)])
+        fake.stores[self.AFRICA] = copy.deepcopy(store)
+        plan = {"keys": {md5(self.DOUBLE)}, "refusals": []}
+        out, pages = io.StringIO(), []
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as cm:
+            fix_name_translations.apply_form(fake, self.AFRICA, store, plan, fix_name_translations.read_options(fake),
+                                             "s", page_of=lambda fid: pages.append(fid) or "", sleep=lambda s: None)
+        self.assertIn("Stopped: the re-read store still alters roster options", str(cm.exception.code))
+        self.assertIn("re-read: APPLIED", out.getvalue())
+        self.assertIn("audit of the re-read store: 1 of this form's roster options altered, 1 option text(s) "
+                      "of the five forms", out.getvalue())
+        self.assertEqual(pages, [])
+        for name in self.GIRLS + [self.DOUBLE, tab]:
+            self.assertNotIn(name, out.getvalue() + str(cm.exception.code))
+
+    def test_a_restore_with_nothing_to_put_back_or_no_store_writes_nothing(self):
+        fake = self.fake()
+        same = os.path.join(self.tmp.name, "backups", "translations", f"{self.AFRICA}-same-before.json")
+        os.makedirs(os.path.dirname(same))
+        with open(same, "w", encoding="utf-8") as f:
+            json.dump(fake.stores[self.AFRICA], f)
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--restore", same, "--apply")
+        self.assertEqual((code, fake.writes), (0, []))
+        self.assertIn("base: 0 entr(ies) put back", out)
+        self.assertIn("nothing to restore", out)
+        fake.stores[self.AFRICA] = ["not", "a", "store"]
+        code, out = self.run_main(fake, "--form", self.AFRICA, "--restore", same, "--apply")
+        self.assertIn("Refused, nothing written: the form's store: not a translation store", str(code))
+        self.assertEqual(fake.writes, [])
+
     def test_the_re_render_failing_after_the_post_never_says_nothing_written(self):
         from glow.jotform import JotformError
         stale_page = None
@@ -6412,11 +6477,12 @@ class FixNameTranslations(unittest.TestCase):
         self.assertEqual(self.run_main(fake, "--form", self.AFRICA, "--apply")[0], 0)
         (saved,) = self.saved()
         fake.stores[self.AFRICA]["en"]["k-new"] = "Added Since"            # kept by the restore
+        fake.stores[self.AFRICA]["en"][md5("Label 0000")] = "Label zero"   # changed since: kept too
         fake.writes.clear()
         code, out = self.run_main(fake, "--form", self.AFRICA, "--restore", saved)
         self.assertEqual((code, fake.writes), (0, []))
         self.assertIn("base: 1 entr(ies) put back; 0 changed since and 0 added since", out)
-        self.assertIn("en: 1 entr(ies) put back; 0 changed since and 1 added since", out)
+        self.assertIn("en: 1 entr(ies) put back; 1 changed since and 1 added since", out)
         self.assertIn("after the restore: 1 of this form's roster options altered again, in 1 club(s)", out)
         code, out = self.run_main(fake, "--form", self.AFRICA, "--restore", saved, "--apply")
         self.assertEqual(code, 0, out)
@@ -6424,6 +6490,8 @@ class FixNameTranslations(unittest.TestCase):
         self.assertEqual(set(payload), {"base", "en"})
         self.assertEqual(list(payload["base"]), list(original["base"]))
         self.assertEqual(list(payload["en"]), list(original["en"]) + ["k-new"])
+        self.assertEqual(payload["en"][md5("Label 0000")], "Label zero")     # not the saved text
+        self.assertEqual(payload["base"][md5("Label 0000")], "Label 0000")
         self.assertIn("public page: 0 restored keys not yet served", out)
         self.assertEqual(len(self.saved()), 2)                               # the store before the restore too
         # refusals: another form's file, a truncated one
