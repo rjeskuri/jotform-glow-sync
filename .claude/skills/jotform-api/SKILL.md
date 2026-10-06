@@ -43,6 +43,20 @@ unless `--apply`.
   rosters). 1.5 s after init, `prePopulations` runs `runAllConditions()` with an event that does
   not bubble: on a page the browser restores (Back) that is the only thing that re-shows the
   roster, so only the rule order covers it, not an operand listener.
+- **`clearFieldOnHide`** is a form-level property (`GET /form/{id}/properties`; live value
+  `disable` on all five forms - template, Africa, Asia, Latin America, U.S 262382706852058 -
+  read 2026-10-06) with three runtime values (`jotform.forms.js`, build `fc726a121d4`): `enable`
+  (clear a field the moment a rule hides it and run every calculation - the mode rejected
+  2026-09-30, loop limit 3), `disable` (the live mode: a rule-hidden field keeps its answer *in the
+  page*) and `dontClear`. At submit, unless the value is `dontClear`, every
+  `input`/`select`/`textarea` inside a `.form-field-hidden` element is emptied before the form is
+  sent; `always-hidden` fields (q98/q100/q102) are not touched and nothing recalculates. So a module
+  dropdown hidden by the Year rule can keep a pick in the page but never in the submission (0 of
+  674 since launch) - the back-fill resolver's "a dropdown hidden again can keep an answer" is true
+  of the page only. `form_status` pins the value (`glow/sync.py` `CLEAR_FIELD_ON_HIDE`, the
+  `module shape:` line; `--rendered` reads the served `JotForm.clearFieldOnHide="…"`; plan
+  `docs/plans/2026-10-06-module-selection.md`); the builder labels of the three values are
+  unverified.
 - **Loop limit**: a rule checked more than `19 * (rules / 100 + 1)` times in one half-second (at
   most 100; 3 with `clearFieldOnHide=enable`) is skipped: today U.S 27, Asia 43, Africa 66, the
   template 94. Calculation rules are exempt unless an operand (or `baseField`) is a time, date,

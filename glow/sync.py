@@ -130,6 +130,23 @@ def has_calc_values(question):
 # them (the generated rollback). docs/plans/2026-10-02-names-and-modules.md
 MODULE_CALC_VALUES = True
 
+# The form-level property `clearFieldOnHide` (GET /form/{id}/properties) is
+# `disable` on all five forms (read 2026-10-06). In Jotform's runtime
+# (jotform.forms.js, build fc726a121d4) it has three values: `enable` - a
+# field is cleared the moment a rule hides it and every calculation re-runs
+# (rejected 2026-09-30: the loop limit drops to 3, DECISIONS); `disable` - the
+# live mode: a rule-hidden field keeps its answer in the page; `dontClear`. At
+# submit, unless the value is `dontClear`, every input, select and textarea
+# inside a `.form-field-hidden` element is emptied before the form is sent
+# (`always-hidden` fields such as q98/q100/q102 are not touched, and nothing
+# recalculates). So a module dropdown hidden by the Year rule can keep a pick
+# in the page but never in the submission (0 of 674 since launch). AUDIT ONLY:
+# tools/form_status.py pins the value (its `module shape:` line); the sync's
+# one PUT to /properties carries the `conditions` key alone and never writes
+# this. A runtime reading, not a contract: a new build means re-reading the
+# submit handler. docs/plans/2026-10-06-module-selection.md
+CLEAR_FIELD_ON_HIDE = "disable"
+
 
 def aligned_calc_values(options):
     """A single-select dropdown's calcValues equal to its own options: an empty slot

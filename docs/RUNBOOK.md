@@ -1118,6 +1118,25 @@ guessed (`names dictionary: not checked (…)`), and the runner's verify step
 logs it as a note. A stale entry made in the builder later is flagged after
 the next apply (or by hand), not prevented.
 
+**The module chain's shape** is pinned by the same report
+([plan](plans/2026-10-06-module-selection.md); nothing on the forms changed
+for it): `module shape: year q94 single-select required; modules q14/q92/q93
+single-select required; sessions q15/q95/q96/q97 single-select required;
+clearFieldOnHide disable`. A form is NOT CLEAN when the year, a module or a
+session dropdown is a multi-select (a mentor could send two modules, and
+question 98 would run them together), is not required (a blank module reaches
+Salesforce), is missing, or when the year dropdown is hidden; and when the
+form-level `clearFieldOnHide` is anything but `disable`: `dontClear` means a
+module dropdown hidden by the Year rule would keep its answer at submit (two
+modules, or last year's, in question 98), `enable` was rejected 2026-09-30
+(the loop limit drops to 3), and an unset or unknown value is a runtime
+behaviour nobody has read, so hidden answers are not treated as cleared.
+`--rendered` reads the served page's `JotForm.clearFieldOnHide` and refuses a
+module `<select>` served `multiple`. The fix is the builder (the dropdown's
+own settings, or the form's setting that clears hidden field values), then
+re-run the report - never a sync apply: the sync writes none of it (its one
+properties write carries `conditions` alone).
+
 **The runner never applies a module line unattended** (`check_bands`: "would
 write the calcValues of 3 module dropdown(s) (q14, q92, q93) - never
 unattended"): the region reads `attention`, its roster changes included,

@@ -1172,16 +1172,19 @@ class SameNameFlow(unittest.TestCase):
         box_hidden: q331's hidden flag (default: hidden once no rule shows it);
         partner_list: the options of a retired partner list left on the form (q600)."""
         roster = self.ROSTER if roster is None else roster
+        # the module chain as the live forms carry it: one required single-select per step
+        # (form_status.audit_module_shape pins it; docs/plans/2026-10-06-module-selection.md)
         qs = {"5": {"type": "control_textbox", "text": "Club Name", "order": "4", "hidden": "Yes"},
               "331": {"type": "control_textbox", "text": "Partner", "order": "7", "name": "partner"},
-              "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9"}}
+              "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9",
+                     "required": "Yes"}}
         for n, (year, mq) in enumerate(sync.MODULES.items()):
             # in step: the calcValues the sync writes (glow.sync.MODULE_CALC_VALUES)
             qs[mq] = {"type": "control_dropdown", "text": "Module", "options": self.MODULES[year],
-                      "order": str(10 + n),
+                      "order": str(10 + n), "required": "Yes",
                       "calcValues": glow_sync.module_calc_values(self.MODULES[year].split("|"))}
         for n, wq in enumerate(sync.WEEKS.values()):
-            qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n)}
+            qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n), "required": "Yes"}
         for q in (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID):
             qs[q] = {"type": "control_textbox", "text": "bridge", "order": "30"}
         for (partner, club), names in roster.items():
@@ -2881,13 +2884,15 @@ def served_store(qs, extra=None):
     return store
 
 
-def served_modules_and_store(qs, store=None):
+def served_modules_and_store(qs, store=None, clear="disable"):
     """The module dropdowns' <select>s as Jotform serves a single-select (read from the U.S
     page 2026-10-02: a "Please Select" placeholder, then each option with a data-calcvalue
-    when the question carries calcValues, the leading slot being the placeholder's), and
-    the store the page embeds (window.allTranslations, FormTranslation.init)."""
+    when the question carries calcValues, the leading slot being the placeholder's), the
+    runtime's clearFieldOnHide (JotForm.clearFieldOnHide="…", the template page 2026-10-06;
+    None: no such line) and the store the page embeds (window.allTranslations,
+    FormTranslation.init)."""
     import html as html_mod
-    parts = []
+    parts = [] if clear is None else [f'<script>JotForm.clearFieldOnHide="{clear}";</script>']
     for year, q in sync.MODULES.items():
         if q not in qs:
             continue
@@ -3039,7 +3044,8 @@ class FormStatusAudit(unittest.TestCase):
                 if path.endswith("/questions"):
                     return copy.deepcopy(qs)
                 if path.endswith("/properties"):
-                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
                 return {"title": "t", "status": "ENABLED", "count": "0"}
         for q_id, q in qs.items():
             q.setdefault("qid", q_id)
@@ -3210,7 +3216,8 @@ class FormStatusAudit(unittest.TestCase):
                 if path.endswith("/questions"):
                     return copy.deepcopy(qs)
                 if path.endswith("/properties"):
-                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
                 return {"title": "t", "status": "ENABLED", "count": "0"}
 
         select = ('<select name="q500_clubPicker[]" multiple="">'
@@ -3396,7 +3403,7 @@ class FormStatusLayout(unittest.TestCase):
         def get(self, path, **params):
             if path.endswith("/properties"):
                 return {"conditions": [], "language": [{"options": "English|Español"}],
-                        "integrations": {"salesforceV2": {"on": 1}}}
+                        "integrations": {"salesforceV2": {"on": 1}}, "clearFieldOnHide": "disable"}
             if path.endswith("/questions"):
                 return copy.deepcopy(self.qs)
             return {"title": "Attendance Form (Template)", "status": "ENABLED", "count": "0"}
@@ -6714,7 +6721,8 @@ class ModuleAndNamesAudit(unittest.TestCase):
                         return copy.deepcopy(questions)
                     if path.endswith("/properties"):
                         return {"conditions": wire, "language": [{"options": "English (US)|Español",
-                                                                   "primaryLanguage": "en"}]}
+                                                                   "primaryLanguage": "en"}],
+                                "clearFieldOnHide": "disable"}
                     if path.endswith("/translations"):
                         if isinstance(store, Exception):
                             raise store
@@ -6792,11 +6800,132 @@ class ModuleAndNamesAudit(unittest.TestCase):
                 '<input type="checkbox" id="input_8_0" value="Not a roster">')
         self.assertEqual(form_status.rendered_options(page, ["7"]), [("7", "q7", "Amara O'Fennwhistle & Grace")])
         problems, r = rendered("<html></html>")
-        self.assertEqual(len(problems), 4)                        # never vouched for: three selects, the store
+        self.assertEqual(len(problems), 5)                # never vouched for: three selects, clearFieldOnHide, the store
         self.assertIn("no select for module dropdown q14", problems[0])
-        self.assertIn("no embedded translation store", problems[3])
+        self.assertIn("no JotForm.clearFieldOnHide on the public page", problems[3])
+        self.assertIn("no embedded translation store", problems[4])
         self.assertFalse(r["rendered_names"]["checked"])
+        self.assertEqual(r["rendered_shape"], {"clearFieldOnHide": None, "multi_select": []})
         self.assertEqual(summary["14"]["options"], 1)
+
+    def test_the_module_shape_is_pinned(self):
+        """docs/plans/2026-10-06-module-selection.md (a): one required single-select per step of
+        the chain, the year visible, and the form-level clearFieldOnHide as glow/sync.py says;
+        an unknown value is reported as not read, never as "cleared"."""
+        qs, _ = self.form()
+        props = {"clearFieldOnHide": glow_sync.CLEAR_FIELD_ON_HIDE}
+        self.assertEqual(glow_sync.CLEAR_FIELD_ON_HIDE, "disable")
+        problems, summary = form_status.audit_module_shape(qs, props)
+        self.assertEqual(problems, [])
+        self.assertEqual(form_status.module_shape_line(summary),
+                         "year q94 single-select required; modules q14/q92/q93 single-select required; "
+                         "sessions q15/q95/q96/q97 single-select required; clearFieldOnHide disable")
+        self.assertEqual(summary["module"]["92"], {"single": True, "required": True, "dropdown": True})
+        self.assertEqual(summary["year"]["94"]["visible"], True)
+        self.assertEqual(sorted(summary["session"]), sorted(sync.WEEKS.values()))
+
+        def only(change, *fragments):
+            changed = copy.deepcopy(qs)
+            change(changed)
+            found, s = form_status.audit_module_shape(changed, props)
+            self.assertEqual(len(found), 1, found)
+            for fragment in fragments:
+                self.assertIn(fragment, found[0])
+            self.assertIn("never a sync apply - the sync does not write it", found[0])
+            return s
+        s = only(lambda q: q["92"].__setitem__("multipleSelections", "Yes"),
+                 "module dropdown q92 (year 2) is a multi-select: a mentor could send two modules; question 98 "
+                 "would run them together")
+        self.assertIn("modules q14/q92/q93: q92 multi-select;", form_status.module_shape_line(s))
+        only(lambda q: q["94"].__setitem__("required", "No"), "year dropdown q94 is not required: a blank year")
+        only(lambda q: q["15"].__setitem__("required", "No"),
+             "session dropdown q15 (8 sessions) is not required: a blank session reaches Salesforce")
+        only(lambda q: q["97"].__setitem__("multipleSelections", "Yes"),
+             "session dropdown q97 (15 sessions) is a multi-select: a mentor could send two sessions; question 100")
+        only(lambda q: q["94"].__setitem__("hidden", "Yes"), "year dropdown q94 is hidden: the chain starts visible")
+        s = only(lambda q: q.pop("96"), "session dropdown q96 (14 sessions) is not on the form")
+        self.assertIn("sessions q15/q95/q96/q97: q96 missing;", form_status.module_shape_line(s))
+        only(lambda q: q["14"].__setitem__("type", "control_radio"),
+             "module dropdown q14 (year 1) is a control_radio, not a dropdown")
+        # clearFieldOnHide: each value its own line; a value nobody has read is never "cleared"
+        for value, fragment in (("dontClear", "a module dropdown hidden by the Year rule would keep its answer at submit"),
+                                ("enable", "rejected 2026-09-30: the loop limit drops to 3 (DECISIONS)"),
+                                (None, "a value whose runtime behaviour has not been read - do not treat hidden "
+                                       "answers as cleared"),
+                                ("Disable", "a value whose runtime behaviour has not been read")):
+            (problem,), s = form_status.audit_module_shape(qs, {} if value is None else {"clearFieldOnHide": value})
+            self.assertIn(f"clearFieldOnHide is {value!r}, not 'disable': {fragment}", problem)
+            self.assertEqual(s["clearFieldOnHide"], value)
+        self.assertTrue(form_status.module_shape_line(form_status.audit_module_shape(qs, {})[1])
+                        .endswith("; clearFieldOnHide unset"))
+        # the shape audit flags shape only: a dropdown without calcValues is the values audit's
+        bare = copy.deepcopy(qs)
+        bare["14"]["calcValues"] = ""
+        self.assertEqual(form_status.audit_module_shape(bare, props)[0], [])
+
+    def test_the_report_and_the_runners_verify_read_the_shape(self):
+        qs, wire = self.form()
+        qs["2"] = {"type": "control_button", "text": "Submit", "name": "submit2", "order": "60"}
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+
+        def report(props_extra, questions=qs):
+            class Fake:
+                def get(self, path, **params):
+                    if path.endswith("/questions"):
+                        return copy.deepcopy(questions)
+                    if path.endswith("/properties"):
+                        return {"conditions": wire, "language": [{"options": "English (US)|Español",
+                                                                   "primaryLanguage": "en"}], **props_extra}
+                    if path.endswith("/translations"):
+                        return served_store(qs)
+                    return {"title": "t", "status": "ENABLED", "count": "0"}
+            return form_status.form_report(glow_forms.TEMPLATE, Fake(), {})
+
+        clean = {"error_conditions": 0, "salesforce": True, "languages": ["a"] * 12,
+                 "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []}}
+        rep = report({"clearFieldOnHide": "disable"})
+        self.assertEqual(rep["module_shape"]["clearFieldOnHide"], "disable")
+        self.assertEqual([p for p in rep["rule_problems"] if "clearFieldOnHide" in p or "dropdown q" in p], [])
+        self.assertEqual(auto_sync.verify_report(dict(clean, **{k: rep[k] for k in ("rule_problems", "names_dictionary")}))[0], [])
+        rep = report({"clearFieldOnHide": "dontClear"})
+        self.assertTrue(any(p.startswith("clearFieldOnHide is 'dontClear', not 'disable'") for p in rep["rule_problems"]))
+        problems, _ = auto_sync.verify_report(dict(clean, **{k: rep[k] for k in ("rule_problems", "names_dictionary")}))
+        self.assertTrue(any("clearFieldOnHide is 'dontClear'" in p for p in problems))   # the verify step fails
+        rep = report({})                                                                  # unset: not read, a problem
+        self.assertIsNone(rep["module_shape"]["clearFieldOnHide"])
+        self.assertTrue(any("do not treat hidden answers as cleared" in p for p in rep["rule_problems"]))
+        multi = copy.deepcopy(qs)
+        multi["93"]["multipleSelections"] = "Yes"
+        rep = report({"clearFieldOnHide": "disable"}, multi)
+        self.assertFalse(rep["module_shape"]["module"]["93"]["single"])
+        self.assertTrue(any("module dropdown q93 (year 3) is a multi-select" in p for p in rep["rule_problems"]))
+
+    def test_the_served_page_is_read_for_the_shape(self):
+        qs, _ = self.form()
+
+        def rendered(page):
+            r = {"id": "999", "module_values": form_status.audit_module_values(qs)[1]}
+            return form_status.rendered_module_problems(r, page), r
+
+        problems, r = rendered(served_modules_and_store(qs))
+        self.assertEqual((problems, r["rendered_shape"]), ([], {"clearFieldOnHide": "disable", "multi_select": []}))
+        (problem,), r = rendered(served_modules_and_store(qs, clear="dontClear"))
+        self.assertIn("rendered page: JotForm.clearFieldOnHide is 'dontClear', not 'disable'", problem)
+        self.assertIn("never a sync apply", problem)
+        self.assertEqual(r["rendered_shape"]["clearFieldOnHide"], "dontClear")
+        (problem,), r = rendered(served_modules_and_store(qs, clear=None))
+        self.assertIn("no JotForm.clearFieldOnHide on the public page", problem)
+        page = served_modules_and_store(qs).replace('name="q92_module2"', 'multiple="" name="q92_module2"')
+        (problem,), r = rendered(page)
+        self.assertIn("rendered page: module dropdown q92 is served as a multi-select (<select multiple>)", problem)
+        self.assertEqual(r["rendered_shape"]["multi_select"], ["92"])
+        self.assertIn('multiple=""', form_status.rendered_select_attrs(page, "92"))
+        self.assertNotIn("multiple", form_status.rendered_select_attrs(page, "14"))
+        self.assertIsNone(form_status.rendered_select_attrs(page, "500"))
+        # the whole-page read: the shape line printed, counts only
+        self.assertEqual(form_status.rendered_clear_field_on_hide('x JotForm.clearFieldOnHide = "enable"; y'), "enable")
+        self.assertIsNone(form_status.rendered_clear_field_on_hide(""))
 
 
 class NamesAndModulesRunbook(unittest.TestCase):
@@ -6829,6 +6958,12 @@ class NamesAndModulesRunbook(unittest.TestCase):
         self.assertEqual(order, sorted(order))
         self.assertIn("never unattended", text)
         self.assertIn("--restore backups/translations/<id>-<stamp>-before.json", text)
+        # the module chain's shape (docs/plans/2026-10-06-module-selection.md): the line is the tool's own
+        qs, _ = SameNameFlow.form(SameNameFlow(), switched=True)
+        line = form_status.module_shape_line(form_status.audit_module_shape(qs, {"clearFieldOnHide": "disable"})[1])
+        self.assertIn(f"module shape: {line}", text)
+        for fragment in ("dontClear", "`enable`", "never a sync apply", "JotForm.clearFieldOnHide"):
+            self.assertIn(fragment, text)
 
 
 class WorkLog(unittest.TestCase):

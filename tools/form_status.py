@@ -15,7 +15,11 @@ after the rosters show or hide and every roster is required - as glow/sync.py's
 constants say (docs/plans/2026-09-30-contact-ids.md) - and, for what Salesforce
 stores (docs/plans/2026-10-02-names-and-modules.md), whether each module dropdown
 carries calcValues equal to its options (MODULE_CALC_VALUES: question 98 then
-copies the module, not the text a translated page shows) and whether the form's
+copies the module, not the text a translated page shows), whether the module
+chain keeps its shape (docs/plans/2026-10-06-module-selection.md: the year,
+module and session dropdowns single-select and required, and the form-level
+clearFieldOnHide as CLEAR_FIELD_ON_HIDE says, so a dropdown hidden by the Year
+rule never sends its answer) and whether the form's
 own translation dictionary alters any roster option (the runtime's lookup
 emulated, glow/translation_lookup.py, in every language the store holds: question
 18 would send another spelling of that girl's name; counts and club names only).
@@ -46,7 +50,7 @@ from glow.cli import run                   # noqa: E402
 from glow.jotform import Client, JotformError     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
-    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PICKER_NAME, SF_NAME_SEP,
+    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PICKER_NAME, SF_NAME_SEP, WEEKS, YEAR,
     aligned_calc_values, club_guards, club_partners, dropdown_options, has_calc_values,
     long_name_partner, partner_picker, picker_calc_values)
 from glow.text import key, name_key        # noqa: E402
@@ -254,7 +258,63 @@ def audit_module_values(questions):
     return problems, summary
 
 
-NAMES_FIX = "tools/fix_name_translations.py --form {form} (dry run first; RUNBOOK \"The names dictionary and the module values\")"
+SHAPE_FIX = ("fix it in the builder's form settings, then re-run; never a sync apply - the sync does not "
+             "write it (RUNBOOK \"The names dictionary and the module values\")")
+# what question 98 / 100 copies, per dropdown kind
+SHAPE_KINDS = (("year", {None: YEAR}, "a blank year hides every module dropdown", None),
+               ("module", {f"year {y}": q for y, q in MODULES.items()}, "a blank module reaches Salesforce", "98"),
+               ("session", {f"{n} sessions": q for n, q in WEEKS.items()}, "a blank session reaches Salesforce", "100"))
+
+
+def audit_module_shape(questions, props):
+    """The module chain's shape (docs/plans/2026-10-06-module-selection.md): the year
+    dropdown (glow.sync.YEAR) visible, every module and session dropdown (MODULES, WEEKS)
+    single-select and required, and the form-level clearFieldOnHide equal to
+    glow.sync.CLEAR_FIELD_ON_HIDE - so one module per submission, never blank, and a
+    dropdown hidden by the Year rule never sends its answer. An unknown clearFieldOnHide
+    value is reported as not read, never treated as cleared. Returns (problems, summary)."""
+    problems, summary = [], {}
+    for kind, qids, blank, copy_qid in SHAPE_KINDS:
+        shapes = {}
+        for label, qid in qids.items():
+            q = questions.get(qid)
+            where = f"{kind} dropdown q{qid}" + (f" ({label})" if label else "")
+            if q is None:
+                shapes[qid] = None
+                problems.append(f"{where} is not on the form - the chain has no {kind} there; {SHAPE_FIX}")
+                continue
+            shape = {"single": q.get("multipleSelections") != "Yes", "required": q.get("required") == "Yes",
+                     "dropdown": q.get("type") == "control_dropdown"}
+            if kind == "year":
+                shape["visible"] = q.get("hidden") != "Yes"
+            shapes[qid] = shape
+            if not shape["dropdown"]:
+                problems.append(f"{where} is a {q.get('type')}, not a dropdown - {SHAPE_FIX}")
+            if not shape["single"]:
+                problems.append(f"{where} is a multi-select: a mentor could send two {kind}s"
+                                + (f"; question {copy_qid} would run them together" if copy_qid else "")
+                                + f" - {SHAPE_FIX}")
+            if not shape["required"]:
+                problems.append(f"{where} is not required: {blank} - {SHAPE_FIX}")
+            if kind == "year" and not shape["visible"]:
+                problems.append(f"{where} is hidden: the chain starts visible, or no mentor can pick a module - "
+                                + SHAPE_FIX)
+        summary[kind] = shapes
+    value = props.get("clearFieldOnHide")
+    summary["clearFieldOnHide"] = value
+    want = glow_sync.CLEAR_FIELD_ON_HIDE
+    if value != want:
+        why = {"dontClear": "a module dropdown hidden by the Year rule would keep its answer at submit (two "
+                            "modules, or last year's, in question 98)",
+               "enable": "rejected 2026-09-30: the loop limit drops to 3 (DECISIONS)"}
+        problems.append(f"clearFieldOnHide is {value!r}, not {want!r}: "
+                        + why.get(value, "a value whose runtime behaviour has not been read - do not treat "
+                                         "hidden answers as cleared")
+                        + f" - {SHAPE_FIX}")
+    return problems, summary
+
+
+NAMES_FIX ="tools/fix_name_translations.py --form {form} (dry run first; RUNBOOK \"The names dictionary and the module values\")"
 
 
 def roster_options(questions):
@@ -484,13 +544,34 @@ def rendered_problems(r, page):
     return problems + rendered_module_problems(r, page) + rendered_names_problems(r, page)
 
 
+def rendered_select_attrs(page, qid):
+    """The attributes of the <select> the page serves for question `qid` (its opening tag,
+    in memory), or None when the page has no such select."""
+    m = re.search(r'<select\b([^>]*\bname="q%s_[^"]*"[^>]*)>' % re.escape(str(qid)), page or "")
+    return m.group(1) if m else None
+
+
+def rendered_clear_field_on_hide(page):
+    """The clearFieldOnHide value the public page hands its runtime (JotForm.clearFieldOnHide =
+    "…", seen on the served template page 2026-10-06), or None when the page has none."""
+    m = re.search(r'JotForm\.clearFieldOnHide\s*=\s*"([^"]*)"', page or "")
+    return m.group(1) if m else None
+
+
 def rendered_module_problems(r, page):
     """--rendered: each module dropdown's options and their data-calcvalue, as glow/sync.py
-    MODULE_CALC_VALUES says (adds r["rendered_modules"]: {qid: counts or None})."""
-    problems, seen = [], {}
+    MODULE_CALC_VALUES says (adds r["rendered_modules"]: {qid: counts or None}), and the
+    chain's shape as served (adds r["rendered_shape"]: the page's clearFieldOnHide and the
+    module selects served with a `multiple` attribute), as CLEAR_FIELD_ON_HIDE says."""
+    problems, seen, multi = [], {}, []
     for year, qid in MODULES.items():
         counts = rendered_calc_values(page, qid)
         seen[qid] = counts
+        attrs = rendered_select_attrs(page, qid)
+        if attrs is not None and re.search(r"\bmultiple\b", attrs):
+            multi.append(qid)
+            problems.append(f"rendered page: module dropdown q{qid} is served as a multi-select (<select "
+                            "multiple>) - a mentor could send two modules; question 98 would run them together")
         want = ((r.get("module_values") or {}).get(qid) or {}).get("options")
         if counts is None:
             problems.append(f"rendered page: no select for module dropdown q{qid} (page not served, or its "
@@ -509,6 +590,16 @@ def rendered_module_problems(r, page):
                             "options carry a data-calcvalue other than their value - question 98 would send "
                             "another module")
     r["rendered_modules"] = seen
+    cleared = rendered_clear_field_on_hide(page)
+    r["rendered_shape"] = {"clearFieldOnHide": cleared, "multi_select": multi}
+    if cleared is None:
+        problems.append("rendered page: no JotForm.clearFieldOnHide on the public page (page not served, or its "
+                        "layout changed) - whether a hidden module dropdown's answer is cleared at submit cannot "
+                        "be vouched for")
+    elif cleared != glow_sync.CLEAR_FIELD_ON_HIDE:
+        problems.append(f"rendered page: JotForm.clearFieldOnHide is {cleared!r}, not "
+                        f"{glow_sync.CLEAR_FIELD_ON_HIDE!r} (a page from before the builder fix: re-run in a few "
+                        "minutes; else " + SHAPE_FIX + ")")
     return problems
 
 
@@ -747,6 +838,28 @@ def module_values_line(summary):
                      for qid, s in summary.items())
 
 
+def module_shape_line(summary):
+    """The printed report's `module shape:` line, from form_report's `module_shape`."""
+    if not summary:
+        return "not read"
+    parts = []
+    for kind, qids, _, _ in SHAPE_KINDS:
+        shapes = summary.get(kind) or {}
+        odd = []
+        for qid in qids.values():
+            s = shapes.get(qid)
+            if s is None:
+                odd.append(f"q{qid} missing")
+                continue
+            words = ([] if s["dropdown"] else ["not a dropdown"]) + ([] if s["single"] else ["multi-select"]) \
+                + ([] if s["required"] else ["not required"]) + ([] if s.get("visible", True) else ["hidden"])
+            if words:
+                odd.append(f"q{qid} " + ", ".join(words))
+        head = f"{kind}{'' if kind == 'year' else 's'} " + "/".join(f"q{q}" for q in qids.values())
+        parts.append(head + (" single-select required" if not odd else ": " + "; ".join(odd)))
+    return "; ".join(parts) + f"; clearFieldOnHide {summary.get('clearFieldOnHide') or 'unset'}"
+
+
 def names_line(summary):
     """The printed report's `names dictionary:` line, from form_report's `names_dictionary`
     (counts and club names only)."""
@@ -821,6 +934,9 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
     # question 98's module: each module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES)
     module_problems, module_summary = audit_module_values(questions)
     rule_problems += module_problems
+    # the chain's shape: one required single-select per step, hidden ones cleared at submit
+    shape_problems, shape_summary = audit_module_shape(questions, props)
+    rule_problems += shape_problems
     # question 18's names: the form's own translation dictionary must alter no roster option
     # (one more GET; a store that cannot be read or emulated is reported, not a problem)
     lang = props.get("language")
@@ -867,9 +983,10 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
                        if guards else None),
         "picker_calc_values": bool(picker and has_calc_values(questions[picker])),
         "picker_options": len(picker_options(questions, picker)) if picker else 0,
-        # {module qid: {"options": n, "aligned": calcValues = its options}}; the names
+        # {module qid: {"options": n, "aligned": calcValues = its options}}; the chain's shape
+        # (per kind, {qid: {"single", "required", "dropdown"}}, and "clearFieldOnHide"); the names
         # dictionary: counts and club names only ("checked": False when the store was not read)
-        "module_values": module_summary, "names_dictionary": names_summary,
+        "module_values": module_summary, "module_shape": shape_summary, "names_dictionary": names_summary,
         "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -916,8 +1033,9 @@ def main():
                          "data-calcvalue equals its value, question 18's calculation comes before "
                          "the rosters' rules and lists the picker, every roster's boxes carry "
                          "validate[required], every module dropdown option's data-calcvalue equals "
-                         "its value, and the translation store the page embeds alters no roster "
-                         "box it serves; prints the runtime build")
+                         "its value, no module select is served `multiple`, JotForm.clearFieldOnHide "
+                         "is what glow/sync.py says, and the translation store the page embeds alters "
+                         "no roster box it serves; prints the runtime build")
     args = ap.parse_args()
     if args.defunct:
         FORMS.update(DEFUNCT)
@@ -964,6 +1082,7 @@ def main():
         print(f"   question 18: {contact_ids_line(rs, r['club_picker'])}   "
               f"rosters required: {rs['required_rosters']} of {rs['clubs']}")
         print(f"   module values: {module_values_line(r.get('module_values'))}")
+        print(f"   module shape: {module_shape_line(r.get('module_shape'))}")
         print(f"   names dictionary: {names_line(r.get('names_dictionary'))}")
         if "build" in r:
             print(f"   runtime build: {r['build'] or 'not found on the public page'}")
@@ -988,6 +1107,10 @@ def main():
                 f"q{qid} " + ("not found" if c is None else
                               f"{c['options']} options, {c['aligned']} with data-calcvalue = value")
                 for qid, c in r["rendered_modules"].items()))
+        if "rendered_shape" in r:
+            s = r["rendered_shape"]
+            print(f"   rendered shape: clearFieldOnHide {s['clearFieldOnHide'] or 'not found on the public page'}, "
+                  f"module selects served multiple: {', '.join('q' + q for q in s['multi_select']) or 'none'}")
         if "rendered_names" in r:
             n = r["rendered_names"]
             print("   rendered names: " + (f"not checked ({n.get('why')})" if not n.get("checked") else
