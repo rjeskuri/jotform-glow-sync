@@ -1209,6 +1209,40 @@ the form already open keeps the old page until she reloads.
 
 Neither touches the rosters, the rules, question 5 or the integration.
 
+**The batches Salesforce already holds with a translated module** are corrected once, in
+place, by `tools/fix_module_values.py` ([plan](plans/2026-10-06-module-selection.md), (b)):
+every `Attendance_Batch__c` since launch whose `Module__c` is not one of the template's module
+options (6 batches and 43 rows as of 2026-10-06, all Latin America's), and the `Attendance__c`
+rows under it, which the processor copied the batch's module onto. The right value is the
+submission's own: the stored answer of the module dropdown its Year answer names, read as the
+back-fill resolver reads it. A batch is paired with **exactly one** submission - the same club
+(question 5), attendance date, question 98, year and session, on the form of its region, created
+within three hours of the batch - or it is listed as `UNMATCHED (<why>)` and left alone (a
+same-day re-send gives two candidates on purpose: correct those by hand, by id). Every run needs
+`JOTFORM_API_KEY`, the CLI login and `--vpn-off` (VPN off, as for the back-fill); until BACKLOG 53
+is decided the dry run itself runs with Ryan present (the CLI login is a read the gate does not see).
+
+```bash
+python3 tools/fix_module_values.py --vpn-off                       # dry run: the pairs, the UNMATCHED, "would write: B batches, M rows"
+python3 tools/fix_module_values.py --vpn-off --apply --limit 1     # Ryan's go: the first batch and its rows, each read back
+python3 tools/fix_module_values.py --vpn-off --apply               # the rest; then the dry run again -> "nothing to correct"
+python3 tools/fix_module_values.py --undo data/module_fix_2026-10/ledger.csv --vpn-off --apply   # rollback: `old` back by id
+```
+
+The dry run prints `canonical modules: 18 (template …: q14 5, q92 7, q93 8 options)`, then one
+line per batch: `<id>  <club>  <date>  <status>  '<Spanish>' -> '<English>'  (<region> <form>,
+submission 1 candidate(s), year 1, session 8; 14 rows; created <UTC>)`. Read the `created` stamps:
+a batch created after the module values went live on its form (Latin America: 2026-10-06 11:17
+UTC) means the fix did not take - tell the session that owns the module values and write nothing.
+`--apply` writes the batch, then each row, one PATCH per record, re-reads each by an explicit-field
+query and keeps a ledger (`data/module_fix_2026-10/ledger.csv`, owner only: ids, module names and
+outcomes - `open`, then `written` / `failed_<status>` / `check`); it stops at the first record not
+`written` and names the id and the HTTP status (never the answer's text). An update runs none of
+the processor (its trigger is after-insert only) and the rows' count is compared before and after.
+`--all-forms` reads the four forms whole for a batch whose region or window the narrow read cannot
+serve. Afterwards the dashboard's "Jotform Sessions by Module Last Month" has no Spanish bar: the
+Salesforce dashboard session is told the date of the apply and the ids in the ledger.
+
 ## Header logo
 
 The logo above the form title is the `image` field (q13 on every form), and
@@ -1823,6 +1857,79 @@ Everything is in `data/backfill_2026-09/` (never committed; owner-only files).
   `created_contacts.csv` every contact a batch created. Remove the attendance rows of those
   batches, the batches, then those contacts - only with Ryan's go - and `close <key> --removed`
   for each.
+
+## Attendance totals and partner-reported counts
+
+Plan: [plans/2026-10-06-attendance-totals.md](plans/2026-10-06-attendance-totals.md) (Ryan's
+decisions of 2026-10-06). Three partners' clubs do not use Jotform and report a monthly count per
+club instead; leadership wants one attendance total that includes them, with the per-girl figures
+labelled "Jotform only". Nothing here is live yet: the field and the processor change are
+deployed by Ryan (plan sections A and B), the tool below runs after the field is deployed.
+
+**The field.** `Attendance_Batch__c.Girls_Present__c` (Number, "Girls present") is the one
+attendance count. After the field is deployed the attendance processor sets it when a Jotform
+batch succeeds (= the attendance rows it created); a partner-reported total is typed into it. A
+batch with no names and no count is then `Failed` "No participants submitted" (no rows, blocks
+nothing); a batch with no names and a count above 0 is an aggregate and succeeds with no rows.
+Total attendance = the sum over `Success` batches; "Jotform only" = the same over batches whose
+`Creator__c` starts with `Jotform`. A girl counted twice in one month on two sources would be a
+double count: a club reports on one source only, and the Monthly Report's weekly counts are
+never summed into attendance.
+
+**The intake contract** - whatever carries a partner's count into Salesforce (a small Jotform
+form, a Salesforce screen flow, a sheet import: BACKLOG 72, Ryan's decision) writes one
+`Attendance_Batch__c` per club per month with exactly these values:
+
+| Field | Value |
+|---|---|
+| `Account_Name__c` | the club's Salesforce Account name **exactly** as the Club picker sends it (CLAUDE.md rule 5): the plain club name, or `<club> - <partner>` where another partner's club shares the name; the sync's `--summary-json` `sf_names` lists them. A mistyped name creates a partner-less account ("Club accounts in Salesforce") |
+| `Attendance_Date__c` | the **last day of the month** reported (a partner that gives per-session counts dates them the session day instead) |
+| `Girls_Present__c` | the count, above 0 (0 or empty with no names is `Failed` "No participants submitted") |
+| `Contact_IDs__c` | **empty** - no names, ever |
+| `Creator__c` | `Partner report` (the label the reports use; any other value not starting with `Jotform` also stays out of the Jotform-only view) |
+| `Module__c`, `Module_Week__c`, `Module_Year__c` | optional; empty keeps the batch out of the by-module report only (it counts rows) |
+| `enable_fuzzy_matching__c` | false |
+
+The processor's club-and-day lock still applies: an aggregate `Success` for a club and date makes
+a Jotform batch for that date a `Failed` "Duplicate", and attendance rows on that date make an
+aggregate `Failed` "Attendance already exists" - which is why aggregates are dated the last day of
+the month, a day the three partners' clubs never send a Jotform batch for.
+
+**The one-off back-fill** (`tools/sf_girls_present.py`): the batches from before the field have
+it empty, so the totals would under-count every one of them. After the field is deployed and
+before the totals go on the dashboard, with Ryan present (the CLI login, VPN off, as for the
+back-fill above; the hook sees `--apply` only):
+
+```bash
+python3 tools/sf_girls_present.py plan --vpn-off            # read-only -> data/sf_girls_present/plan.csv (ids and counts)
+python3 tools/sf_girls_present.py set                       # dry run from the plan: "to set: N Success batches with no Girls present"
+python3 tools/sf_girls_present.py set --apply --vpn-off --limit 1   # Ryan's go: one batch, read back
+python3 tools/sf_girls_present.py set --apply --vpn-off     # the rest, one PATCH per batch, each re-read before and after
+python3 tools/sf_girls_present.py check --vpn-off           # "differ: 0, without a value: 0 -> OK"
+```
+
+It writes only a `Success` batch whose value is still empty, = its attendance rows (0 for the
+legacy blanks, BACKLOG 73); a `Failed` batch stays empty, as the processor leaves it, so the field
+means one thing; a batch with a value - a typed aggregate, or a count the processor set - is
+never touched, so a second `set` finds `to set: 0`. The ledger (`data/sf_girls_present/ledger.csv`,
+owner only: when, id, rows, value read back, outcome `open` then `written` / `failed_<status>` /
+`check`) says what was written; the run stops at the first thing not as planned. Before the field
+exists `plan` and `check` stop with "is `Girls_Present__c` deployed?". An update runs none of the
+processor (after-insert trigger). After the run, read-only: `SELECT COUNT(Id) FROM
+Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Girls_Present__c = null` → 0, and
+`SELECT SUM(Girls_Present__c) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success'` =
+`SELECT COUNT(Id) FROM Attendance__c` (both re-read at the time; live submissions keep arriving).
+
+**Signals** (after the field is deployed; all expected as stated):
+- `python3 tools/sf_girls_present.py check --vpn-off` → `differ: 0, without a value: 0 -> OK`. A
+  `differ` is a Jotform `Success` batch whose count is not its rows; a `without a value` is a
+  `Success` batch the processor or the back-fill did not count. Aggregate batches are not compared
+  (no rows by design).
+- Blank submissions: `SELECT COUNT(Id) FROM Attendance_Batch__c WHERE Status_Message__c = 'No
+  participants submitted'` grows only with real blanks; each is a club to ask, not a day blocked.
+- Club accounts without a parent: still exactly the two pilot accounts ("Club accounts in
+  Salesforce"). One more after an aggregate run means a count was typed under a name no account
+  carries.
 
 ## Attendance dashboard in Salesforce
 

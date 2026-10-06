@@ -350,6 +350,22 @@ the `plans/` prefix):
   stays in memory; it prints club names, dates, ids, statuses, candidate counts and module names;
   the ledger holds ids, module names and outcomes only; every Salesforce read names its fields.
 
+## Build notes ((b), built 2026-10-06 offline on the workflow's branch; nothing run against Salesforce or Jotform)
+- The club name is compared with `backfill_resolve.answer_of` and an `isinstance(str)` check, not
+  `text_of`: `text_of`'s refusal exits with a message about the resolver's files (`resolved.json`,
+  raw copies), which this tool has none of. A non-text question 5 is simply no match.
+- Each printed batch line ends with `created <CreatedDate> UTC`, so the reader can see whether a
+  batch was created after the module values went live on its form (the "When" stop condition).
+- The ledger holds the undo's own rows (`undo_open`, `undo_written`, `undo_failed_<status>`,
+  `undo_check`), so a second `--undo` says `nothing to undo` for a record already put back, and
+  the next dry run lists the correction as due again. `--undo` without `--apply` reads the ledger
+  only and needs no `--vpn-off`.
+- A row under a batch that carries another module than its batch stops the run before any write
+  (the processor copies the batch's module onto every row; anything else is looked at by hand).
+- The `--since` day is an option (`--since YYYY-MM-DD`, default 2026-09-01). The dry run and the
+  apply were **not** run: they need the CLI login (BACKLOG 53), so the first dry run is with Ryan
+  (Order of work, step 2). The fake-org tests are the proof of this step.
+
 ## Proof
 ```
 .venv/bin/python3 test/python_test.py                       → OK (the count rises by the shape and correction tests)
