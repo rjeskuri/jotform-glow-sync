@@ -1029,7 +1029,7 @@ ticks a girl of a club she does not hold.
 ## The names dictionary and the module values
 
 Plan: [plans/2026-10-02-names-and-modules.md](plans/2026-10-02-names-and-modules.md)
-(fixes 1 and 4). Salesforce stores what question 18 (the girls' names) and
+(fixes 1 and 4; **live on all five forms since 2026-10-06 11:22 UTC**). Salesforce stores what question 18 (the girls' names) and
 question 98 (`module_id`) say, and finds a girl by her exact name. Two things
 on the forms changed that text after the mentor ticked it:
 

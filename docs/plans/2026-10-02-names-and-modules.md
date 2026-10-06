@@ -1,7 +1,7 @@
 ---
 title: The names and the module the forms send are the exact roster and dropdown text
 author: Claude (from the 2026-09-30 read-only investigation, design and two adversarial reviews)
-status: accepted         # Ryan 2026-09-30: "Go on all 4 fixes after we get the september data into salesforce" — these are fixes 1 and 4; the back-fill was sent 2026-10-02 02:17-02:43 UTC
+status: done             # accepted by Ryan ("Go on all 4 fixes after we get the september data into salesforce"); live on all five forms 2026-10-06 (Result)
 created: 2026-10-02
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends what Salesforce must match)
 ---
@@ -220,3 +220,31 @@ export by the service account; no POST, PUT or DELETE; every export deleted afte
 
 **Left for the rollout (plan step 1 onwards):** the three adversarial reviews and the browser
 checks on the template; repeat the dry runs on the day (a fresh export).
+
+## Result (2026-10-06, with Ryan's go)
+`AUTO_SYNC_APPLY=0` at 10:47 UTC. `main` fast-forwarded to the branch (`3ea1cab`) and the rollout run
+from it; pushed after the template was proven (`00ee471` on origin, check green).
+
+| Form | Names repair (store saved before) | Module values | After |
+|---|---|---|---|
+| template 262352490535154 | 10:47–10:49 UTC, 55 keys; `262352490535154-2026-10-06T194737-before.json` | 10:49 (with its 22-roster backlog) | CLEAN: 0 of 6,929 options altered (12 languages, API and served page); q14/q92/q93 aligned (API and served page) |
+| U.S 262382706852058 | 11:16, 55 keys; `…-2026-10-06T201634-before.json` | 11:17 | CLEAN |
+| Latin America 262383455778067 | 11:17, 55 keys | 11:17 | CLEAN, 0 of 869 altered |
+| Asia 262383129464057 | 11:19, 55 keys | 11:20 | CLEAN, 0 of 1,636 altered (14 languages) |
+| Africa 262382821971058 | 11:21, 55 keys | 11:22 | CLEAN, 0 of 4,269 altered |
+
+- On U.S Jotform's answer to the store POST was lost; the tool's immediate re-read saw `PARTIAL` (en
+  entries still being written). A compare with the saved store minutes later: `base` and `en` each
+  exactly 55 keys fewer, nothing else gone or changed, the other 11 languages identical — the write
+  had landed whole. The rollout then went one form at a time, the module step only after an
+  `APPLIED` re-read.
+- **Browser, live template** (build `bc6c80d556a`, every submit intercepted): every roster option
+  through the runtime's own `FormTranslation.translate` unchanged in en and es (6,929); 149 girls of
+  seven previously affected clubs ticked — question 18 byte-identical to the ticks in en and es and
+  in the intercepted body; under a simulated Chrome page translation (text rewritten in `<font>`, 442
+  options) question 98 equals the English option for all 20 modules (a control run without
+  `data-calcvalue` sends the translated text); the guard and the required rosters unchanged.
+- `auto_sync.py` dry run in-sync on every region; `AUTO_SYNC_APPLY=1` 11:23 UTC; GitHub run
+  37456046598 in-sync.
+- Follow-ups: release Queens of Quest's two held back-fill sessions in Salesforce; Spanish module
+  values already stored are corrected in another session.
