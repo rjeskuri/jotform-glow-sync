@@ -1841,15 +1841,12 @@ shows the Jotform attendance as charts, built only from data Salesforce already 
 The test report "Jotform Monthly Attendance (test)" now shows a chart with its rows collapsed.
 Its filters are unchanged.
 
-**Until Ryan deploys `fix1`** (validated check-only, 0AfRP000002fuGP0AY):
-- "this month so far" counts the current **fiscal quarter** (Oct-Dec). It is correct in October
-  only, and overcounts from 1 November.
-- The no-attendance table lists one club per row and can stop at 200 rows (213 clubs at the
-  first refresh).
-- The "How to read this dashboard" box is missing.
-
-`fix1` makes "this month" the calendar month, lists the table by partner (at most 49 rows; the
-club list is one click away in its report), and adds the box.
+**`fix1`** (deployed by Ryan 2026-10-06 09:29 UTC, read back the same day):
+- "this month" is the calendar month. Until then it was the current fiscal quarter, which gave
+  the same numbers in October only.
+- The no-attendance table lists one row per partner. A Lightning table stops at 200 rows, and
+  the club list is one click away in its report.
+- It added the "How to read this dashboard" box.
 
 **What the numbers mean:**
 - Every `Attendance__c` row is a girl marked present. Girls are counted with a unique count of
@@ -1863,6 +1860,11 @@ club list is one click away in its report), and adds the box.
   Contact's account. "Clubs with no attendance" joins on `Attendance__c.Account__c`. The two
   agreed on every row on 2026-10-02 (0 of 5,106 differed); they would split only if a girl's
   Contact were moved to another club.
+- **A club without a partner** counts in the girls, sessions and clubs numbers, but never under
+  the Partner filter or in the no-attendance table. So "clubs that sent attendance" plus "clubs
+  with no attendance" equals the clubs with a partner only while every reporting club has one.
+  A new club whose account was not created before its first attendance gets a partner-less
+  account from the processor ("Club accounts in Salesforce", BACKLOG 27); set its parent.
 - Weeks run Sunday to Saturday (every user has the en_US locale). The first week shows only
   1-5 September.
 - "Last month" and "this month" roll over at midnight in the running user's time zone: Ryan's,
@@ -1888,14 +1890,17 @@ club list is one click away in its report), and adds the box.
   Kaleidos" has one, so "Fundacion" finds only the first. Type the name as Salesforce spells it,
   or an unaccented part of it.
 
-**Before leadership gets it** (Ryan's decisions, BACKLOG 60):
-- Both Attendance folders are hidden (not shared). On 2026-10-02 only the 8 active users with
-  View All Data could see them.
-- The dashboard runs as Ryan, so it shows the whole organisation. A chart's report runs as the
-  viewer, though, and club accounts are private (owned by administrators, no sharing rules). A
-  standard user would see few or no rows in the report behind a full chart.
-- The test report's detail rows carry girls' names, and anyone who can open it can expand or
-  export them.
+**Access** (Ryan, 2026-10-06):
+- **Folder sharing stays as it is**: both Attendance folders are hidden (not shared). On
+  2026-10-02 only the 8 active users with View All Data could see them. Do not change it
+  without Ryan.
+- **Girls' names inside Salesforce are fine**: anyone with access to Salesforce may see them,
+  so the test report's name column and the Girl filter stay. This is about Salesforce only.
+  Names still never go into the repo, logs, commits or the conversation (child-privacy).
+- If the folders are ever shared beyond those users: the dashboard runs as Ryan and shows
+  everything, but a chart's report runs as the viewer, and club accounts are private (owned by
+  administrators, no sharing rules). A standard user would then see few or no rows behind a
+  full chart.
 
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
 - Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report and the
@@ -1907,8 +1912,10 @@ club list is one click away in its report), and adds the box.
 - The other copies:
   - `before/`: the test report before any change (a deployable project);
   - `after/`: the first deploy (2026-10-02 03:46 UTC);
-  - `fix1/`: the second change, validated and waiting for Ryan's deploy;
-  - `after2/`: everything as it stands once `fix1` is deployed (what `gen.py` builds today).
+  - `fix1/`: the second change (deployed 2026-10-06 09:29 UTC);
+  - `after2/`: everything as it stands now (what `gen.py` builds).
+- After a deploy, Salesforce writes `expandOthers` true on every report chart and drops or adds a
+  few default attributes on the dashboard. A retrieve differs from `gen.py` only in those.
 - **The steps:**
   1. Back up what is live: `sf project retrieve start -o glow` the six `Jotform_*` reports below,
      the test report and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a
@@ -1919,6 +1926,12 @@ club list is one click away in its report), and adds the box.
   5. Ryan's go; then the same command without `--dry-run`.
   6. Check after: retrieve again and compare with the build. Run one changed report through the
      Analytics API, and compare its totals with SOQL.
+
+**Refreshing through the API** (read-only checks): `sf api request rest
+'/services/data/v62.0/analytics/dashboards/01ZRP00000BE2TR2A1' -o glow -X PUT -b '{}'`.
+- One partner's view: put `?filter1=<option id>` in the path. A `filters` list in the body is
+  ignored, and each partner's view has its own cached results.
+- Salesforce allows one refresh a minute.
 
 **Rollback:**
 - Test report: `cd before && sf project deploy start --dry-run -o glow -d force-app`, then
