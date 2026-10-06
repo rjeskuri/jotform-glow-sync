@@ -1086,7 +1086,12 @@ public page and counts the removed keys it still embeds (`public page: 0
 removed keys still served`). If some are still served after three reads 20 s
 apart, it makes ONE more write, the form's `pagetitle` posted back unchanged
 (the dry run prints it), which makes Jotform re-render the page, and reads it
-again. A lost or non-JSON answer to the POST is re-read and reported as
+again. When the page cannot be shown to serve the change (it still lags, or the
+re-render's read or write fails), the run ends with "The store is fixed but the
+public page could not be shown to serve it": the store IS written, and a second
+run only says `nothing to remove` - re-save the form in the builder if the page
+still lags, then `tools/form_status.py --form <id> --rendered`. A lost or
+non-JSON answer to the POST is re-read and reported as
 `UNCHANGED` (nothing written: run again), `APPLIED` or `PARTIAL` (restore,
 below). It refuses, writing nothing: a store without `base` or `en`, with
 fewer than 1,000 entries in either (a truncated read), or with an entry that

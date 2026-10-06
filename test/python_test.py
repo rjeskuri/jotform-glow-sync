@@ -6358,6 +6358,54 @@ class FixNameTranslations(unittest.TestCase):
             self.assertIn("could not be shown to serve it", str(code))
             self.assertIn(says, out)
 
+    def test_the_re_render_failing_after_the_post_never_says_nothing_written(self):
+        from glow.jotform import JotformError
+        stale_page = None
+
+        def failing(fake, step):
+            """fake with the re-render's `step` failing once the store POST has landed:
+            "props" the first properties read, "post" the pagetitle POST, "again" its re-read."""
+            real_get, real_post = fake.get, fake.post_form
+            reads = []
+
+            def get(path, **params):
+                if fake.writes and path.endswith("/properties"):
+                    reads.append(path)
+                    if step == "props" or (step == "again" and len(reads) == 2):
+                        raise JotformError("GET: a cut-off JSON answer, 900 characters, not shown")
+                return real_get(path, **params)
+
+            def post_form(path, data, label):
+                real_post(path, data, label)
+                if step == "post":
+                    raise JotformError(f"{label}: non-JSON response")
+            fake.get, fake.post_form = get, post_form
+            return fake
+
+        for step in ("props", "post", "again"):
+            fake = self.fake()
+            stale_page = served_page(copy.deepcopy(fake.stores[self.AFRICA]))     # the page never follows
+            code, out = self.run_main(failing(fake, step), "--form", self.AFRICA, "--apply",
+                                      page=lambda fid: stale_page)
+            self.assertIn("re-read: APPLIED", out, step)
+            self.assertNotIn(md5(self.DOUBLE), fake.stores[self.AFRICA]["en"])       # the store is written
+            self.assertIn("The store is fixed but the public page could not be shown to serve it", str(code), step)
+            self.assertNotIn("nothing written", str(code) + out, step)
+            self.assertIn("the re-render could not be done or confirmed", out, step)
+            self.assertNotIn("cut-off", out + str(code))                             # Jotform's answer never echoed
+        # the restore: the same accurate exit after its POST
+        fake, earlier = self.fake(), set(self.saved())
+        self.assertEqual(self.run_main(fake, "--form", self.AFRICA, "--apply")[0], 0)
+        (saved,) = set(self.saved()) - earlier
+        stale_page = served_page(copy.deepcopy(fake.stores[self.AFRICA]))           # without the restored key
+        fake.writes.clear()
+        code, out = self.run_main(failing(fake, "props"), "--form", self.AFRICA, "--restore", saved, "--apply",
+                                  page=lambda fid: stale_page)
+        self.assertIn("re-read: APPLIED", out)
+        self.assertIn(md5(self.DOUBLE), fake.stores[self.AFRICA]["en"])
+        self.assertIn("Restored, but the public page could not be shown to serve it", str(code))
+        self.assertNotIn("nothing written", str(code) + out)
+
     def test_the_restore_puts_back_what_was_removed_in_the_saved_order(self):
         fake = self.fake()
         original = copy.deepcopy(fake.stores[self.AFRICA])

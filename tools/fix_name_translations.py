@@ -26,7 +26,8 @@ the re-read store (0 altered), then reads the public page and counts the
 removed keys it still embeds: if any after a wait, ONE more write - the form's
 `pagetitle` posted back unchanged, which makes Jotform re-render the page -
 and it reads the page again. A lost or non-JSON answer to the POST is re-read
-and reported as unchanged, applied or partial, never guessed.
+and reported as unchanged, applied or partial, never guessed; a failure after
+it (the re-read, the re-render) never says "nothing written".
 
 Refuses, writing nothing: a store without `base` or `en`, below STORE_FLOOR
 entries in either (a truncated read), or with an entry that is not text; a key
@@ -258,16 +259,25 @@ def check_page(client, fid, keys, present, page_of, sleep):
               f"--form {fid} --rendered in a few minutes")
         return False
     print(f"   public page: {n} {what} - re-rendering it (pagetitle posted back unchanged)")
-    props = get(client, f"/form/{fid}/properties", "the form's properties")
-    title = props.get("pagetitle")
+    # the store is written by now: a failure from here on is reported as such (the callers'
+    # exits say the store is written), never as "nothing written"
+    try:
+        props = client.get(f"/form/{fid}/properties")
+        title = props.get("pagetitle") if isinstance(props, dict) else None
+        if title:
+            client.post_form(f"/form/{fid}/properties", {"properties[pagetitle]": title},
+                             f"{fid} re-render (pagetitle unchanged)")
+            again = client.get(f"/form/{fid}/properties")
+    except JotformError:          # never echoed
+        print("   ! the re-render could not be done or confirmed (an error or a non-JSON answer from "
+              f"Jotform) - re-save the form in the builder, then tools/form_status.py --form {fid} --rendered")
+        return False
     if not title:
         print("   ! the form has no pagetitle to post back - re-save the form in the builder, then "
               f"tools/form_status.py --form {fid} --rendered")
         return False
-    client.post_form(f"/form/{fid}/properties", {"properties[pagetitle]": title},
-                     f"{fid} re-render (pagetitle unchanged)")
-    again = get(client, f"/form/{fid}/properties", "the form's properties after the re-render")
-    print(f"   pagetitle re-read: {'unchanged' if again.get('pagetitle') == title else 'CHANGED - set it back'}")
+    same = isinstance(again, dict) and again.get("pagetitle") == title
+    print(f"   pagetitle re-read: {'unchanged' if same else 'CHANGED - set it back'}")
     sleep(PAGE_WAIT)
     n = waiting()
     print(f"   public page: {n if n is not None else 'unreadable,'} {what}")
