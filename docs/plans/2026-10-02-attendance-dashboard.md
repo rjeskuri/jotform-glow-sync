@@ -1,7 +1,7 @@
 ---
 title: Attendance dashboard in Salesforce - charts from the data already there
 author: Claude (with Ryan)
-status: in-progress (deployed 2026-10-02 03:46 UTC by Ryan; fix1 validated, waiting for his deploy)
+status: done (deployed 2026-10-02 03:46 UTC and fix1 2026-10-06 09:29 UTC, both by Ryan; open: BACKLOG 58-61)
 created: 2026-10-02
 intent: none - Ryan's request of 2026-10-02 ("upgrade it now to use charts instead of line by line";
   then "start with basic reporting visuals ... using the info we already have")
@@ -179,8 +179,8 @@ Into BACKLOG with that design.
   - The figures this plan expected (4,712 rows, 2,165 girls) were stale. 220 more September rows
     arrived at 03:11-03:26 UTC, before the deploy: the last back-fill sessions and two live
     submissions. September keeps growing with late submissions.
-- **Defects found, fixed in `fix1`** (check-only 0AfRP000002fuGP0AY: 2 of 2, 0 errors; waiting
-  for Ryan's deploy):
+- **Defects found, fixed in `fix1`** (check-only 0AfRP000002fuGP0AY: 2 of 2, 0 errors; deployed
+  by Ryan 2026-10-06 09:29 UTC, DeployRequest 0AfRP000002gEbh0AE, 2 of 2):
   1. "This month" used `INTERVAL_CURRENT`, which is the current **fiscal quarter**: Oct-Dec, the
      fiscal year starting in January. It was right in October only by coincidence, and would have
      overcounted from 1 November. Now `INTERVAL_THISMONTH`.
@@ -199,6 +199,23 @@ Into BACKLOG with that design.
   - 61: about 11 probable duplicate girls.
 - **Ryan, 2026-10-06**: folder sharing stays as it is, and girls' names are fine for anyone with
   Salesforce access (BACKLOG 60: those two points closed).
+- **`fix1` read back (2026-10-06, read only, three checkers and a skeptic on every doubt)**:
+  - **Deployed equals built**: `fix1` and `after2` are byte-identical. Only the two components
+    changed (09:29:44 UTC); the other six reports are untouched since 10-02. The differences are
+    only Salesforce normalisation.
+  - **"This month"** resolves to THIS_MONTH, 2026-10-01..31, with 725 girls, 67 sessions, 64
+    clubs and 761 rows, all equal to SOQL, and its 18 partners each equal. In October the fiscal
+    quarter gives the same rows, so the fix shows in the numbers only from 1 November. The
+    resolved range is the proof.
+  - **The dashboard after a refresh (09:33 UTC)**: 13 components, all with data.
+    - September: 2,602 girls, 456 sessions, 168 clubs, each equal to SOQL.
+    - The no-attendance table has 39 rows, one per partner, summing to 196 = the metric = SOQL.
+    - The Partner filter on WESAD: every component equal to SOQL.
+  - **Found**: two new WESAD clubs, "Change Makers" and "Seeds of Greatness", are on the roster
+    since 2026-10-01, after the club accounts were created. When their first attendance arrived
+    on 10-03, the processor created partner-less club accounts for them (BACKLOG 27). So 168 + 196
+    = 364, not the 362 clubs with a partner. Fix: set their parent to WESAD, a Salesforce write on
+    Ryan's go.
 - **Also fixed on the way**: `tools/worklog.py` wrote the work log with Windows line endings, so
   every update rewrote every line. It now writes `\n`, with a test.
 - `make check` → `CHECK PASSED` (434 tests, `OK`).
