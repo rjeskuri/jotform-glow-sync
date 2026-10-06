@@ -214,8 +214,14 @@ Into BACKLOG with that design.
   - **Found**: two new WESAD clubs, "Change Makers" and "Seeds of Greatness", are on the roster
     since 2026-10-01, after the club accounts were created. When their first attendance arrived
     on 10-03, the processor created partner-less club accounts for them (BACKLOG 27). So 168 + 196
-    = 364, not the 362 clubs with a partner. Fix: set their parent to WESAD, a Salesforce write on
-    Ryan's go.
+    = 364, not the 362 clubs with a partner. **Fixed 2026-10-06 on Ryan's go**: parent set to WESAD
+    through the write connector, one record per call (10:53:18 and 10:53:34 UTC).
+    - The first call answered "session expired" but had saved, so it was read back before the
+      second.
+    - Names, record type and girls (20 and 19 Contacts and attendance rows) were unchanged.
+    - 364 Club accounts now have a partner; the only two without are the pilots on hold.
+    - Every active roster club now has an account.
+    - Before and after: `data/sf_club_parents_2026-10-06/`. Rollback: ParentId blank on both.
 - **Also fixed on the way**: `tools/worklog.py` wrote the work log with Windows line endings, so
   every update rewrote every line. It now writes `\n`, with a test.
 - `make check` → `CHECK PASSED` (434 tests, `OK`).
