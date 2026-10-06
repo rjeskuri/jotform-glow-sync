@@ -674,6 +674,17 @@ fill must be done before D's totals are read, or every batch from before the dep
   they need the CLI login (BACKLOG 53; with Ryan). The fake-org tests are the proof of this step.
 - Step 3 (the `sf_backfill.py` hold wording, docstring, `outcome_of`, `verify`, the fake org's
   `insert`) is untouched: it is held until the class is deployed (Order across the four plans, B.5).
+- **Review fixes (2026-10-06).** The rows query deviates from the SOQL above: one `GROUP BY` per
+  200 batch ids (`WHERE Attendance_Batch__c IN (...)`, the ids `plan` and `check` already hold)
+  instead of one over every batch. Salesforce gives an aggregate query a single page and no next
+  page (documented at 2,000 groups; not tried against this org), and at the live rate the batches
+  pass that within a year - `check`, a standing signal, would then stop with an HTTP 400 that the
+  "is the field deployed?" hint mis-explains. The result is the same (a batch with no rows is
+  absent either way). `check` also covers a re-read Salesforce did not answer after a 204: the
+  closing row is written (outcome `check`, no value read back) and the stop names the batch. `data/`
+  is created (owner-only) when the folder lies under it and a fresh checkout has none yet, since
+  `sf_backfill.within` needs it to exist. `quoted` is imported at the top with the rest of
+  `sf_backfill`.
 
 ## Decisions to record (proposed rows for `docs/DECISIONS.md`, dated 2026-10-06)
 

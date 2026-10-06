@@ -50,7 +50,7 @@ SF_REGION_FORM = {"Africa": forms.REGIONALS["Africa"], "Asia": forms.REGIONALS["
 BATCH_FIELDS = ("Id, Account_Name__c, Account__c, Account__r.Parent.Region__c, Attendance_Date__c, Module__c, "
                 "Module_Week__c, Module_Year__c, Processing_Status__c, Creator__c, CreatedDate")
 LEDGER_COLS = ["when_utc", "batch_id", "record_id", "sobject", "old", "new", "outcome"]
-WRITTEN = {"written", "check"}               # the outcomes --undo puts back
+WRITTEN = {"written", "check"}               # a correction --undo reverses (check: 204 answered, the value is unknown)
 
 
 # ---- the canonical options and the batches ------------------------------------------------------
@@ -131,7 +131,7 @@ def fetch(client, form_id, window=None):
 
 
 class Jotform:
-    """The forms' questions and submissions, each form read once, each window once."""
+    """The forms' questions (each form's read once) and submissions (one window per batch, or the four forms whole)."""
 
     def __init__(self, client, all_forms=False):
         self.client, self.all_forms, self.questions, self.whole = client, all_forms, {}, None
@@ -200,14 +200,20 @@ def describe(entry):
 
 
 # ---- the ledger and the writes -------------------------------------------------------------------
-def ledger_path(folder):
-    folder = os.path.abspath(folder)
-    if within(folder, REPO) and not within(folder, os.path.join(REPO, "data")):
+def private_folder(folder):
+    """The folder, created owner-only. Inside the checkout it must be under data/ (never committed)."""
+    folder, data = os.path.abspath(folder), os.path.join(REPO, "data")
+    if folder == data or folder.startswith(data + os.sep):
+        os.makedirs(data, 0o700, exist_ok=True)       # a fresh checkout has no data/ yet, and within() needs it to exist
+    if within(folder, REPO) and not within(folder, data):
         raise Refused("--dir: inside the checkout the ledger folder must be under data/ (never committed)")
-    if not os.path.isdir(folder):
-        os.makedirs(folder, 0o700)
+    os.makedirs(folder, 0o700, exist_ok=True)
     os.chmod(folder, 0o700)
-    return os.path.join(folder, "ledger.csv")
+    return folder
+
+
+def ledger_path(folder):
+    return os.path.join(private_folder(folder), "ledger.csv")
 
 
 def read_ledger(path):
@@ -246,15 +252,18 @@ def write_one(org, path, batch_id, sobject, record_id, old, new, prefix=""):
     status, _ = org.update(sobject, record_id, {"Module__c": new})
     if status != 204:
         outcome = f"{prefix}failed_{status}"
+        why = f"Salesforce did not take the write (HTTP {status}; 0 = no answer, the outcome is unknown)"
     else:
-        back = read_one(org, sobject, record_id)
+        try:
+            back = read_one(org, sobject, record_id)
+            why = "the write answered 204 but the value read back differs"
+        except Refused as stop:                  # 204 answered, then no re-read: the value is unknown, the row closes as check
+            back, why = [], f"the write answered 204 but the re-read did not ({stop})"
         outcome = prefix + ("written" if len(back) == 1 and back[0].get("Module__c") == new else "check")
     append_ledger(path, dict(row, when_utc=now(), outcome=outcome))
     if outcome != prefix + "written":
-        raise Refused(f"{record_id} ({sobject}, batch {batch_id}): " + (
-            f"Salesforce did not take the write (HTTP {status}; 0 = no answer, the outcome is unknown)"
-            if not outcome.endswith("check") else "the write answered 204 but the value read back differs")
-            + f" - STOPPED, nothing more written; the ledger {os.path.relpath(path, REPO)} says what was")
+        raise Refused(f"{record_id} ({sobject}, batch {batch_id}): {why} - STOPPED, nothing more written; the ledger "
+                      f"{os.path.relpath(path, REPO)} says what was")
     return outcome
 
 
@@ -284,10 +293,12 @@ def cmd_correct(args, org, client):
     print(f"canonical modules: {len(canonical)} (template {forms.TEMPLATE}: "
           + ", ".join(f"q{MODULES[y]} {len(options[y])}" for y in MODULES) + " options)")
     batches = read_batches(org, args.since)
-    wrong = [b for b in batches if b.get("Module__c") not in canonical]
+    blank = sum(1 for b in batches if not b.get("Module__c"))       # a partner-reported aggregate: no module, nothing to translate
+    wrong = [b for b in batches if b.get("Module__c") and b["Module__c"] not in canonical]
+    scope = f"; without a module, not in scope: {blank}" if blank else ""
     if not wrong:
         print(f"nothing to correct: 0 of {len(batches)} batches since {args.since} carry a module outside the "
-              f"{len(canonical)} canonical options")
+              f"{len(canonical)} canonical options{scope}")
         return
     jotform = Jotform(client, all_forms=args.all_forms)
     entries = []
@@ -300,7 +311,7 @@ def cmd_correct(args, org, client):
         statuses[e["Processing_Status__c"]] = statuses.get(e["Processing_Status__c"], 0) + 1
     print(f"batches since {args.since}: {len(batches)}; module not a canonical option: {len(entries)} ("
           + ", ".join(f"{n} {s}" for s, n in sorted(statuses.items())) + f"); rows under them: "
-          f"{sum(e['rows'] for e in entries)}")
+          f"{sum(e['rows'] for e in entries)}{scope}")
     for entry in entries:
         print(describe(entry))
     matched = [e for e in entries if e["new"]]
@@ -319,25 +330,42 @@ def cmd_correct(args, org, client):
           + (f"; UNMATCHED, left alone: {unmatched}" if unmatched else "") + f"; ledger {os.path.relpath(path, REPO)}")
 
 
+def put_back(row):
+    """(what the record holds, what to write back) when a record's last ledger row calls for an undo, else
+    None. A correction (`written`, `check`) is reversed. An undo's own row runs the other way already
+    (old = the English value, new = the original), so an undo that did not take (`undo_failed_<status>`,
+    `undo_check`) is repeated as it stands; `undo_written` is done, `open` and `undo_open` are unknown."""
+    outcome = row["outcome"]
+    if outcome in WRITTEN:
+        return row["new"], row["old"]
+    if outcome.startswith("undo_") and outcome not in ("undo_open", "undo_written"):
+        return row["old"], row["new"]
+    return None
+
+
 def cmd_undo(args, org):
-    last = last_rows(read_ledger(args.undo))
-    todo = [r for r in last.values() if r["outcome"] in WRITTEN or r["outcome"].startswith("undo_failed_")]
+    path = os.path.abspath(args.undo)
+    if not os.path.isfile(path):
+        raise Refused(f"--undo: there is no ledger {args.undo}")
+    private_folder(os.path.dirname(path))        # the undo's own rows go into the same file: the same rule as --dir
+    last = last_rows(read_ledger(path))
+    todo = [(row, put_back(row)) for row in last.values() if put_back(row)]
     for row in last.values():
-        if row not in todo:
-            print(f"  nothing to undo: {row['record_id']} ({row['sobject']}) is {row['outcome']}")
+        if not put_back(row):
+            print(f"  nothing to undo: {row['record_id']} ({row['sobject']}) is {row['outcome']}"
+                  + (" (the write's outcome is unknown: look at the record in Salesforce)" if row["outcome"].endswith("open") else ""))
     if not todo:
         print("nothing to undo")
         return
     if not args.apply:
-        for row in todo:
-            print(f"  would put back {row['record_id']} ({row['sobject']}, batch {row['batch_id']}): "
-                  f"{row['new']!r} -> {row['old']!r}")
+        for row, (holds, back) in todo:
+            print(f"  would put back {row['record_id']} ({row['sobject']}, batch {row['batch_id']}): {holds!r} -> {back!r}")
         print(f"would put back: {len(todo)} records   (dry run - nothing written; --apply --vpn-off after Ryan's go)")
         return
-    for row in todo:
-        write_one(org, args.undo, row["batch_id"], row["sobject"], row["record_id"], row["new"], row["old"], prefix="undo_")
-        print(f"  put back {row['record_id']} ({row['sobject']}): {row['old']!r}, read back equal")
-    print(f"put back and read back: {len(todo)} records; ledger {args.undo}")
+    for row, (holds, back) in todo:
+        write_one(org, path, row["batch_id"], row["sobject"], row["record_id"], holds, back, prefix="undo_")
+        print(f"  put back {row['record_id']} ({row['sobject']}): {back!r}, read back equal")
+    print(f"put back and read back: {len(todo)} records; ledger {os.path.relpath(path, REPO)}")
 
 
 def positive(text):

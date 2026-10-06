@@ -36,13 +36,14 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
-from sf_backfill import Org, Refused, now, open_private, save_private, within   # noqa: E402
+from sf_backfill import Org, Refused, now, open_private, quoted, save_private, within   # noqa: E402
 
 DEFAULT_DIR = os.path.join(REPO, "data", "sf_girls_present")
 FIELD, SOBJECT, OK = "Girls_Present__c", "Attendance_Batch__c", "Success"
 JOTFORM = "Jotform"                          # Creator__c of the live flow and of the back-fill ("Jotform back-fill ...")
 BATCHES = f"SELECT Id, Name, Processing_Status__c, Creator__c, {FIELD} FROM {SOBJECT} ORDER BY Name"
-ROWS = "SELECT Attendance_Batch__c, COUNT(Id) n FROM Attendance__c GROUP BY Attendance_Batch__c"
+ROWS = "SELECT Attendance_Batch__c, COUNT(Id) n FROM Attendance__c WHERE Attendance_Batch__c IN ({ids}) GROUP BY Attendance_Batch__c"
+CHUNK = 200                                  # batch ids per ROWS query: an aggregate query is one page (2,000 groups), no next page
 JOTFORM_SUCCESS = (f"SELECT Id, {FIELD} FROM {SOBJECT} WHERE Processing_Status__c = '{OK}' "
                    f"AND Creator__c LIKE '{JOTFORM}%'")
 WITHOUT_VALUE = f"SELECT COUNT() FROM {SOBJECT} WHERE Processing_Status__c = '{OK}' AND {FIELD} = null"
@@ -51,12 +52,15 @@ LEDGER_COLS = ["when_utc", "batch_id", "rows", "read_back", "outcome"]
 
 
 class Paths:
+    """plan.csv and ledger.csv in one owner-only folder; inside the checkout it must be under data/."""
+
     def __init__(self, folder):
-        folder = os.path.abspath(folder)
-        if within(folder, REPO) and not within(folder, os.path.join(REPO, "data")):
+        folder, data = os.path.abspath(folder), os.path.join(REPO, "data")
+        if folder == data or folder.startswith(data + os.sep):
+            os.makedirs(data, 0o700, exist_ok=True)   # a fresh checkout has no data/ yet, and within() needs it to exist
+        if within(folder, REPO) and not within(folder, data):
             raise Refused("--dir: inside the checkout the folder must be under data/ (never committed)")
-        if not os.path.isdir(folder):
-            os.makedirs(folder, 0o700)
+        os.makedirs(folder, 0o700, exist_ok=True)
         os.chmod(folder, 0o700)
         self.plan, self.ledger = os.path.join(folder, "plan.csv"), os.path.join(folder, "ledger.csv")
 
@@ -66,8 +70,18 @@ def rel(path):
 
 
 def one_batch(org, batch_id):
-    from sf_backfill import quoted
     return org.query(f"SELECT Id, Processing_Status__c, {FIELD} FROM {SOBJECT} WHERE Id = {quoted(batch_id)}")
+
+
+def row_counts(org, batch_ids):
+    """batch id -> its Attendance__c rows, for the batches named (a batch with none is absent). One GROUP BY
+    per CHUNK ids: Salesforce gives an aggregate query a single page and no way to read more (documented at
+    2,000 groups; not tried against this org), and the batches pass that within a year at the live rate."""
+    ids, counts = sorted(set(batch_ids)), {}
+    for start in range(0, len(ids), CHUNK):
+        for r in org.query(ROWS.format(ids=", ".join(quoted(b) for b in ids[start:start + CHUNK]))):
+            counts[r["Attendance_Batch__c"]] = int(r["n"])
+    return counts
 
 
 def creator_kind(text):
@@ -109,10 +123,10 @@ def tally(entries):
 
 def cmd_plan(args, paths, org):
     try:
-        batches, rows = org.query(BATCHES), org.query(ROWS)
+        batches = org.query(BATCHES)
+        counts = row_counts(org, [b["Id"] for b in batches])
     except Refused as stop:
         raise no_field_hint(stop) from None
-    counts = {r["Attendance_Batch__c"]: int(r["n"]) for r in rows}
     entries = [{"batch_id": b["Id"], "name": b["Name"], "status": b["Processing_Status__c"],
                 "creator": creator_kind(b.get("Creator__c")), "rows": counts.get(b["Id"], 0),
                 "value": "" if as_count(b.get(FIELD)) is None else as_count(b.get(FIELD))} for b in batches]
@@ -166,13 +180,16 @@ def set_one(org, paths, entry):
         append_ledger(paths.ledger, dict(row, when_utc=now(), outcome=f"failed_{status}"))
         raise Refused(f"{entry['name']} {batch_id}: Salesforce did not take the write (HTTP {status}; 0 = no answer, "
                       f"the outcome is unknown) - STOPPED, nothing more written; the ledger {rel(paths.ledger)} says what was")
-    back = one_batch(org, batch_id)
-    read_back = as_count(back[0].get(FIELD)) if len(back) == 1 else None
+    try:
+        back = one_batch(org, batch_id)
+        read_back = as_count(back[0].get(FIELD)) if len(back) == 1 else None
+        why = f"{FIELD} reads back as {read_back!r}, not {rows}"
+    except Refused as stop:                      # 204 answered, then no re-read: the value is unknown, the row closes as check
+        read_back, why = None, f"the re-read did not answer ({stop})"
     outcome = "written" if read_back == rows else "check"
     append_ledger(paths.ledger, dict(row, when_utc=now(), read_back="" if read_back is None else read_back, outcome=outcome))
     if outcome != "written":
-        raise Refused(f"{entry['name']} {batch_id}: the write answered 204 but {FIELD} reads back as {read_back!r}, "
-                      f"not {rows} - STOPPED; look at the batch in Salesforce")
+        raise Refused(f"{entry['name']} {batch_id}: the write answered 204 but {why} - STOPPED; look at the batch in Salesforce")
     return True
 
 
@@ -204,10 +221,10 @@ def cmd_set(args, paths, org):
 # ---- check ---------------------------------------------------------------------------------------
 def cmd_check(args, paths, org):
     try:
-        batches, rows, without = org.query(JOTFORM_SUCCESS), org.query(ROWS), org.count(WITHOUT_VALUE)
+        batches, without = org.query(JOTFORM_SUCCESS), org.count(WITHOUT_VALUE)
+        counts = row_counts(org, [b["Id"] for b in batches])
     except Refused as stop:
         raise no_field_hint(stop) from None
-    counts = {r["Attendance_Batch__c"]: int(r["n"]) for r in rows}
     differ = [b["Id"] for b in batches if as_count(b.get(FIELD)) is not None and as_count(b.get(FIELD)) != counts.get(b["Id"], 0)]
     healthy = not differ and not without
     print(f"check: {len(batches)} Jotform {OK} batches; differ: {len(differ)}, without a value: {without} -> "

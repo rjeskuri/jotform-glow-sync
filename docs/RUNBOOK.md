@@ -1237,11 +1237,16 @@ UTC) means the fix did not take - tell the session that owns the module values a
 `--apply` writes the batch, then each row, one PATCH per record, re-reads each by an explicit-field
 query and keeps a ledger (`data/module_fix_2026-10/ledger.csv`, owner only: ids, module names and
 outcomes - `open`, then `written` / `failed_<status>` / `check`); it stops at the first record not
-`written` and names the id and the HTTP status (never the answer's text). An update runs none of
+`written` and names the id and the HTTP status (never the answer's text). `check` means the write
+answered 204 but the value could not be confirmed (the re-read differed, or got no answer): look
+at the record. `--undo` reverses every `written` and `check` record and repeats an undo that did
+not take; a record still `open` is unknown - look at it in Salesforce. An update runs none of
 the processor (its trigger is after-insert only) and the rows' count is compared before and after.
-`--all-forms` reads the four forms whole for a batch whose region or window the narrow read cannot
-serve. Afterwards the dashboard's "Jotform Sessions by Module Last Month" has no Spanish bar: the
-Salesforce dashboard session is told the date of the apply and the ids in the ledger.
+A batch without a module (a partner-reported aggregate, "Attendance totals and partner-reported
+counts") is out of scope and counted in one line. `--all-forms` reads the four forms whole for a
+batch whose region or window the narrow read cannot serve. Afterwards the dashboard's "Jotform
+Sessions by Module Last Month" has no Spanish bar: the Salesforce dashboard session is told the
+date of the apply and the ids in the ledger.
 
 ## Header logo
 
@@ -1712,7 +1717,10 @@ when nothing matches it creates a new, partner-less Club account.
   and the account is then renamed to the new picker text - with Ryan's go.
 - **A new club** reaches the forms automatically but not Salesforce (BACKLOG 27). It shows in the
   SF Pending tab and the Monday e-mail; its account is created by hand or as a further round of
-  the procedure below, before its first attendance if possible.
+  the procedure below, before its first attendance if possible. Until BACKLOG 27 is built that
+  round is weekly: the Monday e-mail's SF Pending list is worked each Monday (Ryan with Claude).
+  A partner-less account the processor created meanwhile is re-parented to its partner, never
+  re-created (its Contacts and attendance stay; done for two clubs on 2026-10-06).
 - **Signals** (read-only queries, all expected as stated):
   - Club accounts without a parent: exactly the two pilot accounts that are on hold. One more
     means a form sent a name no account carries.
@@ -1913,7 +1921,9 @@ legacy blanks, BACKLOG 73); a `Failed` batch stays empty, as the processor leave
 means one thing; a batch with a value - a typed aggregate, or a count the processor set - is
 never touched, so a second `set` finds `to set: 0`. The ledger (`data/sf_girls_present/ledger.csv`,
 owner only: when, id, rows, value read back, outcome `open` then `written` / `failed_<status>` /
-`check`) says what was written; the run stops at the first thing not as planned. Before the field
+`check` - 204 answered but the value not confirmed: look at the batch) says what was written; the
+run stops at the first thing not as planned. The rows are counted one GROUP BY per 200 batch ids
+(an aggregate query has a single page), so the check keeps working as the batches grow. Before the field
 exists `plan` and `check` stop with "is `Girls_Present__c` deployed?". An update runs none of the
 processor (after-insert trigger). After the run, read-only: `SELECT COUNT(Id) FROM
 Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Girls_Present__c = null` → 0, and

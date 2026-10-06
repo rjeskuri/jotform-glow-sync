@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 import urllib.parse
+from unittest import mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -71,6 +72,8 @@ class ModuleOrg(FakeOrg):
     def __init__(self, batches, rows):
         super().__init__([])
         self.batches, self.rows = batches, rows
+        self.grow_rows = False               # a row lands under a batch right after each read of its rows
+        self.refuse_read_back = False        # the read of one record by id gets no answer from Salesforce
 
     def call(self, *args, **kwargs):
         raise AssertionError("a raw REST call: every read must be an explicit-field SOQL query")
@@ -81,24 +84,30 @@ class ModuleOrg(FakeOrg):
             assert m.group(1) == fmv.BATCH_FIELDS, soql
             return copy.deepcopy([b for b in self.batches if b["CreatedDate"] >= m.group(2)])
         if m := re.fullmatch(r"SELECT Id, Module__c FROM Attendance__c WHERE Attendance_Batch__c = '(\w+)'", soql):
-            return [{"Id": r["Id"], "Module__c": r["Module__c"]} for r in self.rows if r["Attendance_Batch__c"] == m.group(1)]
+            found = [{"Id": r["Id"], "Module__c": r["Module__c"]} for r in self.rows if r["Attendance_Batch__c"] == m.group(1)]
+            if self.grow_rows:
+                self.rows.append(dict(rows_of(m.group(1), len(found) + 1)[-1], Module__c=found[0]["Module__c"] if found else None))
+            return found
         if m := re.fullmatch(r"SELECT Id, Module__c FROM (\w+) WHERE Id = '(\w+)'", soql):
+            if self.refuse_read_back:
+                raise fmv.Refused("Salesforce did not answer a read (HTTP 0)")
             records = self.batches if m.group(1) == "Attendance_Batch__c" else self.rows
             return [{"Id": r["Id"], "Module__c": r["Module__c"]} for r in records if r["Id"] == m.group(2)]
         raise AssertionError(soql)
 
 
 class FakeJotform:
-    """Reads only. The template and the regional forms share one questions table here."""
+    """Reads only. One questions table serves the template and the regional forms, unless a form has its own."""
 
     def __init__(self, submissions, qs=None):
         self.submissions, self.qs, self.asked = submissions, qs or questions(), []     # form id -> [submission]
+        self.form_qs = {}                                                              # form id -> its own questions
 
     def get(self, path, **params):
         self.asked.append((path, params))
         parts = path.strip("/").split("/")
         if parts[2:] == ["questions"]:
-            return copy.deepcopy(self.qs)
+            return copy.deepcopy(self.form_qs.get(parts[1], self.qs))
         subs = self.submissions.get(parts[1], [])
         if parts[2:] == ["submissions"]:
             if "filter" in params:
@@ -204,6 +213,31 @@ class FixModuleValues(unittest.TestCase):
         self.assertIsNone(stop, stop)
         self.assertEqual({r for _, r, _ in self.org.updates}, {BATCH_A} | {r["Id"] for r in rows_of(BATCH_A, 2)})
 
+    def test_an_option_of_the_regional_form_that_the_template_lacks_is_not_a_template_option(self):
+        regional = questions()
+        regional[MODULES["1"]] = dropdown(OPTIONS["1"] + ["Regional Only"])
+        self.jotform.form_qs[LATAM] = regional
+        self.jotform.submissions[LATAM][0] = submission("9001", module="Regional Only")   # stored on the form, unknown to the template
+        out = self.dry()
+        self.assertIn(f"{BATCH_A}  Sunrise Club  2026-09-24  Success  'Toma de decisiones'  UNMATCHED ('Regional Only' is not a "
+                      "template option)", out)
+        self.assertIn(f"{BATCH_B}  Sunrise Club  2026-09-17  Failed  'Toma de decisiones' -> 'Decision Making'", out)
+        self.assertIn("would write: 1 batches, 0 rows; UNMATCHED, left alone: 1", out)
+
+    def test_a_batch_without_a_module_is_out_of_scope_and_counted_once(self):
+        self.org.batches.append(batch("a1l00000000000AGGR", module=None, date="2026-09-30"))   # a partner-reported aggregate
+        out = self.dry()
+        self.assertIn("batches since 2026-09-01: 3; module not a canonical option: 2 (1 Failed, 1 Success); rows under them: 2; "
+                      "without a module, not in scope: 1", out)
+        self.assertNotIn("a1l00000000000AGGR", out)
+        self.assertIn("would write: 2 batches, 2 rows   (dry run", out)
+        for b in self.org.batches[:2]:
+            b["Module__c"] = "Decision Making"
+        out = self.dry()
+        self.assertIn("nothing to correct: 0 of 3 batches since 2026-09-01 carry a module outside the 6 canonical options; "
+                      "without a module, not in scope: 1", out)
+        self.assertEqual(self.org.updates, [])
+
     def test_all_forms_reads_the_four_forms_whole_and_serves_a_region_the_map_does_not_know(self):
         self.org.batches = [batch(BATCH_A, region="Europe")]
         self.jotform.submissions[AFRICA] = [submission("9007", created="2026-09-24 11:02:30", form=AFRICA, club="River Club")]
@@ -268,6 +302,22 @@ class FixModuleValues(unittest.TestCase):
         out, stop = self.apply()
         self.assertIn("a row under it carries another module than the batch - STOPPED before writing", stop)
         self.assertEqual((self.org.updates, self.ledger()), ([], []))
+        self.org.rows[0]["Module__c"], self.org.grow_rows = "Toma de decisiones", True
+        out, stop = self.apply()
+        self.assertIn(f"{BATCH_A}: 3 rows now, 2 when planned - STOPPED before writing", stop)
+        self.assertEqual((self.org.updates, self.ledger()), ([], []))
+
+    def test_a_re_read_salesforce_refuses_after_a_204_closes_the_row_as_check_and_names_the_record(self):
+        self.org.refuse_read_back = True
+        out, stop = self.apply()
+        self.assertIn(f"{BATCH_A} (Attendance_Batch__c, batch {BATCH_A}): the write answered 204 but the re-read did not "
+                      "(Salesforce did not answer a read (HTTP 0)) - STOPPED, nothing more written", stop)
+        self.assertEqual((self.outcomes(), len(self.org.updates)), (["open", "check"], 1))
+        self.assertEqual(self.org.batches[0]["Module__c"], "Decision Making")       # the PATCH took: the undo must know
+        self.org.refuse_read_back = False
+        out, stop = self.run_tool("--undo", os.path.join(self.tmp.name, "ledger.csv"), "--vpn-off", "--apply")
+        self.assertIsNone(stop, stop)
+        self.assertEqual((self.outcomes()[-2:], self.org.batches[0]["Module__c"]), (["undo_open", "undo_written"], "Toma de decisiones"))
 
     def test_undo_puts_back_the_written_and_check_records_only(self):
         self.assertIsNone(self.apply("--limit", "1")[1])
@@ -294,12 +344,43 @@ class FixModuleValues(unittest.TestCase):
         self.assertEqual(len(self.org.updates), 7)
         self.assertIn("'Toma de decisiones' -> 'Decision Making'", self.dry())    # the correction is due again
 
-    def test_an_undone_check_record_stops_the_undo_too(self):
+    def test_an_undone_check_record_stops_the_undo_and_the_next_undo_repeats_it(self):
         self.assertIsNone(self.apply("--limit", "1")[1])
+        ledger = os.path.join(self.tmp.name, "ledger.csv")
         self.org.drift_update = True
-        out, stop = self.run_tool("--undo", os.path.join(self.tmp.name, "ledger.csv"), "--vpn-off", "--apply")
+        out, stop = self.run_tool("--undo", ledger, "--vpn-off", "--apply")
         self.assertIn("answered 204 but the value read back differs", stop)
         self.assertEqual(self.outcomes()[-2:], ["undo_open", "undo_check"])
+        self.org.drift_update = False
+        self.assertIn("would put back: 3 records", self.run_tool("--undo", ledger)[0])      # the check record and the two rows
+        out, stop = self.run_tool("--undo", ledger, "--vpn-off", "--apply")
+        self.assertIsNone(stop, stop)
+        self.assertEqual(self.outcomes()[-6:], ["undo_open", "undo_written"] * 3)
+        self.assertEqual({b["Module__c"] for b in self.org.batches} | {r["Module__c"] for r in self.org.rows}, {"Toma de decisiones"})
+
+    def test_a_retried_undo_after_a_refused_undo_still_puts_the_original_back(self):
+        self.assertIsNone(self.apply("--limit", "1")[1])              # BATCH_A and its two rows hold 'Decision Making'
+        ledger = os.path.join(self.tmp.name, "ledger.csv")
+        self.org.refuse_update = True
+        self.assertIn("HTTP 400", self.run_tool("--undo", ledger, "--vpn-off", "--apply")[1])
+        self.assertEqual(self.outcomes()[-2:], ["undo_open", "undo_failed_400"])
+        self.assertEqual(self.ledger()[-1]["old"], "Decision Making")  # an undo's own row runs the other way round
+        self.org.refuse_update = False
+        out = self.run_tool("--undo", ledger)[0]
+        self.assertIn(f"would put back {BATCH_A} (Attendance_Batch__c, batch {BATCH_A}): 'Decision Making' -> 'Toma de decisiones'", out)
+        self.assertNotIn("'Toma de decisiones' -> 'Decision Making'", out)   # never the correction again
+        out, stop = self.run_tool("--undo", ledger, "--vpn-off", "--apply")
+        self.assertIsNone(stop, stop)
+        self.assertIn(f"put back {BATCH_A} (Attendance_Batch__c): 'Toma de decisiones', read back equal", out)
+        self.assertIn("put back and read back: 3 records", out)
+        self.assertEqual({b["Module__c"] for b in self.org.batches} | {r["Module__c"] for r in self.org.rows}, {"Toma de decisiones"})
+        self.assertEqual([(r["old"], r["new"], r["outcome"]) for r in self.ledger()[-6:]][1::2],
+                         [("Decision Making", "Toma de decisiones", "undo_written")] * 3)
+        self.assertEqual([(s, r, b) for s, r, b in self.org.updates][-3:],
+                         [("Attendance_Batch__c", BATCH_A, {"Module__c": "Toma de decisiones"})]
+                         + [("Attendance__c", r["Id"], {"Module__c": "Toma de decisiones"}) for r in rows_of(BATCH_A, 2)])
+        out, stop = self.run_tool("--undo", ledger, "--vpn-off", "--apply")
+        self.assertEqual((stop, out.count("nothing to undo:"), len(self.org.updates)), (None, 3, 7))
 
     def test_the_salesforce_commands_need_the_vpn_word_and_the_whole_write_flag(self):
         self.assertIn("check that no VPN is on", self.run_tool()[1])
@@ -316,7 +397,18 @@ class FixModuleValues(unittest.TestCase):
     def test_a_ledger_inside_the_checkout_but_outside_data_is_refused(self):
         out, stop = self.run_tool("--vpn-off", "--apply", "--dir", os.path.join(REPO, "docs"))
         self.assertIn("must be under data/", stop)
-        self.assertEqual(self.org.updates, [])
+        self.assertIn("must be under data/", self.run_tool("--undo", os.path.join(REPO, "README.md"))[1])   # the undo appends there
+        self.assertIn("there is no ledger", self.run_tool("--undo", os.path.join(self.tmp.name, "none.csv"))[1])
+        self.assertEqual((self.org.updates, os.path.exists(os.path.join(REPO, "docs", "ledger.csv"))), ([], False))
+
+    def test_a_fresh_checkout_without_data_gets_the_default_folder_created_owner_only(self):
+        with tempfile.TemporaryDirectory() as checkout, mock.patch.object(fmv, "REPO", checkout):
+            folder = os.path.join(checkout, "data", "module_fix_2026-10")
+            self.assertEqual(fmv.ledger_path(folder), os.path.join(folder, "ledger.csv"))
+            self.assertEqual([stat.S_IMODE(os.stat(p).st_mode) for p in (os.path.join(checkout, "data"), folder)], [0o700] * 2)
+            with self.assertRaises(fmv.Refused):
+                fmv.ledger_path(os.path.join(checkout, "docs"))
+            self.assertFalse(os.path.exists(os.path.join(checkout, "docs")))
 
 
 if __name__ == "__main__":

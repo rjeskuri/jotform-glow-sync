@@ -14,6 +14,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -40,14 +41,16 @@ class GirlsOrg(FakeOrg):
                         batch(4, status="Failed"), batch(5, creator="Partner report", value=25.0), batch(6, value=1.0)]
         self.rows = rows(1, 3) + rows(2, 2) + rows(6, 1)
         self.field_missing = False           # the field is not deployed yet: Salesforce refuses the read
+        self.refuse_read_back = False        # once a PATCH went out, the read of one batch by id gets no answer
 
     def call(self, *args, **kwargs):
         raise AssertionError("a raw REST call: every read must be an explicit-field SOQL query")
 
-    def grouped(self):
+    def grouped(self, batch_ids):
         counts = {}
         for r in self.rows:
-            counts[r["Attendance_Batch__c"]] = counts.get(r["Attendance_Batch__c"], 0) + 1
+            if r["Attendance_Batch__c"] in batch_ids:
+                counts[r["Attendance_Batch__c"]] = counts.get(r["Attendance_Batch__c"], 0) + 1
         return [{"Attendance_Batch__c": b, "n": n} for b, n in counts.items()]
 
     def query(self, soql):
@@ -56,12 +59,17 @@ class GirlsOrg(FakeOrg):
             raise gp.Refused("Salesforce did not answer a read (HTTP 400)")
         if soql == gp.BATCHES:
             return copy.deepcopy(sorted(self.batches, key=lambda b: b["Name"]))
-        if soql == gp.ROWS:
-            return self.grouped()
+        if m := re.fullmatch(r"SELECT Attendance_Batch__c, COUNT\(Id\) n FROM Attendance__c WHERE Attendance_Batch__c IN \((.*)\) "
+                             r"GROUP BY Attendance_Batch__c", soql):
+            ids = [i.strip("'") for i in m.group(1).split(", ")]
+            assert all(re.fullmatch(r"'\w+'", i) for i in m.group(1).split(", ")) and 0 < len(ids) <= gp.CHUNK, soql
+            return self.grouped(set(ids))
         if soql == gp.JOTFORM_SUCCESS:
             return copy.deepcopy([{"Id": b["Id"], gp.FIELD: b[gp.FIELD]} for b in self.batches
                                   if b["Processing_Status__c"] == "Success" and b["Creator__c"].startswith("Jotform")])
         if m := re.fullmatch(r"SELECT Id, Processing_Status__c, Girls_Present__c FROM Attendance_Batch__c WHERE Id = '(\w+)'", soql):
+            if self.refuse_read_back and self.updates:
+                raise gp.Refused("Salesforce did not answer a read (HTTP 0)")
             return copy.deepcopy([b for b in self.batches if b["Id"] == m.group(1)])
         raise AssertionError(soql)
 
@@ -195,6 +203,39 @@ class GirlsPresent(unittest.TestCase):
     def test_a_count_that_is_not_a_whole_number_is_a_refusal(self):
         self.org.batches[5][gp.FIELD] = 1.5
         self.assertIn("not a whole number", self.run_tool("plan", "--vpn-off")[1])
+
+    def test_the_rows_are_counted_in_chunks_of_batch_ids(self):
+        def grouped_reads():
+            return [s for s in self.org.seen if s.startswith("SELECT Attendance_Batch__c, COUNT(Id)")]
+        out = self.ok("plan", "--vpn-off")
+        self.assertEqual(len(grouped_reads()), 1)                           # six batches: one GROUP BY of six ids
+        self.org.seen.clear()
+        with mock.patch.object(gp, "CHUNK", 4):
+            self.assertEqual(self.ok("plan", "--vpn-off"), out)             # the same plan from two reads
+            self.assertEqual(len(grouped_reads()), 2)
+            self.org.seen.clear()
+            self.assertEqual(self.run_tool("check", "--vpn-off")[1], "1")   # four Jotform Success batches: one read
+            self.assertEqual(len(grouped_reads()), 1)
+        self.assertTrue(all(" IN ('" in s and s.endswith(") GROUP BY Attendance_Batch__c") for s in grouped_reads()))
+
+    def test_a_re_read_salesforce_refuses_after_a_204_closes_the_row_as_check(self):
+        self.ok("plan", "--vpn-off")
+        self.org.refuse_read_back = True
+        out, stop = self.run_tool("set", "--apply", "--vpn-off")
+        self.assertIn("BATCH-000001 a1l000000000000001: the write answered 204 but the re-read did not answer (Salesforce did "
+                      "not answer a read (HTTP 0)) - STOPPED", stop)
+        self.assertEqual([(r[1], r[3], r[4]) for r in self.ledger()],
+                         [("a1l000000000000001", "", "open"), ("a1l000000000000001", "", "check")])
+        self.assertEqual((self.values()[0], len(self.org.updates)), (3, 1))     # the PATCH took; the ledger says look
+
+    def test_a_fresh_checkout_without_data_gets_the_default_folder_created_owner_only(self):
+        with tempfile.TemporaryDirectory() as checkout, mock.patch.object(gp, "REPO", checkout):
+            folder = os.path.join(checkout, "data", "sf_girls_present")
+            self.assertEqual(gp.Paths(folder).plan, os.path.join(folder, "plan.csv"))
+            self.assertEqual([stat.S_IMODE(os.stat(p).st_mode) for p in (os.path.join(checkout, "data"), folder)], [0o700] * 2)
+            with self.assertRaises(gp.Refused):
+                gp.Paths(os.path.join(checkout, "docs"))
+            self.assertFalse(os.path.exists(os.path.join(checkout, "docs")))
 
     def test_the_live_commands_need_the_vpn_word_and_the_whole_write_flag(self):
         for argv in (("plan",), ("check",), ("set", "--apply")):

@@ -351,15 +351,36 @@ the `plans/` prefix):
   the ledger holds ids, module names and outcomes only; every Salesforce read names its fields.
 
 ## Build notes ((b), built 2026-10-06 offline on the workflow's branch; nothing run against Salesforce or Jotform)
-- The club name is compared with `backfill_resolve.answer_of` and an `isinstance(str)` check, not
-  `text_of`: `text_of`'s refusal exits with a message about the resolver's files (`resolved.json`,
-  raw copies), which this tool has none of. A non-text question 5 is simply no match.
+- The club name is compared with `backfill_resolve.answer_of`, not `text_of`: `text_of`'s refusal
+  exits with a message about the resolver's files (`resolved.json`, raw copies), which this tool
+  has none of. A non-text question 5 never equals the account name, so it is simply no match.
 - Each printed batch line ends with `created <CreatedDate> UTC`, so the reader can see whether a
   batch was created after the module values went live on its form (the "When" stop condition).
 - The ledger holds the undo's own rows (`undo_open`, `undo_written`, `undo_failed_<status>`,
-  `undo_check`), so a second `--undo` says `nothing to undo` for a record already put back, and
-  the next dry run lists the correction as due again. `--undo` without `--apply` reads the ledger
-  only and needs no `--vpn-off`.
+  `undo_check`), each with `old`/`new` as that write ran (old = the English value, new = the
+  original), so a second `--undo` says `nothing to undo` for a record already put back, and the
+  next dry run lists the correction as due again. **Review fix (2026-10-06):** a second `--undo`
+  orients each write from the row's kind - a correction's row is reversed, an undo's own row is
+  repeated as it stands - so an undo Salesforce refused (`undo_failed_<status>`) or did not
+  confirm (`undo_check`) is retried in the right direction instead of re-applying the correction;
+  the plan's "nothing to undo for a record still `open` or `failed_*`" holds, with a hint on an
+  `open`/`undo_open` record (the write's outcome is unknown). The undo refuses a ledger that does
+  not exist and runs the `--dir` rule (inside the checkout: under `data/`) on the ledger's folder,
+  since it appends there. `--undo` without `--apply` reads the ledger only and needs no `--vpn-off`.
+- `check` also covers a re-read Salesforce did not answer after a 204: the closing row is written
+  (outcome `check`, the value unknown) and the stop names the record, so `--undo` treats it as
+  written rather than leaving the record `open` with no closing row (review, 2026-10-06).
+- A batch without a `Module__c` (a partner-reported aggregate, plan `2026-10-06-attendance-totals`
+  F: the module is optional there) is out of scope, not `UNMATCHED`: it is counted in one line
+  (`without a module, not in scope: N`) on the summary and on the `nothing to correct` line, so the
+  clean state stays reachable once aggregates exist (review, 2026-10-06). The plan's SOQL has no
+  creator filter and keeps none: a typed non-canonical module on an aggregate is still listed.
+- `data/` is created (owner-only) when the ledger folder lies under it and a fresh checkout has
+  none yet; `sf_backfill.within` needs the folder to exist, and without this the default `--dir`
+  was refused with a message that said it must be under `data/` (review, 2026-10-06).
+- Docs split: the live-systems paragraph, the README / ARCHITECTURE rows, the RUNBOOK commands,
+  BACKLOG 66 and this plan's DECISIONS row are in (b)'s change; (c)'s `clearFieldOnHide` bullet in
+  the jotform-api skill and BACKLOG 67 describe (a)'s `form_status` line and go with it.
 - A row under a batch that carries another module than its batch stops the run before any write
   (the processor copies the batch's module onto every row; anything else is looked at by hand).
 - The `--since` day is an option (`--since YYYY-MM-DD`, default 2026-09-01). The dry run and the
