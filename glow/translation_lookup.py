@@ -1,8 +1,9 @@
 """Jotform's translation-dictionary lookup, emulated (docs/plans/2026-10-02-names-and-modules.md).
 
 The calculation that fills question 18 (the girls Salesforce stores as present)
-reads each ticked box's data-calcvalue, else FormTranslation.translate(value),
-else the value - never the label (.claude/skills/jotform-api). translate() looks
+reads each ticked box's data-calcvalue, else FormTranslation.translate(value) as
+it is - even '' - and the value only on a page without FormTranslation; never
+the label (.claude/skills/jotform-api). translate() looks
 the text up in a dictionary the runtime builds, in the browser, from the form's
 translation store (GET /form/{id}/translations: {language: {md5 key: text}}).
 Building it collapses whitespace in every key, so a stale `base`/`en` entry that
@@ -263,9 +264,11 @@ def target_languages(store):
 
 
 def is_altered(option, result):
-    """Whether the checkbox reader sends something else than the option: it takes
-    translate(value) when that is not empty."""
-    return bool(result) and result != option
+    """Whether the checkbox reader sends something else than the option: it pushes
+    FormTranslation.translate(value) as it is, even when that is '' (an option that
+    simplifyfWord empties is sent as ''); it falls back to the value only when
+    FormTranslation is not defined."""
+    return result != option
 
 
 def altered(store, options, primary=PRIMARY, builds=BUILDS, codes=RUNTIME_LANGUAGE_ORDER):

@@ -6079,6 +6079,19 @@ class TranslationLookup(unittest.TestCase):
         self.assertIsNone(keys)
         self.assertIn("no dictionary entry", why)
 
+    def test_an_option_that_simplifies_to_nothing_is_sent_empty(self):
+        # the checkbox reader pushes translate(value) as it is: '' for a value simplifyfWord
+        # empties, never the value (that only on a page without FormTranslation)
+        store = name_store([(self.NAME, self.NAME)], {"es": {self.NAME: self.NAME}})
+        for option in (" ", "&nbsp;", "\ufeff", "\u00a0"):
+            self.assertEqual(tl.Lookup(store).translate(option, "en"), "", repr(option))
+            self.assertTrue(tl.is_altered(option, ""), repr(option))
+            self.assertEqual(tl.altered(store, {option}), {option: ["en", "es"]}, repr(option))
+            keys, why = tl.removal(store, {option})
+            self.assertIsNone(keys, repr(option))
+            self.assertIn("no dictionary entry", why)
+        self.assertFalse(tl.is_altered(self.NAME, self.NAME))
+
 
 class FakeStoreClient:
     """glow.jotform.Client stand-in for tools/fix_name_translations.py: the five forms'

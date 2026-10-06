@@ -57,9 +57,10 @@ unless `--apply`.
   is proven on the template by the second dry run and `form_status --rendered`.
   `insertAsText` / `newCalculationType` are builder-side flags.
 - **A checkbox operand is read box by box**: for each ticked box, its `data-calcvalue`, else
-  `FormTranslation.translate(value)` when that is not empty, else `value`; never the label. One
-  checkbox's ticks are joined with `", "`; operands are joined with nothing (two visible rosters
-  fuse one token).
+  `FormTranslation.translate(value)` as it is (even `""`: `translateUncached` returns `""` when
+  `simplifyfWord` empties the value), or `value` only when `FormTranslation` is not defined;
+  never the label. One checkbox's ticks are joined with `", "`; operands are joined with nothing
+  (two visible rosters fuse one token).
 - **The dictionary lookup in a calculation** (`formTranslation.v2.js`, read 2026-10-02 in builds
   `62a8b57dd95` and `fc726a121d4`, byte-identical; emulated by `glow/translation_lookup.py`,
   which `tools/fix_name_translations.py` and `form_status.py` run). `setDictionary`: the original

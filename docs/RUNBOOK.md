@@ -1037,7 +1037,8 @@ on the forms changed that text after the mentor ticked it:
   one dictionary per offered language, cloned from the template) is built
   into a lookup in the browser, and the calculation that fills question 18
   passes every ticked name through it (the box's `data-calcvalue`, else the
-  lookup, else the value). Building the lookup collapses every whitespace run
+  lookup's answer as it is; the value only on a page without the lookup).
+  Building the lookup collapses every whitespace run
   in a key, so a stale entry that spells a girl's name with a double space, a
   tab or a no-break space lands on her exact name and replaces it: 55 roster
   options read 2026-10-02 (Africa 49, Asia 5, Latin America 1, U.S 0; 29
