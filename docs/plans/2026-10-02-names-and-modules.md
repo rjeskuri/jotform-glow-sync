@@ -146,7 +146,40 @@ no POST, PUT or DELETE):
 - **Not run: the sync's own dry run on the five forms.** The fresh Roster export it needs was
   refused by this session's permission check (it needs the sheet's service account), so the
   roster changes that arrived since are unknown here. Run it before the rollout: it must plan
-  the three module lines plus only those roster changes.
+  the three module lines plus only those roster changes. (Run on 2026-10-06, below.)
 
-**Left for the rollout (plan step 1 onwards):** the three adversarial reviews, the sync dry run
-with a fresh export, and the browser checks on the template.
+**Refresh, 2026-10-06.** `main` merged in (the back-fill result, the attendance processor fix,
+the Salesforce attendance dashboard, the work log). Main had taken BACKLOG 58-61 for the
+dashboard, so this branch's three rows are now **62** (the names audit runs only after an
+apply), **63** (other regions' girls' names on each public page) and **64** (the runtime watch);
+both 2026-10-02 DECISIONS rows kept. `make check` passes (with the 2026-08-24 enrollment CSV:
+328 clubs, 6,210 girls). A fresh read-only proof on the live forms (GETs through
+`glow.jotform.Client`, the public pages and Jotform's scripts by curl, the Roster tab exported
+by the service account; no POST, PUT or DELETE; every export and store copy deleted after):
+- Names tool dry run, all five forms: unchanged since 2026-10-02. 55 keys to remove on each
+  (base 55, en 55); altered today → after (emulated, both builds): template 55 → 0 (29 clubs),
+  Africa 49 → 0 (23 clubs), Asia 5 → 0 (5 clubs), Latin America 1 → 0 (1 club), U.S 0 → 0. No
+  refusal. Roster options: template 6,924, Africa 4,266 (4,264 on 10-02), Asia 1,636, Latin
+  America 869, U.S 155. Stores as on 10-02 (`base` 4,416, U.S 6,079; `en` 4,424, U.S 4,468).
+- Sync dry run with a fresh Roster export (7,186 rows, 6,926 active), each form: Africa, Asia,
+  Latin America and U.S plan **exactly the three module lines** (q14: 5 options, q92: 7, q93:
+  8), no roster change (the runner had kept them current), conditions unchanged. The template
+  plans the same three plus **its own roster backlog: 21 roster updates** (19 Africa clubs, 2
+  Asia; 6,924 → 6,926 girls; each equal in count to the club's roster on its regional form, the
+  runner never syncs the template) and so a rewrite of its conditions (395 kept, 0 new, 0
+  dropped). Read it before the template's apply (RUNBOOK rollout step 1).
+- `tools/auto_sync.py` dry run on the same export: every region `attention`, "would write the
+  calcValues of 3 module dropdown(s) (q14, q92, q93) - never unattended", nothing else.
+- `form_status.py --rendered`, all five: NOT CLEAN on the new checks only, as on 10-02 (template,
+  Africa, Asia, Latin America 8 problems each; U.S 6). Question 18 rule 1 with the picker an
+  operand, every roster required, the picker's `data-calcvalue`s, the guard, 0 conditions in
+  error, `salesforce yes` and the region comparison (0 missing, 0 differ) clean on all five.
+- **New runtime builds** (BACKLOG 64's watch): Asia is now served `7a7e75787df`, Africa
+  `9083adfcdff` (the template `fc726a121d4`, U.S and Latin America `62a8b57dd95` as before).
+  Their `formTranslation.v2.js` is byte-identical to the 2026-10-02 builds' (one SHA-256 for
+  all four), so `glow/translation_lookup.py` stands; their `jotform.forms.js` differs from
+  `62a8b57dd95`'s only in the payment total's screen-reader text (no rule, calculation or
+  `data-calcvalue` code).
+
+**Left for the rollout (plan step 1 onwards):** the three adversarial reviews and the browser
+checks on the template; repeat the dry runs on the day (a fresh export).

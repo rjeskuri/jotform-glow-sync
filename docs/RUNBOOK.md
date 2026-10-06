@@ -1129,6 +1129,12 @@ Read on 2026-10-02 (dry runs from the branch, nothing written):
 | Asia | 5 → 0 (5 clubs) | 55 (55, 55) | 3 | NOT CLEAN: 8 |
 | Africa | 49 → 0 (23 clubs) | 55 (55, 55) | 3 | NOT CLEAN: 8 |
 
+Re-read 2026-10-06 with a fresh Roster export: the same counts on every form;
+the sync planned only the three module lines on the four regional forms, and
+on the template those plus its own roster backlog (21 rosters, which the
+runner never syncs there) and with it a conditions rewrite. The plan's Build
+notes have the detail.
+
 **Rollout**, each write Ryan's go, template first. Wait for one runner run
 with all four regions `in-sync`, then set `AUTO_SYNC_APPLY=0` for the whole
 window and confirm it (no run in progress). Close every builder tab on these
