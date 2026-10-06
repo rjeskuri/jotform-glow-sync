@@ -1,7 +1,7 @@
 ---
 title: Clubs that do not report through Jotform leave the forms - a Partners-tab marker for the three partners, deactivation of the U.S clubs, the U.S form disabled
 author: Claude (with Ryan's decisions of 2026-10-06; code and docs read on `main` 9d58ce4 and the branch wf10/four-issues, Jotform GET, Salesforce read connector, 2026-10-06; revised after two reviews the same day)
-status: proposed
+status: accepted         # Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
 created: 2026-10-06
 intent: docs/intent/2026-10-06-clubs-off-jotform.md
 ---
@@ -143,15 +143,15 @@ cell, so the Partners tab is exported too and passed as `--partners <csv>`:
 
 **`RETIRE_INACTIVE`** (glow/sync.py, beside `ROSTERS_REQUIRED` :192 and `CONTACT_IDS_FIRST`
 :171). The second trigger - a club with no active girl leaves the picker in every region - is
-Ryan's open decision, not his decision 5, so it is built behind a constant that ships **off**:
-with `False` a club that loses its last active girl keeps today's `?` treatment; with `True` it is
-retired as below, and only when the club's latest `removed_date` is at least a day before the
-run's UTC date (`roster_pairs`, glow/sync.py:296, learns the latest `removed_date` per pair) - a
-club emptied by "REMOVE every girl" and refilled by "ADD the new girls" minutes later on the Club
-Roster Form (each submission dispatches a sync, appsscript/FormHandlers.gs:866) must not vanish from
-the picker in between. Tests cover both values; his answer flips the constant and goes into
-DECISIONS. Off, the 11 deactivated U.S rosters stay on the template's picker as `?`-kept rosters
-(11 `?` lines on a hand sync; the template is not the runner's).
+built behind a constant - **Ryan, 2026-10-06: on** (`RETIRE_INACTIVE = True`): a club whose
+rows are all inactive is retired as below, but only when the club's latest `removed_date` is at
+least a day before the run's UTC date (`roster_pairs`, glow/sync.py:296, learns the latest
+`removed_date` per pair) - a club emptied by "REMOVE every girl" and refilled by "ADD the new girls"
+minutes later on the Club Roster Form (each submission dispatches a sync,
+appsscript/FormHandlers.gs:866) must not vanish from the picker in between. With `False` a club
+that loses its last active girl keeps today's `?` treatment. Tests cover both values; the decision
+goes into DECISIONS. So the 11 deactivated U.S rosters leave the template's picker at its next
+hand sync (`~ retired roster … no active girl in the Roster`, the day after the deactivation).
 
 **Retired rosters in the sync** (the new state). Decided **before** the reconcile loop, so that
 both of its branches see the same thing: a roster whose club's name another partner's club shares
@@ -745,8 +745,8 @@ DRY RUN - re-run with --apply to write
    still never deleted. A retired roster whose club's name two partners have had is restored with
    its long name, as a question-5 change by hand. Rejected: keeping the show rule as the roster's
    memory (a rule testing an unlisted entry is what the rollback tool and the runner call broken).
-3. "No active girl" as a second trigger is `glow.sync.RETIRE_INACTIVE`, off until Ryan decides
-   (recommended on, with the `removed_date`-before-today rule).
+3. "No active girl" as a second trigger is `glow.sync.RETIRE_INACTIVE`, **on** (Ryan,
+   2026-10-06), with the `removed_date`-before-today rule.
 4. The 11 U.S clubs are deactivated in the Roster (inactive, removed_date, ids kept, ClubRegistry
    untouched; `deactivate_clubs.py --undo` is the way back) and the U.S form is disabled; a
    disabled form is `skipped` by the runner, not failed, and is not synced down to an empty Club
@@ -770,9 +770,8 @@ DRY RUN - re-run with --apply to write
 ## Open decisions (for Ryan)
 
 - The column name and values (`jotform`: `no` / `yes` / blank) - or `attendance_source`.
-- `RETIRE_INACTIVE`: "no active girl = off the picker" for every region (recommended: yes, with
-  the `removed_date`-before-today rule), or only the marker and the U.S deactivation. Off, the 11
-  U.S rosters stay on the template's picker as kept rosters.
+- ~~`RETIRE_INACTIVE`: "no active girl = off the picker" for every region, or only the marker and
+  the U.S deactivation~~ - **decided 2026-10-06: on**, with the `removed_date`-before-today rule.
 - The retired rosters' option lists on the Africa form (751 names) and the U.S form (155): leave
   (recommended for now; the first blanking write to a checkbox question is untested, and the
   disabled U.S form is unreachable) or blank them in a later, tested step (a BACKLOG item).

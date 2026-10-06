@@ -1,7 +1,7 @@
 ---
 title: The module a submission sends is one required dropdown and exact text
 author: Claude (with Ryan's decisions of 2026-10-06; from the read-only module investigation of the same day)
-status: proposed
+status: accepted         # Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
 created: 2026-10-06
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends what Salesforce must match; nothing new is built on the forms)
 ---

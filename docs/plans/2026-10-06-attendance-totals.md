@@ -1,7 +1,7 @@
 ---
 title: One attendance total for leadership that includes the partners who report counts, with the per-girl figures labelled Jotform only, and the clubs that did not submit or sent a blank in plain view
 author: Claude (with Ryan's decisions of 2026-10-06)
-status: proposed
+status: accepted         # Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
 created: 2026-10-06
 intent: docs/intent/2026-10-06-attendance-totals.md
 ---
@@ -143,17 +143,20 @@ column exists until 58 is built; it is kept off every report and tile until then
 a zero. If Ryan prefers not to carry an empty field, strike it here and in D; nothing else
 changes.
 
-**`Attendance_Batch__c.Partner__c`** - formula (Text) `Account__r.Parent.Name`, label "Partner".
-Why: the batch reports in D group and filter by partner, and the dashboard's Partner filter needs
-a column on each component's report whose values are the partner names; a formula on the batch
-gives exactly `Parent.Name`, the same text `PARENT.NAME` and `Account$Parent` give on the other
-reports. The alternative - adding the lookup's parent's fields to the custom report type ("fields
-related via lookup", two hops: batch → club account → parent account) - is offered by the report
-type editor, but whether the metadata deploy accepts the second hop was **not verified**; the
-formula itself is certain (a one-hop-then-parent formula on a lookup is ordinary) and also works
-in list views. Whether a formula column can serve as a dashboard **filter column** on the batch
-components is not verified either - see D.3 and Risks. Blank for a partner-less club (today only
-the two pilots on hold).
+**The partner on a batch report: the lookup path first, a formula field only as the fallback**
+(amended 2026-10-06 on session -51's advice, from its two deploys). The batch reports in D group
+and filter by partner, and the dashboard's Partner filter needs a column on each component's
+report whose values are the partner names. The custom report type carries the club's parent
+**"via lookup"** - `Account__c` → Parent (Name) added to the report type's fields, the column then
+of the shape `Attendance_Batch__c$Account__c.Parent` (the exact token is read from the deployed
+type's describe, `GET /services/data/vXX.X/analytics/reportTypes/<type>`); this org's own DHIS2
+dashboard already filters on such a via-lookup column (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`),
+so the pattern is proven here, and it needs no new field, no field-level security and no extra
+deploy. Only if the check-only validate refuses the two-hop path does the plan fall back to
+**`Attendance_Batch__c.Partner__c`** - formula (Text) `Account__r.Parent.Name`, label "Partner",
+read permission on the Admin profile - whose use as a dashboard **filter column** is itself
+unverified (D.3, Risks). Either way the value is blank for a partner-less club (today only the two
+pilots on hold).
 
 **Field-level security.** The 2026-09-30 deploy gave its new field read/edit on the System
 Administrator profile only ([plan](2026-09-30-monthly-report-checkbox.md) `:107-108`), and
@@ -162,7 +165,7 @@ does: the live integration user, the dashboard's running user (Ryan) and the 7 u
 open the hidden Attendance folders are all System Administrators (read 2026-10-06). Apex sets the
 field in a trigger, where field permissions are not checked. So: `profiles/Admin.profile-meta.xml`
 with `<fieldPermissions>` read + edit for `Girls_Present__c` and `Girls_Enrolled__c`, read for
-`Partner__c` (a formula is read-only), in the same deploy. If the intake (F) ends up with a user
+`Partner__c` only if the fallback formula is created (a formula is read-only), in the same deploy. If the intake (F) ends up with a user
 on another profile typing the counts, that profile needs edit on `Girls_Present__c` then - with
 that plan.
 
@@ -349,7 +352,8 @@ every batch from before the deploy.
 **1. Custom report type `Attendance_Batches`** -
 `force-app/main/default/reportTypes/Attendance_Batches.reportType-meta.xml`: `baseObject
 Attendance_Batch__c`, category `other`, deployed, label "Attendance Batches", one section with
-`Name`, `Account__c`, `Account_Name__c`, `Partner__c`, `Attendance_Date__c`, `CreatedDate`,
+`Name`, `Account__c`, `Account_Name__c`, the club's parent via lookup (`Account__c` → Parent Name;
+`Partner__c` instead only if the fallback formula is created), `Attendance_Date__c`, `CreatedDate`,
 `Creator__c`, `Processing_Status__c`, `Status_Message__c`, `Module__c`, `Module_Week__c`,
 `Module_Year__c`, `Girls_Present__c`, `Girls_Enrolled__c`. **`Contact_IDs__c` is left out on
 purpose**: it is the names list, and no report built on this type can show it.
@@ -394,10 +398,13 @@ Notes on the table:
 - A duplicate (`Failed` "Duplicate: …") counts as submitted, per Ryan: no status criterion.
 - **The existing last-month tile** counts attendance rows (Jotform only), so a club whose only
   September batch was a blank or a duplicate is "without attendance" there but "submitting" on
-  the two new tiles (today 196 against 194). **Proposed**: switch its cross filter to `without
-  Attendance_Batch__c` of any status (drop the creator criterion, rename it "Clubs Not Submitting
-  - Last Month") so the three windows mean one thing. It changes a live report's meaning, so it
-  is listed under "Decisions to record" for Ryan's word; default = switch.
+  the two new tiles (today 196 against 194). **Ryan, 2026-10-06: it stays row-based** ("no
+  Jotform attendance rows last month"); the two new tiles are batch-based ("no submission of any
+  kind"), and the How-to box names the difference in one sentence ("Clubs with no attendance last
+  month counts Jotform rows; clubs not submitting counts submissions of any kind, blanks and
+  duplicates included"). The proposed switch (cross filter `without Attendance_Batch__c` of any
+  status) is recorded here as rejected, so the complement with the "clubs that sent attendance"
+  metric (unique Account over `Attendance__c` rows) holds.
 - "Blank" before B lands would be an Accounts report `with Attendance_Batch__c (Success, in the
   window)` and `without Attendance__c (in the window)`; since B is deployed first in the order of
   work, the batch report above is built directly and the Accounts variant is the fallback only.
@@ -425,7 +432,9 @@ Lightning limit is 20):
   `fix1` made the last-month table per partner, `gen.py:215-216`; the club list is one click away
   in the report). The last-month metric and table stay.
 - **Partner filter mapping per component** (`dashboardFilterColumns`, `gen.py:164`): batch
-  reports → `Attendance_Batch__c$Partner__c`; Accounts reports → `PARENT.NAME` (as `:214`); the
+  reports → the via-lookup parent column (`Attendance_Batch__c$Account__c.Parent` or as the deployed
+  type's describe spells it; `Attendance_Batch__c$Partner__c` only with the fallback formula);
+  Accounts reports → `PARENT.NAME` (as `:214`); the
   existing Contacts reports → `Account$Parent`. The 49 values are the same partner names on
   every column, so one filter drives all 19 components. No new filter value is needed (`Partner
   report` is a creator, not a partner); the filter stays at 49 of 50 (BACKLOG 60.6). **A formula
@@ -444,7 +453,7 @@ below are today's, re-read on the day):
 |---|---|---|
 | Total attendance, last month (all sources) | `SELECT SUM(Girls_Present__c) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Attendance_Date__c = LAST_MONTH` | 6,177 after C (no aggregates yet) |
 | Jotform only, last month | same + `AND Creator__c LIKE 'Jotform%'`; must equal `SELECT COUNT(Id) FROM Attendance__c WHERE Attendance_Date__c = LAST_MONTH` | 6,177 = 6,177 |
-| Total by partner by month | `SELECT Partner__c, CALENDAR_MONTH(Attendance_Date__c), SUM(Girls_Present__c) … GROUP BY …` | one row per partner-month |
+| Total by partner by month | `SELECT Account__r.Parent.Name, CALENDAR_MONTH(Attendance_Date__c), SUM(Girls_Present__c) … GROUP BY …` | one row per partner-month |
 | Clubs not submitting, last 14 days | `SELECT COUNT(Id) FROM Account WHERE RecordType.DeveloperName = 'Club' AND ParentId != null AND Id NOT IN (SELECT Account__c FROM Attendance_Batch__c WHERE Attendance_Date__c = LAST_N_DAYS:14)` | 202 |
 | since 1 Sept | same with `Attendance_Date__c >= 2026-09-01` | 182 |
 | last month (batches of any status) | same with `= LAST_MONTH` | 194 (row-based, Jotform only: 196) |
@@ -671,13 +680,15 @@ fill must be done before D's totals are read, or every batch from before the dep
 3. **"Did not submit" = no `Attendance_Batch__c` of any status dated in the window** (a `Failed`
    duplicate counts as submitted), for three windows: last 14 days, since 1 September, last
    calendar month. **"Blank" = `Failed` "No participants submitted", or a legacy `Success` with
-   `Girls_Present__c` 0.** The existing last-month tile switches from attendance rows to batches
-   so the three windows agree (*pending Ryan's word*). Non-reporting clubs are excluded at the
+   `Girls_Present__c` 0.** The existing last-month tile stays row-based (Ryan, 2026-10-06: "no
+   Jotform attendance rows"), beside the two batch-based windows, the difference named in the
+   How-to box. Non-reporting clubs are excluded at the
    source, not with a Salesforce-side marker (Ryan, 2026-10-06; the sheet's `jotform=no` is the
    clubs-off plan's), so the lists carry the 50 clubs that cannot submit until their counts arrive.
-4. **`Partner__c` on the batch is a formula `Account__r.Parent.Name`**, so batch reports group by
-   partner and the dashboard's one Partner filter drives every tile. The custom report type
-   `Attendance_Batches` leaves `Contact_IDs__c` out.
+4. **The batch report type carries the club's parent via lookup** (`Account__c` → Parent Name),
+   so batch reports group by partner and the dashboard's one Partner filter drives every tile with
+   no new field; a `Partner__c` formula (`Account__r.Parent.Name`) is created only if the validate
+   refuses the two-hop path. The custom report type `Attendance_Batches` leaves `Contact_IDs__c` out.
 5. **A stray club account the processor created is re-parented, never re-created** (its
    Contacts and rows stay) - done for the two WESAD clubs on 2026-10-06 10:53 UTC (Ryan's go, main
    `00ee471`; `00ee471` wrote BACKLOG 27 and the dashboard plan, not this file); until BACKLOG 27
@@ -688,15 +699,14 @@ fill must be done before D's totals are read, or every batch from before the dep
    trigger need none); any other profile that types counts gets edit with the intake plan.
 7. **The blank batch's message is the literal "No participants submitted"** - Ryan's `Failed`
    "No participants" plus one word, one value for the Apex constant, its tests, the report
-   criterion and `outcome_of`'s prefix (*pending Ryan's word*; his exact words are a one-literal
-   change).
+   criterion and `outcome_of`'s prefix (confirmed by Ryan, 2026-10-06).
 
 ## Open decisions (for Ryan)
 
 - **Intake** (F): Jotform aggregate form, coordinator in Salesforce (flow), or sheet import.
 - `Girls_Enrolled__c` now, empty (recommended), or with BACKLOG 58.
-- Switch the existing last-month tile to batches of any status (recommended), or keep it
-  row-based and Jotform-only beside the two new windows.
+- ~~Switch the existing last-month tile to batches of any status, or keep it row-based~~ -
+  **decided 2026-10-06: kept row-based.**
 - The 14-day and since-launch windows test the **session date** (recommended) or the day the
   submission arrived.
 - The 50 clubs that cannot submit on Jotform in the "did not submit" lists: accept the padding
