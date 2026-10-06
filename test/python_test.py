@@ -6613,11 +6613,11 @@ class ModuleAndNamesAudit(unittest.TestCase):
             q.setdefault("qid", q_id)
         stale = served_store(qs, {md5("Jane  Doe"): ("Jane  Doe", "Jane  Doe")})
 
-        def report(store):
+        def report(store, questions=qs):
             class Fake:
                 def get(self, path, **params):
                     if path.endswith("/questions"):
-                        return copy.deepcopy(qs)
+                        return copy.deepcopy(questions)
                     if path.endswith("/properties"):
                         return {"conditions": wire, "language": [{"options": "English (US)|Español",
                                                                    "primaryLanguage": "en"}]}
@@ -6645,6 +6645,17 @@ class ModuleAndNamesAudit(unittest.TestCase):
         self.assertEqual(problems, [])                                # a note, never applied-unverified
         self.assertIn("names dictionary not checked (the store could not be read", notes[0])
         self.assertNotIn("cut-off", json.dumps(rep["names_dictionary"]))
+        # the module half: a dropdown without calcValues is a rule problem, so the verify step fails
+        rep = report(served_store(qs))
+        self.assertEqual(rep["module_values"]["14"], {"options": 1, "aligned": True})
+        self.assertFalse([p for p in rep["rule_problems"] if p.startswith("module dropdown")])
+        bare = copy.deepcopy(qs)
+        bare["14"]["calcValues"] = ""
+        rep = report(served_store(qs), bare)
+        self.assertFalse(rep["module_values"]["14"]["aligned"])
+        self.assertTrue(any(p.startswith("module dropdown q14 (year 1): no calcValues") for p in rep["rule_problems"]))
+        problems, _ = auto_sync.verify_report(dict(clean, **{k: rep[k] for k in ("rule_problems", "names_dictionary")}))
+        self.assertTrue(any("module dropdown q14" in p for p in problems))
 
     def test_the_served_page_is_read_for_the_module_values_and_the_names(self):
         from unittest import mock
@@ -6682,6 +6693,10 @@ class ModuleAndNamesAudit(unittest.TestCase):
         self.assertIn("rendered page: the embedded dictionary alters 1 of the 8 roster options it serves (1 "
                       "roster(s))", problem)
         self.assertNotIn("Jane", problem + json.dumps(r))
+        # a value served html-escaped is looked up as the option it is; a box outside the rosters is no option
+        page = ('<input type="checkbox" id="input_7_0" value="Amara O&#x27;Fennwhistle &amp; Grace">'
+                '<input type="checkbox" id="input_8_0" value="Not a roster">')
+        self.assertEqual(form_status.rendered_options(page, ["7"]), [("7", "q7", "Amara O'Fennwhistle & Grace")])
         problems, r = rendered("<html></html>")
         self.assertEqual(len(problems), 4)                        # never vouched for: three selects, the store
         self.assertIn("no select for module dropdown q14", problems[0])
