@@ -1901,6 +1901,7 @@ Its filters are unchanged.
   everything, but a chart's report runs as the viewer, and club accounts are private (owned by
   administrators, no sharing rules). A standard user would then see few or no rows behind a
   full chart.
+- **Photos**: none in Salesforce since 2026-10-01; they are in Google Drive ("Photos" below).
 
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
 - Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report and the
@@ -1945,6 +1946,140 @@ Its filters are unchanged.
   - the dashboard `Jotform_Attendance_test`.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched.
+
+## Photos
+
+Plan: [plans/2026-10-06-photos-to-drive.md](plans/2026-10-06-photos-to-drive.md).
+
+**Photos.** Since 2026-10-01 no attendance photo goes to Salesforce (the CEO's decision: the
+files there were deleted that day and the four regional forms' mapping lost its upload row; the
+template follows in step 1). Since <date> the photos are copied by Jotform's Google Drive
+integration into the My Drive of <role account>, folder `Attendance photos - <Region>`, one
+subfolder per submission named `<Club Name> <Attendance Date>`, uploaded files only, no PDF
+(the PDF renders every ticked girl's name). The photo stays required on the forms. The photos
+before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
+<named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
+
+`python3 tools/integration_status.py` reads every form's integration: `ok (one action, 8
+fields, Account_Name__c from q5, no upload)` is right, a mapped photo reads `NOT RIGHT: the
+upload field is ['19'], not []`, and `other integrations:` lists the other blocks the form
+carries - the Google Drive block's key once step 2 is done (whether the API shows the block at
+all is unverified until then; `none` on every form on 2026-10-06).
+
+*Setting it up (Ryan, in the builder; the API cannot; template first). Every builder save is a
+live write to a form, so each one follows the ritual: a quiet moment with no other rollout on
+the forms, a backup before, a re-read and compare after. The `/properties` snapshot
+`backup_forms.py` writes holds `integrations`, `emails` and `conditions`, so the compare is a
+plain `diff` of the snapshot before and the one after.*
+
+1. **Template, Salesforce first**. Before: `python3 backup_forms.py` (**all** forms, not just the
+   template: a change to the connected account propagates to every form, see below; note the
+   stamp it prints). Then Settings → Integrations → Salesforce → the existing action (create
+   `Attendance_Batch`) → remove the file upload (Group Photo) → save. **Edit the action; never
+   remove the connected Salesforce account - that detaches the integration from all ten forms
+   (2026-09-30).** After: `python3 backup_forms.py --form 262352490535154` and
+   `diff backups/262352490535154/properties-<before>.json backups/262352490535154/properties-<after>.json`
+   → the only hunks are inside `integrations` (the upload row gone); `emails`, `conditions`,
+   `clearFieldOnHide` byte-identical; `python3 backup_forms.py` again for the other four and
+   the same diff on each → empty. Then `python3 tools/integration_status.py` → every live form
+   `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
+   this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
+2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
+   Settings → Integrations → Google Drive → Authorize → log in as the role account (never your
+   own) → Folder Name `Attendance photos - Template` → Create Subfolders for Submissions ON,
+   name = the "Club Name" field that is **question 5** (the hidden text field; the builder shows
+   the Club picker under the same label - prefer the hidden one; if only the picker is offered,
+   use it and say so in the plan's Result), a space, then "Attendance Date" → Send Uploaded Files
+   ON → **Send Submission PDFs OFF** → Save. After: `backup_forms.py --form 262352490535154`
+   and the diff → hunks inside `integrations` only (a block added, or nothing visible: see the
+   next line), nothing else changed. Then
+   `python3 tools/integration_status.py --form 262352490535154` → the `other integrations:`
+   line names the Drive block, or says none (then the API cannot see it; the Drive check below
+   is by eye).
+3. **One test submission on the template, arranged to change nothing in Salesforce.** A
+   template submission goes through the Salesforce integration like any other and is a real
+   batch for a real club ([contact-ids plan](plans/2026-09-30-contact-ids.md), build notes: "a
+   delivered one is a real batch for a real club"). The processor refuses a second batch for a
+   club and date that already has a Success batch, *before* it reads any name
+   (`processBatch` → `resolveClubAccount` → `isDuplicateBatch` → return, the deployed
+   `AttendanceBatchProcessor.cls` under `data/sf_processor_2026-10-02/after/`): such a batch is
+   Failed `Duplicate: …` with no attendance row and no Contact created. `resolveClubAccount`
+   runs first, though, and **creates a partner-less Club account when question 5 matches no
+   Account name** (the BACKLOG 27 path, seen twice on 2026-10-03) - so the club must be one
+   whose Account name is plain, never one of the seven `<club> - <partner>` names. Mentors
+   submit late (19 of the 27 duplicates since 10-01 were September dates re-sent in October) and
+   a Success batch dated today is the exception, so the query is a window, not a day - read-only
+   SOQL: `SELECT Account_Name__c, Attendance_Date__c FROM Attendance_Batch__c WHERE
+   Processing_Status__c = 'Success' AND Attendance_Date__c = LAST_N_DAYS:3 ORDER BY
+   Attendance_Date__c DESC LIMIT 5`; take the newest club + date pair whose name has no
+   ` - <partner>` suffix; **never a free date**. Also read, before the submission,
+   `SELECT COUNT() FROM Account WHERE RecordType.DeveloperName = 'Club' AND ParentId = null`
+   (2 on 2026-10-06: the two pilots). On the template pick that club and that date, tick one
+   girl (the roster is required), type your own address as the Partner Coordinator Email, and
+   upload a **neutral image with nobody in it**. Open the mentor link
+   (`https://form.jotform.com/262352490535154`), not the builder's preview (whether a preview
+   submission runs the integrations is unverified). **Two e-mails go out with it**: the
+   template's staff notification ("Notification 1", to one fixed address set in the form's
+   Emails tab - it is not in the repo - with the ticked girl's name and the photo link) and the
+   mentor confirmation to the address you typed. Tell the notification's recipient beforehand,
+   or pause that e-mail for the test and switch it back on afterwards (whether a paused e-mail
+   stays in the `emails` list is unverified; the diff of step 4 shows whatever changed and that
+   it came back).
+4. **Read back, within a few minutes:**
+   - Drive (as the role account): folder `Attendance photos - Template` → one subfolder named
+     exactly `<that club> <that date>` → one image file, **no PDF**.
+   - Salesforce (read-only SOQL): exactly one new batch for that club and date,
+     `Processing_Status__c = 'Failed'`, `Status_Message__c LIKE 'Duplicate:%'`, 0 `Attendance__c`
+     rows (`SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = '<id>'`), no new
+     Contact (`SELECT COUNT() FROM Contact WHERE CreatedDate = TODAY AND AccountId = '<club
+     id>'` unchanged from before the test), and the partner-less Club account count unchanged
+     (the query of step 3; 2 today). Then delete that one batch - Ryan's go, one write (the
+     write connector or Ryan in the Salesforce UI) - and read it back as gone.
+   - Jotform: `python3 tools/form_status.py --form 262352490535154 --roster <csv>` →
+     `submissions 2`, CLEAN, `salesforce yes`; `backup_forms.py --form 262352490535154` and the
+     diff against step 2's "after" snapshot → nothing but `count` (the submission) and, if you
+     paused the notification, `emails` back to the original. Delete the test submission in
+     Jotform Tables (Ryan; it frees no space for 30 days), or leave it: it holds one girl's tick
+     and a test photo.
+   - If the subfolder shows a name other than the club's (the picker's text, or empty): fix the
+     Form Fields choice before any regional form.
+5. **The regional forms**, at a quiet moment, smallest first: Latin America `262383455778067`,
+   Asia `262383129464057`, Africa `262382821971058` (U.S skipped: it is being disabled). Per
+   form: `python3 backup_forms.py --form <id>` before; the same settings, folder
+   `Attendance photos - <Region>`, the "Club Name" field that is question 5 on that form;
+   `backup_forms.py --form <id>` after and the diff → hunks inside `integrations` only;
+   `python3 tools/form_status.py --form <id> --roster <csv>` → CLEAN. **No test submission on a
+   regional form**: Asia and Africa submit many times a day, Latin America a few; the read-back
+   is the first real submission's photo appearing in the form's Drive folder (within a day),
+   and `python3 tools/integration_status.py --form <id>` → `other integrations:` naming the
+   block (a `drive: yes` line follows once the key is known and coded - the tool's TODO). After
+   the last form, and once the U.S form reads `DISABLED` (the clubs-off plan): `DRIVE_WANTED =
+   True` in the tool, `integration_status.py` → the template and three regionals `drive: yes`,
+   U.S `drive: not wanted (form DISABLED)`, `integration: ok`; `form_status.py` → every form
+   CLEAN, `salesforce yes`.
+6. **When copies stop** (a subfolder dated more than a week ago is the newest while the form has
+   newer submissions; or Jotform e-mails a token error): the Google token has lapsed. In the
+   builder, on each affected form: Settings → Integrations → Google Drive → remove → add again
+   with the same settings (step 2, backup and diff included); read back with the next real
+   submission. Nothing in the repo raises an alarm for this (BACKLOG 70); look at the folders
+   once a month.
+7. **Storage**: `python3 tools/form_status.py --roster <csv>` prints
+   `storage: upload space N GiB of 10.00 GiB (P%) -> ok; submissions this cycle N of 2,500 (P%,
+   resets <date>) -> ok; plan SILVER` on its first lines (`glow/usage.py`: `GET /user/usage`
+   against the plan's limits; a read that fails is `storage: could not be read (…)`, never a
+   form problem). Each limit is judged on its own: `warn` from 50 % of it, and from 80 % the
+   automatic sync raises an ATTENTION naming the limit every morning until acted on (`!! ` on
+   the line here). **Upload space** is the one Gold or retention answers: at about 50 % of it,
+   decide Gold (100 GiB, nonprofit $594 a year against Silver's $234) or a retention policy
+   (BACKLOG 68). A **submissions** `warn` is a busy month (1,250 submissions in the cycle) and
+   resets on the date printed; it means Gold's 10,000 a month, not retention. Never switch on
+   Jotform's Auto Delete Submissions without reading BACKLOG 68 first.
+
+*Rollback.* Removing the Google Drive integration from a form in the builder stops the copies;
+the photos stay in Jotform and nothing else on the form changes (the before/after diff of that
+save says so). The template's Salesforce upload row is re-added only on the CEO's word, with
+`UPLOADS = ["19"]` put back in `tools/integration_status.py`. What is already in Drive is the
+owner's to delete (the CEO's retention decision).
 
 ## Work log and invoices
 

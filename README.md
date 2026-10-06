@@ -32,7 +32,7 @@ every operational procedure, with its dry-run and apply forms, in
 | `sync_attendance_form.py` | The product: makes one form match the Roster export — rosters, the Club picker, and every condition. Dry run by default, `--apply` writes |
 | `backup_forms.py`, `restore_conditions.py` | Snapshot a form; roll its conditions back |
 | `tools/auto_sync.py` | The unattended loop run by GitHub Actions: export → plan → safety bands → backup → apply → verify → `SyncLog` |
-| `tools/form_status.py` | Read-only audit of every form against the Roster (rules, integration, languages, drift) |
+| `tools/form_status.py`, `tools/integration_status.py` | Read-only audits: every form against the Roster (rules, integration, languages, drift); the Salesforce integration's mapping on every form (no photo since 2026-10-01) and the other integration blocks a form carries |
 | `tools/sheets_client.py`, `tools/upload_roster.py`, `tools/build_roster_offline.js` | Sheet access; rebuilding and uploading the Roster tabs offline with the same `.gs` code |
 | `tools/needs_attention.py`, `tools/derive_partner_regions.py` | Data-quality report; partner → region derivation (generates `appsscript/Regions.gs`) |
 | `tools/add_translations.py`, `add_language.py`, `restore_translations.py`, `add_feedback_link.py`, `clone_regional.py` | Languages, the links above Submit (problem report, Club Roster Form), building a regional form |
