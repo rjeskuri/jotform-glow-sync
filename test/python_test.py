@@ -29,6 +29,8 @@ import add_feedback_link              # noqa: E402
 import add_language                   # noqa: E402
 import add_translations               # noqa: E402
 import auto_sync                      # noqa: E402
+import deactivate_clubs               # noqa: E402
+import disable_form                   # noqa: E402
 import fix_name_translations          # noqa: E402
 import fix_roster_order               # noqa: E402
 import form_status                    # noqa: E402
@@ -36,6 +38,7 @@ import rename_club                    # noqa: E402
 import restore_conditions             # noqa: E402
 import switcher_flags                 # noqa: E402
 import update_static_fields           # noqa: E402
+import upload_roster                  # noqa: E402
 import worklog                        # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
 from glow import forms as glow_forms  # noqa: E402
@@ -3969,6 +3972,20 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertTrue({"partner", "club", "full_name", "status", "region"} <= set(cols))
         self.assertEqual(cols[0], "girl_id")
 
+    def test_partner_columns(self):
+        # the Partners tab's columns: Roster.gs writes them (setUpTabs, seedPartners_) and reads the
+        # jotform cell for the mentor e-mails (loadPartnerJotform_), the offline builder keeps its own
+        # copy, Python reads the cell for the forms (glow.sync). CLAUDE.md rule 7: change all three
+        for path in (ROSTER_GS, os.path.join(REPO, "tools", "build_roster_offline.js")):
+            m = re.search(r"const PARTNER_COLS = \[(.*?)\];", read(path), re.S)
+            self.assertIsNotNone(m, path)
+            self.assertEqual(tuple(re.findall(r"'([a-z_]+)'", m.group(1))), glow_sync.PARTNER_COLS, path)
+            self.assertEqual(m.group(1).count("'") // 2, len(glow_sync.PARTNER_COLS), path)
+        self.assertIn(glow_sync.JOTFORM_COL, glow_sync.PARTNER_COLS)
+        self.assertEqual(glow_sync.PARTNER_COLS[:3], ("partner", "region", "notes"))   # the live tab's header
+        # the Apps Script reads the mark by that column name, never by a fixed letter
+        self.assertIn(f"PARTNER_COLS.indexOf('{glow_sync.JOTFORM_COL}')", read(ROSTER_GS))
+
     def test_regions_match_glow_forms(self):
         # the Club Roster Form's region picker (Config.gs REGIONS) must offer
         # exactly the regions the Python sync routes on — spelling included
@@ -4460,6 +4477,536 @@ class RenameClub(unittest.TestCase):
         code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
         self.assertEqual(code, 0, out)
         self.assertEqual(sheet.tabs["Audit"][-1][1], "moveClub")
+
+
+class GuardForms:
+    """The GETs tools/deactivate_clubs.py's guard makes: the filtered submissions page(s)
+    of each form and its questions (q444 is the Club picker). subs: {form id: [submission]}."""
+
+    def __init__(self, subs=None, picker="444"):
+        self.subs, self.picker, self.gets = subs or {}, picker, []
+
+    def get(self, path, **params):
+        self.gets.append((path, params))
+        if path.endswith("/questions"):
+            return {self.picker: {"type": "control_dropdown", "name": sync.PICKER_NAME},
+                    "5": {"type": "control_textbox"}}
+        page = self.subs.get(path.split("/")[2], [])
+        offset, limit = int(params.get("offset", 0)), int(params.get("limit", 1000))
+        return page[offset:offset + limit]
+
+
+def submission(sid, created, q5, picks):
+    """One attendance submission as the API lists it, the two answers the guard reads."""
+    return {"id": sid, "created_at": created,
+            "answers": {"5": {"answer": q5}, "444": {"answer": picks}, "18": {"answer": "x"}}}
+
+
+class DeactivateClubs(unittest.TestCase):
+    """tools/deactivate_clubs.py on an in-memory sheet and a fake form: the plan, the guard
+    and its match rule, the write, the re-read, the Audit row, --undo."""
+
+    HDR = ["girl_id", "partner", "club", "region", "full_name", "last_name", "status",
+           "added_date", "removed_date", "source"]
+    AFRICA, US = glow_forms.REGIONALS["Africa"], glow_forms.REGIONALS["U.S"]
+
+    def roster(self):
+        g = lambda n, p, c, r, name, status, removed="": \
+            [f"T{n}", p, c, r, name, name.split()[-1], status, "2026-08-26", removed, "T!2"]
+        return [self.HDR,
+                g(1, "Partner One", "QUEENS", "Africa", "Ann Poe", "active"),              # row 2
+                g(2, "Partner One", " queens ", "Africa", "Kay Loe", "active"),            # 3: the same club
+                g(3, "Partner One", "QUEENS", "Africa", "Sue Moe", "inactive", "2026-09-01"),   # 4: left already
+                g(4, "Partner Two", "Queens of Quest", "Africa", "Uma Roe", "active"),     # 5: 'QUEENS' is its prefix
+                g(5, "Partner Three", "Sunrise Club", "U.S", "Eve Hoe", "active"),         # 6
+                g(6, "Partner Three", "Sunrise Club", "U.S", "Ida Toe", " Active "),       # 7: the status as typed
+                g(7, "Partner Four", "Moon Club", "U.S", "Dee Koe", "active"),             # 8
+                g(8, "Partner One", "Stars", "Africa", "Fay Low", "active")]               # 9
+
+    def sheet(self, before_read=None, rows=None):
+        return FakeSheet({"Roster": rows or self.roster(), "Audit": [["when", "action", "detail"]]},
+                         before_read)
+
+    class Clock:
+        """datetime stand-in: 2026-10-07 14:00 UTC (10:00 in New York, the sheet's zone)."""
+        import datetime as _dt
+        instant = _dt.datetime(2026, 10, 7, 14, 0, 0, tzinfo=_dt.timezone.utc)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.instant.astimezone(tz) if tz else cls.instant.astimezone().replace(tzinfo=None)
+
+    def run_main(self, argv, sheet, client=None, key="test", clock=None, out=None):
+        """(exit code, stdout). client: the guard's Jotform (GuardForms); key=None removes the
+        API key from the environment; out: where the backup folders go (a temp dir otherwise)."""
+        import contextlib
+        import io
+        import tempfile
+        from unittest import mock
+        env = dict(os.environ)
+        env.pop("JOTFORM_API_KEY", None)
+        if key:
+            env["JOTFORM_API_KEY"] = key
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(deactivate_clubs, "OUT", out or d), \
+                mock.patch.object(deactivate_clubs.sc, "service", lambda: sheet), \
+                mock.patch.object(deactivate_clubs.sc, "read_tab", sheet.read_tab), \
+                mock.patch.object(deactivate_clubs.sc, "append_rows", sheet.append_rows), \
+                mock.patch.object(deactivate_clubs.sc, "spreadsheet_id", lambda: "SHEET"), \
+                mock.patch.object(deactivate_clubs.sc, "sa_email", lambda: "robot"), \
+                mock.patch.object(deactivate_clubs.sc, "time_zone", lambda svc: "America/New_York"), \
+                mock.patch.object(deactivate_clubs, "datetime", clock or self.Clock), \
+                mock.patch.object(deactivate_clubs, "Client", lambda api_key, apply=False: client or GuardForms()), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(sys, "argv", ["deactivate_clubs.py"] + argv), \
+                contextlib.redirect_stdout(buf):
+            try:
+                deactivate_clubs.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+            finally:
+                self.written = sorted(os.listdir(out or d))
+        return code, buf.getvalue()
+
+    def test_matches_is_exact_or_the_long_name_never_a_prefix(self):
+        m = deactivate_clubs.matches
+        self.assertTrue(m("QUEENS", "Queens"))
+        self.assertTrue(m(" queens ", "QUEENS"))
+        self.assertTrue(m("QUEENS - Partner One", "QUEENS"))         # "<club> - <partner>"
+        self.assertFalse(m("Queens of Quest", "QUEENS"))             # the pinned pair (plan, B)
+        self.assertFalse(m("QUEENS", "Queens of Quest"))
+        self.assertFalse(m("QUEENSX", "QUEENS"))
+        self.assertFalse(m("QUEENS -Partner One", "QUEENS"))         # not the separator
+        self.assertFalse(m("", "QUEENS"))
+        self.assertFalse(m("QUEENS", ""))
+
+    def test_selectors(self):
+        sheet = self.sheet()
+        code, out = self.run_main(["--region", "u.s", "--reason", "x"], sheet)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Sunrise Club", out)
+        self.assertIn("2 active row(s)   rows 6-7", out)             # ' Active ' counts; row order
+        self.assertIn("Moon Club", out)
+        self.assertIn("Roster             3 row(s) -> status inactive, removed_date 2026-10-07 (6 cells)", out)
+        self.assertIn("Audit              1 row appended", out)
+        self.assertIn("--undo", out)
+        self.assertIn("DRY RUN", out)
+        self.assertNotIn("QUEENS", out)
+        self.assertEqual(sheet.batches, [])
+        code, out = self.run_main(["--partner", "partner one"], sheet)
+        self.assertEqual(code, 0, out)
+        self.assertIn("QUEENS", out)
+        self.assertIn("2 active row(s)   rows 2-3", out)             # the inactive row 4 is not planned
+        self.assertIn("Stars", out)
+        self.assertNotIn("Queens of Quest", out)
+        code, out = self.run_main(["--partner", "Partner One", "--club", "queens"], sheet)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Roster             2 row(s) -> status inactive", out)      # QUEENS alone, rows 2-3
+        self.assertNotIn("Stars", out)
+        # names, never: the plan lists rows, counts, partners and clubs
+        for name in ("Ann Poe", "Kay Loe", "Eve Hoe"):
+            self.assertNotIn(name, out)
+
+    def test_refusals_before_anything_is_read(self):
+        sheet = self.sheet()
+        for argv, text in ([[], "choose the clubs"],
+                           [["--club", "QUEENS"], "exactly one --partner"],
+                           [["--region", "U.S", "--check-only", "--apply"], "drop --apply"],
+                           [["--region", "U.S", "--apply"], "--apply needs --reason"],
+                           [["--undo", "x", "--region", "U.S"], "--undo takes no selector"],
+                           [["--region", "U.S", "--recent-days", "-1"], "0 or more"]):
+            code, _ = self.run_main(argv, sheet)
+            self.assertIn(text, str(code), argv)
+            self.assertEqual(sheet.reads, {}, argv)
+        for argv, text in ([["--region", "Mars"], "--region 'Mars' matches no active Roster row"],
+                           [["--partner", "Nobody"], "--partner 'Nobody' matches no active Roster row"],
+                           [["--partner", "Partner One", "--club", "Moon Club"], "--club 'Moon Club' matches"],
+                           [["--partner", "Partner One", "--partner", "Nobody"], "--partner 'Nobody' matches"]):
+            code, _ = self.run_main(argv, sheet)
+            self.assertIn(text, str(code), argv)
+            self.assertIn("Africa / Asia / Latin America / U.S", str(code))
+        self.assertEqual(sheet.batches, [])
+        code, _ = self.run_main(["--region", "U.S"], sheet, key=None)
+        self.assertIn("Set JOTFORM_API_KEY", str(code))
+        self.assertIn("before any club is deactivated", str(code))
+        rows = self.roster() + [["T9", "Partner Five", "Comet Club", "", "Bea Goe", "Goe", "active", "2026-08-26", "", "T!2"]]
+        code, _ = self.run_main(["--partner", "Partner Five"], self.sheet(rows=rows))
+        self.assertIn("region ''", str(code))
+        self.assertIn("no attendance form's", str(code))
+
+    def africa_forms(self):
+        """Africa: one plain submission for Queens of Quest, and one that picked QUEENS together
+        with Queens of Quest (the 2026-09-25 shape); U.S: nothing."""
+        return GuardForms({self.AFRICA: [
+            submission("1", "2026-10-01 09:00:00", "Queens of Quest", ["Queens of Quest"]),
+            submission("2", "2026-09-25 11:26:00", "QUEENSQueens of Quest", ["QUEENS", "Queens of Quest"]),
+        ]})
+
+    def test_check_only_prints_the_counts_and_plans_nothing(self):
+        sheet, forms = self.sheet(), self.africa_forms()
+        code, out = self.run_main(["--partner", "Partner One", "--check-only"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"Africa form {self.AFRICA}: 2 submissions since 2026-09-01 read", out)
+        self.assertRegex(out, r"Partner One\s+2 club\(s\)\s+1 submission\(s\)  \(last 2026-09-25; 1 picked together with another club\)")
+        self.assertIn("'QUEENS': 1 submission(s), 2026-09-25", out)
+        self.assertNotIn("'Stars':", out)
+        self.assertIn("--check-only: 3 active row(s) of 2 club(s) would be deactivated; nothing planned", out)
+        self.assertNotIn("DRY RUN", out)
+        self.assertNotIn("Roster  ", out)
+        self.assertEqual((sheet.batches, len(sheet.tabs["Audit"])), ([], 1))
+        # the submissions GET is filtered since launch and paged with Jotform's maximum
+        subs_gets = [(p, q) for p, q in forms.gets if p.endswith("/submissions")]
+        self.assertEqual(len(subs_gets), 1)
+        self.assertIn("created_at%3Agt", subs_gets[0][1]["filter"])
+        self.assertEqual((subs_gets[0][1]["limit"], subs_gets[0][1]["offset"]), (1000, 0))
+        # the exact rule in the flow: Queens of Quest's two submissions are its own
+        code, out = self.run_main(["--partner", "Partner Two", "--check-only"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"Partner Two\s+1 club\(s\)\s+2 submission\(s\)")
+        self.assertIn("'Queens of Quest': 2 submission(s), 2026-09-25, 2026-10-01", out)
+        code, out = self.run_main(["--region", "U.S", "--check-only"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"U.S form {self.US}: 0 submissions since 2026-09-01 read", out)
+        self.assertRegex(out, r"Partner Three\s+1 club\(s\)\s+0 submission\(s\)\n")
+
+    def test_a_recent_submission_stops_the_run_unless_anyway(self):
+        sheet, forms = self.sheet(), self.africa_forms()
+        code, out = self.run_main(["--partner", "Partner One", "--reason", "x"], sheet, forms)
+        self.assertEqual(str(code), "'QUEENS' (Partner One) sent attendance on 2026-09-25 - deactivating a club "
+                                    "that reports needs --deactivate-anyway (1 of the 2 club(s) named in a "
+                                    "submission since 2026-09-07)")
+        self.assertNotIn("DRY RUN", out)
+        code, out = self.run_main(["--partner", "Partner One", "--reason", "x", "--deactivate-anyway"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn("going on: --deactivate-anyway", out)
+        self.assertIn("DRY RUN", out)
+        code, out = self.run_main(["--partner", "Partner One", "--reason", "x", "--recent-days", "5"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn("no chosen club was named in a submission since 2026-10-02", out)
+        # the prefix pair: Queens of Quest's submissions never stop a run for 'QUEENS'
+        forms = GuardForms({self.AFRICA: [submission("1", "2026-10-06 09:00:00", "Queens of Quest", ["Queens of Quest"])]})
+        code, out = self.run_main(["--partner", "Partner One", "--club", "QUEENS", "--reason", "x"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn("no chosen club was named", out)
+        self.assertEqual(sheet.batches, [])
+
+    def test_apply_writes_the_two_cells_re_reads_and_audits(self):
+        sheet = self.sheet()
+        code, out = self.run_main(["--region", "U.S", "--reason", "no reports (test)", "--apply"], sheet)
+        self.assertEqual(code, 0, out)
+        roster = sheet.tabs["Roster"]
+        self.assertEqual([(r[6], r[8]) for r in roster[6 - 1:8]],
+                         [("inactive", "2026-10-07")] * 3)
+        self.assertEqual([r[6] for r in roster[1:5]], ["active", "active", "inactive", "active"])   # untouched
+        self.assertEqual(roster[4 - 1][8], "2026-09-01")
+        self.assertEqual([r[4] for r in roster[1:]], [r[4] for r in self.roster()[1:]])          # names as they were
+        self.assertEqual(len(sheet.batches), 1)
+        self.assertEqual(len(sheet.batches[0]), 6)
+        self.assertIn("Roster: 6 cell(s) written and verified", out)
+        audit = sheet.tabs["Audit"][-1]
+        self.assertEqual(audit[0], "2026-10-07 10:00:00")                                       # the sheet's zone
+        self.assertEqual(audit[1], "deactivateRows")
+        self.assertEqual(audit[2], "2 club(s) of 2 partner(s) in U.S: 3 row(s) set inactive, removed_date "
+                                   "2026-10-07 - tools/deactivate_clubs.py (no reports (test))")
+        self.assertEqual(len(self.written), 1)
+        self.assertIn("Next (docs/RUNBOOK.md, \"Deactivating a club\")", out)
+        self.assertIn("Update form dropdowns from the Roster", out)
+        self.assertIn("--undo", out)
+        for name in ("Eve Hoe", "Ida Toe", "Dee Koe"):
+            self.assertNotIn(name, out)
+
+    def test_the_backup_folder_holds_the_tab_and_the_rows_written(self):
+        import tempfile
+        sheet = self.sheet()
+        with tempfile.TemporaryDirectory() as out:
+            code, _ = self.run_main(["--partner", "Partner One", "--club", "QUEENS", "--reason", "r", "--apply"],
+                                    sheet, out=out)
+            self.assertEqual(code, 0)
+            folder = os.path.join(out, self.written[0])
+            self.assertEqual(sorted(os.listdir(folder)), ["Roster.csv", "written.json"])
+            import csv
+            with open(os.path.join(folder, "Roster.csv"), newline="", encoding="utf-8") as f:
+                self.assertEqual(list(csv.reader(f)), self.roster())             # as it was, before
+            with open(os.path.join(folder, "written.json"), encoding="utf-8") as f:
+                rec = json.load(f)
+        self.assertEqual(rec["set"], {"status": "inactive", "removed_date": "2026-10-07"})
+        self.assertEqual((rec["status_col"], rec["removed_col"], rec["reason"]), (6, 8, "r"))
+        self.assertEqual(rec["clubs"], [["Partner One", "QUEENS", 2, "Africa"]])
+        self.assertEqual(rec["rows"], [{"row": 2, "partner": "Partner One", "club": "QUEENS", "status": "active",
+                                        "removed_date": ""},
+                                       {"row": 3, "partner": "Partner One", "club": "QUEENS", "status": "active",
+                                        "removed_date": ""}])
+        self.assertNotIn("Ann Poe", json.dumps(rec))
+
+    def test_removed_date_and_the_audit_when_are_the_sheets_day(self):
+        # 03:30 UTC on 10-07 is still 10-06 in New York, whatever zone this process is on
+        import datetime as dt
+
+        class Late(self.Clock):
+            instant = dt.datetime(2026, 10, 7, 3, 30, 0, tzinfo=dt.timezone.utc)
+        sheet = self.sheet()
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, clock=Late)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sheet.tabs["Roster"][6 - 1][8], "2026-10-06")
+        self.assertEqual(sheet.tabs["Audit"][-1][0], "2026-10-06 23:30:00")
+        self.assertIn("removed_date 2026-10-06", out)
+
+    def test_apply_stops_when_a_planned_row_changed_or_the_club_gained_a_row(self):
+        def flip(sheet, tab, n):
+            if tab == "Roster" and n == 2:                   # the re-read just before the write
+                sheet.tabs["Roster"][6 - 1][6] = "inactive"
+        sheet = self.sheet(flip)
+        code, _ = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet)
+        self.assertIn("Roster: row 6 changed since the plan was read", str(code))
+        self.assertIn("nothing written", str(code))
+        self.assertEqual((sheet.batches, len(sheet.tabs["Audit"])), ([], 1))
+        self.assertEqual(len(self.written), 1)             # the backup is taken before the re-read
+
+        def enroll(sheet, tab, n):
+            if tab == "Roster" and n == 2:
+                sheet.tabs["Roster"].append(["T9", "Partner Four", "moon club", "U.S", "Gia Mow", "Mow",
+                                             "active", "2026-10-07", "", "T!9"])
+        sheet = self.sheet(enroll)
+        code, _ = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet)
+        self.assertIn("row 10 came in for the chosen clubs", str(code))
+        self.assertEqual(sheet.batches, [])
+
+    def test_a_row_arriving_during_the_write_is_reported_not_written(self):
+        def enroll(sheet, tab, n):
+            if tab == "Roster" and n == 3:                   # the verify re-read, after the batch
+                sheet.tabs["Roster"].append(["T9", "Partner Four", "Moon Club", "U.S", "Gia Mow", "Mow",
+                                             "active", "2026-10-07", "", "T!9"])
+        sheet = self.sheet(enroll)
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet)
+        self.assertIn("1 row(s) of the chosen clubs arrived during the run and are still active", str(code))
+        self.assertIn("! Roster row 10: active row(s) of the chosen clubs arrived during the run", out)
+        self.assertEqual(len(sheet.batches), 1)                                   # no second batch
+        self.assertEqual(sheet.tabs["Roster"][10 - 1][6], "active")
+        self.assertEqual(sheet.tabs["Audit"][-1][1], "deactivateRows")             # what was written is audited
+        self.assertNotIn("Gia Mow", out + str(code))
+
+    def test_undo_puts_the_rows_back_and_refuses_a_changed_row(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as out:
+            sheet = self.sheet()
+            code, _ = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, out=out)
+            self.assertEqual(code, 0)
+            folder = os.path.join(out, self.written[0])
+            code, text = self.run_main(["--undo", folder], sheet, key=None)      # no key: no guard
+            self.assertEqual(code, 0, text)
+            self.assertIn("3 row(s) -> status and removed_date as before the run of", text)
+            self.assertIn("DRY RUN", text)
+            self.assertEqual(len(sheet.batches), 1)
+            code, text = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertEqual(code, 0, text)
+            self.assertEqual([(r[6], r[8]) for r in sheet.tabs["Roster"][6 - 1:8]],
+                             [("active", ""), (" Active ", ""), ("active", "")])  # exactly as they were
+            self.assertEqual(len(sheet.batches), 2)
+            audit = sheet.tabs["Audit"][-1]
+            self.assertEqual(audit[1], "reactivateRows")
+            self.assertIn("3 row(s) of 2 club(s) of 2 partner(s) in U.S set back as before", audit[2])
+            self.assertIn("tools/deactivate_clubs.py --undo", audit[2])
+            self.assertTrue(any(d.startswith("undo-") for d in os.listdir(folder)), os.listdir(folder))
+            self.assertIn("Update form dropdowns", text)
+            # run again: the rows are active now, so every one of them "changed"
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("rows 6-8 changed since the run of", str(code))
+            self.assertEqual(len(sheet.batches), 2)
+            # a deactivation, then one girl put back by hand: the undo names her row and writes nothing
+            sheet = self.sheet()
+            self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, out=out)
+            folder = os.path.join(out, sorted(os.listdir(out))[-1])
+            sheet.tabs["Roster"][7 - 1][6], sheet.tabs["Roster"][7 - 1][8] = "active", ""
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("Roster: row 7 changed since the run of", str(code))
+            self.assertIn("nothing written", str(code))
+            self.assertEqual(len(sheet.batches), 1)
+            code, _ = self.run_main(["--undo", out], sheet, key=None)
+            self.assertIn("no written.json", str(code))
+
+    def test_undo_stops_when_a_row_moves_under_it(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as out:
+            sheet = self.sheet()
+            self.run_main(["--partner", "Partner Four", "--reason", "x", "--apply"], sheet, out=out)
+            folder = os.path.join(out, self.written[0])
+
+            def reactivate(sheet, tab, n):
+                if tab == "Roster" and n == 2:               # between the undo's plan and its write
+                    sheet.tabs["Roster"][8 - 1][6] = "active"
+            sheet.before_read, sheet.reads = reactivate, {}
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("row 8 changed", str(code))
+            self.assertEqual(len(sheet.batches), 1)
+
+
+class FormApi:
+    """The Jotform calls tools/disable_form.py makes: GET /form/{id}, GET .../properties, and
+    the properties POST, which flips the status (and the message) unless flips=False - the
+    unverified case: Jotform answers 200 and changes nothing."""
+
+    def __init__(self, status="ENABLED", count=0, last="", message=disable_form.DEFAULT_MESSAGE,
+                 flips=True, title="U.S Attendance Form"):
+        self.status, self.count, self.last, self.message = status, count, last, message
+        self.flips, self.title, self.calls = flips, title, []
+
+    def get(self, path, **params):
+        self.calls.append(("GET", path))
+        if path.endswith("/properties"):
+            return {"status": self.status, "messageOfLimitedForm": self.message, "conditions": [], "emails": []}
+        if path.endswith("/questions"):
+            return {"5": {"type": "control_textbox"}}
+        return {"id": path.rsplit("/", 1)[1], "title": self.title, "status": self.status,
+                "count": str(self.count), "last_submission": self.last}
+
+    def post_form(self, path, data, label):
+        self.calls.append(("POST", path, dict(data)))
+        if self.flips:
+            self.status = data.get("properties[status]", self.status)
+            self.message = data.get("properties[messageOfLimitedForm]", self.message)
+
+
+class DisableForm(unittest.TestCase):
+    """tools/disable_form.py: the dry run, the refusals, the backup before the write, the
+    re-read that decides."""
+
+    US = glow_forms.REGIONALS["U.S"]
+
+    def run_main(self, argv, api, key="test", today="2026-10-07 14:00:00"):
+        import contextlib
+        import datetime as dt
+        import io
+        from unittest import mock
+        instant = dt.datetime.strptime(today, "%Y-%m-%d %H:%M:%S")
+
+        class Clock:
+            @staticmethod
+            def now(tz=None):
+                return instant
+
+        def snapshot(form_id, client, stamp):
+            api.calls.append(("BACKUP", form_id, stamp))
+            return {"questions": 7, "conditions": 3, "emails": 1, "salesforce": "yes"}
+        env = dict(os.environ)
+        env.pop("JOTFORM_API_KEY", None)
+        if key:
+            env["JOTFORM_API_KEY"] = key
+        buf = io.StringIO()
+        with mock.patch.object(disable_form, "Client", lambda api_key, apply=False: api), \
+                mock.patch.object(disable_form.backup_forms, "snapshot", snapshot), \
+                mock.patch.object(disable_form, "datetime", Clock), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(sys, "argv", ["disable_form.py"] + argv), \
+                contextlib.redirect_stdout(buf):
+            try:
+                disable_form.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, buf.getvalue()
+
+    def test_dry_run_reads_and_says_what_it_would_do(self):
+        api = FormApi()
+        code, out = self.run_main(["--form", self.US], api)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"U.S Attendance Form {self.US}: status ENABLED, 0 submissions (last none)", out)
+        self.assertIn("messageOfLimitedForm: 'This form is currently unavailable!'", out)
+        self.assertIn("DRY RUN - re-run with --apply to back up the form, then set status DISABLED (then re-read)", out)
+        self.assertEqual([c[0] for c in api.calls], ["GET", "GET"])
+        code, out = self.run_main(["--form", self.US, "--message", "Paused."], api)
+        self.assertEqual(code, 0, out)
+        self.assertIn("message -> 'Paused.'", out)
+        self.assertNotIn("POST", str(api.calls))
+
+    def test_refusals(self):
+        api = FormApi()
+        code, _ = self.run_main(["--form", glow_forms.TEMPLATE], api)
+        self.assertIn("the template is never disabled", str(code))
+        code, _ = self.run_main(["--form", glow_forms.DEFUNCT["U.S"]], api)
+        self.assertIn("not one of the live regional forms", str(code))
+        code, _ = self.run_main(["--form", self.US, "--enable", "--message", "x"], api)
+        self.assertIn("--enable takes no --message", str(code))
+        self.assertEqual(api.calls, [])                                   # nothing read for a refused form
+        code, _ = self.run_main(["--form", self.US], api, key=None)
+        self.assertIn("Set JOTFORM_API_KEY", str(code))
+        api = FormApi(count=3, last="2026-10-01 10:00:00")
+        code, _ = self.run_main(["--form", self.US], api)
+        self.assertIn(f"form {self.US} took a submission on 2026-10-01 (in the last 30 days)", str(code))
+        self.assertIn("--disable-anyway", str(code))
+        code, out = self.run_main(["--form", self.US, "--disable-anyway"], api)
+        self.assertEqual(code, 0, out)
+        self.assertIn("DRY RUN", out)
+        code, out = self.run_main(["--form", self.US], FormApi(count=3, last="2026-08-30 10:00:00"))
+        self.assertEqual(code, 0, out)                                    # older than 30 days: no guard
+        api = FormApi(status="FUNNY")
+        code, _ = self.run_main(["--form", self.US], api)
+        self.assertIn("neither ENABLED nor DISABLED", str(code))
+
+        class Split(FormApi):
+            def get(self, path, **params):
+                out = super().get(path, **params)
+                if path.endswith("/properties"):
+                    out["status"] = "DISABLED"
+                return out
+        code, _ = self.run_main(["--form", self.US], Split())
+        self.assertIn("not the same form state", str(code))
+
+    def test_apply_backs_up_then_posts_then_re_reads(self):
+        api = FormApi()
+        code, out = self.run_main(["--form", self.US, "--message", "The U.S attendance form is paused.", "--apply"], api)
+        self.assertEqual(code, 0, out)
+        kinds = [c[0] for c in api.calls]
+        self.assertEqual(kinds, ["GET", "GET", "BACKUP", "POST", "GET", "GET"])     # the backup before the write
+        self.assertEqual(api.calls[3][2], {"properties[status]": "DISABLED",
+                                           "properties[messageOfLimitedForm]": "The U.S attendance form is paused."})
+        self.assertIn("backup_forms: form", out)
+        self.assertIn("status DISABLED, 0 submissions", out)
+        self.assertIn(f"form {self.US} is DISABLED - the runner reads it as 'skipped'", out)
+        # already off: nothing to do, no POST
+        code, out = self.run_main(["--form", self.US, "--apply"], api)
+        self.assertEqual(code, 0, out)
+        self.assertIn("already DISABLED - nothing to do", out)
+        self.assertEqual([c[0] for c in api.calls].count("POST"), 1)
+        # the way back
+        code, out = self.run_main(["--form", self.US, "--enable", "--apply"], api)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(api.status, "ENABLED")
+        self.assertIn(f"form {self.US} is ENABLED - one runner dry run next", out)
+
+    def test_a_status_that_does_not_move_stops_with_the_builder_step(self):
+        api = FormApi(flips=False)
+        code, out = self.run_main(["--form", self.US, "--apply"], api)
+        self.assertEqual(str(code), disable_form.STILL_ENABLED)
+        self.assertIn("Settings -> Form Status", str(code))
+        self.assertEqual([c[0] for c in api.calls], ["GET", "GET", "BACKUP", "POST", "GET", "GET"])
+        self.assertIn("re-read:", out)
+
+        class StatusOnly(FormApi):
+            def post_form(self, path, data, label):
+                self.calls.append(("POST", path, dict(data)))
+                self.status = data.get("properties[status]", self.status)       # the message stays
+        code, _ = self.run_main(["--form", self.US, "--message", "Paused.", "--apply"], StatusOnly())
+        self.assertIn("messageOfLimitedForm did not change", str(code))
+        self.assertIn("status DISABLED as wanted", str(code))
+
+
+class UploadRosterPartners(unittest.TestCase):
+    """tools/upload_roster.py merge_partners keeps the live header's width (the jotform column)."""
+
+    def test_merge_keeps_every_live_cell_and_the_width(self):
+        live = [["partner", "region", "notes", "jotform"], ["P1", "Africa", "", "no"], ["P2", "", "", ""],
+                ["P3", "Asia", "x"]]
+        local = [["partner", "region", "notes", "jotform"], ["P2", "Asia", "derived", ""], ["P4", "U.S", "", ""]]
+        out, added, filled = upload_roster.merge_partners(live, local)
+        self.assertEqual(out, [["partner", "region", "notes", "jotform"], ["P1", "Africa", "", "no"],
+                               ["P2", "Asia", "derived", ""], ["P3", "Asia", "x", ""], ["P4", "U.S", "", ""]])
+        self.assertEqual((added, filled), (1, 1))
+        # a live tab still three columns wide: its width wins, a local fourth cell is not added
+        out, _, _ = upload_roster.merge_partners([["partner", "region", "notes"], ["P1", "Africa", ""]], local)
+        self.assertEqual({len(r) for r in out}, {3})
+        self.assertEqual(out[-1], ["P4", "U.S", ""])
 
 
 class SwitcherFlags(unittest.TestCase):

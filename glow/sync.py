@@ -20,6 +20,8 @@ from glow.text import key
 COL_PARTNER = "partner organization name"
 COL_CLUB = "club name"
 COL_ROSTER = "please list the full name"
+PARTNER_COLS = ("partner", "region", "notes", "jotform")
+JOTFORM_COL = "jotform"
 
 # ------------------------------------------------------------- fixed field ids
 # Structural fields of the master form. If the form is ever rebuilt from

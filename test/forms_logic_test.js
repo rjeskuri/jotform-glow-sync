@@ -825,7 +825,7 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
   const src = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs']
       .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
   // A spreadsheet of plain arrays (tabs[name] = rows, row 1 = header) with what the handlers call.
-  const world = (zone) => {
+  const world = (zone, jotform) => {       // jotform: the partner's Partners-tab mark ('' = on the forms)
     const tabs = {}, mails = [], audits = [], formLog = [], syncs = [];
     const cell = (name, r, c) => { const t = tabs[name]; while (t.length < r) t.push([]); return t[r - 1]; };
     const sheet = name => ({
@@ -869,7 +869,7 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
     const C = n => vm.runInContext(n, ctx);
     tabs.ReviewQueue = [C('REVIEW_COLS').slice()];
     tabs.ClubRegistry = [C('CLUB_COLS').slice(), ['SUNRISEC', ORG, 'Sunrise Club', '2026-08-26']];
-    tabs.Partners = [C('PARTNER_COLS').slice(), [ORG, 'Africa', '']];
+    tabs.Partners = [C('PARTNER_COLS').slice(), [ORG, 'Africa', '', jotform || '']];
     const g = (id, name, status, removed) => [id, ORG, 'Sunrise Club', 'Africa', name, name.split(' ').pop(), status, '2026-08-26', removed, 'T!2'];
     tabs.Roster = [C('ROSTER_COLS').slice(),
       g('SUNRISEC-ZIBBLEWICK-001', 'Grace Zibblewick', 'inactive', at('2026-09-12T04:00:00Z')),   // a Date cell: 09-12 in New York
@@ -919,6 +919,25 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
         w.mails.length === 1 && kept !== -1 && body.split('\n')[kept + 1] === '  - GRACE ZIBBLEWICK' &&
         !body.includes('Grace Zibblewick'),
         w.mails.length + ' mail(s), heading at line ' + kept + ', ' + body.split('\n').length + ' lines');
+  check('…and closes with the attendance-form line (the partner is on Jotform)',
+        body.split('\n').pop() === 'The attendance form updates within the hour.', body.split('\n').pop());
+  {
+    // the Partners tab's jotform cell reads "no" (capitals ignored): the same change, the e-mail says
+    // nothing changes on the attendance form (docs/plans/2026-10-06-clubs-off-jotform.md, A)
+    const off = world('America/New_York', 'No');
+    const res = off.ctx.runResponse_('ROSTER', off.sheet(RQ), 5, change(), sentOn('2026-09-10'));
+    const last = (off.mails[0] || { body: '' }).body.split('\n').pop();
+    check('a partner marked jotform=no: the same Roster change, the e-mail closes with "nothing changes on the attendance form"',
+          res === result && off.mails.length === 1 && !off.mails[0].body.includes('within the hour') &&
+          last === 'Your organization reports attendance to GLOW directly, so nothing changes on the attendance form.', last);
+    const cols = vm.runInContext('PARTNER_COLS', w.ctx);
+    check('PARTNER_COLS: partner, region, notes, jotform (glow/sync.py and the offline builder carry the same list)',
+          cols.join() === 'partner,region,notes,jotform', cols.join());
+    check('loadPartnerJotform_: "no" by key, anything else (blank, yes, a typo) is on the forms',
+          JSON.stringify(off.ctx.loadPartnerJotform_()) === JSON.stringify({ [off.ctx.key_(ORG)]: true }) &&
+          JSON.stringify(w.ctx.loadPartnerJotform_()) === '{}' &&
+          JSON.stringify(world('UTC', 'nope').ctx.loadPartnerJotform_()) === '{}');
+  }
 
   result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 5, change(), sentOn('2026-09-10'));
   check('run again: still one ReviewQueue row, she is still removed',
@@ -1412,8 +1431,8 @@ const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
         /^new club Nova Club \(Brand New Org\): 3 girls added/.test(result) && added.length === 3 &&
         added.every(r => r[1] === 'Brand New Org' && r[2] === 'Nova Club') &&
         added.map(r => r[4]).join('|') === 'Grace Zibblewick|Mary Zibblewick|Joy Blorptest', result);
-  check('…ClubRegistry, Partners and SF Pending too', w.tabs.ClubRegistry[1][2] === 'Nova Club' &&
-        w.tabs.Partners.some(r => r[0] === 'Brand New Org') &&
+  check('…ClubRegistry, Partners (a full PARTNER_COLS row, jotform blank) and SF Pending too', w.tabs.ClubRegistry[1][2] === 'Nova Club' &&
+        w.tabs.Partners.some(r => r[0] === 'Brand New Org' && r.length === 4 && r[3] === '') &&
         w.tabs['SF Pending'][1].slice(1, 3).join('|') === 'Brand New Org|Nova Club' &&
         w.tabs['SF Pending'][1][5] === 'Mentor Testperson' && w.tabs['SF Pending'][1][7] === 'Kenya');
   check('…and the ReviewQueue ("Same name listed twice" starts with the name, stripped)',
@@ -1513,8 +1532,21 @@ console.log('\nA new club that may duplicate one on file is held, then released 
         w.mails[0].body.includes('checking it against the clubs already enrolled') &&
         !/Fennwhistle|Marrowgate|already enrolled\)/.test(w.mails[0].body) &&
         w.mails[0].body.split('BRIGHT GIRLS').length === 2);
+  check('…and closes with the attendance-form line (the partner is on Jotform)',
+        w.mails[0].body.split('\n').pop() === 'The girls appear on the attendance form once the club is added.');
   check('Audit: the source and the reason kind only',
         w.audits.join() === 'newClubForm: held ' + SRC + ' for review (club name); nothing imported');
+  {
+    const tabsOff = baseTabs(onFile);
+    tabsOff.Partners[0].push('jotform');
+    tabsOff.Partners[1].push('no');                              // Fixture Partner Alpha is not on Jotform
+    const off = sheetWorld(tabsOff);
+    const resOff = off.ctx.runResponse_('ROSTER', off.sheet('Roster Form Responses'), 41, suffixed(), KEY);
+    const lastOff = (off.mails[0] || { body: '' }).body.split('\n').pop();
+    check('a partner marked jotform=no: held the same, the hold notice closes with "nothing changes on the attendance form"',
+          resOff === res && off.mails.length === 1 && !off.mails[0].body.includes('once the club is added') &&
+          lastOff === 'Your organization reports attendance to GLOW directly, so nothing changes on the attendance form.', lastOff);
+  }
 
   console.log('\n  released');
   w = sheetWorld(baseTabs(onFile));
