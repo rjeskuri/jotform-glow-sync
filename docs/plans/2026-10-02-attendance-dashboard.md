@@ -197,6 +197,8 @@ Into BACKLOG with that design.
     the click-through reports, girls' names in the test report, scheduled refresh, the
     50-value filter).
   - 61: about 11 probable duplicate girls.
+- **Ryan, 2026-10-06**: folder sharing stays as it is, and girls' names are fine for anyone with
+  Salesforce access (BACKLOG 60: those two points closed).
 - **Also fixed on the way**: `tools/worklog.py` wrote the work log with Windows line endings, so
   every update rewrote every line. It now writes `\n`, with a test.
 - `make check` → `CHECK PASSED` (434 tests, `OK`).

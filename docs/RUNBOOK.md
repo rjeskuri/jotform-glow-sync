@@ -1696,14 +1696,17 @@ club list is one click away in its report), and adds the box.
   Kaleidos" has one, so "Fundacion" finds only the first. Type the name as Salesforce spells it,
   or an unaccented part of it.
 
-**Before leadership gets it** (Ryan's decisions, BACKLOG 60):
-- Both Attendance folders are hidden (not shared). On 2026-10-02 only the 8 active users with
-  View All Data could see them.
-- The dashboard runs as Ryan, so it shows the whole organisation. A chart's report runs as the
-  viewer, though, and club accounts are private (owned by administrators, no sharing rules). A
-  standard user would see few or no rows in the report behind a full chart.
-- The test report's detail rows carry girls' names, and anyone who can open it can expand or
-  export them.
+**Access** (Ryan, 2026-10-06):
+- **Folder sharing stays as it is**: both Attendance folders are hidden (not shared). On
+  2026-10-02 only the 8 active users with View All Data could see them. Do not change it
+  without Ryan.
+- **Girls' names inside Salesforce are fine**: anyone with access to Salesforce may see them,
+  so the test report's name column and the Girl filter stay. This is about Salesforce only.
+  Names still never go into the repo, logs, commits or the conversation (child-privacy).
+- If the folders are ever shared beyond those users: the dashboard runs as Ryan and shows
+  everything, but a chart's report runs as the viewer, and club accounts are private (owned by
+  administrators, no sharing rules). A standard user would then see few or no rows behind a
+  full chart.
 
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
 - Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report and the
