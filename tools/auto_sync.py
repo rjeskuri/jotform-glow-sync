@@ -642,7 +642,8 @@ class Run:
         submissions count resets every cycle; so the two are judged apart and never merged.
         At warn the line alone (a daily e-mail for months would bury real ATTENTIONs). `read`
         returns glow.usage.read_usage's dict; one that raises is a log line, never a failed
-        run."""
+        run. main() bounds each of its three GETs (curl --max-time), so a stalled connection
+        is that log line within minutes, not a run held to the job's timeout."""
         try:
             u = read()
         except Exception as err:                      # noqa: BLE001 - a Jotform error of any shape
@@ -775,7 +776,7 @@ def main():
     for region in args.region or list(REGIONAL_FORMS):
         run.region(region, csv_path)
     run.check_names()
-    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"])))
+    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"], max_time=60)))
 
     if args.synclog and run.results:
         try:

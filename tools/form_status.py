@@ -23,9 +23,10 @@ rule never sends its answer) and whether the form's
 own translation dictionary alters any roster option (the runtime's lookup
 emulated, glow/translation_lookup.py, in every language the store holds: question
 18 would send another spelling of that girl's name; counts and club names only).
-Its first line is Jotform's storage against the account's plan (glow/usage.py:
-upload space in all and submissions in the monthly cycle, each judged on its own;
-docs/plans/2026-10-06-photos-to-drive.md) - account-wide, so never a form problem.
+Right after the Roster line comes Jotform's storage against the account's plan
+(glow/usage.py: upload space in all and submissions in the monthly cycle, each judged
+on its own; docs/plans/2026-10-06-photos-to-drive.md) - account-wide, so never a form
+problem.
 --rendered reads the public page as well (counts only).
 
 Usage:
@@ -318,7 +319,7 @@ def audit_module_shape(questions, props):
     return problems, summary
 
 
-NAMES_FIX ="tools/fix_name_translations.py --form {form} (dry run first; RUNBOOK \"The names dictionary and the module values\")"
+NAMES_FIX = "tools/fix_name_translations.py --form {form} (dry run first; RUNBOOK \"The names dictionary and the module values\")"
 
 
 def roster_options(questions):
@@ -370,7 +371,7 @@ def read_storage(client):
 
 
 def storage_status_line(store):
-    """The printed report's first line, `!! ` at alarm (from read_storage)."""
+    """The report's `storage:` line, right after the Roster line; `!! ` at alarm (from read_storage)."""
     if "error" in store:
         return f"storage: could not be read ({store['error']})"
     return ("!! " if usage.worst(store["levels"]) == "alarm" else "") + usage.storage_line(store)

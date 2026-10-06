@@ -13,9 +13,10 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   it also prints `real data …: parsed 328 clubs, 6210 girls`.
 - `make venv` once per checkout (`.venv/`); `make lint` is advisory ruff.
 - `python3 tools/form_status.py --roster data/roster_<date>.csv` — read-only; needs
-  `JOTFORM_API_KEY`. Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`, and
-  its first line `storage: upload space … -> ok; submissions this cycle … -> ok` (`warn` from
-  50 % of a limit: BACKLOG "Gold versus retention"; `!!` and a runner ATTENTION from 80 %).
+  `JOTFORM_API_KEY`. Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`, and,
+  right after the Roster line, `storage: upload space … -> ok; submissions this cycle … -> ok`
+  (`warn` from 50 % of a limit: BACKLOG "Gold versus retention"; `!!` and a runner ATTENTION
+  from 80 %).
 - `python3 tools/auto_sync.py` — the automatic loop as a dry run (writes nothing anywhere;
   `--synclog` would record it in the sheet); healthy: every region `in-sync`.
 - `python3 sync_attendance_form.py <roster.csv> --roster --region Africa --form 262382821971058`

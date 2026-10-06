@@ -407,4 +407,5 @@ batch, with nothing written).
   runtime builds not read before** - template `bc6c80d556a`, Africa / Asia / Latin America
   `8705c008453`, U.S `18bdf84aedc` (the audit's premise is `fc726a121d4`; BACKLOG 64 and 67):
   the submit handler's `clearFieldOnHide` branch and the translation runtime of those builds are
-  to be re-read, not done in this build.
+  to be re-read, not done in this build; BACKLOG 64 lists the three builds as seen and not yet
+  re-read (review finding: the open re-read is tracked there, not only here).

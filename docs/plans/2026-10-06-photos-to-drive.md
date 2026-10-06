@@ -598,9 +598,12 @@ done).
 - The storage line in `form_status.py` is read once per run, before the forms, and every report
   dict carries the same `storage` object; the printed line follows the `Roster (active girls)`
   line, which lost its trailing blank line to the storage line (the blank line now follows it).
-- The DECISIONS rows (1-3), BACKLOG 68-70 and CLAUDE.md's healthy line are written; BACKLOG 65
-  (session -54's Result commit) sat below the "Explicitly not planned" paragraph, outside the
-  table, and was moved into the table ahead of 66 (text unchanged).
+- The DECISIONS rows (1-3), BACKLOG 68-70 and CLAUDE.md's healthy line are written. BACKLOG 65
+  (session -54's Result commit) sits below the "Explicitly not planned" paragraph, outside the
+  table; the build moved it into the table and the review moved it back: the attendance-totals
+  plan edits that row in place, and two branches touching one line in two places is a merge
+  conflict - where it sits is that track's to settle. The DECISIONS rows are filed by date (the
+  2026-10-01 row before the 2026-10-02 rows), not grouped by plan.
 - The dashboard's Access bullet was added in this branch's RUNBOOK edit (session -51 had cleared
   it before the build), and the "Automatic sync" section gained the storage paragraph.
 - RUNBOOK "Photos" step 7 (storage) is written as live, not "after part 2": both parts landed in
@@ -613,4 +616,8 @@ done).
   afternoon) and every form CLEAN (the pages on new runtime builds, noted in the
   module-selection plan's Build notes). The `auto_sync.py` dry run was not run from the build worktree (it needs the sheet
   export or a Roster CSV outside the worktree and spawns four sync dry runs); `check_storage` is
-  unit-tested at ok / warn / alarm per limit and with a failing reader.
+  unit-tested at ok / warn / alarm per limit and with a failing reader. The runner's client for
+  the three usage GETs is built with `max_time=60` (review finding: the read runs in the runner's
+  own process after any apply and before the log, ATTENTION and SyncLog are written, so a stalled
+  connection must become `storage: could not be read (JotformError)` within minutes, not hold the
+  run to the job's 30-minute timeout).

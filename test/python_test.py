@@ -532,8 +532,8 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertNotIn("nope", "\n".join(run.lines))
         # main() reads it after the regions, through the one client, with the key from the environment
         src = read(os.path.join(REPO, "tools", "auto_sync.py"))
-        self.assertIn('run.check_names()\n    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"])))',
-                      src)
+        self.assertIn('run.check_names()\n    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"], max_time=60)))',
+                      src)                      # bounded: a stalled GET must not hold the run
 
     def test_a_club_guard_update_is_a_change_and_parses_from_both_shapes(self):
         text = ("Roster: 3 active clubs in Asia (40 girls); 300 clubs overall\n"
