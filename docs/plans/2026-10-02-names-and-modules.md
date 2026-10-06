@@ -127,7 +127,7 @@ Salesforce. `make check` passes.
 7. *Builds*: the five forms were served `formTranslation.v2.js` builds `62a8b57dd95` (regional)
    and `fc726a121d4` (template) on 2026-10-02, byte-identical; against the runtime
    investigation's `9e75d6f1d83` only `setDictionary` differs (it now skips an entry missing in
-   `en` or `base` instead of filing it under "undefined"). The audits run both; BACKLOG 60 is
+   `en` or `base` instead of filing it under "undefined"). The audits run both; BACKLOG 64 is
    the watch for the next build.
 
 **Read-only proof, 2026-10-02** (GETs through `glow.jotform.Client`, the public pages by curl;

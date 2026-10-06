@@ -7169,6 +7169,8 @@ class WorkLog(unittest.TestCase):
                      "description": 'Commas, "quotes"\nand a newline', "source": "auto", "zone": "+08:00"}]
             worklog.write_log(rows, path)
             self.assertEqual(worklog.read_log(path), rows)
+            with open(path, "rb") as fh:
+                self.assertNotIn(b"\r", fh.read())     # LF only: an update must not rewrite every line
 
     def test_transcripts_dir(self):
         repo = os.sep + os.path.join("srv", "jotform-glow-sync")          # built, not a literal path

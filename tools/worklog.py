@@ -529,7 +529,7 @@ def read_log(path=LOG):
 def write_log(rows, path=LOG):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=COLS, extrasaction="ignore")
+        w = csv.DictWriter(fh, fieldnames=COLS, extrasaction="ignore", lineterminator="\n")   # as committed
         w.writeheader()
         w.writerows(rows)
 

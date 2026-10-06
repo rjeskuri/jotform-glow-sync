@@ -1,7 +1,7 @@
 ---
 title: Attendance processor - a submission's new girls created in one insert
 author: Claude (with Ryan)
-status: in-progress
+status: done (deployed to production 2026-10-02 03:25 UTC)
 created: 2026-10-02
 intent: none - Ryan's go of 2026-10-02 ("Go ahead and make the fix")
 ---
@@ -73,3 +73,20 @@ failing one stayed, with their attendance rows, and blocked a retry).
 - The validation run: all tests pass, the class's coverage at least 75%.
 - The rolled-back 47-girl run: Success, 47 rows, NPSP SOQL well under 100.
 - The six waiting sessions: sent and verified by `sf_backfill.py`.
+
+## Result (2026-10-02)
+- Validation in production (check only): 21 of 21 tests (`AttendanceBatchTriggerTest`, with three
+  new ones, and `TestContactTriggerHandler`), the processor's coverage 92%. The new 47-girl test
+  ran with NPSP's real triggers in the org.
+- Independent review of the diff: no defect; its one suggestion (prove that every attendance row
+  points to its own girl) was added to the test. The platform check (done by hand after the second
+  reviewer timed out): the four Contact triggers (NPSP, Mailchimp, Volunteers, GLOW's welcome
+  e-mail handler) handle a list insert; the two active Contact validation rules concern
+  preferred e-mail and phone, which the processor never sets.
+- Deployed 03:25 UTC (validation 0AfRP000002fu1t0AA, quick deploy 0AfRP000002fu3V0AQ); read back
+  identical. Copies: `data/sf_processor_2026-10-02/before` (the rollback) and `after`.
+- Proof in production, rolled back, made-up names: 47 new girls in one batch - Success, 47 rows,
+  NPSP 6 of 100 queries (before the fix: 94 after 23 girls, refusal at 25), CPU 255 ms (before:
+  1,159 ms for 23). Nothing left behind.
+- Then the six waiting back-fill sessions went through: Vision GLOW Club 4 (27, 7, 1 and 0 new
+  girls) and San Carlos 2 (29 and 19 new girls), all verified.

@@ -1,7 +1,7 @@
 ---
 title: September back-fill - the Jotform attendance that never reached Salesforce
 author: Claude (with Ryan)
-status: done for 355 batches (2026-10-02); open: 5 large sessions (a limit), 12 held sessions, the test report
+status: done (2026-10-02): 361 batches; 14 sessions held on purpose (pilot clubs, Queens of Quest)
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-30 ("bring in all submissions for the month of September for all forms")
 ---
@@ -182,3 +182,13 @@ main (fetched 02:16 UTC, roster export of 02:15) and the delegated decisions in 
   at once fails in the processor the same way, and the Jotform action then errors with nothing in
   Salesforce. Most active clubs now have their girls; big clubs that never submitted in September
   are the ones at risk.
+
+### After the processor fix (2026-10-02 03:26 UTC)
+The refusal was NPSP's own query limit, hit because the processor created each new girl with its
+own insert - not a name (proven with made-up names; [plan](2026-10-02-attendance-processor-one-insert.md)).
+After the fix the six waiting sessions went through. **Final**: 361 batches, 4,712 attendance
+rows, 2,052 new girls, 147 clubs, every batch verified and reconciled. Still held on purpose: 10
+sessions in the five pilot clubs and Queens of Quest's 2 (until the names-dictionary repair). The
+test report "Jotform Monthly Attendance (test)" (deployed 02:44 UTC, Attendance folder) shows
+September: 4,932 attendance rows, 24 partners, 149 clubs (back-fill plus live).
+The October risk noted above is gone: a club's first big submission no longer fails.
