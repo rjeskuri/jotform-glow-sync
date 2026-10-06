@@ -43,6 +43,7 @@ from glow import layout               # noqa: E402
 from glow import links                # noqa: E402
 from glow import sync as glow_sync    # noqa: E402
 from glow import translation_lookup as tl   # noqa: E402
+from glow import usage                # noqa: E402
 from glow.text import md5             # noqa: E402
 from sf_club_accounts_test import SalesforceClubAccounts  # noqa: E402,F401  (its own file; run here)
 from integration_status_test import IntegrationStatus     # noqa: E402,F401  (its own file; run here)
@@ -479,6 +480,60 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertIn("1 Salesforce name(s) are sent by more than one club", title)
         self.assertIn("- 'Stars': Stars (Partner One, Africa); Stars (Partner Two, Africa)", detail)
         self.assertIn("--same-name-switch", detail)
+
+    def test_check_storage_judges_each_limit_on_its_own(self):
+        """docs/plans/2026-10-06-photos-to-drive.md: once per run, the storage line in the log;
+        an ATTENTION per limit at alarm naming it (upload space, or the submissions cycle); at
+        warn the line alone; a reader that raises is a log line, never a failed run."""
+        import types
+        from unittest import mock
+
+        def run_with(answer):
+            run = auto_sync.Run(types.SimpleNamespace(apply=False, out="", max_creates=5, max_updates=20,
+                                                      trigger="test", run_url=""))
+
+            def read():
+                if isinstance(answer, Exception):
+                    raise answer
+                return dict(answer)
+            with mock.patch("builtins.print"):
+                run.check_storage(read)
+            return run
+        base = {"plan": "SILVER", "uploads": 1340458410, "uploads_cap": 10738466816,
+                "submissions": 474, "submissions_cap": 2500, "reset": "2026-10-21"}
+        run = run_with(base)
+        self.assertEqual((run.attention, run.failed), ([], False))
+        self.assertEqual(run.lines[-1].strip(), "storage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; "
+                         "submissions this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER")
+        run = run_with(dict(base, uploads=base["uploads_cap"] // 2))          # warn: the line alone
+        self.assertEqual(run.attention, [])
+        self.assertIn("(50.0%) -> warn;", run.lines[-1])
+        run = run_with(dict(base, uploads=base["uploads_cap"] * 9 // 10))     # alarm on upload space
+        (title, detail), = run.attention
+        self.assertEqual(title, "Jotform upload space at 90% - the forms stop at 100%")
+        for fragment in ("SILVER plan allows 10.00 GiB", "9.00 GiB are used", "Gold versus retention",
+                         "Auto Delete Submissions", "frees nothing"):
+            self.assertIn(fragment, detail)
+        self.assertNotIn("submissions this cycle", title)
+        self.assertEqual(run.lines[-1], "  ! " + title)
+        run = run_with(dict(base, submissions=2100))                          # alarm on the cycle only
+        (title, detail), = run.attention
+        self.assertEqual(title, "Jotform submissions this cycle at 84% - the forms stop at 100%")
+        for fragment in ("2,500 submissions a month", "2,100 have arrived", "resets on 2026-10-21",
+                         "busy month, not storage", "Gold versus retention"):
+            self.assertIn(fragment, detail)
+        self.assertNotIn("upload space", title)
+        run = run_with(dict(base, uploads=base["uploads_cap"], submissions=2500))   # both: one each
+        self.assertEqual([t.split(" at ")[0] for t, _ in run.attention],
+                         ["Jotform upload space", "Jotform submissions this cycle"])
+        run = run_with(RuntimeError("nope"))                                  # a failed read
+        self.assertEqual((run.attention, run.failed), ([], False))
+        self.assertEqual(run.lines[-1].strip(), "storage: could not be read (RuntimeError)")
+        self.assertNotIn("nope", "\n".join(run.lines))
+        # main() reads it after the regions, through the one client, with the key from the environment
+        src = read(os.path.join(REPO, "tools", "auto_sync.py"))
+        self.assertIn('run.check_names()\n    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"])))',
+                      src)
 
     def test_a_club_guard_update_is_a_change_and_parses_from_both_shapes(self):
         text = ("Roster: 3 active clubs in Asia (40 girls); 300 clubs overall\n"
@@ -3211,6 +3266,11 @@ class FormStatusAudit(unittest.TestCase):
         for q_id, q in qs.items():
             q.setdefault("qid", q_id)
 
+        storage = {"/user/usage": {"uploads": "1340458410", "submissions": "474", "total_submissions": "690",
+                                   "monthly_usage_reset_date": "2026-10-21 00:00:00", "form_count": "5"},
+                   "/user": {"account_type": "https://api.jotform.com/system/plan/SILVER"},
+                   "/system/plan/SILVER": {"name": "SILVER", "limits": {"uploads": 10738466816, "submissions": 2500}}}
+
         class Fake:
             def get(self, path, **params):
                 if path.endswith("/questions"):
@@ -3218,6 +3278,8 @@ class FormStatusAudit(unittest.TestCase):
                 if path.endswith("/properties"):
                     return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
                             "clearFieldOnHide": "disable"}
+                if path in storage:
+                    return copy.deepcopy(storage[path])
                 return {"title": "t", "status": "ENABLED", "count": "0"}
 
         select = ('<select name="q500_clubPicker[]" multiple="">'
@@ -3257,9 +3319,29 @@ class FormStatusAudit(unittest.TestCase):
             self.assertIn(f"rendered rules: question 18 is rule 1 of {len(wire)}, the first roster rule 2; "
                           "its operands list the picker: yes", good)
             self.assertIn("rendered rosters: 4 with boxes, 4 with validate[required] (8 of 8 boxes)", good)
+            self.assertIn("rendered shape: clearFieldOnHide disable, module selects served multiple: none", good)
+            self.assertIn("module shape: year q94 single-select required; modules q14/q92/q93 single-select "
+                          "required; sessions q15/q95/q96/q97 single-select required; clearFieldOnHide disable", good)
             self.assertIn("→ CLEAN", good)
             for name in ("Jane Doe", "Ann Poe", "Sue Moe"):         # counts only, never a girl
                 self.assertNotIn(name, good)
+            # the storage line right after the Roster line (never a form problem), and in --json
+            self.assertIn("clubs per region\nstorage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; submissions "
+                          "this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER\n", good)
+            (rep,) = json.loads(report(roster, "--json"))
+            self.assertEqual(rep["storage"]["levels"], {"uploads": "ok", "submissions": "ok"})
+            self.assertEqual((rep["storage"]["plan"], rep["storage"]["reset"]), ("SILVER", "2026-10-21"))
+            self.assertEqual(rep["rule_problems"], [])                    # not one of them
+            storage["/user/usage"]["uploads"] = str(10738466816 * 9 // 10)
+            out = report(roster)
+            self.assertIn("\n!! storage: upload space 9.00 GiB of 10.00 GiB (90.0%) -> alarm;", out)
+            self.assertIn("→ CLEAN", out)                                 # account-wide: no form turns NOT CLEAN
+            del storage["/user"]["account_type"]
+            out = report(roster)
+            self.assertIn("\nstorage: could not be read (GET /user: no account_type", out)
+            self.assertIn("→ CLEAN", out)
+            self.assertIn("error", json.loads(report(roster, "--json"))[0]["storage"])
+            storage["/user"]["account_type"] = "https://api.jotform.com/system/plan/SILVER"
             self.assertIn("rendered picker: 4 options, 3 with data-calcvalue = value, 1 different", bad)
             self.assertIn("would send another club's name", bad)
             self.assertNotIn("CLEAN", bad)
@@ -6964,6 +7046,101 @@ class NamesAndModulesRunbook(unittest.TestCase):
         self.assertIn(f"module shape: {line}", text)
         for fragment in ("dontClear", "`enable`", "never a sync apply", "JotForm.clearFieldOnHide"):
             self.assertIn(fragment, text)
+
+
+class JotformUsage(unittest.TestCase):
+    """glow/usage.py: Jotform's two limits against the account's usage, each judged on its own
+    (docs/plans/2026-10-06-photos-to-drive.md); a fake client with the answers' shapes as read
+    2026-10-06 (counts as strings, the plan's URL, numeric limits)."""
+
+    CAP_UP, CAP_SUB = 10738466816, 2500
+
+    class Fake:
+        def __init__(self, **change):
+            self.calls = []
+            self.answers = {
+                "/user/usage": {"uploads": "1340458410", "submissions": "474", "total_submissions": "690",
+                                "monthly_usage_reset_date": "2026-10-21 00:00:00", "form_count": "5"},
+                "/user": {"account_type": "https://api.jotform.com/system/plan/SILVER", "loginToViewUploadedFiles": "1"},
+                "/system/plan/SILVER": {"name": "SILVER", "limits": {"uploads": 10738466816, "submissions": 2500,
+                                                                     "totalSubmissions": 25000, "formCount": 50}}}
+            self.answers.update(change)
+
+        def get(self, path, **params):
+            from glow.jotform import JotformError
+            self.calls.append(path)
+            if path not in self.answers:
+                raise JotformError(f"GET {path}: 404 Not Found")
+            return copy.deepcopy(self.answers[path])
+
+    BASE = {"plan": "SILVER", "uploads": 1340458410, "uploads_cap": CAP_UP, "submissions": 474,
+            "submissions_cap": CAP_SUB, "reset": "2026-10-21"}
+
+    def test_the_three_reads_and_the_line(self):
+        fake = self.Fake()
+        u = usage.read_usage(fake)
+        self.assertEqual(fake.calls, ["/user/usage", "/user", "/system/plan/SILVER"])
+        self.assertEqual(u, self.BASE)                                 # the reset date trimmed to the day
+        self.assertEqual(usage.levels(u), {"uploads": "ok", "submissions": "ok"})
+        self.assertEqual(usage.worst(usage.levels(u)), "ok")
+        self.assertEqual(usage.storage_line(u), "storage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; "
+                         "submissions this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER")
+        # the plan's name from its URL, whatever the case or a trailing slash; other date shapes kept as they are
+        self.assertEqual(usage.plan_name({"account_type": "https://api.jotform.com/system/plan/gold/"}), "GOLD")
+        self.assertEqual(usage.read_usage(self.Fake(**{"/user": {"account_type": ".../system/plan/Gold"},
+                                                       "/system/plan/GOLD": {"limits": {"uploads": 107374182400,
+                                                                                        "submissions": 10000}}}))["plan"],
+                         "GOLD")
+        self.assertEqual([usage.reset_day(v) for v in ("2026-10-21 00:00:00", "2026-10-21", "soon", None)],
+                         ["2026-10-21", "2026-10-21", "soon", ""])
+        self.assertIn("resets ?)", usage.storage_line(dict(self.BASE, reset="")))
+        self.assertEqual((usage.WARN_AT, usage.ALARM_AT), (0.5, 0.8))
+
+    def test_levels_per_limit_at_the_boundaries(self):
+        for limit, cap in (("uploads", self.CAP_UP), ("submissions", self.CAP_SUB)):
+            other = "submissions" if limit == "uploads" else "uploads"
+            # 49.9 / 50 / 79.9 / 80 % of that limit (integer arithmetic: the 50 and 80 % values rounded up)
+            for used, want in ((cap * 499 // 1000, "ok"), (-(-cap * 5 // 10), "warn"),
+                               (cap * 799 // 1000, "warn"), (-(-cap * 8 // 10), "alarm"), (cap, "alarm"),
+                               (cap + 1, "alarm"), (0, "ok")):
+                u = dict(self.BASE, uploads=0, submissions=0)
+                u[limit] = used
+                lv = usage.levels(u)
+                self.assertEqual((lv[limit], lv[other]), (want, "ok"), (limit, used))   # never the other one
+                self.assertEqual(usage.worst(lv), want)
+                self.assertIn(f"-> {want}", usage.storage_line(u).split(usage.NAMES[limit])[1])
+        self.assertEqual(usage.worst({"uploads": "warn", "submissions": "alarm"}), "alarm")
+        self.assertEqual(usage.worst({"uploads": "warn", "submissions": "ok"}), "warn")
+        self.assertEqual(usage.share(dict(self.BASE, submissions=1250), "submissions"), 0.5)
+
+    def test_an_answer_of_another_shape_is_refused_never_guessed(self):
+        from glow.jotform import JotformError
+        cases = {
+            "no account_type": {"/user": {"name": "x"}},
+            "not the shape read on 2026-10-06 (KeyError": {"/user/usage": {"submissions": "474"}},
+            "not the shape read on 2026-10-06 (ValueError": {"/user/usage": {"uploads": "lots", "submissions": "474"}},
+            "GET /system/plan/SILVER limits: not the object": {"/system/plan/SILVER": {"limits": []}},
+            "cannot be judged": {"/system/plan/SILVER": {"limits": {"uploads": 0, "submissions": 2500}}},
+            "GET /user/usage: not the object": {"/user/usage": []},
+        }
+        for message, change in cases.items():
+            with self.subTest(message):
+                with self.assertRaises(ValueError) as caught:
+                    usage.read_usage(self.Fake(**change))
+                self.assertIn(message, str(caught.exception))
+        with self.assertRaises(JotformError):                          # the client's own error passes through
+            usage.read_usage(self.Fake(**{"/user": {"account_type": ".../system/plan/BRONZE"}}))
+        # form_status: a failed read is reported, never a form problem; the line says so
+        fake = self.Fake(**{"/user": {"account_type": ".../system/plan/BRONZE"}})
+        store = form_status.read_storage(fake)
+        self.assertEqual(list(store), ["error"])
+        self.assertIn("GET /system/plan/BRONZE", store["error"])
+        self.assertTrue(form_status.storage_status_line(store).startswith("storage: could not be read (GET /system/plan/BRONZE"))
+        store = form_status.read_storage(self.Fake())
+        self.assertEqual(store["levels"], {"uploads": "ok", "submissions": "ok"})
+        self.assertFalse(form_status.storage_status_line(store).startswith("!!"))
+        store = form_status.read_storage(self.Fake(**{"/user/usage": {"uploads": str(self.CAP_UP), "submissions": "1"}}))
+        self.assertTrue(form_status.storage_status_line(store).startswith("!! storage: upload space 10.00 GiB of 10.00 GiB (100.0%) -> alarm;"))
 
 
 class WorkLog(unittest.TestCase):

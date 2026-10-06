@@ -36,7 +36,11 @@ dropdown's calcValues, stop the region (ATTENTION): each is rolled out by hand,
 one form at a time, template first (docs/RUNBOOK.md, "The names list sent to
 Salesforce" and "The names dictionary and the module values"). The verify step's
 form_status also audits the form's names dictionary; a store it could not read
-is a note.
+is a note. Once per run, after the regions, Jotform's storage is read against the
+account's plan (glow/usage.py): the line is logged, and a limit at 80 % or more -
+upload space in all, or submissions in the monthly cycle, each on its own - is an
+ATTENTION, because at 100 % Jotform disables the forms (docs/RUNBOOK.md,
+"Photos", step 7); a read that fails is a log line, never a failed run.
 """
 import argparse
 import csv
@@ -55,6 +59,8 @@ sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
 import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily inside it)
 from glow import forms as glow_forms  # noqa: E402
+from glow import usage  # noqa: E402  (Jotform's storage against the plan's limits; standard library)
+from glow.jotform import Client  # noqa: E402  (the one read this file makes itself: the usage)
 from glow.sync import sf_name_clashes  # noqa: E402  (standard library only, like this file)
 
 # The live regional forms (one source: glow/forms.py, parity-tested against
@@ -628,6 +634,43 @@ class Run:
         self.log(f"  ! {len(clashes)} name(s) are sent to question 5 by more than one club: "
                  + ", ".join(f"'{name}'" for name, _ in clashes[:8]))
 
+    def check_storage(self, read):
+        """Jotform's account limits, once per run (docs/plans/2026-10-06-photos-to-drive.md):
+        the storage line in the log and, for each limit at alarm (80 % of it), an ATTENTION
+        naming it - at 100 % Jotform disables the forms and attendance collection stops.
+        Upload space is cumulative and is what Gold or a retention policy answers; the
+        submissions count resets every cycle; so the two are judged apart and never merged.
+        At warn the line alone (a daily e-mail for months would bury real ATTENTIONs). `read`
+        returns glow.usage.read_usage's dict; one that raises is a log line, never a failed
+        run."""
+        try:
+            u = read()
+        except Exception as err:                      # noqa: BLE001 - a Jotform error of any shape
+            self.log(f"\nstorage: could not be read ({err.__class__.__name__})")
+            return
+        self.log("\n" + usage.storage_line(u))
+        for limit, lv in usage.levels(u).items():
+            if lv != "alarm":
+                continue
+            pct = f"{usage.share(u, limit) * 100:.0f}%"
+            title = f"Jotform {usage.NAMES[limit]} at {pct} - the forms stop at 100%"
+            if limit == "uploads":
+                detail = (f"The {u['plan']} plan allows {usage.gib(u['uploads_cap'])} of uploaded files in all "
+                          f"(the group photos, about 1.9 MB each); {usage.gib(u['uploads'])} are used. At 100% "
+                          "Jotform disables the forms (\"Form over quota\") and attendance collection stops; "
+                          "copying the photos to Google Drive frees nothing here. Decide now: Gold (more upload "
+                          "space) or a retention policy - docs/BACKLOG.md, \"Gold versus retention\"; "
+                          "docs/RUNBOOK.md, \"Photos\", step 7. Never switch on Jotform's Auto Delete "
+                          "Submissions without reading that BACKLOG item first.")
+            else:
+                detail = (f"The {u['plan']} plan allows {u['submissions_cap']:,} submissions a month across every "
+                          f"form; {u['submissions']:,} have arrived in the cycle that resets on {u['reset'] or '?'}. "
+                          "At 100% Jotform disables the forms until the cycle resets. This is a busy month, not "
+                          "storage: only a bigger plan answers it - docs/BACKLOG.md, \"Gold versus retention\"; "
+                          "docs/RUNBOOK.md, \"Photos\", step 7.")
+            self.attention.append((title, detail))
+            self.log(f"  ! {title}")
+
     def save_conditions(self, form):
         """A conditions-only rollback file next to the full snapshot.
 
@@ -732,6 +775,7 @@ def main():
     for region in args.region or list(REGIONAL_FORMS):
         run.region(region, csv_path)
     run.check_names()
+    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"])))
 
     if args.synclog and run.results:
         try:

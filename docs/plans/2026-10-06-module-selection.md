@@ -382,3 +382,29 @@ EntityDefinition.QualifiedApiName FROM ValidationRule WHERE EntityDefinition.Qua
 exact shape is unverified; the five accepted Spanish batches already say no active rule rejects a
 module value on insert - a rule that fires on update only would show as a 400 on the `--limit 1`
 batch, with nothing written).
+
+## Build notes (2026-10-06, part (a) built on the branch, offline, after -54's confirmation)
+
+- `audit_module_shape` flags a missing module dropdown as the plan says, so a deleted one gives
+  two lines (this audit's and `audit_module_values`'): both true, the form is badly broken then.
+  The session dropdowns' messages name question 100 ("two sessions; question 100 would run them
+  together", "a blank session reaches Salesforce"), the year's a blank year and the chain; a
+  dropdown of another type (`control_radio`, say) is flagged too.
+- The printed line is `module shape: year q94 single-select required; modules q14/q92/q93
+  single-select required; sessions q15/q95/q96/q97 single-select required; clearFieldOnHide
+  disable`; an odd dropdown is named in its group (`modules q14/q92/q93: q92 multi-select`), an
+  unset value prints `clearFieldOnHide unset`.
+- The `--rendered` read checks a `multiple` attribute on the module selects only (as the plan
+  says) and the page's `JotForm.clearFieldOnHide`; a page without that line is "cannot be
+  vouched for", like the other page reads. The report prints a `rendered shape:` line.
+- The test fixtures (`SameNameFlow.form`, `served_modules_and_store`, the fake `/properties`
+  answers) gained the live shape - `required: Yes` on the year, module and session dropdowns,
+  `JotForm.clearFieldOnHide="disable"` on the served page, `clearFieldOnHide: disable` in the
+  properties - so the forms the other tests build are clean under the new audit.
+- Read-only proof, 2026-10-06 afternoon: `form_status.py --roster <fresh export> --rendered` on
+  the five live forms, every `module shape:` line as above, every `rendered shape: clearFieldOnHide
+  disable, module selects served multiple: none`, every form CLEAN. **The pages were served on
+  runtime builds not read before** - template `bc6c80d556a`, Africa / Asia / Latin America
+  `8705c008453`, U.S `18bdf84aedc` (the audit's premise is `fc726a121d4`; BACKLOG 64 and 67):
+  the submit handler's `clearFieldOnHide` branch and the translation runtime of those builds are
+  to be re-read, not done in this build.

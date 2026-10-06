@@ -23,6 +23,9 @@ rule never sends its answer) and whether the form's
 own translation dictionary alters any roster option (the runtime's lookup
 emulated, glow/translation_lookup.py, in every language the store holds: question
 18 would send another spelling of that girl's name; counts and club names only).
+Its first line is Jotform's storage against the account's plan (glow/usage.py:
+upload space in all and submissions in the monthly cycle, each judged on its own;
+docs/plans/2026-10-06-photos-to-drive.md) - account-wide, so never a form problem.
 --rendered reads the public page as well (counts only).
 
 Usage:
@@ -46,6 +49,7 @@ from glow import forms as glow_forms       # noqa: E402
 from glow import layout                    # noqa: E402  (rosters above the links and Submit)
 from glow import sync as glow_sync         # noqa: E402  (question 18's and the modules' constants, read at run time)
 from glow import translation_lookup as tl  # noqa: E402  (the runtime's names dictionary, emulated)
+from glow import usage                     # noqa: E402  (Jotform's storage against the plan's limits)
 from glow.cli import run                   # noqa: E402
 from glow.jotform import Client, JotformError     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
@@ -351,6 +355,25 @@ def audit_names(form_id, options, store, primary=tl.PRIMARY):
                         + ") - question 18 would send another spelling of those girls' names "
                         f"(a second Contact in Salesforce): {NAMES_FIX.format(form=form_id)}")
     return problems, summary
+
+
+def read_storage(client):
+    """Jotform's account usage against its plan's limits (glow/usage.py) with the level per
+    limit - the report's `storage` key, read once per run. A read that fails is reported
+    ({"error": why}) and is never a form problem: the cap is account-wide, and the runner's
+    verify step must not fail on it."""
+    try:
+        u = usage.read_usage(client)
+    except (JotformError, ValueError) as err:
+        return {"error": str(err)[:200]}
+    return dict(u, levels=usage.levels(u))
+
+
+def storage_status_line(store):
+    """The printed report's first line, `!! ` at alarm (from read_storage)."""
+    if "error" in store:
+        return f"storage: could not be read ({store['error']})"
+    return ("!! " if usage.worst(store["levels"]) == "alarm" else "") + usage.storage_line(store)
 
 
 def read_store(client, form_id):
@@ -1041,10 +1064,13 @@ def main():
         FORMS.update(DEFUNCT)
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
     client = Client(api_key)
+    storage = read_storage(client)        # once per run: account-wide, every report carries it
     roster = load_roster(args.roster)
     partners_of = load_partners(args.roster) or None     # an empty Roster vouches for no partner
 
     reports = [form_report(f, client, roster, partners_of) for f in (args.form or FORMS)]
+    for r in reports:
+        r["storage"] = storage
     if args.rendered:
         for r in reports:
             r["rule_problems"] += rendered_problems(r, public_page(r["id"]))
@@ -1052,7 +1078,8 @@ def main():
         print(json.dumps(reports, indent=1))
         return
 
-    print("Roster (active girls):", {r: len(c) for r, c in roster.items()}, "clubs per region\n")
+    print("Roster (active girls):", {r: len(c) for r, c in roster.items()}, "clubs per region")
+    print(storage_status_line(storage) + "\n")
     for r in reports:
         print(f"== {r['label']}  {r['id']}  \"{r['title']}\"  [{r['status']}]")
         last = f"{r['last_submission']} US Eastern" if r["last_submission"] else "none"  # Jotform's clock

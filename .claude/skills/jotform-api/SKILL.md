@@ -1,6 +1,6 @@
 ---
 name: jotform-api
-description: Verified Jotform API semantics for this project — conditions as JSON-string terms/action via PUT properties, question POST merges, translations POST replaces a language, clone resets the language list, dropdown/multi-select properties, the rule walk (index 0 runs last, no recalculation at submit), required + hidden fields, the checkbox calculation reader and the translation-dictionary lookup it runs ticked names through, module dropdown calcValues, the loop limit, 504-but-created. Load before writing or reviewing any code that calls api.jotform.com or reasons about how the forms behave at runtime.
+description: Verified Jotform API semantics for this project — conditions as JSON-string terms/action via PUT properties, question POST merges, translations POST replaces a language, clone resets the language list, dropdown/multi-select properties, the rule walk (index 0 runs last, no recalculation at submit), clearFieldOnHide at submit, required + hidden fields, the checkbox calculation reader and the translation-dictionary lookup it runs ticked names through, module dropdown calcValues, the loop limit, the read-only integrations property (Salesforce, Google Drive), uploaded files behind the login, the account's usage and plan limits, 504-but-created. Load before writing or reviewing any code that calls api.jotform.com or reasons about how the forms behave at runtime.
 ---
 
 # Jotform API — what is verified (2026-08-24 → 2026-09-01)
@@ -205,10 +205,12 @@ unless `--apply`.
   inside `<style id="form-designer-style">` in `<head>`, BEFORE the switcher stylesheet linked
   in `<body>`, so equal-specificity rules lose: use id-based selectors.
 
-## Salesforce
+## Integrations
 - Native Salesforce V2 integration, 8 mapping rows keyed to question ids
-  (5, 17, 18, 98, 100, 102, 105, 109 + photo 19), byte-identical across the forms; it survives a
-  clone. The club name is read from q5 and matching happens inside Salesforce. q5 is the picked
+  (5, 17, 18, 98, 100, 102, 105, 109), byte-identical across the forms; it survives a clone. Its
+  upload row (`uploadFields`) has been **empty since 2026-10-01** on the four regional forms (the
+  CEO: no photo in Salesforce; the template follows at RUNBOOK "Photos" step 1, until then it still
+  reads `['19']`); `tools/integration_status.py` expects `[]`. The club name is read from q5 and matching happens inside Salesforce. q5 is the picked
   option's text, so an option IS the Account name: a club's own name, or `<club> - <partner>`
   for a name two partners share (2026-09-30; never split it on " - ", club names contain it).
   The typed Partner box (q331) is not in the mapping (the live `salesforceV2` action map, read
@@ -229,6 +231,24 @@ unless `--apply`.
 - In the builder's field list the Club picker and question 5 are both called "Club Name":
   `Account_Name__c` must read question 5 (the hidden text field), and the picker's id differs
   per form.
+- **Google Drive** (docs/plans/2026-10-06-photos-to-drive.md): every integration is included on
+  every Jotform plan ($0). The `integrations` property is read-only for it too: builder only
+  (Settings → Integrations → Google Drive; one folder in the connected account's My Drive, Shared
+  Drives unsupported; optional subfolder per submission named from Form Fields; two toggles, Send
+  Submission PDFs and Send Uploaded Files - the forms want files only). Every live form's
+  `integrations` had exactly one key, `salesforceV2`, on 2026-10-06; **the Drive block's key is
+  not read yet** - `tools/integration_status.py` prints the other keys (`other integrations:`),
+  and whether the block shows in the property at all is unverified until Ryan's template setup.
+- **Uploaded files need a login**: `GET /user` `loginToViewUploadedFiles` = `"1"`; an upload URL
+  answers HTTP 200 `text/html` (the login page) with or without the APIKEY header. No script can
+  fetch a photo without switching that off (which would make every photo URL public).
+- **Account usage and limits** (`glow/usage.py`, read 2026-10-06): `GET /user/usage` returns the
+  counts **as strings** - `uploads` (bytes, cumulative), `submissions` (this cycle),
+  `total_submissions`, `form_count`, `monthly_usage_reset_date` as `yyyy-mm-dd 00:00:00`;
+  `GET /user` `account_type` is the plan's URL (`…/system/plan/SILVER`); `GET /system/plan/<NAME>`
+  has `limits` as numbers (`uploads` 10,738,466,816 = 10 GiB, `submissions` 2,500,
+  `totalSubmissions` 25,000, `formCount` 50 on Silver), `prices` and `onSale.nonProfit`. A form's
+  `status` (`ENABLED` / `DISABLED`) is in `GET /form/{id}/properties` (and `GET /form/{id}`).
 
 ## Rate and failure modes
 - Big forms (Africa: ~3,900 checkbox options) make `questions` GETs slow; back up only the form

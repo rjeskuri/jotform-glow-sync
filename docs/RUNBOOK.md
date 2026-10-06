@@ -291,6 +291,15 @@ back ("The names dictionary and the module values"). After every apply the
 verify step also audits the form's names dictionary; a store it could not
 read is a note in the log, not `applied-unverified`.
 
+Once per run, after the regions, the runner also reads **Jotform's storage**
+against the account's plan and logs the same `storage:` line `form_status.py`
+prints ("Photos", step 7): upload space in all and submissions in the monthly
+cycle, each judged on its own. A limit at 80 % or more is an ATTENTION naming
+it ("Jotform upload space at NN% - the forms stop at 100%", or "Jotform
+submissions this cycle at NN% …"), every morning until acted on; at 50 % the
+line reads `warn` and nothing more. A read that fails is one log line,
+`storage: could not be read (…)`, never a failed run.
+
 The workflow fails visibly (GitHub emails the repository owner) on any
 ATTENTION (exit 2) and on any failure (exit 1).
 
