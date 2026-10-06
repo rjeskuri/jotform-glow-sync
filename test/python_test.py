@@ -43,6 +43,7 @@ from glow import layout               # noqa: E402
 from glow import links                # noqa: E402
 from glow import sync as glow_sync    # noqa: E402
 from glow import translation_lookup as tl   # noqa: E402
+from glow import usage                # noqa: E402
 from glow.text import md5             # noqa: E402
 from sf_club_accounts_test import SalesforceClubAccounts  # noqa: E402,F401  (its own file; run here)
 from integration_status_test import IntegrationStatus     # noqa: E402,F401  (its own file; run here)
@@ -479,6 +480,60 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertIn("1 Salesforce name(s) are sent by more than one club", title)
         self.assertIn("- 'Stars': Stars (Partner One, Africa); Stars (Partner Two, Africa)", detail)
         self.assertIn("--same-name-switch", detail)
+
+    def test_check_storage_judges_each_limit_on_its_own(self):
+        """docs/plans/2026-10-06-photos-to-drive.md: once per run, the storage line in the log;
+        an ATTENTION per limit at alarm naming it (upload space, or the submissions cycle); at
+        warn the line alone; a reader that raises is a log line, never a failed run."""
+        import types
+        from unittest import mock
+
+        def run_with(answer):
+            run = auto_sync.Run(types.SimpleNamespace(apply=False, out="", max_creates=5, max_updates=20,
+                                                      trigger="test", run_url=""))
+
+            def read():
+                if isinstance(answer, Exception):
+                    raise answer
+                return dict(answer)
+            with mock.patch("builtins.print"):
+                run.check_storage(read)
+            return run
+        base = {"plan": "SILVER", "uploads": 1340458410, "uploads_cap": 10738466816,
+                "submissions": 474, "submissions_cap": 2500, "reset": "2026-10-21"}
+        run = run_with(base)
+        self.assertEqual((run.attention, run.failed), ([], False))
+        self.assertEqual(run.lines[-1].strip(), "storage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; "
+                         "submissions this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER")
+        run = run_with(dict(base, uploads=base["uploads_cap"] // 2))          # warn: the line alone
+        self.assertEqual(run.attention, [])
+        self.assertIn("(50.0%) -> warn;", run.lines[-1])
+        run = run_with(dict(base, uploads=base["uploads_cap"] * 9 // 10))     # alarm on upload space
+        (title, detail), = run.attention
+        self.assertEqual(title, "Jotform upload space at 90% - the forms stop at 100%")
+        for fragment in ("SILVER plan allows 10.00 GiB", "9.00 GiB are used", "Gold versus retention",
+                         "Auto Delete Submissions", "frees nothing"):
+            self.assertIn(fragment, detail)
+        self.assertNotIn("submissions this cycle", title)
+        self.assertEqual(run.lines[-1], "  ! " + title)
+        run = run_with(dict(base, submissions=2100))                          # alarm on the cycle only
+        (title, detail), = run.attention
+        self.assertEqual(title, "Jotform submissions this cycle at 84% - the forms stop at 100%")
+        for fragment in ("2,500 submissions a month", "2,100 have arrived", "resets on 2026-10-21",
+                         "busy month, not storage", "Gold versus retention"):
+            self.assertIn(fragment, detail)
+        self.assertNotIn("upload space", title)
+        run = run_with(dict(base, uploads=base["uploads_cap"], submissions=2500))   # both: one each
+        self.assertEqual([t.split(" at ")[0] for t, _ in run.attention],
+                         ["Jotform upload space", "Jotform submissions this cycle"])
+        run = run_with(RuntimeError("nope"))                                  # a failed read
+        self.assertEqual((run.attention, run.failed), ([], False))
+        self.assertEqual(run.lines[-1].strip(), "storage: could not be read (RuntimeError)")
+        self.assertNotIn("nope", "\n".join(run.lines))
+        # main() reads it after the regions, through the one client, with the key from the environment
+        src = read(os.path.join(REPO, "tools", "auto_sync.py"))
+        self.assertIn('run.check_names()\n    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"], max_time=60)))',
+                      src)                      # bounded: a stalled GET must not hold the run
 
     def test_a_club_guard_update_is_a_change_and_parses_from_both_shapes(self):
         text = ("Roster: 3 active clubs in Asia (40 girls); 300 clubs overall\n"
@@ -1172,16 +1227,19 @@ class SameNameFlow(unittest.TestCase):
         box_hidden: q331's hidden flag (default: hidden once no rule shows it);
         partner_list: the options of a retired partner list left on the form (q600)."""
         roster = self.ROSTER if roster is None else roster
+        # the module chain as the live forms carry it: one required single-select per step
+        # (form_status.audit_module_shape pins it; docs/plans/2026-10-06-module-selection.md)
         qs = {"5": {"type": "control_textbox", "text": "Club Name", "order": "4", "hidden": "Yes"},
               "331": {"type": "control_textbox", "text": "Partner", "order": "7", "name": "partner"},
-              "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9"}}
+              "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9",
+                     "required": "Yes"}}
         for n, (year, mq) in enumerate(sync.MODULES.items()):
             # in step: the calcValues the sync writes (glow.sync.MODULE_CALC_VALUES)
             qs[mq] = {"type": "control_dropdown", "text": "Module", "options": self.MODULES[year],
-                      "order": str(10 + n),
+                      "order": str(10 + n), "required": "Yes",
                       "calcValues": glow_sync.module_calc_values(self.MODULES[year].split("|"))}
         for n, wq in enumerate(sync.WEEKS.values()):
-            qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n)}
+            qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n), "required": "Yes"}
         for q in (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID):
             qs[q] = {"type": "control_textbox", "text": "bridge", "order": "30"}
         for (partner, club), names in roster.items():
@@ -2881,13 +2939,15 @@ def served_store(qs, extra=None):
     return store
 
 
-def served_modules_and_store(qs, store=None):
+def served_modules_and_store(qs, store=None, clear="disable"):
     """The module dropdowns' <select>s as Jotform serves a single-select (read from the U.S
     page 2026-10-02: a "Please Select" placeholder, then each option with a data-calcvalue
-    when the question carries calcValues, the leading slot being the placeholder's), and
-    the store the page embeds (window.allTranslations, FormTranslation.init)."""
+    when the question carries calcValues, the leading slot being the placeholder's), the
+    runtime's clearFieldOnHide (JotForm.clearFieldOnHide="…", the template page 2026-10-06;
+    None: no such line) and the store the page embeds (window.allTranslations,
+    FormTranslation.init)."""
     import html as html_mod
-    parts = []
+    parts = [] if clear is None else [f'<script>JotForm.clearFieldOnHide="{clear}";</script>']
     for year, q in sync.MODULES.items():
         if q not in qs:
             continue
@@ -3039,7 +3099,8 @@ class FormStatusAudit(unittest.TestCase):
                 if path.endswith("/questions"):
                     return copy.deepcopy(qs)
                 if path.endswith("/properties"):
-                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
                 return {"title": "t", "status": "ENABLED", "count": "0"}
         for q_id, q in qs.items():
             q.setdefault("qid", q_id)
@@ -3205,12 +3266,20 @@ class FormStatusAudit(unittest.TestCase):
         for q_id, q in qs.items():
             q.setdefault("qid", q_id)
 
+        storage = {"/user/usage": {"uploads": "1340458410", "submissions": "474", "total_submissions": "690",
+                                   "monthly_usage_reset_date": "2026-10-21 00:00:00", "form_count": "5"},
+                   "/user": {"account_type": "https://api.jotform.com/system/plan/SILVER"},
+                   "/system/plan/SILVER": {"name": "SILVER", "limits": {"uploads": 10738466816, "submissions": 2500}}}
+
         class Fake:
             def get(self, path, **params):
                 if path.endswith("/questions"):
                     return copy.deepcopy(qs)
                 if path.endswith("/properties"):
-                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
+                if path in storage:
+                    return copy.deepcopy(storage[path])
                 return {"title": "t", "status": "ENABLED", "count": "0"}
 
         select = ('<select name="q500_clubPicker[]" multiple="">'
@@ -3250,9 +3319,29 @@ class FormStatusAudit(unittest.TestCase):
             self.assertIn(f"rendered rules: question 18 is rule 1 of {len(wire)}, the first roster rule 2; "
                           "its operands list the picker: yes", good)
             self.assertIn("rendered rosters: 4 with boxes, 4 with validate[required] (8 of 8 boxes)", good)
+            self.assertIn("rendered shape: clearFieldOnHide disable, module selects served multiple: none", good)
+            self.assertIn("module shape: year q94 single-select required; modules q14/q92/q93 single-select "
+                          "required; sessions q15/q95/q96/q97 single-select required; clearFieldOnHide disable", good)
             self.assertIn("→ CLEAN", good)
             for name in ("Jane Doe", "Ann Poe", "Sue Moe"):         # counts only, never a girl
                 self.assertNotIn(name, good)
+            # the storage line right after the Roster line (never a form problem), and in --json
+            self.assertIn("clubs per region\nstorage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; submissions "
+                          "this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER\n", good)
+            (rep,) = json.loads(report(roster, "--json"))
+            self.assertEqual(rep["storage"]["levels"], {"uploads": "ok", "submissions": "ok"})
+            self.assertEqual((rep["storage"]["plan"], rep["storage"]["reset"]), ("SILVER", "2026-10-21"))
+            self.assertEqual(rep["rule_problems"], [])                    # not one of them
+            storage["/user/usage"]["uploads"] = str(10738466816 * 9 // 10)
+            out = report(roster)
+            self.assertIn("\n!! storage: upload space 9.00 GiB of 10.00 GiB (90.0%) -> alarm;", out)
+            self.assertIn("→ CLEAN", out)                                 # account-wide: no form turns NOT CLEAN
+            del storage["/user"]["account_type"]
+            out = report(roster)
+            self.assertIn("\nstorage: could not be read (GET /user: no account_type", out)
+            self.assertIn("→ CLEAN", out)
+            self.assertIn("error", json.loads(report(roster, "--json"))[0]["storage"])
+            storage["/user"]["account_type"] = "https://api.jotform.com/system/plan/SILVER"
             self.assertIn("rendered picker: 4 options, 3 with data-calcvalue = value, 1 different", bad)
             self.assertIn("would send another club's name", bad)
             self.assertNotIn("CLEAN", bad)
@@ -3396,7 +3485,7 @@ class FormStatusLayout(unittest.TestCase):
         def get(self, path, **params):
             if path.endswith("/properties"):
                 return {"conditions": [], "language": [{"options": "English|Español"}],
-                        "integrations": {"salesforceV2": {"on": 1}}}
+                        "integrations": {"salesforceV2": {"on": 1}}, "clearFieldOnHide": "disable"}
             if path.endswith("/questions"):
                 return copy.deepcopy(self.qs)
             return {"title": "Attendance Form (Template)", "status": "ENABLED", "count": "0"}
@@ -6714,7 +6803,8 @@ class ModuleAndNamesAudit(unittest.TestCase):
                         return copy.deepcopy(questions)
                     if path.endswith("/properties"):
                         return {"conditions": wire, "language": [{"options": "English (US)|Español",
-                                                                   "primaryLanguage": "en"}]}
+                                                                   "primaryLanguage": "en"}],
+                                "clearFieldOnHide": "disable"}
                     if path.endswith("/translations"):
                         if isinstance(store, Exception):
                             raise store
@@ -6792,11 +6882,132 @@ class ModuleAndNamesAudit(unittest.TestCase):
                 '<input type="checkbox" id="input_8_0" value="Not a roster">')
         self.assertEqual(form_status.rendered_options(page, ["7"]), [("7", "q7", "Amara O'Fennwhistle & Grace")])
         problems, r = rendered("<html></html>")
-        self.assertEqual(len(problems), 4)                        # never vouched for: three selects, the store
+        self.assertEqual(len(problems), 5)                # never vouched for: three selects, clearFieldOnHide, the store
         self.assertIn("no select for module dropdown q14", problems[0])
-        self.assertIn("no embedded translation store", problems[3])
+        self.assertIn("no JotForm.clearFieldOnHide on the public page", problems[3])
+        self.assertIn("no embedded translation store", problems[4])
         self.assertFalse(r["rendered_names"]["checked"])
+        self.assertEqual(r["rendered_shape"], {"clearFieldOnHide": None, "multi_select": []})
         self.assertEqual(summary["14"]["options"], 1)
+
+    def test_the_module_shape_is_pinned(self):
+        """docs/plans/2026-10-06-module-selection.md (a): one required single-select per step of
+        the chain, the year visible, and the form-level clearFieldOnHide as glow/sync.py says;
+        an unknown value is reported as not read, never as "cleared"."""
+        qs, _ = self.form()
+        props = {"clearFieldOnHide": glow_sync.CLEAR_FIELD_ON_HIDE}
+        self.assertEqual(glow_sync.CLEAR_FIELD_ON_HIDE, "disable")
+        problems, summary = form_status.audit_module_shape(qs, props)
+        self.assertEqual(problems, [])
+        self.assertEqual(form_status.module_shape_line(summary),
+                         "year q94 single-select required; modules q14/q92/q93 single-select required; "
+                         "sessions q15/q95/q96/q97 single-select required; clearFieldOnHide disable")
+        self.assertEqual(summary["module"]["92"], {"single": True, "required": True, "dropdown": True})
+        self.assertEqual(summary["year"]["94"]["visible"], True)
+        self.assertEqual(sorted(summary["session"]), sorted(sync.WEEKS.values()))
+
+        def only(change, *fragments):
+            changed = copy.deepcopy(qs)
+            change(changed)
+            found, s = form_status.audit_module_shape(changed, props)
+            self.assertEqual(len(found), 1, found)
+            for fragment in fragments:
+                self.assertIn(fragment, found[0])
+            self.assertIn("never a sync apply - the sync does not write it", found[0])
+            return s
+        s = only(lambda q: q["92"].__setitem__("multipleSelections", "Yes"),
+                 "module dropdown q92 (year 2) is a multi-select: a mentor could send two modules; question 98 "
+                 "would run them together")
+        self.assertIn("modules q14/q92/q93: q92 multi-select;", form_status.module_shape_line(s))
+        only(lambda q: q["94"].__setitem__("required", "No"), "year dropdown q94 is not required: a blank year")
+        only(lambda q: q["15"].__setitem__("required", "No"),
+             "session dropdown q15 (8 sessions) is not required: a blank session reaches Salesforce")
+        only(lambda q: q["97"].__setitem__("multipleSelections", "Yes"),
+             "session dropdown q97 (15 sessions) is a multi-select: a mentor could send two sessions; question 100")
+        only(lambda q: q["94"].__setitem__("hidden", "Yes"), "year dropdown q94 is hidden: the chain starts visible")
+        s = only(lambda q: q.pop("96"), "session dropdown q96 (14 sessions) is not on the form")
+        self.assertIn("sessions q15/q95/q96/q97: q96 missing;", form_status.module_shape_line(s))
+        only(lambda q: q["14"].__setitem__("type", "control_radio"),
+             "module dropdown q14 (year 1) is a control_radio, not a dropdown")
+        # clearFieldOnHide: each value its own line; a value nobody has read is never "cleared"
+        for value, fragment in (("dontClear", "a module dropdown hidden by the Year rule would keep its answer at submit"),
+                                ("enable", "rejected 2026-09-30: the loop limit drops to 3 (DECISIONS)"),
+                                (None, "a value whose runtime behaviour has not been read - do not treat hidden "
+                                       "answers as cleared"),
+                                ("Disable", "a value whose runtime behaviour has not been read")):
+            (problem,), s = form_status.audit_module_shape(qs, {} if value is None else {"clearFieldOnHide": value})
+            self.assertIn(f"clearFieldOnHide is {value!r}, not 'disable': {fragment}", problem)
+            self.assertEqual(s["clearFieldOnHide"], value)
+        self.assertTrue(form_status.module_shape_line(form_status.audit_module_shape(qs, {})[1])
+                        .endswith("; clearFieldOnHide unset"))
+        # the shape audit flags shape only: a dropdown without calcValues is the values audit's
+        bare = copy.deepcopy(qs)
+        bare["14"]["calcValues"] = ""
+        self.assertEqual(form_status.audit_module_shape(bare, props)[0], [])
+
+    def test_the_report_and_the_runners_verify_read_the_shape(self):
+        qs, wire = self.form()
+        qs["2"] = {"type": "control_button", "text": "Submit", "name": "submit2", "order": "60"}
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+
+        def report(props_extra, questions=qs):
+            class Fake:
+                def get(self, path, **params):
+                    if path.endswith("/questions"):
+                        return copy.deepcopy(questions)
+                    if path.endswith("/properties"):
+                        return {"conditions": wire, "language": [{"options": "English (US)|Español",
+                                                                   "primaryLanguage": "en"}], **props_extra}
+                    if path.endswith("/translations"):
+                        return served_store(qs)
+                    return {"title": "t", "status": "ENABLED", "count": "0"}
+            return form_status.form_report(glow_forms.TEMPLATE, Fake(), {})
+
+        clean = {"error_conditions": 0, "salesforce": True, "languages": ["a"] * 12,
+                 "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []}}
+        rep = report({"clearFieldOnHide": "disable"})
+        self.assertEqual(rep["module_shape"]["clearFieldOnHide"], "disable")
+        self.assertEqual([p for p in rep["rule_problems"] if "clearFieldOnHide" in p or "dropdown q" in p], [])
+        self.assertEqual(auto_sync.verify_report(dict(clean, **{k: rep[k] for k in ("rule_problems", "names_dictionary")}))[0], [])
+        rep = report({"clearFieldOnHide": "dontClear"})
+        self.assertTrue(any(p.startswith("clearFieldOnHide is 'dontClear', not 'disable'") for p in rep["rule_problems"]))
+        problems, _ = auto_sync.verify_report(dict(clean, **{k: rep[k] for k in ("rule_problems", "names_dictionary")}))
+        self.assertTrue(any("clearFieldOnHide is 'dontClear'" in p for p in problems))   # the verify step fails
+        rep = report({})                                                                  # unset: not read, a problem
+        self.assertIsNone(rep["module_shape"]["clearFieldOnHide"])
+        self.assertTrue(any("do not treat hidden answers as cleared" in p for p in rep["rule_problems"]))
+        multi = copy.deepcopy(qs)
+        multi["93"]["multipleSelections"] = "Yes"
+        rep = report({"clearFieldOnHide": "disable"}, multi)
+        self.assertFalse(rep["module_shape"]["module"]["93"]["single"])
+        self.assertTrue(any("module dropdown q93 (year 3) is a multi-select" in p for p in rep["rule_problems"]))
+
+    def test_the_served_page_is_read_for_the_shape(self):
+        qs, _ = self.form()
+
+        def rendered(page):
+            r = {"id": "999", "module_values": form_status.audit_module_values(qs)[1]}
+            return form_status.rendered_module_problems(r, page), r
+
+        problems, r = rendered(served_modules_and_store(qs))
+        self.assertEqual((problems, r["rendered_shape"]), ([], {"clearFieldOnHide": "disable", "multi_select": []}))
+        (problem,), r = rendered(served_modules_and_store(qs, clear="dontClear"))
+        self.assertIn("rendered page: JotForm.clearFieldOnHide is 'dontClear', not 'disable'", problem)
+        self.assertIn("never a sync apply", problem)
+        self.assertEqual(r["rendered_shape"]["clearFieldOnHide"], "dontClear")
+        (problem,), r = rendered(served_modules_and_store(qs, clear=None))
+        self.assertIn("no JotForm.clearFieldOnHide on the public page", problem)
+        page = served_modules_and_store(qs).replace('name="q92_module2"', 'multiple="" name="q92_module2"')
+        (problem,), r = rendered(page)
+        self.assertIn("rendered page: module dropdown q92 is served as a multi-select (<select multiple>)", problem)
+        self.assertEqual(r["rendered_shape"]["multi_select"], ["92"])
+        self.assertIn('multiple=""', form_status.rendered_select_attrs(page, "92"))
+        self.assertNotIn("multiple", form_status.rendered_select_attrs(page, "14"))
+        self.assertIsNone(form_status.rendered_select_attrs(page, "500"))
+        # the whole-page read: the shape line printed, counts only
+        self.assertEqual(form_status.rendered_clear_field_on_hide('x JotForm.clearFieldOnHide = "enable"; y'), "enable")
+        self.assertIsNone(form_status.rendered_clear_field_on_hide(""))
 
 
 class NamesAndModulesRunbook(unittest.TestCase):
@@ -6829,6 +7040,107 @@ class NamesAndModulesRunbook(unittest.TestCase):
         self.assertEqual(order, sorted(order))
         self.assertIn("never unattended", text)
         self.assertIn("--restore backups/translations/<id>-<stamp>-before.json", text)
+        # the module chain's shape (docs/plans/2026-10-06-module-selection.md): the line is the tool's own
+        qs, _ = SameNameFlow.form(SameNameFlow(), switched=True)
+        line = form_status.module_shape_line(form_status.audit_module_shape(qs, {"clearFieldOnHide": "disable"})[1])
+        self.assertIn(f"module shape: {line}", text)
+        for fragment in ("dontClear", "`enable`", "never a sync apply", "JotForm.clearFieldOnHide"):
+            self.assertIn(fragment, text)
+
+
+class JotformUsage(unittest.TestCase):
+    """glow/usage.py: Jotform's two limits against the account's usage, each judged on its own
+    (docs/plans/2026-10-06-photos-to-drive.md); a fake client with the answers' shapes as read
+    2026-10-06 (counts as strings, the plan's URL, numeric limits)."""
+
+    CAP_UP, CAP_SUB = 10738466816, 2500
+
+    class Fake:
+        def __init__(self, **change):
+            self.calls = []
+            self.answers = {
+                "/user/usage": {"uploads": "1340458410", "submissions": "474", "total_submissions": "690",
+                                "monthly_usage_reset_date": "2026-10-21 00:00:00", "form_count": "5"},
+                "/user": {"account_type": "https://api.jotform.com/system/plan/SILVER", "loginToViewUploadedFiles": "1"},
+                "/system/plan/SILVER": {"name": "SILVER", "limits": {"uploads": 10738466816, "submissions": 2500,
+                                                                     "totalSubmissions": 25000, "formCount": 50}}}
+            self.answers.update(change)
+
+        def get(self, path, **params):
+            from glow.jotform import JotformError
+            self.calls.append(path)
+            if path not in self.answers:
+                raise JotformError(f"GET {path}: 404 Not Found")
+            return copy.deepcopy(self.answers[path])
+
+    BASE = {"plan": "SILVER", "uploads": 1340458410, "uploads_cap": CAP_UP, "submissions": 474,
+            "submissions_cap": CAP_SUB, "reset": "2026-10-21"}
+
+    def test_the_three_reads_and_the_line(self):
+        fake = self.Fake()
+        u = usage.read_usage(fake)
+        self.assertEqual(fake.calls, ["/user/usage", "/user", "/system/plan/SILVER"])
+        self.assertEqual(u, self.BASE)                                 # the reset date trimmed to the day
+        self.assertEqual(usage.levels(u), {"uploads": "ok", "submissions": "ok"})
+        self.assertEqual(usage.worst(usage.levels(u)), "ok")
+        self.assertEqual(usage.storage_line(u), "storage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; "
+                         "submissions this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER")
+        # the plan's name from its URL, whatever the case or a trailing slash; other date shapes kept as they are
+        self.assertEqual(usage.plan_name({"account_type": "https://api.jotform.com/system/plan/gold/"}), "GOLD")
+        self.assertEqual(usage.read_usage(self.Fake(**{"/user": {"account_type": ".../system/plan/Gold"},
+                                                       "/system/plan/GOLD": {"limits": {"uploads": 107374182400,
+                                                                                        "submissions": 10000}}}))["plan"],
+                         "GOLD")
+        self.assertEqual([usage.reset_day(v) for v in ("2026-10-21 00:00:00", "2026-10-21", "soon", None)],
+                         ["2026-10-21", "2026-10-21", "soon", ""])
+        self.assertIn("resets ?)", usage.storage_line(dict(self.BASE, reset="")))
+        self.assertEqual((usage.WARN_AT, usage.ALARM_AT), (0.5, 0.8))
+
+    def test_levels_per_limit_at_the_boundaries(self):
+        for limit, cap in (("uploads", self.CAP_UP), ("submissions", self.CAP_SUB)):
+            other = "submissions" if limit == "uploads" else "uploads"
+            # 49.9 / 50 / 79.9 / 80 % of that limit (integer arithmetic: the 50 and 80 % values rounded up)
+            for used, want in ((cap * 499 // 1000, "ok"), (-(-cap * 5 // 10), "warn"),
+                               (cap * 799 // 1000, "warn"), (-(-cap * 8 // 10), "alarm"), (cap, "alarm"),
+                               (cap + 1, "alarm"), (0, "ok")):
+                u = dict(self.BASE, uploads=0, submissions=0)
+                u[limit] = used
+                lv = usage.levels(u)
+                self.assertEqual((lv[limit], lv[other]), (want, "ok"), (limit, used))   # never the other one
+                self.assertEqual(usage.worst(lv), want)
+                self.assertIn(f"-> {want}", usage.storage_line(u).split(usage.NAMES[limit])[1])
+        self.assertEqual(usage.worst({"uploads": "warn", "submissions": "alarm"}), "alarm")
+        self.assertEqual(usage.worst({"uploads": "warn", "submissions": "ok"}), "warn")
+        self.assertEqual(usage.share(dict(self.BASE, submissions=1250), "submissions"), 0.5)
+
+    def test_an_answer_of_another_shape_is_refused_never_guessed(self):
+        from glow.jotform import JotformError
+        cases = {
+            "no account_type": {"/user": {"name": "x"}},
+            "not the shape read on 2026-10-06 (KeyError": {"/user/usage": {"submissions": "474"}},
+            "not the shape read on 2026-10-06 (ValueError": {"/user/usage": {"uploads": "lots", "submissions": "474"}},
+            "GET /system/plan/SILVER limits: not the object": {"/system/plan/SILVER": {"limits": []}},
+            "cannot be judged": {"/system/plan/SILVER": {"limits": {"uploads": 0, "submissions": 2500}}},
+            "GET /user/usage: not the object": {"/user/usage": []},
+        }
+        for message, change in cases.items():
+            with self.subTest(message):
+                with self.assertRaises(ValueError) as caught:
+                    usage.read_usage(self.Fake(**change))
+                self.assertIn(message, str(caught.exception))
+        with self.assertRaises(JotformError):                          # the client's own error passes through
+            usage.read_usage(self.Fake(**{"/user": {"account_type": ".../system/plan/BRONZE"}}))
+        # form_status: a failed read is reported, never a form problem; the line says so
+        fake = self.Fake(**{"/user": {"account_type": ".../system/plan/BRONZE"}})
+        store = form_status.read_storage(fake)
+        self.assertEqual(list(store), ["error"])
+        self.assertIn("GET /system/plan/BRONZE", store["error"])
+        self.assertTrue(form_status.storage_status_line(store).startswith("storage: could not be read (GET /system/plan/BRONZE"))
+        store = form_status.read_storage(self.Fake())
+        self.assertEqual(store["levels"], {"uploads": "ok", "submissions": "ok"})
+        self.assertFalse(form_status.storage_status_line(store).startswith("!!"))
+        store = form_status.read_storage(self.Fake(**{"/user/usage": {"uploads": str(self.CAP_UP), "submissions": "1"}}))
+        self.assertTrue(form_status.storage_status_line(store).startswith("!! storage: upload space 10.00 GiB of 10.00 GiB (100.0%) -> alarm;"))
 
 
 class WorkLog(unittest.TestCase):

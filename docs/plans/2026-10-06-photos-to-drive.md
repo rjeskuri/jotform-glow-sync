@@ -577,3 +577,47 @@ template, Africa, Asia and Latin America; `drive: not wanted (form DISABLED)` on
 `make check` → `ALL CHECKS PASSED` ×3, `py: … scripts answer --help`, `OK`, `gs: 10 files
 parse`, `secrets: clean`, `docs-links: ok`, `fixtures: up to date`, `CHECK PASSED` (pasted when
 done).
+
+## Build notes (2026-10-06, parts 1 and 2 built together on the branch, offline)
+
+- **`DRIVE_KEY`, the `drive:` line and `DRIVE_WANTED` are not built.** The Drive block's key is
+  unknown until Ryan's template setup (step 4); `tools/integration_status.py` carries a marked
+  TODO with the whole second step (the `DISABLED` skip included), and RUNBOOK "Photos" step 5
+  says a `drive: yes` line follows once the key is known and coded.
+- The `other integrations:` line prints for every live form, including one with no Salesforce
+  block (the plan said "per live form"; a form that lost its Salesforce block may still carry
+  the Drive one, which is worth seeing); old forms get no line.
+- The upload-field message keeps its "since 2026-10-01" parenthesis only while `UPLOADS` is
+  empty, so the rollback (`UPLOADS = ["19"]`) does not print a false reason.
+- `glow/usage.py` refuses an answer of another shape than the one read 2026-10-06 (counts as
+  strings, the plan's URL, numeric limits, a limit of 0) with a `ValueError`; `form_status.py`
+  prints `storage: could not be read (…)` and puts `{"error": …}` under the report's `storage`
+  key, so the runner's verify step never fails on a storage read (the plan's Risks: "a failure
+  only logs a line"); `auto_sync.py` catches any exception from the reader and logs the error's
+  class only.
+- The storage line in `form_status.py` is read once per run, before the forms, and every report
+  dict carries the same `storage` object; the printed line follows the `Roster (active girls)`
+  line, which lost its trailing blank line to the storage line (the blank line now follows it).
+- The DECISIONS rows (1-3), BACKLOG 68-70 and CLAUDE.md's healthy line are written. BACKLOG 65
+  (session -54's Result commit) sits below the "Explicitly not planned" paragraph, outside the
+  table; the build moved it into the table and the review moved it back: the attendance-totals
+  plan edits that row in place, and two branches touching one line in two places is a merge
+  conflict - where it sits is that track's to settle. The DECISIONS rows are filed by date (the
+  2026-10-01 row before the 2026-10-02 rows), not grouped by plan.
+- The dashboard's Access bullet was added in this branch's RUNBOOK edit (session -51 had cleared
+  it before the build), and the "Automatic sync" section gained the storage paragraph.
+- RUNBOOK "Photos" step 7 (storage) is written as live, not "after part 2": both parts landed in
+  one branch. The `<date>`, `<role account>`, sharing and retention placeholders stay for step 8.
+- Read-only proofs, 2026-10-06 afternoon: `integration_status.py` exactly as the "After part 1"
+  block above (template `NOT RIGHT: the upload field is ['19'], not []`, the four regionals `ok …
+  no upload`, `other integrations: none` ×5, exit 1); `form_status.py --rendered` on the five
+  live forms prints the storage line (`storage: upload space 1.30 GiB of 10.00 GiB (13.0%) -> ok;
+  submissions this cycle 510 of 2,500 (20.4%, resets 2026-10-21) -> ok; plan SILVER` by the
+  afternoon) and every form CLEAN (the pages on new runtime builds, noted in the
+  module-selection plan's Build notes). The `auto_sync.py` dry run was not run from the build worktree (it needs the sheet
+  export or a Roster CSV outside the worktree and spawns four sync dry runs); `check_storage` is
+  unit-tested at ok / warn / alarm per limit and with a failing reader. The runner's client for
+  the three usage GETs is built with `max_time=60` (review finding: the read runs in the runner's
+  own process after any apply and before the log, ATTENTION and SyncLog are written, so a stalled
+  connection must become `storage: could not be read (JotformError)` within minutes, not hold the
+  run to the job's 30-minute timeout).
