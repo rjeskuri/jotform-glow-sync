@@ -5992,7 +5992,8 @@ class TranslationLookup(unittest.TestCase):
 
     def test_a_stale_spelling_in_base_and_en_alters_the_exact_name(self):
         for variant in ("Amara  Fennwhistle", "Amara\tFennwhistle", "Amara Fennwhistle",
-                        "Amara   Fennwhistle", "Amara\nFennwhistle"):
+                        "Amara   Fennwhistle", "Amara\nFennwhistle",
+                        "Amara\u202fFennwhistle"):
             store = name_store([(self.NAME, self.NAME), (variant, variant)])
             for skip in tl.BUILDS:
                 lookup = tl.Lookup(store, skip_missing=skip)
@@ -6078,6 +6079,31 @@ class TranslationLookup(unittest.TestCase):
         keys, why = tl.removal(name_store([(self.NAME, self.NAME)]), {"Amara Fennwhistle"})
         self.assertIsNone(keys)
         self.assertIn("no dictionary entry", why)
+
+    def test_each_step_of_the_runtime_is_pinned(self):
+        # trimMultiSpaces, THEN sanitizeKeys: the double space moves first, the <br> spelling over it
+        br, double = "Amara<br>Fennwhistle", "Amara  Fennwhistle"
+        store = name_store([(br, br), (self.NAME, self.NAME), (double, double)])
+        self.assertEqual(tl.Lookup(store).translate(self.NAME, "en"), br)
+        self.assertEqual(tl.removal(store, {self.NAME}), ({md5(br), md5(double)}, None))
+        # the fall-back never walks the language shown: en's own text equal to the name is no match
+        store = name_store([("Amara Fenwhistle", double)])
+        self.assertEqual(tl.altered(store, {self.NAME}), {})
+        self.assertEqual(tl.removal(store, {self.NAME}), (set(), None))
+        # another language is keyed by the base text trimmed (the fall-back reads it there)
+        store = name_store([(" Welcome ", " Welcome ")], {"es": {" Welcome ": self.NAME}})
+        self.assertEqual(tl.altered(store, {self.NAME}), {self.NAME: ["en"]})
+        # ... or by the element id when the en text is one
+        store = name_store([("Hello", "text_7")], {"es": {"Hello": "Hola"}})
+        self.assertEqual(list(tl.Lookup(store).dictionary["es"]), ["text_7"])
+        # a fall-back match is traced to the entry it was when the texts were simplified, and to
+        # the one now under its key
+        store = name_store([("Club Name", "Club Name"), ("Club  Name", "Club  Name")],
+                           {"es": {"Club Name": self.NAME, "Club  Name": "Nombre del club"}})
+        lookup = tl.Lookup(store)
+        result, hits = lookup.trace(self.NAME, "en")
+        self.assertEqual(result, "Club  Name")
+        self.assertEqual(lookup.sources(hits), {md5("Club Name"), md5("Club  Name")})
 
     def test_an_option_that_simplifies_to_nothing_is_sent_empty(self):
         # the checkbox reader pushes translate(value) as it is: '' for a value simplifyfWord
