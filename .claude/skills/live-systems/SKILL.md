@@ -23,6 +23,11 @@ calls; docs/RUNBOOK.md, "Club accounts in Salesforce"), and by `tools/sf_backfil
 (attendance batches, which carry girls' names and so never pass through the conversation; the
 hook catches it; docs/RUNBOOK.md, "Back-fill of attendance into Salesforce"). No Salesforce
 CLI or API call from the Mac while a VPN is on: Salesforce freezes the user (2026-09-30).
+A third way: **metadata deploys** (`sf project deploy start`: the Monthly Report checkbox, the
+attendance processor, the attendance dashboard). Check-only first (`--dry-run`), then Ryan's go;
+the hook does not see `sf` commands. Claude Code's auto-mode guard may refuse a production deploy
+(it did on 2026-10-02); then Ryan runs it himself (docs/RUNBOOK.md, "Attendance dashboard in
+Salesforce").
 
 ## The ritual
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).

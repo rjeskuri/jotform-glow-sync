@@ -1632,6 +1632,115 @@ Everything is in `data/backfill_2026-09/` (never committed; owner-only files).
   batches, the batches, then those contacts - only with Ryan's go - and `close <key> --removed`
   for each.
 
+## Attendance dashboard in Salesforce
+
+Since 2026-10-02 the dashboard **"Jotform Attendance (test)"** (dashboard folder Attendance)
+shows the Jotform attendance as charts, built only from data Salesforce already has
+([plan and result](plans/2026-10-02-attendance-dashboard.md)).
+
+**What is on it:**
+- four numbers: girls who attended last month; girls who attended this month so far; club
+  sessions held last month; clubs that sent attendance last month;
+- per week since 1 September: girls attending, sessions held, clubs reporting;
+- girls per month;
+- last month by partner (girls) and by module (sessions);
+- clubs with no attendance last month: a number and a table.
+
+The test report "Jotform Monthly Attendance (test)" now shows a chart with its rows collapsed.
+Its filters are unchanged.
+
+**Until Ryan deploys `fix1`** (validated check-only, 0AfRP000002fuGP0AY):
+- "this month so far" counts the current **fiscal quarter** (Oct-Dec). It is correct in October
+  only, and overcounts from 1 November.
+- The no-attendance table lists one club per row and can stop at 200 rows (213 clubs at the
+  first refresh).
+- The "How to read this dashboard" box is missing.
+
+`fix1` makes "this month" the calendar month, lists the table by partner (at most 49 rows; the
+club list is one click away in its report), and adds the box.
+
+**What the numbers mean:**
+- Every `Attendance__c` row is a girl marked present. Girls are counted with a unique count of
+  the Contact, so a girl who came to five sessions counts once.
+- A **session** is an attendance batch with at least one girl present. "Clubs that sent
+  attendance" likewise counts only clubs with at least one girl present.
+- A duplicate re-submission refused by the processor adds nothing (the original counts). A
+  submission with no girl ticked adds nothing either: a club whose only submissions last month
+  had no girl ticked appears under "no attendance".
+- The reports use the report type `Accounts_Contacts_Attendance`, so a girl's club is her
+  Contact's account. "Clubs with no attendance" joins on `Attendance__c.Account__c`. The two
+  agreed on every row on 2026-10-02 (0 of 5,106 differed); they would split only if a girl's
+  Contact were moved to another club.
+- Weeks run Sunday to Saturday (every user has the en_US locale). The first week shows only
+  1-5 September.
+- "Last month" and "this month" roll over at midnight in the running user's time zone: Ryan's,
+  Los Angeles, for the dashboard; the viewer's for a report opened from it. 16 of the 18 active
+  users were on Los Angeles time on 2026-10-02, and two on African time zones.
+- **Late submissions**: 12 of the first 28 live sessions arrived more than a day late, and the
+  latest up to 19 days late. So "last month" settles around the 20th, and the latest week and
+  "this month" always start low. Compare months only after that.
+- **Snapshot**: a dashboard shows its last refresh (the time at top right), not live data.
+  Press Refresh, or schedule a daily refresh (Ryan's step, in the dashboard: Refresh >
+  Schedule Refresh).
+
+**Filters:**
+- The dashboard's **Partner** filter covers every component. It holds the 49 partner names
+  that have clubs, typed in exactly (Salesforce allows 50 values per filter).
+  - A new partner must be added to the filter by hand (`partners.json`, below).
+  - A renamed partner account makes its option show 0.
+  - A 51st partner needs another layout, such as filter values by range.
+- **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
+  that report's Club or Girl filter. Its chart follows.
+- The reports' Partner, Club and Girl "contains" filters ignore capitals but **not accents**
+  (tested 2026-10-02). In Salesforce, "Fundacion Bibliotec" has no accent and "Fundación
+  Kaleidos" has one, so "Fundacion" finds only the first. Type the name as Salesforce spells it,
+  or an unaccented part of it.
+
+**Before leadership gets it** (Ryan's decisions, BACKLOG 60):
+- Both Attendance folders are hidden (not shared). On 2026-10-02 only the 8 active users with
+  View All Data could see them.
+- The dashboard runs as Ryan, so it shows the whole organisation. A chart's report runs as the
+  viewer, though, and club accounts are private (owned by administrators, no sharing rules). A
+  standard user would see few or no rows in the report behind a full chart.
+- The test report's detail rows carry girls' names, and anyone who can open it can expand or
+  export them.
+
+**Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
+- Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report and the
+  dashboard into `build/`, from:
+  - `partners.json`: the Partner filter values;
+  - `before/`: the test report as it was;
+  - `sfdx-project.json`.
+  It reads the running user from the CLI login; no user name is written down.
+- The other copies:
+  - `before/`: the test report before any change (a deployable project);
+  - `after/`: the first deploy (2026-10-02 03:46 UTC);
+  - `fix1/`: the second change, validated and waiting for Ryan's deploy;
+  - `after2/`: everything as it stands once `fix1` is deployed (what `gen.py` builds today).
+- **The steps:**
+  1. Back up what is live: `sf project retrieve start -o glow` the six `Jotform_*` reports below,
+     the test report and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a
+     dated folder beside the others.
+  2. Edit `gen.py` or `partners.json`, then `python3 gen.py`.
+  3. Copy only the changed files into a new folder with `sfdx-project.json` (as `fix1/`).
+  4. Check-only: `cd` there, then `sf project deploy start --dry-run -o glow -d force-app`.
+  5. Ryan's go; then the same command without `--dry-run`.
+  6. Check after: retrieve again and compare with the build. Run one changed report through the
+     Analytics API, and compare its totals with SOQL.
+
+**Rollback:**
+- Test report: `cd before && sf project deploy start --dry-run -o glow -d force-app`, then
+  without `--dry-run`.
+- The new components: delete them with a `destructiveChanges.xml`. Never delete
+  `Jotform_Monthly_Attendance_test`; it predates this work and is restored above. The new
+  components are:
+  - the reports `Jotform_Attendance_by_Week`, `Jotform_Attendance_by_Month`,
+    `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month`,
+    `Jotform_Sessions_by_Module_Last_Month` and `Jotform_Clubs_No_Attendance_Last_Month`;
+  - the dashboard `Jotform_Attendance_test`.
+- Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
+  touched.
+
 ## Work log and invoices
 
 This is contract work, invoiced monthly from `worklog/worklog.csv` (date, hours, blocks,

@@ -1,7 +1,7 @@
 ---
 title: Attendance dashboard in Salesforce - charts from the data already there
 author: Claude (with Ryan)
-status: in-progress
+status: in-progress (deployed 2026-10-02 03:46 UTC by Ryan; fix1 validated, waiting for his deploy)
 created: 2026-10-02
 intent: none - Ryan's request of 2026-10-02 ("upgrade it now to use charts instead of line by line";
   then "start with basic reporting visuals ... using the info we already have")
@@ -125,8 +125,9 @@ processor, the forms and the Jotform mapping are untouched.
 - Weeks start on Sunday (the org's locale).
 - The current month fills in as attendance arrives. A partner's mentors who submit late show up
   late.
-- The folders are "Hidden": only Ryan and admins see the dashboard until he shares the folders with
-  leadership (his step, in Salesforce: Share on the folder).
+- The folders are hidden (not shared): on 2026-10-02 only the 8 active users with View All Data
+  could see them, until Ryan shares the folders with leadership (his step, in Salesforce: Share on
+  the folder).
 
 ## Later (not this round): the attendance rate
 "% of max possible" per session = girls present / girls on the club's roster on the session date
@@ -144,3 +145,58 @@ Into BACKLOG with that design.
 - Analytics API numbers = SOQL for September, and this month = SOQL for October so far.
 - The dashboard API returns every component without error.
 - `make check` → `CHECK PASSED` after the docs (plan, RUNBOOK, BACKLOG; no code changes).
+
+## Result (2026-10-02)
+- **Built and validated**:
+  - six reports, the test report's chart with its rows collapsed, and the dashboard (12
+    components, Partner filter with 49 values);
+  - check-only deploy 0AfRP000002fu8L0AQ: 8 of 8 components, 0 errors.
+- **Deployed by Ryan at 03:46:53 UTC.** The session's permission guard refused a production
+  deploy from Claude, so Ryan ran the command himself.
+  - Reports: `00ORP000009a6Um2AI` by week, `…Ul2AI` by month, `…Uj2AI` last month, `…Uk2AI`
+    this month, `…Uo2AI` sessions by module, `…Un2AI` clubs with no attendance; the test report
+    `00ORP000009a5wr2AA`.
+  - Dashboard `01ZRP00000BE2TR2A1`.
+- **Read-back** (read only):
+  - Ten checkers, a skeptic on every doubt, and a completeness critic. They used report runs
+    through the Analytics API, report runs with overridden filters (nothing saved), the
+    dashboard's cached results and SOQL.
+  - **Every number equalled SOQL at the time it was read.**
+    - Since 1 September (read about 04:00 UTC): 4,994 rows, 2,261 girls, 382 sessions, 150
+      clubs.
+    - Each of the five weeks, row for row and unique for unique.
+    - September in the dashboard snapshot (03:56 UTC): 2,248 girls, 377 sessions, 149 clubs,
+      4,932 rows.
+    - Clubs with attendance plus clubs without = 149 + 213 = 362, the club accounts with a
+      partner, with 0 differences across the 49 partners.
+    - Every module, every partner.
+    - The Partner filter, on two partners, including one with an accent.
+    - The reports' Partner, Club and Girl filters.
+  - **Deployed equals built.** The only difference is Salesforce normalising `expandOthers`, which
+    has no visible effect. The pilot dashboard and its reports were not modified.
+  - The club by the girl's Contact and the club on the attendance row never differed (0 of
+    5,106 rows).
+  - The figures this plan expected (4,712 rows, 2,165 girls) were stale. 220 more September rows
+    arrived at 03:11-03:26 UTC, before the deploy: the last back-fill sessions and two live
+    submissions. September keeps growing with late submissions.
+- **Defects found, fixed in `fix1`** (check-only 0AfRP000002fuGP0AY: 2 of 2, 0 errors; waiting
+  for Ryan's deploy):
+  1. "This month" used `INTERVAL_CURRENT`, which is the current **fiscal quarter**: Oct-Dec, the
+     fiscal year starting in January. It was right in October only by coincidence, and would have
+     overcounted from 1 November. Now `INTERVAL_THISMONTH`.
+  2. The "clubs with no attendance" table listed one row per club. That was 213 rows, over the
+     200-row limit of a Lightning table, so the last partners' clubs could be cut off while the
+     number beside it said 213. It now lists one row per partner (at most 49); the club list is
+     one click away in its report.
+  3. Added: a "How to read this dashboard" box (definitions, late submissions, refresh, where the
+     Club and Girl filters are).
+- **Passed to BACKLOG**:
+  - 58: the attendance rate, with Ryan's definition.
+  - 59: region.
+  - 60: what to decide before leadership gets it (folder sharing, private club accounts behind
+    the click-through reports, girls' names in the test report, scheduled refresh, the
+    50-value filter).
+  - 61: about 11 probable duplicate girls.
+- **Also fixed on the way**: `tools/worklog.py` wrote the work log with Windows line endings, so
+  every update rewrote every line. It now writes `\n`, with a test.
+- `make check` → `CHECK PASSED` (434 tests, `OK`).
