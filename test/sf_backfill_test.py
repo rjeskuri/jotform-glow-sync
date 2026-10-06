@@ -57,6 +57,9 @@ class FakeOrg:
         self.message = None          # another text on a batch that is otherwise right
         self.refuse = self.lose_answer = False
         self.die_after_insert = 0    # that many reads after an insert fail
+        self.updates = []            # every PATCH: (sobject, record id, body)
+        self.refuse_update = False   # Salesforce answers a PATCH with 400 and changes nothing
+        self.drift_update = False    # Salesforce answers 204 but the value read back is the old one
 
     def clock(self):
         self.tick += 1
@@ -156,6 +159,20 @@ class FakeOrg:
         if self.lose_answer:
             return 0, None
         return 201, {"id": batch["Id"], "success": True, "errors": []}
+
+    def update(self, sobject, record_id, body):
+        """PATCH one record by id: the fields in `body` land on the batch or attendance row that
+        carries the id (an update runs none of the processor: its trigger is after-insert only)."""
+        self.updates.append((sobject, record_id, dict(body)))
+        if self.refuse_update:
+            return 400, [{"errorCode": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "message": "refused"}]
+        records = self.batches if sobject == "Attendance_Batch__c" else self.rows
+        found = [r for r in records if r.get("Id") == record_id]
+        if len(found) != 1:
+            return 404, [{"errorCode": "NOT_FOUND", "message": "no such record"}]
+        if not self.drift_update:
+            found[0].update(body)
+        return 204, None
 
 
 class Harness:
@@ -791,6 +808,12 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         data = re.search(r'^data = "(.*)"$', config, re.M).group(1)
         self.assertEqual(json.loads(re.sub(r'\\(["\\])', r"\1", data)), body)     # what curl un-escapes
         self.assertTrue(data.isascii())
+        org.update("Attendance_Batch__c", "a1l000000000000001", {"Module__c": "Decision Making"})
+        config = calls[-1][1]                # the one PATCH shape the correction tools use
+        self.assertIn('request = "PATCH"', config)
+        self.assertIn('url = "https://example.my.salesforce.com/services/data/v67.0/sobjects/Attendance_Batch__c/'
+                      'a1l000000000000001"', config)
+        self.assertIn('data = "{\\"Module__c\\": \\"Decision Making\\"}"', config)
 
     def test_reads_follow_pages_and_refuse_what_they_cannot_finish(self):
         pages = {"first": {"done": False, "nextRecordsUrl": "/services/data/v67.0/query/next-1", "records": [{"Id": "1"}]},

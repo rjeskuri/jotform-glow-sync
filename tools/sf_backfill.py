@@ -237,6 +237,10 @@ class Org:
     def insert(self, sobject, body):
         return self.call("POST", f"/services/data/{API}/sobjects/{sobject}", body)
 
+    def update(self, sobject, record_id, body):
+        """PATCH the fields in `body` on one record (HTTP 204, no answer, when it took)."""
+        return self.call("PATCH", f"/services/data/{API}/sobjects/{sobject}/{record_id}", body)
+
 
 def quoted(value):
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
