@@ -181,5 +181,42 @@ by the service account; no POST, PUT or DELETE; every export and store copy dele
   `62a8b57dd95`'s only in the payment total's screen-reader text (no rule, calculation or
   `data-calcvalue` code).
 
+**Review fixes, 2026-10-06** (the adversarial review of the build; each fix with a test that fails
+without it):
+- An option the lookup empties (a value `simplifyfWord` reduces to nothing) now counts as
+  altered: the checkbox reader pushes `translate(value)` as it is, even `""`, and falls back to
+  the value only when `FormTranslation` is not defined (`is_altered`; the module doc, the
+  jotform-api skill and the RUNBOOK said otherwise). No live roster option is such a value.
+- `fix_name_translations.py`: a failed read or write while re-rendering the page after the store
+  POST (or the restore's) said "nothing written; run again", though the store was written and a
+  second run cannot re-render. It now ends "The store is fixed but the public page could not be
+  shown to serve it" (or "Restored, but ..."), and the RUNBOOK says what to do.
+- Tests for what no test pinned (each mutation now fails the suite): the module audit's wiring
+  into `form_report` and the runner's verify step, `rendered_options`' unescape and roster filter
+  (3); the names tool's re-read and rollback branches - another language changed by the POST, a
+  re-read that is no store, the audit of the re-read store, an entry changed since kept by the
+  restore, nothing to restore (7); the emulation's steps - the order of the two renames, the
+  fall-back skipping the language shown, another language's trimmed key and element id, U+202F,
+  a match traced to its entry before the renames (8).
+
+`main` merged again (the dashboard's fix1). The read-only proof re-run after the fixes (GETs
+through `glow.jotform.Client`, the public pages and Jotform's scripts by curl, a fresh Roster
+export by the service account; no POST, PUT or DELETE; every export deleted after):
+- Names tool dry run, all five forms: as before. 55 keys to remove on each (base 55, en 55);
+  altered today → after: template 55 → 0 (29 clubs), Africa 49 → 0 (23), Asia 5 → 0 (5), Latin
+  America 1 → 0 (1), U.S 0 → 0; no refusal. Roster options: template 6,924, Africa 4,269, Asia
+  1,636, Latin America 869, U.S 155.
+- Sync dry run with the fresh export (7,191 rows, 6,929 active): Africa, Asia, Latin America and
+  U.S plan exactly the three module lines, conditions unchanged. The template plans the same
+  three plus its own roster backlog, now 22 roster updates (6,924 → 6,929 girls; the runner never
+  syncs the template), and so a rewrite of its conditions (395 kept, 0 new, 0 dropped).
+  `tools/auto_sync.py` on the same export: every region `attention` for the three module lines
+  only.
+- `form_status.py --rendered`, all five: NOT CLEAN on the new checks only (template, Africa,
+  Asia, Latin America 8 problems each; U.S 6); 0 conditions in error, `salesforce yes`, question
+  18, the picker, the guard, the required rosters and the region comparison clean. Africa is now
+  served build `2bdb1ec3fa8`: its `formTranslation.v2.js` is byte-identical to the others'
+  (BACKLOG 64).
+
 **Left for the rollout (plan step 1 onwards):** the three adversarial reviews and the browser
 checks on the template; repeat the dry runs on the day (a fresh export).
