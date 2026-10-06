@@ -792,3 +792,58 @@ DRY RUN - re-run with --apply to write
   regional form.
 - The exact `kept / new / dropped` split of the first Africa rewrite (read from the dry run).
 - Whether Jotform's disabled page translates (the 2026-09-01 intent's open question).
+
+## Build notes (T3b - B, C, D and the Apps Script half of A: the two tools, Roster.gs / FormHandlers.gs, the Partners-tab mirrors; built 2026-10-07 offline on the workflow's branch, nothing written to any live system)
+
+- `glow/sync.py` has no `ROSTER_COLS`, so `PARTNER_COLS` and `JOTFORM_COL` sit directly after the
+  sheet-layout column constants (`COL_ROSTER`), as the two bare lines the track instructions
+  prescribe (T3a adds the same two lines; the merge is meant to keep one copy).
+- `tools/deactivate_clubs.py` imports its cell helpers (`tidy`, `cell_key`, `nfc_key`, `a1`,
+  `col_letter`, `describe_rows`, `trimmed`) from `tools/rename_club.py` rather than copying them.
+- The guard reads `GET /form/{id}/submissions?limit=1000&offset=…&filter={"created_at:gt":…}`
+  (URL-encoded), pages until a short page, and drops a repeated id; the form's `count` is not
+  compared (a filtered read has no count to compare with). The cut-off compares `created_at`'s day
+  (US Eastern) with the sheet's day minus `--recent-days`: a day's fuzz on a 30-day guard.
+- `--check-only` needs the sheet (the clubs come from the Roster tab) and the key (the form); it
+  reads both and writes nothing. `--reason` is required with `--apply` only (the Audit row's text).
+  A chosen club whose rows carry a region that is no form's (blank, misspelled) stops the run
+  before the guard: there is no form to read for it.
+- The backup folder (`Roster.csv`, `written.json`) is saved before the stale re-read, as
+  `rename_club.py` saves its tabs; a folder left by a run that stopped there is harmless to `--undo`
+  (its rows are not in the recorded state, so the undo refuses them). `written.json` records the
+  columns written (indexes), the values set, the reason, the clubs with their regions and row
+  counts, and per row the number, partner, club and the two old values - never a girl's cell.
+- `--undo` also refuses when a chosen club has an ACTIVE row at the time of the undo (one came back
+  meanwhile): "refuse rather than guess" - the plan's "one of those rows has changed since" read
+  broadly. A row of a chosen club that arrives during a deactivation's write is left active, named
+  with `!`, audited with the rest and the tool exits 1 (no second batch: a girl added to a club
+  being retired is a human's call).
+- `tools/disable_form.py` reads both `GET /form/{id}` and the properties and refuses when their
+  statuses disagree; "already DISABLED - nothing to do" when the status is the wanted one and no new
+  `--message` is given; `--enable` takes no `--message`. The POST carries only what differs.
+- `appsscript/FormHandlers.gs`: the Partners read for the closing line runs inside the two
+  senders' `try`, so a failed read costs the mentor e-mail, never the handler (REVIEW pass 2).
+- RUNBOOK :19 (the five defunct forms are `DISABLED` since 2026-09-30) is corrected here, with
+  "Disabling a regional form"; BACKLOG 1 itself is T3a's edit. No `docs/ARCHITECTURE.md` constants
+  row (T3a adds it); the tool-table rows are added here.
+- **Read-only proof, 2026-10-07 (the live sheet through the service account, the live forms with
+  the key; nothing written):**
+
+  ```
+  Africa form 262382821971058: 231 submissions since 2026-09-01 read
+    Tumaini La Maisha                 16 club(s)    1 submission(s)  (last 2026-09-25; 1 picked together with another club)
+        'Adonai GLOW Club': 1 submission(s), 2026-09-25
+  --check-only: 320 active row(s) of 16 club(s) would be deactivated; nothing planned, nothing written
+    Education and English for You      6 club(s)    0 submission(s)       # 114 active rows
+    Ng'aa Maskani                     16 club(s)    0 submission(s)       # 317 active rows
+  U.S form 262382706852058: 0 submissions since 2026-09-01 read
+    6 partners, 11 club(s), 0 submission(s) each
+  --check-only: 155 active row(s) of 11 club(s) would be deactivated; nothing planned, nothing written
+
+  U.S Attendance Form 262382706852058: status ENABLED, 0 submissions (last none)
+    messageOfLimitedForm: 'This form is currently unavailable!'
+  DRY RUN - re-run with --apply to back up the form, then set status DISABLED (then re-read)
+  ```
+
+  As B expected: 0 / 0 / 1 (the 2026-09-25 two-club pick), U.S 0. Not run: `--apply` of either
+  tool (steps 9-10, Ryan's go), `--undo` on the live sheet, the Apps Script push (step 11).

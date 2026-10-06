@@ -16,8 +16,9 @@ it, and through the forms, Salesforce). The forms and the sheet went live on
 | U.S | `262382706852058` | https://form.jotform.com/262382706852058 |
 | Template (every logic change lands here first) | `262352490535154` | not for mentors |
 
-The five pre-launch forms are retitled "(defunct)" and still enabled until
-they are switched off (backlog item 1). The same table lives in
+The five pre-launch forms are retitled "(defunct)" and have been `DISABLED`
+since 2026-09-30 (read 2026-10-06; how they were switched off is not recorded,
+the builder presumably - backlog item 1). The same table lives in
 `tools/auto_sync.py` (`REGIONAL_FORMS`), `tools/form_status.py`,
 `backup_forms.py` and `appsscript/Config.gs`; `test/python_test.py` fails if
 they drift apart.
@@ -229,6 +230,128 @@ club → the typo's name.
 The raw Enrollment Responses keep the typo (the tab is append-only), so a
 rebuild from them brings it back — see the warning under "Roster rebuild and
 upload".
+
+## Deactivating a club
+
+A club whose girls stop coming, or whose partner stops using the attendance
+form for it, leaves the forms through its Roster rows: every row set
+`inactive` with a `removed_date`, the way the Club Roster Form removes one
+girl ([plan](plans/2026-10-06-clubs-off-jotform.md), C). The girls keep
+their ids and the club its ClubRegistry code, so a reactivation brings the
+same ids back; the template's sync then retires the club's roster question -
+hidden, off the Club picker, never deleted: `~ retired roster '<club>' (q…):
+no active girl in the Roster`, from the day after the removal
+(`glow.sync.RETIRE_INACTIVE`). A whole region's clubs leave the same way,
+**after** the region's form is disabled ("Disabling a regional form"; the
+other way round every runner run fails on the empty region until the form is
+off).
+
+```bash
+python3 tools/deactivate_clubs.py --partner "<partner>" --check-only                   # who sent what since 2026-09-01 (reads only)
+python3 tools/deactivate_clubs.py --region U.S --reason "<why - who decided, when>"     # dry run
+python3 tools/deactivate_clubs.py --region U.S --reason "<why>" --apply
+python3 tools/deactivate_clubs.py --partner "<partner>" --club "<club>" --reason "<why>" --apply   # one club
+python3 tools/deactivate_clubs.py --undo data/deactivate_clubs/<stamp>                 # the way back, dry run
+python3 tools/deactivate_clubs.py --undo data/deactivate_clubs/<stamp> --apply
+```
+
+What the tool does and guards:
+
+- **The guard.** Before the plan it reads the region's attendance form's
+  submissions since 2026-09-01 (`JOTFORM_API_KEY`; counts, days and club
+  names only) and credits each to a club by question 5 or the Club picker's
+  pick: the same text, or `<club> - <partner>` - never a bare prefix
+  (`QUEENS` is not `Queens of Quest`). A club named in the last 30 days
+  (`--recent-days`) stops the run: `'<club>' (<partner>) sent attendance on
+  <day> - deactivating a club that reports needs --deactivate-anyway`.
+  `--check-only` prints the table and stops: per partner its clubs and
+  submissions, then each club that was named with its days and whether it
+  was picked together with another club (the 2026-09-25 Africa pick).
+- **The write** (`--apply`, with `--reason`: one line for the Audit row).
+  `status` → `inactive` and `removed_date` → today in the sheet's zone (the
+  text the Apps Script writes) on every ACTIVE row of the chosen clubs, in
+  one batch. First the Roster tab is saved to
+  `data/deactivate_clubs/<stamp>/Roster.csv` and the rows with their old
+  values to `written.json` beside it; then the tab is re-read and the run
+  stops, nothing written, if a planned row changed or a club gained an
+  active row (a Club Roster Form submission in between: run it again). After
+  the write every row is re-read and compared and the two columns are checked
+  unchanged everywhere else; then one Audit row `deactivateRows` (`11 club(s)
+  of 6 partner(s) in U.S: 155 row(s) set inactive, removed_date <day> -
+  tools/deactivate_clubs.py (<reason>)`). A row of a chosen club that arrives
+  during the write is left active and named (`!`, exit 1): run the tool
+  again for it.
+- **Not touched:** ClubRegistry (the code is immutable; `Ids.gs` finds it by
+  partner + club when the club comes back), SF Pending (the Accounts exist),
+  the Partners tab (the partners stay, with their region), the forms.
+- **Afterwards, in the sheet, now:** **GLOW → Google Forms → Update form
+  dropdowns from the Roster**, so the Club Roster Form reads `(no active
+  clubs)` for the partner; until then it still offers the clubs, and a change
+  sent for one runs against the inactive rows and puts girls back by name.
+  Then `python3 tools/sheets_client.py export Roster data/roster_<date>.csv`
+  and the template's sync dry run (`python3 sync_attendance_form.py
+  data/roster_<date>.csv --roster --form 262352490535154`): from the day
+  after, it plans `~ retired roster …` for each club ("Clubs that do not use
+  Jotform"). The region's form: a `DISABLED` one is `skipped` by the runner
+  and left as it is (its rosters, picker and rules frozen); an enabled one
+  gets the retirements from its next sync.
+- **The way back.** `--undo data/deactivate_clubs/<stamp>` puts back exactly
+  the rows `written.json` names - `status` and `removed_date` as they were -
+  with the same shape (dry run, stale check, one batch, re-read, Audit
+  `reactivateRows`), and refuses, naming the rows, when one has changed since
+  or a chosen club has an active row again (a girl reactivated through the
+  Club Roster Form, a moved club): look at those rows first. Then the
+  dropdown refresh and a runner dry run (the sync restores the rosters,
+  `~ restored roster …`, within its bands). One club that starts again
+  without the undo: the partner sends "Enroll a NEW club" (its section shows
+  no club to change); the duplicate guard holds it as a re-enrollment with
+  its names on file, Ryan releases it from the Monday e-mail ("Working the
+  ReviewQueue") and `planClub_` reactivates the rows by name.
+
+## Disabling a regional form
+
+A regional form nobody will submit on (the U.S form: 0 submissions since
+launch, its 11 clubs deactivated - [plan](plans/2026-10-06-clubs-off-jotform.md),
+D) is switched off, not synced down to an empty Club picker: Jotform then
+serves its "form unavailable" page instead of the form; the runner reads the
+form's status on every run and logs `form <id> is DISABLED - not synced` with
+the SyncLog result `skipped` (no dry run, no apply, no verify, exit code
+unaffected); `form_status.py` prints `[DISABLED]` and skips the region check
+and the served-page checks; the form's rosters, picker and rules stay as they
+are, frozen. **Order:** disable the form first, deactivate its clubs after
+("Deactivating a club"). Deactivated first, every runner run would fail on
+the empty region (`read_roster_csv` exits) until the form is off.
+
+```bash
+python3 tools/disable_form.py --form 262382706852058                 # dry run: status, count, last submission, the disabled page's text
+python3 tools/disable_form.py --form 262382706852058 --message "The U.S attendance form is paused. Please contact your GLOW coordinator." --apply
+python3 tools/disable_form.py --form 262382706852058 --enable --apply   # the way back
+```
+
+- `status` (`ENABLED` / `DISABLED`) is a property of every form (`GET
+  /form/{id}` and its `properties`). Whether `POST /form/{id}/properties`
+  with `properties[status]` **changes** it is unverified until the first run
+  (`.claude/skills/jotform-api/SKILL.md`, "Properties"). `--apply` takes a
+  `backup_forms.py` snapshot first (its properties file records the status
+  and `messageOfLimitedForm`, the disabled page's text, to put back), POSTs,
+  re-reads both GETs and prints them. If the status did not move it stops:
+  `the API accepted the write but the status did not change - disable the
+  form in the builder (Settings -> Form Status) and run this again without
+  --apply to confirm`. Either way the dry run afterwards must read
+  `DISABLED`; record which way worked in the skill.
+- Refusals: the template (never disabled); a form not in `glow.forms.LIVE`
+  (the five pre-launch forms are already off); a form with a submission in
+  the last 30 days, without `--disable-anyway`. The message is English only:
+  whether Jotform's disabled page translates is unverified.
+- Afterwards: one runner dry run (`python3 tools/auto_sync.py`) - the region
+  reads `skipped - form DISABLED`, the others `in-sync`. `REGIONAL_FORMS`
+  keeps the region: the live status is the truth read on every run, nothing
+  to flip back in code.
+- **The way back** (a U.S club starts): its rows back first ("Deactivating a
+  club", the way back), then `python3 tools/disable_form.py --form
+  262382706852058 --enable --apply` (or the builder), one runner dry run
+  (the region reads `in-sync` or plans the restores), `AUTO_SYNC_APPLY`
+  unchanged.
 
 ## Automatic sync
 
