@@ -603,7 +603,11 @@ done).
   table; the build moved it into the table and the review moved it back: the attendance-totals
   plan edits that row in place, and two branches touching one line in two places is a merge
   conflict - where it sits is that track's to settle. The DECISIONS rows are filed by date (the
-  2026-10-01 row before the 2026-10-02 rows), not grouped by plan.
+  2026-10-01 row before the 2026-10-02 rows), not grouped by plan. *Settled at the round-1 merge
+  (2026-10-07): 65 is in the "Data-quality and small things" table, the two tracks' 66 rows are
+  one (the attendance-totals wording, which knows fix 4 is live), 71 holds a reserved row for the
+  clubs-off plan so 65-73 read consecutively, and the DECISIONS rows of 2026-10-06 stand in the
+  order module, photos, storage, then the seven attendance-totals rows.*
 - The dashboard's Access bullet was added in this branch's RUNBOOK edit (session -51 had cleared
   it before the build), and the "Automatic sync" section gained the storage paragraph.
 - RUNBOOK "Photos" step 7 (storage) is written as live, not "after part 2": both parts landed in

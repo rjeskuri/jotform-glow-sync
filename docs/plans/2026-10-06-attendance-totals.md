@@ -658,6 +658,34 @@ fill must be done before D's totals are read, or every batch from before the dep
   fill with a name) is on no dashboard component and in no read-back that is printed; the Apex
   message is a fixed string; test names are the vendor's fictional ones and are not quoted here.
 
+## Build notes (C, built 2026-10-06 offline on the workflow's branch; nothing run against Salesforce)
+- `set --apply` re-reads each batch (`Id, Processing_Status__c, Girls_Present__c`) **before** the
+  PATCH as well as after: a value typed between `plan` and `set` is left alone and counted
+  (`skipped, already has a value`), a status that changed since the plan stops the run. That is the
+  "never touched" rule enforced at write time, not only in the plan.
+- The ledger has an `open` row and a closing row per batch (`written` / `failed_<status>` /
+  `check`), the shape the module tool uses, with the plan's columns (when, id, rows, value read
+  back, outcome).
+- `check` exits 1 when either count is not 0, so a script can read it; aggregate batches
+  (`Creator__c` not starting `Jotform`) are not compared, as planned.
+- `plan` and `check` before the field is deployed stop with "is `Girls_Present__c` deployed?" (the
+  read comes back HTTP 400); the field does not exist in the org yet, and the RUNBOOK section says
+  "after the field is deployed". The `plan --vpn-off`, `set` and `check` runs were **not** made:
+  they need the CLI login (BACKLOG 53; with Ryan). The fake-org tests are the proof of this step.
+- Step 3 (the `sf_backfill.py` hold wording, docstring, `outcome_of`, `verify`, the fake org's
+  `insert`) is untouched: it is held until the class is deployed (Order across the four plans, B.5).
+- **Review fixes (2026-10-06).** The rows query deviates from the SOQL above: one `GROUP BY` per
+  200 batch ids (`WHERE Attendance_Batch__c IN (...)`, the ids `plan` and `check` already hold)
+  instead of one over every batch. Salesforce gives an aggregate query a single page and no next
+  page (documented at 2,000 groups; not tried against this org), and at the live rate the batches
+  pass that within a year - `check`, a standing signal, would then stop with an HTTP 400 that the
+  "is the field deployed?" hint mis-explains. The result is the same (a batch with no rows is
+  absent either way). `check` also covers a re-read Salesforce did not answer after a 204: the
+  closing row is written (outcome `check`, no value read back) and the stop names the batch. `data/`
+  is created (owner-only) when the folder lies under it and a fresh checkout has none yet, since
+  `sf_backfill.within` needs it to exist. `quoted` is imported at the top with the rest of
+  `sf_backfill`.
+
 ## Decisions to record (proposed rows for `docs/DECISIONS.md`, dated 2026-10-06)
 
 1. **A batch with no names and no count is never a success.** The attendance processor marks it
