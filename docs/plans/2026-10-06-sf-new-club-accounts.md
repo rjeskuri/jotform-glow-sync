@@ -346,3 +346,24 @@ consumer keys (`3MVG9…`) and 64-hex consumer secrets, in either case.
       on hold).
 - Nothing is live: `SF_SYNC` is unset and the secrets do not exist yet.
 
+## Rollout
+
+**Done 2026-10-07 (Ryan's go "push both"):**
+- **`main` pushed to GitHub** (`9d58ce4..e03b36d`, then `b1e1733`; the second push also carried
+  the other session's `wf20/sf-dupes` merge, which is code only).
+- **The sheet's token gained Actions: Read and write** (Ryan), with Contents kept for the switch.
+- **`npm run clasp:push`.**
+  - A read-only `clasp pull` beforehand showed the deployed script equal to the repository but for
+    `Dispatch.gs` (the version at `1a8375a`).
+  - A pull afterwards showed it equal to `main` in every file.
+  - Rollback: `git checkout 1a8375a -- appsscript/Dispatch.gs && npm run clasp:push`.
+- **GLOW → Google Forms → Request Jotform sync now**: `HTTP 204` in the Audit tab, and the
+  Actions run 37567574446 (`workflow_dispatch`, `main`, trigger `sheet:manual 2026-10-06
+  23:37:00`, mode apply).
+  - Its log: `SF: off (repository variable SF_SYNC)`; all four regions `in-sync`.
+  - Conclusion: success.
+
+**Next (Ryan):** remove Contents from the token and check `HTTP 204` again; then the Salesforce
+setup, the two secrets and `SF_SYNC=plan` (RUNBOOK "New clubs' accounts, automatically", setup
+steps 1-3 and 5-6).
+
