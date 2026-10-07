@@ -1,7 +1,7 @@
 ---
 title: One Salesforce contact per girl - merge the duplicates the altered names made, then release Queens of Quest
 author: Claude (with Ryan)
-status: accepted (Ryan, 2026-10-07: "Build tool, then go") - in-progress
+status: done (2026-10-07 04:20 UTC; Ryan's go "Build tool, then go", the last four clubs on "go ahead and run it")
 created: 2026-10-07
 intent: none - Ryan's request of 2026-10-06 ("You can handle all salesforce related issues")
 ---
@@ -158,3 +158,28 @@ unchanged) + `send --apply --vpn-off --only <key>` twice, each read back.
   triggers stay inside the limits (`DIAG|limits`; else `--per-run`), and a debug log over 20 MB
   could lose early lines (the `DIAG|ok` line is the last, so a truncated log still shows it).
   Also unproven: NPSP's Primary-affiliation delete behaviour (the cleanup's read-back catches it).
+
+## Result (2026-10-07)
+- `plan` on a fresh Roster export equalled the census: 15 groups, 19 extras, 0 same-date, 1 rename,
+  0 needs-a-person; the same 15 kept and 19 merged-away contacts as the census.
+- Rehearsals (all 5 clubs, rolled back): every check passed; `Database.merge` moved the attendance
+  rows and the affiliations although reparenting is off; largest run (Queens of Quest, 11 merges)
+  11 of 150 DML, 8 of 100 queries, 1.1 of 10 s CPU; each club re-read exactly as before; 0 async
+  jobs left. The first runs found two reading faults in the tool, fixed with tests before any write:
+  an Apex run that throws is answered under `data`, and the debug log writes `|` as `&#124;`
+  (ed2ea98); through a pipe the CLI cut a long answer at 65,536 bytes (47c319c).
+- Applied: the Alpha rename (read back against the Roster); Queens of Quest's 11 merges (03:40 UTC);
+  the release of its two held sessions (BATCH-000611, 09-09: 12 rows, 1 new girl; BATCH-000612,
+  09-16: 11 rows) - the club now has 13 contacts = its 13 active roster girls, 46 rows on 4 dates;
+  the other four clubs' 5 merges (03:57 UTC; the first attempt was stopped by the auto-mode
+  classifier until Ryan's "go ahead and run it"). Every run read back; 0 form submissions during
+  any run.
+- Clean-up (Ryan's go): 15 duplicate-rule sets and 2 doubled affiliations (Janasewa GC-3 and
+  Niharika kept contacts; NPSP had removed the other 17 itself) deleted and read back; every deleted
+  record is in the rollback file.
+- Final `check`: (a) 0 groups, (b) 0 odd names; 2,962 participants (2,980 - 19 + 1);
+  7,540 attendance rows (= the Girls_Present__c sum of the other session's back-fill). Left in (c):
+  the 20 October batches sent before the names repair (they leave the check in November); (d): the
+  11 Las Camelias names (BACKLOG 77).
+- The processor's own fix followed the same day: [plan](2026-10-07-processor-name-spacing.md).
+

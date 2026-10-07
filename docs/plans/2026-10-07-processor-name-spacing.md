@@ -1,7 +1,7 @@
 ---
 title: Attendance processor - a name with extra spaces or invisible characters finds its girl
 author: Claude (with Ryan)
-status: accepted (Ryan, 2026-10-07: "the processor fix so a name with extra spaces can't create a duplicate again") - in-progress
+status: done (deployed to production 2026-10-07 04:38 UTC)
 created: 2026-10-07
 intent: none - Ryan's request of 2026-10-07; BACKLOG 75
 ---
@@ -68,3 +68,26 @@ found by the clean spelling.
 - **Rollback**: redeploy `before` (the 03:22 UTC version).
 - The class is the vendor's (Studio Infinite Lives); Ryan decided not to coordinate with the other
   administrator for these changes (2026-10-02).
+
+## Result (2026-10-07)
+- Step 1: the live class, test class and trigger equalled `data/sf_totals_2026-10/deployed/`.
+- Independent review of the diff: no critical, high or medium defect. Two low notes left as they
+  are: a zero-width space used *instead of* a space joins the two words (as `sf_dupes.py`'s key
+  does; no Roster name holds any format character), and the club's contact names are cleaned even
+  for a batch that then turns out to have no names (harmless). Devanagari names would lose
+  ZWJ/ZWNJ when stored; no roster has any (all 7,202 rows Latin script) - revisit if one arrives.
+- Validation in production (check only, 0AfRP000002gLOf0AM): 33 of 33 tests
+  (`AttendanceBatchTriggerTest` 30 with the 7 new ones, `TestContactTriggerHandler` 3); the
+  processor's coverage 93%. `testCleanName` was the first run of `\p{Cf}` / `[\s\p{Z}]` in this org.
+- Quick deploy 04:38:55 UTC (0AfRP000002gLRt0AM), the two classes only; read back identical (the
+  test class without its final newline, as Salesforce stores it); the trigger unchanged.
+- Proof in production, rolled back, made-up names: two new girls sent with a double space and a
+  no-break space -> Success, 2 rows, 2 clean contacts; the same girls with an invisible mark, a tab
+  and other capitals plus a new girl with a double space inside her last name -> Success, 3 rows,
+  no twin, the new girl stored `Gamma Delta`; 3 contacts, 0 with odd spacing; nothing left behind.
+- `sf_dupes.py check` after the deploy: 0 groups, 0 odd names (2,962 participants).
+- Rollback: redeploy `data/sf_totals_2026-10/deployed/` (the 03:22 UTC version with the blank
+  backstop and `Girls_Present__c`) - **not** `data/sf_totals_2026-10/before/`, which would undo
+  both. The new build: retrieve it from the org (`sf project retrieve start -m
+  ApexClass:AttendanceBatchProcessor ...`).
+
