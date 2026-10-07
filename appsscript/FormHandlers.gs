@@ -803,14 +803,14 @@ function holdNewClub_(a, source, responseKey, partner, club, reasons) {
  * handler; a failure goes to Audit without the address.
  */
 function sendHoldNotice_(to, club, partner, source) {
-  const body = [
-    'Thank you. We received the enrollment of ' + club + ' (' + partner + ').', '',
-    'Before adding the girls, our team is checking it against the clubs already enrolled. ' +
-        'You do not need to do anything, and please do not send it again: we will add the ' +
-        'club, or contact you if we have a question.', '',
-    'The girls appear on the attendance form once the club is added.',
-  ].join('\n');
   try {
+    const body = [
+      'Thank you. We received the enrollment of ' + club + ' (' + partner + ').', '',
+      'Before adding the girls, our team is checking it against the clubs already enrolled. ' +
+          'You do not need to do anything, and please do not send it again: we will add the ' +
+          'club, or contact you if we have a question.', '',
+      attendanceFormLine_(partner, 'The girls appear on the attendance form once the club is added.'),
+    ].join('\n');
     MailApp.sendEmail({ to: to, subject: 'GLOW enrollment received – ' + club, body: body });
   } catch (err) {
     audit_('sendHoldNotice_', 'could not e-mail the mentor about ' + source + ': ' + previewError_(err.message));
@@ -900,13 +900,25 @@ function sendChangeConfirmation_(to, club, partner, plan) {
     lines.push('Our team will check these with you. If you know the enrolled spelling, ' +
                'you can simply submit the form again.');
   }
-  lines.push('', 'The attendance form updates within the hour.');
   try {
+    lines.push('', attendanceFormLine_(partner, 'The attendance form updates within the hour.'));
     MailApp.sendEmail({ to: to, subject: 'GLOW roster change received – ' + club,
                         body: lines.join('\n') });
   } catch (err) {
     audit_('sendChangeConfirmation_', 'could not email ' + to + ': ' + err.message);
   }
+}
+
+/**
+ * The mentor e-mails' closing line about the attendance form: `otherwise` for
+ * a partner whose clubs are on Jotform; for one marked `jotform` = no on the
+ * Partners tab (loadPartnerJotform_), that nothing changes there. Called
+ * inside the senders' try: a failed Partners read must not fail the handler.
+ */
+function attendanceFormLine_(partner, otherwise) {
+  return loadPartnerJotform_()[key_(partner)]
+      ? 'Your organization reports attendance to GLOW directly, so nothing changes on the attendance form.'
+      : otherwise;
 }
 
 // ------------------------------------------------------------- Feedback

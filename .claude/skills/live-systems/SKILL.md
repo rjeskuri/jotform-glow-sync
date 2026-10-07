@@ -14,9 +14,12 @@ Salesforce V2 integration.
 `sync_attendance_form.py --apply`, `restore_conditions.py --apply`, `tools/add_*.py --apply`,
 `tools/restore_translations.py --apply`, `tools/clone_regional.py --apply`,
 `tools/fix_roster_order.py --apply`, `tools/fix_name_translations.py --apply` (also with `--restore`),
-`tools/auto_sync.py --apply`, `tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run
-clasp:push` / `npx clasp push`. Anything else is read-only (GET) or writes only under `data/` and
-`backups/`.
+`tools/disable_form.py --apply` (a regional form's `status`, and the disabled page's text, after a
+`backup_forms` snapshot; `--enable --apply` is the way back), `tools/deactivate_clubs.py --apply`
+(Roster rows' `status` and `removed_date` and one Audit row, after a guard that reads the region's
+form; `--undo <dir> --apply` puts the same rows back), `tools/auto_sync.py --apply`,
+`tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run clasp:push` / `npx clasp
+push`. Anything else is read-only (GET) or writes only under `data/` and `backups/`.
 
 Salesforce (production) is written in these ways only, each with Ryan's explicit go: through the
 write connector, one record per call, by the main session (the hook below does not see those

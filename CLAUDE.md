@@ -63,8 +63,8 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
    in the Partners tab's `jotform` column instead — its rosters are retired, kept hidden and off
    the Club picker (RUNBOOK "Clubs that do not use Jotform"); never a blank region.
 7. qids, `SESSION_OVERRIDES`, form ids, `ROSTER_COLS`, `PARTNER_COLS`, `SYNC_LOG_COLS` exist in BOTH
-   Python and `appsscript/Config.gs` / `Roster.gs` — change both; `test/python_test.py` fails
-   otherwise. `glow/sync.py SHEET_ZONE` is the sheet's own File → Settings zone (America/New_York,
+   Python and `appsscript/Config.gs` / `Roster.gs` (`PARTNER_COLS` in `tools/build_roster_offline.js`
+   too) — change both; `test/python_test.py` fails otherwise. `glow/sync.py SHEET_ZONE` is the sheet's own File → Settings zone (America/New_York,
    what stamps `removed_date`), not `appsscript.json`'s `timeZone`; the runner checks it each run.
 8. `appsscript/Regions.gs` is generated; the sheet's Partners tab wins over it. `data/`, `backups/`,
    `credentials/` hold PII or secrets: never commit, quote or print their contents.

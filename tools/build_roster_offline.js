@@ -83,7 +83,8 @@ const gs = require('../test/load_gs')(['TAB', 'ROSTER_COLS', 'RESPONSE_COLS', 'S
   'lastName_', 'clubCode_', 'mintGirlId_', 'planClub_']);
 
 const REVIEW_COLS = ['raised', 'issue', 'partner', 'club', 'detail', 'resolved'];
-const PARTNER_COLS = ['partner', 'region', 'notes'];
+// keep in step with Roster.gs PARTNER_COLS and glow/sync.py (the parity test compares them)
+const PARTNER_COLS = ['partner', 'region', 'notes', 'jotform'];
 const CLUB_COLS = ['club_code', 'partner', 'club', 'created'];
 const AUDIT_COLS = ['when', 'action', 'detail'];
 
@@ -249,14 +250,19 @@ const partnersOut = partnerRows.map(r => {
   if (!k) return r;
   known[k] = true;
   if (!gs.tidy_(r[1]) && derived[k]) {
-    return [r[0], derived[k], gs.tidy_(r[2]) ? r[2] : derivedNotes[k]];
+    // the region and a blank note filled; every other cell (the jotform mark) as it was
+    const filled = r.slice();
+    filled[1] = derived[k];
+    if (!gs.tidy_(r[2])) filled[2] = derivedNotes[k];
+    return filled;
   }
   return r;
 });
 Object.keys(partnersSeen).sort().forEach(k => {
   if (!k || known[k]) return;
-  partnersOut.push([partnersSeen[k], derived[k] || '',
-                    derived[k] ? derivedNotes[k] : 'region needed']);
+  const row = [partnersSeen[k], derived[k] || '', derived[k] ? derivedNotes[k] : 'region needed'];
+  while (row.length < PARTNER_COLS.length) row.push('');
+  partnersOut.push(row);
 });
 writeCsv(path.join(outDir, 'Partners.csv'), PARTNER_COLS, partnersOut);
 

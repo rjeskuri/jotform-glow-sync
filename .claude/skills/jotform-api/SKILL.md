@@ -204,6 +204,18 @@ unless `--apply`.
   painted (2026-09-20). Use base64 data URIs (`tools/switcher_flags.py`). The page is served
   inside `<style id="form-designer-style">` in `<head>`, BEFORE the switcher stylesheet linked
   in `<body>`, so equal-specificity rules lose: use id-based selectors.
+- **Form status.** `status` (`ENABLED` / `DISABLED`) is a key of both `GET /form/{id}` and
+  `GET /form/{id}/properties` (read 2026-10-06: the five live forms `ENABLED`, the six old forms
+  `DISABLED`). A disabled form's public page is Jotform's own "unavailable" page; the properties
+  carry `messageOfLimitedForm`, on every form the default "This form is currently unavailable!"
+  - that this property is the text the disabled page shows is unverified, and whether that page
+  translates is unverified. **Writing it is UNVERIFIED until tried:** whether the form-encoded
+  `POST /form/{id}/properties` with `properties[status]=DISABLED` (and
+  `properties[messageOfLimitedForm]`) changes anything is not known (`integrations` answered 200
+  and changed nothing; how the five defunct forms were disabled on 2026-09-30 is not recorded).
+  `tools/disable_form.py --apply` takes a `backup_forms` snapshot, POSTs, re-reads both GETs and
+  stops with the builder step (Settings -> Form Status) when the status did not move; record the
+  result here after the first run (the U.S form, docs/plans/2026-10-06-clubs-off-jotform.md, D).
 
 ## Integrations
 - Native Salesforce V2 integration, 8 mapping rows keyed to question ids

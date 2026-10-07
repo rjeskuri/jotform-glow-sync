@@ -53,28 +53,31 @@ def read_csv(path):
 
 
 def merge_partners(live, local):
-    """Live rows verbatim; blank live region filled from local; new appended."""
+    """Live rows verbatim; blank live region filled from local; new appended.
+    Every row keeps the live header's width (partner, region, notes and, since
+    2026-10, jotform: a live mark is never cut off, a new row gets it blank)."""
     if not live:
         return local, len(local) - 1, 0
+    width = max(len(live[0]), 3)
     out = [live[0]]
     seen = {}
     local_by_key = {key(r[0]): r for r in local[1:] if r and key(r[0])}
     filled = 0
     for r in live[1:]:
-        r = (r + ["", "", ""])[:3]
+        r = (r + [""] * width)[:width]
         k = key(r[0])
         if not k:
             out.append(r)
             continue
         seen[k] = True
         if not r[1].strip() and k in local_by_key and local_by_key[k][1].strip():
-            r = [r[0], local_by_key[k][1], r[2] or local_by_key[k][2]]
+            r = [r[0], local_by_key[k][1], r[2] or local_by_key[k][2]] + r[3:]
             filled += 1
         out.append(r)
     added = 0
     for k, r in local_by_key.items():
         if k not in seen:
-            out.append(r[:3])
+            out.append((r + [""] * width)[:width])
             added += 1
     return out, added, filled
 
