@@ -23,6 +23,7 @@ import sys
 import tempfile
 import types
 import unittest
+import unittest.mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -76,9 +77,11 @@ def literal_time(text):
 class FakeSF:
     """Salesforce as far as tools/sf_dupes.py can see it."""
     alias = "fake"
-    CREATEABLE = {"Contact": ["FirstName", "LastName", "AccountId", "Description", "Contact_Role__c", "Email"],
+    CREATEABLE = {"Contact": ["FirstName", "LastName", "AccountId", "Description", "Contact_Role__c", "Email",
+                              "npsp__Primary_Affiliation__c"],
                   "Attendance__c": ["Contact__c", "Account__c", "Attendance_Date__c", "Attendance_Batch__c", "Module__c"],
-                  "npe5__Affiliation__c": ["npe5__Contact__c", "npe5__Organization__c", "npe5__Status__c"],
+                  "npe5__Affiliation__c": ["npe5__Contact__c", "npe5__Organization__c", "npe5__Status__c",
+                                           "npe5__Primary__c"],
                   "DuplicateRecordSet": ["DuplicateRuleId"]}
 
     def __init__(self):
@@ -87,26 +90,28 @@ class FakeSF:
         self.contacts, self.rows, self.affs, self.items, self.sets = {}, {}, {}, {}, {}
         self.batches, self.events, self.queries = [], [], []
         self.apex_mode, self.on_write = "ok", None
+        self.blank_on_delete, self.delete_answer = False, None
 
     # ---- the world
     def contact(self, n, first, last, acc=SUN, when="2026-10-01", hour=10, by=USER, description=DESCRIPTION,
-                affiliation=True):
+                affiliation=True, primary=False):
         self.contacts[cid(n)] = {"Id": cid(n), "FirstName": first, "LastName": last,
                                  "Name": f"{first} {last}" if first else last, "AccountId": acc,
                                  "CreatedDate": created(when, hour), "CreatedById": by, "Description": description,
                                  "Contact_Role__c": "Participant", "Email": None, "IsDeleted": False,
-                                 "MasterRecordId": None}
+                                 "MasterRecordId": None, "npsp__Primary_Affiliation__c": acc if primary else None}
         if affiliation:
-            self.aff(n, n, acc, when, hour)
+            self.aff(n, n, acc, when, hour, primary)
 
     def row(self, n, contact_n, day, acc=None):
         self.rows[row_id(n)] = {"Id": row_id(n), "Contact__c": cid(contact_n),
                                 "Account__c": acc or self.contacts[cid(contact_n)]["AccountId"],
                                 "Attendance_Date__c": day, "Attendance_Batch__c": BATCH, "Module__c": "Self Advocacy"}
 
-    def aff(self, n, contact_n, acc, when="2026-10-01", hour=10):
+    def aff(self, n, contact_n, acc, when="2026-10-01", hour=10, primary=False):
         self.affs[aff_id(n)] = {"Id": aff_id(n), "npe5__Contact__c": cid(contact_n), "npe5__Organization__c": acc,
-                                "CreatedDate": created(when, hour), "npe5__Status__c": "Current"}
+                                "CreatedDate": created(when, hour), "npe5__Status__c": "Current",
+                                "npe5__Primary__c": primary}
 
     def dup_set(self, n, *contact_ns):
         self.sets[set_id(n)] = {"Id": set_id(n), "DuplicateRuleId": "0Bm000000000000DUP"}
@@ -201,8 +206,15 @@ class FakeSF:
 
     def delete(self, sobject, record_id):
         self.events.append(("delete", record_id, self.on_write(self) if self.on_write else None))
+        if self.delete_answer:
+            return self.delete_answer
         if sobject == "npe5__Affiliation__c":
-            del self.affs[record_id]
+            gone = self.affs.pop(record_id)
+            contact = self.contacts[gone["npe5__Contact__c"]]
+            # NPSP's AfterDelete: a Primary affiliation gone blanks the contact's Primary Affiliation
+            if (gone["npe5__Primary__c"] and contact["npsp__Primary_Affiliation__c"] == gone["npe5__Organization__c"]) \
+                    or self.blank_on_delete:
+                contact["npsp__Primary_Affiliation__c"] = None
         else:
             assert sobject == "DuplicateRecordSet"
             del self.sets[record_id]
@@ -251,9 +263,9 @@ class FakeSF:
                     return answer(False, f"System.AssertException: Assertion Failed: DIAG|fail|name|{x}")
         if self.apex_mode == "other":
             logs.append("10:00:01.0 (900)|FATAL_ERROR|System.DmlException: Merge failed. DUPLICATES_DETECTED, "
-                        "Amara Fennwhistle")
+                        "AMARA FENNWHISTLE")
             return answer(False, "System.DmlException: Merge failed. First exception on row 0; first error: "
-                                 "DUPLICATES_DETECTED, Amara Fennwhistle looks like Amara Fennwhistle: []")
+                                 "DUPLICATES_DETECTED, AMARA FENNWHISTLE looks like Amara Fennwhistle: []")
         for kept, ids in calls:
             moved = sorted(r["Id"] for r in self.rows.values() if r["Contact__c"] in ids)
             logs.append(f"10:00:00.5 (500)|USER_DEBUG|[40]|ERROR|DIAG|merged|{kept}|{','.join(ids)}|{','.join(moved)}")
@@ -276,21 +288,23 @@ class FakeSF:
 
 
 class FakeJotform:
-    """The two forms' newest submissions (Jotform's clock: US Eastern)."""
+    """The regional forms' submissions (Jotform's clock: US Eastern), newest first as Jotform's default
+    order is (`oldest_first` plays an order the tool must not trust)."""
 
     def __init__(self):
-        self.latest = {forms.REGIONALS[r]: "2026-10-07 07:00:00" for r in sd.QUIET_FORMS}   # 11:00 UTC
-        self.subs = {forms.REGIONALS[r]: [] for r in sd.QUIET_FORMS}
-        self.calls = []
+        self.latest = {fid: "2026-10-07 07:00:00" for fid in forms.REGIONALS.values()}   # 11:00 UTC
+        self.subs = {fid: [] for fid in forms.REGIONALS.values()}
+        self.calls, self.oldest_first = [], False
 
     def get(self, path, **params):
         self.calls.append((path, params))
+        assert "orderby" not in params and "direction" not in params, params    # the default order only
         form_id = path.split("/")[2]
         if path.endswith("/submissions"):
-            subs = sorted(self.subs[form_id] + [self.latest[form_id]], reverse=True)
+            subs = sorted(self.subs[form_id] + [self.latest[form_id]], reverse=not self.oldest_first)
             offset = params.get("offset", 0)
-            return [{"id": str(i), "created_at": c, "status": "ACTIVE"}
-                    for i, c in enumerate(subs)][offset:offset + params["limit"]]
+            return [{"id": f"{form_id}-{c}", "created_at": c, "status": "ACTIVE"}
+                    for c in subs][offset:offset + params["limit"]]
         return {"id": form_id, "last_submission": self.latest[form_id]}
 
 
@@ -574,6 +588,10 @@ class SfDupesApex(Harness):
                 (False, False, answer(True, logs="")),
                 (False, False, answer(False, marker)),
                 (False, False, answer(False, "System.DmlException: DUPLICATES_DETECTED, Amara Fennwhistle")),
+                # a name written in capitals, as some rosters hold them, is quoted by the error text
+                (False, False, answer(False, "System.DmlException: Merge failed. first error: DUPLICATES_DETECTED, "
+                                             "AMARA FENNWHISTLE looks like ZARA ZIBBLEWICK: []")),
+                (False, False, answer(False, "FENNWHISTLE: UNABLE_TO_LOCK_ROW, AMARA")),
                 (False, True, answer(False, marker, compiled=False)),
                 (False, True, {"status": 1, "message": "no result"})):
             good_said = sd.judge(ans, SUN, rehearse)
@@ -586,6 +604,11 @@ class SfDupesApex(Harness):
         self.assertIn("expected 7, actual 8", said)
         self.assertIn("DUPLICATES_DETECTED", sd.judge(answer(False, "System.DmlException: DUPLICATES_DETECTED, "
                                                                     "Amara Fennwhistle"), SUN, False)[1])
+        said = sd.judge(answer(False, "System.DmlException: Merge failed. first error: DUPLICATES_DETECTED, AMARA "
+                                      "FENNWHISTLE; UNABLE_TO_LOCK_ROW"), SUN, False)[1]
+        self.assertEqual(said, "System.DmlException; DUPLICATES_DETECTED; UNABLE_TO_LOCK_ROW")
+        self.assertEqual(sd.judge(answer(False, "FENNWHISTLE: UNABLE_TO_LOCK_ROW, AMARA"), SUN, False)[1],
+                         "an exception; UNABLE_TO_LOCK_ROW")
 
 
 # ---- the commands on the fake org ---------------------------------------------------------------------
@@ -641,6 +664,7 @@ class SfDupesFlow(Harness):
         out, code = self.run_tool("merge", self.plan_path())
         self.assertEqual(code, 0, out)
         self.assertIn(f"keep {cid(1)} <- {cid(2)} + {cid(3)}", out)
+        self.assertIn("merge (dry run): 1 club(s), 2 merge call(s) in 1 Apex run(s)", out)
         self.assertEqual(self.sf.events, [])                            # a dry run runs nothing
         out, code = self.run_tool("merge", self.plan_path(), "--rehearse")
         self.assertEqual(code, 0, out)
@@ -649,7 +673,8 @@ class SfDupesFlow(Harness):
         self.assertIn("exactly as before the rehearsal", out)
         self.assertNotIn("DIAG|Beatrice", out)
         self.assertIn("DIAG|(a line not shown: not one this tool writes)", out)
-        self.assertFalse(os.path.exists(os.path.join(self.dir, "merge_rollback.json")))   # a rehearsal writes none
+        saved = self.rollback()                         # a rehearsal saves the rollback data too, and no merge
+        self.assertEqual((sorted(saved["contacts"]), saved["merges"]), ([cid(2), cid(3), cid(5)], []))
         self.assertTrue(all(not self.sf.contacts[cid(n)]["IsDeleted"] for n in (2, 3, 5)))
         out, code = self.run_tool("rename", self.plan_path())
         self.assertEqual(code, 0, out)
@@ -769,7 +794,7 @@ class SfDupesFlow(Harness):
         self.assertEqual(saved[cid(5)]["why_kept"], "the earliest created")
         self.assertEqual(saved[cid(2)]["fields"]["LastName"], "Fennwhistle")
         self.assertEqual(set(saved[cid(2)]["fields"]), {"AccountId", "Contact_Role__c", "Description", "Email",
-                                                         "FirstName", "LastName"})
+                                                         "FirstName", "LastName", "npsp__Primary_Affiliation__c"})
         self.assertEqual([r["Id"] for r in saved[cid(2)]["rows"]], [row_id(2)])
         self.assertEqual(set(saved[cid(2)]["rows"][0]), {"Id", "Contact__c", "Account__c", "Attendance_Date__c",
                                                           "Attendance_Batch__c", "Module__c"})
@@ -799,8 +824,9 @@ class SfDupesFlow(Harness):
         self.world()
         self.make_plan()
         self.jf.latest[forms.REGIONALS["Asia"]] = "2026-10-07 07:55:00"       # 11:55 UTC, 5 minutes ago
-        for argv in (["merge", self.plan_path(), "--apply"], ["rename", self.plan_path(), "--apply", "--roster",
-                                                              self.roster], ["cleanup", self.plan_path(), "--apply"]):
+        for argv in (["merge", self.plan_path(), "--apply"], ["merge", self.plan_path(), "--rehearse"],
+                     ["rename", self.plan_path(), "--apply", "--roster", self.roster],
+                     ["cleanup", self.plan_path(), "--apply"]):
             out, code = self.run_tool(*argv)
             if argv[0] == "cleanup":
                 self.assertEqual(code, 0, out)                          # nothing to delete before the merges
@@ -814,10 +840,15 @@ class SfDupesFlow(Harness):
                 self.jf.latest = {k: "2026-10-07 07:00:00" for k in self.jf.latest}
                 out, code = self.run_tool("rename", self.plan_path(), "--apply", "--roster", self.roster)
                 self.assertEqual("20:30 and 21:30" in str(code), refused, (out, code))
+        self.now, self.sf.events = datetime.datetime(2026, 10, 7, 20, 40, tzinfo=UTC), []
+        out, code = self.run_tool("merge", self.plan_path(), "--rehearse")      # its DML locks and runs triggers too
+        self.assertIn("20:30 and 21:30", str(code))
+        self.assertEqual(self.sf.events, [])
         self.now = NOW
         self.jf.latest = {k: "2026-10-07 07:49:00" for k in self.jf.latest}
-        out, code = self.run_tool("merge", self.plan_path(), "--rehearse")      # a rehearsal is not a write
+        out, code = self.run_tool("merge", self.plan_path(), "--rehearse")
         self.assertEqual(code, 0, out)
+        self.assertIn("0 submission(s) on the regional forms, 0 new batch(es)", out)      # counted after it too
 
     def test_a_failed_run_stops_everything_and_prints_no_name(self):
         self.world()
@@ -869,12 +900,143 @@ class SfDupesFlow(Harness):
         self.sf.on_write = lambda sf: self.jf.subs[africa].append("2026-10-07 08:00:30")
         out, code = self.run_tool("merge", self.plan_path(), "--apply")
         self.assertEqual(code, 2, out)
-        self.assertIn("1 submission(s) on the Africa and Asia forms, 0 new batch(es)", out)
+        self.assertIn("1 submission(s) on the regional forms, 0 new batch(es)", out)
         self.assertIn("ATTENTION", out)
         self.sf.batches.append({"Id": "a1l000000000000009", "Name": "BATCH-000009", "Contact_IDs__c": "x",
                                 "CreatedDate": created("2026-10-07", 12)})
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(sd.window_count(types.SimpleNamespace(jotform=lambda: self.jf), self.sf, NOW), 0)
+
+    def test_the_submission_count_checks_the_order_and_counts_every_form(self):
+        ctx = types.SimpleNamespace(jotform=lambda: self.jf)
+        # a Latin America submission with its batch cannot hide a missing Africa one
+        self.jf.subs[forms.REGIONALS["Latin America"]].append("2026-10-07 08:00:20")
+        self.jf.subs[forms.REGIONALS["Africa"]].append("2026-10-07 08:00:30")
+        self.sf.batches.append({"Id": "a1l000000000000009", "Name": "BATCH-000009", "Contact_IDs__c": "x",
+                                "CreatedDate": created("2026-10-07", 12)})
+        with contextlib.redirect_stdout(io.StringIO()) as shown:
+            self.assertEqual(sd.window_count(ctx, self.sf, NOW), 2)
+        self.assertIn("2 submission(s) on the regional forms, 1 new batch(es)", shown.getvalue())
+        self.assertEqual(sorted({p.split("/")[2] for p, _ in self.jf.calls}), sorted(forms.REGIONALS.values()))
+        # a list that is not newest first would end the count on its first page: refused, never 0
+        self.jf.oldest_first = True
+        with self.assertRaises(salesforce.Refused) as stop:
+            sd.submissions_since(self.jf, "Africa", NOW - datetime.timedelta(minutes=1))
+        self.assertIn("did not come newest first", str(stop.exception))
+        self.world()
+        self.make_plan()
+        out, code = self.run_tool("merge", self.plan_path(), "--apply")
+        self.assertEqual(code, 2, out)
+        self.assertIn("could not be made", out)
+        self.assertIn("compare them by hand", out)
+
+        class Pages:                                # a submission arrived between the two page reads
+            def __init__(self, pages):
+                self.pages = pages
+
+            def get(self, path, **params):
+                assert "orderby" not in params
+                return self.pages[params["offset"] // params["limit"]]
+        page1 = [{"id": "s4", "created_at": "2026-10-07 08:04:00", "status": "ACTIVE"},
+                 {"id": "s3", "created_at": "2026-10-07 08:03:00", "status": "DELETED"}]
+        page2 = [{"id": "s3", "created_at": "2026-10-07 08:03:00", "status": "DELETED"},
+                 {"id": "s2", "created_at": "2026-10-07 08:02:00", "status": "ACTIVE"}]
+        page3 = [{"id": "s1", "created_at": "2026-10-07 07:00:00", "status": "ACTIVE"}]
+        with unittest.mock.patch.object(sd, "SUBMISSION_PAGE", 2):
+            self.assertEqual(sd.submissions_since(Pages([page1, page2, page3]), "Africa", NOW), 2)
+
+    def test_an_unknown_run_is_settled_only_on_what_salesforce_shows(self):
+        os.makedirs(self.dir)
+        self.sf.contact(1, "Esther", "Umberlash")
+        self.sf.contact(98, "Esther", "Umberlash")
+
+        def settle(missing=False, **state):
+            rb = sd.Rollback(self.dir)
+            merged = [cid(98)] + ([cid(97)] if missing else [])
+            rb.data["merges"] = [{"club": SUN, "part": 1, "calls": [[cid(1), merged]], "merged": merged,
+                                  "status": "unknown"}]
+            self.sf.contacts[cid(98)].update(state)
+            with contextlib.redirect_stdout(io.StringIO()):
+                sd.settle(self.sf, rb)
+            return rb.data["merges"][0]["status"]
+        self.assertEqual(settle(), "not_applied")
+        self.assertEqual(settle(IsDeleted=True, MasterRecordId=cid(1)), "done")
+        for what, kwargs, said in (
+                ("purged from the Recycle Bin", dict(missing=True), "cannot tell whether that run merged"),
+                ("deleted, but not by this merge", dict(IsDeleted=True, MasterRecordId=None), "not merged into")):
+            with self.subTest(what):
+                with self.assertRaises(salesforce.Refused) as stop:
+                    settle(**kwargs)
+                self.assertIn(said, str(stop.exception))
+
+    def test_rename_and_cleanup_save_each_record_before_its_write(self):
+        self.world()
+        self.make_plan()
+        self.sf.on_write = lambda sf: (self.rollback()["renames"].get(cid(6)) or {}).get("old")
+        out, code = self.run_tool("rename", self.plan_path(), "--apply", "--roster", self.roster)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.sf.events, [("update", cid(6), {"LastName": "Ostrivane  Pellucidor"})])
+        self.sf.on_write, self.sf.events = None, []
+        out, code = self.run_tool("merge", self.plan_path(), "--apply")
+        self.assertEqual(code, 0, out)
+        self.sf.on_write, self.sf.events = lambda sf: {d["id"]: (d["status"], bool(d["record"]))
+                                                       for d in self.rollback()["deleted"]}, []
+        out, code = self.run_tool("cleanup", self.plan_path(), "--dup-sets", "--apply")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([e[1] for e in self.sf.events], [aff_id(2), aff_id(3), aff_id(5), set_id(1)])
+        for _, rid, saved in self.sf.events:
+            self.assertEqual(saved.get(rid), ("saved", True), rid)
+
+    def test_cleanup_keeps_a_primary_affiliation_and_watches_her_primary_affiliation(self):
+        sf = self.sf
+        sf.contact(1, "Amara", "Fennwhistle", SUN, "2026-09-02", primary=True)
+        sf.contact(2, "Amara", "Fennwhistle", SUN, "2026-10-03", primary=True)   # NPSP flagged it Primary too
+        sf.contact(3, "Amara", "Fennwhistle", SUN, "2026-10-04")
+        sf.contact(4, "Beatrice", "Marrowgate", SUN, "2026-10-01")
+        sf.contact(5, "Beatrice", "Marrowgate", SUN, "2026-10-02", primary=True)
+        self.make_plan()
+        out, code = self.run_tool("merge", self.plan_path(), "--apply")
+        self.assertEqual(code, 0, out)
+        out, code = self.run_tool("cleanup", self.plan_path())
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"leave npe5__Affiliation__c {aff_id(2)} (kept contact {cid(1)}: a further Primary", out)
+        self.assertIn(f"would delete npe5__Affiliation__c {aff_id(3)} (kept contact {cid(1)} keeps {aff_id(1)})", out)
+        self.assertIn(f"would delete npe5__Affiliation__c {aff_id(4)} (kept contact {cid(4)} keeps {aff_id(5)})", out)
+        out, code = self.run_tool("cleanup", self.plan_path(), "--apply")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sorted(sf.affs), [aff_id(1), aff_id(2), aff_id(5)])
+        self.assertEqual((sf.contacts[cid(1)]["npsp__Primary_Affiliation__c"],
+                          sf.contacts[cid(4)]["npsp__Primary_Affiliation__c"]), (SUN, None))
+        deleted = {d["id"]: d for d in self.rollback()["deleted"]}
+        self.assertEqual(deleted[aff_id(3)]["contact_primary_before"],
+                         {"contact": cid(1), "npsp__Primary_Affiliation__c": SUN})
+        # should NPSP blank it on another delete as well, the cleanup stops right there
+        self.sf, self.printed = FakeSF(), []
+        self.world()
+        self.sf.contacts[cid(1)]["npsp__Primary_Affiliation__c"] = SUN
+        self.sf.blank_on_delete = True
+        os.remove(os.path.join(self.dir, "merge_rollback.json"))
+        self.make_plan()
+        out, code = self.run_tool("merge", self.plan_path(), "--apply")
+        self.assertEqual(code, 0, out)
+        out, code = self.run_tool("cleanup", self.plan_path(), "--apply")
+        self.assertIn(f"kept contact {cid(1)}: its Primary Affiliation changed", str(code))
+        self.assertIn(f"it was {SUN}, it is blank", str(code))
+        self.assertEqual([e[1] for e in self.sf.events if e[0] == "delete"], [aff_id(2)])
+        entry = self.rollback()["deleted"][-1]
+        self.assertEqual((entry["id"], entry["status"], entry["contact_primary_after"]), (aff_id(2), "CHECK", None))
+
+    def test_a_failed_delete_shows_error_codes_only(self):
+        self.world()
+        self.make_plan()
+        out, code = self.run_tool("merge", self.plan_path(), "--apply")
+        self.assertEqual(code, 0, out)
+        self.sf.delete_answer = (400, [{"errorCode": "DELETE_FAILED",
+                                        "message": "AMARA FENNWHISTLE is still linked to DALIA THORNQUIBBLE"}])
+        out, code = self.run_tool("cleanup", self.plan_path(), "--apply")
+        self.assertIn(f"npe5__Affiliation__c {aff_id(2)}: not deleted as planned (HTTP 400 DELETE_FAILED)", str(code))
+        self.assertEqual(self.rollback()["deleted"][-1]["status"], "CHECK")
+        self.assert_no_names(out)
 
     def test_the_renames_are_checked_again_before_writing(self):
         self.world()

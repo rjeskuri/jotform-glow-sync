@@ -76,7 +76,10 @@ _IDS = r"(?:[A-Za-z0-9]{15,18}(?:,[A-Za-z0-9]{15,18})*)?"
 DIAG_SHAPE = re.compile(r"DIAG\|(?:ok\|[A-Za-z0-9]{15,18}|merged\|[A-Za-z0-9]{15,18}\|" + _IDS + r"\|" + _IDS
                         + r"|limits\|queries=\d+/\d+\|dml=\d+/\d+\|cpu=\d+/\d+)")
 FAIL_TOKEN = re.compile(r"DIAG\|fail\|[a-z ]+(?:\|[A-Za-z0-9]{15,18})?")
-ERROR_WORD = re.compile(r"\b[A-Z][A-Z_]{3,}\b")
+# Salesforce's error codes (DUPLICATES_DETECTED, UNABLE_TO_LOCK_ROW ...): capitals WITH an underscore,
+# which no name has - a bare capitalized word of an error text can be a girl's name written in capitals
+ERROR_CODE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+EXCEPTION_KIND = re.compile(r"(?:[A-Za-z0-9_]+\.)*[A-Za-z0-9_]*Exception(?=:)")
 NAME_FIELDS = ("Name", "FirstName", "LastName")
 RENAMEABLE = ("FirstName", "LastName")
 CONTACT_FIELDS = ("Id, Name, FirstName, LastName, AccountId, Account.Name, CreatedDate, CreatedById, "
@@ -85,6 +88,10 @@ ROW_FIELDS = "Id, Contact__c, Account__c, Attendance_Date__c, Attendance_Batch__
 ROW_KEEP = ("Contact__c", "Account__c", "Attendance_Date__c", "Attendance_Batch__c")
 AFF_FIELDS = "Id, npe5__Contact__c, npe5__Organization__c, CreatedDate"
 ITEM_FIELDS = "Id, RecordId, DuplicateRecordSetId"
+# NPSP: an affiliation flagged Primary, and the contact's Primary Affiliation (an account) - NPSP blanks
+# the contact's field when a Primary affiliation is deleted, even with another one to that account left
+PRIMARY = "npe5__Primary__c"
+CONTACT_PRIMARY = "npsp__Primary_Affiliation__c"
 
 
 # ---- names: the comparison key and what counts as odd ---------------------------------------------
@@ -208,6 +215,15 @@ def query_in(read, soql, ids):
     for i in range(0, len(ids), IN_CHUNK):
         out += read(soql.replace("{ids}", in_list(ids[i:i + IN_CHUNK])))
     return plain(out)
+
+
+def error_codes(text):
+    """The Salesforce error codes in an error text or answer - never its words (they can quote a name)."""
+    return sorted(set(ERROR_CODE.findall(str(text or ""))))
+
+
+def field_names(describe):
+    return {f.get("name") for f in (describe or {}).get("fields") or [] if isinstance(f, dict)}
 
 
 def createable(describe, must=()):
@@ -703,13 +719,13 @@ def judge(answer, club, rehearse):
         return True, "rehearsal ok: every check passed, then the run threw its own end and Salesforce rolled it back"
     if not rehearse and result.get("success") is True and ok:
         return True, "applied: every check passed"
-    kind = re.match(r"[A-Za-z0-9_.]+(?=:)", message)
+    kind = EXCEPTION_KIND.match(message)
     said = [kind.group(0) if kind else ("no exception" if not message else "an exception")]
     said += FAIL_TOKEN.findall(message)
     numbers = re.search(r"Expected: (\d+), Actual: (\d+)", message)
     if numbers:
         said.append(f"expected {numbers.group(1)}, actual {numbers.group(2)}")
-    said += sorted(set(ERROR_WORD.findall(message)) - {"DIAG"})
+    said += error_codes(message)
     if result.get("success") is True and not ok:
         said.append("success without the DIAG|ok line")
     return False, "; ".join(said)
@@ -769,7 +785,16 @@ def settle(org, rb):
         kept_of = {x: kept for kept, chunk in m["calls"] for x in chunk}
         found = {r["Id"]: r for r in query_in(org.query_all, "SELECT Id, IsDeleted, MasterRecordId FROM Contact "
                                               "WHERE Id IN {ids}", m["merged"])}
-        merged = [x for x in m["merged"] if found.get(x, {}).get("IsDeleted") and found[x].get("MasterRecordId") == kept_of[x]]
+        missing = [x for x in m["merged"] if x not in found]
+        if missing:                           # out of the Recycle Bin (15 days, or emptied): it says nothing
+            raise Refused(f"club {m['club']}, part {m['part']}: contact(s) {', '.join(missing)} are not in Salesforce "
+                          "even among the deleted ones - this tool cannot tell whether that run merged; look at it by "
+                          "hand (merge_rollback.json), nothing more is run")
+        odd_ones = [x for x in m["merged"] if found[x].get("IsDeleted") and found[x].get("MasterRecordId") != kept_of[x]]
+        if odd_ones:
+            raise Refused(f"club {m['club']}, part {m['part']}: contact(s) {', '.join(odd_ones)} are deleted but not "
+                          "merged into their kept contact - look at it by hand, nothing more is run")
+        merged = [x for x in m["merged"] if found[x].get("IsDeleted")]
         if len(merged) == len(m["merged"]):
             m.update(status="done", note="settled: the merge had committed")
         elif not merged:
@@ -805,7 +830,7 @@ def save_for_rollback(org, rb, plan, clubs_calls, at):
             "dup_items": [i for i in items if i.get("RecordId") == cid]}
     rb.save()
     print(f"rollback file: {len(ids)} contacts with {len(rows)} rows, {len(affs)} affiliations and "
-          f"{len(items)} duplicate-rule items saved before any write -> {rel(rb.path)}")
+          f"{len(items)} duplicate-rule items saved before the first Apex run -> {rel(rb.path)}")
 
 
 def read_back(org, plan, club, calls, snapshot, done):
@@ -849,9 +874,12 @@ def quiet_window(ctx):
 
 
 def latest_submission(jf, region):
+    """The newest submission's time: the first of Jotform's default order (newest first, the order
+    tools/backfill_resolve.py pages by; no `orderby`, whose direction is not proven) or the form's
+    own last_submission, whichever is later."""
     fid = forms.REGIONALS[region]
     info = jf.get(f"/form/{fid}")
-    page = jf.get(f"/form/{fid}/submissions", limit=1, orderby="created_at")
+    page = jf.get(f"/form/{fid}/submissions", limit=1)
     if not isinstance(page, list) or not isinstance(info, dict):
         raise Refused(f"the {region} form's answer has a shape this tool does not know - nothing written")
     times = [jotform_time(s.get("created_at")) for s in page if isinstance(s, dict)]
@@ -861,26 +889,39 @@ def latest_submission(jf, region):
 
 
 def submissions_since(jf, region, since):
-    fid, count = forms.REGIONALS[region], 0
+    """The form's submissions created since `since`, read page by page in Jotform's default order,
+    newest first. The order is checked, not assumed: a page that is not newest first refuses (the
+    count would otherwise stop early and say 0). A submission arriving meanwhile repeats one on the
+    next page: counted once, by id."""
+    fid, seen, last = forms.REGIONALS[region], {}, None
     for page_no in range(SUBMISSION_PAGES):
-        page = jf.get(f"/form/{fid}/submissions", limit=SUBMISSION_PAGE, offset=page_no * SUBMISSION_PAGE,
-                      orderby="created_at")
-        if not isinstance(page, list):
+        page = jf.get(f"/form/{fid}/submissions", limit=SUBMISSION_PAGE, offset=page_no * SUBMISSION_PAGE)
+        if not isinstance(page, list) or not all(isinstance(s, dict) and s.get("id") for s in page):
             raise Refused(f"the {region} form's submissions have a shape this tool does not know")
-        newer = [s for s in page if isinstance(s, dict) and jotform_time(s.get("created_at")) >= since]
-        count += sum(1 for s in newer if s.get("status") != "DELETED")
-        if len(page) < SUBMISSION_PAGE or len(newer) < len(page):
-            return count
+        older = False
+        for s in page:
+            moment = jotform_time(s.get("created_at"))
+            if last is not None and moment > last:
+                raise Refused(f"the {region} form's submissions did not come newest first - compare them with the "
+                              "batches by hand")
+            last = moment
+            if moment >= since:
+                seen[str(s["id"])] = s.get("status")
+            else:
+                older = True
+        if len(page) < SUBMISSION_PAGE or older:
+            return sum(1 for status in seen.values() if status != "DELETED")
     raise Refused(f"more than {SUBMISSION_PAGE * SUBMISSION_PAGES} submissions on the {region} form since the run "
                   "started - compare them with the batches by hand")
 
 
 def window_count(ctx, org, started):
-    """Form submissions on Africa + Asia vs Attendance_Batch__c since the run began (minus a minute)."""
+    """Submissions on every regional form vs Attendance_Batch__c (every club) since the run began,
+    minus a minute: both sides whole, so a batch of another region cannot hide a missing one."""
     since = started - datetime.timedelta(minutes=1)
-    subs = sum(submissions_since(ctx.jotform(), region, since) for region in QUIET_FORMS)
+    subs = sum(submissions_since(ctx.jotform(), region, since) for region in forms.REGIONALS)
     batches = org.count(f"SELECT COUNT() FROM Attendance_Batch__c WHERE CreatedDate >= {stamp(since)}")
-    print(f"since {stamp(since)}: {subs} submission(s) on the Africa and Asia forms, {batches} new batch(es) in Salesforce")
+    print(f"since {stamp(since)}: {subs} submission(s) on the regional forms, {batches} new batch(es) in Salesforce")
     if subs > batches:
         print("ATTENTION: more submissions than batches - a submission may not have reached Salesforce during the run; "
               "look at the newest submissions and batches (RUNBOOK, Duplicate girls in Salesforce)")
@@ -897,12 +938,13 @@ def cmd_merge(args, ctx):
             raise Refused(f"--club {args.club}: the plan has no merge for that account")
         clubs = [args.club]
     mode = "rehearse" if args.rehearse else "apply" if args.apply else "dry run"
-    if args.apply or args.rehearse:
+    live = args.apply or args.rehearse        # both run DML in Salesforce (a rehearsal's is rolled back)
+    if live:
         settle(org, rb)
     done = rb.done()
     work = [(club, parts_of(plan, club, args.per_run, done)) for club in clubs]
     work = [(club, parts) for club, parts in work if parts and parts[0]]
-    print(f"merge ({mode}): {len(work)} club(s), {sum(len(c) for _, ps in work for p in ps for c in p)} merge call(s) "
+    print(f"merge ({mode}): {len(work)} club(s), {sum(len(p) for _, ps in work for p in ps)} merge call(s) "
           f"in {sum(len(ps) for _, ps in work)} Apex run(s); plan {rel(args.plan)}")
     if not work:
         print("nothing left to merge for this plan")
@@ -911,7 +953,10 @@ def cmd_merge(args, ctx):
     for folder in (apex_dir, log_dir):
         os.makedirs(folder, mode=0o700, exist_ok=True)
         os.chmod(folder, 0o700)
-    if args.apply:
+    if live:
+        # a rehearsal too: its merges lock the club's records and run NPSP's triggers until the final
+        # throw, so it waits for the same quiet moment, and saves the same rollback data in case it ever
+        # kept a change
         quiet_window(ctx)
         for club, _ in work:
             problems = drift(plan, club, live_club(org, plan, club), done)
@@ -923,8 +968,8 @@ def cmd_merge(args, ctx):
     try:
         for club, parts in work:
             for n, calls in enumerate(parts, 1):
-                if args.apply and ran:
-                    quiet_window(ctx)                 # again before every further write
+                if ran:
+                    quiet_window(ctx)                 # again before every further run
                 snapshot = live_club(org, plan, club)
                 problems = drift(plan, club, snapshot, done)
                 if problems:
@@ -933,7 +978,7 @@ def cmd_merge(args, ctx):
                 path = os.path.join(apex_dir, f"{club}_{n}.apex")
                 save_private(path, apex_text(plan, club, calls, done, args.rehearse, n, len(parts), stamp(ctx.clock())))
                 merged = [x for _, chunk in calls for x in chunk]
-                if not (args.apply or args.rehearse):
+                if not live:
                     print(f"would run {rel(path)}: club {club}, part {n} of {len(parts)}, {len(calls)} merge call(s), "
                           f"{len(merged)} contact(s) into {len({k for k, _ in calls})}")
                     for kept, chunk in calls:
@@ -945,7 +990,7 @@ def cmd_merge(args, ctx):
                              "started_at_utc": stamp(ctx.clock()), "plan_sha256": plan["sha256"], "status": "running"}
                     rb.data["merges"].append(entry)
                     rb.save()
-                    ran = True
+                ran = True
                 good, said, diag = run_and_judge(org, path, log_dir, club, n, args.rehearse, ctx)
                 if args.rehearse:
                     if live_club(org, plan, club) != snapshot:
@@ -1193,26 +1238,47 @@ def cmd_rename(args, ctx):
 
 
 # ---- cleanup ----------------------------------------------------------------------------------------
+def primary_of(org, contact):
+    """The contact's NPSP Primary Affiliation: an account id, or None when blank."""
+    found = org.query(f"SELECT Id, {CONTACT_PRIMARY} FROM Contact WHERE Id = {quoted(contact)}")
+    value = found[0].get(CONTACT_PRIMARY) if len(found) == 1 else ""
+    if value is not None and not (isinstance(value, str) and ID.fullmatch(value)):
+        raise Refused(f"kept contact {contact}: its Primary Affiliation could not be read - nothing more deleted")
+    return value
+
+
 def cmd_cleanup(args, ctx):
     plan = load_plan(args.plan)
     org, rb = ctx.org, Rollback(ctx.folder)
     done = rb.done()
     merged_groups = [g for g in plan["groups"] if set(g["merged"]) <= done]
     waiting = len(plan["groups"]) - len(merged_groups)
-    deletes = []                                          # (sobject, id, note, items kept with a set)
+    deletes = []                          # (sobject, id, note, items kept with a set, contact to watch)
+    left = []                             # (affiliation id, kept contact): a further Primary one, never deleted
     kept_ids = [g["kept"] for g in merged_groups]
-    affs = query_in(org.query, f"SELECT {AFF_FIELDS} FROM npe5__Affiliation__c WHERE npe5__Contact__c IN {{ids}}",
-                    kept_ids) if kept_ids else []
+    has_primary = watch = False
+    affs = []
+    if kept_ids:
+        has_primary = PRIMARY in field_names(org.describe("npe5__Affiliation__c"))
+        watch = CONTACT_PRIMARY in field_names(org.describe("Contact"))
+        affs = query_in(org.query, f"SELECT {AFF_FIELDS}{', ' + PRIMARY if has_primary else ''} FROM "
+                        "npe5__Affiliation__c WHERE npe5__Contact__c IN {ids}", kept_ids)
     for g in merged_groups:
         known = {a for info in g["contacts"].values() for a in info.get("affiliations", [])}
+        # the one kept: a Primary one where there is one (a merge moves the merged-away contact's
+        # Primary affiliation over as it is), else the earliest
         mine = sorted((a for a in affs if a.get("npe5__Contact__c") == g["kept"]
                        and a.get("npe5__Organization__c") == g["account_id"]),
-                      key=lambda a: (sf_time(a["CreatedDate"]), a["Id"]))
+                      key=lambda a: (a.get(PRIMARY) is not True, sf_time(a["CreatedDate"]), a["Id"]))
         for a in mine[1:]:
             if a["Id"] not in known:
                 raise Refused(f"kept contact {g['kept']}: affiliation {a['Id']} is not one the plan recorded - look at "
                               "it by hand; nothing deleted")
-            deletes.append(("npe5__Affiliation__c", a["Id"], f"kept contact {g['kept']} keeps {mine[0]['Id']}", None))
+            if has_primary and a.get(PRIMARY) is not False:
+                left.append((a["Id"], g["kept"]))       # NPSP would blank her Primary Affiliation
+                continue
+            deletes.append(("npe5__Affiliation__c", a["Id"], f"kept contact {g['kept']} keeps {mine[0]['Id']}", None,
+                            g["kept"] if watch else None))
     if args.dup_sets:
         set_ids = sorted({s for g in plan["groups"] for info in g["contacts"].values() for _, s in info.get("dup_items", [])})
         existing = {r["Id"] for r in query_in(org.query, "SELECT Id FROM DuplicateRecordSet WHERE Id IN {ids}",
@@ -1223,11 +1289,14 @@ def cmd_cleanup(args, ctx):
         for s in sorted(existing):
             mine = [i for i in items if i.get("DuplicateRecordSetId") == s]
             if len(mine) <= 1 and all(i.get("RecordId") in kept_all for i in mine):
-                deletes.append(("DuplicateRecordSet", s, f"{len(mine)} item(s) left", mine))
+                deletes.append(("DuplicateRecordSet", s, f"{len(mine)} item(s) left", mine, None))
             else:
                 print(f"  duplicate-rule set {s}: {len(mine)} item(s) left - kept")
     print(f"cleanup: {len(merged_groups)} merged group(s), {waiting} not merged yet; {len(deletes)} record(s) to delete")
-    for sobject, rid, note, _ in deletes:
+    for aid, kept in left:
+        print(f"  leave npe5__Affiliation__c {aid} (kept contact {kept}: a further Primary affiliation - NPSP blanks "
+              "the contact's Primary Affiliation when a Primary one is deleted; RUNBOOK, Duplicate girls in Salesforce)")
+    for sobject, rid, note, _, _ in deletes:
         print(f"  {'would delete' if not args.apply else 'delete'} {sobject} {rid} ({note})")
     if not args.apply or not deletes:
         if not args.apply:
@@ -1235,7 +1304,7 @@ def cmd_cleanup(args, ctx):
         return 0
     quiet_window(ctx)
     fields = {s: createable(org.describe(s)) for s in sorted({d[0] for d in deletes})}
-    for sobject, rid, note, items in deletes:
+    for sobject, rid, note, items, contact in deletes:
         found = plain(org.query(f"SELECT Id{''.join(', ' + f for f in fields[sobject])} FROM {sobject} WHERE Id = {quoted(rid)}"))
         if not found:
             print(f"  {sobject} {rid}: already gone")
@@ -1244,15 +1313,27 @@ def cmd_cleanup(args, ctx):
                  "plan_sha256": plan["sha256"], "status": "saved"}
         if items is not None:
             entry["items"] = items
+        before = primary_of(org, contact) if contact else None
+        if contact:
+            entry["contact_primary_before"] = {"contact": contact, CONTACT_PRIMARY: before}
         rb.data["deleted"].append(entry)
         rb.save()
         status, answer = org.delete(sobject, rid)
         back = org.query(f"SELECT Id FROM {sobject} WHERE Id = {quoted(rid)}")
-        entry.update(status="deleted" if status == 204 and not back else "CHECK", http=status,
+        after = primary_of(org, contact) if contact else None
+        changed = bool(contact) and after != before
+        entry.update(status="deleted" if status == 204 and not back and not changed else "CHECK", http=status,
                      deleted_at_utc=stamp(ctx.clock()))
+        if changed:
+            entry["contact_primary_after"] = after
         rb.save()
+        if changed:
+            raise Refused(f"kept contact {contact}: its Primary Affiliation changed when {sobject} {rid} was deleted "
+                          f"(it was {before or 'blank'}, it is {after or 'blank'}) - STOPPED; set it back in Salesforce "
+                          "(both values and the deleted record are in the rollback file)")
         if entry["status"] != "deleted":
-            codes = sorted(set(ERROR_WORD.findall(json.dumps(answer)))) if answer else []
+            codes = error_codes(" ".join(str(e.get("errorCode")) for e in answer if isinstance(e, dict))
+                                if isinstance(answer, list) else "")
             raise Refused(f"{sobject} {rid}: not deleted as planned (HTTP {status}{' ' + ' '.join(codes) if codes else ''}) "
                           "- STOPPED; the record is saved in the rollback file")
         print(f"  {sobject} {rid}: deleted, read back gone")

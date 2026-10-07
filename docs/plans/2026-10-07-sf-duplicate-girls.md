@@ -143,7 +143,18 @@ unchanged) + `send --apply --vpn-off --only <key>` twice, each read back.
 - `cleanup --apply` also refuses in the quiet window and NPSP's hour. For `merge`, `rename` and
   `cleanup` the default folder is the plan's own folder (`check` writes nothing; `plan` writes to
   `data/sf_dupes_<UTC date>/`). Log files are `logs/<stamp>_<club>_<part>.json`.
+- After two reviews (2026-10-07): Salesforce's error texts are reduced to the exception's class and
+  error codes with an underscore (a capitalized word can be a name written in capitals); the
+  submission count reads Jotform's default order (newest first, as `backfill_resolve.py` pages),
+  checks it and counts each submission once by id, over all four regional forms against the batches
+  of every club; `merge --rehearse` waits for the quiet window and NPSP's hour, saves the rollback
+  data first and is followed by the count, like `--apply` (the live-gate hook still does not catch
+  `--rehearse`: adding it is Ryan's call); `settle` refuses a merged-away contact that queryAll no
+  longer returns; `cleanup` keeps a Primary affiliation first, leaves a further Primary one (NPSP
+  blanks `npsp__Primary_Affiliation__c` when a Primary affiliation is deleted) and reads the
+  contact's Primary Affiliation back after each delete (changed: STOPPED, CHECK).
 - Not verifiable offline, so proven by the rehearsal before any `--apply`: the Apex compiles (user
   methods in an anonymous block, `Database.merge(sObject, List<Id>, Boolean)`), NPSP's merge
   triggers stay inside the limits (`DIAG|limits`; else `--per-run`), and a debug log over 20 MB
   could lose early lines (the `DIAG|ok` line is the last, so a truncated log still shows it).
+  Also unproven: NPSP's Primary-affiliation delete behaviour (the cleanup's read-back catches it).

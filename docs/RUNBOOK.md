@@ -1989,7 +1989,13 @@ record id:
   club accounts for one club (11 girls in "Las Camelias" and "Las Camelias Primaria", BACKLOG 77),
   or a namesake the Roster spells differently. A person decides.
 
-### The merge (Ryan's go for every `--apply`)
+### The merge (Ryan's go for every `--apply` and every `--rehearse`)
+
+A rehearsal runs the merges' DML in production and then throws, so Salesforce rolls it back: it
+leaves nothing behind, but it locks the club's records and runs NPSP's triggers meanwhile, and the
+live-gate hook does not catch `--rehearse`. Every `--apply` and `--rehearse` reads Jotform first
+(no submission in the last 10 minutes) and the regional forms afterwards (`merge`): put
+`JOTFORM_API_KEY` in `.env` or the environment, or it refuses before anything runs.
 
 ```bash
 python3 tools/sf_dupes.py plan --vpn-off --roster data/roster_<stamp>.csv     # read-only -> data/sf_dupes_<date>/merge_plan.json
@@ -2013,32 +2019,45 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
   when anything needs a person: such a group is never merged by the tool (same-date pairs go to
   Ryan). Compare the counts with what you expect before going on.
 - **`merge`** re-reads first and refuses any drift from the plan (contacts, their club, their
-  rows by id, the club's participants, a new copy of a girl): make the plan again. `--apply` also
-  refuses while a submission reached the Africa or Asia form in the last 10 minutes, and between
-  20:30 and 21:30 UTC (NPSP's nightly job), and writes `merge_rollback.json` before the first
-  write. One anonymous-Apex run per club (`--per-run N` merge calls per run if a limit bites:
+  rows by id, the club's participants, a new copy of a girl): make the plan again. `--apply` and
+  `--rehearse` also refuse while a submission reached the Africa or Asia form in the last 10
+  minutes, and between 20:30 and 21:30 UTC (NPSP's nightly job) - checked again before each further
+  run - and write `merge_rollback.json` before the first run (a rehearsal too, though it records
+  no merge). One anonymous-Apex run per club (`--per-run N` merge calls per run if a limit bites:
   each run prints `DIAG|limits|queries=..|dml=..|cpu=..`). The Apex checks everything again and
   any failed check aborts the whole run, so a club is merged completely or not at all. Only `DIAG|`
   lines are printed; the full debug log goes to `logs/` (it can hold names). After `--apply` it
   reads back (participants down by exactly the merged count, rows per date unchanged, every moved
-  row on its contact, the merged contacts deleted with their master set) and compares the forms'
-  submissions with the new batches since the run began: **ATTENTION** (exit 2) when there are
-  more submissions - look at the newest submissions and batches by hand.
+  row on its contact, the merged contacts deleted with their master set). After `--apply` and
+  `--rehearse` it compares the submissions on all four regional forms with the new batches of
+  every club since the run began: **ATTENTION** (exit 2) when there are more submissions, or when
+  the count cannot be made (e.g. Jotform's list did not come newest first) - look at the newest
+  submissions and batches by hand.
   - "the rehearsal failed" / "the run failed ... Salesforce rolled it back": nothing changed; read
     the `DIAG|fail|...` reason (and the log file) before anything else.
   - "THE OUTCOME IS UNKNOWN": the CLI's answer was lost. Wait ten minutes, then run the same
-    `merge --apply` again: it settles that run first.
+    `merge --apply` again: it settles that run first. It refuses to settle when a merged-away
+    contact is not even among the deleted ones (Recycle Bin emptied) or was deleted without being
+    merged into its kept contact: look at it by hand.
   - "applied, but the read-back differs": STOP; look at the club in Salesforce.
 - **`rename`** fixes a stored name with odd whitespace (collapsed, invisible characters dropped)
   when the result is exactly one active girl of that club and no other contact has her name; the
-  dry run prints record ids and fields only. A girl whose odd contact got a twin is merged into
+  dry run prints record ids and fields only. `--apply` refuses in the same 10 minutes after a
+  submission and the same NPSP hour as `merge`. A girl whose odd contact got a twin is merged into
   her older contact and that one renamed (either order works).
-- **`cleanup`** (after the merges): a kept contact's affiliations to its club down to one, the
-  earliest - only ones the plan recorded (anything else is refused); `--dup-sets` deletes the
-  plan's duplicate-rule sets left with at most one item (report data). Each record is saved in the
-  rollback file before its delete.
+- **`cleanup`** (after the merges): a kept contact's affiliations to its club down to one - the
+  Primary one (NPSP's flag) where there is one, else the earliest - deleting only ones the plan
+  recorded (anything else is refused). A further **Primary** affiliation (a merge moves the
+  merged-away contact's over as it is) is left and listed ("leave ... a further Primary
+  affiliation"): NPSP blanks the contact's Primary Affiliation when a Primary affiliation is
+  deleted, even with another one to that club left. After each delete the contact's Primary
+  Affiliation is read back; if it changed: STOPPED - set it back in Salesforce (both values are in
+  the rollback file). `--dup-sets` deletes the plan's duplicate-rule sets left with at most one item
+  (report data). Each record is saved in the rollback file before its delete. `--apply` refuses in
+  the same 10 minutes after a submission and the same NPSP hour as `merge`.
 - Everything is in `data/sf_dupes_<date>/` (never committed; owner-only): `merge_plan.json` (ids,
-  dates, counts), `apex/` (ids only), `logs/` and `merge_rollback.json` (both can hold names).
+  dates, counts, and a sha256 of each rename's expected full name - never the name), `apex/` (ids
+  only), `logs/` and `merge_rollback.json` (both can hold names).
 
 ### Rollback, per part
 
@@ -2050,7 +2069,9 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - **A rename**: FirstName / LastName back to the saved `old` values (`renames` in the rollback file).
 - **A deleted affiliation**: insert it again from the saved record (`deleted`). Duplicate-rule
   sets are report data and are not restored.
-- `--rehearse` and a failed run leave nothing to roll back.
+- `--rehearse` and a failed run leave nothing to roll back. Should a rehearsal ever keep a change
+  ("not as before the rehearsal - LOOK AT IT NOW"), the rollback file holds the club's contacts as
+  they were just before it.
 
 ## Attendance dashboard in Salesforce
 

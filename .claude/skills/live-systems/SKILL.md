@@ -39,7 +39,9 @@ A fifth: **`tools/sf_dupes.py merge|rename|cleanup --apply`** (2026-10-07): dupl
 one girl merged by anonymous Apex (`sf apex run`, one all-or-nothing run per club), a stored name's
 whitespace fixed, extra affiliations and duplicate-rule sets deleted; each with Ryan's go, after a
 dry run and `merge --rehearse`, `merge_rollback.json` written before the first write
-(docs/RUNBOOK.md, "Duplicate girls in Salesforce"). The hook catches `--apply`, not `--rehearse`.
+(docs/RUNBOOK.md, "Duplicate girls in Salesforce"). The hook catches `--apply`, not `--rehearse`:
+`merge --rehearse` needs Ryan's explicit go all the same (production DML, rolled back; it waits for
+the same quiet moment as `--apply`).
 
 ## The ritual
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).
