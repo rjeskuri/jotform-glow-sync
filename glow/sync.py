@@ -7,6 +7,7 @@ appsscript/Config.gs; test/parity_test.js and test/python_test.py keep the
 two sides honest. Known divergences: docs/ARCHITECTURE.md.
 """
 import csv
+import datetime
 import html
 import json
 import re
@@ -20,6 +21,12 @@ from glow.text import key
 COL_PARTNER = "partner organization name"
 COL_CLUB = "club name"
 COL_ROSTER = "please list the full name"
+# The Partners tab's columns (appsscript/Roster.gs and tools/build_roster_offline.js
+# carry the same list; test/python_test.py keeps them equal). `jotform` is the
+# marker read_partners_csv reads: `no` = the partner's clubs are not on the
+# attendance forms (docs/plans/2026-10-06-clubs-off-jotform.md).
+PARTNER_COLS = ("partner", "region", "notes", "jotform")
+JOTFORM_COL = "jotform"
 
 # ------------------------------------------------------------- fixed field ids
 # Structural fields of the master form. If the form is ever rebuilt from
@@ -207,6 +214,31 @@ CONTACT_IDS_PICKER_OPERAND = True
 # the flag on every roster it creates and, where a roster on the form lacks it, as
 # an update; off, it writes "No" (the generated rollback).
 ROSTERS_REQUIRED = True
+# A roster question is RETIRED - kept on the form, hidden and frozen, off the
+# Club picker and without a show rule, still in question 18's sum - when its
+# partner is marked `no` in the Partners tab's `jotform` column, and (this
+# constant) when its club has no active girl in the Roster: Ryan, 2026-10-06,
+# on. Only once the club's latest removed_date is at least a day before the
+# run's UTC date (inactive_retires below): a roster emptied and refilled in two
+# Club Roster Form submissions minutes apart must not leave the picker in
+# between. Off, a club that loses its last active girl keeps today's treatment
+# (`?` on the form but not in the sheet export - keeping its current roster).
+# docs/plans/2026-10-06-clubs-off-jotform.md
+RETIRE_INACTIVE = True
+
+
+def inactive_retires(latest_removed, today):
+    """Whether a club with no active girl is retired on `today` (a date, UTC):
+    its latest removed_date (text, YYYY-MM-DD as the sheet writes it) is at
+    least a day before. A club whose rows carry no date, or one this cannot
+    read, stays as it is - the safe side."""
+    if not RETIRE_INACTIVE or not latest_removed:
+        return False
+    try:
+        removed = datetime.date.fromisoformat(latest_removed.strip())
+    except ValueError:
+        return False
+    return removed < today
 
 
 def _rule_parts(rule):
@@ -331,6 +363,60 @@ def roster_pairs(csv_path):
         if active and not entry[2]:
             entry[:] = [partner, club, True]
     return {(p, c): active for p, c, active in found.values()}
+
+
+def roster_removed(csv_path):
+    """{(key(partner), key(club)): the latest removed_date} over EVERY Roster
+    row that has both cells and a date (YYYY-MM-DD; other text is not a date
+    here) - what says how long a club has had no active girl (RETIRE_INACTIVE,
+    inactive_retires). {} for an export without the column."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    if not rows or "removed_date" not in rows[0]:
+        return {}
+    out = {}
+    for r in rows:
+        partner, club, when = key(r["partner"]), key(r["club"]), (r["removed_date"] or "").strip()
+        if partner and club and re.fullmatch(r"\d{4}-\d{2}-\d{2}", when):
+            out[(partner, club)] = max(out.get((partner, club), ""), when)
+    return out
+
+
+def read_partners_csv(csv_path):
+    """{key(partner): "yes" | "no"} from an export of the Partners tab: whether
+    each partner's clubs are on the attendance forms. The columns are read by
+    header name (capitals and spacing ignored); a file without a `partner`
+    column is refused. In the `jotform` column `no` (compared with key) means
+    not on Jotform; `yes` or blank is the default; any other text is treated as
+    yes - nothing leaves a form because of a typo - and reported through warn,
+    so the runner raises ATTENTION for it. A partner listed twice is `no` when
+    any of its rows says so. A tab without the column marks nobody."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.reader(f))
+    header = [key(h) for h in rows[0]] if rows else []
+    if "partner" not in header:
+        sys.exit(f"Not a Partners export: expected a 'partner' column in {csv_path}"
+                 + (" - found: " + ", ".join(rows[0]) if rows else " - the file is empty"))
+    i_p = header.index("partner")
+    i_j = header.index(JOTFORM_COL) if JOTFORM_COL in header else None
+
+    def cell(row, i):
+        return row[i] if i is not None and i < len(row) else ""
+
+    out = {}
+    for r in rows[1:]:
+        partner = cell(r, i_p)
+        if not key(partner):
+            continue
+        value = cell(r, i_j)
+        if key(value) == "no":
+            out[key(partner)] = "no"
+            continue
+        if key(value) not in ("", "yes"):
+            warn(f"  ! Partners tab: '{' '.join(partner.split())}' has {JOTFORM_COL}='{value.strip()}' - "
+                 "only yes, no or blank are understood; treated as yes")
+        out.setdefault(key(partner), "yes")
+    return out
 
 
 def roster_names(csv_path):

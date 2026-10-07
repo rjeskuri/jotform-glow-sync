@@ -258,19 +258,26 @@ class AutoSyncPlan(unittest.TestCase):
         "\nDRY RUN (use --apply to write):\n"
         "  - REPLACE conditions (25 rules)\n")
 
-    def run_region(self, text, apply=False, summary=None, region_check=None):
+    def run_region(self, text, apply=False, summary=None, region_check=None, status="ENABLED", **band):
         """auto_sync.Run.region("Africa") over a fabricated dry run; with apply, every
         later step (backup, apply, verify) answers ok and a clean form_status report -
-        or one whose region check says `region_check`."""
+        or one whose region check says `region_check`. status: what the form's status
+        read answers (an exception: the read raised, after its retries); band: the
+        runner's --max-* overrides."""
         import tempfile
         import types
         from unittest import mock
         clean = {"error_conditions": 0, "salesforce": True, "rule_problems": [], "languages": ["a"] * 12,
                  "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": [],
                                   **(region_check or {})}}
+
+        def status_(form):
+            if isinstance(status, Exception):
+                raise status
+            return status
         with tempfile.TemporaryDirectory() as out:
             args = types.SimpleNamespace(apply=apply, out=out, max_creates=5, max_updates=20,
-                                         trigger="test", run_url="")
+                                         trigger="test", run_url="", **band)
             run = auto_sync.Run(args)
             run.synced = []
 
@@ -281,7 +288,7 @@ class AutoSyncPlan(unittest.TestCase):
                         json.dump(summary, f)
                 return types.SimpleNamespace(returncode=0, stdout=text, stderr="")
 
-            with mock.patch.object(run, "sync", sync_), \
+            with mock.patch.object(run, "sync", sync_), mock.patch.object(run, "read_status", status_), \
                     mock.patch.object(run, "cmd", lambda *a, **k: types.SimpleNamespace(
                         returncode=0, stdout=json.dumps([clean]), stderr="")), \
                     mock.patch.object(run, "save_conditions", lambda form: None), \
@@ -420,20 +427,28 @@ class AutoSyncPlan(unittest.TestCase):
                 f"Roster: 1 active clubs in {region} (1 girls); 2 clubs overall\n\nDRY RUN (use --apply "
                 "to write):\n  nothing to do - form already matches the sheet\n"))
 
-        def run_main(regions):
+        def run_main(regions, partners=True):
             with tempfile.TemporaryDirectory() as tmp:
                 roster = os.path.join(tmp, "roster.csv")
                 with open(roster, "w", encoding="utf-8") as f:
                     f.write("girl_id,partner,club,full_name,status,region\n"
                             "DEMOCLUB-SAMPLE-001,Partner One,Stars,Ann Poe,active,Africa\n"
                             "DEMOCLUB-SAMPLE-002,Partner Three,Stars,Sue Moe,active,Asia\n")
+                tab = os.path.join(tmp, "partners.csv")
+                with open(tab, "w", encoding="utf-8") as f:
+                    f.write("partner,region,notes,jotform\nPartner One,Africa,,\nPartner Three,Asia,,\n")
                 argv = ["auto_sync.py", "--roster", roster, "--out", tmp, "--min-active", "1"]
+                if partners:
+                    argv += ["--partners", tab]
                 for region in regions:
                     argv += ["--region", region]
                 code = 0
                 with mock.patch.object(sys, "argv", argv), \
                         mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
-                        mock.patch.object(auto_sync.Run, "sync", sync_), mock.patch("builtins.print"):
+                        mock.patch.object(auto_sync.Run, "sync", sync_), \
+                        mock.patch.object(auto_sync.Run, "read_status", lambda self, form: "ENABLED"), \
+                        mock.patch.object(auto_sync.Run, "check_storage", lambda self, read: None), \
+                        mock.patch("builtins.print"):
                     try:
                         auto_sync.main()
                     except SystemExit as e:
@@ -448,6 +463,10 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertNotIn("Ann Poe", attention)
         # one region alone has nothing to clash with: exit 0, no ATTENTION file
         self.assertEqual(run_main(["Africa"]), (0, ""))
+        # --roster without --partners: nothing read, exit 1 with what to pass
+        code, attention = run_main(["Africa"], partners=False)
+        self.assertIn("--roster needs --partners <Partners export>", str(code))
+        self.assertEqual(attention, "")
 
     def test_no_two_clubs_of_any_region_may_send_one_salesforce_name(self):
         africa = [{"qid": "11", "partner": "Partner One", "club": "Stars", "value": "Stars - Partner One"},
@@ -532,10 +551,11 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertEqual((run.attention, run.failed), ([], False))
         self.assertEqual(run.lines[-1].strip(), "storage: could not be read (RuntimeError)")
         self.assertNotIn("nope", "\n".join(run.lines))
-        # main() reads it after the regions, through the one client, with the key from the environment
+        # main() reads it after the regions, through the run's one client (the form-status reads use
+        # it too), built with the key from the environment and bounded: a stalled GET must not hold the run
         src = read(os.path.join(REPO, "tools", "auto_sync.py"))
-        self.assertIn('run.check_names()\n    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"], max_time=60)))',
-                      src)                      # bounded: a stalled GET must not hold the run
+        self.assertIn('run.client = Client(os.environ["JOTFORM_API_KEY"], max_time=60)', src)
+        self.assertIn('run.check_names()\n    run.check_storage(lambda: usage.read_usage(run.client))', src)
 
     def test_a_club_guard_update_is_a_change_and_parses_from_both_shapes(self):
         text = ("Roster: 3 active clubs in Asia (40 girls); 300 clubs overall\n"
@@ -583,7 +603,8 @@ class AutoSyncPlan(unittest.TestCase):
                                          trigger="test", run_url="")
             run = auto_sync.Run(args)
             with mock.patch.object(run, "sync", lambda *a, **k: types.SimpleNamespace(
-                    returncode=0, stdout=text, stderr="")), mock.patch("builtins.print"):
+                    returncode=0, stdout=text, stderr="")), \
+                    mock.patch.object(run, "read_status", lambda form: "ENABLED"), mock.patch("builtins.print"):
                 run.region("Africa", os.path.join(out, "roster.csv"))
         self.assertEqual([r[7:9] for r in run.results],
                          [["dry-run", "would apply: " + auto_sync.plan_summary(plan)]])
@@ -617,6 +638,7 @@ class AutoSyncPlan(unittest.TestCase):
                                          trigger="test", run_url="")
             run = auto_sync.Run(args)
             with mock.patch.object(run, "sync", lambda *a, **k: next(results)), \
+                    mock.patch.object(run, "read_status", lambda form: "ENABLED"), \
                     mock.patch.object(run, "cmd", lambda *a, **k: types.SimpleNamespace(
                         returncode=0, stdout="", stderr="")), \
                     mock.patch.object(run, "save_conditions", lambda form: None), \
@@ -1143,9 +1165,10 @@ class FakeForm:
     question create answers `created` (the new question's id, or {}; a list
     answers one create each, in order)."""
 
-    def __init__(self, questions, conditions, apply=False, created=None):
+    def __init__(self, questions, conditions, apply=False, created=None, status="ENABLED"):
         self.questions, self.conditions, self.apply = questions, conditions, apply
         self.created = {"qid": 600} if created is None else created
+        self.status = status             # what GET /form/{id} says (the sync refuses --apply unless ENABLED)
         self.calls, self.writes = [], []
 
     def get(self, path):
@@ -1153,7 +1176,7 @@ class FakeForm:
             return json.loads(json.dumps(self.questions))
         if path == "/properties":
             return {"conditions": json.loads(json.dumps(self.conditions))}
-        return {"count": "0"}
+        return {"count": "0", "status": self.status}
 
     def _write(self, method, path, payload, label):
         self.calls.append(label)
@@ -1269,10 +1292,14 @@ class SameNameFlow(unittest.TestCase):
         wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]
         return qs, wire
 
-    def run_sync(self, fake, *extra, roster=None, regions=None, inactive=None, region="Africa"):
+    def run_sync(self, fake, *extra, roster=None, regions=None, inactive=None, region="Africa",
+                 removed=None, partners=None):
         """(exit code, stdout) of main() on `fake` with a Roster export holding
         `roster` (active; region Africa unless `regions` says otherwise for a
-        club) and `inactive` ({(partner, club): [names]}, rows of another status)."""
+        club) and `inactive` ({(partner, club): [names]}, rows of another status,
+        with the removed_date `removed` gives the club, else none); partners:
+        {partner: jotform cell} - a Partners export listing every partner of the
+        Roster rows written, passed as --partners."""
         import contextlib
         import csv
         import io
@@ -1281,14 +1308,18 @@ class SameNameFlow(unittest.TestCase):
         path = os.path.join(self.tmp.name, "roster.csv")
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["girl_id", "partner", "club", "full_name", "status", "region"])
+            w.writerow(["girl_id", "partner", "club", "full_name", "status", "region", "removed_date"])
             for status, clubs in (("active", roster), ("inactive", inactive or {})):
                 for (partner, club), names in clubs.items():
                     for n, name in enumerate(names):
                         w.writerow([f"DEMOCLUB-SAMPLE-{n:03d}", partner, club, name, status,
-                                    (regions or {}).get((partner, club), "Africa")])
+                                    (regions or {}).get((partner, club), "Africa"),
+                                    (removed or {}).get((partner, club), "") if status != "active" else ""])
         argv = ["sync_attendance_form.py", path, "--roster", "--region", region, "--form", "999",
                 *extra]
+        if partners is not None:
+            everyone = {p for p, _ in list(roster) + list(inactive or {})} | set(partners)
+            argv += ["--partners", self.partners_csv({p: partners.get(p, "") for p in everyone})]
         out = io.StringIO()
         with mock.patch.object(sync, "Jotform", lambda key, form, apply_changes: fake), \
                 mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test"}), \
@@ -1299,6 +1330,17 @@ class SameNameFlow(unittest.TestCase):
             except SystemExit as e:
                 code = e.code
         return code, out.getvalue()
+
+    def partners_csv(self, cells, name="partners.csv"):
+        """A Partners export (glow.sync.PARTNER_COLS) with each partner's jotform cell."""
+        import csv
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(glow_sync.PARTNER_COLS)
+            for partner, cell in sorted(cells.items()):
+                w.writerow([partner, "Africa", "", cell])
+        return path
 
     def summary(self, fake, *extra, **kw):
         path = os.path.join(self.tmp.name, "plan.json")
@@ -1596,7 +1638,10 @@ class SameNameFlow(unittest.TestCase):
     def test_a_roster_left_without_its_rule_by_a_failed_apply_is_finished_not_refused(self):
         # an apply that created the roster (and perhaps updated the picker) and then failed on
         # the rules write: the re-run - the runner's own retry too - must complete it. A roster
-        # with no rule has nothing it "sends today", so this is no question-5 change
+        # with no rule has nothing it "sends today", so this is no question-5 change. Without
+        # its picker entry as well it has the shape of a retired roster (docs/plans/2026-10-06-
+        # clubs-off-jotform.md): the run finishes it with the Partners export, which the runner
+        # always passes; a hand run without one is told so and refuses to --apply
         sheet = {**self.ROSTER, ("Partner One", "Gamma Club"): ["Amara Pellucidor"]}
         self.QIDS = {**self.QIDS, ("Partner One", "Gamma Club"): "20"}       # 14 is a module dropdown
         for picker_written in (True, False):
@@ -1606,12 +1651,38 @@ class SameNameFlow(unittest.TestCase):
             if not picker_written:
                 qs["500"]["options"] = "|".join(self.LONG)
             fake = FakeForm(qs, wire, apply=True)
-            code, _ = self.run_sync(fake, "--apply", roster=sheet)
+            code, out = self.run_sync(fake, "--apply", roster=sheet, partners={})
             self.assertEqual(code, 0, code)
             self.assertEqual(sync.WARNINGS, [])
             self.assertEqual([(m, p) for m, p, _ in fake.writes],
                              ([] if picker_written else [("POST", "/question/500")]) + [("PUT", "/properties")])
             self.assertEqual(self.shows(fake.writes[-1][2], "20"), [("500", "equals", "Gamma Club")])
+            # with its entry written the picker says what it sends (no restore); without, restored
+            self.assertEqual("  ~ restored roster 'Gamma Club' (q20): back on the Club picker" in out,
+                             not picker_written)
+        # without a Partners export the entry-less roster could be a retired one: the dry run says
+        # so, --apply refuses, and with the entry written there is nothing to tell apart
+        for picker_written in (True, False):
+            del sync.WARNINGS[:]
+            qs, _ = self.form(roster=sheet, switched=True)
+            _, wire = self.form(switched=True)
+            if not picker_written:
+                qs["500"]["options"] = "|".join(self.LONG)
+            fake = FakeForm(qs, wire, apply=True)
+            code, out = self.run_sync(fake, "--apply", roster=sheet)
+            if picker_written:
+                self.assertEqual((code, sync.WARNINGS), (0, []))
+                continue
+            self.assertIn("Refusing: 1 roster(s) would be restored without a Partners export", str(code))
+            self.assertEqual(fake.writes, [])
+            self.assertEqual(sync.WARNINGS, [
+                "  ! 'Gamma Club' (q20) has no Club picker entry and no show rule although its club is "
+                "active in the Roster - a retired roster, or a new roster of an apply that stopped "
+                "half-way: pass --partners <Partners export> (the runner always does) and the run "
+                "restores it or keeps it retired"])
+            self.assertNotIn("~ restored", out)
+            code, _ = self.run_sync(FakeForm(qs, wire), roster=sheet)         # the dry run only warns
+            self.assertEqual(code, 0)
 
     def test_a_roster_created_by_an_apply_gets_its_rule_in_the_same_run(self):
         # the commonest unattended write: a new club. Its question's id is only known once
@@ -3032,7 +3103,7 @@ class FormStatusAudit(unittest.TestCase):
                 mock.patch.object(glow_sync, "CONTACT_IDS_PICKER_OPERAND", False):
             self.assertEqual(form_status.audit_rules(*self.form())[0], [])
 
-    SUMMARY = {"clubs": 4, "show_rules": 4, "aggregate_rosters": 4, "long_names": 2,
+    SUMMARY = {"clubs": 4, "show_rules": 4, "live_rosters": 4, "aggregate_rosters": 4, "long_names": 2,
                "contact_ids_rule": 1, "contact_ids_picker_operand": True, "required_rosters": 4}
 
     def test_the_switched_form_is_clean(self):
@@ -5201,7 +5272,7 @@ class SyncLeavesTheLinksAlone(unittest.TestCase):
 
             def get(self, path):
                 return {"/questions": copy.deepcopy(qs), "/properties": {"conditions": []},
-                        "": {"count": "0"}}[path]
+                        "": {"count": "0", "status": "ENABLED"}}[path]
 
             def post_form(self, path, data, label):
                 self.calls.append(label)

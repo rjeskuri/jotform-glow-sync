@@ -41,6 +41,17 @@ account's plan (glow/usage.py): the line is logged, and a limit at 80 % or more 
 upload space in all, or submissions in the monthly cycle, each on its own - is an
 ATTENTION, because at 100 % Jotform disables the forms (docs/RUNBOOK.md,
 "Photos", step 7); a read that fails is a log line, never a failed run.
+
+The Partners tab travels with the Roster (docs/plans/2026-10-06-clubs-off-
+jotform.md): the run exports it too and passes --partners to every sync and
+verify call, so a partner marked jotform=no has its clubs' rosters retired (kept
+hidden, off the Club picker) and a club with no active girl leaves the picker
+the day after; a local --roster run needs --partners as well. More than
+--max-retires retirements or --max-restores restores in one region in one run is
+ATTENTION (the first rollout is by hand); a jotform value other than yes / no /
+blank is an ATTENTION that stops nothing. Before each region the form's status
+is read: a form that is not ENABLED is `skipped` (SyncLog), not failed, and
+nothing is run against it; a status that cannot be read is `failed`.
 """
 import argparse
 import csv
@@ -67,6 +78,7 @@ from glow.sync import sf_name_clashes  # noqa: E402  (standard library only, lik
 # appsscript/Config.gs by test/python_test.py).
 REGIONAL_FORMS = glow_forms.REGIONALS
 ROSTER_TAB = "Roster"
+PARTNERS_TAB = "Partners"
 SYNC_LOG_TAB = "SyncLog"
 # keep in step with SYNC_LOG_COLS in appsscript/Roster.gs
 SYNC_LOG_COLS = ["when", "trigger", "region", "mode", "creates", "updates",
@@ -95,6 +107,14 @@ MODULE_RX = re.compile(r"^  - UPDATE module dropdown \(q(?P<qid>\d+), year (?P<y
                        r"(?:= its (?P<modules>\d+) options|cleared)\)$")
 ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) girls\); "
                        r"(?P<all>\d+) clubs overall")
+# a roster retired (kept hidden, off the Club picker, no show rule) or restored to the
+# picker (docs/plans/2026-10-06-clubs-off-jotform.md): the picker UPDATE that carries it
+# is the counted change; more than --max-retires / --max-restores in one region is a band
+RETIRED_RX = re.compile(r"^  ~ retired roster '(?P<club>.+)' \(q(?P<qid>\d+)\): (?P<reason>.+)$")
+RESTORED_RX = re.compile(r"^  ~ restored roster '(?P<club>.+)' \(q(?P<qid>\d+)\): (?P<reason>.+)$")
+# the Partners tab's jotform cell holds something other than yes / no / blank: read as
+# yes (nothing leaves a form for a typo), reported - ATTENTION without stopping the region
+JOTFORM_VALUE = "only yes, no or blank are understood"
 NOT_IN_EXPORT = "is on the form but not in the sheet export"
 NO_SHARED_NAMES = "shares NO names with the current one"
 # Clubs that share a name (docs/plans/2026-09-30-same-name-clubs.md): what an existing
@@ -125,13 +145,21 @@ def module_entry(m):
 def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
     plan = {"creates": [], "updates": [], "deletes": [], "requires": [], "picker": [],
-            "partner_picker": [], "club_guard": [], "modules": [], "rules": None, "warnings": [],
-            "roster_clubs": None, "roster_girls": None,
+            "partner_picker": [], "club_guard": [], "modules": [], "retired": [], "restored": [],
+            "rules": None, "warnings": [], "roster_clubs": None, "roster_girls": None,
             "sf_names": None}     # sf_names: only the summary file has them
     for line in text.splitlines():
         m = REQUIRED_RX.match(line)
         if m:
             plan["requires"].append({"qid": m["qid"], "club": m["club"], "required": m["required"]})
+            continue
+        m = RETIRED_RX.match(line)
+        if m:
+            plan["retired"].append({"qid": m["qid"], "club": m["club"], "reason": m["reason"]})
+            continue
+        m = RESTORED_RX.match(line)
+        if m:
+            plan["restored"].append({"qid": m["qid"], "club": m["club"], "reason": m["reason"]})
             continue
         m = MODULE_RX.match(line)
         if m:
@@ -192,6 +220,10 @@ def plan_from_summary(summary):
                                                      for c in summary.get("calls", [])) if m],
             "modules": [module_entry(m) for m in (MODULE_RX.match("  - " + c)
                                                   for c in summary.get("calls", [])) if m],
+            "retired": [{"qid": r["qid"], "club": r["club"], "reason": r["reason"]}
+                        for r in summary.get("retired", [])],
+            "restored": [{"qid": r["qid"], "club": r["club"], "reason": r["reason"]}
+                         for r in summary.get("restored", [])],
             "rules": summary.get("rules"),
             "warnings": [w.strip() for w in summary.get("warnings", [])],
             "roster_clubs": summary.get("roster_clubs"),
@@ -217,6 +249,11 @@ def stale_rules(plan):
 def contact_ids_stale(plan):
     """The warnings saying the live rules calculate question 18 the old way."""
     return [w for w in plan["warnings"] if CONTACT_IDS_STALE in w]
+
+
+def odd_jotform_values(plan):
+    """The warnings saying a Partners-tab jotform cell holds something other than yes / no / blank."""
+    return [w for w in plan["warnings"] if JOTFORM_VALUE in w]
 
 
 def name_clashes(sf_names_by_region):
@@ -258,18 +295,30 @@ def plan_summary(plan):
     requires = plan.get("requires", [])
     values = sorted({r["required"] for r in requires})
     modules = plan.get("modules", [])
+    retired, restored = plan.get("retired", []), plan.get("restored", [])
     return (f"{len(plan['creates'])} create(s), {len(plan['updates'])} update(s), "
             f"{len(plan['deletes'])} delete(s), {len(plan['warnings'])} warning(s)"
             + (f", required: {'/'.join(values)} on {len(requires)} roster(s)" if requires else "")
             + (f", module values on {len(modules)} dropdown(s)" if modules else "")
+            + (f", {len(retired)} retired" if retired else "")
+            + (f", {len(restored)} restored" if restored else "")
             + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
             + "".join(f", {m['op'].lower()} partner list" for m in plan.get("partner_picker", []))
             + "".join(f", {m['op'].lower()} club guard" for m in plan.get("club_guard", [])))
 
 
-def check_bands(plan, max_creates=5, max_updates=20):
+def check_bands(plan, max_creates=5, max_updates=20, max_retires=5, max_restores=5):
     """Reasons NOT to apply this plan unattended (empty = within the bands)."""
     reasons = []
+    retired, restored = plan.get("retired", []), plan.get("restored", [])
+    if len(retired) > max_retires:
+        reasons.append(f"would take {len(retired)} clubs off the Club picker at once (band: {max_retires}) - "
+                       "a partner newly marked jotform=no, or a wrong cell on the Partners tab? apply by "
+                       "hand after checking")
+    if len(restored) > max_restores:
+        reasons.append(f"would put {len(restored)} clubs back on the Club picker at once (band: {max_restores}) "
+                       "- a cell flipped back, or a Partners export missing its rows? apply by hand after "
+                       "checking")
     if plan["deletes"]:
         reasons.append(f"would delete {len(plan['deletes'])} roster question(s) - never done "
                        "automatically (that is what --prune is for, on a fresh clone only)")
@@ -341,7 +390,14 @@ def verify_report(rep, min_languages=MIN_LANGUAGES):
     rc = rep.get("region_check")
     if rc is None:
         problems.append("no region check in the report (region spelling in the Roster export?)")
+    elif rc.get("skipped"):
+        notes.append(f"region check skipped (form {rc['skipped']})")
     else:
+        # an apply leaves no roster awaiting retirement: its partner is marked jotform=no
+        # (or its club has no active girl) and it still has its rule or its picker entry
+        if rc.get("awaiting_retirement"):
+            problems.append(f"{len(rc['awaiting_retirement'])} roster(s) still await retirement: "
+                            + ", ".join(rc["awaiting_retirement"][:5]))
         if rc.get("missing_from_form"):
             problems.append(f"{len(rc['missing_from_form'])} club(s) still missing from the form: "
                             + ", ".join(rc["missing_from_form"][:5]))
@@ -413,6 +469,8 @@ class Run:
         self.when = now.strftime("%Y-%m-%d %H:%M:%S %z")
         self.mode = "apply" if args.apply else "dry-run"
         self.sf_names = {}        # region -> what each of its rosters sends to question 5
+        self.partners = None      # the Partners export every sync and verify call gets (--partners)
+        self.client = None        # glow.jotform.Client: the form-status read before each region
         self.names = []
         self._rx = None          # set once the roster is loaded; from then on every
                                  # logged line is redacted BEFORE it reaches stdout
@@ -439,6 +497,8 @@ class Run:
     def sync(self, csv_path, region, form, apply, summary_path=None):
         argv = [sys.executable, os.path.join(REPO, "sync_attendance_form.py"), csv_path,
                 "--roster", "--region", region, "--form", form]
+        if self.partners:
+            argv += ["--partners", self.partners]
         if apply:
             argv.append("--apply")
         if summary_path:
@@ -472,10 +532,39 @@ class Run:
         self.log(f"Roster: exported {max(0, len(values) - 1)} rows -> {os.path.relpath(path, REPO)}")
         return path
 
+    def export_partners(self, svc):
+        """The Partners tab beside the Roster export: the jotform marker the sync reads."""
+        values = self.with_retry(lambda: sc.read_tab(svc, PARTNERS_TAB), "export Partners")
+        path = os.path.join(self.args.out, f"partners_{self.stamp}.csv")
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerows(values)
+        self.log(f"Partners: exported {max(0, len(values) - 1)} rows -> {os.path.relpath(path, REPO)}")
+        return path
+
+    def read_status(self, form):
+        """The form's status as GET /form/{id} says (ENABLED / DISABLED), under the
+        retries; raises when the read still fails."""
+        info = self.with_retry(lambda: self.client.get(f"/form/{form}"), f"read form {form}")
+        return str((info or {}).get("status") or "")
+
     def region(self, region, csv_path):
         form = REGIONAL_FORMS[region]
         a = self.args
         self.log(f"\n== {region}  form {form}")
+        # a form nobody can open is not synced: skipped, not failed, and the exit code is
+        # unaffected (the U.S form while its clubs do not report through Jotform). A status
+        # that cannot be read is a failure of this region; the run goes on to the next
+        try:
+            status = self.read_status(form)
+        except Exception as err:                      # noqa: BLE001 - a JotformError of any shape
+            self.failed = True
+            self.result(region, None, "failed",
+                        f"could not read form status: {err.__class__.__name__}: {str(err)[:200]}")
+            return
+        if status != "ENABLED":
+            self.log(f"  form {form} is {status or 'of no reported status'} - not synced")
+            self.result(region, None, "skipped", f"form {status or 'status not reported'}")
+            return
         summary_path = os.path.join(a.out, f"plan_{slug(region)}_{self.stamp}.json")
         dry = self.sync(csv_path, region, form, apply=False, summary_path=summary_path)
         if dry.returncode != 0:
@@ -505,7 +594,18 @@ class Run:
                                    "counts the club as missing from the form, or its name's roster as "
                                    "differing). docs/RUNBOOK.md, \"Club names two partners share\".\n\n"
                                    + "\n".join("- " + w for w in refused)))
-        note = f"{len(refused)} new club(s) not added (name in use)" if refused else ""
+        # a Partners-tab jotform cell holding something other than yes / no / blank: read as
+        # yes, so nothing left the form for it; a human corrects the cell
+        odd = odd_jotform_values(plan)
+        if odd:
+            self.attention.append((f"{region}: {len(odd)} Partners-tab jotform value(s) not understood",
+                                   "The Partners tab's `jotform` column takes `no` (the partner's clubs are "
+                                   "not on the attendance forms), `yes` or blank. Any other text is read as "
+                                   "yes, so these partners' clubs stay on the forms until the cell is "
+                                   "corrected. docs/RUNBOOK.md, \"Clubs that do not use Jotform\".\n\n"
+                                   + "\n".join("- " + w for w in odd)))
+        note = "; ".join(filter(None, [f"{len(refused)} new club(s) not added (name in use)" if refused else "",
+                                       f"{len(odd)} jotform value(s) not understood" if odd else ""]))
         n = changes(plan)
         # a change of what an existing club sends to question 5 stops the region even
         # when nothing else is planned: a rules-only difference is not a "change" here,
@@ -537,7 +637,8 @@ class Run:
             self.result(region, plan, "in-sync", note)
             return
         summary = plan_summary(plan) + (f"; {note}" if note else "")
-        reasons = check_bands(plan, a.max_creates, a.max_updates)
+        reasons = check_bands(plan, a.max_creates, a.max_updates,
+                              getattr(a, "max_retires", 5), getattr(a, "max_restores", 5))
         if reasons:
             self.attention.append((f"{region}: not applied - {summary}",
                                    "\n".join("- " + r for r in reasons) + "\n\nPlanned:\n" +
@@ -549,6 +650,10 @@ class Run:
                                    "".join(f"\n- MODULE values q{m['qid']} (year {m['year']}: "
                                            + (f"{m['modules']} modules)" if m["modules"] else "cleared)")
                                            for m in plan.get("modules", [])) +
+                                   "".join(f"\n- RETIRE {r['club']} (q{r['qid']}): {r['reason']}"
+                                           for r in plan.get("retired", [])) +
+                                   "".join(f"\n- RESTORE {r['club']} (q{r['qid']}): {r['reason']}"
+                                           for r in plan.get("restored", [])) +
                                    ("\n\nWarnings:\n" + "\n".join("- " + w for w in plan["warnings"]) if plan["warnings"] else "")))
             self.result(region, plan, "attention", "; ".join(reasons))
             return
@@ -582,7 +687,8 @@ class Run:
             self.result(region, plan, "failed", "apply exited " + str(applied.returncode))
             return
         ver = self.cmd([sys.executable, os.path.join(TOOLS, "form_status.py"), "--form", form,
-                        "--roster", csv_path, "--json"], "verify")
+                        "--roster", csv_path, "--json"]
+                       + (["--partners", self.partners] if self.partners else []), "verify")
         rep = None
         if ver.returncode == 0:
             try:
@@ -725,8 +831,15 @@ def main():
                     help="only this region (repeatable; default: all four)")
     ap.add_argument("--trigger", default="manual", help="what started this run (goes to SyncLog)")
     ap.add_argument("--roster", metavar="CSV", help="use this Roster export instead of exporting")
+    ap.add_argument("--partners", metavar="CSV",
+                    help="with --roster: use this Partners export instead of exporting (the jotform "
+                         "marker the sync reads)")
     ap.add_argument("--max-creates", type=int, default=5, help="per region, per run (default 5)")
     ap.add_argument("--max-updates", type=int, default=20, help="per region, per run (default 20)")
+    ap.add_argument("--max-retires", type=int, default=5,
+                    help="rosters taken off the Club picker, per region, per run (default 5)")
+    ap.add_argument("--max-restores", type=int, default=5,
+                    help="rosters put back on the Club picker, per region, per run (default 5)")
     ap.add_argument("--min-active", type=int, default=1000,
                     help="refuse an export with fewer active rows than this (default 1000)")
     ap.add_argument("--synclog", action="store_true",
@@ -738,18 +851,27 @@ def main():
     args = ap.parse_args()
     if not os.environ.get("JOTFORM_API_KEY"):
         sys.exit("Set JOTFORM_API_KEY in the environment (a dry run reads the forms too)")
+    if args.roster and not args.partners:
+        # with --roster nothing is exported, and the sheet service is never built
+        sys.exit("--roster needs --partners <Partners export>: with --roster nothing is exported, and "
+                 "without the Partners tab the sync cannot tell a retired roster from a broken one")
+    if args.partners and not args.roster:
+        sys.exit("--partners goes with --roster (without --roster both tabs are exported)")
     os.makedirs(args.out, exist_ok=True)
 
     run = Run(args)
+    run.client = Client(os.environ["JOTFORM_API_KEY"], max_time=60)   # bounded: a stalled GET must not hold the run
     run.log(f"auto-sync {run.when}  trigger={args.trigger}  mode={run.mode}  "
             f"regions={', '.join(args.region or REGIONAL_FORMS)}")
     svc = None
     if args.roster:
-        csv_path = args.roster
+        csv_path, run.partners = args.roster, args.partners
         run.log(f"Roster: using {os.path.relpath(csv_path, REPO)}")
+        run.log(f"Partners: using {os.path.relpath(run.partners, REPO)}")
     else:
         svc = sc.service()
         csv_path = run.export_roster(svc)
+        run.partners = run.export_partners(svc)
 
     with open(csv_path, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
@@ -776,7 +898,7 @@ def main():
     for region in args.region or list(REGIONAL_FORMS):
         run.region(region, csv_path)
     run.check_names()
-    run.check_storage(lambda: usage.read_usage(Client(os.environ["JOTFORM_API_KEY"], max_time=60)))
+    run.check_storage(lambda: usage.read_usage(run.client))
 
     if args.synclog and run.results:
         try:
