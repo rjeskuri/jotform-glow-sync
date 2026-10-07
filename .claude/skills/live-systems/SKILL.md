@@ -15,8 +15,11 @@ Salesforce V2 integration.
 `tools/restore_translations.py --apply`, `tools/clone_regional.py --apply`,
 `tools/fix_roster_order.py --apply`, `tools/fix_name_translations.py --apply` (also with `--restore`),
 `tools/auto_sync.py --apply`, `tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run
-clasp:push` / `npx clasp push`. Anything else is read-only (GET) or writes only under `data/` and
-`backups/`.
+clasp:push` / `npx clasp push`; in Salesforce `tools/sf_backfill.py send --apply` and
+`tools/sf_dupes.py merge|rename|cleanup --apply` (below). Anything else is read-only (GET) or writes
+only under `data/` and `backups/` - except `tools/sf_dupes.py merge --rehearse`, which runs the
+merges' DML in Salesforce for real and then throws so that Salesforce rolls it back: it leaves
+nothing behind, but it is not read-only (triggers run, records are locked meanwhile).
 
 Salesforce (production) is written in two ways only, both with Ryan's explicit go: through the
 write connector, one record per call, by the main session (the hook below does not see those
@@ -32,6 +35,11 @@ attendance processor, the attendance dashboard). Check-only first (`--dry-run`),
 the hook does not see `sf` commands. Claude Code's auto-mode guard may refuse a production deploy
 (it did on 2026-10-02); then Ryan runs it himself (docs/RUNBOOK.md, "Attendance dashboard in
 Salesforce").
+A fifth: **`tools/sf_dupes.py merge|rename|cleanup --apply`** (2026-10-07): duplicate contacts of
+one girl merged by anonymous Apex (`sf apex run`, one all-or-nothing run per club), a stored name's
+whitespace fixed, extra affiliations and duplicate-rule sets deleted; each with Ryan's go, after a
+dry run and `merge --rehearse`, `merge_rollback.json` written before the first write
+(docs/RUNBOOK.md, "Duplicate girls in Salesforce"). The hook catches `--apply`, not `--rehearse`.
 
 ## The ritual
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).
@@ -81,3 +89,7 @@ writing a translation language without GET + merge first.
   once the Feedback tab has two reply columns), and deal with held new clubs first.
 - Automatic sync: repository variable `AUTO_SYNC_APPLY=0`, or clear the Script Properties
   `SYNC_DISPATCH_REPO` / `SYNC_DISPATCH_TOKEN`.
+- Salesforce duplicate merges, renames, deleted affiliations: from `data/sf_dupes_<date>/merge_rollback.json`
+  (a merge: undelete within 15 days, then the saved rows inserted again on the restored contact;
+  docs/RUNBOOK.md, "Duplicate girls in Salesforce", Rollback). Never delete a back-fill contact
+  to undo anything: it may carry live rows (RUNBOOK, "Back-fill of attendance into Salesforce").

@@ -115,3 +115,35 @@ unchanged) + `send --apply --vpn-off --only <key>` twice, each read back.
 - 11 girls with contacts in both "Las Camelias" and "Las Camelias Primaria" (a club decision, not a
   merge).
 - A guard in `sf_backfill.py` against deleting back-fill contacts that carry live rows.
+
+## Build notes (2026-10-07, branch `wf20/sf-dupes`; offline only, nothing run against Salesforce)
+- `tools/sf_dupes.py`, `test/sf_dupes_test.py` (fictional names; a fake org with a small SOQL
+  evaluator that also plays the Apex's guards), `glow/salesforce.py` gains `Org.query_all`
+  (REST queryAll, deleted and merged contacts) and `Org.delete`; `query` is unchanged.
+- The rehearsal's exception class is `RehearsalEndException` (Apex requires a custom exception's
+  name to end in "Exception"); its message stays `SF_DUPES_REHEARSAL_END`. The tool counts a
+  rehearsal as passed only with that message (bare, or after `[...].RehearsalEndException: `) and
+  the `DIAG|ok|<club>` line; the CLI's exact wording for a custom exception is not yet seen live -
+  any other wording fails safe (the rehearsal reports a failure, nothing is applied).
+- A group whose copies are stored with odd whitespace (a twin of the Alpha contact, or two equally
+  odd copies) is compared in the Apex on normalized names (format characters dropped, whitespace
+  runs one space, trimmed); every other group exactly with `String.equals`. So `rename` and
+  `merge` work in either order.
+- An account is matched to a Roster club by its `<club> - <partner>` name first; by the plain club
+  name only when exactly one active club has it and no other Club account carries that club's long
+  name. `check` (d) compares with every Roster row of a club, any status (a girl who moved club is
+  not reported).
+- `merge --apply` checks the quiet window again before each further Apex run, and records each run
+  in `merge_rollback.json` as `running` before it starts; a run whose answer was lost is `unknown`
+  and the next `merge` settles it with queryAll (all merged: `done`; none: `not_applied`). The Apex
+  additionally asserts the planned participant count, that the merged contacts are gone, that no
+  two copies hold a row on one date, and rows per date per kept contact before = after.
+- Only the three DIAG shapes the Apex writes are printed (`merged`, `limits`, `ok`; every field an
+  id or a count); any other `DIAG|` line, e.g. other code's, is replaced by a placeholder.
+- `cleanup --apply` also refuses in the quiet window and NPSP's hour. For `merge`, `rename` and
+  `cleanup` the default folder is the plan's own folder (`check` writes nothing; `plan` writes to
+  `data/sf_dupes_<UTC date>/`). Log files are `logs/<stamp>_<club>_<part>.json`.
+- Not verifiable offline, so proven by the rehearsal before any `--apply`: the Apex compiles (user
+  methods in an anonymous block, `Database.merge(sObject, List<Id>, Boolean)`), NPSP's merge
+  triggers stay inside the limits (`DIAG|limits`; else `--per-run`), and a debug log over 20 MB
+  could lose early lines (the `DIAG|ok` line is the last, so a truncated log still shows it).

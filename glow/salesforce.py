@@ -20,6 +20,7 @@ import urllib.parse
 API = "v67.0"
 INSTANCE = "https://globalglow.my.salesforce.com"      # production (read 2026-10-06)
 NEXT_PAGE = re.compile(r"/services/data/v\d+\.\d+/query/[A-Za-z0-9_-]+")
+NEXT_PAGE_ALL = re.compile(r"/services/data/v\d+\.\d+/query(?:All)?/[A-Za-z0-9_-]+")   # queryAll's next pages
 PLAIN_HOST = re.compile(r"https://[A-Za-z0-9.-]+(:\d+)?")
 UNSAFE = re.compile(r'[\x00-\x20\x7f"\\]')              # nothing a curl config line could misread
 SAY = re.compile(r"[^A-Za-z0-9 _.,:;'()/-]")            # what of an OAuth error may be repeated
@@ -146,14 +147,22 @@ class Org:
 
     def query(self, soql):
         """Every record of a query, following Salesforce's pages."""
-        path, records = f"/services/data/{API}/query?q=" + urllib.parse.quote(soql), []
+        return self._pages("query", soql, NEXT_PAGE)
+
+    def query_all(self, soql):
+        """query(), deleted and merged-away records included (REST queryAll: IsDeleted,
+        MasterRecordId). Its next pages come as /queryAll/<locator> (or /query/<locator>)."""
+        return self._pages("queryAll", soql, NEXT_PAGE_ALL)
+
+    def _pages(self, resource, soql, next_page):
+        path, records = f"/services/data/{API}/{resource}?q=" + urllib.parse.quote(soql), []
         while path:
             status, answer = self.call("GET", path)
             if status != 200 or not isinstance(answer, dict) or not isinstance(answer.get("records"), list):
                 raise Refused(f"Salesforce did not answer a read (HTTP {status})")
             records += answer["records"]
             path = None if answer.get("done") else answer.get("nextRecordsUrl")
-            if not answer.get("done") and not (isinstance(path, str) and NEXT_PAGE.fullmatch(path)):
+            if not answer.get("done") and not (isinstance(path, str) and next_page.fullmatch(path)):
                 raise Refused("Salesforce gave part of an answer and no way to read the rest: " + soql[:60])
         return records
 
@@ -174,6 +183,10 @@ class Org:
 
     def update(self, sobject, record_id, body):
         return self.call("PATCH", f"/services/data/{API}/sobjects/{sobject}/{record_id}", body)
+
+    def delete(self, sobject, record_id):
+        """(http status, answer): 204 = deleted (to the Recycle Bin)."""
+        return self.call("DELETE", f"/services/data/{API}/sobjects/{sobject}/{record_id}")
 
     def revoke(self):
         """End a GLOW Sync session (best effort); a CLI login's token is only forgotten here."""
