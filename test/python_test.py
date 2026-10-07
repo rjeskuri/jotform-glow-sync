@@ -48,7 +48,7 @@ from sf_club_accounts_test import SalesforceClubAccounts  # noqa: E402,F401  (it
 from integration_status_test import IntegrationStatus     # noqa: E402,F401  (its own file; run here)
 from sf_backfill_test import SalesforceBackfill, SalesforceBackfillEdges   # noqa: E402,F401  (its own file; run here)
 from backfill_resolve_test import BackfillResolve, BackfillResolverAndLoaderAgree   # noqa: E402,F401  (its own file; run here)
-from sf_new_clubs_test import SalesforceNewClubs, GlowSyncLogin   # noqa: E402,F401  (its own file; run here)
+from sf_new_clubs_test import SalesforceNewClubs, GlowSyncLogin, AutoSyncSalesforce   # noqa: E402,F401  (its own file; run here)
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
 EXPECTED = os.path.join(REPO, "test", "fixtures", "expected.json")

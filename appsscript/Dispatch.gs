@@ -2,23 +2,27 @@
  * Tell the sync runner that the Roster changed.
  *
  * Every handler that changes the Roster tab calls tryNotifySync_(), which
- * sends a GitHub "repository_dispatch" event; the auto-sync workflow in the
- * repo then exports the Roster and runs the Jotform sync (docs/RUNBOOK.md,
- * "Automatic sync"). Nothing here can fail a form submission: the call is
- * wrapped like trySyncChoices_, and when the two Script Properties are not
- * set the function returns without doing anything at all.
+ * starts the repo's auto-sync workflow (GitHub's workflow_dispatch); it then
+ * exports the Roster and runs the Jotform sync (docs/RUNBOOK.md, "Automatic
+ * sync"). workflow_dispatch needs only Actions: write, so the token kept here
+ * cannot change the repository's code - which, since the workflow also holds
+ * the Salesforce secret, it must not
+ * (docs/plans/2026-10-06-sf-new-club-accounts.md). Nothing here can fail a
+ * form submission: the call is wrapped like trySyncChoices_, and when the two
+ * Script Properties are not set the function returns without doing anything.
  *
  * Script Properties (File → Project Settings → Script Properties):
  *   SYNC_DISPATCH_REPO   owner/name of the GitHub repository
- *   SYNC_DISPATCH_TOKEN  a fine-grained token for that one repo (Contents: read/write)
+ *   SYNC_DISPATCH_TOKEN  a fine-grained token for that one repo (Actions: read/write only)
  */
 
-const DISPATCH_EVENT = 'roster-changed';
+const DISPATCH_EVENT = 'roster-changed';     // the old repository_dispatch event; the workflow still takes it
+const DISPATCH_WORKFLOW = 'auto-sync.yml';
 
 /** Pure: the request UrlFetchApp will send. Tested offline in test/dispatch_test.js. */
 function buildDispatchRequest_(repo, token, reason, at) {
   return {
-    url: 'https://api.github.com/repos/' + repo + '/dispatches',
+    url: 'https://api.github.com/repos/' + repo + '/actions/workflows/' + DISPATCH_WORKFLOW + '/dispatches',
     options: {
       method: 'post',
       contentType: 'application/json',
@@ -27,9 +31,11 @@ function buildDispatchRequest_(repo, token, reason, at) {
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
+      // the inputs the workflow declares: every region, applied (AUTO_SYNC_APPLY still decides),
+      // and where the run came from - an action name and a time, never a girl's name
       payload: JSON.stringify({
-        event_type: DISPATCH_EVENT,
-        client_payload: { reason: reason, at: at },
+        ref: 'main',
+        inputs: { region: 'all', apply: 'true', source: 'sheet', reason: reason + ' ' + at },
       }),
       muteHttpExceptions: true,
     },

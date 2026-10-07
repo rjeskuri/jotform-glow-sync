@@ -48,6 +48,10 @@ MAX_PER_REGION = 5          # creates in one region in one run, all or nothing (
 MIN_ACCOUNTS = 400          # fewer visible Accounts than this: View All is not effective - write nothing
 CLUB_SLACK = 5              # visible Club accounts may lag the active clubs by this many, no more
 MAX_ACCOUNTS = 4500         # the processor reads LIMIT 5000 Accounts: beyond that it misses names
+SF_PENDING_TAB = "SF Pending"
+# a copy of appsscript/FormHandlers.gs SF_PENDING_COLS (test/sf_new_clubs_test.py compares them)
+SF_PENDING_COLS = ["added", "partner", "club", "region", "girls", "mentor_name", "mentor_email", "country",
+                   "status", "notes"]
 CONFIRM_CREATES = True      # each create also raises "created, check by hand" (plan step 6; off later)
 CODE_IN = re.compile(r"GLOW club code ([A-Z0-9]+);")
 GIRL_ID = re.compile(r"([A-Z0-9]+)-[A-Z0-9]+-\d+")              # CLUBCODE-LASTCODE-NNN (appsscript/Ids.gs)
@@ -143,6 +147,21 @@ def read_codes(roster_csv):
             m = GIRL_ID.fullmatch((row.get("girl_id") or "").strip())
             codes[(key(row.get("partner")), key(row.get("club")))].add(m.group(1) if m else None)
     return {pair: (next(iter(c)) if len(c) == 1 else None) for pair, c in codes.items()}
+
+
+def pending_cell(values, partner, club):
+    """(row, column), 1-based, of the status cell of the ONE pending SF Pending row of this club,
+    columns found by their header; None when there is not exactly one."""
+    if not values:
+        return None
+    head = [key(h) for h in values[0]]
+    if not {"partner", "club", "status"} <= set(head):
+        return None
+    p, c, s = head.index("partner"), head.index("club"), head.index("status")
+    rows = [n for n, row in enumerate(values[1:], 2)
+            if len(row) > max(p, c, s) and key(row[p]) == key(partner) and key(row[c]) == key(club)
+            and key(row[s]) == "pending"]
+    return (rows[0], s + 1) if len(rows) == 1 else None
 
 
 def plain(records):

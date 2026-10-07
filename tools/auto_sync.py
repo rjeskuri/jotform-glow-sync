@@ -56,6 +56,8 @@ sys.path.insert(0, REPO)
 import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily inside it)
 from glow import forms as glow_forms  # noqa: E402
 from glow.sync import sf_name_clashes  # noqa: E402  (standard library only, like this file)
+from glow.salesforce import Org, client_credentials  # noqa: E402
+import sf_new_clubs as sfn  # noqa: E402  (new clubs' Salesforce accounts, BACKLOG 27)
 
 # The live regional forms (one source: glow/forms.py, parity-tested against
 # appsscript/Config.gs by test/python_test.py).
@@ -407,6 +409,7 @@ class Run:
         self.when = now.strftime("%Y-%m-%d %H:%M:%S %z")
         self.mode = "apply" if args.apply else "dry-run"
         self.sf_names = {}        # region -> what each of its rosters sends to question 5
+        self.sf, self.sf_on_form = None, set()   # the Salesforce step; regions whose form is as planned
         self.names = []
         self._rx = None          # set once the roster is loaded; from then on every
                                  # logged line is redacted BEFORE it reaches stdout
@@ -423,7 +426,8 @@ class Run:
         self.lines.append(msg)
 
     def cmd(self, argv, label):
-        r = subprocess.run(argv, capture_output=True, text=True, cwd=REPO, env=os.environ.copy())
+        r = subprocess.run(argv, capture_output=True, text=True, cwd=REPO,
+                           env={k: v for k, v in os.environ.items() if not k.startswith("SF_")})
         for line in (r.stdout or "").splitlines():
             self.log("    " + line)
         if r.returncode != 0:
@@ -451,6 +455,8 @@ class Run:
                 delay *= 2
 
     def result(self, region, plan, result, detail):
+        if result in ("in-sync", "applied", "applied-with-problems", "applied-unverified"):
+            self.sf_on_form.add(region)
         self.results.append([self.when, self.args.trigger, region, self.mode,
                              len(plan["creates"]) if plan else "", len(plan["updates"]) if plan else "",
                              plan["rules"] if plan and plan["rules"] is not None else "",
@@ -550,6 +556,7 @@ class Run:
             self.result(region, plan, "dry-run", "would apply: " + summary)
             return
 
+        self.sf_create(region, plan)        # the new clubs' accounts first: never after their form
         self.log(f"  backing up form {form}")
         bk = self.cmd([sys.executable, os.path.join(REPO, "backup_forms.py"), "--form", form], "backup")
         if bk.returncode != 0:
@@ -557,11 +564,12 @@ class Run:
             self.result(region, plan, "failed", "backup failed - nothing applied")
             return
         self.save_conditions(form)
-        applied = self.sync(csv_path, region, form, apply=True)
+        applied_path = summary_path.replace(".json", "_applied.json")
+        applied = self.sync(csv_path, region, form, apply=True, summary_path=applied_path)
         if applied.returncode != 0:
             self.log("  ! apply failed once - retrying (a failure between the question writes and "
                      "the conditions write leaves the form half-synced; the re-run completes it)")
-            applied = self.sync(csv_path, region, form, apply=True)
+            applied = self.sync(csv_path, region, form, apply=True, summary_path=applied_path)
         if applied.returncode != 0:
             self.failed = True
             self.attention.append((f"{region}: APPLY FAILED - the form may be half-synced",
@@ -575,6 +583,9 @@ class Run:
                                    + (applied.stderr or "").strip()[-500:]))
             self.result(region, plan, "failed", "apply exited " + str(applied.returncode))
             return
+        if os.path.exists(applied_path):
+            with open(applied_path, encoding="utf-8") as f:
+                self.sf_names[region] = json.load(f).get("sf_names")
         ver = self.cmd([sys.executable, os.path.join(TOOLS, "form_status.py"), "--form", form,
                         "--roster", csv_path, "--json"], "verify")
         rep = None
@@ -627,6 +638,72 @@ class Run:
                                + "\n".join(f"- '{name}': " + "; ".join(clubs) for name, clubs in clashes)))
         self.log(f"  ! {len(clashes)} name(s) are sent to question 5 by more than one club: "
                  + ", ".join(f"'{name}'" for name, _ in clashes[:8]))
+
+    # ---- Salesforce: the new clubs' accounts (tools/sf_new_clubs.py; RUNBOOK "Club accounts in Salesforce")
+    def sf_start(self, csv_path):
+        """SF_SYNC (repository variable) off | plan | apply; writes need --apply-salesforce too."""
+        mode = (os.environ.get("SF_SYNC") or "off").strip().lower()
+        if mode not in ("off", "plan", "apply"):
+            self.attention.append(("SF_SYNC is not off, plan or apply",
+                                   f"It is {mode!r}: the Salesforce step did not run."))
+            return
+        if mode == "apply" and not getattr(self.args, "apply_salesforce", False):
+            mode = "plan"
+        if mode == "off":
+            self.log("SF: off (repository variable SF_SYNC)")
+            return
+        cid, secret = os.environ.get("SF_CLIENT_ID"), os.environ.get("SF_CLIENT_SECRET")
+        if not cid or not secret:
+            self.log("SF: not configured (secrets SF_CLIENT_ID / SF_CLIENT_SECRET) - skipped")
+            return
+        self.log(f"SF: {mode}, as GLOW Sync")
+        self.sf = sfn.Step(mode, Org(login=client_credentials(cid, secret)), csv_path, log=self.log)
+        self.sf.prepare()
+
+    def sf_create(self, region, plan):
+        if self.sf is None:
+            return
+        try:
+            self.sf.create(region, plan)
+        except Exception as err:                          # noqa: BLE001 - the form still applies
+            self.sf.warn(f"{region}: the create step failed ({err.__class__.__name__})", str(err)[:300])
+
+    def sf_finish(self, svc):
+        """After all regions: the read-only check, the SF Pending rows of what was created, one
+        SyncLog row. Any error becomes ATTENTION; the session ends either way."""
+        if self.sf is None:
+            return
+        ok = wrong = 0
+        try:
+            ok, wrong = self.sf.check({r: n for r, n in self.sf_names.items() if r in self.sf_on_form},
+                                      [name for name, _ in name_clashes(self.sf_names)])
+            if self.sf.created and self.sf.mode == "apply" and getattr(self.args, "synclog", False):
+                self.mark_sf_pending(svc or sc.service())
+        except (SystemExit, Exception) as err:            # noqa: BLE001 - sheets_client reports via sys.exit
+            self.sf.warn(f"the end-of-run step failed ({err.__class__.__name__})", str(err)[:300])
+        finally:
+            self.sf.close()
+        self.attention += self.sf.attention
+        result = ("failed" if self.sf.broken else "attention" if self.sf.attention
+                  else "applied" if self.sf.created else "in-sync")
+        detail = self.sf.broken or f"{len(self.sf.created)} account(s) created; check: {ok} ok, {wrong} need a person"
+        self.results.append([self.when, self.args.trigger, "Salesforce", self.sf.mode, len(self.sf.created),
+                             "", "", result, detail[:500], self.args.run_url or ""])
+
+    def mark_sf_pending(self, svc):
+        """`done (auto <date>)` on the SF Pending row of each club this run created - one cell,
+        found by its header, the row read again just before the write and once after."""
+        for _, club, _id in self.sf.created:
+            values = self.with_retry(lambda: sc.read_tab(svc, sfn.SF_PENDING_TAB), "read SF Pending")
+            spot = sfn.pending_cell(values, club.partner, club.club)
+            if spot is None:
+                self.log(f"  SF Pending: no single pending row for {club.club} ({club.partner}) - left as is")
+                continue
+            if sfn.pending_cell(sc.read_tab(svc, sfn.SF_PENDING_TAB), club.partner, club.club) != spot:
+                self.log(f"  SF Pending: the rows moved while marking {club.club} - left as is")
+                continue
+            sc.write_cell(svc, sfn.SF_PENDING_TAB, *spot, f"done (auto {self.sf.today})")
+            self.log(f"  SF Pending: {club.club} ({club.partner}) marked done")
 
     def save_conditions(self, form):
         """A conditions-only rollback file next to the full snapshot.
@@ -685,6 +762,9 @@ def main():
     ap.add_argument("--max-updates", type=int, default=20, help="per region, per run (default 20)")
     ap.add_argument("--min-active", type=int, default=1000,
                     help="refuse an export with fewer active rows than this (default 1000)")
+    ap.add_argument("--apply-salesforce", action="store_true",
+                    help="create the Salesforce accounts of the new clubs this run puts on a form "
+                         "(also needs SF_SYNC=apply; the workflow passes it only then)")
     ap.add_argument("--synclog", action="store_true",
                     help="append this run's outcomes to the sheet's SyncLog tab (the workflow "
                          "always passes this; without it nothing is written to the sheet)")
@@ -729,9 +809,11 @@ def main():
                               "then GLOW -> Refresh regions from the Partners tab.\n\n" + detail))
         run.log(f"  ! {sum(n for _, _, n in blank)} active girl(s) in {len(blank)} club(s) have no region")
 
+    run.sf_start(csv_path)
     for region in args.region or list(REGIONAL_FORMS):
         run.region(region, csv_path)
     run.check_names()
+    run.sf_finish(svc)
 
     if args.synclog and run.results:
         try:

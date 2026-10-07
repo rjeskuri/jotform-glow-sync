@@ -446,5 +446,164 @@ class GlowSyncLogin(unittest.TestCase):
         self.assertEqual(check_secrets.scan_text("00Dfake!tok 3MVG9fakeclientid " + "ab" * 16 + "c", "t"), [])
 
 
+
+class AutoSyncSalesforce(unittest.TestCase):
+    """How tools/auto_sync.py runs the step: when, on what, and what it leaves behind."""
+
+    def setUp(self):
+        import types
+        from unittest import mock
+        import auto_sync
+        self.auto_sync, self.mock, self.types = auto_sync, mock, types
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def run_obj(self, apply=True, **extra):
+        args = self.types.SimpleNamespace(apply=apply, out=self.tmp.name, max_creates=5, max_updates=20,
+                                          trigger="test", run_url="", **extra)
+        return self.auto_sync.Run(args)
+
+    def test_the_modes(self):
+        env = {"SF_CLIENT_ID": "id", "SF_CLIENT_SECRET": "secret"}
+        for sf_sync, flag, creds, mode in (("", False, True, None), ("off", True, True, None),
+                                           ("plan", False, False, None), ("plan", True, True, "plan"),
+                                           ("apply", False, True, "plan"), ("apply", True, True, "apply"),
+                                           ("APPLY ", True, True, "apply")):
+            with self.subTest((sf_sync, flag, creds)):
+                run = self.run_obj(apply_salesforce=flag)
+                with self.mock.patch.dict(os.environ, {"SF_SYNC": sf_sync, **(env if creds else {})}, clear=True), \
+                        self.mock.patch.object(sfn.Step, "prepare", lambda self: True), \
+                        self.mock.patch("builtins.print"):
+                    run.sf_start(os.path.join(self.tmp.name, "roster.csv"))
+                self.assertEqual(run.sf.mode if run.sf else None, mode)
+                self.assertEqual(run.attention, [])
+        run = self.run_obj()
+        with self.mock.patch.dict(os.environ, {"SF_SYNC": "yes"}, clear=True), self.mock.patch("builtins.print"):
+            run.sf_start("x.csv")
+        self.assertIsNone(run.sf)
+        self.assertIn("SF_SYNC is not off, plan or apply", run.attention[0][0])
+
+    def region(self, apply, text, applied_names=None):
+        """Run.region("Africa") over a fabricated dry run with a recording Salesforce step."""
+        order = []
+        run = self.run_obj(apply=apply)
+
+        class Rec:
+            def create(self, region, plan):
+                order.append(("sf_create", region, [c["club"] for c in plan["creates"]]))
+        run.sf = Rec()
+        dry = {"creates": [{"club": "Dawn Club", "partner": "Example Partner", "girls": 2}], "updates": [],
+               "deletes": [], "rules": 25, "warnings": [], "calls": ["CREATE roster 'Dawn Club' (2 girls)"],
+               "sf_names": [{"qid": None, "club": "Dawn Club", "value": "Dawn Club", "partner": "Example Partner"}]}
+
+        def sync_(csv_path, region, form, apply, summary_path=None):
+            order.append(("apply" if apply else "dry", region))
+            with open(summary_path, "w", encoding="utf-8") as f:
+                json.dump(dict(dry, sf_names=applied_names) if apply and applied_names else dry, f)
+            return self.types.SimpleNamespace(returncode=0, stdout=text, stderr="")
+        clean = {"error_conditions": 0, "salesforce": True, "rule_problems": [], "languages": ["a"] * 12,
+                 "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []}}
+
+        def cmd(argv, label):
+            order.append((label,))
+            return self.types.SimpleNamespace(returncode=0, stdout=json.dumps([clean]), stderr="")
+        with self.mock.patch.object(run, "sync", sync_), self.mock.patch.object(run, "cmd", cmd), \
+                self.mock.patch.object(run, "save_conditions", lambda form: None), self.mock.patch("builtins.print"):
+            run.region("Africa", os.path.join(self.tmp.name, "roster.csv"))
+        return run, order
+
+    TEXT = ("Roster: 2 active clubs in Africa (4 girls); 9 clubs overall\n"
+            "\nDRY RUN (use --apply to write):\n  - CREATE roster 'Dawn Club' (2 girls)\n")
+
+    def test_the_accounts_come_before_the_form_and_only_when_it_applies(self):
+        run, order = self.region(False, self.TEXT)
+        self.assertNotIn("sf_create", [o[0] for o in order])
+        self.assertNotIn("Africa", run.sf_on_form)                 # a dry-run region is not checked
+        now = [{"qid": "77", "club": "Dawn Club", "value": "Dawn Club", "partner": "Example Partner"}]
+        run, order = self.region(True, self.TEXT, applied_names=now)
+        steps = [o[0] for o in order]
+        self.assertEqual(steps[:3], ["dry", "sf_create", "backup"])    # before the backup and the apply
+        self.assertEqual(order[1], ("sf_create", "Africa", ["Dawn Club"]))
+        self.assertIn("Africa", run.sf_on_form)
+        self.assertEqual(run.sf_names["Africa"], now)              # what the form sends AFTER the apply
+
+    def test_the_end_step_turns_errors_into_attention_and_writes_one_synclog_row(self):
+        run = self.run_obj(synclog=True)
+        closed = []
+
+        class Broken:
+            mode, created, broken, today = "apply", [], None, "2026-10-07"
+
+            def __init__(self):
+                self.attention = []
+
+            def warn(self, title, detail=""):
+                self.attention.append(("SF: " + title, detail))
+
+            def check(self, names, clashes):
+                raise RuntimeError("boom")
+
+            def close(self):
+                closed.append(True)
+        run.sf = Broken()
+        with self.mock.patch("builtins.print"):
+            run.sf_finish(None)
+        self.assertEqual(closed, [True])
+        self.assertIn("the end-of-run step failed (RuntimeError)", run.attention[0][0])
+        (row,) = run.results
+        self.assertEqual((row[2], row[3], row[7]), ("Salesforce", "apply", "attention"))
+
+    def test_child_processes_never_see_the_salesforce_credentials(self):
+        seen = {}
+
+        def fake(argv, **kw):
+            seen.update(kw["env"])
+            return self.types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        run = self.run_obj()
+        with self.mock.patch.dict(os.environ, {"SF_CLIENT_SECRET": "s", "SF_CLIENT_ID": "i", "JOTFORM_API_KEY": "k"}), \
+                self.mock.patch.object(self.auto_sync.subprocess, "run", fake), self.mock.patch("builtins.print"):
+            run.cmd(["true"], "x")
+        self.assertIn("JOTFORM_API_KEY", seen)
+        self.assertFalse([k for k in seen if k.startswith("SF_")])
+
+    def test_the_sf_pending_row_and_its_columns(self):
+        with open(os.path.join(REPO, "appsscript", "FormHandlers.gs"), encoding="utf-8") as fh:
+            gs = re.search(r"const SF_PENDING_COLS = \[([^\]]*)\]", fh.read()).group(1)
+        self.assertEqual(re.findall(r"'([^']+)'", gs), sfn.SF_PENDING_COLS)
+        head = sfn.SF_PENDING_COLS
+        row = dict.fromkeys(head, "")
+        values = [head] + [[dict(row, partner=p, club=c, status=s)[h] for h in head] for p, c, s in (
+            ("Example Partner", "Dawn Club", "done"), ("Example Partner", "Dawn Club", "Pending "),
+            ("Second Partner", "Dawn Club", "pending"))]
+        self.assertEqual(sfn.pending_cell(values, "example partner", "DAWN CLUB"), (3, head.index("status") + 1))
+        self.assertIsNone(sfn.pending_cell(values + [values[2]], "Example Partner", "Dawn Club"))   # two: none
+        self.assertIsNone(sfn.pending_cell([["a", "b"]], "Example Partner", "Dawn Club"))
+        self.assertIsNone(sfn.pending_cell([], "Example Partner", "Dawn Club"))
+
+    def test_one_cell_is_written_raw_and_read_back(self):
+        import sheets_client as sc
+        calls = []
+
+        class Values:
+            def update(self, **kw):
+                calls.append(("update", kw["range"], kw["valueInputOption"], kw["body"]))
+                return self
+
+            def get(self, **kw):
+                calls.append(("get", kw["range"]))
+                return self
+
+            def execute(self):
+                return {"values": [["done (auto 2026-10-07)"]]}
+        svc = self.types.SimpleNamespace(spreadsheets=lambda: self.types.SimpleNamespace(values=Values))
+        with self.mock.patch.object(sc, "spreadsheet_id", lambda: "sheet"):
+            sc.write_cell(svc, "SF Pending", 3, 9, "done (auto 2026-10-07)")
+            self.assertEqual(calls[0][1:], ("'SF Pending'!I3", "RAW", {"values": [["done (auto 2026-10-07)"]]}))
+            sc.write_cell(svc, "SF Pending", 2, 27, "done (auto 2026-10-07)")
+            self.assertEqual(calls[2][1], "'SF Pending'!AA2")
+            with self.assertRaises(SystemExit):
+                sc.write_cell(svc, "SF Pending", 2, 1, "something else")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

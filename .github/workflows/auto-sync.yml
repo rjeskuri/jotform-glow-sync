@@ -1,11 +1,16 @@
 # Keep the regional Jotform attendance forms in step with the Roster tab.
 #
-# Runs when the sheet's Apps Script reports a roster change (Dispatch.gs sends
-# a repository_dispatch), every morning as a backstop, or by hand. Writes to
-# the forms ONLY when the repository variable AUTO_SYNC_APPLY is "1" (and, for
-# a manual run, the "apply" input is ticked); otherwise it is a dry run.
+# Runs when the sheet's Apps Script reports a roster change (Dispatch.gs starts
+# this workflow; older sheets sent a repository_dispatch, still accepted), every
+# morning as a backstop, or by hand. Writes to the forms ONLY when the repository
+# variable AUTO_SYNC_APPLY is "1" (and, for a manual run, the "apply" input is
+# ticked); otherwise it is a dry run. Creates new clubs' Salesforce accounts ONLY
+# when the repository variable SF_SYNC is "apply" (and the forms apply); "plan"
+# reads Salesforce and reports, "off" or unset skips it.
 # Secrets: JOTFORM_API_KEY, GLOW_SA_JSON (service-account key file contents),
-# GLOW_SHEET_ID. See docs/RUNBOOK.md, "Automatic sync".
+# GLOW_SHEET_ID, SF_CLIENT_ID and SF_CLIENT_SECRET (the GLOW Sync External
+# Client App). See docs/RUNBOOK.md, "Automatic sync" and "Club accounts in
+# Salesforce".
 name: auto-sync
 on:
   repository_dispatch:
@@ -21,6 +26,15 @@ on:
         description: "write to the forms (AUTO_SYNC_APPLY must also be 1)"
         type: boolean
         default: false
+      source:
+        description: "who asked: sheet (Dispatch.gs) or empty for a person"
+        default: ""
+      reason:
+        description: "the sheet's action and time (Dispatch.gs)"
+        default: ""
+
+permissions:
+  contents: read
 
 concurrency:
   group: auto-sync            # one run at a time, at most one more pending; a burst beyond that
@@ -58,11 +72,18 @@ jobs:
           APPLY_VAR: ${{ vars.AUTO_SYNC_APPLY }}
           APPLY_INPUT: ${{ inputs.apply }}
           REGION_INPUT: ${{ inputs.region }}
-          REASON: ${{ github.event.client_payload.reason }}
+          REASON: ${{ github.event.client_payload.reason || inputs.reason }}
+          SOURCE: ${{ inputs.source }}
+          SF_SYNC: ${{ vars.SF_SYNC }}
+          SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+          SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
         run: |
-          args=(--trigger "${EVENT}${REASON:+:$REASON}" --synclog)
+          args=(--trigger "${SOURCE:-$EVENT}${REASON:+:$REASON}" --synclog)
           if [ "$APPLY_VAR" = "1" ]; then
-            if [ "$EVENT" != "workflow_dispatch" ] || [ "$APPLY_INPUT" = "true" ]; then args+=(--apply); fi
+            if [ "$EVENT" != "workflow_dispatch" ] || [ "$APPLY_INPUT" = "true" ]; then
+              args+=(--apply)
+              if [ "$SF_SYNC" = "apply" ]; then args+=(--apply-salesforce); fi
+            fi
           fi
           if [ -n "$REGION_INPUT" ] && [ "$REGION_INPUT" != "all" ]; then args+=(--region "$REGION_INPUT"); fi
           echo "python3 tools/auto_sync.py ${args[*]}"
