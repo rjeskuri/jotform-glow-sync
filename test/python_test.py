@@ -54,6 +54,7 @@ from sf_backfill_test import SalesforceBackfill, SalesforceBackfillEdges   # noq
 from backfill_resolve_test import BackfillResolve, BackfillResolverAndLoaderAgree   # noqa: E402,F401  (its own file; run here)
 from fix_module_values_test import FixModuleValues        # noqa: E402,F401  (its own file; run here)
 from sf_girls_present_test import GirlsPresent            # noqa: E402,F401  (its own file; run here)
+from sf_new_clubs_test import SalesforceNewClubs, GlowSyncLogin, AutoSyncSalesforce   # noqa: E402,F401  (its own file; run here)
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
 EXPECTED = os.path.join(REPO, "test", "fixtures", "expected.json")

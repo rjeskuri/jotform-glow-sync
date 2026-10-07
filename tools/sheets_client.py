@@ -192,6 +192,21 @@ def append_rows(svc, title, rows):
         sys.exit(f"{title}: appended {updated} rows, expected {len(rows)}")
 
 
+def write_cell(svc, title, row, col, value):
+    """One cell, RAW, by 1-based row and column; read back after."""
+    a1 = ""
+    n = col
+    while n:
+        n, r = divmod(n - 1, 26)
+        a1 = chr(65 + r) + a1
+    cell = f"{a1}{row}"
+    svc.spreadsheets().values().update(spreadsheetId=spreadsheet_id(), range=_range(title, cell),
+                                       valueInputOption="RAW", body={"values": [[value]]}).execute()
+    got = svc.spreadsheets().values().get(spreadsheetId=spreadsheet_id(), range=_range(title, cell)).execute()
+    if got.get("values", [[""]])[0][0] != value:
+        sys.exit(f"{title}!{cell}: wrote {value!r}, read back {got.get('values')!r}")
+
+
 def _has_tab(svc, title):
     return any(s["properties"]["title"] == title for s in _sheets_meta(svc))
 

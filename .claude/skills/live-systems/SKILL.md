@@ -39,8 +39,14 @@ Salesforce"); and by a **rolled-back anonymous Apex run** (`sf apex run`, the pr
 change: a savepoint, the records inserted for a made-up club, the outcomes asserted,
 `Database.rollback`) - it writes inside a transaction it rolls back, the hook does not see it, so
 it is made on Ryan's go in the conversation or run by Ryan, with the script pasted in full first
-(docs/plans/2026-10-06-attendance-totals.md, B). No Salesforce CLI or API call from the Mac while a
-VPN is on: Salesforce freezes the user (2026-09-30); the tools refuse without `--vpn-off`.
+(docs/plans/2026-10-06-attendance-totals.md, B); and by **the automatic sync** itself, which
+creates a new club's Club account as the GLOW Sync integration user (client credentials, from
+GitHub Actions) when the repository variable `SF_SYNC` is `apply` and the run applies
+(`tools/auto_sync.py --apply-salesforce`; create only, at most 5 per region, right before the
+region's form puts the club on its picker; docs/RUNBOOK.md, "New clubs' accounts, automatically")
+- changing `SF_SYNC`, `gh variable set` or `gh workflow run`, is Ryan's go, and the hook does not
+see those `gh` commands (BACKLOG 53). No Salesforce CLI or API call from the Mac while a VPN is on:
+Salesforce freezes the user (2026-09-30); the tools refuse without `--vpn-off`.
 
 ## The ritual
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).
