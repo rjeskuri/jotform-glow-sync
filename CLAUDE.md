@@ -12,15 +12,16 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   `fixtures: up to date`, `CHECK PASSED`. With `data/enrollment_2026-08-24.csv` (or `CSV=<path>`)
   it also prints `real data …: parsed 328 clubs, 6210 girls`.
 - `make venv` once per checkout (`.venv/`); `make lint` is advisory ruff.
-- `python3 tools/form_status.py --roster data/roster_<date>.csv` — read-only; needs
-  `JOTFORM_API_KEY`. Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`, and,
+- `python3 tools/form_status.py --roster data/roster_<date>.csv --partners data/partners_<date>.csv`
+  — read-only; needs `JOTFORM_API_KEY` (`--partners`: the Partners tab, so a retired roster reads
+  clean). Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`, and,
   right after the Roster line, `storage: upload space … -> ok; submissions this cycle … -> ok`
   (`warn` from 50 % of a limit: BACKLOG "Gold versus retention"; `!!` and a runner ATTENTION
   from 80 %).
 - `python3 tools/auto_sync.py` — the automatic loop as a dry run (writes nothing anywhere;
   `--synclog` would record it in the sheet); healthy: every region `in-sync`.
-- `python3 sync_attendance_form.py <roster.csv> --roster --region Africa --form 262382821971058`
-  — dry run; `--apply` writes. Form ids: `docs/RUNBOOK.md`.
+- `python3 sync_attendance_form.py <roster.csv> --roster --partners <partners.csv> --region Africa
+  --form 262382821971058` — dry run; `--apply` writes. Form ids: `docs/RUNBOOK.md`.
 - `python3 tools/worklog.py update` — hours per day from the session transcripts into
   `worklog/worklog.csv` (Ryan invoices this work monthly), on the Mac's clock at the time
   (`worklog/timezones.csv`); after travel it refuses until `worklog.py zone --since … --zone …`
@@ -58,9 +59,12 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
    name): never change it for an existing club without renaming the Account first (the sync
    refuses without `--q5-change-ok`; RUNBOOK "Club names two partners share").
 6. Active roster rows with a blank region reach NO form and only `auto_sync.py` (ATTENTION) and the
-   sheet's ReviewQueue say so.
-7. qids, `SESSION_OVERRIDES`, form ids, `ROSTER_COLS`, `SYNC_LOG_COLS` exist in BOTH Python and
-   `appsscript/Config.gs` / `Roster.gs` — change both; `test/python_test.py` fails otherwise.
+   sheet's ReviewQueue say so. A partner whose clubs do not report through Jotform is marked `no`
+   in the Partners tab's `jotform` column instead — its rosters are retired, kept hidden and off
+   the Club picker (RUNBOOK "Clubs that do not use Jotform"); never a blank region.
+7. qids, `SESSION_OVERRIDES`, form ids, `ROSTER_COLS`, `PARTNER_COLS`, `SYNC_LOG_COLS` exist in BOTH
+   Python and `appsscript/Config.gs` / `Roster.gs` — change both; `test/python_test.py` fails
+   otherwise.
 8. `appsscript/Regions.gs` is generated; the sheet's Partners tab wins over it. `data/`, `backups/`,
    `credentials/` hold PII or secrets: never commit, quote or print their contents.
 9. Jotform `POST /form/{id}/translations` REPLACES a language's dictionary: GET, merge, POST; a new

@@ -131,39 +131,44 @@ def roster_owner(question, tested, facts):
     return owner, active
 
 
-def retire_decisions(questions, conditions, facts, today=None):
+def roster_owners(questions, conditions, facts):
+    """{roster qid: roster_owner(...)} for every roster question (None where it cannot be told)."""
+    tested = tested_values(questions, conditions)
+    return {str(qid): roster_owner(q, tested.get(str(qid)), facts)
+            for qid, q in questions.items() if q.get("type") == "control_checkbox"}
+
+
+def retire_decisions(questions, owners, facts, today=None):
     """{roster qid: {"club", "partner", "reason"}} for every roster question the Roster
     says is retired, the sync's rule (docs/plans/2026-10-06-clubs-off-jotform.md): its
-    owner (roster_owner) is marked jotform=no in the Partners export, or
+    owner (roster_owners) is marked jotform=no in the Partners export, or
     (glow.sync.RETIRE_INACTIVE) has no active girl in that club and its rows have been
     inactive since before `today`. A question whose owner cannot be told, or whose club
     the Roster does not know, is not here. Reasons: "not on Jotform" / "no active girl"."""
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     marks = facts.get("marks") or {}
-    tested = tested_values(questions, conditions)
     out = {}
-    for qid, q in questions.items():
-        if q.get("type") != "control_checkbox":
-            continue
-        found = roster_owner(q, tested.get(str(qid)), facts)
+    for qid, found in owners.items():
         if found is None:
             continue
         owner, active = found
-        text = " ".join(str(q.get("text") or "").split())
+        text = " ".join(str(questions[qid].get("text") or "").split())
         if marks.get(key(owner)) == "no":
             reason = "not on Jotform"
         elif not active and inactive_retires(facts["removed"].get((key(owner), key(text))), today):
             reason = "no active girl"
         else:
             continue
-        out[str(qid)] = {"club": text, "partner": owner, "reason": reason}
+        out[qid] = {"club": text, "partner": owner, "reason": reason}
     return out
 
 
-def off_picker(questions, conditions):
-    """qids of the roster questions with no show rule and no Club picker entry (the
-    question's own text, or a long name of its own): the shape of a retired roster, and
-    of a roster an apply left half-written."""
+def off_picker(questions, conditions, owner_of=None):
+    """qids of the roster questions with no show rule and no Club picker entry of their
+    own - the question's text, or its long name "<text> - <its partner>" (owner_of: {qid:
+    partner}; a roster whose owner is not known counts any long name of its text as its
+    own, so a namesake's entry keeps it on the picker): the shape of a retired roster,
+    and of a roster an apply left half-written."""
     picker = club_picker(questions)
     listed = {key(o): o for o in (questions[picker].get("options") or "").split("|") if o.strip()} \
         if picker else {}
@@ -172,8 +177,14 @@ def off_picker(questions, conditions):
         if q.get("type") != "control_checkbox" or rules_showing(conditions, qid):
             continue
         text = " ".join(str(q.get("text") or "").split())
-        if not any(k == key(text) or is_long_name(o, text) for k, o in listed.items()):
-            out.add(str(qid))
+        partner = (owner_of or {}).get(str(qid))
+        if partner:
+            own = {key(text), key(f"{text}{SF_NAME_SEP}{' '.join(partner.split())}")}
+            if any(k in own for k in listed):
+                continue
+        elif any(k == key(text) or is_long_name(o, text) for k, o in listed.items()):
+            continue
+        out.add(str(qid))
     return out
 
 
@@ -1096,12 +1107,10 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
     # whose mark this run was not given (--partners), or a roster an apply left half-written
     should, stray, text_of = {}, [], {str(qid): text for v in clubs.values() for text, _, qid in v}
     if facts:
-        should = retire_decisions(questions, conditions, facts)
-        off = off_picker(questions, conditions)
-        for q in sorted(off - set(should), key=int):
-            found = roster_owner(questions[q], tested.get(q), facts)
-            if found and found[1]:
-                stray.append(q)
+        owners = roster_owners(questions, conditions, facts)
+        should = retire_decisions(questions, owners, facts)
+        off = off_picker(questions, conditions, {q: o[0] for q, o in owners.items() if o})
+        stray = [q for q in sorted(off - set(should), key=int) if owners.get(q) and owners[q][1]]
     else:
         off = set()
     retired_now = sorted((q for q in should if q in off), key=int)

@@ -753,6 +753,12 @@ def main():
                 return listed[key(cand)]
         return value
 
+    def picker_entries(text, partner):
+        """The picker's entries for this partner's roster of this text: its plain
+        name, or its own long name "<text> - <partner>" (never a namesake's)."""
+        own = {key(text)} | ({key(sf_club_name(text, partner, True))} if partner else set())
+        return [o for k, o in listed.items() if k in own]
+
     def partner_matches(a, b):
         """Loose partner-name match: 'WESAD' matches 'World Economy ... (WESAD)'."""
         a, b = norm(a).lower(), norm(b).lower()
@@ -823,8 +829,12 @@ def main():
     # written to the question itself (hidden, required, its options frozen);
     # still in question 18's sum (build_conditions). A question whose owner
     # cannot be told, or whose club the Roster does not know at all, keeps
-    # today's treatment and lines (an incomplete export looks like that).
+    # today's treatment and lines (an incomplete export looks like that). The
+    # `~` line names a roster this run takes off the picker (it still has its
+    # rule or its entry): the runner counts those against its band; one the
+    # form already holds retired is only counted below.
     retired = {}     # qid -> {"club", "partner", "reason"}
+    retiring = {}    # the subset this run takes off the picker (the ~ lines)
     if args.roster:
         marks = partners or {}
         removed = roster_removed(args.csv)
@@ -846,10 +856,15 @@ def main():
             else:
                 continue
             retired[qid] = {"club": text, "partner": owner, "reason": reason}
-            print(f"  ~ retired roster '{text}' (q{qid}): {reason}")
+            if qid in current_value or picker_entries(text, owner):
+                retiring[qid] = retired[qid]
+                print(f"  ~ retired roster '{text}' (q{qid}): {reason}")
             existing[text.lower()].remove(qid)
             if not existing[text.lower()]:
                 del existing[text.lower()]
+        if len(retired) > len(retiring):
+            print(f"Retired rosters: {len(retired) - len(retiring)} already off the Club picker "
+                  "(hidden, no show rule; still in question 18's sum)")
 
     # --- reconcile clubs (grouped case-insensitively) ----------------------
     sheet_by_name = defaultdict(list)
@@ -973,9 +988,7 @@ def main():
     if args.roster and has_picker:
         for qid in sorted(pair_of, key=int):
             text = form_text[qid]
-            entries = [o for k, o in listed.items()
-                       if k == key(text) or long_name_partner(o, text, holders.get(key(text)))]
-            if qid not in current_value and not entries:
+            if qid not in current_value and not picker_entries(text, pair_of[qid][0]):
                 restored[qid] = {"club": text, "partner": pair_of[qid][0], "reason": RESTORED_WHY}
                 if args.partners:
                     print(f"  ~ restored roster '{text}' (q{qid}): {RESTORED_WHY}")
@@ -1408,9 +1421,11 @@ def main():
             "requires": [{"qid": q, "club": c, "required": want_required} for q, c in to_require],
             # module dropdowns whose calcValues are written (modules: 0 = cleared)
             "module_values": module_values,
-            # rosters retired this plan (kept hidden, off the picker, no show rule) and
-            # retired rosters restored to it; the Partners export the marker came from
-            "retired": [dict(qid=q, **retired[q]) for q in sorted(retired, key=int)],
+            # rosters this plan takes off the picker (kept hidden, no show rule), how many
+            # the form already holds retired, retired rosters restored to the picker, and
+            # the Partners export the marker came from
+            "retired": [dict(qid=q, **retiring[q]) for q in sorted(retiring, key=int)],
+            "retired_before": len(retired) - len(retiring),
             "restored": [dict(qid=q, **restored[q]) for q in sorted(restored, key=int)],
             "partners": args.partners,
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
