@@ -19,7 +19,8 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   (`warn` from 50 % of a limit: BACKLOG "Gold versus retention"; `!!` and a runner ATTENTION
   from 80 %).
 - `python3 tools/auto_sync.py` — the automatic loop as a dry run (writes nothing anywhere;
-  `--synclog` would record it in the sheet); healthy: every region `in-sync`.
+  `--synclog` would record it in the sheet); healthy: every region `in-sync` (a disabled form's
+  region `skipped - form DISABLED`, RUNBOOK "Disabling a regional form").
 - `python3 sync_attendance_form.py <roster.csv> --roster --partners <partners.csv> --region Africa
   --form 262382821971058` — dry run; `--apply` writes. Form ids: `docs/RUNBOOK.md`.
 - `python3 tools/worklog.py update` — hours per day from the session transcripts into
@@ -64,8 +65,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
    the Club picker (RUNBOOK "Clubs that do not use Jotform"); never a blank region.
 7. qids, `SESSION_OVERRIDES`, form ids, `ROSTER_COLS`, `PARTNER_COLS`, `SYNC_LOG_COLS` exist in BOTH
    Python and `appsscript/Config.gs` / `Roster.gs` (`PARTNER_COLS` in `tools/build_roster_offline.js`
-   too) — change both; `test/python_test.py` fails otherwise. `glow/sync.py SHEET_ZONE` is the sheet's own File → Settings zone (America/New_York,
-   what stamps `removed_date`), not `appsscript.json`'s `timeZone`; the runner checks it each run.
+   too) — change both; `test/python_test.py` fails otherwise. `glow/sync.py SHEET_ZONE` is the
+   sheet's own File → Settings zone (America/New_York, what stamps `removed_date`), not
+   `appsscript.json`'s `timeZone`; the runner checks it each run.
 8. `appsscript/Regions.gs` is generated; the sheet's Partners tab wins over it. `data/`, `backups/`,
    `credentials/` hold PII or secrets: never commit, quote or print their contents.
 9. Jotform `POST /form/{id}/translations` REPLACES a language's dictionary: GET, merge, POST; a new

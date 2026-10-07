@@ -344,10 +344,11 @@ tab? nothing done`; the runner logs `failed`): without that floor a cut export
 would read every partner as unmarked and restore every retired roster
 unattended. The mentor e-mails of a marked partner say the attendance form
 does not change for them (Apps Script, once that change is pushed: the plan's
-step 11). Salesforce is untouched: the clubs'
-Accounts keep their names and stay in "Clubs With No Attendance Last Month"
-until their partner-reported totals arrive ("Attendance totals and
-partner-reported counts").
+step 11). Salesforce is untouched: the clubs' Accounts keep their names. On
+the dashboard they stay in "Clubs with no attendance last month" (that tile
+counts Jotform attendance rows, Ryan's decision of 2026-10-06) and, until
+their partner-reported totals arrive, in the batch-based "did not submit"
+lists planned beside it ("Attendance totals and partner-reported counts").
 ## Deactivating a club
 
 A club whose girls stop coming, or whose partner stops using the attendance
