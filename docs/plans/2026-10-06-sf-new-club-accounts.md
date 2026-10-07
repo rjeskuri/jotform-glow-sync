@@ -334,5 +334,15 @@ consumer keys (`3MVG9…`) and 64-hex consumer secrets, in either case.
 **Proof so far:**
 - `make check` → `CHECK PASSED` (508 tests; `test/sf_new_clubs_test.py` 43, `dispatch_test.js`
   ALL CHECKS PASSED).
+- **Read-only proof on real data**, 2026-10-07 01:46 UTC:
+  - `python3 tools/auto_sync.py` (dry run, today's Roster export, 6,925 active rows): all four
+    regions `in-sync`.
+  - `tools/sf_new_clubs.py check --vpn-off --roster … --summary plan_*.json`, through Ryan's CLI
+    login, exit 0:
+    - `SF: describe ok - Account, Name, ParentId, Description, RecordTypeId createable; Club record
+      type available` (as Ryan; GLOW Sync's own rights are proven at step 4);
+    - `SF: 448 Accounts read, 366 Club`;
+    - `SF: check - 364 ok, 0 need a person` (no stray: the two partner-less accounts are the pilots
+      on hold).
 - Nothing is live: `SF_SYNC` is unset and the secrets do not exist yet.
 
