@@ -1820,7 +1820,9 @@ python3 tools/sf_new_clubs.py check --vpn-off --roster data/roster_<stamp>.csv \
     --summary data/auto_sync/plan_<region>_<stamp>.json ...
 ```
 
-It exits 0 when every club on those forms has its one right account.
+It exits 0 when every club on those forms has its one right account. Partner-less strays are
+reported only when all four regions are covered: give each region's summary, and
+`--disabled <region>` for a region whose form is disabled.
 
 ## September back-fill: the resolver
 

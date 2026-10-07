@@ -514,6 +514,9 @@ def main(argv=None, org=None, partners_path=PARTNERS):
     c.add_argument("--roster", required=True, help="a Roster export (tools/sheets_client.py export Roster ...)")
     c.add_argument("--summary", nargs="+", required=True,
                    help="the sync's --summary-json files, one per region (auto_sync's plan_<region>_<stamp>.json)")
+    c.add_argument("--disabled", action="append", default=[], choices=REGIONS, metavar="REGION",
+                   help="a region whose form is disabled (repeatable): with the other regions' summaries, "
+                        "every form counts as read, so partner-less strays are reported")
     c.add_argument("--alias", default="glow", help="the Salesforce CLI login (Ryan's, read only)")
     c.add_argument("--vpn-off", action="store_true",
                    help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
@@ -529,7 +532,8 @@ def main(argv=None, org=None, partners_path=PARTNERS):
     step = Step("plan", org or Org(a.alias), a.roster, log=print, partners_path=partners_path)
     try:
         if step.prepare():
-            step.check(names, complete=len(names) >= len(REGIONS))
+            read = {r.replace(" ", "") for r in list(names) + a.disabled}     # "Latin America" or a file's "LatinAmerica"
+            step.check(names, complete={r.replace(" ", "") for r in REGIONS} <= read)
     finally:
         step.close()
     for title, detail in step.attention:

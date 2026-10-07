@@ -563,6 +563,23 @@ class SalesforceNewClubs(Fixture):
                      partners_path=self.partners)
         self.assertEqual(stop.exception.code, 0)
         self.assertIn("1 ok, 0 need a person", out.getvalue())
+        org = FakeOrg(base_accounts() + [acct("001000000000000ODD", "Nobody's Club", CLUB)])   # a partner-less stray
+        for given, disabled, reported in ((["U.S"], [], False),                                  # three forms unread
+                                          (["U.S", "Asia", "Africa"], ["Latin America"], True)):  # one disabled
+            with self.subTest(disabled):
+                paths = []
+                for region in given:
+                    paths.append(os.path.join(self.tmp.name, f"plan_{region}.json"))
+                    with open(paths[-1], "w", encoding="utf-8") as fh:
+                        json.dump({"region": region, "sf_names": [{"qid": 3, "club": "Sunrise Club",
+                                   "value": "Sunrise Club", "partner": "Example Partner"}] if region == "U.S" else []}, fh)
+                out = io.StringIO()
+                argv = ["check", "--vpn-off", "--roster", self.roster, "--summary", *paths]
+                for region in disabled:
+                    argv += ["--disabled", region]
+                with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+                    sfn.main(argv, org=FakeOrg(list(org.accounts)), partners_path=self.partners)
+                self.assertEqual("001000000000000ODD" in out.getvalue(), reported)
         self.assertEqual(org.inserts, [])
         cli = salesforce.Org("glow", run=lambda *a, **k: self.fail("a CLI login is never revoked"))
         cli.token, cli.base = "t", "https://x.example"
