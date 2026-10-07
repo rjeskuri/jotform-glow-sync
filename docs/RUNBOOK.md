@@ -16,8 +16,10 @@ it, and through the forms, Salesforce). The forms and the sheet went live on
 | U.S | `262382706852058` | https://form.jotform.com/262382706852058 |
 | Template (every logic change lands here first) | `262352490535154` | not for mentors |
 
-The five pre-launch forms are retitled "(defunct)" and still enabled until
-they are switched off (backlog item 1). The same table lives in
+The five pre-launch forms are retitled "(defunct)" and have been disabled since
+2026-09-30 (`status: DISABLED`, the default "This form is currently
+unavailable!" page; how they were switched off is not in the repo — the
+builder, presumably; backlog item 1). The same table lives in
 `tools/auto_sync.py` (`REGIONAL_FORMS`), `tools/form_status.py`,
 `backup_forms.py` and `appsscript/Config.gs`; `test/python_test.py` fails if
 they drift apart.
@@ -57,14 +59,19 @@ The automatic sync (below) does this on every roster change and every
 morning. By hand, per region:
 
 ```bash
-python3 tools/sheets_client.py export Roster data/roster_<date>.csv        # 1. export
-python3 tools/form_status.py --roster data/roster_<date>.csv               # 2. what differs? (read-only)
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv        # 1. export the Roster...
+python3 tools/sheets_client.py export Partners data/partners_<date>.csv    #    ...and the Partners tab
+python3 tools/form_status.py --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv                                # 2. what differs? (read-only)
 python3 backup_forms.py --form 262382821971058                             # 3. snapshot the form
 python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --partners data/partners_<date>.csv \
         --region Africa --form 262382821971058                             # 4. dry run
 python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --partners data/partners_<date>.csv \
         --region Africa --form 262382821971058 --apply                     # 5. apply
-python3 tools/form_status.py --form 262382821971058 --roster data/roster_<date>.csv   # 6. verify: CLEAN
+python3 tools/form_status.py --form 262382821971058 --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv                                # 6. verify: CLEAN
 ```
 
 Or all four regions in one go, with the same guards the workflow uses:
@@ -73,12 +80,22 @@ Or all four regions in one go, with the same guards the workflow uses:
 python3 tools/auto_sync.py             # dry run, every region, nothing written anywhere
 python3 tools/auto_sync.py --apply     # apply within the bands
 # --synclog additionally records the run in the sheet's SyncLog (the workflow always passes it)
+# --roster data/roster_<date>.csv --partners data/partners_<date>.csv: today's exports instead of new ones
 ```
 
 What to know:
 
 - `form_status.py` without `--roster` compares against the stale offline
   build `data/roster_build/Roster.csv` — always pass the fresh export.
+- `--partners` is the Partners tab ("Clubs that do not use Jotform"). The
+  sync reads which partners' clubs are kept off the forms from it; without it
+  a hand run cannot tell a retired roster from one an apply left half-written,
+  so the dry run says so per roster (`! '<club>' (q…) has no Club picker entry
+  and no show rule although its club is active in the Roster …`) and `--apply`
+  refuses to put such a roster back; `form_status.py` reads NOT CLEAN on it.
+  The runner always passes it (and refuses `--roster` without it). Its dry run
+  prints the form's status first (`Form: <id> status ENABLED`) and refuses
+  `--apply` on a disabled form without `--disabled-ok`.
 - The sync rewrites every condition on every run (`REPLACE conditions` is
   always in the plan); "changed" means a `CREATE`, `UPDATE` or `DELETE` line.
 - Never `--prune` a live form. It deletes questions and is for fresh clones
@@ -230,12 +247,116 @@ The raw Enrollment Responses keep the typo (the tab is append-only), so a
 rebuild from them brings it back — see the warning under "Roster rebuild and
 upload".
 
+## Clubs that do not use Jotform
+
+Some partners report attendance to GLOW directly (a monthly total per club),
+not through the attendance forms: Education and English for You, Tumaini La
+Maisha and Ng'aa Maskani since 2026-10-06
+([plans/2026-10-06-clubs-off-jotform.md](plans/2026-10-06-clubs-off-jotform.md)).
+Their clubs stay in the Roster — the girls are active and enrolled, their ids
+are kept, the Club Roster Form still lists the clubs — but they leave the
+attendance forms' Club picker. Never give such a club a blank region (CLAUDE.md
+rule 6: that says "fix me" and raises ATTENTION on every run); mark the
+partner instead.
+
+**The marker.** The Partners tab's fourth column, `jotform`: `no` = the
+partner's clubs are not on Jotform; `yes` or blank = on Jotform (the default;
+most cells stay empty). GLOW staff set it in the sheet (`Partners!D1` is the
+header `jotform`; `no` in the partner's row). Capitals and spacing do not
+matter (`No`, ` no `); any other text counts as **yes** — nothing leaves a
+form because of a typo — and the runner raises ATTENTION naming the cell
+("Partners-tab jotform value(s) not understood") until it is corrected. An
+export with no `jotform` column at all (the header renamed or moved, a column
+inserted before it) marks nobody: the sync warns (`! Partners tab: the export
+has no 'jotform' column …`), the runner raises ATTENTION ("the Partners export
+has no jotform column"), `--apply` refuses to restore a retired roster from it
+and the runner holds a plan that would — put the header back and the next run
+reads the marks again. The tab travels with the Roster: the runner exports it
+beside the Roster export on every run, a hand run passes it as `--partners`
+(the manual loop above).
+
+**What the next run does.** A roster whose partner is marked `no` is
+**retired**: kept on the form, hidden and frozen (its question is never
+written to, its girls' names stay in its options), off the Club picker, with
+no show rule, still in question 18's sum (harmless: a roster nobody can see
+has no ticked box). The dry run says so per roster, a third marker beside `!`
+and `?`:
+
+```
+Roster: 182 active clubs in Africa (3518 girls); 364 clubs overall; 38 club(s) of 3 partner(s) not on Jotform (Partners tab jotform=no) left off this form
+  ~ retired roster '<club>' (q…): not on Jotform (<partner>, Partners tab jotform=no)
+DRY RUN (use --apply to write):
+  - UPDATE club picker (182 clubs: calcValues, options)
+  - REPLACE conditions (213 rules)
+```
+
+The picker update and the conditions rewrite are the whole change (rule 3:
+generated, nothing hand-made). Once applied, later runs print `Retired
+rosters: N already off the Club picker` and nothing to do. The same happens,
+in every region, to a club that has **no active girl** once its rows have been
+inactive since before the day of the run (`~ retired roster '<club>' (q…): no
+active girl in the Roster`; `glow/sync.py RETIRE_INACTIVE`, on since
+2026-10-06): a roster emptied and refilled in two Club Roster Form submissions
+on one day stays on the picker in between. Days are the sheet's own: the sheet
+stamps `removed_date` in its time zone (File → Settings, America/New_York),
+and the sync and the audit take "today" in that zone (`glow/sync.py
+SHEET_ZONE`, `sheet_today`), never UTC's — the runner reads the sheet's
+setting with the exports and raises ATTENTION when it differs from the
+constant (change the constant if the sheet's zone was changed on purpose).
+
+**The bands.** The runner retires at most 5 rosters and restores at most 5
+per region per run (`--max-retires`, `--max-restores`); more is `attention`,
+nothing applied, "apply by hand after checking" — the first rollout (38 on
+Africa) is a hand apply in any case: backup, dry run, `--apply` with Ryan's
+go, second dry run, then `form_status.py --partners --rendered` (CLEAN,
+`retired rosters: 38 (not on Jotform 38, no active girl 0)` and `rendered
+retired: 38 retired rosters, 38 always-hidden`). The audit's `vs Roster` line
+reads `… 38 await retirement (the next sync apply)` between the mark and the
+apply (a note, not a problem), `… 38 retired` after it.
+
+**Why a retired roster is hidden and required without a rule.** Jotform
+validates a required field only when its element carries neither
+`always-hidden` nor `form-field-hidden` (`.claude/skills/jotform-api`, "Required
++ hidden"); a property-hidden question no rule touches renders `always-hidden`
+alone, and `form_status.py --rendered` counts exactly that for the retired
+rosters (`rendered retired: N retired rosters, N always-hidden` — fewer is a
+PROBLEM: stop, no mentor could submit). Proven on the template before any
+regional form (the plan's step 7).
+
+**The way back.** Clear the cell (or write `yes`): the next run restores the
+rosters (`~ restored roster '<club>' (q…): back on the Club picker`, their
+entries and rules back, an options update if the Roster moved on) — within the
+hour for 5 or fewer, a hand apply for more. A club that has active girls again
+comes back the same way. A restored roster whose club's **name two partners
+have had** has no rule left to read what it sent, so it comes back with its
+long name `<club> - <partner>` as a question-5 change: the `!` line (`… changes
+from '(retired: no rule to read)' to '<club> - <partner>'`), `--apply` refused
+without `--q5-change-ok`, the runner's question-5 band — check the Salesforce
+Account's name first ("Club names two partners share"). None of the 38 shares
+its name. No snapshot is involved: `restore_conditions.py` would refuse the
+pre-retirement conditions anyway (their rules test entries the picker no longer
+lists).
+
+**What else.** A Partners export missing a partner that has active clubs is
+refused by the sync (`Partners export lists 46 of 49 partners with active
+clubs - missing: … - a truncated export, or rows deleted from the Partners
+tab? nothing done`; the runner logs `failed`): without that floor a cut export
+would read every partner as unmarked and restore every retired roster
+unattended. The mentor e-mails of a marked partner say the attendance form
+does not change for them (Apps Script, once that change is pushed: the plan's
+step 11). Salesforce is untouched: the clubs'
+Accounts keep their names and stay in "Clubs With No Attendance Last Month"
+until their partner-reported totals arrive ("Attendance totals and
+partner-reported counts").
+
 ## Automatic sync
 
 **Path:** a roster change in the sheet (New Club / Roster Modification form,
 a rebuild, or a region refresh) → `appsscript/Dispatch.gs` sends a
 `repository_dispatch` event to GitHub → `.github/workflows/auto-sync.yml` →
-`tools/auto_sync.py` exports the Roster tab and, per region, dry-runs the
+`tools/auto_sync.py` exports the Roster and Partners tabs and, per region,
+reads the form's status (a form that is not `ENABLED` is `skipped`, nothing
+run against it; a status that cannot be read is `failed`), dry-runs the
 sync, checks the safety bands, backs up, applies, verifies with
 `form_status.py`, and appends a row to the sheet's **SyncLog** tab. The
 workflow also runs every morning (the cron is UTC: 06:00 Chicago in summer,
@@ -243,21 +364,35 @@ workflow also runs every morning (the cron is UTC: 06:00 Chicago in summer,
 events and manual sheet edits, and can be started by hand from the Actions
 tab ("Run workflow", optional region).
 
-**Safety bands** (per region, per run; `--max-creates`, `--max-updates`):
-at most 5 new clubs and 20 roster updates; never a delete; not when a roster
+**Safety bands** (per region, per run; `--max-creates`, `--max-updates`,
+`--max-retires`, `--max-restores`):
+at most 5 new clubs and 20 roster updates; at most 5 rosters taken off the
+Club picker and 5 put back ("Clubs that do not use Jotform"), and none put
+back from a Partners export without the `jotform` column (nobody can be
+marked in it); never a delete;
+not when a roster
 would be replaced by one sharing no names with the current one; not when the
 export looks truncated (fewer than 1,000 active rows, or many clubs on the
-form missing from the export); never a change of what an existing club
+form missing from the export; a Partners export missing a partner with active
+clubs makes the sync itself refuse, `failed`); never a change of what an
+existing club
 sends to question 5, its Salesforce Account name (a renamed club, a
 respelled partner — "Club names two partners share"), which stops the
 region even when nothing else is planned. Outside the bands nothing is
 written, the region is logged as `attention`, and
 `data/auto_sync/ATTENTION.md` (kept as a workflow artifact) says what to do.
-Two more things raise ATTENTION without stopping a region: a new club that
+Four more things raise ATTENTION without stopping a region: a new club that
 was not added to its form because another partner's club has its name (the
 rest of the region is applied as usual; the SyncLog `detail` says "N new
-club(s) not added (name in use)"), and, once per run, any name that two
-clubs of the regions synced send to question 5. Until a club that was not
+club(s) not added (name in use)"), a Partners-tab `jotform` cell holding
+something other than `yes`, `no` or blank (read as yes; `detail` says "N
+jotform value(s) not understood"), a Partners export with no `jotform` column
+at all (nobody is marked in it; `detail` says "Partners export without a
+jotform column"; a plan that would put a roster back from it is held), and,
+once per run, any name that two clubs of the regions synced send to question
+5 — and, read with the exports, a sheet time zone that differs from
+`glow/sync.py SHEET_ZONE` (the no-active-girl rule's day would be off by the
+difference). Until a club that was not
 added is renamed, every apply in its region reads `applied-with-problems`,
 with a second ATTENTION ("applied, but the form still has problems"): the
 verify step goes by club name, so its "still missing from the form: <club>"
@@ -313,8 +448,12 @@ before 2026-09-02, when the sheet was on UTC, five hours), and a Mac
 the true time. The log file and ATTENTION.md show the runner's clock with
 its UTC offset. `mode` is
 `dry-run` or `apply`; `result` is one of `in-sync`, `dry-run` (would apply), `applied`, `applied-with-problems`,
-`applied-unverified`, `attention`, `failed`. `detail` counts the roster
-creates, updates, deletes and warnings, then names a Club-picker or
+`applied-unverified`, `attention`, `skipped`, `failed`. `skipped` is a form
+whose status is not `ENABLED` (`detail`: `form DISABLED`; nothing was run
+against it, and the exit code is unaffected — "Disabling a regional form").
+`detail` counts the roster
+creates, updates, deletes and warnings, then the rosters retired and restored
+(`…, 38 retired`), then names a Club-picker or
 club-guard write when there is one (`…, update club picker`): such a
 write is applied like a roster change. The Partner-box hide (`HIDE partner
 textbox`, "Club names two partners share") is neither counted nor named in
@@ -358,8 +497,10 @@ keeps as an artifact for 30 days);
 `python3 restore_conditions.py --form <id> --from conditions-<stamp>.json --apply`
 puts the conditions back. It refuses a snapshot whose rules test a club the
 Club picker does not offer today (one from before a form's same-name switch,
-or before a rename): restored, those clubs' rosters would never show — run
-the sync instead. Questions are never deleted by the runner. To stop
+before a rename, or before a partner's rosters were retired): restored, those
+clubs' rosters would never show — run the sync instead (a retirement is undone
+by clearing the Partners cell, "Clubs that do not use Jotform"). Questions are
+never deleted by the runner. To stop
 the automation: `AUTO_SYNC_APPLY=0` (or clear the two Script Properties).
 
 ## The Club picker (mentors choose their club instead of typing it)
