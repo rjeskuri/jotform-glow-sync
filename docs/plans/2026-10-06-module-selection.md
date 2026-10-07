@@ -1,7 +1,7 @@
 ---
 title: The module a submission sends is one required dropdown and exact text
 author: Claude (with Ryan's decisions of 2026-10-06; from the read-only module investigation of the same day)
-status: accepted         # Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+status: done             # accepted by Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan; (a) built on wf10/four-issues, form_status CLEAN in the 2026-10-07 read; (b) applied 2026-10-07 (Result); open: the merge to main
 created: 2026-10-06
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends what Salesforce must match; nothing new is built on the forms)
 ---
@@ -446,3 +446,27 @@ batch, with nothing written).
   the submit handler's `clearFieldOnHide` branch and the translation runtime of those builds are
   to be re-read, not done in this build; BACKLOG 64 lists the three builds as seen and not yet
   re-read (review finding: the open re-read is tracked there, not only here).
+
+## Result
+
+**(a), the `module shape:` audit** - built on `wf10/four-issues` (Build notes above); its live
+proof is `form_status.py`, already CLEAN in the 2026-10-07 read (and on 2026-10-06 with
+`--rendered`, Build notes). Nothing on the forms changed for it. Open: the merge to `main`.
+
+**(b), the Salesforce correction - applied 2026-10-07** (`tools/fix_module_values.py`, each write
+on Ryan's go, VPN off).
+
+- Tooling API first: 0 validation rules on `Attendance_Batch__c` and on `Attendance__c`.
+- Dry run: 595 batches since 2026-09-01; 6 with a non-canonical `Module__c` (5 `Success`, 1
+  `Failed`), 43 rows under them; each paired with exactly one Latin America submission (0
+  `UNMATCHED`); the newest created 2026-10-05, before the module values went live on Latin
+  America (2026-10-06 11:17 UTC), so the "When" stop did not apply.
+- `--apply --vpn-off --limit 1`: Niñas de Oro 2026-09-30, Autodefensa → Self Advocacy, the batch
+  and its 8 rows written and read back; rows 8 before, 8 after. Then `--apply --vpn-off` for the
+  other 5 batches (35 rows). Ledger: 49 records (6 batches + 43 rows), every one `written`
+  (`data/module_fix_2026-10/`, never committed).
+- Dry run again → `nothing to correct: 0 of 595 batches`.
+- SOQL `GROUP BY Module__c` since 2026-09-01, on both objects: 17 values, every one a canonical
+  English option.
+- Session -51 told (its "Jotform Sessions by Module Last Month" chart reads the corrected rows; no
+  `gen.py` change).

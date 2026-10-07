@@ -1,7 +1,7 @@
 ---
 title: One attendance total for leadership that includes the partners who report counts, with the per-girl figures labelled Jotform only, and the clubs that did not submit or sent a blank in plain view
 author: Claude (with Ryan's decisions of 2026-10-06)
-status: in-progress      # accepted by Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan; A + B deployed 2026-10-07 03:22 UTC (Result)
+status: done (F - the intake - open: BACKLOG 72)      # accepted by Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan; A + B deployed 2026-10-07 03:22 UTC, C done 2026-10-07, D deployed 2026-10-07 03:59 UTC (Result); F was planned as its own plan from the start (Order of work, step 7)
 created: 2026-10-06
 intent: docs/intent/2026-10-06-attendance-totals.md
 ---
@@ -156,7 +156,10 @@ deploy. Only if the check-only validate refuses the two-hop path does the plan f
 **`Attendance_Batch__c.Partner__c`** - formula (Text) `Account__r.Parent.Name`, label "Partner",
 read permission on the Admin profile - whose use as a dashboard **filter column** is itself
 unverified (D.3, Risks). Either way the value is blank for a partner-less club (today only the two
-pilots on hold).
+pilots on hold). **Settled 2026-10-07**: the via-lookup path works - Analytics token
+`Attendance_Batch__c.Account__c.Parent.Name`, metadata `Account__c.Parent` in the type and
+`Attendance_Batch__c$Account__c.Parent` on the reports and as the filter column; the `Partner__c`
+formula was not created (Result).
 
 **Field-level security.** The 2026-09-30 deploy gave its new field read/edit on the System
 Administrator profile only ([plan](2026-09-30-monthly-report-checkbox.md) `:107-108`), and
@@ -396,7 +399,10 @@ Notes on the table:
 - `LAST_N_DAYS:14` means the 14 days before today plus today. Its spelling inside a cross-filter
   `<value>` was **not verified** (the existing one carries `LAST_MONTH`, `gen.py:115`); the
   check-only validate settles it, the alternative being `LAST_N_DAYS:14` on a `timeFrameFilter`
-  of a batch-based report.
+  of a batch-based report. **Settled 2026-10-07**: `LAST_N_DAYS:14` is accepted in a cross
+  filter as it stands. The since-1-Sept cross filter's date is not: a cross filter's date value
+  must be the report's locale format, `9/1/2026` (ISO `2026-09-01`, and `greaterThan 2026-08-31`,
+  were refused with "There are errors with your subfilters"; Build notes, dashboard generator).
 - A duplicate (`Failed` "Duplicate: …") counts as submitted, per Ryan: no status criterion.
 - **The existing last-month tile** counts attendance rows (Jotform only), so a club whose only
   September batch was a blank or a duplicate is "without attendance" there but "submitting" on
@@ -444,7 +450,10 @@ Lightning limit is 20):
   `PARENT.NAME` only (`:24, :164, :214`), both standard. The check-only validate settles it;
   the fallback is the report type's own lookup fields (`Account__c`'s parent through "fields
   related via lookup", the second hop A leaves unverified), and the last resort is grouping by
-  `Partner__c` with no Partner filter on the batch tiles (said so in their headers).
+  `Partner__c` with no Partner filter on the batch tiles (said so in their headers). **Settled
+  2026-10-07**: the via-lookup column `Attendance_Batch__c$Account__c.Parent` is the batch
+  components' filter column and the one Partner filter drives every new tile (equal to SOQL under
+  WESAD, Fundación Kaleidos and Ng'aa Maskani); no formula field was needed (Result).
 - **`fix1` pieces kept**: `INTERVAL_THISMONTH` (`:102`), the per-partner no-attendance table
   (`:217-225`), the How-to box (`:233-249`).
 
@@ -673,7 +682,12 @@ fill must be done before D's totals are read, or every batch from before the dep
   for the club's parent, or batch tiles grouped by `Partner__c` without the Partner filter), a
   `Number` field update through `PATCH` on a batch with a validation rule or flow nobody has read
   (the `--limit 1` run proves it before the rest), and whether a report type can carry the
-  parent's parent via lookup (needed only if the formula column fails as a filter).
+  parent's parent via lookup (needed only if the formula column fails as a filter). **Settled
+  2026-10-07** (Result): the prefix `Attendance_Batch__c$…` holds; the partner via lookup works
+  (`Attendance_Batch__c$Account__c.Parent`, report and filter column), so the formula column and
+  the parent's parent are moot; `LAST_N_DAYS:14` is accepted in a cross filter; the since-1-Sept
+  date must be the locale's `9/1/2026`, not ISO; 0 validation rules on either object (Tooling
+  API) and the `--limit 1` PATCH went through.
 - **A mistyped aggregate name** creates a partner-less account, as today; the intake contract
   (F) and the parent-less signal (RUNBOOK `:1683`) are the guards until the intake is designed.
 - **Privacy**: no names enter the repo, the tool's files (ids and counts) or this plan; the
@@ -809,7 +823,27 @@ deployed. No `sf` command was run.
   second grouping (swap `BY_PARTNER_BY_MONTH` if refused); `Girls_Present__c` and
   `Girls_Enrolled__c` existing (A deploys them first; the validate fails until then);
   `Attendance_Totals` free as a developer name. Proven, out of the table: the column prefix
-  `Attendance_Batch__c$<field>` (the pilot dashboard groups on it).
+  `Attendance_Batch__c$<field>` (the pilot dashboard groups on it). **Settled 2026-10-07** by the
+  check-only runs and the deploy (8 of 8): the partner via lookup (Analytics token
+  `Attendance_Batch__c.Account__c.Parent.Name`; metadata `Account__c.Parent` /
+  `Attendance_Batch__c$Account__c.Parent`, report column and filter column alike - the `Partner__c`
+  formula was not needed); `LAST_N_DAYS:14` in a cross filter; the since-1-Sept date in the
+  locale's format (first fix below); the column chart on the second grouping; the filter logic;
+  the two fields and the free developer name.
+
+**Fixes from the first check-only run (2026-10-07).** The first dry run of `totals1/` failed 4 of
+its 8 components, for two causes; after both fixes the dry run passed 8 of 8 with 0 errors and the
+seven existing reports still built byte-identical to `after2/`.
+
+- **The cross filter's date is the report's locale format.** The since-1-Sept cross filter
+  (`Clubs_Not_Submitting_Since_1_Sept`) was refused with "There are errors with your subfilters"
+  for ISO `2026-09-01`, and for `greaterThan 2026-08-31`; `9/1/2026` and `LAST_N_DAYS:400` were
+  accepted. `gen.py` gained the constant `SINCE_CROSS = "9/1/2026"`. The dashboard (the fourth
+  failure) failed only because of this one.
+- **A grouping is never also a column.** The two by-month reports
+  (`Total_Attendance_by_Partner_by_Month`, `Jotform_Attendance_by_Partner_by_Month`) listed the
+  session date both as the month grouping and as a column ("You can't include groupings in the
+  selected columns list"). `gen.py` gained `MONTH_COLUMNS` = every column but the date.
 
 ## Decisions to record (proposed rows for `docs/DECISIONS.md`, dated 2026-10-06)
 
@@ -1022,7 +1056,9 @@ wanted` (plan 4), `rendered: skipped` for plan 1's audit; two tools writing `Att
 plans editing `form_status.py` and two editing `auto_sync.py` - serial commits in B.2 → B.4 after
 -54's confirmation.
 
-## Result (in progress)
+## Result
+
+All Salesforce steps on 2026-10-07 in one CLI sitting, each write on Ryan's go, VPN off.
 
 **A + B, the fields and the processor - live in production since 2026-10-07 03:22 UTC.**
 
@@ -1060,5 +1096,58 @@ Salesforce", "Back-fill of attendance into Salesforce", "Attendance totals and p
 counts"), DECISIONS (the four A/B rows; the two D rows stay pending) and BACKLOG 65 say it is
 deployed.
 
-**Still to do**: C (step 4: `tools/sf_girls_present.py plan` / `set` / `check`, Ryan's go for the
-writes), D (step 5: the report type, reports and tiles), F (Ryan's intake decision).
+**C, the one-off back-fill of `Girls_Present__c` - done (2026-10-07).**
+
+- `plan --vpn-off` (fresh): 606 batches, 575 `Success` and 31 `Failed`; 2 of the successes
+  already carried a count from the new processor (Queens of Quest's two released batches), so
+  573 to set.
+- `set --apply --vpn-off --limit 1`: BATCH-000000 set to 2 = its 2 rows, read back by the tool and
+  re-read independently; then `set --apply --vpn-off` for the remaining 572. Ledger: 573 `open` →
+  573 `written`, no failure (`data/sf_girls_present/`, never committed).
+- `check --vpn-off` → `575 Jotform Success batches; differ: 0, without a value: 0 -> OK`.
+- SOQL afterwards: 0 `Success` batches with an empty `Girls_Present__c`; `SUM(Girls_Present__c)`
+  over `Success` = **7,540** = `COUNT(Id)` of `Attendance__c` 7,540.
+- Session -54's contact merges (19 duplicates, done 03:57 UTC) moved rows between Contacts and
+  changed no row count.
+
+**D, the reporting - deployed 2026-10-07 03:59:58 UTC (deploy `0AfRP000002gLJp0AM`, 8 of 8).**
+
+- The first check-only run of `totals1/` failed 4 of 8; the two `gen.py` fixes (the locale date in
+  the cross filter, `MONTH_COLUMNS`) are in the Build notes above. After them: 8 of 8, 0 errors;
+  the seven existing reports byte-identical to `after2/`.
+- Backup of what was live, taken first: `data/sf_dashboard_2026-10-02/live_2026-10-07/` (the
+  dashboard and the 7 reports).
+- Retrieve after the deploy: what is deployed = what was built, apart from Salesforce's
+  normalisation (`expandOthers` → true, `useReportChart` dropped, `showPicturesOnCharts` and the
+  owner added, apostrophes escaped).
+- Report ids: `Total_Attendance_by_Partner_by_Month` 00ORP000009c8ic2AA,
+  `Jotform_Attendance_by_Partner_by_Month` 00ORP000009c8ia2AA, `Total_Attendance_Last_Month`
+  00ORP000009c8ib2AA, `Clubs_Not_Submitting_Last_14_Days` 00ORP000009c8iY2AQ,
+  `Clubs_Not_Submitting_Since_1_Sept` 00ORP000009c8iZ2AQ, `Blank_Submissions` 00ORP000009c8iX2AQ.
+- **Partner via lookup works**: Analytics token `Attendance_Batch__c.Account__c.Parent.Name`
+  (metadata `Account__c.Parent` / `Attendance_Batch__c$Account__c.Parent`); the `Partner__c`
+  formula fallback was not needed and does not exist.
+- **Read-back** (read only, 04:02-04:13 UTC; the org's time zone is America/Los_Angeles, so
+  `LAST_MONTH` = September): **264 of 264 report/SOQL pairs equal**, every grand total and every
+  group.
+
+| Tile / report | Report = SOQL |
+|---|---|
+| Total attendance, last month | 6,618 (490 `Success` batches) |
+| Total attendance since 1 Sept | 7,437 (September 6,618, October 819) |
+| Jotform only | = total everywhere (no partner-reported batch exists yet), and = `COUNT(Attendance__c)` for each window |
+| Clubs not submitting, last 14 days | 195 (window 09-22..10-06 Pacific: today plus the 14 days before it) |
+| Clubs not submitting since 1 Sept | 175 |
+| Blank submissions since 1 Sept | 3 (the three legacy blanks; no "No participants submitted" batch yet) |
+| Clubs with no attendance last month (the existing, row-based tile) | 189 = SOQL with its cross filter (187 on batches of any status: two clubs sent only blank or failed batches) |
+
+- **Dashboard**: 5 refreshes (unfiltered, WESAD, Fundación Kaleidos, Ng'aa Maskani, unfiltered
+  last), all 18 report components `DATA` with no error each time; every new tile = SOQL under
+  each filter (WESAD 405 attendance last month and 18 clubs not submitting; Fundación Kaleidos
+  126; Ng'aa Maskani 16 not submitting, 0 attendance). Left unfiltered. The seven earlier reports
+  run and equal SOQL.
+- **Not testable yet**: total ≠ Jotform only (needs a first partner-reported batch, F) and the
+  "No participants submitted" branch of Blank Submissions (needs a first live blank).
+
+**Still open**: F, the intake for partner-reported counts (Ryan's decision, BACKLOG 72; its own
+plan). The first aggregate batch is also the first live proof that total and Jotform only part.

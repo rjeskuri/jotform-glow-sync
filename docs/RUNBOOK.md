@@ -1525,11 +1525,16 @@ the form already open keeps the old page until she reloads.
 
 Neither touches the rosters, the rules, question 5 or the integration.
 
-**The batches Salesforce already holds with a translated module** are corrected once, in
-place, by `tools/fix_module_values.py` ([plan](plans/2026-10-06-module-selection.md), (b)):
-every `Attendance_Batch__c` since launch whose `Module__c` is not one of the template's module
-options (6 batches and 43 rows as of 2026-10-06, all Latin America's), and the `Attendance__c`
-rows under it, which the processor copied the batch's module onto. The right value is the
+**The batches Salesforce held with a translated module** were corrected once, in place, by
+`tools/fix_module_values.py` ([plan](plans/2026-10-06-module-selection.md), (b)): every
+`Attendance_Batch__c` since launch whose `Module__c` is not one of the template's module
+options, and the `Attendance__c` rows under it, which the processor copied the batch's module
+onto. **Applied 2026-10-07** (Ryan's go, VPN off): 6 batches (5 Success, 1 Failed) and their 43
+rows, all Latin America's, each paired with exactly one submission; ledger
+`data/module_fix_2026-10/ledger.csv`, 49 records `written`; the dry run since says `nothing to
+correct: 0 of 595 batches`, and `Module__c` since 2026-09-01 holds 17 values on both objects,
+all canonical English. The commands below stay for a check (the dry run is read-only) and for
+the rollback. The right value is the
 submission's own: the stored answer of the module dropdown its Year answer names, read as the
 back-fill resolver reads it. A batch is paired with **exactly one** submission - the same club
 (question 5), attendance date, question 98, year and session, on the form of its region, created
@@ -2311,7 +2316,9 @@ club instead; leadership wants one attendance total that includes them, with the
 labelled "Jotform only". The field and the processor change (plan sections A and B) are
 **deployed since 2026-10-07 03:22 UTC** (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation
 `0AfRP000002gKnZ0AU`; rollback: redeploy `data/sf_totals_2026-10/before/`, the fields can stay).
-Not done yet: the one-off back-fill below (plan C) and the dashboard's totals (plan D).
+The one-off back-fill below (plan C) is done and the dashboard's totals (plan D) are deployed,
+both on 2026-10-07 ("Attendance dashboard in Salesforce"). Open: how the partners' counts come
+in (BACKLOG 72).
 
 **The field.** `Attendance_Batch__c.Girls_Present__c` (Number, "Girls present") is the one
 attendance count. Since the deploy the attendance processor sets it when a Jotform batch
@@ -2343,10 +2350,17 @@ a Jotform batch for that date a `Failed` "Duplicate", and attendance rows on tha
 aggregate `Failed` "Attendance already exists" - which is why aggregates are dated the last day of
 the month, a day the three partners' clubs never send a Jotform batch for.
 
-**The one-off back-fill** (`tools/sf_girls_present.py`): the batches from before the deploy have
-it empty, so the totals would under-count every one of them. Now that the field is deployed
-(2026-10-07 03:22 UTC) and before the totals go on the dashboard, with Ryan present (the CLI
-login, VPN off, as for the back-fill above; the hook sees `--apply` only):
+**The one-off back-fill** (`tools/sf_girls_present.py`) - **done 2026-10-07**, on Ryan's go, VPN
+off. The batches from before the deploy had the field empty, so the totals would have
+under-counted every one of them. `plan` read 606 batches (575 `Success`, 31 `Failed`; 2
+successes already counted by the new processor), `set --apply --limit 1` wrote BATCH-000000
+(2 = its 2 rows, read back and re-read independently), then the remaining 572: ledger
+(`data/sf_girls_present/ledger.csv`) 573 `open` → 573 `written`, no failure. `check` → `575
+Jotform Success batches; differ: 0, without a value: 0 -> OK`; SOQL: 0 `Success` batches without
+a value, and `SUM(Girls_Present__c)` over `Success` = 7,540 = `COUNT(Id)` of `Attendance__c`.
+Since then the processor sets the count on every new batch, and **`check` is the signal**
+(Signals, below). The commands, for the record and for a re-run (a second `set` finds `to set:
+0`; the CLI login, VPN off; the hook sees `--apply` only):
 
 ```bash
 python3 tools/sf_girls_present.py plan --vpn-off            # read-only -> data/sf_girls_present/plan.csv (ids and counts)
@@ -2374,7 +2388,7 @@ Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Girls_Present__c 
 
 **Signals** (the field is deployed since 2026-10-07 03:22 UTC; all expected as stated):
 - `python3 tools/sf_girls_present.py check --vpn-off` → `differ: 0, without a value: 0 -> OK`
-  once the one-off back-fill has run (until then `without a value` counts the older batches). A
+  (true since the one-off back-fill, 2026-10-07: 575 Jotform Success batches then). A
   `differ` is a Jotform `Success` batch whose count is not its rows; a `without a value` is a
   `Success` batch the processor or the back-fill did not count. Aggregate batches are not compared
   (no rows by design).
@@ -2398,11 +2412,13 @@ shows the Jotform attendance as charts, built only from data Salesforce already 
 - last month by partner (girls) and by module (sessions);
 - clubs with no attendance last month: a number and a table.
 
-Once `totals1/` is deployed ([plan](plans/2026-10-06-attendance-totals.md) D; pending Ryan's
-go), also: total attendance last month from every source beside the Jotform-only figures (a
+Since `totals1/` (deployed 2026-10-07 03:59 UTC, [plan](plans/2026-10-06-attendance-totals.md)
+D), also: total attendance last month from every source beside the Jotform-only figures (a
 header says "(Jotform only)" wherever girls are counted by name); total and Jotform attendance
 per partner per month; clubs not submitting in the last 14 days and since 1 September (numbers,
-and a table by partner for the 14 days); blank submissions since 1 September.
+and a table by partner for the 14 days); blank submissions since 1 September. Read back the
+same night: the reports equal SOQL (264 of 264 totals and groups), and every new tile equals
+SOQL unfiltered and under three partners' filters (the plan's Result has the numbers).
 
 The test report "Jotform Monthly Attendance (test)" now shows a chart with its rows collapsed.
 Its filters are unchanged.
@@ -2442,12 +2458,15 @@ Its filters are unchanged.
 - **Snapshot**: a dashboard shows its last refresh (the time at top right), not live data.
   Press Refresh, or schedule a daily refresh (Ryan's step, in the dashboard: Refresh >
   Schedule Refresh).
-- **Once `totals1/` is deployed**: "Total attendance" sums `Girls_Present__c` over `Success`
+- **Total attendance** (since `totals1/`, 2026-10-07) sums `Girls_Present__c` over `Success`
   batches - the Jotform rows plus the monthly counts partners without Jotform report
-  (`Creator__c` `Partner report`; "Attendance totals and partner-reported counts"). "Girls who
+  (`Creator__c` `Partner report`; "Attendance totals and partner-reported counts"). Until a
+  partner's first count arrives (BACKLOG 72) the Jotform-only figures equal the totals. "Girls who
   attended" stays Jotform only (a reported count has no names) and counts each girl once. "Did
   not submit" in the 14-day and since-1-September windows means no batch of any status dated in
-  the window (a refused duplicate counts as submitted); the last-month tile stays row-based. A
+  the window (a refused duplicate counts as submitted); the 14-day window is today plus the 14
+  days before it, in the org's time zone (Pacific: on the evening of 2026-10-06 there, 09-22 to
+  10-06); the last-month tile stays row-based. A
   **blank** is a submission with no girl ticked: `Failed` "No participants submitted", or a
   legacy `Success` with `Girls_Present__c` 0. Clubs whose partner reports a monthly count show
   as not submitting until that count arrives; the U.S clubs, which do not report attendance
@@ -2495,22 +2514,38 @@ Its filters are unchanged.
   - `sfdx-project.json`.
   `--without-girls-enrolled` leaves `Girls_Enrolled__c` out of the type. `gen.py.after2` beside
   it is the previous generator (what built `after2/`), kept for comparison; `NOTES.md` says what
-  `totals1` added and lists the tokens the first check-only validate settles.
+  `totals1` added and lists the tokens the first check-only validate was to settle.
+- Settled by the `totals1/` deploy (2026-10-07; the plan's Build notes): the partner on a batch
+  report is the via-lookup column `Attendance_Batch__c$Account__c.Parent` (Analytics token
+  `Attendance_Batch__c.Account__c.Parent.Name`), for grouping and as the Partner filter's column;
+  a **cross filter's date is the report's locale format** - `9/1/2026` (`gen.py` `SINCE_CROSS`),
+  never ISO `2026-09-01` ("There are errors with your subfilters"); relative values such as
+  `LAST_N_DAYS:14` pass as they are; a report's grouping is never also one of its columns
+  (`MONTH_COLUMNS`: "You can't include groupings in the selected columns list").
 - The other copies:
   - `before/`: the test report before any change (a deployable project);
   - `after/`: the first deploy (2026-10-02 03:46 UTC);
   - `fix1/`: the second change (deployed 2026-10-06 09:29 UTC);
   - `after2/`: what was live before `totals1/`;
+  - `live_2026-10-07/`: the backup retrieved right before `totals1/` was deployed (the dashboard
+    and the 7 reports then live);
   - `totals1/`: the attendance totals, the three "did not submit" windows and the blank report
     ([plan](plans/2026-10-06-attendance-totals.md) D; made from the build after the check-only
-    validate, deployed on Ryan's go - write the date here); what `gen.py` builds.
+    validate, deployed on Ryan's go 2026-10-07 03:59 UTC (0AfRP000002gLJp0AM), 8 of 8
+    components); what `gen.py` builds. Its six reports: `Total_Attendance_by_Partner_by_Month`
+    00ORP000009c8ic2AA, `Jotform_Attendance_by_Partner_by_Month` 00ORP000009c8ia2AA,
+    `Total_Attendance_Last_Month` 00ORP000009c8ib2AA, `Clubs_Not_Submitting_Last_14_Days`
+    00ORP000009c8iY2AQ, `Clubs_Not_Submitting_Since_1_Sept` 00ORP000009c8iZ2AQ,
+    `Blank_Submissions` 00ORP000009c8iX2AQ.
 - After a deploy, Salesforce writes `expandOthers` true on every report chart and drops or adds a
-  few default attributes on the dashboard. A retrieve differs from `gen.py` only in those.
+  few default attributes on the dashboard (for `totals1/`: `useReportChart` dropped,
+  `showPicturesOnCharts` and the owner added, apostrophes escaped). A retrieve differs from
+  `gen.py` only in those.
 - **The steps:**
   1. Back up what is live: `sf project retrieve start -o glow` the reports below (the six
-     `Jotform_*`; once `totals1/` is deployed, its six and the report type `Attendance_Totals`
-     too), the test report and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`),
-     into a dated folder beside the others.
+     `Jotform_*`, the six of `totals1/` and the report type `Attendance_Totals`), the test report
+     and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a dated folder
+     beside the others.
   2. Edit `gen.py` or `partners.json`, then `python3 gen.py`.
   3. Copy only the changed files into a new folder with `sfdx-project.json` (as `fix1/`).
   4. Check-only: `cd` there, then `sf project deploy start --dry-run -o glow -d force-app`.
@@ -2534,12 +2569,13 @@ Its filters are unchanged.
     `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month`,
     `Jotform_Sessions_by_Module_Last_Month` and `Jotform_Clubs_No_Attendance_Last_Month`;
   - the dashboard `Jotform_Attendance_test`;
-  - once `totals1/` is deployed: the reports `Total_Attendance_by_Partner_by_Month`,
+  - since `totals1/` (2026-10-07): the reports `Total_Attendance_by_Partner_by_Month`,
     `Jotform_Attendance_by_Partner_by_Month`, `Total_Attendance_Last_Month`,
     `Clubs_Not_Submitting_Last_14_Days`, `Clubs_Not_Submitting_Since_1_Sept` and
     `Blank_Submissions`, then - **last**, after the six reports that use it - the report type
     `Attendance_Totals`; never `Attendance_Batches` (the vendor's report type). The dashboard
-    itself rolls back to `after2/`'s first (redeploy it; the six reports and the type may stay).
+    itself rolls back to `after2/`'s first (redeploy it, or the copy in `live_2026-10-07/`
+    retrieved just before; the six reports and the type may stay).
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
 
