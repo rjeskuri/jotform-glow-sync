@@ -81,7 +81,6 @@ Values (.csv) on the responses tab. Getting roster.csv and partners.csv:
 Requires: Python 3.10, standard library plus glow/ (this repo's shared library).
 """
 import argparse
-import datetime
 import hashlib
 import json
 import os
@@ -101,9 +100,9 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
     SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners,
     dropdown_options, has_calc_values, inactive_retires, long_name_partner, partner_fields,
-    partner_picker, picker_calc_values, read_partners_csv,
+    partner_picker, partners_marker_present, picker_calc_values, read_partners_csv,
     read_roster_csv, read_sheet, roster_names, roster_pairs, roster_removed,   # against Config.gs
-    sf_club_name, shared_club_names, warn,
+    sf_club_name, shared_club_names, sheet_today, warn,
 )
 from glow import sync as glow_sync  # noqa: E402  - CONTACT_IDS_FIRST, CONTACT_IDS_PICKER_OPERAND and
 #                                     ROSTERS_REQUIRED are read through the module at run time, so
@@ -518,6 +517,7 @@ def main():
                  "form\"), or pass --disabled-ok to write to it anyway")
 
     all_clubs, region_of, partners, off_form = {}, {}, None, {}
+    marker = False      # whether the Partners export has the jotform column at all
     if args.roster:
         sheet, all_clubs, region_of = read_roster_csv(args.csv, args.region)
         dup_names = {}
@@ -525,6 +525,7 @@ def main():
         ever = roster_names(args.csv)       # ...and every girl it has ever held for each
         if args.partners:
             partners = read_partners_csv(args.partners)     # key(partner) -> "yes" | "no"
+            marker = partners_marker_present(args.partners)  # ...else nobody is marked (warned above)
             # the floor: every partner with an active club must be a row of the export,
             # or a cut export would read every partner as unmarked and restore every
             # retired roster unattended (one picker UPDATE, inside every band)
@@ -823,7 +824,8 @@ def main():
     # partner its rule names or its owner read-back when the name has several.
     # When the owner is one pair and either its partner is marked `no` in the
     # Partners tab or (RETIRE_INACTIVE) the pair has no active girl and its
-    # rows have been inactive since before today, the roster is retired: out of
+    # rows have been inactive since before today - the day in the SHEET's zone,
+    # the one its removed_date cells are stamped in - the roster is retired: out of
     # `existing`, so neither branch matches it; not in club_questions nor
     # option_of, so no picker entry, no show rule, no guard term; nothing is
     # written to the question itself (hidden, required, its options frozen);
@@ -838,7 +840,7 @@ def main():
     if args.roster:
         marks = partners or {}
         removed = roster_removed(args.csv)
-        today = datetime.datetime.now(datetime.timezone.utc).date()
+        today = sheet_today()
         pair_by_key = {(key(p), key(c)): (p, c) for p, c in pairs}
         for qid, text in sorted(form_text.items(), key=lambda kv: int(kv[0])):
             who = holders.get(key(text), {})
@@ -981,9 +983,10 @@ def main():
     # claimed it, so it gets its entry and rule back (and an options update if
     # the Roster moved on). Without --partners the two cannot be told apart from
     # a roster that should stay retired: the dry run says so per roster and
-    # --apply refuses (below). The enrollment path (no --roster) has no marker,
-    # and a form without the picker (none is live) has no entry to be off: both
-    # keep their old behaviour.
+    # --apply refuses (below); so does an export without the jotform column
+    # (nobody can be marked in it: a renamed header would lift every mark). The
+    # enrollment path (no --roster) has no marker, and a form without the picker
+    # (none is live) has no entry to be off: both keep their old behaviour.
     restored = {}    # qid -> {"club", "partner", "reason"}
     if args.roster and has_picker:
         for qid in sorted(pair_of, key=int):
@@ -1001,6 +1004,11 @@ def main():
             sys.exit(f"Refusing: {len(restored)} roster(s) would be restored without a Partners export "
                      "(the '!' lines above) - nothing written. Pass --partners <Partners export> and run "
                      "again: the run restores each roster, or keeps it retired")
+        if restored and args.partners and not marker and args.apply:
+            sys.exit(f"Refusing: {len(restored)} roster(s) would be restored from a Partners export that "
+                     f"has no '{JOTFORM_COL}' column (nobody can be marked in it) - nothing written. Check "
+                     f"the Partners tab's header (Partners!D1 = {JOTFORM_COL}), export it again and run again "
+                     "(docs/RUNBOOK.md, \"Clubs that do not use Jotform\")")
 
     # --- what each roster sends to question 5 --------------------------------
     # (docs/plans/2026-09-30-same-name-clubs.md) option_of: qid -> the text its

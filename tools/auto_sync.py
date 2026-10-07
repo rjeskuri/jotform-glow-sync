@@ -46,10 +46,13 @@ The Partners tab travels with the Roster (docs/plans/2026-10-06-clubs-off-
 jotform.md): the run exports it too and passes --partners to every sync and
 verify call, so a partner marked jotform=no has its clubs' rosters retired (kept
 hidden, off the Club picker) and a club with no active girl leaves the picker
-the day after; a local --roster run needs --partners as well. More than
---max-retires retirements or --max-restores restores in one region in one run is
-ATTENTION (the first rollout is by hand); a jotform value other than yes / no /
-blank is an ATTENTION that stops nothing. Before each region the form's status
+the day after (days in the sheet's own zone, glow.sync.SHEET_ZONE, which the run
+checks against the sheet's setting: ATTENTION when they differ); a local --roster
+run needs --partners as well. More than --max-retires retirements or
+--max-restores restores in one region in one run is ATTENTION (the first rollout
+is by hand); a jotform value other than yes / no / blank is an ATTENTION that
+stops nothing; an export without the jotform column is an ATTENTION, and a plan
+that would restore a roster from it is held. Before each region the form's status
 is read: a form that is not ENABLED is `skipped` (SyncLog), not failed, and
 nothing is run against it; a status that cannot be read is `failed`.
 """
@@ -72,7 +75,7 @@ import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily 
 from glow import forms as glow_forms  # noqa: E402
 from glow import usage  # noqa: E402  (Jotform's storage against the plan's limits; standard library)
 from glow.jotform import Client  # noqa: E402  (the one read this file makes itself: the usage)
-from glow.sync import sf_name_clashes  # noqa: E402  (standard library only, like this file)
+from glow.sync import SHEET_ZONE, sf_name_clashes  # noqa: E402  (standard library only, like this file)
 
 # The live regional forms (one source: glow/forms.py, parity-tested against
 # appsscript/Config.gs by test/python_test.py).
@@ -115,6 +118,10 @@ RESTORED_RX = re.compile(r"^  ~ restored roster '(?P<club>.+)' \(q(?P<qid>\d+)\)
 # the Partners tab's jotform cell holds something other than yes / no / blank: read as
 # yes (nothing leaves a form for a typo), reported - ATTENTION without stopping the region
 JOTFORM_VALUE = "only yes, no or blank are understood"
+# the Partners export has no jotform column at all (a renamed or moved header): nobody is
+# marked, so a retired roster of an active club reads as "restore me" - ATTENTION, and a
+# plan that restores anything from such an export is outside the bands (check_bands)
+JOTFORM_COLUMN = "column, so no partner is marked"
 NOT_IN_EXPORT = "is on the form but not in the sheet export"
 NO_SHARED_NAMES = "shares NO names with the current one"
 # Clubs that share a name (docs/plans/2026-09-30-same-name-clubs.md): what an existing
@@ -256,6 +263,11 @@ def odd_jotform_values(plan):
     return [w for w in plan["warnings"] if JOTFORM_VALUE in w]
 
 
+def no_jotform_column(plan):
+    """The warning saying the Partners export has no jotform column (at most one)."""
+    return [w for w in plan["warnings"] if JOTFORM_COLUMN in w]
+
+
 def name_clashes(sf_names_by_region):
     """{region: the sync summary's sf_names} -> [(name, [club, ...])] for every name
     two different clubs of the regions synced send to question 5 (compared as
@@ -319,6 +331,10 @@ def check_bands(plan, max_creates=5, max_updates=20, max_retires=5, max_restores
         reasons.append(f"would put {len(restored)} clubs back on the Club picker at once (band: {max_restores}) "
                        "- a cell flipped back, or a Partners export missing its rows? apply by hand after "
                        "checking")
+    if restored and no_jotform_column(plan):
+        reasons.append(f"would put {len(restored)} club(s) back on the Club picker from a Partners export "
+                       "that has no jotform column (nobody can be marked in it: a renamed or moved header?) "
+                       "- check the Partners tab's header, then the next run restores or keeps them")
     if plan["deletes"]:
         reasons.append(f"would delete {len(plan['deletes'])} roster question(s) - never done "
                        "automatically (that is what --prune is for, on a fresh clone only)")
@@ -604,8 +620,21 @@ class Run:
                                    "yes, so these partners' clubs stay on the forms until the cell is "
                                    "corrected. docs/RUNBOOK.md, \"Clubs that do not use Jotform\".\n\n"
                                    + "\n".join("- " + w for w in odd)))
+        # ...and an export without the column at all: nobody is marked, so a retired roster of
+        # an active club would be restored - said here; a plan that restores is held (check_bands)
+        no_column = no_jotform_column(plan)
+        if no_column:
+            self.attention.append((f"{region}: the Partners export has no jotform column",
+                                   "The Partners tab's header row has no `jotform` column (renamed, moved, "
+                                   "or an inserted column?), so no partner can be marked and every retired "
+                                   "roster of an active club reads as one to restore. Nothing is restored "
+                                   "unattended from such an export; retirements already applied stay as they "
+                                   "are. Put the header back (Partners!D1 = jotform) and the next run reads "
+                                   "the marks again. docs/RUNBOOK.md, \"Clubs that do not use Jotform\".\n\n"
+                                   + "\n".join("- " + w for w in no_column)))
         note = "; ".join(filter(None, [f"{len(refused)} new club(s) not added (name in use)" if refused else "",
-                                       f"{len(odd)} jotform value(s) not understood" if odd else ""]))
+                                       f"{len(odd)} jotform value(s) not understood" if odd else "",
+                                       "Partners export without a jotform column" if no_column else ""]))
         n = changes(plan)
         # a change of what an existing club sends to question 5 stops the region even
         # when nothing else is planned: a rules-only difference is not a "change" here,
@@ -740,6 +769,26 @@ class Run:
         self.log(f"  ! {len(clashes)} name(s) are sent to question 5 by more than one club: "
                  + ", ".join(f"'{name}'" for name, _ in clashes[:8]))
 
+    def check_sheet_zone(self, zone):
+        """The sheet's own time zone (sheets_client.time_zone, read when the tabs are
+        exported) against glow.sync.SHEET_ZONE, the zone the sync and the audit take
+        "today" in for the no-active-girl rule (docs/plans/2026-10-06-clubs-off-jotform.md):
+        the sheet stamps removed_date in its own zone, and a constant that differs from it
+        moves the day's edge. A log line when they agree; an ATTENTION when they do not
+        (the regions still run: the rule is off by the difference, nothing else is)."""
+        if zone == SHEET_ZONE:
+            self.log(f"Sheet zone: {zone} (as glow/sync.py SHEET_ZONE)")
+            return
+        self.attention.append((f"The sheet's time zone is {zone}, the tools expect {SHEET_ZONE}",
+                               f"The spreadsheet's time zone (File > Settings) is {zone}; glow/sync.py "
+                               f"SHEET_ZONE says {SHEET_ZONE}. A club with no active girl is retired once "
+                               "its latest removed_date is before today, and the sheet stamps that date in "
+                               "its own zone, so until the two agree a roster emptied in the sheet's evening "
+                               "may be retired hours early (or kept hours longer). If the sheet's zone was "
+                               "changed on purpose, set SHEET_ZONE to it; otherwise set the sheet back. "
+                               "docs/RUNBOOK.md, \"Clubs that do not use Jotform\"."))
+        self.log(f"  ! sheet zone {zone} differs from glow/sync.py SHEET_ZONE {SHEET_ZONE}")
+
     def check_storage(self, read):
         """Jotform's account limits, once per run (docs/plans/2026-10-06-photos-to-drive.md):
         the storage line in the log and, for each limit at alarm (80 % of it), an ATTENTION
@@ -872,6 +921,7 @@ def main():
         svc = sc.service()
         csv_path = run.export_roster(svc)
         run.partners = run.export_partners(svc)
+        run.check_sheet_zone(sc.time_zone(svc))     # the zone the sync takes "today" in
 
     with open(csv_path, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))

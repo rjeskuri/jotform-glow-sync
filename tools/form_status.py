@@ -28,7 +28,8 @@ Right after the Roster line comes Jotform's storage against the account's plan
 on its own; docs/plans/2026-10-06-photos-to-drive.md) - account-wide, so never a form
 problem. With --partners <Partners export> (docs/plans/2026-10-06-clubs-off-jotform.md)
 the audit knows a RETIRED roster - its partner marked jotform=no, or its club with no
-active girl since before today (glow/sync.py RETIRE_INACTIVE) - from a broken one: off
+active girl since before today in the sheet's zone (glow/sync.py RETIRE_INACTIVE,
+SHEET_ZONE) - from a broken one: off
 the picker and without a show rule it is clean; still with its rule or entry it awaits
 the next sync apply (a note, never a problem); a roster off the picker whose club is
 active and whose partner is not marked is a problem. Without --partners every retired
@@ -43,7 +44,6 @@ Usage:
 """
 import argparse
 import csv
-import datetime
 import html
 import json
 import os
@@ -66,7 +66,7 @@ from glow.sync import (                    # noqa: E402  (shared with the sync t
     GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, JOTFORM_COL, MODULES, PICKER_NAME, SF_NAME_SEP,
     WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, dropdown_options, has_calc_values,
     inactive_retires, long_name_partner, partner_picker, picker_calc_values, read_partners_csv,
-    roster_names, roster_pairs, roster_removed)
+    roster_names, roster_pairs, roster_removed, sheet_today)
 from glow.text import key, name_key        # noqa: E402
 
 FORMS = {glow_forms.TEMPLATE: ("template", None),
@@ -143,9 +143,10 @@ def retire_decisions(questions, owners, facts, today=None):
     says is retired, the sync's rule (docs/plans/2026-10-06-clubs-off-jotform.md): its
     owner (roster_owners) is marked jotform=no in the Partners export, or
     (glow.sync.RETIRE_INACTIVE) has no active girl in that club and its rows have been
-    inactive since before `today`. A question whose owner cannot be told, or whose club
-    the Roster does not know, is not here. Reasons: "not on Jotform" / "no active girl"."""
-    today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    inactive since before `today` (a date in the sheet's zone, glow.sync.sheet_today). A
+    question whose owner cannot be told, or whose club the Roster does not know, is not
+    here. Reasons: "not on Jotform" / "no active girl"."""
+    today = today or sheet_today()
     marks = facts.get("marks") or {}
     out = {}
     for qid, found in owners.items():
@@ -1203,7 +1204,8 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
 
     if region and status != "ENABLED":
         # a disabled form carries its clubs frozen: nothing to compare against the Roster
-        rep["region_check"] = {"skipped": status}
+        # (a status Jotform did not report is skipped the same way, and named as such)
+        rep["region_check"] = {"skipped": status or "status not reported"}
     elif region and region in roster_by_region:
         marks = (facts or {}).get("marks") or {}
         # a partner marked jotform=no has its share of a name taken out of the compare; a
@@ -1272,7 +1274,7 @@ def main():
         for r in reports:
             if r.get("status") != "ENABLED":
                 # the disabled page has no picker, no rules, no boxes, no store: nothing to read
-                r["rendered_skipped"] = r["status"]
+                r["rendered_skipped"] = r["status"] or "status not reported"
                 continue
             r["rule_problems"] += rendered_problems(r, public_page(r["id"]))
     if args.json:
@@ -1289,7 +1291,7 @@ def main():
              if any(off.values()) else ""))
     print(storage_status_line(storage) + "\n")
     for r in reports:
-        print(f"== {r['label']}  {r['id']}  \"{r['title']}\"  [{r['status']}]")
+        print(f"== {r['label']}  {r['id']}  \"{r['title']}\"  [{r['status'] or 'status not reported'}]")
         last = f"{r['last_submission']} US Eastern" if r["last_submission"] else "none"  # Jotform's clock
         print(f"   submissions {r['submissions']} (last {last})   "
               f"questions {r['questions']}   club questions {r['club_questions']} "

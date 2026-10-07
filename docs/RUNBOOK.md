@@ -265,9 +265,15 @@ most cells stay empty). GLOW staff set it in the sheet (`Partners!D1` is the
 header `jotform`; `no` in the partner's row). Capitals and spacing do not
 matter (`No`, ` no `); any other text counts as **yes** — nothing leaves a
 form because of a typo — and the runner raises ATTENTION naming the cell
-("Partners-tab jotform value(s) not understood") until it is corrected. The
-tab travels with the Roster: the runner exports it beside the Roster export on
-every run, a hand run passes it as `--partners` (the manual loop above).
+("Partners-tab jotform value(s) not understood") until it is corrected. An
+export with no `jotform` column at all (the header renamed or moved, a column
+inserted before it) marks nobody: the sync warns (`! Partners tab: the export
+has no 'jotform' column …`), the runner raises ATTENTION ("the Partners export
+has no jotform column"), `--apply` refuses to restore a retired roster from it
+and the runner holds a plan that would — put the header back and the next run
+reads the marks again. The tab travels with the Roster: the runner exports it
+beside the Roster export on every run, a hand run passes it as `--partners`
+(the manual loop above).
 
 **What the next run does.** A roster whose partner is marked `no` is
 **retired**: kept on the form, hidden and frozen (its question is never
@@ -291,7 +297,12 @@ in every region, to a club that has **no active girl** once its rows have been
 inactive since before the day of the run (`~ retired roster '<club>' (q…): no
 active girl in the Roster`; `glow/sync.py RETIRE_INACTIVE`, on since
 2026-10-06): a roster emptied and refilled in two Club Roster Form submissions
-on one day stays on the picker in between.
+on one day stays on the picker in between. Days are the sheet's own: the sheet
+stamps `removed_date` in its time zone (File → Settings, America/New_York),
+and the sync and the audit take "today" in that zone (`glow/sync.py
+SHEET_ZONE`, `sheet_today`), never UTC's — the runner reads the sheet's
+setting with the exports and raises ATTENTION when it differs from the
+constant (change the constant if the sheet's zone was changed on purpose).
 
 **The bands.** The runner retires at most 5 rosters and restores at most 5
 per region per run (`--max-retires`, `--max-restores`); more is `attention`,
@@ -332,7 +343,8 @@ clubs - missing: … - a truncated export, or rows deleted from the Partners
 tab? nothing done`; the runner logs `failed`): without that floor a cut export
 would read every partner as unmarked and restore every retired roster
 unattended. The mentor e-mails of a marked partner say the attendance form
-does not change for them (Apps Script). Salesforce is untouched: the clubs'
+does not change for them (Apps Script, once that change is pushed: the plan's
+step 11). Salesforce is untouched: the clubs'
 Accounts keep their names and stay in "Clubs With No Attendance Last Month"
 until their partner-reported totals arrive ("Attendance totals and
 partner-reported counts").
@@ -355,7 +367,9 @@ tab ("Run workflow", optional region).
 **Safety bands** (per region, per run; `--max-creates`, `--max-updates`,
 `--max-retires`, `--max-restores`):
 at most 5 new clubs and 20 roster updates; at most 5 rosters taken off the
-Club picker and 5 put back ("Clubs that do not use Jotform"); never a delete;
+Club picker and 5 put back ("Clubs that do not use Jotform"), and none put
+back from a Partners export without the `jotform` column (nobody can be
+marked in it); never a delete;
 not when a roster
 would be replaced by one sharing no names with the current one; not when the
 export looks truncated (fewer than 1,000 active rows, or many clubs on the
@@ -367,13 +381,18 @@ respelled partner — "Club names two partners share"), which stops the
 region even when nothing else is planned. Outside the bands nothing is
 written, the region is logged as `attention`, and
 `data/auto_sync/ATTENTION.md` (kept as a workflow artifact) says what to do.
-Three more things raise ATTENTION without stopping a region: a new club that
+Four more things raise ATTENTION without stopping a region: a new club that
 was not added to its form because another partner's club has its name (the
 rest of the region is applied as usual; the SyncLog `detail` says "N new
 club(s) not added (name in use)"), a Partners-tab `jotform` cell holding
 something other than `yes`, `no` or blank (read as yes; `detail` says "N
-jotform value(s) not understood"), and, once per run, any name that two
-clubs of the regions synced send to question 5. Until a club that was not
+jotform value(s) not understood"), a Partners export with no `jotform` column
+at all (nobody is marked in it; `detail` says "Partners export without a
+jotform column"; a plan that would put a roster back from it is held), and,
+once per run, any name that two clubs of the regions synced send to question
+5 — and, read with the exports, a sheet time zone that differs from
+`glow/sync.py SHEET_ZONE` (the no-active-girl rule's day would be off by the
+difference). Until a club that was not
 added is renamed, every apply in its region reads `applied-with-problems`,
 with a second ATTENTION ("applied, but the form still has problems"): the
 verify step goes by club name, so its "still missing from the form: <club>"

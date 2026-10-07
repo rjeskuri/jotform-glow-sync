@@ -862,6 +862,40 @@ regional form", the two skills' entries (T3b and the live steps).
 - *The branch* was cut from `22342d5` (the integration branch's merged head at build time, two
   tracks in), not `4ab74fc`.
 
+**Review fixes (2026-10-07, two adversarial reviews; nothing live touched).**
+
+- *The day rule's "today" is the sheet's day, not the UTC date* this plan wrote (section A,
+  "RETIRE_INACTIVE"). The sheet stamps `removed_date` with `getSpreadsheetTimeZone()`
+  (appsscript/Roster.gs `today_()`), and the spreadsheet's zone is **America/New_York** since
+  2026-09-02 (DECISIONS 2026-09-30, `sheets_client.time_zone`) - not `appsscript.json`'s
+  `timeZone` (America/Chicago, the script project's, which no stamp uses). Against the UTC date a
+  "REMOVE every girl" after 20:00 New York read as yesterday's at the dispatch minutes later, so the
+  club left the picker before the "ADD the new girls" put it back - the flicker the rule exists to
+  prevent, and the plan's own purpose contradicting its letter. Now `glow/sync.py SHEET_ZONE` and
+  `sheet_today()`; the sync and the audit take `today` from it; the tests take theirs from it too
+  (the UTC fixture failed live while this was fixed, at 01:xx UTC = the sheet's evening). No
+  parity test against `appsscript.json`: it would pin the wrong zone. Nothing offline can read the
+  sheet's setting, so the runner, which reads it for SyncLog anyway, compares it with the constant
+  on every export (`Run.check_sheet_zone`: a log line, or an ATTENTION that stops nothing).
+  DECISIONS row 3, the RUNBOOK's section, ARCHITECTURE's constants table and CLAUDE.md rule 7 say so.
+- *A Partners export without the `jotform` column* was read silently as "nobody marked", and with
+  `--partners` given (the runner always) a retired roster of an active club was restored - the
+  risk list's "a missing column is caught by the no-`--partners` warning and refusal" named the one
+  path the runner never takes; 38 on Africa would have tripped the restore band, a region holding
+  five or fewer retired rosters would not. Now `read_partners_csv` warns (a `!` line, so the
+  runner's `plan['warnings']` carry it), `partners_marker_present` tells the sync, `--apply`
+  refuses to restore from such an export, and the runner raises ATTENTION (`JOTFORM_COLUMN`,
+  `no_jotform_column`) and holds a plan that restores anything from it (`check_bands`). A run with
+  nothing to restore goes on `in-sync` with the ATTENTION. DECISIONS row 5 and the RUNBOOK's marker
+  paragraph say so.
+- *A form whose GET reports no status* made `form_status` fall over (`{"skipped": None}` is falsy,
+  so `main()` went looking for the clubs count): the marker is now `status or "status not
+  reported"`, the served-page skip and the header line the same; one test.
+- *The docs' parity claim*: the RUNBOOK's mentor-e-mail sentence now says "once that change is
+  pushed (the plan's step 11)". `Roster.gs PARTNER_COLS` (four entries) and `test_partner_columns`
+  are track T3b's; CLAUDE.md rule 7 and ARCHITECTURE's Partners row are true once both tracks are
+  merged - the orchestrator's `make check` on the merged branch is what confirms it.
+
 **Read-only rehearsal (plan step 4), 2026-10-07 01:20 UTC, key from the environment, GET only.**
 No `data/partners_*.csv` existed, so a scratch export was built from the 2026-10-06T1047Z Roster
 export's partner column (49 partners, their regions, `no` on the three rows) at

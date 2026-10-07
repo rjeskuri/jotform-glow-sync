@@ -243,6 +243,7 @@ class AutoSyncPlan(unittest.TestCase):
                          "Form: {args.form} status {status or 'not reported'}"):
             self.assertIn(fragment, joined, fragment)
         self.assertIn(auto_sync.JOTFORM_VALUE, read(os.path.join(REPO, "glow", "sync.py")))
+        self.assertIn(auto_sync.JOTFORM_COLUMN, read(os.path.join(REPO, "glow", "sync.py")))
         for line, rx in (("UPDATE roster 'A' (q1, 2 girls)", auto_sync.UPDATE_RX),
                          ("UPDATE roster 'A' (q1, 2 girls; required: Yes)", auto_sync.UPDATE_RX),
                          ("UPDATE roster 'A' (q1, 2 girls; required: No)", auto_sync.UPDATE_RX),
@@ -2552,14 +2553,25 @@ class RetiredRosters(unittest.TestCase):
         self.assertEqual(glow_sync.WARNINGS, ["  ! Partners tab: 'Partner Four' has jotform='maybe' - only yes, no "
                                               "or blank are understood; treated as yes"])
         self.assertIn(auto_sync.JOTFORM_VALUE, glow_sync.WARNINGS[0])
+        self.assertTrue(glow_sync.partners_marker_present(path))
         del glow_sync.WARNINGS[:]
-        # the tab before the column marks nobody; one without a partner column is refused
+        # the tab before the column marks nobody - and says so (a renamed header would otherwise
+        # read as every mark lifted); one without a partner column is refused
         write(["partner", "region", "notes"], [["Partner One", "Africa", ""]])
         self.assertEqual(glow_sync.read_partners_csv(path), {"partner one": "yes"})
+        self.assertFalse(glow_sync.partners_marker_present(path))
+        self.assertEqual(glow_sync.WARNINGS, ["  ! Partners tab: the export has no 'jotform' column, so no partner is "
+                                              "marked - a retired roster of an active club would be restored; check "
+                                              "the header (Partners!D1) before applying (docs/RUNBOOK.md, \"Clubs "
+                                              "that do not use Jotform\")"])
+        self.assertIn(auto_sync.JOTFORM_COLUMN, glow_sync.WARNINGS[0])
+        self.assertNotIn(auto_sync.JOTFORM_VALUE, glow_sync.WARNINGS[0])
+        del glow_sync.WARNINGS[:]
         write(["name", "region"], [["Partner One", "Africa"]])
-        with self.assertRaises(SystemExit) as e:
-            glow_sync.read_partners_csv(path)
-        self.assertIn("Not a Partners export: expected a 'partner' column", str(e.exception))
+        for reader in (glow_sync.read_partners_csv, glow_sync.partners_marker_present):
+            with self.assertRaises(SystemExit) as e:
+                reader(path)
+            self.assertIn("Not a Partners export: expected a 'partner' column", str(e.exception))
         self.assertEqual(glow_sync.WARNINGS, [])
         # the constants the Apps Script side mirrors (appsscript/Roster.gs PARTNER_COLS)
         self.assertEqual(glow_sync.PARTNER_COLS, ("partner", "region", "notes", "jotform"))
@@ -2580,6 +2592,34 @@ class RetiredRosters(unittest.TestCase):
         self.assertFalse(glow_sync.inactive_retires("yesterday", today))
         with mock.patch.object(glow_sync, "RETIRE_INACTIVE", False):
             self.assertFalse(glow_sync.inactive_retires("2026-10-06", today))
+        # `today` is the day in the SHEET's zone - the one Roster.gs today_() stamps removed_date
+        # in (getSpreadsheetTimeZone(): America/New_York since 2026-09-02, DECISIONS 2026-09-30),
+        # not appsscript.json's timeZone (the script project's, America/Chicago) and not UTC: a
+        # club emptied at 21:30 New York is dated today there while the UTC date is tomorrow,
+        # so a UTC "today" would retire it at the very next dispatch (review finding)
+        self.assertEqual(glow_sync.SHEET_ZONE, "America/New_York")
+        with open(os.path.join(REPO, "appsscript", "appsscript.json"), encoding="utf-8") as f:
+            self.assertNotEqual(json.load(f)["timeZone"], glow_sync.SHEET_ZONE)     # the two are not one thing
+        utc = dt.timezone.utc
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 10, 7, 1, 30, tzinfo=utc)), dt.date(2026, 10, 6))
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 10, 7, 3, 59, tzinfo=utc)), dt.date(2026, 10, 6))
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 10, 7, 4, 0, tzinfo=utc)), dt.date(2026, 10, 7))
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 10, 7, 11, 0, tzinfo=utc)), dt.date(2026, 10, 7))  # the daily run
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 1, 15, 4, 30, tzinfo=utc)), dt.date(2026, 1, 14))   # winter: UTC-5
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 1, 15, 5, 0, tzinfo=utc)), dt.date(2026, 1, 15))
+        self.assertIsInstance(glow_sync.sheet_today(), dt.date)                                              # the clock
+        # the evening case end to end: emptied "today" in New York, the run minutes later (UTC tomorrow)
+        evening = dt.datetime(2026, 10, 7, 1, 35, tzinfo=utc)
+        self.assertFalse(glow_sync.inactive_retires("2026-10-06", glow_sync.sheet_today(evening)))      # kept
+        self.assertTrue(glow_sync.inactive_retires("2026-10-06", glow_sync.sheet_today(evening + dt.timedelta(hours=9))))
+        with mock.patch.object(glow_sync, "SHEET_ZONE", "Nowhere/Nothing"):
+            with self.assertRaises(SystemExit) as e:
+                glow_sync.sheet_today()
+            self.assertIn("The time zone database has no 'Nowhere/Nothing'", str(e.exception))
+        # the sync and the audit take today from it, the runner checks the constant against the sheet
+        self.assertIn("today = sheet_today()", read(os.path.join(REPO, "sync_attendance_form.py")))
+        self.assertIn("today = today or sheet_today()", read(os.path.join(REPO, "tools", "form_status.py")))
+        self.assertIn("run.check_sheet_zone(sc.time_zone(svc))", read(os.path.join(REPO, "tools", "auto_sync.py")))
         # the latest removed_date per club, from the Roster's rows of any status
         gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
         self.run_sync(FakeForm(*self.form(switched=True)), inactive=gone,
@@ -2683,7 +2723,7 @@ class RetiredRosters(unittest.TestCase):
     def test_a_club_with_no_active_girl_retires_the_day_after_its_last_removal(self):
         import datetime as dt
         from unittest import mock
-        today = dt.datetime.now(dt.timezone.utc).date()
+        today = glow_sync.sheet_today()          # the sheet's day, as the sync reads it (not UTC's)
         yesterday = str(today - dt.timedelta(days=1))
         gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
         sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
@@ -2844,6 +2884,61 @@ class RetiredRosters(unittest.TestCase):
         self.assertIn("empty Club picker", str(code))
         self.assertEqual(fake.calls, [])
 
+    def test_a_partners_export_without_the_jotform_column_warns_and_never_restores_unattended(self):
+        import csv
+        # the header lost its column (renamed, moved, one inserted before it): nobody is marked,
+        # so a retired roster of an active club reads as one to restore - said, never applied
+        path = os.path.join(self.tmp.name, "partners_old.csv")
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["partner", "region", "notes"])
+            for p in ("Partner One", "Partner Two"):
+                w.writerow([p, "Africa", ""])
+        column = ("  ! Partners tab: the export has no 'jotform' column, so no partner is marked - a retired roster of "
+                  "an active club would be restored; check the header (Partners!D1) before applying (docs/RUNBOOK.md, "
+                  "\"Clubs that do not use Jotform\")")
+        qs, wire = self.retired_form(gone=("13",))
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake, "--partners", path)
+        self.assertIn("  ~ restored roster 'Beta Club' (q13): back on the Club picker", out)   # the dry run says so
+        self.assertEqual(sync.WARNINGS, [column])
+        self.assertEqual(fake.calls, ["UPDATE club picker (4 clubs: options)", f"REPLACE conditions ({len(wire) + 1} rules)"])
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", "--partners", path)
+        self.assertIn("Refusing: 1 roster(s) would be restored from a Partners export that has no 'jotform' column "
+                      "(nobody can be marked in it) - nothing written", str(code))
+        self.assertIn("Partners!D1 = jotform", str(code))
+        self.assertEqual(fake.writes, [])
+        # the runner: ATTENTION for the export, and a plan that restores from it is outside the bands
+        plan = auto_sync.plan_from_summary(summary)
+        self.assertEqual(auto_sync.no_jotform_column(plan), [column.strip()])     # the summary strips them
+        (reason,) = auto_sync.check_bands(plan)
+        self.assertIn("would put 1 club(s) back on the Club picker from a Partners export that has no jotform column", reason)
+        run = AutoSyncPlan.run_region(self, out, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+        self.assertIn("no jotform column", run.results[0][8])
+        self.assertEqual([t for t, _ in run.attention][0], "Africa: the Partners export has no jotform column")
+        self.assertIn("Partners!D1 = jotform", run.attention[0][1])
+        self.assertTrue(run.attention[1][0].startswith("Africa: not applied - "))
+        self.assertIn("- RESTORE Beta Club (q13): back on the Club picker", run.attention[1][1])
+        # with nothing to restore the warning alone: in-sync, the ATTENTION still raised
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(switched=True))
+        summary, out = self.summary(fake, "--partners", path)
+        self.assertEqual((fake.calls, sync.WARNINGS), ([], [column]))
+        self.assertEqual(auto_sync.check_bands(auto_sync.plan_from_summary(summary)), [])
+        run = AutoSyncPlan.run_region(self, out)
+        self.assertEqual([r[7:9] for r in run.results], [["in-sync", "Partners export without a jotform column"]])
+        self.assertEqual([t for t, _ in run.attention], ["Africa: the Partners export has no jotform column"])
+        # a roster the Roster says is retired stays so: the export marks nobody, but the inactive rule still holds
+        del sync.WARNINGS[:]
+        gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
+        sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
+        fake = FakeForm(*self.retired_form(gone=("12",)))
+        summary, out = self.summary(fake, "--partners", path, roster=sheet, inactive=gone,
+                                    removed={("Partner Two", "Stars"): "2020-01-01"})
+        self.assertEqual((fake.calls, summary["restored"], summary["retired_before"]), ([], [], 1))
+
     def test_an_odd_jotform_value_is_yes_plus_a_warning_the_runner_reports(self):
         fake = FakeForm(*self.form(switched=True))
         summary, out = self.summary(fake, partners={"Partner Two": "maybe"})
@@ -2937,6 +3032,30 @@ class RetiredRosters(unittest.TestCase):
         src = read(os.path.join(REPO, "tools", "auto_sync.py"))
         self.assertIn('ap.add_argument("--max-retires", type=int, default=5,', src)
         self.assertIn('ap.add_argument("--max-restores", type=int, default=5,', src)
+
+    def test_the_runner_checks_the_sheets_zone_against_the_constant(self):
+        # the sheet stamps removed_date in its own zone; the sync takes "today" in SHEET_ZONE; the
+        # runner, which reads the sheet's setting anyway, says when the two differ (the rule is
+        # then off by the difference) - a log line when they agree, never a failed run
+        import tempfile
+        import types
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as out:
+            args = types.SimpleNamespace(apply=False, out=out, max_creates=5, max_updates=20, trigger="test", run_url="")
+            run = auto_sync.Run(args)
+            with mock.patch("builtins.print"):
+                run.check_sheet_zone(glow_sync.SHEET_ZONE)
+                self.assertEqual((run.attention, run.lines[-1]), ([], "Sheet zone: America/New_York (as glow/sync.py SHEET_ZONE)"))
+                run.check_sheet_zone("America/Chicago")
+        (title, detail), = run.attention
+        self.assertEqual(title, "The sheet's time zone is America/Chicago, the tools expect America/New_York")
+        self.assertIn("glow/sync.py SHEET_ZONE says America/New_York", detail)
+        self.assertIn("Clubs that do not use Jotform", detail)
+        self.assertEqual(run.lines[-1], "  ! sheet zone America/Chicago differs from glow/sync.py SHEET_ZONE America/New_York")
+        self.assertFalse(run.failed)
+        # read where the tabs are exported (a --roster run reads no sheet, and gets no check)
+        src = read(os.path.join(REPO, "tools", "auto_sync.py"))
+        self.assertIn("run.partners = run.export_partners(svc)\n        run.check_sheet_zone(sc.time_zone(svc))", src)
 
     def test_a_disabled_form_is_skipped_and_an_unread_status_is_failed(self):
         run = AutoSyncPlan.run_region(self, self.DRY, apply=True, status="DISABLED")
@@ -4189,7 +4308,7 @@ class RetiredRostersAudit(unittest.TestCase):
     def test_a_club_with_no_active_girl_is_retired_the_day_after_and_a_namesakes_entry_is_not_its_own(self):
         import datetime as dt
         from unittest import mock
-        today = dt.datetime.now(dt.timezone.utc).date()
+        today = glow_sync.sheet_today()          # the sheet's day, as the audit reads it (not UTC's)
         gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
         sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
         qs, wire = self.form(retired=("12",))          # q11's "Stars - Partner One" stays on the picker
@@ -4232,6 +4351,21 @@ class RetiredRostersAudit(unittest.TestCase):
         # an enabled form's page is read, as ever
         _, fetched = self.printed(qs, wire, "--rendered", page="<html></html>")
         self.assertEqual(fetched, [self.AFRICA])
+
+    def test_a_form_whose_status_is_not_reported_is_skipped_like_a_disabled_one(self):
+        # GET /form/{id} without a status: the region check and the served page are skipped and
+        # named as such (a falsy marker once sent main() looking for the clubs count: KeyError)
+        qs, wire = self.form()
+        rep = self.report(qs, wire, marks=self.NO, status=None)
+        self.assertEqual(rep["region_check"], {"skipped": "status not reported"})
+        self.assertIsNone(rep["status"])
+        self.assertEqual(self.verified(rep), ([], ["region check skipped (form status not reported)"]))
+        out, fetched = self.printed(qs, wire, "--rendered", partners={"Partner Two": "no"}, status=None)
+        self.assertEqual(fetched, [])
+        self.assertIn("[status not reported]", out)
+        self.assertIn("   rendered: skipped (form status not reported)\n", out)
+        self.assertIn("   vs Roster: skipped (form status not reported)\n", out)
+        self.assertIn("→ CLEAN", out)
 
     def test_the_served_page_is_counted_for_the_retired_rosters_always_hidden(self):
         page = ('<li class="form-line always-hidden" data-type="control_checkbox" id="id_12">'

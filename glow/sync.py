@@ -219,19 +219,43 @@ ROSTERS_REQUIRED = True
 # partner is marked `no` in the Partners tab's `jotform` column, and (this
 # constant) when its club has no active girl in the Roster: Ryan, 2026-10-06,
 # on. Only once the club's latest removed_date is at least a day before the
-# run's UTC date (inactive_retires below): a roster emptied and refilled in two
-# Club Roster Form submissions minutes apart must not leave the picker in
-# between. Off, a club that loses its last active girl keeps today's treatment
-# (`?` on the form but not in the sheet export - keeping its current roster).
-# docs/plans/2026-10-06-clubs-off-jotform.md
+# day of the run IN THE SHEET'S ZONE (sheet_today, inactive_retires below): a
+# roster emptied and refilled in two Club Roster Form submissions minutes apart
+# must not leave the picker in between. Off, a club that loses its last active
+# girl keeps today's treatment (`?` on the form but not in the sheet export -
+# keeping its current roster). docs/plans/2026-10-06-clubs-off-jotform.md
 RETIRE_INACTIVE = True
+# The spreadsheet's own time zone (File > Settings), the one appsscript/Roster.gs
+# today_() stamps removed_date in (getSpreadsheetTimeZone()) - NOT the script
+# project's appsscript.json timeZone (America/Chicago), which no stamp uses. The
+# sheet moved to it on 2026-09-02 (docs/DECISIONS.md, 2026-09-30, timestamps).
+# Comparing a sheet-zone date with the UTC date would retire a club emptied in
+# the sheet's evening at the very next dispatch (from 20:00 New York the UTC
+# date is already tomorrow). Nothing offline can read the sheet's setting, so
+# tools/auto_sync.py compares this with sheets_client.time_zone on every run
+# and raises ATTENTION when they differ.
+SHEET_ZONE = "America/New_York"
+
+
+def sheet_today(now=None):
+    """Today as a date in the sheet's zone (SHEET_ZONE), the day a removed_date
+    written now would carry; `now` (an aware datetime) stands in for the clock.
+    Exits when the zone is not in the time zone database (refuse, never guess)."""
+    import zoneinfo
+    try:
+        zone = zoneinfo.ZoneInfo(SHEET_ZONE)
+    except zoneinfo.ZoneInfoNotFoundError:
+        sys.exit(f"The time zone database has no '{SHEET_ZONE}' (glow/sync.py SHEET_ZONE) - "
+                 "install tzdata (pip install tzdata) or the system's zoneinfo; nothing done")
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    return now.astimezone(zone).date()
 
 
 def inactive_retires(latest_removed, today):
-    """Whether a club with no active girl is retired on `today` (a date, UTC):
-    its latest removed_date (text, YYYY-MM-DD as the sheet writes it) is at
-    least a day before. A club whose rows carry no date, or one this cannot
-    read, stays as it is - the safe side."""
+    """Whether a club with no active girl is retired on `today` (a date in the
+    sheet's zone, sheet_today()): its latest removed_date (text, YYYY-MM-DD as
+    the sheet writes it, in that zone) is at least a day before. A club whose
+    rows carry no date, or one this cannot read, stays as it is - the safe side."""
     if not RETIRE_INACTIVE or not latest_removed:
         return False
     try:
@@ -382,6 +406,24 @@ def roster_removed(csv_path):
     return out
 
 
+def _partners_rows(csv_path):
+    """(rows, header as keys) of a Partners export; one without a `partner` column is refused."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.reader(f))
+    header = [key(h) for h in rows[0]] if rows else []
+    if "partner" not in header:
+        sys.exit(f"Not a Partners export: expected a 'partner' column in {csv_path}"
+                 + (" - found: " + ", ".join(rows[0]) if rows else " - the file is empty"))
+    return rows, header
+
+
+def partners_marker_present(csv_path):
+    """Whether the Partners export has the `jotform` column at all (by header name,
+    as read_partners_csv reads it). Without it nobody is marked, so a sync with
+    --apply refuses to restore a retired roster from it (sync_attendance_form.py)."""
+    return JOTFORM_COL in _partners_rows(csv_path)[1]
+
+
 def read_partners_csv(csv_path):
     """{key(partner): "yes" | "no"} from an export of the Partners tab: whether
     each partner's clubs are on the attendance forms. The columns are read by
@@ -390,15 +432,16 @@ def read_partners_csv(csv_path):
     not on Jotform; `yes` or blank is the default; any other text is treated as
     yes - nothing leaves a form because of a typo - and reported through warn,
     so the runner raises ATTENTION for it. A partner listed twice is `no` when
-    any of its rows says so. A tab without the column marks nobody."""
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.reader(f))
-    header = [key(h) for h in rows[0]] if rows else []
-    if "partner" not in header:
-        sys.exit(f"Not a Partners export: expected a 'partner' column in {csv_path}"
-                 + (" - found: " + ", ".join(rows[0]) if rows else " - the file is empty"))
+    any of its rows says so. A tab without the column marks nobody, and says so
+    through warn as well (a renamed or moved header would otherwise read as
+    "every mark lifted" and put every retired roster of an active club back)."""
+    rows, header = _partners_rows(csv_path)
     i_p = header.index("partner")
     i_j = header.index(JOTFORM_COL) if JOTFORM_COL in header else None
+    if i_j is None:
+        warn(f"  ! Partners tab: the export has no '{JOTFORM_COL}' column, so no partner is marked - "
+             "a retired roster of an active club would be restored; check the header (Partners!D1) "
+             "before applying (docs/RUNBOOK.md, \"Clubs that do not use Jotform\")")
 
     def cell(row, i):
         return row[i] if i is not None and i < len(row) else ""
