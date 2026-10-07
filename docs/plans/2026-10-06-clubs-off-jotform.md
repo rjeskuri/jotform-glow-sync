@@ -792,3 +792,130 @@ DRY RUN - re-run with --apply to write
   regional form.
 - The exact `kept / new / dropped` split of the first Africa rewrite (read from the dry run).
 - Whether Jotform's disabled page translates (the 2026-09-01 intent's open question).
+
+## Build notes (track T3a - the core, built 2026-10-07 on a branch cut from `wf10/four-issues` at `22342d5`; nothing written to Jotform, the sheet or Salesforce)
+
+**Built as specified** (section A's Python side, `RETIRE_INACTIVE` on, "Retired rosters in the
+sync", "Hidden and required, without a rule" (the `--rendered` count), "The way back", "Refusals",
+`--summary-json`, "The runner", `form_status`, and section D's runner / sync / `form_status` parts):
+`glow/sync.py` (`PARTNER_COLS`, `JOTFORM_COL`, `read_partners_csv`, `RETIRE_INACTIVE = True`,
+`roster_removed`, `inactive_retires`), `sync_attendance_form.py` (`--partners`, the export floor, the
+`Roster:` tail, the `Form:` line and `--disabled-ok`, the retired decision before the reconcile
+loop, the `~` lines, the restore with the long name as an `sf_changes` entry (`RETIRED_OLD`), the
+no-export warning and `--apply` refusal, `build_conditions(..., retired=())`, the summary's
+`retired` / `restored` / `partners`), `tools/auto_sync.py` (the Partners export beside the Roster,
+`--partners`, `--roster` without it refused, `RETIRED_RX` / `RESTORED_RX` / `JOTFORM_VALUE`,
+`plan_summary`, the two bands, the status read under `with_retry` -> `skipped` / `failed`, the
+odd-value ATTENTION, `verify_report`'s skipped note and awaiting problem), `tools/form_status.py`
+(`--partners`, retired / awaiting / stray rosters, the `[DISABLED]` skips of the region check and
+`--rendered`, `rendered_retired`), the tests (`RetiredRosters`, `RetiredRostersAudit`, the
+plan-line test), CLAUDE.md, RUNBOOK ("Clubs that do not use Jotform", the manual loop, "Automatic
+sync", the forms' status at :19), ARCHITECTURE, DECISIONS rows 1, 2, 3 and 5, BACKLOG 1 and 71.
+Not this track's: `tools/deactivate_clubs.py`, `tools/disable_form.py`, `appsscript/`,
+`tools/build_roster_offline.js`, `tools/upload_roster.py`, the parity test
+(`test_partner_columns`), DECISIONS row 4, the RUNBOOK's "Deactivating a club" and "Disabling a
+regional form", the two skills' entries (T3b and the live steps).
+
+**Deviations, and why.**
+
+- *The `~ retired roster` line names a retirement this run makes*, not every retired roster: a
+  roster the form already holds retired (no rule, no entry of its own) is counted in one line
+  (`Retired rosters: N already off the Club picker …`) and in the summary's `retired_before`, and
+  the summary's `retired` list carries the new ones only. The plan's band counts `~` lines; printed
+  on every run, 38 lines would have tripped it on every run after the Africa apply. The runner's
+  dry run on an applied form reads `in-sync` (a test pins it).
+- *A roster's own picker entries are its plain text and its own long name* (`<text> - <its
+  partner>`) - never a namesake's long entry. Without that, Partner Two's retired "Stars" would
+  have read as "on the picker" because "Stars - Partner One" is listed, and would never have been
+  restored (`picker_entries` in the sync, `off_picker` with the owner in `form_status`; both tested).
+- *`roster_pairs` keeps its shape* (`{(partner, club): active}` - every caller reads the value as a
+  flag); the latest `removed_date` per pair is a second reader beside `roster_names`,
+  `glow.sync.roster_removed`, and the day rule is `glow.sync.inactive_retires(latest, today)`, read
+  at run time (so `RETIRE_INACTIVE` patched off in a test turns it off). A date that does not read
+  as `YYYY-MM-DD`, or none, keeps the club as it is (the safe side).
+- *`PARTNER_COLS` / `JOTFORM_COL` sit after the `COL_*` sheet-layout constants* at the top of
+  `glow/sync.py`: the module has no `ROSTER_COLS` to place them after (the Roster columns live in
+  `read_roster_csv`'s `needed` set and `Config.gs`). If T3b placed its two identical lines
+  elsewhere, the merge shows two definitions of the same values - delete one.
+- *The restore and its refusal run on picker forms with `--roster` only*: the typed-box form (none
+  is live) and the enrollment path keep today's behaviour
+  (`test_a_form_without_the_picker_keeps_its_rules_byte_for_byte` reaches its own "Cannot
+  disambiguate" exit as before).
+- *`--apply` is refused on any status other than `ENABLED`* (a status Jotform did not report
+  included), not on `DISABLED` alone - refuse rather than guess; `--disabled-ok` passes it.
+- *The sync refuses a region whose every active club is marked* (`Every active club in <region>
+  belongs to a partner marked jotform=no …`): the form would be synced down to the empty Club
+  picker section C calls untested; disable the form instead.
+- *The `Roster:` tail is printed only when a club is left off* (an Asia run reads as today).
+- *`form_status`*: `load_roster` keeps the names per partner too (a 4-tuple; `form_status` is its
+  only reader), `roster_facts` reads the Roster once more for the holders, the active flags, the
+  owner read-back (`roster_names`) and the dates; `roster_owner` is the sync's owner rule (one
+  holder; else the long name's partner; else the partner whose rows list at least half, and the
+  most, of the question's options); a roster off the picker whose owner cannot be told keeps
+  today's "0 show-rules" line. `rule_summary` gains `live_rosters`, and the `rules:` line reads
+  `N show-rules for N live rosters (M on the form)` only when they differ.
+- *The runner's one `Client`* (`run.client`, `max_time=60`) serves the status reads and the storage
+  read; the storage test's source assertion follows. `check_bands` reads `--max-retires` /
+  `--max-restores` through `getattr` (the tests' argument namespaces predate them).
+- *BACKLOG*: row 71 was reserved for this plan by the merged BACKLOG, so the retired-rosters'-options
+  item is 71 (not the next free number, 74).
+- *The branch* was cut from `22342d5` (the integration branch's merged head at build time, two
+  tracks in), not `4ab74fc`.
+
+**Read-only rehearsal (plan step 4), 2026-10-07 01:20 UTC, key from the environment, GET only.**
+No `data/partners_*.csv` existed, so a scratch export was built from the 2026-10-06T1047Z Roster
+export's partner column (49 partners, their regions, `no` on the three rows) at
+`data/scratch_partners_2026-10-06.csv` (gitignored). Partner organisations and club names only;
+no girl's name read out.
+
+```
+# the sync, Africa
+Form: 262382821971058 status ENABLED
+Roster: 182 active clubs in Africa (3518 girls); 364 clubs overall; 38 club(s) of 3 partner(s) not on Jotform (Partners tab jotform=no) left off this form
+Club picker: q446 (mentors choose their club from a list)
+Club guard: q462 (one club per submission)
+Same-name clubs: 6 roster(s) on this form send '<club> - <partner>' to question 5 (each has its own Club picker entry)
+  ~ retired roster '<club>' (q…): not on Jotform (<partner>, Partners tab jotform=no)   x 38 (6 / 16 / 16 by partner)
+  conditions: 211 kept, 2 new, 40 dropped
+DRY RUN (use --apply to write):
+  - UPDATE roster … (q…, N girls)                             x 3 (the day's roster drift: the 10-06 export against the form on 10-07)
+  - UPDATE club picker (182 clubs: calcValues, options)
+  - REPLACE conditions (213 rules)
+exit 0; no '!' line, no '?' line, 0 restored
+
+# the sync, the template (no --region)
+Form: 262352490535154 status ENABLED
+Roster: 326 active clubs (6178 girls); 364 clubs overall; 38 club(s) of 3 partner(s) not on Jotform (Partners tab jotform=no) left off this form
+Same-name clubs: 7 roster(s) …
+  ~ retired roster …                                          x 38
+  conditions: 355 kept, 2 new, 40 dropped
+DRY RUN (use --apply to write):
+  - UPDATE club picker (326 clubs: calcValues, options)
+  - REPLACE conditions (357 rules)
+exit 0 (no backlog: -54's 22 rosters are applied)
+
+# the audit, --partners, the five live forms (no --rendered)
+Roster (active girls): {'Africa': 179, 'Latin America': 38, 'Asia': 95, 'U.S': 11} clubs per region; not on Jotform: Africa 38
+storage: … -> ok; … -> ok; plan SILVER
+== template …  retired rosters: 0 (not on Jotform 0, no active girl 0)   rules: 364 show-rules for 364 rosters … → CLEAN
+== Africa …    retired rosters: 0 (not on Jotform 0, no active girl 0)   rules: 220 show-rules for 220 rosters … → CLEAN
+   vs Roster (179 clubs in region): 0 missing from form, 0 on form but not in roster, 3 rosters differ, 38 await retirement (the next sync apply)
+== Asia / Latin America / U.S: → CLEAN, retired rosters 0, vs Roster 0 / 0 / 0, all [ENABLED]
+
+# the runner, --roster … --partners …, --out under the scratchpad (nothing written anywhere)
+Partners: using …/scratch_partners_2026-10-06.csv
+== Africa:  Form: … status ENABLED … 38 ~ lines … UPDATE club picker (182 clubs …), REPLACE conditions (213 rules)
+  => Africa: attention - would take 38 clubs off the Club picker at once (band: 5) - a partner newly marked jotform=no, or a wrong cell on the Partners tab? apply by hand after checking
+  => Asia: in-sync
+  => Latin America: in-sync
+  => U.S: in-sync          (every form ENABLED today: no skipped)
+storage: … -> ok
+ATTENTION: 1 item(s): "Africa: not applied - 0 create(s), 3 update(s), 0 delete(s), 0 warning(s), 38 retired, update club picker", 38 "- RETIRE …" lines; exit 2
+```
+
+The counts are the Proof's (182 / 3518 / 364 / 38; 211 kept, 2 new, 40 dropped; 213 and 357
+rules; 326 clubs on the template). The three roster updates on Africa are the day's drift, not this
+plan's. `test/python_test.py`: 528 tests, `OK` (506 before); `scripts/check_py.py`: 49 files parse,
+27 scripts answer --help; `check_secrets.py --file` clean on every changed file; `check_docs_links.py`
+ok. Step 7's headless-Chrome check of the `always-hidden` reading and the live steps wait for Ryan's
+goes; the session's work-log entry is the orchestrator's (not run from this worktree).
