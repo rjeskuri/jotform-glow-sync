@@ -2382,6 +2382,12 @@ shows the Jotform attendance as charts, built only from data Salesforce already 
 - last month by partner (girls) and by module (sessions);
 - clubs with no attendance last month: a number and a table.
 
+Once `totals1/` is deployed ([plan](plans/2026-10-06-attendance-totals.md) D; pending Ryan's
+go), also: total attendance last month from every source beside the Jotform-only figures (a
+header says "(Jotform only)" wherever girls are counted by name); total and Jotform attendance
+per partner per month; clubs not submitting in the last 14 days and since 1 September (numbers,
+and a table by partner for the 14 days); blank submissions since 1 September.
+
 The test report "Jotform Monthly Attendance (test)" now shows a chart with its rows collapsed.
 Its filters are unchanged.
 
@@ -2420,11 +2426,25 @@ Its filters are unchanged.
 - **Snapshot**: a dashboard shows its last refresh (the time at top right), not live data.
   Press Refresh, or schedule a daily refresh (Ryan's step, in the dashboard: Refresh >
   Schedule Refresh).
+- **Once `totals1/` is deployed**: "Total attendance" sums `Girls_Present__c` over `Success`
+  batches - the Jotform rows plus the monthly counts partners without Jotform report
+  (`Creator__c` `Partner report`; "Attendance totals and partner-reported counts"). "Girls who
+  attended" stays Jotform only (a reported count has no names) and counts each girl once. "Did
+  not submit" in the 14-day and since-1-September windows means no batch of any status dated in
+  the window (a refused duplicate counts as submitted); the last-month tile stays row-based. A
+  **blank** is a submission with no girl ticked: `Failed` "No participants submitted", or a
+  legacy `Success` with `Girls_Present__c` 0. Clubs whose partner reports a monthly count show
+  as not submitting until that count arrives; the U.S clubs, which do not report attendance
+  here, stay on the lists ("Clubs that do not use Jotform").
 
 **Filters:**
 - The dashboard's **Partner** filter covers every component. It holds the 49 partner names
   that have clubs, typed in exactly (Salesforce allows 50 values per filter).
-  - A new partner must be added to the filter by hand (`partners.json`, below).
+  - A new partner must be added by hand to **both** lists: the dashboard's `partners.json`
+    (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
+    map the automatic club accounts read, partner → its account; "New clubs' accounts,
+    automatically"). Two lists of the same 49 partners, kept separate on purpose: one is filter
+    text, the other account ids.
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -2448,23 +2468,33 @@ Its filters are unchanged.
 - **Photos**: none in Salesforce since 2026-10-01; they are in Google Drive ("Photos" below).
 
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
-- Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report and the
-  dashboard into `build/`, from:
+- Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report, the batch
+  report type `Attendance_Totals` and the dashboard into `build/`, from:
   - `partners.json`: the Partner filter values;
   - `before/`: the test report as it was;
+  - the deployed copies (`after/`, `fix1/`, `after2/`, `totals1/`): the dashboard's running
+    user, read from the `<runningUser>` they all carry and never written down; copies that
+    disagree stop the build, and the CLI login (`sf org display`) is read only while no copy
+    exists;
   - `sfdx-project.json`.
-  It reads the running user from the CLI login; no user name is written down.
+  `--without-girls-enrolled` leaves `Girls_Enrolled__c` out of the type. `gen.py.after2` beside
+  it is the previous generator (what built `after2/`), kept for comparison; `NOTES.md` says what
+  `totals1` added and lists the tokens the first check-only validate settles.
 - The other copies:
   - `before/`: the test report before any change (a deployable project);
   - `after/`: the first deploy (2026-10-02 03:46 UTC);
   - `fix1/`: the second change (deployed 2026-10-06 09:29 UTC);
-  - `after2/`: everything as it stands now (what `gen.py` builds).
+  - `after2/`: what was live before `totals1/`;
+  - `totals1/`: the attendance totals, the three "did not submit" windows and the blank report
+    ([plan](plans/2026-10-06-attendance-totals.md) D; made from the build after the check-only
+    validate, deployed on Ryan's go - write the date here); what `gen.py` builds.
 - After a deploy, Salesforce writes `expandOthers` true on every report chart and drops or adds a
   few default attributes on the dashboard. A retrieve differs from `gen.py` only in those.
 - **The steps:**
-  1. Back up what is live: `sf project retrieve start -o glow` the six `Jotform_*` reports below,
-     the test report and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a
-     dated folder beside the others.
+  1. Back up what is live: `sf project retrieve start -o glow` the reports below (the six
+     `Jotform_*`; once `totals1/` is deployed, its six and the report type `Attendance_Totals`
+     too), the test report and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`),
+     into a dated folder beside the others.
   2. Edit `gen.py` or `partners.json`, then `python3 gen.py`.
   3. Copy only the changed files into a new folder with `sfdx-project.json` (as `fix1/`).
   4. Check-only: `cd` there, then `sf project deploy start --dry-run -o glow -d force-app`.
@@ -2487,9 +2517,15 @@ Its filters are unchanged.
   - the reports `Jotform_Attendance_by_Week`, `Jotform_Attendance_by_Month`,
     `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month`,
     `Jotform_Sessions_by_Module_Last_Month` and `Jotform_Clubs_No_Attendance_Last_Month`;
-  - the dashboard `Jotform_Attendance_test`.
+  - the dashboard `Jotform_Attendance_test`;
+  - once `totals1/` is deployed: the reports `Total_Attendance_by_Partner_by_Month`,
+    `Jotform_Attendance_by_Partner_by_Month`, `Total_Attendance_Last_Month`,
+    `Clubs_Not_Submitting_Last_14_Days`, `Clubs_Not_Submitting_Since_1_Sept` and
+    `Blank_Submissions`, then - **last**, after the six reports that use it - the report type
+    `Attendance_Totals`; never `Attendance_Batches` (the vendor's report type). The dashboard
+    itself rolls back to `after2/`'s first (redeploy it; the six reports and the type may stay).
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
-  touched.
+  touched, nor the vendor's report type `Attendance_Batches`.
 
 ## Photos
 

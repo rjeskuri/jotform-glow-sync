@@ -466,6 +466,17 @@ pilots again (the two WESAD strays were re-parented 2026-10-06, `00ee471`), so t
 signal reads 2. BACKLOG 58's rate, when it comes, needs the same marker on its "enrolled" side
 (751 girls enrolled, 0 Jotform attendance, by design).
 
+**New clubs of a flagged partner and their accounts** (added 2026-10-07, when `main`'s new-club
+account step was merged): session -51's automatic club accounts
+([plan](2026-10-06-sf-new-club-accounts.md); `tools/sf_new_clubs.py`, repository variable
+`SF_SYNC`) create an account **only for a club the sync puts on a form** - the step runs inside
+the region's apply, over the plan's `CREATE roster` lines. A new club of a partner marked
+`jotform=no` never reaches a form (Risks: "A new club under a flagged partner"), so the sync makes
+no account for it: it stays on SF Pending and in the Monday e-mail for a hand create, and that
+account must exist before the club's first aggregate batch (plan 2 F's contract: a typed name
+with no account makes the processor create a partner-less one). The second trigger that would
+close this, "an active Roster club on no form with no account", is BACKLOG 74 (Ryan's decision).
+
 ## Files that change
 
 - `glow/sync.py` - `PARTNER_COLS`, `JOTFORM_COL`, `read_partners_csv`, `RETIRE_INACTIVE`;
