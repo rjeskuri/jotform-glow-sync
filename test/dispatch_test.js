@@ -53,5 +53,19 @@ check('the workflow reads the reason from either event',
 check('the workflow file is the one the sheet starts', gs.DISPATCH_WORKFLOW === 'auto-sync.yml' &&
       fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', gs.DISPATCH_WORKFLOW)));
 
+// the Salesforce side of the workflow (docs/plans/2026-10-06-sf-new-club-accounts.md)
+check('the workflow token reads the repository contents only',
+      /\npermissions:\n  contents: read\n(?![ \t])/.test(workflow) && workflow.split('permissions:').length === 2);
+check('only main\'s code runs (an Actions-only token picks the ref of a workflow_dispatch)',
+      workflow.includes("    if: github.ref == 'refs/heads/main'\n"));
+const syncAt = workflow.indexOf('      - name: Sync\n');
+const sync = workflow.slice(syncAt, workflow.indexOf('      - name:', syncAt + 1));
+for (const s of ['secrets.SF_CLIENT_ID', 'secrets.SF_CLIENT_SECRET']) {
+  check('the workflow gives ' + s + ' to the Sync step only', workflow.split(s).length === 2 && sync.includes(s));
+}
+check('--apply-salesforce only with --apply and SF_SYNC=apply',
+      workflow.split('--apply-salesforce').length === 2 &&
+      /\n {14}args\+=\(--apply\)\n {14}if \[ "\$SF_SYNC" = "apply" \]; then args\+=\(--apply-salesforce\); fi\n {12}fi\n {10}fi\n/.test(workflow));
+
 console.log('\n' + (failures ? failures + ' FAILURES' : 'ALL CHECKS PASSED'));
 process.exit(failures ? 1 : 0);

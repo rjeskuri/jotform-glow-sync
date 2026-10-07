@@ -291,3 +291,48 @@ consumer keys (`3MVG9…`) and 64-hex consumer secrets, in either case.
   - the SF Pending parity test.
 - Step 4's run log lines, pasted into this plan.
 - Step 7's read-back, pasted into this plan.
+
+## Build notes (2026-10-07, branch `wf11/sf-new-clubs`)
+
+**Deviations from the plan:**
+- **`Org` kept its home's name.** It moved to `glow/salesforce.py`, and `tools/sf_backfill.py`
+  re-exports `Org`, `Refused`, `quoted`, `API` and `NEXT_PAGE`. So `test/sf_backfill_test.py`, and
+  the other session's tools that import them from there, needed no change. `Org.update` (theirs)
+  and `describe` were added.
+- **curl stays the transport.** It follows no redirect without `-L`, so the redirect concern of the
+  review is met by the transport the tests already pin, not by a urllib opener.
+- **The create runs after the form backup**, right before the apply (code review): a failed
+  backup makes no account. An apply that fails after the create leaves the account, which the plan
+  accepts: accounts must come before the form.
+- **The end-of-run check** reads every region's names, judges only the regions whose form is as
+  planned, and reports partner-less strays only when all four forms' names were read.
+- **The workflow runs only on `main`.** A token with Actions: write cannot change code, but it can
+  pick the branch of a `workflow_dispatch`.
+- **The sheet's call carries inputs:** `source` (`sheet`) and `reason` (action and time). The old
+  `repository_dispatch` event is still accepted until the token is switched.
+- **`SF_SYNC=apply` without `--apply-salesforce` runs as `plan`.** A permission set that cannot
+  create (Account describe) turns an `apply` run into `plan` and says so.
+- **Names created unattended** use plain or accented Latin letters, ASCII digits and
+  `space - . ( ) ' /` only, all in the BMP. One of today's 364 clubs falls outside (a comma).
+- **Never a body for a name in use.** What Salesforce already has (the name, the club code) is
+  judged before the name's spelling, the partner and the code, so a name already in use never
+  comes with a "body for a hand create".
+- **A create whose outcome is unknown** is named as such by the check, never "create it by hand".
+- **Reads are retried** through `auto_sync`'s `with_retry`; the insert never is.
+- **Only GLOW Sync's sessions are revoked** at the end; Ryan's CLI login is only forgotten.
+- **`.gitignore`** allows `glow/sf_partners.csv`, which holds organisations only.
+- **BACKLOG 74** (from the other session's plans): a new club of a partner that does not use
+  Jotform gets no account from v1.
+
+**Reviews:**
+- **Three plan reviews** (data integrity, security and operations, conventions and rollout),
+  folded into the plan before approval.
+- **A four-lens code review** of the branch (correctness, security, auto_sync integration,
+  mutation testing): 30 findings, each confirmed by an independent check, none critical. All are
+  fixed with a test, or are documentation (BACKLOG 53's hook pattern is Ryan's file).
+
+**Proof so far:**
+- `make check` → `CHECK PASSED` (508 tests; `test/sf_new_clubs_test.py` 43, `dispatch_test.js`
+  ALL CHECKS PASSED).
+- Nothing is live: `SF_SYNC` is unset and the secrets do not exist yet.
+

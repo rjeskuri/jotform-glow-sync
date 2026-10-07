@@ -233,8 +233,9 @@ upload".
 ## Automatic sync
 
 **Path:** a roster change in the sheet (New Club / Roster Modification form,
-a rebuild, or a region refresh) → `appsscript/Dispatch.gs` sends a
-`repository_dispatch` event to GitHub → `.github/workflows/auto-sync.yml` →
+a rebuild, or a region refresh) → `appsscript/Dispatch.gs` starts the
+workflow on GitHub (`workflow_dispatch`; the older `repository_dispatch` event
+is still accepted) → `.github/workflows/auto-sync.yml` →
 `tools/auto_sync.py` exports the Roster tab and, per region, dry-runs the
 sync, checks the safety bands, backs up, applies, verifies with
 `form_status.py`, and appends a row to the sheet's **SyncLog** tab. The
@@ -242,6 +243,12 @@ workflow also runs every morning (the cron is UTC: 06:00 Chicago in summer,
 05:00 in winter) as a backstop for missed
 events and manual sheet edits, and can be started by hand from the Actions
 tab ("Run workflow", optional region).
+
+**New clubs' Salesforce accounts**: with the repository variable `SF_SYNC` at `plan` or `apply`
+the run also checks Salesforce, and with `apply` creates the account of each new club right
+before the region's form puts it on the Club picker ("Club accounts in Salesforce", "New clubs'
+accounts, automatically"). It is one more SyncLog row, region `Salesforce`; its problems are
+ATTENTION items starting `SF:`.
 
 **Safety bands** (per region, per run; `--max-creates`, `--max-updates`):
 at most 5 new clubs and 20 roster updates; never a delete; not when a roster
@@ -1676,9 +1683,11 @@ when nothing matches it creates a new, partner-less Club account.
 
 - **Never edit a club's name in Salesforce.** A rename starts in the sheet ("Renaming a club"),
   and the account is then renamed to the new picker text - with Ryan's go.
-- **A new club** reaches the forms automatically but not Salesforce (BACKLOG 27). It shows in the
-  SF Pending tab and the Monday e-mail; its account is created by hand or as a further round of
-  the procedure below, before its first attendance if possible.
+- **A new club** gets its account from the automatic sync when `SF_SYNC` is `apply` (below).
+  Otherwise, or when the sync says ATTENTION, it is created by hand before its first attendance:
+  it stays in the SF Pending tab and the Monday e-mail until then. Once `SF_SYNC` is `apply`, create
+  by hand only for an `SF:` ATTENTION item, and read the name in Salesforce first (the sync may
+  have made it since).
 - **Signals** (read-only queries, all expected as stated):
   - Club accounts without a parent: exactly the two pilot accounts that are on hold. One more
     means a form sent a name no account carries.
@@ -1688,15 +1697,126 @@ when nothing matches it creates a new, partner-less Club account.
   - `python3 tools/sf_club_accounts.py soql --totals`, then
     `totals --result <saved answer> --also data/sf_prep_2026-09-30/created_accounts_round2.csv
     data/sf_prep_2026-09-30/created_accounts_round3.csv` → `totals ok` (364 Club accounts).
-- **Writing accounts to Salesforce** goes through the write connector, one record per call, never
-  by a subagent; the live gate does not see those calls, so the only gate is Ryan's go in the
-  conversation. `tools/sf_club_accounts.py` (which never calls Salesforce) cuts the batches, checks
+- **Writing accounts to Salesforce** by hand goes through the write connector, one record per call,
+  never by a subagent; the live gate does not see those calls, so the only gate is Ryan's go in the
+  conversation. The automatic sync writes as its own user, GLOW Sync, and only creates (below). `tools/sf_club_accounts.py` (which never calls Salesforce) cuts the batches, checks
   each saved answer and keeps the rollback files. (Attendance is written by `tools/sf_backfill.py`,
   which the gate does catch: "Back-fill of attendance into Salesforce".)
 - **Rollback files** (never committed): `data/sf_prep_2026-09-30/created_accounts.csv` (345
   created, 8 linked), `created_accounts_round2.csv` (2 created), `created_accounts_round3.csv` (the
   7 same-name clubs), `link_targets_before.json` (the pilot accounts as they were). A created account may be deleted only while it has no Contacts
   and no attendance, and only with Ryan's go.
+
+### New clubs' accounts, automatically (`SF_SYNC`)
+
+([plan](plans/2026-10-06-sf-new-club-accounts.md); `tools/sf_new_clubs.py`, called by
+`tools/auto_sync.py`.)
+
+**What each run does:**
+- Log in as **GLOW Sync**, an integration user, never Ryan's.
+- Read every Account, and stop all Salesforce work for the run if the read is not the whole org.
+- Before a region's form puts a new club on its Club picker, create the club's account:
+  - Name = exactly what question 5 will send;
+  - record type Club;
+  - parent = its partner's account from `glow/sf_partners.csv`;
+  - Description `GLOW club code <code>; created by the automatic sync <date>`.
+- After all regions, check every active club on a form, read only.
+
+**What it never does**: update, rename, delete, change an owner, touch a Contact or attendance, or
+create for a club that is not being put on a form.
+
+**The switch**: repository variable `SF_SYNC`; changing it is Ryan's go (CLAUDE.md rule 1).
+
+| `SF_SYNC` | What it does |
+|---|---|
+| `off` (or unset) | Nothing: no login. |
+| `plan` | Reads and checks only. Every account it would create is an ATTENTION item with the exact body, for a person to create that day. |
+| `apply` | Creates, at most 5 per region per run, all or nothing. Only when the forms apply too (`AUTO_SYNC_APPLY=1`); the workflow then adds `--apply-salesforce`. |
+
+Without the secrets the log says `SF: not configured`, with no ATTENTION.
+
+**Setup** (Ryan, once, in Salesforce Setup and on GitHub; nothing here goes through a Claude
+session):
+1. **User** "GLOW Sync":
+   - user licence Salesforce Integration, profile "Minimum Access - API Only Integrations";
+   - assign it the permission set licence "Salesforce API Integration".
+2. **Permission set** "GLOW Club Sync", licence "Salesforce API Integration":
+   - Account Read, Create and **View All**; field access `ParentId`, `Description`; record type
+     Club;
+   - nothing else: no Edit, no Contact, no attendance;
+   - assign it to GLOW Sync.
+3. **External Client App** "GLOW Sync":
+   - OAuth on; scope **api** only; **client credentials** flow on, Run As = GLOW Sync;
+   - App Policies: Permitted Users "Admin approved users are pre-authorized", permission set GLOW
+     Club Sync;
+   - a short session timeout; no refresh token; no login IP ranges (GitHub's addresses change).
+4. **The dispatch token**:
+   - create a fine-grained token for this one repository with **Actions: read and write** and
+     nothing else;
+   - put it in the sheet's Script Property `SYNC_DISPATCH_TOKEN`;
+   - revoke the old token, which had Contents: write and could change the code that holds the
+     Salesforce secret;
+   - `clasp push` of `Dispatch.gs` must be live first (a quiet moment; no new Google service, so
+     no re-authorisation);
+   - then GLOW → Google Forms → Request Jotform sync now must show `HTTP 204` in the Audit tab;
+   - the workflow runs only on `main` (a token with Actions: write can pick the branch of a run);
+     delete stale branches on GitHub, whose older workflow file has no such guard.
+5. **GitHub**:
+   - secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (the app's consumer key and secret), on the
+     web page or `gh secret set` reading stdin;
+   - repository variable `SF_SYNC` = `plan`.
+6. **First run**: Actions → auto-sync → Run workflow (apply unticked). The log must show:
+   - `SF: plan, as GLOW Sync`;
+   - `SF: describe ok - Account, Name, ParentId, Description, RecordTypeId createable; Club record
+     type available` (otherwise `SF: GLOW Sync cannot create Club accounts: …` names what the
+     permission set lacks, and an `apply` run only shows bodies);
+   - `SF: 448 Accounts read, 366 Club` (or today's counts);
+   - `SF: check - 364 ok, 0 need a person`.
+
+   Then from Ryan's `glow` login: `UserRecordAccess` for GLOW Sync is read access on a club and on
+   a partner account.
+
+**ATTENTION items (`SF: …`) and what to do:**
+
+| Item | Meaning | Fix |
+|---|---|---|
+| `not ready …` | Login refused, the user frozen, or the Account read not whole (View All lost, a page missing, a mapped partner unseen) | Read the detail. **Frozen**: an administrator unfreezes GLOW Sync (Salesforce also e-mails the admins); if it repeats, set `SF_SYNC=off` and ask Salesforce Support. New clubs this run went on the forms without an account: create them by hand. |
+| `would create …` (plan) | A new club needs its account | Create it by hand with the body shown, today |
+| `… - not created`: club code on another account | The club was renamed in the sheet, not in Salesforce | Rename that account to the question-5 name first ("Renaming a club"); no new account |
+| `… - not created`: the name is already an account | The processor made it first, or another record has the name | A partner-less Club: set its `ParentId` as the item says (write connector, Ryan's go). Anything else: look before acting. |
+| `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
+| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds |
+| `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
+| `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description, owner GLOW Sync |
+| `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
+| `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
+| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv` |
+
+**SF Pending**: when it creates an account, the run marks that club's SF Pending row
+`done (auto <date>)`: one cell, found by its header, read again before the write and after.
+
+**Rotating the secret**: regenerate the consumer secret in the External Client App, update the
+GitHub secret, then start a manual run (apply unticked): the log must show `SF: plan` or
+`SF: apply` and the counts.
+
+**Off-boarding / stop**:
+- `SF_SYNC=off` stops future runs; cancel a run already started in Actions.
+- Turning the External Client App off, or deactivating GLOW Sync, removes the access entirely.
+
+**Rollback of creates**:
+- The accounts the sync made: `SELECT Id, Name FROM Account WHERE CreatedById = '<GLOW Sync's
+  user id>'`.
+- One is deleted only while it has no Contacts and no attendance, on Ryan's go.
+- Dispatch: revert `Dispatch.gs` and restore a Contents token (not recommended).
+
+**Local cross-check** (read only, Ryan's CLI login, VPN off):
+
+```
+python3 tools/sf_new_clubs.py check --vpn-off --roster data/roster_<stamp>.csv \
+    --summary data/auto_sync/plan_<region>_<stamp>.json ...
+```
+
+It exits 0 when every club on those forms has its one right account.
 
 ## September back-fill: the resolver
 
@@ -1899,7 +2019,7 @@ Its filters are unchanged.
   Names still never go into the repo, logs, commits or the conversation (child-privacy).
 - If the folders are ever shared beyond those users: the dashboard runs as Ryan and shows
   everything, but a chart's report runs as the viewer, and club accounts are private (owned by
-  administrators, no sharing rules). A standard user would then see few or no rows behind a
+  administrators, or by GLOW Sync for those the automatic sync creates; no sharing rules). A standard user would then see few or no rows behind a
   full chart.
 
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):

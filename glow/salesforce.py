@@ -67,8 +67,9 @@ def cli_login(alias):
     return login
 
 
-def oauth_error(text):
-    """Salesforce's error code and short description only, cleaned - never the body itself."""
+def oauth_error(text, hide=()):
+    """Salesforce's error code and short description only, cleaned - never the body itself, and
+    never any of `hide` (hidden on the raw text, before the cut)."""
     try:
         answer = json.loads(text)
     except ValueError:
@@ -76,6 +77,9 @@ def oauth_error(text):
     if not isinstance(answer, dict):
         return "no readable answer"
     said = " - ".join(str(answer.get(k) or "") for k in ("error", "error_description") if answer.get(k))
+    for value in hide:
+        if value:
+            said = said.replace(value, "(hidden)")
     return SAY.sub("", said)[:120] or "no error given"
 
 
@@ -96,10 +100,8 @@ def client_credentials(client_id, client_secret, instance=INSTANCE):
         except ValueError:
             answer = None
         if status != 200 or not isinstance(answer, dict) or not isinstance(answer.get("access_token"), str):
-            said = oauth_error(text)
-            for secret in (client_secret, client_id):     # never repeated, even if Salesforce echoed one
-                said = said.replace(secret, "[hidden]")
-            raise Refused(f"Salesforce refused the GLOW Sync login (HTTP {status}): {said}")
+            raise Refused(f"Salesforce refused the GLOW Sync login (HTTP {status}): "
+                          f"{oauth_error(text, (client_secret, client_id))}")
         base, token = str(answer.get("instance_url") or "").rstrip("/"), answer["access_token"]
         if base != instance:
             raise Refused("Salesforce answered the GLOW Sync login for another address - nothing sent")
@@ -116,6 +118,7 @@ class Org:
     def __init__(self, alias=None, run=subprocess.run, login=None):
         self.alias, self.run, self.token, self.base = alias, run, None, None
         self.login_with = login or cli_login(alias)
+        self.revocable = login is not None      # GLOW Sync's sessions end with the run; Ryan's CLI login never
 
     def login(self):
         self.base, self.token = self.login_with(self.run)
@@ -173,8 +176,8 @@ class Org:
         return self.call("PATCH", f"/services/data/{API}/sobjects/{sobject}/{record_id}", body)
 
     def revoke(self):
-        """End the session (best effort; the token is forgotten either way)."""
-        if self.token is not None and self.base:
+        """End a GLOW Sync session (best effort); a CLI login's token is only forgotten here."""
+        if self.token is not None and self.base and self.revocable:
             curl(self.run, [f"url = {config_value(self.base + '/services/oauth2/revoke')}", 'request = "POST"',
                             'header = "Content-Type: application/x-www-form-urlencoded"',
                             f"data = {config_value(urllib.parse.urlencode({'token': self.token}))}"])

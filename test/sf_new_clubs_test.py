@@ -68,6 +68,14 @@ class FakeOrg:
         name = re.sub(r"\\(.)", r"\1", m.group(1))
         return [dict(a) for a in self.accounts if a["Name"].lower() == name.lower()]
 
+    GRANT = {"createable": True, "fields": [{"name": n, "createable": True}
+                                            for n in ("Name", "ParentId", "Description", "RecordTypeId")],
+             "recordTypeInfos": [{"recordTypeId": CLUB, "available": True}]}
+
+    def describe(self, sobject):
+        assert sobject == "Account"
+        return getattr(self, "grant", self.GRANT)
+
     def insert(self, sobject, body):
         assert sobject == "Account"
         self.inserts.append(body)
@@ -81,6 +89,9 @@ class FakeOrg:
         if self.mode == "unknown_saved":
             self.accounts.append(new)
             return 0, None
+        if self.mode == "gateway_saved":                  # a 502/504 page after the POST committed
+            self.accounts.append(new)
+            return 502, None
         return 0, None                                    # unknown and lost
 
     def revoke(self):
@@ -142,14 +153,17 @@ class SalesforceNewClubs(Fixture):
         self.assertTrue(m("Niñas Valientes", "NIÑAS VALIENTES"))
         self.assertFalse(m("Ninas Valientes", "Niñas Valientes"))      # accents count
         self.assertTrue(m("İstanbul Girls", "istanbul girls"))   # Java maps İ to i, one character to one
+        self.assertTrue(m("Straße", "STRAẞE"))                     # ß and ẞ are one character each
 
     def test_names_that_may_be_created_unattended(self):
         for ok in ("Sunrise Club", "Dawn's Club", "Niñas de Oro", "GLOW Club (Kibera) 2", "Club A/B - Example Partner",
                    "St. Mary's"):
             with self.subTest(ok):
                 self.assertEqual(sfn.name_problems(ok), [])
-        for bad in ("Sun & Moon", "Club, North", 'The "Best" Club', "Club X", " Club", "Club  X", "Club​X",
-                    "Niñas", "Dawn’s Club", "", "x" * 256):
+        for bad in ("Sun & Moon", "Club, North", 'The "Best" Club', "Club\u00a0X", " Club", "Club  X", "Club\u200bX",
+                    "Nin\u0303as", "Dawn\u2019s Club", "", "x" * 256, "Dawn\u02bcs Club", "Club \u00b2",
+                    "Club \u00bd", "Uni\ufb01ed Club", "\u1218\u1295 Club", "Club \u0663", "A\u030angel Club",
+                    "\U0001E900 Club"):
             with self.subTest(repr(bad)):
                 self.assertTrue(sfn.name_problems(bad))
 
@@ -162,6 +176,11 @@ class SalesforceNewClubs(Fixture):
         codes = sfn.read_codes(self.roster)
         self.assertEqual(codes[("example partner", "sunrise club")], "SUNRISEC")   # the inactive girl does not count
         self.assertIsNone(codes[("example partner", "two codes")])
+        with open(self.roster, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(self.roster, "w", encoding="utf-8") as fh:
+            fh.write("\ufeff" + text.replace(",active,", ",Active,"))         # a BOM, a capital: as the sync reads it
+        self.assertEqual(sfn.read_codes(self.roster)[("example partner", "sunrise club")], "SUNRISEC")
 
     def test_the_partner_map_is_read_strictly(self):
         self.assertEqual(sfn.read_partners(self.partners)["example partner"], (P1, "Example Partner Org"))
@@ -169,6 +188,10 @@ class SalesforceNewClubs(Fixture):
             fh.write(f"example partner,{P2},Again\n")
         with self.assertRaises(sfn.Refused):
             sfn.read_partners(self.partners)
+        with open(self.partners, "w", encoding="utf-8") as fh:
+            fh.write(",".join(sfn.PARTNER_COLS) + f"\nNameless Partner,{P1},\n")
+        with self.assertRaises(sfn.Refused):
+            sfn.read_partners(self.partners)                             # an unnamed partner account
         self.assertEqual(len(sfn.read_partners()), 49)       # the real map: one line per partner
 
     # ---- the guard
@@ -192,6 +215,76 @@ class SalesforceNewClubs(Fixture):
         self.assertFalse(s.prepare())
         self.assertIn("records for a count", s.broken)
 
+    def test_every_clause_of_the_guard_stops_the_run(self):
+        self.write_roster([(f"CODE{n:04d}", "Example Partner", f"Club {n}") for n in range(20)])
+        s = self.step(FakeOrg(base_accounts()))                          # 2 Club accounts for 20 clubs
+        self.assertFalse(s.prepare())
+        self.assertIn("Club accounts visible", s.broken)
+        self.setUp()
+        accounts = base_accounts()
+        next(a for a in accounts if a["Id"] == P1)["RecordTypeId"] = OTHER   # a partner of another type
+        s = self.step(FakeOrg(accounts))
+        self.assertFalse(s.prepare())
+        self.assertIn("not a Household account", s.broken)
+        accounts = base_accounts()
+        accounts[1] = accounts[0]                                          # one record twice, one missing
+        s = self.step(FakeOrg(accounts))
+        self.assertFalse(s.prepare())
+        self.assertIn("records for a count", s.broken)
+        s = self.step(FakeOrg(fillers(4501) + base_accounts()[410:]))     # past the processor's limit: said
+        self.assertTrue(s.prepare())
+        self.assertTrue(any("4505 Accounts" in t for t, _ in s.attention))
+
+    def test_without_the_right_to_create_an_apply_run_only_shows_the_bodies(self):
+        for grant in ({**FakeOrg.GRANT, "createable": False},
+                      {**FakeOrg.GRANT, "recordTypeInfos": []},
+                      {**FakeOrg.GRANT, "fields": FakeOrg.GRANT["fields"][:1]}):
+            with self.subTest(sorted(grant)):
+                org = FakeOrg(base_accounts())
+                org.grant = grant
+                s = self.step(org)
+                self.assertTrue(s.prepare())                             # the check still runs
+                self.assertEqual(s.mode, "plan")
+                self.assertEqual(s.create("U.S", self.plan(("Dawn Club",))), 0)
+                self.assertEqual(org.inserts, [])
+                self.assertTrue(any("cannot create Club accounts" in t for t, _ in s.attention))
+                self.assertTrue(any("would create" in t for t, _ in s.attention))
+        s = self.step(FakeOrg(base_accounts()))
+        s.prepare()
+        self.assertIn("describe ok", "\n".join(s.logged))
+
+    def test_reads_are_retried_and_a_write_never(self):
+        tries = []
+
+        def retry(fn, label):
+            for _ in range(2):
+                try:
+                    return fn()
+                except sfn.Refused:
+                    tries.append(label)
+            return fn()
+
+        class Flaky(FakeOrg):
+            fails = {"count": 1, "where": 1}
+
+            def count(self, soql):
+                if self.fails["count"]:
+                    self.fails["count"] -= 1
+                    raise sfn.Refused("Salesforce did not answer a count (HTTP 503)")
+                return FakeOrg.count(self, soql)
+
+            def query(self, soql):
+                if "WHERE" in soql and self.fails["where"]:
+                    self.fails["where"] -= 1
+                    raise sfn.Refused("Salesforce did not answer a read (HTTP 503)")
+                return FakeOrg.query(self, soql)
+        org = Flaky(base_accounts(), insert="unknown_lost")
+        s = sfn.Step("apply", org, self.roster, log=lambda m: None, partners_path=self.partners, retry=retry)
+        self.assertTrue(s.prepare())
+        self.assertEqual(s.create("U.S", self.plan(("Dawn Club",))), 0)
+        self.assertEqual(len(org.inserts), 1)                            # unknown, and still one POST
+        self.assertEqual(tries, ["Salesforce Account read", "Salesforce re-query"])
+
     def test_a_household_partner_without_parent_is_required(self):
         accounts = base_accounts()
         next(a for a in accounts if a["Id"] == P1)["ParentId"] = P2
@@ -213,6 +306,7 @@ class SalesforceNewClubs(Fixture):
         s2 = self.step(org)
         self.assertTrue(s2.prepare())
         self.assertEqual(s2.create("U.S", self.plan(("Dawn Club",))), 0)
+        self.assertEqual(s2.attention, [])
         self.assertEqual(len(org.inserts), 1)
         names = [{"qid": 7, "club": c, "value": c, "partner": p} for c, p in
                  (("Sunrise Club", "Example Partner"), ("River Club", "Second Partner"), ("Dawn Club", "Example Partner"))]
@@ -236,6 +330,15 @@ class SalesforceNewClubs(Fixture):
         self.assertEqual(s.create("U.S", self.plan(*[(c,) for c, _ in clubs])), 0)
         self.assertEqual(org.inserts, [])
         self.assertTrue(any("more than 5" in t for t, _ in s.attention))
+
+    def test_five_in_a_region_are_created(self):
+        clubs = [f"Club {n}" for n in "ABCDE"]
+        self.write_roster([(f"CLUB{n}XX", "Example Partner", c) for c, n in zip(clubs, "ABCDE")])
+        org = FakeOrg(base_accounts())
+        s = self.step(org)
+        s.prepare()
+        self.assertEqual(s.create("U.S", self.plan(*[(c,) for c in clubs])), 5)
+        self.assertEqual(len(org.inserts), 5)
 
     def test_only_this_region_s_new_clubs_are_created(self):
         org = FakeOrg(base_accounts())
@@ -269,7 +372,29 @@ class SalesforceNewClubs(Fixture):
                 s.prepare()
                 self.assertEqual(s.create("U.S", self.plan(("Dawn Club",))), 0)
                 self.assertEqual(org.inserts, [])
-                self.assertIn(says, next(d for t, d in s.attention if "not created" in t))
+                detail = next(d for t, d in s.attention if "not created" in t)
+                self.assertIn(says, detail)
+                self.assertNotIn("Body for a hand create", detail)            # never a body for a name in use
+
+    def test_what_salesforce_has_is_judged_before_the_name_partner_and_code(self):
+        self.write_roster([("SUNMOONX", "Example Partner", "Sun & Moon"), ("HOPELITE", "Example Partner", "Hope Light")])
+        org = FakeOrg(base_accounts() + [acct("001000000000000SMX", "Sun & Moon", CLUB, P1, "GLOW club code SUNMOONX; x"),
+                                         acct("001000000000000HOP", "Hope Light", HOUSE)])
+        s = self.step(org)
+        s.prepare()
+        self.assertEqual(s.create("U.S", self.plan(("Sun & Moon",), ("Hope Light",))), 0)
+        said = json.dumps(s.attention)
+        self.assertNotIn("Sun & Moon", said)                             # its right account exists: ok, silent
+        self.assertIn("partner/household", said)
+        self.assertNotIn("Body for a hand create", said)
+        # a club whose code is on its right account and on an older one: a person decides
+        self.write_roster([("DAWNCLUB", "Example Partner", "Dawn Club")])
+        org = FakeOrg(base_accounts() + [acct("001000000000000DAW", "Dawn Club", CLUB, P1, "GLOW club code DAWNCLUB; x"),
+                                         acct("001000000000000OLD", "Old Dawn", CLUB, P1, "GLOW club code DAWNCLUB; x")])
+        s = self.step(org)
+        s.prepare()
+        self.assertEqual(s.create("U.S", self.plan(("Dawn Club",))), 0)
+        self.assertIn("001000000000000OLD", json.dumps(s.attention))
 
     def test_a_nearly_equal_name_is_left_to_a_person(self):
         self.write_roster([("NINASXXX", "Example Partner", "Niñas Club")])
@@ -298,6 +423,7 @@ class SalesforceNewClubs(Fixture):
         text = json.dumps(s.attention) + "\n".join(s.logged)
         self.assertIn("FIELD_CUSTOM_VALIDATION_EXCEPTION", text)
         self.assertNotIn("Quillfeather", text)
+        self.assertIn("Body for a hand create", text)
 
     def test_an_unknown_outcome_is_settled_by_reading_back_and_never_retried(self):
         org = FakeOrg(base_accounts(), insert="unknown_saved")
@@ -312,6 +438,34 @@ class SalesforceNewClubs(Fixture):
         self.assertEqual(len(org.inserts), 1)                     # never retried
         self.assertIn("U.S", s.stopped)
         self.assertIn("read again in ten minutes", next(d for t, d in s.attention if "check by hand" in t))
+        s.check({"U.S": [{"qid": 9, "club": "Dawn Club", "value": "Dawn Club", "partner": "Example Partner"}]})
+        said = next(d for t, d in s.attention if "need a person" in t)
+        self.assertIn("did not settle", said)
+        self.assertNotIn("create it by hand", said)                     # no twin invited
+        org = FakeOrg(base_accounts(), insert="gateway_saved")           # a 5xx is unknown too, not a refusal
+        s = self.step(org)
+        s.prepare()
+        self.assertEqual(s.create("U.S", self.plan(("Dawn Club",))), 1)
+        self.assertEqual(len(org.inserts), 1)
+
+    def test_a_read_back_that_differs_from_the_body_stops_the_region(self):
+        self.write_roster([("DAWNCLUB", "Example Partner", "Dawn Club"), ("DUSKCLUB", "Example Partner", "Dusk Club")])
+        for name, change in (("a trigger re-parents it", lambda a, r: a.update(ParentId=P2)),
+                             ("the answer names another record", lambda a, r: r.update(id="001000000000000OTH"))):
+            with self.subTest(name):
+                class Twisted(FakeOrg):
+                    def insert(self, sobject, body):
+                        status, answer = FakeOrg.insert(self, sobject, body)
+                        change(self.accounts[-1], answer)
+                        return status, answer
+                org = Twisted(base_accounts())
+                s = self.step(org)
+                s.prepare()
+                self.assertEqual(s.create("U.S", self.plan(("Dawn Club",), ("Dusk Club",))), 0)
+                self.assertEqual(len(org.inserts), 1)                    # no further write in the region
+                self.assertEqual(s.created, [])
+                self.assertIn("U.S", s.stopped)
+                self.assertTrue(any("check by hand" in t for t, _ in s.attention))
 
     def test_a_partner_not_in_the_map_or_a_doubtful_name_is_left_to_a_person(self):
         self.write_roster([("NEWPART1", "Brand New Partner", "Lakeside Club"), ("SUNMOONX", "Example Partner", "Sun & Moon")])
@@ -359,6 +513,40 @@ class SalesforceNewClubs(Fixture):
         s.prepare()
         self.assertEqual(s.check({"U.S": []}), (0, 0))
 
+    def test_a_pilot_account_and_a_code_on_two_accounts_are_reported(self):
+        self.write_roster([("SUNRISEC", "Example Partner", "Sunrise Club"), ("PILOTCLU", "Example Partner", "Pilot Club")])
+        s = self.step(FakeOrg(base_accounts() + [acct(PILOT, "Pilot Club", CLUB, P1),
+                                                 acct("001000000000000OLS", "Old Sunrise", CLUB, P2,
+                                                      "GLOW club code SUNRISEC; x")]), mode="plan")
+        s.prepare()
+        names = [{"qid": 1, "club": "Sunrise Club", "value": "Sunrise Club", "partner": "Example Partner"},
+                 {"qid": 2, "club": "Pilot Club", "value": "Pilot Club", "partner": "Example Partner"}]
+        s.check({"U.S": names})
+        said = next(d for t, d in s.attention if "need a person" in t)
+        self.assertIn("pilot accounts on hold", said)
+        self.assertIn("club code SUNRISEC is also on 001000000000000OLS", said)
+
+    def test_strays_need_every_form_and_unjudged_regions_still_count_as_users(self):
+        accounts = base_accounts() + [acct("001000000000000DAW", "Dawn Club", CLUB)]       # partner-less
+        names = {"U.S": [{"qid": 1, "club": "Sunrise Club", "value": "Sunrise Club", "partner": "Example Partner"}],
+                 "Asia": [{"qid": 2, "club": "Dawn Club", "value": "Dawn Club", "partner": "Example Partner"}]}
+        s = self.step(FakeOrg(accounts), mode="plan")
+        s.prepare()
+        self.assertEqual(s.check(names, on_form={"U.S"}), (1, 0))       # Asia's club uses it: no stray
+        s = self.step(FakeOrg(accounts), mode="plan")
+        s.prepare()
+        self.assertEqual(s.check({"U.S": names["U.S"]}, complete=False), (1, 0))   # a form unread: no strays
+        s = self.step(FakeOrg(accounts), mode="plan")
+        s.prepare()
+        self.assertEqual(s.check({"U.S": names["U.S"]}), (1, 1))        # every form read: the stray is said
+
+    def test_a_case_match_outside_the_bmp_is_left_to_a_person(self):
+        self.write_roster([("ADLAMXXX", "Example Partner", "\U0001E900 Club")])
+        s = self.step(FakeOrg(base_accounts() + [acct("001000000000000ADL", "\U0001E922 Club", CLUB, P1)]), mode="plan")
+        s.prepare()
+        s.check({"U.S": [{"qid": 1, "club": "\U0001E900 Club", "value": "\U0001E900 Club", "partner": "Example Partner"}]})
+        self.assertIn("outside the BMP", json.dumps(s.attention, ensure_ascii=False))
+
     # ---- the standalone check
     def test_the_check_command_needs_vpn_off_and_never_writes(self):
         summary = os.path.join(self.tmp.name, "plan_us.json")
@@ -376,7 +564,10 @@ class SalesforceNewClubs(Fixture):
         self.assertEqual(stop.exception.code, 0)
         self.assertIn("1 ok, 0 need a person", out.getvalue())
         self.assertEqual(org.inserts, [])
-        self.assertTrue(org.revoked)
+        cli = salesforce.Org("glow", run=lambda *a, **k: self.fail("a CLI login is never revoked"))
+        cli.token, cli.base = "t", "https://x.example"
+        cli.revoke()
+        self.assertIsNone(cli.token)
 
 
 class GlowSyncLogin(unittest.TestCase):
@@ -404,7 +595,10 @@ class GlowSyncLogin(unittest.TestCase):
         self.assertIn("client_secret=S3CRETfake", re.search(r'^data = "(.*)"$', config, re.M).group(1))
         self.assertIn('noproxy = "*"', config)
         self.assertIn('header = "Authorization: Bearer 00Dfake!tok"', calls[1][1])
-        self.assertNotIn("-L", calls[1][0])                       # curl follows no redirect
+        for argv_i, config_i in calls:                            # curl follows no redirect, reads no curlrc
+            self.assertEqual(argv_i[:2], ["curl", "-q"])
+            self.assertFalse({"-L", "--location", "--location-trusted"} & set(argv_i))
+            self.assertNotRegex(config_i, r"(?m)^\s*(-L\b|-{0,2}location)")
         org.update("Account", SUN, {"ParentId": P1})
         self.assertIn(f"/sobjects/Account/{SUN}", calls[-1][1])
         self.assertIn('request = "PATCH"', calls[-1][1])
@@ -413,7 +607,10 @@ class GlowSyncLogin(unittest.TestCase):
         self.assertIsNone(org.token)
 
     def test_a_refused_login_says_why_without_the_body_or_the_secret(self):
+        far = json.dumps({"error": "invalid_grant", "error_description": "x" * 110 + " S3CRETfake"}) + "\n400"
         for body, says in (('{"error": "invalid_grant", "error_description": "user is frozen S3CRETfake"}\n400', "user is frozen"),
+                           (far, "invalid_grant"),
+                           ('{"error": "invalid_client_id", "error_description": "bad 3MVG9fakeclientid"}\n400', "invalid_client_id"),
                            ('{"error": "invalid_client"}\n401', "invalid_client"),
                            ("<html>gateway</html>\n502", "no readable answer"),
                            (json.dumps({"access_token": "t", "instance_url": "https://elsewhere.example"}) + "\n200", "another address"),
@@ -425,6 +622,7 @@ class GlowSyncLogin(unittest.TestCase):
                     org.count("SELECT COUNT() FROM Account")
                 self.assertIn(says, str(stop.exception))
                 self.assertNotIn("S3CRET", str(stop.exception))
+                self.assertNotIn("3MVG9fakeclientid", str(stop.exception))
                 self.assertNotIn("html", str(stop.exception))
                 self.assertEqual(len(calls), 1)                   # nothing sent after a refused login
         org = salesforce.Org(login=salesforce.client_credentials("", ""))
@@ -438,7 +636,8 @@ class GlowSyncLogin(unittest.TestCase):
         token = "00D" + "Ab1" * 5 + "!" + "AQ4AQ.x_9" * 4           # assembled: no literal one in this file
         key, secret = "3MVG9" + "aB3._" * 14, "9F" * 32
         for text, rule in ((token, "Salesforce token"), (key, "Salesforce consumer key"),
-                           (secret, "64-hex secret"), (secret.lower(), "64-hex secret")):
+                           (secret, "64-hex secret"), (secret.lower(), "64-hex secret"),
+                           (token.replace("!", "%21"), "Salesforce token")):
             with self.subTest(rule):
                 hits = check_secrets.scan_text("x " + text + " y", "t")
                 self.assertTrue(any(rule in h for h in hits), hits)
@@ -483,7 +682,7 @@ class AutoSyncSalesforce(unittest.TestCase):
         self.assertIsNone(run.sf)
         self.assertIn("SF_SYNC is not off, plan or apply", run.attention[0][0])
 
-    def region(self, apply, text, applied_names=None):
+    def region(self, apply, text, applied_names=None, warnings=(), sf=None, backup_fails=False):
         """Run.region("Africa") over a fabricated dry run with a recording Salesforce step."""
         order = []
         run = self.run_obj(apply=apply)
@@ -491,9 +690,9 @@ class AutoSyncSalesforce(unittest.TestCase):
         class Rec:
             def create(self, region, plan):
                 order.append(("sf_create", region, [c["club"] for c in plan["creates"]]))
-        run.sf = Rec()
+        run.sf = sf or Rec()
         dry = {"creates": [{"club": "Dawn Club", "partner": "Example Partner", "girls": 2}], "updates": [],
-               "deletes": [], "rules": 25, "warnings": [], "calls": ["CREATE roster 'Dawn Club' (2 girls)"],
+               "deletes": [], "rules": 25, "warnings": list(warnings), "calls": ["CREATE roster 'Dawn Club' (2 girls)"],
                "sf_names": [{"qid": None, "club": "Dawn Club", "value": "Dawn Club", "partner": "Example Partner"}]}
 
         def sync_(csv_path, region, form, apply, summary_path=None):
@@ -506,7 +705,8 @@ class AutoSyncSalesforce(unittest.TestCase):
 
         def cmd(argv, label):
             order.append((label,))
-            return self.types.SimpleNamespace(returncode=0, stdout=json.dumps([clean]), stderr="")
+            return self.types.SimpleNamespace(returncode=1 if backup_fails and label == "backup" else 0,
+                                              stdout=json.dumps([clean]), stderr="")
         with self.mock.patch.object(run, "sync", sync_), self.mock.patch.object(run, "cmd", cmd), \
                 self.mock.patch.object(run, "save_conditions", lambda form: None), self.mock.patch("builtins.print"):
             run.region("Africa", os.path.join(self.tmp.name, "roster.csv"))
@@ -522,10 +722,65 @@ class AutoSyncSalesforce(unittest.TestCase):
         now = [{"qid": "77", "club": "Dawn Club", "value": "Dawn Club", "partner": "Example Partner"}]
         run, order = self.region(True, self.TEXT, applied_names=now)
         steps = [o[0] for o in order]
-        self.assertEqual(steps[:3], ["dry", "sf_create", "backup"])    # before the backup and the apply
-        self.assertEqual(order[1], ("sf_create", "Africa", ["Dawn Club"]))
+        self.assertEqual(steps[:4], ["dry", "backup", "sf_create", "apply"])    # after the backup, before the form
+        self.assertEqual(order[2], ("sf_create", "Africa", ["Dawn Club"]))
         self.assertIn("Africa", run.sf_on_form)
         self.assertEqual(run.sf_names["Africa"], now)              # what the form sends AFTER the apply
+        run, order = self.region(True, self.TEXT, backup_fails=True)
+        self.assertNotIn("sf_create", [o[0] for o in order])          # a failed backup: nothing anywhere
+
+    def test_a_region_not_applied_creates_no_account(self):
+        q5 = "Old Club: " + self.auto_sync.SF_NAME_CHANGE + " 'Old Club' -> 'New Club'"
+        run, order = self.region(True, self.TEXT, warnings=[q5])
+        self.assertIn("attention", [r[7] for r in run.results])
+        self.assertNotIn("sf_create", [o[0] for o in order])
+        self.assertNotIn("Africa", run.sf_on_form)
+
+    def test_a_failing_create_step_never_keeps_the_form_from_applying(self):
+        class Boom:
+            def __init__(self):
+                self.attention = []
+
+            def create(self, region, plan):
+                raise AttributeError("odd answer")
+
+            def warn(self, title, detail=""):
+                self.attention.append(("SF: " + title, detail))
+        boom = Boom()
+        run, order = self.region(True, self.TEXT, sf=boom)
+        self.assertEqual([o[0] for o in order][:3], ["dry", "backup", "apply"])
+        self.assertIn("the create step failed (AttributeError)", boom.attention[0][0])
+
+    def test_a_failing_prepare_never_stops_the_run(self):
+        run = self.run_obj(apply_salesforce=True)
+
+        def boom(step):
+            raise TypeError("unexpected")
+        with self.mock.patch.dict(os.environ, {"SF_SYNC": "apply", "SF_CLIENT_ID": "i", "SF_CLIENT_SECRET": "s"}), \
+                self.mock.patch.object(sfn.Step, "prepare", boom), self.mock.patch("builtins.print"):
+            run.sf_start("roster.csv")
+        self.assertIn("TypeError", run.sf.broken)
+        self.assertTrue(any("not ready" in t for t, _ in run.sf.attention))
+
+    def test_the_end_check_gets_every_region_and_judges_those_on_the_form(self):
+        run = self.run_obj()
+        seen = []
+
+        class Rec:
+            mode, created, broken, attention = "plan", [], None, []
+
+            def check(self, names, clashes, on_form=None, complete=True):
+                seen.append((sorted(names), sorted(on_form), complete))
+                return 0, 0
+
+            def close(self):
+                pass
+        run.sf = Rec()
+        run.sf_names = {"Africa": [], "Asia": []}      # Asia: attention - its sf_names are the PLANNED values
+        run.sf_on_form = {"Africa"}
+        with self.mock.patch("builtins.print"):
+            run.sf_finish(None)
+        self.assertEqual(seen, [(["Africa", "Asia"], ["Africa"], False)])   # two forms unread: no strays
 
     def test_the_end_step_turns_errors_into_attention_and_writes_one_synclog_row(self):
         run = self.run_obj(synclog=True)
@@ -540,7 +795,7 @@ class AutoSyncSalesforce(unittest.TestCase):
             def warn(self, title, detail=""):
                 self.attention.append(("SF: " + title, detail))
 
-            def check(self, names, clashes):
+            def check(self, names, clashes, on_form=None, complete=True):
                 raise RuntimeError("boom")
 
             def close(self):
@@ -579,6 +834,45 @@ class AutoSyncSalesforce(unittest.TestCase):
         self.assertIsNone(sfn.pending_cell(values + [values[2]], "Example Partner", "Dawn Club"))   # two: none
         self.assertIsNone(sfn.pending_cell([["a", "b"]], "Example Partner", "Dawn Club"))
         self.assertIsNone(sfn.pending_cell([], "Example Partner", "Dawn Club"))
+        rev = [list(reversed(r)) for r in values]
+        self.assertEqual(sfn.pending_cell(rev, "Example Partner", "Dawn Club"), (3, rev[0].index("status") + 1))
+
+    def pending_run(self, synclog, reads):
+        writes, reads = [], list(reads)
+        run = self.run_obj(synclog=synclog)
+
+        class Done:
+            mode, broken, today = "apply", None, "2026-10-07"
+            created = [("U.S", sfn.Club("U.S", "Example Partner", "Dawn Club", "Dawn Club", "DAWNCLUB"), "001x")]
+
+            def __init__(self):
+                self.attention = []
+
+            def warn(self, title, detail=""):
+                self.attention.append(("SF: " + title, detail))
+
+            def check(self, names, clashes, on_form=None, complete=True):
+                return 1, 0
+
+            def close(self):
+                pass
+        run.sf = Done()
+        sc = self.auto_sync.sc
+        with self.mock.patch.object(sc, "read_tab", lambda svc, title: reads.pop(0)), \
+                self.mock.patch.object(sc, "write_cell", lambda *a: writes.append(a[1:])), \
+                self.mock.patch("builtins.print"):
+            run.sf_finish(object())
+        return run, writes
+
+    def test_sf_pending_is_marked_only_with_synclog_and_only_while_the_row_stays_put(self):
+        head = sfn.SF_PENDING_COLS
+        row = dict(dict.fromkeys(head, ""), partner="Example Partner", club="Dawn Club", status="pending")
+        mine, other = [row[h] for h in head], [dict(row, club="Other Club")[h] for h in head]
+        self.assertEqual(self.pending_run(False, [[head, mine]] * 2)[1], [])
+        run, writes = self.pending_run(True, [[head, mine]] * 2)
+        self.assertEqual(writes, [("SF Pending", 2, head.index("status") + 1, "done (auto 2026-10-07)")])
+        self.assertEqual(run.attention, [])
+        self.assertEqual(self.pending_run(True, [[head, mine], [head, other, mine]])[1], [])
 
     def test_one_cell_is_written_raw_and_read_back(self):
         import sheets_client as sc

@@ -6,10 +6,11 @@
  * exports the Roster and runs the Jotform sync (docs/RUNBOOK.md, "Automatic
  * sync"). workflow_dispatch needs only Actions: write, so the token kept here
  * cannot change the repository's code - which, since the workflow also holds
- * the Salesforce secret, it must not
- * (docs/plans/2026-10-06-sf-new-club-accounts.md). Nothing here can fail a
- * form submission: the call is wrapped like trySyncChoices_, and when the two
- * Script Properties are not set the function returns without doing anything.
+ * the Salesforce secret, it must not; it can pick a branch, and the workflow
+ * runs only on main (docs/plans/2026-10-06-sf-new-club-accounts.md). Nothing
+ * here can fail a form submission: the call is wrapped like trySyncChoices_,
+ * and when the two Script Properties are not set it returns without doing
+ * anything.
  *
  * Script Properties (File → Project Settings → Script Properties):
  *   SYNC_DISPATCH_REPO   owner/name of the GitHub repository

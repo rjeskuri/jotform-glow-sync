@@ -57,6 +57,7 @@ CODE_IN = re.compile(r"GLOW club code ([A-Z0-9]+);")
 GIRL_ID = re.compile(r"([A-Z0-9]+)-[A-Z0-9]+-\d+")              # CLUBCODE-LASTCODE-NNN (appsscript/Ids.gs)
 PROVEN = set(" -.()'/")     # characters seen arriving intact in question 5 (600 batches, 2026-10-06)
 ERROR_WORD = re.compile(r"\b[A-Z][A-Z_]{3,}\b")
+REGIONS = ("Africa", "Asia", "Latin America", "U.S")       # the four regional forms (auto_sync REGIONAL_FORMS)
 
 Club = collections.namedtuple("Club", "region partner club value code")
 
@@ -97,6 +98,14 @@ def sf_match(submitted, name):
     return True
 
 
+def proven_char(c):
+    """A plain or accented Latin letter (no ligature, modifier or compatibility form), an ASCII
+    digit, or one of PROVEN: what has been seen arriving intact in question 5."""
+    return c in PROVEN or "0" <= c <= "9" or (unicodedata.category(c) in ("Lu", "Ll")
+                                              and unicodedata.name(c, "").startswith("LATIN ")
+                                              and unicodedata.normalize("NFKC", c) == c)
+
+
 def name_problems(value):
     """Why a name may not be created unattended (empty = fine)."""
     problems = []
@@ -106,8 +115,11 @@ def name_problems(value):
         problems.append("an invisible character or a stray space")
     elif unicodedata.normalize("NFC", value) != value:
         problems.append("not in composed (NFC) form")
+    elif any(ord(c) > 0xFFFF for c in value):
+        problems.append("a character outside the Basic Multilingual Plane (the processor's comparison of "
+                        "it is not known)")
     else:
-        strange = sorted({c for c in value if not (unicodedata.category(c).startswith(("L", "N")) or c in PROVEN)})
+        strange = sorted({c for c in value if not proven_char(c)})
         if strange:
             problems.append("a character not yet seen arriving intact in question 5: "
                             + " ".join(f"U+{ord(c):04X}" for c in strange))
@@ -129,10 +141,11 @@ def read_partners(path=PARTNERS):
         out = {}
         for row in reader:
             k, pid = key(row["partner"]), (row["sf_account_id"] or "").strip()
-            if not k or not ACCOUNT_ID.fullmatch(pid) or k in out:
-                raise Refused(f"{os.path.relpath(path, REPO)}: a partner is blank, repeated or has no "
-                              f"plain account id: {row['partner']!r}")
-            out[k] = (pid, row["sf_account_name"])
+            name = (row["sf_account_name"] or "").strip()
+            if not k or not name or not ACCOUNT_ID.fullmatch(pid) or k in out:
+                raise Refused(f"{os.path.relpath(path, REPO)}: a partner is blank, repeated, unnamed or has "
+                              f"no plain account id: {row['partner']!r}")
+            out[k] = (pid, name)
     return out
 
 
@@ -140,9 +153,9 @@ def read_codes(roster_csv):
     """{(key(partner), key(club)): club code or None} for the active clubs of a Roster export. A club
     whose girls carry more than one code gets None: nothing is created for it."""
     codes = collections.defaultdict(set)
-    with open(roster_csv, newline="", encoding="utf-8") as fh:
+    with open(roster_csv, newline="", encoding="utf-8-sig") as fh:
         for row in csv.DictReader(fh):
-            if (row.get("status") or "").strip() != "active":
+            if key(row.get("status")) != "active":
                 continue
             m = GIRL_ID.fullmatch((row.get("girl_id") or "").strip())
             codes[(key(row.get("partner")), key(row.get("club")))].add(m.group(1) if m else None)
@@ -211,6 +224,24 @@ def decide_create(club, accounts, partners, today):
     """('create', body) | ('ok', None): the account is already right | ('attention', why, body or None)."""
     who = f"{club.club} ({club.partner}, {club.region})"
     parent = partners.get(key(club.partner))
+    # what Salesforce already has comes first: an account of this name or code is never doubled
+    same = [a for a in accounts if sf_match(club.value, a.get("Name"))]
+    coded = [a for a in accounts if club.code and code_of(a) == club.code]
+    if parent and len(same) == 1 and same[0].get("RecordTypeId") == CLUB_RECORD_TYPE \
+            and same[0].get("ParentId") == parent[0] and code_of(same[0]) in (None, club.code) \
+            and all(a["Id"] == same[0]["Id"] for a in coded):
+        return ("ok", None)
+    elsewhere = [a for a in coded if a not in same]
+    if elsewhere:
+        return ("attention", f"{who}: club code {club.code} is on {describe(elsewhere[0])} - a rename not made in "
+                             "Salesforce: rename that account to the question-5 name first (RUNBOOK, Renaming "
+                             "a club); create nothing", None)
+    if same:
+        fix = f"; a partner-less Club: set ParentId = {parent[0]}" if parent else ""
+        return ("attention", f"{who}: question 5 {club.value!r} is already the name of "
+                             + "; ".join(describe(a) for a in same)
+                             + f" - the processor would book this club's attendance there; fix by hand{fix}; "
+                               "create nothing", None)
     body = body_for(club, parent[0], today) if parent and club.code else None
     problems = name_problems(club.value)
     if problems:
@@ -221,21 +252,6 @@ def decide_create(club, accounts, partners, today):
                              "line with its Salesforce account (RUNBOOK, Club accounts in Salesforce)", None)
     if not club.code:
         return ("attention", f"{who}: no single club code in the Roster's girl ids - create by hand", None)
-    same = [a for a in accounts if sf_match(club.value, a.get("Name"))]
-    coded = [a for a in accounts if code_of(a) == club.code]
-    if len(same) == 1 and same[0].get("RecordTypeId") == CLUB_RECORD_TYPE and same[0].get("ParentId") == parent[0] \
-            and code_of(same[0]) in (None, club.code) and all(a["Id"] == same[0]["Id"] for a in coded):
-        return ("ok", None)
-    elsewhere = [a for a in coded if a not in same]
-    if elsewhere:
-        return ("attention", f"{who}: club code {club.code} is on {describe(elsewhere[0])} - a rename not made in "
-                             "Salesforce: rename that account to the question-5 name first (RUNBOOK, Renaming "
-                             "a club); nothing created", None)
-    if same:
-        return ("attention", f"{who}: question 5 {club.value!r} is already the name of "
-                             + "; ".join(describe(a) for a in same)
-                             + f" - the processor would book this club's attendance there; fix by hand "
-                               f"(a partner-less Club: set ParentId = {parent[0]}); nothing created", body)
     near = [a for a in accounts if name_key(a.get("Name")) == name_key(club.value)]
     if near:
         return ("attention", f"{who}: an account with nearly the same name exists: "
@@ -261,6 +277,8 @@ def check_club(club, accounts, partners):
     if len(same) > 1:
         return f"{who}: {len(same)} accounts are named {club.value!r}: " + "; ".join(describe(a) for a in same)
     a = same[0]
+    if a.get("Name") != apex_trim(club.value) and any(ord(c) > 0xFFFF for c in club.value + (a.get("Name") or "")):
+        return f"{who}: {describe(a)} matches question 5 only by the case of a character outside the BMP - check by hand"
     if a.get("RecordTypeId") != CLUB_RECORD_TYPE:
         return f"{who}: question 5 {club.value!r} is the name of {describe(a)}, not a Club account"
     if a["Id"] in ON_HOLD_ACCOUNTS:
@@ -276,6 +294,16 @@ def check_club(club, accounts, partners):
         other = next(c for c in coded if c["Id"] != a["Id"])
         return f"{who}: club code {club.code} is also on {describe(other)}"
     return None
+
+
+def createable_gaps(describe_answer):
+    """What GLOW Sync lacks to create a Club account, from GET /sobjects/Account/describe."""
+    d = describe_answer or {}
+    fields = {f.get("name"): f for f in d.get("fields") or []}
+    return ([] if d.get("createable") else ["Account Create"]) \
+        + [n for n in ("Name", "ParentId", "Description", "RecordTypeId") if not (fields.get(n) or {}).get("createable")] \
+        + ([] if any(r.get("recordTypeId") == CLUB_RECORD_TYPE and r.get("available")
+                     for r in d.get("recordTypeInfos") or []) else ["the Club record type"])
 
 
 def strays(accounts, matched_ids):
@@ -308,12 +336,14 @@ class Step:
     """One run's Salesforce work. Every problem ends in self.attention ((title, detail) pairs, the
     shape tools/auto_sync.py collects); nothing here raises past the caller."""
 
-    def __init__(self, mode, org, roster_csv, log=print, partners_path=PARTNERS, today=None):
+    def __init__(self, mode, org, roster_csv, log=print, partners_path=PARTNERS, today=None,
+                 retry=lambda fn, label: fn()):
         assert mode in ("plan", "apply")
         self.mode, self.org, self.roster_csv, self.log = mode, org, roster_csv, log
-        self.partners_path = partners_path
+        self.partners_path, self.retry = partners_path, retry          # retry: reads only, never a write
         self.today = today or datetime.date.today().isoformat()
         self.attention, self.created, self.stopped = [], [], set()
+        self.unsettled = set()                   # names whose create this run did not settle
         self.accounts, self.partners, self.codes, self.broken = [], {}, {}, None
 
     def warn(self, title, detail=""):
@@ -325,17 +355,27 @@ class Step:
         try:
             self.partners = read_partners(self.partners_path)
             self.codes = read_codes(self.roster_csv)
-            total = self.org.count("SELECT COUNT() FROM Account")
-            self.accounts = plain(self.org.query(ACCOUNTS))
+            total, records = self.retry(lambda: (self.org.count("SELECT COUNT() FROM Account"),
+                                                 self.org.query(ACCOUNTS)), "Salesforce Account read")
+            self.accounts = plain(records)
             if len(self.accounts) != total or len({a["Id"] for a in self.accounts}) != total:
                 raise Refused(f"the Account read gave {len(self.accounts)} records for a count of {total}")
             problems = guard_problems(self.accounts, self.partners, len(self.codes))
             if problems:
                 raise Refused("; ".join(problems))
+            lacking = createable_gaps(self.retry(lambda: self.org.describe("Account"), "Salesforce describe"))
         except (Refused, OSError, KeyError, ValueError) as err:
             self.broken = str(err) or err.__class__.__name__
             self.warn("not ready - no account is created or checked this run", self.broken)
             return False
+        if lacking:
+            self.warn("GLOW Sync cannot create Club accounts: " + ", ".join(lacking),
+                      "Fix the GLOW Club Sync permission set (RUNBOOK, New clubs' accounts, automatically); "
+                      "until then each new account is shown for a hand create.")
+            self.mode = "plan"
+        else:
+            self.log("  SF: describe ok - Account, Name, ParentId, Description, RecordTypeId createable; "
+                     "Club record type available")
         for note in partner_notes(self.accounts, self.partners):
             self.warn("partner map out of date", note)
         if len(self.accounts) > MAX_ACCOUNTS:
@@ -382,7 +422,8 @@ class Step:
         """One create, proven before and read back after. Never retried."""
         label = f"{club.club} ({club.partner})"
         try:
-            now = plain(self.org.query(f"SELECT Id, Name FROM Account WHERE Name = {quoted(club.value)}"))
+            now = plain(self.retry(lambda: self.org.query(f"SELECT Id, Name FROM Account WHERE Name = "
+                                                          f"{quoted(club.value)}"), "Salesforce re-query"))
             if any(sf_match(club.value, a.get("Name")) for a in now):
                 self.warn(f"{region}: {label} - an account of that name appeared since the read; nothing created",
                           "; ".join(f"{a['Id']} {a.get('Name')!r}" for a in now))
@@ -397,11 +438,13 @@ class Step:
         if not new_id and not unknown:
             self.stopped.add(region)
             self.warn(f"{region}: {label} - Salesforce refused the create (HTTP {status})",
-                      " ".join(error_words(answer)) or "no error code given")
+                      (" ".join(error_words(answer)) or "no error code given")
+                      + "\n\nBody for a hand create: " + json.dumps(body, ensure_ascii=False))
             return 0
         try:                                              # read back - or settle an unknown outcome
-            found = plain(self.org.query("SELECT Id, Name, RecordTypeId, ParentId, Description FROM Account "
-                                         f"WHERE Name = {quoted(club.value)}"))
+            found = plain(self.retry(lambda: self.org.query("SELECT Id, Name, RecordTypeId, ParentId, Description "
+                                                            f"FROM Account WHERE Name = {quoted(club.value)}"),
+                                     "Salesforce read-back"))
             seen = None
         except Refused as err:
             found, seen = [], f"the read-back failed: {err}"
@@ -410,6 +453,7 @@ class Step:
                  and all(ours[0].get(k) == v for k, v in body.items()))
         if not right:
             self.stopped.add(region)
+            self.unsettled.add(key(club.value))
             self.warn(f"{region}: {label} - check by hand: the create's outcome is not as planned",
                       f"HTTP {status}, id {new_id or 'unknown'}; "
                       + (seen or "found: " + ("; ".join(describe(a) for a in ours) or "nothing (it may still "
@@ -423,8 +467,11 @@ class Step:
                       f"{ours[0]['Id']}: Name, record type Club, parent {body['ParentId']}, Description.")
         return 1
 
-    def check(self, sf_names_by_region, clash_names=()):
-        """After all regions: every active club on a form has its one right account. Returns (ok, wrong)."""
+    def check(self, sf_names_by_region, clash_names=(), on_form=None, complete=True):
+        """After all regions: every active club on a form has its one right account. Accounts any
+        region's clubs use are never strays; only the regions in `on_form` (None: all) are judged, and
+        strays are reported only when `complete` (every regional form's names were read). Returns
+        (ok, wrong)."""
         if self.broken:
             return 0, 0
         clash = {key(n) for n in clash_names}
@@ -433,14 +480,18 @@ class Step:
             for c in clubs_from(region, entries, self.codes):
                 same = [a for a in self.accounts if sf_match(c.value, a.get("Name"))]
                 matched.update(a["Id"] for a in same)
-                if key(c.value) in clash:
-                    continue                              # check_names reports it already
+                if (on_form is not None and region not in on_form) or key(c.value) in clash:
+                    continue                              # not as planned this run, or check_names reports it
+                if key(c.value) in self.unsettled:
+                    wrong.append(f"{c.club} ({c.partner}, {region}): this run's create did not settle (see its "
+                                 "'check by hand' item) - read the account again before creating anything")
+                    continue
                 why = check_club(c, self.accounts, self.partners)
                 if why:
                     wrong.append(why)
                 else:
                     ok += 1
-        for a in strays(self.accounts, matched):
+        for a in (strays(self.accounts, matched) if complete else []):
             wrong.append(f"{describe(a)}: a Club account without a partner that no club on a form uses "
                          "(the processor made it for a name nobody expected?)")
         if wrong:
@@ -478,7 +529,7 @@ def main(argv=None, org=None, partners_path=PARTNERS):
     step = Step("plan", org or Org(a.alias), a.roster, log=print, partners_path=partners_path)
     try:
         if step.prepare():
-            step.check(names)
+            step.check(names, complete=len(names) >= len(REGIONS))
     finally:
         step.close()
     for title, detail in step.attention:

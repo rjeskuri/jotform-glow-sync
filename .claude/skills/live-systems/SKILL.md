@@ -24,6 +24,9 @@ calls; docs/RUNBOOK.md, "Club accounts in Salesforce"), and by `tools/sf_backfil
 (attendance batches, which carry girls' names and so never pass through the conversation; the
 hook catches it; docs/RUNBOOK.md, "Back-fill of attendance into Salesforce"). No Salesforce
 CLI or API call from the Mac while a VPN is on: Salesforce freezes the user (2026-09-30).
+A fourth: **the automatic sync** creates a new club's Club account as the GLOW Sync integration user
+when the repository variable `SF_SYNC` is `apply` (`--apply-salesforce`; create only, at most 5 per
+region; docs/RUNBOOK.md, "New clubs' accounts, automatically"). Changing `SF_SYNC` is Ryan's go.
 A third way: **metadata deploys** (`sf project deploy start`: the Monthly Report checkbox, the
 attendance processor, the attendance dashboard). Check-only first (`--dry-run`), then Ryan's go;
 the hook does not see `sf` commands. Claude Code's auto-mode guard may refuse a production deploy

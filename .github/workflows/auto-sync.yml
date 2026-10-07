@@ -42,6 +42,9 @@ concurrency:
 
 jobs:
   sync:
+    # an Actions-only token chooses the ref of a workflow_dispatch: only main's code gets the
+    # secrets and writes (schedule and repository_dispatch run on main anyway)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

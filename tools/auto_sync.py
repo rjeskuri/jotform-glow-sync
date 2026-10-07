@@ -556,7 +556,6 @@ class Run:
             self.result(region, plan, "dry-run", "would apply: " + summary)
             return
 
-        self.sf_create(region, plan)        # the new clubs' accounts first: never after their form
         self.log(f"  backing up form {form}")
         bk = self.cmd([sys.executable, os.path.join(REPO, "backup_forms.py"), "--form", form], "backup")
         if bk.returncode != 0:
@@ -564,6 +563,7 @@ class Run:
             self.result(region, plan, "failed", "backup failed - nothing applied")
             return
         self.save_conditions(form)
+        self.sf_create(region, plan)        # the new clubs' accounts: after the backup, before their form
         applied_path = summary_path.replace(".json", "_applied.json")
         applied = self.sync(csv_path, region, form, apply=True, summary_path=applied_path)
         if applied.returncode != 0:
@@ -657,8 +657,13 @@ class Run:
             self.log("SF: not configured (secrets SF_CLIENT_ID / SF_CLIENT_SECRET) - skipped")
             return
         self.log(f"SF: {mode}, as GLOW Sync")
-        self.sf = sfn.Step(mode, Org(login=client_credentials(cid, secret)), csv_path, log=self.log)
-        self.sf.prepare()
+        self.sf = sfn.Step(mode, Org(login=client_credentials(cid, secret)), csv_path, log=self.log,
+                           retry=self.with_retry)
+        try:
+            self.sf.prepare()
+        except Exception as err:                          # noqa: BLE001 - the forms sync whatever happens here
+            self.sf.broken = f"{err.__class__.__name__}: {str(err)[:200]}"
+            self.sf.warn("not ready - no account is created or checked this run", self.sf.broken)
 
     def sf_create(self, region, plan):
         if self.sf is None:
@@ -675,8 +680,9 @@ class Run:
             return
         ok = wrong = 0
         try:
-            ok, wrong = self.sf.check({r: n for r, n in self.sf_names.items() if r in self.sf_on_form},
-                                      [name for name, _ in name_clashes(self.sf_names)])
+            ok, wrong = self.sf.check(self.sf_names, [name for name, _ in name_clashes(self.sf_names)],
+                                      on_form=self.sf_on_form,
+                                      complete=all(self.sf_names.get(r) is not None for r in REGIONAL_FORMS))
             if self.sf.created and self.sf.mode == "apply" and getattr(self.args, "synclog", False):
                 self.mark_sf_pending(svc or sc.service())
         except (SystemExit, Exception) as err:            # noqa: BLE001 - sheets_client reports via sys.exit

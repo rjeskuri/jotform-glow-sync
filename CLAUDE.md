@@ -41,9 +41,11 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   intents in `docs/intent/`, decisions in `docs/DECISIONS.md`. Review against `REVIEW.md`.
 
 ## Things Claude gets wrong
-1. Never run `--apply`, `--prune`, `clasp push`, `upload_roster.py --apply` or
-   `sheets_client.py import` without Ryan's explicit go in this conversation. The hook
-   `.claude/hooks/live_gate.sh` blocks them unless HE exported `GLOW_LIVE_OK=1` before launching.
+1. Never run `--apply`, `--prune`, `clasp push`, `upload_roster.py --apply`,
+   `sheets_client.py import`, `auto_sync.py --apply-salesforce`, `gh variable set SF_SYNC …` or
+   `gh workflow run auto-sync.yml -f apply=true` without Ryan's explicit go in this conversation.
+   The hook `.claude/hooks/live_gate.sh` blocks most of them unless HE exported `GLOW_LIVE_OK=1`
+   before launching; it does not see the two `gh` commands (BACKLOG 53).
 2. The API key comes from `.env` / the environment, never a command line (command lines land in
    `.claude/settings.local.json` and transcripts — that leaked a key once).
 3. The sync rewrites ALL conditions on every run, so anything added to a form by hand is wiped:

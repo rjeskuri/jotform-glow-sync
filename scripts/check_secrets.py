@@ -27,7 +27,7 @@ RULES = [
     # Salesforce (docs/plans/2026-10-06-sf-new-club-accounts.md): a session or access token is the
     # org id, "!", then the token; an External Client App's consumer key starts 3MVG9; its consumer
     # secret is 64 hex characters
-    ("Salesforce token", re.compile(r"00D[0-9A-Za-z]{12,15}![0-9A-Za-z._]{20,}"), []),
+    ("Salesforce token", re.compile(r"00D[0-9A-Za-z]{12,15}(?:!|%21)[0-9A-Za-z._]{20,}"), []),
     ("Salesforce consumer key", re.compile(r"3MVG9[0-9A-Za-z._]{40,}"), []),
     ("64-hex secret", re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])"), []),
     ("private key material",
