@@ -4,9 +4,11 @@ club session (docs/plans/2026-09-30-september-backfill.md).
 
 Salesforce turns each Attendance_Batch__c into Contacts and Attendance__c rows by itself (Apex
 AttendanceBatchProcessor). That code is not bulk-safe, creates a stray Club account for any name
-it does not know, stores a batch without names as a Success that blocks the real one, and keeps
-only the FIRST batch per club and date. So this tool sends one record per request, in order,
-after proving each one against Salesforce, and reads every one back.
+it does not know, stores a batch without names as Failed "No participants submitted", which
+blocks nothing (before 2026-10-07: a Success with no rows that blocked the day), keeps only the
+FIRST batch per club and date, and on a Success sets Girls_Present__c to the rows it created. So
+this tool sends one record per request, in order, after proving each one against Salesforce, and
+reads every one back (status, rows, girls, Girls_Present__c).
 
   snapshot  live, read-only: accounts, batches, attendance and participant COUNTS -> sf_state.json
   plan      offline: resolved.json (tools/backfill_resolve.py) + sf_state.json (+ decisions.csv)
@@ -529,7 +531,8 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
                          f"day, the reports tick {ticked} girls ('skip' to acknowledge)")
             else:
                 stop(["salesforce_has_empty_or_failed_batch"],
-                     f"{len(there)} batch(es), {n_rows} attendance rows: the day is blocked until that is removed")
+                     f"{len(there)} batch(es), {n_rows} attendance rows: this tool never adds to a day Salesforce "
+                     "has a batch or rows for; a Failed batch no longer blocks the processor itself")
             continue
         set_aside = []
         for origin in sorted(group["origins"]):
@@ -678,7 +681,8 @@ def cmd_plan(args, paths):
                    and not rows_on.get((b.get("Account__c"), b.get("Attendance_Date__c"))))
     if empty:
         print(f"Salesforce holds {len(empty)} batch(es) from {SCOPE_START} on without any attendance for their club and "
-              "day - each blocks that day for a later batch:")
+              "day - a Success among them blocks that day for a later batch; this tool never adds to a day with any "
+              "batch:")
         for club, day, name, status in empty:
             print(f"  {name} {status} {club} / {day}")
     print(f"decisions: {notes['decisions_read']} read and applied"
@@ -750,8 +754,19 @@ def outcome_of(status, message):
         return "duplicate_batch"
     if message.startswith("Attendance already exists"):
         return "attendance_already_exists"
+    if message.startswith("No participants"):     # a batch without names and without a count (since 2026-10-07)
+        return "no_participants"
     status = status if status in ("Success", "Failed", "Pending") else "no status"
     return f"{status.lower()}_{known_code(message)}"
+
+
+def number_text(value):
+    """A number field as Salesforce gives it (a double such as 3.0, or None when empty), for a message."""
+    if value is None:
+        return "empty"
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value).is_integer():
+        return str(int(value))
+    return repr(value)
 
 
 def participants_of(org, account_id):
@@ -771,7 +786,7 @@ def find_own_batch(org, row):
 def verify(org, row, batch_id, paths, ledger):
     """Read a batch back and close its ledger entry as ok or CHECK. `row` is its 'sending' row."""
     batch = org.query("SELECT Id, Name, Processing_Status__c, Status_Message__c, Account__c, CreatedById, "
-                      f"CreatedDate FROM Attendance_Batch__c WHERE Id = {quoted(batch_id)}")
+                      f"CreatedDate, Girls_Present__c FROM Attendance_Batch__c WHERE Id = {quoted(batch_id)}")
     if len(batch) != 1:
         raise Refused(f"{row['key']}: batch {batch_id} is no longer in Salesforce - if it was removed on purpose: "
                       f"close {row['key']} --removed")
@@ -790,6 +805,11 @@ def verify(org, row, batch_id, paths, ledger):
         wrong.append("the batch landed on another account")
     if counts["n"] != names or counts["girls"] != names:
         wrong.append(f"{counts['n']} rows for {counts['girls']} girls, {names} sent")
+    # the processor sets the count on a Success (= the rows it created) and clears it on every Failed path,
+    # so it is compared on a Success only: a Failed batch is CHECK already, by its status
+    present = batch.get("Girls_Present__c")
+    if batch["Processing_Status__c"] == OK_STATUS and present != counts["n"]:
+        wrong.append(f"Girls_Present__c is {number_text(present)}, the batch has {counts['n']} rows")
     if (made != expected) if row["new_exact"] == "yes" else not 0 <= made <= names:
         wrong.append(f"{made} new participants, {expected} expected")
     if len(contacts) != made:

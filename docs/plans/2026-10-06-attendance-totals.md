@@ -1,7 +1,7 @@
 ---
 title: One attendance total for leadership that includes the partners who report counts, with the per-girl figures labelled Jotform only, and the clubs that did not submit or sent a blank in plain view
 author: Claude (with Ryan's decisions of 2026-10-06)
-status: accepted         # Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+status: in-progress      # accepted by Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan; A + B deployed 2026-10-07 03:22 UTC (Result)
 created: 2026-10-06
 intent: docs/intent/2026-10-06-attendance-totals.md
 ---
@@ -1021,3 +1021,44 @@ wanted` (plan 4), `rendered: skipped` for plan 1's audit; two tools writing `Att
 - one `Org.update`, one auth and VPN rule, one ledger shape, different fields (B.3, C.3-4); three
 plans editing `form_status.py` and two editing `auto_sync.py` - serial commits in B.2 → B.4 after
 -54's confirmation.
+
+## Result (in progress)
+
+**A + B, the fields and the processor - live in production since 2026-10-07 03:22 UTC.**
+
+- Check-only validation `0AfRP000002gKnZ0AU` (`RunSpecifiedTests`: `AttendanceBatchTriggerTest`
+  and `TestContactTriggerHandler`): 26 of 26 tests passed (23 + 3), `AttendanceBatchProcessor`
+  coverage 93% (92% before).
+- Quick deploy `0AfRP000002gKqn0AE` at 2026-10-07 03:22 UTC, on Ryan's go. Retrieved back
+  afterwards: what is live equals what was built (`data/sf_totals_2026-10/after/`; the rollback is
+  `before/`, redeployed - the fields can stay).
+- Fields: `Attendance_Batch__c.Girls_Present__c` and `Girls_Enrolled__c`, both Number(18, 0), read
+  and edit on the System Administrator profile (`Admin`) only. `Girls_Enrolled__c` is empty and on
+  no report (BACKLOG 58).
+- The rolled-back anonymous Apex proof ran once and printed `blank: Failed No participants
+  submitted / aggregate: Success 0 rows 25 / names: Success 2 rows 2`; 0 records were left
+  behind.
+- Tooling API: 0 validation rules on `Attendance_Batch__c` and on `Attendance__c` (the Risks'
+  "a `PATCH` on a batch with a validation rule nobody has read" for C, and plan 1's `Module__c`
+  correction).
+- What the processor does now: blank `Contact_IDs__c` and no count → `Failed` "No participants
+  submitted", no rows, blocks nothing; blank and `Girls_Present__c` > 0 → `Success` with no rows
+  (an aggregate, its count kept); names → as before, plus `Girls_Present__c` = the rows created;
+  every `Failed` path clears `Girls_Present__c` to empty.
+
+**Step 3, the repo follow-through - done (2026-10-07, offline).** `tools/sf_backfill.py`: the
+docstring; the `salesforce_has_empty_or_failed_batch` hold's text (it says "a batch or rows", since
+`send_one` refuses on either); the `plan` listing's text; `outcome_of` → `no_participants`;
+`verify` reads `Girls_Present__c` and, on a `Success`, a count other than the rows (or no count) is
+`CHECK` (a `Failed` batch is `CHECK` already by its status, and the processor clears the count on
+it). `test/sf_backfill_test.py`: the docstring, `FakeOrg.insert` as the new processor, the
+listing and `BATCH-000001 Failed` assertions, the refusal test's comment, one new test (a
+`Success` whose `Girls_Present__c` is 2 or empty for 3 rows is `CHECK`; 3.0 as Salesforce gives
+it is `ok`) and one assertion added to the status-kind test (`no_participants`). The refusal hint
+of `tools/sf_girls_present.py` now also names the profile; RUNBOOK ("The names list sent to
+Salesforce", "Back-fill of attendance into Salesforce", "Attendance totals and partner-reported
+counts"), DECISIONS (the four A/B rows; the two D rows stay pending) and BACKLOG 65 say it is
+deployed.
+
+**Still to do**: C (step 4: `tools/sf_girls_present.py plan` / `set` / `check`, Ryan's go for the
+writes), D (step 5: the report type, reports and tiles), F (Ryan's intake decision).

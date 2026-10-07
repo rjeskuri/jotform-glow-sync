@@ -4,8 +4,11 @@ Offline tests for tools/sf_backfill.py (imported by test/python_test.py, so `mak
 them). Everything here is fictional: clubs, girls, submission and Salesforce ids are invented.
 A fake org stands in for Salesforce and follows its attendance processor where that matters:
 the club is found by name or a stray one is created, the first batch per club and day wins and
-a later one is stored as Failed, a batch without names is a Success without rows, every new
-name becomes a contact, and a handled error leaves the rows made so far behind.
+a later one is stored as Failed, a batch without names is Failed "No participants submitted"
+unless it carries a Girls_Present__c above 0 (an aggregate: a Success without rows), a Success
+sets Girls_Present__c to the rows it created and every Failed path clears it (the processor as
+deployed 2026-10-07), every new name becomes a contact, and a handled error leaves the rows made
+so far behind.
 """
 import contextlib
 import csv
@@ -130,9 +133,11 @@ class FakeOrg:
             self.strays.append(acc)
             self.contacts[acc["Id"]] = {}
         day, when = body["Attendance_Date__c"], self.clock()
+        typed = body.get("Girls_Present__c")         # a partner's count: an aggregate when there are no names
         batch = {"Id": "a1l%015d" % len(self.batches), "Name": "BATCH-%06d" % len(self.batches), "Account__c": acc["Id"],
                  "Attendance_Date__c": day, "Processing_Status__c": "Success", "Creator__c": body["Creator__c"],
-                 "Status_Message__c": self.message or "Processed successfully.", "CreatedById": ME, "CreatedDate": when}
+                 "Status_Message__c": self.message or "Processed successfully.", "CreatedById": ME, "CreatedDate": when,
+                 "Girls_Present__c": typed}
         names = [n.strip() for n in body["Contact_IDs__c"].split(",") if n.strip()]
         if any(b["Account__c"] == acc["Id"] and b["Attendance_Date__c"] == day and b["Processing_Status__c"] == "Success"
                for b in self.batches):
@@ -142,8 +147,11 @@ class FakeOrg:
         elif any(r["Account__c"] == acc["Id"] and r["Attendance_Date__c"] == day for r in self.rows):
             batch.update(Processing_Status__c="Failed", Status_Message__c=f"Attendance already exists for this club on {day}")
             names = []
+        elif not names and not (isinstance(typed, (int, float)) and typed > 0):
+            batch.update(Processing_Status__c="Failed", Status_Message__c="No participants submitted")
         self.batches.append(batch)
         before = dict(self.contacts[acc["Id"]])      # read once, before the loop, never refreshed
+        made = 0
         for position, name in enumerate(names):
             if self.fail_at == position:
                 batch.update(Processing_Status__c="Failed",
@@ -156,6 +164,11 @@ class FakeOrg:
                 mine[name.casefold() if name.casefold() not in mine else f"{name.casefold()} #{position}"] = contact
             self.rows.append({"Attendance_Batch__c": batch["Id"], "Account__c": acc["Id"], "Attendance_Date__c": day,
                               "Contact__c": contact[0], "contact_created": contact[1]})
+            made += 1
+        if batch["Processing_Status__c"] != "Success":
+            batch["Girls_Present__c"] = None         # every Failed path clears the count
+        elif names:
+            batch["Girls_Present__c"] = made         # names win over a typed count; an aggregate keeps its own
         if self.lose_answer:
             return 0, None
         return 201, {"id": batch["Id"], "success": True, "errors": []}
@@ -433,8 +446,10 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         self.assertNotIn("already_in_salesforce", out)
         self.write([row("5", date="2026-09-28")], decisions=[])       # no report for those days at all: still shown
         out = self.plan()[0]
-        self.assertIn("Salesforce holds 2 batch(es) from 2026-09-01 on without any attendance", out)
-        self.assertIn("BATCH-000001 Success Sunrise Club / 2026-09-19", out)
+        self.assertIn("Salesforce holds 2 batch(es) from 2026-09-01 on without any attendance for their club and day - "
+                      "a Success among them blocks that day for a later batch; this tool never adds to a day with any "
+                      "batch:", out)
+        self.assertIn("BATCH-000001 Failed Sunrise Club / 2026-09-19", out)      # a blank: "No participants submitted"
         self.assertIn("BATCH-000002 Failed Sunrise Club / 2026-09-26", out)
 
     def test_new_girls_are_counted_per_club_in_date_order_and_a_large_batch_holds_the_rest(self):
@@ -577,9 +592,12 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         self.org.accounts[0]["ParentId"] = None
         self.assertIn("no longer leads to exactly its one Club account", self.send()[1])
         fresh()
+        # a blank is Failed "No participants submitted" and blocks nothing in Salesforce, but this tool never
+        # adds to a club and day that has any batch
         self.org.insert("Attendance_Batch__c", {"Account_Name__c": "Sunrise Club", "Attendance_Date__c": "2026-09-05",
                                                 "Creator__c": "Jotform", "Contact_IDs__c": ""})
-        self.org.inserts.clear()             # an empty Success batch: no rows, but the day is taken
+        self.assertEqual(self.org.batches[-1]["Processing_Status__c"], "Failed")
+        self.org.inserts.clear()
         self.assertIn("already has a batch or attendance for this club and day", self.send()[1])
         fresh()
         self.org.rows.append({"Attendance_Batch__c": "x", "Account__c": SUNRISE, "Attendance_Date__c": "2026-09-05",
@@ -855,6 +873,7 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         self.assertEqual(bf.outcome_of("Failed", "Duplicate: A successful batch already exists"), "duplicate_batch")
         self.assertEqual(bf.outcome_of("Failed", "Attendance already exists for this club on 9/5/2026"),
                          "attendance_already_exists")
+        self.assertEqual(bf.outcome_of("Failed", "No participants submitted"), "no_participants")
         self.assertEqual(bf.outcome_of("Failed", "Error: STRING_TOO_LONG, First Name: data value too large: "
                                        "WILHELMINA ZIBBLEWICK"), "failed_STRING_TOO_LONG")
         self.assertEqual(bf.outcome_of("Failed", "Error: could not process AMARAZ ZIBBLEWICK"), "failed_other")
@@ -1213,6 +1232,26 @@ class SalesforceBackfillEdges(Harness, unittest.TestCase):
             self.org.rows[-1]["Contact__c"] = self.org.rows[-2]["Contact__c"]
         self.after_insert(same_girl_twice)
         self.assertIn("3 rows for 2 girls, 3 sent", self.send()[1])
+
+    def test_a_success_whose_girls_present_is_not_its_rows_is_check(self):
+        for value, wrong in ((3.0, None),                # Salesforce gives the number as a double: equal
+                             (2.0, "Girls_Present__c is 2, the batch has 3 rows"),
+                             (None, "Girls_Present__c is empty, the batch has 3 rows")):    # a processor without the count
+            with self.subTest(value):
+                self.org = FakeOrg([account(SUNRISE, "Sunrise Club")])
+                if os.path.exists(self.path("ledger.csv")):
+                    os.remove(self.path("ledger.csv"))
+                self.write([row("1")])
+                self.plan()
+                self.after_insert(lambda v=value: self.org.batches[-1].__setitem__("Girls_Present__c", v))
+                out, stop = self.send()
+                if wrong is None:
+                    self.assertIsNone(stop, stop)
+                    self.assertEqual(self.states(), ["sending", "ok"])
+                else:
+                    self.assertIn(f"is in Salesforce but not as planned - {wrong}. STOPPED", stop)
+                    self.assertEqual(self.states(), ["sending", "CHECK"])
+                    self.assertIn(wrong, self.ledger()[-1]["note"])
 
     # ---- the wire
     def test_a_count_refuses_anything_but_a_number_and_no_read_asks_for_a_contact_s_name(self):

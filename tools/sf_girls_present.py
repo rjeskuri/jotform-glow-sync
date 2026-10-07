@@ -3,9 +3,11 @@
 from before the field existed - and the read-only check that keeps it honest afterwards
 (docs/plans/2026-10-06-attendance-totals.md, C).
 
-The attendance processor sets Girls_Present__c when a Jotform batch succeeds (= the attendance rows
-it created); a partner-reported total is typed into it (Creator__c 'Partner report': no names, no
-rows). Batches from before the field have it empty; this tool fills them once, from their rows.
+The field and the processor change are deployed (2026-10-07 03:22 UTC, plan sections A and B):
+since then the attendance processor sets Girls_Present__c when a Jotform batch succeeds (= the
+attendance rows it created) and clears it on a Failed one; a partner-reported total is typed into
+it (Creator__c 'Partner report': no names, no rows). Batches from before the deploy have it empty;
+this tool fills them once, from their rows.
 
   plan    live, read-only: every batch's id, status, creator kind, rows and current value -> plan.csv
   set     offline from plan.csv: what would be written; --apply --vpn-off writes, one PATCH per
@@ -99,9 +101,13 @@ def as_count(value):
 
 
 def no_field_hint(stop):
-    """A read that Salesforce refuses before the field exists gets the one likely cause named."""
+    """A read that Salesforce refuses for the field gets the likely causes named: the field is deployed
+    (2026-10-07 03:22 UTC) with read access on the System Administrator profile only, so an org without
+    it, or a login on another profile, gets HTTP 400 for any query that names it."""
     if "HTTP 400" in str(stop):
-        return Refused(f"{stop} - is {FIELD} deployed on {SOBJECT}? (docs/plans/2026-10-06-attendance-totals.md, A)")
+        return Refused(f"{stop} - is {FIELD} deployed on {SOBJECT}? (in production since 2026-10-07, readable on "
+                       "the System Administrator profile only: is this login on it? "
+                       "docs/plans/2026-10-06-attendance-totals.md, A)")
     return stop
 
 
