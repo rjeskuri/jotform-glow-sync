@@ -742,19 +742,28 @@ def judge(answer, club, rehearse):
     return False, "; ".join(said)
 
 
-def run_apex(org, path):
-    """(the CLI's answer as JSON or None, its raw output). The token never leaves the CLI."""
+def run_apex(org, path, out_path):
+    """(the CLI's answer as JSON or None, its raw output). The token never leaves the CLI. The answer
+    goes to `out_path` (owner only), not to a pipe: through a pipe the CLI cut its answer at 65,536
+    bytes when it exited (an 11-merge log, 2026-10-07)."""
     argv = ["sf", "apex", "run", "--file", path, "--target-org", org.alias, "--json"]
+    fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
     try:
-        out = org.run(argv, capture_output=True, text=True, timeout=APEX_TIMEOUT)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            out = org.run(argv, stdout=fh, stderr=subprocess.PIPE, text=True, timeout=APEX_TIMEOUT)
     except subprocess.TimeoutExpired:
         return None, "timeout"
     except OSError:
         raise Refused("the Salesforce CLI (sf) could not be started - nothing ran") from None
+    text = getattr(out, "stdout", None)
+    if not isinstance(text, str):                     # the real CLI wrote the file; a test's fake answers here
+        with open(out_path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
     try:
-        return json.loads(out.stdout or ""), out.stdout
+        return json.loads(text or ""), text
     except ValueError:
-        return None, out.stdout or ""
+        return None, text or ""
 
 
 # ---- the merge run ----------------------------------------------------------------------------------
@@ -1057,8 +1066,8 @@ def cmd_merge(args, ctx):
 def run_and_judge(org, path, log_dir, club, n, rehearse, ctx):
     """Run one Apex file; (good: True/False/None = unknown, what to say, the DIAG lines). Prints only
     DIAG lines; the CLI's whole answer goes to an owner-only log file (it can hold names)."""
-    answer, raw = run_apex(org, path)
     log = os.path.join(log_dir, f"{stamp(ctx.clock()).replace(':', '')}_{club}_{n}.json")
+    answer, raw = run_apex(org, path, log)
     save_private(log, json.dumps(answer, indent=1, ensure_ascii=False) if answer is not None else raw)
     result = apex_result(answer)
     diag = diag_lines(result.get("logs") if result else "")

@@ -567,6 +567,33 @@ class SfDupesApex(Harness):
                     self.assertNotIn("RehearsalEnd", text)
                     self.assertNotIn("throw", text)
 
+    def test_the_cli_answer_is_read_from_a_file_not_a_pipe(self):
+        # through a pipe the CLI cut an 11-merge answer at 65,536 bytes (2026-10-07): it now writes a file
+        big = json.dumps(cli_answer(False, {"success": False, "compiled": True, "line": 1, "column": 1,
+                                            "exceptionMessage": f"RehearsalEndException: {sd.MARKER}",
+                                            "logs": as_salesforce_logs([f"1 (1)|USER_DEBUG|[9]|ERROR|DIAG|ok|{SUN}"]
+                                                                       + ["1 (1)|LIMIT_USAGE|x" * 10] * 4000)}))
+        self.assertGreater(len(big), 70000)
+        seen = {}
+
+        def cli(argv, stdout=None, **kwargs):
+            seen.update(kwargs, pipe=stdout is None or kwargs.get("capture_output"))
+            stdout.write(big)
+            return types.SimpleNamespace(returncode=1, stdout=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "answer.json")
+            org = types.SimpleNamespace(alias="glow", run=cli)
+            answer, raw = sd.run_apex(org, os.path.join(tmp, "x.apex"), out)
+            self.assertFalse(seen["pipe"])
+            self.assertEqual(os.stat(out).st_mode & 0o777, 0o600)
+            self.assertEqual(sd.judge(answer, SUN, True)[0], True)
+
+            def cut(argv, stdout=None, **_):
+                stdout.write(big[:65536])
+                return types.SimpleNamespace(returncode=1, stdout=None)
+            org.run = cut
+            self.assertIsNone(sd.run_apex(org, os.path.join(tmp, "x.apex"), out)[0])     # unreadable: never a success
+
     def test_only_diag_lines_of_user_debug_entries_are_shown(self):
         log = "\n".join(["67.0 APEX_CODE,FINEST",
                          "10:00:00.1 (1)|VARIABLE_ASSIGNMENT|[3]|c|{\"Name\":\"Amara Fennwhistle\"}",
