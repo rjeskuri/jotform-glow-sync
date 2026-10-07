@@ -59,8 +59,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
    refuses without `--q5-change-ok`; RUNBOOK "Club names two partners share").
 6. Active roster rows with a blank region reach NO form and only `auto_sync.py` (ATTENTION) and the
    sheet's ReviewQueue say so.
-7. qids, `SESSION_OVERRIDES`, form ids, `ROSTER_COLS`, `SYNC_LOG_COLS` exist in BOTH Python and
-   `appsscript/Config.gs` / `Roster.gs` — change both; `test/python_test.py` fails otherwise.
+7. qids, `SESSION_OVERRIDES`, form ids, `ROSTER_COLS`, `PARTNER_COLS`, `SYNC_LOG_COLS` exist in BOTH
+   Python and `appsscript/Config.gs` / `Roster.gs` (`PARTNER_COLS` in `tools/build_roster_offline.js`
+   too) — change both; `test/python_test.py` fails otherwise.
 8. `appsscript/Regions.gs` is generated; the sheet's Partners tab wins over it. `data/`, `backups/`,
    `credentials/` hold PII or secrets: never commit, quote or print their contents.
 9. Jotform `POST /form/{id}/translations` REPLACES a language's dictionary: GET, merge, POST; a new

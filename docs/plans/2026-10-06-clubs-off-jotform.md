@@ -813,11 +813,17 @@ DRY RUN - re-run with --apply to write
   (its rows are not in the recorded state, so the undo refuses them). `written.json` records the
   columns written (indexes), the values set, the reason, the clubs with their regions and row
   counts, and per row the number, partner, club and the two old values - never a girl's cell.
-- `--undo` also refuses when a chosen club has an ACTIVE row at the time of the undo (one came back
-  meanwhile): "refuse rather than guess" - the plan's "one of those rows has changed since" read
-  broadly. A row of a chosen club that arrives during a deactivation's write is left active, named
-  with `!`, audited with the rest and the tool exits 1 (no second batch: a girl added to a club
-  being retired is a human's call).
+- `--undo` also refuses when a chosen club has an ACTIVE row at the time of the undo that
+  `written.json` does not name (one came back, or was enrolled, meanwhile): "refuse rather than
+  guess" - the plan's "one of those rows has changed since" read broadly. Both checks run before
+  the plan (the dry run refuses too, and saves no `undo-<stamp>` folder) and name the rows and
+  their clubs; the remedy is per club - the club leaves `written.json` with its rows AND its
+  `clubs` line (half an edit is refused by name), the rest go back, its own rows are a hand job -
+  so it cannot loop: a row taken out alone would be "active and not in written.json" on the next
+  run. `write_cells`' re-read stays as the race guard for the window between the plan and the
+  write, worded for each path. A row of a chosen club that arrives during a deactivation's write is
+  left active, named with `!`, audited with the rest and the tool exits 1 (no second batch: a girl
+  added to a club being retired is a human's call).
 - `tools/disable_form.py` reads both `GET /form/{id}` and the properties and refuses when their
   statuses disagree; "already DISABLED - nothing to do" when the status is the wanted one and no new
   `--message` is given; `--enable` takes no `--message`. The POST carries only what differs.
@@ -847,3 +853,31 @@ DRY RUN - re-run with --apply to write
 
   As B expected: 0 / 0 / 1 (the 2026-09-25 two-club pick), U.S 0. Not run: `--apply` of either
   tool (steps 9-10, Ryan's go), `--undo` on the live sheet, the Apps Script push (step 11).
+
+- **Review fixes (2026-10-07, two adversarial reviews; eight findings, all applied):**
+  - The undo's remedy loop above (its message named an edit that `write_cells` then refused) and
+    the late timing of its active-row check: both checks now before the plan, the per-club remedy.
+  - B's match rule refined: `key(value) == key(club)`, or `== key(club) + SF_NAME_SEP + key(partner)`
+    - the exact long form of the club's own partner (`sf_club_name`), where B wrote
+    `startswith(key(club) + SF_NAME_SEP)`. The prefix rule would have credited a club with a
+    same-region namesake's `<club> - <other partner>` submissions (none of today's 38 + 11 shares
+    a name; three Africa names have two holders). Still never a bare prefix; the unit test pins
+    `'Ruby - Partner Two'` as not Partner One's `Ruby`.
+  - Beyond the plan, as defence in depth for step 9's order: when the chosen clubs are every
+    active club of a region (`whole_regions`), the guard also reads `GET /form/{id}` and a status
+    other than `DISABLED` is printed with `!`; `--apply` refuses without `--form-enabled-ok`
+    (deactivated first, every runner run fails on the empty region). One read-only GET more; the
+    tests' fake has the U.S form `DISABLED` by default, the RUNBOOK's order.
+  - `appsscript/Roster.gs` `loadPartnerJotform_` finds the column by the Partners tab's header row
+    (`key_`, so ` Jotform ` counts), as T3a's `read_partners_csv` reads the export by header - not
+    by `PARTNER_COLS`' position, which the parity test had pinned as if it were a name lookup. A
+    tab without the header marks nobody. Both sides now agree wherever the column sits, so no new
+    divergence row for ARCHITECTURE; the JS test moves the column once.
+  - `tools/disable_form.py`: the two-statuses-disagree exit says, on the re-read after the POST,
+    that the write was sent and to re-run without `--apply` until both GETs agree (the same
+    `read_form` had said "before anything is written" on both reads).
+  - CLAUDE.md rule 7 lists `PARTNER_COLS` (and the offline builder's copy) - this track's, with the
+    parity test; T3a's CLAUDE.md edits are the `--partners` command lines and rule 6.
+  - RUNBOOK "Deactivating a club" refers to T3a's section as "the section on clubs that do not use
+    Jotform" rather than by a quoted heading this branch cannot see, so a heading change cannot
+    orphan it (`check_docs_links.py` checks file links only).

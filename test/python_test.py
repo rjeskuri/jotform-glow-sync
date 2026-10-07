@@ -3983,8 +3983,12 @@ class PythonAppsScriptParity(unittest.TestCase):
             self.assertEqual(m.group(1).count("'") // 2, len(glow_sync.PARTNER_COLS), path)
         self.assertIn(glow_sync.JOTFORM_COL, glow_sync.PARTNER_COLS)
         self.assertEqual(glow_sync.PARTNER_COLS[:3], ("partner", "region", "notes"))   # the live tab's header
-        # the Apps Script reads the mark by that column name, never by a fixed letter
-        self.assertIn(f"PARTNER_COLS.indexOf('{glow_sync.JOTFORM_COL}')", read(ROSTER_GS))
+        # the Apps Script finds the column by the tab's own header row (key_), as Python's
+        # read_partners_csv reads the export by header - never by the constant's position
+        reader = re.search(r"function loadPartnerJotform_\(\) \{(.*?)\n\}", read(ROSTER_GS), re.S).group(1)
+        self.assertIn("getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(key_)", reader)
+        self.assertIn(f"header.indexOf('{glow_sync.JOTFORM_COL}')", reader)
+        self.assertNotIn("PARTNER_COLS", reader)
 
     def test_regions_match_glow_forms(self):
         # the Club Roster Form's region picker (Config.gs REGIONS) must offer
@@ -4481,16 +4485,22 @@ class RenameClub(unittest.TestCase):
 
 class GuardForms:
     """The GETs tools/deactivate_clubs.py's guard makes: the filtered submissions page(s)
-    of each form and its questions (q444 is the Club picker). subs: {form id: [submission]}."""
+    of each form, its questions (q444 is the Club picker) and, for a region whose every
+    club is chosen, the form itself (its status: ENABLED unless the id is in `disabled`).
+    subs: {form id: [submission]}."""
 
-    def __init__(self, subs=None, picker="444"):
+    def __init__(self, subs=None, picker="444", disabled=()):
         self.subs, self.picker, self.gets = subs or {}, picker, []
+        self.disabled = set(disabled)
 
     def get(self, path, **params):
         self.gets.append((path, params))
         if path.endswith("/questions"):
             return {self.picker: {"type": "control_dropdown", "name": sync.PICKER_NAME},
                     "5": {"type": "control_textbox"}}
+        if re.fullmatch(r"/form/\d+", path):
+            form_id = path.rsplit("/", 1)[1]
+            return {"id": form_id, "status": "DISABLED" if form_id in self.disabled else "ENABLED"}
         page = self.subs.get(path.split("/")[2], [])
         offset, limit = int(params.get("offset", 0)), int(params.get("limit", 1000))
         return page[offset:offset + limit]
@@ -4537,8 +4547,10 @@ class DeactivateClubs(unittest.TestCase):
             return cls.instant.astimezone(tz) if tz else cls.instant.astimezone().replace(tzinfo=None)
 
     def run_main(self, argv, sheet, client=None, key="test", clock=None, out=None):
-        """(exit code, stdout). client: the guard's Jotform (GuardForms); key=None removes the
-        API key from the environment; out: where the backup folders go (a temp dir otherwise)."""
+        """(exit code, stdout). client: the guard's Jotform (GuardForms; by default one whose U.S
+        form is DISABLED, the order the RUNBOOK has - a test of the ENABLED refusal passes its
+        own); key=None removes the API key from the environment; out: where the backup folders
+        go (a temp dir otherwise)."""
         import contextlib
         import io
         import tempfile
@@ -4557,7 +4569,8 @@ class DeactivateClubs(unittest.TestCase):
                 mock.patch.object(deactivate_clubs.sc, "sa_email", lambda: "robot"), \
                 mock.patch.object(deactivate_clubs.sc, "time_zone", lambda svc: "America/New_York"), \
                 mock.patch.object(deactivate_clubs, "datetime", clock or self.Clock), \
-                mock.patch.object(deactivate_clubs, "Client", lambda api_key, apply=False: client or GuardForms()), \
+                mock.patch.object(deactivate_clubs, "Client",
+                                  lambda api_key, apply=False: client or GuardForms(disabled={self.US})), \
                 mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(sys, "argv", ["deactivate_clubs.py"] + argv), \
                 contextlib.redirect_stdout(buf):
@@ -4572,15 +4585,20 @@ class DeactivateClubs(unittest.TestCase):
 
     def test_matches_is_exact_or_the_long_name_never_a_prefix(self):
         m = deactivate_clubs.matches
-        self.assertTrue(m("QUEENS", "Queens"))
-        self.assertTrue(m(" queens ", "QUEENS"))
-        self.assertTrue(m("QUEENS - Partner One", "QUEENS"))         # "<club> - <partner>"
-        self.assertFalse(m("Queens of Quest", "QUEENS"))             # the pinned pair (plan, B)
-        self.assertFalse(m("QUEENS", "Queens of Quest"))
-        self.assertFalse(m("QUEENSX", "QUEENS"))
-        self.assertFalse(m("QUEENS -Partner One", "QUEENS"))         # not the separator
-        self.assertFalse(m("", "QUEENS"))
-        self.assertFalse(m("QUEENS", ""))
+        self.assertTrue(m("QUEENS", "Queens", "Partner One"))
+        self.assertTrue(m(" queens ", "QUEENS", "Partner One"))
+        self.assertTrue(m("QUEENS - Partner One", "QUEENS", "Partner One"))      # "<club> - <its partner>"
+        self.assertTrue(m("queens -  partner one", "QUEENS", "Partner One"))     # by key, both halves
+        self.assertEqual(m(sync.sf_club_name("QUEENS", "Partner One", True), "QUEENS", "Partner One"), True)
+        self.assertFalse(m("Queens of Quest", "QUEENS", "Partner One"))          # the pinned pair (plan, B)
+        self.assertFalse(m("QUEENS", "Queens of Quest", "Partner Two"))
+        self.assertFalse(m("QUEENSX", "QUEENS", "Partner One"))
+        self.assertFalse(m("QUEENS -Partner One", "QUEENS", "Partner One"))      # not the separator
+        self.assertFalse(m("Ruby - Partner Two", "Ruby", "Partner One"))         # a namesake's long name
+        self.assertFalse(m("Ruby - Partner One - Partner Two", "Ruby", "Partner One"))
+        self.assertFalse(m("QUEENS - Partner One", "QUEENS", ""))                # no partner, no long form
+        self.assertFalse(m("", "QUEENS", "Partner One"))
+        self.assertFalse(m("QUEENS", "", "Partner One"))
 
     def test_selectors(self):
         sheet = self.sheet()
@@ -4616,6 +4634,7 @@ class DeactivateClubs(unittest.TestCase):
                            [["--region", "U.S", "--check-only", "--apply"], "drop --apply"],
                            [["--region", "U.S", "--apply"], "--apply needs --reason"],
                            [["--undo", "x", "--region", "U.S"], "--undo takes no selector"],
+                           [["--undo", "x", "--form-enabled-ok"], "--undo takes no selector and no guard flag"],
                            [["--region", "U.S", "--recent-days", "-1"], "0 or more"]):
             code, _ = self.run_main(argv, sheet)
             self.assertIn(text, str(code), argv)
@@ -4691,6 +4710,48 @@ class DeactivateClubs(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("no chosen club was named", out)
         self.assertEqual(sheet.batches, [])
+
+    def test_a_whole_region_needs_its_form_off_first(self):
+        # every active U.S club chosen while the U.S form is ENABLED: the dry run says so, --apply
+        # refuses without --form-enabled-ok (deactivated first, the runner fails on the empty region)
+        sheet, forms = self.sheet(), GuardForms()
+        code, out = self.run_main(["--region", "U.S", "--reason", "x"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"! U.S form {self.US} is ENABLED and these are all of its active clubs - disable it first "
+                      "(tools/disable_form.py), or pass --form-enabled-ok", out)
+        self.assertIn("DRY RUN", out)
+        self.assertIn(f"/form/{self.US}", [p for p, _ in forms.gets])                  # one status GET
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, forms)
+        self.assertIn(f"U.S form {self.US} is ENABLED and the chosen clubs are all of its active clubs", str(code))
+        self.assertIn("disable the form first (tools/disable_form.py", str(code))
+        self.assertIn("--form-enabled-ok", str(code))
+        self.assertEqual((sheet.batches, len(self.written)), ([], 0))                  # before the backup folder
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply", "--form-enabled-ok"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(sheet.batches), 1)
+        # the same clubs through their partners is the same whole region; one partner's is not
+        sheet, forms = self.sheet(), GuardForms()
+        code, out = self.run_main(["--partner", "Partner Three", "--partner", "Partner Four", "--reason", "x"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn("these are all of its active clubs", out)
+        n = len(forms.gets)
+        code, out = self.run_main(["--partner", "Partner Three", "--reason", "x", "--apply"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("all of its active clubs", out)
+        self.assertNotIn(f"/form/{self.US}", [p for p, _ in forms.gets[n:]])           # no status GET needed
+        # a DISABLED form (the RUNBOOK's order): nothing to say
+        sheet = self.sheet()
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, GuardForms(disabled={self.US}))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("disable it first", out)
+        # a status this tool cannot read is not DISABLED either
+
+        class Odd(GuardForms):
+            def get(self, path, **params):
+                out = super().get(path, **params)
+                return {"id": out["id"]} if re.fullmatch(r"/form/\d+", path) else out
+        code, _ = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], self.sheet(), Odd())
+        self.assertIn("is of no readable status and the chosen clubs", str(code))
 
     def test_apply_writes_the_two_cells_re_reads_and_audits(self):
         sheet = self.sheet()
@@ -4814,17 +4875,79 @@ class DeactivateClubs(unittest.TestCase):
             code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
             self.assertIn("rows 6-8 changed since the run of", str(code))
             self.assertEqual(len(sheet.batches), 2)
-            # a deactivation, then one girl put back by hand: the undo names her row and writes nothing
+            # a deactivation, then one girl put back by hand: the undo names her row and her club
+            # and writes nothing - before the plan, so the dry run refuses too and saves no folder
             sheet = self.sheet()
             self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, out=out)
-            folder = os.path.join(out, sorted(os.listdir(out))[-1])
+            folder = os.path.join(out, sorted(os.listdir(out))[-1])     # the fixed clock: the same stamp as above
+            saved = sorted(os.listdir(folder))
             sheet.tabs["Roster"][7 - 1][6], sheet.tabs["Roster"][7 - 1][8] = "active", ""
-            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
-            self.assertIn("Roster: row 7 changed since the run of", str(code))
-            self.assertIn("nothing written", str(code))
+            for argv in (["--undo", folder], ["--undo", folder, "--apply"]):
+                code, text = self.run_main(argv, sheet, key=None)
+                self.assertIn("Roster: row 7 changed since the run of", str(code))
+                self.assertIn("nothing written. Look at those rows first. If the other clubs should still go back, "
+                              "take this club out of written.json - the rows and the line under \"clubs\" - and "
+                              "run again: 'Sunrise Club' (Partner Three); its own rows are then put back by hand "
+                              "from ", str(code))
+                self.assertIn("/Roster.csv or through the Club Roster Form", str(code))
+                self.assertNotIn("DRY RUN", text)
+                self.assertNotIn("Ida Toe", str(code) + text)
             self.assertEqual(len(sheet.batches), 1)
+            self.assertEqual(sorted(os.listdir(folder)), saved)                         # no new undo- folder
+            # the remedy the message names, done: Sunrise Club out of written.json, the rest go back
+            with open(os.path.join(folder, "written.json"), encoding="utf-8") as f:
+                rec = json.load(f)
+            rec["rows"] = [r for r in rec["rows"] if r["club"] != "Sunrise Club"]
+            rec["clubs"] = [c for c in rec["clubs"] if c[1] != "Sunrise Club"]
+            with open(os.path.join(folder, "written.json"), "w", encoding="utf-8") as f:
+                json.dump(rec, f)
+            code, text = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertEqual(code, 0, text)
+            self.assertEqual([(r[6], r[8]) for r in sheet.tabs["Roster"][6 - 1:8]],
+                             [("inactive", "2026-10-07"), ("active", ""), ("active", "")])   # 6 stays, 7 by hand, 8 back
+            self.assertEqual(len(sheet.batches), 2)
+            self.assertIn("1 row(s) of 1 club(s) of 1 partner(s) in U.S set back", sheet.tabs["Audit"][-1][2])
             code, _ = self.run_main(["--undo", out], sheet, key=None)
             self.assertIn("no written.json", str(code))
+
+    def test_undo_refuses_a_club_with_an_active_row_it_does_not_name_before_the_plan(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as out:
+            sheet = self.sheet()
+            self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, out=out)
+            folder = os.path.join(out, self.written[0])
+            # a girl enrolled to Moon Club since (a Club Roster Form submission): her row is nobody's to undo
+            sheet.tabs["Roster"].append(["T9", "Partner Four", "moon club", "U.S", "Gia Mow", "Mow",
+                                         "active", "2026-10-08", "", "T!9"])
+            code, text = self.run_main(["--undo", folder], sheet, key=None)
+            self.assertEqual(str(code), "Roster: row 10 of 'Moon Club' (Partner Four) is active and not in written.json "
+                                        "(enrolled since?) - nothing written. Look at those rows first. If the other "
+                                        "clubs should still go back, take this club out of written.json - the rows "
+                                        "and the line under \"clubs\" - and run again: 'Moon Club' (Partner Four); "
+                                        "its own rows are then put back by hand from "
+                                        f"{os.path.relpath(folder, deactivate_clubs.REPO)}/Roster.csv or through "
+                                        "the Club Roster Form")
+            self.assertNotIn("DRY RUN", text)
+            self.assertEqual(len(sheet.batches), 1)
+            self.assertNotIn("Gia Mow", str(code) + text)
+            # both at once: a changed row of one club and a new row of another, every club named once
+            sheet.tabs["Roster"][7 - 1][6], sheet.tabs["Roster"][7 - 1][8] = "active", ""
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("row 7 changed since the run of", str(code))
+            self.assertIn("; row 10 of 'Moon Club' (Partner Four) is active and not in written.json", str(code))
+            self.assertIn("take these clubs out of written.json - the rows and the line under \"clubs\" - and run "
+                          "again: 'Moon Club' (Partner Four), 'Sunrise Club' (Partner Three); their own rows", str(code))
+            self.assertEqual(len(sheet.batches), 1)
+            # half an edit (a club's rows kept, its "clubs" line dropped) is refused by name
+            with open(os.path.join(folder, "written.json"), encoding="utf-8") as f:
+                rec = json.load(f)
+            rec["clubs"] = [c for c in rec["clubs"] if c[1] != "Moon Club"]
+            with open(os.path.join(folder, "written.json"), "w", encoding="utf-8") as f:
+                json.dump(rec, f)
+            code, _ = self.run_main(["--undo", folder], sheet, key=None)
+            self.assertEqual(str(code), "written.json: row 8 is 'Moon Club' (Partner Four), which has no line under "
+                                        "\"clubs\" - a club leaves written.json with its rows AND its line under "
+                                        "\"clubs\", or not at all")
 
     def test_undo_stops_when_a_row_moves_under_it(self):
         import tempfile
@@ -4839,6 +4962,18 @@ class DeactivateClubs(unittest.TestCase):
             sheet.before_read, sheet.reads = reactivate, {}
             code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
             self.assertIn("row 8 changed", str(code))
+            self.assertIn("look at those rows first (the dry run names them with their clubs)", str(code))
+            self.assertEqual(len(sheet.batches), 1)
+            sheet.tabs["Roster"][8 - 1][6] = "inactive"
+
+            def enroll(sheet, tab, n):
+                if tab == "Roster" and n == 2:               # a new Moon Club row in the same window
+                    sheet.tabs["Roster"].append(["T9", "Partner Four", "Moon Club", "U.S", "Gia Mow", "Mow",
+                                                 "active", "2026-10-08", "", "T!9"])
+            sheet.before_read, sheet.reads = enroll, {}
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("row 10 of the chosen clubs active again since the plan was read", str(code))
+            self.assertNotIn("run the tool again", str(code))
             self.assertEqual(len(sheet.batches), 1)
 
 
@@ -4951,7 +5086,24 @@ class DisableForm(unittest.TestCase):
                     out["status"] = "DISABLED"
                 return out
         code, _ = self.run_main(["--form", self.US], Split())
-        self.assertIn("not the same form state", str(code))
+        self.assertIn("not the same form state; read again before anything is written", str(code))
+
+        class SplitAfter(FormApi):
+            """The two GETs agree until the POST; the re-read then disagrees."""
+            def post_form(self, path, data, label):
+                super().post_form(path, data, label)
+                self.split = True
+
+            def get(self, path, **params):
+                out = super().get(path, **params)
+                if getattr(self, "split", False) and path.endswith("/properties"):
+                    out["status"] = "ENABLED"
+                return out
+        api = SplitAfter()
+        code, _ = self.run_main(["--form", self.US, "--apply"], api)
+        self.assertIn("not the same form state after the write - the properties POST was sent; run this again "
+                      "without --apply until both GETs agree, then decide", str(code))
+        self.assertEqual([c[0] for c in api.calls], ["GET", "GET", "BACKUP", "POST", "GET", "GET"])
 
     def test_apply_backs_up_then_posts_then_re_reads(self):
         api = FormApi()

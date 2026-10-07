@@ -260,13 +260,18 @@ What the tool does and guards:
 - **The guard.** Before the plan it reads the region's attendance form's
   submissions since 2026-09-01 (`JOTFORM_API_KEY`; counts, days and club
   names only) and credits each to a club by question 5 or the Club picker's
-  pick: the same text, or `<club> - <partner>` - never a bare prefix
-  (`QUEENS` is not `Queens of Quest`). A club named in the last 30 days
+  pick: the same text, or exactly `<club> - <its partner>` - never a bare
+  prefix (`QUEENS` is not `Queens of Quest`), and never a namesake's
+  `<club> - <other partner>`. A club named in the last 30 days
   (`--recent-days`) stops the run: `'<club>' (<partner>) sent attendance on
   <day> - deactivating a club that reports needs --deactivate-anyway`.
   `--check-only` prints the table and stops: per partner its clubs and
   submissions, then each club that was named with its days and whether it
-  was picked together with another club (the 2026-09-25 Africa pick).
+  was picked together with another club (the 2026-09-25 Africa pick). When
+  the chosen clubs are every active club of a region (`--region`, or its
+  partners together) the form's status is read too: not `DISABLED`, the
+  table says so with `!` and `--apply` refuses without `--form-enabled-ok` -
+  the order is form first, clubs after.
 - **The write** (`--apply`, with `--reason`: one line for the Audit row).
   `status` → `inactive` and `removed_date` → today in the sheet's zone (the
   text the Apps Script writes) on every ACTIVE row of the chosen clubs, in
@@ -291,16 +296,22 @@ What the tool does and guards:
   Then `python3 tools/sheets_client.py export Roster data/roster_<date>.csv`
   and the template's sync dry run (`python3 sync_attendance_form.py
   data/roster_<date>.csv --roster --form 262352490535154`): from the day
-  after, it plans `~ retired roster …` for each club ("Clubs that do not use
-  Jotform"). The region's form: a `DISABLED` one is `skipped` by the runner
+  after, it plans `~ retired roster …` for each club (the section on clubs
+  that do not use Jotform). The region's form: a `DISABLED` one is `skipped` by the runner
   and left as it is (its rosters, picker and rules frozen); an enabled one
   gets the retirements from its next sync.
 - **The way back.** `--undo data/deactivate_clubs/<stamp>` puts back exactly
   the rows `written.json` names - `status` and `removed_date` as they were -
   with the same shape (dry run, stale check, one batch, re-read, Audit
-  `reactivateRows`), and refuses, naming the rows, when one has changed since
-  or a chosen club has an active row again (a girl reactivated through the
-  Club Roster Form, a moved club): look at those rows first. Then the
+  `reactivateRows`). It refuses before the plan - the dry run too, nothing
+  saved - naming the rows and their clubs, when one of those rows has
+  changed since or a chosen club has an active row `written.json` does not
+  name (a girl reactivated or enrolled through the Club Roster Form, a moved
+  club): that club is a human's call. Look at those rows first; for the other
+  clubs to go back, take that club out of `written.json` - its rows and its
+  line under `"clubs"` (half an edit is refused by name) - and run again; its
+  own rows go back by hand from the folder's `Roster.csv` or through the Club
+  Roster Form. Then the
   dropdown refresh and a runner dry run (the sync restores the rosters,
   `~ restored roster …`, within its bands). One club that starts again
   without the undo: the partner sends "Enroll a NEW club" (its section shows
@@ -319,8 +330,11 @@ the SyncLog result `skipped` (no dry run, no apply, no verify, exit code
 unaffected); `form_status.py` prints `[DISABLED]` and skips the region check
 and the served-page checks; the form's rosters, picker and rules stay as they
 are, frozen. **Order:** disable the form first, deactivate its clubs after
-("Deactivating a club"). Deactivated first, every runner run would fail on
-the empty region (`read_roster_csv` exits) until the form is off.
+("Deactivating a club"; `deactivate_clubs.py` reads the form's status when
+every active club of the region is chosen and refuses `--apply` while it is
+not `DISABLED`, unless `--form-enabled-ok`). Deactivated first, every runner
+run would fail on the empty region (`read_roster_csv` exits) until the form
+is off.
 
 ```bash
 python3 tools/disable_form.py --form 262382706852058                 # dry run: status, count, last submission, the disabled page's text

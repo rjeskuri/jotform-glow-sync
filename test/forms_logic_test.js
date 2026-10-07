@@ -937,6 +937,16 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
           JSON.stringify(off.ctx.loadPartnerJotform_()) === JSON.stringify({ [off.ctx.key_(ORG)]: true }) &&
           JSON.stringify(w.ctx.loadPartnerJotform_()) === '{}' &&
           JSON.stringify(world('UTC', 'nope').ctx.loadPartnerJotform_()) === '{}');
+    // the column is found by the tab's header row (key_), as Python reads the export by header: a tab
+    // with the column somewhere else, or a header typed ' Jotform ', agrees; no header marks nobody
+    const shifted = world('UTC', 'no');
+    shifted.tabs.Partners = [['partner', 'region', 'contact', 'notes', ' Jotform '], [ORG, 'Africa', '', '', 'No']];
+    const noHeader = world('UTC', 'no');
+    noHeader.tabs.Partners = [['partner', 'region', 'notes'], [ORG, 'Africa', 'no']];
+    check('…the column by its header (key_), wherever it sits; a tab without the header marks nobody',
+          JSON.stringify(shifted.ctx.loadPartnerJotform_()) === JSON.stringify({ [shifted.ctx.key_(ORG)]: true }) &&
+          JSON.stringify(noHeader.ctx.loadPartnerJotform_()) === '{}',
+          JSON.stringify(shifted.ctx.loadPartnerJotform_()) + ' ' + JSON.stringify(noHeader.ctx.loadPartnerJotform_()));
   }
 
   result = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 5, change(), sentOn('2026-09-10'));

@@ -47,15 +47,19 @@ STILL_ENABLED = ("the API accepted the write but the status did not change - dis
                  "builder (Settings -> Form Status) and run this again without --apply to confirm")
 
 
-def read_form(client, form_id):
+def read_form(client, form_id, after_write=False):
     """(title, status, count, last submission or "", messageOfLimitedForm) from GET /form/{id}
-    and GET /form/{id}/properties; the two statuses must agree or the tool refuses to say."""
+    and GET /form/{id}/properties; the two statuses must agree or the tool refuses to say -
+    and says whether the POST has already gone out (`after_write`: the re-read)."""
     form = client.get(f"/form/{form_id}") or {}
     props = client.get(f"/form/{form_id}/properties") or {}
     status, prop_status = str(form.get("status") or ""), str(props.get("status") or "")
     if status != prop_status:
         sys.exit(f"form {form_id}: GET /form says status {status!r}, its properties say "
-                 f"{prop_status!r} - not the same form state; read again before anything is written")
+                 f"{prop_status!r} - not the same form state"
+                 + (" after the write - the properties POST was sent; run this again without --apply "
+                    "until both GETs agree, then decide" if after_write
+                    else "; read again before anything is written"))
     return (str(form.get("title") or ""), status, int(form.get("count") or 0),
             str(form.get("last_submission") or "").strip(), str(props.get("messageOfLimitedForm") or ""))
 
@@ -122,7 +126,7 @@ def main():
           f"status {status}) -> backups/{form_id}/*-{stamp}.json")
     client.post_form(f"/form/{form_id}/properties", data,
                      f"POST properties of {form_id}: " + ", ".join(f"{k}={v!r}" for k, v in data.items()))
-    title, after, count, last, message_after = read_form(client, form_id)
+    title, after, count, last, message_after = read_form(client, form_id, after_write=True)
     print("  re-read:")
     describe(form_id, title, after, count, last, message_after)
     if after != wanted:

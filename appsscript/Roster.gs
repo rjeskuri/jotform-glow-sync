@@ -115,14 +115,19 @@ function loadPartnerTabRegions_() {
  * Partners row whose `jotform` cell reads "no" (capitals and spacing ignored).
  * Anything else, a blank included, means the clubs are on the forms. Python
  * reads the same cell for the forms themselves (glow.sync, --partners); the
- * handlers read it only for the mentor e-mails' closing line.
+ * handlers read it only for the mentor e-mails' closing line. The column is
+ * found by its header (row 1, compared with key_), as Python reads the
+ * export, so the two sides agree wherever the column sits; a tab without the
+ * header marks nobody.
  */
 function loadPartnerJotform_() {
   const off = {};
   const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.PARTNERS);
   if (!sheet || sheet.getLastRow() < 2) return off;
-  const iJotform = PARTNER_COLS.indexOf('jotform');
-  sheet.getRange(2, 1, sheet.getLastRow() - 1, PARTNER_COLS.length).getValues()
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(key_);
+  const iJotform = header.indexOf('jotform');
+  if (iJotform < 0) return off;
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, iJotform + 1).getValues()
       .forEach(function (row) {
         const partner = tidy_(row[0]);
         if (partner && key_(row[iJotform]) === 'no') off[key_(partner)] = true;

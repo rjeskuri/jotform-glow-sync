@@ -14,12 +14,18 @@ re-read, an Audit row, and a folder --undo reads back.
 The guard. Before anything is planned, the region's attendance form's
 submissions since 2026-09-01 are read (JOTFORM_API_KEY) and matched to the
 chosen clubs by question 5 and the Club picker's answer: key equality, or
-"<club> - <partner>" (glow.sync.SF_NAME_SEP) - never a bare prefix, or
-'QUEENS' would be credited with 'Queens of Quest'. A club named in the last
---recent-days (30) stops the run unless --deactivate-anyway. --check-only
-prints the counts per partner and club and stops there (the double-check of
+exactly "<club> - <its partner>" (glow.sync.SF_NAME_SEP, the form a club takes
+when another partner's club has its name) - never a bare prefix, or 'QUEENS'
+would be credited with 'Queens of Quest', and never a namesake's
+"<club> - <other partner>". A club named in the last --recent-days (30) stops
+the run unless --deactivate-anyway. --check-only prints the counts per partner
+and club and stops there (the double-check of
 docs/plans/2026-10-06-clubs-off-jotform.md, B). Counts, days and club names
-only: nothing else of a submission is read out.
+only: nothing else of a submission is read out. When the chosen clubs are
+every active club of a region, the form's status is read too: ENABLED, the
+tool says so and --apply refuses without --form-enabled-ok - the form is
+disabled first (tools/disable_form.py), or every runner run fails on the
+empty region.
 
 What --apply writes:
   Roster   status -> inactive, removed_date -> today in the sheet's zone (the
@@ -45,8 +51,13 @@ checked unchanged everywhere else.
 
 --undo puts back exactly the rows written.json names (status and removed_date
 as they were) with the same shape - stale check, one batch, re-read, Audit
-row reactivateRows - and refuses, naming them, when one of those rows has
-changed since (a reactivation through the Club Roster Form, a move).
+row reactivateRows - and refuses, before the plan, naming the rows and their
+clubs, when one of those rows has changed since or a chosen club has an
+active row written.json does not name (a reactivation through the Club Roster
+Form, a new girl, a move): that club is a human's call. For the other clubs to
+go back, it leaves written.json - its rows and its line under "clubs" - and
+the undo runs again; its own rows are put back by hand from Roster.csv or
+through the Club Roster Form.
 
 Afterwards (docs/RUNBOOK.md, "Deactivating a club"): in the sheet, GLOW ->
 Google Forms -> Update form dropdowns from the Roster, so the Club Roster
@@ -81,13 +92,17 @@ RECENT_DAYS = 30
 PAGE = 1000                        # submissions per request (Jotform's maximum)
 
 
-def matches(value, club):
-    """Whether a submitted text (question 5, or one Club picker pick) names `club`:
-    the same text by glow.text.key, or "<club> - <partner>" (the form of a club
-    whose name two partners have). Never a bare prefix: 'QUEENS' is a prefix of
-    'Queens of Quest' and must not be credited with its submissions."""
+def matches(value, club, partner):
+    """Whether a submitted text (question 5, or one Club picker pick) names `club`
+    of `partner`: the same text by glow.text.key, or exactly "<club> - <partner>"
+    (glow.sync.sf_club_name's long form, the club's own partner). Never a bare
+    prefix: 'QUEENS' is a prefix of 'Queens of Quest' and must not be credited
+    with its submissions; and never a namesake's "<club> - <other partner>",
+    which is the other partner's club."""
     head, value = key(club), key(value)
-    return bool(head) and (value == head or value.startswith(head + SF_NAME_SEP))
+    if not head:
+        return False
+    return value == head or (bool(key(partner)) and value == head + SF_NAME_SEP + key(partner))
 
 
 def columns(rows):
@@ -166,6 +181,21 @@ def active_rows_of(rows, cols, pairs):
     return out
 
 
+def whole_regions(rows, cols, chosen):
+    """The regions whose every active club (by cell_key of partner and club) is among
+    `chosen` - the regions a deactivation would empty, whose form must be off first."""
+    i_p, i_c, i_r, i_s = cols["partner"], cols["club"], cols["region"], cols["status"]
+    active = {}
+    for r in rows[1:]:
+        if cell_key(cell(r, i_s)) == ACTIVE and tidy(cell(r, i_p)) and tidy(cell(r, i_c)):
+            active.setdefault(nfc_key(cell(r, i_r)), set()).add((cell_key(cell(r, i_p)), cell_key(cell(r, i_c))))
+    picked = {}
+    for (p, c), e in chosen.items():
+        picked.setdefault(nfc_key(e["region"]), set()).add((cell_key(p), cell_key(c)))
+    return sorted(e["region"] for e in chosen.values()
+                  if active.get(nfc_key(e["region"]), set()) <= picked[nfc_key(e["region"])])
+
+
 # ------------------------------------------------------------------ the guard
 def fetch_since(client, form_id, since=SINCE):
     """Every submission of the form created after `since`, page by page. Jotform
@@ -225,9 +255,9 @@ def club_hits(subs, picker, clubs):
         q5 = answer_of(sub, CLUB_NAME)
         values = picks + ([q5] if isinstance(q5, str) and q5.strip() else [])
         day = str(sub.get("created_at") or "")[:10]
-        for pc in clubs:
-            if any(matches(v, pc[1]) for v in values):
-                out[pc].append((day, len(picks) > 1))
+        for partner, club in clubs:
+            if any(matches(v, club, partner) for v in values):
+                out[(partner, club)].append((day, len(picks) > 1))
     return out
 
 
@@ -252,13 +282,15 @@ def print_counts(region, form_id, subs, hits):
                       + (" ..." if len(days) > 5 else ""))
 
 
-def guard(client, chosen, recent_from, check_only, anyway=False):
+def guard(client, chosen, recent_from, check_only, anyway=False, whole=()):
     """Read each region's form, print the table, and stop when a club was named in a
     submission on or after `recent_from` (yyyy-mm-dd) - unless `check_only` (the
     table is the point; nothing follows) or `anyway` (--deactivate-anyway: said, not
-    stopped)."""
+    stopped). For a region in `whole` (every active club chosen) the form's status is
+    read too and a form that is not DISABLED is named with `!`; returns those as
+    [(region, form id, status)] - the caller refuses --apply for them."""
     regions = sorted({e["region"] for e in chosen.values()})
-    recent = []
+    recent, enabled = [], []
     for region in regions:
         form_id = glow_forms.REGIONALS[region]
         clubs = [pc for pc, e in chosen.items() if e["region"] == region]
@@ -267,19 +299,25 @@ def guard(client, chosen, recent_from, check_only, anyway=False):
         hits = club_hits(subs, picker, clubs)
         print_counts(region, form_id, subs, hits)
         recent += [(pc, day) for pc, found in hits.items() for day, _ in found if day >= recent_from]
+        if region in whole:
+            status = str((client.get(f"/form/{form_id}") or {}).get("status") or "")
+            if status != "DISABLED":
+                enabled.append((region, form_id, status))
+                print(f"  ! {region} form {form_id} is {status or 'of no readable status'} and these are all of "
+                      "its active clubs - disable it first (tools/disable_form.py), or pass --form-enabled-ok")
     if check_only:
         print(f"\n--check-only: {sum(len(e['rows']) for e in chosen.values())} active row(s) of "
               f"{len(chosen)} club(s) would be deactivated; nothing planned, nothing written")
-        return
+        return enabled
     if not recent:
         print(f"  no chosen club was named in a submission since {recent_from}")
-        return
+        return enabled
     (partner, club), day = max(recent, key=lambda t: t[1])
     named = {pc for pc, _ in recent}
     if anyway:
         print(f"  ! {len(named)} of the {len(chosen)} club(s) named in a submission since {recent_from} "
               f"(last: {club!r}, {day}) - going on: --deactivate-anyway")
-        return
+        return enabled
     sys.exit(f"{club!r} ({partner}) sent attendance on {day} - deactivating a club that reports "
              f"needs --deactivate-anyway ({len(named)} of the {len(chosen)} club(s) named in a "
              f"submission since {recent_from})")
@@ -292,22 +330,24 @@ def save_roster(folder, rows):
         csv.writer(f).writerows(rows)
 
 
-def write_cells(svc, before, cols, changes, pairs, label):
+def write_cells(svc, before, cols, changes, pairs, label, gained="came in for the chosen clubs",
+                again="run the tool again"):
     """Set `changes` ({sheet row: {column index: value}}) on the Roster: re-read first
     and stop (nothing written) when one of those rows changed since `before` was
-    read or one of `pairs` gained an active row; one RAW batchUpdate; re-read and
-    compare every row (the planned rows as planned, every other row unchanged in
-    the written columns). Returns (the tab after the write, [late active rows of
-    `pairs` appended during the run])."""
+    read or one of `pairs` has an active row outside `changes` (said with `gained`;
+    `again` is what to do next - the undo's dry run names such rows itself); one RAW
+    batchUpdate; re-read and compare every row (the planned rows as planned, every
+    other row unchanged in the written columns). Returns (the tab after the write,
+    [late active rows of `pairs` appended during the run])."""
     now = sc.read_tab(svc, ROSTER)
     stale = [n for n in changes if n > len(now) or trimmed(now[n - 1]) != trimmed(before[n - 1])]
-    gained = sorted({n for rows in active_rows_of(now, cols, pairs).values() for n in rows} - set(changes))
-    if stale or gained:
+    extra = sorted({n for rows in active_rows_of(now, cols, pairs).values() for n in rows} - set(changes))
+    if stale or extra:
         what = (f"{describe_rows(stale)} changed" if stale else "") \
-            + (" and " if stale and gained else "") \
-            + (f"{describe_rows(gained)} came in for the chosen clubs" if gained else "")
+            + (" and " if stale and extra else "") \
+            + (f"{describe_rows(extra)} {gained}" if extra else "")
         sys.exit(f"{ROSTER}: {what} since the plan was read (a form submission?) - nothing "
-                 "written; run the tool again")
+                 f"written; {again}")
     data = [{"range": a1(ROSTER, f"{col_letter(c)}{n}"), "values": [[v]]}
             for n, cells in changes.items() for c, v in cells.items()]
     resp = svc.spreadsheets().values().batchUpdate(
@@ -377,9 +417,16 @@ def deactivate(args, svc, roster, zone):
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
         "Set JOTFORM_API_KEY in the environment (.env): the guard reads the region's attendance "
         f"form submissions since {SINCE[:10]} before any club is deactivated")
-    guard(Client(api_key), chosen, recent_from, args.check_only, args.deactivate_anyway)
+    enabled = guard(Client(api_key), chosen, recent_from, args.check_only, args.deactivate_anyway,
+                    whole=whole_regions(roster, cols, chosen))
     if args.check_only:
         return
+    if enabled and args.apply and not args.form_enabled_ok:
+        region, form_id, status = enabled[0]
+        sys.exit(f"{region} form {form_id} is {status or 'of no readable status'} and the chosen clubs are "
+                 "all of its active clubs - disable the form first (tools/disable_form.py; docs/RUNBOOK.md, "
+                 "\"Disabling a regional form\"), or pass --form-enabled-ok: deactivated first, every "
+                 "runner run fails on the empty region until the form is off")
 
     rows = sorted(n for e in chosen.values() for n in e["rows"])
     i_s, i_r = cols["status"], cols["removed_date"]
@@ -440,8 +487,20 @@ def undo(args, svc, roster, zone):
         sys.exit(f"{ROSTER}: the status / removed_date columns are not where they were on "
                  f"{record['written']} - put the rows back by hand from "
                  f"{os.path.relpath(folder, REPO)}/Roster.csv")
+    pairs = [(p, c) for p, c, _, _ in record["clubs"]]
+    listed = {(cell_key(p), cell_key(c)) for p, c in pairs}
+    orphan = next((r for r in record["rows"]
+                   if (cell_key(r["partner"]), cell_key(r["club"])) not in listed), None)
+    if orphan:
+        sys.exit(f"written.json: row {orphan['row']} is {orphan['club']!r} ({orphan['partner']}), which has "
+                 "no line under \"clubs\" - a club leaves written.json with its rows AND its line under "
+                 "\"clubs\", or not at all")
+    # Refuse rather than guess, before the plan: a recorded row that is not as the run left it, or
+    # an active row of a recorded club that written.json does not name (a girl enrolled or put back
+    # since), makes that club a human's call; the remedy below cannot loop, because the club leaves
+    # written.json whole (its rows and its "clubs" line), so neither check sees it again.
     was = record["set"]
-    changed = []
+    changed, touched = [], set()
     for r in record["rows"]:
         n = r["row"]
         row = roster[n - 1] if 1 < n <= len(roster) else None
@@ -449,13 +508,25 @@ def undo(args, svc, roster, zone):
                 or cell_key(cell(row, i_c)) != cell_key(r["club"]) \
                 or cell(row, i_s) != was["status"] or cell(row, i_r) != was["removed_date"]:
             changed.append(n)
-    if changed:
-        sys.exit(f"{ROSTER}: {describe_rows(changed)} changed since the run of {record['written']} "
-                 "(a reactivation through the Club Roster Form, a move?) - nothing written. Look at "
-                 "those rows; if the rest should still go back, take them out of written.json and "
-                 "run again")
+            touched.add((r["partner"], r["club"]))
+    recorded = {r["row"] for r in record["rows"]}
+    again = {pc: [n for n in rows if n not in recorded]
+             for pc, rows in active_rows_of(roster, cols, pairs).items()}
+    again = {pc: rows for pc, rows in again.items() if rows}
+    if changed or again:
+        by_name = lambda pc: (key(pc[0]), key(pc[1]))
+        what = ([f"{describe_rows(changed)} changed since the run of {record['written']} (a reactivation "
+                 "through the Club Roster Form, a move?)"] if changed else [])
+        what += [f"{describe_rows(rows)} of {c!r} ({p}) {'is' if len(rows) == 1 else 'are'} active and not "
+                 "in written.json (enrolled since?)" for (p, c), rows in sorted(again.items(), key=by_name)]
+        clubs = sorted(touched | set(again), key=by_name)
+        sys.exit(f"{ROSTER}: " + "; ".join(what) + " - nothing written. Look at those rows first. If the "
+                 f"other clubs should still go back, take {'this club' if len(clubs) == 1 else 'these clubs'} "
+                 "out of written.json - the rows and the line under \"clubs\" - and run again: "
+                 + ", ".join(f"{c!r} ({p})" for p, c in clubs)
+                 + f"; {'its' if len(clubs) == 1 else 'their'} own rows are then put back by hand from "
+                 f"{os.path.relpath(folder, REPO)}/Roster.csv or through the Club Roster Form")
     changes = {r["row"]: {i_s: r["status"], i_r: r["removed_date"]} for r in record["rows"]}
-    pairs = [(p, c) for p, c, _, _ in record["clubs"]]
     regions = sorted({rg for _, _, _, rg in record["clubs"]})
     for p, c, n, _ in sorted(record["clubs"], key=lambda e: (key(e[0]), key(e[1]))):
         print(f"  {p:<32} {c:<32} {n:>4} row(s) back")
@@ -470,10 +541,11 @@ def undo(args, svc, roster, zone):
     out = os.path.join(folder, "undo-" + stamp)
     save_roster(out, roster)
     print(f"\nSaved the {ROSTER} tab before the undo to {os.path.relpath(out, REPO)}/")
-    # the stale check compares the rows with the read above; a row of a chosen club that is
-    # active now is one that came back meanwhile, and it stops the undo too
+    # the race guard: a row that changed, or came active for one of the clubs, between the plan
+    # above and this write stops the undo too - the dry run then names it with its club
     write_cells(svc, roster, cols, changes, pairs, label=f"the {ROSTER} as it was is in "
-                f"{os.path.relpath(out, REPO)}/Roster.csv")
+                f"{os.path.relpath(out, REPO)}/Roster.csv", gained="of the chosen clubs active again",
+                again="look at those rows first (the dry run names them with their clubs)")
     partners = {key(p) for p, _ in pairs}
     detail = (f"{len(changes)} row(s) of {len(pairs)} club(s) of {len(partners)} partner(s) in "
               f"{', '.join(regions)} set back as before {record['written']} (status, removed_date) - "
@@ -498,13 +570,16 @@ def main():
                     help="go on although a chosen club sent attendance in the last --recent-days days")
     ap.add_argument("--check-only", action="store_true",
                     help="print the submission counts per partner and club, then stop (nothing planned)")
+    ap.add_argument("--form-enabled-ok", action="store_true",
+                    help="deactivate every active club of a region although its form is still ENABLED "
+                         "(the runner then fails on the region until the form is disabled)")
     ap.add_argument("--undo", metavar="DIR",
                     help="put back the rows a run's written.json names (data/deactivate_clubs/<stamp>)")
     ap.add_argument("--apply", action="store_true", help="write (dry run without it)")
     args = ap.parse_args()
 
     selectors = bool(args.region or args.partner or args.club)
-    if args.undo and (selectors or args.check_only or args.deactivate_anyway):
+    if args.undo and (selectors or args.check_only or args.deactivate_anyway or args.form_enabled_ok):
         sys.exit("--undo takes no selector and no guard flag: it puts back exactly the rows written.json names")
     if not args.undo and not selectors:
         sys.exit("choose the clubs: --region, --partner (repeatable), or --partner with --club; or --undo <dir>")
