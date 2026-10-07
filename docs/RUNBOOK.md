@@ -1949,6 +1949,135 @@ Everything is in `data/backfill_2026-09/` (never committed; owner-only files).
   `created_contacts.csv` every contact a batch created. Remove the attendance rows of those
   batches, the batches, then those contacts - only with Ryan's go - and `close <key> --removed`
   for each.
+  - **WARNING (since 2026-10-07): the back-fill's contacts now carry live rows.** Every girl
+    ticked on a form since 2026-10-02 is booked on her existing contact, which is often the one
+    the back-fill made, and after the duplicate merge ("Duplicate girls in Salesforce", below)
+    the contact that stays is the back-fill's wherever a group had one. `Attendance__c.Contact__c`
+    is master-detail: **deleting a back-fill contact deletes every attendance row on it, the live
+    ones included.** Before removing a contact listed in `created_contacts.csv`, count its rows
+    whose batch is not in `ledger.csv`; if there is any, do not delete that contact (remove only
+    the back-fill's own rows and batches). A guard in `sf_backfill.py` for this is BACKLOG 78.
+
+## Duplicate girls in Salesforce
+
+([plan](plans/2026-10-07-sf-duplicate-girls.md); `tools/sf_dupes.py`.) The attendance processor
+finds a ticked girl by her exact name (capitals ignored) among her club's contacts and creates a
+contact when nothing matches. While the forms' names dictionary altered some names (a double
+space; fixed 2026-10-06), every such submission made another contact of the same girl, each
+holding part of her attendance. The tool finds them, proves each group against the Roster and
+merges them with Salesforce's own merge, which moves every attendance row to the contact that
+stays.
+
+**VPN off** before any of it: every subcommand reads Salesforce from the Mac and refuses without
+`--vpn-off` (see "Back-fill of attendance into Salesforce"). It prints counts, dates and record
+ids, never a name.
+
+### The monthly check
+
+```bash
+python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv
+```
+
+Read-only. Run it in the first days of each month (its batch check starts on the 1st of the
+current month; `--since yyyy-mm-dd` for another start), and after any change to the forms' names
+dictionary or to the attendance processor. Exit 0: clean; exit 1: a finding, listed per club by
+record id:
+
+- **(a) same name twice in one club** - one girl with two or more contacts (the key ignores
+  capitals, spacing and invisible characters). Merge them (below).
+- **(b) stored names with odd whitespace or invisible characters** - a contact whose next,
+  correctly spelled tick will make a twin. `plan` lists it as a rename (below).
+- **(c) batches whose name list has odd whitespace** - a form is sending altered names again: run
+  `tools/form_status.py` and fix the names dictionary first ("The names dictionary and the
+  module values"), then (a) and (b) follow.
+- **(d) names in two or more clubs that the Roster does not have in each** (with `--roster`;
+  every Roster row of each club, any status) - reported, never merged: a girl who moved club, two
+  club accounts for one club (11 girls in "Las Camelias" and "Las Camelias Primaria", BACKLOG 77),
+  or a namesake the Roster spells differently. A person decides.
+
+### The merge (Ryan's go for every `--apply` and every `--rehearse`)
+
+A rehearsal runs the merges' DML in production and then throws, so Salesforce rolls it back: it
+leaves nothing behind, but it locks the club's records and runs NPSP's triggers meanwhile, and the
+live-gate hook does not catch `--rehearse`. Every `--apply` and `--rehearse` reads Jotform first
+(no submission in the last 10 minutes) and the regional forms afterwards (`merge`): put
+`JOTFORM_API_KEY` in `.env` or the environment, or it refuses before anything runs.
+
+```bash
+python3 tools/sf_dupes.py plan --vpn-off --roster data/roster_<stamp>.csv     # read-only -> data/sf_dupes_<date>/merge_plan.json
+P=data/sf_dupes_<date>/merge_plan.json
+python3 tools/sf_dupes.py merge $P --vpn-off                  # dry run: re-read, drift check, the Apex written, nothing run
+python3 tools/sf_dupes.py merge $P --vpn-off --rehearse       # runs the Apex, then throws: Salesforce rolls it all back
+python3 tools/sf_dupes.py rename $P --vpn-off --apply --roster data/roster_<stamp>.csv
+python3 tools/sf_dupes.py merge $P --vpn-off --apply --club <account id>     # one club; read back; then the next
+python3 tools/sf_dupes.py cleanup $P --vpn-off --dup-sets     # dry run
+python3 tools/sf_dupes.py cleanup $P --vpn-off --dup-sets --apply
+python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # exit 0
+```
+
+- **`plan`** groups a club's Participant contacts by the key and proves each group: the club
+  account is exactly one active Roster club (compared as the processor compares names), the name
+  is exactly one active girl of that club and spelled as the Roster spells her, the copies agree
+  in name, club, role, description and creator, and no two copies hold a row on one date. The
+  contact that stays is the back-fill's (`created_contacts.csv`) where there is one, else the
+  earliest created (ties: the lowest id); the others go in merge calls of at most two. It prints a
+  table per club and `groups N, extras N, same-date N, renames N, needs-a-person N`, and exits 1
+  when anything needs a person: such a group is never merged by the tool (same-date pairs go to
+  Ryan). Compare the counts with what you expect before going on.
+- **`merge`** re-reads first and refuses any drift from the plan (contacts, their club, their
+  rows by id, the club's participants, a new copy of a girl): make the plan again. `--apply` and
+  `--rehearse` also refuse while a submission reached the Africa or Asia form in the last 10
+  minutes, and between 20:30 and 21:30 UTC (NPSP's nightly job) - checked again before each further
+  run - and write `merge_rollback.json` before the first run (a rehearsal too, though it records
+  no merge). One anonymous-Apex run per club (`--per-run N` merge calls per run if a limit bites:
+  each run prints `DIAG|limits|queries=..|dml=..|cpu=..`). The Apex checks everything again and
+  any failed check aborts the whole run, so a club is merged completely or not at all. Only `DIAG|`
+  lines are printed; the full debug log goes to `logs/` (it can hold names). After `--apply` it
+  reads back (participants down by exactly the merged count, rows per date unchanged, every moved
+  row on its contact, the merged contacts deleted with their master set). After `--apply` and
+  `--rehearse` it compares the submissions on all four regional forms with the new batches of
+  every club since the run began: **ATTENTION** (exit 2) when there are more submissions, or when
+  the count cannot be made (e.g. Jotform's list did not come newest first) - look at the newest
+  submissions and batches by hand.
+  - "the rehearsal failed" / "the run failed ... Salesforce rolled it back": nothing changed; read
+    the `DIAG|fail|...` reason (and the log file) before anything else.
+  - "THE OUTCOME IS UNKNOWN": the CLI's answer was lost. Wait ten minutes, then run the same
+    `merge --apply` again: it settles that run first. It refuses to settle when a merged-away
+    contact is not even among the deleted ones (Recycle Bin emptied) or was deleted without being
+    merged into its kept contact: look at it by hand.
+  - "applied, but the read-back differs": STOP; look at the club in Salesforce.
+- **`rename`** fixes a stored name with odd whitespace (collapsed, invisible characters dropped)
+  when the result is exactly one active girl of that club and no other contact has her name; the
+  dry run prints record ids and fields only. `--apply` refuses in the same 10 minutes after a
+  submission and the same NPSP hour as `merge`. A girl whose odd contact got a twin is merged into
+  her older contact and that one renamed (either order works).
+- **`cleanup`** (after the merges): a kept contact's affiliations to its club down to one - the
+  Primary one (NPSP's flag) where there is one, else the earliest - deleting only ones the plan
+  recorded (anything else is refused). A further **Primary** affiliation (a merge moves the
+  merged-away contact's over as it is) is left and listed ("leave ... a further Primary
+  affiliation"): NPSP blanks the contact's Primary Affiliation when a Primary affiliation is
+  deleted, even with another one to that club left. After each delete the contact's Primary
+  Affiliation is read back; if it changed: STOPPED - set it back in Salesforce (both values are in
+  the rollback file). `--dup-sets` deletes the plan's duplicate-rule sets left with at most one item
+  (report data). Each record is saved in the rollback file before its delete. `--apply` refuses in
+  the same 10 minutes after a submission and the same NPSP hour as `merge`.
+- Everything is in `data/sf_dupes_<date>/` (never committed; owner-only): `merge_plan.json` (ids,
+  dates, counts, and a sha256 of each rename's expected full name - never the name), `apex/` (ids
+  only), `logs/` and `merge_rollback.json` (both can hold names).
+
+### Rollback, per part
+
+- **A merge**, within 15 days: undelete the merged-away contact (Recycle Bin; its id and kept
+  contact are in `merge_rollback.json`), then delete the moved rows from the kept contact and
+  insert them again on the restored one from the saved rows (new ids, created date and creator: a
+  master-detail row cannot be moved by an update). After 15 days: a new contact from the saved
+  fields, then the rows. Ryan's go.
+- **A rename**: FirstName / LastName back to the saved `old` values (`renames` in the rollback file).
+- **A deleted affiliation**: insert it again from the saved record (`deleted`). Duplicate-rule
+  sets are report data and are not restored.
+- `--rehearse` and a failed run leave nothing to roll back. Should a rehearsal ever keep a change
+  ("not as before the rehearsal - LOOK AT IT NOW"), the rollback file holds the club's contacts as
+  they were just before it.
 
 ## Attendance dashboard in Salesforce
 
