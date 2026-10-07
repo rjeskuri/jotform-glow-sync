@@ -470,8 +470,8 @@ class Step:
     def check(self, sf_names_by_region, clash_names=(), on_form=None, complete=True):
         """After all regions: every active club on a form has its one right account. Accounts any
         region's clubs use are never strays; only the regions in `on_form` (None: all) are judged, and
-        strays are reported only when `complete` (every regional form's names were read). Returns
-        (ok, wrong)."""
+        strays are reported only when `complete` (every regional form's names were read, or the form
+        is disabled: its clubs keep their accounts, under their partner). Returns (ok, wrong)."""
         if self.broken:
             return 0, 0
         clash = {key(n) for n in clash_names}
@@ -493,7 +493,8 @@ class Step:
                     ok += 1
         for a in (strays(self.accounts, matched) if complete else []):
             wrong.append(f"{describe(a)}: a Club account without a partner that no club on a form uses "
-                         "(the processor made it for a name nobody expected?)")
+                         "(the processor made it for a name nobody expected? or the account of a club "
+                         "whose form is disabled)")
         if wrong:
             self.warn(f"{len(wrong)} club account(s) need a person", "\n".join("- " + w for w in wrong))
         self.log(f"  SF: check - {ok} ok, {len(wrong)} need a person")

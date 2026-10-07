@@ -505,7 +505,10 @@ tab ("Run workflow", optional region).
 the run also checks Salesforce, and with `apply` creates the account of each new club right
 before the region's form puts it on the Club picker ("Club accounts in Salesforce", "New clubs'
 accounts, automatically"). It is one more SyncLog row, region `Salesforce`; its problems are
-ATTENTION items starting `SF:`.
+ATTENTION items starting `SF:`. The end-of-run check reports a partner-less stray account
+only when every regional form's names were read, and a region whose form is disabled
+(`skipped`) counts as read: its clubs keep their accounts, under their partner, so they are
+not strays (a `failed` region does not count, and no stray is reported that run).
 
 **Safety bands** (per region, per run; `--max-creates`, `--max-updates`,
 `--max-retires`, `--max-restores`):

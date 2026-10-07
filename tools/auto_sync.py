@@ -491,6 +491,7 @@ class Run:
         self.partners = None      # the Partners export every sync and verify call gets (--partners)
         self.client = None        # glow.jotform.Client: the form-status read before each region
         self.sf, self.sf_on_form = None, set()   # the Salesforce step; regions whose form is as planned
+        self.skipped = set()      # regions whose form is not ENABLED: nothing run, no sf_names read
         self.names = []
         self._rx = None          # set once the roster is loaded; from then on every
                                  # logged line is redacted BEFORE it reaches stdout
@@ -540,6 +541,8 @@ class Run:
     def result(self, region, plan, result, detail):
         if result in ("in-sync", "applied", "applied-with-problems", "applied-unverified"):
             self.sf_on_form.add(region)
+        elif result == "skipped":
+            self.skipped.add(region)
         self.results.append([self.when, self.args.trigger, region, self.mode,
                              len(plan["creates"]) if plan else "", len(plan["updates"]) if plan else "",
                              plan["rules"] if plan and plan["rules"] is not None else "",
@@ -879,9 +882,12 @@ class Run:
             return
         ok = wrong = 0
         try:
+            # strays are judged only when every form's names were read; a disabled form is never
+            # read (skipped) and counts as read - its clubs keep their accounts, under their partner
             ok, wrong = self.sf.check(self.sf_names, [name for name, _ in name_clashes(self.sf_names)],
                                       on_form=self.sf_on_form,
-                                      complete=all(self.sf_names.get(r) is not None for r in REGIONAL_FORMS))
+                                      complete=all(self.sf_names.get(r) is not None or r in self.skipped
+                                                   for r in REGIONAL_FORMS))
             if self.sf.created and self.sf.mode == "apply" and getattr(self.args, "synclog", False):
                 self.mark_sf_pending(svc or sc.service())
         except (SystemExit, Exception) as err:            # noqa: BLE001 - sheets_client reports via sys.exit

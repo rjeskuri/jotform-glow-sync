@@ -539,6 +539,9 @@ class SalesforceNewClubs(Fixture):
         s = self.step(FakeOrg(accounts), mode="plan")
         s.prepare()
         self.assertEqual(s.check({"U.S": names["U.S"]}), (1, 1))        # every form read: the stray is said
+        said = next(d for t, d in s.attention if "need a person" in t)
+        self.assertIn("'Dawn Club' (Club, parent none): a Club account without a partner that no club on a form uses", said)
+        self.assertIn("or the account of a club whose form is disabled", said)   # a disabled form's club is not matched
 
     def test_a_case_match_outside_the_bmp_is_left_to_a_person(self):
         self.write_roster([("ADLAMXXX", "Example Partner", "\U0001E900 Club")])
@@ -782,6 +785,43 @@ class AutoSyncSalesforce(unittest.TestCase):
         with self.mock.patch("builtins.print"):
             run.sf_finish(None)
         self.assertEqual(seen, [(["Africa", "Asia"], ["Africa"], False)])   # two forms unread: no strays
+
+    def test_a_disabled_forms_region_counts_as_complete_and_an_unread_status_does_not(self):
+        # the U.S form DISABLED: its region is skipped - never synced, no sf_names - yet every other
+        # form's names were read, so the strays are judged (a disabled form's clubs keep their
+        # accounts, under their partner). A status that cannot be read is a failed region: that
+        # form is unread this run, and no stray is reported
+        seen = []
+
+        class Rec:
+            mode, created, broken, attention = "plan", [], None, []
+
+            def check(self, names, clashes, on_form=None, complete=True):
+                seen.append((sorted(names), sorted(on_form), complete))
+                return 0, 0
+
+            def close(self):
+                pass
+        others = {r: [] for r in self.auto_sync.REGIONAL_FORMS if r != "U.S"}
+        for status, complete in (("DISABLED", True), (RuntimeError("boom"), False)):
+            with self.subTest(status):
+                run = self.run_obj()
+                run.sf = Rec()
+
+                def status_(form, status=status):
+                    if isinstance(status, Exception):
+                        raise status
+                    return status
+                with self.mock.patch.object(run, "read_status", status_), self.mock.patch("builtins.print"):
+                    run.region("U.S", os.path.join(self.tmp.name, "roster.csv"))
+                    run.sf_names.update(others)                 # the three other forms, read and as planned
+                    run.sf_on_form.update(others)
+                    run.sf_finish(None)
+                self.assertEqual(run.results[0][7], "skipped" if complete else "failed")
+                self.assertEqual(run.skipped, {"U.S"} if complete else set())
+                self.assertNotIn("U.S", run.sf_names)
+                self.assertEqual(seen.pop(), (sorted(others), sorted(others), complete))
+        self.assertEqual(seen, [])
 
     def test_the_end_step_turns_errors_into_attention_and_writes_one_synclog_row(self):
         run = self.run_obj(synclog=True)
