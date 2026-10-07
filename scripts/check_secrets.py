@@ -24,6 +24,12 @@ RULES = [
      re.compile(r"(?<![0-9a-fA-F])[0-9a-f]{32}(?![0-9a-fA-F])"), []),
     ("Google API key", re.compile(r"AIza[0-9A-Za-z_-]{35}"), []),
     ("OAuth access token", re.compile(r"ya29\.[0-9A-Za-z_-]+"), []),
+    # Salesforce (docs/plans/2026-10-06-sf-new-club-accounts.md): a session or access token is the
+    # org id, "!", then the token; an External Client App's consumer key starts 3MVG9; its consumer
+    # secret is 64 hex characters
+    ("Salesforce token", re.compile(r"00D[0-9A-Za-z]{12,15}![0-9A-Za-z._]{20,}"), []),
+    ("Salesforce consumer key", re.compile(r"3MVG9[0-9A-Za-z._]{40,}"), []),
+    ("64-hex secret", re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])"), []),
     ("private key material",
      re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----|\"private_key\"\s*:"), []),
     ("API key on a URL", re.compile(r"apiKey=[0-9A-Za-z]{8,}"), []),

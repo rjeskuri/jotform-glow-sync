@@ -34,19 +34,17 @@ import io
 import json
 import os
 import re
-import subprocess
 import sys
 import traceback
 import unicodedata
-import urllib.parse
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from sf_club_accounts import ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, odd   # noqa: E402
+from glow.salesforce import API, NEXT_PAGE, Org, Refused, quoted   # noqa: E402,F401 (re-exported)
 
 DEFAULT_DIR = os.path.join(REPO, "data", "backfill_2026-09")
-API = "v67.0"
 SCOPE_START = datetime.date(2026, 9, 1)      # attendance dated before the launch is held, not sent
 MAX_NEW = 22                                 # new girls in one batch proven so far (2026-03-28)
 MAX_AGE_HOURS = 3                            # how old the fetched submissions may be when sending
@@ -54,7 +52,6 @@ CREATOR = "Jotform back-fill"                # the processor never reads the bat
 OK_STATUS, OK_MESSAGE = "Success", "Processed successfully."
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 CREATED_AT = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
-NEXT_PAGE = re.compile(r"/services/data/v\d+\.\d+/query/[A-Za-z0-9_-]+")
 SETTLE_AFTER_MINUTES = 10                    # a request Salesforce is still working on can commit this late
 LEDGER_COLS = ["when_utc", "done_utc", "key", "region", "account_id", "account_name", "attendance_date",
                "submissions", "names", "new_expected", "new_exact", "batch_id", "batch_name", "status",
@@ -77,10 +74,6 @@ ERROR_CODES = {"DUPLICATES_DETECTED", "STRING_TOO_LONG", "REQUIRED_FIELD_MISSING
                "CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY", "INSUFFICIENT_ACCESS_OR_READONLY", "LIMIT_EXCEEDED",
                "INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY", "INVALID_CROSS_REFERENCE_KEY",
                "REQUEST_LIMIT_EXCEEDED", "INVALID_SESSION_ID", "JSON_PARSER_ERROR", "ENTITY_IS_DELETED"}
-
-
-class Refused(Exception):
-    """Stop the run: what is wrong and what to do."""
 
 
 def within(path, root):
@@ -164,82 +157,7 @@ def save_private(path, text):
     os.replace(path + ".new", path)
 
 
-# ---- Salesforce, through the CLI's login and curl ------------------------------------------------
-class Org:
-    """One REST call at a time. The token is read from `sf org auth show-access-token` and handed
-    to curl in a config on stdin, so it is neither on a command line nor on disk; curl is told to
-    ignore any curlrc (-q) and any proxy."""
-
-    def __init__(self, alias, run=subprocess.run):
-        self.alias, self.run, self.token, self.base = alias, run, None, None
-
-    def login(self):
-        try:
-            shown = [json.loads(self.run(["sf", "org", *words, "--target-org", self.alias, "--json"],
-                                         capture_output=True, text=True).stdout)["result"]
-                     for words in (["display"], ["auth", "show-access-token"])]   # the CLI hides the token in `display`
-            self.base, self.token = shown[0]["instanceUrl"].rstrip("/"), shown[1]["accessToken"]
-            if not re.fullmatch(r"https://[A-Za-z0-9.-]+(:\d+)?", self.base) or not self.token \
-                    or re.search(r'[\x00-\x20\x7f"\\]', self.token):
-                raise ValueError
-        except (ValueError, KeyError, TypeError, OSError, AttributeError):
-            raise Refused(f"the Salesforce CLI has no usable login for '{self.alias}' - Ryan signs in, VPN "
-                          f"off, with `sf org login web --alias {self.alias}` (RUNBOOK, Back-fill of "
-                          "attendance into Salesforce)") from None
-
-    def call(self, method, path, body=None):
-        """(http status, parsed answer). Status 0: curl failed or the answer could not be read -
-        the outcome of a write is then unknown."""
-        if self.token is None:
-            self.login()
-        for attempt in (1, 2):
-            config = [f'url = "{self.base}{path}"', f'request = "{method}"', 'noproxy = "*"',
-                      f'header = "Authorization: Bearer {self.token}"', 'header = "Accept: application/json"']
-            if body is not None:
-                text = json.dumps(body, ensure_ascii=True)
-                config += ['header = "Content-Type: application/json"',
-                           'data = "' + text.replace("\\", "\\\\").replace('"', '\\"') + '"']
-            try:
-                out = self.run(["curl", "-q", "-sS", "--max-time", "120", "--config", "-", "-w", "\n%{http_code}"],
-                               input="\n".join(config) + "\n", capture_output=True, text=True)
-            except OSError:
-                return 0, None
-            text, _, code = out.stdout.rpartition("\n")
-            status = int(code) if code.strip().isdigit() else 0
-            if status == 401 and attempt == 1:       # the session ran out: the CLI refreshes it
-                self.login()
-                continue
-            try:
-                return status, json.loads(text) if text.strip() else None
-            except ValueError:
-                return (status if status >= 500 else 0), None
-        return 0, None
-
-    def query(self, soql):
-        """Every record of a query, following Salesforce's pages."""
-        path, records = f"/services/data/{API}/query?q=" + urllib.parse.quote(soql), []
-        while path:
-            status, answer = self.call("GET", path)
-            if status != 200 or not isinstance(answer, dict) or not isinstance(answer.get("records"), list):
-                raise Refused(f"Salesforce did not answer a read (HTTP {status})")
-            records += answer["records"]
-            path = None if answer.get("done") else answer.get("nextRecordsUrl")
-            if not answer.get("done") and not (isinstance(path, str) and NEXT_PAGE.fullmatch(path)):
-                raise Refused("Salesforce gave part of an answer and no way to read the rest: " + soql[:60])
-        return records
-
-    def count(self, soql):
-        status, answer = self.call("GET", f"/services/data/{API}/query?q=" + urllib.parse.quote(soql))
-        if status != 200 or not isinstance(answer, dict) or not isinstance(answer.get("totalSize"), int):
-            raise Refused(f"Salesforce did not answer a count (HTTP {status})")
-        return answer["totalSize"]
-
-    def insert(self, sobject, body):
-        return self.call("POST", f"/services/data/{API}/sobjects/{sobject}", body)
-
-
-def quoted(value):
-    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+# ---- Salesforce: glow/salesforce.py (Org, the CLI login, curl) ------------------------------------
 
 
 def plain(records):

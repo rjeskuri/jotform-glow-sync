@@ -13,6 +13,9 @@ backups/
 !test/fixtures/enrollment_sample.csv
 !worklog/worklog.csv
 !worklog/timezones.csv
+# The partner -> Salesforce account map the automatic sync creates club accounts under:
+# organisation names and record ids only, no person (docs/plans/2026-10-06-sf-new-club-accounts.md).
+!glow/sf_partners.csv
 
 # Never commit credentials. The Jotform API key belongs in .env / the
 # environment (JOTFORM_API_KEY) and, for the Sheet scripts, in Script
