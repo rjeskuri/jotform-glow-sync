@@ -1750,16 +1750,20 @@ session):
    - App Policies: Permitted Users "Admin approved users are pre-authorized", permission set GLOW
      Club Sync;
    - a short session timeout; no refresh token; no login IP ranges (GitHub's addresses change).
-4. **The dispatch token**:
-   - create a fine-grained token for this one repository with **Actions: read and write** and
-     nothing else;
-   - put it in the sheet's Script Property `SYNC_DISPATCH_TOKEN`;
-   - revoke the old token, which had Contents: write and could change the code that holds the
-     Salesforce secret;
-   - `clasp push` of `Dispatch.gs` must be live first (a quiet moment; no new Google service, so
-     no re-authorisation);
-   - then GLOW → Google Forms → Request Jotform sync now must show `HTTP 204` in the Audit tab;
-   - the workflow runs only on `main` (a token with Actions: write can pick the branch of a run);
+4. **The dispatch token**, in this order (the old `Dispatch.gs` needs Contents: write, the new one
+   Actions: write, so the token holds both for a few minutes):
+   1. On GitHub, Settings → Developer settings → Fine-grained tokens → the sheet's token → Edit:
+      add **Actions: Read and write**, keeping Contents for now.
+   2. `npm run clasp:push` of `Dispatch.gs`, at a quiet moment. There is no new Google service,
+      so no re-authorisation.
+   3. GLOW → Google Forms → Request Jotform sync now: the Audit tab must show `HTTP 204`, and the
+      Actions tab a run started by `workflow_dispatch`.
+   4. Edit the token again: Contents → **No access**. It can no longer change the code that holds
+      the Salesforce secret.
+   5. Request Jotform sync now once more: `HTTP 204` again.
+   - Before step 2 the sheet still uses `repository_dispatch`; after it, a token without Actions
+     gets `HTTP 403` in the Audit tab and only the daily run syncs.
+   - The workflow runs only on `main` (a token with Actions: write can pick the branch of a run);
      delete stale branches on GitHub, whose older workflow file has no such guard.
 5. **GitHub**:
    - secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (the app's consumer key and secret), on the
