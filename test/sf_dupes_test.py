@@ -74,6 +74,26 @@ def literal_time(text):
     return datetime.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
+def as_salesforce_logs(lines):
+    """A debug log as `sf apex run --json` returns it: a USER_DEBUG message's | is written as &#124;
+    (seen 2026-10-07)."""
+    out = []
+    for line in lines:
+        parts = line.split("|", 4)
+        out.append("|".join(parts[:4] + [parts[4].replace("|", "&#124;")])
+                   if len(parts) == 5 and parts[1] == "USER_DEBUG" else line)
+    return "\n".join(out)
+
+
+def cli_answer(success, outcome):
+    """The CLI's answer: the outcome under "result" when the Apex finished, under "data" (an error
+    answer) when it threw or did not compile (seen 2026-10-07)."""
+    if success:
+        return {"status": 0, "result": outcome}
+    return {"status": 1, "name": "executeRuntimeFailure" if outcome.get("compiled") else "executeCompileFailure",
+            "message": "the Apex threw", "exitCode": 1, "data": outcome}
+
+
 class FakeSF:
     """Salesforce as far as tools/sf_dupes.py can see it."""
     alias = "fake"
@@ -241,11 +261,10 @@ class FakeSF:
                 "10:00:00.3 (300)|USER_DEBUG|[2]|ERROR|DIAG|Beatrice Marrowgate sneaked in"]
 
         def answer(success, message="", compiled=True):
-            return types.SimpleNamespace(returncode=0 if success else 1, stdout=json.dumps({
-                "status": 0 if success else 1,
-                "result": {"success": success, "compiled": compiled, "compileProblem": "", "exceptionMessage": message,
-                           "exceptionStackTrace": "AnonymousBlock: line 9" if message else "", "line": -1, "column": -1,
-                           "logs": "\n".join(logs)}}))
+            return types.SimpleNamespace(returncode=0 if success else 1, stdout=json.dumps(cli_answer(success, {
+                "success": success, "compiled": compiled, "compileProblem": "", "exceptionMessage": message,
+                "exceptionStackTrace": "AnonymousBlock: line 9" if message else "", "line": -1, "column": -1,
+                "logs": as_salesforce_logs(logs)})))
         if self.apex_mode == "unreadable":
             return types.SimpleNamespace(returncode=1, stdout="Error: socket hang up for Amara Fennwhistle")
         have_people = len(self.participants(acc))
@@ -560,6 +579,7 @@ class SfDupesApex(Harness):
         lines = sd.diag_lines(log)
         hidden = "DIAG|(a line not shown: not one this tool writes)"
         self.assertEqual(lines, [f"DIAG|merged|{cid(1)}|{cid(2)}|{row_id(2)}", hidden, f"DIAG|ok|{SUN}"])
+        self.assertEqual(sd.diag_lines(as_salesforce_logs(log.split("\n"))), lines)     # | written as &#124;
         for sneaky in ("DIAG|ok|Thornquibbleford", "DIAG|ok|Amara Fennwhistle", "DIAG|merged|Fennwhistlewickam|x|y",
                        f"DIAG|merged|{cid(1)}|Fennwhistlewickam|", "DIAG|limits|queries=Amara",
                        f"DIAG|ok|{SUN}|Amara", "DIAG|Esther Umberlash"):
@@ -576,6 +596,10 @@ class SfDupesApex(Harness):
         def answer(success, message="", logs=ok_log, compiled=True):
             return {"status": 0, "result": {"success": success, "compiled": compiled, "exceptionMessage": message,
                                             "logs": logs, "line": 3, "column": 1}}
+
+        def as_cli(success, message="", logs=ok_log, compiled=True):      # what the CLI really answers
+            return cli_answer(success, {"success": success, "compiled": compiled, "exceptionMessage": message,
+                                        "logs": as_salesforce_logs(logs.split("\n")), "line": 3, "column": 1})
         marker = f"RehearsalEndException: {sd.MARKER}"
         for good, rehearse, ans in (
                 (True, True, answer(False, marker)),
@@ -593,7 +617,14 @@ class SfDupesApex(Harness):
                                              "AMARA FENNWHISTLE looks like ZARA ZIBBLEWICK: []")),
                 (False, False, answer(False, "FENNWHISTLE: UNABLE_TO_LOCK_ROW, AMARA")),
                 (False, True, answer(False, marker, compiled=False)),
-                (False, True, {"status": 1, "message": "no result"})):
+                (False, True, {"status": 1, "message": "no result"}),
+                (True, True, as_cli(False, marker)),
+                (False, True, as_cli(False, marker, logs="")),
+                (False, True, as_cli(False, "System.AssertException: Assertion Failed: DIAG|fail|rows before|" + SUN)),
+                (False, True, as_cli(False, marker, compiled=False)),
+                (True, False, as_cli(True)),
+                (False, False, as_cli(False, marker)),
+                (False, True, {"status": 1, "name": "executeRuntimeFailure", "data": {"message": "no outcome"}})):
             good_said = sd.judge(ans, SUN, rehearse)
             with self.subTest(ans=str(ans)[:120], rehearse=rehearse):
                 self.assertEqual(good_said[0], good)

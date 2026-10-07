@@ -690,8 +690,8 @@ def diag_lines(logs):
     out = []
     for line in str(logs or "").splitlines():
         parts = line.split("|", 4)
-        if len(parts) == 5 and parts[1] == "USER_DEBUG" and parts[4].startswith("DIAG|"):
-            message = parts[4]
+        message = parts[4].replace("&#124;", "|") if len(parts) == 5 else ""   # the log writes a message's | as &#124;
+        if parts[1:2] == ["USER_DEBUG"] and message.startswith("DIAG|"):
             ours = DIAG_SHAPE.fullmatch(message) and all(any(ch.isdigit() for ch in token)     # ids, counts
                                                          for token in re.split(r"[|,]", message)[2:] if token)
             out.append(message if ours else "DIAG|(a line not shown: not one this tool writes)")
@@ -704,11 +704,22 @@ def is_marker(message):
     return text == MARKER or bool(re.fullmatch(r"(?:[A-Za-z0-9_]+\.)*RehearsalEndException: " + MARKER, text))
 
 
+def apex_result(answer):
+    """The run's outcome in an `sf apex run --json` answer: under "result" when the Apex finished,
+    under "data" when it threw or did not compile (the CLI then answers as an error, e.g.
+    executeRuntimeFailure - seen 2026-10-07). None when neither holds one."""
+    for key in ("result", "data"):
+        part = answer.get(key) if isinstance(answer, dict) else None
+        if isinstance(part, dict) and "compiled" in part:
+            return part
+    return None
+
+
 def judge(answer, club, rehearse):
     """(good, what to say) for one `sf apex run --json` answer. Never quotes Salesforce's text: only
     the exception's class, this tool's own DIAG|fail token, counts and error codes."""
-    result = answer.get("result") if isinstance(answer, dict) else None
-    if not isinstance(result, dict):
+    result = apex_result(answer)
+    if result is None:
         return False, "the CLI gave no result (see the log file)"
     if not result.get("compiled"):
         return False, (f"the Apex did not compile (line {result.get('line')}, column {result.get('column')}) - "
@@ -1049,8 +1060,8 @@ def run_and_judge(org, path, log_dir, club, n, rehearse, ctx):
     answer, raw = run_apex(org, path)
     log = os.path.join(log_dir, f"{stamp(ctx.clock()).replace(':', '')}_{club}_{n}.json")
     save_private(log, json.dumps(answer, indent=1, ensure_ascii=False) if answer is not None else raw)
-    result = answer.get("result") if isinstance(answer, dict) else None
-    diag = diag_lines(result.get("logs") if isinstance(result, dict) else "")
+    result = apex_result(answer)
+    diag = diag_lines(result.get("logs") if result else "")
     for line in diag:
         print("  " + line)
     if answer is None:
