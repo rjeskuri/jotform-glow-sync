@@ -24,17 +24,28 @@ fi
 # Tool flags AND the raw API shapes the tools wrap - a direct curl PUT to
 # Jotform or a python snippet with apply_changes=True is just as live a write.
 # Salesforce: a deploy (a check-only one too), data writes, anonymous Apex, and
-# sf_dupes.py --rehearse (production DML, rolled back). GitHub: the repository
-# variables and secrets (SF_SYNC, AUTO_SYNC_APPLY) and an applying workflow run.
+# sf_dupes.py --rehearse (production DML, rolled back).
 SF='(^|[^[:alnum:]_.-])sf[[:space:]]+'
-GH='(^|[^[:alnum:]_.-])gh[[:space:]]+((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
-APPLY_TRUE='apply["'\'']?[[:space:]]*[=:][[:space:]]*["'\'']?[Tt][Rr][Uu][Ee]'
 PATTERN="(--apply|--prune|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|GLOW_LIVE_OK\+?=|api\.jotform\.com|api\.github\.com/repos/[^[:space:]]*/dispatches|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
 PATTERN+="|${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}data[[:space:]]+(create|update|delete|upsert|import)|${SF}apex[[:space:]]+run|sf_dupes\.py.*--rehearse"
-PATTERN+="|${GH}(variable|secret)[[:space:]]+set|${GH}workflow[[:space:]]+run.*${APPLY_TRUE}|${APPLY_TRUE}.*${GH}workflow[[:space:]]+run)"
+# GitHub: the sync's switches (repository variables and secrets: SF_SYNC, AUTO_SYNC_APPLY),
+# the workflow itself, a run that applies (apply given true, from a file, by expansion, or
+# inputs as JSON) and a rerun (it repeats the recorded inputs); gh api writes are below.
+GH='(^|[^[:alnum:]_.-])gh[[:space:]]+((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
+APPLY_ON='apply["'\'']?[[:space:]]*[=:][[:space:]]*["'\'']?([Tt][Rr][Uu][Ee]|1|[$@`])'
+PATTERN+="|${GH}(variable|secret)[[:space:]]+(set|delete|remove)|${GH}workflow[[:space:]]+(enable|disable)|${GH}run[[:space:]]+rerun"
+PATTERN+="|${GH}workflow[[:space:]]+run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+run)"
 # matched on one line: a command continued with \ (gh workflow run x \ -f apply=true) or
 # spread over lines is still one command
-MATCH=$(printf '%s' "$CMD" | tr '\n\r' '  ' | grep -Eo "$PATTERN" | head -1) || true
+FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
+MATCH=$(printf '%s' "$FLAT" | grep -Eo "$PATTERN" | head -1) || true
+# gh api: a write - a method other than GET, or fields / --input, which make it a POST - on
+# the Actions API (variables, secrets, workflows, runs) or to a repository dispatch
+if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]" \
+    && printf '%s' "$FLAT" | grep -Eq '(actions/|/dispatches)' \
+    && printf '%s' "$FLAT" | grep -Eiq '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE)|-[fF]|--field|--raw-field|--input)'; then
+  MATCH="gh api write under actions/ or to dispatches"
+fi
 [ -z "$MATCH" ] && exit 0
 
 # read-only and alone: a live flag it mentions is text, not an action
