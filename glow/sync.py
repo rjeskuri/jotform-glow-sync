@@ -40,6 +40,10 @@ YEAR = "94"          # GLOW Club Year dropdown (1|2|3)
 MODULES = {"1": "14", "2": "92", "3": "93"}       # year -> module dropdown qid
 WEEKS = {8: "15", 10: "95", 14: "96", 15: "97"}   # session count -> dropdown qid
 CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID = "18", "98", "100", "102"
+DATE = "17"          # the attendance date (Salesforce Attendance_Date__c)
+PHOTO = "19"         # Group Photo upload: required, off the Salesforce mapping since 2026-10-01
+CREATOR = "105"      # `creator` (Salesforce Creator__c)
+ENABLE_FUZZY = "109"  # `enableFuzzy` (Salesforce enable_fuzzy_matching__c)
 
 # The Club picker question is recognised by this Jotform field name on every
 # side (created by sync_attendance_form.py --club-picker, audited by

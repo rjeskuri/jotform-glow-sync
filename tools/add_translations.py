@@ -57,13 +57,14 @@ from glow import links as glow_links   # noqa: E402
 from glow import translations          # noqa: E402  (read, save, POST: rule 9)
 from glow.cli import api_key, run, targets               # noqa: E402
 from glow.jotform import Client        # noqa: E402
-from glow.sync import PARTNER_PICKER_NAME   # noqa: E402
+from glow.sync import (                    # noqa: E402
+    CONTACT_IDS, CREATOR, ENABLE_FUZZY, MODULE_ID, PARTNER_PICKER_NAME, WEEK_ID, YEAR_ID)
 from glow.text import md5              # noqa: E402
 
 FORMS = {**{fid: region for region, fid in glow_forms.REGIONALS.items()},
          glow_forms.TEMPLATE: "template"}
 # hidden bridge fields, headers and images whose text never shows to a mentor
-NEVER_SHOWN = {"18", "98", "100", "102", "105", "109", "103", "13"}
+NEVER_SHOWN = {CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID, CREATOR, ENABLE_FUZZY, "103", "13"}
 SOURCE_KEYS = translations.SOURCE_KEYS   # the English source maps, never a language to translate into
 
 
