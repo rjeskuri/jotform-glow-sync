@@ -128,6 +128,16 @@ class Hooks(unittest.TestCase):
         "sf apex run --file merge.apex -o glow",
         "/opt/homebrew/bin/sf apex run -f merge.apex",
         "python3 tools/sf_dupes.py merge --plan data/plan.json --rehearse",
+        # ... and the other spellings of the same writes (review of 2026-10-09)
+        "sfdx apex run -f merge.apex -o glow", "sfdx project deploy start -d force-app",
+        "sf force:apex:execute -f merge.apex", "sfdx force:apex:execute -f merge.apex -u glow",
+        "sfdx force:source:deploy -p force-app", "sfdx force:source:push", "sfdx force:source:delete -m ApexClass:X",
+        "sfdx force:mdapi:deploy -d mdapi", "sfdx force:data:record:update -s Account -i 001x -v Name=X",
+        "sfdx force:data:bulk:upsert -s Contact -f c.csv -i Id", "sfdx force:data:tree:import -f a.json",
+        "sf deploy metadata -d force-app", "sf project delete source -m ApexClass:GlowSync",
+        "curl -X PATCH https://example.my.salesforce.com/services/data/v60.0/sobjects/Account/001x -d @a.json",
+        "curl https://login.salesforce.com/services/oauth2/token -d grant_type=client_credentials",
+        "python3 -m sf_dupes merge --rehearse", "cd tools && python3 sf_dupes.py merge --rehearse",
     ]
 
     def test_every_live_command_is_blocked_and_logged(self):
@@ -158,7 +168,9 @@ class Hooks(unittest.TestCase):
                           "gh api -X PATCH repos/o/r/issues/1 -f title=x",       # not a switch of the sync
                           "gh workflow run auto-sync.yml", "gh workflow run auto-sync.yml -f apply=false",
                           "sf org list", "sf data query -q 'SELECT Id FROM Account' -o glow",
-                          "sf project deploy report --job-id 0Af000000000001",
+                          "sf project deploy report --job-id 0Af000000000001", "sfdx force:org:list",
+                          "sf project retrieve start -m ApexClass:GlowSync", "sfdx force:data:soql:query -q 'SELECT Id FROM Account'",
+                          "python3 tools/sf_dupes.py check",
                           "python3 tools/sf_dupes.py plan", "git status"], 0)
         self.assertEqual(self.logged(), {})
 

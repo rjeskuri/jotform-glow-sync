@@ -23,11 +23,14 @@ fi
 
 # Tool flags AND the raw API shapes the tools wrap - a direct curl PUT to
 # Jotform or a python snippet with apply_changes=True is just as live a write.
-# Salesforce: a deploy (a check-only one too), data writes, anonymous Apex, and
-# sf_dupes.py --rehearse (production DML, rolled back).
-SF='(^|[^[:alnum:]_.-])sf[[:space:]]+'
-PATTERN="(--apply|--prune|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|GLOW_LIVE_OK\+?=|api\.jotform\.com|api\.github\.com/repos/[^[:space:]]*/dispatches|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
-PATTERN+="|${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}data[[:space:]]+(create|update|delete|upsert|import)|${SF}apex[[:space:]]+run|sf_dupes\.py.*--rehearse"
+# Salesforce, through sf or the older sfdx: a deploy (a check-only one too) or a
+# delete of metadata, data writes, anonymous Apex, the REST API itself, and
+# --rehearse (sf_dupes.py's production DML, rolled back).
+SF='(^|[^[:alnum:]_.-])sf(dx)?[[:space:]]+'
+PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|GLOW_LIVE_OK\+?=|api\.jotform\.com|api\.github\.com/repos/[^[:space:]]*/dispatches|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
+PATTERN+="|${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}deploy[[:space:]]+metadata|${SF}project[[:space:]]+delete[[:space:]]+source"
+PATTERN+="|${SF}data[[:space:]]+(create|update|delete|upsert|import)|${SF}apex[[:space:]]+run"
+PATTERN+="|${SF}force:(apex:execute|source:(deploy|delete|push)|mdapi:deploy|data:(record|bulk|tree):)|\.salesforce\.com/services/"
 # GitHub: the sync's switches (repository variables and secrets: SF_SYNC, AUTO_SYNC_APPLY),
 # the workflow itself, a run that applies (apply given true, from a file, by expansion, or
 # inputs as JSON) and a rerun (it repeats the recorded inputs); gh api writes are below.
