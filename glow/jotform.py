@@ -7,7 +7,7 @@ self.calls and skipped unless the client was built with apply=True. Reads
 always run. A mislabelled write can therefore never slip through the gate.
 
 Failures raise JotformError with the label; retries (add_language.py's
-behaviour) and allow_fail (clone_regional.py's) are per-client / per-call
+behaviour) and allow_fail (the retired clone script's) are per-client / per-call
 options. glow.cli.run(main) turns the error into a clean sys.exit message.
 
 A JSON body goes to curl on standard input ("--data-binary @-"), never as an
