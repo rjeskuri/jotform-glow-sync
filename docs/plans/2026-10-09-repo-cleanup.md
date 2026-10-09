@@ -1,5 +1,5 @@
 ---
-status: in-progress      # Ryan 2026-10-09: merge wf10+wf11 first, all four phases; one-offs deleted, not archived (the recommended default; Ryan left that question open). Phases 1-4 on wf21/*
+status: in-progress      # done when Ryan pushes main and clasp-pushes
 backlog: 32, 50, 53
 date: 2026-10-09
 ---
@@ -142,3 +142,104 @@ Worktree branch `wf21/cleanup` off the integrated `main`; one commit per phase s
 implements, harness:reviewer reviews each phase's diff, `make check` before/after (test count must
 stay 633 until tests are added). Nothing pushed, no live command. Ryan afterwards: push `main`,
 `clasp push` the Apps Script change at a quiet moment (no new service, so no re-authorization).
+
+## Result
+
+Accepted by Ryan on 2026-10-09: merge wf10 and wf11 first, all four phases; finished one-offs
+deleted, not archived (the recommended default; Ryan left that question open). Built the same
+day on `wf21/cleanup` (75 commits and 4 merges on top of `main` 7f95a1b), then this branch's
+docs and, in parallel, `wf21/claude`. Nothing was pushed and no live command was run.
+
+**What each step did** (`git log --first-parent wf21/cleanup`):
+
+1. **Phase 0, on `main`** before this plan's commit: wf10 merged (`79208cd`), its two lint
+   errors fixed (`ac81722`), wf11 merged (`d81f7f8`); the merged branches deleted and the old
+   worktrees removed (`git worktree list`: `main` and the wf21 worktrees only).
+2. **Foundation**, `1a019b2`..`1814a53` (20 commits straight on `wf21/cleanup`): what every
+   parallel track needed first. Phase 2's harness - tests by discovery, `test/python_test.py`
+   split into 12 files, ruff strict in `make check` and CI, the conflict-marker check,
+   `check_gs.js` pinning the 8 services and refusing unknown calls, the pre-commit hook,
+   clasp's Node 18 guard; Phase 1's hooks - protected paths in every checkout, the gate for
+   `sf`, `sfdx` and `gh` writes, the read-only exemption, then the review's fixes (symbolic
+   links, a checkout under a folder named `data`, shell startup files, renamed `.py` files);
+   and the Phase 3 primitives the tracks would otherwise each have written (`glow.cli`
+   `api_key()` / `targets()`, `glow.sync` `club_picker()` / `rule_parts()`, `Client.url()`
+   encoding, `sf_new_clubs` regions from `glow.forms`).
+3. **Three tracks in parallel**, merged in turn:
+   - `wf21/sf` (12 commits, merge `2438dc5`): `glow/salesforce.py` (the org's ids,
+     `sf_match`, `has_invisible`, `error_codes`, the partner map, `--vpn-off`),
+     `glow/private_files.py`, `glow/submissions.py`, `Client.submissions()` and `CLOCK`;
+     `sf_club_accounts.py` (with its 29 tests) and `backfill_feedback_review.py` retired.
+   - `wf21/jotform` (20 commits, merge `55bb7a0`): Phase 1's Python fixes (`form_status
+     --roster` required, `glow/backup.py` with one second-precision stamp, the snapshot in
+     `restore_conditions.py`, every translation writer saving first, `public_page()`
+     refusing a failed fetch, `integration_status` under `glow.cli.run`) and Phase 3's
+     Jotform side (the qid constants, `dropdown_options`, `_roster_rows`, `language_of`,
+     the sheet-cell helpers, BACKLOG 50's dead code, `glow.REPO`, the `import` subcommand;
+     `needs_attention.py` and `derive_partner_regions.py` retired).
+   - `wf21/gs` (14 commits, merge `85064d6`): A1 (the new-club write order), A2 (the
+     dropdown update under the lock), A3 (no mentor address in Audit), A4 (the rebuild's
+     YES/NO); the unexecuted `FORMS`, `QID`, `SESSION_OVERRIDES`, `getApiKey_`,
+     `renameClubInRegistry_`, `DISPATCH_EVENT` and their parity tests removed; `clubKey_`,
+     `reviewTag_`, `withDocumentLock_`, `spreadsheetZone_`, `foldKey_` consolidated; parity
+     tests for `RESPONSE_COLS`, `similarity_` and `foldKey_`.
+4. **Follow-ups** (4 commits, `608bcd2`..`11f5706`): `clone_regional.py` deleted once nothing
+   imported it; `glow/__init__.py` lists every module; `form_status`'s `*_QID` aliases and the
+   tools' local date, photo and creator qids gone.
+5. **Docs**: `wf21/docs` (5 commits, merge `c64bc23`): the RUNBOOK grouped by system with a
+   contents list and per-procedure skeletons, history moved to the plans; BACKLOG and
+   DECISIONS one section per item; `docs/plans/README.md` generated (`make docs-index`);
+   `scripts/check_doc_refs.py`. Then `wf21/docs2`: the "Retired tools" table in
+   [ARCHITECTURE](../ARCHITECTURE.md#retired-tools), README, ARCHITECTURE's `glow/` modules,
+   the RUNBOOK's leftovers (no heading renamed), BACKLOG 80-86, eight DECISIONS sections, this
+   Result. `wf21/claude`, in parallel: CLAUDE.md, REVIEW.md, the skills and agents,
+   `.gitmessage` and `make hooks` - that branch's own result, not checked here.
+
+**Deviations from the plan above:**
+
+- The RUNBOOK stayed one file (a contents list, the same skeleton per procedure), and
+  BACKLOG and DECISIONS became one section per item in their single files instead of one file
+  per item: tools and tests in other tracks quote RUNBOOK sections in about 80 places
+  (DECISIONS 2026-10-09, "The docs stay one file each").
+- `test/hooks_test.py`, not `test/hooks_test.sh`: plain unittest, found by discovery.
+- The foundation step (2. above) before the parallel tracks, which the plan did not have.
+- The A1 design changed twice after review: a repair after the Roster write (`c403634`),
+  then a retry that inferred "new club" from the Roster rows (`4204d8a`, `1db28d8`), wrong in
+  two interleavings the re-review found; finally "new" decided before any write and the SF
+  Pending row written before the Roster (`6bfabc8`; DECISIONS 2026-10-09).
+- `clone_regional.py` went last (`608bcd2`): `test/gs_parity_test.py` imported it until the
+  Apps Script track removed that test.
+
+**Counts.** Python tests 633 → 661 (`Ran 661 tests`: 29 retired with `sf_club_accounts.py` and 3
+with the unexecuted Apps Script constants, the rest added with the fixes). JavaScript checks 450 → 497 (`ok` lines of `make test`; the
+baseline above said 407, `main` at 7f95a1b prints 450). ruff 2 findings → 0, strict.
+`make check` takes about 16 s on the Mac (8.5 s before: ruff, the hook tests and the `.gs`
+call check are new).
+
+**What is live after which step.** Nothing yet. Pushing `main` makes the runner code live:
+GitHub Actions runs `tools/auto_sync.py` from `main` on the next roster change or morning
+run, with wf10's changes and the consolidated tools - run `python3 tools/auto_sync.py` (a dry
+run) first. The Apps Script changes (A1-A4, the consolidations) go live only with Ryan's
+`clasp push` at a quiet moment (no new Google service, so no re-authorization expected),
+followed by "Process any missed form responses". The hooks, the checks and the docs act in a
+checkout as soon as it has the commits; `make hooks` once per clone.
+
+**What is left:** BACKLOG 80-86 (Python 3.12, `requirements.lock`, the Salesforce metadata in
+git, a scoped live gate, retiring `fix_module_values.py`, the two one-time menu items, an
+optional `FormHandlers.gs` split), 37's explicit `oauthScopes`, 53's remaining gaps, 10's
+replay test; Ryan's steps in [docs/agent/handoff.md](../agent/handoff.md).
+
+**Proof** (`make check` on `wf21/docs2`, tail):
+
+```
+Ran 661 tests in …
+OK
+gs: 10 files parse, 8 services, 0 unknown calls (698 checked, 15 of them menu or trigger handlers)
+secrets: clean (205 files scanned)
+docs-links: ok
+doc-refs: ok
+docs-index: ok
+conflicts: none
+fixtures: up to date
+CHECK PASSED
+```

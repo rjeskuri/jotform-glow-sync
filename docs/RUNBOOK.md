@@ -73,9 +73,11 @@ headings, so a heading is never renamed (`make check` runs
 | U.S | `262382706852058` | https://form.jotform.com/262382706852058 |
 | Template (every logic change lands here first) | `262352490535154` | not for mentors |
 
-The same table lives in `tools/auto_sync.py` (`REGIONAL_FORMS`),
-`tools/form_status.py`, `backup_forms.py` and `appsscript/Config.gs`;
-`test/gs_parity_test.py` fails if they drift apart. The five pre-launch forms
+The same ids live in `glow/forms.py`, in Python only (Apps Script never calls
+Jotform; its copy went on 2026-10-09). The tools that keep a table of their own
+for its order or labels (`tools/auto_sync.py` `REGIONAL_FORMS`,
+`tools/form_status.py`, `backup_forms.py`, …) are pinned to it by
+`test/glow_lib_test.py`. The five pre-launch forms
 are retitled "… (defunct)" (`260703905772560` Africa, `260704198384564` Asia,
 `260704170003542` Latin America, `260703912140547` U.S, `260555608160556`
 master), keep their submission history and have been `DISABLED` since
@@ -136,8 +138,9 @@ python3 tools/auto_sync.py --apply     # apply within the bands
 
 What to know:
 
-- `form_status.py` without `--roster` compares against the stale offline
-  build `data/roster_build/Roster.csv` — always pass the fresh export.
+- `form_status.py` needs `--roster`: since 2026-10-09 it refuses to run
+  without it (it used to fall back to the stale pre-launch build
+  `data/roster_build/Roster.csv`). Always pass a fresh export.
 - `--partners` is the Partners tab ("Clubs that do not use Jotform"). The
   sync reads which partners' clubs are kept off the forms from it; without it
   a hand run cannot tell a retired roster from one an apply left half-written,
@@ -321,7 +324,10 @@ the automation: `AUTO_SYNC_APPLY=0` (or clear the two Script Properties).
 ## Backup and restore (Jotform)
 
 - **When:** before any live write to a form (the tools that write also snapshot on their own); a restore when a rules change must be undone.
-- **Rollback:** the restore below, or Jotform's Revision History.
+- **Dry run:** `restore_conditions.py` without `--apply`: what the snapshot holds against the live form, and any refusal.
+- **Apply:** `--apply`, Ryan's go.
+- **Verify:** the restore re-reads the form: `RESTORED: N conditions on the server (matches snapshot)`.
+- **Rollback:** the restore below, or Jotform's Revision History; a restore is undone with the snapshot it took first.
 
 ```bash
 python3 backup_forms.py                       # every known form -> backups/<id>/{questions,properties}-<stamp>.json
@@ -333,6 +339,17 @@ python3 restore_conditions.py --form <id> --apply      # restore
 Restores touch only the conditions; questions, emails and the Salesforce
 integration are left alone. Jotform's own Revision History is the second
 rollback path. `backups/` holds rosters and never enters git.
+
+- `<stamp>` is to the second, `2026-10-09T153012` (`glow/backup.py`; to the
+  minute until 2026-10-09), so a re-run within the minute never writes over the
+  true "before". Every tool that snapshots uses this one stamp.
+- `restore_conditions.py --apply` first snapshots the form as it is
+  (`backups/<id>/*-<stamp>.json`, never over the `-latest` files, which may be the
+  snapshot being restored) and prints the way back: `--from properties-<stamp>.json`.
+- It refuses a snapshot without conditions, and one with a rule whose terms or
+  action do not parse - `--force` does not override that. A snapshot whose rules
+  test a club the Club picker no longer offers is refused too; there `--force`
+  restores anyway ("Club names two partners share", Restoring conditions).
 
 ## The Club picker (mentors choose their club instead of typing it)
 
@@ -665,7 +682,8 @@ again. When the page cannot be shown to serve the change (it still lags, or the
 re-render's read or write fails), the run ends with "The store is fixed but the
 public page could not be shown to serve it": the store IS written, and a second
 run only says `nothing to remove` - re-save the form in the builder if the page
-still lags, then `tools/form_status.py --form <id> --rendered`. A lost or
+still lags, then `tools/form_status.py --form <id> --roster data/roster_<date>.csv
+--rendered`. A lost or
 non-JSON answer to the POST is re-read and reported as
 `UNCHANGED` (nothing written: run again), `APPLIED` or `PARTIAL` (restore,
 below). It refuses, writing nothing: a store without `base` or `en`, with
@@ -765,7 +783,7 @@ The procedure as run and what the dry run prints: [plan](plans/2026-10-06-module
 - **Dry run:** each command without `--apply`.
 - **Apply:** with `--apply`, Ryan's go.
 - **Verify:** `--audit` again; `switcher_flags.py --check-page`.
-- **Rollback:** each write saves the form's store first (`backups/translations/`, mode 600).
+- **Rollback:** each write saves the form's whole store before its POST, to `backups/translations/<form>-<stamp>-before.json` (mode 600, never over an earlier file); without that file `glow/translations.py` sends nothing. Since 2026-10-09 that includes `add_language.py` and `restore_translations.py`, which used to POST without it.
 
 ```bash
 python3 tools/add_translations.py --audit                 # which labels lack translations
@@ -1118,10 +1136,36 @@ python3 tools/disable_form.py --form 262382706852058 --enable --apply   # the wa
 ## Building a new regional form (not maintenance)
 
 - **When:** only for a fresh form; never against a live one.
+- **Status:** the four regional forms were cloned from the template this way on 2026-08-27 (f542063). The script that did it in one command, `tools/clone_regional.py`, is retired ([Retired tools](ARCHITECTURE.md#retired-tools)); `git show 608bcd2^:tools/clone_regional.py > tools/clone_regional.py` brings it back, but it predates `--partners` - prefer the steps below.
+- **Dry run:** steps 1 and 4 (without `--apply`).
+- **Apply:** steps 2-4 with `--apply`, Ryan's go: each writes to the Jotform account.
+- **Verify:** step 5.
+- **Rollback:** delete the new form in Jotform: no mentor has its link yet.
 
-`tools/clone_regional.py <region> <roster.csv> [--apply]` clones the
-template, restores the languages, syncs one region with `--prune` and prints
-the status. Only for a fresh form; never against a live one.
+1. Snapshot the template: `python3 backup_forms.py --form 262352490535154`.
+2. Clone it: `POST /form/262352490535154/clone`, through `glow.jotform.Client` with
+   the key from the environment (never on a command line). The API can answer 504 and
+   still create the clone: list `GET /user/forms` before and after, and delete an
+   extra clone. Retitle the clone: `POST /form/<clone>/properties` with
+   `properties[title]` and `properties[pagetitle]` = the region's title
+   (`glow/forms.py` `TITLES`) and `properties[pageTitleChanged]` = `Yes`.
+3. Its languages: `python3 tools/restore_translations.py --form <clone>`, then
+   `--apply` (the API clone resets the language list to English; the template is the
+   default source; the store is saved first).
+4. The region's clubs, removing everything else:
+   ```bash
+   python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+           --partners data/partners_<date>.csv --region <region> --form <clone> --prune   # dry run
+   python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+           --partners data/partners_<date>.csv --region <region> --form <clone> --prune --apply
+   ```
+   `--prune` deletes questions: only on this fresh clone (the sync refuses it on a
+   form with submissions).
+5. `python3 tools/form_status.py --form <clone> --roster data/roster_<date>.csv
+   --partners data/partners_<date>.csv` → CLEAN, and `python3
+   tools/integration_status.py --form <clone>` (the Salesforce integration survives a
+   clone). Before mentors get the link, the form goes into `glow/forms.py` and the tool
+   tables `test/glow_lib_test.py` pins to it: a code change with its own plan.
 
 # Clubs
 
@@ -1364,9 +1408,9 @@ What the sync keeps to, on every run:
 It refuses, before any write: `|` or `{…}` in an entry; two rosters that
 would share one entry without the Partner box telling them apart (the way
 out is `--same-name-switch`, or deleting a leftover question); a roster
-becoming long whose long name is another club's own name; `--partner-picker`
-and a form carrying a partner list (both retired 2026-09-30, never
-deployed); `--same-name-switch` on a form without the Club picker; and
+becoming long whose long name is another club's own name; a form carrying a
+partner list (retired 2026-09-30, never deployed; `--partner-picker` is no
+option at all since 2026-10-09, so argparse rejects it); `--same-name-switch` on a form without the Club picker; and
 `--same-name-switch` when a roster that is not in the Roster export (a
 retired club's question left on the form) would be alone on the plain entry
 beside the long ones (`q… would keep the plain Club picker entry '<club>'
@@ -1414,7 +1458,9 @@ lines counted before the apply, the verify and the browser checks - and its roll
   clubs' rosters would never show and the club guard would block their
   mentors. Run the sync instead. `--force` restores anyway: run the sync by
   hand straight after (dry run, then `--apply`), which rebuilds the rules
-  on the picker's entries. The runner does not apply a rules-only
+  on the picker's entries. Since 2026-10-09 the restore snapshots the form
+  before its write and prints the `--from` that undoes it, and refuses a
+  snapshot with a rule that does not parse, `--force` or not. The runner does not apply a rules-only
   difference: it raises ATTENTION ("roster rule(s) test a name the Club
   picker does not list") on every run until that apply, or until a roster
   change in that region makes it apply.
@@ -1637,6 +1683,10 @@ original enrollment row (`planClub_`). It also re-creates any enrolled club
 that was renamed or moved to another partner, under its old name or partner
 and with new ids. Change single clubs with the tools above instead.
 
+After the next `clasp push` of `appsscript/` (the 2026-10-09 cleanup), the menu
+item says this in a YES/NO dialog first and does nothing on any other answer;
+run from the script editor, it refuses.
+
 The offline path's commands, for the record (pre-launch only):
 [archive/runbook-roster-rebuild.md](archive/runbook-roster-rebuild.md). Guarding the
 rebuild itself is BACKLOG 39.
@@ -1682,7 +1732,7 @@ trigger's hour, which follows the script project's zone
 |---|---|
 | **New club held as a possible duplicate** | "Enroll a NEW club" was sent for what may be a club already on file: nothing was imported, and the mentor was told it is being checked. Detail says why — names already active in one club, a club name close to one of the partner's, a typed organization close to a partner on file, or a re-enrollment whose list is mostly not the club's — and names the club(s) on file. Compare the response row (the tag) with those clubs' Roster rows. **Same club:** enter only its new girls on "Add or remove girls" for the club on file (REMOVE anyone who has left), then `resolved <date> by <name>: same club as <club>`. **A new club after all, or the new list is right:** `release <date> by <name>: <why>` (`release` must be the first word), then run **Process any missed form responses**: it asks about released rows separately and imports each as sent. **If the reason says "the organization was typed as …, close to … on file"**, fix that first, or the club is filed under a second spelling of the partner (no region, a second form section — the `ion bu` case): if it is that partner, set the response row's `Partner organization` cell to the partner exactly as the Partners tab spells it (the row stays matched to its item by its Timestamp, and the release preview shows the corrected partner); if it really is another organization, add it to the Partners tab with its region. Until then the release run refuses it (`ERROR: release refused: …`, offered again by the next run). **Sent by mistake:** `resolved …: not imported`. Never ask the partner to send it again, and never edit the `(sent …)` or the `[#…]` tag in detail: the menu matches both to the response row. |
 | **Club name already used by another partner — ask for a different name** | "Enroll a NEW club" was sent with a club name that another partner's club already has — any status, any region; capitals and spacing are ignored, a plural or a typo is a different name — or that reads as a club on file followed by its partner (`<club> - <partner>`). Nothing was imported, and the mentor got the same "it is being checked" note as any held club. A new club may not take a name in use: the attendance forms and Salesforce tell clubs apart by name, and the sync would refuse to add it ([plans/2026-09-30-same-name-clubs.md](plans/2026-09-30-same-name-clubs.md)). Detail names the club(s) that have the name. **First rule out a mix-up:** compare the response row (the tag) with that club's Roster rows — it may be that club, sent under the wrong partner — and, when detail gives more reasons (names on file, a close club name), with the other clubs it names. **Same club:** enter only its new girls on "Add or remove girls" for the club on file, then `resolved <date> by <name>: same club as <club> (<partner>)`. **That club, but the Roster has it under the wrong partner (or it has moved to this one):** move the club on file first ("Moving a club to another partner" — the tool refuses a club whose name two partners already share, and a partner in another region: Ryan's call), then write `release <date> by <name>: club moved to <partner>` with the `Club name` cell unchanged and run **Process any missed form responses**: the response now runs as that existing club (its new girls are added; no second club, no Salesforce line). **A new club:** ask the partner for a different name (the school or the place added is enough: `Stars (Testville Sec Sch)`). Then either **(a) release it under the new name:** set the response row's `Club name` cell to the new name (the row stays matched to its item by its Timestamp), write `release <date> by <name>: renamed to <new name>` (`release` must be the first word), and run **Process any missed form responses** — its preview shows the new name, and YES imports the club as sent otherwise; or **(b) have it sent again:** the partner (or you, from the response row's answers) sends "Enroll a NEW club" under the new name, and you close this item `resolved <date> by <name>: sent again as <new name>` — the held response is then never run. A release with the name unchanged, or changed to another name in use, is refused (`ERROR: release refused: …`, offered again by the next run) and adds a **Form response could not be processed** item: fix the cell, run it again, then close that item. **If detail also says "the organization was typed as …, close to … on file"**, fix that first, as in the row above. **If detail says "this club is on file with no active girl":** the partner sent "Enroll a NEW club" for a club of its own that has no active girl left, and another partner's club has its name. A club retired as a duplicate (the two of 2026-09-30) has no roster on the attendance forms any more, so bringing it back would add a new club under a name in use, which the sync refuses. Work it as above: the girls usually belong to the partner's up-to-date club (**Same club**); a club that really starts again needs a different name (**A new club**). The one false hold: a club that only lost every girl still has its roster on its attendance form, and keeps its name and its Salesforce account — none on 2026-09-30 (the only clubs with no active girl are the two retired ones). That one is Ryan's: he sets one of its girls back to `active` in the Roster (one who is on the list sent, if there is one; `removed_date` emptied — the only Roster cells typed by hand for an item), then releases with the `Club name` cell unchanged: the response runs as that existing club. Never edit the `(sent …)` or the `[#…]` tag in detail. The clubs that already share a name and have active girls are not affected: their own enrollments and roster changes run as always. |
-| **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added by `tools/backfill_feedback_review.py`). |
+| **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added once by a one-off script, since retired: [Retired tools](ARCHITECTURE.md#retired-tools)). |
 | **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. REMOVE only a match that is clearly her; otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). |
 | **Removed girls not put back by an older response** | A Club Roster Form response ran after some girls it lists had been removed — a retry, or an old response confirmed in "Missed form responses" — so they stayed removed instead of coming back (the 2026-09-13 replay cannot recur). Detail names the response row, the day it was sent and the Roster rows; the mentor's confirmation (roster changes) listed the names the mentor typed under "Not added back". Usually nothing to do: `resolved …: stayed removed`. If a girl really has rejoined since her removal (ask the partner), ADD her as above: the same ID comes back. |
 | **Same name listed twice** | Only one girl is on the Roster. Ask the partner: two girls → ADD the second with a mark, e.g. `Jane Doe (B)` (the first keeps her ID); one girl typed twice → `resolved …: one girl, no change`. Never resubmit through "Enroll a NEW club". |
@@ -1768,6 +1818,24 @@ until you confirm:
    row names; every word of it, though capitals do not matter and any dash
    will do for its long one), detail `Roster Form Responses!N (sent <yyyy-mm-dd
    hh:mm:ss from the row's Timestamp>): … [#Roster Form Responses!N]`.
+
+**A Club Roster Form response that failed half-way** (after the next `clasp push`
+of `appsscript/`, the 2026-10-09 cleanup). "Enroll a NEW club" writes the
+ClubRegistry, the Partners tab and the club's **SF Pending** row first, then its
+Roster rows; after the Roster write only best-effort steps follow (the Jotform sync
+request, the form dropdowns, the ReviewQueue items, Audit), and a failure among them
+is noted in FormLog and Audit but never makes the response an `ERROR:`. So a
+failure up to and including the Roster write is an `ERROR:` whose retry here finds
+the club still without girls - still new - with its code, its partner and its
+pending SF Pending row found again (no second row), and a failure after it needs
+no retry. Two things to know: if the Roster write failed and nobody retries, an SF
+Pending row waits for a club with no girls (retry the response, or close that row
+when the club is not coming); and an SF Pending row closed by hand before the
+retry gets a successor (close it again). "Add or remove girls" works the same way
+after the Roster write, so its mentor e-mail is sent once. Before that push the
+SF Pending row came after the Roster write: a failure there lost it, and the retry
+treated the club as existing - check SF Pending for a new club whose response
+shows an `ERROR:` and then a success in FormLog.
 
 The run takes the document lock one row at a time (form submissions keep
 flowing) and starts no row after 4 minutes (Apps Script stops any run at 6);
@@ -1856,15 +1924,27 @@ wording; forms built before 2026-09-28 get it once, from the menu
 ## Apps Script deploy
 
 - **When:** any change under `appsscript/`.
+- **Status:** the 2026-10-09 cleanup's changes (the Club Roster Form handlers' write order, the rebuild's YES/NO, the dropdown update under the lock, the consolidations) are in the repository, not deployed: they wait for Ryan's push. No new Google service, so no re-authorization is expected ([Result](plans/2026-10-09-repo-cleanup.md#result)).
 - **Dry run:** `make gs` (and `make check`).
-- **Apply:** `npm run clasp:push` at a quiet moment: Ryan, or Claude with the gate open.
+- **Apply:** `nvm use 18`, then `npm run clasp:push` at a quiet moment: Ryan, or Claude with the gate open. Ryan can run the push with Claude through the user-only `/deploy-appsscript` skill.
 - **Verify:** a new Google service: authorize at once, then "Process any missed form responses" and read its preview.
 - **Rollback:** a push of the previously deployed `appsscript/` ("Rolling back `appsscript/`", below).
 
 ```bash
-make gs                 # every .gs file parses (a broken file breaks every form handler)
+make gs                 # parse, pinned services, calls that resolve (below)
+nvm use 18              # clasp 2.4.2: the npm scripts refuse any other Node
 npm run clasp:push      # gated: GLOW_LIVE_OK=1 for Claude, or run it yourself
 ```
+
+`make gs` (`scripts/check_gs.js`) checks offline what would otherwise fail only live,
+inside the trigger: every `.gs` file parses and the pure files load together; the
+Google services used are exactly the 8 pinned ones (`FormApp`, `LockService`, `MailApp`,
+`PropertiesService`, `ScriptApp`, `SpreadsheetApp`, `UrlFetchApp`, `Utilities`) - a
+9th, a scope-bearing global such as `Session`, an advanced service or `oauthScopes` in
+`appsscript.json` fails it (a new scope: the rule below); and every call, and every
+function a menu item or trigger names, resolves to a function that exists. `npm run
+clasp:push` and `clasp:open` stop with "clasp 2.4.2 needs Node 18" on any other Node
+(the Mac's default is newer); `npm install` once per clone.
 
 Setup and the manual-paste fallback: [../appsscript/INSTALL.md](../appsscript/INSTALL.md).
 **Scope rule:** adding a Google service to a `.gs` file (UrlFetchApp,
@@ -1937,13 +2017,17 @@ text of its entry in the attendance form's club list
 
 ## Data-quality report
 
-- **When:** a fresh enrollment export to check for names listed twice and other enrollment problems (it reads the CSV and writes its report under `data/`).
+- **When:** no longer run: the report was a pre-launch check of the raw enrollment export.
+- **Status:** retired 2026-10-09. `tools/needs_attention.py` wrote `data/needs_attention_<date>.csv` (names listed twice, re-submitted rosters, clubs renamed on a form, …); the 2026-08-26 list is still worked as BACKLOG 4. Restore: `git show 7c24ac7^:tools/needs_attention.py > tools/needs_attention.py` ([Retired tools](ARCHITECTURE.md#retired-tools)).
 
-```bash
-python3 tools/needs_attention.py data/enrollment_<date>.csv     # -> data/needs_attention_<date>.csv
-```
+Since launch the same questions come from the running system instead: the
+ReviewQueue ("Working the ReviewQueue": a name listed twice, girls missing from
+a re-enrollment, a possible duplicate club), the runner's ATTENTION items
+("Automatic sync") and `tools/form_status.py`.
 
 # Salesforce
+
+Claude loads the `salesforce` skill before any procedure in this part.
 
 ## Club accounts in Salesforce
 
@@ -1970,7 +2054,9 @@ when nothing matches it creates a new, partner-less Club account.
   made it since). A club the sync never puts on a form (its partner marked `jotform=no`, "Clubs
   that do not use Jotform") is a hand create in every mode (BACKLOG 74). A partner-less account
   the processor created meanwhile is re-parented to its partner, never re-created (its Contacts
-  and attendance stay; done for two clubs on 2026-10-06).
+  and attendance stay; done for two clubs on 2026-10-06). An SF Pending row whose club has no
+  Roster rows is a response that failed before its Roster write ("Missed form responses"):
+  retry that first, then create the account.
 - **The Monday e-mail's SF Pending lines** start with the exact account name: the club name, or
   `<club> - <partner>` when another partner's active club has the same name, worked out from
   the Roster when the e-mail is sent. On a form the long or plain name is sticky, so the form's
@@ -1983,14 +2069,20 @@ when nothing matches it creates a new, partner-less Club account.
   - Contacts on Club accounts that are not girls (role other than Participant), Contacts on Club
     accounts marked as portal sign-ups, Monthly Reports on Club accounts, programme-income
     records on Club accounts: all 0.
-  - `python3 tools/sf_club_accounts.py soql --totals`, then
-    `totals --result <saved answer> --also data/sf_prep_2026-09-30/created_accounts_round2.csv
-    data/sf_prep_2026-09-30/created_accounts_round3.csv` → `totals ok` (364 Club accounts).
+  - Every active club on a form has exactly one right account: `python3 tools/sf_new_clubs.py
+    check --vpn-off --roster data/roster_<date>.csv --summary data/auto_sync/plan_<region>_<stamp>.json …`
+    (read only, Ryan's CLI login; the summaries of a local `tools/auto_sync.py` dry run) exits 0;
+    "Local cross-check", under "New clubs' accounts, automatically". (Until 2026-10-09 this
+    signal was the retired `tools/sf_club_accounts.py totals`: 364 Club accounts on 2026-09-30.)
 - **Writing accounts to Salesforce** by hand goes through the write connector, one record per call,
   never by a subagent; the live gate does not see those calls, so the only gate is Ryan's go in the
-  conversation. The automatic sync writes as its own user, GLOW Sync, and only creates (below). `tools/sf_club_accounts.py` (which never calls Salesforce) cuts the batches, checks
-  each saved answer and keeps the rollback files. (Attendance is written by `tools/sf_backfill.py`,
-  which the gate does catch: "Back-fill of attendance into Salesforce".)
+  conversation. The automatic sync writes as its own user, GLOW Sync, and only creates (below). A
+  hand create is named exactly as its SF Pending line says, record type Club, its parent the
+  partner's account in `glow/sf_partners.csv` (the fields the sync's own create sets, below); then
+  the `sf_new_clubs.py check` above. The 2026-09-30 rounds' bookkeeping tool,
+  `tools/sf_club_accounts.py`, is retired ([Retired tools](ARCHITECTURE.md#retired-tools)). (Attendance
+  is written by `tools/sf_backfill.py`, which the gate does catch: "Back-fill of attendance into
+  Salesforce".)
 - **Rollback files** (never committed): `data/sf_prep_2026-09-30/created_accounts.csv` (345
   created, 8 linked), `created_accounts_round2.csv` (2 created), `created_accounts_round3.csv` (the
   7 same-name clubs), `link_targets_before.json` (the pilot accounts as they were). A created account may be deleted only while it has no Contacts
@@ -2575,8 +2667,8 @@ system unless `GLOW_LIVE_OK=1` was exported in Ryan's shell **before** Claude
 Code was started:
 
 - the tools' write flags: `--apply`, `--prune`, `--rehearse` (`sf_dupes.py`'s
-  production run, rolled back), `clasp push` / `clasp:push`,
-  `sheets_client.py import`;
+  production run, rolled back), `clasp push` / `clasp:push`, and
+  `sheets_client.py import` (a subcommand removed 2026-10-09, still in the pattern);
 - the raw APIs the tools wrap: `api.jotform.com`, the Sheets writes
   (`values().update|append|clear`, `batchUpdate`, `apply_changes=True`),
   GitHub repository dispatches;
@@ -2609,7 +2701,8 @@ affected.
 **`protected_paths.sh`** (every Edit and Write) blocks an edit of anything under
 `data/`, `backups/` or `credentials/` (its `README.md` and
 `config.example.json` excepted), a `.env` or `.env.*` file (not `.env.example`),
-`appsscript/Regions.gs` (generated), and `.claude/settings.json`,
+`appsscript/Regions.gs` (hand-kept data since 2026-10-09, edited by Ryan; the
+hook's message still calls it generated), and `.claude/settings.json`,
 `.claude/settings.local.json`, `.claude/live_gate.log` and `.claude/hooks/` -
 the project's and the user's (`~/.claude/`) - in any checkout (the main one, a
 worktree, a sibling clone), matched on path components, ignoring case, with
@@ -2658,6 +2751,19 @@ does. `update` refuses in two cases, and says what to run:
 `python3 tools/worklog.py zone` (no arguments) shows the timeline, the Mac's zone and the commit
 offsets since the last row.
 
+**Which sessions count.** `update` reads this project's transcript folder only
+(`~/.claude/projects/` + the checkout's path, every character other than a letter or a
+digit as `-`; run it in the main checkout - in a worktree it reads the worktree's folder).
+A session started from another folder - the home folder, say - is not counted,
+whatever it worked on.
+On 2026-10-09 that happened twice (the attendance-reports work and the repo-cleanup
+session): the day's row holds only the hours of the sessions started in the
+repository. `--transcripts <folder>` reads that folder **instead** (every session in
+it counts, whatever its project), and with it no logged row changes or is dropped
+without `--rewrite-old`; a day whose work is split between two folders is therefore
+Ryan's call (a recount from one folder, or a `manual` row for the other's hours).
+Start working sessions from the repository.
+
 **What `update` will not do without being asked.** It refuses when a day before the window would
 change (work that moved across the window's edge, or a day never logged) and names the `--since`
 to use. It refuses to drop a row that lost all its work until `--drop-stale` is given (then move
@@ -2674,6 +2780,7 @@ September this way: Sep 1-14 had been counted at +08:00 although the Mac was on 
 
 ```bash
 make check      # everything offline: lint, JS and Python tests, .gs checks, secrets, links, doc references, conflict markers, fixture
+make hooks      # once per clone: the pre-commit hook (secret scan, ruff) and the commit message template
 make docs-index # after adding a plan or an intent, or changing a status: rewrite docs/plans/README.md
 make help       # the individual targets
 ```

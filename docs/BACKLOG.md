@@ -43,6 +43,7 @@ Status: blocked-on-ryan
 - Why: every one of these is a girl who either does not appear on the form or appears twice
 - Effort: 1–2 elapsed weeks of emails; 0.3 tooling
 - Who: needs Ryan/partners
+- 2026-10-09: the tool that wrote the report, `tools/needs_attention.py`, is retired ([Retired tools](ARCHITECTURE.md#retired-tools)); the report itself stays in `data/`.
 
 ### 5. Confirm Haske's region
 
@@ -93,6 +94,7 @@ Status: open
 - **Parity harness** between the Python dry run and the runner's plan on the same export is now `test/python_test.py`; still open: a recorded-API replay test for `sync_attendance_form.py` itself (no network)
 - Effort: 0.5
 - 2026-10-09: `test/python_test.py` was split by subject (d708da8); the Python ↔ Apps Script parity tests are `test/gs_parity_test.py`.
+- 2026-10-09: `make check` finds the tests by discovery (1a019b2), one file per subject: the runner's plan parsing, bands and verify are `test/auto_sync_test.py` (`AutoSyncPlan`). What remains of this item is the recorded-API replay test of `sync_attendance_form.py`.
 
 ### 11b. Duplicate-club guards
 
@@ -246,18 +248,6 @@ Status: open
 
 - Turn on plan mode by default (`defaultMode: plan` in `.claude/settings.json`) after launch week
 
-### 32. `form_status.py --roster` defaults to the stale offline build
-
-Status: open
-
-- `tools/form_status.py --roster` defaults to the stale offline build; default to the newest `data/roster_*.csv` or require the flag
-
-### 33. `needs_attention.py` `REGION_UNSURE` is vacuous
-
-Status: open
-
-- `tools/needs_attention.py` `REGION_UNSURE` is vacuous once regions are derived from the live forms; decide what it should check
-
 ### 34. An `updated` timestamp column on the Roster tab
 
 Status: open
@@ -276,6 +266,7 @@ Status: in-progress
 
 - Pin `oauthScopes` explicitly in `appsscript/appsscript.json` and make `scripts/check_gs.js` fail when a `.gs` uses a Google service whose scope is not listed — a scope-set change becomes a visible diff instead of a silent trigger-breaker (review finding 2026-09-01)
 - 2026-10-09: `scripts/check_gs.js` pins the 8 Google services in use and fails on a 9th (38dbc13, `make check`); `oauthScopes` in `appsscript/appsscript.json` is still not pinned.
+- 2026-10-09: `scripts/check_gs.js` also fails on a scope-bearing global (`Session`), an advanced service enabled in `appsscript.json` or an `oauthScopes` list there (1814a53): services, advanced services and scopes are all checked offline now. Still open: the explicit `oauthScopes` list in the manifest - pinning it means teaching `check_gs.js` that list, which today it refuses as a scope change.
 
 ### 38. Google Form: a REQUIRED region picker
 
@@ -296,6 +287,7 @@ Status: open
 Status: in-progress
 
 - **Club Roster Form, Existing-club page**: its help text ("Not listed? Your organization has no enrolled clubs yet — go back and choose "Enroll a NEW club"", meant for a missing organization) also sends a partner whose club sits under another spelling into enrolling it twice (new ids, and the second club reaches no attendance form: its name is in use). Point them at the problem report instead, and have the duplicate-club guards (11b) hold such a submission (built: a new club whose names sit in one club on file, of any partner, is held); a cross-partner check in `needs_attention.py` (one submitter e-mail, two partners) would have caught `ion bu`
+- 2026-10-09: `needs_attention.py` is retired ([Retired tools](ARCHITECTURE.md#retired-tools)): a cross-partner check would be a new one of its own.
 
 ### 42. Redo the Radiant Girls fix
 
@@ -343,12 +335,6 @@ Status: in-progress
 - Follow-up (its own plan, it changes the runner): an apply that stops after the roster and picker writes leaves only the rules stale, and the runner then reports `in-sync` on every run (on `main` too: the new roster never shows; with the guard its mentors cannot submit). A check in the sync for live rules that miss a roster (show rule, Contact_IDs operand) or a picker option (guard terms), counted by the runner as a change, would let the next run repair it
 - The back-fill must also map by hand the 10 Africa submissions since 09-01 whose question 5 is a bare shared name (Ruby 7, Super Girls 2, Shining Stars 1; 2 by the roster ticked, 8 carry no attendance): replayed as they are, "Ruby" would make Salesforce create a plain Account next to the two long-named ones (49)
 
-### 50. Delete the dead partner-list code
-
-Status: open
-
-- **Delete the dead partner-list code** (retired by 49): `PARTNER_PICKER_PROPS`, `partner_choices` and `build_conditions`' `partner_field` in `sync_attendance_form.py`, `partner_picker` / `partner_fields` / `PARTNER_PICKER_NAME` in `glow/sync.py` (keep the refusal of a form carrying one), `PARTNER_PICKER_RX` and the `partner_picker` plan key in `tools/auto_sync.py`, the partner-list branches of `tools/rename_club.py` and `tools/add_translations.py`, and their tests (the plan `docs/plans/2026-09-28-partner-box.md` is marked superseded)
-
 ### 51. `tools/rename_club.py` cannot rename one of the seven same-name clubs
 
 Status: open
@@ -370,6 +356,7 @@ Status: in-progress
 - Since 2026-10-06 also `gh variable set` / `gh secret set` and `gh workflow run` (they switch the automatic sync's Salesforce writes, `SF_SYNC`): proposed, tested by the code review of 2026-10-06 on a scratch copy of the hook (blocks every write form including reruns and `-R`, passes `gh run list/view`, `gh workflow list`, `gh variable list`): `|gh[[:space:]]+(-R[[:space:]]+[^[:space:]]+[[:space:]]+|--repo[[:space:]=][^[:space:]]+[[:space:]]+)?(workflow[[:space:]]+(run|enable)|run[[:space:]]+rerun|(variable|secret)[[:space:]]+set)|repos/[^[:space:]]*/(dispatches|rerun[^[:space:]]*)|actions/variables`; and in `settings.local.json` move `Bash(gh workflow *)`, `Bash(gh variable *)`, `Bash(gh api *)` from allow to ask.
 - Once the sheet's token is switched, drop the `repository_dispatch` trigger from the workflow. The sync's own write flag is `--apply-salesforce`, which the existing `--apply` pattern already catches
 - 2026-10-09: `.claude/hooks/live_gate.sh` now gates `sf`/`sfdx` writes and deploys, the REST API, `--rehearse`, `gh variable|secret set|delete`, `gh workflow run` that applies, `gh run rerun` and `gh api` writes (8a04c16, cc43d1b, d9c7053; RUNBOOK "Live gate (Claude Code)"). Not done: denying `~/.sfdx` / `~/.sf` in `.claude/settings.json`, the `settings.local.json` moves, dropping the workflow's `repository_dispatch` trigger.
+- 2026-10-09 (after the hooks' review): the write side is gated - `sf`/`sfdx` deploys, data writes, Apex, the `force:` commands and the REST URL; `gh` variable, secret and workflow switches, reruns and `gh api` writes; self-approval through a shell startup file (8d24497). Also still open: `sf org auth show-access-token` (it prints the token, and as a read it passes) and `sf api request` (its relative REST path escapes the `.salesforce.com/services/` pattern); the three of the bullet above stay open, the read denial of `~/.sf` / `~/.sfdx` in `.claude/settings.json` among them (Ryan's file).
 
 ### 55. Monthly Report leftovers
 
@@ -523,6 +510,55 @@ Status: blocked-on-ryan
 - **A session-date guard on the attendance forms** (from the verification of 2026-10-09, BACKLOG 60 (7)): `BATCH-000500` reached Salesforce dated 2026-03-09, probably 3 September typed day first.
 - Proposal: the session date must lie within the season (on or after 2026-09-01) and not in the future, else a hidden warning shows and Submit is held, as the club guard does it (48). The rule is generated by the sync from a `glow/sync.py` constant (the season's first day), never added by hand (CLAUDE.md rule 3); the date widget's own min/max limits are the alternative to compare; check the form's date question format and how "today" behaves across the mentors' time zones; Spanish, French and the other languages need the warning text (translations). Ryan's decision on the rule and the season's first day
 
+## Repository and tooling (from the 2026-10-09 cleanup)
+
+Left out of [plans/2026-10-09-repo-cleanup.md](plans/2026-10-09-repo-cleanup.md) on purpose,
+each its own change.
+
+### 80. Move to Python 3.12
+
+Status: open
+
+- **Python 3.10 reached its end of life on 2026-10-04** (no more security fixes): move CI (`.github/workflows/check.yml` and `auto-sync.yml`), the `.venv` and ruff's `target-version` (`ruff.toml`, `py310`) to 3.12
+- Its own change because CI runs the live sync: a dry run on 3.12 first, then one watched applying run
+- Known so far: `datetime.datetime.utcnow()`, deprecated since 3.12, twice in `tools/sf_backfill.py`; ruff's `UP` rules will offer more once the target moves
+
+### 81. Pin the unattended job's dependencies
+
+Status: open
+
+- `auto-sync.yml` installs `requirements.txt`, whose Google libraries are ranges, so a new upstream release changes what the live sync runs without a commit. Write `requirements.lock` from the venv's `pip freeze`, have `auto-sync.yml` install from it, and refresh it deliberately
+
+### 82. The Salesforce metadata in git
+
+Status: open
+
+- The Apex, the reports and dashboard with their generator (`gen.py`), and the permission sets exist only in gitignored folders under `data/` on one Mac (`data/sf_dashboard_2026-10-02/`, RUNBOOK "Attendance dashboard in Salesforce"). Move the metadata into git as a `salesforce/` sfdx project - metadata only, no record data and no names - and deploy check-only from there
+
+### 83. Scoped live-gate approval
+
+Status: open
+
+- `GLOW_LIVE_OK=1` opens the live gate for every write of a whole Claude Code session; it was open on 10 days so far (`.claude/live_gate.log`). Proposed: `GLOW_LIVE_OK=<tool|form|all>` with an expiry, so an approval covers one tool or one form for a stated time. The hooks are protected files: Ryan's change
+
+### 84. Retire `tools/fix_module_values.py`
+
+Status: open
+
+- After its undo window closes at the end of October 2026: delete the tool and its test, add its row to [Retired tools](ARCHITECTURE.md#retired-tools), and keep in RUNBOOK "The names dictionary and the module values" a one-line SOQL audit that the correction holds (`Module__c` grouped on `Attendance_Batch__c` and `Attendance__c` since 2026-09-01: only the template's English options, 17 on 2026-10-07; BACKLOG 66)
+
+### 85. Remove `migrateCountryToRegion` and `retireOldEnrollmentForm`
+
+Status: open
+
+- Two one-time GLOW menu items in `appsscript/Forms.gs` (the Region picker migration, BACKLOG 38; closing the original enrollment form, BACKLOG 6). Read the live Audit tab first: remove each item and its code once the tab shows it ran, or once its item is settled another way. An Apps Script push, no new service
+
+### 86. Split `FormHandlers.gs` (optional)
+
+Status: open
+
+- `appsscript/FormHandlers.gs` (about 1,350 lines) holds the Club Roster Form and problem-report handlers, FormLog, the missed-responses menu and the Monday e-mail. If it keeps growing, split it along the FormLog and digest seams; the pure parts stay testable through `test/load_gs.js`. An Apps Script push, no new service
+
 ## Done
 
 ### 1. Disable the five defunct Jotforms
@@ -615,6 +651,20 @@ Status: dropped
 - Move `backup_forms.py` / `restore_conditions.py` into `tools/` (doc references only)
 - 2026-10-09: decided against: the rollback pair stays at the root (CLAUDE.md conventions), `backup_forms.py` stays the thin CLI there and `tools/` stays flat (`docs/plans/2026-10-09-repo-cleanup.md`, Phase 3, accepted by Ryan 2026-10-09).
 
+### 32. `form_status.py --roster` defaults to the stale offline build
+
+Status: done 2026-10-09
+
+- `tools/form_status.py --roster` defaults to the stale offline build; default to the newest `data/roster_*.csv` or require the flag
+- 2026-10-09: done - `--roster` is required (bba7886), so the stale build is never read; the export is read as `utf-8-sig`.
+
+### 33. `needs_attention.py` `REGION_UNSURE` is vacuous
+
+Status: dropped
+
+- `tools/needs_attention.py` `REGION_UNSURE` is vacuous once regions are derived from the live forms; decide what it should check
+- 2026-10-09: dropped - `tools/needs_attention.py` is retired (7c24ac7; [Retired tools](ARCHITECTURE.md#retired-tools)); regions come from the Partners tab.
+
 ### 35. At least one girl ticked per submission
 
 Status: done 2026-10-02
@@ -652,6 +702,13 @@ Status: done 2026-09-30
 - Part 1 (the forms) **built 2026-09-30** on `wf6/same-name-forms`: each roster keeps the form it has, `--same-name-switch` by hand, a new club with a name in use is not created, any other question-5 change needs `--q5-change-ok`, q331 hidden, `restore_conditions.py` refuses a pre-switch snapshot.
 - **Forms done 2026-09-30** with Ryan's go: merged (`d238b43`), the template, Asia and Africa switched (7 / 1 / 6 long names), q331 hidden on all five, every form CLEAN and `--rendered` aligned, the runner in-sync with no ATTENTION ([Result](plans/2026-09-30-same-name-clubs.md)).
 - **Apps Script pushed 2026-09-30** (Part 2: the Club Roster Form hold and the Monday e-mail's Account names) and the seven Salesforce Accounts created from the live picker strings the same day ([plan](plans/2026-09-30-salesforce-clubs.md)). Remaining before the Salesforce reconnect: one template test submission with a long name
+
+### 50. Delete the dead partner-list code
+
+Status: done 2026-10-09
+
+- **Delete the dead partner-list code** (retired by 49): `PARTNER_PICKER_PROPS`, `partner_choices` and `build_conditions`' `partner_field` in `sync_attendance_form.py`, `partner_picker` / `partner_fields` / `PARTNER_PICKER_NAME` in `glow/sync.py` (keep the refusal of a form carrying one), `PARTNER_PICKER_RX` and the `partner_picker` plan key in `tools/auto_sync.py`, the partner-list branches of `tools/rename_club.py` and `tools/add_translations.py`, and their tests (the plan `docs/plans/2026-09-28-partner-box.md` is marked superseded)
+- 2026-10-09: done - the dead code deleted (0204593); the sync still refuses a form carrying a partner list and `form_status` reports one (`glow/sync.py` `partner_picker`, `PARTNER_PICKER_NAME`); `--partner-picker` is no longer an option.
 
 ### 54. The Contact duplicate rule alerts, and an alert refuses a girl created by code
 
