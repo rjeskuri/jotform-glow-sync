@@ -107,11 +107,7 @@ def plan_tail_moves(questions, conditions=()):
     Submit; a simulation in which a roster stays below the fence, a link
     falls below Submit or out of order at any step, or what a mentor sees
     comes out in another sequence."""
-    found = buttons(questions)
-    if len(found) != 1:
-        sys.exit(f"expected one Submit button, found {len(found)} - "
-                 "fix the form in the builder first")
-    submit = found[0]
+    submit = links.submit_button(questions)          # exactly one, or a refusal
     breaks = [q for q in questions.values() if q.get("type") == PAGE_BREAK]
     if breaks:
         sys.exit(f"the form has {len(breaks)} page break(s) ({', '.join(label(q) for q in breaks)}) - "
