@@ -1,0 +1,13 @@
+
+
+#----------------------------------------------------------------------|
+# Subject: area: what changed - at most 72 characters (the | above is
+# column 72), e.g. "live_gate: gate gh variable set". A blank line, then
+# the body: why the change, what a reader of `git log` needs, wrapped at
+# 72. Last, the trailers that apply, one per line:
+#
+# Plan: docs/plans/YYYY-MM-DD-<slug>.md
+# Backlog: N
+# Live: none | <what was written, when (UTC), Ryan's go>
+#
+# Lines starting with # are dropped. Installed by `make hooks`.

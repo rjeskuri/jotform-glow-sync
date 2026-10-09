@@ -56,8 +56,8 @@ venv:                                                 ## create .venv with runti
 	  && .venv/bin/python3 -m pip install --quiet -r requirements-dev.txt \
 	  && echo "ok: .venv ready ($$(.venv/bin/python3 --version))"
 
-hooks:                                                ## once per clone: git uses .githooks/ (pre-commit: secret scan of the added lines, ruff)
-	git config core.hooksPath .githooks && echo "hooks: installed"
+hooks:                                                ## once per clone: git uses .githooks/ (pre-commit: secret scan of the added lines, ruff) and the commit template .gitmessage
+	git config core.hooksPath .githooks && git config commit.template .gitmessage && echo "hooks: installed"
 
 help:                                                 ## this list
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed -E 's/:[^#]*##/  -/'
