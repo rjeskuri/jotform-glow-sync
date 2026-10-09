@@ -254,7 +254,7 @@ the last version. `git show <commit>^:<path>` prints it, and
 | `tools/sheets_client.py import` (a subcommand) | Put a CSV into an empty tab, refusing a tab that held data: the one-time import of the original enrollment responses at setup. `whoami`, `tabs`, `export`, `export-all` and the library functions stay | `648947e` (2026-10-09) | `git show 648947e^:tools/sheets_client.py` (the whole file as it was) |
 
 `tools/fix_module_values.py` stays until its undo window closes at the end of
-October 2026.
+October 2026 (BACKLOG 84).
 
 ## Privacy boundaries
 
