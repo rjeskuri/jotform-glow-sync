@@ -9,8 +9,8 @@
     "test": "make test",
     "check": "make check",
     "fixtures": "python3 test/fixtures/make_fixture.py --write",
-    "clasp:push": "cd appsscript && npx clasp push -f",
-    "clasp:open": "cd appsscript && npx clasp open"
+    "clasp:push": "node -e \"process.version.startsWith('v18.')||(console.error('clasp 2.4.2 needs Node 18 (CLAUDE.md rule 11): nvm use 18'),process.exit(1))\" && cd appsscript && npx clasp push -f",
+    "clasp:open": "node -e \"process.version.startsWith('v18.')||(console.error('clasp 2.4.2 needs Node 18 (CLAUDE.md rule 11): nvm use 18'),process.exit(1))\" && cd appsscript && npx clasp open"
   },
   "devDependencies": {
     "@google/clasp": "2.4.2"
