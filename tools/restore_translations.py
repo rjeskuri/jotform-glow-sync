@@ -20,6 +20,10 @@ target's questions automatically wherever the English wording is the same.
 New wording (e.g. the problem-report link) simply stays English until someone
 translates it in the builder.
 
+The POST replaces each language it carries, so --apply first saves the
+target's whole store to backups/translations/<form>-<stamp>-before.json
+(mode 600 - glow/translations.py).
+
 Usage:
     export JOTFORM_API_KEY=...
     python3 tools/restore_translations.py --form <TARGET_ID>                 # dry run
@@ -33,11 +37,13 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+from glow import backup                # noqa: E402  (the stamp of the saved store)
+from glow import translations          # noqa: E402  (read, save, POST: rule 9)
 from glow.cli import api_key, run               # noqa: E402
 from glow.forms import TEMPLATE        # noqa: E402
 from glow.jotform import Client        # noqa: E402
 
-ENGLISH_KEYS = {"en", "base"}
+ENGLISH_KEYS = set(translations.SOURCE_KEYS)
 
 
 def language_of(form_id, client):
@@ -46,14 +52,11 @@ def language_of(form_id, client):
     return lang[0] if isinstance(lang, list) and lang else (lang or {})
 
 
-def translations_of(form_id, client):
-    t = client.get(f"/form/{form_id}/translations")
-    return t if isinstance(t, dict) else {}
-
-
-def describe(form_id, client):
+def describe(form_id, client, store=None):
+    """(the languages offered, {language: entries}) of a form; `store`: its translation store
+    when it was just read."""
     lang = language_of(form_id, client)
-    tr = translations_of(form_id, client)
+    tr = translations.read_store(client, form_id) if store is None else store
     langs = {k: len(v) for k, v in tr.items() if k not in ENGLISH_KEYS}
     return lang.get("options", ""), langs
 
@@ -74,8 +77,8 @@ def main():
         return
 
     src_lang = language_of(args.source, client)
-    src_tr = translations_of(args.source, client)
-    have = translations_of(args.form, client)
+    src_tr = translations.read_store(client, args.source)
+    have = translations.read_store(client, args.form)
     payload = {k: v for k, v in src_tr.items()
                if k not in ENGLISH_KEYS and len(have.get(k, {})) < len(v)}
     print(f"source {args.source}: languages offered: {src_lang.get('options')}")
@@ -89,15 +92,19 @@ def main():
     if options != src_lang.get("options"):
         client.put_json(f"/form/{args.form}/properties",
                         {"properties": {"language": [src_lang]}}, "set language property")
+    after = None
     if payload:
-        # POST replaces each language's dictionary: send existing + source strings
+        # POST replaces each language's dictionary: send existing + source strings, the
+        # target's store saved first
         merged = {}
         for lang, d in payload.items():
             merged[lang] = dict(d)
             merged[lang].update(have.get(lang, {}))
-        client.post_json(f"/form/{args.form}/translations", merged, "post translations")
+        saved = translations.save_store(args.form, have, backup.stamp())
+        print(f"store saved: {os.path.relpath(saved, translations.REPO)}")
+        after = translations.replace_languages(client, args.form, merged, "post translations", saved)
 
-    options, langs = describe(args.form, client)
+    options, langs = describe(args.form, client, after)
     ok = options == src_lang.get("options") and all(
         langs.get(k, 0) >= len(v) for k, v in src_tr.items() if k not in ENGLISH_KEYS)
     print(f"\nafter: languages offered: {options}")

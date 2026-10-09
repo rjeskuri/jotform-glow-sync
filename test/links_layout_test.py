@@ -585,10 +585,11 @@ class TranslationPlan(unittest.TestCase):
         # a same-stamp re-run after a failed POST must keep the true 'before'
         import tempfile
         from unittest import mock
+        from glow import translations
         self.assertIn("<form>-<stamp>-before.json", add_translations.__doc__)
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(add_translations, "REPO", tmp):
-            first = add_translations.save_store("123", {"es": {"k": "before"}}, "2026-09-28T100005")
-            again = add_translations.save_store("123", {"es": {"k": "half-written"}}, "2026-09-28T100005")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(translations, "REPO", tmp):
+            first = translations.save_store("123", {"es": {"k": "before"}}, "2026-09-28T100005")
+            again = translations.save_store("123", {"es": {"k": "half-written"}}, "2026-09-28T100005")
             self.assertNotEqual(first, again)
             self.assertTrue(first.endswith(os.path.join("translations", "123-2026-09-28T100005-before.json")))
             with open(first, encoding="utf-8") as f:

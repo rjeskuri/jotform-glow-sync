@@ -52,16 +52,16 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TOOLS)
 sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
-import add_translations                                     # noqa: E402  (save_store: mode 600, never over a file)
 from form_status import embedded_store, public_page, roster_options   # noqa: E402
+from glow import backup                                     # noqa: E402  (the stamp of the saved store)
 from glow import forms as glow_forms                        # noqa: E402
 from glow import translation_lookup as tl                   # noqa: E402
+from glow import translations                               # noqa: E402  (save_store: mode 600, never over a file)
 from glow.cli import api_key, run                                    # noqa: E402
 from glow.jotform import Client, JotformError               # noqa: E402
 
@@ -76,7 +76,7 @@ PAGE_WAIT, PAGE_TRIES = 20, 3           # seconds between reads of the public pa
 
 def shown(path):
     """A saved store's path as the RUNBOOK writes it (backups/translations/...)."""
-    return os.path.relpath(path, add_translations.REPO)
+    return os.path.relpath(path, translations.REPO)
 
 
 class Refused(Exception):
@@ -294,7 +294,7 @@ def apply_form(client, fid, store, plan, options, stamp, page_of=public_page, sl
     if not keys:
         print("   nothing written")
         return
-    path = add_translations.save_store(fid, store, stamp)
+    path = translations.save_store(fid, store, stamp)
     print(f"   store saved: {shown(path)} (mode 600; the rollback: --restore)")
     want = {lang: {k: v for k, v in store[lang].items() if k not in keys} for lang in SOURCES}
     state, _, after = post_sources(client, fid, store, want,
@@ -364,7 +364,7 @@ def restore(client, fid, path, apply, options, stamp, page_of=public_page, sleep
         print("   --apply: save the current store (mode 600); POST base and en with those entries back "
               "(no other language); re-read and compare; read the public page")
         return
-    saved_now = add_translations.save_store(fid, current, stamp)
+    saved_now = translations.save_store(fid, current, stamp)
     print(f"   current store saved: {shown(saved_now)} (mode 600)")
     state, _, _ = post_sources(client, fid, current, want, f"{fid} POST base and en with {len(back)} key(s) back",
                                saved_now)
@@ -393,7 +393,7 @@ def main():
         sys.exit("--apply and --restore take exactly one --form: the rollout is one form at a time, "
                  "template first (docs/RUNBOOK.md, \"The names dictionary and the module values\")")
     client = Client(api_key(), apply=args.apply)
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp()
     options = read_options(client)
     print("Roster options read from all five forms: "
           + ", ".join(f"{LABEL[f]} {len(options[f])}" for f in ORDER)

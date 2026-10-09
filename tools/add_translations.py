@@ -32,7 +32,8 @@ tools/add_feedback_link.py has put an element on the form, and again after
 it changes an element's URL (each language's copy holds the old link). Before
 a POST the form's whole store is saved to
 backups/translations/<form>-<stamp>-before.json (never over an earlier file;
-mode 600: it holds every girl's name).
+mode 600: it holds every girl's name) - glow/translations.py, as every
+translation writer does.
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -47,12 +48,13 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+from glow import backup                # noqa: E402  (the stamp of the saved store)
 from glow import forms as glow_forms   # noqa: E402
 from glow import links as glow_links   # noqa: E402
+from glow import translations          # noqa: E402  (read, save, POST: rule 9)
 from glow.cli import api_key, run, targets               # noqa: E402
 from glow.jotform import Client        # noqa: E402
 from glow.sync import PARTNER_PICKER_NAME   # noqa: E402
@@ -62,7 +64,7 @@ FORMS = {**{fid: region for region, fid in glow_forms.REGIONALS.items()},
          glow_forms.TEMPLATE: "template"}
 # hidden bridge fields, headers and images whose text never shows to a mentor
 NEVER_SHOWN = {"18", "98", "100", "102", "105", "109", "103", "13"}
-SOURCE_KEYS = ("base", "en")   # the English source maps, never a language to translate into
+SOURCE_KEYS = translations.SOURCE_KEYS   # the English source maps, never a language to translate into
 
 
 def visible_strings(questions):
@@ -89,17 +91,7 @@ def visible_strings(questions):
 
 def load_additions():
     with open(os.path.join(REPO, "tools", "translations_additions.json"), encoding="utf-8") as f:
-        data = json.load(f)
-    out = {}
-    for english, langs in data.items():
-        if english.startswith("_"):
-            continue
-        if "{n}" in english:
-            for n in range(1, 16):
-                out[english.replace("{n}", str(n))] = {l: t.replace("{n}", str(n)) for l, t in langs.items()}
-        else:
-            out[english] = dict(langs)
-    return out
+        return translations.expand_n(json.load(f))
 
 
 def plan_additions(questions, store, additions):
@@ -149,26 +141,6 @@ def merge(store, payload, sources):
     return merged
 
 
-def save_store(form_id, store, stamp):
-    """The whole translation store, before it is replaced (backups/ is never
-    committed). Never over an earlier file: after a failed POST, a re-run with
-    the same stamp would otherwise replace the true 'before' - the rollback.
-    Readable by its owner only (mode 600): `base` and `en` hold every girl's name."""
-    folder = os.path.join(REPO, "backups", "translations")
-    os.makedirs(folder, exist_ok=True)
-    for n in range(1, 100):
-        path = os.path.join(folder, f"{form_id}-{stamp}{'' if n == 1 else f'-{n}'}-before.json")
-        try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            continue
-        os.fchmod(fd, 0o600)               # whatever the umask
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(store, f, ensure_ascii=False, indent=1)
-        return path
-    sys.exit(f"99 store backups for {form_id} at {stamp} already - look in {folder}")
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--form", action="append")
@@ -179,11 +151,11 @@ def main():
     additions = load_additions()
     chosen = targets(args.form, FORMS, unknown=None)
 
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp()
 
     for form_id, label in chosen.items():
         questions = client.get(f"/form/{form_id}/questions")
-        store = client.get(f"/form/{form_id}/translations")
+        store = translations.read_store(client, form_id)
         langs = [lg for lg in store if lg not in SOURCE_KEYS]
 
         if args.audit:
@@ -201,14 +173,13 @@ def main():
               f"{len(payload)} languages ({sum(new.values())} new)")
         if not args.apply or not payload:
             continue
-        backup = save_store(form_id, store, stamp)
-        print(f"   store saved: {os.path.relpath(backup, REPO)}")
+        saved = translations.save_store(form_id, store, stamp)
+        print(f"   store saved: {os.path.relpath(saved, translations.REPO)}")
         # POST /translations REPLACES each language's dictionary, so always
         # send the existing strings plus the additions, never the additions alone
         merged = merge(store, payload, sources)
-        client.post_json(f"/form/{form_id}/translations", merged, f"{form_id} post")
-        after = client.get(f"/form/{form_id}/translations")
-        ok = all(after.get(lg, {}).get(k) == v for lg, d in merged.items() for k, v in d.items())
+        after = translations.replace_languages(client, form_id, merged, f"{form_id} post", saved)
+        ok = translations.reads_back(after, merged)
         print("   " + (f"stored ({', '.join(f'{lg}:{len(after.get(lg, {}))}' for lg in merged)})"
                        if ok else "MISMATCH after write"))
 

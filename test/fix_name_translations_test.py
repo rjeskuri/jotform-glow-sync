@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 tools/fix_name_translations.py on five fake forms whose translation stores hold one stale
-spelling of a girl's name: the dry run, every refusal, the write and its re-read, --restore.
-Fictional names.
+spelling of a girl's name: the dry run, every refusal, the write and its re-read, --restore
+(FixNameTranslations); and every other translation writer saving the store before its POST,
+which replaces whole languages (TranslationWriters, glow/translations.py). Fictional names.
 """
 import copy
 import json
@@ -12,9 +13,9 @@ import unittest
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import name_store
-import add_translations
 import fix_name_translations
 from glow import forms as glow_forms
+from glow import translations
 from glow.text import md5
 
 
@@ -91,7 +92,7 @@ class FixNameTranslations(unittest.TestCase):
         import tempfile
         from unittest import mock
         self.tmp = tempfile.TemporaryDirectory()
-        self.repo = mock.patch.object(add_translations, "REPO", self.tmp.name)
+        self.repo = mock.patch.object(translations, "REPO", self.tmp.name)
         self.repo.start()
 
     def tearDown(self):
@@ -430,6 +431,143 @@ class FixNameTranslations(unittest.TestCase):
             json.dump(name_store([(self.DOUBLE, self.DOUBLE)]), f)
         code, _ = self.run_main(self.fake(), "--form", self.AFRICA, "--restore", short, "--apply")
         self.assertIn("below 1000", str(code))
+
+
+
+class TranslationWriters(unittest.TestCase):
+    """POST /form/{id}/translations REPLACES each language it carries (CLAUDE.md rule 9):
+    add_language.py and restore_translations.py save the whole store before their POST, as
+    add_translations.py and fix_name_translations.py always did (glow/translations.py)."""
+
+    FORM = glow_forms.REGIONALS["Africa"]
+    SOURCE = glow_forms.TEMPLATE
+
+    def setUp(self):
+        import tempfile
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = mock.patch.object(translations, "REPO", self.tmp.name)
+        self.repo.start()
+
+    def tearDown(self):
+        self.repo.stop()
+        self.tmp.cleanup()
+
+    def folder(self):
+        return os.path.join(self.tmp.name, "backups", "translations")
+
+    class Fake:
+        """A Jotform holding a store per form; a POST replaces the languages it carries and
+        records whether a saved store was on disk at that moment."""
+
+        def __init__(self, test, stores, language):
+            self.test, self.stores, self.language, self.posts = test, stores, language, []
+
+        def get(self, path):
+            fid, what = path.split("/")[2], path.split("/")[-1]
+            if what == "translations":
+                return copy.deepcopy(self.stores[fid])
+            if what == "properties":
+                return {"language": [dict(self.language[fid])]}
+            return {}
+
+        def post_json(self, path, payload, label):
+            fid = path.split("/")[2]
+            folder = self.test.folder()
+            on_disk = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+            self.posts.append((fid, sorted(payload), on_disk))
+            self.stores[fid].update(copy.deepcopy(payload))
+
+        def put_json(self, path, payload, label):
+            self.language[path.split("/")[2]] = payload["properties"]["language"][0]
+
+        def post_form(self, path, data, label):
+            pass
+
+    def run_tool(self, module, argv, fake):
+        import contextlib
+        import io
+        from unittest import mock
+        out = io.StringIO()
+        with mock.patch.object(module, "Client", lambda *a, **k: fake), \
+                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                mock.patch.object(sys, "argv", [module.__name__ + ".py", *argv]), \
+                contextlib.redirect_stdout(out):
+            try:
+                module.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def saved(self):
+        out = {}
+        for name in sorted(os.listdir(self.folder())):
+            path = os.path.join(self.folder(), name)
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            with open(path, encoding="utf-8") as f:
+                out[name] = json.load(f)
+        return out
+
+    def test_add_language_saves_the_store_before_its_post(self):
+        import add_language
+        store = {"base": {md5("Date"): "Date"}, "en": {md5("Date"): "Date"},
+                 "or": {"k-old": "older entry"}, "es": {md5("Date"): "Fecha"}}
+        fake = self.Fake(self, {self.FORM: copy.deepcopy(store)}, {self.FORM: {"options": "English|Oriya"}})
+        words = os.path.join(self.tmp.name, "or.json")
+        with open(words, "w", encoding="utf-8") as f:
+            json.dump({"_comment": "x", "Date": "Taarikh"}, f)
+        code, out = self.run_tool(add_language, ["--code", "or", "--name", "Oriya", "--dict", words,
+                                                 "--form", self.FORM, "--apply"], fake)
+        self.assertEqual(code, 0, out)
+        (fid, langs, on_disk), = fake.posts
+        self.assertEqual((fid, langs), (self.FORM, ["or"]))
+        self.assertEqual(len(on_disk), 1)                                  # saved before the POST
+        self.assertRegex(on_disk[0], rf"^{self.FORM}-\d{{4}}-\d\d-\d\dT\d{{6}}-before\.json$")
+        self.assertEqual(self.saved(), {on_disk[0]: store})               # the whole store, as read
+        self.assertIn("store saved: backups/translations/", out)
+        self.assertEqual(fake.stores[self.FORM]["or"], {"k-old": "older entry", md5("Date"): "Taarikh"})
+        self.assertIn("OK: switcher", out)
+        # no dictionary (the strings are on the form already): no POST, nothing saved
+        os.remove(os.path.join(self.folder(), on_disk[0]))
+        code, out = self.run_tool(add_language, ["--code", "or", "--name", "Oriya", "--form", self.FORM,
+                                                 "--apply"], fake)
+        self.assertEqual((code, len(fake.posts), os.listdir(self.folder())), (0, 1, []))
+
+    def test_restore_translations_saves_the_target_store_before_its_post(self):
+        import restore_translations
+        source = {"base": {"k": "Date"}, "en": {"k": "Date"}, "es": {"k": "Fecha", "j": "Club"},
+                  "fr": {"k": "Date (fr)"}}
+        target = {"base": {"k": "Date"}, "en": {"k": "Date"}, "es": {"k": "Fecha"}}
+        fake = self.Fake(self, {self.SOURCE: copy.deepcopy(source), self.FORM: copy.deepcopy(target)},
+                         {self.SOURCE: {"options": "English|Spanish|French"}, self.FORM: {"options": "English"}})
+        code, out = self.run_tool(restore_translations, ["--form", self.FORM, "--apply"], fake)
+        self.assertEqual(code, 0, out)
+        (fid, langs, on_disk), = fake.posts
+        self.assertEqual((fid, langs), (self.FORM, ["es", "fr"]))          # never base or en
+        self.assertEqual(len(on_disk), 1)                                  # saved before the POST
+        self.assertEqual(self.saved(), {on_disk[0]: target})              # the target's whole store
+        self.assertIn("RESTORED", out)
+        self.assertEqual(fake.stores[self.FORM]["es"], {"k": "Fecha", "j": "Club"})
+
+    def test_the_module_refuses_a_post_without_a_saved_store(self):
+        fake = self.Fake(self, {self.FORM: {"es": {}}}, {})
+        with self.assertRaises(ValueError):
+            translations.replace_languages(fake, self.FORM, {"es": {"k": "v"}}, "post", None)
+        with self.assertRaises(ValueError):
+            translations.replace_languages(fake, self.FORM, {"es": {"k": "v"}}, "post",
+                                           os.path.join(self.tmp.name, "nothing.json"))
+        self.assertEqual(fake.posts, [])
+        saved = translations.save_store(self.FORM, {"es": {}}, "2026-10-09T101530")
+        after = translations.replace_languages(fake, self.FORM, {"es": {"k": "v"}}, "post", saved)
+        self.assertTrue(translations.reads_back(after, {"es": {"k": "v"}}))
+        self.assertFalse(translations.reads_back(after, {"es": {"k": "w"}}))
+
+    def test_n_entries_expand_to_the_sessions(self):
+        self.assertEqual(translations.expand_n({"_note": "x", "Week {n}": "Semana {n}", "Date": "Fecha"}),
+                         {**{f"Week {n}": f"Semana {n}" for n in range(1, 16)}, "Date": "Fecha"})
+        self.assertEqual(translations.expand_n({"Week {n}": {"es": "Semana {n}", "fr": "Semaine {n}"}})["Week 15"],
+                         {"es": "Semana 15", "fr": "Semaine 15"})
 
 
 if __name__ == "__main__":
