@@ -145,20 +145,6 @@ class SalesforceNewClubs(Fixture):
         from glow import forms
         self.assertIs(sfn.REGIONS, forms.REGIONS)          # one list of the regional forms: glow/forms.py
 
-    def test_the_processor_s_comparison(self):
-        m = salesforce.sf_match
-        self.assertTrue(m("Sunrise Club", "sunrise club"))
-        self.assertTrue(m("  Sunrise Club\t", "Sunrise Club"))          # question 5 is trimmed ...
-        self.assertFalse(m("Sunrise Club", " Sunrise Club"))           # ... the Account name is not
-        self.assertFalse(m("Sunrise  Club", "Sunrise Club"))           # inner spaces count
-        self.assertFalse(m("Sunrise\xa0Club", "Sunrise Club"))       # a no-break space is not a space
-        self.assertFalse(m("\xa0Sunrise Club", "Sunrise Club"))      # nor trimmed (it is above U+0020)
-        self.assertFalse(m("Straße", "STRASSE"))                       # one character never becomes two
-        self.assertTrue(m("Niñas Valientes", "NIÑAS VALIENTES"))
-        self.assertFalse(m("Ninas Valientes", "Niñas Valientes"))      # accents count
-        self.assertTrue(m("İstanbul Girls", "istanbul girls"))   # Java maps İ to i, one character to one
-        self.assertTrue(m("Straße", "STRAẞE"))                     # ß and ẞ are one character each
-
     def test_names_that_may_be_created_unattended(self):
         for ok in ("Sunrise Club", "Dawn's Club", "Niñas de Oro", "GLOW Club (Kibera) 2", "Club A/B - Example Partner",
                    "St. Mary's"):

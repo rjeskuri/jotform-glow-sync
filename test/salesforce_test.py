@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Offline tests for glow/salesforce.py, the one Salesforce client (found by `make py`'s unittest
-discovery): the CLI login and the token on curl's stdin (CliLoginAndCurl), the GLOW Sync login
-(GlowSyncLogin), queryAll and DELETE (OrgQueryAllAndDelete). Everything here is fictional: ids,
-tokens, secrets and names are invented. The tools' own uses are tested beside each tool.
+Offline tests for glow/salesforce.py, the one Salesforce client, and glow/private_files.py (found
+by `make py`'s unittest discovery): the CLI login and the token on curl's stdin (CliLoginAndCurl),
+the GLOW Sync login (GlowSyncLogin), queryAll and DELETE (OrgQueryAllAndDelete), the processor's
+name comparison and invisible characters (Names), error codes (ErrorCodes), the tools' --vpn-off
+(ToolCommandLines), and the owner-only folders and ledgers (PrivateFiles). Everything here is
+fictional: ids, tokens, secrets and names are invented. The tools' own uses are tested beside each
+tool.
 """
 import datetime
 import json
@@ -243,6 +246,33 @@ class OrgQueryAllAndDelete(unittest.TestCase):
         status, answer = org.delete("npe5__Affiliation__c", aff_id(1))
         self.assertEqual((status, answer[0]["errorCode"]), (404, "ENTITY_IS_DELETED"))
 
+
+
+class Names(unittest.TestCase):
+    """How the attendance processor compares a submitted club name with an Account's (sf_match),
+    and the characters no name may hide (has_invisible)."""
+
+    def test_the_processor_s_comparison(self):
+        m = salesforce.sf_match
+        self.assertTrue(m("Sunrise Club", "sunrise club"))
+        self.assertTrue(m("  Sunrise Club\t", "Sunrise Club"))          # question 5 is trimmed ...
+        self.assertFalse(m("Sunrise Club", " Sunrise Club"))           # ... the Account name is not
+        self.assertFalse(m("Sunrise  Club", "Sunrise Club"))           # inner spaces count
+        self.assertFalse(m("Sunrise\xa0Club", "Sunrise Club"))       # a no-break space is not a space
+        self.assertFalse(m("\xa0Sunrise Club", "Sunrise Club"))      # nor trimmed (it is above U+0020)
+        self.assertFalse(m("Straße", "STRASSE"))                       # one character never becomes two
+        self.assertTrue(m("Niñas Valientes", "NIÑAS VALIENTES"))
+        self.assertFalse(m("Ninas Valientes", "Niñas Valientes"))      # accents count
+        self.assertTrue(m("İstanbul Girls", "istanbul girls"))   # Java maps İ to i, one character to one
+        self.assertTrue(m("Straße", "STRAẞE"))                     # ß and ẞ are one character each
+
+    def test_invisible_characters_are_found(self):
+        for point in (0x00A0, 0x00AD, 0x200B, 0x2060, 0xFEFF, 0x034F, 0x3164, 0xE0020, 0x0009):
+            with self.subTest(hex(point)):
+                self.assertTrue(salesforce.has_invisible("Odd" + chr(point) + "Club"))
+        for name in ("Sunrise Club", "Niñas de Oro", "Dawn's Club", "Club A/B - Example Partner", ""):
+            with self.subTest(name):
+                self.assertFalse(salesforce.has_invisible(name))
 
 
 class ErrorCodes(unittest.TestCase):
