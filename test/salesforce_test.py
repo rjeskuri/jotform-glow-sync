@@ -5,15 +5,19 @@ discovery): the CLI login and the token on curl's stdin (CliLoginAndCurl), the G
 (GlowSyncLogin), queryAll and DELETE (OrgQueryAllAndDelete). Everything here is fictional: ids,
 tokens, secrets and names are invented. The tools' own uses are tested beside each tool.
 """
+import datetime
 import json
 import os
 import re
+import stat
 import sys
+import tempfile
 import types
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+from glow import private_files       # noqa: E402
 from glow import salesforce          # noqa: E402
 
 P1 = "001000000000000PAA"
@@ -275,6 +279,50 @@ class ToolCommandLines(unittest.TestCase):
         for bad in ("0", "-1"):
             with self.subTest(bad), self.assertRaises(argparse.ArgumentTypeError):
                 salesforce.positive(bad)
+
+
+
+class PrivateFiles(unittest.TestCase):
+    """glow/private_files.py: the Salesforce tools' owner-only folders, files and ledgers."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_a_ledger_is_one_header_then_rows_each_on_disk(self):
+        path = os.path.join(self.tmp.name, "ledger.csv")
+        ledger, rows = private_files.Ledger(path, ["when_utc", "key", "note"]), []
+        self.assertEqual(ledger.read(), [])
+        open(path, "w").close()                                  # left empty by a run that died: header still goes in
+        ledger.append({"when_utc": "2026-10-09T12:00:00Z", "key": "a|1", "extra": "never written"}, rows)
+        ledger.append({"key": "b", "note": 'says "x", y'})
+        with open(path, encoding="utf-8", newline="") as fh:
+            self.assertEqual(fh.read(), 'when_utc,key,note\n2026-10-09T12:00:00Z,a|1,\n,b,"says ""x"", y"\n')
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+        self.assertEqual(rows, [{"when_utc": "2026-10-09T12:00:00Z", "key": "a|1", "note": ""}])
+        self.assertEqual(private_files.last_rows(ledger.read() + rows, "key")["a|1"], rows[0])
+        with self.assertRaises(salesforce.Refused) as stop:
+            private_files.Ledger(path, ["when_utc", "key"]).read()
+        self.assertIn("does not start with its header line", str(stop.exception))
+
+    def test_a_folder_is_under_data_inside_the_checkout_and_owner_only(self):
+        checkout = os.path.join(self.tmp.name, "checkout")
+        os.makedirs(os.path.join(checkout, "docs"))
+        self.assertFalse(private_files.within(os.path.join(checkout, "data", "x"), os.path.join(checkout, "data")))
+        folder = private_files.private_folder(os.path.join(checkout, "data", "x"), repo=checkout)   # data/ made first
+        self.assertTrue(private_files.within(folder, os.path.join(checkout, "data")))
+        self.assertEqual([stat.S_IMODE(os.stat(p).st_mode) for p in (os.path.join(checkout, "data"), folder)], [0o700] * 2)
+        for refused in (os.path.join(checkout, "docs"), checkout):
+            with self.subTest(refused), self.assertRaises(salesforce.Refused) as stop:
+                private_files.private_folder(refused, "the ledger folder", repo=checkout)
+            self.assertEqual(str(stop.exception), "--dir: inside the checkout the ledger folder must be under data/ "
+                                                  "(never committed)")
+        outside = os.path.join(self.tmp.name, "elsewhere")
+        with self.assertRaises(salesforce.Refused):
+            private_files.private_folder(outside, repo=checkout, make=False)             # must exist
+        self.assertEqual(private_files.private_folder(outside, repo=checkout), outside)
+        eastern = datetime.timezone(datetime.timedelta(hours=-4))
+        self.assertEqual(private_files.stamp(datetime.datetime(2026, 10, 9, 4, 0, tzinfo=eastern)), "2026-10-09T08:00:00Z")
 
 
 if __name__ == "__main__":

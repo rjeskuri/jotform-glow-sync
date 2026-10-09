@@ -15,7 +15,7 @@ three hours of the batch - or it is listed as UNMATCHED and left alone.
   python3 tools/fix_module_values.py --vpn-off --apply               # the rest, one record per request, each read back
   python3 tools/fix_module_values.py --undo data/module_fix_2026-10/ledger.csv --vpn-off --apply   # put `old` back
 
-Salesforce is read and written through the CLI's login as tools/sf_backfill.py does (the token
+Salesforce is read and written through the CLI's login (glow/salesforce.py; the token
 never on a command line); every read of a record is an explicit-field SOQL query - never the
 names list (Contact_IDs__c) or the status message, never GET /sobjects/<type>/<id>. The ledger
 (data/module_fix_2026-10/ledger.csv, owner only) holds ids, module names and outcomes. What is
@@ -23,7 +23,6 @@ printed: ids, club names, dates, statuses, candidate counts and module names. Th
 JOTFORM_API_KEY.
 """
 import argparse
-import csv
 import datetime
 import json
 import os
@@ -37,9 +36,9 @@ from glow import forms                                              # noqa: E402
 from glow.cli import api_key                                       # noqa: E402
 from glow.jotform import Client, JotformError                       # noqa: E402
 from glow.sync import CLUB_NAME, MODULE_ID, MODULES, WEEK_ID, YEAR  # noqa: E402
-from glow.salesforce import add_vpn_flag, as_int, positive, require_vpn_off   # noqa: E402
+from glow.private_files import Ledger, last_rows, private_folder, rel, stamp  # noqa: E402
+from glow.salesforce import Org, Refused, add_vpn_flag, as_int, positive, quoted, require_vpn_off   # noqa: E402
 from backfill_resolve import PAGE, answer_of, attendance_date, copied_fields   # noqa: E402
-from sf_backfill import Org, Refused, now, open_private, quoted, within        # noqa: E402
 
 DEFAULT_DIR = os.path.join(REPO, "data", "module_fix_2026-10")
 SINCE = "2026-09-01"                         # batches created from this day on (UTC), the launch
@@ -188,55 +187,21 @@ def describe(entry):
 
 
 # ---- the ledger and the writes -------------------------------------------------------------------
-def private_folder(folder):
+def ledger_folder(folder):
     """The folder, created owner-only. Inside the checkout it must be under data/ (never committed)."""
-    folder, data = os.path.abspath(folder), os.path.join(REPO, "data")
-    if folder == data or folder.startswith(data + os.sep):
-        os.makedirs(data, 0o700, exist_ok=True)       # a fresh checkout has no data/ yet, and within() needs it to exist
-    if within(folder, REPO) and not within(folder, data):
-        raise Refused("--dir: inside the checkout the ledger folder must be under data/ (never committed)")
-    os.makedirs(folder, 0o700, exist_ok=True)
-    os.chmod(folder, 0o700)
-    return folder
+    return private_folder(folder, "the ledger folder", repo=REPO)
 
 
 def ledger_path(folder):
-    return os.path.join(private_folder(folder), "ledger.csv")
-
-
-def read_ledger(path):
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
-        return []
-    with open(path, encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        if reader.fieldnames != LEDGER_COLS:
-            raise Refused(f"{path} does not start with this tool's header line: " + ",".join(LEDGER_COLS))
-        return list(reader)
-
-
-def last_rows(ledger):
-    """record id -> its last ledger row (append-only; the last line is a record's state)."""
-    out = {}
-    for row in ledger:
-        out[row["record_id"]] = row
-    return out
-
-
-def append_ledger(path, row):
-    with open_private(path, "a") as fh:
-        writer = csv.DictWriter(fh, fieldnames=LEDGER_COLS, lineterminator="\n")
-        if os.fstat(fh.fileno()).st_size == 0:
-            writer.writeheader()
-        writer.writerow({col: row.get(col, "") for col in LEDGER_COLS})
-        fh.flush()
-        os.fsync(fh.fileno())
+    return os.path.join(ledger_folder(folder), "ledger.csv")
 
 
 def write_one(org, path, batch_id, sobject, record_id, old, new, prefix=""):
     """Ledger row, PATCH, re-read, closing row. Returns the closing outcome; anything but
     `written` is a stop for the caller (nothing else is written)."""
-    row = {"when_utc": now(), "batch_id": batch_id, "record_id": record_id, "sobject": sobject, "old": old, "new": new}
-    append_ledger(path, dict(row, outcome=prefix + "open"))
+    ledger = Ledger(path, LEDGER_COLS)
+    row = {"when_utc": stamp(), "batch_id": batch_id, "record_id": record_id, "sobject": sobject, "old": old, "new": new}
+    ledger.append(dict(row, outcome=prefix + "open"))
     status, _ = org.update(sobject, record_id, {"Module__c": new})
     if status != 204:
         outcome = f"{prefix}failed_{status}"
@@ -248,10 +213,10 @@ def write_one(org, path, batch_id, sobject, record_id, old, new, prefix=""):
         except Refused as stop:                  # 204 answered, then no re-read: the value is unknown, the row closes as check
             back, why = [], f"the write answered 204 but the re-read did not ({stop})"
         outcome = prefix + ("written" if len(back) == 1 and back[0].get("Module__c") == new else "check")
-    append_ledger(path, dict(row, when_utc=now(), outcome=outcome))
+    ledger.append(dict(row, when_utc=stamp(), outcome=outcome))
     if outcome != prefix + "written":
         raise Refused(f"{record_id} ({sobject}, batch {batch_id}): {why} - STOPPED, nothing more written; the ledger "
-                      f"{os.path.relpath(path, REPO)} says what was")
+                      f"{rel(path)} says what was")
     return outcome
 
 
@@ -315,7 +280,7 @@ def cmd_correct(args, org, client):
     for entry in matched:
         apply_entry(org, path, entry)
     print(f"written and read back: {len(matched)} batches, {sum(e['rows'] for e in matched)} rows"
-          + (f"; UNMATCHED, left alone: {unmatched}" if unmatched else "") + f"; ledger {os.path.relpath(path, REPO)}")
+          + (f"; UNMATCHED, left alone: {unmatched}" if unmatched else "") + f"; ledger {rel(path)}")
 
 
 def put_back(row):
@@ -335,8 +300,8 @@ def cmd_undo(args, org):
     path = os.path.abspath(args.undo)
     if not os.path.isfile(path):
         raise Refused(f"--undo: there is no ledger {args.undo}")
-    private_folder(os.path.dirname(path))        # the undo's own rows go into the same file: the same rule as --dir
-    last = last_rows(read_ledger(path))
+    ledger_folder(os.path.dirname(path))         # the undo's own rows go into the same file: the same rule as --dir
+    last = last_rows(Ledger(path, LEDGER_COLS).read(), "record_id")
     todo = [(row, put_back(row)) for row in last.values() if put_back(row)]
     for row in last.values():
         if not put_back(row):
@@ -353,7 +318,7 @@ def cmd_undo(args, org):
     for row, (holds, back) in todo:
         write_one(org, path, row["batch_id"], row["sobject"], row["record_id"], holds, back, prefix="undo_")
         print(f"  put back {row['record_id']} ({row['sobject']}): {back!r}, read back equal")
-    print(f"put back and read back: {len(todo)} records; ledger {os.path.relpath(path, REPO)}")
+    print(f"put back and read back: {len(todo)} records; ledger {rel(path)}")
 
 
 def main(argv=None, org=None, client=None):

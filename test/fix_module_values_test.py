@@ -23,6 +23,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import fix_module_values as fmv                            # noqa: E402
 from glow import forms                                     # noqa: E402
+from glow.private_files import Ledger                      # noqa: E402
 from glow.sync import MODULES, YEAR                        # noqa: E402
 from helpers.fake_org import FakeOrg                      # noqa: E402
 
@@ -145,7 +146,7 @@ class FixModuleValues(unittest.TestCase):
         return self.run_tool("--vpn-off", "--apply", *argv)
 
     def ledger(self):
-        return fmv.read_ledger(os.path.join(self.tmp.name, "ledger.csv"))
+        return Ledger(os.path.join(self.tmp.name, "ledger.csv"), fmv.LEDGER_COLS).read()
 
     def outcomes(self):
         return [r["outcome"] for r in self.ledger()]

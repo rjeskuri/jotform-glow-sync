@@ -19,6 +19,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_backfill as bf                                   # noqa: E402
+from glow.private_files import Ledger                       # noqa: E402
 from glow.salesforce import CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE   # noqa: E402
 from helpers import fake_org                               # noqa: E402
 
@@ -61,7 +62,7 @@ class Harness:
         return os.path.join(self.dir, name)
 
     def write(self, rows, no_ticks=None, decisions=None, fetched=None, read_at="2026-09-30T13:00:00Z", raw=None):
-        resolved = {"fetched_at_utc": fetched or bf.now(), "forms": {}, "rows": rows, "no_ticks": no_ticks or {},
+        resolved = {"fetched_at_utc": fetched or bf.stamp(), "forms": {}, "rows": rows, "no_ticks": no_ticks or {},
                     "flag_vocabulary": sorted(bf.HOLD_FLAGS | bf.PASS_FLAGS)}
         for name, data in (("resolved.json", raw if raw is not None else resolved),
                            ("sf_state.json", self.org.state(read_at))):
@@ -95,11 +96,11 @@ class Harness:
         return self.run_tool("send", "--apply", "--vpn-off", *argv)
 
     def replan(self, rows, **kw):
-        self.write(rows, read_at=bf.now(), **kw)
+        self.write(rows, read_at=bf.stamp(), **kw)
         return self.plan()
 
     def ledger(self):
-        return bf.read_ledger(self.path("ledger.csv"))
+        return Ledger(self.path("ledger.csv"), bf.LEDGER_COLS).read()
 
     def states(self):
         return [r["status"] for r in self.ledger()]
@@ -181,9 +182,9 @@ class SalesforceBackfill(Harness, unittest.TestCase):
                 self.write(rows)
                 self.assertIn(message, self.run_tool("plan")[1])
         for raw in ({"rows": "x"}, [], {"fetched_at_utc": "yesterday", "rows": []},
-                    {"fetched_at_utc": bf.now(), "rows": [], "no_ticks": ["1"], "flag_vocabulary": sorted(bf.HOLD_FLAGS | bf.PASS_FLAGS)},
-                    {"fetched_at_utc": bf.now(), "rows": []}, {"fetched_at_utc": bf.now(), "rows": [], "flag_vocabulary": ["bogus"]},
-                    {"fetched_at_utc": bf.now(), "rows": [], "flag_vocabulary": sorted(bf.HOLD_FLAGS | bf.PASS_FLAGS)[1:]}):
+                    {"fetched_at_utc": bf.stamp(), "rows": [], "no_ticks": ["1"], "flag_vocabulary": sorted(bf.HOLD_FLAGS | bf.PASS_FLAGS)},
+                    {"fetched_at_utc": bf.stamp(), "rows": []}, {"fetched_at_utc": bf.stamp(), "rows": [], "flag_vocabulary": ["bogus"]},
+                    {"fetched_at_utc": bf.stamp(), "rows": [], "flag_vocabulary": sorted(bf.HOLD_FLAGS | bf.PASS_FLAGS)[1:]}):
             with self.subTest(str(raw)[:30]):
                 self.write([], raw=raw)
                 self.assertIn("resolved.json:", self.run_tool("plan")[1])
@@ -192,7 +193,7 @@ class SalesforceBackfill(Harness, unittest.TestCase):
             fh.write('{"accounts": [')
         self.assertIn("cannot be read as JSON", self.run_tool("plan")[1])
         with open(self.path("sf_state.json"), "w") as fh:
-            json.dump({"read_at_utc": bf.now(), "accounts": []}, fh)
+            json.dump({"read_at_utc": bf.stamp(), "accounts": []}, fh)
         self.assertIn("not a complete snapshot", self.run_tool("plan")[1])
 
     def test_two_reports_of_one_session_join_and_a_repeated_girl_counts_once(self):
@@ -642,7 +643,7 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         self.assertEqual((sessions, [h["reasons"] for h in held]), ([], ["submission_already_sent"]))
         # and a batch the ledger has but Salesforce has lost is a refusal
         self.org.batches.pop(0)
-        self.write(rows, decisions=decisions, read_at=bf.now())
+        self.write(rows, decisions=decisions, read_at=bf.stamp())
         self.assertIn("Salesforce no longer has that batch", self.run_tool("plan")[1])
 
     def test_a_club_with_contacts_from_before_is_held_for_every_session_until_ryan_accepts_each(self):

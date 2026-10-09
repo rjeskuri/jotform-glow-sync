@@ -42,15 +42,14 @@ from zoneinfo import ZoneInfo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                          # noqa: E402
 from glow.cli import api_key                                   # noqa: E402
 from glow.jotform import Client, JotformError                   # noqa: E402
+from glow.private_files import load_json, private_folder, rel, save_private, sha256, stamp   # noqa: E402
 from glow.salesforce import (SF_ID, Org, Refused, add_vpn_flag, error_codes, plain, positive,   # noqa: E402
                              quoted, require_vpn_off, sf_match)
 from glow.sync import SF_NAME_SEP                               # noqa: E402
 from glow.text import key as plain_key                          # noqa: E402
-from sf_backfill import save_private, within                    # noqa: E402
 
 BACKFILL_CONTACTS = os.path.join(REPO, "data", "backfill_2026-09", "created_contacts.csv")
 ROLE = "Participant"
@@ -60,7 +59,6 @@ NPSP_WINDOW = ((20, 30), (21, 30))      # UTC: NPSP's nightly job
 QUIET_FORMS = ("Africa", "Asia")
 JOTFORM_CLOCK = ZoneInfo("America/New_York")     # Jotform's created_at
 MARKER = "SF_DUPES_REHEARSAL_END"
-STAMP = "%Y-%m-%dT%H:%M:%SZ"
 IN_CHUNK = 150                # ids per SOQL IN list
 APEX_TIMEOUT = 900            # seconds for one `sf apex run`
 SUBMISSION_PAGE, SUBMISSION_PAGES = 100, 5
@@ -148,10 +146,6 @@ def utc_now():
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def stamp(moment):
-    return moment.astimezone(datetime.timezone.utc).strftime(STAMP)
-
-
 def sf_time(text):
     """A Salesforce datetime (2026-10-01T12:00:00.000+0000) as an aware datetime."""
     try:
@@ -177,16 +171,6 @@ def iso_day(text):
     if str(day) != text:
         raise argparse.ArgumentTypeError("a date like 2026-10-01")
     return day
-
-
-def rel(path):
-    path = os.path.abspath(path)
-    return os.path.relpath(path, REPO) if path.startswith(REPO + os.sep) else path
-
-
-def file_sha(path):
-    with open(path, "rb") as fh:
-        return hashlib.sha256(fh.read()).hexdigest()
 
 
 def in_list(ids):
@@ -216,16 +200,6 @@ def createable(describe, must=()):
     return sorted(names)
 
 
-def load_json(path, what):
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except FileNotFoundError:
-        raise Refused(f"{what} is missing: {path}") from None
-    except (ValueError, OSError):
-        raise Refused(f"{what} cannot be read as JSON: {path}") from None
-
-
 def save_json(path, data):
     save_private(path, json.dumps(data, indent=1, ensure_ascii=False, sort_keys=True))
 
@@ -246,7 +220,7 @@ class Roster:
         if not rows or not set(rows[0]) >= self.NEEDED:
             raise Refused("--roster: not a Roster export (expected the columns "
                           + ", ".join(sorted(self.NEEDED)) + ")")
-        self.sha256, self.clubs = file_sha(path), {}
+        self.sha256, self.clubs = sha256(path), {}
         for row in rows:
             partner, club, name = (" ".join(str(row.get(c) or "").split()) for c in ("partner", "club", "full_name"))
             if not (partner and club and name):
@@ -479,7 +453,7 @@ def load_plan(path):
                 or not all(isinstance(info.get(k), int) for k in ("participants_before", "participants_after")) \
                 or not isinstance(info.get("rows_per_date"), dict):
             bad("a club entry that does not add up")
-    plan["sha256"] = file_sha(path)
+    plan["sha256"] = sha256(path)
     return plan
 
 
@@ -1149,7 +1123,7 @@ def cmd_plan(args, ctx):
               "same_date": sum(1 for n in needs if "same_date" in n["reasons"]), "renames": len(renames),
               "needs_a_person": len(needs)}
     plan = {"tool": "sf_dupes", "version": 1, "made_at_utc": stamp(ctx.clock()), "org": args.org,
-            "roster_sha256": roster.sha256, "backfill_contacts_sha256": file_sha(args.backfill_contacts),
+            "roster_sha256": roster.sha256, "backfill_contacts_sha256": sha256(args.backfill_contacts),
             "club_record_type": rt, "participants_read": len(contacts), "clubs": clubs, "groups": groups,
             "renames": renames, "needs_a_person": needs, "totals": totals}
     path = os.path.join(ctx.folder, "merge_plan.json")
@@ -1361,12 +1335,7 @@ class Ctx:
         return self._jotform
 
     def use_folder(self, folder):
-        folder = os.path.abspath(folder)
-        if within(folder, REPO) and not within(folder, os.path.join(REPO, "data")):
-            raise Refused("--dir: inside the checkout this tool's folder must be under data/ (its files can hold names)")
-        os.makedirs(folder, mode=0o700, exist_ok=True)
-        os.chmod(folder, 0o700)
-        self.folder = folder
+        self.folder = private_folder(folder, "this tool's folder", "its files can hold names", repo=REPO)
 
 
 def main(argv=None, org=None, jotform=None, clock=None):

@@ -35,7 +35,6 @@ import unicodedata
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.forms import REGIONS                                     # noqa: E402  (the four regional forms)
 from glow.salesforce import (CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE,   # noqa: E402
                              PARTNERS, Org, Refused, add_vpn_flag, apex_trim, error_codes, has_invisible,

@@ -686,6 +686,20 @@ class SfDupesFlow(Harness):
         self.assertEqual(code, 2)
         self.assertIn("not allowed with argument", out)
 
+    def test_a_fresh_checkout_without_data_gets_the_folder_made_owner_only(self):
+        # the guard asked within() about a data/ that did not exist yet and refused every folder under it
+        with tempfile.TemporaryDirectory() as checkout, unittest.mock.patch.object(sd, "REPO", checkout):
+            ctx = sd.Ctx(types.SimpleNamespace(org="glow"), self.sf, self.jf, lambda: self.now)
+            folder = os.path.join(checkout, "data", "sf_dupes_2026-10-07")
+            ctx.use_folder(folder)
+            self.assertEqual(ctx.folder, folder)
+            self.assertEqual([stat.S_IMODE(os.stat(p).st_mode) for p in (os.path.join(checkout, "data"), folder)],
+                             [0o700] * 2)
+            with self.assertRaises(salesforce.Refused) as stop:
+                ctx.use_folder(os.path.join(checkout, "docs"))
+            self.assertIn("must be under data/", str(stop.exception))
+            self.assertFalse(os.path.exists(os.path.join(checkout, "docs")))
+
     def test_the_plan(self):
         self.world()
         out = self.make_plan()
