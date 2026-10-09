@@ -24,7 +24,7 @@ Usage:
     export JOTFORM_API_KEY=...
     python3 restore_conditions.py --form 262352490535154                    # dry run
     python3 restore_conditions.py --form 262352490535154 --apply
-    python3 restore_conditions.py --form <ID> --from conditions-2026-08-24T1730.json
+    python3 restore_conditions.py --form <ID> --from conditions-2026-08-24T173000.json
 """
 import argparse
 import json
@@ -33,6 +33,7 @@ import sys
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
+from glow import backup                    # noqa: E402
 from glow.cli import api_key, run          # noqa: E402
 from glow.jotform import Client   # noqa: E402
 from glow import sync as glow_sync             # noqa: E402
@@ -103,8 +104,8 @@ def main():
 
     client = Client(api_key(), apply=args.apply)
 
-    path = os.path.join(REPO, "backups", args.form,
-                        args.src or "properties-latest.json")
+    path = (os.path.join(backup.folder(args.form), args.src) if args.src
+            else backup.path(args.form, "properties"))
     if not os.path.exists(path):
         sys.exit(f"No snapshot at {path} - run backup_forms.py first")
     with open(path, encoding="utf-8") as f:

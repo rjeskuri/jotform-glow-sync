@@ -1055,7 +1055,7 @@ class DisableForm(unittest.TestCase):
             env["JOTFORM_API_KEY"] = key
         buf = io.StringIO()
         with mock.patch.object(disable_form, "Client", lambda api_key, apply=False: api), \
-                mock.patch.object(disable_form.backup_forms, "snapshot", snapshot), \
+                mock.patch.object(disable_form.backup, "snapshot", snapshot), \
                 mock.patch.object(disable_form, "datetime", Clock), \
                 mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(sys, "argv", ["disable_form.py"] + argv), \
@@ -1167,6 +1167,15 @@ class DisableForm(unittest.TestCase):
         code, _ = self.run_main(["--form", self.US, "--message", "Paused.", "--apply"], StatusOnly())
         self.assertIn("messageOfLimitedForm did not change", str(code))
         self.assertIn("status DISABLED as wanted", str(code))
+
+    def test_the_backup_stamp_is_to_the_second(self):
+        # a minute stamp let a re-run within the minute write the half-changed form over the
+        # true "before" (glow/backup.py stamp)
+        api = FormApi()
+        code, out = self.run_main(["--form", self.US, "--apply"], api, today="2026-10-07 14:00:05")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([c for c in api.calls if c[0] == "BACKUP"], [("BACKUP", self.US, "2026-10-07T140005")])
+        self.assertIn(f"backups/{self.US}/*-2026-10-07T140005.json", out)
 
 
 class UploadRosterPartners(unittest.TestCase):

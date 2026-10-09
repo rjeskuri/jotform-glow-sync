@@ -14,7 +14,7 @@ is glow/links.py:
                   -> the Club Roster Form, directly above the problem link
 
 Dry run by default. With --apply each form is snapshotted first
-(backup_forms.py -> backups/<id>/), written, then re-read and checked: the
+(glow/backup.py -> backups/<id>/), written, then re-read and checked: the
 element exactly once, its text as written, not hidden, above what it must be
 above, and no rule mentioning it (the sync rewrites rules, never this
 element). Re-running is a no-op; --remove deletes the element. Refuses an
@@ -39,7 +39,7 @@ from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-from backup_forms import snapshot      # noqa: E402
+from glow import backup               # noqa: E402  (the snapshot before a write)
 from glow import forms as glow_forms   # noqa: E402
 from glow import links as glow_links   # noqa: E402
 from glow.cli import api_key, run, targets               # noqa: E402
@@ -158,7 +158,7 @@ def main():
     chosen = targets(args.form, FORMS)
     # to the second: a re-run just after a failed one must not snapshot the
     # half-written form over the true "before" (the rollback path)
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp(datetime.now())
 
     print(("APPLYING" if args.apply else "DRY RUN")
           + f" - {'remove ' if args.remove else ''}{link.name}: {link.sentence!r}"
@@ -185,7 +185,7 @@ def main():
         if not args.apply or not steps:
             continue
         print(f"\n== writing {chosen[form_id]} {form_id}")
-        snapshot(form_id, client, stamp)       # the rollback path, before any write
+        backup.snapshot(form_id, client, stamp)    # the rollback path, before any write
         print(f"   snapshot: backups/{form_id}/questions-{stamp}.json")
         steps, _ = read_and_plan(form_id)      # the form may have changed since the preview
         if [s["label"] for s in steps] != [s["label"] for s in planned[form_id]]:

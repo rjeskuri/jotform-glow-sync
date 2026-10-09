@@ -473,6 +473,7 @@ class RestoreConditionsFixture:
                       encoding="utf-8") as f:
                 json.dump({"conditions": snapshot}, f)
             with mock.patch.object(restore_conditions, "REPO", tmp), \
+                    mock.patch.object(restore_conditions.backup, "REPO", tmp), \
                     mock.patch.object(restore_conditions, "Client", Fake), \
                     mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
                     mock.patch.object(sys, "argv", ["restore_conditions.py", "--form", "999", *extra]), \

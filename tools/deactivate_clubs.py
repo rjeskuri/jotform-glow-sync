@@ -77,6 +77,7 @@ from rename_club import a1, cell, cell_key, col_letter, describe_rows, nfc_key, 
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+from glow import backup                   # noqa: E402  (the stamp of the saved Roster)
 from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
@@ -435,7 +436,7 @@ def deactivate(args, svc, roster, zone):
         print("\nDRY RUN - re-run with --apply to write")
         return
 
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp(datetime.now())
     out = os.path.join(OUT, stamp)
     save_roster(out, roster)
     record = {"written": stamp, "tab": ROSTER, "status_col": i_s, "removed_col": i_r,
@@ -529,7 +530,7 @@ def undo(args, svc, roster, zone):
         print("\nDRY RUN - re-run with --apply to write")
         return
 
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp(datetime.now())
     out = os.path.join(folder, "undo-" + stamp)
     save_roster(out, roster)
     print(f"\nSaved the {ROSTER} tab before the undo to {os.path.relpath(out, REPO)}/")

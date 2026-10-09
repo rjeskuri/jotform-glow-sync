@@ -72,7 +72,7 @@ import sheets_client as sc
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-import backup_forms                       # noqa: E402
+from glow import backup                   # noqa: E402  (the snapshot before a write)
 from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
@@ -489,7 +489,7 @@ def main():
     zone = sc.named_zone(sc.time_zone(svc))
 
     # --- backups: the tabs as they are now, and a snapshot of each form written --
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp(datetime.now())
     out = os.path.join(OUT, stamp)
     os.makedirs(out, exist_ok=True)
     for tab, rows in tabs.items():
@@ -497,7 +497,7 @@ def main():
             csv.writer(f).writerows(rows)
     print(f"\nSaved the tabs before the change to {os.path.relpath(out, REPO)}/")
     for fid, _ in forms:
-        s = backup_forms.snapshot(fid, client, stamp)
+        s = backup.snapshot(fid, client, stamp)
         print(f"  backup_forms: form {fid} ({s['questions']} questions, {s['conditions']} "
               f"conditions) -> backups/{fid}/*-{stamp}.json")
 

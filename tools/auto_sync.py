@@ -72,6 +72,7 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
 import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily inside it)
+from glow import backup  # noqa: E402  (the conditions-only copy of the snapshot)
 from glow import forms as glow_forms  # noqa: E402
 from glow.cli import api_key  # noqa: E402
 from glow import usage  # noqa: E402  (Jotform's storage against the plan's limits; standard library)
@@ -484,7 +485,7 @@ class Run:
         # cannot be misread as sheet time)
         self.started = datetime.datetime.now(datetime.timezone.utc)
         now = self.started.astimezone()
-        self.stamp = now.strftime("%Y-%m-%dT%H%M%S")
+        self.stamp = backup.stamp(now)
         self.when = now.strftime("%Y-%m-%d %H:%M:%S %z")
         self.mode = "apply" if args.apply else "dry-run"
         self.sf_names = {}        # region -> what each of its rosters sends to question 5
@@ -923,13 +924,8 @@ class Run:
         Salesforce integration settings, so only this file may leave the
         machine (the workflow artifact). Restore with:
         restore_conditions.py --form <id> --from conditions-<stamp>.json"""
-        src = os.path.join(REPO, "backups", form, "properties-latest.json")
         try:
-            with open(src, encoding="utf-8") as f:
-                props = json.load(f)
-            out = os.path.join(REPO, "backups", form, f"conditions-{self.stamp}.json")
-            with open(out, "w", encoding="utf-8") as f:
-                json.dump({"conditions": props.get("conditions", [])}, f, indent=1)
+            backup.save_conditions(form, self.stamp)
         except (OSError, ValueError) as err:
             self.log(f"  ! could not write the conditions-only copy: {err}")
 

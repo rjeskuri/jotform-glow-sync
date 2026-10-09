@@ -23,7 +23,7 @@ glow.forms.LIVE (the defunct forms are already off), and - without
     python3 tools/disable_form.py --form 262382706852058 --message "<text>" --apply
     python3 tools/disable_form.py --form 262382706852058 --enable --apply    # the way back
 
---apply: backup_forms.snapshot first (the properties snapshot records status
+--apply: a snapshot first (glow/backup.py) (the properties snapshot records status
 and the message to put back), then the POST, then both GETs again. The runner
 skips a DISABLED form (SyncLog `skipped`); docs/RUNBOOK.md, "Disabling a
 regional form".
@@ -35,7 +35,7 @@ from datetime import datetime, timedelta
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-import backup_forms                      # noqa: E402
+from glow import backup                  # noqa: E402  (the snapshot before the write)
 from glow import forms as glow_forms     # noqa: E402
 from glow.cli import api_key, run                 # noqa: E402
 from glow.jotform import Client          # noqa: E402
@@ -119,8 +119,8 @@ def main():
         print(f"\nDRY RUN - re-run with --apply to back up the form, then {what} (then re-read)")
         return
 
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M")
-    s = backup_forms.snapshot(form_id, client, stamp)
+    stamp = backup.stamp(datetime.now())
+    s = backup.snapshot(form_id, client, stamp)
     print(f"\n  backup_forms: form {form_id} ({s['questions']} questions, {s['conditions']} conditions, "
           f"status {status}) -> backups/{form_id}/*-{stamp}.json")
     client.post_form(f"/form/{form_id}/properties", data,

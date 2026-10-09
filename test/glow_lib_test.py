@@ -298,6 +298,64 @@ class GlowSyncHelpers(unittest.TestCase):
                 self.assertIsNone(sync.rule_parts(bad))
 
 
+class GlowBackup(unittest.TestCase):
+    """glow/backup.py: the one stamp (to the second), the snapshot files and the
+    conditions-only copy, in a temporary backups/ folder."""
+
+    class Fake:
+        def __init__(self):
+            self.reads = []
+
+        def get(self, path):
+            self.reads.append(path)
+            if path.endswith("/questions"):
+                return {"1": {"type": "control_head"}, "5": {"type": "control_textbox"}}
+            return {"conditions": [{"id": "1"}, {"id": "2"}], "emails": [{}],
+                    "integrations": {"salesforceV2": {"integrationAccountID": "x"}}}
+
+    def test_one_stamp_to_the_second(self):
+        import datetime as dt
+        from glow import backup
+        first, again = dt.datetime(2026, 9, 28, 10, 0, 5), dt.datetime(2026, 9, 28, 10, 0, 40)
+        self.assertEqual(backup.stamp(first), "2026-09-28T100005")
+        self.assertNotEqual(backup.stamp(first), backup.stamp(again))     # a re-run within the minute
+        self.assertRegex(backup.stamp(), r"^\d{4}-\d\d-\d\dT\d{6}$")
+
+    def test_no_tool_mints_a_minute_stamp(self):
+        from helpers.common import REPO, read
+        for folder in ("", "tools", "glow"):
+            for name in sorted(os.listdir(os.path.join(REPO, folder))):
+                if name.endswith(".py"):
+                    with self.subTest(file=os.path.join(folder, name)):
+                        self.assertNotIn('"%Y-%m-%dT%H%M"', read(os.path.join(REPO, folder, name)))
+
+    def test_snapshot_writes_the_stamp_and_latest(self):
+        import tempfile
+        from unittest import mock
+        from glow import backup
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(backup, "REPO", tmp):
+            fake = self.Fake()
+            s = backup.snapshot("123", fake, "2026-10-09T101530")
+            self.assertEqual(s, {"questions": 2, "conditions": 2, "emails": 1, "salesforce": "yes",
+                                 "stamp": "2026-10-09T101530"})
+            self.assertEqual(fake.reads, ["/form/123/questions", "/form/123/properties"])
+            self.assertEqual(sorted(os.listdir(os.path.join(tmp, "backups", "123"))),
+                             ["properties-2026-10-09T101530.json", "properties-latest.json",
+                              "questions-2026-10-09T101530.json", "questions-latest.json"])
+            self.assertEqual(backup.path("123", "properties"),
+                             os.path.join(tmp, "backups", "123", "properties-latest.json"))
+            path = backup.save_conditions("123", "2026-10-09T101530")
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"conditions": [{"id": "1"}, {"id": "2"}]})
+            # latest=False leaves the -latest files alone (restore_conditions' snapshot)
+            backup.snapshot("123", fake, "2026-10-09T101600", latest=False)
+            with open(backup.path("123", "properties"), encoding="utf-8") as f:
+                self.assertEqual(len(json.load(f)["conditions"]), 2)
+            self.assertTrue(os.path.exists(backup.path("123", "questions", "2026-10-09T101600")))
+            # no stamp given: one is minted, and returned
+            self.assertRegex(backup.snapshot("124", fake)["stamp"], r"^\d{4}-\d\d-\d\dT\d{6}$")
+
+
 class TranslationLookup(unittest.TestCase):
     """glow/translation_lookup.py: the runtime's names dictionary (formTranslation.v2.js:
     setDictionary, trimMultiSpaces, sanitizeKeys, translate's fall-back) and the removal
