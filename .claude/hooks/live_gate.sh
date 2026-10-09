@@ -5,8 +5,15 @@
 # master Google Sheet, the deployed Apps Script, Salesforce, or the automatic
 # sync's switches on GitHub - unless GLOW_LIVE_OK=1 was exported by the human
 # BEFORE launching Claude Code. A command that sets GLOW_LIVE_OK itself is
-# always blocked (no self-approval). Fast: a few greps, no network. Every
-# decision on a live command is appended to .claude/live_gate.log (gitignored).
+# always blocked (no self-approval), and so is one that writes a file the next
+# launch reads its environment from - ~/.zshrc and the other shell startup files,
+# a direnv .envrc, the repository's .env (sourced with set -a): a redirect, tee,
+# sed -i or perl -i into one, or launchctl setenv. Fast: a few greps, no network.
+# Every decision on a live command is appended to .claude/live_gate.log (gitignored).
+#
+# Limits: the gate reads the command's text. A write through another program (cp,
+# an editor, a script), or a flag assembled at run time, is not seen: it guards
+# against mistakes, not against intent.
 #
 # A read-only command that only mentions a live flag (grep -n -- '--apply'
 # docs/RUNBOOK.md) passes: its first word is grep, rg, cat, head, tail, wc or ls,
@@ -27,7 +34,7 @@ fi
 # delete of metadata, data writes, anonymous Apex, the REST API itself, and
 # --rehearse (sf_dupes.py's production DML, rolled back).
 SF='(^|[^[:alnum:]_.-])sf(dx)?[[:space:]]+'
-PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|GLOW_LIVE_OK\+?=|api\.jotform\.com|api\.github\.com/repos/[^[:space:]]*/dispatches|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
+PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|api\.jotform\.com|api\.github\.com/repos/[^[:space:]]*/dispatches|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
 PATTERN+="|${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}deploy[[:space:]]+metadata|${SF}project[[:space:]]+delete[[:space:]]+source"
 PATTERN+="|${SF}data[[:space:]]+(create|update|delete|upsert|import)|${SF}apex[[:space:]]+run"
 PATTERN+="|${SF}force:(apex:execute|source:(deploy|delete|push)|mdapi:deploy|data:(record|bulk|tree):)|\.salesforce\.com/services/"
@@ -37,7 +44,12 @@ PATTERN+="|${SF}force:(apex:execute|source:(deploy|delete|push)|mdapi:deploy|dat
 GH='(^|[^[:alnum:]_.-])gh[[:space:]]+((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
 APPLY_ON='apply["'\'']?[[:space:]]*[=:][[:space:]]*["'\'']?([Tt][Rr][Uu][Ee]|1|[$@`])'
 PATTERN+="|${GH}(variable|secret)[[:space:]]+(set|delete|remove)|${GH}workflow[[:space:]]+(enable|disable)|${GH}run[[:space:]]+rerun"
-PATTERN+="|${GH}workflow[[:space:]]+run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+run)"
+PATTERN+="|${GH}workflow[[:space:]]+run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+run"
+# self-approval: the flag in the command, or written where the next launch picks it up
+STARTUP='(\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bashrc|\.bash_profile|\.bash_login|\.profile|\.envrc|\.env)([^[:alnum:]_.-]|$)'
+WRITES='(>|tee[[:space:]]|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i)[^;&|]*'
+SELF="GLOW_LIVE_OK\\+?=|${WRITES}${STARTUP}|launchctl[[:space:]]+setenv"
+PATTERN+="|${SELF})"
 # matched on one line: a command continued with \ (gh workflow run x \ -f apply=true) or
 # spread over lines is still one command
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
@@ -73,7 +85,7 @@ read_only() {
 read_only && exit 0
 
 LOG="${CLAUDE_PROJECT_DIR:-.}/.claude/live_gate.log"
-if [ "${GLOW_LIVE_OK:-}" = "1" ] && ! printf '%s' "$CMD" | grep -Eq 'GLOW_LIVE_OK\+?='; then
+if [ "${GLOW_LIVE_OK:-}" = "1" ] && ! printf '%s' "$FLAT" | grep -Eq "$SELF"; then
   printf '%s ALLOWED %s\n' "$(date '+%F %T')" "$CMD" >> "$LOG"
   exit 0
 fi

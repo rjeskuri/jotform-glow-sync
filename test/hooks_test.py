@@ -156,6 +156,14 @@ class Hooks(unittest.TestCase):
                               "env GLOW_LIVE_OK=1 python3 sync_attendance_form.py x --apply",
                               "GLOW_LIVE_OK+=1 python3 sync_attendance_form.py x --apply",
                               "echo GLOW_LIVE_OK=1 >> ~/.zshrc"], 2, live_ok)
+            # ... or writes it where the next launch reads its environment (review of 2026-10-09)
+            self.assert_gate(["printf 'export GLOW_LIVE_OK\\x3d1' >> ~/.zshrc",
+                              "printf 'export X\\x3d1\\n' > $HOME/.zprofile", "echo x | tee -a ~/.zshenv",
+                              "echo x | tee ~/.bashrc", "cat snippet >> ~/.bash_profile", "echo x >>~/.profile",
+                              "echo x > ~/.zlogin", "sed -i '' 's/a/b/' ~/.zshrc", "sed -e 's/a/b/' -i ~/.bash_login",
+                              "sed --in-place 's/a/b/' ~/.bashrc", "perl -pi -e 's/a/b/' ~/.zshrc",
+                              "echo 'export A=1' > .envrc", "printf 'A\\x3d1' >> .env",
+                              "launchctl setenv GLOW_LIVE_OK 1"], 2, live_ok)
 
     def test_reads_and_dry_runs_pass(self):
         self.assert_gate(["ls", "make check", "python3 tools/auto_sync.py",
@@ -171,6 +179,9 @@ class Hooks(unittest.TestCase):
                           "sf project deploy report --job-id 0Af000000000001", "sfdx force:org:list",
                           "sf project retrieve start -m ApexClass:GlowSync", "sfdx force:data:soql:query -q 'SELECT Id FROM Account'",
                           "python3 tools/sf_dupes.py check",
+                          # the startup files read, or a copy of one written
+                          "cat ~/.zshrc", "grep -n PATH ~/.zshrc", "tail -5 ~/.bash_profile", "ls -la ~/.zshrc",
+                          "wc -l .envrc", "cp ~/.zshrc ~/.zshrc.bak", "echo x > ~/.zshrc.bak", "source .env",
                           "python3 tools/sf_dupes.py plan", "git status"], 0)
         self.assertEqual(self.logged(), {})
 
