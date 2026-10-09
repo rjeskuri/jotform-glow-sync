@@ -62,7 +62,8 @@ def load_regional_rosters():
         path = os.path.join(REPO, "backups", form_id, "questions-latest.json")
         if not os.path.exists(path):
             sys.exit(f"Missing {os.path.relpath(path, REPO)} - run backup_forms.py first")
-        questions = json.load(open(path))
+        with open(path) as f:
+            questions = json.load(f)
         for q in questions.values():
             if q.get("type") != "control_checkbox":
                 continue

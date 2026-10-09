@@ -63,7 +63,7 @@ def read_usage(client):
                "reset": reset_day(usage.get("monthly_usage_reset_date"))}
     except (KeyError, TypeError, ValueError) as err:
         raise ValueError("Jotform's usage or plan answer is not the shape read on 2026-10-06 "
-                         f"({err.__class__.__name__}: {err})")
+                         f"({err.__class__.__name__}: {err})") from err
     for limit in LIMITS:
         if out[f"{limit}_cap"] <= 0 or out[limit] < 0:
             raise ValueError(f"{NAMES[limit]}: {out[limit]} of a limit of {out[f'{limit}_cap']} cannot be judged")

@@ -188,7 +188,7 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
                                    (True, "Stars - Partner One", "Stars - PARTNER ONE")):
             qs, wire = self.guard_form(guard=False, calc=False, switched=switched)
             wire = self.edit(wire, lambda c: '"field": "11"' in c["action"],
-                             terms=lambda c: c["terms"].replace(f'"{old}"', f'"{new}"'))
+                             terms=lambda c, old=old, new=new: c["terms"].replace(f'"{old}"', f'"{new}"'))
             # (before the switch question 18's rule does not test the Partner box: one more line)
             problems = [p for p in form_status.audit_rules(qs, wire, self.PARTNERS)[0] if self.COVERAGE not in p]
             self.assertEqual(len(problems), 1, problems)
@@ -217,8 +217,8 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
             self.assertEqual(sum(fragment in p for p in found), n, found)
             return found
 
-        shows_guard = lambda c: '"Show", "isError": false, "field": "700"' in c["action"]   # noqa: E731
-        requires = lambda c: c["type"] == "require"                                        # noqa: E731
+        shows_guard = lambda c: '"Show", "isError": false, "field": "700"' in c["action"]
+        requires = lambda c: c["type"] == "require"
         qs, wire = self.guard_form()
         qs["700"]["hidden"] = "No"
         only(qs, wire, "is not hidden: every mentor sees the warning")
@@ -251,13 +251,13 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
         only(qs, self.edit(wire, shows_guard, link=lambda c: "Any"), "linking its terms with Any")
         only(qs, self.edit(wire, shows_guard, action=lambda c: c["action"].replace('"Hide"', '"Show"')),
              "its actions are not Hide q2 + Show q700")
-        drop = lambda c: json.dumps([t for t in json.loads(c["terms"]) if t["value"] != "Beta Club"])  # noqa: E731
+        drop = lambda c: json.dumps([t for t in json.loads(c["terms"]) if t["value"] != "Beta Club"])
         only(qs, self.edit(wire, lambda c: shows_guard(c) or requires(c), terms=drop),
              "misses 1 club(s) - their mentors cannot submit: ['Beta Club']", n=2)
-        add = lambda c: json.dumps(json.loads(c["terms"]) + [{"field": "5", "operator": "notEquals",  # noqa: E731
+        add = lambda c: json.dumps(json.loads(c["terms"]) + [{"field": "5", "operator": "notEquals",
                                                                "value": "Old Club"}])
         only(qs, self.edit(wire, requires, terms=add), "tests 1 value(s) that are not the picker's options")
-        filled = lambda c: json.dumps([t for t in json.loads(c["terms"]) if t["operator"] != "isFilled"])  # noqa: E731
+        filled = lambda c: json.dumps([t for t in json.loads(c["terms"]) if t["operator"] != "isFilled"])
         only(qs, self.edit(wire, requires, terms=filled), "does not test that the Club picker is filled")
 
     def test_rendered_calc_values_are_counted_never_printed(self):

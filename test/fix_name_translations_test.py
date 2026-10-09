@@ -376,7 +376,7 @@ class FixNameTranslations(unittest.TestCase):
             fake = self.fake()
             stale_page = served_page(copy.deepcopy(fake.stores[self.AFRICA]))     # the page never follows
             code, out = self.run_main(failing(fake, step), "--form", self.AFRICA, "--apply",
-                                      page=lambda fid: stale_page)
+                                      page=lambda fid, stale_page=stale_page: stale_page)
             self.assertIn("re-read: APPLIED", out, step)
             self.assertNotIn(md5(self.DOUBLE), fake.stores[self.AFRICA]["en"])       # the store is written
             self.assertIn("The store is fixed but the public page could not be shown to serve it", str(code), step)

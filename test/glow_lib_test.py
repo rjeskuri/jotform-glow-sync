@@ -133,9 +133,8 @@ class GlowClient(unittest.TestCase):
         def boom(argv, **kw):
             raise OSError(7, "Argument list too long")
         c = self.gj.Client("KEY")
-        with mock.patch.object(self.gj.subprocess, "run", boom):
-            with self.assertRaises(self.gj.JotformError) as e:
-                c.get("/x")
+        with mock.patch.object(self.gj.subprocess, "run", boom), self.assertRaises(self.gj.JotformError) as e:
+            c.get("/x")
         self.assertIn("curl could not be started", str(e.exception))
 
     def test_is_write_catches_every_shape(self):
@@ -152,7 +151,7 @@ class GlowText(unittest.TestCase):
     """glow.text must be byte-equal to the per-script copies it replaced."""
 
     CORPUS = [None, "", "  ", 7, "Ana  Maria\tLopez ", "ÑANDÚ vex", "Zoë", "İstanbul",
-              "café", "​Grace", "a b", "MiXeD CaSe", "ümit-öz"]
+              "café", "\u200bGrace", "a\xa0b", "MiXeD CaSe", "ümit-öz"]
 
     @staticmethod
     def old_key(s):                                     # tools/form_status.py (pre-refactor)
@@ -195,18 +194,18 @@ class TranslationLookup(unittest.TestCase):
     NAME = "Amara Fennwhistle"
 
     def test_javascripts_whitespace_simplify_and_key_order(self):
-        self.assertEqual(tl.js_trim("﻿　 Amara  "), "Amara")
+        self.assertEqual(tl.js_trim("\ufeff\u3000 Amara \u2028"), "Amara")
         self.assertEqual(tl.js_trim("\x85Amara\x1c"), "\x85Amara\x1c")      # whitespace to Python only
         self.assertEqual("\x85Amara\x1c".strip(), "Amara")
         self.assertEqual(tl.simplify(" Amara &amp; Grace<br>Fennwhistle\t\t &gt; "), "Amara & Grace Fennwhistle >")
         # the ideographic space is replaced AFTER the double spaces: one double space survives
-        self.assertEqual(tl.simplify("Amara　 Fennwhistle"), "Amara  Fennwhistle")
-        self.assertEqual(tl.replace_nbsp("Amara Grace Fennwhistle"), "Amara Grace Fennwhistle")
+        self.assertEqual(tl.simplify("Amara\u3000 Fennwhistle"), "Amara  Fennwhistle")
+        self.assertEqual(tl.replace_nbsp("Amara\xa0Grace\u202fFennwhistle"), "Amara Grace Fennwhistle")
         self.assertEqual(tl.js_order({"b": 1, "10": 2, "a": 3, "2": 4, "01": 5}), ["2", "10", "b", "a", "01"])
 
     def test_a_stale_spelling_in_base_and_en_alters_the_exact_name(self):
-        for variant in ("Amara  Fennwhistle", "Amara\tFennwhistle", "Amara Fennwhistle",
-                        "Amara   Fennwhistle", "Amara\nFennwhistle",
+        for variant in ("Amara  Fennwhistle", "Amara\tFennwhistle", "Amara\xa0Fennwhistle",
+                        "Amara \u2003 Fennwhistle", "Amara\nFennwhistle",
                         "Amara\u202fFennwhistle"):
             store = name_store([(self.NAME, self.NAME), (variant, variant)])
             for skip in tl.BUILDS:
@@ -219,7 +218,7 @@ class TranslationLookup(unittest.TestCase):
             self.assertEqual(tl.altered(tl.without(store, {md5(variant)}), {self.NAME}), {})
 
     def test_an_invisible_mark_is_no_whitespace(self):
-        lrm = "Amara‎ Fennwhistle"
+        lrm = "Amara\u200e Fennwhistle"
         # in base and en alike, its key keeps the mark: the exact name never lands on it
         store = name_store([(self.NAME, self.NAME), (lrm, lrm)])
         self.assertEqual(tl.altered(store, {self.NAME}), {})
@@ -290,7 +289,7 @@ class TranslationLookup(unittest.TestCase):
         with self.assertRaises(ValueError):
             tl.Lookup({"en": {}})
         # a no-break space in the option itself: no entry to remove makes it exact
-        keys, why = tl.removal(name_store([(self.NAME, self.NAME)]), {"Amara Fennwhistle"})
+        keys, why = tl.removal(name_store([(self.NAME, self.NAME)]), {"Amara\xa0Fennwhistle"})
         self.assertIsNone(keys)
         self.assertIn("no dictionary entry", why)
 

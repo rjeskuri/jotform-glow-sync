@@ -503,7 +503,7 @@ class Step:
     def close(self):
         try:
             self.org.revoke()
-        except Exception:                                  # noqa: BLE001 - best effort, the token is dropped
+        except Exception:                                  # best effort, the token is dropped
             self.org.token = None
 
 

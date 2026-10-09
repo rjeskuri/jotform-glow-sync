@@ -147,8 +147,8 @@ class SalesforceNewClubs(Fixture):
         self.assertTrue(m("  Sunrise Club\t", "Sunrise Club"))          # question 5 is trimmed ...
         self.assertFalse(m("Sunrise Club", " Sunrise Club"))           # ... the Account name is not
         self.assertFalse(m("Sunrise  Club", "Sunrise Club"))           # inner spaces count
-        self.assertFalse(m("Sunrise Club", "Sunrise Club"))       # a no-break space is not a space
-        self.assertFalse(m(" Sunrise Club", "Sunrise Club"))      # nor trimmed (it is above U+0020)
+        self.assertFalse(m("Sunrise\xa0Club", "Sunrise Club"))       # a no-break space is not a space
+        self.assertFalse(m("\xa0Sunrise Club", "Sunrise Club"))      # nor trimmed (it is above U+0020)
         self.assertFalse(m("Straße", "STRASSE"))                       # one character never becomes two
         self.assertTrue(m("Niñas Valientes", "NIÑAS VALIENTES"))
         self.assertFalse(m("Ninas Valientes", "Niñas Valientes"))      # accents count
@@ -454,7 +454,7 @@ class SalesforceNewClubs(Fixture):
                              ("the answer names another record", lambda a, r: r.update(id="001000000000000OTH"))):
             with self.subTest(name):
                 class Twisted(FakeOrg):
-                    def insert(self, sobject, body):
+                    def insert(self, sobject, body, change=change):
                         status, answer = FakeOrg.insert(self, sobject, body)
                         change(self.accounts[-1], answer)
                         return status, answer
@@ -652,7 +652,7 @@ class GlowSyncLogin(unittest.TestCase):
 
     def test_the_secret_scanner_knows_salesforce_credentials(self):
         sys.path.insert(0, os.path.join(REPO, "scripts"))
-        import check_secrets                                       # noqa: E402
+        import check_secrets
         token = "00D" + "Ab1" * 5 + "!" + "AQ4AQ.x_9" * 4           # assembled: no literal one in this file
         key, secret = "3MVG9" + "aB3._" * 14, "9F" * 32
         for text, rule in ((token, "Salesforce token"), (key, "Salesforce consumer key"),

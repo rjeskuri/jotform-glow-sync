@@ -51,14 +51,14 @@ the runtime would throw on it, which this module does not emulate.
 import re
 
 # the runtime's \s / trim(): ECMAScript WhiteSpace + LineTerminator
-JS_WS = ("\t\n\v\f\r             "
-         "     　﻿")
+JS_WS = ("\t\n\v\f\r \xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009"
+         "\u200a\u2028\u2029\u202f\u205f\u3000\ufeff")
 _WS_RUN = re.compile("[" + re.escape(JS_WS) + "]+")
-_NBSP = re.compile("[  ]")
+_NBSP = re.compile("[\u202f\xa0]")
 _INDEX = re.compile(r"^(?:0|[1-9][0-9]*)$")
 # simplifyfWord's replaceMap, in its order; each one replaced until none is left
 _SIMPLIFY = (("&gt;", ">"), ("&lt;", "<"), ("&emsp;", " "), ("&nbsp;", " "), ("<br>", " "),
-             ("&amp;", "&"), ("\n", " "), ("\t", " "), ("  ", " "), ("　", " "))
+             ("&amp;", "&"), ("\n", " "), ("\t", " "), ("  ", " "), ("\u3000", " "))
 
 # The 2026-10-02 builds skip an entry missing in `en` or `base`; 9e75d6f1d83 filed it
 # under "undefined". The audits run both (BUILDS): a form can be served either.

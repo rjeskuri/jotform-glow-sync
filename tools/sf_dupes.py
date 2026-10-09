@@ -114,7 +114,7 @@ def key(text):
 def odd(text):
     """A stored name part with whitespace or invisible characters that norm() would change."""
     text = text or ""
-    return (text != " ".join(text.split()) or " " in text or "\t" in text
+    return (text != " ".join(text.split()) or "\xa0" in text or "\t" in text
             or any(unicodedata.category(c) == "Cf" for c in text))
 
 
@@ -261,7 +261,7 @@ class Roster:
                 rows = list(csv.DictReader(fh))
         except (OSError, UnicodeDecodeError, csv.Error):
             raise Refused(f"--roster: cannot read {path} as a UTF-8 CSV") from None
-        if not rows or not self.NEEDED <= set(rows[0]):
+        if not rows or not set(rows[0]) >= self.NEEDED:
             raise Refused("--roster: not a Roster export (expected the columns "
                           + ", ".join(sorted(self.NEEDED)) + ")")
         self.sha256, self.clubs = file_sha(path), {}

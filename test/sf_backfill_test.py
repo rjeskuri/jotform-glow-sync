@@ -477,7 +477,7 @@ class SalesforceBackfill(Harness, unittest.TestCase):
 
     def test_names_that_would_break_the_split_are_held_and_cannot_be_accepted(self):
         for name, why in (("Zibblewick, Amara", "a comma"), ("Amara  Zibblewick", "doubled or invisible"),
-                          ("Amara​Zibblewick Quornstead", "doubled or invisible"), ("A" * 41 + " Vexholm", "longer")):
+                          ("Amara\u200bZibblewick Quornstead", "doubled or invisible"), ("A" * 41 + " Vexholm", "longer")):
             with self.subTest(why):
                 self.write([row("1", names=[name, GIRLS[1]])])
                 held = self.plan()[2]
@@ -1070,7 +1070,7 @@ class SalesforceBackfillEdges(Harness, unittest.TestCase):
                               ('[{"errorCode": "UNKNOWN_EXCEPTION"}]\n500', (500, [{"errorCode": "UNKNOWN_EXCEPTION"}]))):
             posts = []
 
-            def run(argv, input=None, **_):
+            def run(argv, input=None, posts=posts, reply=reply, **_):
                 if argv[0] == "sf":
                     return type("R", (), {"stdout": json.dumps({"result": {"accessToken": "t", "instanceUrl": "https://x"}})})()
                 posts.append(input)

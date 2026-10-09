@@ -321,7 +321,7 @@ def merged_restore(saved, current):
     want, counts = {}, {}
     for lang in SOURCES:
         s, c = saved[lang], current.get(lang, {})
-        out = {k: (c[k] if k in c else v) for k, v in s.items()}
+        out = {k: c.get(k, v) for k, v in s.items()}
         out.update({k: v for k, v in c.items() if k not in s})
         want[lang] = out
         counts[lang] = {"back": sum(1 for k in s if k not in c),
@@ -339,7 +339,7 @@ def restore(client, fid, path, apply, options, stamp, page_of=public_page, sleep
         with open(path, encoding="utf-8") as f:
             saved = json.load(f)
     except (OSError, ValueError) as err:
-        raise Refused(f"cannot read {path}: {err.__class__.__name__}")
+        raise Refused(f"cannot read {path}: {err.__class__.__name__}") from None
     problems = store_problems(saved)
     if problems:
         raise Refused(f"{path}: " + "; ".join(problems))

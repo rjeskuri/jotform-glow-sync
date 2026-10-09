@@ -530,7 +530,7 @@ class Run:
         for i in range(tries):
             try:
                 return fn()
-            except Exception as err:                      # noqa: BLE001 - network errors of any shape
+            except Exception as err:                      # network errors of any shape
                 if i == tries - 1:
                     raise
                 self.log(f"  ! {label}: {err.__class__.__name__}: {str(err)[:200]} - retry in {delay}s")
@@ -581,7 +581,7 @@ class Run:
         # that cannot be read is a failure of this region; the run goes on to the next
         try:
             status = self.read_status(form)
-        except Exception as err:                      # noqa: BLE001 - a JotformError of any shape
+        except Exception as err:                      # a JotformError of any shape
             self.failed = True
             self.result(region, None, "failed",
                         f"could not read form status: {err.__class__.__name__}: {str(err)[:200]}")
@@ -815,7 +815,7 @@ class Run:
         is that log line within minutes, not a run held to the job's timeout."""
         try:
             u = read()
-        except Exception as err:                      # noqa: BLE001 - a Jotform error of any shape
+        except Exception as err:                      # a Jotform error of any shape
             self.log(f"\nstorage: could not be read ({err.__class__.__name__})")
             return
         self.log("\n" + usage.storage_line(u))
@@ -862,7 +862,7 @@ class Run:
                            retry=self.with_retry)
         try:
             self.sf.prepare()
-        except Exception as err:                          # noqa: BLE001 - the forms sync whatever happens here
+        except Exception as err:                          # the forms sync whatever happens here
             self.sf.broken = f"{err.__class__.__name__}: {str(err)[:200]}"
             self.sf.warn("not ready - no account is created or checked this run", self.sf.broken)
 
@@ -871,7 +871,7 @@ class Run:
             return
         try:
             self.sf.create(region, plan)
-        except Exception as err:                          # noqa: BLE001 - the form still applies
+        except Exception as err:                          # the form still applies
             self.sf.warn(f"{region}: the create step failed ({err.__class__.__name__})", str(err)[:300])
 
     def sf_finish(self, svc):
@@ -889,7 +889,7 @@ class Run:
                                                    for r in REGIONAL_FORMS))
             if self.sf.created and self.sf.mode == "apply" and getattr(self.args, "synclog", False):
                 self.mark_sf_pending(svc or sc.service())
-        except (SystemExit, Exception) as err:            # noqa: BLE001 - sheets_client reports via sys.exit
+        except (SystemExit, Exception) as err:            # sheets_client reports via sys.exit
             self.sf.warn(f"the end-of-run step failed ({err.__class__.__name__})", str(err)[:300])
         finally:
             self.sf.close()
@@ -1047,7 +1047,7 @@ def main():
         try:
             svc = svc or sc.service()
             run.with_retry(lambda: run.append_synclog(svc), "SyncLog")
-        except (SystemExit, Exception) as err:            # noqa: BLE001 - sheets_client reports via sys.exit;
+        except (SystemExit, Exception) as err:            # sheets_client reports via sys.exit;
             # a SyncLog failure must not discard the log/ATTENTION files below
             run.attention.append(("SyncLog row could not be written",
                                   f"{err.__class__.__name__}: {str(err)[:300]}\n"

@@ -125,7 +125,7 @@ def main():
 
     # --- IDENTICAL_NAMES (the form's own question)
     if i_same is not None:
-        for k, subs in submissions.items():
+        for _k, subs in submissions.items():
             last = subs[-1]["raw"]
             if len(last) > i_same and last[i_same].strip().lower().startswith("y"):
                 detail = (last[i_same_detail].strip()
@@ -250,7 +250,7 @@ def main():
     # --- GIRL_IN_TWO_CLUBS (skip pairs already reported as possible same club)
     for pk, cs in by_partner.items():
         where = defaultdict(list)
-        for partner, club, girls in cs:
+        for _partner, club, girls in cs:
             for g in girls:
                 where[g].append(club)
         groups = defaultdict(list)
@@ -295,7 +295,7 @@ def main():
                 "stable ID and for matching in Salesforce.", row)
 
     # --- COUNT_MISMATCH and TINY_CLUB
-    for k, subs in submissions.items():
+    for _k, subs in submissions.items():
         last = subs[-1]
         names = last["names"]
         declared = None

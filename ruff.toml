@@ -1,11 +1,25 @@
-# `make lint` runs ruff from .venv (requirements-dev.txt) or from PATH; it is
-# advisory, not part of `make check`.
+# ruff 0.16.5 (requirements-dev.txt), run by `make lint`, `make check` and CI.
+# Deliberately not used: `ruff format` (it would rewrite ~42k lines and flatten the aligned
+# trailing comments the code is read by) and isort (rule I: it would reorder the imports that
+# follow a sys.path insert and carry `# noqa: E402`, and split their aligned comments).
 line-length = 100
 target-version = "py310"
 exclude = ["appsscript", "node_modules", "data", "backups", ".venv"]
 
 [lint]
-select = ["E", "F", "W"]
-# E501 long lines, E731 lambda assignment and E741 short names are tolerated
-# in the older scripts; F-class findings (unused imports, undefined names) are not.
-ignore = ["E501", "E731", "E741"]
+select = [
+    "E", "W",   # pycodestyle errors and warnings
+    "F",        # pyflakes: unused imports and variables, undefined names, redefinitions
+    "B",        # bugbear: closures over a loop variable, raise without from, loop variables unused
+    "UP",       # pyupgrade: spellings older than Python 3.10
+    "SIM",      # simplify: nested with/if, if-else for dict.get, open() outside a with
+    "PLE",      # pylint errors: invisible or bidirectional characters written raw in source
+    "RUF100",   # a `# noqa` that no longer suppresses anything
+]
+ignore = [
+    "E501",     # long lines: 100 is the guide, the older scripts' tables and messages run past it
+    "E731",     # a lambda assigned to a name: short key and filter functions read better so
+    "E741",     # names like l: short loops in the older scripts
+    "B905",     # zip() without strict=: adding it changes behaviour (a raise on unequal lengths)
+    "UP031",    # %-format: Jotform's equation strings ("{%s}" % qid) need tripled braces as f-strings
+]

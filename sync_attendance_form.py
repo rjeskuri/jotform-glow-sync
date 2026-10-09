@@ -325,7 +325,7 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
         else:
             conds.append(mk_field_rule([mk_term(club_field, "equals", club(name))],
                                        [mk_show(qid)]))
-    for low, qids in sorted(by_name.items()):
+    for _low, qids in sorted(by_name.items()):
         if len(qids) > 1:  # ambiguous name -> reveal the Partner box (or list)
             conds.append(mk_field_rule(
                 [mk_term(club_field, "equals", club(club_questions[qids[0]]))],
@@ -560,13 +560,12 @@ def main():
     shared_any = shared_club_names(pairs)                        # names two partners have ever had
     shared_active = shared_club_names(pairs, active_only=True)   # what --same-name-switch goes by
 
-    if args.prune:
-        if int(info.get("count") or 0) > 0:
-            msg = (f"form {args.form} already has {info['count']} submission(s); "
-                   "--prune is for fresh clones only")
-            if args.apply:
-                sys.exit("Refusing: " + msg)
-            warn(f"  ! (preview only) {msg}")
+    if args.prune and int(info.get("count") or 0) > 0:
+        msg = (f"form {args.form} already has {info['count']} submission(s); "
+               "--prune is for fresh clones only")
+        if args.apply:
+            sys.exit("Refusing: " + msg)
+        warn(f"  ! (preview only) {msg}")
 
     # clubs whose roster lists the same full name twice: two different girls
     # need a distinguishing suffix in the SHEET before we trust that roster
@@ -932,7 +931,7 @@ def main():
         entries = sorted(entries)
         unclaimed, taken = list(qids), {}
         for test in (same_partner, loosely(low)):
-            for i, (partner, club, roster) in enumerate(entries):
+            for i, (partner, _club, _roster) in enumerate(entries):
                 if i in taken:
                     continue
                 qid = next((q for q in unclaimed if q in current_partner_of
@@ -964,7 +963,7 @@ def main():
     # (an incomplete export looks the same - always export the FULL tab) -
     # unless the Roster says they belong to another region and we are pruning
     pruned = {q for q, _, _ in to_delete}
-    for low, qids in sorted(existing.items()):
+    for _low, qids in sorted(existing.items()):
         for qid in qids:
             if qid in club_questions or qid in pruned:
                 continue
@@ -1098,7 +1097,7 @@ def main():
         elif key(club) in sent:
             whose = f"what q{sent[key(club)]} sends as its Club Name"
         elif key(club) in long_names:
-            whose = "what {0}'s club '{1}' sends as its Club Name".format(*long_names[key(club)])
+            whose = "what {}'s club '{}' sends as its Club Name".format(*long_names[key(club)])
         else:
             continue
         to_create.remove((club, partner, options))
@@ -1175,7 +1174,7 @@ def main():
         name_groups = defaultdict(list)
         for qid, name in club_questions.items():
             name_groups[name.lower()].append(qid)
-        for low, qids in name_groups.items():
+        for _low, qids in name_groups.items():
             if len(qids) > 1:
                 for qid in qids:
                     partner_of[qid] = pair_of[qid][0] if qid in pair_of else rule_partner(qid)

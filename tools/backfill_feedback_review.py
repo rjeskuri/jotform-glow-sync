@@ -87,7 +87,7 @@ def main():
     rows = parse_rows(args.rows)
 
     sys.path.insert(0, os.path.join(REPO, "tools"))
-    import sheets_client as sc   # noqa: E402  (only now: --help needs no credentials)
+    import sheets_client as sc   # only now: --help needs no credentials
     svc = sc.service()
     feedback = sc.read_tab(svc, FEEDBACK_TAB)
     formlog = sc.read_tab(svc, "FormLog")

@@ -39,9 +39,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from glow import forms as glow_forms      # noqa: E402
-from glow.cli import run                  # noqa: E402
-from glow.jotform import Client           # noqa: E402
+from glow import forms as glow_forms
+from glow.cli import run
+from glow.jotform import Client
 
 WANTED = {
     "mentorEmail": {

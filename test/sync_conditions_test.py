@@ -761,7 +761,7 @@ class ContactIds(unittest.TestCase):
 
     def test_each_question_18_check_fires_on_its_broken_form(self):
         qs, wire = self.form()
-        sum_rule = lambda c: '"resultField": "18"' in c["action"]          # noqa: E731
+        sum_rule = lambda c: '"resultField": "18"' in c["action"]
 
         def edit(**change):
             return FormStatusFixture.edit(wire, sum_rule, **change)
@@ -930,7 +930,7 @@ class EnrollmentParser(unittest.TestCase):
         names, dups = parse_roster("1. Dalia Yexleyton\n12) Esther Grimboltz\n- Farah Halverquist\n"
                                    "3 Gloria Ixworthing\nHana Jubbleton,\nInes Lorrimane.\n\n"
                                    "  Joy   Nimbleford  \n\tKavya Quillstrand\t\n"
-                                   "​Maya Pellucidor\nmaya pellucidor")
+                                   "\u200bMaya Pellucidor\nmaya pellucidor")
         self.assertEqual(names, ["Dalia Yexleyton", "Esther Grimboltz", "Farah Halverquist",
                                  "Gloria Ixworthing", "Hana Jubbleton", "Ines Lorrimane",
                                  "Joy Nimbleford", "Kavya Quillstrand", "Maya Pellucidor"])

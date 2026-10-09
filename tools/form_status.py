@@ -725,7 +725,7 @@ def rendered_module_problems(r, page):
     chain's shape as served (adds r["rendered_shape"]: the page's clearFieldOnHide and the
     module selects served with a `multiple` attribute), as CLEAR_FIELD_ON_HIDE says."""
     problems, seen, multi = [], {}, []
-    for year, qid in MODULES.items():
+    for _year, qid in MODULES.items():
         counts = rendered_calc_values(page, qid)
         seen[qid] = counts
         attrs = rendered_select_attrs(page, qid)

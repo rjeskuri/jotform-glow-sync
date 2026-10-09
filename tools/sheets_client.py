@@ -31,7 +31,8 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 def spreadsheet_id():
     sid = os.environ.get("GLOW_SHEET_ID")
     if not sid and os.path.exists(CONFIG_FILE):
-        sid = json.load(open(CONFIG_FILE)).get("spreadsheet_id")
+        with open(CONFIG_FILE) as f:
+            sid = json.load(f).get("spreadsheet_id")
     if not sid:
         sys.exit("No spreadsheet ID: set GLOW_SHEET_ID or put "
                  '{"spreadsheet_id": "..."} in credentials/config.json '
@@ -247,7 +248,7 @@ def main():
         print(f"{n} rows -> {sys.argv[3]}")
     elif cmd == "export-all":
         out_dir = sys.argv[2]
-        for title, used, _, _ in list_tabs(svc):
+        for title, _used, _, _ in list_tabs(svc):
             n = export_tab(svc, title, os.path.join(out_dir, title + ".csv"))
             print(f"  {title:<24} {n:>6} rows")
     elif cmd == "import":

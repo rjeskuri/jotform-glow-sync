@@ -73,8 +73,8 @@ from datetime import datetime, timedelta
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sheets_client as sc  # noqa: E402
-from rename_club import a1, cell, cell_key, col_letter, describe_rows, nfc_key, tidy, trimmed  # noqa: E402
+import sheets_client as sc
+from rename_club import a1, cell, cell_key, col_letter, describe_rows, nfc_key, tidy, trimmed
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)

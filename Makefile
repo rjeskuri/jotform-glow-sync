@@ -9,7 +9,7 @@ RUFF := $(shell test -x .venv/bin/ruff && echo .venv/bin/ruff || command -v ruff
 
 .PHONY: check test py gs secrets docs-links fixtures fixtures-check lint venv help
 
-check: test py gs secrets docs-links fixtures-check   ## everything, offline, no credentials
+check: lint test py gs secrets docs-links fixtures-check   ## everything, offline, no credentials
 	@echo "CHECK PASSED"
 
 test:                                                 ## JS tests (test/*_test.js): synthetic fixture always, real data when data/ has it
@@ -34,8 +34,9 @@ fixtures:                                             ## regenerate test/fixture
 fixtures-check:                                       ## the committed fixture equals a fresh generation
 	$(PYTHON) test/fixtures/make_fixture.py --check
 
-lint:                                                 ## advisory: ruff, if installed
-	@if [ -n "$(RUFF)" ]; then $(RUFF) check .; else echo "ruff not installed (optional): make venv"; fi
+lint:                                                 ## ruff (ruff.toml): fails on any finding
+	@test -n "$(RUFF)" || { echo "ruff not installed: make venv"; exit 1; }
+	$(RUFF) check . && echo "lint: ok"
 
 venv:                                                 ## create .venv with runtime + dev dependencies
 	python3 -m venv .venv && .venv/bin/python3 -m pip install --quiet --upgrade pip \

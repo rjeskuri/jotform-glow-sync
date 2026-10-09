@@ -986,7 +986,7 @@ class FixRosterOrderTool(unittest.TestCase):
             class Reading(FakeFormClient):
                 gets = 0
 
-                def get(self, path, **params):
+                def get(self, path, fail=fail, **params):
                     if path.endswith("/questions"):
                         self.gets += 1
                         if self.gets == 2 and fail == "read":
@@ -1008,7 +1008,7 @@ class FixRosterOrderTool(unittest.TestCase):
             class Failing(FakeFormClient):
                 failed = False
 
-                def get(self, path, **params):
+                def get(self, path, writes=writes, **params):
                     if path.endswith("/questions") and len(self.writes) == writes and not self.failed:
                         self.failed = True
                         raise fix_roster_order.JotformError(path + ": non-JSON response: '<html>504'")

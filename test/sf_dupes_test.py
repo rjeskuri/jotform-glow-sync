@@ -411,19 +411,19 @@ class Harness(unittest.TestCase):
 class SfDupesNames(Harness):
     def test_the_key_ignores_spacing_invisible_characters_and_case(self):
         base = sd.key("Amara Fennwhistle")
-        for variant in ("Amara  Fennwhistle", "Amara Fennwhistle", "Amara\tFennwhistle", "‎Amara Fennwhistle",
-                        "Amara​ Fennwhistle", " AMARA fennwhistle ", "Amara﻿ Fennwhistle"):
+        for variant in ("Amara  Fennwhistle", "Amara\xa0Fennwhistle", "Amara\tFennwhistle", "\u200eAmara Fennwhistle",
+                        "Amara\u200b Fennwhistle", " AMARA fennwhistle ", "Amara\ufeff Fennwhistle"):
             with self.subTest(repr(variant)):
                 self.assertEqual(sd.key(variant), base)
-        for oddity in ("Amara  Fennwhistle", "Amara Fennwhistle", "Amara\tFennwhistle", "‎Amara Fennwhistle",
+        for oddity in ("Amara  Fennwhistle", "Amara\xa0Fennwhistle", "Amara\tFennwhistle", "\u200eAmara Fennwhistle",
                        " Amara Fennwhistle"):
             self.assertTrue(sd.odd(oddity), repr(oddity))
         self.assertFalse(sd.odd("Amara Fennwhistle"))
         self.assertNotEqual(sd.key("Amara Fennwhistle"), sd.key("Amara Fennwhistl"))
-        self.assertEqual(sd.norm("amara  Fennwhistle‎"), "amara Fennwhistle")      # case kept
+        self.assertEqual(sd.norm("amara  Fennwhistle\u200e"), "amara Fennwhistle")      # case kept
         self.assertTrue(sd.odd_list("Amara  Fennwhistle, Dalia Thornquibble"))
-        self.assertTrue(sd.odd_list("Amara Fennwhistle"))
-        self.assertTrue(sd.odd_list("Amara Fennwhistle,​Dalia Thornquibble"))
+        self.assertTrue(sd.odd_list("Amara\xa0Fennwhistle"))
+        self.assertTrue(sd.odd_list("Amara Fennwhistle,\u200bDalia Thornquibble"))
         self.assertFalse(sd.odd_list("Amara Fennwhistle, Dalia Thornquibble"))
 
     def test_groups_form_within_one_account_only(self):
@@ -1127,7 +1127,7 @@ class SfDupesFlow(Harness):
                             {"Id": "a1l000000000000003", "Name": "BATCH-000003", "CreatedDate": created("2026-10-04"),
                              "Contact_IDs__c": "Amara Fennwhistle, Dalia Thornquibble"},
                             {"Id": "a1l000000000000004", "Name": "BATCH-000004", "CreatedDate": created("2026-09-28"),
-                             "Contact_IDs__c": "Amara Fennwhistle"}]
+                             "Contact_IDs__c": "Amara\xa0Fennwhistle"}]
         out, code = self.run_tool("check", "--roster", self.roster)
         self.assertEqual(code, 1, out)
         self.assertIn("(a) same name twice in one club: 2 group(s), 3 extra contact(s) in 1 club(s)", out)

@@ -35,7 +35,7 @@ from glow.text import md5              # noqa: E402
 
 FORMS = {**{fid: glow_forms.TITLES[region] for region, fid in glow_forms.REGIONALS.items()},
          glow_forms.TEMPLATE: glow_forms.TEMPLATE_TITLE}
-SPECIAL_NAMES = {"arabic": "Arabic‬‎"}   # as in Jotform's table
+SPECIAL_NAMES = {"arabic": "Arabic\u202c\u200e"}   # as in Jotform's table
 
 
 def text_element_keys(questions, base, words):

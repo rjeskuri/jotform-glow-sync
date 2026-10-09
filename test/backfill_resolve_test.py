@@ -691,7 +691,7 @@ class BackfillResolve(unittest.TestCase):
         self.assertTrue(seen["kw"]["capture_output"])
 
     def test_a_failed_dry_run_or_an_applied_plan_is_refused(self):
-        failed = lambda argv, **kw: mock.Mock(returncode=1, stdout=AMARA, stderr=AMARA)   # noqa: E731
+        failed = lambda argv, **kw: mock.Mock(returncode=1, stdout=AMARA, stderr=AMARA)
         self.refused(lambda: br.sync_plan("roster.csv", "Asia", "123", runner=failed),
                      "Asia: the sync's dry run exited 1", "--region 'Asia' --form 123")
 
@@ -744,7 +744,7 @@ class BackfillResolve(unittest.TestCase):
         ]
         for sub, fragments in cases:
             with self.subTest(fragments[0]):
-                self.refused(lambda: self.resolve([sub]), *fragments)
+                self.refused(lambda sub=sub: self.resolve([sub]), *fragments)
         # an unanswered leftover of a deleted question is nothing to refuse
         rows, _, _ = self.resolve([submission("9001", {"10": [AMARA]}, extra={"158": {"answer": ""}})])
         self.assertEqual(len(rows), 1)
@@ -949,9 +949,9 @@ class BackfillResolve(unittest.TestCase):
         def fetch(answer):
             client = glow_jotform.Client("KEY", retries=3, backoff=0, sleep=lambda s: None)
             out = io.StringIO()
-            with mock.patch.object(glow_jotform.subprocess, "run", answer), contextlib.redirect_stdout(out):
-                with self.assertRaises(glow_jotform.JotformError) as stop:
-                    br.fetch_submissions(client, AFRICA, "Africa")
+            with mock.patch.object(glow_jotform.subprocess, "run", answer), contextlib.redirect_stdout(out), \
+                    self.assertRaises(glow_jotform.JotformError) as stop:
+                br.fetch_submissions(client, AFRICA, "Africa")
             return str(stop.exception) + out.getvalue()
 
         said = fetch(curl(cut, "curl: (18) transfer closed with outstanding read data remaining", 18))

@@ -76,7 +76,7 @@ class Client:
                 out = subprocess.run(["curl", "-sS"] + list(args), capture_output=True,
                                      text=True, encoding="utf-8", **extra)
             except OSError as e:          # e.g. E2BIG: never a half-made request
-                raise JotformError(f"{label}: curl could not be started: {e.strerror or e}")
+                raise JotformError(f"{label}: curl could not be started: {e.strerror or e}") from e
             try:
                 resp = json.loads(out.stdout)
             except json.JSONDecodeError:
