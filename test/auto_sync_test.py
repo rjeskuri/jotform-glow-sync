@@ -443,9 +443,26 @@ class AutoSyncPlan(AutoSyncFixture, unittest.TestCase):
         self.assertEqual(run.lines[-1].strip(), "storage: could not be read (RuntimeError)")
         self.assertNotIn("nope", "\n".join(run.lines))
         # main() reads it after the regions, through the run's one client (the form-status reads use
-        # it too), built with the key from the environment and bounded: a stalled GET must not hold the run
+        # it too), built with the key from the environment, stripped as the children's is (review of
+        # 2026-10-09: the raw value, a trailing newline and all, went onto the URLs), and bounded: a
+        # stalled GET must not hold the run. The run's first log line stops main() once it is built.
+        import tempfile
+
+        class Built(Exception):
+            pass
+
+        def stop(self, msg=""):
+            raise Built(self.client)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(sys, "argv", ["auto_sync.py", "--out", tmp]), \
+                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only\n"}), \
+                mock.patch.object(auto_sync.Run, "log", stop), \
+                self.assertRaises(Built) as built:
+            auto_sync.main()
+        client, = built.exception.args
+        self.assertIsInstance(client, auto_sync.Client)
+        self.assertEqual((client.key, client.max_time), ("test-only", 60))
         src = read(os.path.join(REPO, "tools", "auto_sync.py"))
-        self.assertIn('run.client = Client(os.environ["JOTFORM_API_KEY"], max_time=60)', src)
         self.assertIn('run.check_names()\n    run.check_storage(lambda: usage.read_usage(run.client))', src)
 
     def test_a_club_guard_update_is_a_change_and_parses_from_both_shapes(self):

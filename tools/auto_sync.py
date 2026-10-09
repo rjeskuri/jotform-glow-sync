@@ -971,7 +971,7 @@ def main():
     ap.add_argument("--run-url", default=os.environ.get("AUTO_SYNC_RUN_URL", ""),
                     help="link recorded in SyncLog (Actions sets AUTO_SYNC_RUN_URL)")
     args = ap.parse_args()
-    api_key(": a dry run reads the forms too")      # the client below reads it (pinned by a test)
+    jotform_key = api_key(": a dry run reads the forms too")   # stripped, as the children's is
     if args.roster and not args.partners:
         # with --roster nothing is exported, and the sheet service is never built
         sys.exit("--roster needs --partners <Partners export>: with --roster nothing is exported, and "
@@ -981,7 +981,7 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     run = Run(args)
-    run.client = Client(os.environ["JOTFORM_API_KEY"], max_time=60)   # bounded: a stalled GET must not hold the run
+    run.client = Client(jotform_key, max_time=60)   # bounded: a stalled GET must not hold the run
     run.log(f"auto-sync {run.when}  trigger={args.trigger}  mode={run.mode}  "
             f"regions={', '.join(args.region or REGIONAL_FORMS)}")
     svc = None
