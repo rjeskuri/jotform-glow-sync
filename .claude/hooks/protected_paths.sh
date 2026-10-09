@@ -5,6 +5,12 @@
 # edited by hand; appsscript/Regions.gs is generated; the per-machine Claude
 # settings and the live-gate log are not source. Exit 2 blocks the edit and
 # shows the reason.
+#
+# The match is on path components, not on a prefix of $CLAUDE_PROJECT_DIR, so the
+# same set is protected in every copy of the repository (the main checkout, a
+# worktree under .claude/worktrees/, a sibling checkout) and for a relative path
+# (data/x, ./data/x, ../data/x): any `data`, `backups` or `credentials` directory
+# in the path, any `.env` file. Case-insensitive, as the Mac's file system is.
 set -u
 INPUT=$(cat)
 if command -v jq >/dev/null 2>&1; then
@@ -18,10 +24,32 @@ case "$FP" in
   "$ROOT"/*) REL="${FP#"$ROOT"/}" ;;
   *) REL="$FP" ;;
 esac
-case "$REL" in
-  .env.example|credentials/README.md|credentials/config.example.json) exit 0 ;;
-  data/*|backups/*|credentials/*|appsscript/Regions.gs|.claude/settings.local.json|.env|.env.*|.claude/live_gate.log|.claude/hooks/*|.claude/settings.json)
-    echo "BLOCKED by .claude/hooks/protected_paths.sh: '$REL' holds personal data or secrets, is generated (Regions.gs comes from tools/derive_partner_regions.py --write), or is part of the Claude Code guardrails themselves - the gate must not be editable by the thing it gates. Change the generator, or ask Ryan to make guardrail changes himself (or with his explicit go outside this hook)." >&2
-    exit 2 ;;
+
+# "/" + the path with every // and /./ collapsed: each component reads "/name/"
+# (the patterns are variables: bash 3.2 keeps a backslash-escaped / in a replacement)
+P="/$FP" S="/" SS="//" SDS="/./"
+while :; do
+  case "$P" in
+    *//*) P="${P//$SS/$S}" ;;
+    */./*) P="${P//$SDS/$S}" ;;
+    *) break ;;
+  esac
+done
+NAME="${P##*/}"
+
+shopt -s nocasematch
+BLOCKED=
+case "$P" in
+  */data/*|*/backups/*) BLOCKED=1 ;;
+  */credentials/README.md|*/credentials/config.example.json) ;;
+  */credentials/*) BLOCKED=1 ;;
+  */appsscript/Regions.gs|*/.claude/settings.json|*/.claude/settings.local.json|*/.claude/live_gate.log|*/.claude/hooks/*)
+    BLOCKED=1 ;;
 esac
-exit 0
+case "$NAME" in
+  .env.example) ;;
+  .env|.env.*) BLOCKED=1 ;;
+esac
+[ -z "$BLOCKED" ] && exit 0
+echo "BLOCKED by .claude/hooks/protected_paths.sh: '$REL' holds personal data or secrets, is generated (Regions.gs comes from tools/derive_partner_regions.py --write), or is part of the Claude Code guardrails themselves - the gate must not be editable by the thing it gates. Change the generator, or ask Ryan to make guardrail changes himself (or with his explicit go outside this hook)." >&2
+exit 2
