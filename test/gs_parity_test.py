@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-The constants that exist in BOTH Python and appsscript/Config.gs / Roster.gs - SF_NAME_SEP, the
-regions, the Roster, Partners and SyncLog columns - so a change on one side fails here until the
-other side follows (CLAUDE.md rule 7); and the same-name rule itself, run on both sides over one
-fictional Roster (the Apps Script side in Node, through test/load_gs.js).
+The constants that exist in BOTH Python and appsscript/ - SF_NAME_SEP, the regions, the Roster,
+Partners and SyncLog columns and tabs, the response-tab header fragments - so a change on one
+side fails here until the other side follows (CLAUDE.md rule 7); and logic both sides run: the
+same-name rule over one fictional Roster, similarity_ against difflib, foldKey_ against
+glow.text.name_key. The Apps Script side runs in Node, through test/load_gs.js (gs_eval).
 """
+import csv
+import difflib
+import json
 import os
 import re
+import shutil
+import subprocess
 import unittest
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
@@ -15,23 +21,38 @@ import auto_sync
 import form_status
 import sync_attendance_form as sync
 from glow import sync as glow_sync
+from glow.text import name_key
 
 
-CONFIG_GS = os.path.join(REPO, "appsscript", "Config.gs")
-ROSTER_GS = os.path.join(REPO, "appsscript", "Roster.gs")
+GS_DIR = os.path.join(REPO, "appsscript")
+ROSTER_GS = os.path.join(GS_DIR, "Roster.gs")
+FIXTURE_CSV = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
+
+_GS_EVAL = """
+const inp = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const gs = require(process.argv[1])(inp.names, inp.files, { strict: true });
+const out = inp.expr === null ? gs : new Function('gs', 'data', 'return (' + inp.expr + ');')(gs, inp.data);
+process.stdout.write(JSON.stringify(out));
+"""
 
 
-def gs_block(src, name):
-    """Body of `const NAME = {...};` or `const NAME = [...];` in a .gs file."""
-    m = re.search(r"const %s = [\{\[](.*?)\n?[\}\]];" % re.escape(name), src, re.S)
-    assert m, name
-    return m.group(1)
+def gs_eval(names=None, expr=None, data=None):
+    """Every .gs file loaded in Node as the JS tests load them (test/load_gs.js, strict: no
+    Google API, no implicit global), as JSON: the top-level `names` (all of them when None)
+    as {name: value} - functions drop out - or, with `expr`, the value of that JavaScript
+    expression, in which `gs` holds the names and `data` is `data` (JSON). Skips the test
+    when node is missing (make check runs the JS tests first, so there it never is)."""
+    if not shutil.which("node"):
+        raise unittest.SkipTest("node is not installed: the Apps Script side cannot run")
+    files = sorted(f for f in os.listdir(GS_DIR) if f.endswith(".gs"))
+    done = subprocess.run(["node", "-e", _GS_EVAL, os.path.join(REPO, "test", "load_gs.js")],
+                          input=json.dumps({"names": names, "files": files, "expr": expr, "data": data}),
+                          capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
 
 
 class PythonAppsScriptParity(unittest.TestCase):
-    def setUp(self):
-        self.config = read(CONFIG_GS)
-
     def test_picker_name_is_shared(self):
         # the sync and form_status find the Club picker with one function, by one name
         self.assertIs(form_status.club_picker, glow_sync.club_picker)
@@ -42,8 +63,7 @@ class PythonAppsScriptParity(unittest.TestCase):
         # "<club> - <partner>" is one string on both sides: the forms' Club picker entry and
         # question 5 (Python), the Monday e-mail's Salesforce account name and the intake
         # check (Apps Script). CLAUDE.md rule 7: change both
-        found = re.findall(r"^const SF_NAME_SEP = '([^'\n]*)';", self.config, re.M)
-        self.assertEqual(found, [glow_sync.SF_NAME_SEP])
+        self.assertEqual(gs_eval(["SF_NAME_SEP"]), {"SF_NAME_SEP": glow_sync.SF_NAME_SEP})
         self.assertEqual([ord(c) for c in glow_sync.SF_NAME_SEP], [0x20, 0x2D, 0x20])   # no long dash
         # one definition per side, used by name everywhere else
         self.assertIs(sync.SF_NAME_SEP, glow_sync.SF_NAME_SEP)
@@ -163,27 +183,36 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertTrue(held[("Partner Three", "Beta Club")])
         self.assertFalse(held[("Partner Three", "Moon")])               # retired, and nobody else's name
 
-    def test_synclog_columns(self):
-        m = re.search(r"const SYNC_LOG_COLS = \[(.*?)\];", read(ROSTER_GS), re.S)
-        self.assertEqual(re.findall(r"'([a-z0-9_]+)'", m.group(1)), auto_sync.SYNC_LOG_COLS)
-        self.assertEqual(m.group(1).count("'") // 2, len(auto_sync.SYNC_LOG_COLS))
-        self.assertIn("SYNC_LOG: 'SyncLog'", self.config)
+    def test_synclog_columns_and_the_runner_tabs(self):
+        gs = gs_eval(["SYNC_LOG_COLS", "TAB"])
+        self.assertEqual(gs["SYNC_LOG_COLS"], auto_sync.SYNC_LOG_COLS)
+        # the tabs tools/auto_sync.py reads and writes are the ones the sheet's code names
+        self.assertEqual((gs["TAB"]["ROSTER"], gs["TAB"]["PARTNERS"], gs["TAB"]["SYNC_LOG"]),
+                         (auto_sync.ROSTER_TAB, auto_sync.PARTNERS_TAB, auto_sync.SYNC_LOG_TAB))
         self.assertEqual(auto_sync.SYNC_LOG_TAB, "SyncLog")
 
     def test_roster_columns_python_side_is_a_subset(self):
-        cols = re.findall(r"'([a-z_]+)'", gs_block(self.config, "ROSTER_COLS"))
+        cols = gs_eval(["ROSTER_COLS"])["ROSTER_COLS"]
         self.assertTrue({"partner", "club", "full_name", "status", "region"} <= set(cols))
         self.assertEqual(cols[0], "girl_id")
+
+    def test_response_columns(self):
+        # the header fragments both sides find the enrollment export's columns by:
+        # readResponses_ (Normalize.gs) and read_sheet (glow.sync)
+        self.assertEqual(gs_eval(["RESPONSE_COLS"])["RESPONSE_COLS"],
+                         {"partner": glow_sync.COL_PARTNER, "club": glow_sync.COL_CLUB,
+                          "roster": glow_sync.COL_ROSTER})
 
     def test_partner_columns(self):
         # the Partners tab's columns: Roster.gs writes them (setUpTabs, seedPartners_) and reads the
         # jotform cell for the mentor e-mails (loadPartnerJotform_), the offline builder keeps its own
         # copy, Python reads the cell for the forms (glow.sync). CLAUDE.md rule 7: change all three
-        for path in (ROSTER_GS, os.path.join(REPO, "tools", "build_roster_offline.js")):
-            m = re.search(r"const PARTNER_COLS = \[(.*?)\];", read(path), re.S)
-            self.assertIsNotNone(m, path)
-            self.assertEqual(tuple(re.findall(r"'([a-z_]+)'", m.group(1))), glow_sync.PARTNER_COLS, path)
-            self.assertEqual(m.group(1).count("'") // 2, len(glow_sync.PARTNER_COLS), path)
+        self.assertEqual(tuple(gs_eval(["PARTNER_COLS"])["PARTNER_COLS"]), glow_sync.PARTNER_COLS)
+        offline = os.path.join(REPO, "tools", "build_roster_offline.js")   # a script: read, not run
+        m = re.search(r"const PARTNER_COLS = \[(.*?)\];", read(offline), re.S)
+        self.assertIsNotNone(m, offline)
+        self.assertEqual(tuple(re.findall(r"'([a-z_]+)'", m.group(1))), glow_sync.PARTNER_COLS)
+        self.assertEqual(m.group(1).count("'") // 2, len(glow_sync.PARTNER_COLS))
         self.assertIn(glow_sync.JOTFORM_COL, glow_sync.PARTNER_COLS)
         self.assertEqual(glow_sync.PARTNER_COLS[:3], ("partner", "region", "notes"))   # the live tab's header
         # the Apps Script finds the column by the tab's own header row (key_), as Python's
@@ -197,10 +226,73 @@ class PythonAppsScriptParity(unittest.TestCase):
         # the Club Roster Form's region picker (Config.gs REGIONS) must offer
         # exactly the regions the Python sync routes on — spelling included
         from glow import forms as glow_forms
-        regions = re.findall(r"'([^']+)'", gs_block(self.config, "REGIONS"))
-        self.assertEqual(tuple(regions), glow_forms.REGIONS)
-        self.assertIn("U.S", regions)                     # one dot, no trailing dot
-        self.assertIn("REGION: 'Region where this club meets'", self.config)
+        gs = gs_eval(["REGIONS", "Q"])
+        self.assertEqual(tuple(gs["REGIONS"]), glow_forms.REGIONS)
+        self.assertIn("U.S", gs["REGIONS"])               # one dot, no trailing dot
+        self.assertEqual(gs["Q"]["REGION"], "Region where this club meets")
+
+    # Fictional pairs, club- and partner-name-like. Each side counts characters its own way
+    # (JavaScript UTF-16 units, Python code points), so none here is outside the BMP; and
+    # difflib's autojunk only starts at 200 characters, which no name reaches.
+    SIMILARITY_PAIRS = [
+        ("bravehaert", "braveheart"), ("shining stars", "shinning stars"), ("vision", "rise"),
+        ("abcd", "bcde"), ("chacarita", "traslasierra"), ("empowerment kenya", "empowerment uganda"),
+        ("aaab", "abaa"), ("xyz", ""), ("", ""), ("ab", "ba"), ("aaaa", "aa"),
+        ("glow club", "glow clubs"), ("sunrise", "sunset"), ("lucia zorblewick", "lucía zörblewick"),
+        ("kibera hope", "kibera hope 2"), ("harbor club 1", "harbor club (2)"), ("orbit a", "orbit b"),
+        ("las lomitas primaria", "las lomitas secundaria"), ("test aid relief network", "tarn"),
+        ("fundacion demo", "fundación demo"), ("abcabcabc", "cbacbacba"),
+        ("the quick brown fox", "the quack brown box"), ("bright girls testville", "brite girls testvile"),
+        ("evening stars", "morning stars"),
+    ]
+
+    def test_similarity_is_difflibs_ratio(self):
+        # RosterOps.gs similarity_ (the duplicate-club guard's "close names") is meant to be
+        # difflib.SequenceMatcher(None, a, b).ratio(): Ratcliff/Obershelp, ties broken
+        # earliest in a, then in b
+        got = gs_eval(["similarity_"], "data.map(p => gs.similarity_(p[0], p[1]))",
+                      [list(p) for p in self.SIMILARITY_PAIRS])
+        want = [difflib.SequenceMatcher(None, a, b).ratio() for a, b in self.SIMILARITY_PAIRS]
+        self.assertEqual(len(got), len(want))
+        for (a, b), g, w in zip(self.SIMILARITY_PAIRS, got, want):
+            self.assertAlmostEqual(g, w, places=12, msg=f"{a!r} / {b!r}")
+        self.assertTrue(all(len(a) < 200 and len(b) < 200 for a, b in self.SIMILARITY_PAIRS))
+        self.assertTrue(all(ord(c) < 0x10000 for a, b in self.SIMILARITY_PAIRS for c in a + b))
+        self.assertGreater(len({round(w, 6) for w in want}), 15)    # the pairs are not all alike
+
+    def test_fold_key_and_name_key_differ_only_by_invisible_characters(self):
+        # Normalize.gs foldKey_ (the near-duplicate checks: matchWords_, the problem-report
+        # patterns) and glow.text.name_key fold case and accents alike. They differ where a
+        # text holds an invisible character (Normalize.gs INVISIBLE): key_ drops it,
+        # glow.text keeps it - the documented divergence (CLAUDE.md rule 10, BACKLOG 28,
+        # docs/ARCHITECTURE.md "Known divergences"), so it is asserted here, not equality.
+        # Not exercised by these Latin-script names: a combining mark outside U+0300-U+036F
+        # (name_key drops every combining mark, foldKey_ only those).
+        with open(FIXTURE_CSV, newline="", encoding="utf-8-sig") as f:
+            rows = list(csv.reader(f))[1:]
+        texts = set()
+        for row in rows:
+            for i in (2, 3):                                  # partner, club
+                if len(row) > i:
+                    texts.add(row[i])
+            if len(row) > 5:
+                lines = row[5].split("\n")                    # the roster cell, line by line, as typed
+                texts.update(lines)
+                texts.update(glow_sync.parse_roster(row[5])[0])
+        texts = sorted(texts)
+        gs = gs_eval(["foldKey_", "INVISIBLE"],
+                     "{ invisible: gs.INVISIBLE.source, folded: data.map(gs.foldKey_) }", texts)
+        invisible = re.compile(gs["invisible"])
+        self.assertEqual(invisible.pattern.count("\\u"), 7)    # \u200B ... \uFEFF
+        hidden = [t for t in texts if invisible.search(t)]
+        self.assertGreaterEqual(len(hidden), 4)                 # the fixture's "Hidden Chars" club
+        self.assertTrue(any(name_key(t) != t.lower() for t in texts))   # accents are exercised
+        for text, folded in zip(texts, gs["folded"]):
+            self.assertEqual(folded, name_key(invisible.sub("", text)), repr(text))
+            if invisible.search(text):
+                self.assertNotEqual(folded, name_key(text), repr(text))
+            else:
+                self.assertEqual(folded, name_key(text), repr(text))
 
     def test_the_architecture_table_lists_every_mirrored_constant(self):
         # docs/ARCHITECTURE.md's "change both" table is the human copy of CLAUDE.md
@@ -213,7 +305,8 @@ class PythonAppsScriptParity(unittest.TestCase):
         for row in rows:
             self.assertEqual(row.count("|"), 4, row)
         firsts = [row.split("|")[1] for row in rows]
-        for constant in ("`SF_NAME_SEP`", "Roster tab columns", "SyncLog columns"):
+        for constant in ("`SF_NAME_SEP`", "Roster tab columns", "Partners tab columns",
+                         "Response-tab header fragments", "SyncLog columns"):
             self.assertEqual(sum(constant in f for f in firsts), 1, constant)
 
 

@@ -93,7 +93,7 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
 | Roster tab columns | `read_roster_csv` needs `partner, club, full_name, status, region`; `upload_roster.py` positional | `Config.gs ROSTER_COLS` |
 | Partners tab columns (`partner, region, notes, jotform`; `jotform` = `no` keeps a partner's clubs off the attendance forms) | `glow/sync.py PARTNER_COLS`, `JOTFORM_COL`, `read_partners_csv` | `Roster.gs PARTNER_COLS`, `tools/build_roster_offline.js` |
 | The sheet's time zone (`America/New_York`: the day `removed_date` is stamped in, which the no-active-girl rule compares "today" with) | `glow/sync.py SHEET_ZONE`, `sheet_today` | the spreadsheet's own setting (File → Settings), `getSpreadsheetTimeZone()` in `Roster.gs today_()` — not `appsscript.json`'s `timeZone`; no offline test can read it, so `tools/auto_sync.py` checks it on every run |
-| Response-tab header fragments | `sync_attendance_form.py COL_*` | `Config.gs RESPONSE_COLS` |
+| Response-tab header fragments | `glow/sync.py COL_PARTNER`, `COL_CLUB`, `COL_ROSTER` (`read_sheet`) | `Config.gs RESPONSE_COLS` (`readResponses_`) |
 | SyncLog columns | `tools/auto_sync.py SYNC_LOG_COLS` | `Roster.gs SYNC_LOG_COLS` |
 | SF Pending columns (`test/sf_new_clubs_test.py` compares them) | `tools/sf_new_clubs.py SF_PENDING_COLS` | `FormHandlers.gs SF_PENDING_COLS` |
 | Region vocabulary `Africa / Asia / Latin America / U.S` | everywhere as strings | `Regions.gs` values, Partners tab |
