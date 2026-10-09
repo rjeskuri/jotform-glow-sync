@@ -25,12 +25,11 @@ club guard's warning (glow/sync.py) is one too - translated_elements() lists
 them all.
 """
 import html
-import json
 import re
 import sys
 from collections import namedtuple
 
-from .sync import GUARD_SENTENCE, club_guards
+from .sync import GUARD_SENTENCE, club_guards, rule_parts
 
 # The public "fill in" links of the two Google Forms (docs/LAUNCH.md; the test
 # suite pins them to it). Never an edit link: those are for the owner only.
@@ -128,12 +127,20 @@ def render_key(q):
     return (order_of(q), int(q["qid"]))
 
 
+def _parts(rule):
+    """rule_parts(rule), or a ValueError: a rule that does not parse stops the caller."""
+    parts = rule_parts(rule)
+    if parts is None:
+        ident = rule.get("id") if isinstance(rule, dict) else "?"
+        raise ValueError(f"rule {ident}: its terms or action do not parse")
+    return parts
+
+
 def shown_by_rules(conditions):
     """qids some rule shows: hidden fields a mentor can still get to see."""
     out = set()
     for c in conditions or []:
-        action = c.get("action")
-        action = json.loads(action) if isinstance(action, str) else (action or [])
+        _, action = _parts(c)
         out |= {str(a.get("field")) for a in action if a.get("visibility") == "Show"}
     return out
 
@@ -232,9 +239,7 @@ def rules_mentioning(conditions, qid):
     qid = str(qid)
     hits = []
     for c in conditions or []:
-        for part in ("terms", "action"):
-            items = c.get(part)
-            items = json.loads(items) if isinstance(items, str) else (items or [])
+        for items in _parts(c):
             if any(qid in (str(i.get("field", "")), str(i.get("resultField", "")))
                    or qid in str(i.get("operands", "")).split(",")
                    or "{%s}" % qid in str(i.get("equation", ""))

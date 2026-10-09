@@ -71,16 +71,22 @@ def stale_club_terms(conditions, questions):
     options = {o for o in (questions[picker].get("options") or "").split("|") if o}
     stale = set()
     for c in conditions:
-        try:
-            terms = json.loads(c["terms"]) if isinstance(c.get("terms"), str) else c.get("terms")
-        except ValueError:
-            continue
-        for t in terms or []:
+        parts = glow_sync.rule_parts(c)
+        if parts is None:
+            continue                    # main() refuses such a snapshot (unreadable_rules)
+        for t in parts[0]:
             field, op, value = str(t.get("field")), t.get("operator"), str(t.get("value") or "")
             if value and value not in options and \
                     ((field == picker and op == "equals") or (field == CLUB_NAME and op == "notEquals")):
                 stale.add(value)
     return sorted(stale)
+
+
+def unreadable_rules(conditions):
+    """Ids of a snapshot's rules whose terms or action do not parse as Jotform's lists - a
+    snapshot with one is not something to put back on a live form."""
+    return [str(c.get("id")) if isinstance(c, dict) else "?" for c in conditions
+            if glow_sync.rule_parts(c) is None]
 
 
 def main():
@@ -106,6 +112,10 @@ def main():
     conditions = saved["conditions"] if isinstance(saved, dict) else saved
     if not conditions:
         sys.exit(f"{path} holds no conditions - refusing to wipe the form")
+    bad = unreadable_rules(conditions)
+    if bad:
+        sys.exit(f"Refusing: {len(bad)} rule(s) of {path} have terms or an action that do not parse "
+                 f"(rule {', '.join(bad[:5])}{', …' if len(bad) > 5 else ''}) - not a snapshot to restore")
 
     live = client.get(f"/form/{args.form}/properties")
     print(f"form {args.form}: live has {len(live.get('conditions', []))} "

@@ -101,7 +101,7 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
     SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners, club_picker,
     dropdown_options, has_calc_values, inactive_retires, long_name_partner, partner_fields,
     partner_picker, partners_marker_present, picker_calc_values, read_partners_csv,
-    read_roster_csv, read_sheet, roster_names, roster_pairs, roster_removed,   # against Config.gs
+    read_roster_csv, read_sheet, roster_names, roster_pairs, roster_removed, rule_parts,   # against Config.gs
     sf_club_name, shared_club_names, sheet_today, warn,
 )
 from glow import sync as glow_sync  # noqa: E402  - CONTACT_IDS_FIRST, CONTACT_IDS_PICKER_OPERAND and
@@ -386,8 +386,12 @@ def _norm_rules(conds):
     """Rules with the re-minted ids and counters stripped, for comparison."""
     out = []
     for c in conds:
-        terms = json.loads(c["terms"]) if isinstance(c.get("terms"), str) else c["terms"]
-        action = json.loads(c["action"]) if isinstance(c.get("action"), str) else c["action"]
+        parts = rule_parts(c)
+        if parts is None or c.get("terms") is None or c.get("action") is None:
+            # same_conditions then says "not the same" (the rules are rewritten) and rule_delta
+            # counts every planned rule as new, as when the json.loads here raised
+            raise ValueError(f"rule {c.get('id')}: terms/action missing or not parseable")
+        terms, action = parts
         out.append((c.get("type"), c.get("link"),
                     json.dumps([{k: v for k, v in t.items() if k != "id"} for t in terms],
                                sort_keys=True),
@@ -656,10 +660,12 @@ def main():
     for cond in props.get("conditions", []):
         if cond.get("type") != "field":
             continue
-        terms = json.loads(cond["terms"]) if isinstance(cond["terms"], str) \
-            else cond["terms"]
-        action = json.loads(cond["action"]) if isinstance(cond["action"], str) \
-            else cond["action"]
+        parts = rule_parts(cond)
+        if parts is None:
+            sys.exit(f"Refusing: the form's rule {cond.get('id')} has terms or an action that do not "
+                     "parse - look at it in the builder (Settings > Conditions), or restore the rules "
+                     "from a backup (restore_conditions.py)")
+        terms, action = parts
         pterm = next((t for t in terms if str(t["field"]) in pfields
                       and t["operator"] == "equals"), None)
         cterm = next((t for t in terms if str(t["field"]) == club_field

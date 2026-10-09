@@ -27,6 +27,16 @@ class SameNameFlow(SameNameFixture, unittest.TestCase):
     CHANGE = "'Stars' (q{qid}): Club Name (question 5, what Salesforce reads) changes from 'Stars' to '{new}'"
 
     # ---- before the switch: nothing changes on its own
+    def test_a_live_rule_that_does_not_parse_is_refused_not_a_traceback(self):
+        qs, wire = self.form()
+        at = next(n for n, c in enumerate(wire) if c["type"] == "field")      # the rules the sync reads back
+        for broken in ({"terms": "{broken"}, {"action": json.dumps({"visibility": 5}) + "x"}, {"terms": 5}):
+            with self.subTest(broken=broken):
+                fake = FakeForm(qs, wire[:at] + [dict(wire[at], id="88", **broken)] + wire[at + 1:])
+                code, _ = self.run_sync(fake)
+                self.assertIn("Refusing: the form's rule 88 has terms or an action that do not parse", str(code))
+                self.assertEqual(fake.calls, [])
+
     def test_without_the_flag_a_form_told_apart_by_the_partner_box_is_left_as_it_is(self):
         fake = FakeForm(*self.form())
         summary, out = self.summary(fake)

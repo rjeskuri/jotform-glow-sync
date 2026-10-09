@@ -272,16 +272,23 @@ def inactive_retires(latest_removed, today):
     return removed < today
 
 
-def _rule_parts(rule):
-    """(terms, actions) of one rule, wire (JSON strings) or parsed; None when they do not parse."""
+def rule_parts(rule):
+    """(terms, actions) of one condition, wire (JSON strings, as Jotform serves them) or
+    parsed: two lists of dicts - a lone action dict is wrapped, a missing or empty part is [].
+    None when a part does not parse or has another shape: a rule no reader can trust."""
     try:
-        terms = json.loads(rule["terms"]) if isinstance(rule.get("terms"), str) else rule.get("terms")
-        action = json.loads(rule["action"]) if isinstance(rule.get("action"), str) else rule.get("action")
-    except (KeyError, ValueError, TypeError, AttributeError):
+        terms, action = rule.get("terms"), rule.get("action")
+        terms = json.loads(terms) if isinstance(terms, str) else terms
+        action = json.loads(action) if isinstance(action, str) else action
+    except (AttributeError, ValueError):        # not a dict; not JSON
         return None
     if isinstance(action, dict):
         action = [action]
-    return terms or [], action or []
+    terms, action = terms or [], action or []
+    if not (isinstance(terms, list) and isinstance(action, list)
+            and all(isinstance(item, dict) for item in terms + action)):
+        return None
+    return terms, action
 
 
 def contact_ids_layout(conditions, rosters):
@@ -296,7 +303,7 @@ def contact_ids_layout(conditions, rosters):
     out = {"count": len(conditions or []), "calc_rules": [], "position": None, "terms": set(),
            "operands": [], "equation": "", "roster_rules": [], "roster_rule_fields": {}}
     for pos, rule in enumerate(conditions or []):
-        parts = _rule_parts(rule)
+        parts = rule_parts(rule)
         if parts is None:
             continue
         terms, actions = parts

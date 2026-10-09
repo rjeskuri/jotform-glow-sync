@@ -160,6 +160,17 @@ class ConditionBuilder(unittest.TestCase):
         self.assertEqual(sync.rule_delta([], listed), (0, len(listed), 0))
         self.assertEqual(sync.rule_delta([{"terms": "{broken"}], listed), (0, len(listed), 0))
 
+    def test_an_unreadable_live_rule_is_never_the_same_and_the_rules_are_rewritten(self):
+        planned = self.rules(picker="500")
+        wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in planned]
+        self.assertTrue(sync.same_conditions(wire, planned))
+        for broken in ({"terms": "{broken"}, {"terms": 5}, {"terms": "[]", "action": None},
+                       {"terms": [{"field": "500"}], "action": ["Show"]}):
+            with self.subTest(broken=broken):
+                live = wire[:-1] + [dict(wire[-1], **broken)]
+                self.assertFalse(sync.same_conditions(live, planned))
+                self.assertEqual(sync.rule_delta(live, planned), (0, len(planned), 0))
+
     def test_generated_rules_mention_only_rosters_and_structural_fields(self):
         # so no other element - the links above Submit included - is ever
         # shown, hidden or computed by the sync's rewrite; with the partner

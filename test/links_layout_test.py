@@ -193,6 +193,14 @@ class Links(unittest.TestCase):
         self.assertEqual(links.rules_mentioning(conds, "44"), ["3"])
         self.assertEqual(links.rules_mentioning(conds, "4"), [])
         self.assertEqual(links.rules_mentioning(None, "4"), [])
+        self.assertEqual(links.shown_by_rules(conds), {"350"})
+        for broken in ({"id": "9", "terms": "{broken", "action": "[]"}, {"id": "9", "terms": [], "action": 5}):
+            with self.subTest(broken=broken):
+                with self.assertRaises(ValueError) as stop:
+                    links.rules_mentioning(conds + [broken], "4")
+                self.assertIn("rule 9: its terms or action do not parse", str(stop.exception))
+                with self.assertRaises(ValueError):
+                    links.shown_by_rules([broken])
 
 
 class LinkTool(unittest.TestCase):

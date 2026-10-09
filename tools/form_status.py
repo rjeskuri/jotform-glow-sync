@@ -66,7 +66,7 @@ from glow.sync import (                    # noqa: E402  (shared with the sync t
     GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, SF_NAME_SEP,
     WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, club_picker, dropdown_options, has_calc_values,
     inactive_retires, long_name_partner, partner_picker, picker_calc_values, read_partners_csv,
-    roster_names, roster_pairs, roster_removed, sheet_today)
+    roster_names, roster_pairs, roster_removed, rule_parts, sheet_today)
 from glow.text import key, name_key        # noqa: E402
 
 FORMS = {glow_forms.TEMPLATE: ("template", None),
@@ -215,12 +215,9 @@ def _parsed(conditions):
     """[(rule, terms, actions)] for the rules whose terms/action parse."""
     out = []
     for c in conditions or []:
-        try:
-            terms = json.loads(c["terms"]) if isinstance(c["terms"], str) else c["terms"]
-            actions = json.loads(c["action"]) if isinstance(c["action"], str) else c["action"]
-        except (KeyError, ValueError, TypeError):
-            continue
-        out.append((c, terms or [], actions or []))
+        parts = rule_parts(c)
+        if parts is not None:
+            out.append((c, *parts))
     return out
 
 
@@ -836,12 +833,11 @@ def audit_rules(questions, conditions, partners_of=None, retired=()):
              if q.get("type") == "control_checkbox"}
     shown_by = defaultdict(list)     # club qid -> [rule ids that show it]
     for c in conditions:
-        try:
-            terms = json.loads(c["terms"]) if isinstance(c["terms"], str) else c["terms"]
-            actions = json.loads(c["action"]) if isinstance(c["action"], str) else c["action"]
-        except (KeyError, ValueError, TypeError):
+        parts = rule_parts(c)
+        if parts is None:
             problems.append(f"rule {c.get('id')}: terms/action not parseable")
             continue
+        terms, actions = parts
         for t in terms:
             if str(t.get("field")) not in qids:
                 problems.append(f"rule {c.get('id')}: term refers to missing question {t.get('field')}")

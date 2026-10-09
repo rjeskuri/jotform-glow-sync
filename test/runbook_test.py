@@ -57,6 +57,22 @@ class RestoreConditionsGuard(RestoreConditionsFixture, unittest.TestCase):
         typed = SameNameFixture.form(SameNameFixture(), picker=False)
         self.assertEqual(stale(before[1], typed[0]), [])
 
+    def test_a_snapshot_whose_rules_do_not_parse_is_refused_before_anything_is_read(self):
+        qs, wire = ClubGuardFixture.form(ClubGuardFixture())
+        for broken in ({"terms": 5}, {"terms": {"field": "500"}}, {"terms": "{broken"},
+                       {"action": json.dumps(["Show"])}):
+            snapshot = wire[:2] + [dict(wire[2], id="77", **broken)] + wire[3:]
+            self.assertEqual(restore_conditions.unreadable_rules(snapshot), ["77"])
+            restore_conditions.stale_club_terms(snapshot, qs)                  # no traceback either
+            for extra in ((), ("--apply",), ("--apply", "--force")):
+                with self.subTest(broken=broken, extra=extra):
+                    code, out, puts = self.run_restore(snapshot, qs, *extra)
+                    self.assertIn("Refusing: 1 rule(s) of ", str(code))
+                    self.assertIn("have terms or an action that do not parse (rule 77) - not a snapshot "
+                                  "to restore", str(code))
+                    self.assertEqual((out, puts), ("", []))                  # not even the live form is read
+        self.assertEqual(restore_conditions.unreadable_rules(wire), [])
+
     def test_a_snapshot_from_before_the_switch_is_refused_unless_forced(self):
         before, after = ClubGuardFixture.form(ClubGuardFixture(), switched=False), ClubGuardFixture.form(ClubGuardFixture())
         for extra in ((), ("--apply",)):                       # the dry run says so too

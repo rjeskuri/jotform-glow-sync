@@ -61,7 +61,6 @@ form_status CLEAN.
 import argparse
 import csv
 import difflib
-import json
 import os
 import re
 import sys
@@ -77,7 +76,7 @@ import backup_forms                       # noqa: E402
 from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
-from glow.sync import PARTNER, partner_fields   # noqa: E402
+from glow.sync import PARTNER, partner_fields, rule_parts   # noqa: E402
 from glow.text import key, name_key       # noqa: E402
 
 TABS = ("Roster", "ClubRegistry", "SF Pending")   # every tab with a 'partner' and a 'club' column
@@ -232,14 +231,12 @@ def partner_gated(conditions, qids, fields=frozenset({PARTNER})):
     for a club name several partners share."""
     out = []
     for c in conditions:
-        try:
-            terms = json.loads(c["terms"]) if isinstance(c["terms"], str) else c["terms"]
-            actions = json.loads(c["action"]) if isinstance(c["action"], str) else c["action"]
-        except (KeyError, ValueError, TypeError):
+        parts = rule_parts(c)
+        if parts is None:
             continue
-        actions = actions if isinstance(actions, list) else [actions]
-        shows = any(isinstance(a, dict) and str(a.get("field")) in qids for a in actions)
-        if shows and any(isinstance(t, dict) and str(t.get("field")) in fields for t in terms):
+        terms, actions = parts
+        shows = any(str(a.get("field")) in qids for a in actions)
+        if shows and any(str(t.get("field")) in fields for t in terms):
             out.append(str(c.get("id")))
     return out
 

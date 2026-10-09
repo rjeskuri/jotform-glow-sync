@@ -262,6 +262,23 @@ class GlowSyncHelpers(unittest.TestCase):
         self.assertIsNone(sync.club_picker(qs))                  # mentors type the club name
         self.assertIsNone(sync.club_picker({}))
 
+    def test_rule_parts_reads_wire_and_parsed_rules_and_nothing_else(self):
+        from glow import sync
+        terms = [{"field": "500", "operator": "equals", "value": "Alpha Club"}]
+        actions = [{"visibility": "Show", "field": "10"}]
+        wire = {"id": "1", "terms": json.dumps(terms), "action": json.dumps(actions)}
+        self.assertEqual(sync.rule_parts(wire), (terms, actions))                     # as Jotform serves it
+        self.assertEqual(sync.rule_parts({"terms": terms, "action": actions}), (terms, actions))
+        self.assertEqual(sync.rule_parts({"terms": terms, "action": actions[0]}), (terms, actions))  # a lone action
+        self.assertEqual(sync.rule_parts({}), ([], []))
+        self.assertEqual(sync.rule_parts({"terms": None, "action": []}), ([], []))
+        for bad in ({"terms": "{broken", "action": "[]"}, {"terms": "[]", "action": "nope"},
+                    {"terms": 5, "action": []}, {"terms": {"field": "5"}, "action": []},
+                    {"terms": ["5"], "action": []}, {"terms": [], "action": ["Show"]},
+                    {"terms": json.dumps("a string"), "action": []}, "not a rule", None):
+            with self.subTest(rule=bad):
+                self.assertIsNone(sync.rule_parts(bad))
+
 
 class TranslationLookup(unittest.TestCase):
     """glow/translation_lookup.py: the runtime's names dictionary (formTranslation.v2.js:
