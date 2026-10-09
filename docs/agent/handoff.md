@@ -1,8 +1,8 @@
 # Handoff — 2026-10-09
 
 ## State
-- The repo cleanup ([plan and Result](../plans/2026-10-09-repo-cleanup.md#result)) is merged into `wf21/cleanup`, with its docs (`wf21/docs2`) and the CLAUDE.md, skills and agents work (`wf21/claude`); the orchestrator merges it into `main` next. Nothing is pushed and no live command was run.
-- Local `main` is 37 commits ahead of `origin/main` before the cleanup (wf10, wf11 and the plan); then come the cleanup's commits (79 on `wf21/cleanup`, then the docs and CLAUDE.md branches). `make check`: 661 Python tests, 497 JS checks, `CHECK PASSED`; `make lint`: ok.
+- The repo cleanup ([plan and Result](../plans/2026-10-09-repo-cleanup.md#result)) is merged into local `main` (merge of `wf21/cleanup`, which carries the three code tracks, the docs and the CLAUDE.md, skills and agents work); the `wf21/*` branches and worktrees are deleted. Nothing is pushed and no live command was run.
+- Local `main` is 37 commits ahead of `origin/main` before the cleanup (wf10, wf11 and the plan); then come the cleanup's commits (79 on `wf21/cleanup`, then the docs and CLAUDE.md branches). `make check`: 662 Python tests, 497 JS checks, `CHECK PASSED`; `make lint`: ok.
 - Not live yet: the runner code (wf10's changes, the consolidated tools) goes live when `main` is pushed; the Apps Script changes (the new-club write order, the rebuild's YES/NO, the dropdown update under the lock) when it is `clasp push`ed.
 - Earlier today, done: the Attendance report and dashboard folders shared View with All Internal Users, "(test)" dropped from the labels, the permission set `Attendance_Report_Viewer` assigned to the 9 GLOW Standard Users, two partner-less club accounts re-parented ([plan](../plans/2026-10-09-attendance-reports-public.md)).
 
