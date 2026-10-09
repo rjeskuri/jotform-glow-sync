@@ -1015,10 +1015,6 @@ class BackfillResolve(unittest.TestCase):
             self.assertNotIn(form_id, source)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=1)
-
-
 class BackfillResolverAndLoaderAgree(unittest.TestCase):
     """The resolver writes flags the Salesforce loader must know: it refuses a file with any other
     (docs/plans/2026-09-30-backfill-resolver.md, open point LF-2). Both tools live in tools/."""
@@ -1028,3 +1024,7 @@ class BackfillResolverAndLoaderAgree(unittest.TestCase):
         import sf_backfill
         self.assertEqual(set(backfill_resolve.FLAGS), sf_backfill.HOLD_FLAGS | sf_backfill.PASS_FLAGS)
         self.assertFalse(sf_backfill.HOLD_FLAGS & sf_backfill.PASS_FLAGS)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

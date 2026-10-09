@@ -11,7 +11,7 @@ its unique name, never by qid (the qid differs per form).
 The sync never touches them: sync_attendance_form.py writes roster checkboxes,
 the Club picker, the hidden flags of q5 and q331, the
 club guard's warning and the conditions, and no generated rule mentions a link
-element (test/python_test.py, SyncLeavesTheLinksAlone). The club guard's two
+element (test/sync_conditions_test.py, SyncLeavesTheLinksAlone). The club guard's two
 rules are the only generated rules that mention an element other than the
 rosters and the structural fields: its warning and the Submit button
 (docs/plans/2026-09-29-club-guard.md).

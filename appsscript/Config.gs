@@ -82,7 +82,7 @@ const OTHER_PARTNER = 'My organization is not in this list';
  * Canonical region names = the four regional attendance forms. The spelling
  * is load-bearing ('U.S': one dot, no trailing dot) — glow/forms.py REGIONS,
  * the Partners tab and the Jotform sync all use these exact strings;
- * test/python_test.py fails if the two sides drift.
+ * test/gs_parity_test.py fails if the two sides drift.
  */
 const REGIONS = ['Africa', 'Asia', 'Latin America', 'U.S'];
 

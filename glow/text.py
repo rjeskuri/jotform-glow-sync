@@ -1,5 +1,5 @@
 """Text normalization shared by every tool (byte-equal to the copies it replaced;
-test/python_test.py compares against the old implementations)."""
+test/glow_lib_test.py compares against the old implementations)."""
 import hashlib
 import unicodedata
 

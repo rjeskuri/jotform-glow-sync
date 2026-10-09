@@ -3,7 +3,7 @@
 Moved verbatim from sync_attendance_form.py (which imports them back) so the
 other tools stop dynamic-loading that script with importlib. The Apps Script
 side carries the same logic in appsscript/Normalize.gs and the same ids in
-appsscript/Config.gs; test/parity_test.js and test/python_test.py keep the
+appsscript/Config.gs; test/parity_test.js and test/gs_parity_test.py keep the
 two sides honest. Known divergences: docs/ARCHITECTURE.md.
 """
 import csv
@@ -22,7 +22,7 @@ COL_PARTNER = "partner organization name"
 COL_CLUB = "club name"
 COL_ROSTER = "please list the full name"
 # The Partners tab's columns (appsscript/Roster.gs and tools/build_roster_offline.js
-# carry the same list; test/python_test.py keeps them equal). `jotform` is the
+# carry the same list; test/gs_parity_test.py keeps them equal). `jotform` is the
 # marker read_partners_csv reads: `no` = the partner's clubs are not on the
 # attendance forms (docs/plans/2026-10-06-clubs-off-jotform.md).
 PARTNER_COLS = ("partner", "region", "notes", "jotform")

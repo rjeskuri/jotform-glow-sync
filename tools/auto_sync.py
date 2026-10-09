@@ -80,7 +80,7 @@ from glow.salesforce import Org, client_credentials  # noqa: E402
 import sf_new_clubs as sfn  # noqa: E402  (new clubs' Salesforce accounts, BACKLOG 27)
 
 # The live regional forms (one source: glow/forms.py, parity-tested against
-# appsscript/Config.gs by test/python_test.py).
+# appsscript/Config.gs by test/gs_parity_test.py).
 REGIONAL_FORMS = glow_forms.REGIONALS
 ROSTER_TAB = "Roster"
 PARTNERS_TAB = "Partners"
@@ -91,7 +91,7 @@ SYNC_LOG_COLS = ["when", "trigger", "region", "mode", "creates", "updates",
 MIN_LANGUAGES = 12
 DEFAULT_OUT = os.path.join(REPO, "data", "auto_sync")
 
-# The sync tool's plan lines (sync_attendance_form.py; test/python_test.py
+# The sync tool's plan lines (sync_attendance_form.py; test/auto_sync_test.py
 # checks these formats still exist there).
 CREATE_RX = re.compile(r"^  - CREATE roster '(?P<club>.+)' \((?P<girls>\d+) girls\)$")
 # an options update may carry the roster's required flag in the same write

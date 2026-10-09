@@ -1,7 +1,7 @@
 """The one table of Jotform form ids.
 
 Every Python tool reads it from here; appsscript/Config.gs carries the same
-ids for the Apps Script side, and test/python_test.py fails when they drift.
+ids for the Apps Script side, and test/gs_parity_test.py fails when they drift.
 The regional forms went live 2026-09-01 (cloned from the template 2026-08-27);
 the defunct forms are the pre-launch ones, kept as archives.
 """
