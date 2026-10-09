@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 import fix_module_values as fmv                            # noqa: E402
 from glow import forms                                     # noqa: E402
 from glow.sync import MODULES, YEAR                        # noqa: E402
-from sf_backfill_test import FakeOrg                       # noqa: E402
+from helpers.fake_org import FakeOrg                      # noqa: E402
 
 LATAM, AFRICA = forms.REGIONALS["Latin America"], forms.REGIONALS["Africa"]
 SUNRISE, RIVER = "001000000000000CAA", "001000000000000CBB"
@@ -66,7 +66,7 @@ def rows_of(bid, n, module="Toma de decisiones"):
 
 
 class ModuleOrg(FakeOrg):
-    """The shared fake org (sf_backfill_test), answering this tool's three SOQL shapes."""
+    """The shared fake org (test/helpers/fake_org.py), answering this tool's three SOQL shapes."""
 
     def __init__(self, batches, rows):
         super().__init__([])

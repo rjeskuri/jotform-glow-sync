@@ -20,7 +20,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_girls_present as gp                              # noqa: E402
-from sf_backfill_test import FakeOrg                       # noqa: E402
+from helpers.fake_org import FakeOrg                      # noqa: E402
 
 
 def batch(n, status="Success", creator="Jotform", value=None):
@@ -33,7 +33,7 @@ def rows(n, count):
 
 
 class GirlsOrg(FakeOrg):
-    """The shared fake org (sf_backfill_test), answering this tool's SOQL shapes."""
+    """The shared fake org (test/helpers/fake_org.py), answering this tool's SOQL shapes."""
 
     def __init__(self):
         super().__init__([])

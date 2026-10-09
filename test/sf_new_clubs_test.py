@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_new_clubs.py and glow/salesforce.py's GLOW Sync login (found by
-`make py`'s unittest discovery). Everything here is fictional: clubs, partners,
+Offline tests for tools/sf_new_clubs.py (found by `make py`'s unittest discovery; glow/salesforce.py's
+GLOW Sync login: test/salesforce_test.py). Everything here is fictional: clubs, partners,
 girls and Salesforce ids are invented.
 """
 import contextlib
@@ -592,82 +592,6 @@ class SalesforceNewClubs(Fixture):
         cli.token, cli.base = "t", "https://x.example"
         cli.revoke()
         self.assertIsNone(cli.token)
-
-
-class GlowSyncLogin(unittest.TestCase):
-    """glow.salesforce.client_credentials: the secret never on a command line or in a message."""
-
-    def org_with(self, reply):
-        calls = []
-
-        def run(argv, input=None, **_):
-            calls.append((argv, input))
-            return type("R", (), {"stdout": reply(input)})()
-        return salesforce.Org(login=salesforce.client_credentials("3MVG9fakeclientid", "S3CRETfake", "https://x.example")), calls, run
-
-    def test_the_login_sends_the_secret_in_the_body_only(self):
-        def reply(config):
-            if "oauth2/token" in config:
-                return json.dumps({"access_token": "00Dfake!tok", "instance_url": "https://x.example"}) + "\n200"
-            return '{"totalSize": 3}\n200'
-        org, calls, run = self.org_with(reply)
-        org.run = run
-        self.assertEqual(org.count("SELECT COUNT() FROM Account"), 3)
-        argv, config = calls[0]
-        self.assertTrue(all("S3CRET" not in part and "00Dfake" not in part for c in calls for part in c[0]))
-        self.assertIn('url = "https://x.example/services/oauth2/token"', config)
-        self.assertIn("client_secret=S3CRETfake", re.search(r'^data = "(.*)"$', config, re.M).group(1))
-        self.assertIn('noproxy = "*"', config)
-        self.assertIn('header = "Authorization: Bearer 00Dfake!tok"', calls[1][1])
-        for argv_i, config_i in calls:                            # curl follows no redirect, reads no curlrc
-            self.assertEqual(argv_i[:2], ["curl", "-q"])
-            self.assertFalse({"-L", "--location", "--location-trusted"} & set(argv_i))
-            self.assertNotRegex(config_i, r"(?m)^\s*(-L\b|-{0,2}location)")
-        org.update("Account", SUN, {"ParentId": P1})
-        self.assertIn(f"/sobjects/Account/{SUN}", calls[-1][1])
-        self.assertIn('request = "PATCH"', calls[-1][1])
-        org.revoke()
-        self.assertIn("oauth2/revoke", calls[-1][1])
-        self.assertIsNone(org.token)
-
-    def test_a_refused_login_says_why_without_the_body_or_the_secret(self):
-        far = json.dumps({"error": "invalid_grant", "error_description": "x" * 110 + " S3CRETfake"}) + "\n400"
-        for body, says in (('{"error": "invalid_grant", "error_description": "user is frozen S3CRETfake"}\n400', "user is frozen"),
-                           (far, "invalid_grant"),
-                           ('{"error": "invalid_client_id", "error_description": "bad 3MVG9fakeclientid"}\n400', "invalid_client_id"),
-                           ('{"error": "invalid_client"}\n401', "invalid_client"),
-                           ("<html>gateway</html>\n502", "no readable answer"),
-                           (json.dumps({"access_token": "t", "instance_url": "https://elsewhere.example"}) + "\n200", "another address"),
-                           (json.dumps({"access_token": 't"x', "instance_url": "https://x.example"}) + "\n200", "not a plain token")):
-            with self.subTest(says):
-                org, calls, run = self.org_with(lambda _c, b=body: b)
-                org.run = run
-                with self.assertRaises(salesforce.Refused) as stop:
-                    org.count("SELECT COUNT() FROM Account")
-                self.assertIn(says, str(stop.exception))
-                self.assertNotIn("S3CRET", str(stop.exception))
-                self.assertNotIn("3MVG9fakeclientid", str(stop.exception))
-                self.assertNotIn("html", str(stop.exception))
-                self.assertEqual(len(calls), 1)                   # nothing sent after a refused login
-        org = salesforce.Org(login=salesforce.client_credentials("", ""))
-        with self.assertRaises(salesforce.Refused) as stop:
-            org.count("SELECT COUNT() FROM Account")
-        self.assertIn("not configured", str(stop.exception))
-
-    def test_the_secret_scanner_knows_salesforce_credentials(self):
-        sys.path.insert(0, os.path.join(REPO, "scripts"))
-        import check_secrets
-        token = "00D" + "Ab1" * 5 + "!" + "AQ4AQ.x_9" * 4           # assembled: no literal one in this file
-        key, secret = "3MVG9" + "aB3._" * 14, "9F" * 32
-        for text, rule in ((token, "Salesforce token"), (key, "Salesforce consumer key"),
-                           (secret, "64-hex secret"), (secret.lower(), "64-hex secret"),
-                           (token.replace("!", "%21"), "Salesforce token")):
-            with self.subTest(rule):
-                hits = check_secrets.scan_text("x " + text + " y", "t")
-                self.assertTrue(any(rule in h for h in hits), hits)
-                self.assertTrue(all(text not in h for h in hits))   # printed masked
-        self.assertEqual(check_secrets.scan_text("00Dfake!tok 3MVG9fakeclientid " + "ab" * 16 + "c", "t"), [])
-
 
 
 class AutoSyncSalesforce(unittest.TestCase):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_dupes.py and glow/salesforce.py's query_all / delete (found by
-`make py`'s unittest discovery). Everything here is fictional: clubs, partners, girls
+Offline tests for tools/sf_dupes.py (found by `make py`'s unittest discovery; glow/salesforce.py's
+query_all / delete: test/salesforce_test.py). Everything here is fictional: clubs, partners, girls
 (names from test/fixtures/make_fixture.py's invented pools) and Salesforce ids are invented.
 
 A fake org answers the tool's SOQL with a small evaluator (WHERE ... AND ..., =, >=, IN, GROUP BY)
@@ -1141,51 +1141,6 @@ class SfDupesFlow(Harness):
         out, code = self.run_tool("check", "--since", "2026-09-01")
         self.assertIn("whose name list has odd whitespace: 2 of 3", out)
         self.assertIn("(d) names in two or more clubs: not checked (needs --roster)", out)
-
-
-class OrgQueryAllAndDelete(unittest.TestCase):
-    """glow.salesforce.Org.query_all pages through queryAll; Org.delete is one DELETE."""
-
-    def org(self, replies):
-        configs = []
-
-        def run(argv, input=None, **_):
-            configs.append(input)
-            return types.SimpleNamespace(stdout=replies.pop(0))
-        return salesforce.Org(alias="x", run=run, login=lambda run: ("https://x.example", "tok")), configs
-
-    def test_query_all_follows_its_pages(self):
-        first = {"done": False, "records": [{"Id": "a", "IsDeleted": True}],
-                 "nextRecordsUrl": f"/services/data/{salesforce.API}/queryAll/01gFAKE-2000"}
-        org, configs = self.org([json.dumps(first) + "\n200", json.dumps({"done": True, "records": [{"Id": "b"}]}) + "\n200"])
-        records = org.query_all("SELECT Id, IsDeleted FROM Contact WHERE IsDeleted = true")
-        self.assertEqual([r["Id"] for r in records], ["a", "b"])
-        self.assertIn(f'url = "https://x.example/services/data/{salesforce.API}/queryAll?q=SELECT%20Id', configs[0])
-        self.assertIn(f'url = "https://x.example/services/data/{salesforce.API}/queryAll/01gFAKE-2000"', configs[1])
-        for bad in ("https://elsewhere.example/services/data/v67.0/queryAll/01g-2000", "/services/data/v67.0/sobjects/x",
-                    None):
-            with self.subTest(bad):
-                org, _ = self.org([json.dumps(dict(first, nextRecordsUrl=bad)) + "\n200"])
-                with self.assertRaises(salesforce.Refused):
-                    org.query_all("SELECT Id FROM Contact")
-        # query() itself is unchanged: it follows /query/ pages only
-        org, _ = self.org([json.dumps(first) + "\n200"])
-        with self.assertRaises(salesforce.Refused):
-            org.query("SELECT Id FROM Contact")
-        org, configs = self.org([json.dumps(dict(first, nextRecordsUrl="/services/data/v67.0/query/01g-2000")) + "\n200",
-                                 json.dumps({"done": True, "records": []}) + "\n200"])
-        self.assertEqual(len(org.query("SELECT Id FROM Contact")), 1)
-        self.assertIn("/services/data/v67.0/query?q=", configs[0])
-
-    def test_delete_is_one_delete_request(self):
-        org, configs = self.org(["\n204", '[{"errorCode": "ENTITY_IS_DELETED", "message": "gone"}]\n404'])
-        self.assertEqual(org.delete("npe5__Affiliation__c", aff_id(1)), (204, None))
-        self.assertIn(f'url = "https://x.example/services/data/{salesforce.API}/sobjects/npe5__Affiliation__c/{aff_id(1)}"',
-                      configs[0])
-        self.assertIn('request = "DELETE"', configs[0])
-        self.assertNotIn("data = ", configs[0])
-        status, answer = org.delete("npe5__Affiliation__c", aff_id(1))
-        self.assertEqual((status, answer[0]["errorCode"]), (404, "ENTITY_IS_DELETED"))
 
 
 if __name__ == "__main__":
