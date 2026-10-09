@@ -901,7 +901,7 @@ function handleRosterChange_(a, source, submitted) {
   } catch (err) {
     // FormLog records the same summary (runResponse_)
   }
-  if (mentorEmail) sendChangeConfirmation_(mentorEmail, club, partner, plan);
+  if (mentorEmail) sendChangeConfirmation_(mentorEmail, club, partner, plan, source);
   return summary;
 }
 
@@ -909,9 +909,10 @@ function handleRosterChange_(a, source, submitted) {
  * Tell the mentor what happened. Only names THEY typed are echoed back —
  * never other girls from the roster (the address is whatever was typed into
  * a public form, so "did you mean" suggestions stay in the staff-only
- * ReviewQueue).
+ * ReviewQueue). Never fails the handler; a failure goes to Audit without the
+ * address, as sendHoldNotice_'s does.
  */
-function sendChangeConfirmation_(to, club, partner, plan) {
+function sendChangeConfirmation_(to, club, partner, plan, source) {
   const names = function (rows) { return rows.map(function (r) { return r.full_name; }); };
   const section = function (title, list) {
     if (!list.length) return;
@@ -941,7 +942,8 @@ function sendChangeConfirmation_(to, club, partner, plan) {
     MailApp.sendEmail({ to: to, subject: 'GLOW roster change received – ' + club,
                         body: lines.join('\n') });
   } catch (err) {
-    audit_('sendChangeConfirmation_', 'could not email ' + to + ': ' + err.message);
+    audit_('sendChangeConfirmation_', 'could not e-mail the mentor about ' + source + ': ' +
+           previewError_(err.message));
   }
 }
 

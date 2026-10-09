@@ -1575,6 +1575,14 @@ console.log('\nA Sheets failure after the Roster write: Salesforce, the sync req
   check('…Audit failing after the Roster write: not an ERROR either; the item queued, the mentor e-mailed',
         /^Sunrise Club \(Fixture Partner Alpha\): 1 added, 0 reactivated, 1 removed/.test(res) &&
         w.tabs.ReviewQueue.length === 2 && w.mails.length === 1 && w.notified.join() === 'rosterChangeForm', res);
+
+  // review A3: the confirmation's failure is recorded as sendHoldNotice_'s is — never the address
+  w = sheetWorld(baseTabs(rosterRows(A, SUN, ['Grace Zibblewick', 'Mary Zibblewick'])), { mailFails: true });
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, change(), CHANGE_KEY);
+  check('the mentor e-mail failing: the change done; Audit names the response row, never the address',
+        /^Sunrise Club \(Fixture Partner Alpha\): 1 added/.test(res) && !w.mails.length &&
+        w.audits.includes('sendChangeConfirmation_: could not e-mail the mentor about ' + RQ + '!51: Invalid email: <e-mail>') &&
+        !/example\.org/.test(w.audits.join('\n')), w.audits.join(' | '));
 }
 
 console.log('\nA new club that may duplicate one on file is held, then released by staff (BACKLOG 11b)');
