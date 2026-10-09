@@ -73,7 +73,7 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheets_client as sc
-from rename_club import a1, cell, cell_key, col_letter, describe_rows, nfc_key, tidy, trimmed
+from sheets_client import a1, cell, col_letter, describe_rows, trimmed
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -82,7 +82,7 @@ from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
 from glow.sync import CLUB_NAME, SF_NAME_SEP, club_picker   # noqa: E402
-from glow.text import key                 # noqa: E402
+from glow.text import cell_key, key, nfc_key, tidy   # noqa: E402
 
 ROSTER, AUDIT = "Roster", "Audit"
 ACTIVE, INACTIVE = "active", "inactive"           # Config.gs STATUS, as the handlers write them

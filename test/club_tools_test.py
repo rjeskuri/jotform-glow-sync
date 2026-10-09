@@ -16,10 +16,12 @@ from helpers.common import REPO
 import deactivate_clubs
 import disable_form
 import rename_club
+import sheets_client
 import switcher_flags
 import sync_attendance_form as sync
 import upload_roster
 from glow import forms as glow_forms
+from glow import text as glow_text
 
 
 class FakeSheet:
@@ -123,13 +125,20 @@ class RenameClub(unittest.TestCase):
             rename_club.find_cells([["when", "action", "detail"]], "p", "a", "b")
 
     def test_col_letter_and_row_descriptions(self):
-        self.assertEqual([rename_club.col_letter(i) for i in (0, 2, 25, 26, 27)],
+        # the sheet-cell helpers live in tools/sheets_client.py (rename_club and
+        # deactivate_clubs import them)
+        sc = sheets_client
+        self.assertEqual([sc.col_letter(i) for i in (0, 2, 25, 26, 27)],
                          ["A", "C", "Z", "AA", "AB"])
-        self.assertEqual(rename_club.describe_rows([]), "no rows")
-        self.assertEqual(rename_club.describe_rows([7]), "row 7")
-        self.assertEqual(rename_club.describe_rows([3, 4, 5]), "rows 3-5")
-        self.assertEqual(rename_club.describe_rows([3, 5]), "rows 3, 5")
-        self.assertEqual(rename_club.a1("SF Pending", "C4"), "'SF Pending'!C4")
+        self.assertEqual(sc.describe_rows([]), "no rows")
+        self.assertEqual(sc.describe_rows([7]), "row 7")
+        self.assertEqual(sc.describe_rows([3, 4, 5]), "rows 3-5")
+        self.assertEqual(sc.describe_rows([3, 5]), "rows 3, 5")
+        self.assertEqual(sc.a1("SF Pending", "C4"), "'SF Pending'!C4")
+        self.assertEqual(sc.a1("Club's Tab"), "'Club''s Tab'")             # a whole tab, the quote doubled
+        self.assertEqual((sc.cell(["a", "b"], 1), sc.cell(["a"], 3), sc.cell(["a"], None)), ("b", "", ""))
+        self.assertEqual(sc.trimmed(["a", "", "b", "", ""]), ["a", "", "b"])
+        self.assertIs(rename_club.describe_rows, sc.describe_rows)
 
     # --- --new-partner: moving a club filed under a mistyped partner ---------------
     PARTNERS = [["partner", "region", "notes"],
@@ -144,12 +153,15 @@ class RenameClub(unittest.TestCase):
                 ["DEMOCLUB-SAMPLE-001", "Asociación Demo", "Demo Club", "Latin America", "C", "active"]]
 
     def test_cell_key_is_the_apps_script_key(self):
-        self.assertEqual(rename_club.cell_key(" Asoc\u200b  Demo\ufeff "), "asoc demo")
-        self.assertEqual(rename_club.tidy("a\u2060b  c "), "ab c")
+        t = glow_text          # tidy / cell_key / nfc_key live in glow/text.py beside key
+        self.assertEqual(t.cell_key(" Asoc\u200b  Demo\ufeff "), "asoc demo")
+        self.assertEqual(t.tidy("a\u2060b  c "), "ab c")
         # key_ folds neither accents nor Unicode form; nfc_key only fixes the form
-        self.assertNotEqual(rename_club.cell_key("Asociación"), rename_club.cell_key("Asociacion"))
-        self.assertNotEqual(rename_club.cell_key("Asociación"), rename_club.cell_key("Asociacio\u0301n"))
-        self.assertEqual(rename_club.nfc_key("Asociación"), rename_club.nfc_key("Asociacio\u0301n"))
+        self.assertNotEqual(t.cell_key("Asociación"), t.cell_key("Asociacion"))
+        self.assertNotEqual(t.cell_key("Asociación"), t.cell_key("Asociacio\u0301n"))
+        self.assertEqual(t.nfc_key("Asociación"), t.nfc_key("Asociacio\u0301n"))
+        # ...and glow.text.key keeps the invisible characters (BACKLOG 28)
+        self.assertNotEqual(t.key(" Asoc\u200b  Demo "), t.cell_key(" Asoc\u200b  Demo "))
 
     def test_find_cells_for_a_move_matches_the_old_partner_any_status(self):
         i_c, hits, clashes, regions = rename_club.find_cells(
@@ -307,7 +319,7 @@ class RenameClub(unittest.TestCase):
             src = f.read()
         gs_class = re.search(r"const INVISIBLE = /\[(.*?)\]/g;", src).group(1)
         self.assertEqual({int(h, 16) for h in re.findall(r"\\u([0-9A-Fa-f]{4})", gs_class)},
-                         {ord(c) for c in rename_club.INVISIBLE.pattern.strip("[]")})
+                         {ord(c) for c in glow_text.INVISIBLE.pattern.strip("[]")})
 
     # --- main() on an in-memory sheet (no network, fictional rows) ---------------
     MOVE = ["--partner", "asoc demo", "--club", "Sunrise Club",

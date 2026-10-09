@@ -62,13 +62,12 @@ import argparse
 import csv
 import difflib
 import os
-import re
 import sys
-import unicodedata
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheets_client as sc
+from sheets_client import a1, cell, col_letter, describe_rows, trimmed
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -77,50 +76,11 @@ from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
 from glow.sync import PARTNER, partner_fields, rule_parts   # noqa: E402
-from glow.text import key, name_key       # noqa: E402
+from glow.text import cell_key, key, name_key, nfc_key, tidy   # noqa: E402
 
 TABS = ("Roster", "ClubRegistry", "SF Pending")   # every tab with a 'partner' and a 'club' column
 PARTNERS = "Partners"
 OUT = os.path.join(REPO, "data", "rename_club")
-
-# the invisible characters the Apps Script's tidy_ drops (Normalize.gs INVISIBLE)
-INVISIBLE = re.compile("[\u200b\u200c\u200d\u200e\u200f\u2060\ufeff]")
-
-
-def tidy(s):
-    """Normalize.gs tidy_: invisible characters dropped, whitespace collapsed."""
-    return " ".join(INVISIBLE.sub("", str(s or "")).split())
-
-
-def cell_key(s):
-    """Normalize.gs key_ - how the sheet's own scripts group partner and club
-    cells (glow.text.key keeps invisible characters: backlog 28)."""
-    return tidy(s).lower()
-
-
-def nfc_key(s):
-    """cell_key after Unicode NFC, for finding a name typed on a command line."""
-    return cell_key(unicodedata.normalize("NFC", str(s or "")))
-
-
-def cell(row, i):
-    """A cell of a Sheets API row, which omits trailing empty cells."""
-    return row[i] if i is not None and i < len(row) else ""
-
-
-def col_letter(index):
-    """0-based column index -> A1 column letters (0 -> A, 26 -> AA)."""
-    letters = ""
-    index += 1
-    while index:
-        index, rem = divmod(index - 1, 26)
-        letters = chr(65 + rem) + letters
-    return letters
-
-
-def a1(tab, cell):
-    return "'" + tab.replace("'", "''") + "'!" + cell
-
 
 def columns(rows):
     """(partner, club, region or None) column indexes of a tab, header first."""
@@ -241,15 +201,6 @@ def partner_gated(conditions, qids, fields=frozenset({PARTNER})):
     return out
 
 
-def describe_rows(rows):
-    if not rows:
-        return "no rows"
-    if len(rows) > 1 and rows == list(range(rows[0], rows[-1] + 1)):
-        return f"rows {rows[0]}-{rows[-1]}"
-    shown = ", ".join(map(str, rows[:8])) + (", ..." if len(rows) > 8 else "")
-    return ("row " if len(rows) == 1 else "rows ") + shown
-
-
 def form_questions(client, form_id, old, new):
     """([qids of roster questions named old], [qids named new], the form's
     partner fields, {qid named old: cell_key of each girl it lists}) on one form."""
@@ -264,13 +215,6 @@ def form_questions(client, form_id, old, new):
         elif key(q.get("text")) == key(new):
             clashes.append(qid)
     return hits, clashes, partner_fields(questions), girls
-
-
-def trimmed(row):
-    row = list(row)
-    while row and row[-1] == "":
-        row.pop()
-    return row
 
 
 def masked(row, free):
