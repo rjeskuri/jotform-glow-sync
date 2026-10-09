@@ -29,6 +29,8 @@ import add_feedback_link              # noqa: E402
 import add_language                   # noqa: E402
 import add_translations               # noqa: E402
 import auto_sync                      # noqa: E402
+import deactivate_clubs               # noqa: E402
+import disable_form                   # noqa: E402
 import fix_name_translations          # noqa: E402
 import fix_roster_order               # noqa: E402
 import form_status                    # noqa: E402
@@ -36,6 +38,7 @@ import rename_club                    # noqa: E402
 import restore_conditions             # noqa: E402
 import switcher_flags                 # noqa: E402
 import update_static_fields           # noqa: E402
+import upload_roster                  # noqa: E402
 import worklog                        # noqa: E402
 import sync_attendance_form as sync   # noqa: E402
 from glow import forms as glow_forms  # noqa: E402
@@ -43,11 +46,14 @@ from glow import layout               # noqa: E402
 from glow import links                # noqa: E402
 from glow import sync as glow_sync    # noqa: E402
 from glow import translation_lookup as tl   # noqa: E402
+from glow import usage                # noqa: E402
 from glow.text import md5             # noqa: E402
 from sf_club_accounts_test import SalesforceClubAccounts  # noqa: E402,F401  (its own file; run here)
 from integration_status_test import IntegrationStatus     # noqa: E402,F401  (its own file; run here)
 from sf_backfill_test import SalesforceBackfill, SalesforceBackfillEdges   # noqa: E402,F401  (its own file; run here)
 from backfill_resolve_test import BackfillResolve, BackfillResolverAndLoaderAgree   # noqa: E402,F401  (its own file; run here)
+from fix_module_values_test import FixModuleValues        # noqa: E402,F401  (its own file; run here)
+from sf_girls_present_test import GirlsPresent            # noqa: E402,F401  (its own file; run here)
 from sf_new_clubs_test import SalesforceNewClubs, GlowSyncLogin, AutoSyncSalesforce   # noqa: E402,F401  (its own file; run here)
 from sf_dupes_test import SfDupesNames, SfDupesApex, SfDupesFlow, OrgQueryAllAndDelete   # noqa: E402,F401  (its own file; run here)
 
@@ -233,14 +239,27 @@ class AutoSyncPlan(unittest.TestCase):
                          f'CONTACT_IDS_STALE = "{auto_sync.CONTACT_IDS_STALE}"', "{CONTACT_IDS_STALE}: ",
                          "UPDATE roster '{club}' (q{qid}, {options.count('|')+1} girls{also})",
                          'also = f"; required: {want_required}"',
-                         "REQUIRED roster '{club}' (q{qid}: {want_required})"):
+                         "REQUIRED roster '{club}' (q{qid}: {want_required})",
+                         # the retired rosters (docs/plans/2026-10-06-clubs-off-jotform.md): the two ~ lines,
+                         # the Form: line and the Partners-tab warning the runner reports
+                         "~ retired roster '{text}' (q{qid}): {reason}",
+                         "~ restored roster '{text}' (q{qid}): {RESTORED_WHY}",
+                         'RESTORED_WHY = "back on the Club picker"',
+                         "Form: {args.form} status {status or 'not reported'}"):
             self.assertIn(fragment, joined, fragment)
+        self.assertIn(auto_sync.JOTFORM_VALUE, read(os.path.join(REPO, "glow", "sync.py")))
+        self.assertIn(auto_sync.JOTFORM_COLUMN, read(os.path.join(REPO, "glow", "sync.py")))
         for line, rx in (("UPDATE roster 'A' (q1, 2 girls)", auto_sync.UPDATE_RX),
                          ("UPDATE roster 'A' (q1, 2 girls; required: Yes)", auto_sync.UPDATE_RX),
                          ("UPDATE roster 'A' (q1, 2 girls; required: No)", auto_sync.UPDATE_RX),
                          ("REQUIRED roster 'A' (q1: Yes)", auto_sync.REQUIRED_RX),
                          ("REQUIRED roster 'Club (B)' (q1: No)", auto_sync.REQUIRED_RX)):
             self.assertTrue(rx.match("  - " + line), line)
+        for line, rx in (("retired roster 'Club (B)' (q12): not on Jotform (Partner Two, Partners tab jotform=no)",
+                          auto_sync.RETIRED_RX),
+                         ("retired roster 'A' (q1): no active girl in the Roster", auto_sync.RETIRED_RX),
+                         ("restored roster 'A' (q1): back on the Club picker", auto_sync.RESTORED_RX)):
+            self.assertTrue(rx.match("  ~ " + line), line)
         self.assertFalse(auto_sync.UPDATE_RX.match("  - UPDATE roster 'A' (q1, 2 girls; required: Maybe)"))
         self.assertFalse(auto_sync.REQUIRED_RX.match("  - UPDATE roster 'A' (q1, 2 girls; required: Yes)"))
         # the partner list is retired: the sync writes no such line any more (the runner's
@@ -257,19 +276,26 @@ class AutoSyncPlan(unittest.TestCase):
         "\nDRY RUN (use --apply to write):\n"
         "  - REPLACE conditions (25 rules)\n")
 
-    def run_region(self, text, apply=False, summary=None, region_check=None):
+    def run_region(self, text, apply=False, summary=None, region_check=None, status="ENABLED", **band):
         """auto_sync.Run.region("Africa") over a fabricated dry run; with apply, every
         later step (backup, apply, verify) answers ok and a clean form_status report -
-        or one whose region check says `region_check`."""
+        or one whose region check says `region_check`. status: what the form's status
+        read answers (an exception: the read raised, after its retries); band: the
+        runner's --max-* overrides."""
         import tempfile
         import types
         from unittest import mock
         clean = {"error_conditions": 0, "salesforce": True, "rule_problems": [], "languages": ["a"] * 12,
                  "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": [],
                                   **(region_check or {})}}
+
+        def status_(form):
+            if isinstance(status, Exception):
+                raise status
+            return status
         with tempfile.TemporaryDirectory() as out:
             args = types.SimpleNamespace(apply=apply, out=out, max_creates=5, max_updates=20,
-                                         trigger="test", run_url="")
+                                         trigger="test", run_url="", **band)
             run = auto_sync.Run(args)
             run.synced = []
 
@@ -280,7 +306,7 @@ class AutoSyncPlan(unittest.TestCase):
                         json.dump(summary, f)
                 return types.SimpleNamespace(returncode=0, stdout=text, stderr="")
 
-            with mock.patch.object(run, "sync", sync_), \
+            with mock.patch.object(run, "sync", sync_), mock.patch.object(run, "read_status", status_), \
                     mock.patch.object(run, "cmd", lambda *a, **k: types.SimpleNamespace(
                         returncode=0, stdout=json.dumps([clean]), stderr="")), \
                     mock.patch.object(run, "save_conditions", lambda form: None), \
@@ -419,20 +445,28 @@ class AutoSyncPlan(unittest.TestCase):
                 f"Roster: 1 active clubs in {region} (1 girls); 2 clubs overall\n\nDRY RUN (use --apply "
                 "to write):\n  nothing to do - form already matches the sheet\n"))
 
-        def run_main(regions):
+        def run_main(regions, partners=True):
             with tempfile.TemporaryDirectory() as tmp:
                 roster = os.path.join(tmp, "roster.csv")
                 with open(roster, "w", encoding="utf-8") as f:
                     f.write("girl_id,partner,club,full_name,status,region\n"
                             "DEMOCLUB-SAMPLE-001,Partner One,Stars,Ann Poe,active,Africa\n"
                             "DEMOCLUB-SAMPLE-002,Partner Three,Stars,Sue Moe,active,Asia\n")
+                tab = os.path.join(tmp, "partners.csv")
+                with open(tab, "w", encoding="utf-8") as f:
+                    f.write("partner,region,notes,jotform\nPartner One,Africa,,\nPartner Three,Asia,,\n")
                 argv = ["auto_sync.py", "--roster", roster, "--out", tmp, "--min-active", "1"]
+                if partners:
+                    argv += ["--partners", tab]
                 for region in regions:
                     argv += ["--region", region]
                 code = 0
                 with mock.patch.object(sys, "argv", argv), \
                         mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
-                        mock.patch.object(auto_sync.Run, "sync", sync_), mock.patch("builtins.print"):
+                        mock.patch.object(auto_sync.Run, "sync", sync_), \
+                        mock.patch.object(auto_sync.Run, "read_status", lambda self, form: "ENABLED"), \
+                        mock.patch.object(auto_sync.Run, "check_storage", lambda self, read: None), \
+                        mock.patch("builtins.print"):
                     try:
                         auto_sync.main()
                     except SystemExit as e:
@@ -447,6 +481,10 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertNotIn("Ann Poe", attention)
         # one region alone has nothing to clash with: exit 0, no ATTENTION file
         self.assertEqual(run_main(["Africa"]), (0, ""))
+        # --roster without --partners: nothing read, exit 1 with what to pass
+        code, attention = run_main(["Africa"], partners=False)
+        self.assertIn("--roster needs --partners <Partners export>", str(code))
+        self.assertEqual(attention, "")
 
     def test_no_two_clubs_of_any_region_may_send_one_salesforce_name(self):
         africa = [{"qid": "11", "partner": "Partner One", "club": "Stars", "value": "Stars - Partner One"},
@@ -481,6 +519,61 @@ class AutoSyncPlan(unittest.TestCase):
         self.assertIn("1 Salesforce name(s) are sent by more than one club", title)
         self.assertIn("- 'Stars': Stars (Partner One, Africa); Stars (Partner Two, Africa)", detail)
         self.assertIn("--same-name-switch", detail)
+
+    def test_check_storage_judges_each_limit_on_its_own(self):
+        """docs/plans/2026-10-06-photos-to-drive.md: once per run, the storage line in the log;
+        an ATTENTION per limit at alarm naming it (upload space, or the submissions cycle); at
+        warn the line alone; a reader that raises is a log line, never a failed run."""
+        import types
+        from unittest import mock
+
+        def run_with(answer):
+            run = auto_sync.Run(types.SimpleNamespace(apply=False, out="", max_creates=5, max_updates=20,
+                                                      trigger="test", run_url=""))
+
+            def read():
+                if isinstance(answer, Exception):
+                    raise answer
+                return dict(answer)
+            with mock.patch("builtins.print"):
+                run.check_storage(read)
+            return run
+        base = {"plan": "SILVER", "uploads": 1340458410, "uploads_cap": 10738466816,
+                "submissions": 474, "submissions_cap": 2500, "reset": "2026-10-21"}
+        run = run_with(base)
+        self.assertEqual((run.attention, run.failed), ([], False))
+        self.assertEqual(run.lines[-1].strip(), "storage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; "
+                         "submissions this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER")
+        run = run_with(dict(base, uploads=base["uploads_cap"] // 2))          # warn: the line alone
+        self.assertEqual(run.attention, [])
+        self.assertIn("(50.0%) -> warn;", run.lines[-1])
+        run = run_with(dict(base, uploads=base["uploads_cap"] * 9 // 10))     # alarm on upload space
+        (title, detail), = run.attention
+        self.assertEqual(title, "Jotform upload space at 90% - the forms stop at 100%")
+        for fragment in ("SILVER plan allows 10.00 GiB", "9.00 GiB are used", "Gold versus retention",
+                         "Auto Delete Submissions", "frees nothing"):
+            self.assertIn(fragment, detail)
+        self.assertNotIn("submissions this cycle", title)
+        self.assertEqual(run.lines[-1], "  ! " + title)
+        run = run_with(dict(base, submissions=2100))                          # alarm on the cycle only
+        (title, detail), = run.attention
+        self.assertEqual(title, "Jotform submissions this cycle at 84% - the forms stop at 100%")
+        for fragment in ("2,500 submissions a month", "2,100 have arrived", "resets on 2026-10-21",
+                         "busy month, not storage", "Gold versus retention"):
+            self.assertIn(fragment, detail)
+        self.assertNotIn("upload space", title)
+        run = run_with(dict(base, uploads=base["uploads_cap"], submissions=2500))   # both: one each
+        self.assertEqual([t.split(" at ")[0] for t, _ in run.attention],
+                         ["Jotform upload space", "Jotform submissions this cycle"])
+        run = run_with(RuntimeError("nope"))                                  # a failed read
+        self.assertEqual((run.attention, run.failed), ([], False))
+        self.assertEqual(run.lines[-1].strip(), "storage: could not be read (RuntimeError)")
+        self.assertNotIn("nope", "\n".join(run.lines))
+        # main() reads it after the regions, through the run's one client (the form-status reads use
+        # it too), built with the key from the environment and bounded: a stalled GET must not hold the run
+        src = read(os.path.join(REPO, "tools", "auto_sync.py"))
+        self.assertIn('run.client = Client(os.environ["JOTFORM_API_KEY"], max_time=60)', src)
+        self.assertIn('run.check_names()\n    run.check_storage(lambda: usage.read_usage(run.client))', src)
 
     def test_a_club_guard_update_is_a_change_and_parses_from_both_shapes(self):
         text = ("Roster: 3 active clubs in Asia (40 girls); 300 clubs overall\n"
@@ -528,7 +621,8 @@ class AutoSyncPlan(unittest.TestCase):
                                          trigger="test", run_url="")
             run = auto_sync.Run(args)
             with mock.patch.object(run, "sync", lambda *a, **k: types.SimpleNamespace(
-                    returncode=0, stdout=text, stderr="")), mock.patch("builtins.print"):
+                    returncode=0, stdout=text, stderr="")), \
+                    mock.patch.object(run, "read_status", lambda form: "ENABLED"), mock.patch("builtins.print"):
                 run.region("Africa", os.path.join(out, "roster.csv"))
         self.assertEqual([r[7:9] for r in run.results],
                          [["dry-run", "would apply: " + auto_sync.plan_summary(plan)]])
@@ -562,6 +656,7 @@ class AutoSyncPlan(unittest.TestCase):
                                          trigger="test", run_url="")
             run = auto_sync.Run(args)
             with mock.patch.object(run, "sync", lambda *a, **k: next(results)), \
+                    mock.patch.object(run, "read_status", lambda form: "ENABLED"), \
                     mock.patch.object(run, "cmd", lambda *a, **k: types.SimpleNamespace(
                         returncode=0, stdout="", stderr="")), \
                     mock.patch.object(run, "save_conditions", lambda form: None), \
@@ -1088,9 +1183,10 @@ class FakeForm:
     question create answers `created` (the new question's id, or {}; a list
     answers one create each, in order)."""
 
-    def __init__(self, questions, conditions, apply=False, created=None):
+    def __init__(self, questions, conditions, apply=False, created=None, status="ENABLED"):
         self.questions, self.conditions, self.apply = questions, conditions, apply
         self.created = {"qid": 600} if created is None else created
+        self.status = status             # what GET /form/{id} says (the sync refuses --apply unless ENABLED)
         self.calls, self.writes = [], []
 
     def get(self, path):
@@ -1098,7 +1194,7 @@ class FakeForm:
             return json.loads(json.dumps(self.questions))
         if path == "/properties":
             return {"conditions": json.loads(json.dumps(self.conditions))}
-        return {"count": "0"}
+        return {"count": "0", "status": self.status}
 
     def _write(self, method, path, payload, label):
         self.calls.append(label)
@@ -1174,16 +1270,19 @@ class SameNameFlow(unittest.TestCase):
         box_hidden: q331's hidden flag (default: hidden once no rule shows it);
         partner_list: the options of a retired partner list left on the form (q600)."""
         roster = self.ROSTER if roster is None else roster
+        # the module chain as the live forms carry it: one required single-select per step
+        # (form_status.audit_module_shape pins it; docs/plans/2026-10-06-module-selection.md)
         qs = {"5": {"type": "control_textbox", "text": "Club Name", "order": "4", "hidden": "Yes"},
               "331": {"type": "control_textbox", "text": "Partner", "order": "7", "name": "partner"},
-              "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9"}}
+              "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9",
+                     "required": "Yes"}}
         for n, (year, mq) in enumerate(sync.MODULES.items()):
             # in step: the calcValues the sync writes (glow.sync.MODULE_CALC_VALUES)
             qs[mq] = {"type": "control_dropdown", "text": "Module", "options": self.MODULES[year],
-                      "order": str(10 + n),
+                      "order": str(10 + n), "required": "Yes",
                       "calcValues": glow_sync.module_calc_values(self.MODULES[year].split("|"))}
         for n, wq in enumerate(sync.WEEKS.values()):
-            qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n)}
+            qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n), "required": "Yes"}
         for q in (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID):
             qs[q] = {"type": "control_textbox", "text": "bridge", "order": "30"}
         for (partner, club), names in roster.items():
@@ -1211,10 +1310,14 @@ class SameNameFlow(unittest.TestCase):
         wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]
         return qs, wire
 
-    def run_sync(self, fake, *extra, roster=None, regions=None, inactive=None, region="Africa"):
+    def run_sync(self, fake, *extra, roster=None, regions=None, inactive=None, region="Africa",
+                 removed=None, partners=None):
         """(exit code, stdout) of main() on `fake` with a Roster export holding
         `roster` (active; region Africa unless `regions` says otherwise for a
-        club) and `inactive` ({(partner, club): [names]}, rows of another status)."""
+        club) and `inactive` ({(partner, club): [names]}, rows of another status,
+        with the removed_date `removed` gives the club, else none); partners:
+        {partner: jotform cell} - a Partners export listing every partner of the
+        Roster rows written, passed as --partners."""
         import contextlib
         import csv
         import io
@@ -1223,14 +1326,18 @@ class SameNameFlow(unittest.TestCase):
         path = os.path.join(self.tmp.name, "roster.csv")
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["girl_id", "partner", "club", "full_name", "status", "region"])
+            w.writerow(["girl_id", "partner", "club", "full_name", "status", "region", "removed_date"])
             for status, clubs in (("active", roster), ("inactive", inactive or {})):
                 for (partner, club), names in clubs.items():
                     for n, name in enumerate(names):
                         w.writerow([f"DEMOCLUB-SAMPLE-{n:03d}", partner, club, name, status,
-                                    (regions or {}).get((partner, club), "Africa")])
+                                    (regions or {}).get((partner, club), "Africa"),
+                                    (removed or {}).get((partner, club), "") if status != "active" else ""])
         argv = ["sync_attendance_form.py", path, "--roster", "--region", region, "--form", "999",
                 *extra]
+        if partners is not None:
+            everyone = {p for p, _ in list(roster) + list(inactive or {})} | set(partners)
+            argv += ["--partners", self.partners_csv({p: partners.get(p, "") for p in everyone})]
         out = io.StringIO()
         with mock.patch.object(sync, "Jotform", lambda key, form, apply_changes: fake), \
                 mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test"}), \
@@ -1241,6 +1348,17 @@ class SameNameFlow(unittest.TestCase):
             except SystemExit as e:
                 code = e.code
         return code, out.getvalue()
+
+    def partners_csv(self, cells, name="partners.csv"):
+        """A Partners export (glow.sync.PARTNER_COLS) with each partner's jotform cell."""
+        import csv
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(glow_sync.PARTNER_COLS)
+            for partner, cell in sorted(cells.items()):
+                w.writerow([partner, "Africa", "", cell])
+        return path
 
     def summary(self, fake, *extra, **kw):
         path = os.path.join(self.tmp.name, "plan.json")
@@ -1538,7 +1656,10 @@ class SameNameFlow(unittest.TestCase):
     def test_a_roster_left_without_its_rule_by_a_failed_apply_is_finished_not_refused(self):
         # an apply that created the roster (and perhaps updated the picker) and then failed on
         # the rules write: the re-run - the runner's own retry too - must complete it. A roster
-        # with no rule has nothing it "sends today", so this is no question-5 change
+        # with no rule has nothing it "sends today", so this is no question-5 change. Without
+        # its picker entry as well it has the shape of a retired roster (docs/plans/2026-10-06-
+        # clubs-off-jotform.md): the run finishes it with the Partners export, which the runner
+        # always passes; a hand run without one is told so and refuses to --apply
         sheet = {**self.ROSTER, ("Partner One", "Gamma Club"): ["Amara Pellucidor"]}
         self.QIDS = {**self.QIDS, ("Partner One", "Gamma Club"): "20"}       # 14 is a module dropdown
         for picker_written in (True, False):
@@ -1548,12 +1669,38 @@ class SameNameFlow(unittest.TestCase):
             if not picker_written:
                 qs["500"]["options"] = "|".join(self.LONG)
             fake = FakeForm(qs, wire, apply=True)
-            code, _ = self.run_sync(fake, "--apply", roster=sheet)
+            code, out = self.run_sync(fake, "--apply", roster=sheet, partners={})
             self.assertEqual(code, 0, code)
             self.assertEqual(sync.WARNINGS, [])
             self.assertEqual([(m, p) for m, p, _ in fake.writes],
                              ([] if picker_written else [("POST", "/question/500")]) + [("PUT", "/properties")])
             self.assertEqual(self.shows(fake.writes[-1][2], "20"), [("500", "equals", "Gamma Club")])
+            # with its entry written the picker says what it sends (no restore); without, restored
+            self.assertEqual("  ~ restored roster 'Gamma Club' (q20): back on the Club picker" in out,
+                             not picker_written)
+        # without a Partners export the entry-less roster could be a retired one: the dry run says
+        # so, --apply refuses, and with the entry written there is nothing to tell apart
+        for picker_written in (True, False):
+            del sync.WARNINGS[:]
+            qs, _ = self.form(roster=sheet, switched=True)
+            _, wire = self.form(switched=True)
+            if not picker_written:
+                qs["500"]["options"] = "|".join(self.LONG)
+            fake = FakeForm(qs, wire, apply=True)
+            code, out = self.run_sync(fake, "--apply", roster=sheet)
+            if picker_written:
+                self.assertEqual((code, sync.WARNINGS), (0, []))
+                continue
+            self.assertIn("Refusing: 1 roster(s) would be restored without a Partners export", str(code))
+            self.assertEqual(fake.writes, [])
+            self.assertEqual(sync.WARNINGS, [
+                "  ! 'Gamma Club' (q20) has no Club picker entry and no show rule although its club is "
+                "active in the Roster - a retired roster, or a new roster of an apply that stopped "
+                "half-way: pass --partners <Partners export> (the runner always does) and the run "
+                "restores it or keeps it retired"])
+            self.assertNotIn("~ restored", out)
+            code, _ = self.run_sync(FakeForm(qs, wire), roster=sheet)         # the dry run only warns
+            self.assertEqual(code, 0)
 
     def test_a_roster_created_by_an_apply_gets_its_rule_in_the_same_run(self):
         # the commonest unattended write: a new club. Its question's id is only known once
@@ -2356,6 +2503,664 @@ def constants(first=True, operand=True, required=True):
     return stack
 
 
+class RetiredRosters(unittest.TestCase):
+    """Clubs that do not report through Jotform leave the forms
+    (docs/plans/2026-10-06-clubs-off-jotform.md), on SameNameFlow's fake Africa
+    form: a partner marked jotform=no in the Partners export has its rosters
+    RETIRED - kept on the form, hidden and frozen, off the Club picker, no show
+    rule, still in question 18's sum - and so is a club with no active girl
+    since before today (glow.sync.RETIRE_INACTIVE); a retired roster comes back
+    when the Roster says so; a hand run without the export refuses to restore;
+    what the runner makes of the plan. Fictional names."""
+
+    ROSTER, QIDS, MODULES, LONG = SameNameFlow.ROSTER, SameNameFlow.QIDS, SameNameFlow.MODULES, SameNameFlow.LONG
+    form, run_sync, summary = SameNameFlow.form, SameNameFlow.run_sync, SameNameFlow.summary
+    partners_csv, texts, shows = SameNameFlow.partners_csv, SameNameFlow.texts, SameNameFlow.shows
+    rules = staticmethod(SameNameFlow.rules)
+    NO = {"Partner Two": "no"}
+    RETIRED = {"12": "  ~ retired roster 'Stars' (q12): not on Jotform (Partner Two, Partners tab jotform=no)",
+               "13": "  ~ retired roster 'Beta Club' (q13): not on Jotform (Partner Two, Partners tab jotform=no)"}
+    DRY = ("Roster: 3 active clubs in Africa (40 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
+           "  - CREATE roster 'Gamma Club' (2 girls)\n")
+
+    def setUp(self):
+        SameNameFlow.setUp(self)
+
+    def tearDown(self):
+        SameNameFlow.tearDown(self)
+
+    def retired_form(self, gone=("12", "13")):
+        """(questions, wire) of the switched form as the sync leaves it once the rosters
+        `gone` are retired: no show rule for them, their entries off the picker."""
+        qs, _ = self.form(switched=True)
+        option_of, partner_of = self.texts(self.ROSTER, True)
+        keep = {q: o for q, o in option_of.items() if q not in gone}
+        qs["500"]["options"] = "|".join(sorted(set(keep.values()), key=str.lower))
+        modules = {y: o.split("|") for y, o in self.MODULES.items()}
+        conds = sync.build_conditions(keep, partner_of, modules, picker="500", retired=gone)
+        return qs, [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]
+
+    # ---- glow.sync
+    def test_the_partners_tab_is_read_by_header_and_any_other_value_is_yes(self):
+        import csv
+        path = os.path.join(self.tmp.name, "p.csv")
+
+        def write(header, rows):
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                csv.writer(f).writerows([header] + rows)
+            return path
+        write(["Partner", "Region", "Notes", "Jotform "],         # capitals and spacing ignored
+              [["Partner One", "Africa", "", ""], ["Partner Two", "Africa", "", " No "],
+               ["Partner  Three", "Asia", "", "YES"], ["Partner Four", "Asia", "", "maybe"],
+               ["", "", "", "no"], ["Partner Two", "Africa", "", ""]])   # a blank row; a second row of a marked partner
+        self.assertEqual(glow_sync.read_partners_csv(path),
+                         {"partner one": "yes", "partner two": "no", "partner three": "yes", "partner four": "yes"})
+        self.assertEqual(glow_sync.WARNINGS, ["  ! Partners tab: 'Partner Four' has jotform='maybe' - only yes, no "
+                                              "or blank are understood; treated as yes"])
+        self.assertIn(auto_sync.JOTFORM_VALUE, glow_sync.WARNINGS[0])
+        self.assertTrue(glow_sync.partners_marker_present(path))
+        del glow_sync.WARNINGS[:]
+        # the tab before the column marks nobody - and says so (a renamed header would otherwise
+        # read as every mark lifted); one without a partner column is refused
+        write(["partner", "region", "notes"], [["Partner One", "Africa", ""]])
+        self.assertEqual(glow_sync.read_partners_csv(path), {"partner one": "yes"})
+        self.assertFalse(glow_sync.partners_marker_present(path))
+        self.assertEqual(glow_sync.WARNINGS, ["  ! Partners tab: the export has no 'jotform' column, so no partner is "
+                                              "marked - a retired roster of an active club would be restored; check "
+                                              "the header (Partners!D1) before applying (docs/RUNBOOK.md, \"Clubs "
+                                              "that do not use Jotform\")"])
+        self.assertIn(auto_sync.JOTFORM_COLUMN, glow_sync.WARNINGS[0])
+        self.assertNotIn(auto_sync.JOTFORM_VALUE, glow_sync.WARNINGS[0])
+        del glow_sync.WARNINGS[:]
+        write(["name", "region"], [["Partner One", "Africa"]])
+        for reader in (glow_sync.read_partners_csv, glow_sync.partners_marker_present):
+            with self.assertRaises(SystemExit) as e:
+                reader(path)
+            self.assertIn("Not a Partners export: expected a 'partner' column", str(e.exception))
+        self.assertEqual(glow_sync.WARNINGS, [])
+        # the constants the Apps Script side mirrors (appsscript/Roster.gs PARTNER_COLS)
+        self.assertEqual(glow_sync.PARTNER_COLS, ("partner", "region", "notes", "jotform"))
+        self.assertIn(glow_sync.JOTFORM_COL, glow_sync.PARTNER_COLS)
+        self.assertEqual(glow_sync.JOTFORM_COL, glow_sync.PARTNER_COLS[-1])
+
+    def test_the_inactive_rule_is_a_date_before_today_and_the_constant_is_on(self):
+        import datetime as dt
+        from unittest import mock
+        today = dt.date(2026, 10, 7)
+        self.assertTrue(glow_sync.RETIRE_INACTIVE)            # Ryan, 2026-10-06: on
+        self.assertTrue(glow_sync.inactive_retires("2026-10-06", today))
+        self.assertTrue(glow_sync.inactive_retires(" 2026-09-28 ", today))
+        self.assertFalse(glow_sync.inactive_retires("2026-10-07", today))     # the same day: kept
+        self.assertFalse(glow_sync.inactive_retires("2026-10-08", today))
+        self.assertFalse(glow_sync.inactive_retires("", today))              # no date: the safe side
+        self.assertFalse(glow_sync.inactive_retires(None, today))
+        self.assertFalse(glow_sync.inactive_retires("yesterday", today))
+        with mock.patch.object(glow_sync, "RETIRE_INACTIVE", False):
+            self.assertFalse(glow_sync.inactive_retires("2026-10-06", today))
+        # `today` is the day in the SHEET's zone - the one Roster.gs today_() stamps removed_date
+        # in (getSpreadsheetTimeZone(): America/New_York since 2026-09-02, DECISIONS 2026-09-30),
+        # not appsscript.json's timeZone (the script project's, America/Chicago) and not UTC: a
+        # club emptied at 21:30 New York is dated today there while the UTC date is tomorrow,
+        # so a UTC "today" would retire it at the very next dispatch (review finding)
+        self.assertEqual(glow_sync.SHEET_ZONE, "America/New_York")
+        with open(os.path.join(REPO, "appsscript", "appsscript.json"), encoding="utf-8") as f:
+            self.assertNotEqual(json.load(f)["timeZone"], glow_sync.SHEET_ZONE)     # the two are not one thing
+        utc = dt.timezone.utc
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 10, 7, 1, 30, tzinfo=utc)), dt.date(2026, 10, 6))
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 10, 7, 3, 59, tzinfo=utc)), dt.date(2026, 10, 6))
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 10, 7, 4, 0, tzinfo=utc)), dt.date(2026, 10, 7))
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 10, 7, 11, 0, tzinfo=utc)), dt.date(2026, 10, 7))  # the daily run
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 1, 15, 4, 30, tzinfo=utc)), dt.date(2026, 1, 14))   # winter: UTC-5
+        self.assertEqual(glow_sync.sheet_today(dt.datetime(2026, 1, 15, 5, 0, tzinfo=utc)), dt.date(2026, 1, 15))
+        self.assertIsInstance(glow_sync.sheet_today(), dt.date)                                              # the clock
+        # the evening case end to end: emptied "today" in New York, the run minutes later (UTC tomorrow)
+        evening = dt.datetime(2026, 10, 7, 1, 35, tzinfo=utc)
+        self.assertFalse(glow_sync.inactive_retires("2026-10-06", glow_sync.sheet_today(evening)))      # kept
+        self.assertTrue(glow_sync.inactive_retires("2026-10-06", glow_sync.sheet_today(evening + dt.timedelta(hours=9))))
+        with mock.patch.object(glow_sync, "SHEET_ZONE", "Nowhere/Nothing"):
+            with self.assertRaises(SystemExit) as e:
+                glow_sync.sheet_today()
+            self.assertIn("The time zone database has no 'Nowhere/Nothing'", str(e.exception))
+        # the sync and the audit take today from it, the runner checks the constant against the sheet
+        self.assertIn("today = sheet_today()", read(os.path.join(REPO, "sync_attendance_form.py")))
+        self.assertIn("today = today or sheet_today()", read(os.path.join(REPO, "tools", "form_status.py")))
+        self.assertIn("run.check_sheet_zone(sc.time_zone(svc))", read(os.path.join(REPO, "tools", "auto_sync.py")))
+        # the latest removed_date per club, from the Roster's rows of any status
+        gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
+        self.run_sync(FakeForm(*self.form(switched=True)), inactive=gone,
+                      removed={("Partner Two", "Stars"): "2026-10-01"})
+        path = os.path.join(self.tmp.name, "roster.csv")
+        self.assertEqual(glow_sync.roster_removed(path), {("partner two", "stars"): "2026-10-01"})
+        with open(path, encoding="utf-8") as f:
+            rows = f.read().splitlines()
+        rows.append("DEMOCLUB-SAMPLE-009,Partner Two,Stars,Zoe Quillfeather,inactive,Africa,2026-10-03")
+        rows.append("DEMOCLUB-SAMPLE-010,Partner Two,Stars,Yan Quillfeather,inactive,Africa,3 Oct")   # not a date here
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(rows) + "\n")
+        self.assertEqual(glow_sync.roster_removed(path), {("partner two", "stars"): "2026-10-03"})
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("partner,club,full_name,status,region\nPartner One,Stars,Ann Poe,inactive,Africa\n")
+        self.assertEqual(glow_sync.roster_removed(path), {})                 # an export without the column
+
+    # ---- the sync
+    def test_a_marked_partners_rosters_are_retired_and_nothing_is_written_to_them(self):
+        qs, wire = self.form(switched=True)
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake, partners=self.NO)
+        self.assertIn("Form: 999 status ENABLED\nRoster: 2 active clubs in Africa (4 girls); 4 clubs overall; 2 "
+                      "club(s) of 1 partner(s) not on Jotform (Partners tab jotform=no) left off this form\n", out)
+        for line in self.RETIRED.values():
+            self.assertIn(line, out)
+        self.assertEqual(fake.calls, ["UPDATE club picker (2 clubs: options)",
+                                      f"REPLACE conditions ({len(wire) - 2} rules)"])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "Alpha Club|Stars - Partner One"})
+        self.assertEqual(sync.WARNINGS, [])
+        # no show rule for the two; every roster still in question 18's sum; nothing to q12 / q13
+        shown = {a["field"] for _, _, actions in self.rules(fake.writes[1][2]) for a in actions
+                 if a.get("visibility") == "Show"} & set(self.QIDS.values())
+        self.assertEqual(shown, {"10", "11"})
+        (calc,) = [a for _, _, actions in self.rules(fake.writes[1][2]) for a in actions
+                   if a.get("resultField") == sync.CONTACT_IDS]
+        self.assertEqual((calc["operands"], calc["equation"]), ("500,10,11,12,13", "{10}{11}{12}{13}"))
+        self.assertFalse([p for _, p, _ in fake.writes if p in ("/question/12", "/question/13")])
+        self.assertEqual(summary["retired"], [
+            {"qid": "12", "club": "Stars", "partner": "Partner Two",
+             "reason": "not on Jotform (Partner Two, Partners tab jotform=no)"},
+            {"qid": "13", "club": "Beta Club", "partner": "Partner Two",
+             "reason": "not on Jotform (Partner Two, Partners tab jotform=no)"}])
+        self.assertEqual((summary["restored"], summary["retired_before"]), ([], 0))
+        self.assertTrue(summary["partners"].endswith("partners.csv"))
+        self.assertEqual([n["qid"] for n in summary["sf_names"]], ["10", "11"])    # a retired club sends nothing
+        self.assertEqual(summary["sf_name_changes"], [])
+        # the runner reads both shapes: the picker update is the counted change, 2 is within the band
+        for plan in (auto_sync.parse_plan(out), auto_sync.plan_from_summary(summary)):
+            self.assertEqual([(r["qid"], r["club"]) for r in plan["retired"]], [("12", "Stars"), ("13", "Beta Club")])
+            self.assertEqual((auto_sync.changes(plan), auto_sync.check_bands(plan), plan["warnings"]), (1, [], []))
+            self.assertIn(", 2 retired, update club picker", auto_sync.plan_summary(plan))
+        # applied, the form holds them retired: the next run has nothing to do and no ~ line
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", partners=self.NO)
+        self.assertEqual((code, [(m, p) for m, p, _ in fake.writes]), (0, [("POST", "/question/500"), ("PUT", "/properties")]))
+        qs["500"]["options"] = fake.writes[0][2]["question[options]"]
+        after = FakeForm(qs, fake.writes[1][2]["properties"]["conditions"])
+        del sync.WARNINGS[:]
+        summary, out = self.summary(after, partners=self.NO)
+        self.assertEqual((after.calls, sync.WARNINGS), ([], []))
+        self.assertNotIn("~ retired", out)
+        self.assertIn("Retired rosters: 2 already off the Club picker (hidden, no show rule; still in question "
+                      "18's sum)", out)
+        self.assertIn("(conditions unchanged - skipping the rewrite)", out)
+        self.assertIn("nothing to do", out)
+        self.assertEqual((summary["retired"], summary["retired_before"]), ([], 2))
+        self.assertEqual(auto_sync.changes(auto_sync.parse_plan(out)), 0)      # in-sync to the runner
+        # what the sync wrote is the retired state the audit's tests build
+        rq, rw = self.retired_form()
+        self.assertEqual(sync._norm_rules(fake.writes[1][2]["properties"]["conditions"]), sync._norm_rules(rw))
+        self.assertEqual(qs["500"]["options"], rq["500"]["options"])
+
+    def test_the_same_name_branch_retires_the_marked_partners_roster(self):
+        # before the switch the two Stars test one text and are told apart by the Partner box:
+        # Partner Two's goes, q11 is alone on "Stars", its rule loses the Partner term, the box hides
+        qs, wire = self.form()
+        fake = FakeForm(qs, wire)
+        code, out = self.run_sync(fake, partners=self.NO)
+        self.assertEqual(code, 0)
+        self.assertIn(self.RETIRED["12"], out)
+        self.assertIn(self.RETIRED["13"], out)
+        self.assertEqual(fake.calls, ["UPDATE club picker (2 clubs: options)",
+                                      f"REPLACE conditions ({len(wire) - 3} rules)", SameNameFlow.HIDE])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "Alpha Club|Stars"})
+        self.assertEqual(self.shows(fake.writes[1][2], "11"), [("500", "equals", "Stars")])
+        self.assertFalse([a for _, _, actions in self.rules(fake.writes[1][2]) for a in actions
+                          if a.get("visibility") == "Show" and a["field"] in ("12", "13", sync.PARTNER)])
+        self.assertNotIn("Partner box:", out)
+        self.assertEqual(sync.WARNINGS, [])
+        # ...and the roster whose owner the rule names is the one that goes: Partner One marked instead
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form())
+        code, out = self.run_sync(fake, partners={"Partner One": "no"})
+        self.assertEqual(code, 0)
+        self.assertIn("  ~ retired roster 'Stars' (q11): not on Jotform (Partner One, Partners tab jotform=no)", out)
+        self.assertIn("  ~ retired roster 'Alpha Club' (q10): not on Jotform (Partner One, Partners tab jotform=no)", out)
+        self.assertEqual(self.shows(fake.writes[1][2], "12"), [("500", "equals", "Stars")])
+        self.assertEqual(sync.WARNINGS, [])
+
+    def test_a_club_with_no_active_girl_retires_the_day_after_its_last_removal(self):
+        import datetime as dt
+        from unittest import mock
+        today = glow_sync.sheet_today()          # the sheet's day, as the sync reads it (not UTC's)
+        yesterday = str(today - dt.timedelta(days=1))
+        gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
+        sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
+        # today's treatment of a same-name leftover (test_a_namesake_going_inactive_changes_nothing)
+        kept = "  ! 'Stars' (q12) matched no partner in the sheet - keeping it, but check it in the builder"
+        cases = [(yesterday, True, True),        # the day after: retired
+                 (str(today), True, False),      # the same day: a two-step roster replacement may be under way
+                 ("", True, False),              # no date to go by: the safe side
+                 (yesterday, False, False)]      # the constant off: today's treatment
+        for when, on, retires in cases:
+            for partners in (None, {}):          # the Partners export is not what this trigger needs
+                del sync.WARNINGS[:]
+                fake = FakeForm(*self.form(switched=True))
+                with mock.patch.object(glow_sync, "RETIRE_INACTIVE", on):
+                    summary, out = self.summary(fake, roster=sheet, inactive=gone, partners=partners,
+                                                removed={("Partner Two", "Stars"): when})
+                if retires:
+                    self.assertIn("  ~ retired roster 'Stars' (q12): no active girl in the Roster", out, (when, on))
+                    self.assertEqual(fake.calls[0], "UPDATE club picker (3 clubs: options)")
+                    self.assertEqual(fake.writes[0][2], {"question[options]": "Alpha Club|Beta Club|Stars - Partner One"})
+                    self.assertEqual(sync.WARNINGS, [])
+                    self.assertEqual([(r["qid"], r["reason"]) for r in summary["retired"]],
+                                     [("12", "no active girl in the Roster")])
+                    self.assertNotIn("Roster: 3 active clubs in Africa (6 girls); 3 clubs overall;", out)  # no tail
+                else:
+                    self.assertNotIn("~ retired", out, (when, on))
+                    self.assertEqual((fake.calls, sync.WARNINGS), ([], [kept]), (when, on))
+        # a later ADD puts it back: active again, its roster is restored (the ~ line, within the bands)
+        del sync.WARNINGS[:]
+        qs, wire = self.retired_form(gone=("12",))
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake, partners={})
+        self.assertIn("  ~ restored roster 'Stars' (q12): back on the Club picker", out)
+        self.assertEqual(auto_sync.check_bands(auto_sync.plan_from_summary(summary)),
+                         ["question 5 (what Salesforce reads) would change for 1 existing club(s) - rename each "
+                          "Salesforce account named in the warnings first, then apply this region by hand with "
+                          "--q5-change-ok (docs/RUNBOOK.md, \"Club names two partners share\")"])   # a shared name
+
+    def test_a_question_the_roster_does_not_know_keeps_todays_treatment(self):
+        # a roster whose club is in no Roster row (an incomplete export looks like that): the
+        # `?` line and its entry, as ever - never retired on a guess
+        three = {**self.ROSTER, ("Partner Three", "Comet Club"): ["Uma Umberlash", "Valeria Wrenfoldy"]}
+        self.QIDS = {**self.QIDS, ("Partner Three", "Comet Club"): "20"}
+        fake = FakeForm(*self.form(roster=three, switched=True))
+        summary, out = self.summary(fake, partners=self.NO)
+        self.assertNotIn("Comet Club' (q20)", "".join(self.RETIRED.values()))
+        self.assertIn(self.RETIRED["12"], out)
+        self.assertNotIn("~ retired roster 'Comet Club'", out)
+        self.assertEqual(sync.WARNINGS, ["  ? 'Comet Club' (q20) is on the form but not in the sheet export - "
+                                         "keeping its current roster"])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "Alpha Club|Comet Club|Stars - Partner One"})
+        self.assertEqual(self.shows(fake.writes[1][2], "20"), [("500", "equals", "Comet Club")])
+        self.assertEqual(summary["retired_before"], 0)
+        # ...and a name with several holders and no word on the owner: today's treatment too (the
+        # two Stars on one plain entry with the Partner box, Partner Two marked, the rules gone)
+        del sync.WARNINGS[:]
+        qs, wire = self.form()
+        wire = [c for c in wire if '"field": "12"' not in c["action"] and '"field": "11"' not in c["action"]]
+        qs["11"]["options"] = qs["12"]["options"] = "Nobody Known|Nobody Else"       # no owner read-back either
+        fake = FakeForm(qs, wire)
+        code, out = self.run_sync(fake, partners=self.NO)
+        self.assertNotIn("~ retired roster 'Stars'", out)
+        self.assertIn(self.RETIRED["13"], out)
+
+    def test_a_retired_roster_comes_back_plain_or_long(self):
+        # Beta Club - a name one partner has: restored plain, nothing to warn
+        qs, wire = self.retired_form(gone=("13",))
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake, partners={})
+        self.assertIn("  ~ restored roster 'Beta Club' (q13): back on the Club picker", out)
+        self.assertEqual(fake.calls, ["UPDATE club picker (4 clubs: options)",
+                                      f"REPLACE conditions ({len(wire) + 1} rules)"])
+        self.assertEqual(fake.writes[0][2], {"question[options]": "|".join(self.LONG)})
+        self.assertEqual(self.shows(fake.writes[1][2], "13"), [("500", "equals", "Beta Club")])
+        self.assertEqual((sync.WARNINGS, summary["sf_name_changes"]), ([], []))
+        self.assertEqual(summary["restored"], [{"qid": "13", "club": "Beta Club", "partner": "Partner Two",
+                                                "reason": "back on the Club picker"}])
+        self.assertEqual([n["value"] for n in summary["sf_names"]],
+                         ["Alpha Club", "Stars - Partner One", "Stars - Partner Two", "Beta Club"])
+        for plan in (auto_sync.parse_plan(out), auto_sync.plan_from_summary(summary)):
+            self.assertEqual(([r["qid"] for r in plan["restored"]], auto_sync.check_bands(plan)), (["13"], []))
+            self.assertIn(", 1 restored, update club picker", auto_sync.plan_summary(plan))
+        # Partner Two's Stars - a name two partners have had: long, as a question-5 change by hand
+        # (its namesake's long entry on the picker is not its own)
+        del sync.WARNINGS[:]
+        qs, wire = self.retired_form(gone=("12",))
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake, partners={})
+        self.assertIn("  ~ restored roster 'Stars' (q12): back on the Club picker", out)
+        self.assertEqual(fake.writes[0][2], {"question[options]": "|".join(self.LONG)})
+        self.assertEqual(self.shows(fake.writes[1][2], "12"), [("500", "equals", "Stars - Partner Two")])
+        self.assertEqual(summary["sf_name_changes"], [{"qid": "12", "club": "Stars", "old": sync.RETIRED_OLD,
+                                                       "new": "Stars - Partner Two", "switch": False}])
+        self.assertEqual(sync.WARNINGS, ["  ! 'Stars' (q12): Club Name (question 5, what Salesforce reads) changes "
+                                         "from '(retired: no rule to read)' to 'Stars - Partner Two' - rename its "
+                                         "Salesforce account first; an --apply needs --q5-change-ok"])
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", partners={})
+        self.assertIn("Refusing: question 5 (what Salesforce reads) would change for 1 existing club(s)", str(code))
+        self.assertEqual(fake.writes, [])
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", "--q5-change-ok", partners={})
+        self.assertEqual((code, [(m, p) for m, p, _ in fake.writes]), (0, [("POST", "/question/500"), ("PUT", "/properties")]))
+        # the runner's question-5 band holds it for the hand apply
+        plan = auto_sync.plan_from_summary(summary)
+        self.assertEqual(len(auto_sync.q5_changes(plan)), 1)
+        self.assertTrue(any("question 5 (what Salesforce reads) would change" in r for r in auto_sync.check_bands(plan)))
+        # a retired roster whose partner is still marked is not restored by the same run
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.retired_form())
+        summary, out = self.summary(fake, partners=self.NO)
+        self.assertEqual((fake.calls, summary["restored"], summary["retired_before"]), ([], [], 2))
+
+    def test_without_a_partners_export_a_restore_is_warned_and_refused(self):
+        qs, wire = self.retired_form(gone=("13",))
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake)
+        self.assertNotIn("~ restored", out)
+        self.assertEqual(sync.WARNINGS, [
+            "  ! 'Beta Club' (q13) has no Club picker entry and no show rule although its club is active in the "
+            "Roster - a retired roster, or a new roster of an apply that stopped half-way: pass --partners "
+            "<Partners export> (the runner always does) and the run restores it or keeps it retired"])
+        self.assertEqual(fake.calls[0], "UPDATE club picker (4 clubs: options)")     # the dry run still shows the plan
+        self.assertEqual((summary["restored"][0]["qid"], summary["partners"]), ("13", None))
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply")
+        self.assertIn("Refusing: 1 roster(s) would be restored without a Partners export (the '!' lines above) - "
+                      "nothing written", str(code))
+        self.assertEqual(fake.writes, [])
+        # the flag needs the Roster
+        import contextlib
+        import io
+        from unittest import mock
+        argv = ["sync_attendance_form.py", "x.csv", "--form", "999", "--partners", "p.csv"]
+        with mock.patch.object(sys, "argv", argv), mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test"}), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as e:
+            sync.main()
+        self.assertIn("--partners needs --roster", str(e.exception))
+
+    def test_a_partners_export_missing_a_partner_with_active_clubs_is_refused(self):
+        fake = FakeForm(*self.form(switched=True))
+        code, out = self.run_sync(fake, "--partners", self.partners_csv({"Partner One": ""}))
+        self.assertIn("Partners export lists 1 of 2 partners with active clubs - missing: Partner Two - a truncated "
+                      "export, or rows deleted from the Partners tab? nothing done", str(code))
+        self.assertEqual(fake.calls, [])
+        self.assertIn("Form: 999 status ENABLED", out)
+        # a partner with inactive rows only is not required (nothing of it is on the picker's side)
+        gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")],
+                ("Partner Two", "Beta Club"): self.ROSTER[("Partner Two", "Beta Club")]}
+        sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
+        fake = FakeForm(*self.form(roster=sheet, switched=True))
+        code, _ = self.run_sync(fake, "--partners", self.partners_csv({"Partner One": ""}), roster=sheet, inactive=gone)
+        self.assertEqual(code, 0)
+        # every club of the region marked: the form is not synced down to an empty picker
+        fake = FakeForm(*self.form(switched=True))
+        code, _ = self.run_sync(fake, partners={"Partner One": "no", "Partner Two": "no"})
+        self.assertIn("Every active club in Africa belongs to a partner marked jotform=no", str(code))
+        self.assertIn("empty Club picker", str(code))
+        self.assertEqual(fake.calls, [])
+
+    def test_a_partners_export_without_the_jotform_column_warns_and_never_restores_unattended(self):
+        import csv
+        # the header lost its column (renamed, moved, one inserted before it): nobody is marked,
+        # so a retired roster of an active club reads as one to restore - said, never applied
+        path = os.path.join(self.tmp.name, "partners_old.csv")
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["partner", "region", "notes"])
+            for p in ("Partner One", "Partner Two"):
+                w.writerow([p, "Africa", ""])
+        column = ("  ! Partners tab: the export has no 'jotform' column, so no partner is marked - a retired roster of "
+                  "an active club would be restored; check the header (Partners!D1) before applying (docs/RUNBOOK.md, "
+                  "\"Clubs that do not use Jotform\")")
+        qs, wire = self.retired_form(gone=("13",))
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake, "--partners", path)
+        self.assertIn("  ~ restored roster 'Beta Club' (q13): back on the Club picker", out)   # the dry run says so
+        self.assertEqual(sync.WARNINGS, [column])
+        self.assertEqual(fake.calls, ["UPDATE club picker (4 clubs: options)", f"REPLACE conditions ({len(wire) + 1} rules)"])
+        fake = FakeForm(qs, wire, apply=True)
+        code, _ = self.run_sync(fake, "--apply", "--partners", path)
+        self.assertIn("Refusing: 1 roster(s) would be restored from a Partners export that has no 'jotform' column "
+                      "(nobody can be marked in it) - nothing written", str(code))
+        self.assertIn("Partners!D1 = jotform", str(code))
+        self.assertEqual(fake.writes, [])
+        # the runner: ATTENTION for the export, and a plan that restores from it is outside the bands
+        plan = auto_sync.plan_from_summary(summary)
+        self.assertEqual(auto_sync.no_jotform_column(plan), [column.strip()])     # the summary strips them
+        (reason,) = auto_sync.check_bands(plan)
+        self.assertIn("would put 1 club(s) back on the Club picker from a Partners export that has no jotform column", reason)
+        run = AutoSyncPlan.run_region(self, out, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+        self.assertIn("no jotform column", run.results[0][8])
+        self.assertEqual([t for t, _ in run.attention][0], "Africa: the Partners export has no jotform column")
+        self.assertIn("Partners!D1 = jotform", run.attention[0][1])
+        self.assertTrue(run.attention[1][0].startswith("Africa: not applied - "))
+        self.assertIn("- RESTORE Beta Club (q13): back on the Club picker", run.attention[1][1])
+        # with nothing to restore the warning alone: in-sync, the ATTENTION still raised
+        del sync.WARNINGS[:]
+        fake = FakeForm(*self.form(switched=True))
+        summary, out = self.summary(fake, "--partners", path)
+        self.assertEqual((fake.calls, sync.WARNINGS), ([], [column]))
+        self.assertEqual(auto_sync.check_bands(auto_sync.plan_from_summary(summary)), [])
+        run = AutoSyncPlan.run_region(self, out)
+        self.assertEqual([r[7:9] for r in run.results], [["in-sync", "Partners export without a jotform column"]])
+        self.assertEqual([t for t, _ in run.attention], ["Africa: the Partners export has no jotform column"])
+        # a roster the Roster says is retired stays so: the export marks nobody, but the inactive rule still holds
+        del sync.WARNINGS[:]
+        gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
+        sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
+        fake = FakeForm(*self.retired_form(gone=("12",)))
+        summary, out = self.summary(fake, "--partners", path, roster=sheet, inactive=gone,
+                                    removed={("Partner Two", "Stars"): "2020-01-01"})
+        self.assertEqual((fake.calls, summary["restored"], summary["retired_before"]), ([], [], 1))
+
+    def test_an_odd_jotform_value_is_yes_plus_a_warning_the_runner_reports(self):
+        fake = FakeForm(*self.form(switched=True))
+        summary, out = self.summary(fake, partners={"Partner Two": "maybe"})
+        self.assertEqual(fake.calls, [])
+        self.assertNotIn("~ retired", out)
+        self.assertEqual(sync.WARNINGS, ["  ! Partners tab: 'Partner Two' has jotform='maybe' - only yes, no or "
+                                         "blank are understood; treated as yes"])
+        plan = auto_sync.plan_from_summary(summary)
+        self.assertEqual((len(auto_sync.odd_jotform_values(plan)), auto_sync.check_bands(plan)), (1, []))
+        run = AutoSyncPlan.run_region(self, out)
+        self.assertEqual([r[7:9] for r in run.results], [["in-sync", "1 jotform value(s) not understood"]])
+        (title, detail), = run.attention
+        self.assertEqual(title, "Africa: 1 Partners-tab jotform value(s) not understood")
+        self.assertIn("- ! Partners tab: 'Partner Two' has jotform='maybe'", detail)
+        self.assertIn("Clubs that do not use Jotform", detail)
+        # with a roster change in the same plan the change is applied and the warning reported
+        busy = out.replace("  nothing to do - form already matches the sheet", "  - CREATE roster 'Gamma Club' (2 girls)")
+        run = AutoSyncPlan.run_region(self, busy, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results], len(run.attention)), ([False, True], ["applied"], 1))
+        self.assertIn("1 jotform value(s) not understood", run.results[0][8])
+
+    def test_the_form_status_line_and_disabled_ok(self):
+        qs, wire = self.form(switched=True)
+        fake = FakeForm(qs, wire, status="DISABLED")
+        code, out = self.run_sync(fake)
+        self.assertEqual((code, fake.calls), (0, []))                       # a dry run reads it
+        self.assertIn("Form: 999 status DISABLED\nRoster: ", out)
+        fake = FakeForm(qs, wire, apply=True, status="DISABLED")
+        code, _ = self.run_sync(fake, "--apply")
+        self.assertIn("Refusing: form 999 is DISABLED, not ENABLED - a write nobody can see", str(code))
+        self.assertIn("--disabled-ok", str(code))
+        self.assertEqual(fake.writes, [])
+        fake = FakeForm(qs, wire, apply=True, status="DISABLED")
+        self.assertEqual(self.run_sync(fake, "--apply", "--disabled-ok")[0], 0)
+        fake = FakeForm(qs, wire, apply=True, status="")
+        code, _ = self.run_sync(fake, "--apply")
+        self.assertIn("form 999 is of unknown status, not ENABLED", str(code))   # refused, never guessed
+        code, out = self.run_sync(FakeForm(qs, wire, status=""))
+        self.assertIn("Form: 999 status not reported", out)
+
+    def test_the_roster_lines_tail_is_free_text_to_the_runner(self):
+        line = ("Roster: 182 active clubs in Africa (3518 girls); 364 clubs overall; 38 club(s) of 3 partner(s) not "
+                "on Jotform (Partners tab jotform=no) left off this form")
+        m = auto_sync.ROSTER_RX.match(line)
+        self.assertEqual((m["clubs"], m["girls"], m["all"]), ("182", "3518", "364"))
+        plan = auto_sync.parse_plan(line + "\n\nDRY RUN (use --apply to write):\n  - REPLACE conditions (213 rules)\n")
+        self.assertEqual((plan["roster_clubs"], plan["roster_girls"], plan["rules"]), (182, 3518, 213))
+
+    # ---- the runner
+    def test_the_runner_bands_the_retirements_and_the_restores(self):
+        def text(kind, n):
+            why = ("not on Jotform (Partner Nine, Partners tab jotform=no)" if kind == "retired"
+                   else "back on the Club picker")
+            return ("Roster: 20 active clubs in Africa (200 girls); 300 clubs overall\n"
+                    + "".join(f"  ~ {kind} roster 'Club {i}' (q{100 + i}): {why}\n" for i in range(n))
+                    + "\nDRY RUN (use --apply to write):\n  - UPDATE club picker (20 clubs: options)\n"
+                    "  - REPLACE conditions (50 rules)\n")
+        for kind, band, phrase in (("retired", "max_retires", "would take 6 clubs off the Club picker at once (band: 5)"),
+                                   ("restored", "max_restores", "would put 6 clubs back on the Club picker at once (band: 5)")):
+            plan = auto_sync.parse_plan(text(kind, 6))
+            self.assertEqual(len(plan[kind]), 6)
+            self.assertEqual(plan[kind][0], {"qid": "100", "club": "Club 0", "reason": plan[kind][0]["reason"]})
+            self.assertEqual(plan["warnings"], [])                 # a ~ line is no warning
+            (reason,) = auto_sync.check_bands(plan)
+            self.assertIn(phrase, reason)
+            self.assertIn("apply by hand after checking", reason)
+            self.assertEqual(auto_sync.check_bands(plan, **{band: 6}), [])
+            self.assertIn(f", 6 {kind}, update club picker", auto_sync.plan_summary(plan))
+            run = AutoSyncPlan.run_region(self, text(kind, 6), apply=True)
+            self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+            self.assertIn(phrase, run.results[0][8])
+            self.assertIn(f"- {'RETIRE' if kind == 'retired' else 'RESTORE'} Club 0 (q100): ", run.attention[0][1])
+            run = AutoSyncPlan.run_region(self, text(kind, 6), apply=True, **{band: 6})
+            self.assertEqual((run.synced, [r[7] for r in run.results]), ([False, True], ["applied"]))
+            run = AutoSyncPlan.run_region(self, text(kind, 5), apply=True)
+            self.assertEqual([r[7] for r in run.results], ["applied"])
+            self.assertIn(f", 5 {kind}, update club picker; verified clean", run.results[0][8])
+        # the summary file gives the same
+        summary = {"creates": [], "updates": [], "deletes": [], "rules": 50, "warnings": [],
+                   "calls": ["UPDATE club picker (20 clubs: options)"],
+                   "retired": [{"qid": str(100 + i), "club": f"Club {i}", "partner": "Partner Nine",
+                                "reason": "not on Jotform (Partner Nine, Partners tab jotform=no)"} for i in range(6)],
+                   "restored": [{"qid": "200", "club": "Comet Club", "partner": "Partner Nine", "reason": "back on the Club picker"}]}
+        plan = auto_sync.plan_from_summary(summary)
+        self.assertEqual((len(plan["retired"]), len(plan["restored"]), len(auto_sync.check_bands(plan))), (6, 1, 1))
+        self.assertEqual(set(plan), set(auto_sync.parse_plan("")))
+        # the patterns tell the two lines apart, and the defaults are the runner's flags
+        self.assertTrue(auto_sync.RETIRED_RX.match("  ~ retired roster 'Club (B)' (q12): no active girl in the Roster"))
+        self.assertFalse(auto_sync.RETIRED_RX.match("  ~ restored roster 'Club (B)' (q12): back on the Club picker"))
+        self.assertFalse(auto_sync.RESTORED_RX.match("  ~ retired roster 'A' (q1): x"))
+        src = read(os.path.join(REPO, "tools", "auto_sync.py"))
+        self.assertIn('ap.add_argument("--max-retires", type=int, default=5,', src)
+        self.assertIn('ap.add_argument("--max-restores", type=int, default=5,', src)
+
+    def test_the_runner_checks_the_sheets_zone_against_the_constant(self):
+        # the sheet stamps removed_date in its own zone; the sync takes "today" in SHEET_ZONE; the
+        # runner, which reads the sheet's setting anyway, says when the two differ (the rule is
+        # then off by the difference) - a log line when they agree, never a failed run
+        import tempfile
+        import types
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as out:
+            args = types.SimpleNamespace(apply=False, out=out, max_creates=5, max_updates=20, trigger="test", run_url="")
+            run = auto_sync.Run(args)
+            with mock.patch("builtins.print"):
+                run.check_sheet_zone(glow_sync.SHEET_ZONE)
+                self.assertEqual((run.attention, run.lines[-1]), ([], "Sheet zone: America/New_York (as glow/sync.py SHEET_ZONE)"))
+                run.check_sheet_zone("America/Chicago")
+        (title, detail), = run.attention
+        self.assertEqual(title, "The sheet's time zone is America/Chicago, the tools expect America/New_York")
+        self.assertIn("glow/sync.py SHEET_ZONE says America/New_York", detail)
+        self.assertIn("Clubs that do not use Jotform", detail)
+        self.assertEqual(run.lines[-1], "  ! sheet zone America/Chicago differs from glow/sync.py SHEET_ZONE America/New_York")
+        self.assertFalse(run.failed)
+        # read where the tabs are exported (a --roster run reads no sheet, and gets no check)
+        src = read(os.path.join(REPO, "tools", "auto_sync.py"))
+        self.assertIn("run.partners = run.export_partners(svc)\n        run.check_sheet_zone(sc.time_zone(svc))", src)
+
+    def test_a_disabled_form_is_skipped_and_an_unread_status_is_failed(self):
+        run = AutoSyncPlan.run_region(self, self.DRY, apply=True, status="DISABLED")
+        self.assertEqual((run.synced, run.failed, run.attention), ([], False, []))
+        self.assertEqual([r[7:9] for r in run.results], [["skipped", "form DISABLED"]])
+        self.assertIn(f"  form {auto_sync.REGIONAL_FORMS['Africa']} is DISABLED - not synced", run.lines)
+        run = AutoSyncPlan.run_region(self, self.DRY, apply=True, status="")
+        self.assertEqual([r[7:9] for r in run.results], [["skipped", "form status not reported"]])
+        run = AutoSyncPlan.run_region(self, self.DRY, apply=True, status=RuntimeError("boom"))
+        self.assertEqual((run.synced, run.failed), ([], True))
+        self.assertEqual(run.results[0][7:9], ["failed", "could not read form status: RuntimeError: boom"])
+        # read_status itself: GET /form/{id} through the run's client, under the retries
+        import types
+        from unittest import mock
+        run = auto_sync.Run(types.SimpleNamespace(apply=False, out="", max_creates=5, max_updates=20,
+                                                  trigger="test", run_url=""))
+        calls = []
+
+        class Client_:
+            def get(self, path):
+                calls.append(path)
+                if len(calls) < 3:
+                    raise RuntimeError("nope")
+                return {"status": "ENABLED", "count": "0"}
+        run.client = Client_()
+        with mock.patch.object(auto_sync.time, "sleep", lambda s: None), mock.patch("builtins.print"):
+            self.assertEqual(run.read_status("262382821971058"), "ENABLED")
+        self.assertEqual(calls, ["/form/262382821971058"] * 3)
+        run.client = types.SimpleNamespace(get=lambda path: {"count": "0"})
+        self.assertEqual(run.read_status("1"), "")
+        # the SyncLog's result list, as the RUNBOOK writes it
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        self.assertIn("`attention`, `skipped`, `failed`", doc)
+
+    def test_the_partners_export_travels_with_every_sync_and_verify_call(self):
+        import tempfile
+        import types
+        from unittest import mock
+        clean = {"error_conditions": 0, "salesforce": True, "rule_problems": [], "languages": ["a"] * 12,
+                 "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []}}
+        with tempfile.TemporaryDirectory() as out:
+            run = auto_sync.Run(types.SimpleNamespace(apply=True, out=out, max_creates=5, max_updates=20,
+                                                      trigger="test", run_url=""))
+            run.partners = os.path.join(out, "partners.csv")
+            seen = []
+
+            def cmd(argv, label):
+                seen.append((label, argv))
+                if label.startswith("sync"):
+                    return types.SimpleNamespace(returncode=0, stdout=self.DRY, stderr="")
+                if label == "verify":
+                    return types.SimpleNamespace(returncode=0, stdout=json.dumps([clean]), stderr="")
+                return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            with mock.patch.object(run, "cmd", cmd), mock.patch.object(run, "read_status", lambda form: "ENABLED"), \
+                    mock.patch.object(run, "save_conditions", lambda form: None), mock.patch("builtins.print"):
+                run.region("Africa", os.path.join(out, "roster.csv"))
+            self.assertEqual([r[7] for r in run.results], ["applied"])
+            self.assertEqual([label for label, _ in seen], ["sync Africa", "backup", "sync Africa --apply", "verify"])
+            for label, argv in seen:
+                if label == "backup":
+                    self.assertNotIn("--partners", argv)
+                    continue
+                self.assertIn("--partners", argv, label)
+                self.assertEqual(argv[argv.index("--partners") + 1], run.partners, label)
+            self.assertIn("--apply", seen[2][1])
+            self.assertNotIn("--apply", seen[0][1])
+            # (never in main(): --roster needs --partners) without one nothing is added
+            run.partners = None
+            seen.clear()
+            with mock.patch.object(run, "cmd", cmd):
+                run.sync("r.csv", "Africa", "1", apply=False)
+            self.assertNotIn("--partners", seen[0][1])
+            # the exported Partners tab is written beside the Roster export
+            run.args.out = out
+            svc = object()
+            with mock.patch.object(auto_sync.sc, "read_tab", lambda s, tab: [["partner", "region", "notes", "jotform"],
+                                                                              ["Partner One", "Africa", "", "no"]]), \
+                    mock.patch("builtins.print"):
+                path = run.export_partners(svc)
+            self.assertEqual(os.path.basename(path), f"partners_{run.stamp}.csv")
+            self.assertEqual(glow_sync.read_partners_csv(path), {"partner one": "no"})
+            self.assertIn(f"Partners: exported 1 rows -> {os.path.relpath(path, auto_sync.REPO)}", run.lines)
+
+    def test_the_verify_step_notes_a_skipped_check_and_counts_rosters_awaiting_retirement(self):
+        clean = {"error_conditions": 0, "salesforce": True, "rule_problems": [], "languages": ["a"] * 12,
+                 "duplicate_club_questions": []}
+        self.assertEqual(auto_sync.verify_report(dict(clean, region_check={"skipped": "DISABLED"})),
+                         ([], ["region check skipped (form DISABLED)"]))
+        rc = {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": [],
+              "retired": ["Stars", "Beta Club"], "awaiting_retirement": []}
+        self.assertEqual(auto_sync.verify_report(dict(clean, region_check=rc)), ([], []))
+        rc["awaiting_retirement"] = ["Beta Club"]
+        problems, notes = auto_sync.verify_report(dict(clean, region_check=rc))
+        self.assertEqual((problems, notes), (["1 roster(s) still await retirement: Beta Club"], []))
+        # the runner's apply reads applied-with-problems on it
+        run = AutoSyncPlan.run_region(self, self.DRY, apply=True, region_check={"awaiting_retirement": ["Beta Club"]})
+        self.assertEqual([r[7] for r in run.results], ["applied-with-problems"])
+        self.assertIn("1 roster(s) still await retirement: Beta Club", run.results[0][8])
+
+
 class ContactIds(unittest.TestCase):
     """Question 18 (Contact_IDs, the names Salesforce stores) is recalculated after
     the rosters show or hide, and at least one girl is ticked
@@ -2883,13 +3688,15 @@ def served_store(qs, extra=None):
     return store
 
 
-def served_modules_and_store(qs, store=None):
+def served_modules_and_store(qs, store=None, clear="disable"):
     """The module dropdowns' <select>s as Jotform serves a single-select (read from the U.S
     page 2026-10-02: a "Please Select" placeholder, then each option with a data-calcvalue
-    when the question carries calcValues, the leading slot being the placeholder's), and
-    the store the page embeds (window.allTranslations, FormTranslation.init)."""
+    when the question carries calcValues, the leading slot being the placeholder's), the
+    runtime's clearFieldOnHide (JotForm.clearFieldOnHide="…", the template page 2026-10-06;
+    None: no such line) and the store the page embeds (window.allTranslations,
+    FormTranslation.init)."""
     import html as html_mod
-    parts = []
+    parts = [] if clear is None else [f'<script>JotForm.clearFieldOnHide="{clear}";</script>']
     for year, q in sync.MODULES.items():
         if q not in qs:
             continue
@@ -2972,7 +3779,7 @@ class FormStatusAudit(unittest.TestCase):
                 mock.patch.object(glow_sync, "CONTACT_IDS_PICKER_OPERAND", False):
             self.assertEqual(form_status.audit_rules(*self.form())[0], [])
 
-    SUMMARY = {"clubs": 4, "show_rules": 4, "aggregate_rosters": 4, "long_names": 2,
+    SUMMARY = {"clubs": 4, "show_rules": 4, "live_rosters": 4, "aggregate_rosters": 4, "long_names": 2,
                "contact_ids_rule": 1, "contact_ids_picker_operand": True, "required_rosters": 4}
 
     def test_the_switched_form_is_clean(self):
@@ -3041,7 +3848,8 @@ class FormStatusAudit(unittest.TestCase):
                 if path.endswith("/questions"):
                     return copy.deepcopy(qs)
                 if path.endswith("/properties"):
-                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
                 return {"title": "t", "status": "ENABLED", "count": "0"}
         for q_id, q in qs.items():
             q.setdefault("qid", q_id)
@@ -3207,12 +4015,20 @@ class FormStatusAudit(unittest.TestCase):
         for q_id, q in qs.items():
             q.setdefault("qid", q_id)
 
+        storage = {"/user/usage": {"uploads": "1340458410", "submissions": "474", "total_submissions": "690",
+                                   "monthly_usage_reset_date": "2026-10-21 00:00:00", "form_count": "5"},
+                   "/user": {"account_type": "https://api.jotform.com/system/plan/SILVER"},
+                   "/system/plan/SILVER": {"name": "SILVER", "limits": {"uploads": 10738466816, "submissions": 2500}}}
+
         class Fake:
             def get(self, path, **params):
                 if path.endswith("/questions"):
                     return copy.deepcopy(qs)
                 if path.endswith("/properties"):
-                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}]}
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
+                if path in storage:
+                    return copy.deepcopy(storage[path])
                 return {"title": "t", "status": "ENABLED", "count": "0"}
 
         select = ('<select name="q500_clubPicker[]" multiple="">'
@@ -3252,9 +4068,29 @@ class FormStatusAudit(unittest.TestCase):
             self.assertIn(f"rendered rules: question 18 is rule 1 of {len(wire)}, the first roster rule 2; "
                           "its operands list the picker: yes", good)
             self.assertIn("rendered rosters: 4 with boxes, 4 with validate[required] (8 of 8 boxes)", good)
+            self.assertIn("rendered shape: clearFieldOnHide disable, module selects served multiple: none", good)
+            self.assertIn("module shape: year q94 single-select required; modules q14/q92/q93 single-select "
+                          "required; sessions q15/q95/q96/q97 single-select required; clearFieldOnHide disable", good)
             self.assertIn("→ CLEAN", good)
             for name in ("Jane Doe", "Ann Poe", "Sue Moe"):         # counts only, never a girl
                 self.assertNotIn(name, good)
+            # the storage line right after the Roster line (never a form problem), and in --json
+            self.assertIn("clubs per region\nstorage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; submissions "
+                          "this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER\n", good)
+            (rep,) = json.loads(report(roster, "--json"))
+            self.assertEqual(rep["storage"]["levels"], {"uploads": "ok", "submissions": "ok"})
+            self.assertEqual((rep["storage"]["plan"], rep["storage"]["reset"]), ("SILVER", "2026-10-21"))
+            self.assertEqual(rep["rule_problems"], [])                    # not one of them
+            storage["/user/usage"]["uploads"] = str(10738466816 * 9 // 10)
+            out = report(roster)
+            self.assertIn("\n!! storage: upload space 9.00 GiB of 10.00 GiB (90.0%) -> alarm;", out)
+            self.assertIn("→ CLEAN", out)                                 # account-wide: no form turns NOT CLEAN
+            del storage["/user"]["account_type"]
+            out = report(roster)
+            self.assertIn("\nstorage: could not be read (GET /user: no account_type", out)
+            self.assertIn("→ CLEAN", out)
+            self.assertIn("error", json.loads(report(roster, "--json"))[0]["storage"])
+            storage["/user"]["account_type"] = "https://api.jotform.com/system/plan/SILVER"
             self.assertIn("rendered picker: 4 options, 3 with data-calcvalue = value, 1 different", bad)
             self.assertIn("would send another club's name", bad)
             self.assertNotIn("CLEAN", bad)
@@ -3291,6 +4127,281 @@ class FormStatusAudit(unittest.TestCase):
             out = report(roster, "--rendered", page=empty + "\n<!--rest-->")
             self.assertIn("rendered picker: 0 options", out)
             self.assertIn("→ CLEAN", out)
+
+
+class RetiredRostersAudit(unittest.TestCase):
+    """tools/form_status.py and the retired rosters (docs/plans/2026-10-06-clubs-off-
+    jotform.md): with --partners a roster the Roster says is retired is clean off the
+    picker without a rule, awaits the next sync apply while it still has one, and a
+    roster off the picker whose club is active is a problem - as every such roster is
+    without --partners; a disabled form's region check and served page are skipped;
+    the served page's always-hidden count. Fictional names."""
+
+    ROSTER, QIDS, LONG = SameNameFlow.ROSTER, SameNameFlow.QIDS, SameNameFlow.LONG
+    AFRICA = glow_forms.REGIONALS["Africa"]
+    NO = {"partner two": "no"}
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.roster = self.roster_csv()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def roster_csv(self, roster=None, inactive=None, removed=None, name="roster.csv"):
+        """A Roster export: `roster` active in Africa, `inactive` rows of another status
+        with the removed_date `removed` gives their club."""
+        import csv
+        roster = self.ROSTER if roster is None else roster
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["girl_id", "partner", "club", "full_name", "status", "region", "removed_date"])
+            for status, clubs in (("active", roster), ("inactive", inactive or {})):
+                for (partner, club), names in clubs.items():
+                    for n, name_ in enumerate(names):
+                        w.writerow([f"DEMOCLUB-SAMPLE-{n:03d}", partner, club, name_, status, "Africa",
+                                    (removed or {}).get((partner, club), "") if status != "active" else ""])
+        return path
+
+    def form(self, retired=(), **kw):
+        """SameNameFlow's switched form, every question carrying its qid, with the rosters
+        `retired` as the sync leaves them (no show rule, off the picker)."""
+        qs, wire = SameNameFlow.form(SameNameFlow(), switched=True, **kw)
+        qs["2"] = {"type": "control_button", "text": "Submit", "name": "submit2", "order": "60"}
+        if retired:
+            option_of, partner_of = SameNameFlow.texts(SameNameFlow(), self.ROSTER, True)
+            keep = {q: o for q, o in option_of.items() if q not in retired}
+            qs["500"]["options"] = "|".join(sorted(set(keep.values()), key=str.lower))
+            modules = {y: o.split("|") for y, o in SameNameFlow.MODULES.items()}
+            conds = sync.build_conditions(keep, partner_of, modules, picker="500", retired=retired)
+            wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+        return qs, wire
+
+    @staticmethod
+    def verified(rep):
+        """auto_sync.verify_report over the report, the fakes' own gaps filled (no integration, two
+        languages, no translation store: none of them this plan's)."""
+        return auto_sync.verify_report(dict(rep, languages=["a"] * 12, salesforce=True, names_dictionary={"checked": True}))
+
+    def report(self, qs, wire, marks=None, roster=None, status="ENABLED", form=None):
+        """form_report as main() calls it: the Roster's regions, holders and facts from
+        `roster` (the export), the Partners marks (None: no --partners)."""
+        roster = roster or self.roster
+
+        class Fake:
+            def get(self, path, **params):
+                if path.endswith("/questions"):
+                    return copy.deepcopy(qs)
+                if path.endswith("/properties"):
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
+                return {"title": "t", "status": status, "count": "0"}
+        partners_of = form_status.load_partners(roster) or None
+        facts = form_status.roster_facts(roster, marks) if partners_of else None
+        return form_status.form_report(form or self.AFRICA, Fake(), form_status.load_roster(roster), partners_of, facts)
+
+    def printed(self, qs, wire, *extra, partners=None, status="ENABLED", page=None):
+        """main()'s printed report for the Africa form (never the public page: `page`, if
+        given, stands in for it)."""
+        import contextlib
+        import csv
+        import io
+        from unittest import mock
+
+        class Fake:
+            def get(self, path, **params):
+                if path.endswith("/questions"):
+                    return copy.deepcopy(qs)
+                if path.endswith("/properties"):
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
+                return {"title": "t", "status": status, "count": "0"}
+        argv = ["form_status.py", "--form", self.AFRICA, "--roster", self.roster, *extra]
+        if partners is not None:
+            path = os.path.join(self.tmp.name, "partners.csv")
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(glow_sync.PARTNER_COLS)
+                for p in ("Partner One", "Partner Two"):
+                    w.writerow([p, "Africa", "", partners.get(p, "")])
+            argv += ["--partners", path]
+        fetched = []
+
+        def public_page(fid):
+            fetched.append(fid)
+            return page or ""
+        out = io.StringIO()
+        with mock.patch.object(form_status, "Client", lambda key: Fake()), \
+                mock.patch.object(form_status, "public_page", public_page), \
+                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
+            form_status.main()
+        return out.getvalue(), fetched
+
+    def test_a_retired_roster_is_clean_with_the_partners_export(self):
+        qs, wire = self.form(retired=("12", "13"))
+        rep = self.report(qs, wire, marks=self.NO)
+        self.assertEqual(rep["rule_problems"], [])
+        self.assertEqual(rep["retired_rosters"], {"total": 2, "not_on_jotform": 2, "no_active_girl": 0})
+        self.assertEqual((rep["retired_qids"], rep["awaiting_retirement"]), (["12", "13"], 0))
+        self.assertEqual((rep["rule_summary"]["clubs"], rep["rule_summary"]["live_rosters"],
+                          rep["rule_summary"]["show_rules"], rep["rule_summary"]["aggregate_rosters"]), (4, 2, 2, 4))
+        # the region check: Partner Two's share of "Stars" leaves the union compare, Beta Club leaves want
+        self.assertEqual(rep["region_check"], {
+            "roster_clubs": 2, "missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": [],
+            "retired": ["Stars", "Beta Club"], "awaiting_retirement": []})
+        out, _ = self.printed(qs, wire, partners={"Partner Two": "no"})
+        self.assertIn("Roster (active girls): {'Africa': 2} clubs per region; not on Jotform: Africa 2\n", out)
+        self.assertIn("   retired rosters: 2 (not on Jotform 2, no active girl 0)\n", out)
+        self.assertIn("   rules: 2 show-rules for 2 live rosters (4 on the form), Contact_IDs aggregate covers 4  → CLEAN", out)
+        self.assertIn("   vs Roster (2 clubs in region): 0 missing from form, 0 on form but not in roster, 0 rosters "
+                      "differ, 2 retired\n", out)
+        for name in ("Sue Moe", "Liz Noe", "Eve Hoe"):          # counts and club names only
+            self.assertNotIn(name, out)
+        # the verify step reads it clean
+        self.assertEqual(self.verified(rep), ([], []))
+        # a retired roster whose girls differ from the Roster's is no "differs": its options are frozen
+        qs["13"]["options"] = "Nobody Known"
+        self.assertEqual(self.report(qs, wire, marks=self.NO)["region_check"]["rosters_out_of_date"], [])
+
+    def test_a_marked_roster_still_on_the_form_awaits_the_next_apply(self):
+        qs, wire = self.form()
+        rep = self.report(qs, wire, marks=self.NO)
+        self.assertEqual(rep["rule_problems"], [])
+        self.assertEqual(rep["retired_rosters"], {"total": 0, "not_on_jotform": 0, "no_active_girl": 0})
+        self.assertEqual(rep["awaiting_retirement"], 2)
+        self.assertEqual((rep["region_check"]["retired"], rep["region_check"]["awaiting_retirement"]),
+                         ([], ["Stars", "Beta Club"]))
+        self.assertEqual((rep["region_check"]["roster_clubs"], rep["region_check"]["not_in_roster"]), (2, []))
+        out, _ = self.printed(qs, wire, partners={"Partner Two": "no"})
+        self.assertIn("rules: 4 show-rules for 4 rosters, Contact_IDs aggregate covers 4  → CLEAN", out)
+        self.assertIn("0 rosters differ, 2 await retirement (the next sync apply)\n", out)
+        # a note to the audit, a problem to the verify step (an apply leaves nothing awaiting)
+        problems, _ = self.verified(rep)
+        self.assertEqual(problems, ["2 roster(s) still await retirement: Stars, Beta Club"])
+        # without the marks the same form is simply in step
+        rep = self.report(qs, wire)
+        self.assertEqual((rep["rule_problems"], rep["awaiting_retirement"], rep["region_check"]["roster_clubs"]), ([], 0, 3))
+
+    def test_without_the_partners_export_a_retired_roster_of_an_active_club_is_a_problem(self):
+        qs, wire = self.form(retired=("12", "13"))
+        rep = self.report(qs, wire)
+        self.assertEqual(rep["rule_problems"], [
+            "'Stars' (q12) is off the Club picker but its club is active in the Roster - pass --partners if its "
+            "partner is not on Jotform, else the next sync apply restores it",
+            "'Beta Club' (q13) is off the Club picker but its club is active in the Roster - pass --partners if its "
+            "partner is not on Jotform, else the next sync apply restores it"])
+        self.assertEqual(rep["retired_rosters"]["total"], 0)
+        out, _ = self.printed(qs, wire)
+        self.assertIn("2 PROBLEM(S)", out)
+        self.assertNotIn("show-rules, expected 1", out)
+        self.assertNotIn("club picker misses", out)
+        # the same with the export when the partner is not marked: the next apply restores it
+        self.assertEqual(len(self.report(qs, wire, marks={})["rule_problems"]), 2)
+        # and the Roster's own shape of the problem: a roster without its rule on a form the
+        # audit is given no Roster for keeps today's lines
+        rep = form_status.form_report(self.AFRICA, type("F", (), {"get": lambda self, path, **k: (
+            copy.deepcopy(qs) if path.endswith("/questions") else
+            {"conditions": wire, "clearFieldOnHide": "disable"} if path.endswith("/properties") else
+            {"title": "t", "status": "ENABLED", "count": "0"})})(), {})
+        self.assertIn("'Stars' (q12) has 0 show-rules, expected 1", rep["rule_problems"])
+
+    def test_a_club_with_no_active_girl_is_retired_the_day_after_and_a_namesakes_entry_is_not_its_own(self):
+        import datetime as dt
+        from unittest import mock
+        today = glow_sync.sheet_today()          # the sheet's day, as the audit reads it (not UTC's)
+        gone = {("Partner Two", "Stars"): self.ROSTER[("Partner Two", "Stars")]}
+        sheet = {k: v for k, v in self.ROSTER.items() if k not in gone}
+        qs, wire = self.form(retired=("12",))          # q11's "Stars - Partner One" stays on the picker
+        for when, reason in ((str(today - dt.timedelta(days=1)), "no active girl"), (str(today), None)):
+            roster = self.roster_csv(sheet, gone, {("Partner Two", "Stars"): when}, name=f"r{when}.csv")
+            rep = self.report(qs, wire, marks={}, roster=roster)
+            if reason:
+                self.assertEqual(rep["rule_problems"], [])
+                self.assertEqual(rep["retired_rosters"], {"total": 1, "not_on_jotform": 0, "no_active_girl": 1})
+                self.assertEqual(rep["region_check"]["retired"], ["Stars"])
+                self.assertEqual(rep["region_check"]["rosters_out_of_date"], [])  # q11 alone against Partner One's girls
+            else:
+                # the same day: not retired, not stray (its club is not active) - today's lines, the
+                # inactive namesake's girls counted against the name included
+                self.assertEqual(rep["rule_problems"], ["'Stars' (q12) has 0 show-rules, expected 1",
+                                                        "club picker misses 1 club(s): ['Stars']"])
+                self.assertEqual(rep["region_check"]["rosters_out_of_date"], [("Stars", 0, 2)])
+        roster = self.roster_csv(sheet, gone, {("Partner Two", "Stars"): str(today - dt.timedelta(days=1))}, name="r3.csv")
+        with mock.patch.object(glow_sync, "RETIRE_INACTIVE", False):
+            self.assertEqual(self.report(qs, wire, marks={}, roster=roster)["retired_rosters"]["total"], 0)
+        # off_picker: a roster's own entries are its text and "<text> - <its partner>"
+        self.assertEqual(form_status.off_picker(qs, wire, {"12": "Partner Two"}), {"12"})
+        self.assertEqual(form_status.off_picker(qs, wire), set())           # owner unknown: any long name of its text
+        self.assertEqual(form_status.off_picker(*self.form(retired=("13",))), {"13"})
+
+    def test_a_disabled_forms_region_check_and_served_page_are_skipped(self):
+        qs, wire = self.form()
+        rep = self.report(qs, wire, marks=self.NO, status="DISABLED")
+        self.assertEqual(rep["region_check"], {"skipped": "DISABLED"})
+        self.assertEqual(rep["status"], "DISABLED")
+        self.assertEqual(self.verified(rep),
+                         ([], ["region check skipped (form DISABLED)"]))
+        out, fetched = self.printed(qs, wire, "--rendered", partners={"Partner Two": "no"}, status="DISABLED")
+        self.assertEqual(fetched, [])                                        # the public page is never read
+        self.assertIn('[DISABLED]', out)
+        self.assertIn("   rendered: skipped (form DISABLED)\n", out)
+        self.assertIn("   vs Roster: skipped (form DISABLED)\n", out)
+        self.assertNotIn("rendered picker", out)
+        self.assertIn("→ CLEAN", out)
+        # an enabled form's page is read, as ever
+        _, fetched = self.printed(qs, wire, "--rendered", page="<html></html>")
+        self.assertEqual(fetched, [self.AFRICA])
+
+    def test_a_form_whose_status_is_not_reported_is_skipped_like_a_disabled_one(self):
+        # GET /form/{id} without a status: the region check and the served page are skipped and
+        # named as such (a falsy marker once sent main() looking for the clubs count: KeyError)
+        qs, wire = self.form()
+        rep = self.report(qs, wire, marks=self.NO, status=None)
+        self.assertEqual(rep["region_check"], {"skipped": "status not reported"})
+        self.assertIsNone(rep["status"])
+        self.assertEqual(self.verified(rep), ([], ["region check skipped (form status not reported)"]))
+        out, fetched = self.printed(qs, wire, "--rendered", partners={"Partner Two": "no"}, status=None)
+        self.assertEqual(fetched, [])
+        self.assertIn("[status not reported]", out)
+        self.assertIn("   rendered: skipped (form status not reported)\n", out)
+        self.assertIn("   vs Roster: skipped (form status not reported)\n", out)
+        self.assertIn("→ CLEAN", out)
+
+    def test_the_served_page_is_counted_for_the_retired_rosters_always_hidden(self):
+        page = ('<li class="form-line always-hidden" data-type="control_checkbox" id="id_12">'
+                '<input type="checkbox" class="form-checkbox validate[required]" id="input_12_0" value="x"></li>'
+                '<li id="id_13" class="form-line form-field-hidden" data-type="control_checkbox"></li>'
+                '<li class="form-line" id="id_10"></li>')
+        self.assertEqual(form_status.rendered_retired(page, ["12", "13"]), {"retired": 2, "always_hidden": 1})
+        self.assertEqual(form_status.rendered_retired(page, ["12"]), {"retired": 1, "always_hidden": 1})
+        self.assertEqual(form_status.rendered_retired(page, ["14"]), {"retired": 0, "always_hidden": 0})
+        self.assertEqual(form_status.rendered_retired("", ["12"]), {"retired": 0, "always_hidden": 0})
+
+        def problems(page, retired):
+            r = {"club_picker": None, "roster_qids": [], "retired_qids": retired, "id": self.AFRICA}
+            found = form_status.rendered_problems(r, page)
+            return [p for p in found if "retired rosters" in p], r.get("rendered_retired")
+        found, counts = problems(page, ["12", "13"])
+        self.assertEqual(counts, {"retired": 2, "always_hidden": 1})
+        self.assertEqual(len(found), 1)
+        self.assertIn("rendered page: 1 of the 2 retired rosters are served always-hidden (2 found)", found[0])
+        self.assertIn("no mentor could send the form", found[0])
+        self.assertEqual(problems(page, ["12"]), ([], {"retired": 1, "always_hidden": 1}))
+        found, counts = problems(page, ["12", "14"])                      # one not served at all
+        self.assertEqual((len(found), counts), (1, {"retired": 1, "always_hidden": 1}))
+        self.assertEqual(problems(page, [])[1], None)                      # no retired roster: nothing counted
+        # the printed line, on the retired form with its page
+        qs, wire = self.form(retired=("12", "13"))
+        served = ('<li class="form-line always-hidden" id="id_12"></li><li class="form-line always-hidden" id="id_13"></li>'
+                  + served_rules_and_rosters(qs, wire))
+        out, _ = self.printed(qs, wire, "--rendered", partners={"Partner Two": "no"}, page=served)
+        self.assertIn("   rendered retired: 2 retired rosters, 2 always-hidden\n", out)
+        self.assertNotIn("retired rosters are served always-hidden", out)
 
 
 class RestoreConditionsGuard(unittest.TestCase):
@@ -3398,7 +4509,7 @@ class FormStatusLayout(unittest.TestCase):
         def get(self, path, **params):
             if path.endswith("/properties"):
                 return {"conditions": [], "language": [{"options": "English|Español"}],
-                        "integrations": {"salesforceV2": {"on": 1}}}
+                        "integrations": {"salesforceV2": {"on": 1}}, "clearFieldOnHide": "disable"}
             if path.endswith("/questions"):
                 return copy.deepcopy(self.qs)
             return {"title": "Attendance Form (Template)", "status": "ENABLED", "count": "0"}
@@ -3879,6 +4990,24 @@ class PythonAppsScriptParity(unittest.TestCase):
         cols = re.findall(r"'([a-z_]+)'", gs_block(self.config, "ROSTER_COLS"))
         self.assertTrue({"partner", "club", "full_name", "status", "region"} <= set(cols))
         self.assertEqual(cols[0], "girl_id")
+
+    def test_partner_columns(self):
+        # the Partners tab's columns: Roster.gs writes them (setUpTabs, seedPartners_) and reads the
+        # jotform cell for the mentor e-mails (loadPartnerJotform_), the offline builder keeps its own
+        # copy, Python reads the cell for the forms (glow.sync). CLAUDE.md rule 7: change all three
+        for path in (ROSTER_GS, os.path.join(REPO, "tools", "build_roster_offline.js")):
+            m = re.search(r"const PARTNER_COLS = \[(.*?)\];", read(path), re.S)
+            self.assertIsNotNone(m, path)
+            self.assertEqual(tuple(re.findall(r"'([a-z_]+)'", m.group(1))), glow_sync.PARTNER_COLS, path)
+            self.assertEqual(m.group(1).count("'") // 2, len(glow_sync.PARTNER_COLS), path)
+        self.assertIn(glow_sync.JOTFORM_COL, glow_sync.PARTNER_COLS)
+        self.assertEqual(glow_sync.PARTNER_COLS[:3], ("partner", "region", "notes"))   # the live tab's header
+        # the Apps Script finds the column by the tab's own header row (key_), as Python's
+        # read_partners_csv reads the export by header - never by the constant's position
+        reader = re.search(r"function loadPartnerJotform_\(\) \{(.*?)\n\}", read(ROSTER_GS), re.S).group(1)
+        self.assertIn("getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(key_)", reader)
+        self.assertIn(f"header.indexOf('{glow_sync.JOTFORM_COL}')", reader)
+        self.assertNotIn("PARTNER_COLS", reader)
 
     def test_regions_match_glow_forms(self):
         # the Club Roster Form's region picker (Config.gs REGIONS) must offer
@@ -4371,6 +5500,684 @@ class RenameClub(unittest.TestCase):
         code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(), key="test")
         self.assertEqual(code, 0, out)
         self.assertEqual(sheet.tabs["Audit"][-1][1], "moveClub")
+
+
+class GuardForms:
+    """The GETs tools/deactivate_clubs.py's guard makes: the filtered submissions page(s)
+    of each form, its questions (q444 is the Club picker) and, for a region whose every
+    club is chosen, the form itself (its status: ENABLED unless the id is in `disabled`).
+    subs: {form id: [submission]}."""
+
+    def __init__(self, subs=None, picker="444", disabled=()):
+        self.subs, self.picker, self.gets = subs or {}, picker, []
+        self.disabled = set(disabled)
+
+    def get(self, path, **params):
+        self.gets.append((path, params))
+        if path.endswith("/questions"):
+            return {self.picker: {"type": "control_dropdown", "name": sync.PICKER_NAME},
+                    "5": {"type": "control_textbox"}}
+        if re.fullmatch(r"/form/\d+", path):
+            form_id = path.rsplit("/", 1)[1]
+            return {"id": form_id, "status": "DISABLED" if form_id in self.disabled else "ENABLED"}
+        page = self.subs.get(path.split("/")[2], [])
+        offset, limit = int(params.get("offset", 0)), int(params.get("limit", 1000))
+        return page[offset:offset + limit]
+
+
+def submission(sid, created, q5, picks):
+    """One attendance submission as the API lists it, the two answers the guard reads."""
+    return {"id": sid, "created_at": created,
+            "answers": {"5": {"answer": q5}, "444": {"answer": picks}, "18": {"answer": "x"}}}
+
+
+class DeactivateClubs(unittest.TestCase):
+    """tools/deactivate_clubs.py on an in-memory sheet and a fake form: the plan, the guard
+    and its match rule, the write, the re-read, the Audit row, --undo."""
+
+    HDR = ["girl_id", "partner", "club", "region", "full_name", "last_name", "status",
+           "added_date", "removed_date", "source"]
+    AFRICA, US = glow_forms.REGIONALS["Africa"], glow_forms.REGIONALS["U.S"]
+
+    def roster(self):
+        g = lambda n, p, c, r, name, status, removed="": \
+            [f"T{n}", p, c, r, name, name.split()[-1], status, "2026-08-26", removed, "T!2"]
+        return [self.HDR,
+                g(1, "Partner One", "QUEENS", "Africa", "Ann Poe", "active"),              # row 2
+                g(2, "Partner One", " queens ", "Africa", "Kay Loe", "active"),            # 3: the same club
+                g(3, "Partner One", "QUEENS", "Africa", "Sue Moe", "inactive", "2026-09-01"),   # 4: left already
+                g(4, "Partner Two", "Queens of Quest", "Africa", "Uma Roe", "active"),     # 5: 'QUEENS' is its prefix
+                g(5, "Partner Three", "Sunrise Club", "U.S", "Eve Hoe", "active"),         # 6
+                g(6, "Partner Three", "Sunrise Club", "U.S", "Ida Toe", " Active "),       # 7: the status as typed
+                g(7, "Partner Four", "Moon Club", "U.S", "Dee Koe", "active"),             # 8
+                g(8, "Partner One", "Stars", "Africa", "Fay Low", "active")]               # 9
+
+    def sheet(self, before_read=None, rows=None):
+        return FakeSheet({"Roster": rows or self.roster(), "Audit": [["when", "action", "detail"]]},
+                         before_read)
+
+    class Clock:
+        """datetime stand-in: 2026-10-07 14:00 UTC (10:00 in New York, the sheet's zone)."""
+        import datetime as _dt
+        instant = _dt.datetime(2026, 10, 7, 14, 0, 0, tzinfo=_dt.timezone.utc)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.instant.astimezone(tz) if tz else cls.instant.astimezone().replace(tzinfo=None)
+
+    def run_main(self, argv, sheet, client=None, key="test", clock=None, out=None):
+        """(exit code, stdout). client: the guard's Jotform (GuardForms; by default one whose U.S
+        form is DISABLED, the order the RUNBOOK has - a test of the ENABLED refusal passes its
+        own); key=None removes the API key from the environment; out: where the backup folders
+        go (a temp dir otherwise)."""
+        import contextlib
+        import io
+        import tempfile
+        from unittest import mock
+        env = dict(os.environ)
+        env.pop("JOTFORM_API_KEY", None)
+        if key:
+            env["JOTFORM_API_KEY"] = key
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(deactivate_clubs, "OUT", out or d), \
+                mock.patch.object(deactivate_clubs.sc, "service", lambda: sheet), \
+                mock.patch.object(deactivate_clubs.sc, "read_tab", sheet.read_tab), \
+                mock.patch.object(deactivate_clubs.sc, "append_rows", sheet.append_rows), \
+                mock.patch.object(deactivate_clubs.sc, "spreadsheet_id", lambda: "SHEET"), \
+                mock.patch.object(deactivate_clubs.sc, "sa_email", lambda: "robot"), \
+                mock.patch.object(deactivate_clubs.sc, "time_zone", lambda svc: "America/New_York"), \
+                mock.patch.object(deactivate_clubs, "datetime", clock or self.Clock), \
+                mock.patch.object(deactivate_clubs, "Client",
+                                  lambda api_key, apply=False: client or GuardForms(disabled={self.US})), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(sys, "argv", ["deactivate_clubs.py"] + argv), \
+                contextlib.redirect_stdout(buf):
+            try:
+                deactivate_clubs.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+            finally:
+                self.written = sorted(os.listdir(out or d))
+        return code, buf.getvalue()
+
+    def test_matches_is_exact_or_the_long_name_never_a_prefix(self):
+        m = deactivate_clubs.matches
+        self.assertTrue(m("QUEENS", "Queens", "Partner One"))
+        self.assertTrue(m(" queens ", "QUEENS", "Partner One"))
+        self.assertTrue(m("QUEENS - Partner One", "QUEENS", "Partner One"))      # "<club> - <its partner>"
+        self.assertTrue(m("queens -  partner one", "QUEENS", "Partner One"))     # by key, both halves
+        self.assertEqual(m(sync.sf_club_name("QUEENS", "Partner One", True), "QUEENS", "Partner One"), True)
+        self.assertFalse(m("Queens of Quest", "QUEENS", "Partner One"))          # the pinned pair (plan, B)
+        self.assertFalse(m("QUEENS", "Queens of Quest", "Partner Two"))
+        self.assertFalse(m("QUEENSX", "QUEENS", "Partner One"))
+        self.assertFalse(m("QUEENS -Partner One", "QUEENS", "Partner One"))      # not the separator
+        self.assertFalse(m("Ruby - Partner Two", "Ruby", "Partner One"))         # a namesake's long name
+        self.assertFalse(m("Ruby - Partner One - Partner Two", "Ruby", "Partner One"))
+        self.assertFalse(m("QUEENS - Partner One", "QUEENS", ""))                # no partner, no long form
+        self.assertFalse(m("", "QUEENS", "Partner One"))
+        self.assertFalse(m("QUEENS", "", "Partner One"))
+
+    def test_selectors(self):
+        sheet = self.sheet()
+        code, out = self.run_main(["--region", "u.s", "--reason", "x"], sheet)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Sunrise Club", out)
+        self.assertIn("2 active row(s)   rows 6-7", out)             # ' Active ' counts; row order
+        self.assertIn("Moon Club", out)
+        self.assertIn("Roster             3 row(s) -> status inactive, removed_date 2026-10-07 (6 cells)", out)
+        self.assertIn("Audit              1 row appended", out)
+        self.assertIn("--undo", out)
+        self.assertIn("DRY RUN", out)
+        self.assertNotIn("QUEENS", out)
+        self.assertEqual(sheet.batches, [])
+        code, out = self.run_main(["--partner", "partner one"], sheet)
+        self.assertEqual(code, 0, out)
+        self.assertIn("QUEENS", out)
+        self.assertIn("2 active row(s)   rows 2-3", out)             # the inactive row 4 is not planned
+        self.assertIn("Stars", out)
+        self.assertNotIn("Queens of Quest", out)
+        code, out = self.run_main(["--partner", "Partner One", "--club", "queens"], sheet)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Roster             2 row(s) -> status inactive", out)      # QUEENS alone, rows 2-3
+        self.assertNotIn("Stars", out)
+        # names, never: the plan lists rows, counts, partners and clubs
+        for name in ("Ann Poe", "Kay Loe", "Eve Hoe"):
+            self.assertNotIn(name, out)
+
+    def test_refusals_before_anything_is_read(self):
+        sheet = self.sheet()
+        for argv, text in ([[], "choose the clubs"],
+                           [["--club", "QUEENS"], "exactly one --partner"],
+                           [["--region", "U.S", "--check-only", "--apply"], "drop --apply"],
+                           [["--region", "U.S", "--apply"], "--apply needs --reason"],
+                           [["--undo", "x", "--region", "U.S"], "--undo takes no selector"],
+                           [["--undo", "x", "--form-enabled-ok"], "--undo takes no selector and no guard flag"],
+                           [["--region", "U.S", "--recent-days", "-1"], "0 or more"]):
+            code, _ = self.run_main(argv, sheet)
+            self.assertIn(text, str(code), argv)
+            self.assertEqual(sheet.reads, {}, argv)
+        for argv, text in ([["--region", "Mars"], "--region 'Mars' matches no active Roster row"],
+                           [["--partner", "Nobody"], "--partner 'Nobody' matches no active Roster row"],
+                           [["--partner", "Partner One", "--club", "Moon Club"], "--club 'Moon Club' matches"],
+                           [["--partner", "Partner One", "--partner", "Nobody"], "--partner 'Nobody' matches"]):
+            code, _ = self.run_main(argv, sheet)
+            self.assertIn(text, str(code), argv)
+            self.assertIn("Africa / Asia / Latin America / U.S", str(code))
+        self.assertEqual(sheet.batches, [])
+        code, _ = self.run_main(["--region", "U.S"], sheet, key=None)
+        self.assertIn("Set JOTFORM_API_KEY", str(code))
+        self.assertIn("before any club is deactivated", str(code))
+        rows = self.roster() + [["T9", "Partner Five", "Comet Club", "", "Bea Goe", "Goe", "active", "2026-08-26", "", "T!2"]]
+        code, _ = self.run_main(["--partner", "Partner Five"], self.sheet(rows=rows))
+        self.assertIn("region ''", str(code))
+        self.assertIn("no attendance form's", str(code))
+
+    def africa_forms(self):
+        """Africa: one plain submission for Queens of Quest, and one that picked QUEENS together
+        with Queens of Quest (the 2026-09-25 shape); U.S: nothing."""
+        return GuardForms({self.AFRICA: [
+            submission("1", "2026-10-01 09:00:00", "Queens of Quest", ["Queens of Quest"]),
+            submission("2", "2026-09-25 11:26:00", "QUEENSQueens of Quest", ["QUEENS", "Queens of Quest"]),
+        ]})
+
+    def test_check_only_prints_the_counts_and_plans_nothing(self):
+        sheet, forms = self.sheet(), self.africa_forms()
+        code, out = self.run_main(["--partner", "Partner One", "--check-only"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"Africa form {self.AFRICA}: 2 submissions since 2026-09-01 read", out)
+        self.assertRegex(out, r"Partner One\s+2 club\(s\)\s+1 submission\(s\)  \(last 2026-09-25; 1 picked together with another club\)")
+        self.assertIn("'QUEENS': 1 submission(s), 2026-09-25", out)
+        self.assertNotIn("'Stars':", out)
+        self.assertIn("--check-only: 3 active row(s) of 2 club(s) would be deactivated; nothing planned", out)
+        self.assertNotIn("DRY RUN", out)
+        self.assertNotIn("Roster  ", out)
+        self.assertEqual((sheet.batches, len(sheet.tabs["Audit"])), ([], 1))
+        # the submissions GET is filtered since launch and paged with Jotform's maximum
+        subs_gets = [(p, q) for p, q in forms.gets if p.endswith("/submissions")]
+        self.assertEqual(len(subs_gets), 1)
+        self.assertIn("created_at%3Agt", subs_gets[0][1]["filter"])
+        self.assertEqual((subs_gets[0][1]["limit"], subs_gets[0][1]["offset"]), (1000, 0))
+        # the exact rule in the flow: Queens of Quest's two submissions are its own
+        code, out = self.run_main(["--partner", "Partner Two", "--check-only"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"Partner Two\s+1 club\(s\)\s+2 submission\(s\)")
+        self.assertIn("'Queens of Quest': 2 submission(s), 2026-09-25, 2026-10-01", out)
+        code, out = self.run_main(["--region", "U.S", "--check-only"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"U.S form {self.US}: 0 submissions since 2026-09-01 read", out)
+        self.assertRegex(out, r"Partner Three\s+1 club\(s\)\s+0 submission\(s\)\n")
+
+    def test_a_recent_submission_stops_the_run_unless_anyway(self):
+        sheet, forms = self.sheet(), self.africa_forms()
+        code, out = self.run_main(["--partner", "Partner One", "--reason", "x"], sheet, forms)
+        self.assertEqual(str(code), "'QUEENS' (Partner One) sent attendance on 2026-09-25 - deactivating a club "
+                                    "that reports needs --deactivate-anyway (1 of the 2 club(s) named in a "
+                                    "submission since 2026-09-07)")
+        self.assertNotIn("DRY RUN", out)
+        code, out = self.run_main(["--partner", "Partner One", "--reason", "x", "--deactivate-anyway"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn("going on: --deactivate-anyway", out)
+        self.assertIn("DRY RUN", out)
+        code, out = self.run_main(["--partner", "Partner One", "--reason", "x", "--recent-days", "5"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn("no chosen club was named in a submission since 2026-10-02", out)
+        # the prefix pair: Queens of Quest's submissions never stop a run for 'QUEENS'
+        forms = GuardForms({self.AFRICA: [submission("1", "2026-10-06 09:00:00", "Queens of Quest", ["Queens of Quest"])]})
+        code, out = self.run_main(["--partner", "Partner One", "--club", "QUEENS", "--reason", "x"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn("no chosen club was named", out)
+        self.assertEqual(sheet.batches, [])
+
+    def test_a_whole_region_needs_its_form_off_first(self):
+        # every active U.S club chosen while the U.S form is ENABLED: the dry run says so, --apply
+        # refuses without --form-enabled-ok (deactivated first, the runner fails on the empty region)
+        sheet, forms = self.sheet(), GuardForms()
+        code, out = self.run_main(["--region", "U.S", "--reason", "x"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"! U.S form {self.US} is ENABLED and these are all of its active clubs - disable it first "
+                      "(tools/disable_form.py), or pass --form-enabled-ok", out)
+        self.assertIn("DRY RUN", out)
+        self.assertIn(f"/form/{self.US}", [p for p, _ in forms.gets])                  # one status GET
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, forms)
+        self.assertIn(f"U.S form {self.US} is ENABLED and the chosen clubs are all of its active clubs", str(code))
+        self.assertIn("disable the form first (tools/disable_form.py", str(code))
+        self.assertIn("--form-enabled-ok", str(code))
+        self.assertEqual((sheet.batches, len(self.written)), ([], 0))                  # before the backup folder
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply", "--form-enabled-ok"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(sheet.batches), 1)
+        # the same clubs through their partners is the same whole region; one partner's is not
+        sheet, forms = self.sheet(), GuardForms()
+        code, out = self.run_main(["--partner", "Partner Three", "--partner", "Partner Four", "--reason", "x"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertIn("these are all of its active clubs", out)
+        n = len(forms.gets)
+        code, out = self.run_main(["--partner", "Partner Three", "--reason", "x", "--apply"], sheet, forms)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("all of its active clubs", out)
+        self.assertNotIn(f"/form/{self.US}", [p for p, _ in forms.gets[n:]])           # no status GET needed
+        # a DISABLED form (the RUNBOOK's order): nothing to say
+        sheet = self.sheet()
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, GuardForms(disabled={self.US}))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("disable it first", out)
+        # a status this tool cannot read is not DISABLED either
+
+        class Odd(GuardForms):
+            def get(self, path, **params):
+                out = super().get(path, **params)
+                return {"id": out["id"]} if re.fullmatch(r"/form/\d+", path) else out
+        code, _ = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], self.sheet(), Odd())
+        self.assertIn("is of no readable status and the chosen clubs", str(code))
+
+    def test_apply_writes_the_two_cells_re_reads_and_audits(self):
+        sheet = self.sheet()
+        code, out = self.run_main(["--region", "U.S", "--reason", "no reports (test)", "--apply"], sheet)
+        self.assertEqual(code, 0, out)
+        roster = sheet.tabs["Roster"]
+        self.assertEqual([(r[6], r[8]) for r in roster[6 - 1:8]],
+                         [("inactive", "2026-10-07")] * 3)
+        self.assertEqual([r[6] for r in roster[1:5]], ["active", "active", "inactive", "active"])   # untouched
+        self.assertEqual(roster[4 - 1][8], "2026-09-01")
+        self.assertEqual([r[4] for r in roster[1:]], [r[4] for r in self.roster()[1:]])          # names as they were
+        self.assertEqual(len(sheet.batches), 1)
+        self.assertEqual(len(sheet.batches[0]), 6)
+        self.assertIn("Roster: 6 cell(s) written and verified", out)
+        audit = sheet.tabs["Audit"][-1]
+        self.assertEqual(audit[0], "2026-10-07 10:00:00")                                       # the sheet's zone
+        self.assertEqual(audit[1], "deactivateRows")
+        self.assertEqual(audit[2], "2 club(s) of 2 partner(s) in U.S: 3 row(s) set inactive, removed_date "
+                                   "2026-10-07 - tools/deactivate_clubs.py (no reports (test))")
+        self.assertEqual(len(self.written), 1)
+        self.assertIn("Next (docs/RUNBOOK.md, \"Deactivating a club\")", out)
+        self.assertIn("Update form dropdowns from the Roster", out)
+        self.assertIn("--undo", out)
+        for name in ("Eve Hoe", "Ida Toe", "Dee Koe"):
+            self.assertNotIn(name, out)
+
+    def test_the_backup_folder_holds_the_tab_and_the_rows_written(self):
+        import tempfile
+        sheet = self.sheet()
+        with tempfile.TemporaryDirectory() as out:
+            code, _ = self.run_main(["--partner", "Partner One", "--club", "QUEENS", "--reason", "r", "--apply"],
+                                    sheet, out=out)
+            self.assertEqual(code, 0)
+            folder = os.path.join(out, self.written[0])
+            self.assertEqual(sorted(os.listdir(folder)), ["Roster.csv", "written.json"])
+            import csv
+            with open(os.path.join(folder, "Roster.csv"), newline="", encoding="utf-8") as f:
+                self.assertEqual(list(csv.reader(f)), self.roster())             # as it was, before
+            with open(os.path.join(folder, "written.json"), encoding="utf-8") as f:
+                rec = json.load(f)
+        self.assertEqual(rec["set"], {"status": "inactive", "removed_date": "2026-10-07"})
+        self.assertEqual((rec["status_col"], rec["removed_col"], rec["reason"]), (6, 8, "r"))
+        self.assertEqual(rec["clubs"], [["Partner One", "QUEENS", 2, "Africa"]])
+        self.assertEqual(rec["rows"], [{"row": 2, "partner": "Partner One", "club": "QUEENS", "status": "active",
+                                        "removed_date": ""},
+                                       {"row": 3, "partner": "Partner One", "club": "QUEENS", "status": "active",
+                                        "removed_date": ""}])
+        self.assertNotIn("Ann Poe", json.dumps(rec))
+
+    def test_removed_date_and_the_audit_when_are_the_sheets_day(self):
+        # 03:30 UTC on 10-07 is still 10-06 in New York, whatever zone this process is on
+        import datetime as dt
+
+        class Late(self.Clock):
+            instant = dt.datetime(2026, 10, 7, 3, 30, 0, tzinfo=dt.timezone.utc)
+        sheet = self.sheet()
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, clock=Late)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sheet.tabs["Roster"][6 - 1][8], "2026-10-06")
+        self.assertEqual(sheet.tabs["Audit"][-1][0], "2026-10-06 23:30:00")
+        self.assertIn("removed_date 2026-10-06", out)
+
+    def test_apply_stops_when_a_planned_row_changed_or_the_club_gained_a_row(self):
+        def flip(sheet, tab, n):
+            if tab == "Roster" and n == 2:                   # the re-read just before the write
+                sheet.tabs["Roster"][6 - 1][6] = "inactive"
+        sheet = self.sheet(flip)
+        code, _ = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet)
+        self.assertIn("Roster: row 6 changed since the plan was read", str(code))
+        self.assertIn("nothing written", str(code))
+        self.assertEqual((sheet.batches, len(sheet.tabs["Audit"])), ([], 1))
+        self.assertEqual(len(self.written), 1)             # the backup is taken before the re-read
+
+        def enroll(sheet, tab, n):
+            if tab == "Roster" and n == 2:
+                sheet.tabs["Roster"].append(["T9", "Partner Four", "moon club", "U.S", "Gia Mow", "Mow",
+                                             "active", "2026-10-07", "", "T!9"])
+        sheet = self.sheet(enroll)
+        code, _ = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet)
+        self.assertIn("row 10 came in for the chosen clubs", str(code))
+        self.assertEqual(sheet.batches, [])
+
+    def test_a_row_arriving_during_the_write_is_reported_not_written(self):
+        def enroll(sheet, tab, n):
+            if tab == "Roster" and n == 3:                   # the verify re-read, after the batch
+                sheet.tabs["Roster"].append(["T9", "Partner Four", "Moon Club", "U.S", "Gia Mow", "Mow",
+                                             "active", "2026-10-07", "", "T!9"])
+        sheet = self.sheet(enroll)
+        code, out = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet)
+        self.assertIn("1 row(s) of the chosen clubs arrived during the run and are still active", str(code))
+        self.assertIn("! Roster row 10: active row(s) of the chosen clubs arrived during the run", out)
+        self.assertEqual(len(sheet.batches), 1)                                   # no second batch
+        self.assertEqual(sheet.tabs["Roster"][10 - 1][6], "active")
+        self.assertEqual(sheet.tabs["Audit"][-1][1], "deactivateRows")             # what was written is audited
+        self.assertNotIn("Gia Mow", out + str(code))
+
+    def test_undo_puts_the_rows_back_and_refuses_a_changed_row(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as out:
+            sheet = self.sheet()
+            code, _ = self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, out=out)
+            self.assertEqual(code, 0)
+            folder = os.path.join(out, self.written[0])
+            code, text = self.run_main(["--undo", folder], sheet, key=None)      # no key: no guard
+            self.assertEqual(code, 0, text)
+            self.assertIn("3 row(s) -> status and removed_date as before the run of", text)
+            self.assertIn("DRY RUN", text)
+            self.assertEqual(len(sheet.batches), 1)
+            code, text = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertEqual(code, 0, text)
+            self.assertEqual([(r[6], r[8]) for r in sheet.tabs["Roster"][6 - 1:8]],
+                             [("active", ""), (" Active ", ""), ("active", "")])  # exactly as they were
+            self.assertEqual(len(sheet.batches), 2)
+            audit = sheet.tabs["Audit"][-1]
+            self.assertEqual(audit[1], "reactivateRows")
+            self.assertIn("3 row(s) of 2 club(s) of 2 partner(s) in U.S set back as before", audit[2])
+            self.assertIn("tools/deactivate_clubs.py --undo", audit[2])
+            self.assertTrue(any(d.startswith("undo-") for d in os.listdir(folder)), os.listdir(folder))
+            self.assertIn("Update form dropdowns", text)
+            # run again: the rows are active now, so every one of them "changed"
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("rows 6-8 changed since the run of", str(code))
+            self.assertEqual(len(sheet.batches), 2)
+            # a deactivation, then one girl put back by hand: the undo names her row and her club
+            # and writes nothing - before the plan, so the dry run refuses too and saves no folder
+            sheet = self.sheet()
+            self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, out=out)
+            folder = os.path.join(out, sorted(os.listdir(out))[-1])     # the fixed clock: the same stamp as above
+            saved = sorted(os.listdir(folder))
+            sheet.tabs["Roster"][7 - 1][6], sheet.tabs["Roster"][7 - 1][8] = "active", ""
+            for argv in (["--undo", folder], ["--undo", folder, "--apply"]):
+                code, text = self.run_main(argv, sheet, key=None)
+                self.assertIn("Roster: row 7 changed since the run of", str(code))
+                self.assertIn("nothing written. Look at those rows first. If the other clubs should still go back, "
+                              "take this club out of written.json - the rows and the line under \"clubs\" - and "
+                              "run again: 'Sunrise Club' (Partner Three); its own rows are then put back by hand "
+                              "from ", str(code))
+                self.assertIn("/Roster.csv or through the Club Roster Form", str(code))
+                self.assertNotIn("DRY RUN", text)
+                self.assertNotIn("Ida Toe", str(code) + text)
+            self.assertEqual(len(sheet.batches), 1)
+            self.assertEqual(sorted(os.listdir(folder)), saved)                         # no new undo- folder
+            # the remedy the message names, done: Sunrise Club out of written.json, the rest go back
+            with open(os.path.join(folder, "written.json"), encoding="utf-8") as f:
+                rec = json.load(f)
+            rec["rows"] = [r for r in rec["rows"] if r["club"] != "Sunrise Club"]
+            rec["clubs"] = [c for c in rec["clubs"] if c[1] != "Sunrise Club"]
+            with open(os.path.join(folder, "written.json"), "w", encoding="utf-8") as f:
+                json.dump(rec, f)
+            code, text = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertEqual(code, 0, text)
+            self.assertEqual([(r[6], r[8]) for r in sheet.tabs["Roster"][6 - 1:8]],
+                             [("inactive", "2026-10-07"), ("active", ""), ("active", "")])   # 6 stays, 7 by hand, 8 back
+            self.assertEqual(len(sheet.batches), 2)
+            self.assertIn("1 row(s) of 1 club(s) of 1 partner(s) in U.S set back", sheet.tabs["Audit"][-1][2])
+            code, _ = self.run_main(["--undo", out], sheet, key=None)
+            self.assertIn("no written.json", str(code))
+
+    def test_undo_refuses_a_club_with_an_active_row_it_does_not_name_before_the_plan(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as out:
+            sheet = self.sheet()
+            self.run_main(["--region", "U.S", "--reason", "x", "--apply"], sheet, out=out)
+            folder = os.path.join(out, self.written[0])
+            # a girl enrolled to Moon Club since (a Club Roster Form submission): her row is nobody's to undo
+            sheet.tabs["Roster"].append(["T9", "Partner Four", "moon club", "U.S", "Gia Mow", "Mow",
+                                         "active", "2026-10-08", "", "T!9"])
+            code, text = self.run_main(["--undo", folder], sheet, key=None)
+            self.assertEqual(str(code), "Roster: row 10 of 'Moon Club' (Partner Four) is active and not in written.json "
+                                        "(enrolled since?) - nothing written. Look at those rows first. If the other "
+                                        "clubs should still go back, take this club out of written.json - the rows "
+                                        "and the line under \"clubs\" - and run again: 'Moon Club' (Partner Four); "
+                                        "its own rows are then put back by hand from "
+                                        f"{os.path.relpath(folder, deactivate_clubs.REPO)}/Roster.csv or through "
+                                        "the Club Roster Form")
+            self.assertNotIn("DRY RUN", text)
+            self.assertEqual(len(sheet.batches), 1)
+            self.assertNotIn("Gia Mow", str(code) + text)
+            # both at once: a changed row of one club and a new row of another, every club named once
+            sheet.tabs["Roster"][7 - 1][6], sheet.tabs["Roster"][7 - 1][8] = "active", ""
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("row 7 changed since the run of", str(code))
+            self.assertIn("; row 10 of 'Moon Club' (Partner Four) is active and not in written.json", str(code))
+            self.assertIn("take these clubs out of written.json - the rows and the line under \"clubs\" - and run "
+                          "again: 'Moon Club' (Partner Four), 'Sunrise Club' (Partner Three); their own rows", str(code))
+            self.assertEqual(len(sheet.batches), 1)
+            # half an edit (a club's rows kept, its "clubs" line dropped) is refused by name
+            with open(os.path.join(folder, "written.json"), encoding="utf-8") as f:
+                rec = json.load(f)
+            rec["clubs"] = [c for c in rec["clubs"] if c[1] != "Moon Club"]
+            with open(os.path.join(folder, "written.json"), "w", encoding="utf-8") as f:
+                json.dump(rec, f)
+            code, _ = self.run_main(["--undo", folder], sheet, key=None)
+            self.assertEqual(str(code), "written.json: row 8 is 'Moon Club' (Partner Four), which has no line under "
+                                        "\"clubs\" - a club leaves written.json with its rows AND its line under "
+                                        "\"clubs\", or not at all")
+
+    def test_undo_stops_when_a_row_moves_under_it(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as out:
+            sheet = self.sheet()
+            self.run_main(["--partner", "Partner Four", "--reason", "x", "--apply"], sheet, out=out)
+            folder = os.path.join(out, self.written[0])
+
+            def reactivate(sheet, tab, n):
+                if tab == "Roster" and n == 2:               # between the undo's plan and its write
+                    sheet.tabs["Roster"][8 - 1][6] = "active"
+            sheet.before_read, sheet.reads = reactivate, {}
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("row 8 changed", str(code))
+            self.assertIn("look at those rows first (the dry run names them with their clubs)", str(code))
+            self.assertEqual(len(sheet.batches), 1)
+            sheet.tabs["Roster"][8 - 1][6] = "inactive"
+
+            def enroll(sheet, tab, n):
+                if tab == "Roster" and n == 2:               # a new Moon Club row in the same window
+                    sheet.tabs["Roster"].append(["T9", "Partner Four", "Moon Club", "U.S", "Gia Mow", "Mow",
+                                                 "active", "2026-10-08", "", "T!9"])
+            sheet.before_read, sheet.reads = enroll, {}
+            code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
+            self.assertIn("row 10 of the chosen clubs active again since the plan was read", str(code))
+            self.assertNotIn("run the tool again", str(code))
+            self.assertEqual(len(sheet.batches), 1)
+
+
+class FormApi:
+    """The Jotform calls tools/disable_form.py makes: GET /form/{id}, GET .../properties, and
+    the properties POST, which flips the status (and the message) unless flips=False - the
+    unverified case: Jotform answers 200 and changes nothing."""
+
+    def __init__(self, status="ENABLED", count=0, last="", message=disable_form.DEFAULT_MESSAGE,
+                 flips=True, title="U.S Attendance Form"):
+        self.status, self.count, self.last, self.message = status, count, last, message
+        self.flips, self.title, self.calls = flips, title, []
+
+    def get(self, path, **params):
+        self.calls.append(("GET", path))
+        if path.endswith("/properties"):
+            return {"status": self.status, "messageOfLimitedForm": self.message, "conditions": [], "emails": []}
+        if path.endswith("/questions"):
+            return {"5": {"type": "control_textbox"}}
+        return {"id": path.rsplit("/", 1)[1], "title": self.title, "status": self.status,
+                "count": str(self.count), "last_submission": self.last}
+
+    def post_form(self, path, data, label):
+        self.calls.append(("POST", path, dict(data)))
+        if self.flips:
+            self.status = data.get("properties[status]", self.status)
+            self.message = data.get("properties[messageOfLimitedForm]", self.message)
+
+
+class DisableForm(unittest.TestCase):
+    """tools/disable_form.py: the dry run, the refusals, the backup before the write, the
+    re-read that decides."""
+
+    US = glow_forms.REGIONALS["U.S"]
+
+    def run_main(self, argv, api, key="test", today="2026-10-07 14:00:00"):
+        import contextlib
+        import datetime as dt
+        import io
+        from unittest import mock
+        instant = dt.datetime.strptime(today, "%Y-%m-%d %H:%M:%S")
+
+        class Clock:
+            @staticmethod
+            def now(tz=None):
+                return instant
+
+        def snapshot(form_id, client, stamp):
+            api.calls.append(("BACKUP", form_id, stamp))
+            return {"questions": 7, "conditions": 3, "emails": 1, "salesforce": "yes"}
+        env = dict(os.environ)
+        env.pop("JOTFORM_API_KEY", None)
+        if key:
+            env["JOTFORM_API_KEY"] = key
+        buf = io.StringIO()
+        with mock.patch.object(disable_form, "Client", lambda api_key, apply=False: api), \
+                mock.patch.object(disable_form.backup_forms, "snapshot", snapshot), \
+                mock.patch.object(disable_form, "datetime", Clock), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(sys, "argv", ["disable_form.py"] + argv), \
+                contextlib.redirect_stdout(buf):
+            try:
+                disable_form.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, buf.getvalue()
+
+    def test_dry_run_reads_and_says_what_it_would_do(self):
+        api = FormApi()
+        code, out = self.run_main(["--form", self.US], api)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"U.S Attendance Form {self.US}: status ENABLED, 0 submissions (last none)", out)
+        self.assertIn("messageOfLimitedForm: 'This form is currently unavailable!'", out)
+        self.assertIn("DRY RUN - re-run with --apply to back up the form, then set status DISABLED (then re-read)", out)
+        self.assertEqual([c[0] for c in api.calls], ["GET", "GET"])
+        code, out = self.run_main(["--form", self.US, "--message", "Paused."], api)
+        self.assertEqual(code, 0, out)
+        self.assertIn("message -> 'Paused.'", out)
+        self.assertNotIn("POST", str(api.calls))
+
+    def test_refusals(self):
+        api = FormApi()
+        code, _ = self.run_main(["--form", glow_forms.TEMPLATE], api)
+        self.assertIn("the template is never disabled", str(code))
+        code, _ = self.run_main(["--form", glow_forms.DEFUNCT["U.S"]], api)
+        self.assertIn("not one of the live regional forms", str(code))
+        code, _ = self.run_main(["--form", self.US, "--enable", "--message", "x"], api)
+        self.assertIn("--enable takes no --message", str(code))
+        self.assertEqual(api.calls, [])                                   # nothing read for a refused form
+        code, _ = self.run_main(["--form", self.US], api, key=None)
+        self.assertIn("Set JOTFORM_API_KEY", str(code))
+        api = FormApi(count=3, last="2026-10-01 10:00:00")
+        code, _ = self.run_main(["--form", self.US], api)
+        self.assertIn(f"form {self.US} took a submission on 2026-10-01 (in the last 30 days)", str(code))
+        self.assertIn("--disable-anyway", str(code))
+        code, out = self.run_main(["--form", self.US, "--disable-anyway"], api)
+        self.assertEqual(code, 0, out)
+        self.assertIn("DRY RUN", out)
+        code, out = self.run_main(["--form", self.US], FormApi(count=3, last="2026-08-30 10:00:00"))
+        self.assertEqual(code, 0, out)                                    # older than 30 days: no guard
+        api = FormApi(status="FUNNY")
+        code, _ = self.run_main(["--form", self.US], api)
+        self.assertIn("neither ENABLED nor DISABLED", str(code))
+
+        class Split(FormApi):
+            def get(self, path, **params):
+                out = super().get(path, **params)
+                if path.endswith("/properties"):
+                    out["status"] = "DISABLED"
+                return out
+        code, _ = self.run_main(["--form", self.US], Split())
+        self.assertIn("not the same form state; read again before anything is written", str(code))
+
+        class SplitAfter(FormApi):
+            """The two GETs agree until the POST; the re-read then disagrees."""
+            def post_form(self, path, data, label):
+                super().post_form(path, data, label)
+                self.split = True
+
+            def get(self, path, **params):
+                out = super().get(path, **params)
+                if getattr(self, "split", False) and path.endswith("/properties"):
+                    out["status"] = "ENABLED"
+                return out
+        api = SplitAfter()
+        code, _ = self.run_main(["--form", self.US, "--apply"], api)
+        self.assertIn("not the same form state after the write - the properties POST was sent; run this again "
+                      "without --apply until both GETs agree, then decide", str(code))
+        self.assertEqual([c[0] for c in api.calls], ["GET", "GET", "BACKUP", "POST", "GET", "GET"])
+
+    def test_apply_backs_up_then_posts_then_re_reads(self):
+        api = FormApi()
+        code, out = self.run_main(["--form", self.US, "--message", "The U.S attendance form is paused.", "--apply"], api)
+        self.assertEqual(code, 0, out)
+        kinds = [c[0] for c in api.calls]
+        self.assertEqual(kinds, ["GET", "GET", "BACKUP", "POST", "GET", "GET"])     # the backup before the write
+        self.assertEqual(api.calls[3][2], {"properties[status]": "DISABLED",
+                                           "properties[messageOfLimitedForm]": "The U.S attendance form is paused."})
+        self.assertIn("backup_forms: form", out)
+        self.assertIn("status DISABLED, 0 submissions", out)
+        self.assertIn(f"form {self.US} is DISABLED - the runner reads it as 'skipped'", out)
+        # already off: nothing to do, no POST
+        code, out = self.run_main(["--form", self.US, "--apply"], api)
+        self.assertEqual(code, 0, out)
+        self.assertIn("already DISABLED - nothing to do", out)
+        self.assertEqual([c[0] for c in api.calls].count("POST"), 1)
+        # the way back
+        code, out = self.run_main(["--form", self.US, "--enable", "--apply"], api)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(api.status, "ENABLED")
+        self.assertIn(f"form {self.US} is ENABLED - one runner dry run next", out)
+
+    def test_a_status_that_does_not_move_stops_with_the_builder_step(self):
+        api = FormApi(flips=False)
+        code, out = self.run_main(["--form", self.US, "--apply"], api)
+        self.assertEqual(str(code), disable_form.STILL_ENABLED)
+        self.assertIn("Settings -> Form Status", str(code))
+        self.assertEqual([c[0] for c in api.calls], ["GET", "GET", "BACKUP", "POST", "GET", "GET"])
+        self.assertIn("re-read:", out)
+
+        class StatusOnly(FormApi):
+            def post_form(self, path, data, label):
+                self.calls.append(("POST", path, dict(data)))
+                self.status = data.get("properties[status]", self.status)       # the message stays
+        code, _ = self.run_main(["--form", self.US, "--message", "Paused.", "--apply"], StatusOnly())
+        self.assertIn("messageOfLimitedForm did not change", str(code))
+        self.assertIn("status DISABLED as wanted", str(code))
+
+
+class UploadRosterPartners(unittest.TestCase):
+    """tools/upload_roster.py merge_partners keeps the live header's width (the jotform column)."""
+
+    def test_merge_keeps_every_live_cell_and_the_width(self):
+        live = [["partner", "region", "notes", "jotform"], ["P1", "Africa", "", "no"], ["P2", "", "", ""],
+                ["P3", "Asia", "x"]]
+        local = [["partner", "region", "notes", "jotform"], ["P2", "Asia", "derived", ""], ["P4", "U.S", "", ""]]
+        out, added, filled = upload_roster.merge_partners(live, local)
+        self.assertEqual(out, [["partner", "region", "notes", "jotform"], ["P1", "Africa", "", "no"],
+                               ["P2", "Asia", "derived", ""], ["P3", "Asia", "x", ""], ["P4", "U.S", "", ""]])
+        self.assertEqual((added, filled), (1, 1))
+        # a live tab still three columns wide: its width wins, a local fourth cell is not added
+        out, _, _ = upload_roster.merge_partners([["partner", "region", "notes"], ["P1", "Africa", ""]], local)
+        self.assertEqual({len(r) for r in out}, {3})
+        self.assertEqual(out[-1], ["P4", "U.S", ""])
 
 
 class SwitcherFlags(unittest.TestCase):
@@ -5112,7 +6919,7 @@ class SyncLeavesTheLinksAlone(unittest.TestCase):
 
             def get(self, path):
                 return {"/questions": copy.deepcopy(qs), "/properties": {"conditions": []},
-                        "": {"count": "0"}}[path]
+                        "": {"count": "0", "status": "ENABLED"}}[path]
 
             def post_form(self, path, data, label):
                 self.calls.append(label)
@@ -6716,7 +8523,8 @@ class ModuleAndNamesAudit(unittest.TestCase):
                         return copy.deepcopy(questions)
                     if path.endswith("/properties"):
                         return {"conditions": wire, "language": [{"options": "English (US)|Español",
-                                                                   "primaryLanguage": "en"}]}
+                                                                   "primaryLanguage": "en"}],
+                                "clearFieldOnHide": "disable"}
                     if path.endswith("/translations"):
                         if isinstance(store, Exception):
                             raise store
@@ -6794,11 +8602,132 @@ class ModuleAndNamesAudit(unittest.TestCase):
                 '<input type="checkbox" id="input_8_0" value="Not a roster">')
         self.assertEqual(form_status.rendered_options(page, ["7"]), [("7", "q7", "Amara O'Fennwhistle & Grace")])
         problems, r = rendered("<html></html>")
-        self.assertEqual(len(problems), 4)                        # never vouched for: three selects, the store
+        self.assertEqual(len(problems), 5)                # never vouched for: three selects, clearFieldOnHide, the store
         self.assertIn("no select for module dropdown q14", problems[0])
-        self.assertIn("no embedded translation store", problems[3])
+        self.assertIn("no JotForm.clearFieldOnHide on the public page", problems[3])
+        self.assertIn("no embedded translation store", problems[4])
         self.assertFalse(r["rendered_names"]["checked"])
+        self.assertEqual(r["rendered_shape"], {"clearFieldOnHide": None, "multi_select": []})
         self.assertEqual(summary["14"]["options"], 1)
+
+    def test_the_module_shape_is_pinned(self):
+        """docs/plans/2026-10-06-module-selection.md (a): one required single-select per step of
+        the chain, the year visible, and the form-level clearFieldOnHide as glow/sync.py says;
+        an unknown value is reported as not read, never as "cleared"."""
+        qs, _ = self.form()
+        props = {"clearFieldOnHide": glow_sync.CLEAR_FIELD_ON_HIDE}
+        self.assertEqual(glow_sync.CLEAR_FIELD_ON_HIDE, "disable")
+        problems, summary = form_status.audit_module_shape(qs, props)
+        self.assertEqual(problems, [])
+        self.assertEqual(form_status.module_shape_line(summary),
+                         "year q94 single-select required; modules q14/q92/q93 single-select required; "
+                         "sessions q15/q95/q96/q97 single-select required; clearFieldOnHide disable")
+        self.assertEqual(summary["module"]["92"], {"single": True, "required": True, "dropdown": True})
+        self.assertEqual(summary["year"]["94"]["visible"], True)
+        self.assertEqual(sorted(summary["session"]), sorted(sync.WEEKS.values()))
+
+        def only(change, *fragments):
+            changed = copy.deepcopy(qs)
+            change(changed)
+            found, s = form_status.audit_module_shape(changed, props)
+            self.assertEqual(len(found), 1, found)
+            for fragment in fragments:
+                self.assertIn(fragment, found[0])
+            self.assertIn("never a sync apply - the sync does not write it", found[0])
+            return s
+        s = only(lambda q: q["92"].__setitem__("multipleSelections", "Yes"),
+                 "module dropdown q92 (year 2) is a multi-select: a mentor could send two modules; question 98 "
+                 "would run them together")
+        self.assertIn("modules q14/q92/q93: q92 multi-select;", form_status.module_shape_line(s))
+        only(lambda q: q["94"].__setitem__("required", "No"), "year dropdown q94 is not required: a blank year")
+        only(lambda q: q["15"].__setitem__("required", "No"),
+             "session dropdown q15 (8 sessions) is not required: a blank session reaches Salesforce")
+        only(lambda q: q["97"].__setitem__("multipleSelections", "Yes"),
+             "session dropdown q97 (15 sessions) is a multi-select: a mentor could send two sessions; question 100")
+        only(lambda q: q["94"].__setitem__("hidden", "Yes"), "year dropdown q94 is hidden: the chain starts visible")
+        s = only(lambda q: q.pop("96"), "session dropdown q96 (14 sessions) is not on the form")
+        self.assertIn("sessions q15/q95/q96/q97: q96 missing;", form_status.module_shape_line(s))
+        only(lambda q: q["14"].__setitem__("type", "control_radio"),
+             "module dropdown q14 (year 1) is a control_radio, not a dropdown")
+        # clearFieldOnHide: each value its own line; a value nobody has read is never "cleared"
+        for value, fragment in (("dontClear", "a module dropdown hidden by the Year rule would keep its answer at submit"),
+                                ("enable", "rejected 2026-09-30: the loop limit drops to 3 (DECISIONS)"),
+                                (None, "a value whose runtime behaviour has not been read - do not treat hidden "
+                                       "answers as cleared"),
+                                ("Disable", "a value whose runtime behaviour has not been read")):
+            (problem,), s = form_status.audit_module_shape(qs, {} if value is None else {"clearFieldOnHide": value})
+            self.assertIn(f"clearFieldOnHide is {value!r}, not 'disable': {fragment}", problem)
+            self.assertEqual(s["clearFieldOnHide"], value)
+        self.assertTrue(form_status.module_shape_line(form_status.audit_module_shape(qs, {})[1])
+                        .endswith("; clearFieldOnHide unset"))
+        # the shape audit flags shape only: a dropdown without calcValues is the values audit's
+        bare = copy.deepcopy(qs)
+        bare["14"]["calcValues"] = ""
+        self.assertEqual(form_status.audit_module_shape(bare, props)[0], [])
+
+    def test_the_report_and_the_runners_verify_read_the_shape(self):
+        qs, wire = self.form()
+        qs["2"] = {"type": "control_button", "text": "Submit", "name": "submit2", "order": "60"}
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+
+        def report(props_extra, questions=qs):
+            class Fake:
+                def get(self, path, **params):
+                    if path.endswith("/questions"):
+                        return copy.deepcopy(questions)
+                    if path.endswith("/properties"):
+                        return {"conditions": wire, "language": [{"options": "English (US)|Español",
+                                                                   "primaryLanguage": "en"}], **props_extra}
+                    if path.endswith("/translations"):
+                        return served_store(qs)
+                    return {"title": "t", "status": "ENABLED", "count": "0"}
+            return form_status.form_report(glow_forms.TEMPLATE, Fake(), {})
+
+        clean = {"error_conditions": 0, "salesforce": True, "languages": ["a"] * 12,
+                 "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []}}
+        rep = report({"clearFieldOnHide": "disable"})
+        self.assertEqual(rep["module_shape"]["clearFieldOnHide"], "disable")
+        self.assertEqual([p for p in rep["rule_problems"] if "clearFieldOnHide" in p or "dropdown q" in p], [])
+        self.assertEqual(auto_sync.verify_report(dict(clean, **{k: rep[k] for k in ("rule_problems", "names_dictionary")}))[0], [])
+        rep = report({"clearFieldOnHide": "dontClear"})
+        self.assertTrue(any(p.startswith("clearFieldOnHide is 'dontClear', not 'disable'") for p in rep["rule_problems"]))
+        problems, _ = auto_sync.verify_report(dict(clean, **{k: rep[k] for k in ("rule_problems", "names_dictionary")}))
+        self.assertTrue(any("clearFieldOnHide is 'dontClear'" in p for p in problems))   # the verify step fails
+        rep = report({})                                                                  # unset: not read, a problem
+        self.assertIsNone(rep["module_shape"]["clearFieldOnHide"])
+        self.assertTrue(any("do not treat hidden answers as cleared" in p for p in rep["rule_problems"]))
+        multi = copy.deepcopy(qs)
+        multi["93"]["multipleSelections"] = "Yes"
+        rep = report({"clearFieldOnHide": "disable"}, multi)
+        self.assertFalse(rep["module_shape"]["module"]["93"]["single"])
+        self.assertTrue(any("module dropdown q93 (year 3) is a multi-select" in p for p in rep["rule_problems"]))
+
+    def test_the_served_page_is_read_for_the_shape(self):
+        qs, _ = self.form()
+
+        def rendered(page):
+            r = {"id": "999", "module_values": form_status.audit_module_values(qs)[1]}
+            return form_status.rendered_module_problems(r, page), r
+
+        problems, r = rendered(served_modules_and_store(qs))
+        self.assertEqual((problems, r["rendered_shape"]), ([], {"clearFieldOnHide": "disable", "multi_select": []}))
+        (problem,), r = rendered(served_modules_and_store(qs, clear="dontClear"))
+        self.assertIn("rendered page: JotForm.clearFieldOnHide is 'dontClear', not 'disable'", problem)
+        self.assertIn("never a sync apply", problem)
+        self.assertEqual(r["rendered_shape"]["clearFieldOnHide"], "dontClear")
+        (problem,), r = rendered(served_modules_and_store(qs, clear=None))
+        self.assertIn("no JotForm.clearFieldOnHide on the public page", problem)
+        page = served_modules_and_store(qs).replace('name="q92_module2"', 'multiple="" name="q92_module2"')
+        (problem,), r = rendered(page)
+        self.assertIn("rendered page: module dropdown q92 is served as a multi-select (<select multiple>)", problem)
+        self.assertEqual(r["rendered_shape"]["multi_select"], ["92"])
+        self.assertIn('multiple=""', form_status.rendered_select_attrs(page, "92"))
+        self.assertNotIn("multiple", form_status.rendered_select_attrs(page, "14"))
+        self.assertIsNone(form_status.rendered_select_attrs(page, "500"))
+        # the whole-page read: the shape line printed, counts only
+        self.assertEqual(form_status.rendered_clear_field_on_hide('x JotForm.clearFieldOnHide = "enable"; y'), "enable")
+        self.assertIsNone(form_status.rendered_clear_field_on_hide(""))
 
 
 class NamesAndModulesRunbook(unittest.TestCase):
@@ -6831,6 +8760,107 @@ class NamesAndModulesRunbook(unittest.TestCase):
         self.assertEqual(order, sorted(order))
         self.assertIn("never unattended", text)
         self.assertIn("--restore backups/translations/<id>-<stamp>-before.json", text)
+        # the module chain's shape (docs/plans/2026-10-06-module-selection.md): the line is the tool's own
+        qs, _ = SameNameFlow.form(SameNameFlow(), switched=True)
+        line = form_status.module_shape_line(form_status.audit_module_shape(qs, {"clearFieldOnHide": "disable"})[1])
+        self.assertIn(f"module shape: {line}", text)
+        for fragment in ("dontClear", "`enable`", "never a sync apply", "JotForm.clearFieldOnHide"):
+            self.assertIn(fragment, text)
+
+
+class JotformUsage(unittest.TestCase):
+    """glow/usage.py: Jotform's two limits against the account's usage, each judged on its own
+    (docs/plans/2026-10-06-photos-to-drive.md); a fake client with the answers' shapes as read
+    2026-10-06 (counts as strings, the plan's URL, numeric limits)."""
+
+    CAP_UP, CAP_SUB = 10738466816, 2500
+
+    class Fake:
+        def __init__(self, **change):
+            self.calls = []
+            self.answers = {
+                "/user/usage": {"uploads": "1340458410", "submissions": "474", "total_submissions": "690",
+                                "monthly_usage_reset_date": "2026-10-21 00:00:00", "form_count": "5"},
+                "/user": {"account_type": "https://api.jotform.com/system/plan/SILVER", "loginToViewUploadedFiles": "1"},
+                "/system/plan/SILVER": {"name": "SILVER", "limits": {"uploads": 10738466816, "submissions": 2500,
+                                                                     "totalSubmissions": 25000, "formCount": 50}}}
+            self.answers.update(change)
+
+        def get(self, path, **params):
+            from glow.jotform import JotformError
+            self.calls.append(path)
+            if path not in self.answers:
+                raise JotformError(f"GET {path}: 404 Not Found")
+            return copy.deepcopy(self.answers[path])
+
+    BASE = {"plan": "SILVER", "uploads": 1340458410, "uploads_cap": CAP_UP, "submissions": 474,
+            "submissions_cap": CAP_SUB, "reset": "2026-10-21"}
+
+    def test_the_three_reads_and_the_line(self):
+        fake = self.Fake()
+        u = usage.read_usage(fake)
+        self.assertEqual(fake.calls, ["/user/usage", "/user", "/system/plan/SILVER"])
+        self.assertEqual(u, self.BASE)                                 # the reset date trimmed to the day
+        self.assertEqual(usage.levels(u), {"uploads": "ok", "submissions": "ok"})
+        self.assertEqual(usage.worst(usage.levels(u)), "ok")
+        self.assertEqual(usage.storage_line(u), "storage: upload space 1.25 GiB of 10.00 GiB (12.5%) -> ok; "
+                         "submissions this cycle 474 of 2,500 (19.0%, resets 2026-10-21) -> ok; plan SILVER")
+        # the plan's name from its URL, whatever the case or a trailing slash; other date shapes kept as they are
+        self.assertEqual(usage.plan_name({"account_type": "https://api.jotform.com/system/plan/gold/"}), "GOLD")
+        self.assertEqual(usage.read_usage(self.Fake(**{"/user": {"account_type": ".../system/plan/Gold"},
+                                                       "/system/plan/GOLD": {"limits": {"uploads": 107374182400,
+                                                                                        "submissions": 10000}}}))["plan"],
+                         "GOLD")
+        self.assertEqual([usage.reset_day(v) for v in ("2026-10-21 00:00:00", "2026-10-21", "soon", None)],
+                         ["2026-10-21", "2026-10-21", "soon", ""])
+        self.assertIn("resets ?)", usage.storage_line(dict(self.BASE, reset="")))
+        self.assertEqual((usage.WARN_AT, usage.ALARM_AT), (0.5, 0.8))
+
+    def test_levels_per_limit_at_the_boundaries(self):
+        for limit, cap in (("uploads", self.CAP_UP), ("submissions", self.CAP_SUB)):
+            other = "submissions" if limit == "uploads" else "uploads"
+            # 49.9 / 50 / 79.9 / 80 % of that limit (integer arithmetic: the 50 and 80 % values rounded up)
+            for used, want in ((cap * 499 // 1000, "ok"), (-(-cap * 5 // 10), "warn"),
+                               (cap * 799 // 1000, "warn"), (-(-cap * 8 // 10), "alarm"), (cap, "alarm"),
+                               (cap + 1, "alarm"), (0, "ok")):
+                u = dict(self.BASE, uploads=0, submissions=0)
+                u[limit] = used
+                lv = usage.levels(u)
+                self.assertEqual((lv[limit], lv[other]), (want, "ok"), (limit, used))   # never the other one
+                self.assertEqual(usage.worst(lv), want)
+                self.assertIn(f"-> {want}", usage.storage_line(u).split(usage.NAMES[limit])[1])
+        self.assertEqual(usage.worst({"uploads": "warn", "submissions": "alarm"}), "alarm")
+        self.assertEqual(usage.worst({"uploads": "warn", "submissions": "ok"}), "warn")
+        self.assertEqual(usage.share(dict(self.BASE, submissions=1250), "submissions"), 0.5)
+
+    def test_an_answer_of_another_shape_is_refused_never_guessed(self):
+        from glow.jotform import JotformError
+        cases = {
+            "no account_type": {"/user": {"name": "x"}},
+            "not the shape read on 2026-10-06 (KeyError": {"/user/usage": {"submissions": "474"}},
+            "not the shape read on 2026-10-06 (ValueError": {"/user/usage": {"uploads": "lots", "submissions": "474"}},
+            "GET /system/plan/SILVER limits: not the object": {"/system/plan/SILVER": {"limits": []}},
+            "cannot be judged": {"/system/plan/SILVER": {"limits": {"uploads": 0, "submissions": 2500}}},
+            "GET /user/usage: not the object": {"/user/usage": []},
+        }
+        for message, change in cases.items():
+            with self.subTest(message):
+                with self.assertRaises(ValueError) as caught:
+                    usage.read_usage(self.Fake(**change))
+                self.assertIn(message, str(caught.exception))
+        with self.assertRaises(JotformError):                          # the client's own error passes through
+            usage.read_usage(self.Fake(**{"/user": {"account_type": ".../system/plan/BRONZE"}}))
+        # form_status: a failed read is reported, never a form problem; the line says so
+        fake = self.Fake(**{"/user": {"account_type": ".../system/plan/BRONZE"}})
+        store = form_status.read_storage(fake)
+        self.assertEqual(list(store), ["error"])
+        self.assertIn("GET /system/plan/BRONZE", store["error"])
+        self.assertTrue(form_status.storage_status_line(store).startswith("storage: could not be read (GET /system/plan/BRONZE"))
+        store = form_status.read_storage(self.Fake())
+        self.assertEqual(store["levels"], {"uploads": "ok", "submissions": "ok"})
+        self.assertFalse(form_status.storage_status_line(store).startswith("!!"))
+        store = form_status.read_storage(self.Fake(**{"/user/usage": {"uploads": str(self.CAP_UP), "submissions": "1"}}))
+        self.assertTrue(form_status.storage_status_line(store).startswith("!! storage: upload space 10.00 GiB of 10.00 GiB (100.0%) -> alarm;"))
 
 
 class WorkLog(unittest.TestCase):

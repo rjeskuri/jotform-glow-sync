@@ -14,7 +14,10 @@
  */
 
 const REVIEW_COLS = ['raised', 'issue', 'partner', 'club', 'detail', 'resolved'];
-const PARTNER_COLS = ['partner', 'region', 'notes'];
+// `jotform` = no: the partner's clubs are not on the attendance forms (the Python sync keeps
+// them off the Club picker; here it only changes the mentor e-mails' closing line). Keep in
+// step with glow/sync.py PARTNER_COLS and tools/build_roster_offline.js.
+const PARTNER_COLS = ['partner', 'region', 'notes', 'jotform'];
 const CLUB_COLS = ['club_code', 'partner', 'club', 'created'];
 const AUDIT_COLS = ['when', 'action', 'detail'];
 // Appended by tools/auto_sync.py (keep in step with SYNC_LOG_COLS there)
@@ -105,6 +108,31 @@ function loadPartnerTabRegions_() {
         if (partner && region) regions[key_(partner)] = region;
       });
   return regions;
+}
+
+/**
+ * Partners whose clubs are not on Jotform: {key_(partner): true} for every
+ * Partners row whose `jotform` cell reads "no" (capitals and spacing ignored).
+ * Anything else, a blank included, means the clubs are on the forms. Python
+ * reads the same cell for the forms themselves (glow.sync, --partners); the
+ * handlers read it only for the mentor e-mails' closing line. The column is
+ * found by its header (row 1, compared with key_), as Python reads the
+ * export, so the two sides agree wherever the column sits; a tab without the
+ * header marks nobody.
+ */
+function loadPartnerJotform_() {
+  const off = {};
+  const sheet = SpreadsheetApp.getActive().getSheetByName(TAB.PARTNERS);
+  if (!sheet || sheet.getLastRow() < 2) return off;
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(key_);
+  const iJotform = header.indexOf('jotform');
+  if (iJotform < 0) return off;
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, iJotform + 1).getValues()
+      .forEach(function (row) {
+        const partner = tidy_(row[0]);
+        if (partner && key_(row[iJotform]) === 'no') off[key_(partner)] = true;
+      });
+  return off;
 }
 
 /** Every partner name on the Partners tab (column A), as typed, blanks left out. */
@@ -348,8 +376,11 @@ function seedPartners_(partnersSeen, formRegions) {
   const missing = Object.keys(partnersSeen)
       .filter(function (k) { return k && !known[k]; })
       .map(function (k) {
-        return [partnersSeen[k], regionFor(k),
-                regionFor(k) ? noteFor(k) : 'region needed'];
+        // every PARTNER_COLS cell, or setValues throws on the width: jotform blank (= on the forms)
+        const row = [partnersSeen[k], regionFor(k),
+                     regionFor(k) ? noteFor(k) : 'region needed'];
+        while (row.length < PARTNER_COLS.length) row.push('');
+        return row;
       });
   if (missing.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, PARTNER_COLS.length)

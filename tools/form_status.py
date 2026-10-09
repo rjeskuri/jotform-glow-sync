@@ -15,10 +15,26 @@ after the rosters show or hide and every roster is required - as glow/sync.py's
 constants say (docs/plans/2026-09-30-contact-ids.md) - and, for what Salesforce
 stores (docs/plans/2026-10-02-names-and-modules.md), whether each module dropdown
 carries calcValues equal to its options (MODULE_CALC_VALUES: question 98 then
-copies the module, not the text a translated page shows) and whether the form's
+copies the module, not the text a translated page shows), whether the module
+chain keeps its shape (docs/plans/2026-10-06-module-selection.md: the year,
+module and session dropdowns single-select and required, and the form-level
+clearFieldOnHide as CLEAR_FIELD_ON_HIDE says, so a dropdown hidden by the Year
+rule never sends its answer) and whether the form's
 own translation dictionary alters any roster option (the runtime's lookup
 emulated, glow/translation_lookup.py, in every language the store holds: question
 18 would send another spelling of that girl's name; counts and club names only).
+Right after the Roster line comes Jotform's storage against the account's plan
+(glow/usage.py: upload space in all and submissions in the monthly cycle, each judged
+on its own; docs/plans/2026-10-06-photos-to-drive.md) - account-wide, so never a form
+problem. With --partners <Partners export> (docs/plans/2026-10-06-clubs-off-jotform.md)
+the audit knows a RETIRED roster - its partner marked jotform=no, or its club with no
+active girl since before today in the sheet's zone (glow/sync.py RETIRE_INACTIVE,
+SHEET_ZONE) - from a broken one: off
+the picker and without a show rule it is clean; still with its rule or entry it awaits
+the next sync apply (a note, never a problem); a roster off the picker whose club is
+active and whose partner is not marked is a problem. Without --partners every retired
+roster of an active club reads that way: the tool refuses to guess. A form whose
+status is not ENABLED has its region check and its served-page checks skipped.
 --rendered reads the public page as well (counts only).
 
 Usage:
@@ -42,13 +58,15 @@ from glow import forms as glow_forms       # noqa: E402
 from glow import layout                    # noqa: E402  (rosters above the links and Submit)
 from glow import sync as glow_sync         # noqa: E402  (question 18's and the modules' constants, read at run time)
 from glow import translation_lookup as tl  # noqa: E402  (the runtime's names dictionary, emulated)
+from glow import usage                     # noqa: E402  (Jotform's storage against the plan's limits)
 from glow.cli import run                   # noqa: E402
 from glow.jotform import Client, JotformError     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
-    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PICKER_NAME, SF_NAME_SEP,
-    aligned_calc_values, club_guards, club_partners, dropdown_options, has_calc_values,
-    long_name_partner, partner_picker, picker_calc_values)
+    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, JOTFORM_COL, MODULES, PICKER_NAME, SF_NAME_SEP,
+    WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, dropdown_options, has_calc_values,
+    inactive_retires, long_name_partner, partner_picker, picker_calc_values, read_partners_csv,
+    roster_names, roster_pairs, roster_removed, sheet_today)
 from glow.text import key, name_key        # noqa: E402
 
 FORMS = {glow_forms.TEMPLATE: ("template", None),
@@ -60,7 +78,10 @@ ENABLE_FUZZY_QID = "109"
 
 
 def load_roster(path):
-    """region -> {key(club): (club, set(name keys), partner)} for ACTIVE girls."""
+    """region -> {key(club): (club, set(name keys), partner, {key(partner): set(name keys)})}
+    for ACTIVE girls: the names of every partner's club of that name together (the
+    region check compares union against union), and per partner (a retired partner's
+    share leaves the compare)."""
     by_region = defaultdict(dict)
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -68,9 +89,104 @@ def load_roster(path):
                 continue
             region = row.get("region", "").strip() or "(no region)"
             ck = key(row["club"])
-            entry = by_region[region].setdefault(ck, (row["club"], set(), row["partner"]))
+            entry = by_region[region].setdefault(ck, (row["club"], set(), row["partner"], {}))
             entry[1].add(name_key(row["full_name"]))
+            entry[3].setdefault(key(row["partner"]), set()).add(name_key(row["full_name"]))
     return by_region
+
+
+def roster_facts(path, marks):
+    """What the Roster says about every club, for the retired-roster decision
+    (retire_decisions): {"holders": club_partners over every row, "pairs": roster_pairs
+    (active or not), "ever": roster_names, "removed": roster_removed, "marks": the
+    Partners export's {key(partner): yes | no}, or None when none was given}."""
+    pairs = roster_pairs(path)
+    return {"holders": club_partners(pairs), "pairs": pairs, "ever": roster_names(path),
+            "removed": roster_removed(path), "marks": marks}
+
+
+def roster_owner(question, tested, facts):
+    """(partner, active) of the Roster club a roster question is, or None when it
+    cannot be told: the one partner with a club of that name (any status), or among
+    several the one its rule's long name carries, else the one whose rows list at
+    least half, and the most, of the girls the question holds (the sync's owner
+    read-back). `active`: whether that club has an active girl."""
+    text = " ".join(str(question.get("text") or "").split())
+    who = facts["holders"].get(key(text), {})
+    owner = None
+    if len(who) == 1:
+        owner = next(iter(who.values()))
+    elif who:
+        owner = long_name_partner(tested or "", text, who)
+        if owner is None:
+            have = {key(o) for o in (question.get("options") or "").split("|") if o.strip()}
+            fits = sorted(((len(have & facts["ever"].get((pk, key(text)), set())), p)
+                           for pk, p in who.items()), key=lambda f: -f[0])
+            if have and fits[0][0] * 2 >= len(have) and fits[0][0] > fits[1][0]:
+                owner = fits[0][1]
+    if owner is None:
+        return None
+    pc = (key(owner), key(text))
+    active = next((a for (p, c), a in facts["pairs"].items() if (key(p), key(c)) == pc), False)
+    return owner, active
+
+
+def roster_owners(questions, conditions, facts):
+    """{roster qid: roster_owner(...)} for every roster question (None where it cannot be told)."""
+    tested = tested_values(questions, conditions)
+    return {str(qid): roster_owner(q, tested.get(str(qid)), facts)
+            for qid, q in questions.items() if q.get("type") == "control_checkbox"}
+
+
+def retire_decisions(questions, owners, facts, today=None):
+    """{roster qid: {"club", "partner", "reason"}} for every roster question the Roster
+    says is retired, the sync's rule (docs/plans/2026-10-06-clubs-off-jotform.md): its
+    owner (roster_owners) is marked jotform=no in the Partners export, or
+    (glow.sync.RETIRE_INACTIVE) has no active girl in that club and its rows have been
+    inactive since before `today` (a date in the sheet's zone, glow.sync.sheet_today). A
+    question whose owner cannot be told, or whose club the Roster does not know, is not
+    here. Reasons: "not on Jotform" / "no active girl"."""
+    today = today or sheet_today()
+    marks = facts.get("marks") or {}
+    out = {}
+    for qid, found in owners.items():
+        if found is None:
+            continue
+        owner, active = found
+        text = " ".join(str(questions[qid].get("text") or "").split())
+        if marks.get(key(owner)) == "no":
+            reason = "not on Jotform"
+        elif not active and inactive_retires(facts["removed"].get((key(owner), key(text))), today):
+            reason = "no active girl"
+        else:
+            continue
+        out[qid] = {"club": text, "partner": owner, "reason": reason}
+    return out
+
+
+def off_picker(questions, conditions, owner_of=None):
+    """qids of the roster questions with no show rule and no Club picker entry of their
+    own - the question's text, or its long name "<text> - <its partner>" (owner_of: {qid:
+    partner}; a roster whose owner is not known counts any long name of its text as its
+    own, so a namesake's entry keeps it on the picker): the shape of a retired roster,
+    and of a roster an apply left half-written."""
+    picker = club_picker(questions)
+    listed = {key(o): o for o in (questions[picker].get("options") or "").split("|") if o.strip()} \
+        if picker else {}
+    out = set()
+    for qid, q in questions.items():
+        if q.get("type") != "control_checkbox" or rules_showing(conditions, qid):
+            continue
+        text = " ".join(str(q.get("text") or "").split())
+        partner = (owner_of or {}).get(str(qid))
+        if partner:
+            own = {key(text), key(f"{text}{SF_NAME_SEP}{' '.join(partner.split())}")}
+            if any(k in own for k in listed):
+                continue
+        elif any(k == key(text) or is_long_name(o, text) for k, o in listed.items()):
+            continue
+        out.add(str(qid))
+    return out
 
 
 def load_partners(path):
@@ -254,6 +370,62 @@ def audit_module_values(questions):
     return problems, summary
 
 
+SHAPE_FIX = ("fix it in the builder's form settings, then re-run; never a sync apply - the sync does not "
+             "write it (RUNBOOK \"The names dictionary and the module values\")")
+# what question 98 / 100 copies, per dropdown kind
+SHAPE_KINDS = (("year", {None: YEAR}, "a blank year hides every module dropdown", None),
+               ("module", {f"year {y}": q for y, q in MODULES.items()}, "a blank module reaches Salesforce", "98"),
+               ("session", {f"{n} sessions": q for n, q in WEEKS.items()}, "a blank session reaches Salesforce", "100"))
+
+
+def audit_module_shape(questions, props):
+    """The module chain's shape (docs/plans/2026-10-06-module-selection.md): the year
+    dropdown (glow.sync.YEAR) visible, every module and session dropdown (MODULES, WEEKS)
+    single-select and required, and the form-level clearFieldOnHide equal to
+    glow.sync.CLEAR_FIELD_ON_HIDE - so one module per submission, never blank, and a
+    dropdown hidden by the Year rule never sends its answer. An unknown clearFieldOnHide
+    value is reported as not read, never treated as cleared. Returns (problems, summary)."""
+    problems, summary = [], {}
+    for kind, qids, blank, copy_qid in SHAPE_KINDS:
+        shapes = {}
+        for label, qid in qids.items():
+            q = questions.get(qid)
+            where = f"{kind} dropdown q{qid}" + (f" ({label})" if label else "")
+            if q is None:
+                shapes[qid] = None
+                problems.append(f"{where} is not on the form - the chain has no {kind} there; {SHAPE_FIX}")
+                continue
+            shape = {"single": q.get("multipleSelections") != "Yes", "required": q.get("required") == "Yes",
+                     "dropdown": q.get("type") == "control_dropdown"}
+            if kind == "year":
+                shape["visible"] = q.get("hidden") != "Yes"
+            shapes[qid] = shape
+            if not shape["dropdown"]:
+                problems.append(f"{where} is a {q.get('type')}, not a dropdown - {SHAPE_FIX}")
+            if not shape["single"]:
+                problems.append(f"{where} is a multi-select: a mentor could send two {kind}s"
+                                + (f"; question {copy_qid} would run them together" if copy_qid else "")
+                                + f" - {SHAPE_FIX}")
+            if not shape["required"]:
+                problems.append(f"{where} is not required: {blank} - {SHAPE_FIX}")
+            if kind == "year" and not shape["visible"]:
+                problems.append(f"{where} is hidden: the chain starts visible, or no mentor can pick a module - "
+                                + SHAPE_FIX)
+        summary[kind] = shapes
+    value = props.get("clearFieldOnHide")
+    summary["clearFieldOnHide"] = value
+    want = glow_sync.CLEAR_FIELD_ON_HIDE
+    if value != want:
+        why = {"dontClear": "a module dropdown hidden by the Year rule would keep its answer at submit (two "
+                            "modules, or last year's, in question 98)",
+               "enable": "rejected 2026-09-30: the loop limit drops to 3 (DECISIONS)"}
+        problems.append(f"clearFieldOnHide is {value!r}, not {want!r}: "
+                        + why.get(value, "a value whose runtime behaviour has not been read - do not treat "
+                                         "hidden answers as cleared")
+                        + f" - {SHAPE_FIX}")
+    return problems, summary
+
+
 NAMES_FIX = "tools/fix_name_translations.py --form {form} (dry run first; RUNBOOK \"The names dictionary and the module values\")"
 
 
@@ -291,6 +463,25 @@ def audit_names(form_id, options, store, primary=tl.PRIMARY):
                         + ") - question 18 would send another spelling of those girls' names "
                         f"(a second Contact in Salesforce): {NAMES_FIX.format(form=form_id)}")
     return problems, summary
+
+
+def read_storage(client):
+    """Jotform's account usage against its plan's limits (glow/usage.py) with the level per
+    limit - the report's `storage` key, read once per run. A read that fails is reported
+    ({"error": why}) and is never a form problem: the cap is account-wide, and the runner's
+    verify step must not fail on it."""
+    try:
+        u = usage.read_usage(client)
+    except (JotformError, ValueError) as err:
+        return {"error": str(err)[:200]}
+    return dict(u, levels=usage.levels(u))
+
+
+def storage_status_line(store):
+    """The report's `storage:` line, right after the Roster line; `!! ` at alarm (from read_storage)."""
+    if "error" in store:
+        return f"storage: could not be read ({store['error']})"
+    return ("!! " if usage.worst(store["levels"]) == "alarm" else "") + usage.storage_line(store)
 
 
 def read_store(client, form_id):
@@ -424,12 +615,42 @@ def rendered_required(page, rosters):
             "boxes": sum(len(v) for v in per.values()), "boxes_required": sum(sum(v) for v in per.values())}
 
 
+def rendered_retired(page, rosters):
+    """The retired rosters' <li> elements as the page serves them (counts only):
+    {"retired": how many of `rosters` have an element, "always_hidden": how many of
+    those carry the always-hidden class}. A property-hidden question no rule touches
+    renders with always-hidden alone, and Jotform validates a required field only
+    when its <li> carries neither always-hidden nor form-field-hidden (.claude/skills/
+    jotform-api, "Required + hidden") - so this is what lets the retired, required
+    rosters rest without a rule."""
+    rosters = {str(q) for q in rosters}
+    seen = {}
+    for attrs in re.findall(r"<li\b([^>]*)>", page or ""):
+        m = re.search(r'\bid="id_(\d+)"', attrs)
+        if not m or m.group(1) not in rosters:
+            continue
+        cls = re.search(r'\bclass="([^"]*)"', attrs)
+        seen[m.group(1)] = bool(cls and "always-hidden" in cls.group(1).split())
+    return {"retired": len(seen), "always_hidden": sum(1 for v in seen.values() if v)}
+
+
 def rendered_problems(r, page):
     """--rendered: what the served page says against what the API audit expects,
     each expectation from glow/sync.py's constants. Adds r["build"], r["rendered_rules"],
-    r["rendered_required"] (and r["rendered"], the picker's calcValues) and returns problems."""
+    r["rendered_required"] (and r["rendered"], the picker's calcValues; r["rendered_retired"]
+    when the form has retired rosters) and returns problems."""
     problems = []
     r["build"] = runtime_build(page)
+    retired = r.get("retired_qids") or []
+    if retired:
+        counts = rendered_retired(page, retired)
+        r["rendered_retired"] = counts
+        if counts["retired"] != len(retired) or counts["always_hidden"] != len(retired):
+            problems.append(f"rendered page: {counts['always_hidden']} of the {len(retired)} retired rosters "
+                            f"are served always-hidden ({counts['retired']} found) - a required roster served "
+                            "without it is validated at submit and no mentor could send the form (a page "
+                            "from before the apply: re-run in a few minutes; else stop, RUNBOOK \"Clubs that "
+                            "do not use Jotform\")")
     picker = r["club_picker"]
     if picker:
         counts = rendered_calc_values(page, picker)
@@ -484,13 +705,34 @@ def rendered_problems(r, page):
     return problems + rendered_module_problems(r, page) + rendered_names_problems(r, page)
 
 
+def rendered_select_attrs(page, qid):
+    """The attributes of the <select> the page serves for question `qid` (its opening tag,
+    in memory), or None when the page has no such select."""
+    m = re.search(r'<select\b([^>]*\bname="q%s_[^"]*"[^>]*)>' % re.escape(str(qid)), page or "")
+    return m.group(1) if m else None
+
+
+def rendered_clear_field_on_hide(page):
+    """The clearFieldOnHide value the public page hands its runtime (JotForm.clearFieldOnHide =
+    "…", seen on the served template page 2026-10-06), or None when the page has none."""
+    m = re.search(r'JotForm\.clearFieldOnHide\s*=\s*"([^"]*)"', page or "")
+    return m.group(1) if m else None
+
+
 def rendered_module_problems(r, page):
     """--rendered: each module dropdown's options and their data-calcvalue, as glow/sync.py
-    MODULE_CALC_VALUES says (adds r["rendered_modules"]: {qid: counts or None})."""
-    problems, seen = [], {}
+    MODULE_CALC_VALUES says (adds r["rendered_modules"]: {qid: counts or None}), and the
+    chain's shape as served (adds r["rendered_shape"]: the page's clearFieldOnHide and the
+    module selects served with a `multiple` attribute), as CLEAR_FIELD_ON_HIDE says."""
+    problems, seen, multi = [], {}, []
     for year, qid in MODULES.items():
         counts = rendered_calc_values(page, qid)
         seen[qid] = counts
+        attrs = rendered_select_attrs(page, qid)
+        if attrs is not None and re.search(r"\bmultiple\b", attrs):
+            multi.append(qid)
+            problems.append(f"rendered page: module dropdown q{qid} is served as a multi-select (<select "
+                            "multiple>) - a mentor could send two modules; question 98 would run them together")
         want = ((r.get("module_values") or {}).get(qid) or {}).get("options")
         if counts is None:
             problems.append(f"rendered page: no select for module dropdown q{qid} (page not served, or its "
@@ -509,6 +751,16 @@ def rendered_module_problems(r, page):
                             "options carry a data-calcvalue other than their value - question 98 would send "
                             "another module")
     r["rendered_modules"] = seen
+    cleared = rendered_clear_field_on_hide(page)
+    r["rendered_shape"] = {"clearFieldOnHide": cleared, "multi_select": multi}
+    if cleared is None:
+        problems.append("rendered page: no JotForm.clearFieldOnHide on the public page (page not served, or its "
+                        "layout changed) - whether a hidden module dropdown's answer is cleared at submit cannot "
+                        "be vouched for")
+    elif cleared != glow_sync.CLEAR_FIELD_ON_HIDE:
+        problems.append(f"rendered page: JotForm.clearFieldOnHide is {cleared!r}, not "
+                        f"{glow_sync.CLEAR_FIELD_ON_HIDE!r} (a page from before the builder fix: re-run in a few "
+                        "minutes; else " + SHAPE_FIX + ")")
     return problems
 
 
@@ -571,12 +823,16 @@ def is_long_name(value, text):
     return key(value).startswith(head) and len(key(value)) > len(head)
 
 
-def audit_rules(questions, conditions, partners_of=None):
+def audit_rules(questions, conditions, partners_of=None, retired=()):
     """Rule-level checks on a form's live conditions. Returns a list of
     problem strings (empty = clean) and a summary dict. partners_of: the
     Roster's {key(club): {key(partner): partner}} (load_partners); with it a
-    long name's partner must be one the Roster has for that club."""
+    long name's partner must be one the Roster has for that club. retired:
+    roster qids that may have no show rule - a retired roster (the Roster says
+    so), or one form_report reports in its own words; one that still has its
+    rule is checked like every other."""
     problems = []
+    retired = {str(q) for q in retired}
     qids = set(questions)
     picker = club_picker(questions)
     club_field = picker or CLUB_NAME_QID
@@ -611,6 +867,8 @@ def audit_rules(questions, conditions, partners_of=None):
     for qid, name in clubs.items():
         rules = shown_by.get(qid, [])
         if len(rules) != 1:
+            if not rules and qid in retired:
+                continue
             problems.append(f"'{name}' (q{qid}) has {len(rules)} show-rules, expected 1")
             continue
         _, terms = rules[0]
@@ -648,6 +906,7 @@ def audit_rules(questions, conditions, partners_of=None):
     problems += ids_problems
     problems += audit_picker(questions, conditions) + audit_club_guard(questions, conditions)
     summary = {"clubs": len(clubs), "show_rules": sum(len(v) for v in shown_by.values()),
+               "live_rosters": sum(1 for q in clubs if shown_by.get(q)),
                "aggregate_rosters": len(set(clubs) & set(shape["operands"])), "long_names": long_names,
                # question 18's rule, 1-based (None: no such rule), and whether it lists the picker
                "contact_ids_rule": None if shape["position"] is None else shape["position"] + 1,
@@ -747,6 +1006,28 @@ def module_values_line(summary):
                      for qid, s in summary.items())
 
 
+def module_shape_line(summary):
+    """The printed report's `module shape:` line, from form_report's `module_shape`."""
+    if not summary:
+        return "not read"
+    parts = []
+    for kind, qids, _, _ in SHAPE_KINDS:
+        shapes = summary.get(kind) or {}
+        odd = []
+        for qid in qids.values():
+            s = shapes.get(qid)
+            if s is None:
+                odd.append(f"q{qid} missing")
+                continue
+            words = ([] if s["dropdown"] else ["not a dropdown"]) + ([] if s["single"] else ["multi-select"]) \
+                + ([] if s["required"] else ["not required"]) + ([] if s.get("visible", True) else ["hidden"])
+            if words:
+                odd.append(f"q{qid} " + ", ".join(words))
+        head = f"{kind}{'' if kind == 'year' else 's'} " + "/".join(f"q{q}" for q in qids.values())
+        parts.append(head + (" single-select required" if not odd else ": " + "; ".join(odd)))
+    return "; ".join(parts) + f"; clearFieldOnHide {summary.get('clearFieldOnHide') or 'unset'}"
+
+
 def names_line(summary):
     """The printed report's `names dictionary:` line, from form_report's `names_dictionary`
     (counts and club names only)."""
@@ -787,11 +1068,15 @@ def layout_line(lo):
     return f"every roster above {lo['fence']}"
 
 
-def form_report(form_id, client, roster_by_region, partners_of=None):
+def form_report(form_id, client, roster_by_region, partners_of=None, facts=None):
+    """One form's report. partners_of: load_partners (the Roster's holders of each club
+    name); facts: roster_facts, with which the retired rosters are told from broken ones
+    (none: a roster without its rule is a problem, as ever)."""
     label, region = FORMS.get(form_id) or DEFUNCT.get(form_id) or (form_id, None)
     props = client.get(f"/form/{form_id}/properties", limit=1000)
     questions = client.get(f"/form/{form_id}/questions", limit=1000)
     info = client.get(f"/form/{form_id}", limit=1000)
+    status = info.get("status")
 
     clubs = {}
     for q in questions.values():
@@ -815,12 +1100,37 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
     fuzzy = questions.get(ENABLE_FUZZY_QID, {})
     mentor_email = any(q.get("type") == "control_email" for q in questions.values())
 
-    rule_problems, rule_summary = audit_rules(questions, conditions, partners_of)
+    # retired rosters (docs/plans/2026-10-06-clubs-off-jotform.md): what the Roster says
+    # is off the picker, against what the form holds. Retired: no rule, no entry - as the
+    # sync leaves them. Awaiting: the Roster says retired, the form still has its rule or
+    # entry (the next sync apply) - a note, never a problem. Stray: off the picker although
+    # its club is active and its partner is not marked - a retired roster of a partner
+    # whose mark this run was not given (--partners), or a roster an apply left half-written
+    should, stray, text_of = {}, [], {str(qid): text for v in clubs.values() for text, _, qid in v}
+    if facts:
+        owners = roster_owners(questions, conditions, facts)
+        should = retire_decisions(questions, owners, facts)
+        off = off_picker(questions, conditions, {q: o[0] for q, o in owners.items() if o})
+        stray = [q for q in sorted(off - set(should), key=int) if owners.get(q) and owners[q][1]]
+    else:
+        off = set()
+    retired_now = sorted((q for q in should if q in off), key=int)
+    awaiting = sorted((q for q in should if q not in off), key=int)
+    quiet = set(should) | set(stray)       # the rosters whose missing rule is explained, or reported below
+
+    rule_problems, rule_summary = audit_rules(questions, conditions, partners_of, retired=quiet)
+    for q in stray:
+        rule_problems.append(f"'{text_of[q]}' (q{q}) is off the Club picker but its club is active in the "
+                             "Roster - pass --partners if its partner is not on Jotform, else the next sync "
+                             "apply restores it")
     # a roster rendering below the links / Submit shows a mentor her names under the button
     rule_problems += layout.audit_layout(questions)
     # question 98's module: each module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES)
     module_problems, module_summary = audit_module_values(questions)
     rule_problems += module_problems
+    # the chain's shape: one required single-select per step, hidden ones cleared at submit
+    shape_problems, shape_summary = audit_module_shape(questions, props)
+    rule_problems += shape_problems
     # question 18's names: the form's own translation dictionary must alter no roster option
     # (one more GET; a store that cannot be read or emulated is reported, not a problem)
     lang = props.get("language")
@@ -836,7 +1146,7 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
         listed = {key(o): o for o in (questions[picker].get("options") or "").split("|") if o.strip()}
         wanted ={str(qid): tested.get(str(qid), text) for v in clubs.values() for text, _, qid in v}
         missing = sorted({text for v in clubs.values() for text, _, qid in v
-                          if key(wanted[str(qid)]) not in listed})
+                          if key(wanted[str(qid)]) not in listed and str(qid) not in quiet})
         extra = sorted(o for k, o in listed.items() if k not in {key(w) for w in wanted.values()})
         if missing:
             rule_problems.append(f"club picker misses {len(missing)} club(s): {missing[:5]}")
@@ -867,14 +1177,22 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
                        if guards else None),
         "picker_calc_values": bool(picker and has_calc_values(questions[picker])),
         "picker_options": len(picker_options(questions, picker)) if picker else 0,
-        # {module qid: {"options": n, "aligned": calcValues = its options}}; the names
+        # {module qid: {"options": n, "aligned": calcValues = its options}}; the chain's shape
+        # (per kind, {qid: {"single", "required", "dropdown"}}, and "clearFieldOnHide"); the names
         # dictionary: counts and club names only ("checked": False when the store was not read)
-        "module_values": module_summary, "names_dictionary": names_summary,
-        "id": form_id, "label": label, "title": info.get("title"), "status": info.get("status"),
+        "module_values": module_summary, "module_shape": shape_summary, "names_dictionary": names_summary,
+        "id": form_id, "label": label, "title": info.get("title"), "status": status,
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
         # the rosters a mentor can tick a girl on (qids only): what --rendered counts on the page
         "roster_qids": sorted((str(qid) for v in clubs.values() for _, opts, qid in v if opts), key=int),
+        # the retired rosters (off the picker, no rule, as the Roster says), by reason, and
+        # the qids --rendered counts always-hidden; the rosters the Roster says to retire
+        # that still have their rule or entry await the next sync apply
+        "retired_rosters": {"total": len(retired_now),
+                            "not_on_jotform": sum(1 for q in retired_now if should[q]["reason"] == "not on Jotform"),
+                            "no_active_girl": sum(1 for q in retired_now if should[q]["reason"] == "no active girl")},
+        "retired_qids": retired_now, "awaiting_retirement": len(awaiting),
         "duplicate_club_questions": dup_clubs,
         "options_total": sum(len(o) for v in clubs.values() for _, o, _ in v),
         "conditions": len(conditions), "error_conditions": errored,
@@ -884,22 +1202,37 @@ def form_report(form_id, client, roster_by_region, partners_of=None):
                          "hidden": fuzzy.get("hidden")},
     }
 
-    if region and region in roster_by_region:
-        want = roster_by_region[region]
-        have = set(clubs)
+    if region and status != "ENABLED":
+        # a disabled form carries its clubs frozen: nothing to compare against the Roster
+        # (a status Jotform did not report is skipped the same way, and named as such)
+        rep["region_check"] = {"skipped": status or "status not reported"}
+    elif region and region in roster_by_region:
+        marks = (facts or {}).get("marks") or {}
+        # a partner marked jotform=no has its share of a name taken out of the compare; a
+        # name every Roster holder of which in the region is marked leaves want altogether
+        want = {}
+        for k, (club, _, partner, by_partner) in roster_by_region[region].items():
+            shares = [names for pk, names in by_partner.items() if marks.get(pk) != "no"]
+            if shares:
+                want[k] = (club, set().union(*shares), partner)
+        # the questions that still count: a retired roster neither holds a club in the
+        # region's compare nor is "on form but not in roster"
+        live = {k: [(t, o, q) for t, o, q in v if str(q) not in should] for k, v in clubs.items()}
+        have = {k for k, v in live.items() if v}
         missing = [want[k][0] for k in want if k not in have]
-        extra = [clubs[k][0][0] for k in clubs if k not in want]
+        extra = [live[k][0][0] for k in have if k not in want]
         stale = []
         for k in want:
-            if k in clubs:
+            if k in have:
                 # same-named clubs (different partners) each have their own question;
                 # the roster side merges them by name, so compare union against union
-                on_form = set().union(*(opts for _, opts, _ in clubs[k]))
+                on_form = set().union(*(opts for _, opts, _ in live[k]))
                 if on_form != want[k][1]:
                     stale.append((want[k][0], len(want[k][1] - on_form), len(on_form - want[k][1])))
         rep["region_check"] = {
             "roster_clubs": len(want), "missing_from_form": missing, "not_in_roster": extra,
             "rosters_out_of_date": stale,
+            "retired": [text_of[q] for q in retired_now], "awaiting_retirement": [text_of[q] for q in awaiting],
         }
     return rep
 
@@ -908,6 +1241,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--form", action="append")
     ap.add_argument("--roster", default=os.path.join(REPO, "data", "roster_build", "Roster.csv"))
+    ap.add_argument("--partners", metavar="PATH",
+                    help="an export of the Partners tab: its `jotform` column (no = the partner's clubs "
+                         "are not on the attendance forms) tells a retired roster from a broken one; "
+                         "without it a roster off the Club picker whose club is active is a problem")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--defunct", action="store_true", help="include the retired forms")
     ap.add_argument("--rendered", action="store_true",
@@ -916,27 +1253,45 @@ def main():
                          "data-calcvalue equals its value, question 18's calculation comes before "
                          "the rosters' rules and lists the picker, every roster's boxes carry "
                          "validate[required], every module dropdown option's data-calcvalue equals "
-                         "its value, and the translation store the page embeds alters no roster "
-                         "box it serves; prints the runtime build")
+                         "its value, no module select is served `multiple`, JotForm.clearFieldOnHide "
+                         "is what glow/sync.py says, and the translation store the page embeds alters "
+                         "no roster box it serves; prints the runtime build")
     args = ap.parse_args()
     if args.defunct:
         FORMS.update(DEFUNCT)
     api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
     client = Client(api_key)
+    storage = read_storage(client)        # once per run: account-wide, every report carries it
+    marks = read_partners_csv(args.partners) if args.partners else None
     roster = load_roster(args.roster)
     partners_of = load_partners(args.roster) or None     # an empty Roster vouches for no partner
+    facts = roster_facts(args.roster, marks) if partners_of else None
 
-    reports = [form_report(f, client, roster, partners_of) for f in (args.form or FORMS)]
+    reports = [form_report(f, client, roster, partners_of, facts) for f in (args.form or FORMS)]
+    for r in reports:
+        r["storage"] = storage
     if args.rendered:
         for r in reports:
+            if r.get("status") != "ENABLED":
+                # the disabled page has no picker, no rules, no boxes, no store: nothing to read
+                r["rendered_skipped"] = r["status"] or "status not reported"
+                continue
             r["rule_problems"] += rendered_problems(r, public_page(r["id"]))
     if args.json:
         print(json.dumps(reports, indent=1))
         return
 
-    print("Roster (active girls):", {r: len(c) for r, c in roster.items()}, "clubs per region\n")
+    # the clubs per region that are on the forms, and the ones a marked partner keeps off
+    shown = {region: sum(1 for *_, by in want.values() if any((marks or {}).get(pk) != "no" for pk in by))
+             for region, want in roster.items()}
+    off = {region: sum(1 for *_, by in want.values() for pk in by if (marks or {}).get(pk) == "no")
+           for region, want in roster.items()}
+    print("Roster (active girls):", shown, "clubs per region"
+          + ("; not on Jotform: " + ", ".join(f"{r} {n}" for r, n in sorted(off.items()) if n)
+             if any(off.values()) else ""))
+    print(storage_status_line(storage) + "\n")
     for r in reports:
-        print(f"== {r['label']}  {r['id']}  \"{r['title']}\"  [{r['status']}]")
+        print(f"== {r['label']}  {r['id']}  \"{r['title']}\"  [{r['status'] or 'status not reported'}]")
         last = f"{r['last_submission']} US Eastern" if r["last_submission"] else "none"  # Jotform's clock
         print(f"   submissions {r['submissions']} (last {last})   "
               f"questions {r['questions']}   club questions {r['club_questions']} "
@@ -960,13 +1315,22 @@ def main():
             g = r.get("club_guard")
             print(f"   club guard: q{g['qid']} ({g['clubs']} clubs)" if g
                   else "   club guard: none (a mentor can pick several clubs)")
+        rr = r["retired_rosters"]
+        print(f"   retired rosters: {rr['total']} (not on Jotform {rr['not_on_jotform']}, "
+              f"no active girl {rr['no_active_girl']})")
         rs = r["rule_summary"]
         print(f"   question 18: {contact_ids_line(rs, r['club_picker'])}   "
               f"rosters required: {rs['required_rosters']} of {rs['clubs']}")
         print(f"   module values: {module_values_line(r.get('module_values'))}")
+        print(f"   module shape: {module_shape_line(r.get('module_shape'))}")
         print(f"   names dictionary: {names_line(r.get('names_dictionary'))}")
+        if "rendered_skipped" in r:
+            print(f"   rendered: skipped (form {r['rendered_skipped']})")
         if "build" in r:
             print(f"   runtime build: {r['build'] or 'not found on the public page'}")
+        if "rendered_retired" in r:
+            c = r["rendered_retired"]
+            print(f"   rendered retired: {len(r['retired_qids'])} retired rosters, {c['always_hidden']} always-hidden")
         if "rendered" in r:
             c = r["rendered"]
             print("   rendered picker: " + ("not found on the public page" if c is None else
@@ -988,11 +1352,17 @@ def main():
                 f"q{qid} " + ("not found" if c is None else
                               f"{c['options']} options, {c['aligned']} with data-calcvalue = value")
                 for qid, c in r["rendered_modules"].items()))
+        if "rendered_shape" in r:
+            s = r["rendered_shape"]
+            print(f"   rendered shape: clearFieldOnHide {s['clearFieldOnHide'] or 'not found on the public page'}, "
+                  f"module selects served multiple: {', '.join('q' + q for q in s['multi_select']) or 'none'}")
         if "rendered_names" in r:
             n = r["rendered_names"]
             print("   rendered names: " + (f"not checked ({n.get('why')})" if not n.get("checked") else
                   f"the embedded dictionary alters {n['altered']} of the {n['options']} roster options served"))
-        print(f"   rules: {rs['show_rules']} show-rules for {rs['clubs']} rosters, "
+        rosters = (f"{rs['clubs']} rosters" if rs["live_rosters"] == rs["clubs"]
+                   else f"{rs['live_rosters']} live rosters ({rs['clubs']} on the form)")
+        print(f"   rules: {rs['show_rules']} show-rules for {rosters}, "
               f"Contact_IDs aggregate covers {rs['aggregate_rosters']}  → "
               f"{'CLEAN' if not r['rule_problems'] else str(len(r['rule_problems'])) + ' PROBLEM(S)'}")
         for p in r["rule_problems"][:10]:
@@ -1000,11 +1370,16 @@ def main():
         if r["duplicate_club_questions"]:
             print(f"   DUPLICATE club questions: {r['duplicate_club_questions']}")
         rc = r.get("region_check")
-        if rc:
+        if rc and rc.get("skipped"):
+            print(f"   vs Roster: skipped (form {rc['skipped']})")
+        elif rc:
             print(f"   vs Roster ({rc['roster_clubs']} clubs in region): "
                   f"{len(rc['missing_from_form'])} missing from form, "
                   f"{len(rc['not_in_roster'])} on form but not in roster, "
-                  f"{len(rc['rosters_out_of_date'])} rosters differ")
+                  f"{len(rc['rosters_out_of_date'])} rosters differ"
+                  + (f", {len(rc['awaiting_retirement'])} await retirement (the next sync apply)"
+                     if rc.get("awaiting_retirement") else "")
+                  + (f", {len(rc['retired'])} retired" if rc.get("retired") else ""))
             for name in rc["missing_from_form"][:8]:
                 print(f"      missing: {name}")
             if len(rc["missing_from_form"]) > 8:

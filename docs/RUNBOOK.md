@@ -16,8 +16,10 @@ it, and through the forms, Salesforce). The forms and the sheet went live on
 | U.S | `262382706852058` | https://form.jotform.com/262382706852058 |
 | Template (every logic change lands here first) | `262352490535154` | not for mentors |
 
-The five pre-launch forms are retitled "(defunct)" and still enabled until
-they are switched off (backlog item 1). The same table lives in
+The five pre-launch forms are retitled "(defunct)" and have been `DISABLED`
+since 2026-09-30 (read 2026-10-06: `status: DISABLED`, the default "This form
+is currently unavailable!" page; how they were switched off is not recorded —
+the builder, presumably; backlog item 1). The same table lives in
 `tools/auto_sync.py` (`REGIONAL_FORMS`), `tools/form_status.py`,
 `backup_forms.py` and `appsscript/Config.gs`; `test/python_test.py` fails if
 they drift apart.
@@ -57,14 +59,19 @@ The automatic sync (below) does this on every roster change and every
 morning. By hand, per region:
 
 ```bash
-python3 tools/sheets_client.py export Roster data/roster_<date>.csv        # 1. export
-python3 tools/form_status.py --roster data/roster_<date>.csv               # 2. what differs? (read-only)
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv        # 1. export the Roster...
+python3 tools/sheets_client.py export Partners data/partners_<date>.csv    #    ...and the Partners tab
+python3 tools/form_status.py --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv                                # 2. what differs? (read-only)
 python3 backup_forms.py --form 262382821971058                             # 3. snapshot the form
 python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --partners data/partners_<date>.csv \
         --region Africa --form 262382821971058                             # 4. dry run
 python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --partners data/partners_<date>.csv \
         --region Africa --form 262382821971058 --apply                     # 5. apply
-python3 tools/form_status.py --form 262382821971058 --roster data/roster_<date>.csv   # 6. verify: CLEAN
+python3 tools/form_status.py --form 262382821971058 --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv                                # 6. verify: CLEAN
 ```
 
 Or all four regions in one go, with the same guards the workflow uses:
@@ -73,12 +80,22 @@ Or all four regions in one go, with the same guards the workflow uses:
 python3 tools/auto_sync.py             # dry run, every region, nothing written anywhere
 python3 tools/auto_sync.py --apply     # apply within the bands
 # --synclog additionally records the run in the sheet's SyncLog (the workflow always passes it)
+# --roster data/roster_<date>.csv --partners data/partners_<date>.csv: today's exports instead of new ones
 ```
 
 What to know:
 
 - `form_status.py` without `--roster` compares against the stale offline
   build `data/roster_build/Roster.csv` — always pass the fresh export.
+- `--partners` is the Partners tab ("Clubs that do not use Jotform"). The
+  sync reads which partners' clubs are kept off the forms from it; without it
+  a hand run cannot tell a retired roster from one an apply left half-written,
+  so the dry run says so per roster (`! '<club>' (q…) has no Club picker entry
+  and no show rule although its club is active in the Roster …`) and `--apply`
+  refuses to put such a roster back; `form_status.py` reads NOT CLEAN on it.
+  The runner always passes it (and refuses `--roster` without it). Its dry run
+  prints the form's status first (`Form: <id> status ENABLED`) and refuses
+  `--apply` on a disabled form without `--disabled-ok`.
 - The sync rewrites every condition on every run (`REPLACE conditions` is
   always in the plan); "changed" means a `CREATE`, `UPDATE` or `DELETE` line.
 - Never `--prune` a live form. It deletes questions and is for fresh clones
@@ -230,13 +247,253 @@ The raw Enrollment Responses keep the typo (the tab is append-only), so a
 rebuild from them brings it back — see the warning under "Roster rebuild and
 upload".
 
+## Clubs that do not use Jotform
+
+Some partners report attendance to GLOW directly (a monthly total per club),
+not through the attendance forms: Education and English for You, Tumaini La
+Maisha and Ng'aa Maskani since 2026-10-06
+([plans/2026-10-06-clubs-off-jotform.md](plans/2026-10-06-clubs-off-jotform.md)).
+Their clubs stay in the Roster — the girls are active and enrolled, their ids
+are kept, the Club Roster Form still lists the clubs — but they leave the
+attendance forms' Club picker. Never give such a club a blank region (CLAUDE.md
+rule 6: that says "fix me" and raises ATTENTION on every run); mark the
+partner instead.
+
+**The marker.** The Partners tab's fourth column, `jotform`: `no` = the
+partner's clubs are not on Jotform; `yes` or blank = on Jotform (the default;
+most cells stay empty). GLOW staff set it in the sheet (`Partners!D1` is the
+header `jotform`; `no` in the partner's row). Capitals and spacing do not
+matter (`No`, ` no `); any other text counts as **yes** — nothing leaves a
+form because of a typo — and the runner raises ATTENTION naming the cell
+("Partners-tab jotform value(s) not understood") until it is corrected. An
+export with no `jotform` column at all (the header renamed or moved, a column
+inserted before it) marks nobody: the sync warns (`! Partners tab: the export
+has no 'jotform' column …`), the runner raises ATTENTION ("the Partners export
+has no jotform column"), `--apply` refuses to restore a retired roster from it
+and the runner holds a plan that would — put the header back and the next run
+reads the marks again. The tab travels with the Roster: the runner exports it
+beside the Roster export on every run, a hand run passes it as `--partners`
+(the manual loop above).
+
+**What the next run does.** A roster whose partner is marked `no` is
+**retired**: kept on the form, hidden and frozen (its question is never
+written to, its girls' names stay in its options), off the Club picker, with
+no show rule, still in question 18's sum (harmless: a roster nobody can see
+has no ticked box). The dry run says so per roster, a third marker beside `!`
+and `?`:
+
+```
+Roster: 182 active clubs in Africa (3518 girls); 364 clubs overall; 38 club(s) of 3 partner(s) not on Jotform (Partners tab jotform=no) left off this form
+  ~ retired roster '<club>' (q…): not on Jotform (<partner>, Partners tab jotform=no)
+DRY RUN (use --apply to write):
+  - UPDATE club picker (182 clubs: calcValues, options)
+  - REPLACE conditions (213 rules)
+```
+
+The picker update and the conditions rewrite are the whole change (rule 3:
+generated, nothing hand-made). Once applied, later runs print `Retired
+rosters: N already off the Club picker` and nothing to do. The same happens,
+in every region, to a club that has **no active girl** once its rows have been
+inactive since before the day of the run (`~ retired roster '<club>' (q…): no
+active girl in the Roster`; `glow/sync.py RETIRE_INACTIVE`, on since
+2026-10-06): a roster emptied and refilled in two Club Roster Form submissions
+on one day stays on the picker in between. Days are the sheet's own: the sheet
+stamps `removed_date` in its time zone (File → Settings, America/New_York),
+and the sync and the audit take "today" in that zone (`glow/sync.py
+SHEET_ZONE`, `sheet_today`), never UTC's — the runner reads the sheet's
+setting with the exports and raises ATTENTION when it differs from the
+constant (change the constant if the sheet's zone was changed on purpose).
+
+**The bands.** The runner retires at most 5 rosters and restores at most 5
+per region per run (`--max-retires`, `--max-restores`); more is `attention`,
+nothing applied, "apply by hand after checking" — the first rollout (38 on
+Africa) is a hand apply in any case: backup, dry run, `--apply` with Ryan's
+go, second dry run, then `form_status.py --partners --rendered` (CLEAN,
+`retired rosters: 38 (not on Jotform 38, no active girl 0)` and `rendered
+retired: 38 retired rosters, 38 always-hidden`). The audit's `vs Roster` line
+reads `… 38 await retirement (the next sync apply)` between the mark and the
+apply (a note, not a problem), `… 38 retired` after it.
+
+**Why a retired roster is hidden and required without a rule.** Jotform
+validates a required field only when its element carries neither
+`always-hidden` nor `form-field-hidden` (`.claude/skills/jotform-api`, "Required
++ hidden"); a property-hidden question no rule touches renders `always-hidden`
+alone, and `form_status.py --rendered` counts exactly that for the retired
+rosters (`rendered retired: N retired rosters, N always-hidden` — fewer is a
+PROBLEM: stop, no mentor could submit). Proven on the template before any
+regional form (the plan's step 7).
+
+**The way back.** Clear the cell (or write `yes`): the next run restores the
+rosters (`~ restored roster '<club>' (q…): back on the Club picker`, their
+entries and rules back, an options update if the Roster moved on) — within the
+hour for 5 or fewer, a hand apply for more. A club that has active girls again
+comes back the same way. A restored roster whose club's **name two partners
+have had** has no rule left to read what it sent, so it comes back with its
+long name `<club> - <partner>` as a question-5 change: the `!` line (`… changes
+from '(retired: no rule to read)' to '<club> - <partner>'`), `--apply` refused
+without `--q5-change-ok`, the runner's question-5 band — check the Salesforce
+Account's name first ("Club names two partners share"). None of the 38 shares
+its name. No snapshot is involved: `restore_conditions.py` would refuse the
+pre-retirement conditions anyway (their rules test entries the picker no longer
+lists).
+
+**What else.** A Partners export missing a partner that has active clubs is
+refused by the sync (`Partners export lists 46 of 49 partners with active
+clubs - missing: … - a truncated export, or rows deleted from the Partners
+tab? nothing done`; the runner logs `failed`): without that floor a cut export
+would read every partner as unmarked and restore every retired roster
+unattended. The mentor e-mails of a marked partner say the attendance form
+does not change for them (Apps Script, once that change is pushed: the plan's
+step 11). Salesforce is untouched: the clubs' Accounts keep their names. On
+the dashboard they stay in "Clubs with no attendance last month" (that tile
+counts Jotform attendance rows, Ryan's decision of 2026-10-06) and, until
+their partner-reported totals arrive, in the batch-based "did not submit"
+lists planned beside it ("Attendance totals and partner-reported counts").
+## Deactivating a club
+
+A club whose girls stop coming, or whose partner stops using the attendance
+form for it, leaves the forms through its Roster rows: every row set
+`inactive` with a `removed_date`, the way the Club Roster Form removes one
+girl ([plan](plans/2026-10-06-clubs-off-jotform.md), C). The girls keep
+their ids and the club its ClubRegistry code, so a reactivation brings the
+same ids back; the template's sync then retires the club's roster question -
+hidden, off the Club picker, never deleted: `~ retired roster '<club>' (q…):
+no active girl in the Roster`, from the day after the removal
+(`glow.sync.RETIRE_INACTIVE`). A whole region's clubs leave the same way,
+**after** the region's form is disabled ("Disabling a regional form"; the
+other way round every runner run fails on the empty region until the form is
+off).
+
+```bash
+python3 tools/deactivate_clubs.py --partner "<partner>" --check-only                   # who sent what since 2026-09-01 (reads only)
+python3 tools/deactivate_clubs.py --region U.S --reason "<why - who decided, when>"     # dry run
+python3 tools/deactivate_clubs.py --region U.S --reason "<why>" --apply
+python3 tools/deactivate_clubs.py --partner "<partner>" --club "<club>" --reason "<why>" --apply   # one club
+python3 tools/deactivate_clubs.py --undo data/deactivate_clubs/<stamp>                 # the way back, dry run
+python3 tools/deactivate_clubs.py --undo data/deactivate_clubs/<stamp> --apply
+```
+
+What the tool does and guards:
+
+- **The guard.** Before the plan it reads the region's attendance form's
+  submissions since 2026-09-01 (`JOTFORM_API_KEY`; counts, days and club
+  names only) and credits each to a club by question 5 or the Club picker's
+  pick: the same text, or exactly `<club> - <its partner>` - never a bare
+  prefix (`QUEENS` is not `Queens of Quest`), and never a namesake's
+  `<club> - <other partner>`. A club named in the last 30 days
+  (`--recent-days`) stops the run: `'<club>' (<partner>) sent attendance on
+  <day> - deactivating a club that reports needs --deactivate-anyway`.
+  `--check-only` prints the table and stops: per partner its clubs and
+  submissions, then each club that was named with its days and whether it
+  was picked together with another club (the 2026-09-25 Africa pick). When
+  the chosen clubs are every active club of a region (`--region`, or its
+  partners together) the form's status is read too: not `DISABLED`, the
+  table says so with `!` and `--apply` refuses without `--form-enabled-ok` -
+  the order is form first, clubs after.
+- **The write** (`--apply`, with `--reason`: one line for the Audit row).
+  `status` → `inactive` and `removed_date` → today in the sheet's zone (the
+  text the Apps Script writes) on every ACTIVE row of the chosen clubs, in
+  one batch. First the Roster tab is saved to
+  `data/deactivate_clubs/<stamp>/Roster.csv` and the rows with their old
+  values to `written.json` beside it; then the tab is re-read and the run
+  stops, nothing written, if a planned row changed or a club gained an
+  active row (a Club Roster Form submission in between: run it again). After
+  the write every row is re-read and compared and the two columns are checked
+  unchanged everywhere else; then one Audit row `deactivateRows` (`11 club(s)
+  of 6 partner(s) in U.S: 155 row(s) set inactive, removed_date <day> -
+  tools/deactivate_clubs.py (<reason>)`). A row of a chosen club that arrives
+  during the write is left active and named (`!`, exit 1): run the tool
+  again for it.
+- **Not touched:** ClubRegistry (the code is immutable; `Ids.gs` finds it by
+  partner + club when the club comes back), SF Pending (the Accounts exist),
+  the Partners tab (the partners stay, with their region), the forms.
+- **Afterwards, in the sheet, now:** **GLOW → Google Forms → Update form
+  dropdowns from the Roster**, so the Club Roster Form reads `(no active
+  clubs)` for the partner; until then it still offers the clubs, and a change
+  sent for one runs against the inactive rows and puts girls back by name.
+  Then `python3 tools/sheets_client.py export Roster data/roster_<date>.csv`
+  and the template's sync dry run (`python3 sync_attendance_form.py
+  data/roster_<date>.csv --roster --form 262352490535154`): from the day
+  after, it plans `~ retired roster …` for each club (the section on clubs
+  that do not use Jotform). The region's form: a `DISABLED` one is `skipped` by the runner
+  and left as it is (its rosters, picker and rules frozen); an enabled one
+  gets the retirements from its next sync.
+- **The way back.** `--undo data/deactivate_clubs/<stamp>` puts back exactly
+  the rows `written.json` names - `status` and `removed_date` as they were -
+  with the same shape (dry run, stale check, one batch, re-read, Audit
+  `reactivateRows`). It refuses before the plan - the dry run too, nothing
+  saved - naming the rows and their clubs, when one of those rows has
+  changed since or a chosen club has an active row `written.json` does not
+  name (a girl reactivated or enrolled through the Club Roster Form, a moved
+  club): that club is a human's call. Look at those rows first; for the other
+  clubs to go back, take that club out of `written.json` - its rows and its
+  line under `"clubs"` (half an edit is refused by name) - and run again; its
+  own rows go back by hand from the folder's `Roster.csv` or through the Club
+  Roster Form. Then the
+  dropdown refresh and a runner dry run (the sync restores the rosters,
+  `~ restored roster …`, within its bands). One club that starts again
+  without the undo: the partner sends "Enroll a NEW club" (its section shows
+  no club to change); the duplicate guard holds it as a re-enrollment with
+  its names on file, Ryan releases it from the Monday e-mail ("Working the
+  ReviewQueue") and `planClub_` reactivates the rows by name.
+
+## Disabling a regional form
+
+A regional form nobody will submit on (the U.S form: 0 submissions since
+launch, its 11 clubs deactivated - [plan](plans/2026-10-06-clubs-off-jotform.md),
+D) is switched off, not synced down to an empty Club picker: Jotform then
+serves its "form unavailable" page instead of the form; the runner reads the
+form's status on every run and logs `form <id> is DISABLED - not synced` with
+the SyncLog result `skipped` (no dry run, no apply, no verify, exit code
+unaffected); `form_status.py` prints `[DISABLED]` and skips the region check
+and the served-page checks; the form's rosters, picker and rules stay as they
+are, frozen. **Order:** disable the form first, deactivate its clubs after
+("Deactivating a club"; `deactivate_clubs.py` reads the form's status when
+every active club of the region is chosen and refuses `--apply` while it is
+not `DISABLED`, unless `--form-enabled-ok`). Deactivated first, every runner
+run would fail on the empty region (`read_roster_csv` exits) until the form
+is off.
+
+```bash
+python3 tools/disable_form.py --form 262382706852058                 # dry run: status, count, last submission, the disabled page's text
+python3 tools/disable_form.py --form 262382706852058 --message "The U.S attendance form is paused. Please contact your GLOW coordinator." --apply
+python3 tools/disable_form.py --form 262382706852058 --enable --apply   # the way back
+```
+
+- `status` (`ENABLED` / `DISABLED`) is a property of every form (`GET
+  /form/{id}` and its `properties`). Whether `POST /form/{id}/properties`
+  with `properties[status]` **changes** it is unverified until the first run
+  (`.claude/skills/jotform-api/SKILL.md`, "Properties"). `--apply` takes a
+  `backup_forms.py` snapshot first (its properties file records the status
+  and `messageOfLimitedForm`, the disabled page's text, to put back), POSTs,
+  re-reads both GETs and prints them. If the status did not move it stops:
+  `the API accepted the write but the status did not change - disable the
+  form in the builder (Settings -> Form Status) and run this again without
+  --apply to confirm`. Either way the dry run afterwards must read
+  `DISABLED`; record which way worked in the skill.
+- Refusals: the template (never disabled); a form not in `glow.forms.LIVE`
+  (the five pre-launch forms are already off); a form with a submission in
+  the last 30 days, without `--disable-anyway`. The message is English only:
+  whether Jotform's disabled page translates is unverified.
+- Afterwards: one runner dry run (`python3 tools/auto_sync.py`) - the region
+  reads `skipped - form DISABLED`, the others `in-sync`. `REGIONAL_FORMS`
+  keeps the region: the live status is the truth read on every run, nothing
+  to flip back in code.
+- **The way back** (a U.S club starts): its rows back first ("Deactivating a
+  club", the way back), then `python3 tools/disable_form.py --form
+  262382706852058 --enable --apply` (or the builder), one runner dry run
+  (the region reads `in-sync` or plans the restores), `AUTO_SYNC_APPLY`
+  unchanged.
+
 ## Automatic sync
 
 **Path:** a roster change in the sheet (New Club / Roster Modification form,
 a rebuild, or a region refresh) → `appsscript/Dispatch.gs` starts the
 workflow on GitHub (`workflow_dispatch`; the older `repository_dispatch` event
 is still accepted) → `.github/workflows/auto-sync.yml` →
-`tools/auto_sync.py` exports the Roster tab and, per region, dry-runs the
+`tools/auto_sync.py` exports the Roster and Partners tabs and, per region,
+reads the form's status (a form that is not `ENABLED` is `skipped`, nothing
+run against it; a status that cannot be read is `failed`), dry-runs the
 sync, checks the safety bands, backs up, applies, verifies with
 `form_status.py`, and appends a row to the sheet's **SyncLog** tab. The
 workflow also runs every morning (the cron is UTC: 06:00 Chicago in summer,
@@ -248,23 +505,40 @@ tab ("Run workflow", optional region).
 the run also checks Salesforce, and with `apply` creates the account of each new club right
 before the region's form puts it on the Club picker ("Club accounts in Salesforce", "New clubs'
 accounts, automatically"). It is one more SyncLog row, region `Salesforce`; its problems are
-ATTENTION items starting `SF:`.
+ATTENTION items starting `SF:`. The end-of-run check reports a partner-less stray account
+only when every regional form's names were read, and a region whose form is disabled
+(`skipped`) counts as read: its clubs keep their accounts, under their partner, so they are
+not strays (a `failed` region does not count, and no stray is reported that run).
 
-**Safety bands** (per region, per run; `--max-creates`, `--max-updates`):
-at most 5 new clubs and 20 roster updates; never a delete; not when a roster
+**Safety bands** (per region, per run; `--max-creates`, `--max-updates`,
+`--max-retires`, `--max-restores`):
+at most 5 new clubs and 20 roster updates; at most 5 rosters taken off the
+Club picker and 5 put back ("Clubs that do not use Jotform"), and none put
+back from a Partners export without the `jotform` column (nobody can be
+marked in it); never a delete;
+not when a roster
 would be replaced by one sharing no names with the current one; not when the
 export looks truncated (fewer than 1,000 active rows, or many clubs on the
-form missing from the export); never a change of what an existing club
+form missing from the export; a Partners export missing a partner with active
+clubs makes the sync itself refuse, `failed`); never a change of what an
+existing club
 sends to question 5, its Salesforce Account name (a renamed club, a
 respelled partner — "Club names two partners share"), which stops the
 region even when nothing else is planned. Outside the bands nothing is
 written, the region is logged as `attention`, and
 `data/auto_sync/ATTENTION.md` (kept as a workflow artifact) says what to do.
-Two more things raise ATTENTION without stopping a region: a new club that
+Four more things raise ATTENTION without stopping a region: a new club that
 was not added to its form because another partner's club has its name (the
 rest of the region is applied as usual; the SyncLog `detail` says "N new
-club(s) not added (name in use)"), and, once per run, any name that two
-clubs of the regions synced send to question 5. Until a club that was not
+club(s) not added (name in use)"), a Partners-tab `jotform` cell holding
+something other than `yes`, `no` or blank (read as yes; `detail` says "N
+jotform value(s) not understood"), a Partners export with no `jotform` column
+at all (nobody is marked in it; `detail` says "Partners export without a
+jotform column"; a plan that would put a roster back from it is held), and,
+once per run, any name that two clubs of the regions synced send to question
+5 — and, read with the exports, a sheet time zone that differs from
+`glow/sync.py SHEET_ZONE` (the no-active-girl rule's day would be off by the
+difference). Until a club that was not
 added is renamed, every apply in its region reads `applied-with-problems`,
 with a second ATTENTION ("applied, but the form still has problems"): the
 verify step goes by club name, so its "still missing from the form: <club>"
@@ -298,6 +572,15 @@ back ("The names dictionary and the module values"). After every apply the
 verify step also audits the form's names dictionary; a store it could not
 read is a note in the log, not `applied-unverified`.
 
+Once per run, after the regions, the runner also reads **Jotform's storage**
+against the account's plan and logs the same `storage:` line `form_status.py`
+prints ("Photos", step 7): upload space in all and submissions in the monthly
+cycle, each judged on its own. A limit at 80 % or more is an ATTENTION naming
+it ("Jotform upload space at NN% - the forms stop at 100%", or "Jotform
+submissions this cycle at NN% …"), every morning until acted on; at 50 % the
+line reads `warn` and nothing more. A read that fails is one log line,
+`storage: could not be read (…)`, never a failed run.
+
 The workflow fails visibly (GitHub emails the repository owner) on any
 ATTENTION (exit 2) and on any failure (exit 1).
 
@@ -311,8 +594,12 @@ before 2026-09-02, when the sheet was on UTC, five hours), and a Mac
 the true time. The log file and ATTENTION.md show the runner's clock with
 its UTC offset. `mode` is
 `dry-run` or `apply`; `result` is one of `in-sync`, `dry-run` (would apply), `applied`, `applied-with-problems`,
-`applied-unverified`, `attention`, `failed`. `detail` counts the roster
-creates, updates, deletes and warnings, then names a Club-picker or
+`applied-unverified`, `attention`, `skipped`, `failed`. `skipped` is a form
+whose status is not `ENABLED` (`detail`: `form DISABLED`; nothing was run
+against it, and the exit code is unaffected — "Disabling a regional form").
+`detail` counts the roster
+creates, updates, deletes and warnings, then the rosters retired and restored
+(`…, 38 retired`), then names a Club-picker or
 club-guard write when there is one (`…, update club picker`): such a
 write is applied like a roster change. The Partner-box hide (`HIDE partner
 textbox`, "Club names two partners share") is neither counted nor named in
@@ -356,8 +643,10 @@ keeps as an artifact for 30 days);
 `python3 restore_conditions.py --form <id> --from conditions-<stamp>.json --apply`
 puts the conditions back. It refuses a snapshot whose rules test a club the
 Club picker does not offer today (one from before a form's same-name switch,
-or before a rename): restored, those clubs' rosters would never show — run
-the sync instead. Questions are never deleted by the runner. To stop
+before a rename, or before a partner's rosters were retired): restored, those
+clubs' rosters would never show — run the sync instead (a retirement is undone
+by clearing the Partners cell, "Clubs that do not use Jotform"). Questions are
+never deleted by the runner. To stop
 the automation: `AUTO_SYNC_APPLY=0` (or clear the two Script Properties).
 
 ## The Club picker (mentors choose their club instead of typing it)
@@ -816,11 +1105,12 @@ Question 18 (Contact_IDs) is the list of girls Salesforce stores as present:
 one calculation over every roster, hidden rosters ignored, so only the shown
 club's ticks arrive. Of September's 484 submissions, 64 had no girl ticked
 (stored as an empty *Success* batch that blocks the club's real batch for
-that day), 17 had girls ticked but an empty question 18 (207 names never
-sent), and 2 carried another club's girls. Two checks close this on the form,
-both generated by the sync and switched by constants in `glow/sync.py`
-(**live on all five forms since 2026-10-02 02:04 UTC**; the template since
-2026-10-01 16:37 UTC):
+that day - until 2026-10-07; since then Failed "No participants submitted",
+which blocks nothing), 17 had girls ticked but an empty question 18 (207
+names never sent), and 2 carried another club's girls. Two checks close
+this on the form, both generated by the sync and switched by constants in
+`glow/sync.py` (**live on all five forms since 2026-10-02 02:04 UTC**; the
+template since 2026-10-01 16:37 UTC):
 
 - **Question 18 is recalculated after the rosters change**
   (`CONTACT_IDS_FIRST`, `CONTACT_IDS_PICKER_OPERAND`). Jotform walks a field's
@@ -1125,6 +1415,25 @@ guessed (`names dictionary: not checked (…)`), and the runner's verify step
 logs it as a note. A stale entry made in the builder later is flagged after
 the next apply (or by hand), not prevented.
 
+**The module chain's shape** is pinned by the same report
+([plan](plans/2026-10-06-module-selection.md); nothing on the forms changed
+for it): `module shape: year q94 single-select required; modules q14/q92/q93
+single-select required; sessions q15/q95/q96/q97 single-select required;
+clearFieldOnHide disable`. A form is NOT CLEAN when the year, a module or a
+session dropdown is a multi-select (a mentor could send two modules, and
+question 98 would run them together), is not required (a blank module reaches
+Salesforce), is missing, or when the year dropdown is hidden; and when the
+form-level `clearFieldOnHide` is anything but `disable`: `dontClear` means a
+module dropdown hidden by the Year rule would keep its answer at submit (two
+modules, or last year's, in question 98), `enable` was rejected 2026-09-30
+(the loop limit drops to 3), and an unset or unknown value is a runtime
+behaviour nobody has read, so hidden answers are not treated as cleared.
+`--rendered` reads the served page's `JotForm.clearFieldOnHide` and refuses a
+module `<select>` served `multiple`. The fix is the builder (the dropdown's
+own settings, or the form's setting that clears hidden field values), then
+re-run the report - never a sync apply: the sync writes none of it (its one
+properties write carries `conditions` alone).
+
 **The runner never applies a module line unattended** (`check_bands`: "would
 write the calcValues of 3 module dropdown(s) (q14, q92, q93) - never
 unattended"): the region reads `attention`, its roster changes included,
@@ -1215,6 +1524,50 @@ the form already open keeps the old page until she reloads.
   wrote (`calcValues` was `""` on every module dropdown before the rollout).
 
 Neither touches the rosters, the rules, question 5 or the integration.
+
+**The batches Salesforce held with a translated module** were corrected once, in place, by
+`tools/fix_module_values.py` ([plan](plans/2026-10-06-module-selection.md), (b)): every
+`Attendance_Batch__c` since launch whose `Module__c` is not one of the template's module
+options, and the `Attendance__c` rows under it, which the processor copied the batch's module
+onto. **Applied 2026-10-07** (Ryan's go, VPN off): 6 batches (5 Success, 1 Failed) and their 43
+rows, all Latin America's, each paired with exactly one submission; ledger
+`data/module_fix_2026-10/ledger.csv`, 49 records `written`; the dry run since says `nothing to
+correct: 0 of 595 batches`, and `Module__c` since 2026-09-01 holds 17 values on both objects,
+all canonical English. The commands below stay for a check (the dry run is read-only) and for
+the rollback. The right value is the
+submission's own: the stored answer of the module dropdown its Year answer names, read as the
+back-fill resolver reads it. A batch is paired with **exactly one** submission - the same club
+(question 5), attendance date, question 98, year and session, on the form of its region, created
+within three hours of the batch - or it is listed as `UNMATCHED (<why>)` and left alone (a
+same-day re-send gives two candidates on purpose: correct those by hand, by id). Every run needs
+`JOTFORM_API_KEY`, the CLI login and `--vpn-off` (VPN off, as for the back-fill); until BACKLOG 53
+is decided the dry run itself runs with Ryan present (the CLI login is a read the gate does not see).
+
+```bash
+python3 tools/fix_module_values.py --vpn-off                       # dry run: the pairs, the UNMATCHED, "would write: B batches, M rows"
+python3 tools/fix_module_values.py --vpn-off --apply --limit 1     # Ryan's go: the first batch and its rows, each read back
+python3 tools/fix_module_values.py --vpn-off --apply               # the rest; then the dry run again -> "nothing to correct"
+python3 tools/fix_module_values.py --undo data/module_fix_2026-10/ledger.csv --vpn-off --apply   # rollback: `old` back by id
+```
+
+The dry run prints `canonical modules: 18 (template …: q14 5, q92 7, q93 8 options)`, then one
+line per batch: `<id>  <club>  <date>  <status>  '<Spanish>' -> '<English>'  (<region> <form>,
+submission 1 candidate(s), year 1, session 8; 14 rows; created <UTC>)`. Read the `created` stamps:
+a batch created after the module values went live on its form (Latin America: 2026-10-06 11:17
+UTC) means the fix did not take - tell the session that owns the module values and write nothing.
+`--apply` writes the batch, then each row, one PATCH per record, re-reads each by an explicit-field
+query and keeps a ledger (`data/module_fix_2026-10/ledger.csv`, owner only: ids, module names and
+outcomes - `open`, then `written` / `failed_<status>` / `check`); it stops at the first record not
+`written` and names the id and the HTTP status (never the answer's text). `check` means the write
+answered 204 but the value could not be confirmed (the re-read differed, or got no answer): look
+at the record. `--undo` reverses every `written` and `check` record and repeats an undo that did
+not take; a record still `open` is unknown - look at it in Salesforce. An update runs none of
+the processor (its trigger is after-insert only) and the rows' count is compared before and after.
+A batch without a module (a partner-reported aggregate, "Attendance totals and partner-reported
+counts") is out of scope and counted in one line. `--all-forms` reads the four forms whole for a
+batch whose region or window the narrow read cannot serve. Afterwards the dashboard's "Jotform
+Sessions by Module Last Month" has no Spanish bar: the Salesforce dashboard session is told the
+date of the apply and the ids in the ledger.
 
 ## Header logo
 
@@ -1685,9 +2038,14 @@ when nothing matches it creates a new, partner-less Club account.
   and the account is then renamed to the new picker text - with Ryan's go.
 - **A new club** gets its account from the automatic sync when `SF_SYNC` is `apply` (below).
   Otherwise, or when the sync says ATTENTION, it is created by hand before its first attendance:
-  it stays in the SF Pending tab and the Monday e-mail until then. Once `SF_SYNC` is `apply`, create
-  by hand only for an `SF:` ATTENTION item, and read the name in Salesforce first (the sync may
-  have made it since).
+  it stays in the SF Pending tab and the Monday e-mail until then - while `SF_SYNC` is not `apply`
+  that round is weekly: the Monday e-mail's SF Pending list is worked each Monday (Ryan with
+  Claude) as a further round of the procedure below. Once `SF_SYNC` is `apply`, create by hand
+  only for an `SF:` ATTENTION item, and read the name in Salesforce first (the sync may have
+  made it since). A club the sync never puts on a form (its partner marked `jotform=no`, "Clubs
+  that do not use Jotform") is a hand create in every mode (BACKLOG 74). A partner-less account
+  the processor created meanwhile is re-parented to its partner, never re-created (its Contacts
+  and attendance stay; done for two clubs on 2026-10-06).
 - **Signals** (read-only queries, all expected as stated):
   - Club accounts without a parent: exactly the two pilot accounts that are on hold. One more
     means a form sent a name no account carries.
@@ -1912,7 +2270,9 @@ python3 tools/sf_backfill.py status                   # what was sent; what a ro
 Everything is in `data/backfill_2026-09/` (never committed; owner-only files).
 
 - The club is the roster that holds the ticks, the names are the ticks; one batch per club and
-  day; no batch without names; nothing for a club and day Salesforce already has.
+  day; no batch without names (since 2026-10-07 03:22 UTC the processor refuses one anyway:
+  `Failed` "No participants submitted", no rows); nothing for a club and day Salesforce already
+  has - a batch of any status, or rows.
 - `held.csv` lists what waits, with **every** reason. Ryan decides in `decisions.csv`
   (`key,decision`; several clauses joined with `;`), then `plan` again:
   `skip` - leave it out; `use <submission id>[+<id>]` - which report(s) of a day reported twice
@@ -1939,7 +2299,11 @@ Everything is in `data/backfill_2026-09/` (never committed; owner-only files).
     "saved nothing" only ten minutes after the request, when Salesforce can no longer be working
     on it.
   - `CHECK` - **"is in Salesforce but not as planned"**: the batch exists and may hold part of
-    the attendance; its rows block that club and day. Read its status message in Salesforce
+    the attendance; its rows block that club and day. A `Failed` batch without rows blocks
+    nothing in Salesforce (the processor's duplicate check reads `Success` batches only), but this
+    tool still never adds to its day. On a `Success` the read-back also compares
+    `Girls_Present__c` with the batch's rows (since 2026-10-07): a different or empty count is a
+    `CHECK` too. Read its status message in Salesforce
     (the tool never prints it: it can quote a girl's name). Then either remove the batch, its
     attendance rows and the contacts it made (Ryan's go) and `close <key> --removed`, or, if it
     is right after all, `close <key> --accepted`. After either: `snapshot` and `plan` again (a
@@ -2079,6 +2443,96 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
   ("not as before the rehearsal - LOOK AT IT NOW"), the rollback file holds the club's contacts as
   they were just before it.
 
+## Attendance totals and partner-reported counts
+
+Plan: [plans/2026-10-06-attendance-totals.md](plans/2026-10-06-attendance-totals.md) (Ryan's
+decisions of 2026-10-06). Three partners' clubs do not use Jotform and report a monthly count per
+club instead; leadership wants one attendance total that includes them, with the per-girl figures
+labelled "Jotform only". The field and the processor change (plan sections A and B) are
+**deployed since 2026-10-07 03:22 UTC** (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation
+`0AfRP000002gKnZ0AU`; rollback: redeploy `data/sf_totals_2026-10/before/`, the fields can stay).
+The one-off back-fill below (plan C) is done and the dashboard's totals (plan D) are deployed,
+both on 2026-10-07 ("Attendance dashboard in Salesforce"). Open: how the partners' counts come
+in (BACKLOG 72).
+
+**The field.** `Attendance_Batch__c.Girls_Present__c` (Number, "Girls present") is the one
+attendance count. Since the deploy the attendance processor sets it when a Jotform batch
+succeeds (= the attendance rows it created) and clears it on every `Failed` path; a
+partner-reported total is typed into it. A batch with no names and no count is `Failed` "No
+participants submitted" (no rows, blocks nothing); a batch with no names and a count above 0 is
+an aggregate and succeeds with no rows.
+Total attendance = the sum over `Success` batches; "Jotform only" = the same over batches whose
+`Creator__c` starts with `Jotform`. A girl counted twice in one month on two sources would be a
+double count: a club reports on one source only, and the Monthly Report's weekly counts are
+never summed into attendance.
+
+**The intake contract** - whatever carries a partner's count into Salesforce (a small Jotform
+form, a Salesforce screen flow, a sheet import: BACKLOG 72, Ryan's decision) writes one
+`Attendance_Batch__c` per club per month with exactly these values:
+
+| Field | Value |
+|---|---|
+| `Account_Name__c` | the club's Salesforce Account name **exactly** as the Club picker sends it (CLAUDE.md rule 5): the plain club name, or `<club> - <partner>` where another partner's club shares the name; the sync's `--summary-json` `sf_names` lists them. A mistyped name creates a partner-less account ("Club accounts in Salesforce") |
+| `Attendance_Date__c` | the **last day of the month** reported (a partner that gives per-session counts dates them the session day instead) |
+| `Girls_Present__c` | the count, above 0 (0 or empty with no names is `Failed` "No participants submitted") |
+| `Contact_IDs__c` | **empty** - no names, ever |
+| `Creator__c` | `Partner report` (the label the reports use; any other value not starting with `Jotform` also stays out of the Jotform-only view) |
+| `Module__c`, `Module_Week__c`, `Module_Year__c` | optional; empty keeps the batch out of the by-module report only (it counts rows) |
+| `enable_fuzzy_matching__c` | false |
+
+The processor's club-and-day lock still applies: an aggregate `Success` for a club and date makes
+a Jotform batch for that date a `Failed` "Duplicate", and attendance rows on that date make an
+aggregate `Failed` "Attendance already exists" - which is why aggregates are dated the last day of
+the month, a day the three partners' clubs never send a Jotform batch for.
+
+**The one-off back-fill** (`tools/sf_girls_present.py`) - **done 2026-10-07**, on Ryan's go, VPN
+off. The batches from before the deploy had the field empty, so the totals would have
+under-counted every one of them. `plan` read 606 batches (575 `Success`, 31 `Failed`; 2
+successes already counted by the new processor), `set --apply --limit 1` wrote BATCH-000000
+(2 = its 2 rows, read back and re-read independently), then the remaining 572: ledger
+(`data/sf_girls_present/ledger.csv`) 573 `open` → 573 `written`, no failure. `check` → `575
+Jotform Success batches; differ: 0, without a value: 0 -> OK`; SOQL: 0 `Success` batches without
+a value, and `SUM(Girls_Present__c)` over `Success` = 7,540 = `COUNT(Id)` of `Attendance__c`.
+Since then the processor sets the count on every new batch, and **`check` is the signal**
+(Signals, below). The commands, for the record and for a re-run (a second `set` finds `to set:
+0`; the CLI login, VPN off; the hook sees `--apply` only):
+
+```bash
+python3 tools/sf_girls_present.py plan --vpn-off            # read-only -> data/sf_girls_present/plan.csv (ids and counts)
+python3 tools/sf_girls_present.py set                       # dry run from the plan: "to set: N Success batches with no Girls present"
+python3 tools/sf_girls_present.py set --apply --vpn-off --limit 1   # Ryan's go: one batch, read back
+python3 tools/sf_girls_present.py set --apply --vpn-off     # the rest, one PATCH per batch, each re-read before and after
+python3 tools/sf_girls_present.py check --vpn-off           # "differ: 0, without a value: 0 -> OK"
+```
+
+It writes only a `Success` batch whose value is still empty, = its attendance rows (0 for the
+legacy blanks, BACKLOG 73); a `Failed` batch stays empty, as the processor leaves it, so the field
+means one thing; a batch with a value - a typed aggregate, or a count the processor set - is
+never touched, so a second `set` finds `to set: 0`. The ledger (`data/sf_girls_present/ledger.csv`,
+owner only: when, id, rows, value read back, outcome `open` then `written` / `failed_<status>` /
+`check` - 204 answered but the value not confirmed: look at the batch) says what was written; the
+run stops at the first thing not as planned. The rows are counted one GROUP BY per 200 batch ids
+(an aggregate query has a single page), so the check keeps working as the batches grow. A read
+Salesforce refuses for the field (HTTP 400: an org without it, or a login not on the System
+Administrator profile, the only one that can read it) stops `plan` and `check` with "is
+`Girls_Present__c` deployed?" and names the profile. An update runs none of the
+processor (after-insert trigger). After the run, read-only: `SELECT COUNT(Id) FROM
+Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Girls_Present__c = null` → 0, and
+`SELECT SUM(Girls_Present__c) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success'` =
+`SELECT COUNT(Id) FROM Attendance__c` (both re-read at the time; live submissions keep arriving).
+
+**Signals** (the field is deployed since 2026-10-07 03:22 UTC; all expected as stated):
+- `python3 tools/sf_girls_present.py check --vpn-off` → `differ: 0, without a value: 0 -> OK`
+  (true since the one-off back-fill, 2026-10-07: 575 Jotform Success batches then). A
+  `differ` is a Jotform `Success` batch whose count is not its rows; a `without a value` is a
+  `Success` batch the processor or the back-fill did not count. Aggregate batches are not compared
+  (no rows by design).
+- Blank submissions: `SELECT COUNT(Id) FROM Attendance_Batch__c WHERE Status_Message__c = 'No
+  participants submitted'` grows only with real blanks; each is a club to ask, not a day blocked.
+- Club accounts without a parent: still exactly the two pilot accounts ("Club accounts in
+  Salesforce"). One more after an aggregate run means a count was typed under a name no account
+  carries.
+
 ## Attendance dashboard in Salesforce
 
 Since 2026-10-02 the dashboard **"Jotform Attendance (test)"** (dashboard folder Attendance)
@@ -2092,6 +2546,14 @@ shows the Jotform attendance as charts, built only from data Salesforce already 
 - girls per month;
 - last month by partner (girls) and by module (sessions);
 - clubs with no attendance last month: a number and a table.
+
+Since `totals1/` (deployed 2026-10-07 03:59 UTC, [plan](plans/2026-10-06-attendance-totals.md)
+D), also: total attendance last month from every source beside the Jotform-only figures (a
+header says "(Jotform only)" wherever girls are counted by name); total and Jotform attendance
+per partner per month; clubs not submitting in the last 14 days and since 1 September (numbers,
+and a table by partner for the 14 days); blank submissions since 1 September. Read back the
+same night: the reports equal SOQL (264 of 264 totals and groups), and every new tile equals
+SOQL unfiltered and under three partners' filters (the plan's Result has the numbers).
 
 The test report "Jotform Monthly Attendance (test)" now shows a chart with its rows collapsed.
 Its filters are unchanged.
@@ -2131,11 +2593,28 @@ Its filters are unchanged.
 - **Snapshot**: a dashboard shows its last refresh (the time at top right), not live data.
   Press Refresh, or schedule a daily refresh (Ryan's step, in the dashboard: Refresh >
   Schedule Refresh).
+- **Total attendance** (since `totals1/`, 2026-10-07) sums `Girls_Present__c` over `Success`
+  batches - the Jotform rows plus the monthly counts partners without Jotform report
+  (`Creator__c` `Partner report`; "Attendance totals and partner-reported counts"). Until a
+  partner's first count arrives (BACKLOG 72) the Jotform-only figures equal the totals. "Girls who
+  attended" stays Jotform only (a reported count has no names) and counts each girl once. "Did
+  not submit" in the 14-day and since-1-September windows means no batch of any status dated in
+  the window (a refused duplicate counts as submitted); the 14-day window is today plus the 14
+  days before it, in the org's time zone (Pacific: on the evening of 2026-10-06 there, 09-22 to
+  10-06); the last-month tile stays row-based. A
+  **blank** is a submission with no girl ticked: `Failed` "No participants submitted", or a
+  legacy `Success` with `Girls_Present__c` 0. Clubs whose partner reports a monthly count show
+  as not submitting until that count arrives; the U.S clubs, which do not report attendance
+  here, stay on the lists ("Clubs that do not use Jotform").
 
 **Filters:**
 - The dashboard's **Partner** filter covers every component. It holds the 49 partner names
   that have clubs, typed in exactly (Salesforce allows 50 values per filter).
-  - A new partner must be added to the filter by hand (`partners.json`, below).
+  - A new partner must be added by hand to **both** lists: the dashboard's `partners.json`
+    (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
+    map the automatic club accounts read, partner → its account; "New clubs' accounts,
+    automatically"). Two lists of the same 49 partners, kept separate on purpose: one is filter
+    text, the other account ids.
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -2154,27 +2633,54 @@ Its filters are unchanged.
   Names still never go into the repo, logs, commits or the conversation (child-privacy).
 - If the folders are ever shared beyond those users: the dashboard runs as Ryan and shows
   everything, but a chart's report runs as the viewer, and club accounts are private (owned by
-  administrators, or by GLOW Sync for those the automatic sync creates; no sharing rules). A standard user would then see few or no rows behind a
-  full chart.
+  administrators, or by GLOW Sync for those the automatic sync creates; no sharing rules). A
+  standard user would then see few or no rows behind a full chart.
+- **Photos**: none in Salesforce since 2026-10-01; they are in Google Drive ("Photos" below).
 
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
-- Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report and the
-  dashboard into `build/`, from:
+- Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report, the batch
+  report type `Attendance_Totals` and the dashboard into `build/`, from:
   - `partners.json`: the Partner filter values;
   - `before/`: the test report as it was;
+  - the deployed copies (`after/`, `fix1/`, `after2/`, `totals1/`): the dashboard's running
+    user, read from the `<runningUser>` they all carry and never written down; copies that
+    disagree stop the build, and the CLI login (`sf org display`) is read only while no copy
+    exists;
   - `sfdx-project.json`.
-  It reads the running user from the CLI login; no user name is written down.
+  `--without-girls-enrolled` leaves `Girls_Enrolled__c` out of the type. `gen.py.after2` beside
+  it is the previous generator (what built `after2/`), kept for comparison; `NOTES.md` says what
+  `totals1` added and lists the tokens the first check-only validate was to settle.
+- Settled by the `totals1/` deploy (2026-10-07; the plan's Build notes): the partner on a batch
+  report is the via-lookup column `Attendance_Batch__c$Account__c.Parent` (Analytics token
+  `Attendance_Batch__c.Account__c.Parent.Name`), for grouping and as the Partner filter's column;
+  a **cross filter's date is the report's locale format** - `9/1/2026` (`gen.py` `SINCE_CROSS`),
+  never ISO `2026-09-01` ("There are errors with your subfilters"); relative values such as
+  `LAST_N_DAYS:14` pass as they are; a report's grouping is never also one of its columns
+  (`MONTH_COLUMNS`: "You can't include groupings in the selected columns list").
 - The other copies:
   - `before/`: the test report before any change (a deployable project);
   - `after/`: the first deploy (2026-10-02 03:46 UTC);
   - `fix1/`: the second change (deployed 2026-10-06 09:29 UTC);
-  - `after2/`: everything as it stands now (what `gen.py` builds).
+  - `after2/`: what was live before `totals1/`;
+  - `live_2026-10-07/`: the backup retrieved right before `totals1/` was deployed (the dashboard
+    and the 7 reports then live);
+  - `totals1/`: the attendance totals, the three "did not submit" windows and the blank report
+    ([plan](plans/2026-10-06-attendance-totals.md) D; made from the build after the check-only
+    validate, deployed on Ryan's go 2026-10-07 03:59 UTC (0AfRP000002gLJp0AM), 8 of 8
+    components); what `gen.py` builds. Its six reports: `Total_Attendance_by_Partner_by_Month`
+    00ORP000009c8ic2AA, `Jotform_Attendance_by_Partner_by_Month` 00ORP000009c8ia2AA,
+    `Total_Attendance_Last_Month` 00ORP000009c8ib2AA, `Clubs_Not_Submitting_Last_14_Days`
+    00ORP000009c8iY2AQ, `Clubs_Not_Submitting_Since_1_Sept` 00ORP000009c8iZ2AQ,
+    `Blank_Submissions` 00ORP000009c8iX2AQ.
 - After a deploy, Salesforce writes `expandOthers` true on every report chart and drops or adds a
-  few default attributes on the dashboard. A retrieve differs from `gen.py` only in those.
+  few default attributes on the dashboard (for `totals1/`: `useReportChart` dropped,
+  `showPicturesOnCharts` and the owner added, apostrophes escaped). A retrieve differs from
+  `gen.py` only in those.
 - **The steps:**
-  1. Back up what is live: `sf project retrieve start -o glow` the six `Jotform_*` reports below,
-     the test report and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a
-     dated folder beside the others.
+  1. Back up what is live: `sf project retrieve start -o glow` the reports below (the six
+     `Jotform_*`, the six of `totals1/` and the report type `Attendance_Totals`), the test report
+     and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a dated folder
+     beside the others.
   2. Edit `gen.py` or `partners.json`, then `python3 gen.py`.
   3. Copy only the changed files into a new folder with `sfdx-project.json` (as `fix1/`).
   4. Check-only: `cd` there, then `sf project deploy start --dry-run -o glow -d force-app`.
@@ -2197,9 +2703,150 @@ Its filters are unchanged.
   - the reports `Jotform_Attendance_by_Week`, `Jotform_Attendance_by_Month`,
     `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month`,
     `Jotform_Sessions_by_Module_Last_Month` and `Jotform_Clubs_No_Attendance_Last_Month`;
-  - the dashboard `Jotform_Attendance_test`.
+  - the dashboard `Jotform_Attendance_test`;
+  - since `totals1/` (2026-10-07): the reports `Total_Attendance_by_Partner_by_Month`,
+    `Jotform_Attendance_by_Partner_by_Month`, `Total_Attendance_Last_Month`,
+    `Clubs_Not_Submitting_Last_14_Days`, `Clubs_Not_Submitting_Since_1_Sept` and
+    `Blank_Submissions`, then - **last**, after the six reports that use it - the report type
+    `Attendance_Totals`; never `Attendance_Batches` (the vendor's report type). The dashboard
+    itself rolls back to `after2/`'s first (redeploy it, or the copy in `live_2026-10-07/`
+    retrieved just before; the six reports and the type may stay).
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
-  touched.
+  touched, nor the vendor's report type `Attendance_Batches`.
+
+## Photos
+
+Plan: [plans/2026-10-06-photos-to-drive.md](plans/2026-10-06-photos-to-drive.md).
+
+**Photos.** Since 2026-10-01 no attendance photo goes to Salesforce (the CEO's decision: the
+files there were deleted that day and the four regional forms' mapping lost its upload row; the
+template follows in step 1). Since <date> the photos are copied by Jotform's Google Drive
+integration into the My Drive of <role account>, folder `Attendance photos - <Region>`, one
+subfolder per submission named `<Club Name> <Attendance Date>`, uploaded files only, no PDF
+(the PDF renders every ticked girl's name). The photo stays required on the forms. The photos
+before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
+<named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
+
+`python3 tools/integration_status.py` reads every form's integration: `ok (one action, 8
+fields, Account_Name__c from q5, no upload)` is right, a mapped photo reads `NOT RIGHT: the
+upload field is ['19'], not []`, and `other integrations:` lists the other blocks the form
+carries - the Google Drive block's key once step 2 is done (whether the API shows the block at
+all is unverified until then; `none` on every form on 2026-10-06).
+
+*Setting it up (Ryan, in the builder; the API cannot; template first). Every builder save is a
+live write to a form, so each one follows the ritual: a quiet moment with no other rollout on
+the forms, a backup before, a re-read and compare after. The `/properties` snapshot
+`backup_forms.py` writes holds `integrations`, `emails` and `conditions`, so the compare is a
+plain `diff` of the snapshot before and the one after.*
+
+1. **Template, Salesforce first**. Before: `python3 backup_forms.py` (**all** forms, not just the
+   template: a change to the connected account propagates to every form, see below; note the
+   stamp it prints). Then Settings → Integrations → Salesforce → the existing action (create
+   `Attendance_Batch`) → remove the file upload (Group Photo) → save. **Edit the action; never
+   remove the connected Salesforce account - that detaches the integration from all ten forms
+   (2026-09-30).** After: `python3 backup_forms.py --form 262352490535154` and
+   `diff backups/262352490535154/properties-<before>.json backups/262352490535154/properties-<after>.json`
+   → the only hunks are inside `integrations` (the upload row gone); `emails`, `conditions`,
+   `clearFieldOnHide` byte-identical; `python3 backup_forms.py` again for the other four and
+   the same diff on each → empty. Then `python3 tools/integration_status.py` → every live form
+   `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
+   this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
+2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
+   Settings → Integrations → Google Drive → Authorize → log in as the role account (never your
+   own) → Folder Name `Attendance photos - Template` → Create Subfolders for Submissions ON,
+   name = the "Club Name" field that is **question 5** (the hidden text field; the builder shows
+   the Club picker under the same label - prefer the hidden one; if only the picker is offered,
+   use it and say so in the plan's Result), a space, then "Attendance Date" → Send Uploaded Files
+   ON → **Send Submission PDFs OFF** → Save. After: `backup_forms.py --form 262352490535154`
+   and the diff → hunks inside `integrations` only (a block added, or nothing visible: see the
+   next line), nothing else changed. Then
+   `python3 tools/integration_status.py --form 262352490535154` → the `other integrations:`
+   line names the Drive block, or says none (then the API cannot see it; the Drive check below
+   is by eye).
+3. **One test submission on the template, arranged to change nothing in Salesforce.** A
+   template submission goes through the Salesforce integration like any other and is a real
+   batch for a real club ([contact-ids plan](plans/2026-09-30-contact-ids.md), build notes: "a
+   delivered one is a real batch for a real club"). The processor refuses a second batch for a
+   club and date that already has a Success batch, *before* it reads any name
+   (`processBatch` → `resolveClubAccount` → `isDuplicateBatch` → return, the deployed
+   `AttendanceBatchProcessor.cls` under `data/sf_processor_2026-10-02/after/`): such a batch is
+   Failed `Duplicate: …` with no attendance row and no Contact created. `resolveClubAccount`
+   runs first, though, and **creates a partner-less Club account when question 5 matches no
+   Account name** (the BACKLOG 27 path, seen twice on 2026-10-03) - so the club must be one
+   whose Account name is plain, never one of the seven `<club> - <partner>` names. Mentors
+   submit late (19 of the 27 duplicates since 10-01 were September dates re-sent in October) and
+   a Success batch dated today is the exception, so the query is a window, not a day - read-only
+   SOQL: `SELECT Account_Name__c, Attendance_Date__c FROM Attendance_Batch__c WHERE
+   Processing_Status__c = 'Success' AND Attendance_Date__c = LAST_N_DAYS:3 ORDER BY
+   Attendance_Date__c DESC LIMIT 5`; take the newest club + date pair whose name has no
+   ` - <partner>` suffix; **never a free date**. Also read, before the submission,
+   `SELECT COUNT() FROM Account WHERE RecordType.DeveloperName = 'Club' AND ParentId = null`
+   (2 on 2026-10-06: the two pilots). On the template pick that club and that date, tick one
+   girl (the roster is required), type your own address as the Partner Coordinator Email, and
+   upload a **neutral image with nobody in it**. Open the mentor link
+   (`https://form.jotform.com/262352490535154`), not the builder's preview (whether a preview
+   submission runs the integrations is unverified). **Two e-mails go out with it**: the
+   template's staff notification ("Notification 1", to one fixed address set in the form's
+   Emails tab - it is not in the repo - with the ticked girl's name and the photo link) and the
+   mentor confirmation to the address you typed. Tell the notification's recipient beforehand,
+   or pause that e-mail for the test and switch it back on afterwards (whether a paused e-mail
+   stays in the `emails` list is unverified; the diff of step 4 shows whatever changed and that
+   it came back).
+4. **Read back, within a few minutes:**
+   - Drive (as the role account): folder `Attendance photos - Template` → one subfolder named
+     exactly `<that club> <that date>` → one image file, **no PDF**.
+   - Salesforce (read-only SOQL): exactly one new batch for that club and date,
+     `Processing_Status__c = 'Failed'`, `Status_Message__c LIKE 'Duplicate:%'`, 0 `Attendance__c`
+     rows (`SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = '<id>'`), no new
+     Contact (`SELECT COUNT() FROM Contact WHERE CreatedDate = TODAY AND AccountId = '<club
+     id>'` unchanged from before the test), and the partner-less Club account count unchanged
+     (the query of step 3; 2 today). Then delete that one batch - Ryan's go, one write (the
+     write connector or Ryan in the Salesforce UI) - and read it back as gone.
+   - Jotform: `python3 tools/form_status.py --form 262352490535154 --roster <csv>` →
+     `submissions 2`, CLEAN, `salesforce yes`; `backup_forms.py --form 262352490535154` and the
+     diff against step 2's "after" snapshot → nothing but `count` (the submission) and, if you
+     paused the notification, `emails` back to the original. Delete the test submission in
+     Jotform Tables (Ryan; it frees no space for 30 days), or leave it: it holds one girl's tick
+     and a test photo.
+   - If the subfolder shows a name other than the club's (the picker's text, or empty): fix the
+     Form Fields choice before any regional form.
+5. **The regional forms**, at a quiet moment, smallest first: Latin America `262383455778067`,
+   Asia `262383129464057`, Africa `262382821971058` (U.S skipped: it is being disabled). Per
+   form: `python3 backup_forms.py --form <id>` before; the same settings, folder
+   `Attendance photos - <Region>`, the "Club Name" field that is question 5 on that form;
+   `backup_forms.py --form <id>` after and the diff → hunks inside `integrations` only;
+   `python3 tools/form_status.py --form <id> --roster <csv>` → CLEAN. **No test submission on a
+   regional form**: Asia and Africa submit many times a day, Latin America a few; the read-back
+   is the first real submission's photo appearing in the form's Drive folder (within a day),
+   and `python3 tools/integration_status.py --form <id>` → `other integrations:` naming the
+   block (a `drive: yes` line follows once the key is known and coded - the tool's TODO). After
+   the last form, and once the U.S form reads `DISABLED` (the clubs-off plan): `DRIVE_WANTED =
+   True` in the tool, `integration_status.py` → the template and three regionals `drive: yes`,
+   U.S `drive: not wanted (form DISABLED)`, `integration: ok`; `form_status.py` → every form
+   CLEAN, `salesforce yes`.
+6. **When copies stop** (a subfolder dated more than a week ago is the newest while the form has
+   newer submissions; or Jotform e-mails a token error): the Google token has lapsed. In the
+   builder, on each affected form: Settings → Integrations → Google Drive → remove → add again
+   with the same settings (step 2, backup and diff included); read back with the next real
+   submission. Nothing in the repo raises an alarm for this (BACKLOG 70); look at the folders
+   once a month.
+7. **Storage**: `python3 tools/form_status.py --roster <csv>` prints
+   `storage: upload space N GiB of 10.00 GiB (P%) -> ok; submissions this cycle N of 2,500 (P%,
+   resets <date>) -> ok; plan SILVER` on its first lines (`glow/usage.py`: `GET /user/usage`
+   against the plan's limits; a read that fails is `storage: could not be read (…)`, never a
+   form problem). Each limit is judged on its own: `warn` from 50 % of it, and from 80 % the
+   automatic sync raises an ATTENTION naming the limit every morning until acted on (`!! ` on
+   the line here). **Upload space** is the one Gold or retention answers: at about 50 % of it,
+   decide Gold (100 GiB, nonprofit $594 a year against Silver's $234) or a retention policy
+   (BACKLOG 68). A **submissions** `warn` is a busy month (1,250 submissions in the cycle) and
+   resets on the date printed; it means Gold's 10,000 a month, not retention. Never switch on
+   Jotform's Auto Delete Submissions without reading BACKLOG 68 first.
+
+*Rollback.* Removing the Google Drive integration from a form in the builder stops the copies;
+the photos stay in Jotform and nothing else on the form changes (the before/after diff of that
+save says so). The template's Salesforce upload row is re-added only on the CEO's word, with
+`UPLOADS = ["19"]` put back in `tools/integration_status.py`. What is already in Drive is the
+owner's to delete (the CEO's retention decision).
 
 ## Work log and invoices
 

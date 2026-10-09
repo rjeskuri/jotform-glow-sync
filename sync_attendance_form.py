@@ -58,9 +58,25 @@ what Salesforce reads) changes from 'X' to 'Y'"), and --apply refuses it
 unless it is --same-name-switch's own or --q5-change-ok is given. A NEW club
 whose name another partner's club already has is not created.
 
+Clubs that do not report through Jotform (docs/plans/2026-10-06-clubs-off-
+jotform.md): with --roster, --partners <Partners export> brings the Partners
+tab's `jotform` column (glow/sync.py JOTFORM_COL; `no` = the partner's clubs
+are not on the forms). Such a club's roster question is RETIRED - kept on the
+form, hidden and frozen, off the Club picker, no show rule, still in question
+18's sum ("~ retired roster '<club>' (q…): not on Jotform (<partner>, Partners
+tab jotform=no)") - and so is a club with no active girl once its rows have
+been inactive since before today (glow/sync.py RETIRE_INACTIVE). When the
+mark is lifted or the club has active girls again the roster is restored ("~
+restored roster …: back on the Club picker"); a restored roster whose name two
+partners have had sends its long name, listed as a question-5 change. A hand
+run without --partners cannot tell a retired roster from one an apply left
+half-written, so it warns per roster and --apply refuses to restore. The
+runner always passes --partners.
+
 Getting enrollment.csv: in Google Sheets, File > Download > Comma Separated
-Values (.csv) on the responses tab. Getting roster.csv:
+Values (.csv) on the responses tab. Getting roster.csv and partners.csv:
     python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+    python3 tools/sheets_client.py export Partners data/partners_<date>.csv
 
 Requires: Python 3.10, standard library plus glow/ (this repo's shared library).
 """
@@ -80,13 +96,13 @@ from glow.layout import label as layout_label, roster_slot   # noqa: E402
 from glow.links import order_of as links_order_of, submit_button  # noqa: E402
 from glow.sync import (             # noqa: E402  - the parsers and structural ids,
     CLUB_NAME, CONTACT_IDS, GUARD_DISABLES_SUBMIT,   # shared with the
-    GUARD_NAME, GUARD_PROPS,
+    GUARD_NAME, GUARD_PROPS, JOTFORM_COL,
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
     SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners,
-    dropdown_options, has_calc_values, long_name_partner, partner_fields, partner_picker,
-    picker_calc_values,
-    read_roster_csv, read_sheet, roster_names, roster_pairs, sf_club_name,   # against Config.gs
-    shared_club_names, warn,
+    dropdown_options, has_calc_values, inactive_retires, long_name_partner, partner_fields,
+    partner_picker, partners_marker_present, picker_calc_values, read_partners_csv,
+    read_roster_csv, read_sheet, roster_names, roster_pairs, roster_removed,   # against Config.gs
+    sf_club_name, shared_club_names, sheet_today, warn,
 )
 from glow import sync as glow_sync  # noqa: E402  - CONTACT_IDS_FIRST, CONTACT_IDS_PICKER_OPERAND and
 #                                     ROSTERS_REQUIRED are read through the module at run time, so
@@ -152,6 +168,13 @@ RULES_OLDER = "which the Club picker does not list"
 # raises ATTENTION and does not apply that region (docs/plans/2026-09-30-
 # contact-ids.md).
 CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
+# A retired roster that comes back (docs/plans/2026-10-06-clubs-off-jotform.md)
+# has no rule to read what it sent: when its name is one two partners have had
+# it is restored with its long name, listed as a question-5 change from this
+# text - the Q5_CHANGES warning, the --q5-change-ok refusal and the runner's
+# band all fire, and the Account's name is checked by hand first.
+RETIRED_OLD = "(retired: no rule to read)"
+RESTORED_WHY = "back on the Club picker"
 
 # SESSION_OVERRIDES (sessions per elective module) lives in glow/sync.py -
 # edit it THERE when the curriculum changes, and mirror appsscript/Config.gs.
@@ -230,7 +253,8 @@ def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
             "priority": "0", "index": "0", "terms": terms, "action": [action]}
 
 def build_conditions(club_questions, partner_of, module_options, picker=None,
-                     partner_field=PARTNER, picker_options=None, guard=None, submit=None):
+                     partner_field=PARTNER, picker_options=None, guard=None, submit=None,
+                     retired=()):
     """club_questions: {qid: the text its rule tests} - the club's name, or on
     a form with the Club picker its picker entry, which for a club whose name
     another partner's club shares is "<club> - <partner>" (main() decides;
@@ -244,7 +268,10 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     the picker's options exactly as this run writes them (the rules test each
     club in the picker's spelling); guard / submit: qids of the clubGuard
     warning and the Submit button on a form with the one-club guard (section
-    D; both, with a picker and its options, or no guard rules at all).
+    D; both, with a picker and its options, or no guard rules at all);
+    retired: qids of the retired rosters (docs/plans/2026-10-06-clubs-off-
+    jotform.md) - in question 18's operands and equation like every roster,
+    but with no show rule (a roster nobody can see has no tick to add).
 
     On a form with the picker the Contact_IDs sum (section C) is rule 0, built
     before every other rule so its ids are the lowest, and lists the picker
@@ -262,7 +289,7 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     def club(name):
         return spelling.get(name.lower(), name)
 
-    roster_qids = sorted(club_questions, key=int)
+    roster_qids = sorted(set(club_questions) | {str(q) for q in retired}, key=int)
 
     def contact_ids():
         # no separator between the rosters, guard or not: only one roster can be
@@ -427,6 +454,15 @@ def main():
     ap.add_argument("--roster", action="store_true",
                     help="the CSV is an export of the Roster tab (one row per girl)")
     ap.add_argument("--region", help="with --roster: only this region's clubs")
+    ap.add_argument("--partners", metavar="PATH",
+                    help="with --roster: an export of the Partners tab, whose `jotform` column "
+                         "says which partners' clubs are not on the attendance forms (`no`): their "
+                         "rosters are retired - kept hidden, off the Club picker. Without it a hand "
+                         "run cannot tell a retired roster from a half-written one and refuses to "
+                         "--apply a restore; the runner always passes it")
+    ap.add_argument("--disabled-ok", action="store_true",
+                    help="with --apply: write to a form whose status is not ENABLED (a disabled form "
+                         "is one nobody can open; the runner skips it)")
     ap.add_argument("--prune", action="store_true",
                     help="with --region: DELETE club questions that the Roster "
                          "places in another region (fresh clones only)")
@@ -457,6 +493,8 @@ def main():
     args = ap.parse_args()
     if args.region and not args.roster:
         sys.exit("--region needs --roster (the Roster tab is what carries regions)")
+    if args.partners and not args.roster:
+        sys.exit("--partners needs --roster (the Partners tab marks Roster clubs, not enrollment rows)")
     if args.prune and not args.region:
         sys.exit("--prune needs --region")
     if args.partner_picker:
@@ -468,16 +506,50 @@ def main():
         "Set JOTFORM_API_KEY in the environment")
     jf = Jotform(api_key, args.form, args.apply)
 
-    all_clubs, region_of = {}, {}
+    # the form's status first: a DISABLED form is one nobody can open, so a write
+    # to it is refused unless asked for (the runner skips such a form instead)
+    info = jf.get("")
+    status = str(info.get("status") or "")
+    print(f"Form: {args.form} status {status or 'not reported'}")
+    if args.apply and status != "ENABLED" and not args.disabled_ok:
+        sys.exit(f"Refusing: form {args.form} is {status or 'of unknown status'}, not ENABLED - a write "
+                 "nobody can see. Enable the form first (docs/RUNBOOK.md, \"Disabling a regional "
+                 "form\"), or pass --disabled-ok to write to it anyway")
+
+    all_clubs, region_of, partners, off_form = {}, {}, None, {}
+    marker = False      # whether the Partners export has the jotform column at all
     if args.roster:
         sheet, all_clubs, region_of = read_roster_csv(args.csv, args.region)
         dup_names = {}
         pairs = roster_pairs(args.csv)      # every club the Roster holds: any status, all regions
         ever = roster_names(args.csv)       # ...and every girl it has ever held for each
+        if args.partners:
+            partners = read_partners_csv(args.partners)     # key(partner) -> "yes" | "no"
+            marker = partners_marker_present(args.partners)  # ...else nobody is marked (warned above)
+            # the floor: every partner with an active club must be a row of the export,
+            # or a cut export would read every partner as unmarked and restore every
+            # retired roster unattended (one picker UPDATE, inside every band)
+            with_clubs = {key(p): p for p, _ in all_clubs}
+            missing = sorted(p for k, p in with_clubs.items() if k not in partners)
+            if missing:
+                sys.exit(f"Partners export lists {len(with_clubs) - len(missing)} of {len(with_clubs)} "
+                         f"partners with active clubs - missing: {', '.join(missing)} - a truncated "
+                         "export, or rows deleted from the Partners tab? nothing done")
+            # the clubs of a partner marked `no` leave this form's share of the Roster
+            # (all_clubs and region_of stay the Roster's truth for foreign_region)
+            off_form = {pc: v for pc, v in sheet.items() if partners.get(key(pc[0])) == "no"}
+            sheet = {pc: v for pc, v in sheet.items() if pc not in off_form}
+            if not sheet:
+                sys.exit(f"Every active club{' in ' + args.region if args.region else ''} belongs to a "
+                         f"partner marked {JOTFORM_COL}=no in the Partners export - the form would be "
+                         "left with an empty Club picker, a shape never tested: disable the form "
+                         "instead (docs/RUNBOOK.md, \"Clubs that do not use Jotform\")")
         print(f"Roster: {len(sheet)} active clubs"
               f"{' in ' + args.region if args.region else ''} "
               f"({sum(len(v) for v in sheet.values())} girls); "
-              f"{len(all_clubs)} clubs overall")
+              f"{len(all_clubs)} clubs overall"
+              + (f"; {len(off_form)} club(s) of {len({key(p) for p, _ in off_form})} partner(s) not "
+                 f"on Jotform (Partners tab {JOTFORM_COL}=no) left off this form" if off_form else ""))
     else:
         sheet, dup_names = read_sheet(args.csv)
         pairs = {k: True for k in sheet}
@@ -489,7 +561,6 @@ def main():
     shared_active = shared_club_names(pairs, active_only=True)   # what --same-name-switch goes by
 
     if args.prune:
-        info = jf.get("")
         if int(info.get("count") or 0) > 0:
             msg = (f"form {args.form} already has {info['count']} submission(s); "
                    "--prune is for fresh clones only")
@@ -683,6 +754,12 @@ def main():
                 return listed[key(cand)]
         return value
 
+    def picker_entries(text, partner):
+        """The picker's entries for this partner's roster of this text: its plain
+        name, or its own long name "<text> - <partner>" (never a namesake's)."""
+        own = {key(text)} | ({key(sf_club_name(text, partner, True))} if partner else set())
+        return [o for k, o in listed.items() if k in own]
+
     def partner_matches(a, b):
         """Loose partner-name match: 'WESAD' matches 'World Economy ... (WESAD)'."""
         a, b = norm(a).lower(), norm(b).lower()
@@ -739,6 +816,57 @@ def main():
             warn(f"  ! '{form_text[qid]}' (q{qid}) belongs to {reg} - kept "
                  "(use --prune on a fresh clone to remove it)")
         return True
+
+    # --- retired rosters (docs/plans/2026-10-06-clubs-off-jotform.md) ----------
+    # Decided BEFORE the reconcile loop, so that both of its branches see the
+    # same thing. For every roster question the Roster is asked who owns it:
+    # the partners with a club of that name (any status), narrowed by the
+    # partner its rule names or its owner read-back when the name has several.
+    # When the owner is one pair and either its partner is marked `no` in the
+    # Partners tab or (RETIRE_INACTIVE) the pair has no active girl and its
+    # rows have been inactive since before today - the day in the SHEET's zone,
+    # the one its removed_date cells are stamped in - the roster is retired: out of
+    # `existing`, so neither branch matches it; not in club_questions nor
+    # option_of, so no picker entry, no show rule, no guard term; nothing is
+    # written to the question itself (hidden, required, its options frozen);
+    # still in question 18's sum (build_conditions). A question whose owner
+    # cannot be told, or whose club the Roster does not know at all, keeps
+    # today's treatment and lines (an incomplete export looks like that). The
+    # `~` line names a roster this run takes off the picker (it still has its
+    # rule or its entry): the runner counts those against its band; one the
+    # form already holds retired is only counted below.
+    retired = {}     # qid -> {"club", "partner", "reason"}
+    retiring = {}    # the subset this run takes off the picker (the ~ lines)
+    if args.roster:
+        marks = partners or {}
+        removed = roster_removed(args.csv)
+        today = sheet_today()
+        pair_by_key = {(key(p), key(c)): (p, c) for p, c in pairs}
+        for qid, text in sorted(form_text.items(), key=lambda kv: int(kv[0])):
+            who = holders.get(key(text), {})
+            if len(who) == 1:
+                owner = next(iter(who.values()))
+            elif qid in current_partner_of and key(current_partner_of[qid]) in who:
+                owner = who[key(current_partner_of[qid])]
+            else:
+                continue
+            pc = pair_by_key[(key(owner), key(text))]
+            if marks.get(key(owner)) == "no":
+                reason = f"not on Jotform ({owner}, Partners tab {JOTFORM_COL}=no)"
+            elif not pairs[pc] and inactive_retires(removed.get((key(owner), key(text))), today):
+                reason = "no active girl in the Roster"
+            else:
+                continue
+            retired[qid] = {"club": text, "partner": owner, "reason": reason}
+            if qid in current_value or picker_entries(text, owner):
+                retiring[qid] = retired[qid]
+                print(f"  ~ retired roster '{text}' (q{qid}): {reason}")
+            existing[text.lower()].remove(qid)
+            if not existing[text.lower()]:
+                del existing[text.lower()]
+        if len(retired) > len(retiring):
+            print(f"Retired rosters: {len(retired) - len(retiring)} already off the Club picker "
+                  "(hidden, no show rule; still in question 18's sum)")
 
     # --- reconcile clubs (grouped case-insensitively) ----------------------
     sheet_by_name = defaultdict(list)
@@ -846,6 +974,42 @@ def main():
             warn(f"  ? '{form_text[qid]}' (q{qid}) is on the form but "
                  "not in the sheet export - keeping its current roster")
 
+    # --- retired rosters coming back ------------------------------------------
+    # A claimed roster with no show rule and no Club picker entry (its plain
+    # text or a long name of its own) is a retired roster whose club is active
+    # again and whose partner is not marked `no` - or a new roster of an apply
+    # that stopped between the question writes and the picker and conditions
+    # writes. With --partners both are one path: the ordinary matching above
+    # claimed it, so it gets its entry and rule back (and an options update if
+    # the Roster moved on). Without --partners the two cannot be told apart from
+    # a roster that should stay retired: the dry run says so per roster and
+    # --apply refuses (below); so does an export without the jotform column
+    # (nobody can be marked in it: a renamed header would lift every mark). The
+    # enrollment path (no --roster) has no marker, and a form without the picker
+    # (none is live) has no entry to be off: both keep their old behaviour.
+    restored = {}    # qid -> {"club", "partner", "reason"}
+    if args.roster and has_picker:
+        for qid in sorted(pair_of, key=int):
+            text = form_text[qid]
+            if qid not in current_value and not picker_entries(text, pair_of[qid][0]):
+                restored[qid] = {"club": text, "partner": pair_of[qid][0], "reason": RESTORED_WHY}
+                if args.partners:
+                    print(f"  ~ restored roster '{text}' (q{qid}): {RESTORED_WHY}")
+                else:
+                    warn(f"  ! '{text}' (q{qid}) has no Club picker entry and no show rule although its "
+                         "club is active in the Roster - a retired roster, or a new roster of an apply "
+                         "that stopped half-way: pass --partners <Partners export> (the runner always "
+                         "does) and the run restores it or keeps it retired")
+        if restored and not args.partners and args.apply:
+            sys.exit(f"Refusing: {len(restored)} roster(s) would be restored without a Partners export "
+                     "(the '!' lines above) - nothing written. Pass --partners <Partners export> and run "
+                     "again: the run restores each roster, or keeps it retired")
+        if restored and args.partners and not marker and args.apply:
+            sys.exit(f"Refusing: {len(restored)} roster(s) would be restored from a Partners export that "
+                     f"has no '{JOTFORM_COL}' column (nobody can be marked in it) - nothing written. Check "
+                     f"the Partners tab's header (Partners!D1 = {JOTFORM_COL}), export it again and run again "
+                     "(docs/RUNBOOK.md, \"Clubs that do not use Jotform\")")
+
     # --- what each roster sends to question 5 --------------------------------
     # (docs/plans/2026-09-30-same-name-clubs.md) option_of: qid -> the text its
     # rule tests. With the Club picker that is its picker entry, its calcValue,
@@ -892,7 +1056,11 @@ def main():
                     or key(new_club) in shared_any)
                 switch = (args.same_name_switch and not long_now
                           and key(new_club) in shared_active)
-                option_of[qid] = sf_club_name(new_club, partner, long_now or switch)
+                # a restored roster has no rule to read: a name two partners have had
+                # comes back long (what every roster of a shared name sends since the
+                # 2026-09-30 switch), as a question-5 change by hand (RETIRED_OLD)
+                back_long = qid in restored and key(new_club) in shared_any
+                option_of[qid] = sf_club_name(new_club, partner, long_now or switch or back_long)
             if now and key(now) != key(option_of[qid]):
                 # the switch's own change: plain -> long, nothing else different
                 by_switch = (qid in pair_of and args.same_name_switch
@@ -900,6 +1068,9 @@ def main():
                              and key(option_of[qid]) == key(sf_club_name(new_club, pair_of[qid][0], True)))
                 sf_changes.append({"qid": qid, "club": new_club, "old": now,
                                    "new": option_of[qid], "switch": bool(by_switch)})
+            elif qid in restored and key(option_of[qid]) != key(text):
+                sf_changes.append({"qid": qid, "club": new_club, "old": RETIRED_OLD,
+                                   "new": option_of[qid], "switch": False})
 
     # --- a new club may not take a name that is in use ------------------------
     # Ryan, 2026-09-30: an existing club's name never changes, so a club to be
@@ -1191,7 +1362,7 @@ def main():
     conds = build_conditions(option_of, partner_of, module_options,
                              picker=picker_qid or ("NEW" if args.club_picker else None),
                              picker_options=picker_list, guard=guard_field,
-                             submit=submit_qid if guard_field else None)
+                             submit=submit_qid if guard_field else None, retired=retired)
     # The typed Partner box has nothing left to do on a picker form once no rule
     # shows it (every same-name club has its own entry, or the form has none):
     # unhidden, every mentor sees an optional "Partner" box. Hidden, it is still
@@ -1258,6 +1429,13 @@ def main():
             "requires": [{"qid": q, "club": c, "required": want_required} for q, c in to_require],
             # module dropdowns whose calcValues are written (modules: 0 = cleared)
             "module_values": module_values,
+            # rosters this plan takes off the picker (kept hidden, no show rule), how many
+            # the form already holds retired, retired rosters restored to the picker, and
+            # the Partners export the marker came from
+            "retired": [dict(qid=q, **retiring[q]) for q in sorted(retiring, key=int)],
+            "retired_before": len(retired) - len(retiring),
+            "restored": [dict(qid=q, **restored[q]) for q in sorted(restored, key=int)],
+            "partners": args.partners,
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
             "club_picker": picker_qid, "partner_picker": partner_qid, "club_guard": guard_qid,
             # what every roster on the form sends to question 5 after this plan = the
