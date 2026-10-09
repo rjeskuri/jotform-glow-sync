@@ -25,7 +25,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms                  # noqa: E402
-from glow.cli import api_key           # noqa: E402
+from glow.cli import api_key, run      # noqa: E402
 from glow.jotform import Client         # noqa: E402
 from glow.sync import CLUB_NAME, PICKER_NAME   # noqa: E402
 
@@ -153,4 +153,4 @@ def main(argv=None, client=None):
 
 
 if __name__ == "__main__":
-    main()
+    run(main)
