@@ -703,7 +703,7 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
   const current = existing.byClub[clubKey_(partner, club)] || [];
   // A new club: nothing on file - or, on a retry, only the rows this response added (their
   // source is this response): an attempt that wrote the Roster and then failed leaves them.
-  const isNew = current.every(function (r) { return tidy_(r.source) === source; });
+  const isNew = current.every(function (r) { return tidy_(r.source) === tidy_(source); });
 
   const plan = planClub_({ partner: partner, club: club, names: parsed.names,
                            duplicates: parsed.duplicates, source: source,
