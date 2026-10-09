@@ -701,9 +701,9 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
   const state = loadIdState_();
   const today = today_();
   const current = existing.byClub[clubKey_(partner, club)] || [];
-  // A new club: nothing on file - or, on a retry, only the rows this response added (their
-  // source is this response): an attempt that wrote the Roster and then failed leaves them.
-  const isNew = current.every(function (r) { return tidy_(r.source) === tidy_(source); });
+  // the rows this response added: an attempt that wrote the Roster and then failed leaves them
+  const mine = current.filter(function (r) { return tidy_(r.source) === tidy_(source); });
+  const isNew = isNewClubFor_(current, mine);
 
   const plan = planClub_({ partner: partner, club: club, names: parsed.names,
                            duplicates: parsed.duplicates, source: source,
@@ -719,12 +719,14 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
   applyRosterPlan_(ss, plan, today);
 
   // The Roster has changed: a retry re-plans against it and finds the girls on file. So the
-  // Jotform sync request and the Salesforce row come first, the ReviewQueue is best-effort,
-  // and a later failure (the Salesforce row, Audit) is an ERROR whose retry still finds the
-  // club new (isNew above), asks for the sync again and adds the row once (sfPendingAdd_).
+  // Jotform sync request and the Salesforce row come first, and every step after the row is
+  // best-effort (the ReviewQueue, Audit: FormLog records the summary). The one ERROR left
+  // after the Roster write is the Salesforce row itself; its retry still finds the club new
+  // (isNewClubFor_, even with another response's rows added since), asks for the sync again
+  // and adds the row (sfPendingAdd_: one pending row per club).
   if (isNew || plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
   if (isNew) {
-    sfPendingAdd_(ss, [today, partner, club, region, plan.toAppend.length || current.length,
+    sfPendingAdd_(ss, [today, partner, club, region, plan.toAppend.length || mine.length,
                        sheetText_(a[Q.MENTOR_NAME]), sheetText_(a[Q.MENTOR_EMAIL]),
                        sheetText_(a[Q.COUNTRY]), 'pending', '']);
   }
@@ -753,7 +755,11 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
       keptRemovedNote_(plan) + ', ' + issues.length + ' for review' +
       (queued ? '' : ' (NOT on the ReviewQueue: see Audit)') +
       (released ? ' (released from hold by staff)' : '');
-  audit_('newClubForm', summary);
+  try {
+    audit_('newClubForm', summary);
+  } catch (err) {
+    // FormLog records the same summary (runResponse_)
+  }
   return summary;
 }
 

@@ -101,6 +101,26 @@ function keptRemovedIssue_(entry, sentDay, kept) {
 }
 
 /**
+ * True if a new-club response's club is new for it (so it goes to SF Pending).
+ * current: the club's Roster rows; mine: those whose source is this response.
+ * New = nothing on file - or, on a retry after an attempt that wrote the Roster
+ * and then failed, nothing on file from before that attempt: rows another
+ * response added since (the club sent again, an ADD on the change form) do
+ * not make it an existing club. The attempt's day is the earliest added_date
+ * of its rows, and days are all the Roster records: another response's row
+ * added that same day counts as later (if that response enrolled the club
+ * first, it queued it already and sfPendingAdd_ finds its row). A row with no
+ * readable added_date counts as earlier.
+ */
+function isNewClubFor_(current, mine) {
+  if (!mine.length) return !current.length;
+  const first = mine.map(function (r) { return dayOf_(r.added_date); }).filter(String).sort()[0];
+  return current.every(function (r) {
+    return mine.indexOf(r) !== -1 || (!!first && dayOf_(r.added_date) >= first);
+  });
+}
+
+/**
  * Plan what a club's full roster submission does to the Roster.
  *
  * Girls already on file keep their row and ID; inactive ones are

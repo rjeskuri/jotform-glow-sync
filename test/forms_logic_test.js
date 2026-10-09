@@ -205,6 +205,24 @@ console.log('\nthe replay guard: an older response never puts back girls removed
         !replay.toAppend.length && !replay.vanished.length && replay.issues[0]?.detail.includes('20 girl(s)'));
 }
 
+console.log('\nisNewClubFor_ — the new-club response a club goes to Salesforce for');
+{
+  const MINE = 'Roster Form Responses!50';
+  const row = (source, added) => ({ source, added_date: added });
+  const a = row(MINE, '2026-09-27'), b = row(MINE, '2026-09-27');
+  const is = (current, mine) => gs.isNewClubFor_(current, mine);
+  check('nothing on file: new; on file from another response, none of this one\'s: existing',
+        is([], []) && !is([row('Enrollment Responses!7', '2026-08-26')], []));
+  check('a retry: only this response\'s rows, or with another response\'s added the same day or later: new',
+        is([a, b], [a, b]) && is([a, b, row('Roster Form Responses!51', '2026-09-27')], [a, b]) &&
+        is([a, row('Roster Form Responses!52', '2026-09-28')], [a]));
+  check('…a row from before the attempt, or one with no readable day: existing',
+        !is([row('Enrollment Responses!7', '2026-08-26'), a], [a]) && !is([row('Roster Form Responses!3', ''), a], [a]));
+  const undated = row(MINE, '');
+  check('…this response\'s own rows with no readable day: only those alone are new',
+        is([undated], [undated]) && !is([undated, row('Roster Form Responses!52', '2026-09-28')], [undated]));
+}
+
 console.log('\nclosestNames_');
 check('ranks by shared words', gs.closestNames_('Zibblewick', ['Mary Zibblewick', 'Grace Zibblewick', 'Joy Blorptest']).length === 2);
 check('empty query → no candidates', gs.closestNames_('   ', ['Mary Zibblewick']).length === 0);
@@ -1521,7 +1539,38 @@ console.log('\nA Sheets failure after the Roster write: Salesforce, the sync req
         w.tabs.Roster.length === 3 && sfRows(w).length === 1 && sfRows(w)[0][4] === 2 &&
         w.notified.join() === 'newClubForm,newClubForm', res);
   w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-  check('…run once more (FormLog lost): still one Salesforce row for the club', sfRows(w).length === 1);
+  check('…run once more (FormLog lost): still one Salesforce row for the club',
+        sfRows(w).length === 1);
+
+  // another response for the club lands between the failed attempt and its retry (review of A1)
+  const between = [
+    ['the club sent again with one more girl (a new-club response)', x => x.ctx.runResponse_('ROSTER', x.sheet(RQ), 51,
+        newClub(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson', 'Kai Newperson']),
+        'ROSTER|w:2026-09-27 11:00:00.000|' + A + '|Comet Club')],
+    ['an ADD on the change form', x => x.ctx.runResponse_('ROSTER', x.sheet(RQ), 52,
+        { [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: A, [HQ.CLUB_PREFIX + A + ')']: 'Comet Club',
+          [HQ.ADD]: 'Kai Newperson' }, 'ROSTER|w:2026-09-27 12:00:00.000|' + A + '|Comet Club')],
+  ];
+  for (const [label, run] of between) {
+    opts = { down: 'SF Pending' };
+    w = sheetWorld(baseTabs(), opts);
+    const first = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+    opts.down = null;
+    const mid = run(w);
+    res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+    check('SF Pending down, then ' + label + ', then the retry: still the new club for the response that enrolled it — ' +
+          'one Salesforce row, with that response\'s girls; the one in between queued nothing',
+          first === 'ERROR: sheet unavailable' && !/^ERROR|^new club/.test(mid) && w.tabs.Roster.length === 4 &&
+          res.startsWith('new club Comet Club (' + A + '): 0 girls added') && sfRows(w).length === 1 &&
+          sfRows(w)[0][4] === 2, mid + ' / ' + res);
+  }
+
+  w = sheetWorld(baseTabs());
+  w.ctx.audit_ = () => { throw new Error('sheet unavailable'); };
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('a new club, Audit failing after the Roster write: not an ERROR (FormLog has the summary); row and sync done',
+        /^new club Comet Club \(Fixture Partner Alpha\): 2 girls added/.test(res) && sfRows(w).length === 1 &&
+        w.notified.join() === 'newClubForm', res);
 
   opts = { down: 'ClubRegistry' };
   w = sheetWorld(baseTabs(), opts);
