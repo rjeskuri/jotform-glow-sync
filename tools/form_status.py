@@ -43,7 +43,6 @@ Usage:
     python3 tools/form_status.py --roster data/roster_<date>.csv --form <ID> ...  # some
 """
 import argparse
-import csv
 import html
 import json
 import os
@@ -65,7 +64,7 @@ from glow.sync import (                    # noqa: E402  (shared with the sync t
     CLUB_NAME, CONTACT_IDS, ENABLE_FUZZY, GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PARTNER,
     SF_NAME_SEP, WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, club_picker, dropdown_options, has_calc_values,
     inactive_retires, long_name_partner, partner_picker, picker_calc_values, read_partners_csv,
-    roster_names, roster_pairs, roster_removed, rule_parts, sheet_today)
+    _roster_rows, roster_names, roster_pairs, roster_removed, rule_parts, sheet_today)
 from glow.text import key, name_key        # noqa: E402
 
 FORMS = {glow_forms.TEMPLATE: ("template", None),
@@ -82,15 +81,14 @@ def load_roster(path):
     region check compares union against union), and per partner (a retired partner's
     share leaves the compare)."""
     by_region = defaultdict(dict)
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            if key(row.get("status")) != "active":
-                continue
-            region = row.get("region", "").strip() or "(no region)"
-            ck = key(row["club"])
-            entry = by_region[region].setdefault(ck, (row["club"], set(), row["partner"], {}))
-            entry[1].add(name_key(row["full_name"]))
-            entry[3].setdefault(key(row["partner"]), set()).add(name_key(row["full_name"]))
+    for row in _roster_rows(path):
+        if key(row.get("status")) != "active":
+            continue
+        region = row.get("region", "").strip() or "(no region)"
+        ck = key(row["club"])
+        entry = by_region[region].setdefault(ck, (row["club"], set(), row["partner"], {}))
+        entry[1].add(name_key(row["full_name"]))
+        entry[3].setdefault(key(row["partner"]), set()).add(name_key(row["full_name"]))
     return by_region
 
 
@@ -193,12 +191,11 @@ def load_partners(path):
     regions: the partners a club's long name ("<club> - <partner>",
     glow.sync.SF_NAME_SEP) may carry."""
     pairs = {}
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            partner = " ".join((row.get("partner") or "").split())
-            club = " ".join((row.get("club") or "").split())
-            if partner and club:
-                pairs.setdefault((partner, club), True)
+    for row in _roster_rows(path, needed=None):
+        partner = " ".join((row.get("partner") or "").split())
+        club = " ".join((row.get("club") or "").split())
+        if partner and club:
+            pairs.setdefault((partner, club), True)
     return club_partners(pairs)
 
 

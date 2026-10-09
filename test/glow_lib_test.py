@@ -332,6 +332,33 @@ class GlowSyncHelpers(unittest.TestCase):
             with self.subTest(rule=bad):
                 self.assertIsNone(sync.rule_parts(bad))
 
+    def test_every_roster_reader_reads_one_way_and_refuses_one_way(self):
+        # glow.sync._roster_rows: utf-8-sig, by header, and one refusal for what is not an export
+        import tempfile
+        import form_status
+        from glow import sync
+        refusal = "Not a Roster export: expected the columns club, full_name, partner, region, status"
+        readers = (sync.roster_pairs, sync.roster_names, sync.read_roster_csv, form_status.load_roster)
+        with tempfile.TemporaryDirectory() as tmp:
+            other, roster = os.path.join(tmp, "other.csv"), os.path.join(tmp, "roster.csv")
+            with open(other, "w", encoding="utf-8") as f:
+                f.write("partner,club\nPartner One,Alpha Club\n")
+            with open(roster, "w", encoding="utf-8-sig", newline="") as f:
+                f.write("partner,club,full_name,status,region,removed_date\r\n"
+                        "Partner One,Alpha Club,Ana Example,active,Africa,\r\n"
+                        "Partner One,Alpha Club,Bea Example,inactive,Africa,2026-10-01\r\n")
+            for reader in readers:
+                with self.subTest(reader=reader.__name__):
+                    with self.assertRaises(SystemExit) as cm:
+                        reader(other)
+                    self.assertEqual(cm.exception.code, refusal)
+            self.assertEqual(sync.roster_removed(other), {})                  # no removed_date column: none
+            self.assertEqual(sync.roster_pairs(roster), {("Partner One", "Alpha Club"): True})
+            self.assertEqual(sync.roster_names(roster), {("partner one", "alpha club"): {"ana example", "bea example"}})
+            self.assertEqual(sync.read_roster_csv(roster)[0], {("Partner One", "Alpha Club"): ["Ana Example"]})
+            self.assertEqual(sync.roster_removed(roster), {("partner one", "alpha club"): "2026-10-01"})
+            self.assertEqual(list(form_status.load_roster(roster)), ["Africa"])
+
 
 class GlowBackup(unittest.TestCase):
     """glow/backup.py: the one stamp (to the second), the snapshot files and the
