@@ -35,6 +35,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                              # noqa: E402
+from glow.cli import api_key                                       # noqa: E402
 from glow.jotform import Client, JotformError                       # noqa: E402
 from glow.sync import CLUB_NAME, MODULE_ID, MODULES, WEEK_ID, YEAR  # noqa: E402
 from backfill_resolve import PAGE, answer_of, attendance_date, copied_fields   # noqa: E402
@@ -405,8 +406,7 @@ def main(argv=None, org=None, client=None):
             cmd_undo(args, org)
             return
         if client is None:
-            api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY in the environment (RUNBOOK, Credentials)")
-            client = Client(api_key, retries=3)
+            client = Client(api_key(" - docs/RUNBOOK.md, \"Credentials\""), retries=3)
         cmd_correct(args, org, client)
     except (Refused, JotformError) as stop:
         sys.exit(str(stop))

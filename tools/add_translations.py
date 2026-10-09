@@ -53,7 +53,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms as glow_forms   # noqa: E402
 from glow import links as glow_links   # noqa: E402
-from glow.cli import run               # noqa: E402
+from glow.cli import api_key, run, targets               # noqa: E402
 from glow.jotform import Client        # noqa: E402
 from glow.sync import PARTNER_PICKER_NAME   # noqa: E402
 from glow.text import md5              # noqa: E402
@@ -175,14 +175,13 @@ def main():
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--audit", action="store_true", help="only report untranslated labels")
     args = ap.parse_args()
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
-    client = Client(api_key, apply=args.apply)
+    client = Client(api_key(), apply=args.apply)
     additions = load_additions()
-    targets = {f: FORMS.get(f, f) for f in args.form} if args.form else FORMS
+    chosen = targets(args.form, FORMS, unknown=None)
 
     stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
 
-    for form_id, label in targets.items():
+    for form_id, label in chosen.items():
         questions = client.get(f"/form/{form_id}/questions")
         store = client.get(f"/form/{form_id}/translations")
         langs = [lg for lg in store if lg not in SOURCE_KEYS]

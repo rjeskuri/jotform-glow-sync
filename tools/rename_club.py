@@ -75,7 +75,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 import backup_forms                       # noqa: E402
 from glow import forms as glow_forms      # noqa: E402
-from glow.cli import run                  # noqa: E402
+from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
 from glow.sync import PARTNER, partner_fields   # noqa: E402
 from glow.text import key, name_key       # noqa: E402
@@ -417,9 +417,7 @@ def main():
 
     forms, client = [], None
     if not args.sheet_only:
-        api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-            "Set JOTFORM_API_KEY in the environment (.env), or pass --sheet-only")
-        client = Client(api_key, apply=args.apply)
+        client = Client(api_key(", or pass --sheet-only"), apply=args.apply)
         ids = args.form or []
         if not ids:
             if len(regions) != 1:

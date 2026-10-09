@@ -19,7 +19,7 @@ from datetime import datetime
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
-from glow.cli import run            # noqa: E402
+from glow.cli import api_key, run            # noqa: E402
 from glow.forms import LABELS as FORMS  # noqa: E402
 from glow.jotform import Client     # noqa: E402
 
@@ -51,9 +51,7 @@ def main():
     ap.add_argument("--form", help="snapshot a single form ID")
     args = ap.parse_args()
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-        "Set JOTFORM_API_KEY in the environment")
-    client = Client(api_key)
+    client = Client(api_key())
     stamp = datetime.now().strftime("%Y-%m-%dT%H%M")
     targets = {args.form: "single"} if args.form else FORMS
 

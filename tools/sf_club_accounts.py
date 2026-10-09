@@ -888,12 +888,10 @@ def pickers(_args, paths, client=None):
     form is reported (a roster artefact), not failed."""
     sys.path.insert(0, REPO)
     from glow import forms, jotform
+    from glow.cli import api_key
     from glow.sync import PICKER_NAME, picker_calc_values
     if client is None:
-        api_key = os.environ.get("JOTFORM_API_KEY")
-        if not api_key:
-            sys.exit("JOTFORM_API_KEY is not in the environment (RUNBOOK, Credentials)")
-        client = jotform.Client(api_key)
+        client = jotform.Client(api_key(" - docs/RUNBOOK.md, \"Credentials\""))
     items, rs = all_items(paths), rows(paths)
     same = [r for r in rs if r["action"].startswith("create (")]
     held = hold_codes(paths)

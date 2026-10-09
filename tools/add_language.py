@@ -29,7 +29,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms as glow_forms   # noqa: E402
 from glow import links as glow_links   # noqa: E402
-from glow.cli import run               # noqa: E402
+from glow.cli import api_key, run, targets               # noqa: E402
 from glow.jotform import Client        # noqa: E402
 from glow.text import md5              # noqa: E402
 
@@ -80,14 +80,13 @@ def main():
     ap.add_argument("--form", action="append")
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
     # the big translation POSTs 504 at the gateway now and then: retry hard
-    client = Client(api_key, apply=args.apply, retries=5, backoff=8, max_time=150)
+    client = Client(api_key(), apply=args.apply, retries=5, backoff=8, max_time=150)
     name = SPECIAL_NAMES.get(args.name.lower(), args.name)
     words = load_dict(args.dict) if args.dict else {}
-    targets = {f: FORMS.get(f, f) for f in args.form} if args.form else FORMS
+    chosen = targets(args.form, FORMS, unknown=None)     # the title is written: never "?"
 
-    for form_id, title in targets.items():
+    for form_id, title in chosen.items():
         props = client.get(f"/form/{form_id}/properties")
         lang = props.get("language")
         lang = lang[0] if isinstance(lang, list) and lang else (lang or {})

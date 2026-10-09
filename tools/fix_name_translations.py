@@ -62,7 +62,7 @@ import add_translations                                     # noqa: E402  (save_
 from form_status import embedded_store, public_page, roster_options   # noqa: E402
 from glow import forms as glow_forms                        # noqa: E402
 from glow import translation_lookup as tl                   # noqa: E402
-from glow.cli import run                                    # noqa: E402
+from glow.cli import api_key, run                                    # noqa: E402
 from glow.jotform import Client, JotformError               # noqa: E402
 
 # template first, then the regional forms smallest first (the rollout's order)
@@ -392,8 +392,7 @@ def main():
     if (args.apply or args.restore) and len(args.form or []) != 1:
         sys.exit("--apply and --restore take exactly one --form: the rollout is one form at a time, "
                  "template first (docs/RUNBOOK.md, \"The names dictionary and the module values\")")
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY in the environment")
-    client = Client(api_key, apply=args.apply)
+    client = Client(api_key(), apply=args.apply)
     stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
     options = read_options(client)
     print("Roster options read from all five forms: "

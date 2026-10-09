@@ -28,7 +28,7 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-from glow.cli import run                                # noqa: E402
+from glow.cli import api_key, run                                # noqa: E402
 from glow.forms import TEMPLATE as WORKING_COPY, TITLES  # noqa: E402
 from glow.jotform import Client                          # noqa: E402
 
@@ -46,8 +46,8 @@ def main():
     ap.add_argument("--existing", help="re-sync this clone instead of making one")
     ap.add_argument("--source", default=WORKING_COPY, help="form to clone (default: working copy)")
     args = ap.parse_args()
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
-    client = Client(api_key, apply=args.apply)
+    key = api_key()
+    client = Client(key, apply=args.apply)
     title = TITLES[args.region]
 
     if args.existing:
@@ -87,14 +87,14 @@ def main():
         print("2b. restoring the language list (the clone drops it)")
         subprocess.run([sys.executable, os.path.join(REPO, "tools", "restore_translations.py"),
                         "--form", clone_id, "--source", args.source, "--apply"],
-                       env={**os.environ, "JOTFORM_API_KEY": api_key})
+                       env={**os.environ, "JOTFORM_API_KEY": key})
 
     print(f"\n3. syncing {args.region} clubs" + (" (dry run)" if not args.apply else ""))
     cmd = [sys.executable, os.path.join(REPO, "sync_attendance_form.py"), args.roster_csv,
            "--roster", "--region", args.region, "--prune", "--form", clone_id]
     if args.apply and clone_id != args.source:
         cmd.append("--apply")
-    r = subprocess.run(cmd, env={**os.environ, "JOTFORM_API_KEY": api_key})
+    r = subprocess.run(cmd, env={**os.environ, "JOTFORM_API_KEY": key})
     if r.returncode:
         sys.exit(f"sync failed ({r.returncode}) - the clone {clone_id} is left as is")
 
@@ -102,7 +102,7 @@ def main():
         print("\n4. status")
         subprocess.run([sys.executable, os.path.join(REPO, "tools", "form_status.py"),
                         "--form", clone_id, "--roster", args.roster_csv],
-                       env={**os.environ, "JOTFORM_API_KEY": api_key})
+                       env={**os.environ, "JOTFORM_API_KEY": key})
         info = client.get(f"/form/{clone_id}")
         print(f"\nDONE: {title}  id {clone_id}\n  fill in: {info.get('url')}\n"
               f"  builder: https://www.jotform.com/build/{clone_id}")

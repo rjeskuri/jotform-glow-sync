@@ -6,6 +6,7 @@ names dictionary as glow/translation_lookup.py emulates it (TranslationLookup). 
 fictional names.
 """
 import json
+import os
 import unittest
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
@@ -198,6 +199,51 @@ class GlowForms(unittest.TestCase):
         self.assertIsNone(forms.region_of(forms.DEFUNCT["Africa"]))
         ids = {forms.TEMPLATE, *forms.REGIONALS.values(), *forms.DEFUNCT.values()}
         self.assertEqual(len(ids), 10)
+
+
+class GlowCli(unittest.TestCase):
+    """glow/cli.py: the API key every tool reads and the forms a --form selects."""
+
+    def key(self, env, *args, **kw):
+        from unittest import mock
+
+        from glow import cli
+        with mock.patch.dict(os.environ, env, clear=True):
+            return cli.api_key(*args, **kw)
+
+    def test_the_key_comes_from_the_environment_stripped(self):
+        self.assertEqual(self.key({"JOTFORM_API_KEY": "  k3y\n"}), "k3y")
+
+    def test_no_key_stops_with_what_to_set(self):
+        for env in ({}, {"JOTFORM_API_KEY": ""}, {"JOTFORM_API_KEY": " \t\n"}):
+            with self.subTest(env=env), self.assertRaises(SystemExit) as stop:
+                self.key(env)
+            self.assertEqual(str(stop.exception.code), "Set JOTFORM_API_KEY in the environment (.env)")
+        with self.assertRaises(SystemExit) as stop:
+            self.key({}, ", or pass --sheet-only")
+        self.assertEqual(stop.exception.code, "Set JOTFORM_API_KEY in the environment (.env), or pass --sheet-only")
+
+    def test_a_tool_may_raise_its_own_refusal_instead(self):
+        class Refused(Exception):
+            pass
+        with self.assertRaises(Refused) as stop:
+            self.key({}, ": a write reads the forms first", error=Refused)
+        self.assertEqual(str(stop.exception), "Set JOTFORM_API_KEY in the environment (.env): a write reads the forms first")
+
+    def test_targets_are_the_forms_given_or_every_live_form(self):
+        from glow import cli, forms
+        every = cli.targets(None)
+        self.assertEqual(every, forms.LIVE)
+        self.assertEqual(list(every)[0], forms.TEMPLATE)              # the template first, as LIVE has it
+        every["x"] = "y"
+        self.assertNotIn("x", forms.LIVE)                            # a copy: a caller cannot change LIVE
+        self.assertEqual(cli.targets([]), forms.LIVE)
+        asia = forms.REGIONALS["Asia"]
+        self.assertEqual(cli.targets([asia, "123", forms.TEMPLATE]), {asia: "Asia", "123": "?", forms.TEMPLATE: "template"})
+        self.assertEqual(list(cli.targets([asia, forms.TEMPLATE])), [asia, forms.TEMPLATE])   # in the order given
+        titles = {asia: "Asia Attendance Form"}
+        self.assertEqual(cli.targets(None, titles), titles)
+        self.assertEqual(cli.targets([asia, "123"], titles, unknown=None), {asia: "Asia Attendance Form", "123": "123"})
 
 
 class TranslationLookup(unittest.TestCase):

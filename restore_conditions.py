@@ -33,7 +33,7 @@ import sys
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
-from glow.cli import run          # noqa: E402
+from glow.cli import api_key, run          # noqa: E402
 from glow.jotform import Client   # noqa: E402
 from glow import sync as glow_sync             # noqa: E402
 from glow.sync import CLUB_NAME, PICKER_NAME   # noqa: E402
@@ -95,9 +95,7 @@ def main():
                          "not offer today (their rosters will not show until the sync runs)")
     args = ap.parse_args()
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-        "Set JOTFORM_API_KEY in the environment")
-    client = Client(api_key, apply=args.apply)
+    client = Client(api_key(), apply=args.apply)
 
     path = os.path.join(REPO, "backups", args.form,
                         args.src or "properties-latest.json")

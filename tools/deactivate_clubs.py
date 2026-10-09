@@ -79,7 +79,7 @@ from rename_club import a1, cell, cell_key, col_letter, describe_rows, nfc_key, 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms as glow_forms      # noqa: E402
-from glow.cli import run                  # noqa: E402
+from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
 from glow.sync import CLUB_NAME, PICKER_NAME, SF_NAME_SEP   # noqa: E402
 from glow.text import key                 # noqa: E402
@@ -414,10 +414,9 @@ def deactivate(args, svc, roster, zone):
     # the sheet's day, as removed_date is; created_at is US Eastern - a day's fuzz on a 30-day guard
     recent_from = (datetime.now(zone) - timedelta(days=args.recent_days)).strftime("%Y-%m-%d")
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-        "Set JOTFORM_API_KEY in the environment (.env): the guard reads the region's attendance "
-        f"form submissions since {SINCE[:10]} before any club is deactivated")
-    enabled = guard(Client(api_key), chosen, recent_from, args.check_only, args.deactivate_anyway,
+    client = Client(api_key(": the guard reads the region's attendance form submissions since "
+                            f"{SINCE[:10]} before any club is deactivated"))
+    enabled = guard(client, chosen, recent_from, args.check_only, args.deactivate_anyway,
                     whole=whole_regions(roster, cols, chosen))
     if args.check_only:
         return

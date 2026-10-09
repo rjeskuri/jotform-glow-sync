@@ -37,7 +37,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 import backup_forms                      # noqa: E402
 from glow import forms as glow_forms     # noqa: E402
-from glow.cli import run                 # noqa: E402
+from glow.cli import api_key, run                 # noqa: E402
 from glow.jotform import Client          # noqa: E402
 
 RECENT_DAYS = 30
@@ -94,8 +94,7 @@ def main():
                  "defunct forms are already off")
     if args.enable and (args.message or args.disable_anyway):
         sys.exit("--enable takes no --message and no --disable-anyway")
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY in the environment (.env)")
-    client = Client(api_key, apply=args.apply)
+    client = Client(api_key(), apply=args.apply)
     wanted = ENABLED if args.enable else DISABLED
 
     title, status, count, last, message = read_form(client, form_id)

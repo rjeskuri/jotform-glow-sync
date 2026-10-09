@@ -57,14 +57,13 @@ sys.path.insert(0, REPO)
 from backup_forms import snapshot                  # noqa: E402
 from glow import forms as glow_forms               # noqa: E402
 from glow import layout                            # noqa: E402
-from glow.cli import run                           # noqa: E402
+from glow.cli import api_key, run, targets                           # noqa: E402
 from glow.jotform import Client, JotformError      # noqa: E402
 from glow.links import order_of, render_key        # noqa: E402
 from sync_attendance_form import same_conditions   # noqa: E402
 
 # the template first: it is repaired (and looked at) before any live form
-FORMS = {glow_forms.TEMPLATE: "template",
-         **{fid: region for region, fid in glow_forms.REGIONALS.items()}}
+FORMS = glow_forms.LIVE
 
 
 def _steps(questions, moves):
@@ -210,10 +209,9 @@ def main():
     args = ap.parse_args()
     if args.undo and not args.form:
         sys.exit("--undo needs --form (each form whose orders go back)")
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
-    client = Client(api_key, apply=args.apply)
-    targets = {f: FORMS.get(f, "?") for f in args.form} if args.form else FORMS
-    saved = {f: load_snapshot(f, args.undo) for f in targets} if args.undo else {}
+    client = Client(api_key(), apply=args.apply)
+    chosen = targets(args.form, FORMS)
+    saved = {f: load_snapshot(f, args.undo) for f in chosen} if args.undo else {}
     # to the second: a re-run just after a stopped one must not snapshot the
     # half-moved form over the true "before" (the rollback path)
     stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
@@ -235,7 +233,7 @@ def main():
     # every form is planned before anything is written: a refusal on the
     # fifth form must not leave the first four changed
     planned = {}
-    for form_id, label in targets.items():
+    for form_id, label in chosen.items():
         print(f"== {label} {form_id}")
         steps, notes = plan(form_id, *read(form_id))
         planned[form_id] = steps
@@ -256,13 +254,13 @@ def main():
         # before the repair (the part-way note in the plan says so)
         back = (f"\n   the rollback to this form as this run found it: --form {form_id} "
                 f"--undo {stamp} (dry run first)" if wrote else "")
-        sys.exit(f"   ! {targets[form_id]} {form_id}: {msg}\nstopped - the forms after it are "
+        sys.exit(f"   ! {chosen[form_id]} {form_id}: {msg}\nstopped - the forms after it are "
                  f"untouched{done}. Re-run the dry run before anything else.{back}")
 
     for form_id, steps in planned.items():
         if not steps:
             continue
-        print(f"\n== writing {targets[form_id]} {form_id}")
+        print(f"\n== writing {chosen[form_id]} {form_id}")
         sent, done = [], []      # POSTs sent / confirmed ([(qid, order)])
         # an API error on any read or write stops the run here: a 504 on the
         # probe or the verify re-read must not skip the verify unannounced
@@ -300,7 +298,7 @@ def main():
         problems = verify(before, after, rules_before, rules_after, done, saved.get(form_id))
         if problems:
             stop(form_id, "MISMATCH after the writes: " + "; ".join(problems), wrote=True)
-        written.append(targets[form_id])
+        written.append(chosen[form_id])
         if args.undo:
             print(f"   re-read: verified - the {args.undo} orders are back, nothing else changed")
         else:

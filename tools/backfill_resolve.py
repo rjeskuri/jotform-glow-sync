@@ -42,7 +42,7 @@ from collections import Counter, defaultdict, namedtuple
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms                  # noqa: E402
-from glow.cli import run                # noqa: E402
+from glow.cli import api_key, run                # noqa: E402
 from glow.jotform import Client         # noqa: E402
 from glow.sync import (                 # noqa: E402
     CLUB_NAME, CONTACT_IDS, MODULE_ID, MODULES, PICKER_NAME, SESSION_OVERRIDES, SF_NAME_SEP, WEEK_ID,
@@ -663,9 +663,7 @@ def main(argv=None, client=None, plan_of=sync_plan):
                  "without --region")
     raw_dir = private_place(args.raw_dir or os.path.join(os.path.dirname(out), "raw"), "A raw copy")
     if client is None:
-        api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-            "Set JOTFORM_API_KEY in the environment (RUNBOOK, Credentials)")
-        client = Client(api_key, retries=3)
+        client = Client(api_key(" - docs/RUNBOOK.md, \"Credentials\""), retries=3)
 
     roster = read_roster(args.roster)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

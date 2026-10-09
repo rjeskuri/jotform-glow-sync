@@ -33,7 +33,7 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-from glow.cli import run               # noqa: E402
+from glow.cli import api_key, run               # noqa: E402
 from glow.forms import TEMPLATE        # noqa: E402
 from glow.jotform import Client        # noqa: E402
 
@@ -65,8 +65,7 @@ def main():
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--check", action="store_true", help="only report the target's state")
     args = ap.parse_args()
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
-    client = Client(api_key, apply=args.apply)
+    client = Client(api_key(), apply=args.apply)
 
     options, langs = describe(args.form, client)
     print(f"target {args.form}: languages offered: {options or '(none)'}")

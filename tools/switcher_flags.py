@@ -37,7 +37,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 import backup_forms                       # noqa: E402
 from glow import forms as glow_forms      # noqa: E402
-from glow.cli import run                  # noqa: E402
+from glow.cli import api_key, run, targets                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
 
 FLAGS = {"or": "or.svg"}                  # language code -> file under tools/switcher_flags/
@@ -100,7 +100,7 @@ def main():
     ap.add_argument("--check-page", action="store_true",
                     help="read the PUBLIC page of each form and report the switcher's flags")
     args = ap.parse_args()
-    form_ids = args.form or list(glow_forms.LIVE)
+    form_ids = list(targets(args.form))
 
     if args.check_page:
         for fid in form_ids:
@@ -111,8 +111,7 @@ def main():
                   f"without a built-in flag: {', '.join(missing) or 'none'}")
         return
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY in the environment (.env)")
-    client = Client(api_key, apply=args.apply)
+    client = Client(api_key(), apply=args.apply)
     block = css_block()
     print(f"CSS block: {len(block)} chars, flags for {', '.join(sorted(FLAGS))}\n")
     stamp = datetime.now().strftime("%Y-%m-%dT%H%M")

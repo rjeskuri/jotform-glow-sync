@@ -73,6 +73,7 @@ sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
 import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily inside it)
 from glow import forms as glow_forms  # noqa: E402
+from glow.cli import api_key  # noqa: E402
 from glow import usage  # noqa: E402  (Jotform's storage against the plan's limits; standard library)
 from glow.jotform import Client  # noqa: E402  (the one read this file makes itself: the usage)
 from glow.sync import SHEET_ZONE, sf_name_clashes  # noqa: E402  (standard library only)
@@ -989,8 +990,7 @@ def main():
     ap.add_argument("--run-url", default=os.environ.get("AUTO_SYNC_RUN_URL", ""),
                     help="link recorded in SyncLog (Actions sets AUTO_SYNC_RUN_URL)")
     args = ap.parse_args()
-    if not os.environ.get("JOTFORM_API_KEY"):
-        sys.exit("Set JOTFORM_API_KEY in the environment (a dry run reads the forms too)")
+    api_key(": a dry run reads the forms too")      # the client below reads it (pinned by a test)
     if args.roster and not args.partners:
         # with --roster nothing is exported, and the sheet service is never built
         sys.exit("--roster needs --partners <Partners export>: with --roster nothing is exported, and "

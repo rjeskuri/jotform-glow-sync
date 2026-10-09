@@ -25,6 +25,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms                  # noqa: E402
+from glow.cli import api_key           # noqa: E402
 from glow.jotform import Client         # noqa: E402
 from glow.sync import CLUB_NAME, PICKER_NAME   # noqa: E402
 
@@ -111,10 +112,7 @@ def main(argv=None, client=None):
     ap.add_argument("--form", help="one form id (default: every attendance form, old ones included)")
     args = ap.parse_args(argv)
     if client is None:
-        key = os.environ.get("JOTFORM_API_KEY")
-        if not key:
-            sys.exit("JOTFORM_API_KEY is not in the environment (RUNBOOK, Credentials)")
-        client = Client(key)
+        client = Client(api_key(" - docs/RUNBOOK.md, \"Credentials\""))
     old = {fid: f"old {name}" for name, fid in forms.DEFUNCT.items()}
     known = {**forms.LIVE, **old}
     if args.form and args.form not in known:

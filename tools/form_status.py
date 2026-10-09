@@ -59,7 +59,7 @@ from glow import layout                    # noqa: E402  (rosters above the link
 from glow import sync as glow_sync         # noqa: E402  (question 18's and the modules' constants, read at run time)
 from glow import translation_lookup as tl  # noqa: E402  (the runtime's names dictionary, emulated)
 from glow import usage                     # noqa: E402  (Jotform's storage against the plan's limits)
-from glow.cli import run                   # noqa: E402
+from glow.cli import api_key, run                   # noqa: E402
 from glow.jotform import Client, JotformError     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
@@ -1259,8 +1259,7 @@ def main():
     args = ap.parse_args()
     if args.defunct:
         FORMS.update(DEFUNCT)
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
-    client = Client(api_key)
+    client = Client(api_key())
     storage = read_storage(client)        # once per run: account-wide, every report carries it
     marks = read_partners_csv(args.partners) if args.partners else None
     roster = load_roster(args.roster)

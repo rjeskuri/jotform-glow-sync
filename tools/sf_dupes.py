@@ -44,6 +44,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                          # noqa: E402
+from glow.cli import api_key                                   # noqa: E402
 from glow.jotform import Client, JotformError                   # noqa: E402
 from glow.salesforce import Org, Refused, quoted                # noqa: E402
 from glow.sync import SF_NAME_SEP                               # noqa: E402
@@ -1374,11 +1375,8 @@ class Ctx:
 
     def jotform(self):
         if self._jotform is None:
-            api_key = os.environ.get("JOTFORM_API_KEY")
-            if not api_key:
-                raise Refused("Set JOTFORM_API_KEY in the environment (.env): a write first checks that no submission "
-                              "reached the Africa or Asia form in the last 10 minutes")
-            self._jotform = Client(api_key)
+            self._jotform = Client(api_key(": a write first checks that no submission reached the Africa or "
+                                           "Asia form in the last 10 minutes", error=Refused))
         return self._jotform
 
     def use_folder(self, folder):

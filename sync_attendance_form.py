@@ -90,7 +90,7 @@ from collections import Counter, defaultdict
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
-from glow.cli import run            # noqa: E402
+from glow.cli import api_key, run            # noqa: E402
 from glow.jotform import Client     # noqa: E402
 from glow.layout import label as layout_label, roster_slot   # noqa: E402
 from glow.links import order_of as links_order_of, submit_button  # noqa: E402
@@ -502,9 +502,7 @@ def main():
                  "their own entry in the Club picker ('<club> - <partner>') - see "
                  "--same-name-switch and docs/RUNBOOK.md, \"Club names two partners share\"")
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-        "Set JOTFORM_API_KEY in the environment")
-    jf = Jotform(api_key, args.form, args.apply)
+    jf = Jotform(api_key(), args.form, args.apply)
 
     # the form's status first: a DISABLED form is one nobody can open, so a write
     # to it is refused unless asked for (the runner skips such a form instead)
