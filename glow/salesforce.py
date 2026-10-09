@@ -12,10 +12,11 @@ or on disk. curl ignores any curlrc (-q) and any proxy, and follows no redirect,
 Authorization header never reaches another host. A refusal carries Salesforce's error code and
 short description, never a response body.
 
-Beside the client, what every Salesforce tool relies on: the org's record types and the pilot
-accounts on hold, how the attendance processor compares a submitted club name with an Account's
-(sf_match), which names may hide nothing (has_invisible), and the partner map
-(glow/sf_partners.csv, read_partners).
+Beside the client, what every Salesforce tool relies on: the org's record types, ids and the pilot
+accounts on hold; how the attendance processor compares a submitted club name with an Account's
+(sf_match); the characters no name may hide (has_invisible); the error codes of an answer, never
+its words (error_codes); the partner map (glow/sf_partners.csv, read_partners); and the tools'
+--vpn-off (add_vpn_flag, require_vpn_off). Their owner-only files: glow/private_files.py.
 """
 import argparse
 import csv
