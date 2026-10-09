@@ -499,8 +499,8 @@ function wordsClose_(wa, wb, filler) {
 
 /**
  * How alike two strings are, 0..1 — Python's
- * difflib.SequenceMatcher(None, a, b).ratio(), which tools/needs_attention.py
- * uses: twice the characters in matching blocks (Ratcliff/Obershelp) over the
+ * difflib.SequenceMatcher(None, a, b).ratio() (test/gs_parity_test.py compares
+ * them): twice the characters in matching blocks (Ratcliff/Obershelp) over the
  * total length.
  */
 function similarity_(a, b) {
