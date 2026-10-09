@@ -88,77 +88,35 @@ class ConditionBuilder(unittest.TestCase):
         self.assertEqual([c["priority"] for c in conds], [c["index"] for c in conds])
 
     def test_the_default_partner_field_is_the_typed_box(self):
-        # a form without the partner list keeps exactly the rules it has today
-        self.assertEqual(sync._norm_rules(self.rules(picker="500")),
-                         sync._norm_rules(self.rules(picker="500", partner_field=sync.PARTNER)))
+        # the rosters that share a text are told apart by the typed box (the partner
+        # list that could stand in for it is gone, BACKLOG 50)
         fields = {t["field"] for c in self.rules(picker="500") for t in c["terms"]}
         self.assertIn(sync.PARTNER, fields)
         # the typed box is the partner answer itself: nothing is copied into it
         self.assertFalse([c for c in self.rules(picker="500") if c["type"] == "calculation"
                           and c["action"][0]["resultField"] == sync.PARTNER])
 
-    def test_the_partner_list_changes_the_partner_field_and_copies_it_into_q331(self):
-        typed = self.rules(picker="500")
-        listed = self.rules(picker="500", partner_field="600")
-        # one rule more: the chosen partner is copied into the hidden typed box, which the
-        # staff notification e-mail's "Partner {partner}" row reads (integration review F1)
-        copies = [c for c in listed if c["type"] == "calculation"
-                  and c["action"][0]["resultField"] == sync.PARTNER]
-        self.assertEqual(len(copies), 1)
-        self.assertEqual([(t["field"], t["operator"]) for t in copies[0]["terms"]], [("600", "isFilled")])
-        self.assertEqual((copies[0]["action"][0]["operands"], copies[0]["action"][0]["equation"]),
-                         ("600", "{600}"))
-        self.assertTrue(copies[0]["action"][0]["insertAsText"])
-        self.assertFalse(copies[0]["action"][0]["ignoreHiddenFields"])   # as the q5 copy
-        self.assertEqual(len(listed), len(typed) + 1)
-        listed = [c for c in listed if c is not copies[0]]
-        # the gated rules and the reveal rule test / show the list; nothing tests q331
-        self.assertFalse([t for c in listed for t in c["terms"] if t["field"] == sync.PARTNER])
-        self.assertFalse([a for c in listed for a in c["action"] if a.get("field") == sync.PARTNER])
-        stars = [c for c in listed if c["type"] == "field"
-                 and c["action"][0].get("field") in ("11", "12")]
-        self.assertEqual(sorted(t["value"] for c in stars for t in c["terms"] if t["field"] == "600"),
-                         ["Partner One", "Partner Two"])
-        self.assertTrue(all(c["link"] == "All" for c in stars))
-        reveal = [c for c in listed if c["type"] == "field" and c["action"][0].get("field") == "600"]
-        self.assertEqual([(t["field"], t["value"]) for t in reveal[0]["terms"]], [("500", "Stars")])
-        # swap the list back for the typed box: every rule is identical, in the same order
-        back = json.loads(json.dumps(listed).replace('"field": "600"', '"field": "%s"' % sync.PARTNER))
-        self.assertEqual(sync._norm_rules(back), sync._norm_rules(typed))
-        changed = [a for a, b in zip(sync._norm_rules(listed), sync._norm_rules(typed)) if a != b]
-        self.assertEqual(len(changed), 3)                   # 2 gated rosters + 1 reveal
-
-    def test_the_questions_carry_the_partner_list_as_a_partner_field(self):
+    def test_a_partner_list_left_on_a_form_is_recognised_by_name(self):
+        # what the sync's refusal and form_status's audit go by (the list itself is retired)
         qs = {"331": {"type": "control_textbox"}, "444": {"type": "control_dropdown", "name": "clubPicker"}}
-        self.assertEqual(sync.partner_fields(qs), {sync.PARTNER})
         self.assertIsNone(sync.partner_picker(qs))
         qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
         self.assertEqual(sync.partner_picker(qs), "600")
-        self.assertEqual(sync.partner_fields(qs), {sync.PARTNER, "600"})
         qs["600"]["type"] = "control_textbox"                # recognised as a dropdown only
         self.assertIsNone(sync.partner_picker(qs))
-
-    def test_partner_choices_are_the_partners_of_shared_names(self):
-        clubs = {"10": "Alpha Club", "11": "Stars", "12": "STARS", "13": "Beta Club", "14": "Moon"}
-        partners = {"11": "Partner Two", "12": "partner one", "10": "Partner Three"}
-        self.assertEqual(sync.partner_choices(clubs, partners), ["partner one", "Partner Two"])
-        # a club about to be created makes its name shared; the same partner twice is listed once
-        pending = [("moon", "Partner Four"), ("Stars", " Partner  two ")]
-        self.assertEqual(sync.partner_choices({"14": "Moon", **clubs}, {"14": "Partner One", **partners},
-                                              pending),
-                         ["Partner Four", "Partner One", "Partner Two"])
-        self.assertEqual(sync.partner_choices({"10": "Alpha Club"}, {}), [])
-        self.assertEqual(sync.partner_choices({"10": "A", "11": "a"}, {"10": "", "11": " "}), [])
 
     def test_rule_delta_counts_kept_new_and_dropped_rules(self):
         typed = self.rules(picker="500")
         wire = [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"]), id="x",
                      index="99", priority="99") for c in typed]
         self.assertEqual(sync.rule_delta(wire, self.rules(picker="500")), (len(typed), 0, 0))
-        listed = self.rules(picker="500", partner_field="600")
-        self.assertEqual(sync.rule_delta(wire, listed), (len(typed) - 3, 4, 3))   # + the q331 copy
-        self.assertEqual(sync.rule_delta([], listed), (0, len(listed), 0))
-        self.assertEqual(sync.rule_delta([{"terms": "{broken"}], listed), (0, len(listed), 0))
+        sync._counter[0] = 0
+        fewer = sync.build_conditions({k: v for k, v in self.CLUBS.items() if k != "10"}, self.PARTNERS,
+                                      self.MODULES, picker="500")
+        # Alpha Club's show rule goes, and question 18's sum is one roster shorter: one new, two dropped
+        self.assertEqual(sync.rule_delta(wire, fewer), (len(typed) - 2, 1, 2))
+        self.assertEqual(sync.rule_delta([], fewer), (0, len(fewer), 0))
+        self.assertEqual(sync.rule_delta([{"terms": "{broken"}], fewer), (0, len(fewer), 0))
 
     def test_an_unreadable_live_rule_is_never_the_same_and_the_rules_are_rewritten(self):
         planned = self.rules(picker="500")
@@ -173,28 +131,25 @@ class ConditionBuilder(unittest.TestCase):
 
     def test_generated_rules_mention_only_rosters_and_structural_fields(self):
         # so no other element - the links above Submit included - is ever
-        # shown, hidden or computed by the sync's rewrite; with the partner
-        # list (wf/partner-box) the list is the one field added, and with the
-        # club guard (wf5/club-guard) the warning and Submit - only then
+        # shown, hidden or computed by the sync's rewrite; with the club guard
+        # (wf5/club-guard) the warning and Submit - only then
         structural = {sync.CLUB_NAME, sync.PARTNER, sync.YEAR, sync.CONTACT_IDS, sync.MODULE_ID,
                       sync.WEEK_ID, sync.YEAR_ID, *sync.MODULES.values(), *sync.WEEKS.values()}
         for picker in (None, "500"):
-            for partner_field in (sync.PARTNER, "600"):
-                for guard in (None, "700"):
-                    mentioned = set()
-                    for c in self.rules(picker=picker, partner_field=partner_field,
-                                        picker_options=self.OPTIONS, guard=guard,
-                                        submit="2" if guard else None):
-                        for item in c["terms"] + c["action"]:
-                            mentioned |= {str(item[k]) for k in ("field", "resultField") if k in item}
-                            mentioned |= {o for o in str(item.get("operands", "")).split(",") if o}
-                            mentioned |= set(re.findall(r"\{(\d+)\}", str(item.get("equation", ""))))
-                    on = bool(picker and guard)
-                    allowed = (structural | {partner_field} | set(self.CLUBS)
-                               | ({picker} if picker else set()) | ({guard, "2"} if on else set()))
-                    self.assertLessEqual(mentioned, allowed, mentioned - allowed)
-                    self.assertIn(partner_field, mentioned)   # the shared names really are gated
-                    self.assertEqual({guard, "2"} <= mentioned, on)
+            for guard in (None, "700"):
+                mentioned = set()
+                for c in self.rules(picker=picker, picker_options=self.OPTIONS, guard=guard,
+                                    submit="2" if guard else None):
+                    for item in c["terms"] + c["action"]:
+                        mentioned |= {str(item[k]) for k in ("field", "resultField") if k in item}
+                        mentioned |= {o for o in str(item.get("operands", "")).split(",") if o}
+                        mentioned |= set(re.findall(r"\{(\d+)\}", str(item.get("equation", ""))))
+                on = bool(picker and guard)
+                allowed = (structural | set(self.CLUBS)
+                           | ({picker} if picker else set()) | ({guard, "2"} if on else set()))
+                self.assertLessEqual(mentioned, allowed, mentioned - allowed)
+                self.assertIn(sync.PARTNER, mentioned)   # the shared names really are gated
+                self.assertEqual({guard, "2"} <= mentioned, on)
 
     # ---- one club per submission (docs/plans/2026-09-29-club-guard.md)
     OPTIONS = ["Alpha Club", "Beta Club", "Stars"]     # the picker's options, as main() writes them

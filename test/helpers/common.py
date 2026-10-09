@@ -230,8 +230,8 @@ class SameNameFixture:
         else:
             qs["5"]["hidden"] = "No"
         if partner_list is not None:
-            qs["600"] = dict(sync.PARTNER_PICKER_PROPS, type="control_dropdown",
-                             name=sync.PARTNER_PICKER_NAME, order="7", options=partner_list)
+            qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME, "text": "Partner",
+                         "hidden": "Yes", "order": "7", "options": partner_list}
         if picker and not partner_of:
             qs["331"]["hidden"] = "Yes"
         if rules_switched is not None:

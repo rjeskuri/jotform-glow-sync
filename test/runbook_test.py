@@ -187,7 +187,7 @@ class SameNameRunbook(unittest.TestCase):
         self.assertIn(auto_sync.SAME_NAME_REFUSED, text)
         self.assertIn(glow_sync.SF_NAME_SEP.join(("`<club>", "<partner>`")), text)
         src = read(os.path.join(REPO, "sync_attendance_form.py"))
-        for flag in ("--same-name-switch", "--q5-change-ok", "--partner-picker"):
+        for flag in ("--same-name-switch", "--q5-change-ok"):
             self.assertIn(flag, text)
             self.assertIn(f'"{flag}"', src)
         self.assertIn("HIDE partner textbox (q331: no rule shows it;", text)

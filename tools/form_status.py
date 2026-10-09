@@ -805,7 +805,6 @@ def audit_rules(questions, conditions, partners_of=None, retired=()):
     picker = club_picker(questions)
     club_field = picker or CLUB_NAME
     plist = partner_picker(questions)            # a retired partner list left on the form
-    partner_fields = {PARTNER, plist} if plist else {PARTNER}
     clubs = {qid: " ".join(q["text"].split()) for qid, q in questions.items()
              if q.get("type") == "control_checkbox"}
     shown_by = defaultdict(list)     # club qid -> [rule ids that show it]
@@ -839,7 +838,7 @@ def audit_rules(questions, conditions, partners_of=None, retired=()):
             problems.append(f"'{name}' (q{qid}) has {len(rules)} show-rules, expected 1")
             continue
         _, terms = rules[0]
-        partner_terms[qid] = [t for t in terms if str(t.get("field")) in partner_fields]
+        partner_terms[qid] = [t for t in terms if str(t.get("field")) == PARTNER]
         club_terms = [t for t in terms if str(t.get("field")) == club_field]
         value = " ".join(str(club_terms[0].get("value")).split()) if club_terms else None
         if value is None or not (key(value) == key(name) or (picker and is_long_name(value, name))):
@@ -1138,7 +1137,7 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
                          "shown_by_rules": len(rules_showing(conditions, PARTNER))}
                         if box else None),
         "layout": layout.summary(questions),
-        "languages": languages, "club_picker": picker, "partner_picker": partner_picker(questions),
+        "languages": languages, "club_picker": picker,
         "club_guard": ({"qid": guards[0], "clubs": len(picker_options(questions, picker)) if picker else 0}
                        if guards else None),
         "picker_calc_values": bool(picker and has_calc_values(questions[picker])),
@@ -1277,9 +1276,6 @@ def main():
         print(f"   enableFuzzy: required={f['required']} selected={f['selected']!r} hidden={f['hidden']}")
         print(f"   languages: {len(r['languages'])} ({', '.join(r['languages'][:4])}{'…' if len(r['languages']) > 4 else ''})")
         print(f"   club picker: {'q' + r['club_picker'] if r['club_picker'] else 'none (mentors type the club name)'}")
-        if r.get("partner_picker"):
-            print(f"   partner picker: q{r['partner_picker']} (retired 2026-09-30: delete it in the "
-                  "builder)")
         if r["club_picker"]:
             print(f"   same-name clubs: {r['same_name_rosters']} rosters send '<club> - <partner>'")
         print(f"   partner box: {partner_box_line(r.get('partner_box'), r['club_picker'])}")

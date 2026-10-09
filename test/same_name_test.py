@@ -51,7 +51,7 @@ class SameNameFlow(SameNameFixture, unittest.TestCase):
                          [("10", "Partner One", "Alpha Club", "Alpha Club"),
                           ("11", "Partner One", "Stars", "Stars"), ("12", "Partner Two", "Stars", "Stars"),
                           ("13", "Partner Two", "Beta Club", "Beta Club")])
-        self.assertIsNone(summary["partner_picker"])
+        self.assertNotIn("partner_picker", summary)          # the retired list's key is gone (BACKLOG 50)
 
     def test_the_partner_is_read_back_from_the_rules_on_the_typed_box(self):
         # Partner Two's Stars gets an all-new roster: only the partner in the live
@@ -76,10 +76,8 @@ class SameNameFlow(SameNameFixture, unittest.TestCase):
                                         {"question[hidden]": "Yes", "question[required]": "No"})])
         self.assertIn("(conditions unchanged - skipping the rewrite)", out)
         self.assertEqual(sync.WARNINGS, [])
-        # the runner does not count it as a change (it rides along with the next roster change),
-        # and its label is not mistaken for a partner-list write
+        # the runner does not count it as a change (it rides along with the next roster change)
         self.assertEqual(auto_sync.changes(auto_sync.parse_plan("\nDRY RUN:\n  - " + self.HIDE + "\n")), 0)
-        self.assertFalse(auto_sync.PARTNER_PICKER_RX.match("  - " + self.HIDE))
         # already hidden: nothing at all
         fake = FakeForm(*self.form(roster=roster))
         self.assertEqual((self.run_sync(fake, roster=roster)[0], fake.calls), (0, []))
@@ -761,10 +759,16 @@ class SameNameFlow(SameNameFixture, unittest.TestCase):
 
     # ---- refusals, before any write
     def test_the_partner_list_is_retired(self):
+        # the flag is gone (BACKLOG 50): argparse refuses it, nothing is read or written
+        import contextlib
+        import io
         fake = FakeForm(*self.form(), apply=True)
-        code, _ = self.run_sync(fake, "--partner-picker", "--apply")
-        self.assertIn("retired 2026-09-30", str(code))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            code, _ = self.run_sync(fake, "--partner-picker", "--apply")
+        self.assertEqual(code, 2)
+        self.assertIn("unrecognized arguments: --partner-picker", err.getvalue())
         self.assertEqual(fake.writes, [])
+        # a form still carrying the list is refused before any write
         fake = FakeForm(*self.form(partner_list="Partner One|Partner Two"), apply=True)
         code, _ = self.run_sync(fake, "--apply")
         self.assertIn("q600 is a partner list", str(code))

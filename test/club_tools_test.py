@@ -67,23 +67,18 @@ class FakeSheet:
 
 class FakeJotform:
     """The two GETs a move makes; q352 is the club's roster, q444 the picker.
-    gated: True = its rule tests the typed Partner box (q331); "list" = the form
-    has the partner list (q600) and the rule tests that instead."""
+    gated: its rule tests the typed Partner box (q331)."""
 
     def __init__(self, gated=False):
         self.gated = gated
 
     def get(self, path, **params):
         if path.endswith("/questions"):
-            qs = {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
-                  "444": {"type": "control_dropdown", "text": "Club Name"}}
-            if self.gated == "list":
-                qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
-            return qs
+            return {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
+                    "444": {"type": "control_dropdown", "text": "Club Name"}}
         terms = [{"field": "444", "operator": "equals", "value": "Sunrise Club"}]
         if self.gated:
-            field = "600" if self.gated == "list" else sync.PARTNER
-            terms.insert(0, {"field": field, "operator": "equals", "value": "asoc demo"})
+            terms.insert(0, {"field": sync.PARTNER, "operator": "equals", "value": "asoc demo"})
         return {"conditions": [{"id": "1", "type": "field", "terms": json.dumps(terms),
                                 "action": json.dumps([{"visibility": "Show", "field": "352"}])}]}
 
@@ -202,12 +197,11 @@ class RenameClub(unittest.TestCase):
         broken = {"id": "4", "terms": "{not json", "action": "[]"}
         self.assertEqual(rename_club.partner_gated([plain, other, broken], {"352"}), [])
         self.assertEqual(rename_club.partner_gated([plain, gated, other], {"352"}), ["2"])
-        # on a form with the partner list the rule tests the list instead
+        # a term on any other field is no Partner term (the retired partner list's q600 included)
         listed = dict(gated, id="5", terms=[dict(gated["terms"][0], field="600"), gated["terms"][1]])
         self.assertEqual(rename_club.partner_gated([plain, listed], {"352"}), [])
-        self.assertEqual(rename_club.partner_gated([plain, listed], {"352"}, {sync.PARTNER, "600"}), ["5"])
 
-    def test_form_questions_names_the_partner_fields(self):
+    def test_form_questions_finds_the_rosters_by_name(self):
         class Client:
             def __init__(self, qs):
                 self.qs = qs
@@ -217,10 +211,9 @@ class RenameClub(unittest.TestCase):
         qs = {"352": {"type": "control_checkbox", "text": "Sunrise Club", "options": "A Girl|B  Girl"},
               "353": {"type": "control_checkbox", "text": "New Name"}}
         self.assertEqual(rename_club.form_questions(Client(qs), "1", "sunrise club", "New Name"),
-                         (["352"], ["353"], {sync.PARTNER}, {"352": {"a girl", "b girl"}}))
-        qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
-        self.assertEqual(rename_club.form_questions(Client(qs), "1", "Sunrise Club", "x")[2],
-                         {sync.PARTNER, "600"})
+                         (["352"], ["353"], {"352": {"a girl", "b girl"}}))
+        self.assertEqual(rename_club.form_questions(Client(qs), "1", "Sunrise Club", "x"),
+                         (["352"], [], {"352": {"a girl", "b girl"}}))
 
     # --- renaming a club the sync did not add (its name was another partner's club's) ---
     def stars_sheet(self):
@@ -439,10 +432,9 @@ class RenameClub(unittest.TestCase):
 
     def test_move_refuses_a_partner_gated_rule_and_sheet_only_apply(self):
         sheet = self.move_sheet()
-        for gated in (True, "list"):   # the typed box, or the partner list (main() passes its fields)
-            code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(gated), key="test")
-            self.assertIn("given Partner", str(code), gated)
-            self.assertEqual(sheet.batches, [], gated)
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(gated=True), key="test")
+        self.assertIn("given Partner (the typed Partner box)", str(code))
+        self.assertEqual(sheet.batches, [])
         code, _ = self.run_main(self.MOVE + ["--sheet-only", "--apply"], sheet)
         self.assertIn("drop --sheet-only", str(code))
         self.assertEqual(sheet.batches, [])

@@ -57,8 +57,7 @@ from glow import links as glow_links   # noqa: E402
 from glow import translations          # noqa: E402  (read, save, POST: rule 9)
 from glow.cli import api_key, run, targets               # noqa: E402
 from glow.jotform import Client        # noqa: E402
-from glow.sync import (                    # noqa: E402
-    CONTACT_IDS, CREATOR, ENABLE_FUZZY, MODULE_ID, PARTNER_PICKER_NAME, WEEK_ID, YEAR_ID)
+from glow.sync import CONTACT_IDS, CREATOR, ENABLE_FUZZY, MODULE_ID, WEEK_ID, YEAR_ID   # noqa: E402
 from glow.text import md5              # noqa: E402
 
 FORMS = {**{fid: region for region, fid in glow_forms.REGIONALS.items()},
@@ -70,8 +69,7 @@ SOURCE_KEYS = translations.SOURCE_KEYS   # the English source maps, never a lang
 
 def visible_strings(questions):
     """English text -> where it appears, for everything a mentor can see
-    (rosters and the partner list's options excluded: names are not
-    translated; the list's "Partner" label is)."""
+    (rosters excluded: names are not translated)."""
     out = {}
     for qid, q in questions.items():
         if q.get("type") == "control_checkbox" or qid in NEVER_SHOWN:
@@ -82,8 +80,7 @@ def visible_strings(questions):
                 plain = H.unescape(re.sub(r"<[^>]+>", "", v)).strip()
                 if plain:
                     out.setdefault(plain, set()).add(f"q{qid}.{fld}")
-        if q.get("type") in ("control_dropdown", "control_radio") and q.get("options") \
-                and q.get("name") != PARTNER_PICKER_NAME:
+        if q.get("type") in ("control_dropdown", "control_radio") and q.get("options"):
             for o in q["options"].split("|"):
                 if o.strip():
                     out.setdefault(o.strip(), set()).add(f"q{qid}.option")

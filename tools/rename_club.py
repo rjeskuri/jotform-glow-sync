@@ -75,7 +75,7 @@ from glow import backup                   # noqa: E402  (the snapshot before a w
 from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
-from glow.sync import PARTNER, partner_fields, rule_parts   # noqa: E402
+from glow.sync import PARTNER, rule_parts   # noqa: E402
 from glow.text import cell_key, key, name_key, nfc_key, tidy   # noqa: E402
 
 TABS = ("Roster", "ClubRegistry", "SF Pending")   # every tab with a 'partner' and a 'club' column
@@ -184,11 +184,10 @@ def near_partners(rows, name):
     return same or difflib.get_close_matches(name, names, n=3, cutoff=0.8)
 
 
-def partner_gated(conditions, qids, fields=frozenset({PARTNER})):
-    """Ids of the rules that show one of `qids` and test a partner field: the
-    typed Partner box (q331), or the partner list on a form that has one
-    (`fields`, from glow.sync.partner_fields). The sync writes such a term only
-    for a club name several partners share."""
+def partner_gated(conditions, qids):
+    """Ids of the rules that show one of `qids` and test the typed Partner box
+    (q331). The sync writes such a term only for a club name several partners
+    share."""
     out = []
     for c in conditions:
         parts = rule_parts(c)
@@ -196,14 +195,14 @@ def partner_gated(conditions, qids, fields=frozenset({PARTNER})):
             continue
         terms, actions = parts
         shows = any(str(a.get("field")) in qids for a in actions)
-        if shows and any(str(t.get("field")) in fields for t in terms):
+        if shows and any(str(t.get("field")) == PARTNER for t in terms):
             out.append(str(c.get("id")))
     return out
 
 
 def form_questions(client, form_id, old, new):
-    """([qids of roster questions named old], [qids named new], the form's
-    partner fields, {qid named old: cell_key of each girl it lists}) on one form."""
+    """([qids of roster questions named old], [qids named new], {qid named old:
+    cell_key of each girl it lists}) on one form."""
     questions = client.get(f"/form/{form_id}/questions")
     hits, clashes, girls = [], [], {}
     for qid, q in questions.items():
@@ -214,7 +213,7 @@ def form_questions(client, form_id, old, new):
             girls[qid] = {cell_key(o) for o in str(q.get("options") or "").split("|") if cell_key(o)}
         elif key(q.get("text")) == key(new):
             clashes.append(qid)
-    return hits, clashes, partner_fields(questions), girls
+    return hits, clashes, girls
 
 
 def masked(row, free):
@@ -375,7 +374,7 @@ def main():
         namesakes = sharing_partners(tabs["Roster"], (partner,), {old}) if renaming else []
         own = club_girls(tabs["Roster"], partner, old) if namesakes else set()
         for fid in ids:
-            hits, clashes, pfields, girls = form_questions(client, fid, old, new)
+            hits, clashes, girls = form_questions(client, fid, old, new)
             label = glow_forms.LABELS.get(fid, fid)
             if clashes:
                 sys.exit(f"form {fid}: a roster question named {new!r} already exists "
@@ -406,10 +405,10 @@ def main():
                              "next sync creates its roster under the new name")
             if moving:
                 props = client.get(f"/form/{fid}/properties")
-                gated = partner_gated(props.get("conditions") or [], {hits[0]}, pfields)
+                gated = partner_gated(props.get("conditions") or [], {hits[0]})
                 if gated:
                     sys.exit(f"form {fid}: rule {', '.join(gated)} shows q{hits[0]} only for a "
-                             "given Partner (typed or chosen from the partner list) - the name "
+                             "given Partner (the typed Partner box) - the name "
                              "is shared on this form, and a move would leave that rule on the "
                              "old partner until the next sync; sync the "
                              "form and check form_status first")

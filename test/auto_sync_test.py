@@ -472,44 +472,6 @@ class AutoSyncPlan(AutoSyncFixture, unittest.TestCase):
         self.assertFalse(auto_sync.GUARD_RX.match("  - UPDATE club picker (3 clubs: calcValues)"))
         self.assertFalse(auto_sync.PICKER_RX.match("  - UPDATE club guard (text)"))
 
-    def test_a_partner_list_update_is_a_change_and_parses_from_both_shapes(self):
-        text = ("Roster: 3 active clubs in Africa (40 girls); 300 clubs overall\n"
-                "\nDRY RUN (use --apply to write):\n"
-                "  - UPDATE partner picker (8 partners: options)\n"
-                "  - REPLACE conditions (254 rules)\n")
-        plan = auto_sync.parse_plan(text)
-        self.assertEqual(plan["partner_picker"], [{"op": "UPDATE", "partners": 8}])
-        self.assertEqual(plan["picker"], [])
-        self.assertEqual(auto_sync.changes(plan), 1)
-        self.assertEqual(auto_sync.check_bands(plan), [])
-        # applied unattended, so the SyncLog detail must say what was written (integration review F2)
-        self.assertEqual(auto_sync.plan_summary(plan),
-                         "0 create(s), 0 update(s), 0 delete(s), 0 warning(s), update partner list")
-        # …and the runner's row uses it (a dry run here: "would apply: …")
-        import tempfile
-        import types
-        from unittest import mock
-        with tempfile.TemporaryDirectory() as out:
-            args = types.SimpleNamespace(apply=False, out=out, max_creates=5, max_updates=20,
-                                         trigger="test", run_url="")
-            run = auto_sync.Run(args)
-            with mock.patch.object(run, "sync", lambda *a, **k: types.SimpleNamespace(
-                    returncode=0, stdout=text, stderr="")), \
-                    mock.patch.object(run, "read_status", lambda form: "ENABLED"), mock.patch("builtins.print"):
-                run.region("Africa", os.path.join(out, "roster.csv"))
-        self.assertEqual([r[7:9] for r in run.results],
-                         [["dry-run", "would apply: " + auto_sync.plan_summary(plan)]])
-        summary = {"creates": [], "updates": [], "deletes": [], "rules": 254, "warnings": [],
-                   "calls": ["CREATE partner picker (9 partners)", "REPLACE conditions (254 rules)"]}
-        self.assertEqual(auto_sync.plan_from_summary(summary)["partner_picker"],
-                         [{"op": "CREATE", "partners": 9}])
-        # the sync's own labels match the pattern the runner reads
-        for label in ("CREATE partner picker (2 partners)", "UPDATE partner picker (2 partners: options)",
-                      "UPDATE partner picker (8 partners: hidden, options)"):
-            self.assertTrue(auto_sync.PARTNER_PICKER_RX.match("  - " + label), label)
-        self.assertFalse(auto_sync.PARTNER_PICKER_RX.match(
-            "  - HIDE partner textbox (q331: the partner list replaces it)"))
-
     def test_a_failed_apply_says_later_runs_will_not_repair_it(self):
         # a half-write (the roster and picker written, the conditions PUT failed twice)
         # leaves only the rules stale, and a rules-only difference is not a change to
@@ -551,16 +513,6 @@ class AutoSyncPlan(AutoSyncFixture, unittest.TestCase):
         additions = json.loads(read(os.path.join(REPO, "tools", "translations_additions.json")))
         self.assertIn(sync.PICKER_TEXT, additions)
         self.assertIn(sync.PICKER_SUBLABEL, additions)
-
-    def test_partner_list_shape_is_the_module_dropdowns(self):
-        # pinned here, not read back from PARTNER_PICKER_PROPS: a change to it would be
-        # applied to Africa unattended by the next runner apply (an UPDATE is a change)
-        self.assertEqual(sync.PARTNER_PICKER_PROPS["hidden"], "Yes")     # only a shared name shows it
-        self.assertEqual(sync.PARTNER_PICKER_PROPS["required"], "Yes")   # once shown, a partner is chosen
-        self.assertEqual(sync.PARTNER_PICKER_PROPS["multipleSelections"], "No")   # one partner
-        self.assertEqual(sync.PARTNER_PICKER_PROPS["text"], "Partner")   # already translated everywhere
-        self.assertEqual(sync.PARTNER_PICKER_PROPS["emptyText"], "Please Select")
-        self.assertEqual(sync.PARTNER_PICKER_PROPS["subLabel"], "")
 
 
 class SheetWhen(unittest.TestCase):

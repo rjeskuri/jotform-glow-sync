@@ -51,11 +51,9 @@ ENABLE_FUZZY = "109"  # `enableFuzzy` (Salesforce enable_fuzzy_matching__c)
 PICKER_NAME = "clubPicker"
 
 # The partner list (docs/plans/2026-09-28-partner-box.md) was built, never
-# deployed, and is RETIRED (2026-09-30, docs/plans/2026-09-30-same-name-clubs.md):
-# the sync refuses --partner-picker and a form carrying one. The name stays so
-# that refusal, the audit and the other tools still recognise such a question;
-# the rest of the partner-list code is dead and waits for its clean-up
-# (docs/BACKLOG.md).
+# deployed, and is RETIRED (2026-09-30, docs/plans/2026-09-30-same-name-clubs.md);
+# its code is gone (BACKLOG 50). The name stays so the sync can refuse a form
+# carrying one and tools/form_status.py can report it.
 PARTNER_PICKER_NAME = "partnerPicker"
 
 
@@ -67,17 +65,10 @@ def club_picker(questions):
 
 
 def partner_picker(questions):
-    """qid of the partner list, or None while the form has only the typed box."""
+    """qid of a retired partner list left on the form, or None (the typed box alone)."""
     return next((qid for qid, q in questions.items()
                  if q.get("type") == "control_dropdown" and q.get("name") == PARTNER_PICKER_NAME),
                 None)
-
-
-def partner_fields(questions):
-    """The fields a partner-gated rule may test: the typed box (q331) and,
-    once the form has it, the partner list."""
-    pp = partner_picker(questions)
-    return {PARTNER, pp} if pp else {PARTNER}
 
 
 # ------------------------------------------------- one club per submission

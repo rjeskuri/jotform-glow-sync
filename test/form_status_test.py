@@ -2,8 +2,7 @@
 """
 tools/form_status.py's audits: the rules (FormStatusAudit), the layout (FormStatusLayout), the
 module values and the names dictionary (ModuleAndNamesAudit) and Jotform's usage limits
-(JotformUsage); and what tools/add_translations.py counts as a string a mentor sees
-(TranslationAudit). Fictional names.
+(JotformUsage). Fictional names.
 """
 import copy
 import json
@@ -489,22 +488,6 @@ class FormStatusLayout(unittest.TestCase):
         line = form_status.layout_line(rep["layout"])
         self.assertNotIn("no link", line)
         self.assertEqual(line, "2 Submit buttons, expected 1 - rosters not checked")
-
-
-class TranslationAudit(unittest.TestCase):
-    """tools/add_translations.py: what counts as a string a mentor sees."""
-
-    def test_partner_names_are_not_strings_to_translate(self):
-        import add_translations
-        qs, _ = SameNameFixture.form(SameNameFixture(), partner_list="Partner One|Partner Two")
-        strings = add_translations.visible_strings(qs)
-        # the list's label is (already translated everywhere); its options stay English,
-        # so adding the list does not grow the audit's "untranslated" count
-        self.assertEqual(strings["Partner"], {"q331.text", "q600.text"})
-        self.assertNotIn("Partner One", strings)
-        self.assertNotIn("Partner Two", strings)
-        # other dropdowns' options are still counted (the module names are translated)
-        self.assertEqual(strings["Core 1"], {f"q{sync.MODULES['1']}.option"})
 
 
 class ModuleAndNamesAudit(unittest.TestCase):
