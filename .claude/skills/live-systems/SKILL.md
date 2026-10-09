@@ -1,72 +1,57 @@
 ---
 name: live-systems
-description: What is live (the four regional Jotform attendance forms, the template, the master enrollment sheet, the deployed Apps Script, the Salesforce integration), which commands write to them, the backup → dry-run → go → apply → verify ritual, and the rollback path per system. Load before any command with --apply, --prune, clasp push, upload_roster.py, sheets_client.py import, or auto_sync.py --apply, and before editing appsscript/.
+description: What is live (the four regional Jotform attendance forms, the template, the master enrollment sheet, the deployed Apps Script, the automatic sync), every command that writes to them with its backup and rollback, and the backup → dry-run → go → apply → verify ritual. Load before any command with --apply, --prune or --rehearse, clasp push, upload_roster.py, auto_sync.py --apply or a gh switch of the sync, and before editing appsscript/ (Salesforce writes are in the salesforce skill).
 ---
 
 # Live systems
 
 Live since 2026-09-01: the four regional attendance forms (ids in `docs/RUNBOOK.md`), the
 template `262352490535154` (not mentor-facing, but every logic change lands there first), the
-master enrollment Google Sheet and the Apps Script bound to it, and — through the forms — the
-Salesforce V2 integration.
+master enrollment Google Sheet and the Apps Script bound to it, the automatic sync (GitHub
+Actions, `main`'s code), and — through the forms — Salesforce, whose writers, gates and
+rollbacks are in `.claude/skills/salesforce`.
 
-## Writers
-`sync_attendance_form.py --apply`, `restore_conditions.py --apply`, `tools/add_*.py --apply`,
-`tools/restore_translations.py --apply`, `tools/clone_regional.py --apply`,
-`tools/fix_roster_order.py --apply`, `tools/fix_name_translations.py --apply` (also with `--restore`),
-`tools/disable_form.py --apply` (a regional form's `status`, and the disabled page's text, after a
-`backup_forms` snapshot; `--enable --apply` is the way back), `tools/deactivate_clubs.py --apply`
-(Roster rows' `status` and `removed_date` and one Audit row, after a guard that reads the region's
-form; `--undo <dir> --apply` puts the same rows back), `tools/auto_sync.py --apply`,
-`tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run clasp:push` / `npx clasp
-push`; in Salesforce `tools/sf_backfill.py send --apply`, `tools/fix_module_values.py --apply`,
-`tools/sf_girls_present.py set --apply` and `tools/sf_dupes.py merge|rename|cleanup --apply`
-(below). Anything else is read-only (GET) or writes only under `data/` and `backups/` - except
-`tools/sf_dupes.py merge --rehearse`, which runs the merges' DML in Salesforce for real and then
-throws so that Salesforce rolls it back: it leaves nothing behind, but it is not read-only
-(triggers run, records are locked meanwhile).
+## The gate
+`.claude/hooks/live_gate.sh` blocks these unless Ryan exported `GLOW_LIVE_OK=1` before launching
+Claude Code: `--apply`, `--prune`, `--rehearse`, `clasp push` / `clasp:push`; raw `api.jotform.com`
+calls, Sheets writes and GitHub dispatches; `sf`/`sfdx` deploys (check-only ones too), data
+writes, `apex run` and the REST API by URL; `gh variable|secret set|delete`, `gh workflow
+enable|disable`, a `gh workflow run` that applies, `gh run rerun` and `gh api` writes under
+`actions/`; and always a self-approval (setting `GLOW_LIVE_OK`, writing a shell startup file or
+`.env`, `launchctl setenv`). A read-only command that only mentions a flag (`grep`, `cat`,
+`git log` …, alone) passes. The hook is a seatbelt, not the permission: **every live write needs
+Ryan's explicit go in this conversation**, gated or not (it does not see the connectors,
+`sf api request rest`, or a write through another program). RUNBOOK "Live gate (Claude Code)".
 
-Salesforce (production) is written in these ways only, each with Ryan's explicit go: through the
-write connector, one record per call, by the main session (the hook below does not see those
-calls; docs/RUNBOOK.md, "Club accounts in Salesforce"); by the three `--apply` tools the hook
-catches, each one record per request, read back, with a ledger per record - `tools/sf_backfill.py
-send --apply` (new attendance batches, which carry girls' names and so never pass through the
-conversation; docs/RUNBOOK.md, "Back-fill of attendance into Salesforce"),
-`tools/fix_module_values.py --apply` (and `--undo … --apply`: `Module__c` on batches and their rows,
-docs/RUNBOOK.md, "The names dictionary and the module values") and `tools/sf_girls_present.py set
---apply` (`Girls_Present__c` on batches, docs/RUNBOOK.md, "Attendance totals and partner-reported
-counts") - a batch `PATCH` runs none of the processor, whose trigger is after-insert only; by
-**`tools/sf_dupes.py merge|rename|cleanup --apply`** (2026-10-07: duplicate contacts of one girl
-merged by anonymous Apex - `sf apex run`, one all-or-nothing run per club - a stored name's
-whitespace fixed, extra affiliations and duplicate-rule sets deleted), after a dry run and
-`merge --rehearse`, `merge_rollback.json` written before the first write (docs/RUNBOOK.md,
-"Duplicate girls in Salesforce") - the hook catches `--apply`, not `--rehearse`: `merge --rehearse`
-needs Ryan's explicit go all the same (production DML, rolled back; it waits for the same quiet
-moment as `--apply`); by **metadata deploys** (`sf project deploy start`: the Monthly Report
-checkbox, the attendance processor, the attendance dashboard), check-only first (`--dry-run`), then
-Ryan's go - the hook does not see `sf` commands, and Claude Code's auto-mode guard may refuse a
-production deploy (it did on 2026-10-02), then Ryan runs it himself (docs/RUNBOOK.md, "Attendance
-dashboard in Salesforce"); and by a **rolled-back anonymous Apex run** (`sf apex run`, the proof of
-a processor change: a savepoint, the records inserted for a made-up club, the outcomes asserted,
-`Database.rollback`) - it writes inside a transaction it rolls back, the hook does not see it, so
-it is made on Ryan's go in the conversation or run by Ryan, with the script pasted in full first
-(docs/plans/2026-10-06-attendance-totals.md, B); and by **the automatic sync** itself, which
-creates a new club's Club account as the GLOW Sync integration user (client credentials, from
-GitHub Actions) when the repository variable `SF_SYNC` is `apply` and the run applies
-(`tools/auto_sync.py --apply-salesforce`; create only, at most 5 per region, right before the
-region's form puts the club on its picker; docs/RUNBOOK.md, "New clubs' accounts, automatically")
-- changing `SF_SYNC`, `gh variable set` or `gh workflow run`, is Ryan's go, and the hook does not
-see those `gh` commands (BACKLOG 53). No Salesforce CLI or API call from the Mac while a VPN is on:
-Salesforce freezes the user (2026-09-30); the tools refuse without `--vpn-off`.
+## Writers (one per row; every other command is read-only or writes only under `data/` and `backups/`)
+| Writer | What it changes | Saved before the write | Rollback |
+|---|---|---|---|
+| `sync_attendance_form.py --apply` | A form's rosters, Club picker and ALL its conditions; with `--prune` it deletes questions (fresh clones only) | `backup_forms.py --form <id>` (take it) | Conditions: below |
+| `restore_conditions.py --apply` | A form's conditions | A snapshot of its own | That snapshot; Jotform Revision History |
+| `tools/add_feedback_link.py --apply` | The link elements above Submit | A snapshot | `--remove --apply` |
+| `tools/add_translations.py --apply` | Translation strings | The whole store (`backups/translations/`) | RUNBOOK "Translations" |
+| `tools/add_language.py --apply` | A language on the switcher, and its dictionary | The whole store | RUNBOOK "Translations" |
+| `tools/restore_translations.py --apply` | A clone's language list and missing strings | The whole store | RUNBOOK "Translations" |
+| `tools/fix_name_translations.py --apply` | `base`/`en` entries of the names dictionary | The whole store | `--restore <saved store> --apply` |
+| `tools/switcher_flags.py --apply` | `injectCSS` (the switcher's flags) | A snapshot (its properties) | The snapshot's `injectCSS` |
+| `tools/update_static_fields.py --apply` | Wording, the photo limits, the header logo | `backup_forms.py --form <id>` (take it) | The questions snapshot or Revision History (RUNBOOK "Header logo") |
+| `tools/fix_roster_order.py --apply` | The roster questions' `order` | A snapshot | `--form <id> --undo <stamp> --apply` |
+| `tools/disable_form.py --apply` | A regional form's `status` and its disabled page's text | A snapshot | `--enable --apply` |
+| `tools/rename_club.py --apply` | A club's name or partner in the sheet's tabs and on its form | The tabs (`data/rename_club/<stamp>/`), a form snapshot | Those tabs and `restore_conditions.py` (RUNBOOK "Renaming a club") |
+| `tools/deactivate_clubs.py --apply` | Roster rows' `status` and `removed_date`, one Audit row | The Roster tab (`data/deactivate_clubs/<stamp>/`) | `--undo <dir> --apply` |
+| `tools/upload_roster.py --apply` | The sheet's roster tabs (the offline path) | The tabs it replaces (`data/roster_build/previous/<stamp>/`) | Those tabs, or the `export-all` you took |
+| `tools/auto_sync.py --apply` | What the sync writes, per region, within the bands; a SyncLog row | A conditions snapshot per form (`backups/<form>/conditions-<stamp>.json`) | `restore_conditions.py --from` it; stop: `AUTO_SYNC_APPLY=0` |
+| `npm run clasp:push` / `npx clasp push` | The deployed Apps Script | The last deployed commit (`/deploy-appsscript`) | That commit pushed again, never below the floors (below) |
+| `gh variable set AUTO_SYNC_APPLY`, `gh workflow run auto-sync.yml -f apply=true` | Whether, and when, the runner writes | — | `AUTO_SYNC_APPLY=0`, or clear the Script Properties `SYNC_DISPATCH_REPO` / `SYNC_DISPATCH_TOKEN` |
 
 ## The ritual
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).
 2. Back up the exact thing you will write: `backup_forms.py --form <id>`,
    `sheets_client.py export-all data/live_<date>`, or note the last pushed commit for Apps Script.
-3. Get Ryan's explicit go in this conversation. The hook `.claude/hooks/live_gate.sh` blocks the
-   write unless he exported `GLOW_LIVE_OK=1` before launching Claude Code or runs it himself.
-4. Apply. Then verify with a read: `form_status.py --form <id> --roster <csv>` (CLEAN),
-   `sheets_client.py tabs`, or the sheet menu.
+3. Get Ryan's explicit go in this conversation; then he runs it, or Claude does if he launched
+   Claude Code with `GLOW_LIVE_OK=1`.
+4. Apply. Then verify with a read: `form_status.py --form <id> --roster <csv> --partners <csv>`
+   (CLEAN), `sheets_client.py tabs`, or the sheet menu.
 5. Say what was written, where the backup is, and how to roll back.
 
 ## Never
@@ -81,7 +66,7 @@ the Contact_IDs sum back after the roster rules: docs/RUNBOOK.md, "The names lis
 Salesforce"; so merge right after the template's rollout, before the first regional form);
 writing a translation language without GET + merge first.
 
-## Rollback
+## Rollback beyond the table
 - Conditions: `restore_conditions.py --form <id> [--from <snapshot>] --apply`; Jotform Revision
   History as the second path. It refuses a snapshot whose rules test clubs the Club picker no
   longer offers (any from before a form's `--same-name-switch`, or before a rename): run the
@@ -93,21 +78,10 @@ writing a translation language without GET + merge first.
   runs `main`'s constants: merge the constants-off commit only once every form is rolled back, then
   `AUTO_SYNC_APPLY=1`; never while any form is still rolled out (the runner would put the old rule
   order back on it with its next roster change).
-- The names dictionary (`base`/`en` of a form's translation store): `tools/fix_name_translations.py
-  --form <id> --restore backups/translations/<id>-<stamp>-before.json`, a dry run, then `--apply`
-  (puts back the entries the form no longer has). The module dropdowns' `calcValues`: generated,
-  so `glow/sync.py` `MODULE_CALC_VALUES = False` on a branch and the sync applied by hand per form;
-  the runner never applies those lines (docs/RUNBOOK.md, "The names dictionary and the module
-  values").
+- The module dropdowns' `calcValues`: generated, so `glow/sync.py` `MODULE_CALC_VALUES = False` on
+  a branch and the sync applied by hand per form; the runner never applies those lines
+  (docs/RUNBOOK.md, "The names dictionary and the module values").
 - Questions: never deleted by tooling; a wrongly created question is removed in the builder.
-- Sheet tabs: `data/roster_build/previous/<stamp>/` (upload_roster saves them) or the
-  `export-all` you took.
 - Apps Script: `git checkout <previously deployed commit> -- appsscript && npm run clasp:push` —
   never below the floors in docs/RUNBOOK.md, "Rolling back `appsscript/`" (`7a175c4`; `986a325`
   once the Feedback tab has two reply columns), and deal with held new clubs first.
-- Automatic sync: repository variable `AUTO_SYNC_APPLY=0`, or clear the Script Properties
-  `SYNC_DISPATCH_REPO` / `SYNC_DISPATCH_TOKEN`.
-- Salesforce duplicate merges, renames, deleted affiliations: from `data/sf_dupes_<date>/merge_rollback.json`
-  (a merge: undelete within 15 days, then the saved rows inserted again on the restored contact;
-  docs/RUNBOOK.md, "Duplicate girls in Salesforce", Rollback). Never delete a back-fill contact
-  to undo anything: it may carry live rows (RUNBOOK, "Back-fill of attendance into Salesforce").

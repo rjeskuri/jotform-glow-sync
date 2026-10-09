@@ -1,267 +1,61 @@
 ---
 name: jotform-api
-description: Verified Jotform API semantics for this project — conditions as JSON-string terms/action via PUT properties, question POST merges, translations POST replaces a language, clone resets the language list, dropdown/multi-select properties, the rule walk (index 0 runs last, no recalculation at submit), clearFieldOnHide at submit, required + hidden fields, the checkbox calculation reader and the translation-dictionary lookup it runs ticked names through, module dropdown calcValues, the loop limit, the read-only integrations property (Salesforce, Google Drive), uploaded files behind the login, the account's usage and plan limits, 504-but-created. Load before writing or reviewing any code that calls api.jotform.com or reasons about how the forms behave at runtime.
+description: Verified Jotform API and runtime semantics for this project's forms - conditions, questions, translations, calculations, properties, integrations and account limits, with the traps that have cost data before. Load before writing or reviewing code that calls api.jotform.com, or before reasoning about how the forms behave at runtime.
 ---
 
-# Jotform API — what is verified (2026-08-24 → 2026-09-01)
+# Jotform API — what is verified (2026-08-24 → 2026-10-06)
 
-Everything below was confirmed against the live API and the runtime
-(`jotform.forms.js`); when the docs and this file disagree, this file won.
-The client conventions are in `sync_attendance_form.py` (`Jotform` class):
-`curl -sS`, JSON response with `responseCode`; writes are recorded and skipped
-unless `--apply`.
+Confirmed against the live API and the runtime (`jotform.forms.js`); when Jotform's docs and
+these files disagree, these files won. The client is `glow/jotform.py` (`Client`;
+`sync_attendance_form.py`'s `Jotform` class is a form-scoped view of it): `curl -sS`, a JSON
+answer with `responseCode`; every write is recorded and skipped unless `--apply`.
 
-## Conditions
-- Read: `GET /form/{id}/properties` (the `conditions` key). `GET /form/{id}/properties/conditions` 404s.
-- Write: `PUT /form/{id}/properties` with JSON `{"properties": {"conditions": [...]}}`. Each
-  condition's `terms` and `action` must be **JSON-encoded strings**. Writing the key replaces the
-  whole array; other property keys are untouched. Ids: unique 13-digit numeric strings; keep
-  `index` and `priority` sequential and equal (`build_conditions` does).
-- Runtime `equals` is case-insensitive and trims outer whitespace (`JotForm.checkValueByOperator`)
-  — on a text box or single-select. **A multi-select dropdown** (the Club picker,
-  `<select multiple>`) is different (read 2026-09-29 in the runtime, build ef085979a40): only
-  `equals` ("this exact option is selected", exact and **case-sensitive** on the option's value),
-  `notEquals`, `isEmpty`, `isFilled` are evaluated; `contains`, `lessThan` and the rest are
-  silently skipped; there is no count-selected operator. A rule spelling a club unlike its
-  option never fires (Africa's "SUPER GIRLS" vs "Super Girls"), so the sync writes every
-  picker term in the picker's own spelling and `form_status` flags any other.
-- Rule types: `field` rules Show/Hide (Hide works on the Submit button, `control_button`;
-  several Hide rules on one field combine — Show does not re-show it while another Hide is
-  true); `require` rules Require/Unrequire/Enable/Disable (Disable greys `<button>`). No custom
-  error action. Hiding Submit alone does not stop desktop Enter in a text box from submitting —
-  the club guard also disables it (runtime reading; first used by `--club-guard`, verified in
-  the browser on the template before any regional form).
-- **The rule walk** (read 2026-09-30 in `jotform.forms.js`, md5 `841dc566a7`, byte-identical in
-  builds `9e75d6f1d83`, `772a1982daf`, `962dcbe2fa6`, `cca53a3a639` and `2dd4239c231`, the five
-  the forms were served on by 2026-10-01): `setConditions` reverses the rules array, and each field's listener
-  walks the rules that test it in that reversed order, so **the rule at index 0 runs last**.
-  Showing or hiding a field never re-runs a calculation (only a section or multi-field action
-  with `clearFieldOnHide=enable` does), and **nothing recalculates at submit**. A calculation over
-  fields that rules show or hide must therefore come before those rules and test the fields they
-  test: the Contact_IDs sum is rule 0 on a picker form (`glow/sync.py` `CONTACT_IDS_FIRST`; with it
-  after the roster rules, a change of club calculated question 18 over the previous club's
-  rosters). 1.5 s after init, `prePopulations` runs `runAllConditions()` with an event that does
-  not bubble: on a page the browser restores (Back) that is the only thing that re-shows the
-  roster, so only the rule order covers it, not an operand listener.
-- **`clearFieldOnHide`** is a form-level property (`GET /form/{id}/properties`; live value
-  `disable` on all five forms - template, Africa, Asia, Latin America, U.S 262382706852058 -
-  read 2026-10-06) with three runtime values (`jotform.forms.js`, build `fc726a121d4`): `enable`
-  (clear a field the moment a rule hides it and run every calculation - the mode rejected
-  2026-09-30, loop limit 3), `disable` (the live mode: a rule-hidden field keeps its answer *in the
-  page*) and `dontClear`. At submit, unless the value is `dontClear`, every
-  `input`/`select`/`textarea` inside a `.form-field-hidden` element is emptied before the form is
-  sent; `always-hidden` fields (q98/q100/q102) are not touched and nothing recalculates. So a module
-  dropdown hidden by the Year rule can keep a pick in the page but never in the submission (0 of
-  674 since launch) - the back-fill resolver's "a dropdown hidden again can keep an answer" is true
-  of the page only. `form_status` pins the value (`glow/sync.py` `CLEAR_FIELD_ON_HIDE`, the
-  `module shape:` line; `--rendered` reads the served `JotForm.clearFieldOnHide="…"`; plan
-  `docs/plans/2026-10-06-module-selection.md`); the builder labels of the three values are
-  unverified.
-- **Loop limit**: a rule checked more than `19 * (rules / 100 + 1)` times in one half-second (at
-  most 100; 3 with `clearFieldOnHide=enable`) is skipped: today U.S 27, Asia 43, Africa 66, the
-  template 94. Calculation rules are exempt unless an operand (or `baseField`) is a time, date,
-  text or "mixed" field; the picker is a dropdown and the rosters are checkboxes.
-- Calculations: text concatenates at top level, `[brackets]` = math; `ignoreHiddenFields: true`
-  makes hidden fields contribute "" in text context (that is how one aggregate over every roster
-  yields only the visible club's ticks; "hidden" is the `form-field-hidden` class on the field's
-  `<li>` or section, tested at each run). `operands` must list every `{qid}` in the equation or
-  changes do not re-trigger: each operand gets a `change` listener on its `<li>`, which fires by
-  bubbling after the field's rules ran. An operand need not be in the equation (the Club picker
-  on the Contact_IDs sum, `CONTACT_IDS_PICKER_OPERAND`); whether Jotform keeps such an operand
-  is proven on the template by the second dry run and `form_status --rendered`.
-  `insertAsText` / `newCalculationType` are builder-side flags.
-- **A checkbox operand is read box by box**: for each ticked box, its `data-calcvalue`, else
-  `FormTranslation.translate(value)` as it is (even `""`: `translateUncached` returns `""` when
-  `simplifyfWord` empties the value), or `value` only when `FormTranslation` is not defined;
-  never the label. One checkbox's ticks are joined with `", "`; operands are joined with nothing
-  (two visible rosters fuse one token).
-- **The dictionary lookup in a calculation** (`formTranslation.v2.js`, read 2026-10-02 in builds
-  `62a8b57dd95` and `fc726a121d4`, byte-identical; emulated by `glow/translation_lookup.py`,
-  which `tools/fix_name_translations.py` and `form_status.py` run). `setDictionary`: the original
-  language is `base`; `dictionary.base` maps each entry's `en` text to its `base` text, and every
-  other language L maps the `base` text, trimmed, to L's text, trimmed (an entry missing in
-  `en`/`base` is skipped; the older build `9e75d6f1d83` files it under "undefined"). Then
-  `trimMultiSpaces` and `sanitizeKeys` move every key whose whitespace runs collapse (JavaScript's
-  `\s`: tab, newline, U+00A0 and the other Unicode spaces, U+FEFF; not U+200E) onto the
-  collapsed key, **overwriting** the entry there: a stale `Amara  Fennwhistle` beats the exact
-  `Amara Fennwhistle` in either order. `translate(word)` simplifies the word (`&amp;`, `<br>`,
-  tabs, double spaces…), returns `dictionary[to][word]` when truthy, else retries with no-break
-  spaces replaced, else walks the other languages in the runtime's own order for an entry whose
-  simplified text equals the word and returns `to`'s entry for that key, else the word. `to` is
-  the language the form shows (the primary `en`, or the mentor's browser language: the forms
-  detect it). So a stale `base`/`en` spelling of a girl's name replaces her exact name in
-  question 18: 55 options on 2026-10-02 (Africa 49, Asia 5, Latin America 1), removed by the tool.
-  The page embeds the same store (`window.allTranslations.translations`, equal to the API's,
-  key order included); `form_status --rendered` audits that copy.
-- A field filled by a calculation can be the source of another rule (the Club picker → q5 copy);
-  a calculation writing a text box fires keyup, so a rule testing q5 re-evaluates after each copy.
-- The calculation reader, in text context, joins a multi-select's selected options with **no
-  separator**, taking each option's `data-calcvalue` if it has one, else its visible text (which
-  the browser's page translation can alter). So two clubs picked reach q5 run together, and a
-  calculation cannot count a selection (only math/date functions exist).
+## The rules that bite most
+- **Conditions** are read from `GET /form/{id}/properties` (the `conditions` key;
+  `/properties/conditions` 404s) and written with JSON `PUT /form/{id}/properties`
+  `{"properties": {"conditions": [...]}}`, each condition's `terms` and `action` a
+  **JSON-encoded string** (`glow.sync.rule_parts` decodes them). The write **replaces the whole
+  array**: the sync regenerates every rule (CLAUDE.md rule 3).
+- **`POST /form/{id}/translations` replaces each posted language's whole dictionary.** GET the
+  store, save it, merge, POST, re-read (`glow/translations.py`; 135 strings per language were
+  lost once). A new English string needs its `base` and `en` entries (md5 → English) too.
+  `PUT` answers an HTML 504.
+- **`POST /form/{id}/question/{qid}`** (form-encoded `question[key]=value`) **merges**
+  properties. Adding a question at a taken order inserts it and pushes the block below down to
+  the first gap; moving one to an empty order moves nothing else.
+- **A clone resets the `language` property** (the offered languages) to English (US) and leaves
+  `pagetitle` "Clone of …": `tools/restore_translations.py`, then `properties[pagetitle]`.
+- **The rule walk**: the runtime reverses the rules, so **index 0 runs last**; showing or hiding a
+  field never re-runs a calculation and **nothing recalculates at submit**. A calculation over
+  fields that rules show or hide comes first (the Contact_IDs sum is rule 0: `CONTACT_IDS_FIRST`).
+- **`clearFieldOnHide` at submit**: unless it is `dontClear` (the live value is `disable`), every
+  input inside a `.form-field-hidden` element is emptied before sending; `always-hidden` fields are
+  not touched.
+- **Runtime `equals`** is case-insensitive and trimmed on a text box or single-select; on the
+  multi-select Club picker only `equals` (exact, case-sensitive), `notEquals`, `isEmpty` and
+  `isFilled` are evaluated, the rest silently skipped.
+- **Dropdown `calcValues` has a leading empty slot**: `len(calcValues.split('|')) ==
+  len(options.split('|')) + 1` (the placeholder); the picker keeps it too
+  (`PICKER_CALC_LEADING_EMPTY`).
+- **The `integrations` property is read-only** through the API: a PUT or POST answers 200 and
+  changes nothing; the Salesforce and Google Drive integrations are set up in the builder.
+  Removing a connected account removes the integration from every form.
+- **A 504 can hide a completed write**, a clone included (check `/user/forms`): re-GET before
+  retrying.
+- **A request body goes on standard input** (`--data-binary @-`), never on curl's command line:
+  Linux refuses an argument over 131,072 bytes and a form's rules pass that.
+- The `emails` property write replaces the whole array (resend the others verbatim); hidden fields
+  are still submitted and skip `required`.
 
-## Questions
-- `POST /form/{id}/question/{qid}` form-urlencoded `question[key]=value` **merges** properties.
-- `POST /form/{id}/questions` adds; only `question[type]` is required; `control_email` needs
-  `question[validation]=Email`. The response `content` is usually the new question (with `qid`),
-  but can be a list — read defensively.
-- Adding a question at an order another question holds **inserts** it there: that question and
-  the block below it move down by one, up to the first gap (seen in the snapshots: the Club
-  picker created at 3 on the template 2026-09-01 moved 351 questions, and q5 is now 4 on all
-  five forms; Africa 2026-09-12 the same, the shift stopping at a gap). Adding at an empty order
-  moves nothing. Equal orders render in creation order (qid), so code must be right under both
-  (`glow/layout.py`; the club guard's warning is created at the picker's order + 1).
-- Moving an existing question by posting `question[order]` to an EMPTY order keeps exactly the
-  value sent and moves nothing else (verified 2026-09-30 by the roster-order repair on all five
-  forms: 45 writes, each probe `q2 holds order N as sent; no other order changed`, each re-read
-  verified). The public page renders by the new order at once. Posting onto a TAKEN order is
-  still unobserved — `tools/fix_roster_order.py` writes only to empty orders.
-- A request body never goes on curl's command line: Linux refuses one argument over 131,072
-  bytes and a form's rules pass that (Africa about 153 KB, the template 244 KB since the club
-  guard). `glow/jotform.py` sends JSON bodies on standard input (`--data-binary @-`); the Mac
-  has no per-argument limit, so only the GitHub runner would have failed.
-- Dropdown `calcValues` has a leading empty slot for the placeholder on a single-select:
-  `len(calcValues.split('|')) == len(options.split('|')) + 1`; the served `<option value="">Please
-  Select</option>` carries no `data-calcvalue` and every other option the next value (the year
-  dropdown q94 `|1|2|3`, the session dropdowns `|1|…|8`). **The module dropdowns** (q14, q92, q93,
-  single-selects) get their own options in that layout from the sync (`glow/sync.py`
-  `MODULE_CALC_VALUES`, 2026-10-02): question 98's copy then reads the `data-calcvalue`, which a
-  browser's "Translate page" does not rewrite (it rewrote the visible text in 30 of Latin
-  America's 111 September submissions). A multi-select renders no
-  placeholder but still wants the slot: with `PICKER_CALC_LEADING_EMPTY = True`
-  (`glow/sync.py`) every rendered option's `data-calcvalue` equals its `value` — verified
-  2026-09-30 by `form_status.py --rendered` on all five forms (359/12/39/96/216 options, 0
-  different). The calculation copy into question 5 then reads the calcValue.
-- Dropdown with `multipleSelections=Yes` renders Jotform's own searchable component (the
-  `searchText` property is its placeholder, `visibleOptions` the rows shown). `maxSelection` /
-  `minSelection` are checkbox-only and are silently dropped on dropdowns.
-- Hidden fields (`hidden=Yes`) are still submitted and still reach the integrations; validation
-  (`required`) is skipped while a field is hidden.
-- **Required + hidden** (each question has `required` "Yes"/"No"; `POST /question/{qid}` with
-  `question[required]=Yes` merges, or it goes in the create payload). Read in the runtime
-  2026-09-30 and proven in headless Chrome 2026-10-01 on local copies of three forms (nothing
-  submitted): `init` puts `novalidate` on the form, so the HTML `required` attribute is inert. At
-  submit `validateAll` runs `validateInput` on every `[class*="validate"]` input, and that returns
-  true without checking when the field's `<li>` (or its section) carries `always-hidden` or
-  `form-field-hidden` (`showField` removes both): a roster a rule hides is never checked. A
-  checkbox fails only when no box of its `<li>` is ticked, so one tick satisfies a required roster,
-  and a change on a box re-validates, so the error goes with the first tick. Served markup of a
-  required field: `<li class="form-line jf-required …">`, the label's `*`, each input
-  `validate[required]` plus `required=""`. Live precedent: the module and session dropdowns are
-  hidden + required and submissions arrive with them hidden, so the server takes a hidden
-  required field empty. A required **checkbox** had not been rendered on these forms before
-  2026-10: `form_status --rendered` counts the roster boxes carrying `validate[required]`.
+## Checking a form
+`python3 tools/form_status.py --roster data/roster_<date>.csv --partners data/partners_<date>.csv
+[--form <id>] [--rendered]` (read-only; `--roster` is required). Every `form_status --rendered`
+in the references means this command with `--rendered`.
 
-## Images and other assets
-- There is NO upload endpoint: `control_image`'s `src` can only point at an already-hosted file
-  (verified against the docs and Jotform's own answers, 2026-09-24). The builder's uploader puts
-  files at `https://www.jotform.com/uploads/<account>/form_files/<name>.png`, and that URL works
-  as an `src` on any form. `/form/{id}/files` lists SUBMISSION uploads, not form assets.
-- `width` / `height` / `align` on the question are the display size; `text` is the file's
-  basename and is not shown to a mentor (q13 is in `add_translations.py`'s `NEVER_SHOWN`).
-  Ship a 2x file and set width/height to half of it, or phones render it soft.
-
-## Emails
-- Managed through the `emails` property (no endpoint); autoresponder type `"autorespond"`,
-  recipient `to: "{fieldUniqueName}"`. Writing replaces the whole array — resend the existing
-  notifications verbatim. Bodies cap at 65,535 chars (long default templates are truncated
-  mid-HTML); the server regenerates default notification bodies when questions change.
-  API-created submissions do not trigger emails.
-
-## Clone
-- `POST /form/{id}/clone` may 504 at the gateway on big forms but still creates the clone (check
-  `/user/forms`; one clone per attempt). The clone copies translated strings but **resets** the
-  `language` property (the offered-languages list) to English (US) and leaves `pagetitle` as
-  "Clone of …" — `tools/restore_translations.py`, then `properties[pagetitle]`.
-
-## Translations (undocumented, working)
-- `GET /form/{id}/translations` → `{lang: {md5(englishText): translated}}`; the `en` and `base`
-  entries hold the source texts (including every checkbox option — i.e. every girl's name).
-- `POST /form/{id}/translations` with the same shape **replaces each posted language's whole
-  dictionary** — always GET, union, then POST (135 strings per language were lost once). PUT
-  returns an HTML 504 page.
-- Keys are the md5 of the plain English text; the runtime resolves element text → key through
-  `base`, so a new string must be added to `base` and `en` (md5 → English) as well, or its
-  translations never apply. Re-POST `properties[pagetitle]` to force a re-render.
-- The `base`/`en` entries are also what a ticked girl's name passes through on its way into
-  question 18 (above): a stale spelling there is a defect in Salesforce, not a cosmetic one. A
-  saved store holds every girl's name: save it mode 600 (`add_translations.save_store`).
-- Jotform's own runtime texts (`JotForm.texts`, e.g. the required message "This field is
-  required.") are translated the same way: `formTranslation.v2.js` builds its dictionary as
-  `dictionary[lang][base[md5]]`, so without the `base` entry nothing translates, whatever the
-  languages hold. Read 2026-10-01: key `9303c9bd…` is in 11 languages on every form but in `base`
-  on U.S only, so the message is English on the other four (BACKLOG 57). The server never
-  localises it (the served `JotForm.texts.required` is English with any `Accept-Language`).
-- Text elements (`control_text`) are translated by element id: key `text_<qid>`, value = the
-  translated inner HTML.
-
-## Properties
-- Form-urlencoded `POST /form/{id}/properties` with `properties[key]=value` sets scalars (title,
-  pagetitle, injectCSS); JSON `PUT` for structured ones (language, conditions).
-- `injectCSS` is stored verbatim (GET returns what was sent) but the public page serves it with
-  every `http:` rewritten to `//` (protocol-relative) — inside a percent-encoded SVG data URI that
-  turned `xmlns='http://www.w3.org/2000/svg'` into `//www.w3.org/2000/svg` and the image never
-  painted (2026-09-20). Use base64 data URIs (`tools/switcher_flags.py`). The page is served
-  inside `<style id="form-designer-style">` in `<head>`, BEFORE the switcher stylesheet linked
-  in `<body>`, so equal-specificity rules lose: use id-based selectors.
-- **Form status.** `status` (`ENABLED` / `DISABLED`) is a key of both `GET /form/{id}` and
-  `GET /form/{id}/properties` (read 2026-10-06: the five live forms `ENABLED`, the six old forms
-  `DISABLED`). A disabled form's public page is Jotform's own "unavailable" page; the properties
-  carry `messageOfLimitedForm`, on every form the default "This form is currently unavailable!"
-  - that this property is the text the disabled page shows is unverified, and whether that page
-  translates is unverified. **Writing it is UNVERIFIED until tried:** whether the form-encoded
-  `POST /form/{id}/properties` with `properties[status]=DISABLED` (and
-  `properties[messageOfLimitedForm]`) changes anything is not known (`integrations` answered 200
-  and changed nothing; how the five defunct forms were disabled on 2026-09-30 is not recorded).
-  `tools/disable_form.py --apply` takes a `backup_forms` snapshot, POSTs, re-reads both GETs and
-  stops with the builder step (Settings -> Form Status) when the status did not move; record the
-  result here after the first run (the U.S form, docs/plans/2026-10-06-clubs-off-jotform.md, D).
-
-## Integrations
-- Native Salesforce V2 integration, 8 mapping rows keyed to question ids
-  (5, 17, 18, 98, 100, 102, 105, 109), byte-identical across the forms; it survives a clone. Its
-  upload row (`uploadFields`) has been **empty since 2026-10-01** on the four regional forms (the
-  CEO: no photo in Salesforce; the template follows at RUNBOOK "Photos" step 1, until then it still
-  reads `['19']`); `tools/integration_status.py` expects `[]`. The club name is read from q5 and matching happens inside Salesforce. q5 is the picked
-  option's text, so an option IS the Account name: a club's own name, or `<club> - <partner>`
-  for a name two partners share (2026-09-30; never split it on " - ", club names contain it).
-  The typed Partner box (q331) is not in the mapping (the live `salesforceV2` action map, read
-  for the 2026-09-30 same-name design); only the staff notification e-mail's `{partner}` row and
-  the submissions table read it.
-- A question with `hidden` unset that no rule targets is shown to every mentor: q331 on Asia,
-  Latin America and U.S had neither on 2026-09-30 (API read; the same design's review saw the
-  box on Asia's public page). On the template and Africa the rules that Show it for a shared name
-  are what kept it out of sight; with those rules gone it would appear, so the sync sets
-  `hidden=Yes` once no generated rule shows it, after the conditions write.
-
-- The `integrations` property is READ-ONLY through the API (verified 2026-09-30 on the template):
-  a JSON `PUT /form/{id}/properties` of `{"properties": {"integrations": {...}}}` and a
-  form-encoded `POST` of `properties[integrations][salesforceV2][...]` both answer 200 with
-  `{"formID": ...}` and change nothing. The integration is set up per form in the builder;
-  `tools/integration_status.py` checks the result. Removing a connected account in Jotform
-  removes the integration from EVERY form that used it (all ten, 2026-09-30).
-- In the builder's field list the Club picker and question 5 are both called "Club Name":
-  `Account_Name__c` must read question 5 (the hidden text field), and the picker's id differs
-  per form.
-- **Google Drive** (docs/plans/2026-10-06-photos-to-drive.md): every integration is included on
-  every Jotform plan ($0). The `integrations` property is read-only for it too: builder only
-  (Settings → Integrations → Google Drive; one folder in the connected account's My Drive, Shared
-  Drives unsupported; optional subfolder per submission named from Form Fields; two toggles, Send
-  Submission PDFs and Send Uploaded Files - the forms want files only). Every live form's
-  `integrations` had exactly one key, `salesforceV2`, on 2026-10-06; **the Drive block's key is
-  not read yet** - `tools/integration_status.py` prints the other keys (`other integrations:`),
-  and whether the block shows in the property at all is unverified until Ryan's template setup.
-- **Uploaded files need a login**: `GET /user` `loginToViewUploadedFiles` = `"1"`; an upload URL
-  answers HTTP 200 `text/html` (the login page) with or without the APIKEY header. No script can
-  fetch a photo without switching that off (which would make every photo URL public).
-- **Account usage and limits** (`glow/usage.py`, read 2026-10-06): `GET /user/usage` returns the
-  counts **as strings** - `uploads` (bytes, cumulative), `submissions` (this cycle),
-  `total_submissions`, `form_count`, `monthly_usage_reset_date` as `yyyy-mm-dd 00:00:00`;
-  `GET /user` `account_type` is the plan's URL (`…/system/plan/SILVER`); `GET /system/plan/<NAME>`
-  has `limits` as numbers (`uploads` 10,738,466,816 = 10 GiB, `submissions` 2,500,
-  `totalSubmissions` 25,000, `formCount` 50 on Silver), `prices` and `onSale.nonProfit`. A form's
-  `status` (`ENABLED` / `DISABLED`) is in `GET /form/{id}/properties` (and `GET /form/{id}`).
-
-## Rate and failure modes
-- Big forms (Africa: ~3,900 checkbox options) make `questions` GETs slow; back up only the form
-  you are about to write. Gateway 504s can hide a completed write — re-GET before retrying.
+## References (everything else, verbatim)
+| File | Holds |
+|---|---|
+| [references/conditions.md](references/conditions.md) | Conditions: read/write, runtime operators, rule types, the rule walk, `clearFieldOnHide`, the loop limit, calculations, the checkbox reader, the dictionary lookup |
+| [references/questions.md](references/questions.md) | Questions: merge, insert at an order, moves, the body size, `calcValues`, multi-select dropdowns, hidden and required fields; images |
+| [references/translations.md](references/translations.md) | Translations (store shape, replace semantics, `base`/`en`, runtime texts, text elements); clones |
+| [references/forms-and-account.md](references/forms-and-account.md) | E-mails, properties (`injectCSS`, form status), integrations (Salesforce, Google Drive, uploads behind the login), account usage and plan limits, rate and failure modes |
