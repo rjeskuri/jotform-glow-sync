@@ -1118,10 +1118,36 @@ python3 tools/disable_form.py --form 262382706852058 --enable --apply   # the wa
 ## Building a new regional form (not maintenance)
 
 - **When:** only for a fresh form; never against a live one.
+- **Status:** the four regional forms were cloned from the template this way on 2026-08-27 (f542063). The script that did it in one command, `tools/clone_regional.py`, is retired ([Retired tools](ARCHITECTURE.md#retired-tools)); `git show 608bcd2^:tools/clone_regional.py > tools/clone_regional.py` brings it back, but it predates `--partners` - prefer the steps below.
+- **Dry run:** steps 1 and 4 (without `--apply`).
+- **Apply:** steps 2-4 with `--apply`, Ryan's go: each writes to the Jotform account.
+- **Verify:** step 5.
+- **Rollback:** delete the new form in Jotform: no mentor has its link yet.
 
-`tools/clone_regional.py <region> <roster.csv> [--apply]` clones the
-template, restores the languages, syncs one region with `--prune` and prints
-the status. Only for a fresh form; never against a live one.
+1. Snapshot the template: `python3 backup_forms.py --form 262352490535154`.
+2. Clone it: `POST /form/262352490535154/clone`, through `glow.jotform.Client` with
+   the key from the environment (never on a command line). The API can answer 504 and
+   still create the clone: list `GET /user/forms` before and after, and delete an
+   extra clone. Retitle the clone: `POST /form/<clone>/properties` with
+   `properties[title]` and `properties[pagetitle]` = the region's title
+   (`glow/forms.py` `TITLES`) and `properties[pageTitleChanged]` = `Yes`.
+3. Its languages: `python3 tools/restore_translations.py --form <clone>`, then
+   `--apply` (the API clone resets the language list to English; the template is the
+   default source; the store is saved first).
+4. The region's clubs, removing everything else:
+   ```bash
+   python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+           --partners data/partners_<date>.csv --region <region> --form <clone> --prune   # dry run
+   python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+           --partners data/partners_<date>.csv --region <region> --form <clone> --prune --apply
+   ```
+   `--prune` deletes questions: only on this fresh clone (the sync refuses it on a
+   form with submissions).
+5. `python3 tools/form_status.py --form <clone> --roster data/roster_<date>.csv
+   --partners data/partners_<date>.csv` → CLEAN, and `python3
+   tools/integration_status.py --form <clone>` (the Salesforce integration survives a
+   clone). Before mentors get the link, the form goes into `glow/forms.py` and the tool
+   tables `test/glow_lib_test.py` pins to it: a code change with its own plan.
 
 # Clubs
 
@@ -1682,7 +1708,7 @@ trigger's hour, which follows the script project's zone
 |---|---|
 | **New club held as a possible duplicate** | "Enroll a NEW club" was sent for what may be a club already on file: nothing was imported, and the mentor was told it is being checked. Detail says why — names already active in one club, a club name close to one of the partner's, a typed organization close to a partner on file, or a re-enrollment whose list is mostly not the club's — and names the club(s) on file. Compare the response row (the tag) with those clubs' Roster rows. **Same club:** enter only its new girls on "Add or remove girls" for the club on file (REMOVE anyone who has left), then `resolved <date> by <name>: same club as <club>`. **A new club after all, or the new list is right:** `release <date> by <name>: <why>` (`release` must be the first word), then run **Process any missed form responses**: it asks about released rows separately and imports each as sent. **If the reason says "the organization was typed as …, close to … on file"**, fix that first, or the club is filed under a second spelling of the partner (no region, a second form section — the `ion bu` case): if it is that partner, set the response row's `Partner organization` cell to the partner exactly as the Partners tab spells it (the row stays matched to its item by its Timestamp, and the release preview shows the corrected partner); if it really is another organization, add it to the Partners tab with its region. Until then the release run refuses it (`ERROR: release refused: …`, offered again by the next run). **Sent by mistake:** `resolved …: not imported`. Never ask the partner to send it again, and never edit the `(sent …)` or the `[#…]` tag in detail: the menu matches both to the response row. |
 | **Club name already used by another partner — ask for a different name** | "Enroll a NEW club" was sent with a club name that another partner's club already has — any status, any region; capitals and spacing are ignored, a plural or a typo is a different name — or that reads as a club on file followed by its partner (`<club> - <partner>`). Nothing was imported, and the mentor got the same "it is being checked" note as any held club. A new club may not take a name in use: the attendance forms and Salesforce tell clubs apart by name, and the sync would refuse to add it ([plans/2026-09-30-same-name-clubs.md](plans/2026-09-30-same-name-clubs.md)). Detail names the club(s) that have the name. **First rule out a mix-up:** compare the response row (the tag) with that club's Roster rows — it may be that club, sent under the wrong partner — and, when detail gives more reasons (names on file, a close club name), with the other clubs it names. **Same club:** enter only its new girls on "Add or remove girls" for the club on file, then `resolved <date> by <name>: same club as <club> (<partner>)`. **That club, but the Roster has it under the wrong partner (or it has moved to this one):** move the club on file first ("Moving a club to another partner" — the tool refuses a club whose name two partners already share, and a partner in another region: Ryan's call), then write `release <date> by <name>: club moved to <partner>` with the `Club name` cell unchanged and run **Process any missed form responses**: the response now runs as that existing club (its new girls are added; no second club, no Salesforce line). **A new club:** ask the partner for a different name (the school or the place added is enough: `Stars (Testville Sec Sch)`). Then either **(a) release it under the new name:** set the response row's `Club name` cell to the new name (the row stays matched to its item by its Timestamp), write `release <date> by <name>: renamed to <new name>` (`release` must be the first word), and run **Process any missed form responses** — its preview shows the new name, and YES imports the club as sent otherwise; or **(b) have it sent again:** the partner (or you, from the response row's answers) sends "Enroll a NEW club" under the new name, and you close this item `resolved <date> by <name>: sent again as <new name>` — the held response is then never run. A release with the name unchanged, or changed to another name in use, is refused (`ERROR: release refused: …`, offered again by the next run) and adds a **Form response could not be processed** item: fix the cell, run it again, then close that item. **If detail also says "the organization was typed as …, close to … on file"**, fix that first, as in the row above. **If detail says "this club is on file with no active girl":** the partner sent "Enroll a NEW club" for a club of its own that has no active girl left, and another partner's club has its name. A club retired as a duplicate (the two of 2026-09-30) has no roster on the attendance forms any more, so bringing it back would add a new club under a name in use, which the sync refuses. Work it as above: the girls usually belong to the partner's up-to-date club (**Same club**); a club that really starts again needs a different name (**A new club**). The one false hold: a club that only lost every girl still has its roster on its attendance form, and keeps its name and its Salesforce account — none on 2026-09-30 (the only clubs with no active girl are the two retired ones). That one is Ryan's: he sets one of its girls back to `active` in the Roster (one who is on the list sent, if there is one; `removed_date` emptied — the only Roster cells typed by hand for an item), then releases with the `Club name` cell unchanged: the response runs as that existing club. Never edit the `(sent …)` or the `[#…]` tag in detail. The clubs that already share a name and have active girls are not affected: their own enrollments and roster changes run as always. |
-| **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added by `tools/backfill_feedback_review.py`). |
+| **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added once by a one-off script, since retired: [Retired tools](ARCHITECTURE.md#retired-tools)). |
 | **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. REMOVE only a match that is clearly her; otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). |
 | **Removed girls not put back by an older response** | A Club Roster Form response ran after some girls it lists had been removed — a retry, or an old response confirmed in "Missed form responses" — so they stayed removed instead of coming back (the 2026-09-13 replay cannot recur). Detail names the response row, the day it was sent and the Roster rows; the mentor's confirmation (roster changes) listed the names the mentor typed under "Not added back". Usually nothing to do: `resolved …: stayed removed`. If a girl really has rejoined since her removal (ask the partner), ADD her as above: the same ID comes back. |
 | **Same name listed twice** | Only one girl is on the Roster. Ask the partner: two girls → ADD the second with a mark, e.g. `Jane Doe (B)` (the first keeps her ID); one girl typed twice → `resolved …: one girl, no change`. Never resubmit through "Enroll a NEW club". |
@@ -1937,11 +1963,13 @@ text of its entry in the attendance form's club list
 
 ## Data-quality report
 
-- **When:** a fresh enrollment export to check for names listed twice and other enrollment problems (it reads the CSV and writes its report under `data/`).
+- **When:** no longer run: the report was a pre-launch check of the raw enrollment export.
+- **Status:** retired 2026-10-09. `tools/needs_attention.py` wrote `data/needs_attention_<date>.csv` (names listed twice, re-submitted rosters, clubs renamed on a form, …); the 2026-08-26 list is still worked as BACKLOG 4. Restore: `git show 7c24ac7^:tools/needs_attention.py > tools/needs_attention.py` ([Retired tools](ARCHITECTURE.md#retired-tools)).
 
-```bash
-python3 tools/needs_attention.py data/enrollment_<date>.csv     # -> data/needs_attention_<date>.csv
-```
+Since launch the same questions come from the running system instead: the
+ReviewQueue ("Working the ReviewQueue": a name listed twice, girls missing from
+a re-enrollment, a possible duplicate club), the runner's ATTENTION items
+("Automatic sync") and `tools/form_status.py`.
 
 # Salesforce
 
@@ -1983,14 +2011,20 @@ when nothing matches it creates a new, partner-less Club account.
   - Contacts on Club accounts that are not girls (role other than Participant), Contacts on Club
     accounts marked as portal sign-ups, Monthly Reports on Club accounts, programme-income
     records on Club accounts: all 0.
-  - `python3 tools/sf_club_accounts.py soql --totals`, then
-    `totals --result <saved answer> --also data/sf_prep_2026-09-30/created_accounts_round2.csv
-    data/sf_prep_2026-09-30/created_accounts_round3.csv` → `totals ok` (364 Club accounts).
+  - Every active club on a form has exactly one right account: `python3 tools/sf_new_clubs.py
+    check --vpn-off --roster data/roster_<date>.csv --summary data/auto_sync/plan_<region>_<stamp>.json …`
+    (read only, Ryan's CLI login; the summaries of a local `tools/auto_sync.py` dry run) exits 0;
+    "Local cross-check", under "New clubs' accounts, automatically". (Until 2026-10-09 this
+    signal was the retired `tools/sf_club_accounts.py totals`: 364 Club accounts on 2026-09-30.)
 - **Writing accounts to Salesforce** by hand goes through the write connector, one record per call,
   never by a subagent; the live gate does not see those calls, so the only gate is Ryan's go in the
-  conversation. The automatic sync writes as its own user, GLOW Sync, and only creates (below). `tools/sf_club_accounts.py` (which never calls Salesforce) cuts the batches, checks
-  each saved answer and keeps the rollback files. (Attendance is written by `tools/sf_backfill.py`,
-  which the gate does catch: "Back-fill of attendance into Salesforce".)
+  conversation. The automatic sync writes as its own user, GLOW Sync, and only creates (below). A
+  hand create is named exactly as its SF Pending line says, record type Club, its parent the
+  partner's account in `glow/sf_partners.csv` (the fields the sync's own create sets, below); then
+  the `sf_new_clubs.py check` above. The 2026-09-30 rounds' bookkeeping tool,
+  `tools/sf_club_accounts.py`, is retired ([Retired tools](ARCHITECTURE.md#retired-tools)). (Attendance
+  is written by `tools/sf_backfill.py`, which the gate does catch: "Back-fill of attendance into
+  Salesforce".)
 - **Rollback files** (never committed): `data/sf_prep_2026-09-30/created_accounts.csv` (345
   created, 8 linked), `created_accounts_round2.csv` (2 created), `created_accounts_round3.csv` (the
   7 same-name clubs), `link_targets_before.json` (the pilot accounts as they were). A created account may be deleted only while it has no Contacts
@@ -2575,8 +2609,8 @@ system unless `GLOW_LIVE_OK=1` was exported in Ryan's shell **before** Claude
 Code was started:
 
 - the tools' write flags: `--apply`, `--prune`, `--rehearse` (`sf_dupes.py`'s
-  production run, rolled back), `clasp push` / `clasp:push`,
-  `sheets_client.py import`;
+  production run, rolled back), `clasp push` / `clasp:push`, and
+  `sheets_client.py import` (a subcommand removed 2026-10-09, still in the pattern);
 - the raw APIs the tools wrap: `api.jotform.com`, the Sheets writes
   (`values().update|append|clear`, `batchUpdate`, `apply_changes=True`),
   GitHub repository dispatches;
@@ -2609,7 +2643,8 @@ affected.
 **`protected_paths.sh`** (every Edit and Write) blocks an edit of anything under
 `data/`, `backups/` or `credentials/` (its `README.md` and
 `config.example.json` excepted), a `.env` or `.env.*` file (not `.env.example`),
-`appsscript/Regions.gs` (generated), and `.claude/settings.json`,
+`appsscript/Regions.gs` (hand-kept data since 2026-10-09, edited by Ryan; the
+hook's message still calls it generated), and `.claude/settings.json`,
 `.claude/settings.local.json`, `.claude/live_gate.log` and `.claude/hooks/` -
 the project's and the user's (`~/.claude/`) - in any checkout (the main one, a
 worktree, a sibling clone), matched on path components, ignoring case, with

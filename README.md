@@ -34,8 +34,8 @@ every operational procedure, with its dry-run and apply forms, in
 | `tools/auto_sync.py` | The unattended loop run by GitHub Actions: export → plan → safety bands → backup → apply → verify → `SyncLog` |
 | `tools/form_status.py`, `tools/integration_status.py` | Read-only audits: every form against the Roster (rules, integration, languages, drift, the module chain's shape, Jotform's storage against the plan's limits); the Salesforce integration's mapping on every form (no photo since 2026-10-01) and the other integration blocks a form carries |
 | `tools/sheets_client.py`, `tools/upload_roster.py`, `tools/build_roster_offline.js` | Sheet access; rebuilding and uploading the Roster tabs offline with the same `.gs` code |
-| `tools/needs_attention.py`, `tools/derive_partner_regions.py` | Data-quality report; partner → region derivation (generates `appsscript/Regions.gs`) |
-| `tools/add_translations.py`, `add_language.py`, `restore_translations.py`, `add_feedback_link.py`, `clone_regional.py` | Languages, the links above Submit (problem report, Club Roster Form), building a regional form |
+| `tools/add_translations.py`, `add_language.py`, `restore_translations.py`, `add_feedback_link.py` | Languages, the links above Submit (problem report, Club Roster Form) |
+| (retired) | Finished one-offs, deleted with the commit that restores each: [docs/ARCHITECTURE.md, Retired tools](docs/ARCHITECTURE.md#retired-tools) |
 | `tools/fix_name_translations.py` | Removes the stale translation-dictionary entries that alter girls' names in question 18 (found by emulating Jotform's lookup); store saved first, `--restore` rolls back; counts and club names only |
 | `tools/fix_roster_order.py` | One-time repair: every roster above the links and Submit (moves the links, Submit and the hidden fields after the last roster; `--undo` rolls back) |
 | `tools/backfill_resolve.py` | September back-fill, read-only: every attendance submission as one row per ticked roster in `data/backfill_2026-09/resolved.json` (holds names; prints counts only) |

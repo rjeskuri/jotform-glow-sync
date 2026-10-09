@@ -66,14 +66,15 @@ Reload the spreadsheet.
    through the Club Roster Form and re-creates renamed or moved clubs under
    their old name or partner (`docs/RUNBOOK.md`, "Roster rebuild and upload").
 3. Open the **Partners** tab. The **region** column (Africa / Asia / Latin
-   America / U.S) was derived from which regional attendance form each
-   partner's clubs sat on (`tools/derive_partner_regions.py`; the map is
-   `Regions.gs`). The **notes** column says how solid each one is; a row
-   whose note starts with **PLEASE CONFIRM** or says **region needed** is
-   worth a look. Correct it here — the tab always wins over the derived
-   map — then **GLOW → Refresh regions from the Partners tab**. A partner
-   with no region lands in the ReviewQueue, and its girls reach no
-   attendance form until the region is filled in.
+   America / U.S) is prefilled from `Regions.gs`, a map derived before launch
+   from which regional attendance form each partner's clubs sat on (the
+   script that derived it is retired, and the map is hand-kept data now:
+   [Retired tools](../docs/ARCHITECTURE.md#retired-tools)). The **notes**
+   column says how solid each one is; a row whose note starts with **PLEASE
+   CONFIRM** or says **region needed** is worth a look. Correct it here — the
+   tab always wins over the map — then **GLOW → Refresh regions from the
+   Partners tab**. A partner with no region lands in the ReviewQueue, and its
+   girls reach no attendance form until the region is filled in.
 4. Open the **ReviewQueue** tab: one row per question the scripts could not
    decide (a removal that matched nobody, a name listed twice, a partner with
    no region, a problem report asking for a roster change, …). Ryan owns it;
@@ -160,6 +161,9 @@ date; her row, her ID and every Salesforce record stay as they were.
 and checks they agree with the Python tool; it also parses every `.gs` file.
 `test/forms_logic_test.js` covers the roster-change decisions,
 `test/dispatch_test.js` the sync notification. Run it after any change to
-the shared logic in either language. If a real partner has no entry in
-`Regions.gs`, regenerate it: `python3 tools/derive_partner_regions.py <csv>
---write` (it derives from the pre-launch form snapshots in `backups/`).
+the shared logic in either language. With a real export, the parity check
+also wants every partner in it to have a `Regions.gs` entry. A partner
+missing there gets its region in the Partners tab, which wins; add it to
+`Regions.gs` by hand only for a partner the tab lacks, with its
+`PARTNER_REGION_NOTES` line (Ryan's edit: the edit hook keeps Claude out of
+that file). Nothing regenerates it any more.

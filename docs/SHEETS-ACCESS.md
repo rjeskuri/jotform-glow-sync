@@ -31,23 +31,23 @@ One-time setup, about ten minutes:
    their data row counts.
 
 Why Editor and not Viewer: the tools create and fill the Roster, Partners,
-ClubRegistry, ReviewQueue, Audit and SyncLog tabs (and, once, the *Enrollment
-Responses* import). The spreadsheet is the **master enrollment** sheet — the
-original response sheet stayed with its owner, so its data came across as a
-CSV export.
+ClubRegistry, ReviewQueue, Audit and SyncLog tabs. The spreadsheet is the
+**master enrollment** sheet — the original response sheet stayed with its
+owner, so its data came across once, at setup, as a CSV export put into the
+*Enrollment Responses* tab (by `sheets_client.py import`, a subcommand retired
+2026-10-09: [Retired tools](ARCHITECTURE.md#retired-tools)).
 
 ## What the tools do with it
 
 | Command | Effect |
 |---|---|
 | `python3 tools/sheets_client.py export Roster data/roster_<date>.csv` | The Roster tab, the input of every sync |
+| `python3 tools/sheets_client.py export Partners data/partners_<date>.csv` | The Partners tab, read with the Roster export (`--partners`: which partners' clubs stay off the forms) |
 | `python3 tools/sheets_client.py export "Enrollment Responses" data/enrollment_<date>.csv` | Export the imported responses tab |
-| `python3 tools/sheets_client.py import "Enrollment Responses" data/enrollment_<date>.csv` | One-time import of the original form's responses (refuses to overwrite) |
 | `python3 tools/sheets_client.py export-all data/live_<date>` | Every tab, for rebuilding against the live state |
 | `node tools/build_roster_offline.js data/enrollment_<date>.csv --tz America/New_York [--existing data/live_<date>]` | Builds the five tabs locally in `data/roster_build/` using the *same* code that runs inside the sheet, dated in the sheet's zone (`--tz`: File → Settings → Time zone) |
 | `python3 tools/upload_roster.py [--apply] [--replace]` | Writes them to the spreadsheet — Roster and ClubRegistry replaced, Partners merged (staff edits win), ReviewQueue and Audit appended |
-| `python3 tools/auto_sync.py` | Reads the Roster tab in-process and appends to SyncLog (see `RUNBOOK.md`) |
-| `python3 tools/needs_attention.py data/enrollment_<date>.csv` | The list of clubs and names that need a human to chase down |
+| `python3 tools/auto_sync.py` | Reads the Roster and Partners tabs in-process; with `--synclog` it appends its run to SyncLog (see `RUNBOOK.md`) |
 
 **First upload** (empty tabs): build, then `upload_roster.py --apply`.
 
