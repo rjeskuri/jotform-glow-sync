@@ -39,9 +39,9 @@ class Hooks(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_hook(self, name, tool_input, live_ok=None, tool="Bash"):
+    def run_hook(self, name, tool_input, live_ok=None, tool="Bash", project=None):
         env = {k: v for k, v in os.environ.items() if k != "GLOW_LIVE_OK"}
-        env["CLAUDE_PROJECT_DIR"] = self.tmp.name
+        env["CLAUDE_PROJECT_DIR"] = project or self.tmp.name
         if live_ok is not None:
             env["GLOW_LIVE_OK"] = live_ok
         done = subprocess.run([os.path.join(HOOKS, name)], input=json.dumps(
@@ -223,8 +223,9 @@ class Hooks(unittest.TestCase):
         ], 2)
 
     # ---- protected_paths.sh
-    def edit(self, path):
-        return self.run_hook("protected_paths.sh", {"file_path": path, "content": "x"}, tool="Write")[0]
+    def edit(self, path, project=None):
+        return self.run_hook("protected_paths.sh", {"file_path": path, "content": "x"}, tool="Write",
+                             project=project)[0]
 
     def test_protected_paths_are_refused_wherever_the_checkout_lives(self):
         root = self.tmp.name                         # CLAUDE_PROJECT_DIR
@@ -253,6 +254,30 @@ class Hooks(unittest.TestCase):
         self.assert_edit([os.path.join(home, rel) for home in (root, worktree) for rel in ordinary]
                          + ["docs/plans/x.md", "./tools/auto_sync.py"], 0)
         self.assertEqual(self.run_hook("protected_paths.sh", {})[0], 0)        # no path: nothing to judge
+
+    def test_a_checkout_that_lives_under_a_data_folder_stays_editable(self):
+        # inside the project only the part below it is read (review of 2026-10-09: every edit of
+        # /Volumes/data/jotform-glow-sync/... was refused); outside it, the whole path
+        project = os.path.join(self.tmp.name, "Volumes", "data", "jotform-glow-sync")
+        worktree = os.path.join(project, ".claude", "worktrees", "wf99-x")
+        for path, code in [(os.path.join(project, "tools", "x.py"), 0), (os.path.join(project, "docs", "a.md"), 0),
+                           (os.path.join(worktree, "tools", "x.py"), 0), (project + "//tools/./x.py", 0),
+                           ("tools/x.py", 0),
+                           (os.path.join(project, "data", "x.csv"), 2), (os.path.join(project, "credentials", "a.json"), 2),
+                           (os.path.join(worktree, "data", "x.csv"), 2), (os.path.join(worktree, ".env"), 2),
+                           (os.path.join(project, ".claude", "settings.json"), 2), ("data/x.csv", 2),
+                           (project + "-wf20/data/x.csv", 2),
+                           (project + "-wf20/tools/x.py", 2)]:         # a sibling outside: its whole path
+            with self.subTest(path=path):
+                self.assertEqual(self.edit(path, project=project), code, path)
+
+    def test_the_user_level_claude_settings_and_hooks_are_protected_too(self):
+        # they could switch the project's hooks off (kept on purpose, review of 2026-10-09)
+        home = os.path.join(os.sep, "Users", "someone")
+        self.assert_edit([os.path.join(home, ".claude", "settings.json"),
+                          os.path.join(home, ".claude", "settings.local.json"),
+                          os.path.join(home, ".claude", "hooks", "gate.sh")], 2)
+        self.assert_edit([os.path.join(home, ".claude", "CLAUDE.md"), os.path.join(home, "notes", "todo.md")], 0)
 
 
 if __name__ == "__main__":
