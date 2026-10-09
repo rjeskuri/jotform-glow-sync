@@ -23,7 +23,7 @@ glow.forms.LIVE (the defunct forms are already off), and - without
     python3 tools/disable_form.py --form 262382706852058 --message "<text>" --apply
     python3 tools/disable_form.py --form 262382706852058 --enable --apply    # the way back
 
---apply: a snapshot first (glow/backup.py) (the properties snapshot records status
+--apply: a snapshot first (glow/backup.py; the properties snapshot records status
 and the message to put back), then the POST, then both GETs again. The runner
 skips a DISABLED form (SyncLog `skipped`); docs/RUNBOOK.md, "Disabling a
 regional form".

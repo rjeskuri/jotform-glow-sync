@@ -5,8 +5,9 @@ carrying the clubs the Roster says it should, with clean logic and the
 Salesforce integration intact?
 
 Read-only. Compares every form's club checkboxes against the Roster tab
-(--roster <csv>, a fresh export: required), grouped by region, and reports what the Jotform API says about conditions, emails,
-integration, submissions and the enableFuzzy field, and whether every roster
+(--roster <csv>, a fresh export: required), grouped by region, and reports
+what the Jotform API says about conditions, emails, integration, submissions
+and the enableFuzzy field, and whether every roster
 renders above the links and the Submit button (glow/layout.py; a roster below
 them makes the form NOT CLEAN - tools/fix_roster_order.py repairs it), and
 whether question 18 (Contact_IDs, the names sent to Salesforce) is calculated

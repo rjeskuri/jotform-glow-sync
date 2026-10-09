@@ -243,9 +243,8 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     still share one text and are told apart by the typed Partner box (PARTNER);
     picker: qid of the Club dropdown when the form has one (the rules then key
     on it and its value is copied into the CLUB_NAME textbox for Salesforce);
-    picker_options:
-    the picker's options exactly as this run writes them (the rules test each
-    club in the picker's spelling); guard / submit: qids of the clubGuard
+    picker_options: the picker's options exactly as this run writes them (the
+    rules test each club in the picker's spelling); guard / submit: qids of the clubGuard
     warning and the Submit button on a form with the one-club guard (section
     D; both, with a picker and its options, or no guard rules at all);
     retired: qids of the retired rosters (docs/plans/2026-10-06-clubs-off-
