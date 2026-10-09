@@ -16,12 +16,12 @@
 /**
  * Look up (or mint) the permanent code for a club.
  *
- * Matching is by (partner, club) case-insensitively. A club whose name changes
- * keeps its original code by being re-keyed in the registry — see
- * renameClubInRegistry_.
+ * Matching is by (partner, club) case-insensitively. A club renamed or moved
+ * with tools/rename_club.py keeps its original code: the tool rewrites its
+ * ClubRegistry row together with its Roster rows.
  */
 function clubCode_(registry, partner, club) {
-  const k = key_(partner) + '||' + key_(club);
+  const k = clubKey_(partner, club);
   if (registry.byKey[k]) return registry.byKey[k].code;
 
   let base = asciiCode_(club).slice(0, 8);
@@ -66,7 +66,7 @@ function loadIdState_() {
           const code = tidy_(row[0]), partner = tidy_(row[1]), club = tidy_(row[2]);
           if (!code) return;
           const entry = { code: code, partner: partner, club: club };
-          registry.byKey[key_(partner) + '||' + key_(club)] = entry;
+          registry.byKey[clubKey_(partner, club)] = entry;
           registry.byCode[code] = entry;
         });
   }
@@ -83,19 +83,4 @@ function loadIdState_() {
         });
   }
   return { registry: registry, sequence: sequence };
-}
-
-/**
- * Point an existing club code at a new club name, so girls enrolled after a
- * rename share the ID stem of those enrolled before it. Call this from the
- * ReviewQueue when staff confirm that two names are the same club.
- */
-function renameClubInRegistry_(registry, partner, oldClub, newClub) {
-  const oldKey = key_(partner) + '||' + key_(oldClub);
-  const entry = registry.byKey[oldKey];
-  if (!entry) return null;
-  delete registry.byKey[oldKey];
-  entry.club = newClub;
-  registry.byKey[key_(partner) + '||' + key_(newClub)] = entry;
-  return entry.code;
 }

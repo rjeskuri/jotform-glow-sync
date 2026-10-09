@@ -1,7 +1,8 @@
 ---
 title: Jotform to Salesforce reconnected - the integration restored on the forms
 author: Claude (with Ryan)
-status: in-progress (the API cannot write the integration; Ryan sets it in the builder per form, the tool checks)
+status: done             # Jotform reconnected 2026-09-30 12:05 UTC (2026-09-30-same-name-clubs.md, Verification after the switch); attendance flows since
+done: 2026-09-30
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-30 ("get the Jotform data flowing into Salesforce")
 ---

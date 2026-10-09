@@ -15,6 +15,10 @@ keyed by their element id). This tool does both:
     --dict    optional JSON of English -> translation (tools/translations_or.json);
               omit when the form already has the strings (Arabic)
 
+--apply saves the form's whole translation store before it POSTs the language
+(backups/translations/<form>-<stamp>-before.json, mode 600: the POST replaces
+the language's dictionary - glow/translations.py).
+
 Usage:
     export JOTFORM_API_KEY=...
     python3 tools/add_language.py --code ar --name arabic                       # dry run
@@ -27,15 +31,17 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+from glow import backup                # noqa: E402  (the stamp of the saved store)
 from glow import forms as glow_forms   # noqa: E402
 from glow import links as glow_links   # noqa: E402
-from glow.cli import run               # noqa: E402
+from glow import translations          # noqa: E402  (read, save, POST: rule 9)
+from glow.cli import api_key, run, targets               # noqa: E402
 from glow.jotform import Client        # noqa: E402
 from glow.text import md5              # noqa: E402
 
 FORMS = {**{fid: glow_forms.TITLES[region] for region, fid in glow_forms.REGIONALS.items()},
          glow_forms.TEMPLATE: glow_forms.TEMPLATE_TITLE}
-SPECIAL_NAMES = {"arabic": "Arabic‬‎"}   # as in Jotform's table
+SPECIAL_NAMES = {"arabic": "Arabic\u202c\u200e"}   # as in Jotform's table
 
 
 def text_element_keys(questions, base, words):
@@ -59,17 +65,7 @@ def text_element_keys(questions, base, words):
 
 def load_dict(path):
     with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    out = {}
-    for english, text in data.items():
-        if english.startswith("_"):
-            continue
-        if "{n}" in english:
-            for n in range(1, 16):
-                out[english.replace("{n}", str(n))] = text.replace("{n}", str(n))
-        else:
-            out[english] = text
-    return out
+        return translations.expand_n(json.load(f))
 
 
 def main():
@@ -80,19 +76,18 @@ def main():
     ap.add_argument("--form", action="append")
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
     # the big translation POSTs 504 at the gateway now and then: retry hard
-    client = Client(api_key, apply=args.apply, retries=5, backoff=8, max_time=150)
+    client = Client(api_key(), apply=args.apply, retries=5, backoff=8, max_time=150)
     name = SPECIAL_NAMES.get(args.name.lower(), args.name)
     words = load_dict(args.dict) if args.dict else {}
-    targets = {f: FORMS.get(f, f) for f in args.form} if args.form else FORMS
+    chosen = targets(args.form, FORMS, unknown=None)     # the title is written: never "?"
+    stamp = backup.stamp()
 
-    for form_id, title in targets.items():
+    for form_id, title in chosen.items():
         props = client.get(f"/form/{form_id}/properties")
-        lang = props.get("language")
-        lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
+        lang = glow_forms.language_of(props)
         options = [o for o in str(lang.get("options", "")).split("|") if o]
-        store = client.get(f"/form/{form_id}/translations")
+        store = translations.read_store(client, form_id)
         have = store.get(args.code, {})
         base = store.get("base", {})
 
@@ -115,17 +110,20 @@ def main():
             lang["options"] = "|".join(options + [name])
             client.put_json(f"/form/{form_id}/properties",
                             {"properties": {"language": [lang]}}, f"{form_id} set options")
+        after = {}
         if new:
             merged = dict(have)
             merged.update(new)
-            client.post_json(f"/form/{form_id}/translations", {args.code: merged},
-                             f"{form_id} post {args.code}")
+            # the POST replaces the language's dictionary: the store is saved first
+            saved = translations.save_store(form_id, store, stamp)
+            print(f"   store saved: {os.path.relpath(saved, translations.REPO)}")
+            after = translations.replace_languages(client, form_id, {args.code: merged},
+                                                   f"{form_id} post {args.code}", saved)
         # re-render the cached page
         client.post_form(f"/form/{form_id}/properties",
                          {"properties[pagetitle]": title}, f"{form_id} nudge")
-        after = client.get(f"/form/{form_id}/translations")
         props = client.get(f"/form/{form_id}/properties")
-        opts = props["language"][0]["options"] if isinstance(props.get("language"), list) else ""
+        opts = glow_forms.language_of(props).get("options") or ""
         ok = name in opts and all(after.get(args.code, {}).get(k) == v for k, v in new.items())
         print(f"   {'OK' if ok else 'PROBLEM'}: switcher = {opts}")
 

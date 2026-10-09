@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/fix_module_values.py (imported by test/python_test.py, so `make py` runs
-them). Everything here is fictional: clubs, submission and Salesforce ids are invented; the module
+Offline tests for tools/fix_module_values.py (found by `make py`'s unittest discovery).
+Everything here is fictional: clubs, submission and Salesforce ids are invented; the module
 names are the curriculum's (not personal data). A fake org holds two batches with their rows and
 answers the tool's SOQL shapes; a fake Jotform serves the template's module dropdowns and the
 submissions of one regional form, filtered as the API filters.
@@ -16,7 +16,6 @@ import stat
 import sys
 import tempfile
 import unittest
-import urllib.parse
 from unittest import mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,8 +23,10 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import fix_module_values as fmv                            # noqa: E402
 from glow import forms                                     # noqa: E402
+from glow import jotform                                   # noqa: E402
+from glow.private_files import Ledger                      # noqa: E402
 from glow.sync import MODULES, YEAR                        # noqa: E402
-from sf_backfill_test import FakeOrg                       # noqa: E402
+from helpers.fake_org import FakeOrg                      # noqa: E402
 
 LATAM, AFRICA = forms.REGIONALS["Latin America"], forms.REGIONALS["Africa"]
 SUNRISE, RIVER = "001000000000000CAA", "001000000000000CBB"
@@ -67,7 +68,7 @@ def rows_of(bid, n, module="Toma de decisiones"):
 
 
 class ModuleOrg(FakeOrg):
-    """The shared fake org (sf_backfill_test), answering this tool's three SOQL shapes."""
+    """The shared fake org (test/helpers/fake_org.py), answering this tool's three SOQL shapes."""
 
     def __init__(self, batches, rows):
         super().__init__([])
@@ -97,10 +98,12 @@ class ModuleOrg(FakeOrg):
 
 
 class FakeJotform:
-    """Reads only. One questions table serves the template and the regional forms, unless a form has its own."""
+    """Reads only. One questions table serves the template and the regional forms, unless a form has its own.
+    Submissions are paged by the client's own reader (glow.jotform.Client.submissions) over this get()."""
+    submissions = jotform.Client.submissions
 
     def __init__(self, submissions, qs=None):
-        self.submissions, self.qs, self.asked = submissions, qs or questions(), []     # form id -> [submission]
+        self.by_form, self.qs, self.asked = submissions, qs or questions(), []         # form id -> [submission]
         self.form_qs = {}                                                              # form id -> its own questions
 
     def get(self, path, **params):
@@ -108,11 +111,11 @@ class FakeJotform:
         parts = path.strip("/").split("/")
         if parts[2:] == ["questions"]:
             return copy.deepcopy(self.form_qs.get(parts[1], self.qs))
-        subs = self.submissions.get(parts[1], [])
+        subs = self.by_form.get(parts[1], [])
         if parts[2:] == ["submissions"]:
             if "filter" in params:
-                assert "{" not in params["filter"] and '"' not in params["filter"], "the filter must be URL-encoded"
-                window = json.loads(urllib.parse.unquote(params["filter"]))
+                assert "%" not in params["filter"], "the client encodes the filter (glow.jotform.Client.url), not the tool"
+                window = json.loads(params["filter"])
                 subs = [s for s in subs if window["created_at:gt"] < s["created_at"] < window["created_at:lt"]]
             return copy.deepcopy(subs[params["offset"]:params["offset"] + params["limit"]])
         return {"id": parts[1], "count": str(len(subs))}
@@ -146,12 +149,28 @@ class FixModuleValues(unittest.TestCase):
         return self.run_tool("--vpn-off", "--apply", *argv)
 
     def ledger(self):
-        return fmv.read_ledger(os.path.join(self.tmp.name, "ledger.csv"))
+        return Ledger(os.path.join(self.tmp.name, "ledger.csv"), fmv.LEDGER_COLS).read()
 
     def outcomes(self):
         return [r["outcome"] for r in self.ledger()]
 
     # ---- the pairing
+    def test_the_window_filter_reaches_jotform_encoded_once(self):
+        import subprocess
+        import urllib.parse
+        urls = []
+
+        def curl(argv, **kw):
+            urls.append(next(a for a in argv if a.startswith(jotform.API_BASE)))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"responseCode": 200, "content": []}),
+                                               stderr="")
+        window = ("2026-09-24 08:03:00", "2026-09-24 14:03:00")
+        with mock.patch.object(jotform.subprocess, "run", curl):
+            self.assertEqual(jotform.Client("KEY").submissions("123", fmv.window_filter(window)), [])
+        flt = json.dumps({"created_at:gt": window[0], "created_at:lt": window[1]})
+        self.assertIn("&filter=" + urllib.parse.quote(flt, safe=""), urls[0])     # as the tool encoded it before
+        self.assertEqual(urllib.parse.parse_qs(urllib.parse.urlsplit(urls[0]).query)["filter"], [flt])
+
     def test_the_region_map_names_the_four_live_forms(self):
         self.assertEqual(sorted(fmv.SF_REGION_FORM), ["Africa", "Asia", "North America", "South America"])
         self.assertEqual(sorted(fmv.SF_REGION_FORM.values()), sorted(forms.REGIONALS.values()))
@@ -167,10 +186,11 @@ class FixModuleValues(unittest.TestCase):
                       f"(Latin America {LATAM}, submission 1 candidate(s), year 1, session 7; 0 rows", out)
         self.assertIn("would write: 2 batches, 2 rows   (dry run - nothing written; --apply --vpn-off after Ryan's go)", out)
         self.assertEqual((self.org.updates, os.path.exists(os.path.join(self.tmp.name, "ledger.csv"))), ([], False))
-        # one Jotform read per batch, on the region's form only, inside a URL-encoded 6-hour window around CreatedDate
+        # one Jotform read per batch, on the region's form only, inside a 6-hour window around CreatedDate
+        # (passed as plain JSON: glow.jotform.Client.url encodes it, once)
         fetched = [(p, q) for p, q in self.jotform.asked if p.endswith("/submissions")]
         self.assertEqual([p for p, _ in fetched], [f"/form/{LATAM}/submissions"] * 2)
-        window = json.loads(urllib.parse.unquote(fetched[0][1]["filter"]))
+        window = json.loads(fetched[0][1]["filter"])
         self.assertEqual(window, {"created_at:gt": "2026-09-24 08:03:00", "created_at:lt": "2026-09-24 14:03:00"})
         self.assertNotIn(AFRICA, "".join(p for p, _ in self.jotform.asked))
         # every Salesforce read is an explicit-field SOQL query, never the names list or the status message
@@ -192,7 +212,7 @@ class FixModuleValues(unittest.TestCase):
             batch("a1l00000000000WHER", region="Europe"),
             batch("a1l00000000000GONE", created="2026-10-02T15:03:00.000+0000", date="2026-10-02"),  # option left the form
             batch(BATCH_A)]
-        self.jotform.submissions[LATAM] += [
+        self.jotform.by_form[LATAM] += [
             submission("9003", created="2026-09-30 11:02:00", date=("2026", "09", "30")),
             submission("9004", created="2026-09-30 11:04:00", date=("2026", "09", "30")),
             submission("9005", created="2026-10-01 11:02:00", date=("2026", "10", "01"), year="2", module="Community 201"),
@@ -217,7 +237,7 @@ class FixModuleValues(unittest.TestCase):
         regional = questions()
         regional[MODULES["1"]] = dropdown(OPTIONS["1"] + ["Regional Only"])
         self.jotform.form_qs[LATAM] = regional
-        self.jotform.submissions[LATAM][0] = submission("9001", module="Regional Only")   # stored on the form, unknown to the template
+        self.jotform.by_form[LATAM][0] = submission("9001", module="Regional Only")   # stored on the form, unknown to the template
         out = self.dry()
         self.assertIn(f"{BATCH_A}  Sunrise Club  2026-09-24  Success  'Toma de decisiones'  UNMATCHED ('Regional Only' is not a "
                       "template option)", out)
@@ -240,7 +260,7 @@ class FixModuleValues(unittest.TestCase):
 
     def test_all_forms_reads_the_four_forms_whole_and_serves_a_region_the_map_does_not_know(self):
         self.org.batches = [batch(BATCH_A, region="Europe")]
-        self.jotform.submissions[AFRICA] = [submission("9007", created="2026-09-24 11:02:30", form=AFRICA, club="River Club")]
+        self.jotform.by_form[AFRICA] = [submission("9007", created="2026-09-24 11:02:30", form=AFRICA, club="River Club")]
         self.assertIn("UNMATCHED (region 'Europe' names no form)", self.dry())
         self.jotform.asked.clear()
         out = self.dry("--all-forms")

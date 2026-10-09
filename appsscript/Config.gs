@@ -1,12 +1,10 @@
 /**
  * Shared configuration for the GLOW enrollment → attendance pipeline.
  *
- * This script is bound to the enrollment spreadsheet. Nothing here talks to
- * Jotform; Phase 1 is Sheet-only.
- *
- * Secrets live in Script Properties (File → Project Settings → Script
- * Properties), never in code:
- *   JOTFORM_API_KEY   - used from Phase 2 onward
+ * This script is bound to the enrollment spreadsheet and never talks to
+ * Jotform: the Python sync does, and Dispatch.gs only asks GitHub to run it.
+ * Settings and the one secret (the dispatch token) live in Script Properties
+ * (PROP below; File → Project Settings → Script Properties), never in code.
  */
 
 /**
@@ -82,7 +80,7 @@ const OTHER_PARTNER = 'My organization is not in this list';
  * Canonical region names = the four regional attendance forms. The spelling
  * is load-bearing ('U.S': one dot, no trailing dot) — glow/forms.py REGIONS,
  * the Partners tab and the Jotform sync all use these exact strings;
- * test/python_test.py fails if the two sides drift.
+ * test/gs_parity_test.py fails if the two sides drift.
  */
 const REGIONS = ['Africa', 'Asia', 'Latin America', 'U.S'];
 
@@ -109,50 +107,6 @@ const RESPONSE_COLS = {
   roster: 'please list the full name',
 };
 
-/** Jotform forms this pipeline manages (Phase 2+). */
-const FORMS = {
-  TEMPLATE: '262352490535154',      // every sync-logic change lands here first
-  AFRICA: '262382821971058',        // live regionals, cloned from the template 2026-08-27
-  ASIA: '262383129464057',
-  LATIN_AMERICA: '262383455778067',
-  US: '262382706852058',
-  // defunct (kept as archives, labelled "(defunct)" in Jotform):
-  // master 260555608160556, Africa 260703905772560, Asia 260704198384564,
-  // Latin America 260704170003542, U.S 260703912140547
-};
-
-/**
- * Structural question IDs. Verified identical on all six forms (2026-08-24),
- * and the Salesforce integration maps to these numbers — changing them breaks
- * the integration.
- */
-const QID = {
-  CLUB_NAME: '5',
-  DATE: '17',
-  PARTNER: '331',
-  PHOTO: '19',
-  YEAR: '94',
-  MODULE: { '1': '14', '2': '92', '3': '93' },   // GLOW year → module dropdown
-  SESSIONS: { 8: '15', 10: '95', 14: '96', 15: '97' },  // length → dropdown
-  CONTACT_IDS: '18',
-  MODULE_ID: '98',
-  WEEK_ID: '100',
-  YEAR_ID: '102',
-  CREATOR: '105',
-  ENABLE_FUZZY: '109',
-  MENTOR_EMAIL: '332',            // working copy only; clones inherit it
-};
-
-/**
- * Sessions per module. Modules not listed run 8 sessions.
- * EDIT HERE when the curriculum changes.
- */
-const SESSION_OVERRIDES = {
-  'Elective - Healthy GLOW': 14,
-  'Elective - Girl Boss Basics': 10,
-  'Elective - Girl Boss Pro': 15,
-};
-
 const STATUS = { ACTIVE: 'active', INACTIVE: 'inactive' };
 
 /**
@@ -165,13 +119,3 @@ const STATUS = { ACTIVE: 'active', INACTIVE: 'inactive' };
  * themselves: never split a name on it.
  */
 const SF_NAME_SEP = ' - ';
-
-function getApiKey_() {
-  const key = PropertiesService.getScriptProperties()
-      .getProperty('JOTFORM_API_KEY');
-  if (!key) {
-    throw new Error('JOTFORM_API_KEY is not set. Add it in File → Project ' +
-                    'Settings → Script Properties.');
-  }
-  return key;
-}

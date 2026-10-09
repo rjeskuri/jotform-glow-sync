@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_girls_present.py (imported by test/python_test.py, so `make py` runs
-them). Everything here is fictional: batch ids, names and counts are invented. The fake org holds
+Offline tests for tools/sf_girls_present.py (found by `make py`'s unittest discovery).
+Everything here is fictional: batch ids, names and counts are invented. The fake org holds
 six batches - live Jotform ones with and without rows, a back-filled one, a Failed duplicate, a
 typed partner aggregate and one the processor already counted - and answers the tool's SOQL shapes.
 """
@@ -20,7 +20,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_girls_present as gp                              # noqa: E402
-from sf_backfill_test import FakeOrg                       # noqa: E402
+from helpers.fake_org import FakeOrg                      # noqa: E402
 
 
 def batch(n, status="Success", creator="Jotform", value=None):
@@ -33,7 +33,7 @@ def rows(n, count):
 
 
 class GirlsOrg(FakeOrg):
-    """The shared fake org (sf_backfill_test), answering this tool's SOQL shapes."""
+    """The shared fake org (test/helpers/fake_org.py), answering this tool's SOQL shapes."""
 
     def __init__(self):
         super().__init__([])
@@ -203,6 +203,11 @@ class GirlsPresent(unittest.TestCase):
     def test_a_count_that_is_not_a_whole_number_is_a_refusal(self):
         self.org.batches[5][gp.FIELD] = 1.5
         self.assertIn("not a whole number", self.run_tool("plan", "--vpn-off")[1])
+        # glow.salesforce.as_int underneath: empty is None, a whole double or int its number, anything else refused
+        self.assertEqual([gp.as_count(v) for v in (None, "", 3.0, 3, 0.0)], [None, None, 3, 3, 0])
+        for value in (1.5, "x", True):
+            with self.subTest(value=value), self.assertRaises(gp.Refused):
+                gp.as_count(value)
 
     def test_the_rows_are_counted_in_chunks_of_batch_ids(self):
         def grouped_reads():

@@ -1,7 +1,8 @@
 ---
 title: The Google Forms send roster changes to the Club Roster Form, and the problem form asks for a reply address again
 author: Claude (for Ryan's approval)
-status: proposed         # Ryan approves before merge
+status: blocked          # merged 2026-09-29, the menu item deployed 2026-09-30; the one-time menu run is Ryan's (BACKLOG 43)
+backlog: 43
 created: 2026-09-28
 intent: none — BACKLOG 43, from the 2026-09-26/27 problem-report review
 ---

@@ -70,19 +70,19 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
-from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sheets_client as sc  # noqa: E402
-from rename_club import a1, cell, cell_key, col_letter, describe_rows, nfc_key, tidy, trimmed  # noqa: E402
+import sheets_client as sc
+from sheets_client import a1, cell, col_letter, describe_rows, trimmed
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+from glow import backup                   # noqa: E402  (the stamp of the saved Roster)
 from glow import forms as glow_forms      # noqa: E402
-from glow.cli import run                  # noqa: E402
+from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
-from glow.sync import CLUB_NAME, PICKER_NAME, SF_NAME_SEP   # noqa: E402
-from glow.text import key                 # noqa: E402
+from glow.sync import CLUB_NAME, SF_NAME_SEP, club_picker   # noqa: E402
+from glow.text import cell_key, key, nfc_key, tidy   # noqa: E402
 
 ROSTER, AUDIT = "Roster", "Audit"
 ACTIVE, INACTIVE = "active", "inactive"           # Config.gs STATUS, as the handlers write them
@@ -201,7 +201,7 @@ def fetch_since(client, form_id, since=SINCE):
     """Every submission of the form created after `since`, page by page. Jotform
     lists the newest first, so one arriving meanwhile repeats a submission on the
     next page (dropped here) and hides none."""
-    flt = quote(json.dumps({"created_at:gt": since}), safe="")
+    flt = json.dumps({"created_at:gt": since})        # glow.jotform.Client.url encodes it
     seen, out, offset = set(), [], 0
     while True:
         page = client.get(f"/form/{form_id}/submissions", limit=PAGE, offset=offset, filter=flt)
@@ -219,12 +219,6 @@ def fetch_since(client, form_id, since=SINCE):
             break
         offset += PAGE
     return out
-
-
-def picker_of(questions):
-    """qid of the form's Club picker (the dropdown named PICKER_NAME), or None."""
-    return next((qid for qid, q in questions.items()
-                 if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
 
 
 def answer_of(sub, qid):
@@ -295,7 +289,7 @@ def guard(client, chosen, recent_from, check_only, anyway=False, whole=()):
         form_id = glow_forms.REGIONALS[region]
         clubs = [pc for pc, e in chosen.items() if e["region"] == region]
         subs = fetch_since(client, form_id)
-        picker = picker_of(client.get(f"/form/{form_id}/questions") or {})
+        picker = club_picker(client.get(f"/form/{form_id}/questions") or {})
         hits = club_hits(subs, picker, clubs)
         print_counts(region, form_id, subs, hits)
         recent += [(pc, day) for pc, found in hits.items() for day, _ in found if day >= recent_from]
@@ -414,10 +408,9 @@ def deactivate(args, svc, roster, zone):
     # the sheet's day, as removed_date is; created_at is US Eastern - a day's fuzz on a 30-day guard
     recent_from = (datetime.now(zone) - timedelta(days=args.recent_days)).strftime("%Y-%m-%d")
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-        "Set JOTFORM_API_KEY in the environment (.env): the guard reads the region's attendance "
-        f"form submissions since {SINCE[:10]} before any club is deactivated")
-    enabled = guard(Client(api_key), chosen, recent_from, args.check_only, args.deactivate_anyway,
+    client = Client(api_key(": the guard reads the region's attendance form submissions since "
+                            f"{SINCE[:10]} before any club is deactivated"))
+    enabled = guard(client, chosen, recent_from, args.check_only, args.deactivate_anyway,
                     whole=whole_regions(roster, cols, chosen))
     if args.check_only:
         return
@@ -443,7 +436,7 @@ def deactivate(args, svc, roster, zone):
         print("\nDRY RUN - re-run with --apply to write")
         return
 
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp(datetime.now())
     out = os.path.join(OUT, stamp)
     save_roster(out, roster)
     record = {"written": stamp, "tab": ROSTER, "status_col": i_s, "removed_col": i_r,
@@ -537,7 +530,7 @@ def undo(args, svc, roster, zone):
         print("\nDRY RUN - re-run with --apply to write")
         return
 
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp(datetime.now())
     out = os.path.join(folder, "undo-" + stamp)
     save_roster(out, roster)
     print(f"\nSaved the {ROSTER} tab before the undo to {os.path.relpath(out, REPO)}/")

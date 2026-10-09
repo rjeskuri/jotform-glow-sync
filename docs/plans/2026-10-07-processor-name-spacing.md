@@ -1,7 +1,9 @@
 ---
 title: Attendance processor - a name with extra spaces or invisible characters finds its girl
 author: Claude (with Ryan)
-status: done (deployed to production 2026-10-07 04:38 UTC)
+status: done             # deployed to production 2026-10-07 04:38 UTC
+done: 2026-10-07
+backlog: 75
 created: 2026-10-07
 intent: none - Ryan's request of 2026-10-07; BACKLOG 75
 ---

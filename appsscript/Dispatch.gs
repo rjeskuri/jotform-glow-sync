@@ -17,7 +17,6 @@
  *   SYNC_DISPATCH_TOKEN  a fine-grained token for that one repo (Actions: read/write only)
  */
 
-const DISPATCH_EVENT = 'roster-changed';     // the old repository_dispatch event; the workflow still takes it
 const DISPATCH_WORKFLOW = 'auto-sync.yml';
 
 /** Pure: the request UrlFetchApp will send. Tested offline in test/dispatch_test.js. */

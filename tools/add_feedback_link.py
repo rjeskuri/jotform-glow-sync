@@ -14,7 +14,7 @@ is glow/links.py:
                   -> the Club Roster Form, directly above the problem link
 
 Dry run by default. With --apply each form is snapshotted first
-(backup_forms.py -> backups/<id>/), written, then re-read and checked: the
+(glow/backup.py -> backups/<id>/), written, then re-read and checked: the
 element exactly once, its text as written, not hidden, above what it must be
 above, and no rule mentioning it (the sync rewrites rules, never this
 element). Re-running is a no-op; --remove deletes the element. Refuses an
@@ -39,10 +39,10 @@ from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-from backup_forms import snapshot      # noqa: E402
+from glow import backup               # noqa: E402  (the snapshot before a write)
 from glow import forms as glow_forms   # noqa: E402
 from glow import links as glow_links   # noqa: E402
-from glow.cli import run               # noqa: E402
+from glow.cli import api_key, run, targets               # noqa: E402
 from glow.jotform import Client        # noqa: E402
 
 # the live regional forms + the template they came from
@@ -154,12 +154,11 @@ def main():
     args = ap.parse_args()
     link = glow_links.LINKS[args.link]
     url = glow_links.check_public_url(args.url or link.url)
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
-    client = Client(api_key, apply=args.apply)
-    targets = {f: FORMS.get(f, "?") for f in args.form} if args.form else FORMS
+    client = Client(api_key(), apply=args.apply)
+    chosen = targets(args.form, FORMS)
     # to the second: a re-run just after a failed one must not snapshot the
     # half-written form over the true "before" (the rollback path)
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp(datetime.now())
 
     print(("APPLYING" if args.apply else "DRY RUN")
           + f" - {'remove ' if args.remove else ''}{link.name}: {link.sentence!r}"
@@ -172,7 +171,7 @@ def main():
     # every form is planned before anything is written: a refusal on the
     # fifth form must not leave the first four changed
     planned = {}
-    for form_id, label in targets.items():
+    for form_id, label in chosen.items():
         print(f"== {label} {form_id}")
         steps, notes = read_and_plan(form_id)
         planned[form_id] = steps
@@ -185,8 +184,8 @@ def main():
     for form_id, steps in planned.items():
         if not args.apply or not steps:
             continue
-        print(f"\n== writing {targets[form_id]} {form_id}")
-        snapshot(form_id, client, stamp)       # the rollback path, before any write
+        print(f"\n== writing {chosen[form_id]} {form_id}")
+        backup.snapshot(form_id, client, stamp)    # the rollback path, before any write
         print(f"   snapshot: backups/{form_id}/questions-{stamp}.json")
         steps, _ = read_and_plan(form_id)      # the form may have changed since the preview
         if [s["label"] for s in steps] != [s["label"] for s in planned[form_id]]:

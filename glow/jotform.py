@@ -7,7 +7,7 @@ self.calls and skipped unless the client was built with apply=True. Reads
 always run. A mislabelled write can therefore never slip through the gate.
 
 Failures raise JotformError with the label; retries (add_language.py's
-behaviour) and allow_fail (clone_regional.py's) are per-client / per-call
+behaviour) and allow_fail (the retired clone script's) are per-client / per-call
 options. glow.cli.run(main) turns the error into a clean sys.exit message.
 
 A JSON body goes to curl on standard input ("--data-binary @-"), never as an
@@ -19,11 +19,16 @@ the GitHub runner it would not.
 import json
 import subprocess
 import time
+import urllib.parse
+from zoneinfo import ZoneInfo
 
 API_BASE = "https://api.jotform.com"
 _WRITE_METHODS = {"POST", "PUT", "DELETE"}
 # Linux: one argument may not exceed 131,072 bytes (MAX_ARG_STRLEN); stay clear of it.
 MAX_ARG_BYTES = 120_000
+# Jotform's clock: a submission's created_at and a form's last_submission are US Eastern wall
+# time, 'yyyy-mm-dd hh:mm:ss' (not the sheet's zone, glow.sync.SHEET_ZONE, though the same today)
+CLOCK = ZoneInfo("America/New_York")
 
 
 class JotformError(RuntimeError):
@@ -52,8 +57,10 @@ class Client:
         self.calls = []          # every write's label, in order (dry run and apply alike)
 
     def url(self, path, **params):
-        extra = "".join(f"&{k}={v}" for k, v in params.items())
-        return f"{API_BASE}{path}?apiKey={self.key}{extra}"
+        """The API URL of `path`: the key and `params` as its query, every value URL-encoded
+        here, once - a caller passes plain values (a submissions filter is its JSON text)."""
+        query = urllib.parse.urlencode({"apiKey": self.key, **params}, quote_via=urllib.parse.quote, safe="")
+        return f"{API_BASE}{path}?{query}"
 
     def call(self, args, label, *, allow_fail=False, body=None):
         """Run curl with `args`; `body`, when given, is sent on curl's standard input
@@ -76,7 +83,7 @@ class Client:
                 out = subprocess.run(["curl", "-sS"] + list(args), capture_output=True,
                                      text=True, encoding="utf-8", **extra)
             except OSError as e:          # e.g. E2BIG: never a half-made request
-                raise JotformError(f"{label}: curl could not be started: {e.strerror or e}")
+                raise JotformError(f"{label}: curl could not be started: {e.strerror or e}") from e
             try:
                 resp = json.loads(out.stdout)
             except json.JSONDecodeError:
@@ -104,6 +111,39 @@ class Client:
     def get(self, path, **params):
         return self.call([self.url(path, **params)], f"GET {path}")
 
+    def submissions(self, form_id, filter=None, *, page=100, enough=None, label=None):
+        """The form's submissions, any status, read page by page (`page` per request; Jotform
+        allows up to 1000) in Jotform's default order, newest first - no `orderby`, whose
+        direction is not proven. `filter`: Jotform's submissions filter as a dict
+        ({"created_at:gt": "2026-09-24 08:03:00"}), sent as its JSON text (url() encodes it).
+        A submission arriving meanwhile repeats one on the next page: kept once, by id, as first
+        read. enough(page), given each page as it came: True stops the reading after it. Reading
+        the whole form (no filter, no enough), the form's own count, read afterwards, is the
+        check. JotformError, with `label` (default 'form <id>'), for an answer that is not a list
+        of submissions with ids and for a count the pages fall short of."""
+        label = label or f"form {form_id}"
+        params = {} if filter is None else {"filter": json.dumps(filter)}
+        seen, out, offset = set(), [], 0
+        while True:
+            got = self.get(f"/form/{form_id}/submissions", limit=page, offset=offset, **params)
+            if not isinstance(got, list) or not all(isinstance(s, dict) and s.get("id") for s in got):
+                raise JotformError(f"{label}: the submissions answer is not a list of submissions with "
+                                   "ids - an answer shape this tool does not know")
+            for sub in got:
+                if sub["id"] not in seen:
+                    seen.add(sub["id"])
+                    out.append(sub)
+            stop = enough is not None and enough(got)
+            if stop or len(got) < page:
+                break
+            offset += page
+        if filter is None and enough is None:
+            reported = int((self.get(f"/form/{form_id}") or {}).get("count") or 0)
+            if len(out) < reported:
+                raise JotformError(f"{label}: fetched {len(out)} submissions but the form reports {reported} - "
+                                   "one was missed while paging (a deletion meanwhile?); run it again")
+        return out
+
     def post_form(self, path, data, label):
         """form-urlencoded POST (question create/update - MERGES properties)."""
         args = ["-X", "POST", self.url(path)]
@@ -125,3 +165,21 @@ class Client:
 
     def delete(self, path, label):
         return self.call(["-X", "DELETE", self.url(path)], label)
+
+
+def public_page(form_id, max_time=90):
+    """The form's public page (https://form.jotform.com/<id>) as a mentor's browser receives
+    it - no API key, so nothing of the account goes with the request. Kept in memory by every
+    caller (a served page lists every roster: never printed or saved). Raises JotformError when
+    curl fails: a page that could not be fetched never reads as an empty one."""
+    url = f"https://form.jotform.com/{form_id}"
+    try:
+        out = subprocess.run(["curl", "-sSL", "--max-time", str(max_time), "-A", "Mozilla/5.0", url],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as e:
+        raise JotformError(f"public page of form {form_id}: curl could not be started: "
+                           f"{e.strerror or e}") from e
+    if out.returncode != 0:
+        raise JotformError(f"public page of form {form_id}: curl exited {out.returncode}: "
+                           f"{out.stderr.strip()[:200]}")
+    return out.stdout

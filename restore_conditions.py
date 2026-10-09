@@ -4,7 +4,10 @@ Restore a form's conditional logic from a snapshot taken by backup_forms.py.
 
 This is the rollback path when a sync or manual edit breaks a form's logic.
 It only touches the `conditions` property; questions, emails, and the
-Salesforce integration are left exactly as they are.
+Salesforce integration are left exactly as they are. Like every writer, --apply
+first snapshots the form as it is (glow/backup.py: backups/<id>/*-<stamp>.json,
+never over the -latest files, which may be the snapshot being restored) - the
+way back from the restore itself: --from properties-<stamp>.json.
 
 Because the questions stay, a snapshot must still fit them. It is refused
 when its rules test a club on the Club picker - or list one in the club guard
@@ -24,7 +27,7 @@ Usage:
     export JOTFORM_API_KEY=...
     python3 restore_conditions.py --form 262352490535154                    # dry run
     python3 restore_conditions.py --form 262352490535154 --apply
-    python3 restore_conditions.py --form <ID> --from conditions-2026-08-24T1730.json
+    python3 restore_conditions.py --form <ID> --from conditions-2026-08-24T173000.json
 """
 import argparse
 import json
@@ -33,10 +36,11 @@ import sys
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
-from glow.cli import run          # noqa: E402
+from glow import backup                    # noqa: E402
+from glow.cli import api_key, run          # noqa: E402
 from glow.jotform import Client   # noqa: E402
 from glow import sync as glow_sync             # noqa: E402
-from glow.sync import CLUB_NAME, PICKER_NAME   # noqa: E402
+from glow.sync import CLUB_NAME   # noqa: E402
 
 
 def contact_ids_note(conditions, questions):
@@ -45,8 +49,8 @@ def contact_ids_note(conditions, questions):
     restores, but form_status reports the form NOT CLEAN and the runner stops its
     region until the sync is applied by hand - or the constants are turned off, the
     generated rollback. None when the snapshot is in the current shape."""
-    picker = next((str(qid) for qid, q in questions.items()
-                   if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
+    picker = glow_sync.club_picker(questions)
+    picker = None if picker is None else str(picker)
     rosters = {str(qid) for qid, q in questions.items() if q.get("type") == "control_checkbox"}
     stale = glow_sync.contact_ids_stale(conditions, rosters, picker)
     if not stale:
@@ -64,23 +68,29 @@ def stale_club_terms(conditions, questions):
     not offer (exactly, as a multi-select compares): values of `equals` terms
     on the picker - roster rules - and of `notEquals` terms on question 5 - the
     club guard's list. Sorted, each once. [] on a form without the picker."""
-    picker = next((str(qid) for qid, q in questions.items()
-                   if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
+    picker = glow_sync.club_picker(questions)
+    picker = None if picker is None else str(picker)
     if picker is None:
         return []
-    options = {o for o in (questions[picker].get("options") or "").split("|") if o}
+    options = set(glow_sync.dropdown_options(questions[picker]))
     stale = set()
     for c in conditions:
-        try:
-            terms = json.loads(c["terms"]) if isinstance(c.get("terms"), str) else c.get("terms")
-        except ValueError:
-            continue
-        for t in terms or []:
+        parts = glow_sync.rule_parts(c)
+        if parts is None:
+            continue                    # main() refuses such a snapshot (unreadable_rules)
+        for t in parts[0]:
             field, op, value = str(t.get("field")), t.get("operator"), str(t.get("value") or "")
             if value and value not in options and \
                     ((field == picker and op == "equals") or (field == CLUB_NAME and op == "notEquals")):
                 stale.add(value)
     return sorted(stale)
+
+
+def unreadable_rules(conditions):
+    """Ids of a snapshot's rules whose terms or action do not parse as Jotform's lists - a
+    snapshot with one is not something to put back on a live form."""
+    return [str(c.get("id")) if isinstance(c, dict) else "?" for c in conditions
+            if glow_sync.rule_parts(c) is None]
 
 
 def main():
@@ -95,12 +105,10 @@ def main():
                          "not offer today (their rosters will not show until the sync runs)")
     args = ap.parse_args()
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-        "Set JOTFORM_API_KEY in the environment")
-    client = Client(api_key, apply=args.apply)
+    client = Client(api_key(), apply=args.apply)
 
-    path = os.path.join(REPO, "backups", args.form,
-                        args.src or "properties-latest.json")
+    path = (os.path.join(backup.folder(args.form), args.src) if args.src
+            else backup.path(args.form, "properties"))
     if not os.path.exists(path):
         sys.exit(f"No snapshot at {path} - run backup_forms.py first")
     with open(path, encoding="utf-8") as f:
@@ -108,6 +116,10 @@ def main():
     conditions = saved["conditions"] if isinstance(saved, dict) else saved
     if not conditions:
         sys.exit(f"{path} holds no conditions - refusing to wipe the form")
+    bad = unreadable_rules(conditions)
+    if bad:
+        sys.exit(f"Refusing: {len(bad)} rule(s) of {path} have terms or an action that do not parse "
+                 f"(rule {', '.join(bad[:5])}{', …' if len(bad) > 5 else ''}) - not a snapshot to restore")
 
     live = client.get(f"/form/{args.form}/properties")
     print(f"form {args.form}: live has {len(live.get('conditions', []))} "
@@ -131,9 +143,15 @@ def main():
         print(f"  ! --force: {msg}. Run the sync (dry run, then --apply) straight after")
 
     if not args.apply:
-        print("\nDRY RUN - re-run with --apply to restore")
+        print("\nDRY RUN - re-run with --apply to restore (the form is snapshotted first)")
         return
 
+    # the form as it is, before the PUT: the way back from this restore. Not over the -latest
+    # files: they may be the snapshot being restored, and a re-run after a lost answer must
+    # restore that again, not the state this restore replaces
+    s = backup.snapshot(args.form, client, latest=False)
+    print(f"snapshot before the restore: backups/{args.form}/*-{s['stamp']}.json "
+          f"(to undo the restore: --from properties-{s['stamp']}.json)")
     client.put_json(f"/form/{args.form}/properties",
                     {"properties": {"conditions": conditions}}, "PUT conditions")
 

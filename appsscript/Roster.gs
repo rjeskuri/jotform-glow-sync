@@ -24,14 +24,13 @@ const AUDIT_COLS = ['when', 'action', 'detail'];
 const SYNC_LOG_COLS = ['when', 'trigger', 'region', 'mode', 'creates', 'updates',
                        'rules', 'result', 'detail', 'run_url'];
 
+// in the spreadsheet's own zone (spreadsheetZone_, FormHandlers.gs), never the script's
 function today_() {
-  return Utilities.formatDate(new Date(),
-      SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+  return Utilities.formatDate(new Date(), spreadsheetZone_(), 'yyyy-MM-dd');
 }
 
 function now_() {
-  return Utilities.formatDate(new Date(),
-      SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+  return Utilities.formatDate(new Date(), spreadsheetZone_(), 'yyyy-MM-dd HH:mm:ss');
 }
 
 function setUpTabs() {
@@ -62,6 +61,23 @@ function audit_(action, detail) {
 }
 
 /**
+ * fn() under the document lock, which every entry point that changes the sheet
+ * or the forms takes (the form-submit trigger waits up to 120 s for it in
+ * onAnyFormSubmit), and fn's value. If the lock is not free within waitMs,
+ * busy() runs instead and its value is returned (no busy: undefined). Never
+ * take it around a dialog: a waiting trigger would time out.
+ */
+function withDocumentLock_(waitMs, fn, busy) {
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(waitMs)) return busy ? busy() : undefined;
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
  * Add issues to the ReviewQueue, skipping any that are already there and
  * still unresolved. Re-running the rebuild must not fill the tab with copies
  * of the same open question — but two different questions about the same
@@ -73,8 +89,7 @@ function review_(rows) {
   if (!rows.length) return;
   const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.REVIEW, REVIEW_COLS);
   const identity = function (issue, partner, club, detail) {
-    const m = String(detail || '').match(/\[#([^\]]*)\]\s*$/);
-    return key_(issue) + '||' + key_(partner) + '||' + key_(club) + '||' + (m ? m[1] : '');
+    return key_(issue) + '||' + clubKey_(partner, club) + '||' + (reviewTag_(detail) || '');
   };
   const open = {};
   if (sheet.getLastRow() > 1) {
@@ -95,6 +110,12 @@ function review_(rows) {
       .setValues(fresh.map(function (r) {
         return [stamp, r.issue, r.partner || '', r.club || '', r.detail || '', ''];
       }));
+}
+
+/** The tag review_ ends an item's detail with (' [#<dedupeKey>]'), or null if it has none. */
+function reviewTag_(detail) {
+  const m = String(detail == null ? '' : detail).match(/\[#([^\]]*)\]\s*$/);
+  return m ? m[1] : null;
 }
 
 /** Partner → region from the Partners tab ONLY (staff-authoritative; no derived fallback). */
@@ -206,7 +227,7 @@ function loadRoster_() {
   if (!sheet || sheet.getLastRow() < 2) return { rows: rows, byClub: {} };
   const values = sheet.getRange(2, 1, sheet.getLastRow() - 1,
                                 ROSTER_COLS.length).getValues();
-  const zone = ss.getSpreadsheetTimeZone();
+  const zone = spreadsheetZone_();
   const byClub = {};
   values.forEach(function (v, i) {
     const row = {};
@@ -218,7 +239,7 @@ function loadRoster_() {
       }
     });
     row._sheetRow = i + 2;
-    row._ck = key_(row.partner) + '||' + key_(row.club);
+    row._ck = clubKey_(row.partner, row.club);
     rows.push(row);
     if (!byClub[row._ck]) byClub[row._ck] = [];
     byClub[row._ck].push(row);
@@ -229,25 +250,40 @@ function loadRoster_() {
 /**
  * Rebuild the Roster tab from the raw enrollment responses.
  *
- * Safe to re-run: existing girls keep their IDs, new girls are appended, and
- * girls who have disappeared from a club's latest submission are reported for
- * review rather than removed automatically (a partner re-submitting a short
- * roster must not silently retire two thirds of a club).
+ * Before launch it was safe to re-run: existing girls keep their IDs, new
+ * girls are appended, and girls who have disappeared from a club's latest
+ * submission are reported for review rather than removed automatically (a
+ * partner re-submitting a short roster must not silently retire two thirds of
+ * a club). Since launch (2026-09-01) it undoes later changes, so it says what
+ * it does and runs only on YES (REBUILD_WARNING; docs/RUNBOOK.md, "Roster
+ * rebuild and upload").
  */
 function rebuildRosterFromResponses() {
   const ss = SpreadsheetApp.getActive();
-  // IDs are minted here; two overlapping runs would hand out the same numbers
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(30000)) {
-    ss.toast('Another rebuild is still running - try again in a minute.', 'GLOW', 8);
+  let ui = null;
+  try { ui = SpreadsheetApp.getUi(); } catch (err) { /* script editor: no dialogs */ }
+  if (!ui) {
+    throw new Error('Run this from the sheet (GLOW → Rebuild roster from enrollment responses): ' +
+                    'it says what it does and asks first.');
+  }
+  // the dialog before the lock: never hold it while a dialog is open
+  if (ui.alert('Rebuild the roster from the enrollment responses?', REBUILD_WARNING,
+               ui.ButtonSet.YES_NO) !== ui.Button.YES) {
     return;
   }
-  try {
-    return rebuildRosterLocked_(ss);
-  } finally {
-    lock.releaseLock();
-  }
+  // IDs are minted here; two overlapping runs would hand out the same numbers
+  return withDocumentLock_(30000, function () { return rebuildRosterLocked_(ss); }, function () {
+    ss.toast('Another rebuild is still running - try again in a minute.', 'GLOW', 8);
+  });
 }
+
+/** What the rebuild's YES/NO says (literals only: a top-level constant must not read another file's). */
+const REBUILD_WARNING = 'Not after launch. Since 2026-09-01 the Roster has moved on from the ' +
+    'enrollment responses. A rebuild from them puts back every girl removed through the Club ' +
+    'Roster Form whose name is still on her club\'s enrollment row, and creates again every ' +
+    'club renamed or moved to another partner since, under its old name or partner and with ' +
+    'new ids. To change a club, use the Club Roster Form or docs/RUNBOOK.md instead.' +
+    '\n\nRebuild anyway? (No changes nothing.)';
 
 function rebuildRosterLocked_(ss) {
   setUpTabs();
@@ -262,7 +298,7 @@ function rebuildRosterLocked_(ss) {
 
   clubs.forEach(function (entry) {
     partnersSeen[key_(entry.partner)] = entry.partner;
-    const ck = key_(entry.partner) + '||' + key_(entry.club);
+    const ck = clubKey_(entry.partner, entry.club);
     const region = regions[key_(entry.partner)] || '';
     if (!region) noRegion[key_(entry.partner)] = entry.partner;
     entry.source = TAB.RESPONSES + '!' + entry.sourceRow;

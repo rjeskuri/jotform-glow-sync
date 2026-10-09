@@ -1,7 +1,7 @@
 ---
 title: The Global Catalyst logo replaces the Global Girls GLOW header banner
 author: Claude (executed with Ryan)
-status: blocked-on-ryan
+status: blocked          # on Ryan: the logo's upload in the builder (Result: live steps pending Ryan)
 created: 2026-09-24
 intent: none — requested by Ryan on 2026-09-24
 ---

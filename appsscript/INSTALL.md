@@ -8,8 +8,10 @@ the automatic Jotform sync when the Roster changed.
 ## Deploy with clasp (the normal way)
 
 `clasp` pushes the whole `appsscript/` folder into the sheet's script project
-with one command — every later change too. The repo pins clasp 2.4.2 because
-this machine runs Node 18 (clasp 3 needs Node 20); `npm install` fetches it.
+with one command — every later change too. The repo pins clasp 2.4.2, which
+runs on Node 18 (clasp 3 needs Node 20); `npm install` fetches it. The npm
+scripts `clasp:push` and `clasp:open` refuse to run on any other Node ("clasp
+2.4.2 needs Node 18"): `nvm use 18` first — the Mac's default Node is newer.
 
 One-time, with you at the keyboard (clasp signs in as *your* Google account —
 the forms and triggers the script creates belong to you):
@@ -25,14 +27,18 @@ the forms and triggers the script creates belong to you):
 
        {"scriptId": "<SCRIPT_ID>", "rootDir": "."}
 
-4. `make gs` (every file parses — a broken file breaks every form handler),
-   then `npm run clasp:push` (that is `clasp push -f` inside `appsscript/`;
-   `.claspignore` limits the push to `*.gs` and `appsscript.json`). Reload
-   the sheet: the **GLOW** menu appears next to Help.
+4. `make gs` (every file parses — a broken file breaks every form handler;
+   only the 8 pinned Google services are used, so the push adds no OAuth
+   scope; every function called exists), then `nvm use 18` and `npm run
+   clasp:push` (that is `clasp push -f` inside `appsscript/`; `.claspignore`
+   limits the push to `*.gs` and `appsscript.json`). Reload the sheet: the
+   **GLOW** menu appears next to Help.
 
 Edit the `.gs` files in the repo, run `make check`, push — never edit in the
 online editor; the next push would overwrite it. Inside Claude Code the push
-is gated by `.claude/hooks/live_gate.sh` (`docs/RUNBOOK.md`, "Live gate").
+is gated by `.claude/hooks/live_gate.sh` (`docs/RUNBOOK.md`, "Live gate"), and
+Ryan can run it with Claude through the user-only `/deploy-appsscript` skill
+(`docs/RUNBOOK.md`, "Apps Script deploy").
 
 ### Fallback: paste by hand
 
@@ -65,15 +71,19 @@ Reload the spreadsheet.
    launch (2026-09-01) do not re-run it.** It reactivates girls removed
    through the Club Roster Form and re-creates renamed or moved clubs under
    their old name or partner (`docs/RUNBOOK.md`, "Roster rebuild and upload").
+   Once the 2026-10-09 code is pushed, the item says so in a YES/NO dialog
+   first and does nothing unless you answer YES; from the script editor it
+   refuses.
 3. Open the **Partners** tab. The **region** column (Africa / Asia / Latin
-   America / U.S) was derived from which regional attendance form each
-   partner's clubs sat on (`tools/derive_partner_regions.py`; the map is
-   `Regions.gs`). The **notes** column says how solid each one is; a row
-   whose note starts with **PLEASE CONFIRM** or says **region needed** is
-   worth a look. Correct it here — the tab always wins over the derived
-   map — then **GLOW → Refresh regions from the Partners tab**. A partner
-   with no region lands in the ReviewQueue, and its girls reach no
-   attendance form until the region is filled in.
+   America / U.S) is prefilled from `Regions.gs`, a map derived before launch
+   from which regional attendance form each partner's clubs sat on (the
+   script that derived it is retired, and the map is hand-kept data now:
+   [Retired tools](../docs/ARCHITECTURE.md#retired-tools)). The **notes**
+   column says how solid each one is; a row whose note starts with **PLEASE
+   CONFIRM** or says **region needed** is worth a look. Correct it here — the
+   tab always wins over the map — then **GLOW → Refresh regions from the
+   Partners tab**. A partner with no region lands in the ReviewQueue, and its
+   girls reach no attendance form until the region is filled in.
 4. Open the **ReviewQueue** tab: one row per question the scripts could not
    decide (a removal that matched nobody, a name listed twice, a partner with
    no region, a problem report asking for a roster change, …). Ryan owns it;
@@ -118,6 +128,10 @@ Things to know:
 - The form dropdowns are refreshed from the Roster after every submission
   and by **Update form dropdowns from the Roster**. A brand-new partner
   (enrolled via "not in this list") gets its own club section automatically.
+  Once the 2026-10-09 code is pushed, the menu item takes the document lock
+  as the handlers do (busy: a "try again" message), and **Create the Google
+  Forms**, when the lock is busy, stops before installing the triggers and
+  says to run it again (it reuses the forms).
 - Free text from the Club Roster Form never reaches the sheet as a formula:
   a leading `=`, `+`, `-` or `@` is stripped (`Normalize.gs sheetText_`).
   A girl's name loses only that leading run, so it still matches her Roster
@@ -160,6 +174,9 @@ date; her row, her ID and every Salesforce record stay as they were.
 and checks they agree with the Python tool; it also parses every `.gs` file.
 `test/forms_logic_test.js` covers the roster-change decisions,
 `test/dispatch_test.js` the sync notification. Run it after any change to
-the shared logic in either language. If a real partner has no entry in
-`Regions.gs`, regenerate it: `python3 tools/derive_partner_regions.py <csv>
---write` (it derives from the pre-launch form snapshots in `backups/`).
+the shared logic in either language. With a real export, the parity check
+also wants every partner in it to have a `Regions.gs` entry. A partner
+missing there gets its region in the Partners tab, which wins; add it to
+`Regions.gs` by hand only for a partner the tab lacks, with its
+`PARTNER_REGION_NOTES` line (Ryan's edit: the edit hook keeps Claude out of
+that file). Nothing regenerates it any more.

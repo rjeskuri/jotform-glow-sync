@@ -19,41 +19,16 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const loadGs = require('./load_gs');
+const { check, finish } = require('./helpers/js/check');
+const { readCsv } = require('./helpers/js/csv');
 
 const REPO = path.resolve(__dirname, '..');
-const gs = loadGs(['tidy_', 'key_', 'asciiCode_', 'parseRoster_', 'lastName_', 'clubCode_',
-                   'mintGirlId_', 'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'RESPONSE_COLS',
-                   'REGIONS']);
+const gs = loadGs(null, null, { strict: true });   // every top-level name of the pure files
 const REGIONS = new Set(gs.REGIONS);   // the canonical list lives in Config.gs (backlog 38)
-
-let failures = 0;
-function check(label, cond, detail) {
-  if (!cond) { failures++; console.log('  FAIL ' + label + (detail ? ' :: ' + detail : '')); }
-  else console.log('  ok   ' + label + (detail ? ' :: ' + detail : ''));
-}
-
-// ---- minimal CSV parser (handles quoted fields with embedded newlines) ----
-function parseCsv(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (c === '"') inQuotes = false;
-      else field += c;
-    } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (c !== '\r') field += c;
-  }
-  if (field || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
 
 /** Replicate readResponses_ over a CSV: last submission per (partner, club) wins. */
 function readClubs(csvPath) {
-  const csv = parseCsv(fs.readFileSync(csvPath, 'utf8').replace(/^﻿/, ''));
+  const csv = readCsv(csvPath);
   const header = csv[0].map(h => h.toLowerCase());
   const col = frag => header.findIndex(h => h.includes(frag));
   const iP = col(gs.RESPONSE_COLS.partner), iC = col(gs.RESPONSE_COLS.club),
@@ -66,7 +41,7 @@ function readClubs(csvPath) {
     if (!club) continue;   // mirrors read_sheet (readResponses_ also drops partner-less rows)
     const parsed = gs.parseRoster_(row[iR]);
     if (!parsed.names.length) continue;
-    byIdentity[gs.key_(partner) + '||' + gs.key_(club)] =
+    byIdentity[gs.clubKey_(partner, club)] =
       { partner, club, names: parsed.names, duplicates: parsed.duplicates, sourceRow: r + 1 };
   }
   return Object.values(byIdentity);
@@ -156,7 +131,8 @@ function runDataset({ name, csvPath, pyClubs, pins, real }) {
   if (real) {
     check('every sheet partner has a derived region', noRegion.length === 0,
           (partners.length - noRegion.length) + '/' + partners.length +
-          (noRegion.length ? ' — missing: ' + noRegion.join('; ') + ' (re-run tools/derive_partner_regions.py <csv> --write)' : ''));
+          (noRegion.length ? ' — missing: ' + noRegion.join('; ') + ' (the sheet\'s Partners tab wins; add one ' +
+                             'to Regions.gs by hand only for a partner the tab lacks)' : ''));
     if (pins && pins.partners) check(`pinned ${pins.partners} partners`, partners.length === pins.partners, String(partners.length));
   } else {
     check('fixture partners are fictional: none has a derived region', noRegion.length === partners.length,
@@ -179,7 +155,7 @@ function runDataset({ name, csvPath, pyClubs, pins, real }) {
 
   // parity with the Python tool's club canonicalization
   if (pyClubs) {
-    const jsKeys = new Set(clubs.map(c => gs.key_(c.partner) + '||' + gs.key_(c.club)));
+    const jsKeys = new Set(clubs.map(c => gs.clubKey_(c.partner, c.club)));   // py_clubs.py writes the same 'partner||club'
     const pyKeys = new Set(pyClubs);
     const onlyJs = [...jsKeys].filter(k => !pyKeys.has(k));
     const onlyPy = [...pyKeys].filter(k => !jsKeys.has(k));
@@ -215,5 +191,5 @@ if (process.env.PARITY_REAL !== '0' && fs.existsSync(realCsv)) {
   console.log('\nreal data: skipped (no ' + path.relative(REPO, realCsv) + ')');
 }
 
-console.log('\n' + (failures ? failures + ' FAILURES' : 'ALL CHECKS PASSED'));
-process.exit(failures ? 1 : 0);
+check('no Apps Script code made an undeclared global', !loadGs.strayGlobals().length, loadGs.strayGlobals().join(', '));
+finish();

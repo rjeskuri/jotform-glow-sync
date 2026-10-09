@@ -41,7 +41,7 @@ refuses a target that is not in the Partners tab or sits in another region,
 a club whose current name another partner's club shares, and a club whose
 show rule tests the Partner box (so a move's --apply needs the Jotform key).
 Dry run by default; --apply first saves the tabs it touches under
-data/rename_club/<stamp>/ and takes a backup_forms.py snapshot of each form
+data/rename_club/<stamp>/ and takes a snapshot (glow/backup.py) of each form
 it writes, re-reads the tabs and stops (nothing written) if the club gained a
 row or a planned row changed meanwhile, writes, then re-reads and compares
 every write. Rows of the club that a form submission appends during the
@@ -61,67 +61,26 @@ form_status CLEAN.
 import argparse
 import csv
 import difflib
-import json
 import os
-import re
 import sys
-import unicodedata
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import sheets_client as sc  # noqa: E402
+import sheets_client as sc
+from sheets_client import a1, cell, col_letter, describe_rows, trimmed
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-import backup_forms                       # noqa: E402
+from glow import backup                   # noqa: E402  (the snapshot before a write)
 from glow import forms as glow_forms      # noqa: E402
-from glow.cli import run                  # noqa: E402
+from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
-from glow.sync import PARTNER, partner_fields   # noqa: E402
-from glow.text import key, name_key       # noqa: E402
+from glow.sync import PARTNER, rule_parts   # noqa: E402
+from glow.text import cell_key, key, name_key, nfc_key, tidy   # noqa: E402
 
 TABS = ("Roster", "ClubRegistry", "SF Pending")   # every tab with a 'partner' and a 'club' column
 PARTNERS = "Partners"
 OUT = os.path.join(REPO, "data", "rename_club")
-
-# the invisible characters the Apps Script's tidy_ drops (Normalize.gs INVISIBLE)
-INVISIBLE = re.compile("[\u200b\u200c\u200d\u200e\u200f\u2060\ufeff]")
-
-
-def tidy(s):
-    """Normalize.gs tidy_: invisible characters dropped, whitespace collapsed."""
-    return " ".join(INVISIBLE.sub("", str(s or "")).split())
-
-
-def cell_key(s):
-    """Normalize.gs key_ - how the sheet's own scripts group partner and club
-    cells (glow.text.key keeps invisible characters: backlog 28)."""
-    return tidy(s).lower()
-
-
-def nfc_key(s):
-    """cell_key after Unicode NFC, for finding a name typed on a command line."""
-    return cell_key(unicodedata.normalize("NFC", str(s or "")))
-
-
-def cell(row, i):
-    """A cell of a Sheets API row, which omits trailing empty cells."""
-    return row[i] if i is not None and i < len(row) else ""
-
-
-def col_letter(index):
-    """0-based column index -> A1 column letters (0 -> A, 26 -> AA)."""
-    letters = ""
-    index += 1
-    while index:
-        index, rem = divmod(index - 1, 26)
-        letters = chr(65 + rem) + letters
-    return letters
-
-
-def a1(tab, cell):
-    return "'" + tab.replace("'", "''") + "'!" + cell
-
 
 def columns(rows):
     """(partner, club, region or None) column indexes of a tab, header first."""
@@ -225,37 +184,25 @@ def near_partners(rows, name):
     return same or difflib.get_close_matches(name, names, n=3, cutoff=0.8)
 
 
-def partner_gated(conditions, qids, fields=frozenset({PARTNER})):
-    """Ids of the rules that show one of `qids` and test a partner field: the
-    typed Partner box (q331), or the partner list on a form that has one
-    (`fields`, from glow.sync.partner_fields). The sync writes such a term only
-    for a club name several partners share."""
+def partner_gated(conditions, qids):
+    """Ids of the rules that show one of `qids` and test the typed Partner box
+    (q331). The sync writes such a term only for a club name several partners
+    share."""
     out = []
     for c in conditions:
-        try:
-            terms = json.loads(c["terms"]) if isinstance(c["terms"], str) else c["terms"]
-            actions = json.loads(c["action"]) if isinstance(c["action"], str) else c["action"]
-        except (KeyError, ValueError, TypeError):
+        parts = rule_parts(c)
+        if parts is None:
             continue
-        actions = actions if isinstance(actions, list) else [actions]
-        shows = any(isinstance(a, dict) and str(a.get("field")) in qids for a in actions)
-        if shows and any(isinstance(t, dict) and str(t.get("field")) in fields for t in terms):
+        terms, actions = parts
+        shows = any(str(a.get("field")) in qids for a in actions)
+        if shows and any(str(t.get("field")) == PARTNER for t in terms):
             out.append(str(c.get("id")))
     return out
 
 
-def describe_rows(rows):
-    if not rows:
-        return "no rows"
-    if len(rows) > 1 and rows == list(range(rows[0], rows[-1] + 1)):
-        return f"rows {rows[0]}-{rows[-1]}"
-    shown = ", ".join(map(str, rows[:8])) + (", ..." if len(rows) > 8 else "")
-    return ("row " if len(rows) == 1 else "rows ") + shown
-
-
 def form_questions(client, form_id, old, new):
-    """([qids of roster questions named old], [qids named new], the form's
-    partner fields, {qid named old: cell_key of each girl it lists}) on one form."""
+    """([qids of roster questions named old], [qids named new], {qid named old:
+    cell_key of each girl it lists}) on one form."""
     questions = client.get(f"/form/{form_id}/questions")
     hits, clashes, girls = [], [], {}
     for qid, q in questions.items():
@@ -266,14 +213,7 @@ def form_questions(client, form_id, old, new):
             girls[qid] = {cell_key(o) for o in str(q.get("options") or "").split("|") if cell_key(o)}
         elif key(q.get("text")) == key(new):
             clashes.append(qid)
-    return hits, clashes, partner_fields(questions), girls
-
-
-def trimmed(row):
-    row = list(row)
-    while row and row[-1] == "":
-        row.pop()
-    return row
+    return hits, clashes, girls
 
 
 def masked(row, free):
@@ -417,9 +357,7 @@ def main():
 
     forms, client = [], None
     if not args.sheet_only:
-        api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-            "Set JOTFORM_API_KEY in the environment (.env), or pass --sheet-only")
-        client = Client(api_key, apply=args.apply)
+        client = Client(api_key(", or pass --sheet-only"), apply=args.apply)
         ids = args.form or []
         if not ids:
             if len(regions) != 1:
@@ -436,7 +374,7 @@ def main():
         namesakes = sharing_partners(tabs["Roster"], (partner,), {old}) if renaming else []
         own = club_girls(tabs["Roster"], partner, old) if namesakes else set()
         for fid in ids:
-            hits, clashes, pfields, girls = form_questions(client, fid, old, new)
+            hits, clashes, girls = form_questions(client, fid, old, new)
             label = glow_forms.LABELS.get(fid, fid)
             if clashes:
                 sys.exit(f"form {fid}: a roster question named {new!r} already exists "
@@ -466,11 +404,11 @@ def main():
                              "rename it in the sheet only - run again with --sheet-only - and the "
                              "next sync creates its roster under the new name")
             if moving:
-                props = client.get(f"/form/{fid}/properties", limit=1000)
-                gated = partner_gated(props.get("conditions") or [], {hits[0]}, pfields)
+                props = client.get(f"/form/{fid}/properties")
+                gated = partner_gated(props.get("conditions") or [], {hits[0]})
                 if gated:
                     sys.exit(f"form {fid}: rule {', '.join(gated)} shows q{hits[0]} only for a "
-                             "given Partner (typed or chosen from the partner list) - the name "
+                             "given Partner (the typed Partner box) - the name "
                              "is shared on this form, and a move would leave that rule on the "
                              "old partner until the next sync; sync the "
                              "form and check form_status first")
@@ -494,7 +432,7 @@ def main():
     zone = sc.named_zone(sc.time_zone(svc))
 
     # --- backups: the tabs as they are now, and a snapshot of each form written --
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp(datetime.now())
     out = os.path.join(OUT, stamp)
     os.makedirs(out, exist_ok=True)
     for tab, rows in tabs.items():
@@ -502,7 +440,7 @@ def main():
             csv.writer(f).writerows(rows)
     print(f"\nSaved the tabs before the change to {os.path.relpath(out, REPO)}/")
     for fid, _ in forms:
-        s = backup_forms.snapshot(fid, client, stamp)
+        s = backup.snapshot(fid, client, stamp)
         print(f"  backup_forms: form {fid} ({s['questions']} questions, {s['conditions']} "
               f"conditions) -> backups/{fid}/*-{stamp}.json")
 

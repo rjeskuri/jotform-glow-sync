@@ -7,50 +7,52 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 `tools/auto_sync.py`. Procedures: `docs/RUNBOOK.md`. Design: `docs/ARCHITECTURE.md`.
 
 ## Commands (run before saying "done"; paste the tail; fix the code, not the check)
-- `make check` — everything, offline, no credentials. Healthy tail: `ALL CHECKS PASSED` ×3,
-  `py: … scripts answer --help`, `OK`, `gs: 10 files parse`, `secrets: clean`, `docs-links: ok`,
-  `fixtures: up to date`, `CHECK PASSED`. With `data/enrollment_2026-08-24.csv` (or `CSV=<path>`)
-  it also prints `real data …: parsed 328 clubs, 6210 girls`.
-- `make venv` once per checkout (`.venv/`); `make lint` is advisory ruff.
+- Once per clone: `make venv` (with the ruff `make check` needs) and `make hooks` (pre-commit
+  secret scan and ruff, the commit template). `make docs-index` after a plan's or intent's
+  frontmatter changes.
+- `make check` — everything, offline. Healthy tail: `lint: ok`, `ALL CHECKS PASSED` ×4, `py: N
+  files parse, N scripts answer --help`, `Ran N tests … OK` (`make py`: unittest discover),
+  `gs: 10 files parse, 8 services, 0 unknown calls`, `secrets: clean`, `docs-links: ok`,
+  `doc-refs: ok`, `docs-index: ok`, `conflicts: none`, `fixtures: up to date`, `CHECK PASSED`.
 - `python3 tools/form_status.py --roster data/roster_<date>.csv --partners data/partners_<date>.csv`
-  — read-only; needs `JOTFORM_API_KEY` (`--partners`: the Partners tab, so a retired roster reads
-  clean). Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`, and,
-  right after the Roster line, `storage: upload space … -> ok; submissions this cycle … -> ok`
-  (`warn` from 50 % of a limit: BACKLOG "Gold versus retention"; `!!` and a runner ATTENTION
-  from 80 %).
-- `python3 tools/auto_sync.py` — the automatic loop as a dry run (writes nothing anywhere;
-  `--synclog` would record it in the sheet); healthy: every region `in-sync` (a disabled form's
-  region `skipped - form DISABLED`, RUNBOOK "Disabling a regional form").
+  — read-only, needs `JOTFORM_API_KEY`; `--roster` is required, `--partners` makes a retired
+  roster read clean. Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`,
+  `storage: … -> ok` (`warn` from 50 % of a limit, `!!` and a runner ATTENTION from 80 %).
+- `python3 tools/auto_sync.py` — the automatic loop as a dry run (writes nothing); healthy: every
+  region `in-sync` (a disabled form's `skipped - form DISABLED`).
 - `python3 sync_attendance_form.py <roster.csv> --roster --partners <partners.csv> --region Africa
   --form 262382821971058` — dry run; `--apply` writes. Form ids: `docs/RUNBOOK.md`.
-- `python3 tools/worklog.py update` — hours per day from the session transcripts into
-  `worklog/worklog.csv` (Ryan invoices this work monthly), on the Mac's clock at the time
-  (`worklog/timezones.csv`); after travel it refuses until `worklog.py zone --since … --zone …`
-  records the switch (RUNBOOK "Work log and invoices"); `export --month yyyy-mm` for the invoice.
 
 ## Conventions
 - Dry run by default; `--apply` writes; back up before a live write (`backup_forms.py --form`),
   re-read and compare after; refuse rather than guess (`sys.exit("what to fix")`).
-- `print()`, argparse, standard library only (the Sheets tools excepted). Tools in `tools/`;
-  the product `sync_attendance_form.py` and the rollback pair stay at the root.
+- `print()`, argparse, standard library only (the Sheets tools excepted). Shared code in `glow/`,
+  tools in `tools/`; `sync_attendance_form.py` and the rollback pair stay at the root.
 - Fictional names only in tests, fixtures and docs (`test/fixtures/make_fixture.py`); girls' names
   never in logs (`auto_sync.redact`), commits, or this file.
-- Work log (contract work, invoiced monthly): at the end of every working session run
-  `python3 tools/worklog.py update` and write or refresh that day's `description` in
-  `worklog/worklog.csv` — 1-3 plain, client-facing sentences on what was done; no girls' or
-  mentors' names, no jargon. Never edit `hours` of `auto` rows; Ryan adds `manual` rows. If
-  `update` refuses after a zone change, record it with `worklog.py zone` (check the suggested
-  moment against when Ryan travelled). `--drop-stale` / `--rewrite-old` only when Ryan's
-  correction calls for them (RUNBOOK "Work log and invoices").
-- Plan mode for anything beyond a one-line fix; the plan is committed under `docs/plans/` first;
-  intents in `docs/intent/`, decisions in `docs/DECISIONS.md`. Review against `REVIEW.md`.
+- Beyond a one-line fix: a plan in `docs/plans/` first (`status:` `proposed|accepted|in-progress|
+  blocked|done|superseded`); an intent is optional. A decision: a dated section at the end of
+  `docs/DECISIONS.md`. BACKLOG: a new item takes the next free number, an update is a dated
+  bullet, never renumber. Review against `REVIEW.md`.
+- Commits: subject ≤ 72 characters, `area: what changed`, blank line, a body that says why;
+  trailers when they apply: `Plan: docs/plans/…`, `Backlog: N`, `Live: none | <what, when UTC,
+  Ryan's go>` (`.gitmessage`). Subjects before 2026-10-09 averaged 200+ characters, unreadable.
+- Branches: features in a worktree `.claude/worktrees/<name>` on `wf<N>/<slug>` (or
+  `fix/<slug>`); the primary checkout stays on `main`. Merge with `/integrate`, then delete branch
+  and worktree — first check its `data/` and `backups/` for files that exist nowhere else
+  (`git worktree remove` deletes them; on 2026-10-09 one held the only copies of 11 files).
+- Work log (invoiced monthly): `/harness:worklog` at the end of every session (`tools/worklog.py
+  update`; after travel `worklog.py zone`: RUNBOOK "Work log and invoices"). Descriptions: 1-3
+  plain, client-facing sentences, no names. Never edit `hours` of `auto` rows; `--drop-stale` /
+  `--rewrite-old` only on Ryan's word. Hours come from the primary checkout's transcript folder: a
+  session started from the home folder counts only if `--transcripts` names it (missed 2026-10-09).
 
 ## Things Claude gets wrong
-1. Never run `--apply`, `--prune`, `clasp push`, `upload_roster.py --apply`,
-   `sheets_client.py import`, `auto_sync.py --apply-salesforce`, `gh variable set SF_SYNC …` or
-   `gh workflow run auto-sync.yml -f apply=true` without Ryan's explicit go in this conversation.
-   The hook `.claude/hooks/live_gate.sh` blocks most of them unless HE exported `GLOW_LIVE_OK=1`
-   before launching; it does not see the two `gh` commands (BACKLOG 53).
+1. Every live write needs Ryan's explicit go in this conversation: `--apply`, `--prune`,
+   `--rehearse`, `clasp push`, the sync's GitHub switches (`gh variable|secret set`, `gh workflow
+   run … apply=true`), Salesforce writes and deploys. `.claude/hooks/live_gate.sh` blocks them
+   (`gh` and `sf` too) unless HE exported `GLOW_LIVE_OK=1` before launching; it is a seatbelt, not
+   the go: it misses the connectors and a write through another program.
 2. The API key comes from `.env` / the environment, never a command line (command lines land in
    `.claude/settings.local.json` and transcripts — that leaked a key once).
 3. The sync rewrites ALL conditions on every run, so anything added to a form by hand is wiped:
@@ -65,21 +67,24 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
    sheet's ReviewQueue say so. A partner whose clubs do not report through Jotform is marked `no`
    in the Partners tab's `jotform` column instead — its rosters are retired, kept hidden and off
    the Club picker (RUNBOOK "Clubs that do not use Jotform"); never a blank region.
-7. qids, `SESSION_OVERRIDES`, form ids, `ROSTER_COLS`, `PARTNER_COLS`, `SYNC_LOG_COLS` exist in BOTH
-   Python and `appsscript/Config.gs` / `Roster.gs` (`PARTNER_COLS` in `tools/build_roster_offline.js`
-   too) — change both; `test/python_test.py` fails otherwise. `glow/sync.py SHEET_ZONE` is the
-   sheet's own File → Settings zone (America/New_York, what stamps `removed_date`), not
-   `appsscript.json`'s `timeZone`; the runner checks it each run.
-8. `appsscript/Regions.gs` is generated; the sheet's Partners tab wins over it. `data/`, `backups/`,
-   `credentials/` hold PII or secrets: never commit, quote or print their contents.
+7. In BOTH Python and `appsscript/`, checked by `test/gs_parity_test.py` — change both:
+   `SF_NAME_SEP`, `REGIONS`, `ROSTER_COLS`, `PARTNER_COLS` (`tools/build_roster_offline.js` too),
+   `SYNC_LOG_COLS`, the runner's tab names, `RESPONSE_COLS`; `SF_PENDING_COLS` (by
+   `test/sf_new_clubs_test.py`). qids, form ids, `SESSION_OVERRIDES`: Python only. `glow/sync.py
+   SHEET_ZONE` is the sheet's own zone (America/New_York), not `appsscript.json`'s `timeZone`.
+8. `appsscript/Regions.gs` is hand-kept data (its "GENERATED" header is stale), protected by the
+   edit hook; the sheet's Partners tab wins over it. `data/`, `backups/`, `credentials/` hold PII
+   or secrets: never commit, quote or print their contents.
 9. Jotform `POST /form/{id}/translations` REPLACES a language's dictionary: GET, merge, POST; a new
    English string also needs its `base`+`en` entries (`.claude/skills/jotform-api`).
 10. Python `read_sheet` keeps partner-less rows and only strips `-` bullets; Apps Script drops those
     rows and strips `•`/`*` too — known divergences, do not silently fix one side.
-11. Node 18 + clasp 2.4.2 are pinned (clasp 3 needs Node 20). A new Google service in a `.gs` file
-    adds an OAuth scope, and until the owner re-authorizes, the form-submit trigger FAILS HARD
-    (submissions unprocessed) — push at a quiet moment, authorize immediately, then run
-    "Process any missed form responses" and read its preview: only what arrived since the push,
-    plus earlier `retry after ERROR` rows (docs/RUNBOOK.md, "Missed form responses"). Never roll
-    `appsscript/` back before `7a175c4`, nor before `986a325` once the Feedback tab has two reply
-    columns; deal with held new clubs first (docs/RUNBOOK.md, "Rolling back `appsscript/`").
+11. Node 18 + clasp 2.4.2 are pinned. A new Google service in a `.gs` file adds an OAuth scope, and
+    until the owner re-authorizes, the form-submit trigger FAILS HARD (`make gs` fails on a 9th
+    service). Never roll `appsscript/` back before `7a175c4`, nor before `986a325` once the Feedback
+    tab has two reply columns. To push or roll back: load `/deploy-appsscript`.
+12. Salesforce: VPN off before any `sf` call (Salesforce freezes the user); the tools take
+    `--vpn-off`. Reads: the read-only connector (`Global_Glow_SF` `soqlQuery`) or Ryan's `sf`
+    alias `glow`. Writes: the write connector (`Global_Glow_Full_Access`), one record per call, on
+    Ryan's go, never from a subagent; or the plan/apply tools with ledgers. Metadata: retrieve →
+    check-only validate → Ryan's go → quick deploy → read back. Load `.claude/skills/salesforce`.

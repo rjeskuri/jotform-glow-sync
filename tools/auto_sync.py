@@ -72,15 +72,18 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
 import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily inside it)
+from glow import backup  # noqa: E402  (the conditions-only copy of the snapshot)
 from glow import forms as glow_forms  # noqa: E402
+from glow.cli import api_key  # noqa: E402
 from glow import usage  # noqa: E402  (Jotform's storage against the plan's limits; standard library)
 from glow.jotform import Client  # noqa: E402  (the one read this file makes itself: the usage)
 from glow.sync import SHEET_ZONE, sf_name_clashes  # noqa: E402  (standard library only)
+from glow.text import key  # noqa: E402
 from glow.salesforce import Org, client_credentials  # noqa: E402
 import sf_new_clubs as sfn  # noqa: E402  (new clubs' Salesforce accounts, BACKLOG 27)
 
 # The live regional forms (one source: glow/forms.py, parity-tested against
-# appsscript/Config.gs by test/python_test.py).
+# appsscript/Config.gs by test/gs_parity_test.py).
 REGIONAL_FORMS = glow_forms.REGIONALS
 ROSTER_TAB = "Roster"
 PARTNERS_TAB = "Partners"
@@ -91,7 +94,7 @@ SYNC_LOG_COLS = ["when", "trigger", "region", "mode", "creates", "updates",
 MIN_LANGUAGES = 12
 DEFAULT_OUT = os.path.join(REPO, "data", "auto_sync")
 
-# The sync tool's plan lines (sync_attendance_form.py; test/python_test.py
+# The sync tool's plan lines (sync_attendance_form.py; test/auto_sync_test.py
 # checks these formats still exist there).
 CREATE_RX = re.compile(r"^  - CREATE roster '(?P<club>.+)' \((?P<girls>\d+) girls\)$")
 # an options update may carry the roster's required flag in the same write
@@ -102,8 +105,6 @@ REQUIRED_RX = re.compile(r"^  - REQUIRED roster '(?P<club>.+)' \(q(?P<qid>\d+): 
 DELETE_RX = re.compile(r"^  - DELETE roster '(?P<club>.+)' \(q(?P<qid>\d+), belongs to (?P<region>.+)\)$")
 REPLACE_RX = re.compile(r"^  - REPLACE conditions \((?P<rules>\d+) rules")
 PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs(?::[^)]*)?\)$")
-PARTNER_PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) partner picker "
-                               r"\((?P<partners>\d+) partners(?::[^)]*)?\)$")
 GUARD_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club guard \([^)]*\)$")
 # a module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES): never applied unattended
 # (check_bands) - the first rollout is by hand, template first; afterwards a difference means
@@ -141,10 +142,6 @@ RULES_OLDER = "which the Club picker does not list"
 CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
 
 
-def key(s):
-    return " ".join(str(s or "").split()).lower()
-
-
 # ------------------------------------------------------------ pure functions
 def module_entry(m):
     """A MODULE_RX match -> {"qid", "year", "modules"} (modules: 0 = the calcValues cleared)."""
@@ -154,7 +151,7 @@ def module_entry(m):
 def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
     plan = {"creates": [], "updates": [], "deletes": [], "requires": [], "picker": [],
-            "partner_picker": [], "club_guard": [], "modules": [], "retired": [], "restored": [],
+            "club_guard": [], "modules": [], "retired": [], "restored": [],
             "rules": None, "warnings": [], "roster_clubs": None, "roster_girls": None,
             "sf_names": None}     # sf_names: only the summary file has them
     for line in text.splitlines():
@@ -177,10 +174,6 @@ def parse_plan(text):
         m = PICKER_RX.match(line)
         if m:
             plan["picker"].append({"op": m["op"], "clubs": int(m["clubs"])})
-            continue
-        m = PARTNER_PICKER_RX.match(line)
-        if m:
-            plan["partner_picker"].append({"op": m["op"], "partners": int(m["partners"])})
             continue
         m = GUARD_RX.match(line)
         if m:
@@ -222,9 +215,6 @@ def plan_from_summary(summary):
                          for r in summary.get("requires", [])],
             "picker": [{"op": m["op"], "clubs": int(m["clubs"])}
                        for m in (PICKER_RX.match("  - " + c) for c in summary.get("calls", [])) if m],
-            "partner_picker": [{"op": m["op"], "partners": int(m["partners"])}
-                               for m in (PARTNER_PICKER_RX.match("  - " + c)
-                                         for c in summary.get("calls", [])) if m],
             "club_guard": [{"op": m["op"]} for m in (GUARD_RX.match("  - " + c)
                                                      for c in summary.get("calls", [])) if m],
             "modules": [module_entry(m) for m in (MODULE_RX.match("  - " + c)
@@ -292,20 +282,18 @@ def name_clashes(sf_names_by_region):
 
 def changes(plan):
     """Roster creates/updates/deletes, required flags written on their own, module dropdowns'
-    calcValues, plus a Club-picker, partner-list or club-guard update (never a create: the runner
-    passes none of --club-picker, --partner-picker and --club-guard, so a CREATE here means
-    someone else did)."""
+    calcValues, plus a Club-picker or club-guard update (never a create: the runner passes
+    neither --club-picker nor --club-guard, so a CREATE here means someone else did)."""
     return (len(plan["creates"]) + len(plan["updates"]) + len(plan["deletes"])
             + len(plan.get("requires", [])) + len(plan.get("modules", []))
-            + len(plan.get("picker", [])) + len(plan.get("partner_picker", []))
-            + len(plan.get("club_guard", [])))
+            + len(plan.get("picker", [])) + len(plan.get("club_guard", [])))
 
 
 def plan_summary(plan):
     """One line for the SyncLog detail and the attention title: the roster counts, then the
-    required flags written on their own, the module dropdowns' calcValues, and each Club-picker,
-    partner-list or club-guard write by name (only when planned), so a list-only apply does not
-    read as "0 create(s), 0 update(s)"."""
+    required flags written on their own, the module dropdowns' calcValues, and each Club-picker
+    or club-guard write by name (only when planned), so a list-only apply does not read as
+    "0 create(s), 0 update(s)"."""
     requires = plan.get("requires", [])
     values = sorted({r["required"] for r in requires})
     modules = plan.get("modules", [])
@@ -317,7 +305,6 @@ def plan_summary(plan):
             + (f", {len(retired)} retired" if retired else "")
             + (f", {len(restored)} restored" if restored else "")
             + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
-            + "".join(f", {m['op'].lower()} partner list" for m in plan.get("partner_picker", []))
             + "".join(f", {m['op'].lower()} club guard" for m in plan.get("club_guard", [])))
 
 
@@ -483,7 +470,7 @@ class Run:
         # cannot be misread as sheet time)
         self.started = datetime.datetime.now(datetime.timezone.utc)
         now = self.started.astimezone()
-        self.stamp = now.strftime("%Y-%m-%dT%H%M%S")
+        self.stamp = backup.stamp(now)
         self.when = now.strftime("%Y-%m-%d %H:%M:%S %z")
         self.mode = "apply" if args.apply else "dry-run"
         self.sf_names = {}        # region -> what each of its rosters sends to question 5
@@ -530,7 +517,7 @@ class Run:
         for i in range(tries):
             try:
                 return fn()
-            except Exception as err:                      # noqa: BLE001 - network errors of any shape
+            except Exception as err:                      # network errors of any shape
                 if i == tries - 1:
                     raise
                 self.log(f"  ! {label}: {err.__class__.__name__}: {str(err)[:200]} - retry in {delay}s")
@@ -581,7 +568,7 @@ class Run:
         # that cannot be read is a failure of this region; the run goes on to the next
         try:
             status = self.read_status(form)
-        except Exception as err:                      # noqa: BLE001 - a JotformError of any shape
+        except Exception as err:                      # a JotformError of any shape
             self.failed = True
             self.result(region, None, "failed",
                         f"could not read form status: {err.__class__.__name__}: {str(err)[:200]}")
@@ -815,7 +802,7 @@ class Run:
         is that log line within minutes, not a run held to the job's timeout."""
         try:
             u = read()
-        except Exception as err:                      # noqa: BLE001 - a Jotform error of any shape
+        except Exception as err:                      # a Jotform error of any shape
             self.log(f"\nstorage: could not be read ({err.__class__.__name__})")
             return
         self.log("\n" + usage.storage_line(u))
@@ -862,7 +849,7 @@ class Run:
                            retry=self.with_retry)
         try:
             self.sf.prepare()
-        except Exception as err:                          # noqa: BLE001 - the forms sync whatever happens here
+        except Exception as err:                          # the forms sync whatever happens here
             self.sf.broken = f"{err.__class__.__name__}: {str(err)[:200]}"
             self.sf.warn("not ready - no account is created or checked this run", self.sf.broken)
 
@@ -871,7 +858,7 @@ class Run:
             return
         try:
             self.sf.create(region, plan)
-        except Exception as err:                          # noqa: BLE001 - the form still applies
+        except Exception as err:                          # the form still applies
             self.sf.warn(f"{region}: the create step failed ({err.__class__.__name__})", str(err)[:300])
 
     def sf_finish(self, svc):
@@ -889,7 +876,7 @@ class Run:
                                                    for r in REGIONAL_FORMS))
             if self.sf.created and self.sf.mode == "apply" and getattr(self.args, "synclog", False):
                 self.mark_sf_pending(svc or sc.service())
-        except (SystemExit, Exception) as err:            # noqa: BLE001 - sheets_client reports via sys.exit
+        except (SystemExit, Exception) as err:            # sheets_client reports via sys.exit
             self.sf.warn(f"the end-of-run step failed ({err.__class__.__name__})", str(err)[:300])
         finally:
             self.sf.close()
@@ -922,13 +909,8 @@ class Run:
         Salesforce integration settings, so only this file may leave the
         machine (the workflow artifact). Restore with:
         restore_conditions.py --form <id> --from conditions-<stamp>.json"""
-        src = os.path.join(REPO, "backups", form, "properties-latest.json")
         try:
-            with open(src, encoding="utf-8") as f:
-                props = json.load(f)
-            out = os.path.join(REPO, "backups", form, f"conditions-{self.stamp}.json")
-            with open(out, "w", encoding="utf-8") as f:
-                json.dump({"conditions": props.get("conditions", [])}, f, indent=1)
+            backup.save_conditions(form, self.stamp)
         except (OSError, ValueError) as err:
             self.log(f"  ! could not write the conditions-only copy: {err}")
 
@@ -989,8 +971,7 @@ def main():
     ap.add_argument("--run-url", default=os.environ.get("AUTO_SYNC_RUN_URL", ""),
                     help="link recorded in SyncLog (Actions sets AUTO_SYNC_RUN_URL)")
     args = ap.parse_args()
-    if not os.environ.get("JOTFORM_API_KEY"):
-        sys.exit("Set JOTFORM_API_KEY in the environment (a dry run reads the forms too)")
+    jotform_key = api_key(": a dry run reads the forms too")   # stripped, as the children's is
     if args.roster and not args.partners:
         # with --roster nothing is exported, and the sheet service is never built
         sys.exit("--roster needs --partners <Partners export>: with --roster nothing is exported, and "
@@ -1000,7 +981,7 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     run = Run(args)
-    run.client = Client(os.environ["JOTFORM_API_KEY"], max_time=60)   # bounded: a stalled GET must not hold the run
+    run.client = Client(jotform_key, max_time=60)   # bounded: a stalled GET must not hold the run
     run.log(f"auto-sync {run.when}  trigger={args.trigger}  mode={run.mode}  "
             f"regions={', '.join(args.region or REGIONAL_FORMS)}")
     svc = None
@@ -1047,7 +1028,7 @@ def main():
         try:
             svc = svc or sc.service()
             run.with_retry(lambda: run.append_synclog(svc), "SyncLog")
-        except (SystemExit, Exception) as err:            # noqa: BLE001 - sheets_client reports via sys.exit;
+        except (SystemExit, Exception) as err:            # sheets_client reports via sys.exit;
             # a SyncLog failure must not discard the log/ATTENTION files below
             run.attention.append(("SyncLog row could not be written",
                                   f"{err.__class__.__name__}: {str(err)[:300]}\n"

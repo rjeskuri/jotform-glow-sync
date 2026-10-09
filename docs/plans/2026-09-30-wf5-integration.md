@@ -2,6 +2,8 @@
 title: Rosters above Submit and the club guard, merged together (wf5 integration)
 author: Claude (workflow integrator, wf5/integration, 2026-09-30)
 status: done             # accepted by Ryan 2026-09-30 with both plans below; merged, the roster-order repair and the club guard live on all five forms the same day (Result)
+done: 2026-09-30
+backlog: 47, 48
 created: 2026-09-30
 intent: none — integrates [plans/2026-09-29-rosters-above-submit.md](2026-09-29-rosters-above-submit.md) (BACKLOG 47) and [plans/2026-09-29-club-guard.md](2026-09-29-club-guard.md) (BACKLOG 48)
 ---

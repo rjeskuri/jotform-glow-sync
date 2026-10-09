@@ -1,7 +1,7 @@
 ---
 title: The group photo never reaches Salesforce; it is kept where staff can find it, under GLOW's control
 author: GLOW's CEO (the decision of 2026-10-01) and Ryan (2026-10-06), captured by Claude
-status: proposed
+status: in-progress   # its plan is built and merged; the Drive set-up is Ryan's
 created: 2026-10-06
 ---
 

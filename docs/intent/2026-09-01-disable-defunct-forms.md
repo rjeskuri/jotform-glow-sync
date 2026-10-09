@@ -1,7 +1,8 @@
 ---
 title: Switch off the five pre-launch attendance forms
 author: Ryan Eskuri (backlog item 1, captured by Claude)
-status: proposed
+status: done          # the five pre-launch forms DISABLED since 2026-09-30 (BACKLOG 1)
+done: 2026-09-30
 created: 2026-09-01
 ---
 

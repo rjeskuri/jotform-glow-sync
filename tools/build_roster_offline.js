@@ -77,10 +77,9 @@ const TODAY = at.year + '-' + at.month + '-' + at.day;
 const NOW = TODAY + ' ' + at.hour + ':' + at.minute + ':' + at.second;
 
 // ------------------------------------------------ load the real .gs code
-// Only the pure-logic files; Roster.gs/Menu.gs call SpreadsheetApp.
-const gs = require('../test/load_gs')(['TAB', 'ROSTER_COLS', 'RESPONSE_COLS', 'STATUS',
-  'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'tidy_', 'key_', 'asciiCode_', 'parseRoster_',
-  'lastName_', 'clubCode_', 'mintGirlId_', 'planClub_']);
+// Every top-level name of the pure-logic files; Roster.gs/Menu.gs call SpreadsheetApp.
+const gs = require('../test/load_gs')();
+const { readCsv } = require('../test/helpers/js/csv');
 
 const REVIEW_COLS = ['raised', 'issue', 'partner', 'club', 'detail', 'resolved'];
 // keep in step with Roster.gs PARTNER_COLS and glow/sync.py (the parity test compares them)
@@ -89,23 +88,6 @@ const CLUB_COLS = ['club_code', 'partner', 'club', 'created'];
 const AUDIT_COLS = ['when', 'action', 'detail'];
 
 // ------------------------------------------------------------- CSV helpers
-function parseCsv(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (c === '"') inQuotes = false;
-      else field += c;
-    } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (c !== '\r') field += c;
-  }
-  if (field || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
 function csvCell(v) {
   const s = v == null ? '' : String(v);
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -114,22 +96,19 @@ function writeCsv(file, header, rows) {
   const lines = [header, ...rows].map(r => r.map(csvCell).join(','));
   fs.writeFileSync(file, lines.join('\n') + '\n');
 }
-function readCsvFile(file) {
-  return parseCsv(fs.readFileSync(file, 'utf8').replace(/^﻿/, ''));
-}
 function readExisting(name, cols) {
   // rows of an existing tab as arrays padded to `cols`, or [] if absent
   if (!existingDir) return [];
   const file = path.join(existingDir, name + '.csv');
   if (!fs.existsSync(file)) return [];
-  return readCsvFile(file).slice(1).map(r => {
+  return readCsv(file).slice(1).map(r => {
     const out = cols.map((_, j) => (r[j] == null ? '' : r[j]));
     return out;
   }).filter(r => r.some(v => String(v).trim()));
 }
 
 // ------------------------------------- readResponses_ (mirror of Normalize.gs)
-const csv = readCsvFile(csvPath);
+const csv = readCsv(csvPath);
 const header = csv[0].map(h => String(h).toLowerCase());
 function col(fragment) {
   const i = header.findIndex(h => h.includes(fragment));
@@ -149,7 +128,7 @@ for (let r = 1; r < csv.length; r++) {
   if (!partner || !club) continue;
   const parsed = gs.parseRoster_(row[iRoster]);
   if (!parsed.names.length) continue;
-  byIdentity[gs.key_(partner) + '||' + gs.key_(club)] = {
+  byIdentity[gs.clubKey_(partner, club)] = {
     partner, club, names: parsed.names, duplicates: parsed.duplicates, sourceRow: r + 1,
   };
 }
@@ -163,7 +142,7 @@ for (const row of registryRows) {
   const code = gs.tidy_(row[0]), partner = gs.tidy_(row[1]), club = gs.tidy_(row[2]);
   if (!code) continue;
   const entry = { code, partner, club };
-  registry.byKey[gs.key_(partner) + '||' + gs.key_(club)] = entry;
+  registry.byKey[gs.clubKey_(partner, club)] = entry;
   registry.byCode[code] = entry;
 }
 const existingRows = readExisting('Roster', gs.ROSTER_COLS).map(v => {
@@ -180,7 +159,7 @@ for (const row of existingRows) {
 }
 const existingByClub = {};
 for (const row of existingRows) {
-  const ck = gs.key_(row.partner) + '||' + gs.key_(row.club);
+  const ck = gs.clubKey_(row.partner, row.club);
   (existingByClub[ck] = existingByClub[ck] || []).push(row);
 }
 
@@ -203,7 +182,7 @@ let newGirls = 0, reactivated = 0;
 const state = { registry, sequence };
 for (const entry of clubs) {
   partnersSeen[gs.key_(entry.partner)] = entry.partner;
-  const ck = gs.key_(entry.partner) + '||' + gs.key_(entry.club);
+  const ck = gs.clubKey_(entry.partner, entry.club);
   const region = regions[gs.key_(entry.partner)] || '';
   if (!region) noRegion[gs.key_(entry.partner)] = entry.partner;
   entry.source = gs.TAB.RESPONSES + '!' + entry.sourceRow;

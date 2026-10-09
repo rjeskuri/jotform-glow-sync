@@ -31,7 +31,6 @@ refuse without --vpn-off.
 import argparse
 import csv
 import datetime
-import hashlib
 import io
 import json
 import os
@@ -42,9 +41,11 @@ import unicodedata
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "tools"))
-from sf_club_accounts import ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, odd   # noqa: E402
-from glow.salesforce import API, NEXT_PAGE, Org, Refused, quoted   # noqa: E402,F401 (re-exported)
+from glow.private_files import (STAMP, Ledger, keep_private, last_rows, load_json,   # noqa: E402
+                                open_private, private_folder, rel, save_private, sha256, stamp)
+from glow.salesforce import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, Org, Refused,   # noqa: E402
+                             add_vpn_flag, apex_trim, error_codes, has_invisible, plain, positive, quoted,
+                             require_vpn_off, sf_match)
 
 DEFAULT_DIR = os.path.join(REPO, "data", "backfill_2026-09")
 SCOPE_START = datetime.date(2026, 9, 1)      # attendance dated before the launch is held, not sent
@@ -52,7 +53,6 @@ MAX_NEW = 22                                 # new girls in one batch proven so 
 MAX_AGE_HOURS = 3                            # how old the fetched submissions may be when sending
 CREATOR = "Jotform back-fill"                # the processor never reads the batch's Creator__c
 OK_STATUS, OK_MESSAGE = "Success", "Processed successfully."
-STAMP = "%Y-%m-%dT%H:%M:%SZ"
 CREATED_AT = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 SETTLE_AFTER_MINUTES = 10                    # a request Salesforce is still working on can commit this late
 LEDGER_COLS = ["when_utc", "done_utc", "key", "region", "account_id", "account_name", "attendance_date",
@@ -70,101 +70,20 @@ RELEASABLE = {"several_rosters_ticked", "name_unknown_to_roster", "date_before_s
               "date_after_submission", "club_has_earlier_contacts", "similar_names",
               "more_new_girls_than_proven"}
 DONE, OPEN, UNSETTLED = {"ok", "accepted"}, {"CHECK"}, {"sending", "unknown"}
-# the only words of a Salesforce error this tool repeats; the message itself can quote a girl's name
-ERROR_CODES = {"DUPLICATES_DETECTED", "STRING_TOO_LONG", "REQUIRED_FIELD_MISSING", "INVALID_FIELD",
-               "FIELD_CUSTOM_VALIDATION_EXCEPTION", "FIELD_INTEGRITY_EXCEPTION", "UNABLE_TO_LOCK_ROW",
-               "CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY", "INSUFFICIENT_ACCESS_OR_READONLY", "LIMIT_EXCEEDED",
-               "INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY", "INVALID_CROSS_REFERENCE_KEY",
-               "REQUEST_LIMIT_EXCEEDED", "INVALID_SESSION_ID", "JSON_PARSER_ERROR", "ENTITY_IS_DELETED"}
-
-
-def within(path, root):
-    """Is path the folder root or somewhere under it? By inode: symlinks and letter case do not fool it."""
-    path = os.path.realpath(path)
-    while os.path.exists(root):
-        if os.path.exists(path) and os.path.samefile(path, root):
-            return True
-        parent = os.path.dirname(path)
-        if parent == path:
-            break
-        path = parent
-    return False
 
 
 class Paths:
     def __init__(self, folder):
-        folder = os.path.abspath(folder)
-        if not os.path.isdir(folder):
-            raise Refused(f"--dir: there is no folder {folder}")
-        if within(folder, REPO) and not within(folder, os.path.join(REPO, "data")):
-            raise Refused("--dir: inside the checkout the back-fill folder must be under data/ (it holds names)")
+        folder = private_folder(folder, "the back-fill folder", "it holds names", repo=REPO, make=False)
         self.folder = folder
         self.resolved = os.path.join(folder, "resolved.json")
         self.state = os.path.join(folder, "sf_state.json")
         self.decisions = os.path.join(folder, "decisions.csv")
         self.plan = os.path.join(folder, "plan.json")
         self.held = os.path.join(folder, "held.csv")
-        self.ledger = os.path.join(folder, "ledger.csv")
+        self.ledger = Ledger(os.path.join(folder, "ledger.csv"), LEDGER_COLS)
         self.sent_names = os.path.join(folder, "sent_names.json")
         self.contacts = os.path.join(folder, "created_contacts.csv")
-
-    def keep_private(self):
-        """The folder and what is in it hold girls' names: the owner only, whoever created them."""
-        os.chmod(self.folder, 0o700)
-        for name in os.listdir(self.folder):
-            path = os.path.join(self.folder, name)
-            if os.path.isfile(path) and not os.path.islink(path):
-                os.chmod(path, 0o600)
-
-
-def now():
-    return datetime.datetime.now(datetime.timezone.utc).strftime(STAMP)
-
-
-def sha256(path):
-    if not os.path.exists(path):
-        return "absent"
-    with open(path, "rb") as fh:
-        return hashlib.sha256(fh.read()).hexdigest()
-
-
-def rel(path):
-    return os.path.relpath(path, REPO)
-
-
-def load_json(path, what):
-    if not os.path.exists(path):
-        raise Refused(f"{what} is missing: {rel(path)}")
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (ValueError, OSError):
-        raise Refused(f"{what} cannot be read as JSON: {rel(path)}") from None
-
-
-def open_private(path, mode):
-    """A file only the owner can read, also when it already existed with a wider mode."""
-    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if mode == "a" else os.O_TRUNC)
-    fd = os.open(path, flags, 0o600)
-    os.fchmod(fd, 0o600)
-    return os.fdopen(fd, mode, encoding="utf-8", newline="")
-
-
-def save_private(path, text):
-    """All of the new content or none of it: written beside the file, then moved onto it."""
-    with open_private(path + ".new", "w") as fh:
-        fh.write(text)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(path + ".new", path)
-
-
-# ---- Salesforce: glow/salesforce.py (Org, the CLI login, curl) ------------------------------------
-
-
-def plain(records):
-    return [{k: v for k, v in r.items() if k != "attributes"} for r in records]
-
 
 # ---- snapshot ------------------------------------------------------------------------------------
 STATE_QUERIES = {
@@ -182,7 +101,7 @@ def cmd_snapshot(args, paths, org):
     state = {"read_at_utc": "", "source": f"sf CLI login '{org.alias}'"}
     for name, soql in STATE_QUERIES.items():
         state[name] = plain(org.query(soql))
-    state["read_at_utc"] = now()
+    state["read_at_utc"] = stamp()
     save_private(paths.state, json.dumps(state, indent=1))
     print(f"snapshot: {len(state['accounts'])} accounts, {len(state['batches'])} batches, "
           f"{len(state['attendance'])} club days with attendance, {len(state['participants'])} clubs "
@@ -311,25 +230,6 @@ def read_decisions(path):
     return out
 
 
-def read_ledger(path):
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
-        return []
-    with open(path, encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        if reader.fieldnames != LEDGER_COLS:
-            raise Refused("ledger.csv does not start with its header line - restore it before anything else: "
-                          + ",".join(LEDGER_COLS))
-        return list(reader)
-
-
-def last_rows(ledger):
-    """key -> its last ledger row (the ledger is append-only; the last line is a key's state)."""
-    out = {}
-    for row in ledger:
-        out[row["key"]] = row
-    return out
-
-
 def stamp_of(row):
     return row["done_utc"] or row["when_utc"]
 
@@ -385,18 +285,29 @@ def bad_name(name):
         return "a blank name"
     if "," in name:
         return "a comma (Salesforce would split it into two girls)"
-    if name != " ".join(name.split()) or odd(name) or name != nfc(name):
+    if name != " ".join(name.split()) or has_invisible(name) or name != nfc(name):
         return "doubled or invisible characters"
     if len(first) > 40 or len(rest) > 80 or (not rest and len(first) > 80):
         return "a name part longer than the Contact fields"
     return None
 
 
-def resolve_account(name, by_name):
-    """(account, None) or (None, why it cannot be used)."""
+def accounts_by_length(accounts):
+    """{len(Name): [account, ...]}: sf_match accepts only an Account name as long as the trimmed
+    question 5, so a name is compared with these alone."""
+    out = {}
+    for acc in accounts:
+        out.setdefault(len(acc["Name"]), []).append(acc)
+    return out
+
+
+def resolve_account(name, by_length):
+    """(account, None) or (None, why it cannot be used). The account is the one the processor
+    books the name on: glow.salesforce.sf_match (question 5 trimmed as Java trims, case ignored
+    one character to one - 'Straße' is not 'STRASSE'), not a case-fold."""
     if not isinstance(name, str) or not name.strip():
         return None, "no_account_name"
-    found = by_name.get(name.strip().casefold(), [])
+    found = [acc for acc in by_length.get(len(apex_trim(name)), []) if sf_match(name, acc["Name"])]
     if not found:
         return None, "account_not_found"     # the processor would CREATE a stray Club account
     if len(found) > 1:
@@ -417,16 +328,14 @@ def as_number(value):
 def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, dup_rule_ok=False):
     """(queue, held, skipped, notes): the sessions to send in order, the held ones with EVERY
     reason that holds them, the skipped ones, and counts for the report."""
-    by_name = {}
-    for acc in state["accounts"]:
-        by_name.setdefault(acc["Name"].strip().casefold(), []).append(acc)
+    by_length = accounts_by_length(state["accounts"])
     batches_on = {}
     for batch in state["batches"]:
         batches_on.setdefault((batch.get("Account__c"), batch.get("Attendance_Date__c")), []).append(batch)
     rows_on = {(a["Account__c"], a["Attendance_Date__c"]): a["n"] for a in state["attendance"]}
     participants = {p["AccountId"]: p["n"] for p in state["participants"]}
     batch_ids = {b["Id"] for b in state["batches"]}
-    last = last_rows(ledger)
+    last = last_rows(ledger, "key")
     if ledger and state["read_at_utc"] < max(stamp_of(r) for r in ledger):
         raise Refused("the Salesforce snapshot is older than the last batch this tool sent - snapshot again")
     done = {key: row for key, row in last.items() if row["status"] in DONE}
@@ -456,7 +365,7 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
     #    grouped, so a moved report joins (or collides with) what that day already has
     groups, origins, clubs_of = {}, set(), {}    # clubs_of: submission -> the clubs its rows lead to today
     for row in resolved["rows"]:
-        acc, why = resolve_account(row.get("sf_account_name"), by_name)
+        acc, why = resolve_account(row.get("sf_account_name"), by_length)
         if why:
             hold([why], [row])
             continue
@@ -657,11 +566,11 @@ def cmd_plan(args, paths):
     resolved = check_resolved(load_json(paths.resolved, "the resolver's output"))
     state = check_state(load_json(paths.state, "the Salesforce snapshot"))
     queue, held, skipped, notes = build_plan(resolved, state, read_decisions(paths.decisions),
-                                             read_ledger(paths.ledger), read_sent_names(paths.sent_names),
+                                             paths.ledger.read(), read_sent_names(paths.sent_names),
                                              max_new=args.max_new, dup_rule_ok=args.dup_rule_ok)
-    plan = {"made_at_utc": now(), "resolved_sha256": sha256(paths.resolved),
+    plan = {"made_at_utc": stamp(), "resolved_sha256": sha256(paths.resolved),
             "decisions_sha256": sha256(paths.decisions), "resolved_fetched_at_utc": resolved["fetched_at_utc"],
-            "state_read_at_utc": state["read_at_utc"], "closed_by_hand": closed_by_hand(read_ledger(paths.ledger)),
+            "state_read_at_utc": state["read_at_utc"], "closed_by_hand": closed_by_hand(paths.ledger.read()),
             "sessions": queue}
     save_private(paths.plan, json.dumps(plan, indent=1, ensure_ascii=False))
     with open_private(paths.held, "w") as fh:
@@ -727,21 +636,11 @@ def body_of(session):
             "Creator__c": marker(session), "enable_fuzzy_matching__c": False}
 
 
-def append_ledger(path, row, ledger=None):
-    with open_private(path, "a") as fh:
-        writer = csv.DictWriter(fh, fieldnames=LEDGER_COLS, lineterminator="\n")
-        if os.fstat(fh.fileno()).st_size == 0:     # new, or left empty by a run that died right here
-            writer.writeheader()
-        writer.writerow({col: row.get(col, "") for col in LEDGER_COLS})
-        fh.flush()
-        os.fsync(fh.fileno())
-    if ledger is not None:
-        ledger.append({col: str(row.get(col, "")) for col in LEDGER_COLS})
-
-
 def known_code(text):
-    found = [word for word in re.findall(r"[A-Z][A-Z_]+", text or "") if word in ERROR_CODES]
-    return found[0] if found else "other"
+    """The only word of a Salesforce error this tool repeats: its error code (glow.salesforce.error_codes,
+    the first of them), else 'other' - the message itself can quote a girl's name."""
+    codes = error_codes(text)
+    return codes[0] if codes else "other"
 
 
 def outcome_of(status, message):
@@ -814,7 +713,7 @@ def verify(org, row, batch_id, paths, ledger):
         wrong.append(f"{made} new participants, {expected} expected")
     if len(contacts) != made:
         wrong.append(f"{len(contacts)} contacts made by the batch, the club grew by {made}")
-    closed = dict(row, done_utc=now(), batch_id=batch_id, batch_name=batch["Name"], rows=counts["n"],
+    closed = dict(row, done_utc=stamp(), batch_id=batch_id, batch_name=batch["Name"], rows=counts["n"],
                   participants_after=after, contacts_created=len(contacts), created_by=batch["CreatedById"],
                   outcome=outcome, status="CHECK" if wrong else "ok", note="; ".join(wrong) or row.get("note", ""))
     listed = set()
@@ -824,7 +723,7 @@ def verify(org, row, batch_id, paths, ledger):
     with open_private(paths.contacts, "a") as fh:     # the rollback list first, then the verdict
         csv.writer(fh, lineterminator="\n").writerows(
             [batch_id, contact] for contact in contacts if (batch_id, contact) not in listed)
-    append_ledger(paths.ledger, closed, ledger)
+    paths.ledger.append(closed, ledger)
     if wrong:
         raise Refused(f"{row['key']}: batch {closed['batch_name']} is in Salesforce but not as planned - "
                       + "; ".join(wrong) + ". STOPPED: it may hold part of the attendance and blocks this club "
@@ -853,12 +752,12 @@ def send_one(org, session, ledger, paths):
         raise Refused(f"{key}: Salesforce already has a batch or attendance for this club and day (a live "
                       "submission?) - nothing sent; snapshot and plan again")
     before = participants_of(org, acc_id)
-    mine = sorted((r for r in last_rows(ledger).values() if r["account_id"] == acc_id and r["status"] in DONE),
+    mine = sorted((r for r in last_rows(ledger, "key").values() if r["account_id"] == acc_id and r["status"] in DONE),
                   key=stamp_of)
     if session["new_exact"] and before != (int(mine[-1]["participants_after"]) if mine else 0):
         raise Refused(f"{key}: the club has {before} participants, not what this run left - somebody "
                       "else added girls; nothing sent; snapshot and plan again")
-    row = {"when_utc": now(), "key": key, "region": session["region"], "account_id": acc_id,
+    row = {"when_utc": stamp(), "key": key, "region": session["region"], "account_id": acc_id,
            "account_name": session["account_name"], "attendance_date": date,
            "submissions": "+".join(session["submissions"]), "names": len(names),
            "new_expected": session["new_expected"], "new_exact": "yes" if session["new_exact"] else "no",
@@ -868,15 +767,15 @@ def send_one(org, session, ledger, paths):
     sent[key] = {"submissions": session["submissions"], "set_aside": session.get("set_aside") or [],
                  "names": sorted(fold(n) for n in names)}
     save_private(paths.sent_names, json.dumps(sent, indent=1, ensure_ascii=False))
-    append_ledger(paths.ledger, row, ledger)  # from here on the ledger knows a batch may exist
+    paths.ledger.append(row, ledger)  # from here on the ledger knows a batch may exist
     status, answer, batch_id = 0, None, None
     try:
         status, answer = org.insert("Attendance_Batch__c", body_of(session))
         batch_id = answer.get("id") if status == 201 and isinstance(answer, dict) else None
         if not batch_id and 400 <= status < 500 and status != 401 and isinstance(answer, list):
             code = known_code(str(answer[0].get("errorCode") or "")) if answer and isinstance(answer[0], dict) else "other"
-            append_ledger(paths.ledger, dict(row, done_utc=now(), status="not_saved", outcome=f"http_{status}_{code}",
-                                             note="Salesforce refused the batch and saved nothing"), ledger)
+            paths.ledger.append(dict(row, done_utc=stamp(), status="not_saved", outcome=f"http_{status}_{code}",
+                                     note="Salesforce refused the batch and saved nothing"), ledger)
             raise Refused(f"{key}: Salesforce refused the batch (HTTP {status} {code}) and saved nothing. This club "
                           f"waits; decide with Ryan, then `send --apply --vpn-off --retry {key}` (RUNBOOK, Back-fill "
                           "of attendance into Salesforce)")
@@ -886,9 +785,9 @@ def send_one(org, session, ledger, paths):
         return verify(org, row, batch_id, paths, ledger)
     except BaseException:
         if ledger[-1]["key"] == key and ledger[-1]["status"] == "sending":   # the outcome is not known
-            append_ledger(paths.ledger, dict(row, done_utc=now(), status="unknown", batch_id=batch_id or "",
-                                             outcome=f"http_{status}", note="the answer or the read-back was lost"),
-                          ledger)
+            paths.ledger.append(dict(row, done_utc=stamp(), status="unknown", batch_id=batch_id or "",
+                                     outcome=f"http_{status}", note="the answer or the read-back was lost"),
+                                ledger)
             raise Refused(f"{key}: the batch was sent but Salesforce's answer or the read-back was lost (HTTP "
                           f"{status}) - A BATCH MAY BE IN SALESFORCE. Nothing more is sent; run `send --apply "
                           "--vpn-off` again: it looks this batch up before anything else") from None
@@ -903,8 +802,8 @@ def settle(org, row, ledger, paths):
         if datetime.datetime.utcnow() < ready:
             raise Refused(f"{row['key']}: no batch with this session's marker yet, but Salesforce may still be "
                           f"working on it - run send again after {ready.strftime('%H:%M:%S')} UTC")
-        append_ledger(paths.ledger, dict(row, done_utc=now(), status="not_saved", outcome="not_found",
-                                         note="looked up later: no batch with this session's marker"), ledger)
+        paths.ledger.append(dict(row, done_utc=stamp(), status="not_saved", outcome="not_found",
+                                 note="looked up later: no batch with this session's marker"), ledger)
         print(f"  settled {row['key']}: Salesforce saved nothing; the club waits for --retry")
         return
     closed = verify(org, row, batch_id, paths, ledger)
@@ -915,13 +814,13 @@ def cmd_send(args, paths, org):
     plan = load_json(paths.plan, "the plan")
     if plan.get("resolved_sha256") != sha256(paths.resolved) or plan.get("decisions_sha256") != sha256(paths.decisions):
         raise Refused("resolved.json or decisions.csv changed after the plan was made - run plan again")
-    ledger = read_ledger(paths.ledger)
-    stuck = sorted(k for k, r in last_rows(ledger).items() if r["status"] in OPEN)
+    ledger = paths.ledger.read()
+    stuck = sorted(k for k, r in last_rows(ledger, "key").items() if r["status"] in OPEN)
     if stuck:
         raise Refused("the ledger holds a batch that is in Salesforce but was not right (" + ", ".join(stuck)
                       + ") - deal with it, then `close <key> --removed` or `close <key> --accepted` (RUNBOOK, "
                       "Back-fill of attendance into Salesforce)")
-    unsettled = [r for r in last_rows(ledger).values() if r["status"] in UNSETTLED]
+    unsettled = [r for r in last_rows(ledger, "key").values() if r["status"] in UNSETTLED]
     if args.apply:
         for row in unsettled:                # before anything else: it needs the ledger only
             settle(org, row, ledger, paths)
@@ -939,7 +838,7 @@ def cmd_send(args, paths, org):
         if not datetime.timedelta(0) <= age + datetime.timedelta(minutes=5) or age > datetime.timedelta(hours=MAX_AGE_HOURS):
             raise Refused(f"the submissions were fetched more than {MAX_AGE_HOURS} hours ago - run the resolver, "
                           "snapshot and plan again, so a newer report of the same session is not missed")
-    last = last_rows(ledger)
+    last = last_rows(ledger, "key")
     done = {k for k, r in last.items() if r["status"] in DONE}
     retry = set(args.retry or [])
     refused = {k: r for k, r in last.items() if r["status"] == "not_saved"}
@@ -973,28 +872,28 @@ def cmd_send(args, paths, org):
         row = send_one(org, session, ledger, paths)
         print(f"  {position}/{len(queue)} {row['batch_name']} {session['account_name']} {session['attendance_date']}: "
               f"{row['rows']} rows, {row['contacts_created']} new girls - ok")
-    print(f"sent and verified: {len(queue)} batches; ledger {rel(paths.ledger)}")
+    print(f"sent and verified: {len(queue)} batches; ledger {rel(paths.ledger.path)}")
 
 
 # ---- close, status -------------------------------------------------------------------------------
 def cmd_close(args, paths):
-    row = last_rows(read_ledger(paths.ledger)).get(args.key)
+    row = last_rows(paths.ledger.read(), "key").get(args.key)
     if row is None:
         raise Refused(f"the ledger has no session {args.key}")
     if args.accepted and row["status"] != "CHECK":
         raise Refused(f"--accepted is for a batch the ledger marks CHECK; {args.key} is '{row['status']}'")
     if args.removed and (row["status"] not in DONE | OPEN | UNSETTLED or not row["batch_id"]):
         raise Refused(f"--removed is for a batch that was in Salesforce; {args.key} is '{row['status']}'")
-    closed = dict(row, done_utc=now(), status="accepted" if args.accepted else "removed", new_exact="no",
+    closed = dict(row, done_utc=stamp(), status="accepted" if args.accepted else "removed", new_exact="no",
                   note=("accepted as it is by Ryan" if args.accepted else "removed from Salesforce by hand")
                   + (f": {args.note}" if args.note else ""))
-    append_ledger(paths.ledger, closed)
+    paths.ledger.append(closed)
     print(f"{args.key}: recorded as {closed['status']} ({row['batch_name']}); this club's later sessions will "
           "be held for Ryan's 'accept' (its participants are no longer all this run's)")
 
 
 def cmd_status(args, paths):
-    last = last_rows(read_ledger(paths.ledger))
+    last = last_rows(paths.ledger.read(), "key")
     good = [r for r in last.values() if r["status"] in DONE]
     print(f"ledger: {len(good)} batches sent and verified, {sum(int(r['rows'] or 0) for r in good)} attendance rows, "
           f"{sum(int(r['contacts_created'] or 0) for r in good)} new girls, "
@@ -1006,13 +905,6 @@ def cmd_status(args, paths):
         print(f"rollback would remove, by id: {len(good)} batches with their attendance rows (ledger.csv, batch_id) "
               f"and the {sum(int(r['contacts_created'] or 0) for r in good)} participant contacts they created "
               f"({rel(paths.contacts)}) - only with Ryan's go")
-
-
-def positive(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
 
 
 def main(argv=None, org=None):
@@ -1032,8 +924,7 @@ def main(argv=None, org=None):
     send.add_argument("--only", help="send only this session key")
     send.add_argument("--retry", action="append", help="a session Salesforce refused, decided since (repeatable)")
     for live in (snap, send):
-        live.add_argument("--vpn-off", action="store_true",
-                          help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+        add_vpn_flag(live)
     close = sub.add_parser("close", allow_abbrev=False)
     close.add_argument("key")
     how = close.add_mutually_exclusive_group(required=True)
@@ -1044,7 +935,7 @@ def main(argv=None, org=None):
     args = ap.parse_args(argv)
     try:
         paths = Paths(args.dir)
-        paths.keep_private()
+        keep_private(paths.folder)
         if args.cmd == "plan":
             cmd_plan(args, paths)
         elif args.cmd == "status":
@@ -1052,9 +943,8 @@ def main(argv=None, org=None):
         elif args.cmd == "close":
             cmd_close(args, paths)
         else:
-            if (args.cmd == "snapshot" or args.apply) and not args.vpn_off:
-                raise Refused("this command talks to Salesforce from this Mac: check that no VPN is on, then add "
-                              "--vpn-off (a connection through a VPN froze Ryan's user on 2026-09-30)")
+            if args.cmd == "snapshot" or args.apply:
+                require_vpn_off(args)
             org = org or Org(args.org)
             (cmd_snapshot if args.cmd == "snapshot" else cmd_send)(args, paths, org)
     except Refused as stop:

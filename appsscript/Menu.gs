@@ -14,7 +14,7 @@ function onOpen() {
       .addSubMenu(SpreadsheetApp.getUi().createMenu('Google Forms')
           .addItem('Create the Google Forms', 'createGlowForms')
           .addItem('Show form links', 'showFormLinks')
-          .addItem('Update form dropdowns from the Roster', 'syncFormChoices')
+          .addItem('Update form dropdowns from the Roster', 'syncFormChoicesFromMenu')
           .addItem('Replace the Country question with the Region picker (one-time)',
                    'migrateCountryToRegion')
           .addItem('Update the forms\' wording (one-time; shows the changes first)',

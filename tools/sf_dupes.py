@@ -38,18 +38,17 @@ import subprocess
 import sys
 import traceback
 import unicodedata
-from zoneinfo import ZoneInfo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                          # noqa: E402
-from glow.jotform import Client, JotformError                   # noqa: E402
-from glow.salesforce import Org, Refused, quoted                # noqa: E402
+from glow.cli import api_key                                   # noqa: E402
+from glow.jotform import CLOCK, Client, JotformError            # noqa: E402
+from glow.private_files import load_json, private_folder, rel, save_private, sha256, stamp   # noqa: E402
+from glow.salesforce import (SF_ID, Org, Refused, add_vpn_flag, error_codes, plain, positive,   # noqa: E402
+                             quoted, require_vpn_off, sf_match)
 from glow.sync import SF_NAME_SEP                               # noqa: E402
 from glow.text import key as plain_key                          # noqa: E402
-from sf_backfill import save_private, within                    # noqa: E402
-from sf_new_clubs import sf_match                               # noqa: E402
 
 BACKFILL_CONTACTS = os.path.join(REPO, "data", "backfill_2026-09", "created_contacts.csv")
 ROLE = "Participant"
@@ -57,13 +56,10 @@ CHUNK = 2                     # Database.merge: one master and at most two dupli
 QUIET_MINUTES = 10            # no submission on the Africa or Asia form for this long before a write
 NPSP_WINDOW = ((20, 30), (21, 30))      # UTC: NPSP's nightly job
 QUIET_FORMS = ("Africa", "Asia")
-JOTFORM_CLOCK = ZoneInfo("America/New_York")     # Jotform's created_at
 MARKER = "SF_DUPES_REHEARSAL_END"
-STAMP = "%Y-%m-%dT%H:%M:%SZ"
 IN_CHUNK = 150                # ids per SOQL IN list
 APEX_TIMEOUT = 900            # seconds for one `sf apex run`
 SUBMISSION_PAGE, SUBMISSION_PAGES = 100, 5
-ID = re.compile(r"[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?")
 CONTACT_ID = re.compile(r"003[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?")
 ACCOUNT_ID = re.compile(r"001[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?")
 ALIAS = re.compile(r"[A-Za-z0-9_.-]+")
@@ -76,9 +72,6 @@ _IDS = r"(?:[A-Za-z0-9]{15,18}(?:,[A-Za-z0-9]{15,18})*)?"
 DIAG_SHAPE = re.compile(r"DIAG\|(?:ok\|[A-Za-z0-9]{15,18}|merged\|[A-Za-z0-9]{15,18}\|" + _IDS + r"\|" + _IDS
                         + r"|limits\|queries=\d+/\d+\|dml=\d+/\d+\|cpu=\d+/\d+)")
 FAIL_TOKEN = re.compile(r"DIAG\|fail\|[a-z ]+(?:\|[A-Za-z0-9]{15,18})?")
-# Salesforce's error codes (DUPLICATES_DETECTED, UNABLE_TO_LOCK_ROW ...): capitals WITH an underscore,
-# which no name has - a bare capitalized word of an error text can be a girl's name written in capitals
-ERROR_CODE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
 EXCEPTION_KIND = re.compile(r"(?:[A-Za-z0-9_]+\.)*[A-Za-z0-9_]*Exception(?=:)")
 NAME_FIELDS = ("Name", "FirstName", "LastName")
 RENAMEABLE = ("FirstName", "LastName")
@@ -106,20 +99,21 @@ def norm(text):
     return " ".join(cf_free(text).split())
 
 
-def key(text):
-    """The grouping key: norm(), case-folded."""
+def spelling_key(text):
+    """The grouping key: norm(), case-folded - two spellings of one name that differ only in
+    whitespace, invisible characters or case get one key."""
     return norm(text).casefold()
 
 
-def odd(text):
+def odd_spacing(text):
     """A stored name part with whitespace or invisible characters that norm() would change."""
     text = text or ""
-    return (text != " ".join(text.split()) or " " in text or "\t" in text
+    return (text != " ".join(text.split()) or "\xa0" in text or "\t" in text
             or any(unicodedata.category(c) == "Cf" for c in text))
 
 
 def odd_contact(contact):
-    return any(odd(contact.get(f)) for f in NAME_FIELDS)
+    return any(odd_spacing(contact.get(f)) for f in NAME_FIELDS)
 
 
 def odd_list(text):
@@ -150,10 +144,6 @@ def utc_now():
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def stamp(moment):
-    return moment.astimezone(datetime.timezone.utc).strftime(STAMP)
-
-
 def sf_time(text):
     """A Salesforce datetime (2026-10-01T12:00:00.000+0000) as an aware datetime."""
     try:
@@ -168,7 +158,7 @@ def jotform_time(text):
         moment = datetime.datetime.strptime(str(text), "%Y-%m-%d %H:%M:%S")
     except ValueError:
         raise Refused("Jotform gave a submission time this tool cannot read - nothing written") from None
-    return moment.replace(tzinfo=JOTFORM_CLOCK).astimezone(datetime.timezone.utc)
+    return moment.replace(tzinfo=CLOCK).astimezone(datetime.timezone.utc)
 
 
 def iso_day(text):
@@ -181,30 +171,9 @@ def iso_day(text):
     return day
 
 
-def positive(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
-
-
-def rel(path):
-    path = os.path.abspath(path)
-    return os.path.relpath(path, REPO) if path.startswith(REPO + os.sep) else path
-
-
-def file_sha(path):
-    with open(path, "rb") as fh:
-        return hashlib.sha256(fh.read()).hexdigest()
-
-
-def plain(records):
-    return [{k: v for k, v in r.items() if k != "attributes"} for r in records]
-
-
 def in_list(ids):
     for x in ids:
-        if not isinstance(x, str) or not ID.fullmatch(x):
+        if not isinstance(x, str) or not SF_ID.fullmatch(x):
             raise Refused("a record id that is not a plain Salesforce id - nothing done")
     return "(" + ", ".join(quoted(x) for x in ids) + ")"
 
@@ -217,11 +186,6 @@ def query_in(read, soql, ids):
     return plain(out)
 
 
-def error_codes(text):
-    """The Salesforce error codes in an error text or answer - never its words (they can quote a name)."""
-    return sorted(set(ERROR_CODE.findall(str(text or ""))))
-
-
 def field_names(describe):
     return {f.get("name") for f in (describe or {}).get("fields") or [] if isinstance(f, dict)}
 
@@ -232,16 +196,6 @@ def createable(describe, must=()):
     names = {n for n in names if isinstance(n, str) and FIELD.fullmatch(n)} | set(must)
     names.discard("Id")
     return sorted(names)
-
-
-def load_json(path, what):
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except FileNotFoundError:
-        raise Refused(f"{what} is missing: {path}") from None
-    except (ValueError, OSError):
-        raise Refused(f"{what} cannot be read as JSON: {path}") from None
 
 
 def save_json(path, data):
@@ -261,23 +215,23 @@ class Roster:
                 rows = list(csv.DictReader(fh))
         except (OSError, UnicodeDecodeError, csv.Error):
             raise Refused(f"--roster: cannot read {path} as a UTF-8 CSV") from None
-        if not rows or not self.NEEDED <= set(rows[0]):
+        if not rows or not set(rows[0]) >= self.NEEDED:
             raise Refused("--roster: not a Roster export (expected the columns "
                           + ", ".join(sorted(self.NEEDED)) + ")")
-        self.sha256, self.clubs = file_sha(path), {}
+        self.sha256, self.clubs = sha256(path), {}
         for row in rows:
             partner, club, name = (" ".join(str(row.get(c) or "").split()) for c in ("partner", "club", "full_name"))
             if not (partner and club and name):
                 continue
             entry = self.clubs.setdefault((plain_key(partner), plain_key(club)),
                                           {"partner": partner, "club": club, "active": [], "ever": set()})
-            entry["ever"].add(key(name))
+            entry["ever"].add(spelling_key(name))
             if plain_key(row.get("status")) == "active":
                 entry["active"].append(name)
 
     def club_for(self, account_name, club_account_names):
         """(the active Roster club whose question-5 name is this account's name, None) or
-        (None, why). Names are compared as the processor compares them (sf_new_clubs.sf_match);
+        (None, why). Names are compared as the processor compares them (glow.salesforce.sf_match);
         a club whose '<club> - <partner>' name is another Club account's name sends that one."""
         active = [c for c in self.clubs.values() if c["active"]]
         long = [c for c in active if sf_match(c["club"] + SF_NAME_SEP + c["partner"], account_name)]
@@ -293,7 +247,7 @@ class Roster:
 
 
 def girls_with(club, name_key):
-    return [n for n in club["active"] if key(n) == name_key]
+    return [n for n in club["active"] if spelling_key(n) == name_key]
 
 
 def read_backfill(path):
@@ -308,8 +262,8 @@ def read_backfill(path):
     out = set()
     for n, line in enumerate(lines):
         cells = [c.strip() for c in line]
-        if len(cells) != 2 or not (ID.fullmatch(cells[0]) and CONTACT_ID.fullmatch(cells[1])):
-            if n == 0 and not ID.fullmatch(cells[0]):
+        if len(cells) != 2 or not (SF_ID.fullmatch(cells[0]) and CONTACT_ID.fullmatch(cells[1])):
+            if n == 0 and not SF_ID.fullmatch(cells[0]):
                 continue                      # a header line
             raise Refused(f"the back-fill's contact list has a line that is not 'batch id,contact id': line {n + 1}")
         out.add(cells[1])
@@ -367,7 +321,7 @@ def group_by_key(contacts):
     """{(account id, key): [contacts sorted by id]} for every 2+ contacts with one key in ONE account."""
     by = collections.defaultdict(list)
     for c in contacts:
-        k = key(c.get("Name"))
+        k = spelling_key(c.get("Name"))
         if k:
             by[(c["AccountId"], k)].append(c)
     return {g: sorted(m, key=lambda c: c["Id"]) for g, m in by.items() if len(m) > 1}
@@ -443,10 +397,10 @@ def decide(contacts, rows_of, roster, club_names, backfill_ids):
         done, why_not = renamed(c)
         reasons += [r for r in (why, why_not) if r]
         if done and club:
-            girls = girls_with(club, key(done[1]))
+            girls = girls_with(club, spelling_key(done[1]))
             if len(girls) != 1 or girls[0] != done[1]:
                 reasons.append("not_one_roster_girl")
-        if done and any(o["Id"] != c["Id"] and key(o.get("Name")) == key(done[1]) for o in by_account[c["AccountId"]]):
+        if done and any(o["Id"] != c["Id"] and spelling_key(o.get("Name")) == spelling_key(done[1]) for o in by_account[c["AccountId"]]):
             reasons.append("another_contact_has_this_name")
         if reasons:
             needs.append({"kind": "rename", "account_id": c["AccountId"], "contact_ids": [c["Id"]], "reasons": reasons})
@@ -477,10 +431,10 @@ def load_plan(path):
                   and [x for chunk in g["chunks"] for x in chunk] == merged
                   and all(1 <= len(chunk) <= CHUNK for chunk in g["chunks"])
                   and set(g["contacts"]) == set(members) and g["kind"] in ("identical", "normalized")
-                  and all(isinstance(r, list) and len(r) == 2 and ID.fullmatch(r[0]) and (DAY.fullmatch(r[1]) or r[1] == "")
+                  and all(isinstance(r, list) and len(r) == 2 and SF_ID.fullmatch(r[0]) and (DAY.fullmatch(r[1]) or r[1] == "")
                           for info in g["contacts"].values() for r in info["rows"])
-                  and all(ID.fullmatch(a) for info in g["contacts"].values() for a in info.get("affiliations", []))
-                  and all(ID.fullmatch(i) and ID.fullmatch(s) for info in g["contacts"].values()
+                  and all(SF_ID.fullmatch(a) for info in g["contacts"].values() for a in info.get("affiliations", []))
+                  and all(SF_ID.fullmatch(i) and SF_ID.fullmatch(s) for info in g["contacts"].values()
                           for i, s in info.get("dup_items", [])))
         except (KeyError, TypeError, ValueError):
             ok = False
@@ -497,7 +451,7 @@ def load_plan(path):
                 or not all(isinstance(info.get(k), int) for k in ("participants_before", "participants_after")) \
                 or not isinstance(info.get("rows_per_date"), dict):
             bad("a club entry that does not add up")
-    plan["sha256"] = file_sha(path)
+    plan["sha256"] = sha256(path)
     return plan
 
 
@@ -536,8 +490,8 @@ def live_club(org, plan, club):
         org.query, "SELECT Id, AccountId, Contact_Role__c FROM Contact WHERE Id IN {ids}", planned)}
     by_key = collections.defaultdict(list)
     for c in contacts:
-        by_key[key(c.get("Name"))].append(c["Id"])
-    names = {c["Id"]: key(c.get("Name")) for c in contacts}
+        by_key[spelling_key(c.get("Name"))].append(c["Id"])
+    names = {c["Id"]: spelling_key(c.get("Name")) for c in contacts}
     groups = {}
     for g in club_groups(plan, club):
         anchor = next((m for m in [g["kept"]] + g["merged"] if m in names), None)
@@ -587,7 +541,7 @@ def apex_text(plan, club, calls, done, rehearse, part, parts, made_at):
         kept_of[kept] = kept
         kept_of.update({x: kept for x in chunk})
     for x in [club] + list(kept_of):
-        if not ID.fullmatch(x):
+        if not SF_ID.fullmatch(x):
             raise Refused("a record id that is not a plain Salesforce id - nothing written")
     rows = sum(len(alive.get(x, ())) for x in kept_of)
     merged = sum(len(chunk) for _, chunk in calls)
@@ -895,44 +849,43 @@ def quiet_window(ctx):
 
 def latest_submission(jf, region):
     """The newest submission's time: the first of Jotform's default order (newest first, the order
-    tools/backfill_resolve.py pages by; no `orderby`, whose direction is not proven) or the form's
-    own last_submission, whichever is later."""
+    glow.jotform.Client.submissions pages by) or the form's own last_submission, whichever is later."""
     fid = forms.REGIONALS[region]
     info = jf.get(f"/form/{fid}")
-    page = jf.get(f"/form/{fid}/submissions", limit=1)
-    if not isinstance(page, list) or not isinstance(info, dict):
+    if not isinstance(info, dict):
         raise Refused(f"the {region} form's answer has a shape this tool does not know - nothing written")
-    times = [jotform_time(s.get("created_at")) for s in page if isinstance(s, dict)]
+    page = jf.submissions(fid, page=1, enough=lambda _page: True, label=f"the {region} form")
+    times = [jotform_time(s.get("created_at")) for s in page]
     if info.get("last_submission"):
         times.append(jotform_time(info["last_submission"]))
     return max(times) if times else None
 
 
 def submissions_since(jf, region, since):
-    """The form's submissions created since `since`, read page by page in Jotform's default order,
-    newest first. The order is checked, not assumed: a page that is not newest first refuses (the
-    count would otherwise stop early and say 0). A submission arriving meanwhile repeats one on the
-    next page: counted once, by id."""
-    fid, seen, last = forms.REGIONALS[region], {}, None
-    for page_no in range(SUBMISSION_PAGES):
-        page = jf.get(f"/form/{fid}/submissions", limit=SUBMISSION_PAGE, offset=page_no * SUBMISSION_PAGE)
-        if not isinstance(page, list) or not all(isinstance(s, dict) and s.get("id") for s in page):
-            raise Refused(f"the {region} form's submissions have a shape this tool does not know")
+    """How many of the form's submissions (not deleted) were created since `since`, read page by
+    page in Jotform's default order, newest first, until a page reaches back past `since`. The
+    order is checked, not assumed: a page that is not newest first refuses (the count would
+    otherwise stop early and say 0). A submission arriving meanwhile repeats one on the next page:
+    counted once, by id (glow.jotform.Client.submissions)."""
+    state = {"last": None, "pages": 0}
+
+    def enough(page):
         older = False
         for s in page:
             moment = jotform_time(s.get("created_at"))
-            if last is not None and moment > last:
+            if state["last"] is not None and moment > state["last"]:
                 raise Refused(f"the {region} form's submissions did not come newest first - compare them with the "
                               "batches by hand")
-            last = moment
-            if moment >= since:
-                seen[str(s["id"])] = s.get("status")
-            else:
-                older = True
-        if len(page) < SUBMISSION_PAGE or older:
-            return sum(1 for status in seen.values() if status != "DELETED")
-    raise Refused(f"more than {SUBMISSION_PAGE * SUBMISSION_PAGES} submissions on the {region} form since the run "
-                  "started - compare them with the batches by hand")
+            state["last"] = moment
+            older = older or moment < since
+        state["pages"] += 1
+        if not older and len(page) == SUBMISSION_PAGE and state["pages"] == SUBMISSION_PAGES:
+            raise Refused(f"more than {SUBMISSION_PAGE * SUBMISSION_PAGES} submissions on the {region} form since "
+                          "the run started - compare them with the batches by hand")
+        return older
+
+    subs = jf.submissions(forms.REGIONALS[region], page=SUBMISSION_PAGE, enough=enough, label=f"the {region} form")
+    return sum(1 for s in subs if jotform_time(s.get("created_at")) >= since and s.get("status") != "DELETED")
 
 
 def window_count(ctx, org, started):
@@ -1102,7 +1055,7 @@ def cmd_check(args, ctx):
     odd_ones = [c for c in contacts if odd_contact(c)]
     print(f"(b) stored names with odd whitespace or invisible characters: {len(odd_ones)}")
     for c in odd_ones:
-        print(f"  {c['AccountId']}: {c['Id']} ({', '.join(f for f in NAME_FIELDS if odd(c.get(f)))})")
+        print(f"  {c['AccountId']}: {c['Id']} ({', '.join(f for f in NAME_FIELDS if odd_spacing(c.get(f)))})")
     findings += len(odd_ones)
     batches = plain(org.query("SELECT Id, Name, Contact_IDs__c FROM Attendance_Batch__c WHERE CreatedDate >= "
                               f"{since}T00:00:00Z ORDER BY CreatedDate"))
@@ -1116,8 +1069,8 @@ def cmd_check(args, ctx):
         names = [a["Name"] for a in accounts]
         by_key = collections.defaultdict(lambda: collections.defaultdict(list))
         for c in contacts:
-            if key(c.get("Name")):
-                by_key[key(c["Name"])][c["AccountId"]].append(c)
+            if spelling_key(c.get("Name")):
+                by_key[spelling_key(c["Name"])][c["AccountId"]].append(c)
         account_name = {a["Id"]: a["Name"] for a in accounts}
         found = []
         for k, places in by_key.items():
@@ -1167,7 +1120,7 @@ def cmd_plan(args, ctx):
               "same_date": sum(1 for n in needs if "same_date" in n["reasons"]), "renames": len(renames),
               "needs_a_person": len(needs)}
     plan = {"tool": "sf_dupes", "version": 1, "made_at_utc": stamp(ctx.clock()), "org": args.org,
-            "roster_sha256": roster.sha256, "backfill_contacts_sha256": file_sha(args.backfill_contacts),
+            "roster_sha256": roster.sha256, "backfill_contacts_sha256": sha256(args.backfill_contacts),
             "club_record_type": rt, "participants_read": len(contacts), "clubs": clubs, "groups": groups,
             "renames": renames, "needs_a_person": needs, "totals": totals}
     path = os.path.join(ctx.folder, "merge_plan.json")
@@ -1219,7 +1172,7 @@ def cmd_rename(args, ctx):
             problems.append(f"{cid}: the stored name changed since the plan")
             continue
         allowed = group_of.get(cid, {cid}) if r["in_group"] else {cid}
-        if any(o["Id"] not in allowed and key(o.get("Name")) == key(new[1]) for o in others if o["AccountId"] == c["AccountId"]):
+        if any(o["Id"] not in allowed and spelling_key(o.get("Name")) == spelling_key(new[1]) for o in others if o["AccountId"] == c["AccountId"]):
             problems.append(f"{cid}: another contact of the club has this name now")
             continue
         todo.append((r, c, new))
@@ -1248,7 +1201,7 @@ def cmd_rename(args, ctx):
         back = [flat_contact(x) for x in org.query(f"SELECT {CONTACT_FIELDS} FROM Contact WHERE Id = {quoted(cid)}")]
         club, _ = roster.club_for(back[0]["AccountName"] if back else None, names)
         ok = (len(back) == 1 and all(back[0][f] == norm(c[f]) for f in fields) and back[0]["Name"] == new_name
-              and club is not None and girls_with(club, key(new_name)) == [new_name])
+              and club is not None and girls_with(club, spelling_key(new_name)) == [new_name])
         rb.data["renames"][cid].update(status="done" if ok else "CHECK", http=status, done_at_utc=stamp(ctx.clock()))
         rb.save()
         failed += not ok
@@ -1262,7 +1215,7 @@ def primary_of(org, contact):
     """The contact's NPSP Primary Affiliation: an account id, or None when blank."""
     found = org.query(f"SELECT Id, {CONTACT_PRIMARY} FROM Contact WHERE Id = {quoted(contact)}")
     value = found[0].get(CONTACT_PRIMARY) if len(found) == 1 else ""
-    if value is not None and not (isinstance(value, str) and ID.fullmatch(value)):
+    if value is not None and not (isinstance(value, str) and SF_ID.fullmatch(value)):
         raise Refused(f"kept contact {contact}: its Primary Affiliation could not be read - nothing more deleted")
     return value
 
@@ -1374,20 +1327,12 @@ class Ctx:
 
     def jotform(self):
         if self._jotform is None:
-            api_key = os.environ.get("JOTFORM_API_KEY")
-            if not api_key:
-                raise Refused("Set JOTFORM_API_KEY in the environment (.env): a write first checks that no submission "
-                              "reached the Africa or Asia form in the last 10 minutes")
-            self._jotform = Client(api_key)
+            self._jotform = Client(api_key(": a write first checks that no submission reached the Africa or "
+                                           "Asia form in the last 10 minutes", error=Refused))
         return self._jotform
 
     def use_folder(self, folder):
-        folder = os.path.abspath(folder)
-        if within(folder, REPO) and not within(folder, os.path.join(REPO, "data")):
-            raise Refused("--dir: inside the checkout this tool's folder must be under data/ (its files can hold names)")
-        os.makedirs(folder, mode=0o700, exist_ok=True)
-        os.chmod(folder, 0o700)
-        self.folder = folder
+        self.folder = private_folder(folder, "this tool's folder", "its files can hold names", repo=REPO)
 
 
 def main(argv=None, org=None, jotform=None, clock=None):
@@ -1420,14 +1365,11 @@ def main(argv=None, org=None, jotform=None, clock=None):
     cleanup.add_argument("--dup-sets", action="store_true", help="also the plan's duplicate-rule sets left with one item")
     cleanup.add_argument("--apply", action="store_true", help="delete (needs Ryan's go)")
     for live in (check, plan, merge, rename, cleanup):
-        live.add_argument("--vpn-off", action="store_true",
-                          help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+        add_vpn_flag(live)
     args = ap.parse_args(argv)
     code = 0
     try:
-        if not args.vpn_off:
-            raise Refused("this command talks to Salesforce from this Mac: check that no VPN is on, then add --vpn-off "
-                          "(a connection through a VPN froze Ryan's user on 2026-09-30)")
+        require_vpn_off(args)
         if not ALIAS.fullmatch(args.org):
             raise Refused("--org: a Salesforce CLI alias is letters, digits, '.', '_' and '-' only")
         ctx = Ctx(args, org, jotform, clock or utc_now)

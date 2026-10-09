@@ -100,8 +100,8 @@ def build_rows(rng):
                                             "zainab ostrivane", "Esther Wrenfoldy"]))
     rows.append(row(delta, "Dawn Circle", ["Nia Kestrelby", "Olga Lorrimane", "Nia Kestrelby"]))
     # 4. invisible characters inside roster lines (never in partner/club cells)
-    rows.append(row(beta, "Hidden Chars", ["​Maya Pellucidor", "Leila‎ Thornquibble",
-                                            "﻿Yara Umberlash", "Uma Wrenfoldy⁠"]))
+    rows.append(row(beta, "Hidden Chars", ["\u200bMaya Pellucidor", "Leila\u200e Thornquibble",
+                                            "\ufeffYara Umberlash", "Uma Wrenfoldy\u2060"]))
     # 5. numbering, "-" bullets, trailing punctuation, blank lines, stray whitespace
     rows.append(row(alpha, "Numbered List", ["1. Dalia Yexleyton", "12) Esther Grimboltz",
                                               "- Farah Halverquist", "3 Gloria Ixworthing",
@@ -114,7 +114,7 @@ def build_rows(rng):
     # 8. the same club name under two partners
     rows.append(row(alpha, "Stars", ["Thandi Cobblewynd", "Wanjiru Fennwhistle"]))
     rows.append(row(beta, "Stars", ["Ximena Marrowgate", "Yara Ostrivane", "Aisha Pellucidor"]))
-    # 10. "number of girls" deliberately off by four (needs_attention material)
+    # 10. "number of girls" deliberately off by four (a data-quality case)
     rows.append(row(gamma, "Miscounted", ["Bianca Thornquibble", "Camila Umberlash",
                                            "Diana Wrenfoldy"], count=7))
     # random filler clubs, deterministic under the seed

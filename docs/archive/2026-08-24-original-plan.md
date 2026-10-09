@@ -2,7 +2,7 @@
 
 > **Historical document.** Written 2026-08-24, before launch. Phases 0, 1, 3 and 4 shipped by
 > 2026-08-28 (four regional forms live; Roster tab + Google Forms in the master enrollment sheet).
-> Current state lives in [LAUNCH.md](../LAUNCH.md), [BACKLOG.md](../BACKLOG.md),
+> Current state lives in [RUNBOOK.md](../RUNBOOK.md), [BACKLOG.md](../BACKLOG.md),
 > [ARCHITECTURE.md](../ARCHITECTURE.md) and [DECISIONS.md](../DECISIONS.md). Kept for the
 > reasoning behind the decisions; paths were made repo-relative when it was archived.
 

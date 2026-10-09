@@ -1,7 +1,9 @@
 ---
 title: Monthly Report in Salesforce - the "attendance submitted electronically" checkbox
 author: Claude (with Ryan)
-status: done (deployed to production 2026-09-30 13:26 UTC; open: which other profiles see the field)
+status: done             # deployed to production 2026-09-30 13:26 UTC; open: which other profiles see the field (BACKLOG 55)
+done: 2026-09-30
+backlog: 55
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-30, wording confirmed by GLOW leadership
 ---
@@ -112,7 +114,8 @@ off (13:14 UTC).
   `GC_sessions_did_you_observe_last_month__c`); on an existing report a save that does not send
   them fails. The form always sends them, so partners are not affected; the new test sends them too.
 - Proof: the live form, opened with the test account's link, shows both additions
-  (`data/sf_monthly_report_2026-09-30/monthly-report-girls-reach-LIVE.png`, sent to Ryan). Not done:
+  (`data/sf_monthly_report_2026-09-30/monthly-report-girls-reach-LIVE.png`, sent to Ryan; committed as
+  [monthly-report-girls-reach-2026-09-30.png](../screenshots/monthly-report-girls-reach-2026-09-30.png)). Not done:
   a save through the live form itself (the automated test covers save, read-back and untick).
 - Open: other profiles that should see the field; whether an empty week should be stored as blank
   instead of 0.

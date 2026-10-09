@@ -25,21 +25,23 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms                  # noqa: E402
+from glow.cli import api_key, run      # noqa: E402
 from glow.jotform import Client         # noqa: E402
-from glow.sync import CLUB_NAME, PICKER_NAME   # noqa: E402
+from glow.sync import (                 # noqa: E402
+    CLUB_NAME, CONTACT_IDS, CREATOR, DATE, ENABLE_FUZZY, MODULE_ID, PHOTO, PICKER_NAME, WEEK_ID, YEAR_ID)
 
 KEY = "salesforceV2"
 # the one action the forms have carried since the pilot: Salesforce field -> question id
-MAPPING = {"Account_Name__c": CLUB_NAME, "Attendance_Date__c": "17", "Contact_IDs__c": "18",
-           "Module__c": "98", "Module_Week__c": "100", "Module_Year__c": "102",
-           "Creator__c": "105", "enable_fuzzy_matching__c": "109"}
+MAPPING = {"Account_Name__c": CLUB_NAME, "Attendance_Date__c": DATE, "Contact_IDs__c": CONTACT_IDS,
+           "Module__c": MODULE_ID, "Module_Week__c": WEEK_ID, "Module_Year__c": YEAR_ID,
+           "Creator__c": CREATOR, "enable_fuzzy_matching__c": ENABLE_FUZZY}
 # no upload: the Group Photo (q19) left the mapping on 2026-10-01 (the CEO: no photo in
 # Salesforce, DECISIONS) and is never re-mapped without the CEO's word
 UPLOADS = []
 # the questions behind it, by their field names (the photo must still exist: it is required)
-QUESTIONS = {CLUB_NAME: "clubName", "17": "date", "18": "contact_ids", "98": "module_id",
-             "100": "week_id", "102": "year_id", "105": "creator", "109": "enableFuzzy",
-             "19": "photo"}
+QUESTIONS = {CLUB_NAME: "clubName", DATE: "date", CONTACT_IDS: "contact_ids", MODULE_ID: "module_id",
+             WEEK_ID: "week_id", YEAR_ID: "year_id", CREATOR: "creator", ENABLE_FUZZY: "enableFuzzy",
+             PHOTO: "photo"}
 # TODO (docs/plans/2026-10-06-photos-to-drive.md, part 2, NOT built yet): once Ryan has set up the
 # Google Drive integration on the template in the builder, the `other integrations:` line below
 # prints the Drive block's key - that is how it is learned (whether the block is visible in the
@@ -111,10 +113,7 @@ def main(argv=None, client=None):
     ap.add_argument("--form", help="one form id (default: every attendance form, old ones included)")
     args = ap.parse_args(argv)
     if client is None:
-        key = os.environ.get("JOTFORM_API_KEY")
-        if not key:
-            sys.exit("JOTFORM_API_KEY is not in the environment (RUNBOOK, Credentials)")
-        client = Client(key)
+        client = Client(api_key(" - docs/RUNBOOK.md, \"Credentials\""))
     old = {fid: f"old {name}" for name, fid in forms.DEFUNCT.items()}
     known = {**forms.LIVE, **old}
     if args.form and args.form not in known:
@@ -155,4 +154,4 @@ def main(argv=None, client=None):
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

@@ -1,7 +1,7 @@
 """The one table of Jotform form ids.
 
-Every Python tool reads it from here; appsscript/Config.gs carries the same
-ids for the Apps Script side, and test/python_test.py fails when they drift.
+Every Python tool reads it from here; the ids are Python-only (the Apps Script
+side never needed them; its unused copies were removed 2026-10-09).
 The regional forms went live 2026-09-01 (cloned from the template 2026-08-27);
 the defunct forms are the pre-launch ones, kept as archives.
 """
@@ -32,11 +32,18 @@ LIVE = {TEMPLATE: "template", **{fid: region for region, fid in REGIONALS.items(
 # human-readable label per id (what backup_forms.py prints)
 LABELS = {
     TEMPLATE: "template (every sync-logic change lands here first)",
-    **{fid: f"{region} (live from 2026-08-27)" for region, fid in REGIONALS.items()},
+    **{fid: f"{region} (live from 2026-09-01)" for region, fid in REGIONALS.items()},
     **{fid: f"{region} (defunct)" for region, fid in DEFUNCT.items()},
 }
 
 TITLES = {region: f"{region} Attendance Form" for region in REGIONALS}
+
+
+def language_of(props):
+    """A form's `language` property (GET /form/{id}/properties) as one dict: Jotform serves
+    it as a list of one, a dict, or not at all ({})."""
+    lang = (props or {}).get("language")
+    return lang[0] if isinstance(lang, list) and lang else (lang or {})
 
 
 def region_of(form_id):

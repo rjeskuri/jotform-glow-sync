@@ -1,7 +1,8 @@
 ---
 title: The Jotform client sends a JSON body on standard input
 author: Claude (found by an adversarial review of the Contact_IDs design, 2026-09-30)
-status: accepted         # a fix, not a feature: Ryan is told before it is pushed; no form is touched
+status: done             # a7eb3a8 on main, 2026-09-30
+done: 2026-09-30
 created: 2026-09-30
 intent: none — docs/intent/2026-09-01-shared-jotform-client.md is the client's
 ---

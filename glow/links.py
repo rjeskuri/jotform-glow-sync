@@ -11,7 +11,7 @@ its unique name, never by qid (the qid differs per form).
 The sync never touches them: sync_attendance_form.py writes roster checkboxes,
 the Club picker, the hidden flags of q5 and q331, the
 club guard's warning and the conditions, and no generated rule mentions a link
-element (test/python_test.py, SyncLeavesTheLinksAlone). The club guard's two
+element (test/sync_conditions_test.py, SyncLeavesTheLinksAlone). The club guard's two
 rules are the only generated rules that mention an element other than the
 rosters and the structural fields: its warning and the Submit button
 (docs/plans/2026-09-29-club-guard.md).
@@ -25,15 +25,15 @@ club guard's warning (glow/sync.py) is one too - translated_elements() lists
 them all.
 """
 import html
-import json
 import re
 import sys
 from collections import namedtuple
 
-from .sync import GUARD_SENTENCE, club_guards
+from .sync import GUARD_SENTENCE, club_guards, rule_parts
 
-# The public "fill in" links of the two Google Forms (docs/LAUNCH.md; the test
-# suite pins them to it). Never an edit link: those are for the owner only.
+# The public "fill in" links of the two Google Forms (docs/RUNBOOK.md, "The forms",
+# which the test suite pins them to; first listed in docs/archive/2026-09-01-launch.md).
+# Never an edit link: those are for the owner only.
 PROBLEM_FORM_URL = ("https://docs.google.com/forms/d/e/"
                     "1FAIpQLSeYx286-Bre0aSOWnhEDgC4_6FjGyPssldLA3J5WzIeK8cKCA/viewform")
 ROSTER_FORM_URL = ("https://docs.google.com/forms/d/e/"
@@ -128,12 +128,20 @@ def render_key(q):
     return (order_of(q), int(q["qid"]))
 
 
+def _parts(rule):
+    """rule_parts(rule), or a ValueError: a rule that does not parse stops the caller."""
+    parts = rule_parts(rule)
+    if parts is None:
+        ident = rule.get("id") if isinstance(rule, dict) else "?"
+        raise ValueError(f"rule {ident}: its terms or action do not parse")
+    return parts
+
+
 def shown_by_rules(conditions):
     """qids some rule shows: hidden fields a mentor can still get to see."""
     out = set()
     for c in conditions or []:
-        action = c.get("action")
-        action = json.loads(action) if isinstance(action, str) else (action or [])
+        _, action = _parts(c)
         out |= {str(a.get("field")) for a in action if a.get("visibility") == "Show"}
     return out
 
@@ -232,9 +240,7 @@ def rules_mentioning(conditions, qid):
     qid = str(qid)
     hits = []
     for c in conditions or []:
-        for part in ("terms", "action"):
-            items = c.get(part)
-            items = json.loads(items) if isinstance(items, str) else (items or [])
+        for items in _parts(c):
             if any(qid in (str(i.get("field", "")), str(i.get("resultField", "")))
                    or qid in str(i.get("operands", "")).split(",")
                    or "{%s}" % qid in str(i.get("equation", ""))

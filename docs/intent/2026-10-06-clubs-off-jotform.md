@@ -1,7 +1,7 @@
 ---
 title: Clubs that do not report through Jotform leave the attendance forms, without leaving the roster
 author: Ryan Eskuri (decisions of 2026-10-06, captured by Claude)
-status: proposed
+status: in-progress   # its plan is built and merged, nothing applied yet
 created: 2026-10-06
 ---
 

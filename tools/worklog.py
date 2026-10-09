@@ -565,8 +565,8 @@ def first_day(since, old_tz, new_tz):
 def a_date(text):
     try:
         return dt.date.fromisoformat(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{text!r}: give a date like 2026-09-28")
+    except ValueError as err:
+        raise argparse.ArgumentTypeError(f"{text!r}: give a date like 2026-09-28") from err
 
 
 def transcript_events(folder):

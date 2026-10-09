@@ -1,0 +1,46 @@
+#!/bin/bash
+# Git pre-commit hook for commits made outside Claude Code (VS Code, a terminal), which the
+# .claude/hooks never see. Installed per clone by `make hooks` (git config core.hooksPath).
+#
+#  - the lines the commit ADDS go through scripts/check_secrets.py --stdin: the same rules as
+#    `make secrets`, the Claude hook and CI (keys, tokens, sheet ids, girl IDs, e-mail addresses);
+#  - ruff (ruff.toml) on the staged version of every added, changed or renamed .py file.
+#
+# An emergency bypass is `git commit --no-verify`; `make check` and CI still run the full checks.
+set -euo pipefail
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+PY="$ROOT/.venv/bin/python3"
+[ -x "$PY" ] || PY=python3
+
+# the added lines only (a removed secret is not a new one), without the diff's "+" (the e-mail
+# rule's local part takes "+", so a decorator at column 0 would read as an address);
+# package-lock.json is skipped as check_secrets.py skips it in the full scan
+added=$(git diff --cached -U0 --no-color --src-prefix=a/ --dst-prefix=b/ -- . ':(exclude)package-lock.json' \
+          | grep '^+' | grep -vE '^\+\+\+ (b/|/dev/null)' | sed 's/^+//' || true)
+if [ -n "$added" ] && ! printf '%s\n' "$added" | "$PY" scripts/check_secrets.py --stdin; then
+  echo "pre-commit: the staged lines above match a secret or personal-data rule - remove them" \
+       "(.claude/skills/child-privacy)" >&2
+  exit 1
+fi
+
+py_files=()
+while IFS= read -r -d '' f; do
+  py_files+=("$f")
+done < <(git diff --cached --name-only -z --diff-filter=AMR -- '*.py')
+if [ "${#py_files[@]}" -gt 0 ]; then
+  RUFF="$ROOT/.venv/bin/ruff"
+  [ -x "$RUFF" ] || RUFF=$(command -v ruff || true)
+  if [ -z "$RUFF" ]; then
+    echo "pre-commit: ruff is not installed - make venv" >&2
+    exit 1
+  fi
+  failed=0
+  for f in "${py_files[@]}"; do      # the staged content, not the working copy
+    git show ":$f" | "$RUFF" check --force-exclude --quiet --stdin-filename "$f" - || failed=1
+  done
+  if [ "$failed" -ne 0 ]; then
+    echo "pre-commit: ruff findings in the staged .py files above - make lint" >&2
+    exit 1
+  fi
+fi

@@ -17,7 +17,7 @@ every form today; ten once the Club Roster Form link is on it).
 Dry run by default. Every form is planned before any is written; the tool
 refuses - on every form - rather than guess (two Submit buttons, a page
 break, a field a mentor can see below the links, a link below Submit). With
---apply, per form: a snapshot (backup_forms.py -> backups/<id>/), a re-read
+--apply, per form: a snapshot (glow/backup.py -> backups/<id>/), a re-read
 and re-plan (a form changed since the preview is not written), Submit first
 (then every roster is above it), the hidden fields, the links last; after
 the first write a re-read checks Jotform kept the order as sent and moved
@@ -50,21 +50,19 @@ import hashlib
 import json
 import os
 import sys
-from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-from backup_forms import snapshot                  # noqa: E402
+from glow import backup                            # noqa: E402  (the snapshot before a write)
 from glow import forms as glow_forms               # noqa: E402
 from glow import layout                            # noqa: E402
-from glow.cli import run                           # noqa: E402
+from glow.cli import api_key, run, targets                           # noqa: E402
 from glow.jotform import Client, JotformError      # noqa: E402
 from glow.links import order_of, render_key        # noqa: E402
 from sync_attendance_form import same_conditions   # noqa: E402
 
 # the template first: it is repaired (and looked at) before any live form
-FORMS = {glow_forms.TEMPLATE: "template",
-         **{fid: region for region, fid in glow_forms.REGIONALS.items()}}
+FORMS = glow_forms.LIVE
 
 
 def _steps(questions, moves):
@@ -107,7 +105,7 @@ def plan_undo(questions, saved):
 
 def load_snapshot(form_id, stamp):
     """The questions backups/<id>/questions-<stamp>.json holds (read, never printed)."""
-    path = os.path.join(REPO, "backups", form_id, f"questions-{stamp}.json")
+    path = backup.path(form_id, "questions", stamp)
     if not os.path.exists(path):
         sys.exit(f"no snapshot backups/{form_id}/questions-{stamp}.json - --undo takes the stamp "
                  "this tool printed when it wrote the form")
@@ -210,13 +208,12 @@ def main():
     args = ap.parse_args()
     if args.undo and not args.form:
         sys.exit("--undo needs --form (each form whose orders go back)")
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
-    client = Client(api_key, apply=args.apply)
-    targets = {f: FORMS.get(f, "?") for f in args.form} if args.form else FORMS
-    saved = {f: load_snapshot(f, args.undo) for f in targets} if args.undo else {}
+    client = Client(api_key(), apply=args.apply)
+    chosen = targets(args.form, FORMS)
+    saved = {f: load_snapshot(f, args.undo) for f in chosen} if args.undo else {}
     # to the second: a re-run just after a stopped one must not snapshot the
     # half-moved form over the true "before" (the rollback path)
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp()
 
     def read(form_id):
         questions = client.get(f"/form/{form_id}/questions")
@@ -235,7 +232,7 @@ def main():
     # every form is planned before anything is written: a refusal on the
     # fifth form must not leave the first four changed
     planned = {}
-    for form_id, label in targets.items():
+    for form_id, label in chosen.items():
         print(f"== {label} {form_id}")
         steps, notes = plan(form_id, *read(form_id))
         planned[form_id] = steps
@@ -256,18 +253,18 @@ def main():
         # before the repair (the part-way note in the plan says so)
         back = (f"\n   the rollback to this form as this run found it: --form {form_id} "
                 f"--undo {stamp} (dry run first)" if wrote else "")
-        sys.exit(f"   ! {targets[form_id]} {form_id}: {msg}\nstopped - the forms after it are "
+        sys.exit(f"   ! {chosen[form_id]} {form_id}: {msg}\nstopped - the forms after it are "
                  f"untouched{done}. Re-run the dry run before anything else.{back}")
 
     for form_id, steps in planned.items():
         if not steps:
             continue
-        print(f"\n== writing {targets[form_id]} {form_id}")
+        print(f"\n== writing {chosen[form_id]} {form_id}")
         sent, done = [], []      # POSTs sent / confirmed ([(qid, order)])
         # an API error on any read or write stops the run here: a 504 on the
         # probe or the verify re-read must not skip the verify unannounced
         try:
-            snapshot(form_id, client, stamp)              # the rollback path, before any write
+            backup.snapshot(form_id, client, stamp)       # the rollback path, before any write
             print(f"   snapshot: backups/{form_id}/questions-{stamp}.json (the rollback to the "
                   f"form as this run found it: --form {form_id} --undo {stamp})")
             before, rules_before = read(form_id)          # the form may have changed since the preview
@@ -300,7 +297,7 @@ def main():
         problems = verify(before, after, rules_before, rules_after, done, saved.get(form_id))
         if problems:
             stop(form_id, "MISMATCH after the writes: " + "; ".join(problems), wrote=True)
-        written.append(targets[form_id])
+        written.append(chosen[form_id])
         if args.undo:
             print(f"   re-read: verified - the {args.undo} orders are back, nothing else changed")
         else:

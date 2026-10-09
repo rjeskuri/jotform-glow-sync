@@ -2,6 +2,8 @@
 # secrets: the tests run on the synthetic fixture (test/fixtures/).
 name: check
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -14,4 +16,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+      # ruff only: the tests need none of requirements.txt (the Google libraries)
+      - run: pip install -q ruff==0.16.5
       - run: make check

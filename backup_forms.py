@@ -5,6 +5,8 @@ emails, Salesforce integration) into backups/<formId>/.
 
 Snapshots are the rollback path: `conditions` can be restored with a single
 PUT (see restore_conditions.py). Run this before ANY change to a live form.
+The snapshot itself, its file names and its stamp are glow/backup.py's; the
+tools that write a form take theirs through it.
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -12,38 +14,16 @@ Usage:
     python3 backup_forms.py --form <ID>     # just one
 """
 import argparse
-import json
 import os
 import sys
-from datetime import datetime
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
-from glow.cli import run            # noqa: E402
+from glow import backup                 # noqa: E402
+from glow.backup import snapshot        # noqa: E402  (also the name tools imported from here)
+from glow.cli import api_key, run            # noqa: E402
 from glow.forms import LABELS as FORMS  # noqa: E402
 from glow.jotform import Client     # noqa: E402
-
-
-def snapshot(form_id, client, stamp):
-    outdir = os.path.join(REPO, "backups", form_id)
-    os.makedirs(outdir, exist_ok=True)
-    summary = {}
-    for part in ("questions", "properties"):
-        content = client.get(f"/form/{form_id}/{part}")
-        for name in (f"{part}-{stamp}.json", f"{part}-latest.json"):
-            with open(os.path.join(outdir, name), "w") as f:
-                json.dump(content, f, indent=1)
-        summary[part] = content
-
-    props = summary["properties"]
-    integ = props.get("integrations") or {}
-    sf = integ.get("salesforceV2") if isinstance(integ, dict) else None
-    return {
-        "questions": len(summary["questions"]),
-        "conditions": len(props.get("conditions", [])),
-        "emails": len(props.get("emails", [])),
-        "salesforce": "yes" if sf else "NO",
-    }
 
 
 def main():
@@ -51,10 +31,8 @@ def main():
     ap.add_argument("--form", help="snapshot a single form ID")
     args = ap.parse_args()
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-        "Set JOTFORM_API_KEY in the environment")
-    client = Client(api_key)
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M")
+    client = Client(api_key())
+    stamp = backup.stamp()
     targets = {args.form: "single"} if args.form else FORMS
 
     print(f"Snapshot {stamp} -> backups/\n")

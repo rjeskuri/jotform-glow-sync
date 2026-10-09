@@ -5,7 +5,7 @@ question 98 before the module calcValues were live - and the Attendance__c rows 
 the processor copied the batch's module onto (docs/plans/2026-10-06-module-selection.md, (b)).
 
 The ground truth is the Jotform submission the batch came from: the stored answer of the module
-dropdown its Year answer names (tools/backfill_resolve.py copied_fields), read the same way the
+dropdown its Year answer names (glow/submissions.py copied_fields), read the same way the
 September back-fill read it. A batch is paired with exactly one submission - the same club (question
 5), attendance date, question 98, year and session, on the form of the batch's region, created within
 three hours of the batch - or it is listed as UNMATCHED and left alone.
@@ -15,7 +15,7 @@ three hours of the batch - or it is listed as UNMATCHED and left alone.
   python3 tools/fix_module_values.py --vpn-off --apply               # the rest, one record per request, each read back
   python3 tools/fix_module_values.py --undo data/module_fix_2026-10/ledger.csv --vpn-off --apply   # put `old` back
 
-Salesforce is read and written through the CLI's login as tools/sf_backfill.py does (the token
+Salesforce is read and written through the CLI's login (glow/salesforce.py; the token
 never on a command line); every read of a record is an explicit-field SOQL query - never the
 names list (Contact_IDs__c) or the status message, never GET /sobjects/<type>/<id>. The ledger
 (data/module_fix_2026-10/ledger.csv, owner only) holds ids, module names and outcomes. What is
@@ -23,27 +23,23 @@ printed: ids, club names, dates, statuses, candidate counts and module names. Th
 JOTFORM_API_KEY.
 """
 import argparse
-import csv
 import datetime
-import json
 import os
 import sys
-import urllib.parse
-import zoneinfo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                              # noqa: E402
-from glow.jotform import Client, JotformError                       # noqa: E402
+from glow.cli import api_key                                       # noqa: E402
+from glow.jotform import CLOCK, Client, JotformError                # noqa: E402
 from glow.sync import CLUB_NAME, MODULE_ID, MODULES, WEEK_ID, YEAR  # noqa: E402
-from backfill_resolve import PAGE, answer_of, attendance_date, copied_fields   # noqa: E402
-from sf_backfill import Org, Refused, now, open_private, quoted, within        # noqa: E402
+from glow.private_files import Ledger, last_rows, private_folder, rel, stamp  # noqa: E402
+from glow.salesforce import Org, Refused, add_vpn_flag, as_int, positive, quoted, require_vpn_off   # noqa: E402
+from glow.submissions import answer_of, attendance_date, copied_fields   # noqa: E402
 
 DEFAULT_DIR = os.path.join(REPO, "data", "module_fix_2026-10")
 SINCE = "2026-09-01"                         # batches created from this day on (UTC), the launch
 WINDOW = datetime.timedelta(hours=3)         # a submission's created_at against the batch's CreatedDate
-JOTFORM_CLOCK = zoneinfo.ZoneInfo("America/New_York")     # created_at as Jotform gives it: US Eastern
 # Account__r.Parent.Region__c (the partner account's region, read 2026-10-06) -> the attendance form
 SF_REGION_FORM = {"Africa": forms.REGIONALS["Africa"], "Asia": forms.REGIONALS["Asia"],
                   "South America": forms.REGIONALS["Latin America"], "North America": forms.REGIONALS["U.S"]}
@@ -85,49 +81,16 @@ def region_of(batch):
     return ((batch.get("Account__r") or {}).get("Parent") or {}).get("Region__c")
 
 
-def as_int(value):
-    """A whole number from what Salesforce (a double) or Jotform (text) gives, else None."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value) if value.is_integer() else None
-    text = str(value).strip() if value is not None else ""
-    return int(text) if text.isascii() and text.isdigit() else None
-
-
 # ---- the Jotform side ----------------------------------------------------------------------------
 def window_of(created):
     """(from, to) in Jotform's clock, three hours either side of a batch's CreatedDate."""
-    when = datetime.datetime.strptime(created, "%Y-%m-%dT%H:%M:%S.%f%z").astimezone(JOTFORM_CLOCK)
+    when = datetime.datetime.strptime(created, "%Y-%m-%dT%H:%M:%S.%f%z").astimezone(CLOCK)
     return tuple((when + sign * WINDOW).strftime("%Y-%m-%d %H:%M:%S") for sign in (-1, 1))
 
 
-def fetch(client, form_id, window=None):
-    """The submissions of a form, paged: the ones created inside `window` (Jotform's filter, URL-encoded
-    here because glow.jotform.Client.url does not encode its parameters), or the whole form."""
-    params = {}
-    if window:
-        params["filter"] = urllib.parse.quote(json.dumps({"created_at:gt": window[0], "created_at:lt": window[1]}),
-                                              safe="")
-    seen, out, offset = set(), [], 0
-    while True:
-        page = client.get(f"/form/{form_id}/submissions", limit=PAGE, offset=offset, **params)
-        if not isinstance(page, list) or not all(isinstance(s, dict) and s.get("id") for s in page):
-            raise Refused(f"form {form_id}: the submissions answer is not a list of submissions with ids")
-        for sub in page:
-            if sub["id"] not in seen:
-                seen.add(sub["id"])
-                out.append(sub)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
-    if window is None:                       # the whole form: its own count is the check, as the resolver's
-        reported = int((client.get(f"/form/{form_id}") or {}).get("count") or 0)
-        if len(out) < reported:
-            raise Refused(f"form {form_id}: fetched {len(out)} submissions but the form reports {reported} - run again")
-    return out
+def window_filter(window):
+    """Jotform's submissions filter for the ones created strictly inside `window`."""
+    return {"created_at:gt": window[0], "created_at:lt": window[1]}
 
 
 class Jotform:
@@ -145,13 +108,13 @@ class Jotform:
         """[(form id, submission)] the batch may have come from, or a reason there are none."""
         if self.all_forms:
             if self.whole is None:
-                self.whole = [(fid, sub) for fid in forms.REGIONALS.values() for sub in fetch(self.client, fid)]
+                self.whole = [(fid, sub) for fid in forms.REGIONALS.values() for sub in self.client.submissions(fid)]
             return self.whole, None
         form_id = SF_REGION_FORM.get(region_of(batch))
         if not form_id:
             return [], f"region {region_of(batch)!r} names no form"
         window = window_of(batch["CreatedDate"])
-        return [(form_id, sub) for sub in fetch(self.client, form_id, window)
+        return [(form_id, sub) for sub in self.client.submissions(form_id, window_filter(window))
                 if window[0] < str(sub.get("created_at")) < window[1]], None
 
 
@@ -200,55 +163,21 @@ def describe(entry):
 
 
 # ---- the ledger and the writes -------------------------------------------------------------------
-def private_folder(folder):
+def ledger_folder(folder):
     """The folder, created owner-only. Inside the checkout it must be under data/ (never committed)."""
-    folder, data = os.path.abspath(folder), os.path.join(REPO, "data")
-    if folder == data or folder.startswith(data + os.sep):
-        os.makedirs(data, 0o700, exist_ok=True)       # a fresh checkout has no data/ yet, and within() needs it to exist
-    if within(folder, REPO) and not within(folder, data):
-        raise Refused("--dir: inside the checkout the ledger folder must be under data/ (never committed)")
-    os.makedirs(folder, 0o700, exist_ok=True)
-    os.chmod(folder, 0o700)
-    return folder
+    return private_folder(folder, "the ledger folder", repo=REPO)
 
 
 def ledger_path(folder):
-    return os.path.join(private_folder(folder), "ledger.csv")
-
-
-def read_ledger(path):
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
-        return []
-    with open(path, encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        if reader.fieldnames != LEDGER_COLS:
-            raise Refused(f"{path} does not start with this tool's header line: " + ",".join(LEDGER_COLS))
-        return list(reader)
-
-
-def last_rows(ledger):
-    """record id -> its last ledger row (append-only; the last line is a record's state)."""
-    out = {}
-    for row in ledger:
-        out[row["record_id"]] = row
-    return out
-
-
-def append_ledger(path, row):
-    with open_private(path, "a") as fh:
-        writer = csv.DictWriter(fh, fieldnames=LEDGER_COLS, lineterminator="\n")
-        if os.fstat(fh.fileno()).st_size == 0:
-            writer.writeheader()
-        writer.writerow({col: row.get(col, "") for col in LEDGER_COLS})
-        fh.flush()
-        os.fsync(fh.fileno())
+    return os.path.join(ledger_folder(folder), "ledger.csv")
 
 
 def write_one(org, path, batch_id, sobject, record_id, old, new, prefix=""):
     """Ledger row, PATCH, re-read, closing row. Returns the closing outcome; anything but
     `written` is a stop for the caller (nothing else is written)."""
-    row = {"when_utc": now(), "batch_id": batch_id, "record_id": record_id, "sobject": sobject, "old": old, "new": new}
-    append_ledger(path, dict(row, outcome=prefix + "open"))
+    ledger = Ledger(path, LEDGER_COLS)
+    row = {"when_utc": stamp(), "batch_id": batch_id, "record_id": record_id, "sobject": sobject, "old": old, "new": new}
+    ledger.append(dict(row, outcome=prefix + "open"))
     status, _ = org.update(sobject, record_id, {"Module__c": new})
     if status != 204:
         outcome = f"{prefix}failed_{status}"
@@ -260,10 +189,10 @@ def write_one(org, path, batch_id, sobject, record_id, old, new, prefix=""):
         except Refused as stop:                  # 204 answered, then no re-read: the value is unknown, the row closes as check
             back, why = [], f"the write answered 204 but the re-read did not ({stop})"
         outcome = prefix + ("written" if len(back) == 1 and back[0].get("Module__c") == new else "check")
-    append_ledger(path, dict(row, when_utc=now(), outcome=outcome))
+    ledger.append(dict(row, when_utc=stamp(), outcome=outcome))
     if outcome != prefix + "written":
         raise Refused(f"{record_id} ({sobject}, batch {batch_id}): {why} - STOPPED, nothing more written; the ledger "
-                      f"{os.path.relpath(path, REPO)} says what was")
+                      f"{rel(path)} says what was")
     return outcome
 
 
@@ -327,7 +256,7 @@ def cmd_correct(args, org, client):
     for entry in matched:
         apply_entry(org, path, entry)
     print(f"written and read back: {len(matched)} batches, {sum(e['rows'] for e in matched)} rows"
-          + (f"; UNMATCHED, left alone: {unmatched}" if unmatched else "") + f"; ledger {os.path.relpath(path, REPO)}")
+          + (f"; UNMATCHED, left alone: {unmatched}" if unmatched else "") + f"; ledger {rel(path)}")
 
 
 def put_back(row):
@@ -347,8 +276,8 @@ def cmd_undo(args, org):
     path = os.path.abspath(args.undo)
     if not os.path.isfile(path):
         raise Refused(f"--undo: there is no ledger {args.undo}")
-    private_folder(os.path.dirname(path))        # the undo's own rows go into the same file: the same rule as --dir
-    last = last_rows(read_ledger(path))
+    ledger_folder(os.path.dirname(path))         # the undo's own rows go into the same file: the same rule as --dir
+    last = last_rows(Ledger(path, LEDGER_COLS).read(), "record_id")
     todo = [(row, put_back(row)) for row in last.values() if put_back(row)]
     for row in last.values():
         if not put_back(row):
@@ -365,22 +294,14 @@ def cmd_undo(args, org):
     for row, (holds, back) in todo:
         write_one(org, path, row["batch_id"], row["sobject"], row["record_id"], holds, back, prefix="undo_")
         print(f"  put back {row['record_id']} ({row['sobject']}): {back!r}, read back equal")
-    print(f"put back and read back: {len(todo)} records; ledger {os.path.relpath(path, REPO)}")
-
-
-def positive(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
+    print(f"put back and read back: {len(todo)} records; ledger {rel(path)}")
 
 
 def main(argv=None, org=None, client=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                  allow_abbrev=False)
     ap.add_argument("--apply", action="store_true", help="write to Salesforce (needs Ryan's go)")
-    ap.add_argument("--vpn-off", action="store_true",
-                    help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+    add_vpn_flag(ap)
     ap.add_argument("--limit", type=positive, help="correct only the first N matched batches (their rows included)")
     ap.add_argument("--since", default=SINCE, metavar="YYYY-MM-DD", help=f"batches created from this day on (default {SINCE})")
     ap.add_argument("--all-forms", action="store_true",
@@ -397,16 +318,14 @@ def main(argv=None, org=None, client=None):
         sys.exit("--since: a date like 2026-09-01")
     try:
         talks = not args.undo or args.apply          # the undo's dry run reads the ledger only
-        if talks and not args.vpn_off:
-            raise Refused("this command talks to Salesforce from this Mac: check that no VPN is on, then add "
-                          "--vpn-off (a connection through a VPN froze Ryan's user on 2026-09-30)")
+        if talks:
+            require_vpn_off(args)
         org = org or (Org(args.org) if talks else None)
         if args.undo:
             cmd_undo(args, org)
             return
         if client is None:
-            api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY in the environment (RUNBOOK, Credentials)")
-            client = Client(api_key, retries=3)
+            client = Client(api_key(" - docs/RUNBOOK.md, \"Credentials\""), retries=3)
         cmd_correct(args, org, client)
     except (Refused, JotformError) as stop:
         sys.exit(str(stop))

@@ -90,7 +90,7 @@ from collections import Counter, defaultdict
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
-from glow.cli import run            # noqa: E402
+from glow.cli import api_key, run            # noqa: E402
 from glow.jotform import Client     # noqa: E402
 from glow.layout import label as layout_label, roster_slot   # noqa: E402
 from glow.links import order_of as links_order_of, submit_button  # noqa: E402
@@ -98,10 +98,10 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
     CLUB_NAME, CONTACT_IDS, GUARD_DISABLES_SUBMIT,   # shared with the
     GUARD_NAME, GUARD_PROPS, JOTFORM_COL,
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
-    SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners,
-    dropdown_options, has_calc_values, inactive_retires, long_name_partner, partner_fields,
+    SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners, club_picker,
+    dropdown_options, has_calc_values, inactive_retires, long_name_partner,
     partner_picker, partners_marker_present, picker_calc_values, read_partners_csv,
-    read_roster_csv, read_sheet, roster_names, roster_pairs, roster_removed,   # against Config.gs
+    read_roster_csv, read_sheet, roster_names, roster_pairs, roster_removed, rule_parts,   # against Config.gs
     sf_club_name, shared_club_names, sheet_today, warn,
 )
 from glow import sync as glow_sync  # noqa: E402  - CONTACT_IDS_FIRST, CONTACT_IDS_PICKER_OPERAND and
@@ -128,24 +128,6 @@ PICKER_PROPS = {
     "multipleSelections": "Yes",
     "searchText": "Type to search your club",
     "visibleOptions": "5",
-    "emptyText": "Please Select",
-}
-
-# RETIRED 2026-09-30, never deployed (docs/plans/2026-09-30-same-name-clubs.md):
-# the partner list. When two partners had a club of the same name the picker
-# listed that name once and the rosters were told apart by the partner - the
-# typed Partner box (q331), which had to equal the partner's full name as the
-# Roster spells it, or this list (--partner-picker, docs/plans/2026-09-28-
-# partner-box.md). Now each such club is its own picker entry, "<club> -
-# <partner>", and main() refuses the flag and a form carrying the list. What
-# is left of it here (these props, partner_choices, build_conditions'
-# partner_field) is dead code waiting for its clean-up (docs/BACKLOG.md).
-PARTNER_PICKER_PROPS = {
-    "text": "Partner",
-    "subLabel": "",
-    "required": "Yes",
-    "hidden": "Yes",
-    "multipleSelections": "No",
     "emptyText": "Please Select",
 }
 
@@ -253,20 +235,16 @@ def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
             "priority": "0", "index": "0", "terms": terms, "action": [action]}
 
 def build_conditions(club_questions, partner_of, module_options, picker=None,
-                     partner_field=PARTNER, picker_options=None, guard=None, submit=None,
-                     retired=()):
+                     picker_options=None, guard=None, submit=None, retired=()):
     """club_questions: {qid: the text its rule tests} - the club's name, or on
     a form with the Club picker its picker entry, which for a club whose name
     another partner's club shares is "<club> - <partner>" (main() decides;
     glow.sync.SF_NAME_SEP); partner_of: {qid: partner} for the rosters that
-    still share one text and are told apart by the partner; picker: qid of the
-    Club dropdown when the form has one (the rules then key on it and its
-    value is copied into the CLUB_NAME textbox for Salesforce); partner_field:
-    the field the same-text rules test - the typed Partner box (the retired
-    partner list passed its own qid; its value was then copied into the hidden
-    typed box, which the staff notification e-mail reads); picker_options:
-    the picker's options exactly as this run writes them (the rules test each
-    club in the picker's spelling); guard / submit: qids of the clubGuard
+    still share one text and are told apart by the typed Partner box (PARTNER);
+    picker: qid of the Club dropdown when the form has one (the rules then key
+    on it and its value is copied into the CLUB_NAME textbox for Salesforce);
+    picker_options: the picker's options exactly as this run writes them (the
+    rules test each club in the picker's spelling); guard / submit: qids of the clubGuard
     warning and the Submit button on a form with the one-club guard (section
     D; both, with a picker and its options, or no guard rules at all);
     retired: qids of the retired rosters (docs/plans/2026-10-06-clubs-off-
@@ -319,17 +297,17 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     for qid, name in sorted(club_questions.items(), key=lambda kv: int(kv[0])):
         if len(by_name[name.lower()]) > 1:
             conds.append(mk_field_rule(
-                [mk_term(partner_field, "equals", partner_of[qid]),
+                [mk_term(PARTNER, "equals", partner_of[qid]),
                  mk_term(club_field, "equals", club(name))],
                 [mk_show(qid)], link="All"))
         else:
             conds.append(mk_field_rule([mk_term(club_field, "equals", club(name))],
                                        [mk_show(qid)]))
-    for low, qids in sorted(by_name.items()):
-        if len(qids) > 1:  # ambiguous name -> reveal the Partner box (or list)
+    for _low, qids in sorted(by_name.items()):
+        if len(qids) > 1:  # ambiguous name -> reveal the Partner box
             conds.append(mk_field_rule(
                 [mk_term(club_field, "equals", club(club_questions[qids[0]]))],
-                [mk_show(partner_field)]))
+                [mk_show(PARTNER)]))
 
     # B. curriculum cascade
     for year, module_qid in MODULES.items():
@@ -349,10 +327,6 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     if picker:  # the picked club -> the textbox Salesforce reads (Account_Name__c)
         conds.append(mk_calc_rule([mk_term(picker, "isFilled")], CLUB_NAME,
                                   picker, "{%s}" % picker, as_text=True))
-    if partner_field != PARTNER:  # the chosen partner -> the hidden typed box (q331), which
-        # the staff notification e-mail's "Partner {partner}" row and the export's Partner read
-        conds.append(mk_calc_rule([mk_term(partner_field, "isFilled")], PARTNER,
-                                  partner_field, "{%s}" % partner_field, as_text=True))
     conds.append(mk_calc_rule([mk_term(YEAR, "isFilled")], YEAR_ID,
                               YEAR, "{%s}" % YEAR))
     for module_qid in MODULES.values():
@@ -386,8 +360,12 @@ def _norm_rules(conds):
     """Rules with the re-minted ids and counters stripped, for comparison."""
     out = []
     for c in conds:
-        terms = json.loads(c["terms"]) if isinstance(c.get("terms"), str) else c["terms"]
-        action = json.loads(c["action"]) if isinstance(c.get("action"), str) else c["action"]
+        parts = rule_parts(c)
+        if parts is None or c.get("terms") is None or c.get("action") is None:
+            # same_conditions then says "not the same" (the rules are rewritten) and rule_delta
+            # counts every planned rule as new, as when the json.loads here raised
+            raise ValueError(f"rule {c.get('id')}: terms/action missing or not parseable")
+        terms, action = parts
         out.append((c.get("type"), c.get("link"),
                     json.dumps([{k: v for k, v in t.items() if k != "id"} for t in terms],
                                sort_keys=True),
@@ -414,24 +392,6 @@ def rule_delta(current, planned):
     plan = Counter(_norm_rules(planned))
     kept = sum((cur & plan).values())
     return kept, sum(plan.values()) - kept, sum(cur.values()) - kept
-
-def partner_choices(club_questions, partner_of, pending=()):
-    """What the partner list offers: the partner of every roster whose name
-    another roster shares (case-insensitively, as Jotform's "equals" compares),
-    counting the (club, partner) pairs in `pending` that are about to be
-    created. One entry per partner (first spelling kept), sorted."""
-    by_name = defaultdict(list)
-    for qid, name in club_questions.items():
-        by_name[name.lower()].append(partner_of.get(qid, ""))
-    for club, partner in pending:
-        by_name[club.lower()].append(partner)
-    out = {}
-    for partners in by_name.values():
-        if len(partners) > 1:
-            for p in partners:
-                if p and p.strip():
-                    out.setdefault(" ".join(p.split()).lower(), p)
-    return sorted(out.values(), key=str.lower)
 
 def joined_clashes(options):
     """[(a, b, c)]: two picker options whose names run together - what
@@ -472,9 +432,6 @@ def main():
     ap.add_argument("--club-picker", action="store_true",
                     help="add the Club dropdown to this form (once; afterwards it is "
                          "maintained on every run) and hide the Club Name textbox")
-    ap.add_argument("--partner-picker", action="store_true",
-                    help="retired 2026-09-30 (refused): clubs that share a name each have "
-                         "their own Club picker entry instead - see --same-name-switch")
     ap.add_argument("--club-guard", action="store_true",
                     help="add the one-club-per-submission guard to this form (once; afterwards "
                          "it is maintained on every run): a warning below the Club picker, and "
@@ -497,14 +454,8 @@ def main():
         sys.exit("--partners needs --roster (the Partners tab marks Roster clubs, not enrollment rows)")
     if args.prune and not args.region:
         sys.exit("--prune needs --region")
-    if args.partner_picker:
-        sys.exit("--partner-picker was retired 2026-09-30: clubs that share a name each have "
-                 "their own entry in the Club picker ('<club> - <partner>') - see "
-                 "--same-name-switch and docs/RUNBOOK.md, \"Club names two partners share\"")
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit(
-        "Set JOTFORM_API_KEY in the environment")
-    jf = Jotform(api_key, args.form, args.apply)
+    jf = Jotform(api_key(), args.form, args.apply)
 
     # the form's status first: a DISABLED form is one nobody can open, so a write
     # to it is refused unless asked for (the runner skips such a form instead)
@@ -560,13 +511,12 @@ def main():
     shared_any = shared_club_names(pairs)                        # names two partners have ever had
     shared_active = shared_club_names(pairs, active_only=True)   # what --same-name-switch goes by
 
-    if args.prune:
-        if int(info.get("count") or 0) > 0:
-            msg = (f"form {args.form} already has {info['count']} submission(s); "
-                   "--prune is for fresh clones only")
-            if args.apply:
-                sys.exit("Refusing: " + msg)
-            warn(f"  ! (preview only) {msg}")
+    if args.prune and int(info.get("count") or 0) > 0:
+        msg = (f"form {args.form} already has {info['count']} submission(s); "
+               "--prune is for fresh clones only")
+        if args.apply:
+            sys.exit("Refusing: " + msg)
+        warn(f"  ! (preview only) {msg}")
 
     # clubs whose roster lists the same full name twice: two different girls
     # need a distinguishing suffix in the SHEET before we trust that roster
@@ -593,20 +543,18 @@ def main():
             existing.setdefault(norm(q["text"]).lower(), []).append(qid)
             form_text[qid] = norm(q["text"])
 
-    module_options = {
-        year: [o for o in questions[mqid]["options"].split("|") if o]
-        for year, mqid in MODULES.items()}
+    module_options = {year: dropdown_options(questions[mqid]) for year, mqid in MODULES.items()}
 
-    picker_qid = next((qid for qid, q in questions.items()
-                       if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME),
-                      None)
+    picker_qid = club_picker(questions)
     if picker_qid:
         print(f"Club picker: q{picker_qid} (mentors choose their club from a list)")
         if args.club_picker:
             print("  - the form already has the Club picker; --club-picker is not needed")
 
+    # the partner list (docs/plans/2026-09-28-partner-box.md) was never deployed and is
+    # retired (2026-09-30): clubs that share a name each have their own picker entry
     partner_qid = partner_picker(questions)
-    if partner_qid:     # never deployed; retired with --partner-picker (no live form has one)
+    if partner_qid:
         sys.exit(f"q{partner_qid} is a partner list ({PARTNER_PICKER_NAME!r}), retired 2026-09-30: "
                  "clubs that share a name each have their own Club picker entry now. Delete the "
                  "list in the builder first, then run this again")
@@ -655,17 +603,18 @@ def main():
     #    "Y" is no partner. The roster's own text is stripped as a prefix;
     #    nothing is ever split on " - ".
     current_partner_of, current_value, gated = {}, {}, set()
-    pfields = partner_fields(questions)
     club_field = picker_qid or CLUB_NAME
     props = jf.get("/properties")
     for cond in props.get("conditions", []):
         if cond.get("type") != "field":
             continue
-        terms = json.loads(cond["terms"]) if isinstance(cond["terms"], str) \
-            else cond["terms"]
-        action = json.loads(cond["action"]) if isinstance(cond["action"], str) \
-            else cond["action"]
-        pterm = next((t for t in terms if str(t["field"]) in pfields
+        parts = rule_parts(cond)
+        if parts is None:
+            sys.exit(f"Refusing: the form's rule {cond.get('id')} has terms or an action that do not "
+                     "parse - look at it in the builder (Settings > Conditions), or restore the rules "
+                     "from a backup (restore_conditions.py)")
+        terms, action = parts
+        pterm = next((t for t in terms if str(t["field"]) == PARTNER
                       and t["operator"] == "equals"), None)
         cterm = next((t for t in terms if str(t["field"]) == club_field
                       and t["operator"] == "equals"), None)
@@ -932,7 +881,7 @@ def main():
         entries = sorted(entries)
         unclaimed, taken = list(qids), {}
         for test in (same_partner, loosely(low)):
-            for i, (partner, club, roster) in enumerate(entries):
+            for i, (partner, _club, _roster) in enumerate(entries):
                 if i in taken:
                     continue
                 qid = next((q for q in unclaimed if q in current_partner_of
@@ -964,7 +913,7 @@ def main():
     # (an incomplete export looks the same - always export the FULL tab) -
     # unless the Roster says they belong to another region and we are pruning
     pruned = {q for q, _, _ in to_delete}
-    for low, qids in sorted(existing.items()):
+    for _low, qids in sorted(existing.items()):
         for qid in qids:
             if qid in club_questions or qid in pruned:
                 continue
@@ -1098,7 +1047,7 @@ def main():
         elif key(club) in sent:
             whose = f"what q{sent[key(club)]} sends as its Club Name"
         elif key(club) in long_names:
-            whose = "what {0}'s club '{1}' sends as its Club Name".format(*long_names[key(club)])
+            whose = "what {}'s club '{}' sends as its Club Name".format(*long_names[key(club)])
         else:
             continue
         to_create.remove((club, partner, options))
@@ -1175,7 +1124,7 @@ def main():
         name_groups = defaultdict(list)
         for qid, name in club_questions.items():
             name_groups[name.lower()].append(qid)
-        for low, qids in name_groups.items():
+        for _low, qids in name_groups.items():
             if len(qids) > 1:
                 for qid in qids:
                     partner_of[qid] = pair_of[qid][0] if qid in pair_of else rule_partner(qid)
@@ -1437,7 +1386,7 @@ def main():
             "restored": [dict(qid=q, **restored[q]) for q in sorted(restored, key=int)],
             "partners": args.partners,
             "rules": len(conds), "warnings": list(WARNINGS), "calls": list(jf.calls),
-            "club_picker": picker_qid, "partner_picker": partner_qid, "club_guard": guard_qid,
+            "club_picker": picker_qid, "club_guard": guard_qid,
             # what every roster on the form sends to question 5 after this plan = the
             # club's Salesforce Account name (the picker's spelling); a club not created
             # yet (a dry run) has no qid. tools/auto_sync.py compares these across regions

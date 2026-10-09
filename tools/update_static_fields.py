@@ -39,9 +39,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from glow import forms as glow_forms      # noqa: E402
-from glow.cli import run                  # noqa: E402
-from glow.jotform import Client           # noqa: E402
+from glow import forms as glow_forms
+from glow.cli import api_key, run, targets
+from glow.jotform import Client
 
 WANTED = {
     "mentorEmail": {
@@ -129,9 +129,8 @@ def main():
     ap.add_argument("--apply", action="store_true", help="write (dry run without it)")
     args = ap.parse_args()
 
-    api_key = os.environ.get("JOTFORM_API_KEY") or sys.exit("Set JOTFORM_API_KEY")
-    form_ids = [args.form] if args.form else list(glow_forms.LIVE)
-    client = Client(api_key, apply=args.apply)
+    form_ids = list(targets([args.form] if args.form else None))
+    client = Client(api_key(), apply=args.apply)
     fields = wanted_fields(args.image_src)
     if args.image_src:
         print(f"  header image: {args.image_src}\n    {check_src(args.image_src)}\n")

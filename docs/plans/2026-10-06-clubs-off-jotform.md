@@ -1,7 +1,8 @@
 ---
 title: Clubs that do not report through Jotform leave the forms - a Partners-tab marker for the three partners, deactivation of the U.S clubs, the U.S form disabled
 author: Claude (with Ryan's decisions of 2026-10-06; code and docs read on `main` 9d58ce4 and the branch wf10/four-issues, Jotform GET, Salesforce read connector, 2026-10-06; revised after two reviews the same day)
-status: accepted         # Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+status: in-progress      # built 2026-10-07 (Build notes), merged into main 2026-10-09 (79208cd); nothing applied yet. Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+backlog: 71, 74
 created: 2026-10-06
 intent: docs/intent/2026-10-06-clubs-off-jotform.md
 ---
@@ -227,7 +228,7 @@ it gets its entry and rule back and an options update if the Roster moved on. Th
 Flipping the cell is the rollback of the marker; `deactivate_clubs.py --undo` (C) is the rollback
 of a deactivation. No snapshot is involved (and `restore_conditions.py` would refuse the
 pre-retirement conditions file anyway: its rules test entries the picker no longer lists -
-docs/RUNBOOK.md "Rollback" under "Automatic sync").
+docs/RUNBOOK.md "Automatic sync", its **Rollback**).
 
 **Refusals.** Without `--partners`, a roster with no show rule and no picker entry whose club is
 active in the Roster would be restored - 38 entries back on Africa by a forgotten flag. The same
