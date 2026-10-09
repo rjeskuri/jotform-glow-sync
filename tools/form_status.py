@@ -186,19 +186,6 @@ def off_picker(questions, conditions, owner_of=None):
     return out
 
 
-def load_partners(path):
-    """{key(club): {key(partner): partner}} for every Roster row - any status, all
-    regions: the partners a club's long name ("<club> - <partner>",
-    glow.sync.SF_NAME_SEP) may carry."""
-    pairs = {}
-    for row in _roster_rows(path, needed=None):
-        partner = " ".join((row.get("partner") or "").split())
-        club = " ".join((row.get("club") or "").split())
-        if partner and club:
-            pairs.setdefault((partner, club), True)
-    return club_partners(pairs)
-
-
 # glow.sync's own ids; test/gs_parity_test.py reads them under these names
 CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID, ENABLE_FUZZY_QID = CLUB_NAME, PARTNER, CONTACT_IDS, ENABLE_FUZZY
 
@@ -807,7 +794,7 @@ def is_long_name(value, text):
 def audit_rules(questions, conditions, partners_of=None, retired=()):
     """Rule-level checks on a form's live conditions. Returns a list of
     problem strings (empty = clean) and a summary dict. partners_of: the
-    Roster's {key(club): {key(partner): partner}} (load_partners); with it a
+    Roster's {key(club): {key(partner): partner}} (roster_facts' holders); with it a
     long name's partner must be one the Roster has for that club. retired:
     roster qids that may have no show rule - a retired roster (the Roster says
     so), or one form_report reports in its own words; one that still has its
@@ -1049,13 +1036,13 @@ def layout_line(lo):
 
 
 def form_report(form_id, client, roster_by_region, partners_of=None, facts=None):
-    """One form's report. partners_of: load_partners (the Roster's holders of each club
+    """One form's report. partners_of: roster_facts' holders (the Roster's holders of each club
     name); facts: roster_facts, with which the retired rosters are told from broken ones
     (none: a roster without its rule is a problem, as ever)."""
     label, region = FORMS.get(form_id) or DEFUNCT.get(form_id) or (form_id, None)
-    props = client.get(f"/form/{form_id}/properties", limit=1000)
+    props = client.get(f"/form/{form_id}/properties")
     questions = client.get(f"/form/{form_id}/questions", limit=1000)
-    info = client.get(f"/form/{form_id}", limit=1000)
+    info = client.get(f"/form/{form_id}")
     status = info.get("status")
 
     clubs = {}
@@ -1248,8 +1235,10 @@ def main():
     storage = read_storage(client)        # once per run: account-wide, every report carries it
     marks = read_partners_csv(args.partners) if args.partners else None
     roster = load_roster(args.roster)
-    partners_of = load_partners(args.roster) or None     # an empty Roster vouches for no partner
-    facts = roster_facts(args.roster, marks) if partners_of else None
+    facts = roster_facts(args.roster, marks)
+    partners_of = facts["holders"] or None     # a Roster with no partner + club row vouches for no partner
+    if partners_of is None:
+        facts = None                           # ...and tells no retired roster from a broken one
 
     reports = [form_report(f, client, roster, partners_of, facts) for f in (args.form or FORMS)]
     for r in reports:

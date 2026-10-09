@@ -405,7 +405,7 @@ def main():
                              "rename it in the sheet only - run again with --sheet-only - and the "
                              "next sync creates its roster under the new name")
             if moving:
-                props = client.get(f"/form/{fid}/properties", limit=1000)
+                props = client.get(f"/form/{fid}/properties")
                 gated = partner_gated(props.get("conditions") or [], {hits[0]}, pfields)
                 if gated:
                     sys.exit(f"form {fid}: rule {', '.join(gated)} shows q{hits[0]} only for a "

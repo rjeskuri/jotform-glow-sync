@@ -30,7 +30,7 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
 
     PARTNERS = {"stars": {"partner one": "Partner One", "partner two": "Partner Two"},
                 "alpha club": {"partner one": "Partner One"},
-                "beta club": {"partner two": "Partner Two"}}       # the Roster's, as load_partners gives
+                "beta club": {"partner two": "Partner Two"}}       # the Roster's, as roster_facts' holders give
 
     def form(self, **kw):
         return SameNameFixture.form(SameNameFixture(), **kw)

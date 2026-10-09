@@ -757,8 +757,9 @@ class RetiredRostersAudit(unittest.TestCase):
                     return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
                             "clearFieldOnHide": "disable"}
                 return {"title": "t", "status": status, "count": "0"}
-        partners_of = form_status.load_partners(roster) or None
-        facts = form_status.roster_facts(roster, marks) if partners_of else None
+        facts = form_status.roster_facts(roster, marks)
+        partners_of = facts["holders"] or None
+        facts = facts if partners_of else None
         return form_status.form_report(form or self.AFRICA, Fake(), form_status.load_roster(roster), partners_of, facts)
 
     def printed(self, qs, wire, *extra, partners=None, status="ENABLED", page=None):
