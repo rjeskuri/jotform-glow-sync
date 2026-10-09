@@ -37,6 +37,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - Partner → region derived from which regional form each partner's clubs were on, Partners tab overrides
 - **Why:** nobody had typed regions; the old forms encoded them
 - **Consequences:** `Regions.gs` is generated and frozen at that derivation; the Partners tab is authoritative
+- 2026-10-09: the deriving script is retired and `Regions.gs` is hand-kept data (2026-10-09 — Finished one-offs are deleted, not archived)
 
 ### 2026-08-26 — Git history rewritten once for privacy
 
@@ -490,3 +491,58 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   day; three intents were done while marked proposed or in-progress) because nothing read them.
 - **Consequences:** the 2026-10-09 restructure set every plan's and intent's status from the
   evidence (BACKLOG, the plans' Results, git); `docs/README.md` describes the flow.
+
+### 2026-10-09 — Lint with ruff, a small rule set, no formatter
+
+- ruff 0.16.5 (`ruff.toml`) runs in `make check`, CI and the pre-commit hook and fails on any finding: the families E, F, W, B, UP, SIM, PLE and RUF100; E501, E731, E741, B905 and UP031 ignored, each with its reason in the file ([plan](plans/2026-10-09-repo-cleanup.md), Phase 2).
+- **Why:** it finds real faults (unused imports and variables, closures over a loop variable, a raise that loses its cause, invisible characters written raw) and stale `# noqa`; the merged tree had about 83 findings, 34 of them auto-fixable.
+- **Rejected:** `ruff format` (a diff of about 42,800 lines that flattens the aligned trailing comments the code is read by); isort (it reorders the imports that follow a `sys.path` insert and breaks their `# noqa: E402`); a `pyproject.toml` with an editable install of `glow` (the worktrees share one `.venv` through a symlink, so an editable `glow` would point at one checkout and every other one would test that checkout's code).
+- **Consequences:** `make venv` installs ruff (`requirements-dev.txt`); a new rule family is a change of its own.
+
+### 2026-10-09 — Tests found by discovery, one file per subject
+
+- `make check` runs `python3 -m unittest discover -s test -p '*_test.py'`; the 9.4k-line `test/python_test.py` became one file per subject, and what more than one file uses lives in `test/helpers/common.py`, a fixture other test classes borrow as a mixin. The JavaScript suites are every `test/*_test.js` ([plan](plans/2026-10-09-repo-cleanup.md), Phase 2).
+- **Why:** every branch edited `python_test.py` and its hand-kept import list, so every merge conflicted there; with discovery a new test file runs without being registered.
+- **Rejected:** importing one test class into another module (discovery would run it twice: hence the mixins); splitting `test/forms_logic_test.js` (it stays one file, its `check()` helper shared through `test/helpers/js/`).
+- **Consequences:** the split moved test code verbatim (the same 633 test ids then); a new test module imports `helpers.common` first, which puts the repository root and `tools/` on `sys.path`.
+
+### 2026-10-09 — The hooks match path components in every checkout
+
+- `protected_paths.sh` matches path components, ignoring case, in any checkout (the main one, a worktree, a sibling clone): inside the project only the part below it, and the path with symbolic links resolved as well; `~/.claude/settings*.json` and `~/.claude/hooks/` are protected like the project's own.
+- `live_gate.sh` lets a read-only command through (its first word `grep`, `rg`, `cat`, `head`, `tail`, `wc`, `ls` or `git log|show|diff|grep|blame|status`, with nothing else that can run in it), and treats a write to a shell startup file (`~/.zshrc` and the others, `.envrc`, `.env`) or `launchctl setenv` as self-approval, blocked even when `GLOW_LIVE_OK` is set ([plan](plans/2026-10-09-repo-cleanup.md), Phase 1; approved by Ryan).
+- **Why:** the old prefix match let an edit of `data/`, `credentials/` or `.claude/settings.json` from a worktree or a `./` path through (reproduced); the user-level settings could switch the project's hooks off; 20 of 31 logged blocks were `grep`, `git` or `echo` on the docs; `printf … >> ~/.zshrc` passed.
+- **Rejected:** parsing the shell properly: the gate reads text, so a write through `cp`, an editor or a script is not seen - it guards against mistakes, not intent.
+- **Consequences:** `test/hooks_test.py` pins both hooks; a checkout under a folder named `data` is not refused as a whole.
+
+### 2026-10-09 — Finished one-offs are deleted, not archived
+
+- A finished one-time tool is deleted; its row in ARCHITECTURE [Retired tools](ARCHITECTURE.md#retired-tools) says what it did, the deleting commit and the `git show` that restores it. `tools/` stays flat; `tools/fix_module_values.py` stays until its undo window closes (BACKLOG 84); `appsscript/Regions.gs` becomes hand-kept data.
+- *(the plan's recommended default; Ryan left the question open)* ([plan](plans/2026-10-09-repo-cleanup.md), Phase 3)
+- **Why:** an archived script no longer runs against today's `glow/`, yet it would still have to pass `make check` and still be read and edited; git keeps every version.
+- **Rejected:** a `tools/archive/` folder; subfolders in `tools/` (about 300 documented paths would break for little gain).
+- **Consequences:** restoring one is a `git show` and a `make check` against today's `glow/`; the docs point at the table, not at the file.
+
+### 2026-10-09 — A new club's SF Pending row is written before its Roster rows
+
+- In `handleNewClub_` (`appsscript/FormHandlers.gs`) whether the club is new is decided before any write (it has no girls on file), and every write that may fail comes before the Roster write: ClubRegistry, Partners, then the SF Pending row; after the Roster write only best-effort steps (the sync request, the dropdowns, the ReviewQueue through `tryReview_`, Audit). Live after Ryan's next `clasp push` ([plan](plans/2026-10-09-repo-cleanup.md), Phase 1, A1).
+- **Why:** the ReviewQueue write and the SF Pending append ran unprotected after the Roster write; a failure there made the response an ERROR whose retry saw an existing club - no SF Pending row (no account, nothing in the Monday e-mail), no sync request, and a mentor told that the girls just added were "already on the roster".
+- **Rejected:** inferring "new" on the retry from the Roster rows' sources and dates (built, then wrong twice in review: when another response for the club ran in between, and when a club enrolled and closed in SF Pending was sent again with one more girl).
+- **Consequences:** a failed Roster write that nobody retries leaves a pending SF Pending row for a club with no girls (the response shows ERROR in FormLog and the menu); a pending row closed by hand before the retry gets a second one. RUNBOOK "Missed form responses".
+
+### 2026-10-09 — Private files and ledgers in `glow/private_files.py`
+
+- The owner-only folders and files (0700 / 0600, inside the checkout only under `data/`) and `Ledger`, the append-only CSV of every Salesforce writer, live in `glow/private_files.py`; the tools import it instead of `tools/sf_backfill.py`, which stops being an import hub ([plan](plans/2026-10-09-repo-cleanup.md), Phase 3).
+- **Why:** three copies of the ledger and of the folder guard had drifted: one refused a `data/` that a fresh checkout does not have yet.
+- **Consequences:** the files' bytes are unchanged; a refusal is `glow.salesforce.Refused`.
+
+### 2026-10-09 — `Client.url()` encodes the query
+
+- `glow.jotform.Client.url()` URL-encodes the key and every parameter, once; a caller passes plain values (a submissions filter as its JSON text) ([plan](plans/2026-10-09-repo-cleanup.md), Phase 1).
+- **Why:** two callers encoded the filter by hand, and any other would have sent it raw.
+- **Consequences:** the URL those two send is byte-identical to before (tested); no caller pre-encodes.
+
+### 2026-10-09 — Salesforce output repeats error codes only
+
+- What a tool repeats from a Salesforce answer in its output (ATTENTION items, ledger outcomes) is the answer's error codes, `glow.salesforce.error_codes()` (a code has an underscore; no name has), never its words ([plan](plans/2026-10-09-repo-cleanup.md), Phase 3).
+- **Why:** `sf_new_clubs.py` took every all-caps word of four letters or more from an answer, so a name Salesforce quoted in capitals could reach the runner's ATTENTION past `auto_sync.redact`, which knows full names only.
+- **Consequences:** any code is named (`failed_NOT_FOUND`, no longer `failed_other`); the words of an error are read in Salesforce, not in a log.
