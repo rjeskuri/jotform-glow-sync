@@ -273,7 +273,8 @@ class Step:
 
     def __init__(self, mode, org, roster_csv, log=print, partners_path=PARTNERS, today=None,
                  retry=lambda fn, label: fn()):
-        assert mode in ("plan", "apply")
+        if mode not in ("plan", "apply"):            # a refusal, not an assert: python -O drops asserts
+            raise Refused(f"the Salesforce step's mode is {mode!r}, not plan or apply - nothing done")
         self.mode, self.org, self.roster_csv, self.log = mode, org, roster_csv, log
         self.partners_path, self.retry = partners_path, retry          # retry: reads only, never a write
         self.today = today or datetime.date.today().isoformat()

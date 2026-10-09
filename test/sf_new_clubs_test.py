@@ -325,6 +325,14 @@ class SalesforceNewClubs(Fixture):
         title, detail = next((t, d) for t, d in s.attention if "would create" in t)
         self.assertEqual(json.loads(detail)["ParentId"], P1)
 
+    def test_a_mode_other_than_plan_or_apply_is_refused_before_anything_runs(self):
+        org = FakeOrg(base_accounts())
+        for mode in ("off", "APPLY", None):
+            with self.subTest(mode), self.assertRaises(sfn.Refused) as stop:
+                self.step(org, mode=mode)
+            self.assertIn("not plan or apply", str(stop.exception))
+        self.assertEqual((org.seen, org.inserts), ([], []))
+
     def test_more_than_five_in_a_region_creates_none(self):
         clubs = [(f"Club {n}", "Example Partner") for n in "ABCDEF"]
         self.write_roster([(f"CLUB{n}XX", p, c) for (c, p), n in zip(clubs, "ABCDEF")])
