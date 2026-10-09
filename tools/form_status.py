@@ -1113,8 +1113,7 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
     rule_problems += shape_problems
     # question 18's names: the form's own translation dictionary must alter no roster option
     # (one more GET; a store that cannot be read or emulated is reported, not a problem)
-    lang = props.get("language")
-    lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
+    lang = glow_forms.language_of(props)
     names_problems, names_summary = audit_names(form_id, roster_options(questions), read_store(client, form_id),
                                                 lang.get("primaryLanguage") or tl.PRIMARY)
     rule_problems += names_problems

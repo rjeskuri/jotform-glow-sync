@@ -40,22 +40,21 @@ sys.path.insert(0, REPO)
 from glow import backup                # noqa: E402  (the stamp of the saved store)
 from glow import translations          # noqa: E402  (read, save, POST: rule 9)
 from glow.cli import api_key, run               # noqa: E402
-from glow.forms import TEMPLATE        # noqa: E402
+from glow.forms import TEMPLATE, language_of   # noqa: E402
 from glow.jotform import Client        # noqa: E402
 
 ENGLISH_KEYS = set(translations.SOURCE_KEYS)
 
 
-def language_of(form_id, client):
-    props = client.get(f"/form/{form_id}/properties")
-    lang = props.get("language")
-    return lang[0] if isinstance(lang, list) and lang else (lang or {})
+def language_property(form_id, client):
+    """The form's `language` property (glow.forms.language_of): the languages it offers."""
+    return language_of(client.get(f"/form/{form_id}/properties"))
 
 
 def describe(form_id, client, store=None):
     """(the languages offered, {language: entries}) of a form; `store`: its translation store
     when it was just read."""
-    lang = language_of(form_id, client)
+    lang = language_property(form_id, client)
     tr = translations.read_store(client, form_id) if store is None else store
     langs = {k: len(v) for k, v in tr.items() if k not in ENGLISH_KEYS}
     return lang.get("options", ""), langs
@@ -76,7 +75,7 @@ def main():
     if args.check:
         return
 
-    src_lang = language_of(args.source, client)
+    src_lang = language_property(args.source, client)
     src_tr = translations.read_store(client, args.source)
     have = translations.read_store(client, args.form)
     payload = {k: v for k, v in src_tr.items()

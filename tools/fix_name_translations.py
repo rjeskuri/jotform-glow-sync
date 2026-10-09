@@ -411,9 +411,7 @@ def main():
     plans, refused = {}, []
     for fid in [f for f in ORDER if f in forms]:
         props = get(client, f"/form/{fid}/properties", f"{LABEL[fid]}'s properties")
-        lang = props.get("language")
-        lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
-        primary = lang.get("primaryLanguage") or tl.PRIMARY
+        primary = glow_forms.language_of(props).get("primaryLanguage") or tl.PRIMARY
         if primary != tl.PRIMARY:
             sys.exit(f"{LABEL[fid]}: primaryLanguage is {primary!r}, not {tl.PRIMARY!r} - this tool posts "
                      "base and en only; refusing rather than guessing")

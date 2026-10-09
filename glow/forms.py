@@ -39,6 +39,13 @@ LABELS = {
 TITLES = {region: f"{region} Attendance Form" for region in REGIONALS}
 
 
+def language_of(props):
+    """A form's `language` property (GET /form/{id}/properties) as one dict: Jotform serves
+    it as a list of one, a dict, or not at all ({})."""
+    lang = (props or {}).get("language")
+    return lang[0] if isinstance(lang, list) and lang else (lang or {})
+
+
 def region_of(form_id):
     """The region a live form serves, or None (template / unknown / defunct)."""
     region = LIVE.get(form_id)

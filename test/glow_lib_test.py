@@ -253,6 +253,14 @@ class GlowForms(unittest.TestCase):
         ids = {forms.TEMPLATE, *forms.REGIONALS.values(), *forms.DEFUNCT.values()}
         self.assertEqual(len(ids), 10)
 
+    def test_the_language_property_in_every_shape_jotform_serves(self):
+        from glow import forms
+        lang = {"options": "English|Español", "primaryLanguage": "en"}
+        self.assertEqual(forms.language_of({"language": [lang]}), lang)      # a list of one
+        self.assertEqual(forms.language_of({"language": lang}), lang)        # a dict
+        for none in ({"language": []}, {"language": ""}, {}, None):
+            self.assertEqual(forms.language_of(none), {})
+
 
 class GlowCli(unittest.TestCase):
     """glow/cli.py: the API key every tool reads and the forms a --form selects."""

@@ -85,8 +85,7 @@ def main():
 
     for form_id, title in chosen.items():
         props = client.get(f"/form/{form_id}/properties")
-        lang = props.get("language")
-        lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
+        lang = glow_forms.language_of(props)
         options = [o for o in str(lang.get("options", "")).split("|") if o]
         store = translations.read_store(client, form_id)
         have = store.get(args.code, {})
@@ -124,7 +123,7 @@ def main():
         client.post_form(f"/form/{form_id}/properties",
                          {"properties[pagetitle]": title}, f"{form_id} nudge")
         props = client.get(f"/form/{form_id}/properties")
-        opts = props["language"][0]["options"] if isinstance(props.get("language"), list) else ""
+        opts = glow_forms.language_of(props).get("options") or ""
         ok = name in opts and all(after.get(args.code, {}).get(k) == v for k, v in new.items())
         print(f"   {'OK' if ok else 'PROBLEM'}: switcher = {opts}")
 
