@@ -385,6 +385,22 @@ class PreCommit(unittest.TestCase):
         self.git("rm", "-q", "cfg.txt")
         self.assertEqual(self.hook()[0], 0)                              # removing it is fine
 
+    def test_a_column_0_decorator_is_not_read_as_an_e_mail_address(self):
+        # review of 2026-10-09: the diff's "+" marker went into the scan, and with it a decorator at
+        # column 0 matched the e-mail rule (whose local part takes "+"), refusing a clean commit
+        self.write("tools/cached.py", "\n".join(["import functools", "", "",
+                                                 "@functools.lru_cache(maxsize=64)",
+                                                 "def club(name):", "    return name.strip()", ""]))
+        self.git("add", "tools/cached.py")
+        code, out = self.hook()
+        self.assertEqual(code, 0, out)
+        address = "mentor" + "@" + "school.test"                         # built here, as above
+        self.write("notes.md", f"{address}\n")                           # still caught at column 0
+        self.git("add", "notes.md")
+        code, out = self.hook()
+        self.assertEqual(code, 1, out)
+        self.assertIn("e-mail address", out)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

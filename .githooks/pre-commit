@@ -13,10 +13,11 @@ cd "$ROOT"
 PY="$ROOT/.venv/bin/python3"
 [ -x "$PY" ] || PY=python3
 
-# the added lines only (a removed secret is not a new one); package-lock.json is skipped as
-# check_secrets.py skips it in the full scan
+# the added lines only (a removed secret is not a new one), without the diff's "+" (the e-mail
+# rule's local part takes "+", so a decorator at column 0 would read as an address);
+# package-lock.json is skipped as check_secrets.py skips it in the full scan
 added=$(git diff --cached -U0 --no-color --src-prefix=a/ --dst-prefix=b/ -- . ':(exclude)package-lock.json' \
-          | grep '^+' | grep -vE '^\+\+\+ (b/|/dev/null)' || true)
+          | grep '^+' | grep -vE '^\+\+\+ (b/|/dev/null)' | sed 's/^+//' || true)
 if [ -n "$added" ] && ! printf '%s\n' "$added" | "$PY" scripts/check_secrets.py --stdin; then
   echo "pre-commit: the staged lines above match a secret or personal-data rule - remove them" \
        "(.claude/skills/child-privacy)" >&2

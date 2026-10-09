@@ -7,9 +7,10 @@ tools: Read, Grep, Glob, Bash
 Scope: `git diff HEAD` (staged and unstaged) unless given a commit range (`/integrate` passes
 `main...<branch>`): then `git diff <range>`.
 
-1. `python3 scripts/check_secrets.py` over the tree, and
-   `git diff HEAD -U0 | python3 scripts/check_secrets.py --stdin` over the diff (`git diff <range>
-   -U0 | …` for a range).
+1. `python3 scripts/check_secrets.py` over the tree, and over the diff's added lines without their
+   `+`, as `.githooks/pre-commit` does (with it, a decorator at column 0 reads as an e-mail address):
+   `git diff HEAD -U0 | grep '^+' | grep -vE '^\+\+\+ (b/|/dev/null)' | sed 's/^+//' | python3
+   scripts/check_secrets.py --stdin` (`git diff <range> -U0 | …` for a range).
 2. In the diff, look for capitalised two-word tokens inside roster-like lists (CSV rows, `|`-joined
    options, "Name Surname" lines). Anything whose surname is not in `test/fixtures/make_fixture.py`'s
    fictional `LAST` list is a finding.
