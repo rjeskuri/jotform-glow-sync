@@ -9,8 +9,11 @@ const fs = require('fs');
 const path = require('path');
 const loadGs = require('./load_gs');
 
-const gs = loadGs(['buildDispatchRequest_', 'DISPATCH_EVENT', 'DISPATCH_WORKFLOW', 'PROP', 'TAB'],
+const gs = loadGs(['buildDispatchRequest_', 'DISPATCH_WORKFLOW', 'PROP', 'TAB'],
                   ['Config.gs', 'Dispatch.gs']);
+// the repository_dispatch event a sheet sent before the switch to workflow_dispatch; the
+// workflow still takes it (no .gs code sends it any more)
+const OLD_DISPATCH_EVENT = 'roster-changed';
 const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'auto-sync.yml'), 'utf8');
 
 let failures = 0;
@@ -43,7 +46,7 @@ check('Script Property names are declared in Config.gs',
       gs.PROP.SYNC_DISPATCH_REPO === 'SYNC_DISPATCH_REPO' && gs.PROP.SYNC_DISPATCH_TOKEN === 'SYNC_DISPATCH_TOKEN');
 check('SyncLog tab is declared in Config.gs', gs.TAB.SYNC_LOG === 'SyncLog');
 check('the workflow still takes the old event (until the token is switched)',
-      workflow.includes('types: [' + gs.DISPATCH_EVENT + ']'));
+      workflow.includes('types: [' + OLD_DISPATCH_EVENT + ']'));
 for (const input of ['region', 'apply', 'source', 'reason']) {
   check('the workflow declares the input ' + input,
         new RegExp('\\n      ' + input + ':\\n').test(workflow));

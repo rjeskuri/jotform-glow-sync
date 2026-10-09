@@ -1029,8 +1029,7 @@ function tryReview_(items, source) {
 }
 
 // ------------------------------------ problem reports and the ReviewQueue (pure)
-// Tested offline in test/forms_logic_test.js; the back-fill tool
-// (tools/backfill_feedback_review.py) runs these same functions.
+// Tested offline in test/forms_logic_test.js.
 
 /** Every issue the ReviewQueue can hold, in the order the weekly e-mail lists them. */
 const REVIEW_ISSUES = [

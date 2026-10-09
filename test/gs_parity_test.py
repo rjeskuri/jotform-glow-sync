@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-The constants that exist in BOTH Python and appsscript/Config.gs / Roster.gs - form ids, qids,
-SESSION_OVERRIDES, SF_NAME_SEP, the Roster, Partners and SyncLog columns - so a change on one
-side fails here until the other side follows (CLAUDE.md rule 7); and the same-name rule itself,
-run on both sides over one fictional Roster (the Apps Script side in Node, through
-test/load_gs.js).
+The constants that exist in BOTH Python and appsscript/Config.gs / Roster.gs - SF_NAME_SEP, the
+regions, the Roster, Partners and SyncLog columns - so a change on one side fails here until the
+other side follows (CLAUDE.md rule 7); and the same-name rule itself, run on both sides over one
+fictional Roster (the Apps Script side in Node, through test/load_gs.js).
 """
 import os
 import re
@@ -33,64 +32,11 @@ class PythonAppsScriptParity(unittest.TestCase):
     def setUp(self):
         self.config = read(CONFIG_GS)
 
-    def test_form_ids(self):
-        forms = dict(re.findall(r"^\s+([A-Z_]+): '(\d+)',", gs_block(self.config, "FORMS"), re.M))
-        self.assertEqual({"Africa": forms["AFRICA"], "Asia": forms["ASIA"],
-                          "Latin America": forms["LATIN_AMERICA"], "U.S": forms["US"]},
-                         auto_sync.REGIONAL_FORMS)
-        template = [fid for fid, (label, _) in form_status.FORMS.items() if label == "template"]
-        self.assertEqual(template, [forms["TEMPLATE"]])
-        self.assertEqual({fid for fid, (_, region) in form_status.FORMS.items() if region},
-                         set(auto_sync.REGIONAL_FORMS.values()))
-        self.assertTrue(all(re.fullmatch(r"\d{15}", f) for f in auto_sync.REGIONAL_FORMS.values()))
-        # every other Python copy of the table (docs promise this test catches drift)
-        import add_feedback_link
-        import add_language
-        import add_translations
-        import backup_forms
-        import clone_regional
-        import restore_translations
-        live = set(auto_sync.REGIONAL_FORMS.values()) | {forms["TEMPLATE"]}
-        defunct = set(form_status.DEFUNCT)
-        self.assertEqual(set(backup_forms.FORMS), live | defunct)
-        self.assertEqual(set(add_translations.FORMS), live)
-        self.assertEqual(set(add_language.FORMS), live)
-        self.assertEqual(set(add_feedback_link.FORMS), live)
-        self.assertEqual(clone_regional.WORKING_COPY, forms["TEMPLATE"])
-        self.assertEqual(restore_translations.TEMPLATE, forms["TEMPLATE"])
-        self.assertEqual(set(clone_regional.TITLES), set(auto_sync.REGIONAL_FORMS))
-
     def test_picker_name_is_shared(self):
         # the sync and form_status find the Club picker with one function, by one name
         self.assertIs(form_status.club_picker, glow_sync.club_picker)
         self.assertIs(sync.club_picker, glow_sync.club_picker)
         self.assertEqual(sync.PICKER_NAME, glow_sync.PICKER_NAME)
-
-    def test_qids(self):
-        block = gs_block(self.config, "QID")
-        simple = dict(re.findall(r"^\s+([A-Z_]+): '(\d+)',", block, re.M))
-        self.assertEqual(simple["CLUB_NAME"], sync.CLUB_NAME)
-        self.assertEqual(simple["PARTNER"], sync.PARTNER)
-        self.assertEqual(simple["YEAR"], sync.YEAR)
-        self.assertEqual((simple["CONTACT_IDS"], simple["MODULE_ID"], simple["WEEK_ID"], simple["YEAR_ID"]),
-                         (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID))
-        self.assertEqual(simple["ENABLE_FUZZY"], form_status.ENABLE_FUZZY_QID)
-        self.assertEqual((simple["CLUB_NAME"], simple["PARTNER"], simple["CONTACT_IDS"]),
-                         (form_status.CLUB_NAME_QID, form_status.PARTNER_QID, form_status.CONTACT_IDS_QID))
-        modules = dict(re.findall(r"'(\d)': '(\d+)'", re.search(r"MODULE: \{([^}]*)\}", block).group(1)))
-        self.assertEqual(modules, sync.MODULES)
-        sessions = {int(k): v for k, v in
-                    re.findall(r"(\d+): '(\d+)'", re.search(r"SESSIONS: \{([^}]*)\}", block).group(1))}
-        self.assertEqual(sessions, sync.WEEKS)
-
-    def test_session_overrides(self):
-        # tolerant of a missing trailing comma and of double-quoted keys, so a
-        # GS-side addition can never be invisible to this test
-        block = gs_block(self.config, "SESSION_OVERRIDES")
-        pairs = {k or k2: int(v) for k, k2, v in
-                 re.findall(r"(?:'([^']+)'|\"([^\"]+)\")\s*:\s*(\d+)\s*,?", block)}
-        self.assertEqual(pairs, sync.SESSION_OVERRIDES)
-        self.assertEqual(len(pairs), block.count(":"))   # every entry was parsed
 
     def test_the_same_name_separator(self):
         # "<club> - <partner>" is one string on both sides: the forms' Club picker entry and
@@ -267,8 +213,7 @@ class PythonAppsScriptParity(unittest.TestCase):
         for row in rows:
             self.assertEqual(row.count("|"), 4, row)
         firsts = [row.split("|")[1] for row in rows]
-        for constant in ("Live form ids", "Structural question ids", "SESSION_OVERRIDES",
-                         "`SF_NAME_SEP`", "Roster tab columns", "SyncLog columns"):
+        for constant in ("`SF_NAME_SEP`", "Roster tab columns", "SyncLog columns"):
             self.assertEqual(sum(constant in f for f in firsts), 1, constant)
 
 

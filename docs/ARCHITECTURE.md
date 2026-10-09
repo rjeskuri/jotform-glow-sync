@@ -89,9 +89,6 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
 
 | Constant | Python | Apps Script |
 |---|---|---|
-| Live form ids | `tools/auto_sync.py REGIONAL_FORMS`, `tools/form_status.py FORMS`, `backup_forms.py FORMS`, `tools/add_*.py`, `tools/clone_regional.py` | `Config.gs FORMS` |
-| Structural question ids (club name 5, partner 331, year 94, modules 14/92/93, sessions 15/95/96/97, bridge 18/98/100/102, enableFuzzy 109) | `sync_attendance_form.py` top, `tools/form_status.py` | `Config.gs QID` |
-| `SESSION_OVERRIDES` (sessions per elective module) | `sync_attendance_form.py` | `Config.gs` |
 | `SF_NAME_SEP` (`" - "` between club and partner in the name of a club whose name two partners share: club-list entry = question 5 = Salesforce account) | `glow/sync.py` | `Config.gs` |
 | Roster tab columns | `read_roster_csv` needs `partner, club, full_name, status, region`; `upload_roster.py` positional | `Config.gs ROSTER_COLS` |
 | Partners tab columns (`partner, region, notes, jotform`; `jotform` = `no` keeps a partner's clubs off the attendance forms) | `glow/sync.py PARTNER_COLS`, `JOTFORM_COL`, `read_partners_csv` | `Roster.gs PARTNER_COLS`, `tools/build_roster_offline.js` |

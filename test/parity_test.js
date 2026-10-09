@@ -156,7 +156,8 @@ function runDataset({ name, csvPath, pyClubs, pins, real }) {
   if (real) {
     check('every sheet partner has a derived region', noRegion.length === 0,
           (partners.length - noRegion.length) + '/' + partners.length +
-          (noRegion.length ? ' — missing: ' + noRegion.join('; ') + ' (re-run tools/derive_partner_regions.py <csv> --write)' : ''));
+          (noRegion.length ? ' — missing: ' + noRegion.join('; ') + ' (the sheet\'s Partners tab wins; add one ' +
+                             'to Regions.gs by hand only for a partner the tab lacks)' : ''));
     if (pins && pins.partners) check(`pinned ${pins.partners} partners`, partners.length === pins.partners, String(partners.length));
   } else {
     check('fixture partners are fictional: none has a derived region', noRegion.length === partners.length,
