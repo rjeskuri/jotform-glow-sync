@@ -7,7 +7,8 @@
  *    pure-logic files load together (a symbol renamed in another file);
  *  - the Google services the .gs files use are exactly the pinned ones: a new service adds an
  *    OAuth scope, and until the owner re-authorizes, the form-submit trigger FAILS HARD
- *    (CLAUDE.md rule 11);
+ *    (CLAUDE.md rule 11). A name ending in App or Service, a scope-bearing global (Session, the
+ *    advanced services) and, in appsscript.json, enabledAdvancedServices or oauthScopes all count;
  *  - every bare call `name(...)`, and every function a menu item or trigger names as a string,
  *    resolves to a top-level function or constant of some .gs file, a parameter or local of the
  *    code around it, or a JavaScript built-in - a renamed or deleted function would otherwise
@@ -15,7 +16,9 @@
  *
  * The scan works on tokens with comments, strings and regular expressions taken out; it does
  * not model scopes exactly (a local anywhere in a top-level function counts for all of it), so
- * it can miss a bad call but does not report a good one.
+ * it can miss a bad call but does not report a good one. A `/` after the `)` of an if, while or
+ * for head starts a regular expression; `name(...) {` is a method only in an object literal or a
+ * class body (an object literal is a `{` where an expression goes).
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,6 +30,10 @@ const loadGs = require('../test/load_gs');
 const SERVICES = ['FormApp', 'LockService', 'MailApp', 'PropertiesService', 'ScriptApp',
                   'SpreadsheetApp', 'UrlFetchApp', 'Utilities'];
 const SERVICE_RX = /^[A-Z][A-Za-z]*(App|Service)$/;
+// globals that bring a scope without that suffix: Session (userinfo.email) and the advanced services
+const SCOPED = new Set(['Session', 'Drive', 'Sheets', 'Gmail', 'Calendar', 'Docs', 'Slides', 'People',
+                        'AdminDirectory', 'Jdbc', 'Maps', 'Charts', 'Forms', 'Tasks', 'YouTube', 'Analytics',
+                        'BigQuery']);
 const BUILTINS = new Set([
   'Array', 'ArrayBuffer', 'BigInt', 'Boolean', 'DataView', 'Date', 'Error', 'EvalError',
   'Function', 'Map', 'Number', 'Object', 'Promise', 'Proxy', 'RangeError', 'ReferenceError',
@@ -51,7 +58,8 @@ const PUNCT = ['...', '===', '!==', '**=', '<<=', '>>=', '>>>', '=>', '==', '!='
  * expressions are dropped, a template literal is one 'str' (its ${...} parts are tokenized). */
 function tokenize(src) {
   const out = [];
-  const stack = [];                         // '{' or '${' (a template expression)
+  const stack = [];                         // per open {: 'obj', 'class' or 'block'; '${' in a template
+  const parens = [];                        // per open (: true when it is an if / while / for head
   let i = 0, line = 1;
   const prev = () => out[out.length - 1];
   const regexAllowed = () => {
@@ -59,7 +67,16 @@ function tokenize(src) {
     if (!p) return true;
     if (p.t === 'id') return KEYWORDS.has(p.v) && BEFORE_REGEX.has(p.v);
     if (p.t === 'num' || p.t === 'str') return false;
-    return !(p.v === ')' || p.v === ']' || p.v === '}');
+    return !((p.v === ')' && !p.ctrl) || p.v === ']' || p.v === '}');
+  };
+  const braceKind = () => {                 // what the { about to open is
+    const p = prev();
+    for (let k = out.length - 1; k >= 0 && !['{', '}', ';', '(', ')'].includes(out[k].v); k--) {
+      if (out[k].t === 'id' && out[k].v === 'class') return 'class';      // class X extends a.B {
+    }
+    if (p && p.t === 'p' && !['=>', ')', ']', '}', ';', '{'].includes(p.v)) return 'obj';   // where a value goes
+    if (p && p.t === 'id' && BEFORE_REGEX.has(p.v) && !['else', 'do'].includes(p.v)) return 'obj';
+    return 'block';
   };
   const template = () => {                  // i is just after a backtick or a closing }
     while (i < src.length) {
@@ -114,7 +131,7 @@ function tokenize(src) {
     if (/[A-Za-z_$]/.test(c)) {
       let j = i + 1;
       while (/[\w$]/.test(src[j] || '')) j++;
-      out.push({ t: 'id', v: src.slice(i, j), line });
+      out.push({ t: 'id', v: src.slice(i, j), line, brace: stack[stack.length - 1] });
       i = j;
       continue;
     }
@@ -125,12 +142,15 @@ function tokenize(src) {
       i = j;
       continue;
     }
-    if (c === '{') stack.push('{');
+    if (c === '{') stack.push(braceKind());
     if (c === '}') {
       if (stack.pop() === '${') { i++; template(); continue; }
     }
     const op = PUNCT.find(p => src.startsWith(p, i)) || c;
-    out.push({ t: 'p', v: op, line });
+    const tok = { t: 'p', v: op, line };
+    if (op === '(') parens.push(!!prev() && prev().t === 'id' && ['if', 'while', 'for'].includes(prev().v));
+    if (op === ')') tok.ctrl = parens.pop() === true;
+    out.push(tok);
     i += op.length;
   }
   return out;
@@ -170,6 +190,11 @@ function units(toks) {
   return out;
 }
 
+/** Whether `name(...) {` at k is a method in an object literal or a class body, not a call. */
+function shorthand(toks, k) {
+  return ['obj', 'class'].includes(toks[k].brace) && (toks[closing(toks, k + 1) + 1] || {}).v === '{';
+}
+
 function scan(file, toks, globals) {
   const services = new Set(), calls = [], handlers = [], badServices = [];
   for (const [from, to] of units(toks)) {
@@ -194,19 +219,18 @@ function scan(file, toks, globals) {
           }
           idsIn(toks, open, k - 1).forEach(v => locals.add(v));
         }
-      } else if (tok.t === 'id' && next.v === '(' && !KEYWORDS.has(tok.v)) {
-        const close = closing(toks, k + 1);
-        if ((toks[close + 1] || {}).v === '{') {        // method shorthand: name(params) { ... }
-          idsIn(toks, k + 1, close).forEach(v => locals.add(v));
-        }
+      } else if (tok.t === 'id' && next.v === '(' && !KEYWORDS.has(tok.v) && shorthand(toks, k)) {
+        idsIn(toks, k + 1, closing(toks, k + 1)).forEach(v => locals.add(v));
       }
     }
     for (let k = from; k <= to; k++) {
       const tok = toks[k], before = toks[k - 1] || {}, next = toks[k + 1] || {};
       if (tok.t !== 'id' || KEYWORDS.has(tok.v)) continue;
       const member = before.v === '.' || before.v === '?.';
+      const key = next.v === ':' && tok.brace === 'obj';      // { Forms: ... } names no service
       if (!member && SERVICES.includes(tok.v)) services.add(tok.v);
-      else if (!member && SERVICE_RX.test(tok.v)) badServices.push({ file, line: tok.line, name: tok.v });
+      else if (!member && !key && (SERVICE_RX.test(tok.v) || SCOPED.has(tok.v)) && !globals.has(tok.v) &&
+               !locals.has(tok.v)) badServices.push({ file, line: tok.line, name: tok.v });
       if (next.v !== '(') continue;
       if (member) {                             // addItem('Label', 'fn') and newTrigger('fn')
         const args = toks.slice(k + 2, closing(toks, k + 1));
@@ -218,7 +242,7 @@ function scan(file, toks, globals) {
         continue;
       }
       if (before.v === 'function') continue;       // a declaration's name
-      if ((toks[closing(toks, k + 1) + 1] || {}).v === '{') continue;   // a method shorthand
+      if (shorthand(toks, k)) continue;              // a method: name(params) { ... }
       calls.push({ file, line: tok.line, name: tok.v,
                    ok: locals.has(tok.v) || globals.has(tok.v) || BUILTINS.has(tok.v) });
     }
@@ -260,6 +284,15 @@ try {
   loadGs(['TAB', 'ROSTER_COLS', 'parseRoster_', 'planClub_', 'buildDispatchRequest_']);
 } catch (err) {
   fail('pure files do not load together :: ' + err.message);
+}
+
+// the manifest: an advanced service or a pinned scope list is a scope change too (none today)
+const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'appsscript.json'), 'utf8'));
+const advanced = ((manifest.dependencies || {}).enabledAdvancedServices || []).map(s => s.userSymbol || s.serviceId);
+if (advanced.length || 'oauthScopes' in manifest) {
+  fail(`appsscript.json ${advanced.length ? 'enables advanced services (' + advanced.join(', ') + ')' : 'pins oauthScopes'}: ` +
+       'a scope change, and until the owner re-authorizes the form-submit trigger fails hard (CLAUDE.md rule 11) - ' +
+       'pin it in scripts/check_gs.js only with that plan');
 }
 
 const tokens = {}, globals = new Set();
