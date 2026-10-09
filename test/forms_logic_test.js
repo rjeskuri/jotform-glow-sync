@@ -2804,6 +2804,65 @@ console.log('\n  the handler reads the filled-in one of two same-titled columns 
   check('distinct titles: read as before', plainRow.a === 'x' && plainRow.b === '' && plainRow.Timestamp === 't');
 }
 
+console.log('\nMenu entry points: the dropdown update takes the lock, the rebuild asks first (review A2, A4)');
+{
+  const vm = require('vm');
+  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'Forms.gs', 'Menu.gs']
+      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const menuWorld = opts => {
+    const out = { toasts: [], dialogs: [], ran: [], locks: 0, held: false };
+    const ui = { alert: (title, text) => { out.dialogs.push(title + '\n' + text); return opts.reply; },
+                 Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } };
+    const ctx = vm.createContext({
+      console,
+      SpreadsheetApp: {
+        getActive: () => ({ toast: msg => out.toasts.push(msg) }),
+        getUi: () => { if (opts.editor) throw new Error('Cannot call SpreadsheetApp.getUi() from this context.'); return ui; },
+      },
+      LockService: { getDocumentLock: () => ({
+        tryLock: () => { if (opts.busy) return false; out.held = true; return true; },
+        releaseLock: () => { out.held = false; out.locks++; } }) },
+    });
+    vm.runInContext(src, ctx);
+    ctx.syncFormChoices = () => { out.ran.push('syncFormChoices' + (out.held ? ' (locked)' : '')); return 2; };
+    ctx.rebuildRosterLocked_ = () => { out.ran.push('rebuild' + (out.held ? ' (locked)' : '')); return 'summary'; };
+    out.ctx = ctx;
+    return out;
+  };
+  let m = menuWorld({});
+  m.ctx.syncFormChoicesFromMenu();
+  check('"Update form dropdowns from the Roster": syncFormChoices under the document lock, released after',
+        m.ran.join() === 'syncFormChoices (locked)' && m.locks === 1 && !m.held, m.ran.join());
+  m = menuWorld({ busy: true });
+  m.ctx.syncFormChoicesFromMenu();
+  check('…the lock busy: not run, "try again in a minute"', !m.ran.length && /try again in a minute/.test(m.toasts.join()));
+  const menuSrc = fs.readFileSync(path.join(loadGs.GS_DIR, 'Menu.gs'), 'utf8');
+  check('…the menu item names the locked wrapper (the handlers keep calling syncFormChoices, under their own lock)',
+        menuSrc.includes("'Update form dropdowns from the Roster', 'syncFormChoicesFromMenu'") &&
+        !/'syncFormChoices'/.test(menuSrc));
+
+  for (const reply of ['NO', 'CLOSE']) {
+    m = menuWorld({ reply });
+    const r = m.ctx.rebuildRosterFromResponses();
+    check('"Rebuild roster from enrollment responses" answered ' + reply + ': nothing runs, the lock is never taken',
+          r === undefined && !m.ran.length && !m.locks && m.dialogs.length === 1);
+  }
+  const warning = m.dialogs[0].replace(/\s+/g, ' ');
+  check('…the question says "not after launch" and what a rebuild undoes',
+        warning.startsWith('Rebuild the roster from the enrollment responses? Not after launch.') &&
+        warning.includes('puts back every girl removed through the Club Roster Form') &&
+        warning.includes('renamed or moved to another partner') && warning.includes('new ids') &&
+        warning.endsWith('Rebuild anyway? (No changes nothing.)'), warning);
+  m = menuWorld({ reply: 'YES' });
+  check('…YES: the rebuild runs, under the lock', m.ctx.rebuildRosterFromResponses() === 'summary' &&
+        m.ran.join() === 'rebuild (locked)' && m.locks === 1);
+  m = menuWorld({ editor: true });
+  let threw = '';
+  try { m.ctx.rebuildRosterFromResponses(); } catch (e) { threw = e.message; }
+  check('…from the script editor (no dialogs): refused, saying where to run it; nothing runs',
+        /^Run this from the sheet \(GLOW → Rebuild roster/.test(threw) && !m.ran.length, threw);
+}
+
 // --------------------------------------------- real data, if available
 const csvPath = process.env.CSV || path.join(REPO, 'data', 'enrollment_2026-08-24.csv');
 if (fs.existsSync(csvPath) && path.basename(csvPath) === 'enrollment_2026-08-24.csv') {

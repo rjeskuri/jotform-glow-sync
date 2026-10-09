@@ -246,18 +246,40 @@ function loadRoster_() {
 /**
  * Rebuild the Roster tab from the raw enrollment responses.
  *
- * Safe to re-run: existing girls keep their IDs, new girls are appended, and
- * girls who have disappeared from a club's latest submission are reported for
- * review rather than removed automatically (a partner re-submitting a short
- * roster must not silently retire two thirds of a club).
+ * Before launch it was safe to re-run: existing girls keep their IDs, new
+ * girls are appended, and girls who have disappeared from a club's latest
+ * submission are reported for review rather than removed automatically (a
+ * partner re-submitting a short roster must not silently retire two thirds of
+ * a club). Since launch (2026-09-01) it undoes later changes, so it says what
+ * it does and runs only on YES (REBUILD_WARNING; docs/RUNBOOK.md, "Roster
+ * rebuild and upload").
  */
 function rebuildRosterFromResponses() {
   const ss = SpreadsheetApp.getActive();
+  let ui = null;
+  try { ui = SpreadsheetApp.getUi(); } catch (err) { /* script editor: no dialogs */ }
+  if (!ui) {
+    throw new Error('Run this from the sheet (GLOW → Rebuild roster from enrollment responses): ' +
+                    'it says what it does and asks first.');
+  }
+  // the dialog before the lock: never hold it while a dialog is open
+  if (ui.alert('Rebuild the roster from the enrollment responses?', REBUILD_WARNING,
+               ui.ButtonSet.YES_NO) !== ui.Button.YES) {
+    return;
+  }
   // IDs are minted here; two overlapping runs would hand out the same numbers
   return withDocumentLock_(30000, function () { return rebuildRosterLocked_(ss); }, function () {
     ss.toast('Another rebuild is still running - try again in a minute.', 'GLOW', 8);
   });
 }
+
+/** What the rebuild's YES/NO says (literals only: a top-level constant must not read another file's). */
+const REBUILD_WARNING = 'Not after launch. Since 2026-09-01 the Roster has moved on from the ' +
+    'enrollment responses. A rebuild from them puts back every girl removed through the Club ' +
+    'Roster Form whose name is still on her club\'s enrollment row, and creates again every ' +
+    'club renamed or moved to another partner since, under its old name or partner and with ' +
+    'new ids. To change a club, use the Club Roster Form or docs/RUNBOOK.md instead.' +
+    '\n\nRebuild anyway? (No changes nothing.)';
 
 function rebuildRosterLocked_(ss) {
   setUpTabs();

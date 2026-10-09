@@ -15,8 +15,9 @@
  *   Something isn't working?   a one-minute problem report → staff email
  *
  * Run `createGlowForms` once from the GLOW menu (it is idempotent: forms
- * that already exist are reused). Run `syncFormChoices` after roster changes
- * so the dropdowns stay current — the rebuild and the handlers call it.
+ * that already exist are reused). The form handlers keep the dropdowns
+ * current (syncFormChoices after each change); after a change made any other
+ * way, run "Update form dropdowns from the Roster" (syncFormChoicesFromMenu).
  *
  * The forms are owned by whoever runs this, live in their Drive, and can be
  * edited in the normal Forms UI — but question TITLES must stay as in
@@ -122,7 +123,7 @@ function createGlowForms() {
     feedback.setDescription(feedbackDescription_(roster.getPublishedUrl()));
   }
 
-  syncFormChoices();
+  syncFormChoicesFromMenu();   // under the document lock, like the menu item
   installTriggers();
   audit_('createGlowForms', made.length ? 'created: ' + made.join(', ') : 'both forms already existed');
 
@@ -351,6 +352,19 @@ function syncFormChoices() {
 
   audit_('syncFormChoices', changed + ' dropdown(s) updated');
   return changed;
+}
+
+/**
+ * Menu: GLOW → Google Forms → Update form dropdowns from the Roster.
+ * syncFormChoices under the document lock, as the form handlers run it (they
+ * hold the lock already): two runs at once would both find a new partner
+ * without a section and both insert one.
+ */
+function syncFormChoicesFromMenu() {
+  const ss = SpreadsheetApp.getActive();
+  withDocumentLock_(30000, syncFormChoices, function () {
+    ss.toast('Another GLOW operation is still running - try again in a minute.', 'GLOW', 8);
+  });
 }
 
 function clubQuestionTitle_(partner) {
