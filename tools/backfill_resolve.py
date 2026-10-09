@@ -47,13 +47,12 @@ from glow.jotform import Client         # noqa: E402
 from glow.submissions import (          # noqa: E402
     Unreadable, answer_of, attendance_date, copied_fields, text_of, ticked_rosters)
 from glow.sync import (                 # noqa: E402
-    CLUB_NAME, CONTACT_IDS, MODULE_ID, SF_NAME_SEP, WEEK_ID, YEAR_ID, club_partners, club_picker,
-    roster_names, roster_pairs)
+    CLUB_NAME, CONTACT_IDS, CREATOR, MODULE_ID, PHOTO, SF_NAME_SEP, WEEK_ID, YEAR_ID, club_partners,
+    club_picker, roster_names, roster_pairs)
 from glow.text import key               # noqa: E402
 
 SINCE = "2026-09-01 00:00:00"           # created_at, as Jotform gives it: US Eastern
 MONTH_START = "2026-09-01"              # an attendance date before it is flagged
-PHOTO, CREATOR = "19", "105"            # the attendance date (17): glow.submissions.DATE
 PAGE = 100                              # submissions per request (Jotform allows up to 1000)
 DEFAULT_OUT = os.path.join(REPO, "data", "backfill_2026-09", "resolved.json")
 # every flag a row can carry, in the order a row lists them. The two about a ticked name that

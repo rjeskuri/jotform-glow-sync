@@ -8,9 +8,8 @@ answer itself, which can hold a girl's name): the caller says what it means for 
 """
 import datetime
 
-from .sync import MODULE_ID, MODULES, SESSION_OVERRIDES, WEEK_ID, WEEKS, YEAR, YEAR_ID, has_calc_values
-
-DATE = "17"             # the attendance date question (Jotform: {year, month, day})
+from .sync import (
+    DATE, MODULE_ID, MODULES, SESSION_OVERRIDES, WEEK_ID, WEEKS, YEAR, YEAR_ID, has_calc_values)
 
 
 class Unreadable(ValueError):
