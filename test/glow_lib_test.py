@@ -261,6 +261,34 @@ class GlowForms(unittest.TestCase):
         for none in ({"language": []}, {"language": ""}, {}, None):
             self.assertEqual(forms.language_of(none), {})
 
+    def test_every_tools_form_table_holds_glow_forms_ids_and_regions(self):
+        # the per-tool tables kept for their order (the rollout's, the regions-first loop) or
+        # their labels hold exactly glow.forms' ids and regions; dict equality ignores order.
+        # (test/gs_parity_test.py compared them with each other until Config.gs's FORMS went.)
+        import add_feedback_link
+        import add_language
+        import add_translations
+        import auto_sync
+        import backup_forms
+        import fix_name_translations
+        import fix_roster_order
+        import form_status
+        from glow import forms
+        for table in (add_translations.FORMS, add_feedback_link.FORMS, fix_roster_order.FORMS):
+            self.assertEqual(table, forms.LIVE)                          # id -> "template" or region
+        self.assertEqual(add_language.FORMS, {fid: forms.TITLES.get(region, forms.TEMPLATE_TITLE)
+                                              for fid, region in forms.LIVE.items()})
+        self.assertEqual(sorted(fix_name_translations.ORDER), sorted(forms.LIVE))
+        self.assertEqual(fix_name_translations.ORDER[0], forms.TEMPLATE)     # the rollout starts there
+        self.assertEqual(fix_name_translations.LABEL, forms.LIVE)
+        self.assertEqual(auto_sync.REGIONAL_FORMS, forms.REGIONALS)
+        self.assertEqual({fid: region for fid, (_, region) in form_status.FORMS.items()},
+                         {fid: forms.region_of(fid) for fid in forms.LIVE})
+        self.assertEqual(form_status.FORMS[forms.TEMPLATE][0], "template")
+        self.assertEqual({fid: region for fid, (_, region) in form_status.DEFUNCT.items()},
+                         {fid: None if name == "master" else name for name, fid in forms.DEFUNCT.items()})
+        self.assertEqual(set(backup_forms.FORMS), set(forms.LIVE) | set(forms.DEFUNCT.values()))
+
 
 class GlowCli(unittest.TestCase):
     """glow/cli.py: the API key every tool reads and the forms a --form selects."""
