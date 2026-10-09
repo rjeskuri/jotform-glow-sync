@@ -187,10 +187,6 @@ def off_picker(questions, conditions, owner_of=None):
     return out
 
 
-# glow.sync's own ids; test/gs_parity_test.py reads them under these names
-CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID, ENABLE_FUZZY_QID = CLUB_NAME, PARTNER, CONTACT_IDS, ENABLE_FUZZY
-
-
 def picker_options(questions, picker):
     """The picker's options exactly as stored (what a multi-select's rules compare)."""
     return dropdown_options(questions[picker])
