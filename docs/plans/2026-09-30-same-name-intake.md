@@ -2,6 +2,8 @@
 title: The intake checker for club names two partners share (Part 2 of the same-name plan)
 author: Claude (workflow track wf6/same-name-intake, 2026-09-30)
 status: done             # Part 2 of plans/2026-09-30-same-name-clubs.md, accepted by Ryan 2026-09-30 with that plan; merged (d238b43) and pushed to Apps Script 2026-09-30 10:38 UTC (Result at the end)
+done: 2026-09-30
+backlog: 49
 created: 2026-09-30
 intent: none — build notes for Part 2 of [plans/2026-09-30-same-name-clubs.md](2026-09-30-same-name-clubs.md), which stays the authority (its intent: docs/intent/2026-09-01-club-picker.md, amended 2026-09-30)
 ---

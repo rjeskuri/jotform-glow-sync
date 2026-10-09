@@ -1,7 +1,9 @@
 ---
 title: The module a submission sends is one required dropdown and exact text
 author: Claude (with Ryan's decisions of 2026-10-06; from the read-only module investigation of the same day)
-status: done             # accepted by Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan; (a) built on wf10/four-issues, form_status CLEAN in the 2026-10-07 read; (b) applied 2026-10-07 (Result); open: the merge to main
+status: done             # accepted by Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan; (a) built on wf10/four-issues, form_status CLEAN in the 2026-10-07 read, merged into main 2026-10-09 (79208cd); (b) applied 2026-10-07 (Result)
+done: 2026-10-07
+backlog: 66, 67
 created: 2026-10-06
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends what Salesforce must match; nothing new is built on the forms)
 ---

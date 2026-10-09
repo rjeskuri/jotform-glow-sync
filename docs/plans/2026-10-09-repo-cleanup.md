@@ -1,5 +1,6 @@
 ---
-status: accepted  # Ryan 2026-10-09: merge wf10+wf11 first, all four phases; one-offs deleted, not archived (the recommended default; Ryan left that question open)
+status: in-progress      # Ryan 2026-10-09: merge wf10+wf11 first, all four phases; one-offs deleted, not archived (the recommended default; Ryan left that question open). Phases 1-4 on wf21/*
+backlog: 32, 50, 53
 date: 2026-10-09
 ---
 # Repo cleanup: organize, consolidate, lint (no rewrite)

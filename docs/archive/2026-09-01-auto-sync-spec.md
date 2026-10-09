@@ -8,6 +8,12 @@ intent: docs/intent/2026-09-01-auto-sync.md
 
 # Spec: automatic Jotform sync
 
+> **Historical document.** The one spec written before the spec stage was retired (2026-10-09:
+> a plan is required, an intent optional; [docs/README.md](../README.md)). Moved from
+> `docs/specs/`; what it specified was built by
+> [plans/2026-09-01-auto-sync.md](../plans/2026-09-01-auto-sync.md) and is live since 2026-09-12.
+
+
 ## Summary
 
 The sheet's Apps Script sends a GitHub `repository_dispatch` event whenever the Roster changes.

@@ -2,6 +2,7 @@
 """
 scripts/check_doc_refs.py: the reference shapes it reads (in prose and in string literals
 continued over lines), what counts as a RUNBOOK section, GitHub's anchors, BACKLOG items.
+scripts/docs_index.py: the frontmatter it reads, the status vocabulary, the index's cells.
 """
 import os
 import sys
@@ -12,6 +13,7 @@ from helpers.common import REPO
 
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 import check_doc_refs as refs
+import docs_index
 
 
 def names(text, code=False):
@@ -74,6 +76,27 @@ class DocRefs(unittest.TestCase):
         self.assertEqual(cited, ["41", "43", "46", "1", "64", "67", "27"])
         self.assertEqual(refs.BACKLOG_TITLE_REF.search('BACKLOG "Gold versus retention"').group(1),
                          "Gold versus retention")
+
+
+
+class DocsIndex(unittest.TestCase):
+
+    def test_the_frontmatter_and_the_title(self):
+        keys, h1 = docs_index.frontmatter("---\ntitle: A thing\nstatus: done   # shipped\ndone: 2026-10-01\n"
+                                          "backlog: 41, 42\n---\n\n# Plan: A thing\n")
+        self.assertEqual((keys["status"], keys["done"], keys["backlog"], h1),
+                         ("done   # shipped", "2026-10-01", "41, 42", "Plan: A thing"))
+        self.assertEqual(docs_index.frontmatter("# Plan: no frontmatter\n"), ({}, "Plan: no frontmatter"))
+
+    def test_the_status_vocabulary(self):
+        for value in ("proposed", "accepted", "in-progress", "blocked", "done", "superseded",
+                      "done             # merged 2026-09-29; deployed (BACKLOG 41)"):
+            self.assertIsNone(docs_index.status_of(value)[1], value)
+        for value in ("blocked-on-ryan", "done (deployed 2026-10-02)", "draft", "accepted (Ryan) - in-progress", ""):
+            self.assertIn("is not one of", docs_index.status_of(value)[1], value)
+
+    def test_a_cell_never_breaks_the_table_or_turns_into_html(self):
+        self.assertEqual(docs_index.cell("a | b <club> - <partner>"), "a \\| b &lt;club&gt; - &lt;partner&gt;")
 
 
 if __name__ == "__main__":

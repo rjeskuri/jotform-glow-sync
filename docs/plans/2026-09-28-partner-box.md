@@ -2,6 +2,7 @@
 title: Mentors choose their partner from a list when two partners share a club name
 author: Claude (workflow track "partner-box", 2026-09-28)
 status: superseded       # 2026-09-30, never deployed: docs/plans/2026-09-30-same-name-clubs.md (each same-name club has its own Club picker entry; --partner-picker is refused)
+backlog: 45, 50
 created: 2026-09-28
 intent: none — review finding 1 of 2026-09-26/27 (Ruby / the Partner box); BACKLOG 36 is the larger alternative
 ---

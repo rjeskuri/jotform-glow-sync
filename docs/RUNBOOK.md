@@ -2674,6 +2674,7 @@ September this way: Sep 1-14 had been counted at +08:00 although the Mac was on 
 
 ```bash
 make check      # everything offline: lint, JS and Python tests, .gs checks, secrets, links, doc references, conflict markers, fixture
+make docs-index # after adding a plan or an intent, or changing a status: rewrite docs/plans/README.md
 make help       # the individual targets
 ```
 

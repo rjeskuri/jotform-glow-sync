@@ -2,6 +2,8 @@
 title: Club picker on every attendance form, with the training guide's wording
 author: Claude (executed with Ryan; leadership approval 2026-09-12)
 status: done
+done: 2026-09-12
+backlog: 1c
 created: 2026-09-12
 intent: docs/intent/2026-09-01-club-picker.md
 ---

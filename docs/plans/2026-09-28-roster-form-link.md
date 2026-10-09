@@ -1,7 +1,8 @@
 ---
 title: The attendance forms point mentors to the Club Roster Form when a girl is missing or has left
 author: Claude (workflow track wf/roster-form-link, 2026-09-28)
-status: proposed         # Ryan approves before merge; the live steps need his go
+status: blocked          # merged 2026-09-29 (1563a34); placing the link on the forms waits for Ryan's go (BACKLOG 46)
+backlog: 46
 created: 2026-09-28
 intent: none — finding 6 of the 2026-09-26/27 problem-report review; requested by Ryan in the 2026-09-28 workflow session
 ---

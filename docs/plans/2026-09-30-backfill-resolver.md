@@ -1,7 +1,8 @@
 ---
 title: September back-fill - the resolver (every attendance submission as clean rows)
 author: Claude (workflow builder, wf7/backfill-resolve, 2026-09-30)
-status: accepted         # Ryan asked for the back-fill directly on 2026-09-30; this is its read-only first step
+status: done             # its rows were the September back-fill's input, sent 2026-10-02 (2026-09-30-september-backfill.md, Result)
+done: 2026-10-02
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-30 (back-fill September's attendance into Salesforce); the plan for the whole back-fill is the loader session's `2026-09-30-september-backfill.md`
 ---

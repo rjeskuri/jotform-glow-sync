@@ -2,6 +2,8 @@
 title: The names list sent to Salesforce is never empty and never another club's
 author: Claude (read-only investigation of Jotform's runtime and of all September submissions, a design and two adversarial reviews, 2026-09-30)
 status: done             # Ryan 2026-09-30: "Go on all 4 fixes"; then "Guard first, then back-fill"; rolled out on all five forms 2026-10-01/02 with his go (Result)
+done: 2026-10-02
+backlog: 35, 56, 57
 created: 2026-09-30
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends the right girls for the right club)
 ---

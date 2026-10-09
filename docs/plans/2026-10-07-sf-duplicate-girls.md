@@ -1,7 +1,9 @@
 ---
 title: One Salesforce contact per girl - merge the duplicates the altered names made, then release Queens of Quest
 author: Claude (with Ryan)
-status: done (2026-10-07 04:20 UTC; Ryan's go "Build tool, then go", the last four clubs on "go ahead and run it")
+status: done             # 2026-10-07 04:20 UTC; Ryan's go "Build tool, then go", the last four clubs on "go ahead and run it"
+done: 2026-10-07
+backlog: 61, 76, 77, 78
 created: 2026-10-07
 intent: none - Ryan's request of 2026-10-06 ("You can handle all salesforce related issues")
 ---

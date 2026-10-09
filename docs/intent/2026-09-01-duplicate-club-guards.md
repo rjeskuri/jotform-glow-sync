@@ -1,7 +1,7 @@
 ---
 title: Catch "new club" submissions that duplicate a club we already have
 author: Ryan Eskuri (captured by Claude)
-status: proposed
+status: in-progress   # the handler guard deployed 2026-09-30 (BACKLOG 11b); the form-side question is not built
 created: 2026-09-01
 ---
 

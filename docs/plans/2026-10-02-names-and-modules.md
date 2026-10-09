@@ -2,6 +2,8 @@
 title: The names and the module the forms send are the exact roster and dropdown text
 author: Claude (from the 2026-09-30 read-only investigation, design and two adversarial reviews)
 status: done             # accepted by Ryan ("Go on all 4 fixes after we get the september data into salesforce"); live on all five forms 2026-10-06 (Result)
+done: 2026-10-06
+backlog: 62, 63, 64
 created: 2026-10-02
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends what Salesforce must match)
 ---

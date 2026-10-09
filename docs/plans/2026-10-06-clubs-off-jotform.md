@@ -1,7 +1,8 @@
 ---
 title: Clubs that do not report through Jotform leave the forms - a Partners-tab marker for the three partners, deactivation of the U.S clubs, the U.S form disabled
 author: Claude (with Ryan's decisions of 2026-10-06; code and docs read on `main` 9d58ce4 and the branch wf10/four-issues, Jotform GET, Salesforce read connector, 2026-10-06; revised after two reviews the same day)
-status: accepted         # Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+status: in-progress      # built 2026-10-07 (Build notes), merged into main 2026-10-09 (79208cd); nothing applied yet. Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+backlog: 71, 74
 created: 2026-10-06
 intent: docs/intent/2026-10-06-clubs-off-jotform.md
 ---

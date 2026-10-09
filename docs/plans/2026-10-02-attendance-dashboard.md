@@ -1,7 +1,9 @@
 ---
 title: Attendance dashboard in Salesforce - charts from the data already there
 author: Claude (with Ryan)
-status: done (deployed 2026-10-02 03:46 UTC and fix1 2026-10-06 09:29 UTC, both by Ryan; open: BACKLOG 58-61)
+status: done             # deployed 2026-10-02 03:46 UTC and fix1 2026-10-06 09:29 UTC, both by Ryan; open: BACKLOG 58-61
+done: 2026-10-02
+backlog: 58, 59, 60, 61
 created: 2026-10-02
 intent: none - Ryan's request of 2026-10-02 ("upgrade it now to use charts instead of line by line";
   then "start with basic reporting visuals ... using the info we already have")

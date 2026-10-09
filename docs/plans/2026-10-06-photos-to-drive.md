@@ -1,7 +1,8 @@
 ---
 title: The group photo never reaches Salesforce; it is kept where staff can find it, under GLOW's control
 author: Claude (with Ryan's decisions of 2026-10-06)
-status: accepted         # Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+status: in-progress      # parts 1 and 2 built 2026-10-06 (Build notes), merged into main 2026-10-09 (79208cd); the Drive set-up in the builder is Ryan's. Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+backlog: 68, 69, 70
 created: 2026-10-06
 intent: docs/intent/2026-10-06-photos-to-drive.md
 ---

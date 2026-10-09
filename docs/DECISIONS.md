@@ -67,6 +67,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - Adopt the AI-native SDLC playbook: intent → spec → plan under `docs/`, CLAUDE.md, REVIEW.md, skills, hooks, `make check`
 - **Why:** see `docs/plans/2026-09-01-ai-native-sdlc-adoption.md`
 - **Consequences:** plan mode for non-trivial changes; committed plans are the audit trail
+- 2026-10-09: the spec stage is retired and an intent is optional (the 2026-10-09 decision on plans and intents).
 
 ### 2026-09-01 — `make` and `scripts/` as the check interface
 
@@ -115,6 +116,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - `docs/PLAN.md` archived, not rewritten
 - **Why:** it is the best record of *why*; current state lives in LAUNCH/BACKLOG/ARCHITECTURE
 - **Consequences:** `docs/archive/2026-08-24-original-plan.md`
+- 2026-10-09: the launch notes followed (`docs/archive/2026-09-01-launch.md`); their links are in the RUNBOOK, "The forms".
 
 ### 2026-09-01 — The rollback pair stays at the repo root
 
@@ -473,3 +475,18 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   written), for the reason above.
 - **Consequences:** headings are never renamed (add a section instead); a BACKLOG item or a
   decision is updated by a dated bullet.
+
+### 2026-10-09 — A plan is required, an intent optional, the spec stage retired
+
+- Anything beyond a one-line fix gets a plan under `docs/plans/`, committed before the code; an
+  intent under `docs/intent/` only captures Ryan's ask before a plan exists, and the spec stage
+  is gone (its one file is in `docs/archive/`, its template deleted).
+- [docs/plans/README.md](plans/README.md) indexes the plans and intents from their frontmatter
+  (`make docs-index`); `make check` fails when it is stale, when a status is not one of
+  `proposed`, `accepted`, `in-progress`, `blocked`, `done`, `superseded` (a comment after a `#`),
+  or when a `backlog:` item does not exist. A done plan carries `done: YYYY-MM-DD`.
+- **Why:** in five weeks one spec was written against 41 plans; the plans' statuses had drifted
+  (four plans still "proposed" had been merged on 2026-09-29 and three of them deployed the next
+  day; three intents were done while marked proposed or in-progress) because nothing read them.
+- **Consequences:** the 2026-10-09 restructure set every plan's and intent's status from the
+  evidence (BACKLOG, the plans' Results, git); `docs/README.md` describes the flow.

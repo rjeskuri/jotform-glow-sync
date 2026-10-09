@@ -2,6 +2,7 @@
 title: Rename a club in place (sheet + forms), first use 2026-09-14
 author: Claude (executed with Ryan)
 status: done
+done: 2026-09-14
 created: 2026-09-14
 intent: none — an operational correction Ryan asked for on 2026-09-14
 ---

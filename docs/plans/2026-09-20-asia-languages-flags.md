@@ -2,6 +2,8 @@
 title: Hindi and Persian on the Asia form; a switcher flag for Odia on every form
 author: Claude (executed with Ryan)
 status: done
+done: 2026-09-20
+backlog: 6b
 created: 2026-09-20
 intent: none — requested by Ryan on 2026-09-20
 ---

@@ -2,6 +2,8 @@
 title: Clubs that share a name send "<club> - <partner>" to Salesforce
 author: Claude (design workflow + two adversarial reviews, 2026-09-30)
 status: done             # accepted by Ryan 2026-09-30; Step 0, the forms (Part 1) and the Apps Script push (Part 2) are live, the seven Salesforce Accounts exist (Results below); open: one template test submission
+done: 2026-09-30
+backlog: 49
 created: 2026-09-30
 intent: docs/intent/2026-09-01-club-picker.md (its constraint "question 5 stays the plain club name" is amended by Ryan's decision of 2026-09-30)
 ---

@@ -1,7 +1,9 @@
 ---
 title: Catch "new club" submissions that duplicate a club we already have
 author: Claude (workflow track, 2026-09-28)
-status: proposed         # Ryan approves before merge
+status: done             # merged 2026-09-29, deployed 2026-09-30 with the same-name push (BACKLOG 11b, 44); not built: the form-side question
+done: 2026-09-30
+backlog: 11b, 44
 created: 2026-09-28
 intent: docs/intent/2026-09-01-duplicate-club-guards.md
 ---

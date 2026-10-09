@@ -1,7 +1,8 @@
 ---
 title: Time zones fixed - the work log (billing) and the sheet-facing timestamps
 author: Claude (with Ryan)
-status: done (local commits; push awaits Ryan's go)
+status: done             # local commits then; their push awaited Ryan's go
+done: 2026-09-30
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-29 ("Make sure timezone issues are fixed")
 ---

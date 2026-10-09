@@ -1,7 +1,9 @@
 ---
 title: One attendance total for leadership that includes the partners who report counts, with the per-girl figures labelled Jotform only, and the clubs that did not submit or sent a blank in plain view
 author: Claude (with Ryan's decisions of 2026-10-06)
-status: done (F - the intake - open: BACKLOG 72)      # accepted by Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan; A + B deployed 2026-10-07 03:22 UTC, C done 2026-10-07, D deployed 2026-10-07 03:59 UTC (Result); F was planned as its own plan from the start (Order of work, step 7)
+status: done             # F (the intake) open: BACKLOG 72; accepted by Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan; A + B deployed 2026-10-07 03:22 UTC, C done 2026-10-07, D deployed 2026-10-07 03:59 UTC (Result); F was planned as its own plan from the start (Order of work, step 7)
+done: 2026-10-07
+backlog: 72, 73
 created: 2026-10-06
 intent: docs/intent/2026-10-06-attendance-totals.md
 ---

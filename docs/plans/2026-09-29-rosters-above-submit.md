@@ -2,6 +2,8 @@
 title: Every roster renders above the links and the Submit button
 author: Claude (workflow track wf5/rosters-above-submit, 2026-09-29)
 status: done             # accepted by Ryan 2026-09-30; merged (3ed68b2) and applied to all five forms the same day (Result)
+done: 2026-09-30
+backlog: 47
 created: 2026-09-29
 intent: none — BACKLOG 47 (found 2026-09-28 while building the Club Roster Form link); design read-only on 2026-09-29
 ---

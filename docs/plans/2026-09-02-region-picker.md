@@ -2,6 +2,7 @@
 title: New partners choose their region on the Club Roster Form
 author: Claude (approved by Ryan)
 status: in-progress
+backlog: 38
 created: 2026-09-02
 intent: docs/intent/2026-09-02-region-picker.md
 ---

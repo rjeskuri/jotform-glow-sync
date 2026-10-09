@@ -1,7 +1,7 @@
 ---
 title: One attendance total for leadership that includes the partners who report counts, with the per-girl figures labelled Jotform only, and the clubs that did not submit or sent a blank in plain view
 author: Ryan Eskuri (decisions of 2026-10-06, captured by Claude)
-status: proposed
+status: in-progress   # the plan's A-D done 2026-10-07; how partners' counts come in is open (BACKLOG 72)
 created: 2026-10-06
 ---
 

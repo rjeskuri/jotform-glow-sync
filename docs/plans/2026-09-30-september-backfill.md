@@ -1,7 +1,8 @@
 ---
 title: September back-fill - the Jotform attendance that never reached Salesforce
 author: Claude (with Ryan)
-status: done (2026-10-02): 361 batches; 14 sessions held on purpose (pilot clubs, Queens of Quest)
+status: done             # 361 batches; 14 sessions held on purpose (pilot clubs, Queens of Quest)
+done: 2026-10-02
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-30 ("bring in all submissions for the month of September for all forms")
 ---

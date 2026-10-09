@@ -1,7 +1,9 @@
 ---
 title: Replay guard — an older form response never puts back girls removed after it was sent
 author: Claude (with Ryan)
-status: proposed         # proposed → accepted (Ryan) → in-progress → done
+status: done             # merged 2026-09-29, deployed 2026-09-30 with the same-name push (BACKLOG 41)
+done: 2026-09-30
+backlog: 41
 created: 2026-09-28
 intent: none — BACKLOG 41, the follow-up named in docs/plans/2026-09-27-formlog-key.md
 ---

@@ -48,8 +48,9 @@ every operational procedure, with its dry-run and apply forms, in
 
 ## Docs
 
-[docs/README.md](docs/README.md) is the index: runbook, architecture, decisions, launch notes,
-backlog, and the intent → spec → plan trail under `docs/intent`, `docs/specs`, `docs/plans`.
+[docs/README.md](docs/README.md) is the index: runbook, architecture, decisions, backlog, and
+the plans under `docs/plans` (an intent under `docs/intent` is optional; the launch notes are in
+`docs/archive`).
 `CLAUDE.md` is the one-page briefing for Claude; `REVIEW.md` the review policy.
 
 ## Safety properties

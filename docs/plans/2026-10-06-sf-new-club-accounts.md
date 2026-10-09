@@ -1,7 +1,8 @@
 ---
 title: Salesforce club accounts created automatically for new clubs (BACKLOG 27)
 author: Claude (with Ryan)
-status: accepted (Ryan, 2026-10-06) - in-progress
+status: blocked          # accepted by Ryan 2026-10-06; built 2026-10-07 and in main; the Salesforce and GitHub setup is Ryan's and not done as of 2026-10-09 (BACKLOG 27)
+backlog: 27
 created: 2026-10-06
 intent: none - Ryan's request of 2026-10-06 ("look at doing the salesforce clubs records automatically")
 ---

@@ -2,6 +2,8 @@
 title: One club per attendance submission (the multi-club guard)
 author: Claude (workflow track "club-guard", 2026-09-29)
 status: done             # accepted by Ryan 2026-09-30 (the wording, GUARD_DISABLES_SUBMIT = True); merged 3ed68b2; live on all five forms the same day (Result)
+done: 2026-09-30
+backlog: 48
 created: 2026-09-29
 intent: docs/intent/2026-09-01-club-picker.md (its open question: "confirm a mentor cannot pick two clubs … if two can be picked, add a guard rule")
 ---
