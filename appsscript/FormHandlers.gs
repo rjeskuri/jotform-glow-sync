@@ -702,18 +702,34 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
   const state = loadIdState_();
   const today = today_();
   const current = existing.byClub[key_(partner) + '||' + key_(club)] || [];
-  const isNew = !current.length;
+  // A new club: nothing on file - or, on a retry, only the rows this response added (their
+  // source is this response): an attempt that wrote the Roster and then failed leaves them.
+  const isNew = current.every(function (r) { return tidy_(r.source) === source; });
 
   const plan = planClub_({ partner: partner, club: club, names: parsed.names,
                            duplicates: parsed.duplicates, source: source,
                            submitted: submitted },
                          current, state, region, today);
-  applyRosterPlan_(ss, plan, today);
+  // ClubRegistry and Partners before the Roster: a retry finds the code and the partner
+  // again and adds nothing twice, so a failure here is an ERROR that a retry repairs.
   saveClubRegistry_(state.registry);
   const seen = {}; seen[key_(partner)] = partner;
   const formRegions = {};
   if (formRegion) formRegions[key_(partner)] = formRegion;
   seedPartners_(seen, formRegions);
+  applyRosterPlan_(ss, plan, today);
+
+  // The Roster has changed: a retry re-plans against it and finds the girls on file. So the
+  // Jotform sync request and the Salesforce row come first, the ReviewQueue is best-effort,
+  // and a later failure (the Salesforce row, Audit) is an ERROR whose retry still finds the
+  // club new (isNew above), asks for the sync again and adds the row once (sfPendingAdd_).
+  if (isNew || plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
+  if (isNew) {
+    sfPendingAdd_(ss, [today, partner, club, region, plan.toAppend.length || current.length,
+                       sheetText_(a[Q.MENTOR_NAME]), sheetText_(a[Q.MENTOR_EMAIL]),
+                       sheetText_(a[Q.COUNTRY]), 'pending', '']);
+  }
+  trySyncChoices_();
 
   const issues = plan.issues;
   if (!region) {
@@ -731,22 +747,32 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
                   detail: 'Their note: ' + tidy_(a[Q.SAME_NAME_DETAIL]) +
                       ' — the roster has no repeated name, so check the girls are listed distinctly.' });
   }
-  review_(issues);
-
-  if (isNew) {
-    ensureTab_(ss, TAB.SF_PENDING, SF_PENDING_COLS).appendRow([
-      today, partner, club, region, plan.toAppend.length, sheetText_(a[Q.MENTOR_NAME]),
-      sheetText_(a[Q.MENTOR_EMAIL]), sheetText_(a[Q.COUNTRY]), 'pending', '']);
-  }
-  trySyncChoices_();
+  const queued = tryReview_(issues, source);
 
   const summary = (isNew ? 'new club ' : 'existing club ') + club + ' (' + partner + '): ' +
       plan.toAppend.length + ' girls added, ' + plan.reactivate.length + ' reactivated' +
       keptRemovedNote_(plan) + ', ' + issues.length + ' for review' +
+      (queued ? '' : ' (NOT on the ReviewQueue: see Audit)') +
       (released ? ' (released from hold by staff)' : '');
   audit_('newClubForm', summary);
-  if (plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
   return summary;
+}
+
+/**
+ * Append a new club to SF Pending (the Monday e-mail's Salesforce list) unless
+ * a row for the same partner and club is there already, whatever its status:
+ * a retry of the response that added it adds no second one. True if appended.
+ */
+function sfPendingAdd_(ss, row) {
+  const sheet = ensureTab_(ss, TAB.SF_PENDING, SF_PENDING_COLS);
+  const p = SF_PENDING_COLS.indexOf('partner'), c = SF_PENDING_COLS.indexOf('club');
+  const ck = key_(row[p]) + '||' + key_(row[c]);
+  const onFile = sheet.getLastRow() > 1 &&
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, SF_PENDING_COLS.length).getValues()
+          .some(function (r) { return key_(r[p]) + '||' + key_(r[c]) === ck; });
+  if (onFile) return false;
+  sheet.appendRow(row);
+  return true;
 }
 
 /** How a hold reason reads in Audit, and (all but samename) in FormLog: holdSummary_. */
@@ -849,21 +875,31 @@ function handleRosterChange_(a, source, submitted) {
                                    removes: removes.names, duplicates: adds.duplicates,
                                    source: source, submitted: submitted },
                                  current, state, region, today);
+  saveClubRegistry_(state.registry);   // before the Roster: a retry finds the code again
   applyRosterPlan_(ss, plan, today);
-  saveClubRegistry_(state.registry);
+
+  // The Roster has changed, and a retry would re-plan against it: the girls just added would
+  // be "already on the roster" in the mentor's e-mail, and nothing would ask for a Jotform
+  // sync. So from here on no step fails the run: each is best-effort, and FormLog records
+  // the summary.
+  if (plan.toAppend.length || plan.reactivate.length || plan.deactivate.length) {
+    tryNotifySync_('rosterChangeForm');
+  }
   if (plan.toAppend.length && !region) plan.issues.push(noRegionIssue_(partner));
-  review_(plan.issues);
   trySyncChoices_();
+  const queued = tryReview_(plan.issues, source);
 
   const summary = club + ' (' + partner + '): ' + plan.toAppend.length + ' added, ' +
       plan.reactivate.length + ' reactivated, ' + plan.deactivate.length + ' removed' +
       keptRemovedNote_(plan) +
       (plan.alreadyActive.length ? ', ' + plan.alreadyActive.length + ' already on the roster' : '') +
       (plan.alreadyInactive.length ? ', ' + plan.alreadyInactive.length + ' already removed' : '') +
-      (plan.unmatched.length ? ', ' + plan.unmatched.length + ' removal(s) did not match' : '');
-  audit_('rosterChangeForm', summary);
-  if (plan.toAppend.length || plan.reactivate.length || plan.deactivate.length) {
-    tryNotifySync_('rosterChangeForm');
+      (plan.unmatched.length ? ', ' + plan.unmatched.length + ' removal(s) did not match' : '') +
+      (queued ? '' : ', ' + plan.issues.length + ' for review NOT on the ReviewQueue (see Audit)');
+  try {
+    audit_('rosterChangeForm', summary);
+  } catch (err) {
+    // FormLog records the same summary (runResponse_)
   }
   if (mentorEmail) sendChangeConfirmation_(mentorEmail, club, partner, plan);
   return summary;

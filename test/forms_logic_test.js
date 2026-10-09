@@ -1508,6 +1508,75 @@ const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
   }
 }
 
+console.log('\nA Sheets failure after the Roster write: Salesforce, the sync request and the mentor e-mail stay right (review A1)');
+{
+  const A = 'Fixture Partner Alpha', SUN = 'Sunrise Club', RQ = 'Roster Form Responses', SRC = RQ + '!50';
+  const KEY = 'ROSTER|w:2026-09-27 10:15:30.250|' + A + '|Comet Club';
+  // "Yes, two girls share a name" with no repeated name: one ReviewQueue item
+  const comet = () => newClub(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson'], { [HQ.SAME_NAME]: 'Yes' });
+  const sfRows = w => w.tabs['SF Pending'].slice(1).filter(r => r[2] === 'Comet Club');
+
+  let opts = { down: 'ReviewQueue' };
+  let w = sheetWorld(baseTabs(), opts);
+  let res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('a new club, the ReviewQueue down: imported, not an ERROR; FormLog says its item is NOT queued',
+        res === 'new club Comet Club (' + A + '): 2 girls added, 0 reactivated, 1 for review ' +
+                '(NOT on the ReviewQueue: see Audit)' && w.tabs.Roster.length === 3, res);
+  check('…its Salesforce row written and the Jotform sync requested',
+        sfRows(w).length === 1 && sfRows(w)[0][4] === 2 && w.notified.join() === 'newClubForm', JSON.stringify(sfRows(w)));
+  check('…and Audit names the item that could not be queued (the issue and the source only)',
+        w.audits.includes('tryReview_: could not add 1 item(s) (Partner says two girls share a name) for ' + SRC +
+                          ': sheet unavailable'), w.audits.join(' | '));
+
+  opts = { down: 'SF Pending' };
+  w = sheetWorld(baseTabs(), opts);
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('a new club, SF Pending down: ERROR (retried from the menu), but the girls are on the Roster and the sync was requested',
+        res === 'ERROR: sheet unavailable' && w.tabs.Roster.length === 3 && !sfRows(w).length &&
+        w.notified.join() === 'newClubForm', res);
+  opts.down = null;
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('…the retry: still a new club (its only rows are this response\'s), so the Salesforce row is added, with its girls',
+        res === 'new club Comet Club (' + A + '): 0 girls added, 0 reactivated, 1 for review' &&
+        w.tabs.Roster.length === 3 && sfRows(w).length === 1 && sfRows(w)[0][4] === 2 &&
+        w.notified.join() === 'newClubForm,newClubForm', res);
+  w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('…run once more (FormLog lost): still one Salesforce row for the club', sfRows(w).length === 1);
+
+  opts = { down: 'ClubRegistry' };
+  w = sheetWorld(baseTabs(), opts);
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('ClubRegistry down: ERROR before the Roster is written — nothing imported, no Salesforce row, no sync request',
+        res === 'ERROR: sheet unavailable' && w.tabs.Roster.length === 1 && !sfRows(w).length && !w.notified.length, res);
+  opts.down = null;
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('…the retry imports it as if the first attempt had not happened',
+        /^new club Comet Club \(Fixture Partner Alpha\): 2 girls added/.test(res) && w.tabs.ClubRegistry.length === 2 &&
+        sfRows(w).length === 1 && w.notified.join() === 'newClubForm', res);
+
+  const change = () => ({ [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: A, [HQ.CLUB_PREFIX + A + ')']: SUN,
+                          [HQ.ADD]: 'Joy Blorptest', [HQ.REMOVE]: 'Mary Zibblewick\nNobody Here',
+                          [HQ.MENTOR_EMAIL_MOD]: 'mentor@example.org' });
+  const CHANGE_KEY = 'ROSTER|w:2026-09-27 11:00:00.000|' + A + '|' + SUN;
+  w = sheetWorld(baseTabs(rosterRows(A, SUN, ['Grace Zibblewick', 'Mary Zibblewick'])), { down: 'ReviewQueue' });
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, change(), CHANGE_KEY);
+  const body = (w.mails[0] || { body: '' }).body.split('\n');
+  check('a roster change, the ReviewQueue down: done, not an ERROR; FormLog says the item is NOT queued; sync requested',
+        res === SUN + ' (' + A + '): 1 added, 0 reactivated, 1 removed, 1 removal(s) did not match, ' +
+                '1 for review NOT on the ReviewQueue (see Audit)' &&
+        w.tabs.Roster.length === 4 && w.notified.join() === 'rosterChangeForm', res);
+  check('…the mentor e-mail lists her as added and the removal as done (never "already on the roster")',
+        w.mails.length === 1 && body[body.indexOf('Added:') + 1] === '  - Joy Blorptest' &&
+        body[body.indexOf('Removed:') + 1] === '  - Mary Zibblewick' && !body.some(l => l.startsWith('Already')),
+        body.join(' / '));
+  w = sheetWorld(baseTabs(rosterRows(A, SUN, ['Grace Zibblewick', 'Mary Zibblewick'])));
+  w.ctx.audit_ = () => { throw new Error('sheet unavailable'); };
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, change(), CHANGE_KEY);
+  check('…Audit failing after the Roster write: not an ERROR either; the item queued, the mentor e-mailed',
+        /^Sunrise Club \(Fixture Partner Alpha\): 1 added, 0 reactivated, 1 removed/.test(res) &&
+        w.tabs.ReviewQueue.length === 2 && w.mails.length === 1 && w.notified.join() === 'rosterChangeForm', res);
+}
+
 console.log('\nA new club that may duplicate one on file is held, then released by staff (BACKLOG 11b)');
 {
   const A = 'Fixture Partner Alpha';
