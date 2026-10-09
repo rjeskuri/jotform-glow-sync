@@ -1,7 +1,9 @@
 ---
 title: Attendance dashboard in Salesforce - charts from the data already there
 author: Claude (with Ryan)
-status: done (deployed 2026-10-02 03:46 UTC and fix1 2026-10-06 09:29 UTC, both by Ryan; open: BACKLOG 58-61)
+status: done             # deployed 2026-10-02 03:46 UTC and fix1 2026-10-06 09:29 UTC, both by Ryan; open: BACKLOG 58-61
+done: 2026-10-02
+backlog: 58, 59, 60, 61
 created: 2026-10-02
 intent: none - Ryan's request of 2026-10-02 ("upgrade it now to use charts instead of line by line";
   then "start with basic reporting visuals ... using the info we already have")
@@ -225,3 +227,77 @@ Into BACKLOG with that design.
 - **Also fixed on the way**: `tools/worklog.py` wrote the work log with Windows line endings, so
   every update rewrote every line. It now writes `\n`, with a test.
 - `make check` → `CHECK PASSED` (434 tests, `OK`).
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "Attendance dashboard in Salesforce": what is on it and what the numbers mean
+
+**What is on it:**
+- four numbers: girls who attended last month; girls who attended this month so far; club
+  sessions held last month; clubs that sent attendance last month;
+- per week since 1 September: girls attending, sessions held, clubs reporting;
+- girls per month;
+- last month by partner (girls) and by module (sessions);
+- clubs with no attendance last month: a number and a table.
+
+Since `totals1/` (deployed 2026-10-07 03:59 UTC, [plan](2026-10-06-attendance-totals.md)
+D), also: total attendance last month from every source beside the Jotform-only figures (a
+header says "(Jotform only)" wherever girls are counted by name); total and Jotform attendance
+per partner per month; clubs not submitting in the last 14 days and since 1 September (numbers,
+and a table by partner for the 14 days); blank submissions since 1 September. Read back the
+same night: the reports equal SOQL (264 of 264 totals and groups), and every new tile equals
+SOQL unfiltered and under three partners' filters (the plan's Result has the numbers).
+
+The report "Jotform Monthly Attendance" (`Jotform_Monthly_Attendance_test`; "(test)" in its
+label until the same deploy) shows a chart with its rows collapsed. Its filters are unchanged.
+
+**`fix1`** (deployed by Ryan 2026-10-06 09:29 UTC, read back the same day):
+- "this month" is the calendar month. Until then it was the current fiscal quarter, which gave
+  the same numbers in October only.
+- The no-attendance table lists one row per partner. A Lightning table stops at 200 rows, and
+  the club list is one click away in its report.
+- It added the "How to read this dashboard" box.
+
+**What the numbers mean:**
+- Every `Attendance__c` row is a girl marked present. Girls are counted with a unique count of
+  the Contact, so a girl who came to five sessions counts once.
+- A **session** is an attendance batch with at least one girl present. "Clubs that sent
+  attendance" likewise counts only clubs with at least one girl present.
+- A duplicate re-submission refused by the processor adds nothing (the original counts). A
+  submission with no girl ticked adds nothing either: a club whose only submissions last month
+  had no girl ticked appears under "no attendance".
+- The reports use the report type `Accounts_Contacts_Attendance`, so a girl's club is her
+  Contact's account. "Clubs with no attendance" joins on `Attendance__c.Account__c`. The two
+  agreed on every row on 2026-10-02 (0 of 5,106 differed); they would split only if a girl's
+  Contact were moved to another club.
+- **A club without a partner** counts in the girls, sessions and clubs numbers, but never under
+  the Partner filter or in the no-attendance table. So "clubs that sent attendance" plus "clubs
+  with no attendance" equals the clubs with a partner only while every reporting club has one.
+  A new club whose account was not created before its first attendance gets a partner-less
+  account from the processor ("Club accounts in Salesforce", BACKLOG 27); set its parent.
+- Weeks run Sunday to Saturday (every user has the en_US locale). The first week shows only
+  1-5 September.
+- "Last month" and "this month" roll over at midnight in the running user's time zone: Ryan's,
+  Los Angeles, for the dashboard; the viewer's for a report opened from it. 16 of the 18 active
+  users were on Los Angeles time on 2026-10-02, and two on African time zones.
+- **Late submissions**: 12 of the first 28 live sessions arrived more than a day late, and the
+  latest up to 19 days late. So "last month" settles around the 20th, and the latest week and
+  "this month" always start low. Compare months only after that.
+- **Snapshot**: a dashboard shows its last refresh (the time at top right), not live data.
+  Press Refresh, or schedule a daily refresh (Ryan's step: **Subscribe** on the dashboard in
+  Lightning; Refresh ▾ → Schedule Refresh is the Classic path; Access, below).
+- **Total attendance** (since `totals1/`, 2026-10-07) sums `Girls_Present__c` over `Success`
+  batches - the Jotform rows plus the monthly counts partners without Jotform report
+  (`Creator__c` `Partner report`; "Attendance totals and partner-reported counts"). Until a
+  partner's first count arrives (BACKLOG 72) the Jotform-only figures equal the totals. "Girls who
+  attended" stays Jotform only (a reported count has no names) and counts each girl once. "Did
+  not submit" in the 14-day and since-1-September windows means no batch of any status dated in
+  the window (a refused duplicate counts as submitted); the 14-day window is today plus the 14
+  days before it, in the org's time zone (Pacific: on the evening of 2026-10-06 there, 09-22 to
+  10-06); the last-month tile stays row-based. A
+  **blank** is a submission with no girl ticked: `Failed` "No participants submitted", or a
+  legacy `Success` with `Girls_Present__c` 0. Clubs whose partner reports a monthly count show
+  as not submitting until that count arrives; the U.S clubs, which do not report attendance
+  here, stay on the lists ("Clubs that do not use Jotform").

@@ -20,6 +20,20 @@ from glow import forms as glow_forms
 from glow import sync as glow_sync
 from glow.text import md5
 
+MOVED = "## From the RUNBOOK (moved 2026-10-09)"
+
+
+def moved(plan):
+    """What docs/RUNBOOK.md said of a finished one-time procedure until 2026-10-09, moved word for
+    word to the end of its plan (the RUNBOOK keeps a stub that links there)."""
+    return read(os.path.join(REPO, "docs", "plans", plan + ".md")).split(MOVED, 1)[1]
+
+
+def backlog_item(number):
+    """One item of docs/BACKLOG.md, from its `### <number>.` heading to the next heading, as one line."""
+    doc = read(os.path.join(REPO, "docs", "BACKLOG.md"))
+    return " ".join(doc.split(f"\n### {number}. ", 1)[1].split("\n#", 1)[0].split())
+
 
 class RestoreConditionsGuard(RestoreConditionsFixture, unittest.TestCase):
     """restore_conditions.py: a snapshot whose rules test clubs the Club picker no
@@ -115,13 +129,13 @@ class RestoreConditionsGuard(RestoreConditionsFixture, unittest.TestCase):
 
 
 class RosterRepairRunbook(unittest.TestCase):
-    """docs/RUNBOOK.md "Rosters above Submit": the runner is paused before the
+    """docs/RUNBOOK.md "Rosters above Submit", the one-time repair as run (moved to its plan,
+    docs/plans/2026-09-29-rosters-above-submit.md): the runner is paused before the
     merge (the form_status check ships with it), and the procedures whose
     checks expect CLEAN come after the repair."""
 
     def section(self):
-        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
-        return doc.split("## Rosters above Submit", 1)[1].split("\n## ", 1)[0]
+        return moved("2026-09-29-rosters-above-submit")
 
     def test_the_runner_is_paused_before_the_merge(self):
         text = self.section()
@@ -130,19 +144,18 @@ class RosterRepairRunbook(unittest.TestCase):
         self.assertIn("then back to `1`", text)
 
     def test_what_expects_clean_waits_for_the_repair(self):
-        backlog = {l.split("|")[1].strip(): l for l in read(os.path.join(REPO, "docs", "BACKLOG.md"))
-                   .splitlines() if re.match(r"\| (~~45~~|46) \|", l)}
-        self.assertIn("after 47's repair", backlog["46"])
+        self.assertIn("after 47's repair", backlog_item("46"))
         # the partner list (45) was retired before it was deployed; what took its place
         # (the same-name switch, RUNBOOK "Club names two partners share") expects CLEAN too
-        self.assertIn("superseded 2026-09-30", backlog["~~45~~"])
+        self.assertIn("superseded 2026-09-30", backlog_item("45"))
         self.assertIn("the same-name switch", " ".join(self.section().split()))
 
 
 class SameNameRunbook(unittest.TestCase):
     """docs/RUNBOOK.md "Club names two partners share": the one-time switch is
     backed up, previewed and verified, the runner paused around it; the rollback
-    is for before the Salesforce reconnect; the quoted warnings are the code's."""
+    is for before the Salesforce reconnect (both as run, moved to
+    docs/plans/2026-09-30-same-name-clubs.md); the quoted warnings are the code's."""
 
     def section(self):
         doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
@@ -150,7 +163,7 @@ class SameNameRunbook(unittest.TestCase):
         return doc.split("## Club names two partners share", 1)[1].split("\n## ", 1)[0]
 
     def test_the_switch_is_backed_up_previewed_applied_and_verified_in_that_order(self):
-        switch = self.section().split("### The one-time switch", 1)[1].split("\n### ", 1)[0]
+        switch = moved("2026-09-30-same-name-clubs").split("### The one-time switch", 1)[1].split("\n### ", 1)[0]
         block = switch.split("```bash", 1)[1].split("```", 1)[0]
         lines = [l for l in block.splitlines() if l.strip()]
 
@@ -175,7 +188,7 @@ class SameNameRunbook(unittest.TestCase):
         self.assertNotIn("--q5-change-ok --apply", text)         # the switch needs no second flag
 
     def test_the_rollback_is_all_forms_with_the_runner_paused_and_only_before_the_reconnect(self):
-        text = " ".join(self.section().split("### Rollback", 1)[1].split())
+        text = " ".join(moved("2026-09-30-same-name-clubs").split("### Rollback", 1)[1].split())
         self.assertIn("only before the Salesforce reconnect", text)
         self.assertLess(text.index("AUTO_SYNC_APPLY=0"), text.index("Revert the merge"))
         self.assertLess(text.index("Revert the merge"), text.index("AUTO_SYNC_APPLY=1"))
@@ -219,7 +232,7 @@ class SameNameRunbook(unittest.TestCase):
         # the switch: its refusal is the tool's, and the count is checked before applying
         self.assertIn("would keep the plain Club picker entry", text)
         self.assertIn("would keep the plain Club picker entry", src)
-        self.assertIn("**one more means stop**", text)
+        self.assertIn("**one more means stop**", " ".join(moved("2026-09-30-same-name-clubs").split()))
         # the Partner-box hide rides along and is not in SyncLog's detail
         self.assertIn("neither counted nor named in `detail`", runner)
         # the retired design is gone from the prose: no roster is Partner-gated for a part move
@@ -230,13 +243,16 @@ class SameNameRunbook(unittest.TestCase):
 
 class ContactIdsRunbook(unittest.TestCase):
     """docs/RUNBOOK.md "The names list sent to Salesforce": what it quotes is the
-    code's own, the rollout is backed up, previewed, applied and verified in that
-    order with the runner paused, the console check prints counts only, and the
-    rollback is the constants."""
+    code's own, the rollout (as run, moved to docs/plans/2026-09-30-contact-ids.md) is
+    backed up, previewed, applied and verified in that order with the runner paused,
+    the console check prints counts only, and the rollback is the constants."""
 
     def section(self):
         doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
         return doc.split("## The names list sent to Salesforce", 1)[1].split("\n## ", 1)[0]
+
+    def moved(self):
+        return moved("2026-09-30-contact-ids")
 
     def test_the_quoted_lines_are_the_tools_own(self):
         text = " ".join(self.section().split())
@@ -253,7 +269,7 @@ class ContactIdsRunbook(unittest.TestCase):
         self.assertIn("`REQUIRED roster` line", runner)
 
     def test_the_rollout_is_backed_up_previewed_applied_and_verified(self):
-        text = self.section()
+        text = self.moved()
         block = text.split("```bash", 1)[1].split("```", 1)[0]
         lines = [l for l in block.splitlines() if l.strip()]
 
@@ -278,7 +294,7 @@ class ContactIdsRunbook(unittest.TestCase):
         # the runner syncs from main, and older code puts a rolled-out form back in the old
         # order with its next roster change and reads CLEAN: the merge is a step of its own,
         # between the template and the first regional form, before the runner is switched on
-        flat = " ".join(self.section().split())
+        flat = " ".join(self.moved().split())
         m = flat.index("**merge and push**")
         self.assertLess(flat.index("The template goes first"), m)
         self.assertLess(m, flat.index("Then U.S, Latin America, Asia and Africa"))
@@ -298,22 +314,22 @@ class ContactIdsRunbook(unittest.TestCase):
     def test_the_required_message_is_english_on_four_forms(self):
         # only U.S's translation store holds the `base` entry of Jotform's required text
         # (read 2026-10-01): the rollout's Español check must not read English as a failure
-        flat = " ".join(self.section().split())
+        flat = " ".join(self.moved().split())
         self.assertNotIn("in the form's language", flat)
+        self.assertNotIn("in the form's language", " ".join(self.section().split()))
         self.assertNotIn("in the form's language", " ".join(read(os.path.join(REPO, "glow", "sync.py")).split()))
         step7 = flat.split(" 7. ", 1)[1].split("`equal: false`", 1)[0]
         self.assertIn("Spanish on U.S only", step7)
         self.assertIn("template, Africa, Asia and Latin America it stays English", step7)
         self.assertIn("not a failure", step7)
-        backlog = read(os.path.join(REPO, "docs", "BACKLOG.md"))
-        item = next(l for l in backlog.splitlines() if l.startswith("| 57 |"))
+        item = backlog_item("57")
         self.assertIn(f"`{md5('This field is required.')[:8]}…`", item)      # the key, cut (check_secrets)
         self.assertIn("`base`", item)
 
     def test_the_back_step_cannot_pass_from_the_browsers_memory(self):
         # a default Chrome restores the page from its back-forward cache, where the old rules
         # pass too: the step makes Chrome load it again and reads Jotform's own flag
-        flat = " ".join(self.section().split())
+        flat = " ".join(self.moved().split())
         step6 = flat.split(" 6. ", 1)[1].split(" 7. ", 1)[0]
         self.assertIn("addEventListener('unload', () => {})", step6)
         self.assertIn("`bf: false`", step6)
@@ -327,13 +343,12 @@ class ContactIdsRunbook(unittest.TestCase):
                          "Ticks in one roster only are refused", "Ticks in both still go through",
                          "clears the picker and picks her club again"):
             self.assertIn(fragment, residual)
-        backlog = read(os.path.join(REPO, "docs", "BACKLOG.md"))
-        item = next(l for l in backlog.splitlines() if l.startswith("| 56 |"))
+        item = backlog_item("56")
         self.assertIn("ticks in one roster only are refused", item)
         self.assertIn("higher in the list", item)
 
     def test_the_console_check_prints_counts_only(self):
-        js = self.section().split("```js", 1)[1].split("```", 1)[0].strip()
+        js = self.moved().split("```js", 1)[1].split("```", 1)[0].strip()
         returned = js.split("return {", 1)[1].split("};", 1)[0]
         self.assertEqual(re.findall(r"(\w+):", returned), ["shown", "ticked", "q18", "equal", "flagged", "bf"])
         self.assertNotIn("console.log", js)
@@ -356,7 +371,8 @@ class ContactIdsRunbook(unittest.TestCase):
 
 class NamesAndModulesRunbook(unittest.TestCase):
     """docs/RUNBOOK.md "The names dictionary and the module values": the commands and
-    lines it quotes are the tools' own, the rollout is template first with the runner
+    lines it quotes are the tools' own, the rollout (as run, moved to
+    docs/plans/2026-10-02-names-and-modules.md) is template first with the runner
     paused, and both rollbacks are there."""
 
     def section(self):
@@ -375,10 +391,11 @@ class NamesAndModulesRunbook(unittest.TestCase):
         for flag in ("--restore", "--apply", "--form"):
             self.assertIn(flag, text)
         self.assertIn("MODULE_CALC_VALUES", text)
-        self.assertIn("AUTO_SYNC_APPLY=0", text)
-        self.assertIn(f"fix_name_translations.py --form {glow_forms.TEMPLATE} --apply", text)
+        rollout = " ".join(moved("2026-10-02-names-and-modules").split())
+        self.assertIn("AUTO_SYNC_APPLY=0", rollout)
+        self.assertIn(f"fix_name_translations.py --form {glow_forms.TEMPLATE} --apply", rollout)
         # template first, merged, then the regional forms; the runner back on last
-        order = [text.index(s) for s in ("1. The template", "2. **Merge and push**",
+        order = [rollout.index(s) for s in ("1. The template", "2. **Merge and push**",
                                          "3. U.S, Latin America, Asia, Africa, smallest first",
                                          "then `AUTO_SYNC_APPLY=1`")]
         self.assertEqual(order, sorted(order))

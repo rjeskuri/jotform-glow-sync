@@ -2,6 +2,7 @@
 title: Problem reports that are roster changes reach the ReviewQueue, and Ryan works it weekly
 author: Claude (with Ryan)
 status: done
+done: 2026-09-28
 created: 2026-09-28
 intent: none — the 2026-09-26/27 problem-report review
 ---

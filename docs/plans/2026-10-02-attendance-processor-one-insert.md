@@ -1,7 +1,8 @@
 ---
 title: Attendance processor - a submission's new girls created in one insert
 author: Claude (with Ryan)
-status: done (deployed to production 2026-10-02 03:25 UTC)
+status: done             # deployed to production 2026-10-02 03:25 UTC
+done: 2026-10-02
 created: 2026-10-02
 intent: none - Ryan's go of 2026-10-02 ("Go ahead and make the fix")
 ---

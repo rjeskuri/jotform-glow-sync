@@ -85,7 +85,7 @@ top-level side effects and run in Node through `test/load_gs.js`.
 
 ## Constants that exist on both sides
 
-Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
+Change both, or `test/gs_parity_test.py` (`PythonAppsScriptParity`) fails:
 
 | Constant | Python | Apps Script |
 |---|---|---|
@@ -110,7 +110,7 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
    JS mirrors the sheet rebuild by hand, sharing `RosterOps.gs`; the round
    trip (upload, then run the sheet's rebuild and expect no change) is the
    check.
-3. The constants table above — `test/python_test.py` parses `Config.gs`.
+3. The constants table above — `test/gs_parity_test.py` parses `Config.gs`.
 4. `RosterOps.gs sharedClubNames_` / `sfClubName_` ↔ `glow/sync.py`
    `shared_club_names` / `sf_club_name` — which clubs are
    `<club> - <partner>` (a name that active clubs of two or more partners
@@ -118,7 +118,7 @@ Change both, or `test/python_test.py` (`PythonAppsScriptParity`) fails:
    `--same-name-switch`; afterwards a form's long or plain name is sticky);
    Apps Script uses the rule for the Monday e-mail's Salesforce lines only.
    Each side is tested on its own, with fictional names
-   (`test/forms_logic_test.js`, `test/python_test.py`), and
+   (`test/forms_logic_test.js`; `test/sync_conditions_test.py` `SameNameRule`), and
    `PythonAppsScriptParity` runs both over one fictional Roster (the `.gs`
    side in Node, through `test/load_gs.js`): the separator, which names are
    shared, each club's name, and — for the two checkers, the sync's and the

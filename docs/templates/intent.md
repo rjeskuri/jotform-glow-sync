@@ -1,11 +1,14 @@
 ---
 title: <what is wanted, in one line>
 author: <who asked>
-status: draft            # draft | proposed | accepted | in-progress | done | superseded | rejected
+status: proposed         # proposed | accepted | in-progress | blocked | done | superseded; a comment after the #
 created: YYYY-MM-DD
 ---
 
 # Intent: <feature name>
+
+<!-- Optional: only to capture Ryan's ask before a plan exists. Small changes go straight to a
+     plan (docs/templates/plan.md), which can quote the ask in its `intent:` line. -->
 
 ## Problem
 <the current state and the pain it causes — who feels it, how often>

@@ -1,7 +1,9 @@
 ---
 title: Adopt the AI-native SDLC playbook (repo polish, feedback loop, guardrails) and automate the Jotform sync
 author: Claude, approved by Ryan Eskuri
-status: in-progress
+status: done             # merged into main; Ryan's setup steps done with BACKLOG 1b (AUTO_SYNC_APPLY=1, 2026-09-12)
+done: 2026-09-12
+backlog: 1b, 11a
 created: 2026-09-01
 intent: docs/intent/2026-09-01-auto-sync.md
 ---

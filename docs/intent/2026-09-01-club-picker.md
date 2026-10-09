@@ -1,7 +1,8 @@
 ---
 title: Mentors pick their club from a list instead of typing its name
 author: Ryan Eskuri (captured by Claude)
-status: in-progress
+status: done          # the picker on all forms 2026-09-12; its open question (two clubs picked) answered by the club guard, live 2026-09-30
+done: 2026-09-30
 created: 2026-09-01
 ---
 

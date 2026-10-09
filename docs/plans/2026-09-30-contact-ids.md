@@ -2,6 +2,8 @@
 title: The names list sent to Salesforce is never empty and never another club's
 author: Claude (read-only investigation of Jotform's runtime and of all September submissions, a design and two adversarial reviews, 2026-09-30)
 status: done             # Ryan 2026-09-30: "Go on all 4 fixes"; then "Guard first, then back-fill"; rolled out on all five forms 2026-10-01/02 with his go (Result)
+done: 2026-10-02
+backlog: 35, 56, 57
 created: 2026-09-30
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends the right girls for the right club)
 ---
@@ -252,3 +254,144 @@ one the RUNBOOK's merge check reads. `make check`: CHECK PASSED, 434 Python test
   visible ticks; Back with no tick is refused. All passed. Served rules: question 18 at index 0 on
   every form (last in the picker's walk), the picker among its operands.
 - Open: BACKLOG 56 (language switcher with two clubs) and 57 (the required message's translation).
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "The names list sent to Salesforce": September's submissions
+
+Of September's 484 submissions, 64 had no girl ticked
+(stored as an empty *Success* batch that blocks the club's real batch for
+that day - until 2026-10-07; since then Failed "No participants submitted",
+which blocks nothing), 17 had girls ticked but an empty question 18 (207
+names never sent), and 2 carried another club's girls.
+
+### "The names list sent to Salesforce": the browser proof
+
+Proven in headless Chrome on local copies of the Asia, U.S and Africa pages
+(2026-10-01; nothing submitted, every submit request intercepted). With
+required rosters, one club picked and no girl ticked was refused on all three
+forms, and no hidden roster was ever flagged. One tick went through. Two
+clubs picked was still the club guard's case. With the new order, removing
+one of two clubs, or clearing and re-picking a club, left question 18 equal to
+the visible ticks; with the old order it did not. Jotform's runtime file
+(`jotform.forms.js`, md5 `841dc566a7`) is byte-identical in every build the
+five forms were served on 2026-10-01 (`9e75d6f1d83` U.S, Latin America, Asia;
+`962dcbe2fa6`, later `2dd4239c231`, Africa; `cca53a3a639` template). A required checkbox has never
+been rendered by Jotform's server on these forms: the browser proof imitated
+the markup. The template's `--rendered` check after its write is a **hard
+stop**.
+
+### "The names list sent to Salesforce": the rollout as run
+
+Read on 2026-10-01 (dry runs from the branch, nothing written):
+
+| Form | Plan |
+|---|---|
+| U.S | `REPLACE conditions (42 rules)`, 41 kept, 1 new, 1 dropped; 11 `REQUIRED roster` |
+| Latin America | 69 rules, 68 kept, 1 new, 1 dropped; 38 `REQUIRED roster` |
+| Asia | 126 rules, 125 kept, 1 new, 1 dropped; 95 `REQUIRED roster` |
+| Africa | 251 rules, 250 kept, 1 new, 1 dropped; 220 `REQUIRED roster` |
+| template | 393 rules (+2 once its new rosters exist), 390 kept, 3 new, 3 dropped; 359 `REQUIRED roster`; its backlog: 2 `CREATE roster`, 3 `UPDATE roster … ; required: Yes`, `UPDATE club picker` |
+
+The guard's two rules are among the template's new rules because its picker
+gains two clubs. All five then read NOT CLEAN: three API problems and three
+rendered ones each.
+
+**Rollout**, each step Ryan's go. Set `AUTO_SYNC_APPLY=0` for the whole
+window and confirm it, with no run in progress. Close every builder tab on
+these forms. Order matters: the runner syncs from `main`, and older code puts
+the Contact_IDs sum back after the roster rules, creates rosters without the
+flag and reports that CLEAN, with no warning. Its dry run reads `in-sync` on
+a rolled-out form, so an `in-sync` cannot tell the old code from the new.
+
+1. The template goes first: the commands below with its id and no
+   `--region`, then the browser steps after them. Its plan carries its
+   roster backlog: read it before applying. Until the merge (step 2), nobody
+   applies the template from another checkout, `rename_club.py`'s template
+   step included.
+2. Once the template passed its hard stop and the browser steps, **merge and
+   push**, with `AUTO_SYNC_APPLY` still `0`. Then prove the runner runs this
+   code: one run by hand (Actions, "Run workflow", apply unticked: a dry
+   run). Every region must read `attention` with the reason "the form's rules
+   calculate question 18 … the old way". A region without that reason means
+   the runner still runs older code: stop. From here on the runner refuses
+   every region not rolled out yet, even if the switch were on; that is the
+   safety net, not the plan.
+3. Then U.S, Latin America, Asia and Africa, smallest first, each with its
+   `--region`, the same commands (U.S below), then browser steps 2 and 5:
+
+```bash
+python3 backup_forms.py --form 262382706852058                                                  # note the stamp: the second rollback path
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --region U.S --form 262382706852058           # dry run: exactly the table's lines
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --region U.S --form 262382706852058 --apply   # one PUT + one POST per roster
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --region U.S --form 262382706852058           # "nothing to do", no warning (else Jotform altered what was written: stop)
+python3 tools/form_status.py --form 262382706852058 --roster data/roster_<date>.csv              # CLEAN; "question 18: rule 1 of …, … operand: yes"
+python3 tools/form_status.py --form 262382706852058 --roster data/roster_<date>.csv --rendered   # HARD STOP: rule 1, operands list the picker: yes, N of N rosters with validate[required]
+```
+
+The apply makes about one write per roster: 11 on U.S, 220 on Africa, 359
+on the template. The `REQUIRED roster` writes come last, after the rules, so
+a run that stops among them leaves no new roster without its rule. A 504 can
+hide a completed write: re-run the dry run, which lists only what is still
+missing, before anything else. If the second dry run
+still plans `REPLACE conditions`, Jotform did not keep what was sent. That
+means the order, or an operand it dropped (`--rendered` says which). The
+order is the fix: if Jotform reorders the rules, stop and roll back. If it
+only drops the operand, set `CONTACT_IDS_PICKER_OPERAND = False` and apply
+again. On the template only, open the builder's Conditions page and close it
+without saving. The dry run must still say `nothing to do`.
+
+Then, in a real browser on the served page, without submitting. After each
+step paste this in the console; it prints counts, never a name (`bf`: the
+page came back from the browser's memory, below):
+
+```js
+(() => { const q = document.getElementById('input_18').value, t = [...document.querySelectorAll('li[data-type="control_checkbox"]:not(.form-field-hidden) input[type="checkbox"]:checked')].map(b => b.value); return { shown: document.querySelectorAll('li[data-type="control_checkbox"]:not(.form-field-hidden)').length, ticked: t.length, q18: q ? q.split(', ').length : 0, equal: q === t.join(', '), flagged: document.querySelectorAll('li[data-type="control_checkbox"].form-line-error').length, bf: !!(window.JotForm && JotForm.fromBFCache) }; })()
+```
+
+1. Pick a club, tick three girls: `ticked: 3, q18: 3, equal: true`.
+2. Pick a second club (the guard's warning), tick girls in both, remove the
+   first: `equal: true`, Submit back.
+3. Pick a club, tick, clear the picker, pick the same club again, touch no box:
+   `ticked` and `q18` equal and not 0.
+4. Switch the club back and forth quickly four times: `equal: true`, Submit
+   visible and enabled.
+5. Pick a club, tick nothing, press Submit: refused, `flagged: 1`, the roster
+   shows Jotform's required message. Tick one girl: the message goes.
+6. Pick a club, tick three girls, then paste
+   `addEventListener('unload', () => {})` in the console. Go to another page
+   and come back with the browser's Back: `ticked: 3, q18: 3, equal: true`,
+   `bf: false`. Without that line Chrome restores the page from memory (its
+   back-forward cache), where the old rules pass too: that is `bf: true`,
+   and the step proved nothing. The line makes Chrome load the page again,
+   the path behind the 17 empty question-18 submissions (read 2026-10-01 on
+   a local copy of the U.S page: the old rules gave `q18: 0`, the new ones
+   `q18: 3`). If `bf` still reads `true`, repeat it in a Chrome started on
+   its own: `open -na "Google Chrome" --args --user-data-dir="$(mktemp -d)"
+   --disable-features=BackForwardCache`.
+7. Español, step 5 again: refused the same way. The message is in Spanish
+   on U.S only. On the template, Africa, Asia and Latin America it stays
+   English (their translation stores lack its `base` entry, BACKLOG 57):
+   not a failure. Switch back to English.
+
+`equal: false` with `q18` equal to `ticked` is the names-dictionary defect
+(55 roster names whose spelling the forms' own translation dictionary alters:
+"The names dictionary and the module values" below), not this one. Until a
+form's dictionary is fixed, pick a club it does not affect for these checks. Each form's page can be served on its own
+runtime build, so steps 2 and 5 are repeated on every regional form. No test
+submission: a delivered one creates a real batch for a real club, and the
+console checks prove the same thing.
+
+When all five forms are CLEAN with `--rendered`, run one `auto_sync.py` dry
+run from `main` (merged in step 2): every region `in-sync`, no ATTENTION.
+Then `AUTO_SYNC_APPLY=1`. Stopped
+half-way, the runner stays at `0`. Every region not rolled out reads
+`attention` anyway, and its roster changes wait for a hand apply, which
+also rolls it out. A mentor with the form already open keeps the old page
+until she reloads.
+
+**Afterwards**, daily for a week: question 18 against the stored ticks on new
+submissions (the back-fill resolver's `q18_differs` / `q18_empty` flags; counts
+and ids only), and the count of submissions with no tick (0 expected).

@@ -1,7 +1,9 @@
 ---
 title: Move a club to its real partner (a mistyped partner), first use 2026-09-24
 author: Claude (with Ryan)
-status: done (applied 2026-09-28; accepted by Ryan 2026-09-24, in conversation: gated tool; blank the typo's Partners row with a note; the raw enrollment response stays as it is)
+status: done             # applied 2026-09-28; accepted by Ryan 2026-09-24, in conversation: gated tool; blank the typo's Partners row with a note; the raw enrollment response stays as it is
+done: 2026-09-28
+backlog: 39
 created: 2026-09-24
 intent: none — an operational correction Ryan asked for on 2026-09-24
 ---

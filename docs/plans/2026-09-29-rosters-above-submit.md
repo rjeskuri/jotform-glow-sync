@@ -2,6 +2,8 @@
 title: Every roster renders above the links and the Submit button
 author: Claude (workflow track wf5/rosters-above-submit, 2026-09-29)
 status: done             # accepted by Ryan 2026-09-30; merged (3ed68b2) and applied to all five forms the same day (Result)
+done: 2026-09-30
+backlog: 47
 created: 2026-09-29
 intent: none — BACKLOG 47 (found 2026-09-28 while building the Club Roster Form link); design read-only on 2026-09-29
 ---
@@ -343,3 +345,93 @@ CHECK PASSED
   in-sync everywhere.
 
 Next: re-count BACKLOG 35's empty submissions for two weeks (to 2026-10-14).
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "Rosters above Submit": the one-time repair
+
+A mentor sees her girls' names where her club's roster renders, so every
+roster must render above the links and the Submit button. Until 2026-09-29
+the sync created each new roster at the form's highest order + 1 — after
+Submit — and every roster created since the 2026-08-24 overhaul rendered
+under the button (Africa 98 of 221 on 2026-09-29; BACKLOG 47). Two parts
+(`glow/layout.py`, [plan](2026-09-29-rosters-above-submit.md)). The
+repair ran on all five forms on 2026-09-30; the steps below stay for a
+relapse (`form_status` names it) or a new regional form:
+
+- **The sync** gives a new roster the order of the last roster rendering
+  above the first link (or above Submit when there is no link). Jotform
+  inserts a question created at a taken order there and moves the block
+  below down by one, so the new roster lands just above that roster; were
+  it to keep both at that order, the newer one would render just after it.
+  Either way it is above the first link. Its plan says where: `New rosters
+  go at order 139, above somethingNotWorking (q443)`. No extra write; the
+  links and Submit are never written by the sync. A form with no Submit and
+  no link (the test fixtures) still gets the highest order + 1.
+- **The one-time repair**, `tools/fix_roster_order.py`, moves what renders
+  at and below the first link — the links, Submit, the seven hidden bridge
+  fields — to empty orders after the last one, in the same sequence. Nine
+  order writes per form (ten once the Club Roster Form link is on it); no
+  roster, rule, translation, e-mail or Salesforce mapping is written.
+
+```bash
+# first: AUTO_SYNC_APPLY=0, before the merge (below)
+python3 tools/fix_roster_order.py                                        # dry run: the template + 4 regionals
+python3 tools/fix_roster_order.py --form 262352490535154 --apply         # the template first; open its page
+python3 tools/fix_roster_order.py --apply                                # then the four regionals
+python3 tools/form_status.py --roster data/roster_<date>.csv             # every form: layout: every roster above …
+python3 tools/fix_roster_order.py --form <id> --undo <stamp>             # the rollback (dry run; --apply writes)
+```
+
+From the merge (the check ships with it) until every form is CLEAN:
+repository variable `AUTO_SYNC_APPLY=0`, set before merging — an unrepaired
+form is NOT CLEAN for `form_status`, so a runner apply would end
+`applied-with-problems` — then back to `1`. Run the repair in the same
+sitting as the merge: until a form is repaired, `form_status` shows the
+`layout` problem on it, so no other procedure's "CLEAN" can pass there (the
+manual loop, renaming or moving a club, the Club picker, the same-name
+switch, the club guard). That line is this section's job, not theirs.
+
+The tool plans all five forms before it writes any and refuses — on every
+form — rather than guess: two Submit buttons, a page break, a field a mentor can
+see below the first link, a link below Submit, or a simulation of the moves
+that would leave a roster below the links or change what a mentor sees.
+With `--apply`, per form: a snapshot (`backups/<id>/questions-<stamp>.json`,
+stamped to the second; the tool prints the `--undo` line), a re-read and
+re-plan (a form changed since the preview is not written), Submit first
+(then every roster is above it), the hidden fields, the links last. After
+the first write a re-read checks that Jotform kept the order as sent and
+moved nothing else. Otherwise it stops after that one write and says what
+Jotform stored and what the re-read shows (whether every roster is above
+Submit). If other questions shifted too, open the form; if a roster's order
+changed, `--undo` refuses (then the builder, or Revision History). After the
+last write a re-read verifies the whole form: the same questions, identical
+apart from `order`, the orders as sent, every roster above the links and
+Submit, the rules unchanged. Anything unexpected — an API error on any read
+or write included — stops the run, and later forms stay untouched; the stop
+says how many moves were confirmed and, once anything was written, repeats
+the `--undo` line. After a
+stop (or a gateway 504) run the dry run again first: it re-plans from what
+the form holds, a form left part-way says `part-way: …`, and a finished
+form says `nothing to do` — if the stop came before the verify, then run
+`form_status --form <id>` on it. Keep the stopped run's `--undo` stamp: it
+is the rollback to the form before the repair, and it works from the
+finished form too; a re-run's snapshot holds the part-way form (undoing it,
+then the first stamp, still gets back).
+
+`form_status` checks the layout on every run (`layout:` line, `layout` in
+`--json`): a roster rendering below the first link or Submit, a link below
+Submit, or not exactly one Submit makes the form NOT CLEAN — and the
+runner's verify sees it. Rollback: `--undo <stamp>` puts the snapshot's
+orders back by the same path (planned, probed, verified). It is for right
+after the repair, before the Club Roster Form link or the club guard is
+placed (the guard's warning is created at the picker's order + 1, which
+moves the rosters below it down by one, up to the first gap): it refuses
+once the form's questions or a roster's order have changed since, and when
+the snapshot holds two questions at one order (the link placed before the
+repair leaves Submit sharing the next field's order) — then the builder, or
+Jotform's Revision History. The builder and the submissions table list
+fields by `order`, so the hidden fields move to the end there too
+(cosmetic).

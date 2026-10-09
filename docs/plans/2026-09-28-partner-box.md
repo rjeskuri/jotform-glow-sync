@@ -2,6 +2,7 @@
 title: Mentors choose their partner from a list when two partners share a club name
 author: Claude (workflow track "partner-box", 2026-09-28)
 status: superseded       # 2026-09-30, never deployed: docs/plans/2026-09-30-same-name-clubs.md (each same-name club has its own Club picker entry; --partner-picker is refused)
+backlog: 45, 50
 created: 2026-09-28
 intent: none — review finding 1 of 2026-09-26/27 (Ruby / the Partner box); BACKLOG 36 is the larger alternative
 ---
@@ -156,8 +157,8 @@ Salesforce reads (CLAUDE.md rule 5). Not without a template experiment first.
   partner-list rules, `partner_choices`, `rule_delta`, the `main()` flow on a
   fake form (create order, refusals, upkeep, read-back), the `form_status`
   audit, `rename_club`, `auto_sync` parsing, and the plan-line formats.
-- `docs/RUNBOOK.md` — "The partner list (club names two partners share)":
-  commands, browser check, rollback.
+- `docs/RUNBOOK.md` — then "The partner list (club names two partners share)", since
+  2026-09-30 "Club names two partners share": commands, browser check, rollback.
 - `docs/DECISIONS.md` — one row.
 - `docs/BACKLOG.md` — new item 45 (this), 36 unchanged but cross-referenced.
 - `docs/ARCHITECTURE.md` — the `sync_attendance_form.py` row names the list
@@ -201,7 +202,7 @@ Salesforce reads (CLAUDE.md rule 5). Not without a template experiment first.
 - **Wrong partner picked:** no roster shows, as with a wrong typed partner
   today. It cannot happen silently for the mentor's own club, because every
   partner of a shared name is on the list by construction.
-- **Rollback per form** (RUNBOOK "The partner list" has the steps): with
+- **Rollback per form** (the RUNBOOK's then "The partner list" had the steps): with
   `AUTO_SYNC_APPLY=0` throughout, `restore_conditions.py --form <id> --from
   properties-<stamp>.json --apply` puts the rules back on q331. `<stamp>` is
   the `backup_forms.py --form` taken just before the apply. The runner writes

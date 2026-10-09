@@ -1,5 +1,6 @@
 ---
-status: accepted  # Ryan 2026-10-09: merge wf10+wf11 first, all four phases; one-offs deleted, not archived (the recommended default; Ryan left that question open)
+status: in-progress      # Ryan 2026-10-09: merge wf10+wf11 first, all four phases; one-offs deleted, not archived (the recommended default; Ryan left that question open). Phases 1-4 on wf21/*
+backlog: 32, 50, 53
 date: 2026-10-09
 ---
 # Repo cleanup: organize, consolidate, lint (no rewrite)
@@ -16,7 +17,7 @@ other. In a worktree off `main`:
 1. Merge `wf10/four-issues`; fix its two F-errors (`tools/auto_sync.py:79` duplicate import,
    `tools/form_status.py:66` unused `JOTFORM_COL`).
 2. Merge `wf11/reports-public`. Conflicts (docs only): BACKLOG 27 = concatenate both sentences;
-   RUNBOOK "Attendance dashboard" = 2026-10-09 Access block supersedes 2026-10-06, keep wf10's
+   RUNBOOK "Attendance dashboard in Salesforce" = 2026-10-09 Access block supersedes 2026-10-06, keep wf10's
    totals1 paragraph, "Total attendance" bullet and Photos bullet; live-systems skill = union of
    both writer lists; worklog.csv = take main's rows, re-run `worklog.py update`.
 3. `make check`; fast-forward local `main`. Not pushed (pushing makes wf10's runner code live).

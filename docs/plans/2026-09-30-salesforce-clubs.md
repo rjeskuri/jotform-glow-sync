@@ -1,7 +1,8 @@
 ---
 title: Club accounts in Salesforce, linked to their partners
 author: Claude (with Ryan)
-status: in-progress (all accounts written and verified 2026-09-30, the seven same-name clubs included; open: the morning-after read, the SF Pending rows)
+status: in-progress      # all accounts written and verified 2026-09-30, the seven same-name clubs included; open: the morning-after read, the SF Pending rows
+backlog: 27
 created: 2026-09-30
 intent: none - Ryan's request of 2026-09-29/30 ("assign the clubs to a partner", then "create all clubs")
 ---

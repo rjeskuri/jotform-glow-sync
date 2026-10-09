@@ -1,7 +1,8 @@
 ---
 title: Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped
 author: Claude (with Ryan's decisions of 2026-10-09)
-status: built and validated check-only 2026-10-09 (0AfRP000002gXhZ0AU, 5 of 5, 0 errors; after the review's fixes); waiting for Ryan (deploy, refresh schedule, assignment)
+status: blocked          # built and validated check-only 2026-10-09 (0AfRP000002gXhZ0AU, 5 of 5, 0 errors; after the review's fixes); waiting for Ryan (deploy, refresh schedule, assignment)
+backlog: 60
 created: 2026-10-09
 intent: none - Ryan's decisions of 2026-10-09 in conversation (DECISIONS); BACKLOG 60
 ---

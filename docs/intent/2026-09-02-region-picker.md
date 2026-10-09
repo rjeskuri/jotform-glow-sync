@@ -1,7 +1,7 @@
 ---
 title: New partners choose their region on the Club Roster Form
 author: Ryan
-status: accepted
+status: in-progress   # built 2026-09-02 and deployed with the 2026-09-30 push; the one-time menu migration is not recorded (BACKLOG 38)
 created: 2026-09-02
 ---
 

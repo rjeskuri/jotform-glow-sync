@@ -2,6 +2,8 @@
 title: The names and the module the forms send are the exact roster and dropdown text
 author: Claude (from the 2026-09-30 read-only investigation, design and two adversarial reviews)
 status: done             # accepted by Ryan ("Go on all 4 fixes after we get the september data into salesforce"); live on all five forms 2026-10-06 (Result)
+done: 2026-10-06
+backlog: 62, 63, 64
 created: 2026-10-02
 intent: docs/intent/2026-09-01-club-picker.md (the attendance form sends what Salesforce must match)
 ---
@@ -248,3 +250,73 @@ from it; pushed after the template was proven (`00ee471` on origin, check green)
   37456046598 in-sync.
 - Follow-ups: release Queens of Quest's two held back-fill sessions in Salesforce; Spanish module
   values already stored are corrected in another session.
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "The names dictionary and the module values": the rollout as run
+
+Read on 2026-10-02 (dry runs from the branch, nothing written):
+
+| Form | Names: altered today → after | Keys to remove (base, en) | Sync: module lines | `form_status --rendered` |
+|---|---|---|---|---|
+| template | 55 → 0 (29 clubs) | 55 (55, 55) | 3 | NOT CLEAN: 8 problems (3 + 1 API, 3 + 1 page) |
+| U.S | 0 → 0 | 55 (55, 55) | 3 | NOT CLEAN: 6 (the modules only) |
+| Latin America | 1 → 0 (1 club) | 55 (55, 55) | 3 | NOT CLEAN: 8 |
+| Asia | 5 → 0 (5 clubs) | 55 (55, 55) | 3 | NOT CLEAN: 8 |
+| Africa | 49 → 0 (23 clubs) | 55 (55, 55) | 3 | NOT CLEAN: 8 |
+
+Re-read 2026-10-06 with a fresh Roster export: the same counts on every form;
+the sync planned only the three module lines on the four regional forms, and
+on the template those plus its own roster backlog (21 rosters, which the
+runner never syncs there) and with it a conditions rewrite. The plan's Build
+notes have the detail.
+
+**Rollout**, each write Ryan's go, template first. Wait for one runner run
+with all four regions `in-sync`, then set `AUTO_SYNC_APPLY=0` for the whole
+window and confirm it (no run in progress). Close every builder tab on these
+forms. Nobody applies the sync to a form from a checkout without this code
+while the window is open.
+
+1. The template, from the branch (no `--region`: its Roster export is the
+   whole tab; its own roster backlog, if any, rides along: read it first):
+
+```bash
+python3 backup_forms.py --form 262352490535154                                           # the questions as they are (calcValues "" today)
+python3 tools/fix_name_translations.py --form 262352490535154                            # dry run: 55 keys, after the removal 0
+python3 tools/fix_name_translations.py --form 262352490535154 --apply                    # store saved (note the file), POST, re-read: APPLIED, page: 0
+python3 tools/fix_name_translations.py --form 262352490535154                            # "nothing to remove"
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154            # dry run: the three module lines (+ its roster backlog)
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --apply    # three question writes
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154            # "nothing to do"
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --rendered   # CLEAN: names 0 altered, module values aligned, rendered too
+```
+
+   Then in a real browser on the template's public page, without submitting
+   (every submit intercepted, as for the browser steps above): pick a club the
+   tool listed, tick every girl, and run the console check of "The names list
+   sent to Salesforce": `equal: true` (it was `false` before the fix). Pick a
+   year and a module, then Chrome's "Translate page" to Spanish: the console
+   line `document.getElementById('input_98').value` still prints the English
+   module. Open the builder's Translations page and close it without saving:
+   the names tool's dry run still says `nothing to remove`.
+2. **Merge and push**, `AUTO_SYNC_APPLY` still `0`. One runner run by hand
+   (Actions, "Run workflow", apply unticked): every region reads `attention`
+   with "would write the calcValues of 3 module dropdown(s)". A region without
+   it means the runner runs older code: stop.
+3. U.S, Latin America, Asia, Africa, smallest first, each with its `--region`
+   and the same commands: backup, names tool dry run, `--apply`, dry run again;
+   sync dry run (the three module lines and the roster changes since), `--apply`,
+   `nothing to do`; `form_status --rendered` CLEAN; the console check on one
+   affected club (Africa, Asia, Latin America) and the "Translate page" check.
+4. With all five CLEAN under `--rendered`: one `auto_sync.py` dry run, every
+   region `in-sync`, then `AUTO_SYNC_APPLY=1`.
+5. Tell the Salesforce session: the forms send the exact names and the
+   canonical module; the held sessions and the stale-spelling duplicates can
+   be handled.
+
+Stopped half-way, the runner stays at `0`: every region not rolled out reads
+`attention` (the module lines), and a hand apply of its sync also rolls its
+modules out; its names dictionary needs the tool run separately. A mentor with
+the form already open keeps the old page until she reloads.
