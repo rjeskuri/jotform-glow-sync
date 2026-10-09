@@ -43,7 +43,8 @@ import unicodedata
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
-from glow.salesforce import ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, has_invisible   # noqa: E402
+from glow.salesforce import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, apex_trim,   # noqa: E402
+                             has_invisible, sf_match)
 from glow.salesforce import API, NEXT_PAGE, Org, Refused, quoted   # noqa: E402,F401 (re-exported)
 
 DEFAULT_DIR = os.path.join(REPO, "data", "backfill_2026-09")
@@ -392,11 +393,22 @@ def bad_name(name):
     return None
 
 
-def resolve_account(name, by_name):
-    """(account, None) or (None, why it cannot be used)."""
+def accounts_by_length(accounts):
+    """{len(Name): [account, ...]}: sf_match accepts only an Account name as long as the trimmed
+    question 5, so a name is compared with these alone."""
+    out = {}
+    for acc in accounts:
+        out.setdefault(len(acc["Name"]), []).append(acc)
+    return out
+
+
+def resolve_account(name, by_length):
+    """(account, None) or (None, why it cannot be used). The account is the one the processor
+    books the name on: glow.salesforce.sf_match (question 5 trimmed as Java trims, case ignored
+    one character to one - 'Straße' is not 'STRASSE'), not a case-fold."""
     if not isinstance(name, str) or not name.strip():
         return None, "no_account_name"
-    found = by_name.get(name.strip().casefold(), [])
+    found = [acc for acc in by_length.get(len(apex_trim(name)), []) if sf_match(name, acc["Name"])]
     if not found:
         return None, "account_not_found"     # the processor would CREATE a stray Club account
     if len(found) > 1:
@@ -417,9 +429,7 @@ def as_number(value):
 def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, dup_rule_ok=False):
     """(queue, held, skipped, notes): the sessions to send in order, the held ones with EVERY
     reason that holds them, the skipped ones, and counts for the report."""
-    by_name = {}
-    for acc in state["accounts"]:
-        by_name.setdefault(acc["Name"].strip().casefold(), []).append(acc)
+    by_length = accounts_by_length(state["accounts"])
     batches_on = {}
     for batch in state["batches"]:
         batches_on.setdefault((batch.get("Account__c"), batch.get("Attendance_Date__c")), []).append(batch)
@@ -456,7 +466,7 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
     #    grouped, so a moved report joins (or collides with) what that day already has
     groups, origins, clubs_of = {}, set(), {}    # clubs_of: submission -> the clubs its rows lead to today
     for row in resolved["rows"]:
-        acc, why = resolve_account(row.get("sf_account_name"), by_name)
+        acc, why = resolve_account(row.get("sf_account_name"), by_length)
         if why:
             hold([why], [row])
             continue

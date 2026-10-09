@@ -298,6 +298,18 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         self.write([row("7", club="Held Pilot Club")])
         self.assertEqual([h["reasons"] for h in self.plan()[2]], ["account_without_partner"])
 
+    def test_the_club_is_found_as_the_processor_finds_it_not_by_a_case_fold(self):
+        # glow.salesforce.sf_match: question 5 trimmed as Java trims (up to U+0020), case ignored one
+        # character to one; a case-fold took both of the first two for an account the processor never books on
+        self.org.accounts += [account("001000000000000SAA", "STRASSE CLUB"), account("001000000000000NAA", "Nightfall Club")]
+        self.write([row("1", club="Straße Club"),                            # casefold: 'strasse club'
+                    row("2", club="\xa0Nightfall Club"),                     # Python's strip() drops a no-break space
+                    row("3", club="  sunrise club\t", date="2026-09-06")])   # trimmed, case ignored: Sunrise Club
+        _, sessions, held = self.plan()
+        self.assertEqual(sorted((h["submissions"], h["reasons"]) for h in held),
+                         [("1", "account_not_found"), ("2", "account_not_found")])
+        self.assertEqual([(s["account_id"], s["account_name"]) for s in sessions], [(SUNRISE, "Sunrise Club")])
+
     def test_a_resolver_file_that_cannot_be_trusted_is_refused_without_a_traceback(self):
         cases = {"row without names": [row("1", names=[])],
                  "with a blank one": [row("1", names=["Amara Zibblewick", " "])],
