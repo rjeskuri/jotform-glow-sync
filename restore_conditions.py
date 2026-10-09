@@ -36,7 +36,7 @@ sys.path.insert(0, REPO)
 from glow.cli import api_key, run          # noqa: E402
 from glow.jotform import Client   # noqa: E402
 from glow import sync as glow_sync             # noqa: E402
-from glow.sync import CLUB_NAME, PICKER_NAME   # noqa: E402
+from glow.sync import CLUB_NAME   # noqa: E402
 
 
 def contact_ids_note(conditions, questions):
@@ -45,8 +45,8 @@ def contact_ids_note(conditions, questions):
     restores, but form_status reports the form NOT CLEAN and the runner stops its
     region until the sync is applied by hand - or the constants are turned off, the
     generated rollback. None when the snapshot is in the current shape."""
-    picker = next((str(qid) for qid, q in questions.items()
-                   if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
+    picker = glow_sync.club_picker(questions)
+    picker = None if picker is None else str(picker)
     rosters = {str(qid) for qid, q in questions.items() if q.get("type") == "control_checkbox"}
     stale = glow_sync.contact_ids_stale(conditions, rosters, picker)
     if not stale:
@@ -64,8 +64,8 @@ def stale_club_terms(conditions, questions):
     not offer (exactly, as a multi-select compares): values of `equals` terms
     on the picker - roster rules - and of `notEquals` terms on question 5 - the
     club guard's list. Sorted, each once. [] on a form without the picker."""
-    picker = next((str(qid) for qid, q in questions.items()
-                   if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
+    picker = glow_sync.club_picker(questions)
+    picker = None if picker is None else str(picker)
     if picker is None:
         return []
     options = {o for o in (questions[picker].get("options") or "").split("|") if o}

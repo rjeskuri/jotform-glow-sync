@@ -63,8 +63,8 @@ from glow.cli import api_key, run                   # noqa: E402
 from glow.jotform import Client, JotformError     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
-    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PICKER_NAME, SF_NAME_SEP,
-    WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, dropdown_options, has_calc_values,
+    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, SF_NAME_SEP,
+    WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, club_picker, dropdown_options, has_calc_values,
     inactive_retires, long_name_partner, partner_picker, picker_calc_values, read_partners_csv,
     roster_names, roster_pairs, roster_removed, sheet_today)
 from glow.text import key, name_key        # noqa: E402
@@ -204,12 +204,6 @@ def load_partners(path):
 
 
 CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID = "5", "331", "18"
-
-
-def club_picker(questions):
-    """qid of the Club dropdown, or None when mentors type the club name."""
-    return next((qid for qid, q in questions.items()
-                 if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
 
 
 def picker_options(questions, picker):

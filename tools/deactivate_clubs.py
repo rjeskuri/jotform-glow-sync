@@ -81,7 +81,7 @@ sys.path.insert(0, REPO)
 from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run                  # noqa: E402
 from glow.jotform import Client           # noqa: E402
-from glow.sync import CLUB_NAME, PICKER_NAME, SF_NAME_SEP   # noqa: E402
+from glow.sync import CLUB_NAME, SF_NAME_SEP, club_picker   # noqa: E402
 from glow.text import key                 # noqa: E402
 
 ROSTER, AUDIT = "Roster", "Audit"
@@ -221,12 +221,6 @@ def fetch_since(client, form_id, since=SINCE):
     return out
 
 
-def picker_of(questions):
-    """qid of the form's Club picker (the dropdown named PICKER_NAME), or None."""
-    return next((qid for qid, q in questions.items()
-                 if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
-
-
 def answer_of(sub, qid):
     found = (sub.get("answers") or {}).get(qid) if qid else None
     return found.get("answer") if isinstance(found, dict) else None
@@ -295,7 +289,7 @@ def guard(client, chosen, recent_from, check_only, anyway=False, whole=()):
         form_id = glow_forms.REGIONALS[region]
         clubs = [pc for pc, e in chosen.items() if e["region"] == region]
         subs = fetch_since(client, form_id)
-        picker = picker_of(client.get(f"/form/{form_id}/questions") or {})
+        picker = club_picker(client.get(f"/form/{form_id}/questions") or {})
         hits = club_hits(subs, picker, clubs)
         print_counts(region, form_id, subs, hits)
         recent += [(pc, day) for pc, found in hits.items() for day, _ in found if day >= recent_from]

@@ -889,7 +889,7 @@ def pickers(_args, paths, client=None):
     sys.path.insert(0, REPO)
     from glow import forms, jotform
     from glow.cli import api_key
-    from glow.sync import PICKER_NAME, picker_calc_values
+    from glow.sync import club_picker, picker_calc_values
     if client is None:
         client = jotform.Client(api_key(" - docs/RUNBOOK.md, \"Credentials\""))
     items, rs = all_items(paths), rows(paths)
@@ -899,8 +899,7 @@ def pickers(_args, paths, client=None):
     failed, compared = False, 0
     for region, form_id in forms.REGIONALS.items():
         questions = client.get(f"/form/{form_id}/questions")
-        picker = next((q for q in questions.values()
-                       if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
+        picker = questions.get(club_picker(questions))
         if not picker:
             sys.exit(f"{region}: no Club picker on the form")
         slots = (picker.get("options") or "").split("|")

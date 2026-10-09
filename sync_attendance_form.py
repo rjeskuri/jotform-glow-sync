@@ -98,7 +98,7 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
     CLUB_NAME, CONTACT_IDS, GUARD_DISABLES_SUBMIT,   # shared with the
     GUARD_NAME, GUARD_PROPS, JOTFORM_COL,
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
-    SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners,
+    SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners, club_picker,
     dropdown_options, has_calc_values, inactive_retires, long_name_partner, partner_fields,
     partner_picker, partners_marker_present, picker_calc_values, read_partners_csv,
     read_roster_csv, read_sheet, roster_names, roster_pairs, roster_removed,   # against Config.gs
@@ -594,9 +594,7 @@ def main():
         year: [o for o in questions[mqid]["options"].split("|") if o]
         for year, mqid in MODULES.items()}
 
-    picker_qid = next((qid for qid, q in questions.items()
-                       if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME),
-                      None)
+    picker_qid = club_picker(questions)
     if picker_qid:
         print(f"Club picker: q{picker_qid} (mentors choose their club from a list)")
         if args.club_picker:

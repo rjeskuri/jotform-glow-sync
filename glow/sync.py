@@ -55,6 +55,13 @@ PICKER_NAME = "clubPicker"
 PARTNER_PICKER_NAME = "partnerPicker"
 
 
+def club_picker(questions):
+    """qid of the Club picker (the dropdown named PICKER_NAME), or None when mentors type
+    the club name."""
+    return next((qid for qid, q in questions.items()
+                 if q.get("type") == "control_dropdown" and q.get("name") == PICKER_NAME), None)
+
+
 def partner_picker(questions):
     """qid of the partner list, or None while the form has only the typed box."""
     return next((qid for qid, q in questions.items()

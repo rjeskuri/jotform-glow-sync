@@ -45,8 +45,8 @@ from glow import forms                  # noqa: E402
 from glow.cli import api_key, run                # noqa: E402
 from glow.jotform import Client         # noqa: E402
 from glow.sync import (                 # noqa: E402
-    CLUB_NAME, CONTACT_IDS, MODULE_ID, MODULES, PICKER_NAME, SESSION_OVERRIDES, SF_NAME_SEP, WEEK_ID,
-    WEEKS, YEAR, YEAR_ID, club_partners, has_calc_values, roster_names, roster_pairs)
+    CLUB_NAME, CONTACT_IDS, MODULE_ID, MODULES, SESSION_OVERRIDES, SF_NAME_SEP, WEEK_ID,
+    WEEKS, YEAR, YEAR_ID, club_partners, club_picker, has_calc_values, roster_names, roster_pairs)
 from glow.text import key               # noqa: E402
 
 SINCE = "2026-09-01 00:00:00"           # created_at, as Jotform gives it: US Eastern
@@ -331,8 +331,7 @@ def resolve(region, form_id, submissions, questions, today, roster):
     """(rows, no_ticks, counts) for one form. submissions: as fetched, any status, any
     date; questions: the form today; today: rosters_today(); roster: read_roster()."""
     active, codes = roster.active, roster.codes
-    picker = next((qid for qid, q in questions.items() if q.get("type") == "control_dropdown"
-                   and q.get("name") == PICKER_NAME), None)
+    picker = club_picker(questions)
     options = {qid: {o.strip() for o in (q.get("options") or "").split("|") if o.strip()}
                for qid, q in questions.items() if q.get("type") == "control_checkbox"}
     # the live Club picker's entries: exactly, and by key (the first spelling, as the sync reads it)

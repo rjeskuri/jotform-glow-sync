@@ -61,7 +61,10 @@ class PythonAppsScriptParity(unittest.TestCase):
         self.assertEqual(set(clone_regional.TITLES), set(auto_sync.REGIONAL_FORMS))
 
     def test_picker_name_is_shared(self):
-        self.assertEqual(form_status.PICKER_NAME, sync.PICKER_NAME)
+        # the sync and form_status find the Club picker with one function, by one name
+        self.assertIs(form_status.club_picker, glow_sync.club_picker)
+        self.assertIs(sync.club_picker, glow_sync.club_picker)
+        self.assertEqual(sync.PICKER_NAME, glow_sync.PICKER_NAME)
 
     def test_qids(self):
         block = gs_block(self.config, "QID")

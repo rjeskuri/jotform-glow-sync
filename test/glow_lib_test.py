@@ -246,6 +246,23 @@ class GlowCli(unittest.TestCase):
         self.assertEqual(cli.targets([asia, "123"], titles, unknown=None), {asia: "Asia Attendance Form", "123": "123"})
 
 
+class GlowSyncHelpers(unittest.TestCase):
+    """glow/sync.py's readers of a form that every tool shares."""
+
+    def test_club_picker_is_the_dropdown_by_its_name(self):
+        from glow import sync
+        qs = {"5": {"type": "control_textbox", "name": "clubName"},
+              "331": {"type": "control_textbox", "name": "partner"},
+              "600": {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME},
+              "700": {"type": "control_checkbox", "name": sync.PICKER_NAME},       # not a dropdown
+              "500": {"type": "control_dropdown", "name": sync.PICKER_NAME}}
+        self.assertEqual(sync.club_picker(qs), "500")
+        self.assertEqual(sync.partner_picker(qs), "600")
+        del qs["500"]
+        self.assertIsNone(sync.club_picker(qs))                  # mentors type the club name
+        self.assertIsNone(sync.club_picker({}))
+
+
 class TranslationLookup(unittest.TestCase):
     """glow/translation_lookup.py: the runtime's names dictionary (formTranslation.v2.js:
     setDictionary, trimMultiSpaces, sanitizeKeys, translate's fall-back) and the removal
