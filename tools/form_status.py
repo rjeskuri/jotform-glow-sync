@@ -63,7 +63,7 @@ from glow.cli import run                   # noqa: E402
 from glow.jotform import Client, JotformError     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
-    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, JOTFORM_COL, MODULES, PICKER_NAME, SF_NAME_SEP,
+    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PICKER_NAME, SF_NAME_SEP,
     WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, dropdown_options, has_calc_values,
     inactive_retires, long_name_partner, partner_picker, picker_calc_values, read_partners_csv,
     roster_names, roster_pairs, roster_removed, sheet_today)

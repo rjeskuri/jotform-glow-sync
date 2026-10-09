@@ -75,8 +75,7 @@ import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily 
 from glow import forms as glow_forms  # noqa: E402
 from glow import usage  # noqa: E402  (Jotform's storage against the plan's limits; standard library)
 from glow.jotform import Client  # noqa: E402  (the one read this file makes itself: the usage)
-from glow.sync import SHEET_ZONE, sf_name_clashes  # noqa: E402  (standard library only, like this file)
-from glow.sync import sf_name_clashes  # noqa: E402  (standard library only, like this file)
+from glow.sync import SHEET_ZONE, sf_name_clashes  # noqa: E402  (standard library only)
 from glow.salesforce import Org, client_credentials  # noqa: E402
 import sf_new_clubs as sfn  # noqa: E402  (new clubs' Salesforce accounts, BACKLOG 27)
 
