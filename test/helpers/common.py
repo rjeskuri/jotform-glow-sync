@@ -445,25 +445,29 @@ class FormStatusFixture:
 class RestoreConditionsFixture:
     """restore_conditions.main() against a fake Jotform and a snapshot in a temporary backups/
     folder. RestoreConditionsGuard inherits it; other TestCases borrow run_restore
-    (RestoreConditionsFixture.run_restore(self, ...))."""
+    (RestoreConditionsFixture.run_restore(self, ...)). After a run, self.restore_calls holds
+    the fake's calls in order and self.restore_files backups/999/ ({name: content})."""
 
     def run_restore(self, snapshot, questions, *extra):
         import contextlib
         import io
         import tempfile
         from unittest import mock
-        puts = []
+        puts, calls = [], []
+        self.restore_calls = calls
 
         class Fake:
             def __init__(self, key, apply=False):
                 pass
 
             def get(self, path):
+                calls.append(("GET", path))
                 if path.endswith("/questions"):
                     return copy.deepcopy(questions)
                 return {"conditions": puts[-1] if puts else [{"id": "live"}]}
 
             def put_json(self, path, payload, label):
+                calls.append(("PUT", path))
                 puts.append(payload["properties"]["conditions"])
 
         out = io.StringIO()
@@ -483,6 +487,11 @@ class RestoreConditionsFixture:
                     code = 0
                 except SystemExit as e:
                     code = e.code
+            folder = os.path.join(tmp, "backups", "999")
+            self.restore_files = {}
+            for name in sorted(os.listdir(folder)):
+                with open(os.path.join(folder, name), encoding="utf-8") as f:
+                    self.restore_files[name] = json.load(f)
         return code, out.getvalue(), puts
 
 

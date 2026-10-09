@@ -4,7 +4,10 @@ Restore a form's conditional logic from a snapshot taken by backup_forms.py.
 
 This is the rollback path when a sync or manual edit breaks a form's logic.
 It only touches the `conditions` property; questions, emails, and the
-Salesforce integration are left exactly as they are.
+Salesforce integration are left exactly as they are. Like every writer, --apply
+first snapshots the form as it is (glow/backup.py: backups/<id>/*-<stamp>.json,
+never over the -latest files, which may be the snapshot being restored) - the
+way back from the restore itself: --from properties-<stamp>.json.
 
 Because the questions stay, a snapshot must still fit them. It is refused
 when its rules test a club on the Club picker - or list one in the club guard
@@ -140,9 +143,15 @@ def main():
         print(f"  ! --force: {msg}. Run the sync (dry run, then --apply) straight after")
 
     if not args.apply:
-        print("\nDRY RUN - re-run with --apply to restore")
+        print("\nDRY RUN - re-run with --apply to restore (the form is snapshotted first)")
         return
 
+    # the form as it is, before the PUT: the way back from this restore. Not over the -latest
+    # files: they may be the snapshot being restored, and a re-run after a lost answer must
+    # restore that again, not the state this restore replaces
+    s = backup.snapshot(args.form, client, latest=False)
+    print(f"snapshot before the restore: backups/{args.form}/*-{s['stamp']}.json "
+          f"(to undo the restore: --from properties-{s['stamp']}.json)")
     client.put_json(f"/form/{args.form}/properties",
                     {"properties": {"conditions": conditions}}, "PUT conditions")
 
