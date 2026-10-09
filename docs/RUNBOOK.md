@@ -2081,9 +2081,10 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 
 ## Attendance dashboard in Salesforce
 
-Since 2026-10-02 the dashboard **"Jotform Attendance (test)"** (dashboard folder Attendance)
-shows the Jotform attendance as charts, built only from data Salesforce already has
-([plan and result](plans/2026-10-02-attendance-dashboard.md)).
+Since 2026-10-02 the dashboard **"Jotform Attendance"** (dashboard folder Attendance,
+DeveloperName `Jotform_Attendance_test`) shows the Jotform attendance as charts, built only
+from data Salesforce already has ([plan and result](plans/2026-10-02-attendance-dashboard.md)).
+Its label carries "(test)" until Ryan deploys the 2026-10-09 change (Access, below).
 
 **What is on it:**
 - four numbers: girls who attended last month; girls who attended this month so far; club
@@ -2093,8 +2094,8 @@ shows the Jotform attendance as charts, built only from data Salesforce already 
 - last month by partner (girls) and by module (sessions);
 - clubs with no attendance last month: a number and a table.
 
-The test report "Jotform Monthly Attendance (test)" now shows a chart with its rows collapsed.
-Its filters are unchanged.
+The report "Jotform Monthly Attendance" (`Jotform_Monthly_Attendance_test`; "(test)" in its
+label until the same deploy) shows a chart with its rows collapsed. Its filters are unchanged.
 
 **`fix1`** (deployed by Ryan 2026-10-06 09:29 UTC, read back the same day):
 - "this month" is the calendar month. Until then it was the current fiscal quarter, which gave
@@ -2129,8 +2130,8 @@ Its filters are unchanged.
   latest up to 19 days late. So "last month" settles around the 20th, and the latest week and
   "this month" always start low. Compare months only after that.
 - **Snapshot**: a dashboard shows its last refresh (the time at top right), not live data.
-  Press Refresh, or schedule a daily refresh (Ryan's step, in the dashboard: Refresh >
-  Schedule Refresh).
+  Press Refresh, or schedule a daily refresh (Ryan's step: **Subscribe** on the dashboard in
+  Lightning; Refresh ▾ → Schedule Refresh is the Classic path; Access, below).
 
 **Filters:**
 - The dashboard's **Partner** filter covers every component. It holds the 49 partner names
@@ -2148,7 +2149,7 @@ Its filters are unchanged.
 **Access** (Ryan's decisions of 2026-10-09,
 [plan](plans/2026-10-09-attendance-reports-public.md); they reverse his 2026-10-06 "folder
 sharing stays as it is"):
-- **Status**: built and validated check-only on 2026-10-09 (`0AfRP000002gXeL0AU`, 5 of 5, 0
+- **Status**: built and validated check-only on 2026-10-09 (`0AfRP000002gXhZ0AU`, 5 of 5, 0
   errors). Until Ryan deploys `data/sf_dashboard_2026-10-02/public_2026-10-09/`, both folders stay
   hidden and only System Administrators (View All Data) see them.
 - **Both Attendance folders are shared as Viewer with All Internal Users**: `folderShares` View,
@@ -2167,12 +2168,18 @@ sharing stays as it is"):
   are private (`Attendance__c` follows its Contact). The set gives:
   - Read on `Attendance__c` and `Attendance_Batch__c`;
   - View All on Contact and on Account;
-  - Read on the 14 fields the reports show, filter or group (listed in the plan).
+  - Read on the 21 fields that the reports in both folders show, filter or group, the pilot
+    reports included. The list is in the plan; the derivation is
+    `public_2026-10-09/evidence/`.
   A filter on a field the viewer cannot read is dropped silently, or the report fails "Invalid
   Report". Every per-girl report filters on `Creator__c`: without it, the totals would include
   the March pilot rows.
-  - **For** the 9 active GLOW Standard Users. Assigning it is a record write, done on Ryan's go
-    after the deploy. System Administrators need nothing.
+  - **For** the 9 active GLOW Standard Users. One of them is "Portal Login", a shared login
+    account, not a person. Ryan included it (2026-10-09), accepting that it sees every Account
+    and Contact. The 8 staff already have Modify All on Account and Contact through
+    `Portal_User_Login_Access`.
+    - Assigning the set is a record write, done on Ryan's go after the deploy.
+    - System Administrators need nothing.
   - **A new staff user**: Setup → Permission Sets → Attendance Report Viewer → Manage Assignments
     → Add Assignment. Without it, they see the dashboard with refused or empty reports behind it.
   - **A report change that uses another field**: add that field's Read to the set, or viewers

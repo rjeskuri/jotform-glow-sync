@@ -1,7 +1,7 @@
 ---
 title: Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped
 author: Claude (with Ryan's decisions of 2026-10-09)
-status: built and validated check-only 2026-10-09 (0AfRP000002gXeL0AU, 5 of 5, 0 errors); waiting for Ryan (View All on Account, deploy, refresh schedule, assignment)
+status: built and validated check-only 2026-10-09 (0AfRP000002gXhZ0AU, 5 of 5, 0 errors; after the review's fixes); waiting for Ryan (deploy, refresh schedule, assignment)
 created: 2026-10-09
 intent: none - Ryan's decisions of 2026-10-09 in conversation (DECISIONS); BACKLOG 60
 ---
@@ -38,6 +38,10 @@ intent: none - Ryan's decisions of 2026-10-09 in conversation (DECISIONS); BACKL
      access (his 2026-10-06 call, unchanged).
   2. One new permission set for the 9 active users with the profile "GLOW Standard User", so a
      chart's click-through report shows them what the chart counts.
+     - One of the 9 (`005RP000000qearYAA`) is **"Portal Login", a shared login account, not a
+       person**. Ryan chose to include it with the set as built: View All on Account and on
+       Contact, assigned to all 9. He accepted that this shared account sees every Account and
+       Contact.
   3. Drop "(test)" from the two labels; every DeveloperName stays.
   4. A daily scheduled refresh of the dashboard.
 
@@ -50,7 +54,7 @@ intent: none - Ryan's decisions of 2026-10-09 in conversation (DECISIONS); BACKL
   ("Attendance By Club By Date", "Attendance By Club By Participant", "Last 60 days New
   Participants", "Last 60 days RAW Jotform Data", "Last 60 days New Club Accounts Report"). A
   folder share covers everything in the folder, so these become visible too. They are unchanged
-  by this plan, and the permission set is not sized for them (Risks).
+  by this plan. The permission set covers their fields too (after the review; Risks).
 - **"All Internal Users"** is the group `AllInternalUsers` (`00G6A000000iMLWUA2`, Type
   `Organization`). The org has no portal groups and no roles. The three guest users are not
   internal, so they are never in it.
@@ -72,22 +76,29 @@ intent: none - Ryan's decisions of 2026-10-09 in conversation (DECISIONS); BACKL
 - **The 9 active GLOW Standard Users**:
   - The profile has Read and Edit on Account and Contact, without View All. It has no Read on
     `Attendance__c` or `Attendance_Batch__c`. It has Run Reports.
-  - 8 of the 9 also hold `Portal_User_Login_Access`, which gives **Modify All on Account and
-    Contact** (so View All on both). The 9th does not.
+  - The 8 staff also hold `Portal_User_Login_Access`, which gives **Modify All on Account and
+    Contact** (so View All on both). That was already the case before this plan; it is not a
+    change. The ninth, the shared "Portal Login" account, does not hold it.
   - Checked with `UserRecordAccess`, read only: one of the 8 can read 200 of 200 sampled Club
-    accounts. The 9th can read 0 of 200 Club accounts and 0 of 200 club Contacts.
-- **So View All on Contact alone does not reach the 9th user.** The six per-girl reports
+    accounts. "Portal Login" can read 0 of 200 Club accounts and 0 of 200 club Contacts.
+- **So View All on Contact alone does not reach "Portal Login".** The six per-girl reports
   (`Accounts_Contacts_Attendance`) and the three club lists (`AccountList`) start from the Account,
-  and a report shows only the Accounts its viewer can read. The 9th user would see empty reports
-  behind full charts. This plan therefore adds **View All on Account** to the permission set, as
-  the other 8 already have through `Portal_User_Login_Access`. This is Claude's addition to
-  Ryan's list, and **Ryan confirms it before the deploy** (Steps for Ryan, 1). The narrower
-  alternative is a sharing rule (Club accounts, Read, All Internal Users, with Contact access
-  Read). That is another design, and not this plan.
+  and a report shows only the Accounts its viewer can read. "Portal Login" would see empty reports
+  behind full charts.
+  - So the permission set also gives **View All on Account**, as the 8 staff already have
+    through `Portal_User_Login_Access`.
+  - Claude added it to Ryan's list. **Ryan accepted it on 2026-10-09**, for the shared account
+    too (Context, decision 2).
+  - The narrower alternative, a sharing rule (Club accounts, Read, All Internal Users, with
+    Contact access Read), was not chosen.
 - **The fields the reports use**: read from the live retrieve. Every column, filter, grouping,
-  time frame, cross filter, chart and dashboard filter column of the 13 reports and the dashboard
-  was listed, and checked against `sf sobject describe` (which fields take a field permission).
-  The list is under "What changes".
+  time frame, cross filter, chart, custom formula and dashboard filter column of **all 18 reports
+  and both dashboards** in the folders, the pilot items included, was listed. Each was checked
+  against `sf sobject describe` (which fields take a field permission). The list is under "What
+  changes".
+- **The report types**: `Accounts_Contacts_Attendance` and `Attendance_Totals` both have
+  `<deployed>true</deployed>` (retrieved read only into the backup), so non-administrators can run
+  reports on them.
 
 ## What changes (four metadata files and one new one; Ryan deploys)
 Built in `data/sf_dashboard_2026-10-02/public_2026-10-09/` (its own `sfdx-project.json`), from a
@@ -104,24 +115,32 @@ fresh retrieve of what is live (`before_public_2026-10-09/`). Nothing under `dat
    - **Objects**:
      - Read on `Attendance__c` and `Attendance_Batch__c`;
      - Read and **View All** on Contact (Ryan's list);
-     - Read and **View All** on Account (Claude's addition, above).
+     - Read and **View All** on Account (added by Claude, accepted by Ryan 2026-10-09; above).
      - Nothing to create, edit or delete.
-   - **Field Read** (read only, never edit), every field the reports and dashboard use that takes
-     a field permission:
+   - **Field Read** (read only, never edit): 21 fields, every field the reports and dashboards in
+     both folders use that takes a field permission:
      - `Attendance__c`: `Account__c` (the join of "Clubs With No Attendance Last Month"),
        `Attendance_Batch__c`, `Attendance_Date__c`, `Creator__c`, `Module__c`,
-       `Module_Week__c`, `Module_Year__c`;
+       `Module_Week__c`, `Module_Year__c`, and for the pilot report "Attendance By Club By
+       Participant" `Present__c`;
      - `Attendance_Batch__c`: `Account__c` (the partner via lookup, the join of both "Clubs Not
        Submitting" reports), `Attendance_Date__c`, `Creator__c`, `Girls_Present__c`,
-       `Processing_Status__c`, `Status_Message__c`;
+       `Processing_Status__c`, `Status_Message__c`, and for the pilot report "Last 60 days RAW
+       Jotform Data" `Contact_IDs__c`, `Module__c`, `Module_Week__c`, `Module_Year__c`,
+       `enable_fuzzy_matching__c`;
      - `Account`: `ParentId` (the Partner column, filter, grouping and dashboard filter). The
-       profile already grants it; it is in the set so the set works on any profile.
-   - **Used but outside field permissions**:
-     - the Name fields;
+       profile already grants it; it is in the set so the set works on any profile;
+     - `Contact`: `Contact_Role__c` (the pilot report "Last 60 days New Participants").
+   - **Used but outside field permissions**: `describe` says `permissionable` false, so they are
+     readable with the object:
+     - the Name fields, Contact `FirstName` / `LastName`;
      - `Attendance__c.Contact__c` (master-detail);
-     - `Attendance_Batch__c.Account_Name__c` (required);
-     - `CreatedDate`, Id and Account record type.
-     They are readable with the object. No custom field on Account or Contact is used.
+     - `Attendance_Batch__c.Account_Name__c`: required (`<required>true</required>`, nillable
+       false). "Blank Submissions" filters on it with filter logic, and no permission can hide
+       it;
+     - Id, `CreatedDate`, `CreatedById`, `LastModifiedDate`, `LastModifiedById`, `OwnerId`,
+       Account `RecordTypeId` and `LastActivityDate`.
+     The derivation and the describe output are kept in `public_2026-10-09/evidence/`.
    - Why every filter field matters: a viewer without a filter field's permission gets that
      filter dropped silently (no filter logic), or "Invalid Report" (with filter logic). All the
      per-girl reports filter on `Creator__c`, so without it a viewer's click-through totals would
@@ -182,8 +201,9 @@ For later:
 ## Order of work
 1. Commit this plan (branch `wf11/reports-public`).
 2. Back up what is live into `data/sf_dashboard_2026-10-02/before_public_2026-10-09/`, read only:
-   the 13 reports, the report type `Attendance_Totals`, the dashboard, the pilot dashboard and its
-   5 reports, and `ReportFolder:Attendance` / `DashboardFolder:Attendance`. The `totals1` items
+   the 13 reports, the report types `Attendance_Totals` and `Accounts_Contacts_Attendance`, the
+   dashboard, the pilot dashboard and its 5 reports, and `ReportFolder:Attendance` /
+   `DashboardFolder:Attendance`. The `totals1` items
    must equal `verify_2026-10-09/` (else stop: something was deployed since).
 3. Build `public_2026-10-09/`: copy only the four changed files from the backup and edit them,
    then write the permission set.
@@ -197,39 +217,34 @@ For later:
 7. Ryan: the steps below.
 
 ## Steps for Ryan (VPN off)
-1. **Confirm View All on Account** (above). If no:
-   - delete the Account `objectPermissions` block from the permission set file, and "and Account"
-     from its description;
-   - run the check-only again;
-   - accept that the 9th user sees nothing behind the charts until a sharing rule or another
-     decision.
-2. **Before the deploy, as the 9th user** (`005RP000000qearYAA`; Setup → Users → Login): the
-   Attendance folders are not listed under Reports or Dashboards. This is the "before".
-3. **Deploy**:
+1. **Before the deploy, as "Portal Login"** (`005RP000000qearYAA`, the shared account; Setup →
+   Users → Login): the Attendance folders are not listed under Reports or Dashboards. This is the
+   "before".
+2. **Deploy**:
    ```bash
    cd ~/jotform-glow-sync/data/sf_dashboard_2026-10-02/public_2026-10-09
    sf project deploy start --dry-run -o glow -d force-app    # check only, once more
    sf project deploy start -o glow -d force-app              # the deploy: 5 components
    ```
-4. **Schedule the refresh**: open "Jotform Attendance", then **Subscribe** (Lightning). Choose
+3. **Schedule the refresh**: open "Jotform Attendance", then **Subscribe** (Lightning). Choose
    Frequency Daily, 05:00 (your time zone, America/Los_Angeles). Untick the e-mail if you do not
    want it, and add no recipients unless leadership wants the e-mail. In Classic the same is
    Refresh ▾ → Schedule Refresh. It refreshes as the running user, you.
-5. **Login As a GLOW Standard User, before the permission set**. Use the 9th user, who has none of
-   `Portal_User_Login_Access`.
+4. **Login As a GLOW Standard User, before the permission set**. Use "Portal Login", which has
+   none of `Portal_User_Login_Access`.
    - The folders and the dashboard are visible, with the dashboard's full numbers (it runs as
      Ryan).
    - A chart's report does not open ("insufficient privileges"), or shows no rows. This user has
      no Read on `Attendance__c` and sees no Club account.
-6. **Assign the permission set** to the 9 GLOW Standard Users. Do it yourself, or give Claude's
+5. **Assign the permission set** to the 9 GLOW Standard Users. Do it yourself, or give Claude's
    main session the go (a record write).
-7. **Login As the same user, after**:
+6. **Login As the same user, after**:
    - Click "Girls who attended last month": the report's total equals the tile.
    - Its Partner filter still works: pick one partner.
    - "Clubs With No Attendance Last Month" lists clubs.
    - "Total Attendance Last Month" shows the partner column filled.
    - Repeat the first check as one of the other 8 users.
-8. Tell Claude. Claude then reads back, read only:
+7. Tell Claude. Claude then reads back, read only:
    - the retrieve equals `public_2026-10-09/`, apart from Salesforce's normalisation;
    - the shares API lists one share per folder;
    - the scheduled job exists (`CronTrigger`).
@@ -253,17 +268,20 @@ For later:
 ## Risks
 - **The pilot items open up too**: the pilot dashboard "Attendance" and its 5 reports sit in the
   same folders, so every internal user sees them. The pilot dashboard runs as a specified user and
-  shows its numbers to anyone who opens it. Its reports run as the viewer. The permission set
-  covers only the fields of the 13 Jotform reports, so a pilot column outside them shows empty, or
-  its filter drops, for a viewer. The pilot reports use `Attendance__c.Present__c`, the batch's
-  `Contact_IDs__c`, module fields and `enable_fuzzy_matching__c`, and `Contact.Contact_Role__c`.
-  The profile grants Read on the custom ones of these. "Last 60 days RAW Jotform Data" shows the
-  names lists (`Contact_IDs__c`), which is allowed inside Salesforce. Moving the pilot items into
-  an admin-only folder is a separate step, if Ryan wants it.
+  shows its numbers to anyone who opens it. Its reports run as the viewer.
+  - After the review, the permission set also covers the pilot reports' fields, so their columns
+    show for a viewer: `Attendance__c.Present__c`, the batch's `Contact_IDs__c`, its module
+    fields and `enable_fuzzy_matching__c`, and `Contact.Contact_Role__c`.
+  - "Last 60 days RAW Jotform Data" shows the names lists (`Contact_IDs__c`), which is allowed
+    inside Salesforce.
+  - Moving the pilot items into an admin-only folder is a separate step, if Ryan wants it.
 - **Wider data than the reports**: View All on Contact and on Account opens every Contact and
-  Account to these 9 users: donors, households and organisations as well as clubs and girls. That
-  is in reports, list views and search, not only in the attendance reports. 8 of the 9 already
-  have more than that (Modify All). The permission set gives nothing to edit.
+  Account to these 9 users: donors, households and organisations as well as clubs and girls.
+  - That is in reports, list views and search, not only in the attendance reports.
+  - The 8 staff already had more than that (Modify All).
+  - For the shared "Portal Login" account it is new. Ryan accepted it (2026-10-09). Whoever knows
+    that login sees every Account and Contact.
+  - The permission set gives nothing to edit.
 - **All Internal Users** includes the two integration users and the Chatter Free user. Chatter
   Free cannot open reports. Guest users are never in the group.
 - **Users not on GLOW Standard User** (System Administrators) see everything already; nothing
@@ -278,8 +296,10 @@ For later:
 
 ## Result (2026-10-09, build and check-only; nothing deployed, no record written)
 - **Backup** (05:14 UTC, read only): `data/sf_dashboard_2026-10-02/before_public_2026-10-09/`.
-  - It holds 23 files: the 13 reports, the report type, the dashboard, the pilot dashboard and
-    its 5 reports, and both folders.
+  - It holds 24 files: the 13 reports, the report types `Attendance_Totals` and
+    `Accounts_Contacts_Attendance` (the second retrieved after the review, 05:2x UTC; both
+    `<deployed>true</deployed>`), the dashboard, the pilot dashboard and its 5 reports, and both
+    folders.
   - The 15 `totals1` files are byte-identical to `verify_2026-10-09/`, so nothing was deployed
     since this morning.
   - Both folder files hold only `<name>Attendance</name>`: no shares.
@@ -291,21 +311,30 @@ For later:
   - the dashboard changes only line 793, `<title>`: "Jotform Attendance (test)" → "Jotform
     Attendance";
   - the permission set is the only new file.
-- **The field list was checked by a script**:
-  - It mapped every token of the 13 reports and the dashboard (columns, filters, groupings, time
-    frames, cross filters, charts, dashboard filter columns; not the pilot items) to its field.
-  - It kept the fields `describe` marks permissionable.
-  - The result equals the permission set's 14 fields exactly: no field extra, none missing.
-  - The used fields without a field permission are the Name fields, `Account_Name__c`
-    (required), `CreatedDate`, Id and `RecordTypeId`.
-- **Check-only deploy** `0AfRP000002gXeL0AU` (05:15:53-05:15:58 UTC), `sf project deploy start
-  --dry-run -o glow -d force-app`: Succeeded, checkOnly, 5 of 5 components, 0 errors, 0 tests.
+- **The field list was derived by a script** (`evidence/derive_fields.py`; its output is
+  `evidence/field_derivation.txt`, and `evidence/describe_fields.txt` holds the describe):
+  - It maps every token of the 18 reports and the 2 dashboards to its field: columns, filters,
+    groupings, time frames, cross filters, charts, custom detail formulas and dashboard filter
+    columns. The first pass covered the 13 Jotform reports only and found 14 fields. The review
+    asked for the pilot items too, and this pass covers them.
+  - It keeps the fields `describe` marks permissionable: 21. That is the 14 plus the review's 7,
+    nothing else.
+  - The permission set equals that list exactly: no field extra, none missing. 0 tokens are
+    unmapped.
+  - 22 used fields take no field permission (listed under "What changes").
+    `Attendance_Batch__c.Account_Name__c` is one of them: its field definition, retrieved read
+    only, says `<required>true</required>`.
+- **First check-only deploy** `0AfRP000002gXeL0AU` (05:15:53-05:15:58 UTC): 5 of 5, 0 errors,
+  with 14 fields. It is superseded by the one after the review (below).
+- **Check-only deploy after the review** `0AfRP000002gXhZ0AU` (05:29:55-05:30:00 UTC), `sf project
+  deploy start --dry-run -o glow -d force-app`: Succeeded, checkOnly, 5 of 5 components, 0
+  errors, 0 tests.
   - ReportFolder Attendance: changed.
   - Report `Attendance/Jotform_Monthly_Attendance_test`: changed.
   - DashboardFolder Attendance: changed.
   - Dashboard `Attendance/Jotform_Attendance_test`: changed.
   - PermissionSet `Attendance_Report_Viewer`: created.
-  The JSON is beside the build (`checkonly_0AfRP000002gXeL0AU.json`).
+  Both JSON outputs are beside the build (`checkonly_<id>.json`).
 - **Read after the check-only, nothing changed**: both folders still have `"shares": []`, the two
   labels still carry "(test)" (unchanged LastModifiedDate), and no `Attendance_Report_Viewer`
   exists.
@@ -316,5 +345,5 @@ For later:
     Internal Users.
 - **Not verified, and only after Ryan's steps**:
   - that the deploy gives exactly one share per folder;
-  - that the 9th user sees rows after the assignment (Login As);
+  - that "Portal Login" and a staff user see rows after the assignment (Login As);
   - that the refresh job appears.
