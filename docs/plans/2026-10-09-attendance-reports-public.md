@@ -1,7 +1,7 @@
 ---
 title: Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped
 author: Claude (with Ryan's decisions of 2026-10-09)
-status: proposed (build and check-only by Claude; Ryan deploys, as on 2026-10-02 and 2026-10-07)
+status: built and validated check-only 2026-10-09 (0AfRP000002gXeL0AU, 5 of 5, 0 errors); waiting for Ryan (View All on Account, deploy, refresh schedule, assignment)
 created: 2026-10-09
 intent: none - Ryan's decisions of 2026-10-09 in conversation (DECISIONS); BACKLOG 60
 ---
@@ -197,9 +197,12 @@ For later:
 7. Ryan: the steps below.
 
 ## Steps for Ryan (VPN off)
-1. **Confirm View All on Account** (above). If no: delete the Account `objectPermissions` block
-   from the permission set file, run the check-only again, and accept that the 9th user sees
-   nothing behind the charts until a sharing rule or another decision.
+1. **Confirm View All on Account** (above). If no:
+   - delete the Account `objectPermissions` block from the permission set file, and "and Account"
+     from its description;
+   - run the check-only again;
+   - accept that the 9th user sees nothing behind the charts until a sharing rule or another
+     decision.
 2. **Before the deploy, as the 9th user** (`005RP000000qearYAA`; Setup → Users → Login): the
    Attendance folders are not listed under Reports or Dashboards. This is the "before".
 3. **Deploy**:
@@ -252,8 +255,11 @@ For later:
   same folders, so every internal user sees them. The pilot dashboard runs as a specified user and
   shows its numbers to anyone who opens it. Its reports run as the viewer. The permission set
   covers only the fields of the 13 Jotform reports, so a pilot column outside them shows empty, or
-  its filter drops, for a viewer. Moving the pilot items into an admin-only folder is a separate
-  step, if Ryan wants it.
+  its filter drops, for a viewer. The pilot reports use `Attendance__c.Present__c`, the batch's
+  `Contact_IDs__c`, module fields and `enable_fuzzy_matching__c`, and `Contact.Contact_Role__c`.
+  The profile grants Read on the custom ones of these. "Last 60 days RAW Jotform Data" shows the
+  names lists (`Contact_IDs__c`), which is allowed inside Salesforce. Moving the pilot items into
+  an admin-only folder is a separate step, if Ryan wants it.
 - **Wider data than the reports**: View All on Contact and on Account opens every Contact and
   Account to these 9 users: donors, households and organisations as well as clubs and girls. That
   is in reports, list views and search, not only in the attendance reports. 8 of the 9 already
@@ -270,5 +276,45 @@ For later:
 - **Descriptions**: the test report's description still starts "Test report:". The labels-only
   decision keeps it as it is.
 
-## Result
-To be filled after the build and the check-only deploy.
+## Result (2026-10-09, build and check-only; nothing deployed, no record written)
+- **Backup** (05:14 UTC, read only): `data/sf_dashboard_2026-10-02/before_public_2026-10-09/`.
+  - It holds 23 files: the 13 reports, the report type, the dashboard, the pilot dashboard and
+    its 5 reports, and both folders.
+  - The 15 `totals1` files are byte-identical to `verify_2026-10-09/`, so nothing was deployed
+    since this morning.
+  - Both folder files hold only `<name>Attendance</name>`: no shares.
+- **Build**: `data/sf_dashboard_2026-10-02/public_2026-10-09/` has 5 components, and
+  `diff_vs_live.txt` beside them. Against the backup:
+  - each folder file gains only the 5-line `folderShares` block;
+  - the report changes only line 101, `<name>`: "Jotform Monthly Attendance (test)" → "Jotform
+    Monthly Attendance";
+  - the dashboard changes only line 793, `<title>`: "Jotform Attendance (test)" → "Jotform
+    Attendance";
+  - the permission set is the only new file.
+- **The field list was checked by a script**:
+  - It mapped every token of the 13 reports and the dashboard (columns, filters, groupings, time
+    frames, cross filters, charts, dashboard filter columns; not the pilot items) to its field.
+  - It kept the fields `describe` marks permissionable.
+  - The result equals the permission set's 14 fields exactly: no field extra, none missing.
+  - The used fields without a field permission are the Name fields, `Account_Name__c`
+    (required), `CreatedDate`, Id and `RecordTypeId`.
+- **Check-only deploy** `0AfRP000002gXeL0AU` (05:15:53-05:15:58 UTC), `sf project deploy start
+  --dry-run -o glow -d force-app`: Succeeded, checkOnly, 5 of 5 components, 0 errors, 0 tests.
+  - ReportFolder Attendance: changed.
+  - Report `Attendance/Jotform_Monthly_Attendance_test`: changed.
+  - DashboardFolder Attendance: changed.
+  - Dashboard `Attendance/Jotform_Attendance_test`: changed.
+  - PermissionSet `Attendance_Report_Viewer`: created.
+  The JSON is beside the build (`checkonly_0AfRP000002gXeL0AU.json`).
+- **Read after the check-only, nothing changed**: both folders still have `"shares": []`, the two
+  labels still carry "(test)" (unchanged LastModifiedDate), and no `Attendance_Report_Viewer`
+  exists.
+- **Settled on the way**:
+  - Schedule Refresh is not deployable (above).
+  - A folder deploy's replace or add behaviour is not documented (above).
+  - `AllInternalUsers` / `Organization` is how this org itself stores a Viewer share with All
+    Internal Users.
+- **Not verified, and only after Ryan's steps**:
+  - that the deploy gives exactly one share per folder;
+  - that the 9th user sees rows after the assignment (Login As);
+  - that the refresh job appears.

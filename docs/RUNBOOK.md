@@ -2145,17 +2145,44 @@ Its filters are unchanged.
   Kaleidos" has one, so "Fundacion" finds only the first. Type the name as Salesforce spells it,
   or an unaccented part of it.
 
-**Access** (Ryan, 2026-10-06):
-- **Folder sharing stays as it is**: both Attendance folders are hidden (not shared). On
-  2026-10-02 only the 8 active users with View All Data could see them. Do not change it
-  without Ryan.
-- **Girls' names inside Salesforce are fine**: anyone with access to Salesforce may see them,
-  so the test report's name column and the Girl filter stay. This is about Salesforce only.
-  Names still never go into the repo, logs, commits or the conversation (child-privacy).
-- If the folders are ever shared beyond those users: the dashboard runs as Ryan and shows
-  everything, but a chart's report runs as the viewer, and club accounts are private (owned by
-  administrators, or by GLOW Sync for those the automatic sync creates; no sharing rules). A standard user would then see few or no rows behind a
-  full chart.
+**Access** (Ryan's decisions of 2026-10-09,
+[plan](plans/2026-10-09-attendance-reports-public.md); they reverse his 2026-10-06 "folder
+sharing stays as it is"):
+- **Status**: built and validated check-only on 2026-10-09 (`0AfRP000002gXeL0AU`, 5 of 5, 0
+  errors). Until Ryan deploys `data/sf_dashboard_2026-10-02/public_2026-10-09/`, both folders stay
+  hidden and only System Administrators (View All Data) see them.
+- **Both Attendance folders are shared as Viewer with All Internal Users**: `folderShares` View,
+  `AllInternalUsers`, `Organization`. Never a guest or portal group.
+  - The share opens everything in the folders, including the March pilot dashboard "Attendance"
+    and its 5 reports.
+  - The shares API (`GET /services/data/v62.0/folders/{id}/shares`) is the measure.
+    `Folder.AccessType` reads `Hidden` even on a shared folder.
+  - Whether a folder deploy replaces or adds shares is not documented. Deploy a folder only from a
+    fresh retrieve, and remove a share in the folder's Share dialog.
+- **"(test)" is dropped** by the same deploy: "Jotform Attendance" and "Jotform Monthly
+  Attendance". The DeveloperNames stay (`Jotform_Attendance_test`,
+  `Jotform_Monthly_Attendance_test`), so the paths below are unchanged.
+- **Permission set `Attendance_Report_Viewer`**, read only. The dashboard runs as Ryan and shows
+  everything to anyone who opens it. A chart's report runs as the viewer, and Account and Contact
+  are private (`Attendance__c` follows its Contact). The set gives:
+  - Read on `Attendance__c` and `Attendance_Batch__c`;
+  - View All on Contact and on Account;
+  - Read on the 14 fields the reports show, filter or group (listed in the plan).
+  A filter on a field the viewer cannot read is dropped silently, or the report fails "Invalid
+  Report". Every per-girl report filters on `Creator__c`: without it, the totals would include
+  the March pilot rows.
+  - **For** the 9 active GLOW Standard Users. Assigning it is a record write, done on Ryan's go
+    after the deploy. System Administrators need nothing.
+  - **A new staff user**: Setup → Permission Sets → Attendance Report Viewer → Manage Assignments
+    → Add Assignment. Without it, they see the dashboard with refused or empty reports behind it.
+  - **A report change that uses another field**: add that field's Read to the set, or viewers
+    lose the column or the filter.
+- **Daily refresh** (not metadata): Ryan's Subscribe on the dashboard, Daily 05:00
+  America/Los_Angeles. It runs as Ryan, the running user.
+- **Girls' names inside Salesforce are fine** (Ryan, 2026-10-06, unchanged): anyone with access
+  to Salesforce may see them, so the test report's name column and the Girl filter stay. This is
+  about Salesforce only. Names still never go into the repo, logs, commits or the conversation
+  (child-privacy).
 
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
 - Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report and the
