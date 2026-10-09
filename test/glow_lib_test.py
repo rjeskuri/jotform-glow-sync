@@ -170,6 +170,41 @@ class GlowClient(unittest.TestCase):
             c.get("/x")
         self.assertIn("curl could not be started", str(e.exception))
 
+    def test_the_public_page_is_one_keyless_curl_whose_failure_is_refused(self):
+        import subprocess as sp
+        from unittest import mock
+        with mock.patch.object(self.gj.subprocess, "run", self.fake(["<html>page</html>"])):
+            self.assertEqual(self.gj.public_page("123"), "<html>page</html>")
+        argv, = self.spawned
+        self.assertEqual(argv[:2], ["curl", "-sSL"])
+        self.assertEqual(argv[-1], "https://form.jotform.com/123")
+        self.assertIn("--max-time", argv)
+        self.assertFalse(any("apiKey" in a for a in argv))              # no key goes to a public page
+
+        def down(argv, **kw):
+            return sp.CompletedProcess(argv, 6, stdout="", stderr="curl: (6) Could not resolve host\n")
+        with mock.patch.object(self.gj.subprocess, "run", down), self.assertRaises(self.gj.JotformError) as e:
+            self.gj.public_page("123")
+        self.assertIn("public page of form 123: curl exited 6", str(e.exception))
+
+    def test_a_page_that_cannot_be_fetched_is_never_an_empty_one(self):
+        # switcher_flags --check-page read a network failure as "0 languages"; form_status
+        # --rendered as a page without its arrays; fix_name_translations' check stays its own
+        import subprocess as sp
+        from unittest import mock
+        import fix_name_translations
+        import switcher_flags
+
+        def down(argv, **kw):
+            return sp.CompletedProcess(argv, 28, stdout="", stderr="curl: (28) timed out\n")
+        with mock.patch.object(self.gj.subprocess, "run", down):
+            with self.assertRaises(self.gj.JotformError):
+                switcher_flags.page_flags("123")
+            self.assertIsNone(fix_name_translations.page_count("123", {"k"}, True, self.gj.public_page))
+        page = '<li data-lang="or" x>a</li><li data-lang="te">b<svg/></li>'
+        with mock.patch.object(self.gj.subprocess, "run", self.fake([page])):
+            self.assertEqual(switcher_flags.page_flags("123"), (False, {"or": False, "te": True}))
+
     def test_is_write_catches_every_shape(self):
         w = self.gj.is_write
         self.assertTrue(w(["-X", "POST", "u"]))

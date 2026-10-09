@@ -29,7 +29,6 @@ import argparse
 import base64
 import os
 import re
-import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,13 +36,12 @@ sys.path.insert(0, REPO)
 from glow import backup                   # noqa: E402  (the snapshot before a write)
 from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run, targets                  # noqa: E402
-from glow.jotform import Client           # noqa: E402
+from glow.jotform import Client, public_page   # noqa: E402
 
 FLAGS = {"or": "or.svg"}                  # language code -> file under tools/switcher_flags/
 SVG_DIR = os.path.join(REPO, "tools", "switcher_flags")
 START, END = "/* GLOW switcher flags v2 */", "/* /GLOW switcher flags */"
 ANY_START = "/* GLOW switcher flags v"          # an earlier version's block is replaced too
-PUBLIC = "https://form.jotform.com/"
 
 
 def data_uri(svg):
@@ -81,10 +79,9 @@ def merge(existing, block):
 
 
 def page_flags(form_id):
-    """(has_block, {code: True/False}) from the public form page - read-only, no API key."""
-    out = subprocess.run(["curl", "-sS", "-L", "-A", "Mozilla/5.0", PUBLIC + form_id],
-                         capture_output=True, text=True)
-    html = out.stdout
+    """(has_block, {code: True/False}) from the public form page - read-only, no API key. A page
+    that cannot be fetched stops the run (glow.jotform.public_page), never reads as 0 languages."""
+    html = public_page(form_id)
     flags = {}
     for lang, inner in re.findall(r'<li data-lang="([^"]+)"[^>]*>(.*?)</li>', html, re.S):
         flags[lang] = "<svg" in inner

@@ -128,3 +128,21 @@ class Client:
 
     def delete(self, path, label):
         return self.call(["-X", "DELETE", self.url(path)], label)
+
+
+def public_page(form_id, max_time=90):
+    """The form's public page (https://form.jotform.com/<id>) as a mentor's browser receives
+    it - no API key, so nothing of the account goes with the request. Kept in memory by every
+    caller (a served page lists every roster: never printed or saved). Raises JotformError when
+    curl fails: a page that could not be fetched never reads as an empty one."""
+    url = f"https://form.jotform.com/{form_id}"
+    try:
+        out = subprocess.run(["curl", "-sSL", "--max-time", str(max_time), "-A", "Mozilla/5.0", url],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as e:
+        raise JotformError(f"public page of form {form_id}: curl could not be started: "
+                           f"{e.strerror or e}") from e
+    if out.returncode != 0:
+        raise JotformError(f"public page of form {form_id}: curl exited {out.returncode}: "
+                           f"{out.stderr.strip()[:200]}")
+    return out.stdout

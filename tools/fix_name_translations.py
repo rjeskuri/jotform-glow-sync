@@ -57,13 +57,13 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TOOLS)
 sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
-from form_status import embedded_store, public_page, roster_options   # noqa: E402
+from form_status import embedded_store, roster_options     # noqa: E402
 from glow import backup                                     # noqa: E402  (the stamp of the saved store)
 from glow import forms as glow_forms                        # noqa: E402
 from glow import translation_lookup as tl                   # noqa: E402
 from glow import translations                               # noqa: E402  (save_store: mode 600, never over a file)
 from glow.cli import api_key, run                                    # noqa: E402
-from glow.jotform import Client, JotformError               # noqa: E402
+from glow.jotform import Client, JotformError, public_page  # noqa: E402
 
 # template first, then the regional forms smallest first (the rollout's order)
 ORDER = [glow_forms.TEMPLATE] + [glow_forms.REGIONALS[r] for r in ("U.S", "Latin America", "Asia", "Africa")]
@@ -228,8 +228,12 @@ def post_sources(client, fid, before, want, label, saved):
 
 def page_count(fid, keys, present, page_of):
     """How many of `keys` the public page's embedded store holds in base/en (present=True) or
-    lacks (present=False); None when the page could not be read."""
-    store, _ = embedded_store(page_of(fid))
+    lacks (present=False); None when the page could not be read (fetched, or its store found)."""
+    try:
+        page = page_of(fid)
+    except JotformError:          # the store is written by now: the callers say so, and what to run
+        return None
+    store, _ = embedded_store(page)
     if store is None:
         return None
     held = {k for lang in SOURCES for k in store.get(lang, {})}

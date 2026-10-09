@@ -48,7 +48,6 @@ import html
 import json
 import os
 import re
-import subprocess
 import sys
 from collections import defaultdict
 
@@ -60,7 +59,7 @@ from glow import sync as glow_sync         # noqa: E402  (question 18's and the 
 from glow import translation_lookup as tl  # noqa: E402  (the runtime's names dictionary, emulated)
 from glow import usage                     # noqa: E402  (Jotform's storage against the plan's limits)
 from glow.cli import api_key, run                   # noqa: E402
-from glow.jotform import Client, JotformError     # noqa: E402
+from glow.jotform import Client, JotformError, public_page     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
     GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, SF_NAME_SEP,
@@ -777,13 +776,6 @@ def rendered_names_problems(r, page):
                 "(a page from before the fix: re-run in a few minutes; else "
                 + NAMES_FIX.format(form=r.get("id", "<id>")) + ")"]
     return []
-
-
-def public_page(form_id):
-    """The form as a mentor's browser receives it (curl, like every call here)."""
-    out = subprocess.run(["curl", "-sSL", "--max-time", "90", f"https://form.jotform.com/{form_id}"],
-                         capture_output=True, text=True)
-    return out.stdout if out.returncode == 0 else ""
 
 
 def tested_values(questions, conditions):
