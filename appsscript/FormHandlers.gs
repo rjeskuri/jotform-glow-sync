@@ -186,14 +186,12 @@ function processMissedResponses() {
   const outcomes = [];
   for (let i = 0; i < confirmed.length; i++) {
     if (Date.now() - started > MISSED.BUDGET_MS) break;
-    const lock = LockService.getDocumentLock();
     const wait = Math.max(0, Math.min(MISSED.LOCK_WAIT_MS, MISSED.BUDGET_MS - (Date.now() - started)));
-    if (!lock.tryLock(wait)) break;   // a submission is being processed, or out of time
-    try {
+    const ran = withDocumentLock_(wait, function () {
       outcomes.push(runConfirmed_(confirmed[i], snap));
-    } finally {
-      lock.releaseLock();
-    }
+      return true;
+    });
+    if (!ran) break;   // a submission is being processed, or out of time
     Utilities.sleep(MISSED.PAUSE_MS);
   }
   const left = confirmed.length - outcomes.length;
@@ -341,6 +339,7 @@ function responseStamp_(timestamp, zone) {
   return { text: tidy_(timestamp) };
 }
 
+/** The spreadsheet's own time zone (File → Settings), never the script's: today_, now_ and every date cell. */
 function spreadsheetZone_() {
   return SpreadsheetApp.getActive().getSpreadsheetTimeZone();
 }
@@ -701,19 +700,37 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
                                derivedPartnerRegions_()[key_(partner)]);
   const state = loadIdState_();
   const today = today_();
-  const current = existing.byClub[key_(partner) + '||' + key_(club)] || [];
+  const current = existing.byClub[clubKey_(partner, club)] || [];
   const isNew = !current.length;
 
   const plan = planClub_({ partner: partner, club: club, names: parsed.names,
                            duplicates: parsed.duplicates, source: source,
                            submitted: submitted },
                          current, state, region, today);
-  applyRosterPlan_(ss, plan, today);
+  // Every write that may fail comes BEFORE the Roster write, the "new club" decision included:
+  // a failure up to and including the Roster write is an ERROR whose retry finds the club
+  // still without girls, so still new, and finds what the attempt did write again -
+  // ClubRegistry and Partners (the code and the partner on file), SF Pending (sfPendingAdd_
+  // adds no second pending row). After the Roster write nothing fails the run, so no retry
+  // has to guess whether the club was new. Accepted: if the Roster write fails and nobody
+  // retries, a pending SF Pending row waits for a club with no girls (the response shows as
+  // ERROR in FormLog and the menu); if staff close that row by hand before the retry, the
+  // retry adds another.
   saveClubRegistry_(state.registry);
   const seen = {}; seen[key_(partner)] = partner;
   const formRegions = {};
   if (formRegion) formRegions[key_(partner)] = formRegion;
   seedPartners_(seen, formRegions);
+  if (isNew) {
+    sfPendingAdd_(ss, [today, partner, club, region, plan.toAppend.length,
+                       sheetText_(a[Q.MENTOR_NAME]), sheetText_(a[Q.MENTOR_EMAIL]),
+                       sheetText_(a[Q.COUNTRY]), 'pending', '']);
+  }
+  applyRosterPlan_(ss, plan, today);
+
+  // from here on, best-effort only (FormLog records the summary)
+  if (plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
+  trySyncChoices_();
 
   const issues = plan.issues;
   if (!region) {
@@ -731,22 +748,45 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
                   detail: 'Their note: ' + tidy_(a[Q.SAME_NAME_DETAIL]) +
                       ' — the roster has no repeated name, so check the girls are listed distinctly.' });
   }
-  review_(issues);
-
-  if (isNew) {
-    ensureTab_(ss, TAB.SF_PENDING, SF_PENDING_COLS).appendRow([
-      today, partner, club, region, plan.toAppend.length, sheetText_(a[Q.MENTOR_NAME]),
-      sheetText_(a[Q.MENTOR_EMAIL]), sheetText_(a[Q.COUNTRY]), 'pending', '']);
-  }
-  trySyncChoices_();
+  const queued = tryReview_(issues, source);
 
   const summary = (isNew ? 'new club ' : 'existing club ') + club + ' (' + partner + '): ' +
       plan.toAppend.length + ' girls added, ' + plan.reactivate.length + ' reactivated' +
       keptRemovedNote_(plan) + ', ' + issues.length + ' for review' +
+      (queued ? '' : ' (NOT on the ReviewQueue: see Audit)') +
       (released ? ' (released from hold by staff)' : '');
-  audit_('newClubForm', summary);
-  if (plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
+  try {
+    audit_('newClubForm', summary);
+  } catch (err) {
+    // FormLog records the same summary (runResponse_)
+  }
   return summary;
+}
+
+/**
+ * Append a new club to SF Pending (the Monday e-mail's Salesforce list) unless
+ * the same partner and club has a row there that is still 'pending'.
+ * handleNewClub_ writes the row before the Roster, so the response a retry
+ * runs again is one whose Roster write failed: its club is still new, and its
+ * row is found here instead of added twice. tools/sf_new_clubs.py (run by the
+ * auto-sync that a new club's response requests) marks a club's ONE pending
+ * row done, normally within the hour, so this covers a retry made before that
+ * - and a response that completed is never re-run as new (its club has Roster
+ * rows). A row with any other status (done, or closed by hand) does not count:
+ * a club enrolled under a name an old, closed row has gets a row of its own.
+ * True if appended.
+ */
+function sfPendingAdd_(ss, row) {
+  const sheet = ensureTab_(ss, TAB.SF_PENDING, SF_PENDING_COLS);
+  const p = SF_PENDING_COLS.indexOf('partner'), c = SF_PENDING_COLS.indexOf('club');
+  const s = SF_PENDING_COLS.indexOf('status');
+  const ck = clubKey_(row[p], row[c]);
+  const onFile = sheet.getLastRow() > 1 &&
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, SF_PENDING_COLS.length).getValues()
+          .some(function (r) { return clubKey_(r[p], r[c]) === ck && key_(r[s]) === 'pending'; });
+  if (onFile) return false;
+  sheet.appendRow(row);
+  return true;
 }
 
 /** How a hold reason reads in Audit, and (all but samename) in FormLog: holdSummary_. */
@@ -830,7 +870,7 @@ function handleRosterChange_(a, source, submitted) {
   if (!adds.names.length && !removes.names.length) return 'nothing to do (no names given)';
 
   const existing = loadRoster_();
-  const current = existing.byClub[key_(partner) + '||' + key_(club)] || [];
+  const current = existing.byClub[clubKey_(partner, club)] || [];
   if (!current.length) {
     review_([{ issue: 'Roster change for a club not on file', partner: partner, club: club,
                detail: source + ': no girls are enrolled under this partner + club, so nothing ' +
@@ -849,23 +889,33 @@ function handleRosterChange_(a, source, submitted) {
                                    removes: removes.names, duplicates: adds.duplicates,
                                    source: source, submitted: submitted },
                                  current, state, region, today);
+  saveClubRegistry_(state.registry);   // before the Roster: a retry finds the code again
   applyRosterPlan_(ss, plan, today);
-  saveClubRegistry_(state.registry);
+
+  // The Roster has changed, and a retry would re-plan against it: the girls just added would
+  // be "already on the roster" in the mentor's e-mail, and nothing would ask for a Jotform
+  // sync. So from here on no step fails the run: each is best-effort, and FormLog records
+  // the summary.
+  if (plan.toAppend.length || plan.reactivate.length || plan.deactivate.length) {
+    tryNotifySync_('rosterChangeForm');
+  }
   if (plan.toAppend.length && !region) plan.issues.push(noRegionIssue_(partner));
-  review_(plan.issues);
   trySyncChoices_();
+  const queued = tryReview_(plan.issues, source);
 
   const summary = club + ' (' + partner + '): ' + plan.toAppend.length + ' added, ' +
       plan.reactivate.length + ' reactivated, ' + plan.deactivate.length + ' removed' +
       keptRemovedNote_(plan) +
       (plan.alreadyActive.length ? ', ' + plan.alreadyActive.length + ' already on the roster' : '') +
       (plan.alreadyInactive.length ? ', ' + plan.alreadyInactive.length + ' already removed' : '') +
-      (plan.unmatched.length ? ', ' + plan.unmatched.length + ' removal(s) did not match' : '');
-  audit_('rosterChangeForm', summary);
-  if (plan.toAppend.length || plan.reactivate.length || plan.deactivate.length) {
-    tryNotifySync_('rosterChangeForm');
+      (plan.unmatched.length ? ', ' + plan.unmatched.length + ' removal(s) did not match' : '') +
+      (queued ? '' : ', ' + plan.issues.length + ' for review NOT on the ReviewQueue (see Audit)');
+  try {
+    audit_('rosterChangeForm', summary);
+  } catch (err) {
+    // FormLog records the same summary (runResponse_)
   }
-  if (mentorEmail) sendChangeConfirmation_(mentorEmail, club, partner, plan);
+  if (mentorEmail) sendChangeConfirmation_(mentorEmail, club, partner, plan, source);
   return summary;
 }
 
@@ -873,9 +923,10 @@ function handleRosterChange_(a, source, submitted) {
  * Tell the mentor what happened. Only names THEY typed are echoed back —
  * never other girls from the roster (the address is whatever was typed into
  * a public form, so "did you mean" suggestions stay in the staff-only
- * ReviewQueue).
+ * ReviewQueue). Never fails the handler; a failure goes to Audit without the
+ * address, as sendHoldNotice_'s does.
  */
-function sendChangeConfirmation_(to, club, partner, plan) {
+function sendChangeConfirmation_(to, club, partner, plan, source) {
   const names = function (rows) { return rows.map(function (r) { return r.full_name; }); };
   const section = function (title, list) {
     if (!list.length) return;
@@ -905,7 +956,8 @@ function sendChangeConfirmation_(to, club, partner, plan) {
     MailApp.sendEmail({ to: to, subject: 'GLOW roster change received – ' + club,
                         body: lines.join('\n') });
   } catch (err) {
-    audit_('sendChangeConfirmation_', 'could not email ' + to + ': ' + err.message);
+    audit_('sendChangeConfirmation_', 'could not e-mail the mentor about ' + source + ': ' +
+           previewError_(err.message));
   }
 }
 
@@ -992,8 +1044,7 @@ function tryReview_(items, source) {
 }
 
 // ------------------------------------ problem reports and the ReviewQueue (pure)
-// Tested offline in test/forms_logic_test.js; the back-fill tool
-// (tools/backfill_feedback_review.py) runs these same functions.
+// Tested offline in test/forms_logic_test.js.
 
 /** Every issue the ReviewQueue can hold, in the order the weekly e-mail lists them. */
 const REVIEW_ISSUES = [
@@ -1014,11 +1065,6 @@ const RC_PEOPLE = /\b(?:girls?|members?|students?|names|roster|list|(?:to|from) 
 const RC_CHANGE = /\b(?:add(?:ed|ing)?|remov(?:e|ed|ing|al)|join(?:ed|ing|s)?|left|chang(?:e|ed|es|ing)|reduc(?:e|ed|es|ing|tion)|updated|up to date|agreg\w*|anadi\w*|quitar\w*|elimin\w*|se fue(?:ron)?|cambi\w*|actualizad[ao]s?)\b/;
 const RC_NEW = /\bnew (?:girls?|members?|students?|names)\b|\bnuev[ao]s? (?:ninas?|chicas?|integrantes|participantes)\b|\b(?:ninas?|chicas?|integrantes|participantes) nuev[ao]s?\b/;
 
-/** Report text as the patterns read it: lower case, accents folded (so \b sees "anadio"). */
-function foldText_(s) {
-  return foldKey_(s);
-}
-
 /**
  * Why a problem report looks like a roster change: 'form' (it names the Club
  * Roster Form), 'text' (its words ask to add or remove girls) or '' (it does
@@ -1027,8 +1073,9 @@ function foldText_(s) {
  */
 function looksLikeRosterChange_(a) {
   if (key_(a[Q.FB_FORM]).indexOf('roster form') !== -1) return 'form';
-  let text = foldText_(tidy_(a[Q.FB_DOING]) + ' ' + tidy_(a[Q.FB_WHAT]));
-  const club = foldText_(a[Q.FB_CLUB]);
+  // the text as the patterns read it: lower case, accents folded (so \b sees "anadio")
+  let text = foldKey_(tidy_(a[Q.FB_DOING]) + ' ' + tidy_(a[Q.FB_WHAT]));
+  const club = foldKey_(a[Q.FB_CLUB]);
   if (club.length >= 4) text = text.split(club).join(' ');   // "<X> Girls Club" is no roster word
   return RC_NEW.test(text) || (RC_PEOPLE.test(text) && RC_CHANGE.test(text)) ? 'text' : '';
 }
@@ -1112,10 +1159,10 @@ function holdDecisions_(rows) {
   rows.forEach(function (r) {
     if (issues.indexOf(issueKey_(r.issue)) === -1) return;
     const detail = String(r.detail == null ? '' : r.detail);
-    const tag = detail.match(/\[#([^\]]*)\]\s*$/), sent = detail.match(/\(sent ([^)]*)\)/);
-    if (!tag) return;
+    const tag = reviewTag_(detail), sent = detail.match(/\(sent ([^)]*)\)/);
+    if (tag === null) return;
     const resolved = tidy_(r.resolved);
-    out[tag[1]] = { row: r.row, sentAt: sent ? sent[1] : '',
+    out[tag] = { row: r.row, sentAt: sent ? sent[1] : '',
                     state: !resolved ? 'open' : /^release\b/i.test(resolved) ? 'release' : 'closed' };
   });
   return out;
@@ -1132,12 +1179,12 @@ function sentDayOfKey_(responseKey) {
  * 'Feedback!7'. Other tags ARE girls' names (a duplicated or unmatched name).
  */
 function responseRowTag_(detail) {
-  const m = String(detail || '').match(/\[#([^\]]*)\]\s*$/);
-  if (!m) return '';
-  const bang = m[1].lastIndexOf('!');
-  const tab = m[1].slice(0, bang), row = m[1].slice(bang + 1);
+  const tag = reviewTag_(detail);
+  if (tag === null) return '';
+  const bang = tag.lastIndexOf('!');
+  const tab = tag.slice(0, bang), row = tag.slice(bang + 1);
   return bang > 0 && /^\d+$/.test(row) &&
-      [TAB.FEEDBACK, TAB.ROSTER_FORM, TAB.RESPONSES].indexOf(tab) !== -1 ? m[1] : '';
+      [TAB.FEEDBACK, TAB.ROSTER_FORM, TAB.RESPONSES].indexOf(tab) !== -1 ? tag : '';
 }
 
 /** "partner / club" for the weekly e-mail: only names on file are shown. */

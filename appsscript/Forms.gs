@@ -15,8 +15,9 @@
  *   Something isn't working?   a one-minute problem report → staff email
  *
  * Run `createGlowForms` once from the GLOW menu (it is idempotent: forms
- * that already exist are reused). Run `syncFormChoices` after roster changes
- * so the dropdowns stay current — the rebuild and the handlers call it.
+ * that already exist are reused). The form handlers keep the dropdowns
+ * current (syncFormChoices after each change); after a change made any other
+ * way, run "Update form dropdowns from the Roster" (syncFormChoicesFromMenu).
  *
  * The forms are owned by whoever runs this, live in their Drive, and can be
  * edited in the normal Forms UI — but question TITLES must stay as in
@@ -122,9 +123,19 @@ function createGlowForms() {
     feedback.setDescription(feedbackDescription_(roster.getPublishedUrl()));
   }
 
-  syncFormChoices();
+  // the dropdowns under the document lock, like the menu item; if it is busy, stop before the
+  // triggers and say so: a run again reuses the forms and finishes the job
+  const created = made.length ? 'created: ' + made.join(', ') : 'both forms already existed';
+  if (!withDocumentLock_(30000, function () { syncFormChoices(); return true; })) {
+    audit_('createGlowForms', created + '; stopped before the dropdowns and triggers: another ' +
+           'GLOW operation held the lock');
+    ui.alert('GLOW forms', 'The forms are there, but their dropdowns are NOT filled and the ' +
+             'triggers NOT installed: another GLOW operation was running. Run "Create the ' +
+             'Google Forms" again in a minute (it reuses the forms).', ui.ButtonSet.OK);
+    return;
+  }
   installTriggers();
-  audit_('createGlowForms', made.length ? 'created: ' + made.join(', ') : 'both forms already existed');
+  audit_('createGlowForms', created);
 
   ui.alert('GLOW forms', formLinksText_(roster, feedback) +
       '\n\nResponses land in the tabs "' + TAB.ROSTER_FORM + '" and "' + TAB.FEEDBACK +
@@ -353,6 +364,19 @@ function syncFormChoices() {
   return changed;
 }
 
+/**
+ * Menu: GLOW → Google Forms → Update form dropdowns from the Roster.
+ * syncFormChoices under the document lock, as the form handlers run it (they
+ * hold the lock already): two runs at once would both find a new partner
+ * without a section and both insert one.
+ */
+function syncFormChoicesFromMenu() {
+  const ss = SpreadsheetApp.getActive();
+  withDocumentLock_(30000, syncFormChoices, function () {
+    ss.toast('Another GLOW operation is still running - try again in a minute.', 'GLOW', 8);
+  });
+}
+
 function clubQuestionTitle_(partner) {
   return Q.CLUB_PREFIX + partner + ')';
 }
@@ -489,16 +513,9 @@ function migrateCountryToRegion() {
   const ui = SpreadsheetApp.getUi();
   // the document lock every mutating entry point takes: two concurrent runs
   // would BOTH pass the "is the picker there yet?" check and insert twice
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(30000)) {
+  withDocumentLock_(30000, function () { migrateCountryToRegionLocked_(ui); }, function () {
     ss.toast('Another GLOW operation is still running - try again in a minute.', 'GLOW', 8);
-    return;
-  }
-  try {
-    migrateCountryToRegionLocked_(ui);
-  } finally {
-    lock.releaseLock();
-  }
+  });
 }
 
 function migrateCountryToRegionLocked_(ui) {
@@ -602,18 +619,14 @@ function migrateFormWording() {
              ui.ButtonSet.OK);
     return 0;
   }
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(30000)) {
+  const done = [];
+  const message = withDocumentLock_(30000, function () {
+    return migrateFormWordingLocked_(forms, plan, done);
+  });
+  if (message === undefined) {
     ui.alert('GLOW forms', 'Another GLOW operation is still running — nothing was changed. ' +
              'Try again in a minute.', ui.ButtonSet.OK);
     return 0;
-  }
-  const done = [];
-  let message;
-  try {
-    message = migrateFormWordingLocked_(forms, plan, done);
-  } finally {
-    lock.releaseLock();
   }
   ui.alert('GLOW forms', message, ui.ButtonSet.OK);
   return done.length;

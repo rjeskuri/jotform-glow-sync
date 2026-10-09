@@ -12,17 +12,11 @@
 const fs = require('fs');
 const path = require('path');
 const loadGs = require('./load_gs');
+const { check, finish } = require('./helpers/js/check');
+const { readCsv } = require('./helpers/js/csv');
 
 const REPO = path.resolve(__dirname, '..');
-const gs = loadGs(['ROSTER_COLS', 'STATUS', 'tidy_', 'key_', 'asciiCode_', 'parseRoster_', 'lastName_', 'clubCode_',
-                   'mintGirlId_', 'planClub_', 'planModification_', 'closestNames_',
-                   'chooseRegion_', 'canonicalRegion_', 'derivedPartnerRegions_', 'REGIONS']);
-
-let failures = 0;
-function check(label, cond, detail) {
-  console.log((cond ? '  ok   ' : '  FAIL ') + label + (detail ? ' :: ' + detail : ''));
-  if (!cond) failures++;
-}
+const gs = loadGs(null, null, { strict: true });
 const col = name => gs.ROSTER_COLS.indexOf(name);
 const rowObj = (arr, sheetRow) => {
   const o = {}; gs.ROSTER_COLS.forEach((c, i) => { o[c] = arr[i]; }); o._sheetRow = sheetRow; return o;
@@ -239,11 +233,7 @@ check('derived map keys are key_-normalized, values non-empty', (function () {
 // FormHandlers.gs calls Google services only inside functions, so its pure
 // helpers load next to Config.gs and Normalize.gs (as dispatch_test.js does).
 console.log('\nFormLog keys and "Process any missed form responses" (FormHandlers.gs)');
-const fh = loadGs(['Q', 'OTHER_PARTNER', 'MISSED', 'RETRY_PREFIXES', 'RESPONSE_STAMP_FORMAT', 'missedOrder_',
-                   'isRetryResult_', 'responseTail_', 'responseKeyOf_', 'sameCellAcrossZones_', 'indexFormLog_',
-                   'responseDone_', 'planMissedRun_', 'missedPreviewText_', 'previewError_',
-                   'daysBetween_'],
-                  ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+const fh = loadGs(null, ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'], { strict: true });
 const FQ = fh.Q;
 const ORG = 'Test Partner Org';
 // A Timestamp cell whose text is `wall`, read while the spreadsheet is at UTC+offsetMin:
@@ -457,20 +447,17 @@ console.log('\n  held rows, failed old rows');
 console.log('\n  the menu run itself (processMissedResponses; Google services stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'];   // Roster.gs: withDocumentLock_
   // Returns what ran and what Audit got, answering the YES/NO dialogs in turn.
-  const runMenu = (responses, log, replies) => {
+  const runMenu = (responses, log, replies, lockBusy) => {
     const ran = [], audits = [], dialogs = [];
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: { getUi: () => ({
         alert: (title, text, buttons) => { dialogs.push(text); return buttons === 'YES_NO' ? replies.shift() : 'OK'; },
         Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } }) },
-      LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
+      LockService: { getDocumentLock: () => ({ tryLock: () => !lockBusy, releaseLock: () => {} }) },
       Utilities: { sleep: () => {} },
     });
-    vm.runInContext(src, ctx);
     // function declarations are properties of the vm's global object, so these replace them
     ctx.readMissedSnapshot_ = () => ({ zone: 'America/New_York', sheets: {}, responses,
                                        index: ctx.indexFormLog_(log), today: '2026-09-27' });
@@ -505,6 +492,10 @@ console.log('\n  the menu run itself (processMissedResponses; Google services st
   const nothing = runMenu([], [], []);
   check('nothing pending: one "Nothing to process." message, no Audit row',
         !nothing.ran.length && !nothing.audits.length && nothing.dialogs.join() === 'Nothing to process.');
+  const busy = runMenu(responses, [], ['YES', 'YES', 'YES'], true);
+  check('the document lock busy (a submission being processed): no row runs, "4 not started yet — run it again"',
+        !busy.ran.length && /^0 processed, 4 not started yet — run it again/.test(busy.dialogs[3]) &&
+        /; 4 left$/.test(busy.audits[1]), busy.dialogs[3]);
 }
 
 check('daysBetween_: whole days, NaN for a non-date',
@@ -515,10 +506,7 @@ check('menu limits: 240 s budget (6-minute limit), 30 s lock wait (< the trigger
 
 // ------------------ problem reports that are roster changes; the weekly e-mail
 console.log('\nProblem reports → ReviewQueue, and the weekly e-mail (FormHandlers.gs)');
-const pr = loadGs(['Q', 'TAB', 'REVIEW_ISSUES', 'OTHER_ISSUE', 'DIGEST', 'looksLikeRosterChange_',
-                   'feedbackReviewItem_', 'sentDayOfKey_', 'responseRowTag_', 'reviewDigest_',
-                   'sfPendingLines_'],
-                  ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+const pr = loadGs(null, ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'], { strict: true });
 const PQ = pr.Q;
 const CANARY = 'Hope Fennwhistle';   // a fictional girl: must never reach an e-mail, a digest or Audit
 const report = (form, what, extra) => Object.assign({ [PQ.FB_FORM]: form, [PQ.FB_WHAT]: what }, extra || {});
@@ -637,8 +625,7 @@ console.log('\n  the weekly e-mail\'s ReviewQueue section');
 console.log('\n  the handler and the weekly e-mail, run with Google services stubbed');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs'];
   // A spreadsheet of plain arrays: tabs[name] = rows (row 1 = header).
   const world = (opts) => {
     const tabs = {}, mails = [], audits = [];
@@ -659,8 +646,7 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
       }),
       setFrozenRows: () => {},
     });
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
                                              insertSheet: n => { tabs[n] = []; return sheet(n); },
                                              getSpreadsheetTimeZone: () => 'America/New_York' }) },
@@ -668,7 +654,6 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
       MailApp: { sendEmail: o => { if (opts.mailFails > 0) { opts.mailFails--; throw new Error('quota'); } mails.push(o); } },
       Utilities: { formatDate: d => d.toISOString().slice(0, 10) },
     });
-    vm.runInContext(src, ctx);
     ctx.today_ = () => '2026-09-28';
     ctx.now_ = () => '2026-09-28 09:00:00';
     ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
@@ -822,8 +807,7 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
 console.log('\n  the replay guard in the Club Roster Form handlers (Google services stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs', 'Dispatch.gs'];
   // A spreadsheet of plain arrays (tabs[name] = rows, row 1 = header) with what the handlers call.
   const world = (zone, jotform) => {       // jotform: the partner's Partners-tab mark ('' = on the forms)
     const tabs = {}, mails = [], audits = [], formLog = [], syncs = [];
@@ -846,8 +830,7 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
       appendRow: row => { tabs[name].push(row.slice()); },
       setFrozenRows: () => {},
     });
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
                                              insertSheet: n => { tabs[n] = []; return sheet(n); },
                                              getSpreadsheetTimeZone: () => zone }) },
@@ -858,7 +841,6 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
         return new Intl.DateTimeFormat('en-CA', { timeZone: z, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
       } },
     });
-    vm.runInContext(src, ctx);
     ctx.today_ = () => '2026-09-28';
     ctx.now_ = () => '2026-09-28 09:00:00';
     ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
@@ -1020,8 +1002,7 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
 }
 
 console.log('\nThe duplicate-club guard (RosterOps.gs newClubHoldReasons_, BACKLOG 11b)');
-const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose_', 'partnersClose_', 'matchWords_',
-                   'numberTag_', 'similarity_']);
+const dg = loadGs(null, null, { strict: true });
 {
   console.log('\n  similarity_ = Python difflib.SequenceMatcher(None, a, b).ratio()');
   // values from Python 3 difflib, pinned
@@ -1356,8 +1337,9 @@ const nz = loadGs(['sheetText_', 'parseFormRoster_', 'parseRoster_', 'foldKey_',
         nz.foldKey_('G.L.O.W') === 'g.l.o.w');
 }
 
-const HANDLER_FILES = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs'];
-const handlerSrc = HANDLER_FILES.map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+// Dispatch.gs: tryNotifySync_, which sheetWorld replaces
+const HANDLER_FILES = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs',
+                       'Dispatch.gs'];
 /**
  * A spreadsheet of plain arrays (tabs[name] = rows, row 1 = header) with the
  * real handler code loaded over it. Records e-mails, Audit, FormLog, Jotform
@@ -1391,8 +1373,7 @@ function sheetWorld(tabs, opts) {
     appendRow: row => { guard(name); tabs[name].push(row.slice()); },
     setFrozenRows: () => {},
   });
-  const ctx = vm.createContext({
-    console,
+  const ctx = loadGs.sandbox(HANDLER_FILES, {
     SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
                                            insertSheet: n => { tabs[n] = []; return sheet(n); },
                                            getSpreadsheetTimeZone: () => 'America/New_York' }) },
@@ -1400,11 +1381,11 @@ function sheetWorld(tabs, opts) {
     // a failing send names its recipient, as MailApp's "Invalid email: …" does
     MailApp: { sendEmail: o => { if (opts.mailFails) throw new Error('Invalid email: ' + o.to); out.mails.push(o); } },
   });
-  vm.runInContext(handlerSrc, ctx);
   ctx.today_ = () => '2026-09-28';
   ctx.now_ = () => '2026-09-28 09:00:00';
   ctx.audit_ = (action, detail) => out.audits.push(action + ': ' + detail);
   ctx.formLogAdd_ = (which, row, key, result) => out.formLog.push([which, row, key, result]);
+  out.real = { trySyncChoices_: ctx.trySyncChoices_, tryNotifySync_: ctx.tryNotifySync_ };   // for failure tests
   ctx.trySyncChoices_ = () => { out.synced++; };
   ctx.tryNotifySync_ = why => out.notified.push(why);
   out.ctx = ctx;
@@ -1506,6 +1487,173 @@ const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
           wa.tabs.Roster.length === 4 && sunActive(wa) === 2 && /1 removed/.test(rmRes) &&
           !wa.tabs.ReviewQueue.some(r => r[1] === 'Removal did not match anyone'), rmRes);
   }
+}
+
+console.log('\nA Sheets failure in the Club Roster Form handlers: Salesforce, the sync request and the mentor e-mail stay right (review A1)');
+{
+  const A = 'Fixture Partner Alpha', SUN = 'Sunrise Club', RQ = 'Roster Form Responses', SRC = RQ + '!50';
+  const KEY = 'ROSTER|w:2026-09-27 10:15:30.250|' + A + '|Comet Club';
+  // "Yes, two girls share a name" with no repeated name: one ReviewQueue item
+  const comet = () => newClub(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson'], { [HQ.SAME_NAME]: 'Yes' });
+  const sfRows = w => w.tabs['SF Pending'].slice(1).filter(r => r[2] === 'Comet Club');
+  const cometRows = w => w.tabs.Roster.slice(1).filter(r => r[2] === 'Comet Club');
+  const run50 = w => w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  const NEW = 'new club Comet Club (' + A + '): 2 girls added, 0 reactivated, 1 for review';
+
+  console.log('\n  after the Roster write nothing fails the run');
+  let opts = { down: 'ReviewQueue' };
+  let w = sheetWorld(baseTabs(), opts);
+  let res = run50(w);
+  check('a new club, the ReviewQueue down: imported, not an ERROR; FormLog says its item is NOT queued',
+        res === NEW + ' (NOT on the ReviewQueue: see Audit)' && cometRows(w).length === 2, res);
+  check('…its Salesforce row written and the Jotform sync requested',
+        sfRows(w).length === 1 && sfRows(w)[0][4] === 2 && w.notified.join() === 'newClubForm', JSON.stringify(sfRows(w)));
+  check('…and Audit names the item that could not be queued (the issue and the source only)',
+        w.audits.includes('tryReview_: could not add 1 item(s) (Partner says two girls share a name) for ' + SRC +
+                          ': sheet unavailable'), w.audits.join(' | '));
+  w = sheetWorld(baseTabs(), { down: 'ReviewQueue' });
+  w.ctx.tryNotifySync_ = w.real.tryNotifySync_;
+  w.ctx.notifySync_ = () => { throw new Error('GitHub unreachable'); };
+  w.ctx.trySyncChoices_ = w.real.trySyncChoices_;   // Forms.gs is not loaded: syncFormChoices throws
+  const keepAudit = w.ctx.audit_;
+  w.ctx.audit_ = (action, detail) => {
+    if (action === 'newClubForm') throw new Error('sheet unavailable');   // the summary's own Audit row
+    keepAudit(action, detail);
+  };
+  res = run50(w);
+  check('…the sync request, the dropdowns, the ReviewQueue and the summary\'s Audit row all failing: still not an ' +
+        'ERROR; the girls and the Salesforce row are there, and Audit says what failed',
+        res === NEW + ' (NOT on the ReviewQueue: see Audit)' && cometRows(w).length === 2 && sfRows(w).length === 1 &&
+        w.audits.includes('syncRequested: newClubForm failed: GitHub unreachable') &&
+        w.audits.some(x => x.startsWith('syncFormChoices: failed: ')) &&
+        w.audits.some(x => x.startsWith('tryReview_: could not add 1 item(s)')), w.audits.join(' | '));
+
+  console.log('\n  up to the Roster write: an ERROR whose retry finds the club still new');
+  opts = { down: 'SF Pending' };
+  w = sheetWorld(baseTabs(), opts);
+  res = run50(w);
+  check('SF Pending down: ERROR before the Roster write — no girl on file, no sync request',
+        res === 'ERROR: sheet unavailable' && !cometRows(w).length && !sfRows(w).length && !w.notified.length, res);
+  opts.down = null;
+  res = run50(w);
+  check('…the retry: still a new club, imported; one Salesforce row with its girls; the sync requested',
+        res === NEW && cometRows(w).length === 2 && sfRows(w).length === 1 && sfRows(w)[0][4] === 2 &&
+        w.notified.join() === 'newClubForm', res);
+
+  opts = { down: 'Roster' };
+  w = sheetWorld(baseTabs(), opts);
+  res = run50(w);
+  check('the Roster write failing: ERROR; the Salesforce row is already written (pending), no girl, no sync request',
+        res === 'ERROR: sheet unavailable' && !cometRows(w).length && sfRows(w).length === 1 &&
+        sfRows(w)[0][8] === 'pending' && !w.notified.length, res);
+  opts.down = null;
+  res = run50(w);
+  check('…the retry: still new; the girls written, the sync requested, and still ONE Salesforce row',
+        res === NEW && cometRows(w).length === 2 && sfRows(w).length === 1 && w.notified.join() === 'newClubForm', res);
+  res = run50(w);
+  check('…run once more (FormLog lost): an existing club now, nothing added, still one Salesforce row',
+        res.startsWith('existing club Comet Club (' + A + '): 0 girls added') && sfRows(w).length === 1, res);
+
+  opts = { down: 'ClubRegistry' };
+  w = sheetWorld(baseTabs(), opts);
+  res = run50(w);
+  check('ClubRegistry down: ERROR before anything else is written — no girl, no Salesforce row, no sync request',
+        res === 'ERROR: sheet unavailable' && !cometRows(w).length && !sfRows(w).length && !w.notified.length, res);
+  opts.down = null;
+  res = run50(w);
+  check('…the retry imports it as if the first attempt had not happened',
+        res === NEW && w.tabs.ClubRegistry.length === 2 && sfRows(w).length === 1 && w.notified.join() === 'newClubForm', res);
+
+  console.log('\n  other responses for the club, and late runs');
+  // the re-review's case: enrolled, its Salesforce row done by the auto-sync within the hour, then
+  // the club sent again with one more girl - and that response run a second time
+  const resend = () => newClub(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson', 'Kai Newperson']);
+  const KEY51 = 'ROSTER|w:2026-09-27 14:00:00.000|' + A + '|Comet Club';
+  w = sheetWorld(baseTabs());
+  run50(w);
+  w.tabs['SF Pending'][1][8] = 'done';
+  const r51 = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, resend(), KEY51);
+  const again = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, resend(), KEY51);   // its FormLog row lost: run again
+  check('enrolled (its Salesforce row done), sent again with one more girl, that run again: an existing club both ' +
+        'times, no second Salesforce row',
+        r51.startsWith('existing club Comet Club (' + A + '): 1 girls added') &&
+        again.startsWith('existing club Comet Club (' + A + '): 0 girls added') &&
+        sfRows(w).length === 1 && sfRows(w)[0][8] === 'done' && cometRows(w).length === 3, r51 + ' / ' + again);
+
+  // another response for the club between a failed attempt and its retry
+  const between = [
+    ['the club sent again with one more girl', x => x.ctx.runResponse_('ROSTER', x.sheet(RQ), 51, resend(), KEY51)],
+    ['an ADD on the change form', x => x.ctx.runResponse_('ROSTER', x.sheet(RQ), 52,
+        { [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: A, [HQ.CLUB_PREFIX + A + ')']: 'Comet Club',
+          [HQ.ADD]: 'Kai Newperson' }, 'ROSTER|w:2026-09-27 12:00:00.000|' + A + '|Comet Club')],
+  ];
+  for (const failing of ['SF Pending', 'Roster']) {
+    for (const [label, between_] of between) {
+      opts = { down: failing };
+      w = sheetWorld(baseTabs(), opts);
+      const first = run50(w);
+      opts.down = null;
+      const mid = between_(w);
+      res = run50(w);
+      check(failing + ' failing for the enrolment, then ' + label + ', then the retry: the club on the Roster, ' +
+            'ONE Salesforce row (pending)',
+            first === 'ERROR: sheet unavailable' && !/^ERROR/.test(mid) && !/^ERROR/.test(res) &&
+            cometRows(w).length >= 2 && sfRows(w).length === 1 && sfRows(w)[0][8] === 'pending',
+            mid + ' / ' + res);
+    }
+  }
+
+  // a new-club response run late from the menu, for a club another response enrolled since
+  const since = rosterRows(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson'])
+      .map(r => { r[7] = '2026-09-20'; r[9] = RQ + '!45'; return r; });
+  w = sheetWorld(baseTabs(since));
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 40, comet(), 'ROSTER|w:2026-09-01 09:00:00.000|' + A + '|Comet Club');
+  check('a new-club response sent 09-01 and run late, its club enrolled since by another response: an existing club, ' +
+        'no Salesforce row', res.startsWith('existing club Comet Club (' + A + '): 0 girls added') && !sfRows(w).length, res);
+
+  // SF Pending: only a row still pending counts as the club's (review of A1)
+  const tabsWith = sfOld => Object.assign(baseTabs(), { 'SF Pending': baseTabs()['SF Pending'].concat(sfOld) });
+  const old = status => ['2026-08-30', A, 'Comet Club', 'Africa', 3, 'Mentor Testperson', 'mentor@example.org', '', status, ''];
+  w = sheetWorld(tabsWith([old('done'), old('cancelled by Ryan: enrolled by mistake')]));
+  res = run50(w);
+  check('a new club under a name an old SF Pending row has, that row done (or closed by hand): a row of its own',
+        res === NEW && sfRows(w).length === 3 && sfRows(w)[2][8] === 'pending' && sfRows(w)[2][0] === '2026-09-28',
+        JSON.stringify(sfRows(w).map(r => r[8])));
+  w = sheetWorld(tabsWith([old(' Pending ')]));
+  run50(w);
+  check('…one still pending (any capitals or spacing): no second one — sf_new_clubs.py marks a club\'s ONE pending row',
+        sfRows(w).length === 1);
+
+  console.log('\n  a roster change: after the Roster write nothing fails the run');
+  const change = () => ({ [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: A, [HQ.CLUB_PREFIX + A + ')']: SUN,
+                          [HQ.ADD]: 'Joy Blorptest', [HQ.REMOVE]: 'Mary Zibblewick\nNobody Here',
+                          [HQ.MENTOR_EMAIL_MOD]: 'mentor@example.org' });
+  const CHANGE_KEY = 'ROSTER|w:2026-09-27 11:00:00.000|' + A + '|' + SUN;
+  w = sheetWorld(baseTabs(rosterRows(A, SUN, ['Grace Zibblewick', 'Mary Zibblewick'])), { down: 'ReviewQueue' });
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, change(), CHANGE_KEY);
+  const body = (w.mails[0] || { body: '' }).body.split('\n');
+  check('a roster change, the ReviewQueue down: done, not an ERROR; FormLog says the item is NOT queued; sync requested',
+        res === SUN + ' (' + A + '): 1 added, 0 reactivated, 1 removed, 1 removal(s) did not match, ' +
+                '1 for review NOT on the ReviewQueue (see Audit)' &&
+        w.tabs.Roster.length === 4 && w.notified.join() === 'rosterChangeForm', res);
+  check('…the mentor e-mail lists her as added and the removal as done (never "already on the roster")',
+        w.mails.length === 1 && body[body.indexOf('Added:') + 1] === '  - Joy Blorptest' &&
+        body[body.indexOf('Removed:') + 1] === '  - Mary Zibblewick' && !body.some(l => l.startsWith('Already')),
+        body.join(' / '));
+  w = sheetWorld(baseTabs(rosterRows(A, SUN, ['Grace Zibblewick', 'Mary Zibblewick'])));
+  w.ctx.audit_ = () => { throw new Error('sheet unavailable'); };
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, change(), CHANGE_KEY);
+  check('…Audit failing after the Roster write: not an ERROR either; the item queued, the mentor e-mailed',
+        /^Sunrise Club \(Fixture Partner Alpha\): 1 added, 0 reactivated, 1 removed/.test(res) &&
+        w.tabs.ReviewQueue.length === 2 && w.mails.length === 1 && w.notified.join() === 'rosterChangeForm', res);
+
+  // review A3: the confirmation's failure is recorded as sendHoldNotice_'s is — never the address
+  w = sheetWorld(baseTabs(rosterRows(A, SUN, ['Grace Zibblewick', 'Mary Zibblewick'])), { mailFails: true });
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, change(), CHANGE_KEY);
+  check('the mentor e-mail failing: the change done; Audit names the response row, never the address',
+        /^Sunrise Club \(Fixture Partner Alpha\): 1 added/.test(res) && !w.mails.length &&
+        w.audits.includes('sendChangeConfirmation_: could not e-mail the mentor about ' + RQ + '!51: Invalid email: <e-mail>') &&
+        !/example\.org/.test(w.audits.join('\n')), w.audits.join(' | '));
 }
 
 console.log('\nA new club that may duplicate one on file is held, then released by staff (BACKLOG 11b)');
@@ -1852,11 +2000,7 @@ console.log('\nA new club with a name another partner\'s club has is held until 
 }
 
 console.log('\n  FormLog, the ReviewQueue decision and the menu plan');
-const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'SAME_NAME_ISSUE', 'HOLD_ISSUES', 'RETRY_PREFIXES', 'REVIEW_ISSUES', 'isHeldResult_', 'isRetryResult_',
-                   'heldForReview_', 'indexFormLog_', 'holdDecisions_', 'planMissedRun_', 'missedPreviewText_',
-                   'responseKeyOf_', 'responseDone_', 'sentAtOfKey_', 'sentAtOfStamp_', 'releasedBy_',
-                   'heldClubReviewItem_', 'reviewDigest_', 'closedHoldsText_'],
-                  ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+const hd = loadGs(null, ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'], { strict: true });
 {
   const today = '2026-09-28';
   const tab = 'Roster Form Responses';
@@ -2018,8 +2162,7 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'SAME_NAME_ISSUE', 'HOLD_IS
 console.log('\n  the menu run with held rows (processMissedResponses, runConfirmed_; Google services stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'];
   const tab = 'Roster Form Responses';
   const R = (row, wall, club) => ({ which: 'ROSTER', row, tab, stamp: cellAt(wall, -240), answers: newClubAnswers(club) });
   const HELD = 'HELD: possible duplicate (club name) — ReviewQueue [#…]';
@@ -2027,15 +2170,13 @@ console.log('\n  the menu run with held rows (processMissedResponses, runConfirm
   const fresh = R(49, '2026-09-27 12:00:00.100', 'Foxtrot Club');
   const world = (responses, holds, replies) => {
     const ran = [], audits = [], dialogs = [];
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: { getUi: () => ({
         alert: (title, text, buttons) => { dialogs.push(text); return buttons === 'YES_NO' ? replies.shift() : 'OK'; },
         Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } }) },
       LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
       Utilities: { sleep: () => {} },
     });
-    vm.runInContext(src, ctx);
     const log = held.map(r => ['ROSTER', r.row, ctx.responseKeyOf_('ROSTER', r.stamp, r.answers), HELD]);
     ctx.readMissedSnapshot_ = () => ({ zone: 'America/New_York', sheets: { ROSTER: {} }, responses,
                                        index: ctx.indexFormLog_(log), today: '2026-09-28', holds });
@@ -2237,10 +2378,7 @@ console.log('\n  the offline builder dates in the sheet\'s zone (--tz), never th
 
 // ------------------------------- the Google Forms' wording (backlog 43)
 console.log('\nGoogle Forms wording: the one-time migration and fresh builds (Forms.gs)');
-const fw = loadGs(['Q', 'WORDING', 'WORDING_LABELS', 'feedbackDescription_', 'rosterDescription_',
-                   'rosterDescription2026_08_', 'planFormWording_', 'formWordingPreviewText_',
-                   'formWordingKey_', 'wordingText_'],
-                  ['Config.gs', 'Normalize.gs', 'Forms.gs']);
+const fw = loadGs(null, ['Config.gs', 'Normalize.gs', 'Forms.gs'], { strict: true });
 const WQ = fw.Q, W = fw.WORDING, WL = fw.WORDING_LABELS;
 const FB_URL = 'https://forms.example.org/problem/viewform';
 const RF_URL = 'https://forms.example.org/roster/viewform';
@@ -2410,8 +2548,7 @@ console.log('\n  the plan (pure)');
 console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and Audit stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Forms.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'Forms.gs', 'FormHandlers.gs'];   // withDocumentLock_, installTriggers
   const ItemType = { TEXT: 'TEXT', PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', LIST: 'LIST',
                      MULTIPLE_CHOICE: 'MULTIPLE_CHOICE', PAGE_BREAK: 'PAGE_BREAK' };
   // A fake form exposes only what the generators and the migration may call:
@@ -2461,8 +2598,7 @@ console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and A
       forms[id] = form;
       return form;
     };
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       FormApp: {
         ItemType, PageNavigationType: { SUBMIT: 'SUBMIT', CONTINUE: 'CONTINUE' },
         createTextValidation: () => {
@@ -2488,7 +2624,6 @@ console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and A
       },
       LockService: { getDocumentLock: () => ({ tryLock: () => !opts.lockBusy, releaseLock: () => { locks++; } }) },
     });
-    vm.runInContext(src, ctx);
     ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
     return { ctx, calls, audits, dialogs, forms, props, locks: () => locks, makeForm };
   };
@@ -2699,6 +2834,27 @@ console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and A
   check('…its problem form ends with the device question, then the reply question (e-mail validated)',
         fbTitles.slice(-2).join('|') === WQ.FB_DEVICE + '|' + WQ.FB_EMAIL &&
         w.forms[w.props.FORM_FEEDBACK_ID].items[fbTitles.length - 1]._it.validation.kind === 'email');
+
+  // the document lock busy: the dropdowns are not filled, so stop before the triggers and say so
+  const busyOpts = { props: {}, lockBusy: true };
+  w = world(busyOpts);
+  const ran = [];
+  w.ctx.syncFormChoices = () => { ran.push('syncFormChoices'); return 0; };
+  w.ctx.installTriggers = () => { ran.push('installTriggers'); };
+  w.ctx.linkFormToSheet_ = () => null;
+  w.ctx.createGlowForms();
+  check('"Create the Google Forms" with the lock busy: forms made, no dropdowns, no triggers; it says so and to run it again',
+        !ran.length && !!w.props.FORM_ROSTER_ID && w.dialogs.length === 1 &&
+        /dropdowns are NOT filled and the triggers NOT installed/.test(w.dialogs[0]) &&
+        w.dialogs[0].includes('Run "Create the Google Forms" again') &&
+        w.audits.join() === 'createGlowForms: created: feedback, club roster; stopped before the dropdowns and ' +
+                            'triggers: another GLOW operation held the lock', w.audits.join(' | '));
+  busyOpts.lockBusy = false;
+  const formsBefore = Object.keys(w.forms).length;
+  w.ctx.createGlowForms();
+  check('…run again: the same forms reused, then the dropdowns and the triggers',
+        Object.keys(w.forms).length === formsBefore && ran.join() === 'syncFormChoices,installTriggers' &&
+        w.audits[1] === 'createGlowForms: both forms already existed', ran.join() + ' | ' + w.audits[1]);
 }
 
 console.log('\n  the handler reads the filled-in one of two same-titled columns (FormHandlers.gs)');
@@ -2723,22 +2879,67 @@ console.log('\n  the handler reads the filled-in one of two same-titled columns 
   check('distinct titles: read as before', plainRow.a === 'x' && plainRow.b === '' && plainRow.Timestamp === 't');
 }
 
+console.log('\nMenu entry points: the dropdown update takes the lock, the rebuild asks first (review A2, A4)');
+{
+  const vm = require('vm');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'Forms.gs', 'Menu.gs'];
+  const menuWorld = opts => {
+    const out = { toasts: [], dialogs: [], ran: [], locks: 0, held: false };
+    const ui = { alert: (title, text) => { out.dialogs.push(title + '\n' + text); return opts.reply; },
+                 Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } };
+    const ctx = loadGs.sandbox(gsFiles, {
+      SpreadsheetApp: {
+        getActive: () => ({ toast: msg => out.toasts.push(msg) }),
+        getUi: () => { if (opts.editor) throw new Error('Cannot call SpreadsheetApp.getUi() from this context.'); return ui; },
+      },
+      LockService: { getDocumentLock: () => ({
+        tryLock: () => { if (opts.busy) return false; out.held = true; return true; },
+        releaseLock: () => { out.held = false; out.locks++; } }) },
+    });
+    ctx.syncFormChoices = () => { out.ran.push('syncFormChoices' + (out.held ? ' (locked)' : '')); return 2; };
+    ctx.rebuildRosterLocked_ = () => { out.ran.push('rebuild' + (out.held ? ' (locked)' : '')); return 'summary'; };
+    out.ctx = ctx;
+    return out;
+  };
+  let m = menuWorld({});
+  m.ctx.syncFormChoicesFromMenu();
+  check('"Update form dropdowns from the Roster": syncFormChoices under the document lock, released after',
+        m.ran.join() === 'syncFormChoices (locked)' && m.locks === 1 && !m.held, m.ran.join());
+  m = menuWorld({ busy: true });
+  m.ctx.syncFormChoicesFromMenu();
+  check('…the lock busy: not run, "try again in a minute"', !m.ran.length && /try again in a minute/.test(m.toasts.join()));
+  const menuSrc = fs.readFileSync(path.join(loadGs.GS_DIR, 'Menu.gs'), 'utf8');
+  check('…the menu item names the locked wrapper (the handlers keep calling syncFormChoices, under their own lock)',
+        menuSrc.includes("'Update form dropdowns from the Roster', 'syncFormChoicesFromMenu'") &&
+        !/'syncFormChoices'/.test(menuSrc));
+
+  for (const reply of ['NO', 'CLOSE']) {
+    m = menuWorld({ reply });
+    const r = m.ctx.rebuildRosterFromResponses();
+    check('"Rebuild roster from enrollment responses" answered ' + reply + ': nothing runs, the lock is never taken',
+          r === undefined && !m.ran.length && !m.locks && m.dialogs.length === 1);
+  }
+  const warning = m.dialogs[0].replace(/\s+/g, ' ');
+  check('…the question says "not after launch" and what a rebuild undoes',
+        warning.startsWith('Rebuild the roster from the enrollment responses? Not after launch.') &&
+        warning.includes('puts back every girl removed through the Club Roster Form') &&
+        warning.includes('renamed or moved to another partner') && warning.includes('new ids') &&
+        warning.endsWith('Rebuild anyway? (No changes nothing.)'), warning);
+  m = menuWorld({ reply: 'YES' });
+  check('…YES: the rebuild runs, under the lock', m.ctx.rebuildRosterFromResponses() === 'summary' &&
+        m.ran.join() === 'rebuild (locked)' && m.locks === 1);
+  m = menuWorld({ editor: true });
+  let threw = '';
+  try { m.ctx.rebuildRosterFromResponses(); } catch (e) { threw = e.message; }
+  check('…from the script editor (no dialogs): refused, saying where to run it; nothing runs',
+        /^Run this from the sheet \(GLOW → Rebuild roster/.test(threw) && !m.ran.length, threw);
+}
+
 // --------------------------------------------- real data, if available
 const csvPath = process.env.CSV || path.join(REPO, 'data', 'enrollment_2026-08-24.csv');
 if (fs.existsSync(csvPath) && path.basename(csvPath) === 'enrollment_2026-08-24.csv') {
   console.log('\nreal CSV — planClub_ over every club matches a fresh mint');
-  const text = fs.readFileSync(csvPath, 'utf8').replace(/^﻿/, '');
-  const rows = [];
-  { let row = [], field = '', q = false;
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (q) { if (c === '"' && text[i + 1] === '"') { field += '"'; i++; } else if (c === '"') q = false; else field += c; }
-      else if (c === '"') q = true;
-      else if (c === ',') { row.push(field); field = ''; }
-      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-      else if (c !== '\r') field += c;
-    }
-    if (field || row.length) { row.push(field); rows.push(row); } }
+  const rows = readCsv(csvPath);
   const hdr = rows[0].map(h => h.toLowerCase());
   const iP = hdr.findIndex(h => h.includes('partner organization name')),
         iC = hdr.findIndex(h => h.includes('club name')),
@@ -2765,5 +2966,6 @@ if (fs.existsSync(csvPath) && path.basename(csvPath) === 'enrollment_2026-08-24.
   check('16 duplicate-name clubs flagged', dupIssues === 16, String(dupIssues));
 }
 
-console.log('\n' + (failures ? failures + ' FAILURES' : 'ALL CHECKS PASSED'));
-process.exit(failures ? 1 : 0);
+check('no Apps Script code the tests ran made an undeclared global', !loadGs.strayGlobals().length,
+      loadGs.strayGlobals().join(', '));
+finish();
