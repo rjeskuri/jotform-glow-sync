@@ -142,6 +142,15 @@ class Hooks(unittest.TestCase):
         "curl -X PATCH https://example.my.salesforce.com/services/data/v60.0/sobjects/Account/001x -d @a.json",
         "curl https://login.salesforce.com/services/oauth2/token -d grant_type=client_credentials",
         "python3 -m sf_dupes merge --rehearse", "cd tools && python3 sf_dupes.py merge --rehearse",
+        # the REST and GraphQL API through the CLI, a relative path (found 2026-10-09)
+        "sf api request rest '/services/data/v60.0/sobjects/Account/001x' -X PATCH --body '{}'",
+        "sf api request rest /services/data/v60.0/sobjects/Account --method POST --body @account.json",
+        "sf api request rest /services/data/v60.0/sobjects/Account/001x -XDELETE -o glow",
+        "sf api request rest /services/data/v60.0/sobjects/Account/001x --method=delete",
+        "sf api request rest /services/data/v60.0/sobjects/Account -b '{\"Name\": \"X\"}'",
+        "sf api request rest --file request.json -o glow", "sf api request rest -f request.json",
+        "sfdx api request rest /services/data/v60.0/sobjects/Account/001x -X PUT -b @a.json",
+        "sf api request graphql --body '{\"query\": \"mutation { x }\"}'", "sf api request graphql --body @query.txt",
     ]
 
     def test_every_live_command_is_blocked_and_logged(self):
@@ -182,6 +191,9 @@ class Hooks(unittest.TestCase):
                           "sf org list", "sf data query -q 'SELECT Id FROM Account' -o glow",
                           "sf project deploy report --job-id 0Af000000000001", "sfdx force:org:list",
                           "sf project retrieve start -m ApexClass:GlowSync", "sfdx force:data:soql:query -q 'SELECT Id FROM Account'",
+                          "sf api request rest '/services/data/v60.0/query?q=SELECT+Id+FROM+Account' -o glow",
+                          "sf api request rest /services/data/v60.0/limits", "sf api request rest /services/data/v60.0/ -X GET",
+                          "sf api request rest /services/data/v60.0/ --stream-to-file out.txt --include",
                           "python3 tools/sf_dupes.py check",
                           # the startup files read, or a copy of one written
                           "cat ~/.zshrc", "grep -n PATH ~/.zshrc", "tail -5 ~/.bash_profile", "ls -la ~/.zshrc",

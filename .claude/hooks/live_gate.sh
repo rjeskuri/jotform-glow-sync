@@ -61,6 +61,17 @@ if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]" \
     && printf '%s' "$FLAT" | grep -Eiq '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE)|-[fF]|--field|--raw-field|--input)'; then
   MATCH="gh api write under actions/ or to dispatches"
 fi
+# sf api request: any GraphQL call (a mutation writes), and a REST call that writes - a method
+# other than GET (the CLI offers GET POST PUT PATCH HEAD DELETE OPTIONS TRACE), a body (-b,
+# --body) or a request file (-f, --file: it carries its own method and body). A relative path
+# (/services/data/...) does not name the host, so the URL pattern above does not see it.
+if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
+  MATCH="sf api request graphql"
+fi
+if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${SF}api[[:space:]]+request[[:space:]]+rest" \
+    && printf '%s' "$FLAT" | grep -Eiq '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file)'; then
+  MATCH="sf api request rest that writes"
+fi
 [ -z "$MATCH" ] && exit 0
 
 # read-only and alone: a live flag it mentions is text, not an action

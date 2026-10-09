@@ -67,7 +67,7 @@ description: Salesforce for this project - what lives there (attendance batches 
 | `sf project deploy validate`, `start`, `quick` | Metadata | Hook (check-only too) | Redeploy the `before/` retrieve; a `destructiveChanges.xml` for new components |
 | `sf apex run` (the rolled-back proof of a processor change) | Inserts inside a transaction that ends in `Database.rollback` | Hook; the script pasted in full first | Nothing left, unless the script misses its rollback call |
 | `sf data create`, `update`, `delete`, `upsert`, `import` | Records | Hook | Prefer the write connector (one record) or a tool with a ledger |
-| `sf api request rest` with a method other than GET | Anything | **Not gated by the hook** (a relative path is not seen) | As for the record or metadata it changed |
+| `sf api request rest` with a method other than GET, a body (`-b`/`--body`) or a request file (`-f`/`--file`); `sf api request graphql` | Anything | Hook (a GET without a body or file passes: a read) | As for the record or metadata it changed |
 
 `SF_SYNC` is `off` (or unset: no login), `plan` (reads, checks, and turns every account it would
 create into an ATTENTION item with the exact body) or `apply`. `gh variable set SF_SYNC …` and
