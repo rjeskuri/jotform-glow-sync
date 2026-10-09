@@ -8,19 +8,13 @@
 const fs = require('fs');
 const path = require('path');
 const loadGs = require('./load_gs');
+const { check, finish } = require('./helpers/js/check');
 
-const gs = loadGs(['buildDispatchRequest_', 'DISPATCH_WORKFLOW', 'PROP', 'TAB'],
-                  ['Config.gs', 'Dispatch.gs']);
+const gs = loadGs(null, ['Config.gs', 'Dispatch.gs'], { strict: true });
 // the repository_dispatch event a sheet sent before the switch to workflow_dispatch; the
 // workflow still takes it (no .gs code sends it any more)
 const OLD_DISPATCH_EVENT = 'roster-changed';
 const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'auto-sync.yml'), 'utf8');
-
-let failures = 0;
-function check(label, cond, detail) {
-  console.log((cond ? '  ok   ' : '  FAIL ') + label + (detail ? ' :: ' + detail : ''));
-  if (!cond) failures++;
-}
 
 const req = gs.buildDispatchRequest_('example-org/jotform-glow-sync', 'TOKEN-VALUE', 'rosterChangeForm',
                                      '2026-09-01 10:15:00');
@@ -70,5 +64,5 @@ check('--apply-salesforce only with --apply and SF_SYNC=apply',
       workflow.split('--apply-salesforce').length === 2 &&
       /\n {14}args\+=\(--apply\)\n {14}if \[ "\$SF_SYNC" = "apply" \]; then args\+=\(--apply-salesforce\); fi\n {12}fi\n {10}fi\n/.test(workflow));
 
-console.log('\n' + (failures ? failures + ' FAILURES' : 'ALL CHECKS PASSED'));
-process.exit(failures ? 1 : 0);
+check('no Apps Script code made an undeclared global', !loadGs.strayGlobals().length, loadGs.strayGlobals().join(', '));
+finish();

@@ -12,17 +12,11 @@
 const fs = require('fs');
 const path = require('path');
 const loadGs = require('./load_gs');
+const { check, finish } = require('./helpers/js/check');
+const { readCsv } = require('./helpers/js/csv');
 
 const REPO = path.resolve(__dirname, '..');
-const gs = loadGs(['ROSTER_COLS', 'STATUS', 'tidy_', 'key_', 'asciiCode_', 'parseRoster_', 'lastName_', 'clubCode_',
-                   'mintGirlId_', 'planClub_', 'planModification_', 'closestNames_',
-                   'chooseRegion_', 'canonicalRegion_', 'derivedPartnerRegions_', 'REGIONS']);
-
-let failures = 0;
-function check(label, cond, detail) {
-  console.log((cond ? '  ok   ' : '  FAIL ') + label + (detail ? ' :: ' + detail : ''));
-  if (!cond) failures++;
-}
+const gs = loadGs(null, null, { strict: true });
 const col = name => gs.ROSTER_COLS.indexOf(name);
 const rowObj = (arr, sheetRow) => {
   const o = {}; gs.ROSTER_COLS.forEach((c, i) => { o[c] = arr[i]; }); o._sheetRow = sheetRow; return o;
@@ -239,11 +233,7 @@ check('derived map keys are key_-normalized, values non-empty', (function () {
 // FormHandlers.gs calls Google services only inside functions, so its pure
 // helpers load next to Config.gs and Normalize.gs (as dispatch_test.js does).
 console.log('\nFormLog keys and "Process any missed form responses" (FormHandlers.gs)');
-const fh = loadGs(['Q', 'OTHER_PARTNER', 'MISSED', 'RETRY_PREFIXES', 'RESPONSE_STAMP_FORMAT', 'missedOrder_',
-                   'isRetryResult_', 'responseTail_', 'responseKeyOf_', 'sameCellAcrossZones_', 'indexFormLog_',
-                   'responseDone_', 'planMissedRun_', 'missedPreviewText_', 'previewError_',
-                   'daysBetween_'],
-                  ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']);
+const fh = loadGs(null, ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'], { strict: true });
 const FQ = fh.Q;
 const ORG = 'Test Partner Org';
 // A Timestamp cell whose text is `wall`, read while the spreadsheet is at UTC+offsetMin:
@@ -457,20 +447,17 @@ console.log('\n  held rows, failed old rows');
 console.log('\n  the menu run itself (processMissedResponses; Google services stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']   // Roster.gs: withDocumentLock_
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'];   // Roster.gs: withDocumentLock_
   // Returns what ran and what Audit got, answering the YES/NO dialogs in turn.
   const runMenu = (responses, log, replies, lockBusy) => {
     const ran = [], audits = [], dialogs = [];
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: { getUi: () => ({
         alert: (title, text, buttons) => { dialogs.push(text); return buttons === 'YES_NO' ? replies.shift() : 'OK'; },
         Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } }) },
       LockService: { getDocumentLock: () => ({ tryLock: () => !lockBusy, releaseLock: () => {} }) },
       Utilities: { sleep: () => {} },
     });
-    vm.runInContext(src, ctx);
     // function declarations are properties of the vm's global object, so these replace them
     ctx.readMissedSnapshot_ = () => ({ zone: 'America/New_York', sheets: {}, responses,
                                        index: ctx.indexFormLog_(log), today: '2026-09-27' });
@@ -519,10 +506,7 @@ check('menu limits: 240 s budget (6-minute limit), 30 s lock wait (< the trigger
 
 // ------------------ problem reports that are roster changes; the weekly e-mail
 console.log('\nProblem reports → ReviewQueue, and the weekly e-mail (FormHandlers.gs)');
-const pr = loadGs(['Q', 'TAB', 'REVIEW_ISSUES', 'OTHER_ISSUE', 'DIGEST', 'looksLikeRosterChange_',
-                   'feedbackReviewItem_', 'sentDayOfKey_', 'responseRowTag_', 'reviewDigest_',
-                   'sfPendingLines_'],
-                  ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']);
+const pr = loadGs(null, ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'], { strict: true });
 const PQ = pr.Q;
 const CANARY = 'Hope Fennwhistle';   // a fictional girl: must never reach an e-mail, a digest or Audit
 const report = (form, what, extra) => Object.assign({ [PQ.FB_FORM]: form, [PQ.FB_WHAT]: what }, extra || {});
@@ -641,8 +625,7 @@ console.log('\n  the weekly e-mail\'s ReviewQueue section');
 console.log('\n  the handler and the weekly e-mail, run with Google services stubbed');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs'];
   // A spreadsheet of plain arrays: tabs[name] = rows (row 1 = header).
   const world = (opts) => {
     const tabs = {}, mails = [], audits = [];
@@ -663,8 +646,7 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
       }),
       setFrozenRows: () => {},
     });
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
                                              insertSheet: n => { tabs[n] = []; return sheet(n); },
                                              getSpreadsheetTimeZone: () => 'America/New_York' }) },
@@ -672,7 +654,6 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
       MailApp: { sendEmail: o => { if (opts.mailFails > 0) { opts.mailFails--; throw new Error('quota'); } mails.push(o); } },
       Utilities: { formatDate: d => d.toISOString().slice(0, 10) },
     });
-    vm.runInContext(src, ctx);
     ctx.today_ = () => '2026-09-28';
     ctx.now_ = () => '2026-09-28 09:00:00';
     ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
@@ -826,8 +807,7 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
 console.log('\n  the replay guard in the Club Roster Form handlers (Google services stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs', 'Dispatch.gs'];
   // A spreadsheet of plain arrays (tabs[name] = rows, row 1 = header) with what the handlers call.
   const world = (zone, jotform) => {       // jotform: the partner's Partners-tab mark ('' = on the forms)
     const tabs = {}, mails = [], audits = [], formLog = [], syncs = [];
@@ -850,8 +830,7 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
       appendRow: row => { tabs[name].push(row.slice()); },
       setFrozenRows: () => {},
     });
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
                                              insertSheet: n => { tabs[n] = []; return sheet(n); },
                                              getSpreadsheetTimeZone: () => zone }) },
@@ -862,7 +841,6 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
         return new Intl.DateTimeFormat('en-CA', { timeZone: z, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
       } },
     });
-    vm.runInContext(src, ctx);
     ctx.today_ = () => '2026-09-28';
     ctx.now_ = () => '2026-09-28 09:00:00';
     ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
@@ -1024,8 +1002,7 @@ console.log('\n  the replay guard in the Club Roster Form handlers (Google servi
 }
 
 console.log('\nThe duplicate-club guard (RosterOps.gs newClubHoldReasons_, BACKLOG 11b)');
-const dg = loadGs(['DUP_GUARD', 'STATUS', 'newClubHoldReasons_', 'clubNamesClose_', 'partnersClose_', 'matchWords_',
-                   'numberTag_', 'similarity_']);
+const dg = loadGs(null, null, { strict: true });
 {
   console.log('\n  similarity_ = Python difflib.SequenceMatcher(None, a, b).ratio()');
   // values from Python 3 difflib, pinned
@@ -1360,8 +1337,9 @@ const nz = loadGs(['sheetText_', 'parseFormRoster_', 'parseRoster_', 'foldKey_',
         nz.foldKey_('G.L.O.W') === 'g.l.o.w');
 }
 
-const HANDLER_FILES = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs'];
-const handlerSrc = HANDLER_FILES.map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+// Dispatch.gs: tryNotifySync_, which sheetWorld replaces
+const HANDLER_FILES = ['Config.gs', 'Normalize.gs', 'Ids.gs', 'Regions.gs', 'RosterOps.gs', 'Roster.gs', 'FormHandlers.gs',
+                       'Dispatch.gs'];
 /**
  * A spreadsheet of plain arrays (tabs[name] = rows, row 1 = header) with the
  * real handler code loaded over it. Records e-mails, Audit, FormLog, Jotform
@@ -1395,8 +1373,7 @@ function sheetWorld(tabs, opts) {
     appendRow: row => { guard(name); tabs[name].push(row.slice()); },
     setFrozenRows: () => {},
   });
-  const ctx = vm.createContext({
-    console,
+  const ctx = loadGs.sandbox(HANDLER_FILES, {
     SpreadsheetApp: { getActive: () => ({ getSheetByName: n => (tabs[n] ? sheet(n) : null),
                                            insertSheet: n => { tabs[n] = []; return sheet(n); },
                                            getSpreadsheetTimeZone: () => 'America/New_York' }) },
@@ -1404,7 +1381,6 @@ function sheetWorld(tabs, opts) {
     // a failing send names its recipient, as MailApp's "Invalid email: …" does
     MailApp: { sendEmail: o => { if (opts.mailFails) throw new Error('Invalid email: ' + o.to); out.mails.push(o); } },
   });
-  vm.runInContext(handlerSrc, ctx);
   ctx.today_ = () => '2026-09-28';
   ctx.now_ = () => '2026-09-28 09:00:00';
   ctx.audit_ = (action, detail) => out.audits.push(action + ': ' + detail);
@@ -1933,11 +1909,7 @@ console.log('\nA new club with a name another partner\'s club has is held until 
 }
 
 console.log('\n  FormLog, the ReviewQueue decision and the menu plan');
-const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'SAME_NAME_ISSUE', 'HOLD_ISSUES', 'RETRY_PREFIXES', 'REVIEW_ISSUES', 'isHeldResult_', 'isRetryResult_',
-                   'heldForReview_', 'indexFormLog_', 'holdDecisions_', 'planMissedRun_', 'missedPreviewText_',
-                   'responseKeyOf_', 'responseDone_', 'sentAtOfKey_', 'sentAtOfStamp_', 'releasedBy_',
-                   'heldClubReviewItem_', 'reviewDigest_', 'closedHoldsText_'],
-                  ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']);
+const hd = loadGs(null, ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'], { strict: true });
 {
   const today = '2026-09-28';
   const tab = 'Roster Form Responses';
@@ -2099,8 +2071,7 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'SAME_NAME_ISSUE', 'HOLD_IS
 console.log('\n  the menu run with held rows (processMissedResponses, runConfirmed_; Google services stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs'];
   const tab = 'Roster Form Responses';
   const R = (row, wall, club) => ({ which: 'ROSTER', row, tab, stamp: cellAt(wall, -240), answers: newClubAnswers(club) });
   const HELD = 'HELD: possible duplicate (club name) — ReviewQueue [#…]';
@@ -2108,15 +2079,13 @@ console.log('\n  the menu run with held rows (processMissedResponses, runConfirm
   const fresh = R(49, '2026-09-27 12:00:00.100', 'Foxtrot Club');
   const world = (responses, holds, replies) => {
     const ran = [], audits = [], dialogs = [];
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: { getUi: () => ({
         alert: (title, text, buttons) => { dialogs.push(text); return buttons === 'YES_NO' ? replies.shift() : 'OK'; },
         Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } }) },
       LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
       Utilities: { sleep: () => {} },
     });
-    vm.runInContext(src, ctx);
     const log = held.map(r => ['ROSTER', r.row, ctx.responseKeyOf_('ROSTER', r.stamp, r.answers), HELD]);
     ctx.readMissedSnapshot_ = () => ({ zone: 'America/New_York', sheets: { ROSTER: {} }, responses,
                                        index: ctx.indexFormLog_(log), today: '2026-09-28', holds });
@@ -2318,10 +2287,7 @@ console.log('\n  the offline builder dates in the sheet\'s zone (--tz), never th
 
 // ------------------------------- the Google Forms' wording (backlog 43)
 console.log('\nGoogle Forms wording: the one-time migration and fresh builds (Forms.gs)');
-const fw = loadGs(['Q', 'WORDING', 'WORDING_LABELS', 'feedbackDescription_', 'rosterDescription_',
-                   'rosterDescription2026_08_', 'planFormWording_', 'formWordingPreviewText_',
-                   'formWordingKey_', 'wordingText_'],
-                  ['Config.gs', 'Normalize.gs', 'Forms.gs']);
+const fw = loadGs(null, ['Config.gs', 'Normalize.gs', 'Forms.gs'], { strict: true });
 const WQ = fw.Q, W = fw.WORDING, WL = fw.WORDING_LABELS;
 const FB_URL = 'https://forms.example.org/problem/viewform';
 const RF_URL = 'https://forms.example.org/roster/viewform';
@@ -2491,8 +2457,7 @@ console.log('\n  the plan (pure)');
 console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and Audit stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'Forms.gs']   // Roster.gs: withDocumentLock_
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'Forms.gs', 'FormHandlers.gs'];   // withDocumentLock_, installTriggers
   const ItemType = { TEXT: 'TEXT', PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', LIST: 'LIST',
                      MULTIPLE_CHOICE: 'MULTIPLE_CHOICE', PAGE_BREAK: 'PAGE_BREAK' };
   // A fake form exposes only what the generators and the migration may call:
@@ -2542,8 +2507,7 @@ console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and A
       forms[id] = form;
       return form;
     };
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       FormApp: {
         ItemType, PageNavigationType: { SUBMIT: 'SUBMIT', CONTINUE: 'CONTINUE' },
         createTextValidation: () => {
@@ -2569,7 +2533,6 @@ console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and A
       },
       LockService: { getDocumentLock: () => ({ tryLock: () => !opts.lockBusy, releaseLock: () => { locks++; } }) },
     });
-    vm.runInContext(src, ctx);
     ctx.audit_ = (action, detail) => audits.push(action + ': ' + detail);
     return { ctx, calls, audits, dialogs, forms, props, locks: () => locks, makeForm };
   };
@@ -2807,14 +2770,12 @@ console.log('\n  the handler reads the filled-in one of two same-titled columns 
 console.log('\nMenu entry points: the dropdown update takes the lock, the rebuild asks first (review A2, A4)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'Forms.gs', 'Menu.gs']
-      .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
+  const gsFiles = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'Forms.gs', 'Menu.gs'];
   const menuWorld = opts => {
     const out = { toasts: [], dialogs: [], ran: [], locks: 0, held: false };
     const ui = { alert: (title, text) => { out.dialogs.push(title + '\n' + text); return opts.reply; },
                  Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } };
-    const ctx = vm.createContext({
-      console,
+    const ctx = loadGs.sandbox(gsFiles, {
       SpreadsheetApp: {
         getActive: () => ({ toast: msg => out.toasts.push(msg) }),
         getUi: () => { if (opts.editor) throw new Error('Cannot call SpreadsheetApp.getUi() from this context.'); return ui; },
@@ -2823,7 +2784,6 @@ console.log('\nMenu entry points: the dropdown update takes the lock, the rebuil
         tryLock: () => { if (opts.busy) return false; out.held = true; return true; },
         releaseLock: () => { out.held = false; out.locks++; } }) },
     });
-    vm.runInContext(src, ctx);
     ctx.syncFormChoices = () => { out.ran.push('syncFormChoices' + (out.held ? ' (locked)' : '')); return 2; };
     ctx.rebuildRosterLocked_ = () => { out.ran.push('rebuild' + (out.held ? ' (locked)' : '')); return 'summary'; };
     out.ctx = ctx;
@@ -2867,18 +2827,7 @@ console.log('\nMenu entry points: the dropdown update takes the lock, the rebuil
 const csvPath = process.env.CSV || path.join(REPO, 'data', 'enrollment_2026-08-24.csv');
 if (fs.existsSync(csvPath) && path.basename(csvPath) === 'enrollment_2026-08-24.csv') {
   console.log('\nreal CSV — planClub_ over every club matches a fresh mint');
-  const text = fs.readFileSync(csvPath, 'utf8').replace(/^﻿/, '');
-  const rows = [];
-  { let row = [], field = '', q = false;
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (q) { if (c === '"' && text[i + 1] === '"') { field += '"'; i++; } else if (c === '"') q = false; else field += c; }
-      else if (c === '"') q = true;
-      else if (c === ',') { row.push(field); field = ''; }
-      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-      else if (c !== '\r') field += c;
-    }
-    if (field || row.length) { row.push(field); rows.push(row); } }
+  const rows = readCsv(csvPath);
   const hdr = rows[0].map(h => h.toLowerCase());
   const iP = hdr.findIndex(h => h.includes('partner organization name')),
         iC = hdr.findIndex(h => h.includes('club name')),
@@ -2905,5 +2854,6 @@ if (fs.existsSync(csvPath) && path.basename(csvPath) === 'enrollment_2026-08-24.
   check('16 duplicate-name clubs flagged', dupIssues === 16, String(dupIssues));
 }
 
-console.log('\n' + (failures ? failures + ' FAILURES' : 'ALL CHECKS PASSED'));
-process.exit(failures ? 1 : 0);
+check('no Apps Script code the tests ran made an undeclared global', !loadGs.strayGlobals().length,
+      loadGs.strayGlobals().join(', '));
+finish();

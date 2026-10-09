@@ -77,10 +77,9 @@ const TODAY = at.year + '-' + at.month + '-' + at.day;
 const NOW = TODAY + ' ' + at.hour + ':' + at.minute + ':' + at.second;
 
 // ------------------------------------------------ load the real .gs code
-// Only the pure-logic files; Roster.gs/Menu.gs call SpreadsheetApp.
-const gs = require('../test/load_gs')(['TAB', 'ROSTER_COLS', 'RESPONSE_COLS', 'STATUS',
-  'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'tidy_', 'key_', 'clubKey_', 'asciiCode_', 'parseRoster_',
-  'lastName_', 'clubCode_', 'mintGirlId_', 'planClub_']);
+// Every top-level name of the pure-logic files; Roster.gs/Menu.gs call SpreadsheetApp.
+const gs = require('../test/load_gs')();
+const { readCsv } = require('../test/helpers/js/csv');
 
 const REVIEW_COLS = ['raised', 'issue', 'partner', 'club', 'detail', 'resolved'];
 // keep in step with Roster.gs PARTNER_COLS and glow/sync.py (the parity test compares them)
@@ -89,23 +88,6 @@ const CLUB_COLS = ['club_code', 'partner', 'club', 'created'];
 const AUDIT_COLS = ['when', 'action', 'detail'];
 
 // ------------------------------------------------------------- CSV helpers
-function parseCsv(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (c === '"') inQuotes = false;
-      else field += c;
-    } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (c !== '\r') field += c;
-  }
-  if (field || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
 function csvCell(v) {
   const s = v == null ? '' : String(v);
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -114,22 +96,19 @@ function writeCsv(file, header, rows) {
   const lines = [header, ...rows].map(r => r.map(csvCell).join(','));
   fs.writeFileSync(file, lines.join('\n') + '\n');
 }
-function readCsvFile(file) {
-  return parseCsv(fs.readFileSync(file, 'utf8').replace(/^﻿/, ''));
-}
 function readExisting(name, cols) {
   // rows of an existing tab as arrays padded to `cols`, or [] if absent
   if (!existingDir) return [];
   const file = path.join(existingDir, name + '.csv');
   if (!fs.existsSync(file)) return [];
-  return readCsvFile(file).slice(1).map(r => {
+  return readCsv(file).slice(1).map(r => {
     const out = cols.map((_, j) => (r[j] == null ? '' : r[j]));
     return out;
   }).filter(r => r.some(v => String(v).trim()));
 }
 
 // ------------------------------------- readResponses_ (mirror of Normalize.gs)
-const csv = readCsvFile(csvPath);
+const csv = readCsv(csvPath);
 const header = csv[0].map(h => String(h).toLowerCase());
 function col(fragment) {
   const i = header.findIndex(h => h.includes(fragment));
