@@ -765,16 +765,23 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
 
 /**
  * Append a new club to SF Pending (the Monday e-mail's Salesforce list) unless
- * a row for the same partner and club is there already, whatever its status:
- * a retry of the response that added it adds no second one. True if appended.
+ * the same partner and club has a row there that is still 'pending': a retry
+ * of the response that added it adds no second one, and tools/sf_new_clubs.py,
+ * which marks a club's ONE pending row done, never finds two. A row with any
+ * other status (done, or closed by hand) does not count: a club enrolled under
+ * a name an old, closed row has gets a row of its own. The cost: a re-run that
+ * comes after its own row was marked done adds a second one - possible only if
+ * the run still failed after writing the row (a failure handler's own Audit
+ * write failing too) or FormLog lost its result. True if appended.
  */
 function sfPendingAdd_(ss, row) {
   const sheet = ensureTab_(ss, TAB.SF_PENDING, SF_PENDING_COLS);
   const p = SF_PENDING_COLS.indexOf('partner'), c = SF_PENDING_COLS.indexOf('club');
+  const s = SF_PENDING_COLS.indexOf('status');
   const ck = clubKey_(row[p], row[c]);
   const onFile = sheet.getLastRow() > 1 &&
       sheet.getRange(2, 1, sheet.getLastRow() - 1, SF_PENDING_COLS.length).getValues()
-          .some(function (r) { return clubKey_(r[p], r[c]) === ck; });
+          .some(function (r) { return clubKey_(r[p], r[c]) === ck && key_(r[s]) === 'pending'; });
   if (onFile) return false;
   sheet.appendRow(row);
   return true;

@@ -1539,7 +1539,7 @@ console.log('\nA Sheets failure after the Roster write: Salesforce, the sync req
         w.tabs.Roster.length === 3 && sfRows(w).length === 1 && sfRows(w)[0][4] === 2 &&
         w.notified.join() === 'newClubForm,newClubForm', res);
   w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-  check('…run once more (FormLog lost): still one Salesforce row for the club',
+  check('…run once more (FormLog lost): still one Salesforce row for the club (its row is still pending)',
         sfRows(w).length === 1);
 
   // another response for the club lands between the failed attempt and its retry (review of A1)
@@ -1564,6 +1564,19 @@ console.log('\nA Sheets failure after the Roster write: Salesforce, the sync req
           res.startsWith('new club Comet Club (' + A + '): 0 girls added') && sfRows(w).length === 1 &&
           sfRows(w)[0][4] === 2, mid + ' / ' + res);
   }
+
+  // SF Pending: only a row still pending counts as the club's (review of A1)
+  const tabsWith = sfOld => Object.assign(baseTabs(), { 'SF Pending': baseTabs()['SF Pending'].concat(sfOld) });
+  const old = status => ['2026-08-30', A, 'Comet Club', 'Africa', 3, 'Mentor Testperson', 'mentor@example.org', '', status, ''];
+  w = sheetWorld(tabsWith([old('done'), old('cancelled by Ryan: enrolled by mistake')]));
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('a new club under a name an old SF Pending row has, that row done (or closed by hand): a row of its own',
+        /^new club Comet Club/.test(res) && sfRows(w).length === 3 && sfRows(w)[2][8] === 'pending' &&
+        sfRows(w)[2][0] === '2026-09-28', JSON.stringify(sfRows(w).map(r => r[8])));
+  w = sheetWorld(tabsWith([old(' Pending ')]));
+  w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  check('…one still pending (any capitals or spacing): no second one — sf_new_clubs.py marks a club\'s ONE pending row',
+        sfRows(w).length === 1);
 
   w = sheetWorld(baseTabs());
   w.ctx.audit_ = () => { throw new Error('sheet unavailable'); };
