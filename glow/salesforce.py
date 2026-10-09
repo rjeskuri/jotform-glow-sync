@@ -11,11 +11,21 @@ The token stays in memory and goes to curl in a config on stdin: never on a comm
 or on disk. curl ignores any curlrc (-q) and any proxy, and follows no redirect, so the
 Authorization header never reaches another host. A refusal carries Salesforce's error code and
 short description, never a response body.
+
+Beside the client, what every Salesforce tool relies on: the org's record types and the pilot
+accounts on hold, how the attendance processor compares a submitted club name with an Account's
+(sf_match), which names may hide nothing (has_invisible), and the partner map
+(glow/sf_partners.csv, read_partners).
 """
+import csv
 import json
+import os
 import re
 import subprocess
+import unicodedata
 import urllib.parse
+
+from .text import key
 
 API = "v67.0"
 INSTANCE = "https://globalglow.my.salesforce.com"      # production (read 2026-10-06)
@@ -24,6 +34,18 @@ NEXT_PAGE_ALL = re.compile(r"/services/data/v\d+\.\d+/query(?:All)?/[A-Za-z0-9_-
 PLAIN_HOST = re.compile(r"https://[A-Za-z0-9.-]+(:\d+)?")
 UNSAFE = re.compile(r'[\x00-\x20\x7f"\\]')              # nothing a curl config line could misread
 SAY = re.compile(r"[^A-Za-z0-9 _.,:;'()/-]")            # what of an OAuth error may be repeated
+
+# ---- the org (read 2026-09-30)
+CLUB_RECORD_TYPE = "012RP000002uklNYAQ"      # RecordType 'Club' on Account
+PARTNER_RECORD_TYPE = "0126A000000cdYFQAY"   # 'Household Account': every partner account has it
+# the two pilot Club accounts Ryan is checking: never a parent, never a link target
+ON_HOLD_ACCOUNTS = {"001RP00000nMZXfYAO", "001RP00000mgVVMYA2"}
+ACCOUNT_ID = re.compile(r"001[A-Za-z0-9]{15}")          # an Account's id as the API gives it: 18 characters
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PARTNERS = os.path.join(REPO, "glow", "sf_partners.csv")
+PARTNER_COLS = ["partner", "sf_account_id", "sf_account_name"]
+# characters that render as nothing or as a space but are not one, beyond the Unicode categories
+FILLERS = {0x034F, 0x115F, 0x1160, 0x2800, 0x3164, 0xFFA0, 0xFFFC} | set(range(0xFE00, 0xFE10))
 
 
 class Refused(Exception):
@@ -195,3 +217,71 @@ class Org:
                             'header = "Content-Type: application/x-www-form-urlencoded"',
                             f"data = {config_value(urllib.parse.urlencode({'token': self.token}))}"])
         self.token = None
+
+
+# ---- how the attendance processor compares a submitted name with an Account's ---------------------
+def apex_trim(s):
+    """Java String.trim(): every character up to U+0020 off both ends, nothing else."""
+    start, end = 0, len(s)
+    while start < end and s[start] <= " ":
+        start += 1
+    while end > start and s[end - 1] <= " ":
+        end -= 1
+    return s[start:end]
+
+
+def _upper(c):
+    u = c.upper()
+    return u if len(u) == 1 else c       # Character.toUpperCase maps one character to one
+
+
+SIMPLE_LOWER = {"\u0130": "i"}     # Java's one-to-one mapping where Python's full one gives two characters
+
+
+def _lower(c):
+    u = c.lower()
+    return u if len(u) == 1 else SIMPLE_LOWER.get(c, c)
+
+
+def sf_match(submitted, name):
+    """`submitted.trim().equalsIgnoreCase(name)` as the Apex processor runs it: question 5 is
+    trimmed, the Account's name is not; one character never becomes two ('Straße' is not
+    'STRASSE'), and a no-break space is neither a space nor trimmed."""
+    a, b = apex_trim(submitted or ""), name or ""
+    if len(a) != len(b):
+        return False
+    for x, y in zip(a, b):
+        ux, uy = _upper(x), _upper(y)
+        if x != y and ux != uy and _lower(ux) != _lower(uy):
+            return False
+    return True
+
+
+# ---- names ----------------------------------------------------------------------------------------
+def has_invisible(name):
+    """Control, format, private, unassigned, line/paragraph separators, any space that is not
+    the plain one, and the invisible fillers: none of them may hide in a name."""
+    for c in name:
+        cat = unicodedata.category(c)
+        if cat in ("Cc", "Cf", "Co", "Cn", "Cs", "Zl", "Zp") or (cat == "Zs" and c != " ") \
+                or ord(c) in FILLERS:
+            return True
+    return False
+
+
+# ---- the partner map ------------------------------------------------------------------------------
+def read_partners(path=PARTNERS):
+    """{key(partner): (account id, account name)} from glow/sf_partners.csv."""
+    with open(path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        if reader.fieldnames != PARTNER_COLS:
+            raise Refused(f"{os.path.relpath(path, REPO)}: the columns must be {','.join(PARTNER_COLS)}")
+        out = {}
+        for row in reader:
+            k, pid = key(row["partner"]), (row["sf_account_id"] or "").strip()
+            name = (row["sf_account_name"] or "").strip()
+            if not k or not name or not ACCOUNT_ID.fullmatch(pid) or k in out:
+                raise Refused(f"{os.path.relpath(path, REPO)}: a partner is blank, repeated, unnamed or has "
+                              f"no plain account id: {row['partner']!r}")
+            out[k] = (pid, name)
+    return out

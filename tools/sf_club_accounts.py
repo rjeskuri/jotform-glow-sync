@@ -32,12 +32,12 @@ import sys
 import unicodedata
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from glow.salesforce import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS,   # noqa: E402
+                             PARTNER_RECORD_TYPE, has_invisible)
+
 DEFAULT_DIR = os.path.join(REPO, "data", "sf_prep_2026-09-30")
 
-CLUB_RECORD_TYPE = "012RP000002uklNYAQ"      # RecordType 'Club' on Account (read 2026-09-30)
-PARTNER_RECORD_TYPE = "0126A000000cdYFQAY"   # 'Household Account': every partner account has it
-# the two pilot Club accounts Ryan is checking: never a parent, never a link target
-ON_HOLD_ACCOUNTS = {"001RP00000nMZXfYAO", "001RP00000mgVVMYA2"}
 BASELINE_CLUBS = 10                          # Club accounts before this plan (the pilot ones)
 # the three single-record batches: an apostrophe, a pilot account with little history, an accent
 FIRST_CREATE, FIRST_LINK, FIRST_ACCENT = "GLOWINGP", "ELOHIM", "LASNINAS"
@@ -49,21 +49,7 @@ CREATED_COLS = ["when_utc", "batch", "seq", "action", "region", "club_code", "sf
                 "sf_account_name", "parent_id", "previous_parent_id", "note"]
 LOG_COLS = ["when_utc", "batch", "event"]
 FIELDS = "Id, Name, RecordTypeId, ParentId, Description, OwnerId, CreatedById, CreatedDate"
-ACCOUNT_ID = re.compile(r"001[A-Za-z0-9]{15}")
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
-# characters that render as nothing or as a space but are not one, beyond the Unicode categories
-FILLERS = {0x034F, 0x115F, 0x1160, 0x2800, 0x3164, 0xFFA0, 0xFFFC} | set(range(0xFE00, 0xFE10))
-
-
-def odd(name):
-    """Control, format, private, unassigned, line/paragraph separators, any space that is not
-    the plain one, and the invisible fillers: none of them may hide in a name."""
-    for c in name:
-        cat = unicodedata.category(c)
-        if cat in ("Cc", "Cf", "Co", "Cn", "Cs", "Zl", "Zp") or (cat == "Zs" and c != " ") \
-                or ord(c) in FILLERS:
-            return True
-    return False
 
 
 class Paths:
@@ -144,7 +130,7 @@ def csv_problems(rs, create, link, same, held_codes):
     partners = {key(r["sf_partner_account_name"]) for r in rs} | {key(r["partner_name"]) for r in rs}
     for r in create + link:
         code, name = r["club_code"], r["sf_account_name"]
-        if not name or name != name.strip() or "  " in name or odd(name):
+        if not name or name != name.strip() or "  " in name or has_invisible(name):
             problems.append(f"{code}: name is empty or has edge/double/invisible whitespace")
         if name != unicodedata.normalize("NFC", name):
             problems.append(f"{code}: name is not NFC-normalised")

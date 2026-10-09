@@ -25,7 +25,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_backfill as bf                                   # noqa: E402
-from sf_club_accounts import CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE   # noqa: E402
+from glow.salesforce import CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE   # noqa: E402
 
 PARTNER = "001000000000000PAA"
 SUNRISE, RIVER, PILOT = "001000000000000CAA", "001000000000000CBB", "001000000000000CCC"

@@ -43,7 +43,7 @@ import unicodedata
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
-from sf_club_accounts import ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, odd   # noqa: E402
+from glow.salesforce import ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, has_invisible   # noqa: E402
 from glow.salesforce import API, NEXT_PAGE, Org, Refused, quoted   # noqa: E402,F401 (re-exported)
 
 DEFAULT_DIR = os.path.join(REPO, "data", "backfill_2026-09")
@@ -385,7 +385,7 @@ def bad_name(name):
         return "a blank name"
     if "," in name:
         return "a comma (Salesforce would split it into two girls)"
-    if name != " ".join(name.split()) or odd(name) or name != nfc(name):
+    if name != " ".join(name.split()) or has_invisible(name) or name != nfc(name):
         return "doubled or invisible characters"
     if len(first) > 40 or len(rest) > 80 or (not rest and len(first) > 80):
         return "a name part longer than the Contact fields"

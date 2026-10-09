@@ -46,11 +46,10 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                          # noqa: E402
 from glow.cli import api_key                                   # noqa: E402
 from glow.jotform import Client, JotformError                   # noqa: E402
-from glow.salesforce import Org, Refused, quoted                # noqa: E402
+from glow.salesforce import Org, Refused, quoted, sf_match      # noqa: E402
 from glow.sync import SF_NAME_SEP                               # noqa: E402
 from glow.text import key as plain_key                          # noqa: E402
 from sf_backfill import save_private, within                    # noqa: E402
-from sf_new_clubs import sf_match                               # noqa: E402
 
 BACKFILL_CONTACTS = os.path.join(REPO, "data", "backfill_2026-09", "created_contacts.csv")
 ROLE = "Participant"
@@ -107,12 +106,13 @@ def norm(text):
     return " ".join(cf_free(text).split())
 
 
-def key(text):
-    """The grouping key: norm(), case-folded."""
+def spelling_key(text):
+    """The grouping key: norm(), case-folded - two spellings of one name that differ only in
+    whitespace, invisible characters or case get one key."""
     return norm(text).casefold()
 
 
-def odd(text):
+def odd_spacing(text):
     """A stored name part with whitespace or invisible characters that norm() would change."""
     text = text or ""
     return (text != " ".join(text.split()) or "\xa0" in text or "\t" in text
@@ -120,7 +120,7 @@ def odd(text):
 
 
 def odd_contact(contact):
-    return any(odd(contact.get(f)) for f in NAME_FIELDS)
+    return any(odd_spacing(contact.get(f)) for f in NAME_FIELDS)
 
 
 def odd_list(text):
@@ -272,13 +272,13 @@ class Roster:
                 continue
             entry = self.clubs.setdefault((plain_key(partner), plain_key(club)),
                                           {"partner": partner, "club": club, "active": [], "ever": set()})
-            entry["ever"].add(key(name))
+            entry["ever"].add(spelling_key(name))
             if plain_key(row.get("status")) == "active":
                 entry["active"].append(name)
 
     def club_for(self, account_name, club_account_names):
         """(the active Roster club whose question-5 name is this account's name, None) or
-        (None, why). Names are compared as the processor compares them (sf_new_clubs.sf_match);
+        (None, why). Names are compared as the processor compares them (glow.salesforce.sf_match);
         a club whose '<club> - <partner>' name is another Club account's name sends that one."""
         active = [c for c in self.clubs.values() if c["active"]]
         long = [c for c in active if sf_match(c["club"] + SF_NAME_SEP + c["partner"], account_name)]
@@ -294,7 +294,7 @@ class Roster:
 
 
 def girls_with(club, name_key):
-    return [n for n in club["active"] if key(n) == name_key]
+    return [n for n in club["active"] if spelling_key(n) == name_key]
 
 
 def read_backfill(path):
@@ -368,7 +368,7 @@ def group_by_key(contacts):
     """{(account id, key): [contacts sorted by id]} for every 2+ contacts with one key in ONE account."""
     by = collections.defaultdict(list)
     for c in contacts:
-        k = key(c.get("Name"))
+        k = spelling_key(c.get("Name"))
         if k:
             by[(c["AccountId"], k)].append(c)
     return {g: sorted(m, key=lambda c: c["Id"]) for g, m in by.items() if len(m) > 1}
@@ -444,10 +444,10 @@ def decide(contacts, rows_of, roster, club_names, backfill_ids):
         done, why_not = renamed(c)
         reasons += [r for r in (why, why_not) if r]
         if done and club:
-            girls = girls_with(club, key(done[1]))
+            girls = girls_with(club, spelling_key(done[1]))
             if len(girls) != 1 or girls[0] != done[1]:
                 reasons.append("not_one_roster_girl")
-        if done and any(o["Id"] != c["Id"] and key(o.get("Name")) == key(done[1]) for o in by_account[c["AccountId"]]):
+        if done and any(o["Id"] != c["Id"] and spelling_key(o.get("Name")) == spelling_key(done[1]) for o in by_account[c["AccountId"]]):
             reasons.append("another_contact_has_this_name")
         if reasons:
             needs.append({"kind": "rename", "account_id": c["AccountId"], "contact_ids": [c["Id"]], "reasons": reasons})
@@ -537,8 +537,8 @@ def live_club(org, plan, club):
         org.query, "SELECT Id, AccountId, Contact_Role__c FROM Contact WHERE Id IN {ids}", planned)}
     by_key = collections.defaultdict(list)
     for c in contacts:
-        by_key[key(c.get("Name"))].append(c["Id"])
-    names = {c["Id"]: key(c.get("Name")) for c in contacts}
+        by_key[spelling_key(c.get("Name"))].append(c["Id"])
+    names = {c["Id"]: spelling_key(c.get("Name")) for c in contacts}
     groups = {}
     for g in club_groups(plan, club):
         anchor = next((m for m in [g["kept"]] + g["merged"] if m in names), None)
@@ -1103,7 +1103,7 @@ def cmd_check(args, ctx):
     odd_ones = [c for c in contacts if odd_contact(c)]
     print(f"(b) stored names with odd whitespace or invisible characters: {len(odd_ones)}")
     for c in odd_ones:
-        print(f"  {c['AccountId']}: {c['Id']} ({', '.join(f for f in NAME_FIELDS if odd(c.get(f)))})")
+        print(f"  {c['AccountId']}: {c['Id']} ({', '.join(f for f in NAME_FIELDS if odd_spacing(c.get(f)))})")
     findings += len(odd_ones)
     batches = plain(org.query("SELECT Id, Name, Contact_IDs__c FROM Attendance_Batch__c WHERE CreatedDate >= "
                               f"{since}T00:00:00Z ORDER BY CreatedDate"))
@@ -1117,8 +1117,8 @@ def cmd_check(args, ctx):
         names = [a["Name"] for a in accounts]
         by_key = collections.defaultdict(lambda: collections.defaultdict(list))
         for c in contacts:
-            if key(c.get("Name")):
-                by_key[key(c["Name"])][c["AccountId"]].append(c)
+            if spelling_key(c.get("Name")):
+                by_key[spelling_key(c["Name"])][c["AccountId"]].append(c)
         account_name = {a["Id"]: a["Name"] for a in accounts}
         found = []
         for k, places in by_key.items():
@@ -1220,7 +1220,7 @@ def cmd_rename(args, ctx):
             problems.append(f"{cid}: the stored name changed since the plan")
             continue
         allowed = group_of.get(cid, {cid}) if r["in_group"] else {cid}
-        if any(o["Id"] not in allowed and key(o.get("Name")) == key(new[1]) for o in others if o["AccountId"] == c["AccountId"]):
+        if any(o["Id"] not in allowed and spelling_key(o.get("Name")) == spelling_key(new[1]) for o in others if o["AccountId"] == c["AccountId"]):
             problems.append(f"{cid}: another contact of the club has this name now")
             continue
         todo.append((r, c, new))
@@ -1249,7 +1249,7 @@ def cmd_rename(args, ctx):
         back = [flat_contact(x) for x in org.query(f"SELECT {CONTACT_FIELDS} FROM Contact WHERE Id = {quoted(cid)}")]
         club, _ = roster.club_for(back[0]["AccountName"] if back else None, names)
         ok = (len(back) == 1 and all(back[0][f] == norm(c[f]) for f in fields) and back[0]["Name"] == new_name
-              and club is not None and girls_with(club, key(new_name)) == [new_name])
+              and club is not None and girls_with(club, spelling_key(new_name)) == [new_name])
         rb.data["renames"][cid].update(status="done" if ok else "CHECK", http=status, done_at_utc=stamp(ctx.clock()))
         rb.save()
         failed += not ok

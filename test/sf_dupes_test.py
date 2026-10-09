@@ -410,16 +410,16 @@ class Harness(unittest.TestCase):
 # ---- the pure parts --------------------------------------------------------------------------------
 class SfDupesNames(Harness):
     def test_the_key_ignores_spacing_invisible_characters_and_case(self):
-        base = sd.key("Amara Fennwhistle")
+        base = sd.spelling_key("Amara Fennwhistle")
         for variant in ("Amara  Fennwhistle", "Amara\xa0Fennwhistle", "Amara\tFennwhistle", "\u200eAmara Fennwhistle",
                         "Amara\u200b Fennwhistle", " AMARA fennwhistle ", "Amara\ufeff Fennwhistle"):
             with self.subTest(repr(variant)):
-                self.assertEqual(sd.key(variant), base)
+                self.assertEqual(sd.spelling_key(variant), base)
         for oddity in ("Amara  Fennwhistle", "Amara\xa0Fennwhistle", "Amara\tFennwhistle", "\u200eAmara Fennwhistle",
                        " Amara Fennwhistle"):
-            self.assertTrue(sd.odd(oddity), repr(oddity))
-        self.assertFalse(sd.odd("Amara Fennwhistle"))
-        self.assertNotEqual(sd.key("Amara Fennwhistle"), sd.key("Amara Fennwhistl"))
+            self.assertTrue(sd.odd_spacing(oddity), repr(oddity))
+        self.assertFalse(sd.odd_spacing("Amara Fennwhistle"))
+        self.assertNotEqual(sd.spelling_key("Amara Fennwhistle"), sd.spelling_key("Amara Fennwhistl"))
         self.assertEqual(sd.norm("amara  Fennwhistle\u200e"), "amara Fennwhistle")      # case kept
         self.assertTrue(sd.odd_list("Amara  Fennwhistle, Dalia Thornquibble"))
         self.assertTrue(sd.odd_list("Amara\xa0Fennwhistle"))

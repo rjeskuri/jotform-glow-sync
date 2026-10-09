@@ -106,7 +106,7 @@ class Fixture(unittest.TestCase):
         self.partners = os.path.join(self.tmp.name, "partners.csv")
         with open(self.partners, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
-            w.writerow(sfn.PARTNER_COLS)
+            w.writerow(salesforce.PARTNER_COLS)
             w.writerow(["Example Partner", P1, "Example Partner Org"])
             w.writerow(["Second Partner", P2, "Second Partner"])
         self.roster = os.path.join(self.tmp.name, "roster.csv")
@@ -146,7 +146,7 @@ class SalesforceNewClubs(Fixture):
         self.assertIs(sfn.REGIONS, forms.REGIONS)          # one list of the regional forms: glow/forms.py
 
     def test_the_processor_s_comparison(self):
-        m = sfn.sf_match
+        m = salesforce.sf_match
         self.assertTrue(m("Sunrise Club", "sunrise club"))
         self.assertTrue(m("  Sunrise Club\t", "Sunrise Club"))          # question 5 is trimmed ...
         self.assertFalse(m("Sunrise Club", " Sunrise Club"))           # ... the Account name is not
@@ -187,16 +187,16 @@ class SalesforceNewClubs(Fixture):
         self.assertEqual(sfn.read_codes(self.roster)[("example partner", "sunrise club")], "SUNRISEC")
 
     def test_the_partner_map_is_read_strictly(self):
-        self.assertEqual(sfn.read_partners(self.partners)["example partner"], (P1, "Example Partner Org"))
+        self.assertEqual(salesforce.read_partners(self.partners)["example partner"], (P1, "Example Partner Org"))
         with open(self.partners, "a", encoding="utf-8") as fh:
             fh.write(f"example partner,{P2},Again\n")
         with self.assertRaises(sfn.Refused):
-            sfn.read_partners(self.partners)
+            salesforce.read_partners(self.partners)
         with open(self.partners, "w", encoding="utf-8") as fh:
-            fh.write(",".join(sfn.PARTNER_COLS) + f"\nNameless Partner,{P1},\n")
+            fh.write(",".join(salesforce.PARTNER_COLS) + f"\nNameless Partner,{P1},\n")
         with self.assertRaises(sfn.Refused):
-            sfn.read_partners(self.partners)                             # an unnamed partner account
-        self.assertEqual(len(sfn.read_partners()), 49)       # the real map: one line per partner
+            salesforce.read_partners(self.partners)                             # an unnamed partner account
+        self.assertEqual(len(salesforce.read_partners()), 49)       # the real map: one line per partner
 
     # ---- the guard
     def test_a_read_that_is_not_the_whole_org_stops_every_write(self):

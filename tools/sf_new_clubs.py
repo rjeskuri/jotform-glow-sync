@@ -37,13 +37,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.forms import REGIONS                                     # noqa: E402  (the four regional forms)
-from glow.salesforce import Org, Refused, quoted                  # noqa: E402
+from glow.salesforce import (CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE,   # noqa: E402
+                             PARTNERS, Org, Refused, apex_trim, has_invisible, quoted, read_partners,
+                             sf_match)
 from glow.text import key, name_key                               # noqa: E402
-from sf_club_accounts import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS,   # noqa: E402
-                              PARTNER_RECORD_TYPE, odd)
 
-PARTNERS = os.path.join(REPO, "glow", "sf_partners.csv")
-PARTNER_COLS = ["partner", "sf_account_id", "sf_account_name"]
 ACCOUNTS = "SELECT Id, Name, RecordTypeId, ParentId, Description, CreatedById FROM Account"
 MAX_PER_REGION = 5          # creates in one region in one run, all or nothing (the forms' band too)
 MIN_ACCOUNTS = 400          # fewer visible Accounts than this: View All is not effective - write nothing
@@ -62,42 +60,7 @@ ERROR_WORD = re.compile(r"\b[A-Z][A-Z_]{3,}\b")
 Club = collections.namedtuple("Club", "region partner club value code")
 
 
-# ---- how the processor compares a submitted name with an Account's -------------------------------
-def apex_trim(s):
-    """Java String.trim(): every character up to U+0020 off both ends, nothing else."""
-    start, end = 0, len(s)
-    while start < end and s[start] <= " ":
-        start += 1
-    while end > start and s[end - 1] <= " ":
-        end -= 1
-    return s[start:end]
-
-
-def _upper(c):
-    u = c.upper()
-    return u if len(u) == 1 else c       # Character.toUpperCase maps one character to one
-
-
-SIMPLE_LOWER = {"\u0130": "i"}     # Java's one-to-one mapping where Python's full one gives two characters
-
-
-def _lower(c):
-    u = c.lower()
-    return u if len(u) == 1 else SIMPLE_LOWER.get(c, c)
-
-
-def sf_match(submitted, name):
-    """`submitted.trim().equalsIgnoreCase(name)` as the Apex processor runs it."""
-    a, b = apex_trim(submitted or ""), name or ""
-    if len(a) != len(b):
-        return False
-    for x, y in zip(a, b):
-        ux, uy = _upper(x), _upper(y)
-        if x != y and ux != uy and _lower(ux) != _lower(uy):
-            return False
-    return True
-
-
+# ---- names ----------------------------------------------------------------------------------------
 def proven_char(c):
     """A plain or accented Latin letter (no ligature, modifier or compatibility form), an ASCII
     digit, or one of PROVEN: what has been seen arriving intact in question 5."""
@@ -111,7 +74,7 @@ def name_problems(value):
     problems = []
     if not value or len(value) > 255:
         problems.append("empty or longer than 255 characters")
-    elif odd(value) or value != value.strip() or "  " in value:
+    elif has_invisible(value) or value != value.strip() or "  " in value:
         problems.append("an invisible character or a stray space")
     elif unicodedata.normalize("NFC", value) != value:
         problems.append("not in composed (NFC) form")
@@ -132,23 +95,6 @@ def code_of(account):
 
 
 # ---- inputs ---------------------------------------------------------------------------------------
-def read_partners(path=PARTNERS):
-    """{key(partner): (account id, account name)} from glow/sf_partners.csv."""
-    with open(path, newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        if reader.fieldnames != PARTNER_COLS:
-            raise Refused(f"{os.path.relpath(path, REPO)}: the columns must be {','.join(PARTNER_COLS)}")
-        out = {}
-        for row in reader:
-            k, pid = key(row["partner"]), (row["sf_account_id"] or "").strip()
-            name = (row["sf_account_name"] or "").strip()
-            if not k or not name or not ACCOUNT_ID.fullmatch(pid) or k in out:
-                raise Refused(f"{os.path.relpath(path, REPO)}: a partner is blank, repeated, unnamed or has "
-                              f"no plain account id: {row['partner']!r}")
-            out[k] = (pid, name)
-    return out
-
-
 def read_codes(roster_csv):
     """{(key(partner), key(club)): club code or None} for the active clubs of a Roster export. A club
     whose girls carry more than one code gets None: nothing is created for it."""
