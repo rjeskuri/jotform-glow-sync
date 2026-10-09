@@ -4,7 +4,7 @@
 #
 #  - the lines the commit ADDS go through scripts/check_secrets.py --stdin: the same rules as
 #    `make secrets`, the Claude hook and CI (keys, tokens, sheet ids, girl IDs, e-mail addresses);
-#  - ruff (ruff.toml) on the staged version of every added or changed .py file.
+#  - ruff (ruff.toml) on the staged version of every added, changed or renamed .py file.
 #
 # An emergency bypass is `git commit --no-verify`; `make check` and CI still run the full checks.
 set -euo pipefail
@@ -26,7 +26,7 @@ fi
 py_files=()
 while IFS= read -r -d '' f; do
   py_files+=("$f")
-done < <(git diff --cached --name-only -z --diff-filter=AM -- '*.py')
+done < <(git diff --cached --name-only -z --diff-filter=AMR -- '*.py')
 if [ "${#py_files[@]}" -gt 0 ]; then
   RUFF="$ROOT/.venv/bin/ruff"
   [ -x "$RUFF" ] || RUFF=$(command -v ruff || true)
