@@ -289,6 +289,23 @@ def has_invisible(name):
 
 
 # ---- the tools' command lines ---------------------------------------------------------------------
+VPN_REFUSAL = ("this command talks to Salesforce from this Mac: check that no VPN is on, then add --vpn-off "
+               "(a connection through a VPN froze Ryan's user on 2026-09-30)")
+
+
+def add_vpn_flag(parser):
+    """--vpn-off on a (sub)command that talks to Salesforce from this Mac; require_vpn_off() reads it."""
+    parser.add_argument("--vpn-off", action="store_true",
+                        help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+
+
+def require_vpn_off(args):
+    """Refused unless the operator said --vpn-off: Salesforce freezes a user whose API call comes
+    through a VPN."""
+    if not getattr(args, "vpn_off", False):
+        raise Refused(VPN_REFUSAL)
+
+
 def positive(text):
     """argparse type: a whole number of 1 or more (--limit, --max-new, --per-run)."""
     value = int(text)

@@ -38,8 +38,8 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.forms import REGIONS                                     # noqa: E402  (the four regional forms)
 from glow.salesforce import (CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE,   # noqa: E402
-                             PARTNERS, Org, Refused, apex_trim, has_invisible, plain, quoted,
-                             read_partners, sf_match)
+                             PARTNERS, Org, Refused, add_vpn_flag, apex_trim, has_invisible, plain,
+                             quoted, read_partners, require_vpn_off, sf_match)
 from glow.text import key, name_key                               # noqa: E402
 
 ACCOUNTS = "SELECT Id, Name, RecordTypeId, ParentId, Description, CreatedById FROM Account"
@@ -461,11 +461,12 @@ def main(argv=None, org=None, partners_path=PARTNERS):
                    help="a region whose form is disabled (repeatable): with the other regions' summaries, "
                         "every form counts as read, so partner-less strays are reported")
     c.add_argument("--alias", default="glow", help="the Salesforce CLI login (Ryan's, read only)")
-    c.add_argument("--vpn-off", action="store_true",
-                   help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+    add_vpn_flag(c)
     a = p.parse_args(argv)
-    if not a.vpn_off:
-        sys.exit("say --vpn-off once you have checked that no VPN is on (Salesforce freezes the user otherwise)")
+    try:
+        require_vpn_off(a)
+    except Refused as stop:
+        sys.exit(str(stop))
     names = {}
     for path in a.summary:
         with open(path, encoding="utf-8") as fh:

@@ -44,7 +44,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.salesforce import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, apex_trim,   # noqa: E402
-                             has_invisible, plain, positive, sf_match)
+                             add_vpn_flag, has_invisible, plain, positive, require_vpn_off, sf_match)
 from glow.salesforce import API, NEXT_PAGE, Org, Refused, quoted   # noqa: E402,F401 (re-exported)
 
 DEFAULT_DIR = os.path.join(REPO, "data", "backfill_2026-09")
@@ -1031,8 +1031,7 @@ def main(argv=None, org=None):
     send.add_argument("--only", help="send only this session key")
     send.add_argument("--retry", action="append", help="a session Salesforce refused, decided since (repeatable)")
     for live in (snap, send):
-        live.add_argument("--vpn-off", action="store_true",
-                          help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+        add_vpn_flag(live)
     close = sub.add_parser("close", allow_abbrev=False)
     close.add_argument("key")
     how = close.add_mutually_exclusive_group(required=True)
@@ -1051,9 +1050,8 @@ def main(argv=None, org=None):
         elif args.cmd == "close":
             cmd_close(args, paths)
         else:
-            if (args.cmd == "snapshot" or args.apply) and not args.vpn_off:
-                raise Refused("this command talks to Salesforce from this Mac: check that no VPN is on, then add "
-                              "--vpn-off (a connection through a VPN froze Ryan's user on 2026-09-30)")
+            if args.cmd == "snapshot" or args.apply:
+                require_vpn_off(args)
             org = org or Org(args.org)
             (cmd_snapshot if args.cmd == "snapshot" else cmd_send)(args, paths, org)
     except Refused as stop:

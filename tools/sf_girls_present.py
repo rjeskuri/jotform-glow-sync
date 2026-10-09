@@ -38,7 +38,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
-from glow.salesforce import as_int, positive                # noqa: E402
+from glow.salesforce import add_vpn_flag, as_int, positive, require_vpn_off   # noqa: E402
 from sf_backfill import Org, Refused, now, open_private, quoted, save_private, within   # noqa: E402
 
 DEFAULT_DIR = os.path.join(REPO, "data", "sf_girls_present")
@@ -255,15 +255,13 @@ def main(argv=None, org=None):
     setter.add_argument("--limit", type=positive, help="set only the first N batches of the plan")
     check = sub.add_parser("check", allow_abbrev=False)
     for live in (plan, setter, check):
-        live.add_argument("--vpn-off", action="store_true",
-                          help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+        add_vpn_flag(live)
     args = ap.parse_args(argv)
     try:
         paths = Paths(args.dir)
         talks = args.cmd != "set" or args.apply
-        if talks and not args.vpn_off:
-            raise Refused("this command talks to Salesforce from this Mac: check that no VPN is on, then add "
-                          "--vpn-off (a connection through a VPN froze Ryan's user on 2026-09-30)")
+        if talks:
+            require_vpn_off(args)
         org = org or (Org(args.org) if talks else None)
         {"plan": cmd_plan, "set": cmd_set, "check": cmd_check}[args.cmd](args, paths, org)
     except Refused as stop:

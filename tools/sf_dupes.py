@@ -46,7 +46,8 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                          # noqa: E402
 from glow.cli import api_key                                   # noqa: E402
 from glow.jotform import Client, JotformError                   # noqa: E402
-from glow.salesforce import SF_ID, Org, Refused, plain, positive, quoted, sf_match   # noqa: E402
+from glow.salesforce import (SF_ID, Org, Refused, add_vpn_flag, plain, positive, quoted,   # noqa: E402
+                             require_vpn_off, sf_match)
 from glow.sync import SF_NAME_SEP                               # noqa: E402
 from glow.text import key as plain_key                          # noqa: E402
 from sf_backfill import save_private, within                    # noqa: E402
@@ -1406,14 +1407,11 @@ def main(argv=None, org=None, jotform=None, clock=None):
     cleanup.add_argument("--dup-sets", action="store_true", help="also the plan's duplicate-rule sets left with one item")
     cleanup.add_argument("--apply", action="store_true", help="delete (needs Ryan's go)")
     for live in (check, plan, merge, rename, cleanup):
-        live.add_argument("--vpn-off", action="store_true",
-                          help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+        add_vpn_flag(live)
     args = ap.parse_args(argv)
     code = 0
     try:
-        if not args.vpn_off:
-            raise Refused("this command talks to Salesforce from this Mac: check that no VPN is on, then add --vpn-off "
-                          "(a connection through a VPN froze Ryan's user on 2026-09-30)")
+        require_vpn_off(args)
         if not ALIAS.fullmatch(args.org):
             raise Refused("--org: a Salesforce CLI alias is letters, digits, '.', '_' and '-' only")
         ctx = Ctx(args, org, jotform, clock or utc_now)

@@ -240,5 +240,26 @@ class OrgQueryAllAndDelete(unittest.TestCase):
         self.assertEqual((status, answer[0]["errorCode"]), (404, "ENTITY_IS_DELETED"))
 
 
+
+class ToolCommandLines(unittest.TestCase):
+    """What the Salesforce tools' command lines share: --vpn-off and its refusal, positive()."""
+
+    def test_the_vpn_flag_and_its_refusal(self):
+        import argparse
+        ap = argparse.ArgumentParser()
+        salesforce.add_vpn_flag(ap)
+        self.assertIn("no VPN is on", ap.format_help())
+        salesforce.require_vpn_off(ap.parse_args(["--vpn-off"]))
+        for args in (ap.parse_args([]), types.SimpleNamespace()):          # without it, or a command that has none
+            with self.subTest(args=args), self.assertRaises(salesforce.Refused) as stop:
+                salesforce.require_vpn_off(args)
+            self.assertEqual(str(stop.exception), salesforce.VPN_REFUSAL)
+        self.assertIn("check that no VPN is on, then add --vpn-off", salesforce.VPN_REFUSAL)
+        self.assertEqual(salesforce.positive("3"), 3)
+        for bad in ("0", "-1"):
+            with self.subTest(bad), self.assertRaises(argparse.ArgumentTypeError):
+                salesforce.positive(bad)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

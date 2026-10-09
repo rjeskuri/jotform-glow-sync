@@ -37,7 +37,7 @@ from glow import forms                                              # noqa: E402
 from glow.cli import api_key                                       # noqa: E402
 from glow.jotform import Client, JotformError                       # noqa: E402
 from glow.sync import CLUB_NAME, MODULE_ID, MODULES, WEEK_ID, YEAR  # noqa: E402
-from glow.salesforce import as_int, positive                        # noqa: E402
+from glow.salesforce import add_vpn_flag, as_int, positive, require_vpn_off   # noqa: E402
 from backfill_resolve import PAGE, answer_of, attendance_date, copied_fields   # noqa: E402
 from sf_backfill import Org, Refused, now, open_private, quoted, within        # noqa: E402
 
@@ -360,8 +360,7 @@ def main(argv=None, org=None, client=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                  allow_abbrev=False)
     ap.add_argument("--apply", action="store_true", help="write to Salesforce (needs Ryan's go)")
-    ap.add_argument("--vpn-off", action="store_true",
-                    help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+    add_vpn_flag(ap)
     ap.add_argument("--limit", type=positive, help="correct only the first N matched batches (their rows included)")
     ap.add_argument("--since", default=SINCE, metavar="YYYY-MM-DD", help=f"batches created from this day on (default {SINCE})")
     ap.add_argument("--all-forms", action="store_true",
@@ -378,9 +377,8 @@ def main(argv=None, org=None, client=None):
         sys.exit("--since: a date like 2026-09-01")
     try:
         talks = not args.undo or args.apply          # the undo's dry run reads the ledger only
-        if talks and not args.vpn_off:
-            raise Refused("this command talks to Salesforce from this Mac: check that no VPN is on, then add "
-                          "--vpn-off (a connection through a VPN froze Ryan's user on 2026-09-30)")
+        if talks:
+            require_vpn_off(args)
         org = org or (Org(args.org) if talks else None)
         if args.undo:
             cmd_undo(args, org)
