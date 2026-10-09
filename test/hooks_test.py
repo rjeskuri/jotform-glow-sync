@@ -106,7 +106,7 @@ class Hooks(unittest.TestCase):
         "gh workflow run auto-sync.yml \\\n  -f apply=true",
         "echo '{\"apply\": \"true\"}' | gh workflow run auto-sync.yml --json",
         # ... and the other spellings of the same switches (review of 2026-10-09)
-        "gh workflow run auto-sync.yml -F apply=@/tmp/yes",
+        "gh workflow run auto-sync.yml -F apply=@yes.txt",
         "gh workflow run auto-sync.yml --json < inputs.json",
         "gh workflow run auto-sync.yml -f apply=$APPLY",
         "gh run rerun 1234", "gh run rerun 1234 --failed", "gh -R owner/repo run rerun 1234",
@@ -276,7 +276,7 @@ class Hooks(unittest.TestCase):
                 self.assertEqual(self.edit(path, project=project), code, path)
 
     def test_a_symbolic_link_into_a_protected_folder_is_followed(self):
-        # review of 2026-10-09: /tmp/alias-to-data/x.csv was allowed though it points into data/
+        # review of 2026-10-09: <a temp folder>/alias-to-data/x.csv was allowed though it points into data/
         root = self.tmp.name
         for d in ("data", "credentials", "tools", os.path.join(".claude", "hooks")):
             os.makedirs(os.path.join(root, d), exist_ok=True)
