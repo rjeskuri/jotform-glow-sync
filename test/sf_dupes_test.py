@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_dupes.py and glow/salesforce.py's query_all / delete (found by
-`make py`'s unittest discovery). Everything here is fictional: clubs, partners, girls
+Offline tests for tools/sf_dupes.py (found by `make py`'s unittest discovery; glow/salesforce.py's
+query_all / delete: test/salesforce_test.py). Everything here is fictional: clubs, partners, girls
 (names from test/fixtures/make_fixture.py's invented pools) and Salesforce ids are invented.
 
 A fake org answers the tool's SOQL with a small evaluator (WHERE ... AND ..., =, >=, IN, GROUP BY)
@@ -30,6 +30,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_dupes as sd                  # noqa: E402
 from glow import forms                 # noqa: E402
+from glow.jotform import Client, JotformError   # noqa: E402
 from glow import salesforce            # noqa: E402
 
 UTC = datetime.timezone.utc
@@ -308,7 +309,8 @@ class FakeSF:
 
 class FakeJotform:
     """The regional forms' submissions (Jotform's clock: US Eastern), newest first as Jotform's default
-    order is (`oldest_first` plays an order the tool must not trust)."""
+    order is (`oldest_first` plays an order the tool must not trust), paged by the client's own reader."""
+    submissions = Client.submissions
 
     def __init__(self):
         self.latest = {fid: "2026-10-07 07:00:00" for fid in forms.REGIONALS.values()}   # 11:00 UTC
@@ -410,16 +412,16 @@ class Harness(unittest.TestCase):
 # ---- the pure parts --------------------------------------------------------------------------------
 class SfDupesNames(Harness):
     def test_the_key_ignores_spacing_invisible_characters_and_case(self):
-        base = sd.key("Amara Fennwhistle")
+        base = sd.spelling_key("Amara Fennwhistle")
         for variant in ("Amara  Fennwhistle", "Amara\xa0Fennwhistle", "Amara\tFennwhistle", "\u200eAmara Fennwhistle",
                         "Amara\u200b Fennwhistle", " AMARA fennwhistle ", "Amara\ufeff Fennwhistle"):
             with self.subTest(repr(variant)):
-                self.assertEqual(sd.key(variant), base)
+                self.assertEqual(sd.spelling_key(variant), base)
         for oddity in ("Amara  Fennwhistle", "Amara\xa0Fennwhistle", "Amara\tFennwhistle", "\u200eAmara Fennwhistle",
                        " Amara Fennwhistle"):
-            self.assertTrue(sd.odd(oddity), repr(oddity))
-        self.assertFalse(sd.odd("Amara Fennwhistle"))
-        self.assertNotEqual(sd.key("Amara Fennwhistle"), sd.key("Amara Fennwhistl"))
+            self.assertTrue(sd.odd_spacing(oddity), repr(oddity))
+        self.assertFalse(sd.odd_spacing("Amara Fennwhistle"))
+        self.assertNotEqual(sd.spelling_key("Amara Fennwhistle"), sd.spelling_key("Amara Fennwhistl"))
         self.assertEqual(sd.norm("amara  Fennwhistle\u200e"), "amara Fennwhistle")      # case kept
         self.assertTrue(sd.odd_list("Amara  Fennwhistle, Dalia Thornquibble"))
         self.assertTrue(sd.odd_list("Amara\xa0Fennwhistle"))
@@ -685,6 +687,20 @@ class SfDupesFlow(Harness):
         out, code = self.run_tool("merge", self.plan_path(), "--rehearse", "--apply")
         self.assertEqual(code, 2)
         self.assertIn("not allowed with argument", out)
+
+    def test_a_fresh_checkout_without_data_gets_the_folder_made_owner_only(self):
+        # the guard asked within() about a data/ that did not exist yet and refused every folder under it
+        with tempfile.TemporaryDirectory() as checkout, unittest.mock.patch.object(sd, "REPO", checkout):
+            ctx = sd.Ctx(types.SimpleNamespace(org="glow"), self.sf, self.jf, lambda: self.now)
+            folder = os.path.join(checkout, "data", "sf_dupes_2026-10-07")
+            ctx.use_folder(folder)
+            self.assertEqual(ctx.folder, folder)
+            self.assertEqual([stat.S_IMODE(os.stat(p).st_mode) for p in (os.path.join(checkout, "data"), folder)],
+                             [0o700] * 2)
+            with self.assertRaises(salesforce.Refused) as stop:
+                ctx.use_folder(os.path.join(checkout, "docs"))
+            self.assertIn("must be under data/", str(stop.exception))
+            self.assertFalse(os.path.exists(os.path.join(checkout, "docs")))
 
     def test_the_plan(self):
         self.world()
@@ -989,6 +1005,8 @@ class SfDupesFlow(Harness):
         self.assertIn("compare them by hand", out)
 
         class Pages:                                # a submission arrived between the two page reads
+            submissions = Client.submissions
+
             def __init__(self, pages):
                 self.pages = pages
 
@@ -1002,6 +1020,18 @@ class SfDupesFlow(Harness):
         page3 = [{"id": "s1", "created_at": "2026-10-07 07:00:00", "status": "ACTIVE"}]
         with unittest.mock.patch.object(sd, "SUBMISSION_PAGE", 2):
             self.assertEqual(sd.submissions_since(Pages([page1, page2, page3]), "Africa", NOW), 2)
+        # every page newer than the run's start, up to the cap: refused, never a short count
+        newer = [[{"id": f"s{n}", "created_at": f"2026-10-07 08:{59 - n:02d}:00", "status": "ACTIVE"}] for n in range(3)]
+        with unittest.mock.patch.object(sd, "SUBMISSION_PAGE", 1), unittest.mock.patch.object(sd, "SUBMISSION_PAGES", 2), \
+                self.assertRaises(salesforce.Refused) as stop:
+            sd.submissions_since(Pages(newer), "Africa", NOW)
+        self.assertIn("more than 2 submissions on the Africa form", str(stop.exception))
+        with unittest.mock.patch.object(sd, "SUBMISSION_PAGE", 1), unittest.mock.patch.object(sd, "SUBMISSION_PAGES", 4):
+            self.assertEqual(sd.submissions_since(Pages(newer + [[]]), "Africa", NOW), 3)
+        # an answer without ids is Jotform's, not a count
+        with self.assertRaises(JotformError) as stop:
+            sd.submissions_since(Pages([[{"created_at": "2026-10-07 08:04:00"}]]), "Africa", NOW)
+        self.assertIn("the Africa form: the submissions answer is not a list of submissions with ids", str(stop.exception))
 
     def test_an_unknown_run_is_settled_only_on_what_salesforce_shows(self):
         os.makedirs(self.dir)
@@ -1141,51 +1171,6 @@ class SfDupesFlow(Harness):
         out, code = self.run_tool("check", "--since", "2026-09-01")
         self.assertIn("whose name list has odd whitespace: 2 of 3", out)
         self.assertIn("(d) names in two or more clubs: not checked (needs --roster)", out)
-
-
-class OrgQueryAllAndDelete(unittest.TestCase):
-    """glow.salesforce.Org.query_all pages through queryAll; Org.delete is one DELETE."""
-
-    def org(self, replies):
-        configs = []
-
-        def run(argv, input=None, **_):
-            configs.append(input)
-            return types.SimpleNamespace(stdout=replies.pop(0))
-        return salesforce.Org(alias="x", run=run, login=lambda run: ("https://x.example", "tok")), configs
-
-    def test_query_all_follows_its_pages(self):
-        first = {"done": False, "records": [{"Id": "a", "IsDeleted": True}],
-                 "nextRecordsUrl": f"/services/data/{salesforce.API}/queryAll/01gFAKE-2000"}
-        org, configs = self.org([json.dumps(first) + "\n200", json.dumps({"done": True, "records": [{"Id": "b"}]}) + "\n200"])
-        records = org.query_all("SELECT Id, IsDeleted FROM Contact WHERE IsDeleted = true")
-        self.assertEqual([r["Id"] for r in records], ["a", "b"])
-        self.assertIn(f'url = "https://x.example/services/data/{salesforce.API}/queryAll?q=SELECT%20Id', configs[0])
-        self.assertIn(f'url = "https://x.example/services/data/{salesforce.API}/queryAll/01gFAKE-2000"', configs[1])
-        for bad in ("https://elsewhere.example/services/data/v67.0/queryAll/01g-2000", "/services/data/v67.0/sobjects/x",
-                    None):
-            with self.subTest(bad):
-                org, _ = self.org([json.dumps(dict(first, nextRecordsUrl=bad)) + "\n200"])
-                with self.assertRaises(salesforce.Refused):
-                    org.query_all("SELECT Id FROM Contact")
-        # query() itself is unchanged: it follows /query/ pages only
-        org, _ = self.org([json.dumps(first) + "\n200"])
-        with self.assertRaises(salesforce.Refused):
-            org.query("SELECT Id FROM Contact")
-        org, configs = self.org([json.dumps(dict(first, nextRecordsUrl="/services/data/v67.0/query/01g-2000")) + "\n200",
-                                 json.dumps({"done": True, "records": []}) + "\n200"])
-        self.assertEqual(len(org.query("SELECT Id FROM Contact")), 1)
-        self.assertIn("/services/data/v67.0/query?q=", configs[0])
-
-    def test_delete_is_one_delete_request(self):
-        org, configs = self.org(["\n204", '[{"errorCode": "ENTITY_IS_DELETED", "message": "gone"}]\n404'])
-        self.assertEqual(org.delete("npe5__Affiliation__c", aff_id(1)), (204, None))
-        self.assertIn(f'url = "https://x.example/services/data/{salesforce.API}/sobjects/npe5__Affiliation__c/{aff_id(1)}"',
-                      configs[0])
-        self.assertIn('request = "DELETE"', configs[0])
-        self.assertNotIn("data = ", configs[0])
-        status, answer = org.delete("npe5__Affiliation__c", aff_id(1))
-        self.assertEqual((status, answer[0]["errorCode"]), (404, "ENTITY_IS_DELETED"))
 
 
 if __name__ == "__main__":

@@ -20,11 +20,15 @@ import json
 import subprocess
 import time
 import urllib.parse
+from zoneinfo import ZoneInfo
 
 API_BASE = "https://api.jotform.com"
 _WRITE_METHODS = {"POST", "PUT", "DELETE"}
 # Linux: one argument may not exceed 131,072 bytes (MAX_ARG_STRLEN); stay clear of it.
 MAX_ARG_BYTES = 120_000
+# Jotform's clock: a submission's created_at and a form's last_submission are US Eastern wall
+# time, 'yyyy-mm-dd hh:mm:ss' (not the sheet's zone, glow.sync.SHEET_ZONE, though the same today)
+CLOCK = ZoneInfo("America/New_York")
 
 
 class JotformError(RuntimeError):
@@ -106,6 +110,39 @@ class Client:
     # ---- the shapes the tools use
     def get(self, path, **params):
         return self.call([self.url(path, **params)], f"GET {path}")
+
+    def submissions(self, form_id, filter=None, *, page=100, enough=None, label=None):
+        """The form's submissions, any status, read page by page (`page` per request; Jotform
+        allows up to 1000) in Jotform's default order, newest first - no `orderby`, whose
+        direction is not proven. `filter`: Jotform's submissions filter as a dict
+        ({"created_at:gt": "2026-09-24 08:03:00"}), sent as its JSON text (url() encodes it).
+        A submission arriving meanwhile repeats one on the next page: kept once, by id, as first
+        read. enough(page), given each page as it came: True stops the reading after it. Reading
+        the whole form (no filter, no enough), the form's own count, read afterwards, is the
+        check. JotformError, with `label` (default 'form <id>'), for an answer that is not a list
+        of submissions with ids and for a count the pages fall short of."""
+        label = label or f"form {form_id}"
+        params = {} if filter is None else {"filter": json.dumps(filter)}
+        seen, out, offset = set(), [], 0
+        while True:
+            got = self.get(f"/form/{form_id}/submissions", limit=page, offset=offset, **params)
+            if not isinstance(got, list) or not all(isinstance(s, dict) and s.get("id") for s in got):
+                raise JotformError(f"{label}: the submissions answer is not a list of submissions with "
+                                   "ids - an answer shape this tool does not know")
+            for sub in got:
+                if sub["id"] not in seen:
+                    seen.add(sub["id"])
+                    out.append(sub)
+            stop = enough is not None and enough(got)
+            if stop or len(got) < page:
+                break
+            offset += page
+        if filter is None and enough is None:
+            reported = int((self.get(f"/form/{form_id}") or {}).get("count") or 0)
+            if len(out) < reported:
+                raise JotformError(f"{label}: fetched {len(out)} submissions but the form reports {reported} - "
+                                   "one was missed while paging (a deletion meanwhile?); run it again")
+        return out
 
     def post_form(self, path, data, label):
         """form-urlencoded POST (question create/update - MERGES properties)."""

@@ -24,7 +24,7 @@ this tool fills them once, from their rows.
 Only a Success batch whose Girls_Present__c is empty is written (= its rows; 0 for a blank). Failed
 batches stay empty, as the processor leaves them, so the field means one thing: the count behind a
 success. A batch with a value is never touched - a typed aggregate survives, and a second run finds
-nothing to set. Salesforce access is tools/sf_backfill.py's (the CLI's login, the token on curl's
+nothing to set. Salesforce access is glow/salesforce.py's (the CLI's login, the token on curl's
 stdin, never on a command line); it reads ids, names of batches, statuses, creators and counts -
 never a girl's name, never Contact_IDs__c. plan.csv and ledger.csv live in data/sf_girls_present/
 (never committed, owner only), although they hold ids and counts only.
@@ -37,8 +37,8 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "tools"))
-from sf_backfill import Org, Refused, now, open_private, quoted, save_private, within   # noqa: E402
+from glow.private_files import Ledger, private_folder, rel, save_private, stamp   # noqa: E402
+from glow.salesforce import Org, Refused, add_vpn_flag, as_int, positive, quoted, require_vpn_off   # noqa: E402
 
 DEFAULT_DIR = os.path.join(REPO, "data", "sf_girls_present")
 FIELD, SOBJECT, OK = "Girls_Present__c", "Attendance_Batch__c", "Success"
@@ -57,18 +57,8 @@ class Paths:
     """plan.csv and ledger.csv in one owner-only folder; inside the checkout it must be under data/."""
 
     def __init__(self, folder):
-        folder, data = os.path.abspath(folder), os.path.join(REPO, "data")
-        if folder == data or folder.startswith(data + os.sep):
-            os.makedirs(data, 0o700, exist_ok=True)   # a fresh checkout has no data/ yet, and within() needs it to exist
-        if within(folder, REPO) and not within(folder, data):
-            raise Refused("--dir: inside the checkout the folder must be under data/ (never committed)")
-        os.makedirs(folder, 0o700, exist_ok=True)
-        os.chmod(folder, 0o700)
-        self.plan, self.ledger = os.path.join(folder, "plan.csv"), os.path.join(folder, "ledger.csv")
-
-
-def rel(path):
-    return os.path.relpath(path, REPO)
+        folder = private_folder(folder, repo=REPO)
+        self.plan, self.ledger = os.path.join(folder, "plan.csv"), Ledger(os.path.join(folder, "ledger.csv"), LEDGER_COLS)
 
 
 def one_batch(org, batch_id):
@@ -91,13 +81,14 @@ def creator_kind(text):
 
 
 def as_count(value):
-    """Girls_Present__c as Salesforce gives it (a double, or None when empty) -> int or None."""
+    """Girls_Present__c as Salesforce gives it (a double, or None when empty) -> int or None;
+    anything but a whole number is a refusal."""
     if value is None or value == "":
         return None
-    number = float(value)
-    if not number.is_integer():
+    number = as_int(value)
+    if number is None:
         raise Refused(f"{FIELD} holds {value!r}, not a whole number - look at it in Salesforce")
-    return int(number)
+    return number
 
 
 def no_field_hint(stop):
@@ -157,16 +148,6 @@ def read_plan(path):
 
 
 # ---- set -----------------------------------------------------------------------------------------
-def append_ledger(path, row):
-    with open_private(path, "a") as fh:
-        writer = csv.DictWriter(fh, fieldnames=LEDGER_COLS, lineterminator="\n")
-        if os.fstat(fh.fileno()).st_size == 0:
-            writer.writeheader()
-        writer.writerow({col: row.get(col, "") for col in LEDGER_COLS})
-        fh.flush()
-        os.fsync(fh.fileno())
-
-
 def set_one(org, paths, entry):
     """Re-read, ledger row, PATCH, re-read, closing row. True when written; False when the batch has
     a value by now (left alone); Refused at the first thing not as planned."""
@@ -179,13 +160,13 @@ def set_one(org, paths, entry):
                       "run plan again")
     if as_count(found[0].get(FIELD)) is not None:
         return False
-    row = {"when_utc": now(), "batch_id": batch_id, "rows": rows}
-    append_ledger(paths.ledger, dict(row, outcome="open"))
+    row = {"when_utc": stamp(), "batch_id": batch_id, "rows": rows}
+    paths.ledger.append(dict(row, outcome="open"))
     status, _ = org.update(SOBJECT, batch_id, {FIELD: rows})
     if status != 204:
-        append_ledger(paths.ledger, dict(row, when_utc=now(), outcome=f"failed_{status}"))
+        paths.ledger.append(dict(row, when_utc=stamp(), outcome=f"failed_{status}"))
         raise Refused(f"{entry['name']} {batch_id}: Salesforce did not take the write (HTTP {status}; 0 = no answer, "
-                      f"the outcome is unknown) - STOPPED, nothing more written; the ledger {rel(paths.ledger)} says what was")
+                      f"the outcome is unknown) - STOPPED, nothing more written; the ledger {rel(paths.ledger.path)} says what was")
     try:
         back = one_batch(org, batch_id)
         read_back = as_count(back[0].get(FIELD)) if len(back) == 1 else None
@@ -193,7 +174,7 @@ def set_one(org, paths, entry):
     except Refused as stop:                      # 204 answered, then no re-read: the value is unknown, the row closes as check
         read_back, why = None, f"the re-read did not answer ({stop})"
     outcome = "written" if read_back == rows else "check"
-    append_ledger(paths.ledger, dict(row, when_utc=now(), read_back="" if read_back is None else read_back, outcome=outcome))
+    paths.ledger.append(dict(row, when_utc=stamp(), read_back="" if read_back is None else read_back, outcome=outcome))
     if outcome != "written":
         raise Refused(f"{entry['name']} {batch_id}: the write answered 204 but {why} - STOPPED; look at the batch in Salesforce")
     return True
@@ -221,7 +202,7 @@ def cmd_set(args, paths, org):
             skipped += 1
             print(f"  {entry['name']} {entry['batch_id']}: has a value now - left alone")
     print(f"set and read back: {written}" + (f"; skipped, already has a value: {skipped}" if skipped else "")
-          + f"; ledger {rel(paths.ledger)}")
+          + f"; ledger {rel(paths.ledger.path)}")
 
 
 # ---- check ---------------------------------------------------------------------------------------
@@ -241,13 +222,6 @@ def cmd_check(args, paths, org):
         sys.exit(1)
 
 
-def positive(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
-
-
 def main(argv=None, org=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                  allow_abbrev=False)
@@ -260,15 +234,13 @@ def main(argv=None, org=None):
     setter.add_argument("--limit", type=positive, help="set only the first N batches of the plan")
     check = sub.add_parser("check", allow_abbrev=False)
     for live in (plan, setter, check):
-        live.add_argument("--vpn-off", action="store_true",
-                          help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+        add_vpn_flag(live)
     args = ap.parse_args(argv)
     try:
         paths = Paths(args.dir)
         talks = args.cmd != "set" or args.apply
-        if talks and not args.vpn_off:
-            raise Refused("this command talks to Salesforce from this Mac: check that no VPN is on, then add "
-                          "--vpn-off (a connection through a VPN froze Ryan's user on 2026-09-30)")
+        if talks:
+            require_vpn_off(args)
         org = org or (Org(args.org) if talks else None)
         {"plan": cmd_plan, "set": cmd_set, "check": cmd_check}[args.cmd](args, paths, org)
     except Refused as stop:
