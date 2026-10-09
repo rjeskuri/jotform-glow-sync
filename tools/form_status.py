@@ -62,8 +62,8 @@ from glow.cli import api_key, run                   # noqa: E402
 from glow.jotform import Client, JotformError, public_page     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
-    CLUB_NAME, CONTACT_IDS, ENABLE_FUZZY, GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PARTNER,
-    SF_NAME_SEP, WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, club_picker, dropdown_options, has_calc_values,
+    CLUB_NAME, CONTACT_IDS, ENABLE_FUZZY, GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULE_ID, MODULES,
+    PARTNER, SF_NAME_SEP, WEEK_ID, WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, club_picker, dropdown_options, has_calc_values,
     inactive_retires, long_name_partner, partner_picker, picker_calc_values, read_partners_csv,
     _roster_rows, roster_names, roster_pairs, roster_removed, rule_parts, sheet_today)
 from glow.text import key, name_key        # noqa: E402
@@ -344,10 +344,10 @@ def audit_module_values(questions):
 
 SHAPE_FIX = ("fix it in the builder's form settings, then re-run; never a sync apply - the sync does not "
              "write it (RUNBOOK \"The names dictionary and the module values\")")
-# what question 98 / 100 copies, per dropdown kind
+# what question 98 / 100 (MODULE_ID / WEEK_ID) copies, per dropdown kind
 SHAPE_KINDS = (("year", {None: YEAR}, "a blank year hides every module dropdown", None),
-               ("module", {f"year {y}": q for y, q in MODULES.items()}, "a blank module reaches Salesforce", "98"),
-               ("session", {f"{n} sessions": q for n, q in WEEKS.items()}, "a blank session reaches Salesforce", "100"))
+               ("module", {f"year {y}": q for y, q in MODULES.items()}, "a blank module reaches Salesforce", MODULE_ID),
+               ("session", {f"{n} sessions": q for n, q in WEEKS.items()}, "a blank session reaches Salesforce", WEEK_ID))
 
 
 def audit_module_shape(questions, props):
