@@ -243,7 +243,7 @@ const fh = loadGs(['Q', 'OTHER_PARTNER', 'MISSED', 'RETRY_PREFIXES', 'RESPONSE_S
                    'isRetryResult_', 'responseTail_', 'responseKeyOf_', 'sameCellAcrossZones_', 'indexFormLog_',
                    'responseDone_', 'planMissedRun_', 'missedPreviewText_', 'previewError_',
                    'daysBetween_'],
-                  ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+                  ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']);
 const FQ = fh.Q;
 const ORG = 'Test Partner Org';
 // A Timestamp cell whose text is `wall`, read while the spreadsheet is at UTC+offsetMin:
@@ -522,7 +522,7 @@ console.log('\nProblem reports → ReviewQueue, and the weekly e-mail (FormHandl
 const pr = loadGs(['Q', 'TAB', 'REVIEW_ISSUES', 'OTHER_ISSUE', 'DIGEST', 'looksLikeRosterChange_',
                    'feedbackReviewItem_', 'sentDayOfKey_', 'responseRowTag_', 'reviewDigest_',
                    'sfPendingLines_'],
-                  ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+                  ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']);
 const PQ = pr.Q;
 const CANARY = 'Hope Fennwhistle';   // a fictional girl: must never reach an e-mail, a digest or Audit
 const report = (form, what, extra) => Object.assign({ [PQ.FB_FORM]: form, [PQ.FB_WHAT]: what }, extra || {});
@@ -1937,7 +1937,7 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'SAME_NAME_ISSUE', 'HOLD_IS
                    'heldForReview_', 'indexFormLog_', 'holdDecisions_', 'planMissedRun_', 'missedPreviewText_',
                    'responseKeyOf_', 'responseDone_', 'sentAtOfKey_', 'sentAtOfStamp_', 'releasedBy_',
                    'heldClubReviewItem_', 'reviewDigest_', 'closedHoldsText_'],
-                  ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']);
+                  ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']);
 {
   const today = '2026-09-28';
   const tab = 'Roster Form Responses';

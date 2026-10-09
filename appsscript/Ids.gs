@@ -21,7 +21,7 @@
  * renameClubInRegistry_.
  */
 function clubCode_(registry, partner, club) {
-  const k = key_(partner) + '||' + key_(club);
+  const k = clubKey_(partner, club);
   if (registry.byKey[k]) return registry.byKey[k].code;
 
   let base = asciiCode_(club).slice(0, 8);
@@ -66,7 +66,7 @@ function loadIdState_() {
           const code = tidy_(row[0]), partner = tidy_(row[1]), club = tidy_(row[2]);
           if (!code) return;
           const entry = { code: code, partner: partner, club: club };
-          registry.byKey[key_(partner) + '||' + key_(club)] = entry;
+          registry.byKey[clubKey_(partner, club)] = entry;
           registry.byCode[code] = entry;
         });
   }

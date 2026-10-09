@@ -320,7 +320,7 @@ function newClubHoldReasons_(entry, rows, partners) {
   rows.forEach(function (r) {
     const p = tidy_(r.partner), c = tidy_(r.club), n = foldKey_(r.full_name);
     if (!p || !c) return;
-    const ck = key_(p) + '||' + key_(c);
+    const ck = clubKey_(p, c);
     if (!holders[ck]) holders[ck] = { partner: p, club: c };
     if (!n) return;
     const club = clubs[ck] ||
@@ -343,7 +343,7 @@ function newClubHoldReasons_(entry, rows, partners) {
   // a club as the hold texts name it: the spelling of its rows with a girl's name, if it has any
   const named = function (ck) { const x = clubs[ck] || holders[ck]; return x.club + ' (' + x.partner + ')'; };
 
-  const own = clubs[pk + '||' + name];
+  const own = clubs[clubKey_(entry.partner, entry.club)];
   if (own) {
     const onFile = count(names, own.all), active = Object.keys(own.active);
     if (!active.length) {

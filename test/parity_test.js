@@ -21,7 +21,7 @@ const { spawnSync } = require('child_process');
 const loadGs = require('./load_gs');
 
 const REPO = path.resolve(__dirname, '..');
-const gs = loadGs(['tidy_', 'key_', 'asciiCode_', 'parseRoster_', 'lastName_', 'clubCode_',
+const gs = loadGs(['tidy_', 'key_', 'clubKey_', 'asciiCode_', 'parseRoster_', 'lastName_', 'clubCode_',
                    'mintGirlId_', 'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'RESPONSE_COLS',
                    'REGIONS']);
 const REGIONS = new Set(gs.REGIONS);   // the canonical list lives in Config.gs (backlog 38)
@@ -66,7 +66,7 @@ function readClubs(csvPath) {
     if (!club) continue;   // mirrors read_sheet (readResponses_ also drops partner-less rows)
     const parsed = gs.parseRoster_(row[iR]);
     if (!parsed.names.length) continue;
-    byIdentity[gs.key_(partner) + '||' + gs.key_(club)] =
+    byIdentity[gs.clubKey_(partner, club)] =
       { partner, club, names: parsed.names, duplicates: parsed.duplicates, sourceRow: r + 1 };
   }
   return Object.values(byIdentity);
@@ -179,7 +179,7 @@ function runDataset({ name, csvPath, pyClubs, pins, real }) {
 
   // parity with the Python tool's club canonicalization
   if (pyClubs) {
-    const jsKeys = new Set(clubs.map(c => gs.key_(c.partner) + '||' + gs.key_(c.club)));
+    const jsKeys = new Set(clubs.map(c => gs.clubKey_(c.partner, c.club)));   // py_clubs.py writes the same 'partner||club'
     const pyKeys = new Set(pyClubs);
     const onlyJs = [...jsKeys].filter(k => !pyKeys.has(k));
     const onlyPy = [...pyKeys].filter(k => !jsKeys.has(k));

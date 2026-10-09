@@ -339,6 +339,7 @@ function responseStamp_(timestamp, zone) {
   return { text: tidy_(timestamp) };
 }
 
+/** The spreadsheet's own time zone (File → Settings), never the script's: today_, now_ and every date cell. */
 function spreadsheetZone_() {
   return SpreadsheetApp.getActive().getSpreadsheetTimeZone();
 }
@@ -699,7 +700,7 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
                                derivedPartnerRegions_()[key_(partner)]);
   const state = loadIdState_();
   const today = today_();
-  const current = existing.byClub[key_(partner) + '||' + key_(club)] || [];
+  const current = existing.byClub[clubKey_(partner, club)] || [];
   // A new club: nothing on file - or, on a retry, only the rows this response added (their
   // source is this response): an attempt that wrote the Roster and then failed leaves them.
   const isNew = current.every(function (r) { return tidy_(r.source) === source; });
@@ -764,10 +765,10 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
 function sfPendingAdd_(ss, row) {
   const sheet = ensureTab_(ss, TAB.SF_PENDING, SF_PENDING_COLS);
   const p = SF_PENDING_COLS.indexOf('partner'), c = SF_PENDING_COLS.indexOf('club');
-  const ck = key_(row[p]) + '||' + key_(row[c]);
+  const ck = clubKey_(row[p], row[c]);
   const onFile = sheet.getLastRow() > 1 &&
       sheet.getRange(2, 1, sheet.getLastRow() - 1, SF_PENDING_COLS.length).getValues()
-          .some(function (r) { return key_(r[p]) + '||' + key_(r[c]) === ck; });
+          .some(function (r) { return clubKey_(r[p], r[c]) === ck; });
   if (onFile) return false;
   sheet.appendRow(row);
   return true;
@@ -854,7 +855,7 @@ function handleRosterChange_(a, source, submitted) {
   if (!adds.names.length && !removes.names.length) return 'nothing to do (no names given)';
 
   const existing = loadRoster_();
-  const current = existing.byClub[key_(partner) + '||' + key_(club)] || [];
+  const current = existing.byClub[clubKey_(partner, club)] || [];
   if (!current.length) {
     review_([{ issue: 'Roster change for a club not on file', partner: partner, club: club,
                detail: source + ': no girls are enrolled under this partner + club, so nothing ' +
@@ -1050,11 +1051,6 @@ const RC_PEOPLE = /\b(?:girls?|members?|students?|names|roster|list|(?:to|from) 
 const RC_CHANGE = /\b(?:add(?:ed|ing)?|remov(?:e|ed|ing|al)|join(?:ed|ing|s)?|left|chang(?:e|ed|es|ing)|reduc(?:e|ed|es|ing|tion)|updated|up to date|agreg\w*|anadi\w*|quitar\w*|elimin\w*|se fue(?:ron)?|cambi\w*|actualizad[ao]s?)\b/;
 const RC_NEW = /\bnew (?:girls?|members?|students?|names)\b|\bnuev[ao]s? (?:ninas?|chicas?|integrantes|participantes)\b|\b(?:ninas?|chicas?|integrantes|participantes) nuev[ao]s?\b/;
 
-/** Report text as the patterns read it: lower case, accents folded (so \b sees "anadio"). */
-function foldText_(s) {
-  return foldKey_(s);
-}
-
 /**
  * Why a problem report looks like a roster change: 'form' (it names the Club
  * Roster Form), 'text' (its words ask to add or remove girls) or '' (it does
@@ -1063,8 +1059,9 @@ function foldText_(s) {
  */
 function looksLikeRosterChange_(a) {
   if (key_(a[Q.FB_FORM]).indexOf('roster form') !== -1) return 'form';
-  let text = foldText_(tidy_(a[Q.FB_DOING]) + ' ' + tidy_(a[Q.FB_WHAT]));
-  const club = foldText_(a[Q.FB_CLUB]);
+  // the text as the patterns read it: lower case, accents folded (so \b sees "anadio")
+  let text = foldKey_(tidy_(a[Q.FB_DOING]) + ' ' + tidy_(a[Q.FB_WHAT]));
+  const club = foldKey_(a[Q.FB_CLUB]);
   if (club.length >= 4) text = text.split(club).join(' ');   // "<X> Girls Club" is no roster word
   return RC_NEW.test(text) || (RC_PEOPLE.test(text) && RC_CHANGE.test(text)) ? 'text' : '';
 }
@@ -1148,10 +1145,10 @@ function holdDecisions_(rows) {
   rows.forEach(function (r) {
     if (issues.indexOf(issueKey_(r.issue)) === -1) return;
     const detail = String(r.detail == null ? '' : r.detail);
-    const tag = detail.match(/\[#([^\]]*)\]\s*$/), sent = detail.match(/\(sent ([^)]*)\)/);
-    if (!tag) return;
+    const tag = reviewTag_(detail), sent = detail.match(/\(sent ([^)]*)\)/);
+    if (tag === null) return;
     const resolved = tidy_(r.resolved);
-    out[tag[1]] = { row: r.row, sentAt: sent ? sent[1] : '',
+    out[tag] = { row: r.row, sentAt: sent ? sent[1] : '',
                     state: !resolved ? 'open' : /^release\b/i.test(resolved) ? 'release' : 'closed' };
   });
   return out;
@@ -1168,12 +1165,12 @@ function sentDayOfKey_(responseKey) {
  * 'Feedback!7'. Other tags ARE girls' names (a duplicated or unmatched name).
  */
 function responseRowTag_(detail) {
-  const m = String(detail || '').match(/\[#([^\]]*)\]\s*$/);
-  if (!m) return '';
-  const bang = m[1].lastIndexOf('!');
-  const tab = m[1].slice(0, bang), row = m[1].slice(bang + 1);
+  const tag = reviewTag_(detail);
+  if (tag === null) return '';
+  const bang = tag.lastIndexOf('!');
+  const tab = tag.slice(0, bang), row = tag.slice(bang + 1);
   return bang > 0 && /^\d+$/.test(row) &&
-      [TAB.FEEDBACK, TAB.ROSTER_FORM, TAB.RESPONSES].indexOf(tab) !== -1 ? m[1] : '';
+      [TAB.FEEDBACK, TAB.ROSTER_FORM, TAB.RESPONSES].indexOf(tab) !== -1 ? tag : '';
 }
 
 /** "partner / club" for the weekly e-mail: only names on file are shown. */

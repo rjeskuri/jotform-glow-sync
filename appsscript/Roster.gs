@@ -24,14 +24,13 @@ const AUDIT_COLS = ['when', 'action', 'detail'];
 const SYNC_LOG_COLS = ['when', 'trigger', 'region', 'mode', 'creates', 'updates',
                        'rules', 'result', 'detail', 'run_url'];
 
+// in the spreadsheet's own zone (spreadsheetZone_, FormHandlers.gs), never the script's
 function today_() {
-  return Utilities.formatDate(new Date(),
-      SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+  return Utilities.formatDate(new Date(), spreadsheetZone_(), 'yyyy-MM-dd');
 }
 
 function now_() {
-  return Utilities.formatDate(new Date(),
-      SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+  return Utilities.formatDate(new Date(), spreadsheetZone_(), 'yyyy-MM-dd HH:mm:ss');
 }
 
 function setUpTabs() {
@@ -90,8 +89,7 @@ function review_(rows) {
   if (!rows.length) return;
   const sheet = ensureTab_(SpreadsheetApp.getActive(), TAB.REVIEW, REVIEW_COLS);
   const identity = function (issue, partner, club, detail) {
-    const m = String(detail || '').match(/\[#([^\]]*)\]\s*$/);
-    return key_(issue) + '||' + key_(partner) + '||' + key_(club) + '||' + (m ? m[1] : '');
+    return key_(issue) + '||' + clubKey_(partner, club) + '||' + (reviewTag_(detail) || '');
   };
   const open = {};
   if (sheet.getLastRow() > 1) {
@@ -112,6 +110,12 @@ function review_(rows) {
       .setValues(fresh.map(function (r) {
         return [stamp, r.issue, r.partner || '', r.club || '', r.detail || '', ''];
       }));
+}
+
+/** The tag review_ ends an item's detail with (' [#<dedupeKey>]'), or null if it has none. */
+function reviewTag_(detail) {
+  const m = String(detail == null ? '' : detail).match(/\[#([^\]]*)\]\s*$/);
+  return m ? m[1] : null;
 }
 
 /** Partner → region from the Partners tab ONLY (staff-authoritative; no derived fallback). */
@@ -223,7 +227,7 @@ function loadRoster_() {
   if (!sheet || sheet.getLastRow() < 2) return { rows: rows, byClub: {} };
   const values = sheet.getRange(2, 1, sheet.getLastRow() - 1,
                                 ROSTER_COLS.length).getValues();
-  const zone = ss.getSpreadsheetTimeZone();
+  const zone = spreadsheetZone_();
   const byClub = {};
   values.forEach(function (v, i) {
     const row = {};
@@ -235,7 +239,7 @@ function loadRoster_() {
       }
     });
     row._sheetRow = i + 2;
-    row._ck = key_(row.partner) + '||' + key_(row.club);
+    row._ck = clubKey_(row.partner, row.club);
     rows.push(row);
     if (!byClub[row._ck]) byClub[row._ck] = [];
     byClub[row._ck].push(row);
@@ -294,7 +298,7 @@ function rebuildRosterLocked_(ss) {
 
   clubs.forEach(function (entry) {
     partnersSeen[key_(entry.partner)] = entry.partner;
-    const ck = key_(entry.partner) + '||' + key_(entry.club);
+    const ck = clubKey_(entry.partner, entry.club);
     const region = regions[key_(entry.partner)] || '';
     if (!region) noRegion[key_(entry.partner)] = entry.partner;
     entry.source = TAB.RESPONSES + '!' + entry.sourceRow;

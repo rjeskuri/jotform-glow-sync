@@ -79,7 +79,7 @@ const NOW = TODAY + ' ' + at.hour + ':' + at.minute + ':' + at.second;
 // ------------------------------------------------ load the real .gs code
 // Only the pure-logic files; Roster.gs/Menu.gs call SpreadsheetApp.
 const gs = require('../test/load_gs')(['TAB', 'ROSTER_COLS', 'RESPONSE_COLS', 'STATUS',
-  'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'tidy_', 'key_', 'asciiCode_', 'parseRoster_',
+  'PARTNER_REGIONS', 'PARTNER_REGION_NOTES', 'tidy_', 'key_', 'clubKey_', 'asciiCode_', 'parseRoster_',
   'lastName_', 'clubCode_', 'mintGirlId_', 'planClub_']);
 
 const REVIEW_COLS = ['raised', 'issue', 'partner', 'club', 'detail', 'resolved'];
@@ -149,7 +149,7 @@ for (let r = 1; r < csv.length; r++) {
   if (!partner || !club) continue;
   const parsed = gs.parseRoster_(row[iRoster]);
   if (!parsed.names.length) continue;
-  byIdentity[gs.key_(partner) + '||' + gs.key_(club)] = {
+  byIdentity[gs.clubKey_(partner, club)] = {
     partner, club, names: parsed.names, duplicates: parsed.duplicates, sourceRow: r + 1,
   };
 }
@@ -163,7 +163,7 @@ for (const row of registryRows) {
   const code = gs.tidy_(row[0]), partner = gs.tidy_(row[1]), club = gs.tidy_(row[2]);
   if (!code) continue;
   const entry = { code, partner, club };
-  registry.byKey[gs.key_(partner) + '||' + gs.key_(club)] = entry;
+  registry.byKey[gs.clubKey_(partner, club)] = entry;
   registry.byCode[code] = entry;
 }
 const existingRows = readExisting('Roster', gs.ROSTER_COLS).map(v => {
@@ -180,7 +180,7 @@ for (const row of existingRows) {
 }
 const existingByClub = {};
 for (const row of existingRows) {
-  const ck = gs.key_(row.partner) + '||' + gs.key_(row.club);
+  const ck = gs.clubKey_(row.partner, row.club);
   (existingByClub[ck] = existingByClub[ck] || []).push(row);
 }
 
@@ -203,7 +203,7 @@ let newGirls = 0, reactivated = 0;
 const state = { registry, sequence };
 for (const entry of clubs) {
   partnersSeen[gs.key_(entry.partner)] = entry.partner;
-  const ck = gs.key_(entry.partner) + '||' + gs.key_(entry.club);
+  const ck = gs.clubKey_(entry.partner, entry.club);
   const region = regions[gs.key_(entry.partner)] || '';
   if (!region) noRegion[gs.key_(entry.partner)] = entry.partner;
   entry.source = gs.TAB.RESPONSES + '!' + entry.sourceRow;

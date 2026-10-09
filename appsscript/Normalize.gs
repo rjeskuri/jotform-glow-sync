@@ -19,6 +19,11 @@ function key_(s) {
   return tidy_(s).toLowerCase();
 }
 
+/** A club's identity, (partner, club) compared with key_: 'partner||club'. */
+function clubKey_(partner, club) {
+  return key_(partner) + '||' + key_(club);
+}
+
 /**
  * Strip diacritics and punctuation for ID codes: "Sánchez" → "SANCHEZ".
  * Names keep their accents in the Roster; only the ID code is folded.
@@ -99,7 +104,7 @@ function readResponses_() {
     if (!partner || !club) continue;
     const parsed = parseRoster_(row[iRoster]);
     if (!parsed.names.length) continue;
-    byIdentity[key_(partner) + '||' + key_(club)] = {
+    byIdentity[clubKey_(partner, club)] = {
       partner: partner,
       club: club,
       names: parsed.names,
