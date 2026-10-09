@@ -19,45 +19,10 @@ Salesforce V2 integration.
 (Roster rows' `status` and `removed_date` and one Audit row, after a guard that reads the region's
 form; `--undo <dir> --apply` puts the same rows back), `tools/auto_sync.py --apply`,
 `tools/upload_roster.py --apply`, `tools/sheets_client.py import`, `npm run clasp:push` / `npx clasp
-push`; in Salesforce `tools/sf_backfill.py send --apply`, `tools/fix_module_values.py --apply`,
-`tools/sf_girls_present.py set --apply` and `tools/sf_dupes.py merge|rename|cleanup --apply`
-(below). Anything else is read-only (GET) or writes only under `data/` and `backups/` - except
-`tools/sf_dupes.py merge --rehearse`, which runs the merges' DML in Salesforce for real and then
-throws so that Salesforce rolls it back: it leaves nothing behind, but it is not read-only
-(triggers run, records are locked meanwhile).
+push`. Anything else is read-only (GET) or writes only under `data/` and `backups/`.
 
-Salesforce (production) is written in these ways only, each with Ryan's explicit go: through the
-write connector, one record per call, by the main session (the hook below does not see those
-calls; docs/RUNBOOK.md, "Club accounts in Salesforce"); by the three `--apply` tools the hook
-catches, each one record per request, read back, with a ledger per record - `tools/sf_backfill.py
-send --apply` (new attendance batches, which carry girls' names and so never pass through the
-conversation; docs/RUNBOOK.md, "Back-fill of attendance into Salesforce"),
-`tools/fix_module_values.py --apply` (and `--undo … --apply`: `Module__c` on batches and their rows,
-docs/RUNBOOK.md, "The names dictionary and the module values") and `tools/sf_girls_present.py set
---apply` (`Girls_Present__c` on batches, docs/RUNBOOK.md, "Attendance totals and partner-reported
-counts") - a batch `PATCH` runs none of the processor, whose trigger is after-insert only; by
-**`tools/sf_dupes.py merge|rename|cleanup --apply`** (2026-10-07: duplicate contacts of one girl
-merged by anonymous Apex - `sf apex run`, one all-or-nothing run per club - a stored name's
-whitespace fixed, extra affiliations and duplicate-rule sets deleted), after a dry run and
-`merge --rehearse`, `merge_rollback.json` written before the first write (docs/RUNBOOK.md,
-"Duplicate girls in Salesforce") - the hook catches `--apply`, not `--rehearse`: `merge --rehearse`
-needs Ryan's explicit go all the same (production DML, rolled back; it waits for the same quiet
-moment as `--apply`); by **metadata deploys** (`sf project deploy start`: the Monthly Report
-checkbox, the attendance processor, the attendance dashboard), check-only first (`--dry-run`), then
-Ryan's go - the hook does not see `sf` commands, and Claude Code's auto-mode guard may refuse a
-production deploy (it did on 2026-10-02), then Ryan runs it himself (docs/RUNBOOK.md, "Attendance
-dashboard in Salesforce"); and by a **rolled-back anonymous Apex run** (`sf apex run`, the proof of
-a processor change: a savepoint, the records inserted for a made-up club, the outcomes asserted,
-`Database.rollback`) - it writes inside a transaction it rolls back, the hook does not see it, so
-it is made on Ryan's go in the conversation or run by Ryan, with the script pasted in full first
-(docs/plans/2026-10-06-attendance-totals.md, B); and by **the automatic sync** itself, which
-creates a new club's Club account as the GLOW Sync integration user (client credentials, from
-GitHub Actions) when the repository variable `SF_SYNC` is `apply` and the run applies
-(`tools/auto_sync.py --apply-salesforce`; create only, at most 5 per region, right before the
-region's form puts the club on its picker; docs/RUNBOOK.md, "New clubs' accounts, automatically")
-- changing `SF_SYNC`, `gh variable set` or `gh workflow run`, is Ryan's go, and the hook does not
-see those `gh` commands (BACKLOG 53). No Salesforce CLI or API call from the Mac while a VPN is on:
-Salesforce freezes the user (2026-09-30); the tools refuse without `--vpn-off`.
+Salesforce's writers (the connectors, the `sf` CLI, the tools with `--vpn-off`, the automatic
+sync's `SF_SYNC`), their gates and rollbacks: `.claude/skills/salesforce`.
 
 ## The ritual
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).
@@ -107,7 +72,4 @@ writing a translation language without GET + merge first.
   once the Feedback tab has two reply columns), and deal with held new clubs first.
 - Automatic sync: repository variable `AUTO_SYNC_APPLY=0`, or clear the Script Properties
   `SYNC_DISPATCH_REPO` / `SYNC_DISPATCH_TOKEN`.
-- Salesforce duplicate merges, renames, deleted affiliations: from `data/sf_dupes_<date>/merge_rollback.json`
-  (a merge: undelete within 15 days, then the saved rows inserted again on the restored contact;
-  docs/RUNBOOK.md, "Duplicate girls in Salesforce", Rollback). Never delete a back-fill contact
-  to undo anything: it may carry live rows (RUNBOOK, "Back-fill of attendance into Salesforce").
+- Salesforce: per writer in `.claude/skills/salesforce`.
