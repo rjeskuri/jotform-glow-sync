@@ -16,7 +16,6 @@ import stat
 import sys
 import tempfile
 import unittest
-import urllib.parse
 from unittest import mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -111,8 +110,8 @@ class FakeJotform:
         subs = self.submissions.get(parts[1], [])
         if parts[2:] == ["submissions"]:
             if "filter" in params:
-                assert "{" not in params["filter"] and '"' not in params["filter"], "the filter must be URL-encoded"
-                window = json.loads(urllib.parse.unquote(params["filter"]))
+                assert "%" not in params["filter"], "the client encodes the filter (glow.jotform.Client.url), not the tool"
+                window = json.loads(params["filter"])
                 subs = [s for s in subs if window["created_at:gt"] < s["created_at"] < window["created_at:lt"]]
             return copy.deepcopy(subs[params["offset"]:params["offset"] + params["limit"]])
         return {"id": parts[1], "count": str(len(subs))}
@@ -152,6 +151,24 @@ class FixModuleValues(unittest.TestCase):
         return [r["outcome"] for r in self.ledger()]
 
     # ---- the pairing
+    def test_the_window_filter_reaches_jotform_encoded_once(self):
+        import subprocess
+        import urllib.parse
+
+        from glow import jotform
+        urls = []
+
+        def curl(argv, **kw):
+            urls.append(next(a for a in argv if a.startswith(jotform.API_BASE)))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"responseCode": 200, "content": []}),
+                                               stderr="")
+        window = ("2026-09-24 08:03:00", "2026-09-24 14:03:00")
+        with mock.patch.object(jotform.subprocess, "run", curl):
+            self.assertEqual(fmv.fetch(jotform.Client("KEY"), "123", window), [])
+        flt = json.dumps({"created_at:gt": window[0], "created_at:lt": window[1]})
+        self.assertIn("&filter=" + urllib.parse.quote(flt, safe=""), urls[0])     # as the tool encoded it before
+        self.assertEqual(urllib.parse.parse_qs(urllib.parse.urlsplit(urls[0]).query)["filter"], [flt])
+
     def test_the_region_map_names_the_four_live_forms(self):
         self.assertEqual(sorted(fmv.SF_REGION_FORM), ["Africa", "Asia", "North America", "South America"])
         self.assertEqual(sorted(fmv.SF_REGION_FORM.values()), sorted(forms.REGIONALS.values()))
@@ -167,10 +184,11 @@ class FixModuleValues(unittest.TestCase):
                       f"(Latin America {LATAM}, submission 1 candidate(s), year 1, session 7; 0 rows", out)
         self.assertIn("would write: 2 batches, 2 rows   (dry run - nothing written; --apply --vpn-off after Ryan's go)", out)
         self.assertEqual((self.org.updates, os.path.exists(os.path.join(self.tmp.name, "ledger.csv"))), ([], False))
-        # one Jotform read per batch, on the region's form only, inside a URL-encoded 6-hour window around CreatedDate
+        # one Jotform read per batch, on the region's form only, inside a 6-hour window around CreatedDate
+        # (passed as plain JSON: glow.jotform.Client.url encodes it, once)
         fetched = [(p, q) for p, q in self.jotform.asked if p.endswith("/submissions")]
         self.assertEqual([p for p, _ in fetched], [f"/form/{LATAM}/submissions"] * 2)
-        window = json.loads(urllib.parse.unquote(fetched[0][1]["filter"]))
+        window = json.loads(fetched[0][1]["filter"])
         self.assertEqual(window, {"created_at:gt": "2026-09-24 08:03:00", "created_at:lt": "2026-09-24 14:03:00"})
         self.assertNotIn(AFRICA, "".join(p for p, _ in self.jotform.asked))
         # every Salesforce read is an explicit-field SOQL query, never the names list or the status message

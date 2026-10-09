@@ -28,7 +28,6 @@ import datetime
 import json
 import os
 import sys
-import urllib.parse
 import zoneinfo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -106,12 +105,11 @@ def window_of(created):
 
 
 def fetch(client, form_id, window=None):
-    """The submissions of a form, paged: the ones created inside `window` (Jotform's filter, URL-encoded
-    here because glow.jotform.Client.url does not encode its parameters), or the whole form."""
+    """The submissions of a form, paged: the ones created inside `window` (Jotform's filter, which
+    glow.jotform.Client.url encodes), or the whole form."""
     params = {}
     if window:
-        params["filter"] = urllib.parse.quote(json.dumps({"created_at:gt": window[0], "created_at:lt": window[1]}),
-                                              safe="")
+        params["filter"] = json.dumps({"created_at:gt": window[0], "created_at:lt": window[1]})
     seen, out, offset = set(), [], 0
     while True:
         page = client.get(f"/form/{form_id}/submissions", limit=PAGE, offset=offset, **params)

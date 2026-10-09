@@ -523,6 +523,24 @@ class DeactivateClubs(unittest.TestCase):
     """tools/deactivate_clubs.py on an in-memory sheet and a fake form: the plan, the guard
     and its match rule, the write, the re-read, the Audit row, --undo."""
 
+    def test_the_submissions_filter_reaches_jotform_encoded_once(self):
+        import subprocess
+        import urllib.parse
+        from unittest import mock
+
+        from glow import jotform
+        urls = []
+
+        def curl(argv, **kw):
+            urls.append(next(a for a in argv if a.startswith(jotform.API_BASE)))
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"responseCode": 200, "content": []}),
+                                               stderr="")
+        with mock.patch.object(jotform.subprocess, "run", curl):
+            self.assertEqual(deactivate_clubs.fetch_since(jotform.Client("KEY"), "123", "2026-09-01 00:00:00"), [])
+        self.assertIn("&filter=%7B%22created_at%3Agt%22%3A%20%222026-09-01%2000%3A00%3A00%22%7D", urls[0])
+        self.assertEqual(json.loads(urllib.parse.parse_qs(urllib.parse.urlsplit(urls[0]).query)["filter"][0]),
+                         {"created_at:gt": "2026-09-01 00:00:00"})
+
     HDR = ["girl_id", "partner", "club", "region", "full_name", "last_name", "status",
            "added_date", "removed_date", "source"]
     AFRICA, US = glow_forms.REGIONALS["Africa"], glow_forms.REGIONALS["U.S"]
@@ -685,7 +703,7 @@ class DeactivateClubs(unittest.TestCase):
         # the submissions GET is filtered since launch and paged with Jotform's maximum
         subs_gets = [(p, q) for p, q in forms.gets if p.endswith("/submissions")]
         self.assertEqual(len(subs_gets), 1)
-        self.assertIn("created_at%3Agt", subs_gets[0][1]["filter"])
+        self.assertEqual(json.loads(subs_gets[0][1]["filter"]), {"created_at:gt": deactivate_clubs.SINCE})   # Client.url encodes it
         self.assertEqual((subs_gets[0][1]["limit"], subs_gets[0][1]["offset"]), (1000, 0))
         # the exact rule in the flow: Queens of Quest's two submissions are its own
         code, out = self.run_main(["--partner", "Partner Two", "--check-only"], sheet, forms)

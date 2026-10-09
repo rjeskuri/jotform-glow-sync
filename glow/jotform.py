@@ -19,6 +19,7 @@ the GitHub runner it would not.
 import json
 import subprocess
 import time
+import urllib.parse
 
 API_BASE = "https://api.jotform.com"
 _WRITE_METHODS = {"POST", "PUT", "DELETE"}
@@ -52,8 +53,10 @@ class Client:
         self.calls = []          # every write's label, in order (dry run and apply alike)
 
     def url(self, path, **params):
-        extra = "".join(f"&{k}={v}" for k, v in params.items())
-        return f"{API_BASE}{path}?apiKey={self.key}{extra}"
+        """The API URL of `path`: the key and `params` as its query, every value URL-encoded
+        here, once - a caller passes plain values (a submissions filter is its JSON text)."""
+        query = urllib.parse.urlencode({"apiKey": self.key, **params}, quote_via=urllib.parse.quote, safe="")
+        return f"{API_BASE}{path}?{query}"
 
     def call(self, args, label, *, allow_fail=False, body=None):
         """Run curl with `args`; `body`, when given, is sent on curl's standard input

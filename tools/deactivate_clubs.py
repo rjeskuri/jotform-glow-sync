@@ -70,7 +70,6 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
-from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheets_client as sc
@@ -201,7 +200,7 @@ def fetch_since(client, form_id, since=SINCE):
     """Every submission of the form created after `since`, page by page. Jotform
     lists the newest first, so one arriving meanwhile repeats a submission on the
     next page (dropped here) and hides none."""
-    flt = quote(json.dumps({"created_at:gt": since}), safe="")
+    flt = json.dumps({"created_at:gt": since})        # glow.jotform.Client.url encodes it
     seen, out, offset = set(), [], 0
     while True:
         page = client.get(f"/form/{form_id}/submissions", limit=PAGE, offset=offset, filter=flt)

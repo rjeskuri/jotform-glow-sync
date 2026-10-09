@@ -70,6 +70,24 @@ class GlowClient(unittest.TestCase):
             c.get("/form/1/questions", limit=1000)
         self.assertIn("--max-time", self.spawned[0])
 
+    def test_url_params_are_encoded_once(self):
+        import urllib.parse
+        from unittest import mock
+        c = self.gj.Client("KEY")
+        flt = json.dumps({"created_at:gt": "2026-09-01 00:00:00", "created_at:lt": "2026-09-02 00:00:00"})
+        url = c.url("/form/1/submissions", limit=1000, offset=0, filter=flt)
+        # byte for byte what the two tools sent when they encoded the filter themselves
+        self.assertEqual(url, "https://api.jotform.com/form/1/submissions?apiKey=KEY&limit=1000&offset=0&filter="
+                              + urllib.parse.quote(flt, safe=""))
+        self.assertNotIn("%25", url)                                     # no "%" was encoded again
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        self.assertEqual(query["filter"], [flt])                         # one decoding gives the JSON back
+        self.assertEqual(c.url("/form/1", q="a&b=c d"), "https://api.jotform.com/form/1?apiKey=KEY&q=a%26b%3Dc%20d")
+        with mock.patch.object(self.gj.subprocess, "run", self.fake([self.ok([])])):
+            c.get("/form/1/submissions", limit=1000, filter=flt)
+        sent = next(a for a in self.spawned[0] if a.startswith(self.gj.API_BASE))
+        self.assertEqual(urllib.parse.parse_qs(urllib.parse.urlsplit(sent).query)["filter"], [flt])
+
     def test_retry_then_success_then_give_up(self):
         import contextlib
         import io
