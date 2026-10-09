@@ -72,7 +72,7 @@ def stale_club_terms(conditions, questions):
     picker = None if picker is None else str(picker)
     if picker is None:
         return []
-    options = {o for o in (questions[picker].get("options") or "").split("|") if o}
+    options = set(glow_sync.dropdown_options(questions[picker]))
     stale = set()
     for c in conditions:
         parts = glow_sync.rule_parts(c)

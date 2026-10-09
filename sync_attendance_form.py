@@ -594,9 +594,7 @@ def main():
             existing.setdefault(norm(q["text"]).lower(), []).append(qid)
             form_text[qid] = norm(q["text"])
 
-    module_options = {
-        year: [o for o in questions[mqid]["options"].split("|") if o]
-        for year, mqid in MODULES.items()}
+    module_options = {year: dropdown_options(questions[mqid]) for year, mqid in MODULES.items()}
 
     picker_qid = club_picker(questions)
     if picker_qid:

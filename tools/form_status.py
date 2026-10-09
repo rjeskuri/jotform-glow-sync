@@ -208,7 +208,7 @@ CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID, ENABLE_FUZZY_QID = CLUB_NAME, PARTN
 
 def picker_options(questions, picker):
     """The picker's options exactly as stored (what a multi-select's rules compare)."""
-    return [o for o in (questions[picker].get("options") or "").split("|") if o]
+    return dropdown_options(questions[picker])
 
 
 def _parsed(conditions):
