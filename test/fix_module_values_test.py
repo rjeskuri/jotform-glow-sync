@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/fix_module_values.py (imported by test/python_test.py, so `make py` runs
-them). Everything here is fictional: clubs, submission and Salesforce ids are invented; the module
+Offline tests for tools/fix_module_values.py (found by `make py`'s unittest discovery).
+Everything here is fictional: clubs, submission and Salesforce ids are invented; the module
 names are the curriculum's (not personal data). A fake org holds two batches with their rows and
 answers the tool's SOQL shapes; a fake Jotform serves the template's module dropdowns and the
 submissions of one regional form, filtered as the API filters.

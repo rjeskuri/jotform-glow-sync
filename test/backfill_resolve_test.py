@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/backfill_resolve.py (imported by test/python_test.py). A fake
+Offline tests for tools/backfill_resolve.py (found by `make py`'s unittest discovery). A fake
 client stands in for Jotform and a canned plan for the sync's dry run; every girl, mentor,
 club and partner here is fictional (first names and invented surnames from
 test/fixtures/make_fixture.py).

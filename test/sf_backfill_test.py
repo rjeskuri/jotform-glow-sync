@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_backfill.py (imported by test/python_test.py, so `make py` runs
-them). Everything here is fictional: clubs, girls, submission and Salesforce ids are invented.
+Offline tests for tools/sf_backfill.py (found by `make py`'s unittest discovery).
+Everything here is fictional: clubs, girls, submission and Salesforce ids are invented.
 A fake org stands in for Salesforce and follows its attendance processor where that matters:
 the club is found by name or a stray one is created, the first batch per club and day wins and
 a later one is stored as Failed, a batch without names is Failed "No participants submitted"

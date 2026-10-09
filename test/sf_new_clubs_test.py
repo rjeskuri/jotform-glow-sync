@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_new_clubs.py and glow/salesforce.py's GLOW Sync login (imported by
-test/python_test.py, so `make py` runs them). Everything here is fictional: clubs, partners,
+Offline tests for tools/sf_new_clubs.py and glow/salesforce.py's GLOW Sync login (found by
+`make py`'s unittest discovery). Everything here is fictional: clubs, partners,
 girls and Salesforce ids are invented.
 """
 import contextlib

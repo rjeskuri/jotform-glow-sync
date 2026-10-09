@@ -12,12 +12,12 @@ RUFF := $(shell test -x .venv/bin/ruff && echo .venv/bin/ruff || command -v ruff
 check: test py gs secrets docs-links fixtures-check   ## everything, offline, no credentials
 	@echo "CHECK PASSED"
 
-test:                                                 ## JS tests: synthetic fixture always, real data when data/ has it
-	node test/parity_test.js && node test/forms_logic_test.js && node test/dispatch_test.js
+test:                                                 ## JS tests (test/*_test.js): synthetic fixture always, real data when data/ has it
+	@for f in test/*_test.js; do echo "node $$f"; node $$f || exit 1; done
 
-py:                                                   ## every .py parses, every script answers --help, Python unit tests
+py:                                                   ## every .py parses, every script answers --help, Python unit tests (test/*_test.py)
 	$(PYTHON) scripts/check_py.py
-	$(PYTHON) test/python_test.py
+	$(PYTHON) -m unittest discover -s test -p '*_test.py'
 
 gs:                                                   ## every Apps Script file parses (guards clasp push)
 	node scripts/check_gs.js

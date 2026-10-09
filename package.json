@@ -6,7 +6,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/parity_test.js && node test/forms_logic_test.js && node test/dispatch_test.js",
+    "test": "make test",
     "check": "make check",
     "fixtures": "python3 test/fixtures/make_fixture.py --write",
     "clasp:push": "cd appsscript && npx clasp push -f",

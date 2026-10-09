@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/integration_status.py (imported by test/python_test.py). A fake
+Offline tests for tools/integration_status.py (found by `make py`'s unittest discovery). A fake
 client stands in for Jotform; nothing here is a real connection id.
 """
 import contextlib

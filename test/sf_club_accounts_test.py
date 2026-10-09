@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_club_accounts.py (imported by test/python_test.py, so `make py`
-runs them). Everything here is fictional: clubs, partners and Salesforce ids are invented,
+Offline tests for tools/sf_club_accounts.py (found by `make py`'s unittest discovery).
+Everything here is fictional: clubs, partners and Salesforce ids are invented,
 and the tool is pointed at a temporary folder (its --dir).
 """
 import argparse

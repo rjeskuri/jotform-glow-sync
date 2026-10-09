@@ -48,14 +48,6 @@ from glow import sync as glow_sync    # noqa: E402
 from glow import translation_lookup as tl   # noqa: E402
 from glow import usage                # noqa: E402
 from glow.text import md5             # noqa: E402
-from sf_club_accounts_test import SalesforceClubAccounts  # noqa: E402,F401  (its own file; run here)
-from integration_status_test import IntegrationStatus     # noqa: E402,F401  (its own file; run here)
-from sf_backfill_test import SalesforceBackfill, SalesforceBackfillEdges   # noqa: E402,F401  (its own file; run here)
-from backfill_resolve_test import BackfillResolve, BackfillResolverAndLoaderAgree   # noqa: E402,F401  (its own file; run here)
-from fix_module_values_test import FixModuleValues        # noqa: E402,F401  (its own file; run here)
-from sf_girls_present_test import GirlsPresent            # noqa: E402,F401  (its own file; run here)
-from sf_new_clubs_test import SalesforceNewClubs, GlowSyncLogin, AutoSyncSalesforce   # noqa: E402,F401  (its own file; run here)
-from sf_dupes_test import SfDupesNames, SfDupesApex, SfDupesFlow, OrgQueryAllAndDelete   # noqa: E402,F401  (its own file; run here)
 
 FIXTURE = os.path.join(REPO, "test", "fixtures", "enrollment_sample.csv")
 EXPECTED = os.path.join(REPO, "test", "fixtures", "expected.json")

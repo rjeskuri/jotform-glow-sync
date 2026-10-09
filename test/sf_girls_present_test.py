@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_girls_present.py (imported by test/python_test.py, so `make py` runs
-them). Everything here is fictional: batch ids, names and counts are invented. The fake org holds
+Offline tests for tools/sf_girls_present.py (found by `make py`'s unittest discovery).
+Everything here is fictional: batch ids, names and counts are invented. The fake org holds
 six batches - live Jotform ones with and without rows, a back-filled one, a Failed duplicate, a
 typed partner aggregate and one the processor already counted - and answers the tool's SOQL shapes.
 """

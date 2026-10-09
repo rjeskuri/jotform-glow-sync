@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Offline tests for tools/sf_dupes.py and glow/salesforce.py's query_all / delete (imported by
-test/python_test.py, so `make py` runs them). Everything here is fictional: clubs, partners, girls
+Offline tests for tools/sf_dupes.py and glow/salesforce.py's query_all / delete (found by
+`make py`'s unittest discovery). Everything here is fictional: clubs, partners, girls
 (names from test/fixtures/make_fixture.py's invented pools) and Salesforce ids are invented.
 
 A fake org answers the tool's SOQL with a small evaluator (WHERE ... AND ..., =, >=, IN, GROUP BY)
