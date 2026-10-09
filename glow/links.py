@@ -31,8 +31,9 @@ from collections import namedtuple
 
 from .sync import GUARD_SENTENCE, club_guards, rule_parts
 
-# The public "fill in" links of the two Google Forms (docs/LAUNCH.md; the test
-# suite pins them to it). Never an edit link: those are for the owner only.
+# The public "fill in" links of the two Google Forms (docs/RUNBOOK.md, "The forms",
+# which the test suite pins them to; first listed in docs/archive/2026-09-01-launch.md).
+# Never an edit link: those are for the owner only.
 PROBLEM_FORM_URL = ("https://docs.google.com/forms/d/e/"
                     "1FAIpQLSeYx286-Bre0aSOWnhEDgC4_6FjGyPssldLA3J5WzIeK8cKCA/viewform")
 ROSTER_FORM_URL = ("https://docs.google.com/forms/d/e/"
