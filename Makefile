@@ -7,9 +7,9 @@ SHELL := /bin/bash
 PYTHON := $(shell test -x .venv/bin/python3 && echo .venv/bin/python3 || echo python3)
 RUFF := $(shell test -x .venv/bin/ruff && echo .venv/bin/ruff || command -v ruff)
 
-.PHONY: check test py gs secrets docs-links fixtures fixtures-check lint venv help
+.PHONY: check test py gs secrets docs-links conflicts fixtures fixtures-check lint venv help
 
-check: lint test py gs secrets docs-links fixtures-check   ## everything, offline, no credentials
+check: lint test py gs secrets docs-links conflicts fixtures-check   ## everything, offline, no credentials
 	@echo "CHECK PASSED"
 
 test:                                                 ## JS tests (test/*_test.js): synthetic fixture always, real data when data/ has it
@@ -27,6 +27,12 @@ secrets:                                              ## no keys, PII or real id
 
 docs-links:                                           ## no dead absolute paths; every relative markdown link resolves
 	$(PYTHON) scripts/check_docs_links.py
+
+conflicts:                                            ## no merge-conflict markers in tracked files (not =======: a Markdown underline)
+	@git grep -nE '^(<<<<<<<|>>>>>>>)( |$$)'; s=$$?; \
+	if [ $$s -eq 0 ]; then echo "conflicts: merge-conflict markers above - resolve them"; exit 1; fi; \
+	if [ $$s -ne 1 ]; then echo "conflicts: git grep failed ($$s)"; exit 1; fi; \
+	echo "conflicts: none"
 
 fixtures:                                             ## regenerate test/fixtures/{enrollment_sample.csv,expected.json}
 	$(PYTHON) test/fixtures/make_fixture.py --write

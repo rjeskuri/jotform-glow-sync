@@ -10,17 +10,14 @@ import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKIP_DIRS = {".venv", "venv", "node_modules", "data", "backups", "__pycache__"}
 
 
 def tracked_py():
-    out = []
-    for root, dirs, files in os.walk(REPO):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
-        for f in files:
-            if f.endswith(".py"):
-                out.append(os.path.relpath(os.path.join(root, f), REPO))
-    return sorted(out)
+    """The .py files git tracks (like the other checkers: never data/, .venv or a worktree)."""
+    out = subprocess.run(["git", "ls-files", "-z", "--", "*.py"], capture_output=True, text=True,
+                         cwd=REPO, check=True).stdout
+    # a file deleted but not yet `git rm`-ed is skipped, as check_secrets.py skips it
+    return sorted(p for p in out.split("\0") if p and os.path.isfile(os.path.join(REPO, p)))
 
 
 def is_cli(path):

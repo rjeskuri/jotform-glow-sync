@@ -70,19 +70,27 @@ class GlowClient(unittest.TestCase):
         self.assertIn("--max-time", self.spawned[0])
 
     def test_retry_then_success_then_give_up(self):
+        import contextlib
+        import io
         from unittest import mock
         naps = []
         c = self.gj.Client("KEY", retries=3, backoff=1, sleep=naps.append)
+        out = io.StringIO()
         with mock.patch.object(self.gj.subprocess, "run",
-                               self.fake(["<html>504</html>", "<html>504</html>", self.ok()])):
+                               self.fake(["<html>504</html>", "<html>504</html>", self.ok()])), \
+                contextlib.redirect_stdout(out):
             self.assertEqual(c.get("/x"), {"x": 1})
         self.assertEqual((len(self.spawned), naps), (3, [1, 1]))
+        self.assertEqual(out.getvalue(), "  ! GET /x: attempt 1/3 failed - retrying in 1s\n"
+                                         "  ! GET /x: attempt 2/3 failed - retrying in 1s\n")
         self.spawned.clear()
         c1 = self.gj.Client("KEY")                       # default: one attempt
-        with mock.patch.object(self.gj.subprocess, "run", self.fake(["nope"])):
+        out = io.StringIO()
+        with mock.patch.object(self.gj.subprocess, "run", self.fake(["nope"])), contextlib.redirect_stdout(out):
             with self.assertRaises(self.gj.JotformError):
                 c1.get("/x")
             self.assertIsNone(c1.call([c1.url("/x")], "GET /x", allow_fail=True))
+        self.assertEqual(out.getvalue(), "  ! GET /x: GET /x: non-JSON response: 'nope'  (continuing)\n")
 
     def test_a_json_body_goes_on_standard_input_never_as_an_argument(self):
         # Linux refuses one argument over 131,072 bytes; Africa's rules are about 153 KB
@@ -104,12 +112,18 @@ class GlowClient(unittest.TestCase):
         self.assertEqual(c.calls, ["REPLACE conditions", "POST translations"])
 
     def test_a_retry_sends_the_body_again(self):
+        import contextlib
+        import io
         from unittest import mock
         c = self.gj.Client("KEY", apply=True, retries=3, backoff=0, sleep=lambda s: None)
+        out = io.StringIO()
         with mock.patch.object(self.gj.subprocess, "run",
-                               self.fake(["<html>504</html>", "<html>504</html>", self.ok()])):
+                               self.fake(["<html>504</html>", "<html>504</html>", self.ok()])), \
+                contextlib.redirect_stdout(out):
             self.assertEqual(c.put_json("/form/1/properties", {"a": "é"}, "REPLACE y"), {"x": 1})
         self.assertEqual(self.bodies, [json.dumps({"a": "é"})] * 3)
+        self.assertEqual(out.getvalue(), "  ! REPLACE y: attempt 1/3 failed - retrying in 0s\n"
+                                         "  ! REPLACE y: attempt 2/3 failed - retrying in 0s\n")
 
     def test_an_argument_too_large_for_a_command_line_is_refused_not_tried(self):
         from unittest import mock

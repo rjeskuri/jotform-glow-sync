@@ -59,7 +59,9 @@ class RetiredRosters(unittest.TestCase):
 
     # ---- glow.sync
     def test_the_partners_tab_is_read_by_header_and_any_other_value_is_yes(self):
+        import contextlib
         import csv
+        import io
         path = os.path.join(self.tmp.name, "p.csv")
 
         def write(header, rows):
@@ -70,8 +72,11 @@ class RetiredRosters(unittest.TestCase):
               [["Partner One", "Africa", "", ""], ["Partner Two", "Africa", "", " No "],
                ["Partner  Three", "Asia", "", "YES"], ["Partner Four", "Asia", "", "maybe"],
                ["", "", "", "no"], ["Partner Two", "Africa", "", ""]])   # a blank row; a second row of a marked partner
-        self.assertEqual(glow_sync.read_partners_csv(path),
-                         {"partner one": "yes", "partner two": "no", "partner three": "yes", "partner four": "yes"})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(glow_sync.read_partners_csv(path),
+                             {"partner one": "yes", "partner two": "no", "partner three": "yes", "partner four": "yes"})
+        self.assertEqual(out.getvalue(), "".join(w + "\n" for w in glow_sync.WARNINGS))    # printed as it is kept
         self.assertEqual(glow_sync.WARNINGS, ["  ! Partners tab: 'Partner Four' has jotform='maybe' - only yes, no "
                                               "or blank are understood; treated as yes"])
         self.assertIn(auto_sync.JOTFORM_VALUE, glow_sync.WARNINGS[0])
@@ -80,7 +85,10 @@ class RetiredRosters(unittest.TestCase):
         # the tab before the column marks nobody - and says so (a renamed header would otherwise
         # read as every mark lifted); one without a partner column is refused
         write(["partner", "region", "notes"], [["Partner One", "Africa", ""]])
-        self.assertEqual(glow_sync.read_partners_csv(path), {"partner one": "yes"})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(glow_sync.read_partners_csv(path), {"partner one": "yes"})
+        self.assertEqual(out.getvalue(), "".join(w + "\n" for w in glow_sync.WARNINGS))
         self.assertFalse(glow_sync.partners_marker_present(path))
         self.assertEqual(glow_sync.WARNINGS, ["  ! Partners tab: the export has no 'jotform' column, so no partner is "
                                               "marked - a retired roster of an active club would be restored; check "
