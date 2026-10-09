@@ -36,6 +36,7 @@ import unicodedata
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
+from glow.forms import REGIONS                                     # noqa: E402  (the four regional forms)
 from glow.salesforce import Org, Refused, quoted                  # noqa: E402
 from glow.text import key, name_key                               # noqa: E402
 from sf_club_accounts import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS,   # noqa: E402
@@ -57,7 +58,6 @@ CODE_IN = re.compile(r"GLOW club code ([A-Z0-9]+);")
 GIRL_ID = re.compile(r"([A-Z0-9]+)-[A-Z0-9]+-\d+")              # CLUBCODE-LASTCODE-NNN (appsscript/Ids.gs)
 PROVEN = set(" -.()'/")     # characters seen arriving intact in question 5 (600 batches, 2026-10-06)
 ERROR_WORD = re.compile(r"\b[A-Z][A-Z_]{3,}\b")
-REGIONS = ("Africa", "Asia", "Latin America", "U.S")       # the four regional forms (auto_sync REGIONAL_FORMS)
 
 Club = collections.namedtuple("Club", "region partner club value code")
 

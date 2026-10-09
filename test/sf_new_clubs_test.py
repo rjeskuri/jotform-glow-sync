@@ -141,6 +141,10 @@ class Fixture(unittest.TestCase):
 
 class SalesforceNewClubs(Fixture):
     # ---- the comparison and the names
+    def test_the_regions_are_the_forms_table_s(self):
+        from glow import forms
+        self.assertIs(sfn.REGIONS, forms.REGIONS)          # one list of the regional forms: glow/forms.py
+
     def test_the_processor_s_comparison(self):
         m = sfn.sf_match
         self.assertTrue(m("Sunrise Club", "sunrise club"))
