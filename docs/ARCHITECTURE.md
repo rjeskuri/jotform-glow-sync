@@ -53,11 +53,11 @@ enrollment responses → `sync_attendance_form.py read_sheet` (no `--roster`).
 | Where | What | Talks to |
 |---|---|---|
 | `sync_attendance_form.py` | The product: makes one form match the sheet — creates/updates roster questions, regenerates every condition (visibility rules, curriculum cascade, Salesforce bridge, and — on a form with the club guard — the one-club rules), and keeps the Club picker and the club guard's warning (found by field name, `clubPicker` / `clubGuard`, added once by `--club-picker` / `--club-guard`) in shape. A club whose name another partner's club shares has its own picker entry, `<club> - <partner>` — the text question 5 sends to Salesforce (`glow/sync.py` `SF_NAME_SEP`, `sf_club_name`): each roster keeps the form its rule has (read back, never flipped), `--same-name-switch` makes the shared names long by hand, a new club with a name in use is not created, and any other change of an existing club's question 5 needs `--q5-change-ok`. A plain roster's rule names no partner, so where the Roster has another partner's club of that name its owner is read from the Roster's rows of any status (`roster_names`: whose rows list at least half, and the most, of the girls the question holds) — a retired club's question is never taken over by a newcomer. New rosters are created above the links and Submit (`glow/layout.py`). Question 18 (Contact_IDs) is rule 0 on a picker form, with the picker as an operand, and every roster carries Jotform's `required` flag (`glow/sync.py` `CONTACT_IDS_FIRST`, `CONTACT_IDS_PICKER_OPERAND`, `ROSTERS_REQUIRED`, read at run time: turning one off and applying is the rollback); it warns when the live rules calculate question 18 the old way. With `--partners` (the Partners tab) a roster whose partner is marked `jotform=no`, or whose club has had no active girl since before today (`RETIRE_INACTIVE`), is retired: kept on the form hidden and frozen, off the picker, no show rule, still in question 18's sum (`~ retired roster …`); it comes back when the Roster says so (`~ restored roster …`; a shared name long, as a question-5 change), and without the export a restore is warned and refused. It prints the form's status first and refuses `--apply` on a disabled form without `--disabled-ok`. Dry run by default, `--apply` writes, `--summary-json` for the runner (its `sf_names`: what every roster sends; `requires`: rosters whose flag alone is written; `retired` / `restored`) | Jotform API via `curl` |
-| `backup_forms.py`, `restore_conditions.py` | Snapshot and rollback (conditions only; a snapshot whose rules test clubs the Club picker no longer offers is refused; one that calculates question 18 the old way restores with a note) | Jotform API |
+| `backup_forms.py`, `restore_conditions.py` | Snapshot and rollback: `backup_forms.py` is the command line of `glow/backup.py`; the restore puts back conditions only, snapshots the form before its PUT (the `--from` that undoes it is printed; the `-latest` files are left alone) and refuses a snapshot with a rule whose terms or action do not parse (`--force` does not override that); a snapshot whose rules test clubs the Club picker no longer offers is refused; one that calculates question 18 the old way restores with a note) | Jotform API |
 | `tools/form_status.py` | Read-only audit of every form vs the Roster export, rule by rule (rosters grouped by the text their rule tests; the picker's options are those texts; question 18's place, operands and equation and the rosters' required flag, the module dropdowns' `calcValues`, and the module chain's shape - year, module and session dropdowns single-select and required, the form-level `clearFieldOnHide` - each as `glow/sync.py`'s constants say; the names dictionary, emulated by `glow/translation_lookup.py`: no roster option altered in any language); `--rendered` reads the public page (counts only: picker and module `data-calcvalue`, no module select served `multiple`, `JotForm.clearFieldOnHide`, question 18 in `JotForm.setConditions` / `setCalculations`, `validate[required]` boxes, the embedded translation store against the boxes served, the runtime build, and the retired rosters' `always-hidden` elements); the line after the Roster line is Jotform's storage against the plan's limits (`glow/usage.py`: upload space in all, submissions in the cycle, each on its own - account-wide, never a form problem); with `--partners` a retired roster is told from a broken one (retired: clean; still with its rule or entry: awaiting the next apply; off the picker with an active club and no mark: a problem); a form whose status is not `ENABLED` has its region check and served-page checks skipped; `--json` | Jotform API, the public page |
 | `tools/integration_status.py` | Read-only: every form's Salesforce integration against the one known action (create `Attendance_Batch__c`, eight fields from their questions, `Account_Name__c` from question 5, no upload since 2026-10-01, one connection for the live forms, none on the old ones) and the other integration blocks a form carries (`other integrations:`, where the Google Drive block's key will show once Ryan sets it up); the builder is the only writer | Jotform API |
 | `tools/auto_sync.py` | The unattended loop (export the Roster and Partners tabs → form status → plan → bands → backup → apply → verify → SyncLog); a form that is not `ENABLED` is `skipped`, a status that cannot be read `failed`. ATTENTION also for a question-5 change of an existing club (the region is not applied), question 18 calculated the old way, a required flag written on its own or a module dropdown's `calcValues` (the region is not applied: each is rolled out by hand), more than 5 rosters retired or restored at once (`--max-retires`, `--max-restores`), a new club refused for its name, a Partners-tab `jotform` value not understood, a Partners export without the `jotform` column (a plan restoring a roster from it is held), a name two clubs send, and roster rules that test a name the Club picker does not list (never `in-sync`; the rules-only rewrite is applied by hand); once per run Jotform's storage (`glow/usage.py`): the line logged, an ATTENTION per limit at 80 %; and the sheet's time zone against `glow/sync.py SHEET_ZONE`. With the repository variable `SF_SYNC` (`plan` / `apply`) the new clubs' Salesforce accounts are made by `tools/sf_new_clubs.py` right after the region's backup and before its apply, only for a region whose form applies (a `skipped` form's region is left out of the end-of-run check too), then every club on a form is checked read-only: one SyncLog row `Salesforce` | Sheets API, Salesforce REST, the tools above |
-| `tools/sheets_client.py` | Service-account access to the sheet; importable (`read_tab`, `append_rows`, `write_tab`, `write_cell`) | Sheets API |
+| `tools/sheets_client.py` | Service-account access to the sheet: `whoami`, `tabs`, `export`, `export-all`; importable (`read_tab`, `append_rows`, `write_tab`, `write_cell`, and the cell helpers `a1`, `col_letter`, `cell`, `trimmed`, `describe_rows`, moved here from `rename_club.py` on 2026-10-09) | Sheets API |
 | `tools/sf_new_clubs.py`, `glow/salesforce.py`, `glow/sf_partners.csv` | New clubs' Salesforce accounts (BACKLOG 27): `auto_sync` creates a new club's Club account as the GLOW Sync integration user right before its form puts it on the picker (`SF_SYNC` off/plan/apply, at most 5 per region, all or nothing), and checks every club on a form afterwards, read only; `check` is the same check from Ryan's CLI login. `glow/salesforce.py` is the one Salesforce client (the CLI's login for the Mac tools, client credentials for GitHub Actions); the partner map is organisation names and account ids | Salesforce REST, Sheets API (SF Pending) |
 | `tools/sf_dupes.py` | One Salesforce contact per girl ([plan](plans/2026-10-07-sf-duplicate-girls.md), RUNBOOK "Duplicate girls in Salesforce"): `check` (the monthly look, read only: the same name twice in a club, stored names and batches' name lists with odd whitespace, names in two clubs the Roster does not have in both), `plan` (each group proven against the Roster, the contact that stays, merge calls of at most two -> `merge_plan.json`, ids only), `merge` (dry run, `--rehearse` or `--apply`: one anonymous-Apex `Database.merge` run per club, all or nothing, the rollback file first, read back), `rename`, `cleanup` (extra affiliations, duplicate-rule sets). Uses `glow/salesforce.py` (`query_all`, `delete`) and `sf apex run` through Ryan's CLI login; prints ids and counts, never a name | Salesforce REST and CLI, Jotform API (read only: the quiet-window check and the submission count) |
 | `tools/upload_roster.py`, `tools/build_roster_offline.js` | Rebuild the Roster tabs offline with the *same* `.gs` code, upload them | local, Sheets API |
@@ -73,7 +73,7 @@ enrollment responses → `sync_attendance_form.py read_sheet` (no `--roster`).
 | `tools/fix_roster_order.py` | One-time repair (BACKLOG 47): the links, Submit and the hidden bridge fields move to empty orders after the last roster, so every roster renders above them; `glow/layout.py` holds the plan, the order the sync gives a new roster, and the `form_status` layout check | Jotform API |
 | `tools/update_static_fields.py` | The fields the sync never touches: label wording, the Group Photo limits, and the header logo (`--image-src`, since the API cannot upload an asset). Declarative — wanted properties per field name, re-read and compared after every write | Jotform API |
 | `appsscript/*.gs` | Bound to the sheet: config, normalization, ids, roster ops, form generation, submission handlers, menu, dispatch | Google services |
-| `test/`, `scripts/`, `Makefile` | The offline feedback loop (`make check`) | nothing |
+| `test/`, `scripts/`, `.githooks/`, `Makefile` | The offline feedback loop (`make check`): ruff; the Python tests by discovery (`python3 -m unittest discover -s test -p '*_test.py'`, one file per subject, shared fixtures as mixins in `test/helpers/common.py`, the fake Salesforce org in `test/helpers/fake_org.py`) and the JavaScript suites `test/*_test.js`; `scripts/check_gs.js` (the `.gs` files parse, use only the 8 pinned Google services, call only functions that exist); the secret, link, RUNBOOK-section and BACKLOG-number checks; `.githooks/pre-commit` for commits made outside Claude Code | nothing |
 
 `appsscript/Config.gs` documents the Script Properties and the Salesforce
 mapping's dependence on question ids. `Roster.gs`, `Forms.gs`,
@@ -81,9 +81,40 @@ mapping's dependence on question ids. `Roster.gs`, `Forms.gs`,
 `Normalize.gs`, `Ids.gs`, `Regions.gs`, `RosterOps.gs`, `Dispatch.gs` have no
 top-level side effects and run in Node through `test/load_gs.js`.
 
+### `glow/`, the shared library
+
+Standard library only (HTTP through `curl`). On 2026-10-09 the copies the tools kept
+of the same helpers moved here ([plan](plans/2026-10-09-repo-cleanup.md), Phase 3);
+`glow/__init__.py` lists the modules.
+
+| Module | What it holds |
+|---|---|
+| `glow/jotform.py` | `Client`, the one Jotform API client: `call()` treats any POST, PUT, DELETE or `--data*` as a write and skips it unless the client was built with `apply=True`; a JSON body goes on curl's standard input; `url()` URL-encodes the key and every parameter, once (callers pass plain values, a submissions filter as its JSON text); `submissions()` reads a form's submissions page by page and checks the count. `public_page()`: the public page as a mentor's browser gets it (no key, a browser user agent; a curl failure raises, never reads as an empty page). `CLOCK`: Jotform's clock (US Eastern) for `created_at` |
+| `glow/forms.py` | The form ids, Python only: `TEMPLATE`, `REGIONALS`, `LIVE`, `DEFUNCT`, `REGIONS` (parity-tested against `Config.gs REGIONS`, the Club Roster Form's region picker), `TITLES`; `language_of()`. The tools that keep their own table (for its order or labels) are pinned to it by `test/glow_lib_test.py` |
+| `glow/sync.py` | The Roster and enrollment readers (`read_roster_csv`, `_roster_rows`, `read_partners_csv`, `read_sheet`, `parse_roster`), the structural question ids (below), `club_picker()` (the one reader of the Club picker), `dropdown_options()`, `rule_parts()` (a rule's terms and action decoded, or None), the switches the sync and the audit read (`CONTACT_IDS_FIRST`, `ROSTERS_REQUIRED`, `RETIRE_INACTIVE`, …), `SESSION_OVERRIDES`, `SHEET_ZONE`, `SF_NAME_SEP` |
+| `glow/text.py` | The keys names are compared by: `key`, `name_key`; the sheet's `tidy`, `cell_key`, `nfc_key` and `INVISIBLE` (from `rename_club.py`) |
+| `glow/cli.py` | `run(main)` (a `JotformError` is a one-line exit), `api_key()` (the key from the environment; it was copied into 22 tools), `targets()` (the forms a `--form` selects) |
+| `glow/backup.py` | `snapshot()` (a form's questions and properties into `backups/<form>/<part>-<stamp>.json` and `-latest.json`), `stamp()` (to the second, so a re-run within the minute never overwrites the true "before"), `path()`, `save_conditions()` |
+| `glow/translations.py` | A form's translation store: `read_store()`, `save_store()` (`backups/translations/<form>-<stamp>-before.json`, mode 600, never over an earlier file), `expand_n()`, `replace_languages()` (refuses to POST without the saved store), `reads_back()` |
+| `glow/submissions.py` | Reading a submission (from `tools/backfill_resolve.py`): an answer, the ticked rosters, the attendance date, the module, session and year from the dropdowns rather than their copies; an unknown answer shape is `Unreadable`, never echoed |
+| `glow/links.py`, `glow/layout.py` | The link elements above Submit and their place; where rosters sit relative to the links and Submit |
+| `glow/usage.py`, `glow/translation_lookup.py` | Jotform's storage against the plan's limits; the runtime's names dictionary, emulated |
+| `glow/salesforce.py`, `glow/sf_partners.csv` | The one Salesforce client (`Org`: the CLI's login on the Mac, client credentials for GitHub Actions); and what every Salesforce tool relies on, moved here from the tools: the org's record-type ids and the pilot accounts on hold, `sf_match()` (the attendance processor's trimmed, case-ignoring name match, one comparison instead of three), `has_invisible()`, `error_codes()` (codes only, never a word of the answer), the partner map (`read_partners()`), and `--vpn-off` (`add_vpn_flag()`, `require_vpn_off()`) |
+| `glow/private_files.py` | Files that can hold names or record ids: owner-only folders and files, inside the checkout only under `data/` (`private_folder`, `open_private`, `save_private`), and `Ledger`, the append-only CSV each Salesforce writer keeps |
+
+The structural question ids, in `glow/sync.py` (those the Salesforce mapping reads are
+frozen: DECISIONS 2026-08-24): Club Name `CLUB_NAME` 5, Partner `PARTNER` 331, year `YEAR` 94,
+modules `MODULES` 14 / 92 / 93, sessions `WEEKS` 15 / 95 / 96 / 97, the date `DATE` 17,
+Contact_IDs `CONTACT_IDS` 18, the Group Photo `PHOTO` 19, the bridge copies `MODULE_ID` 98,
+`WEEK_ID` 100, `YEAR_ID` 102, `CREATOR` 105 and `ENABLE_FUZZY` 109. Tools import them; none
+spells a qid of its own.
+
 ## Constants that exist on both sides
 
-Change both, or `test/gs_parity_test.py` (`PythonAppsScriptParity`) fails:
+Change both, or `test/gs_parity_test.py` (`PythonAppsScriptParity`) fails. The
+question ids, the form ids and `SESSION_OVERRIDES` are Python only since 2026-10-09
+(`glow/sync.py`, `glow/forms.py`): Apps Script never talks to Jotform, and its unused
+copies went.
 
 | Constant | Python | Apps Script |
 |---|---|---|
@@ -94,7 +125,7 @@ Change both, or `test/gs_parity_test.py` (`PythonAppsScriptParity`) fails:
 | Response-tab header fragments | `glow/sync.py COL_PARTNER`, `COL_CLUB`, `COL_ROSTER` (`read_sheet`) | `Config.gs RESPONSE_COLS` (`readResponses_`) |
 | SyncLog columns | `tools/auto_sync.py SYNC_LOG_COLS` | `Roster.gs SYNC_LOG_COLS` |
 | SF Pending columns (`test/sf_new_clubs_test.py` compares them) | `tools/sf_new_clubs.py SF_PENDING_COLS` | `FormHandlers.gs SF_PENDING_COLS` |
-| Region vocabulary `Africa / Asia / Latin America / U.S` | everywhere as strings | `Regions.gs` values, Partners tab |
+| Region vocabulary `Africa / Asia / Latin America / U.S` | `glow/forms.py REGIONS` (the tools' strings follow it) | `Config.gs REGIONS` (the Club Roster Form's region picker), `Regions.gs` values, Partners tab |
 
 ## Parity bridges (same logic, two languages)
 
@@ -123,6 +154,13 @@ Change both, or `test/gs_parity_test.py` (`PythonAppsScriptParity`) fails:
    intake's `newClubHoldReasons_` — which new club's name is in use.
    `SameNameFlow` does the same for the switch itself: the `sf_names` the
    switched form sends are the names `sfClubName_` prints.
+5. `RosterOps.gs similarity_` (the duplicate-club guard's "close names") ↔
+   Python's `difflib.SequenceMatcher(None, a, b).ratio()` — `test/gs_parity_test.py`
+   compares them over fictional pairs.
+6. `Normalize.gs foldKey_` (the near-duplicate checks) ↔ `glow/text.py name_key`:
+   the same case and accent folding, except that `foldKey_` drops the invisible
+   characters (`Normalize.gs INVISIBLE`) and `name_key` keeps them — the divergence
+   below; `test/gs_parity_test.py` asserts exactly that difference over the fixture.
 
 ## Known divergences (documented, not fixed — see the backlog)
 
@@ -135,7 +173,8 @@ Change both, or `test/gs_parity_test.py` (`PythonAppsScriptParity`) fails:
   invisible characters; Python's `shared_club_names` and the sync's own
   check compare with `glow.text.key`, which keeps them. A club cell with a
   zero-width character inside is the same name in Apps Script and a
-  different one in Python (the intake errs toward holding). Cells the form
+  different one in Python (the intake errs toward holding); `foldKey_` (the
+  near-duplicate checks) and `glow.text.name_key` differ the same way. Cells the form
   handlers write never hold one (likewise a girl's name cell with only
   such characters is no name in Apps Script). Also: the intake check counts
   Roster rows of any status, with a girl's name or not (as `roster_pairs`),
@@ -183,7 +222,7 @@ Change both, or `test/gs_parity_test.py` (`PythonAppsScriptParity`) fails:
   Because a reactivation records no date, an old REMOVE replayed later can
   still take off a girl re-added since.
 
-## Generated and placeholder code
+## Generated and hand-kept files
 
 - `appsscript/Regions.gs` — hand-kept data since 2026-10-09: the partner → region
   map derived on 2026-08-25 from the pre-launch regional forms by a script now
@@ -196,10 +235,6 @@ Change both, or `test/gs_parity_test.py` (`PythonAppsScriptParity`) fails:
   until he changes them.
 - `test/fixtures/enrollment_sample.csv`, `expected.json` — generated by
   `test/fixtures/make_fixture.py`; `make fixtures-check` fails when stale.
-- `Config.gs` `QID`, `FORMS`, `SESSION_OVERRIDES`, `getApiKey_` and
-  `Ids.gs renameClubInRegistry_` are not referenced yet: scaffolding for a
-  native Apps Script sync (superseded by the auto-sync workflow; kept for
-  the constants test and the ReviewQueue rename flow).
 
 ## Retired tools
 
