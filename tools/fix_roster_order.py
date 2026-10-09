@@ -17,7 +17,7 @@ every form today; ten once the Club Roster Form link is on it).
 Dry run by default. Every form is planned before any is written; the tool
 refuses - on every form - rather than guess (two Submit buttons, a page
 break, a field a mentor can see below the links, a link below Submit). With
---apply, per form: a snapshot (backup_forms.py -> backups/<id>/), a re-read
+--apply, per form: a snapshot (glow/backup.py -> backups/<id>/), a re-read
 and re-plan (a form changed since the preview is not written), Submit first
 (then every roster is above it), the hidden fields, the links last; after
 the first write a re-read checks Jotform kept the order as sent and moved

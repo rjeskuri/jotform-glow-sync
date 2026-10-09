@@ -41,7 +41,7 @@ refuses a target that is not in the Partners tab or sits in another region,
 a club whose current name another partner's club shares, and a club whose
 show rule tests the Partner box (so a move's --apply needs the Jotform key).
 Dry run by default; --apply first saves the tabs it touches under
-data/rename_club/<stamp>/ and takes a backup_forms.py snapshot of each form
+data/rename_club/<stamp>/ and takes a snapshot (glow/backup.py) of each form
 it writes, re-reads the tabs and stops (nothing written) if the club gained a
 row or a planned row changed meanwhile, writes, then re-reads and compares
 every write. Rows of the club that a form submission appends during the
