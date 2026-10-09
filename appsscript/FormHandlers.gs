@@ -701,35 +701,35 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
   const state = loadIdState_();
   const today = today_();
   const current = existing.byClub[clubKey_(partner, club)] || [];
-  // the rows this response added: an attempt that wrote the Roster and then failed leaves them
-  const mine = current.filter(function (r) { return tidy_(r.source) === tidy_(source); });
-  const isNew = isNewClubFor_(current, mine);
+  const isNew = !current.length;
 
   const plan = planClub_({ partner: partner, club: club, names: parsed.names,
                            duplicates: parsed.duplicates, source: source,
                            submitted: submitted },
                          current, state, region, today);
-  // ClubRegistry and Partners before the Roster: a retry finds the code and the partner
-  // again and adds nothing twice, so a failure here is an ERROR that a retry repairs.
+  // Every write that may fail comes BEFORE the Roster write, the "new club" decision included:
+  // a failure up to and including the Roster write is an ERROR whose retry finds the club
+  // still without girls, so still new, and finds what the attempt did write again -
+  // ClubRegistry and Partners (the code and the partner on file), SF Pending (sfPendingAdd_
+  // adds no second pending row). After the Roster write nothing fails the run, so no retry
+  // has to guess whether the club was new. Accepted: if the Roster write fails and nobody
+  // retries, a pending SF Pending row waits for a club with no girls (the response shows as
+  // ERROR in FormLog and the menu); if staff close that row by hand before the retry, the
+  // retry adds another.
   saveClubRegistry_(state.registry);
   const seen = {}; seen[key_(partner)] = partner;
   const formRegions = {};
   if (formRegion) formRegions[key_(partner)] = formRegion;
   seedPartners_(seen, formRegions);
-  applyRosterPlan_(ss, plan, today);
-
-  // The Roster has changed: a retry re-plans against it and finds the girls on file. So the
-  // Jotform sync request and the Salesforce row come first, and every step after the row is
-  // best-effort (the ReviewQueue, Audit: FormLog records the summary). The one ERROR left
-  // after the Roster write is the Salesforce row itself; its retry still finds the club new
-  // (isNewClubFor_, even with another response's rows added since), asks for the sync again
-  // and adds the row (sfPendingAdd_: one pending row per club).
-  if (isNew || plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
   if (isNew) {
-    sfPendingAdd_(ss, [today, partner, club, region, plan.toAppend.length || mine.length,
+    sfPendingAdd_(ss, [today, partner, club, region, plan.toAppend.length,
                        sheetText_(a[Q.MENTOR_NAME]), sheetText_(a[Q.MENTOR_EMAIL]),
                        sheetText_(a[Q.COUNTRY]), 'pending', '']);
   }
+  applyRosterPlan_(ss, plan, today);
+
+  // from here on, best-effort only (FormLog records the summary)
+  if (plan.toAppend.length || plan.reactivate.length) tryNotifySync_('newClubForm');
   trySyncChoices_();
 
   const issues = plan.issues;
@@ -765,14 +765,16 @@ function handleNewClub_(a, source, responseKey, released, submitted) {
 
 /**
  * Append a new club to SF Pending (the Monday e-mail's Salesforce list) unless
- * the same partner and club has a row there that is still 'pending': a retry
- * of the response that added it adds no second one, and tools/sf_new_clubs.py,
- * which marks a club's ONE pending row done, never finds two. A row with any
- * other status (done, or closed by hand) does not count: a club enrolled under
- * a name an old, closed row has gets a row of its own. The cost: a re-run that
- * comes after its own row was marked done adds a second one - possible only if
- * the run still failed after writing the row (a failure handler's own Audit
- * write failing too) or FormLog lost its result. True if appended.
+ * the same partner and club has a row there that is still 'pending'.
+ * handleNewClub_ writes the row before the Roster, so the response a retry
+ * runs again is one whose Roster write failed: its club is still new, and its
+ * row is found here instead of added twice. tools/sf_new_clubs.py (run by the
+ * auto-sync that a new club's response requests) marks a club's ONE pending
+ * row done, normally within the hour, so this covers a retry made before that
+ * - and a response that completed is never re-run as new (its club has Roster
+ * rows). A row with any other status (done, or closed by hand) does not count:
+ * a club enrolled under a name an old, closed row has gets a row of its own.
+ * True if appended.
  */
 function sfPendingAdd_(ss, row) {
   const sheet = ensureTab_(ss, TAB.SF_PENDING, SF_PENDING_COLS);

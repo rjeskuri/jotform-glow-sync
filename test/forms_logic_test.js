@@ -205,24 +205,6 @@ console.log('\nthe replay guard: an older response never puts back girls removed
         !replay.toAppend.length && !replay.vanished.length && replay.issues[0]?.detail.includes('20 girl(s)'));
 }
 
-console.log('\nisNewClubFor_ — the new-club response a club goes to Salesforce for');
-{
-  const MINE = 'Roster Form Responses!50';
-  const row = (source, added) => ({ source, added_date: added });
-  const a = row(MINE, '2026-09-27'), b = row(MINE, '2026-09-27');
-  const is = (current, mine) => gs.isNewClubFor_(current, mine);
-  check('nothing on file: new; on file from another response, none of this one\'s: existing',
-        is([], []) && !is([row('Enrollment Responses!7', '2026-08-26')], []));
-  check('a retry: only this response\'s rows, or with another response\'s added the same day or later: new',
-        is([a, b], [a, b]) && is([a, b, row('Roster Form Responses!51', '2026-09-27')], [a, b]) &&
-        is([a, row('Roster Form Responses!52', '2026-09-28')], [a]));
-  check('…a row from before the attempt, or one with no readable day: existing',
-        !is([row('Enrollment Responses!7', '2026-08-26'), a], [a]) && !is([row('Roster Form Responses!3', ''), a], [a]));
-  const undated = row(MINE, '');
-  check('…this response\'s own rows with no readable day: only those alone are new',
-        is([undated], [undated]) && !is([undated, row('Roster Form Responses!52', '2026-09-28')], [undated]));
-}
-
 console.log('\nclosestNames_');
 check('ranks by shared words', gs.closestNames_('Zibblewick', ['Mary Zibblewick', 'Grace Zibblewick', 'Joy Blorptest']).length === 2);
 check('empty query → no candidates', gs.closestNames_('   ', ['Mary Zibblewick']).length === 0);
@@ -1403,6 +1385,7 @@ function sheetWorld(tabs, opts) {
   ctx.now_ = () => '2026-09-28 09:00:00';
   ctx.audit_ = (action, detail) => out.audits.push(action + ': ' + detail);
   ctx.formLogAdd_ = (which, row, key, result) => out.formLog.push([which, row, key, result]);
+  out.real = { trySyncChoices_: ctx.trySyncChoices_, tryNotifySync_: ctx.tryNotifySync_ };   // for failure tests
   ctx.trySyncChoices_ = () => { out.synced++; };
   ctx.tryNotifySync_ = why => out.notified.push(why);
   out.ctx = ctx;
@@ -1506,96 +1489,142 @@ const KEY41 = 'ROSTER|w:2026-09-21 10:15:30.250|x|y';
   }
 }
 
-console.log('\nA Sheets failure after the Roster write: Salesforce, the sync request and the mentor e-mail stay right (review A1)');
+console.log('\nA Sheets failure in the Club Roster Form handlers: Salesforce, the sync request and the mentor e-mail stay right (review A1)');
 {
   const A = 'Fixture Partner Alpha', SUN = 'Sunrise Club', RQ = 'Roster Form Responses', SRC = RQ + '!50';
   const KEY = 'ROSTER|w:2026-09-27 10:15:30.250|' + A + '|Comet Club';
   // "Yes, two girls share a name" with no repeated name: one ReviewQueue item
   const comet = () => newClub(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson'], { [HQ.SAME_NAME]: 'Yes' });
   const sfRows = w => w.tabs['SF Pending'].slice(1).filter(r => r[2] === 'Comet Club');
+  const cometRows = w => w.tabs.Roster.slice(1).filter(r => r[2] === 'Comet Club');
+  const run50 = w => w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  const NEW = 'new club Comet Club (' + A + '): 2 girls added, 0 reactivated, 1 for review';
 
+  console.log('\n  after the Roster write nothing fails the run');
   let opts = { down: 'ReviewQueue' };
   let w = sheetWorld(baseTabs(), opts);
-  let res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  let res = run50(w);
   check('a new club, the ReviewQueue down: imported, not an ERROR; FormLog says its item is NOT queued',
-        res === 'new club Comet Club (' + A + '): 2 girls added, 0 reactivated, 1 for review ' +
-                '(NOT on the ReviewQueue: see Audit)' && w.tabs.Roster.length === 3, res);
+        res === NEW + ' (NOT on the ReviewQueue: see Audit)' && cometRows(w).length === 2, res);
   check('…its Salesforce row written and the Jotform sync requested',
         sfRows(w).length === 1 && sfRows(w)[0][4] === 2 && w.notified.join() === 'newClubForm', JSON.stringify(sfRows(w)));
   check('…and Audit names the item that could not be queued (the issue and the source only)',
         w.audits.includes('tryReview_: could not add 1 item(s) (Partner says two girls share a name) for ' + SRC +
                           ': sheet unavailable'), w.audits.join(' | '));
+  w = sheetWorld(baseTabs(), { down: 'ReviewQueue' });
+  w.ctx.tryNotifySync_ = w.real.tryNotifySync_;
+  w.ctx.notifySync_ = () => { throw new Error('GitHub unreachable'); };
+  w.ctx.trySyncChoices_ = w.real.trySyncChoices_;   // Forms.gs is not loaded: syncFormChoices throws
+  const keepAudit = w.ctx.audit_;
+  w.ctx.audit_ = (action, detail) => {
+    if (action === 'newClubForm') throw new Error('sheet unavailable');   // the summary's own Audit row
+    keepAudit(action, detail);
+  };
+  res = run50(w);
+  check('…the sync request, the dropdowns, the ReviewQueue and the summary\'s Audit row all failing: still not an ' +
+        'ERROR; the girls and the Salesforce row are there, and Audit says what failed',
+        res === NEW + ' (NOT on the ReviewQueue: see Audit)' && cometRows(w).length === 2 && sfRows(w).length === 1 &&
+        w.audits.includes('syncRequested: newClubForm failed: GitHub unreachable') &&
+        w.audits.some(x => x.startsWith('syncFormChoices: failed: ')) &&
+        w.audits.some(x => x.startsWith('tryReview_: could not add 1 item(s)')), w.audits.join(' | '));
 
+  console.log('\n  up to the Roster write: an ERROR whose retry finds the club still new');
   opts = { down: 'SF Pending' };
   w = sheetWorld(baseTabs(), opts);
-  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-  check('a new club, SF Pending down: ERROR (retried from the menu), but the girls are on the Roster and the sync was requested',
-        res === 'ERROR: sheet unavailable' && w.tabs.Roster.length === 3 && !sfRows(w).length &&
-        w.notified.join() === 'newClubForm', res);
+  res = run50(w);
+  check('SF Pending down: ERROR before the Roster write — no girl on file, no sync request',
+        res === 'ERROR: sheet unavailable' && !cometRows(w).length && !sfRows(w).length && !w.notified.length, res);
   opts.down = null;
-  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-  check('…the retry: still a new club (its only rows are this response\'s), so the Salesforce row is added, with its girls',
-        res === 'new club Comet Club (' + A + '): 0 girls added, 0 reactivated, 1 for review' &&
-        w.tabs.Roster.length === 3 && sfRows(w).length === 1 && sfRows(w)[0][4] === 2 &&
-        w.notified.join() === 'newClubForm,newClubForm', res);
-  w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-  check('…run once more (FormLog lost): still one Salesforce row for the club (its row is still pending)',
-        sfRows(w).length === 1);
+  res = run50(w);
+  check('…the retry: still a new club, imported; one Salesforce row with its girls; the sync requested',
+        res === NEW && cometRows(w).length === 2 && sfRows(w).length === 1 && sfRows(w)[0][4] === 2 &&
+        w.notified.join() === 'newClubForm', res);
 
-  // another response for the club lands between the failed attempt and its retry (review of A1)
+  opts = { down: 'Roster' };
+  w = sheetWorld(baseTabs(), opts);
+  res = run50(w);
+  check('the Roster write failing: ERROR; the Salesforce row is already written (pending), no girl, no sync request',
+        res === 'ERROR: sheet unavailable' && !cometRows(w).length && sfRows(w).length === 1 &&
+        sfRows(w)[0][8] === 'pending' && !w.notified.length, res);
+  opts.down = null;
+  res = run50(w);
+  check('…the retry: still new; the girls written, the sync requested, and still ONE Salesforce row',
+        res === NEW && cometRows(w).length === 2 && sfRows(w).length === 1 && w.notified.join() === 'newClubForm', res);
+  res = run50(w);
+  check('…run once more (FormLog lost): an existing club now, nothing added, still one Salesforce row',
+        res.startsWith('existing club Comet Club (' + A + '): 0 girls added') && sfRows(w).length === 1, res);
+
+  opts = { down: 'ClubRegistry' };
+  w = sheetWorld(baseTabs(), opts);
+  res = run50(w);
+  check('ClubRegistry down: ERROR before anything else is written — no girl, no Salesforce row, no sync request',
+        res === 'ERROR: sheet unavailable' && !cometRows(w).length && !sfRows(w).length && !w.notified.length, res);
+  opts.down = null;
+  res = run50(w);
+  check('…the retry imports it as if the first attempt had not happened',
+        res === NEW && w.tabs.ClubRegistry.length === 2 && sfRows(w).length === 1 && w.notified.join() === 'newClubForm', res);
+
+  console.log('\n  other responses for the club, and late runs');
+  // the re-review's case: enrolled, its Salesforce row done by the auto-sync within the hour, then
+  // the club sent again with one more girl - and that response run a second time
+  const resend = () => newClub(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson', 'Kai Newperson']);
+  const KEY51 = 'ROSTER|w:2026-09-27 14:00:00.000|' + A + '|Comet Club';
+  w = sheetWorld(baseTabs());
+  run50(w);
+  w.tabs['SF Pending'][1][8] = 'done';
+  const r51 = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, resend(), KEY51);
+  const again = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 51, resend(), KEY51);   // its FormLog row lost: run again
+  check('enrolled (its Salesforce row done), sent again with one more girl, that run again: an existing club both ' +
+        'times, no second Salesforce row',
+        r51.startsWith('existing club Comet Club (' + A + '): 1 girls added') &&
+        again.startsWith('existing club Comet Club (' + A + '): 0 girls added') &&
+        sfRows(w).length === 1 && sfRows(w)[0][8] === 'done' && cometRows(w).length === 3, r51 + ' / ' + again);
+
+  // another response for the club between a failed attempt and its retry
   const between = [
-    ['the club sent again with one more girl (a new-club response)', x => x.ctx.runResponse_('ROSTER', x.sheet(RQ), 51,
-        newClub(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson', 'Kai Newperson']),
-        'ROSTER|w:2026-09-27 11:00:00.000|' + A + '|Comet Club')],
+    ['the club sent again with one more girl', x => x.ctx.runResponse_('ROSTER', x.sheet(RQ), 51, resend(), KEY51)],
     ['an ADD on the change form', x => x.ctx.runResponse_('ROSTER', x.sheet(RQ), 52,
         { [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: A, [HQ.CLUB_PREFIX + A + ')']: 'Comet Club',
           [HQ.ADD]: 'Kai Newperson' }, 'ROSTER|w:2026-09-27 12:00:00.000|' + A + '|Comet Club')],
   ];
-  for (const [label, run] of between) {
-    opts = { down: 'SF Pending' };
-    w = sheetWorld(baseTabs(), opts);
-    const first = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-    opts.down = null;
-    const mid = run(w);
-    res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-    check('SF Pending down, then ' + label + ', then the retry: still the new club for the response that enrolled it — ' +
-          'one Salesforce row, with that response\'s girls; the one in between queued nothing',
-          first === 'ERROR: sheet unavailable' && !/^ERROR|^new club/.test(mid) && w.tabs.Roster.length === 4 &&
-          res.startsWith('new club Comet Club (' + A + '): 0 girls added') && sfRows(w).length === 1 &&
-          sfRows(w)[0][4] === 2, mid + ' / ' + res);
+  for (const failing of ['SF Pending', 'Roster']) {
+    for (const [label, between_] of between) {
+      opts = { down: failing };
+      w = sheetWorld(baseTabs(), opts);
+      const first = run50(w);
+      opts.down = null;
+      const mid = between_(w);
+      res = run50(w);
+      check(failing + ' failing for the enrolment, then ' + label + ', then the retry: the club on the Roster, ' +
+            'ONE Salesforce row (pending)',
+            first === 'ERROR: sheet unavailable' && !/^ERROR/.test(mid) && !/^ERROR/.test(res) &&
+            cometRows(w).length >= 2 && sfRows(w).length === 1 && sfRows(w)[0][8] === 'pending',
+            mid + ' / ' + res);
+    }
   }
+
+  // a new-club response run late from the menu, for a club another response enrolled since
+  const since = rosterRows(A, 'Comet Club', ['Ivy Newperson', 'Jo Newperson'])
+      .map(r => { r[7] = '2026-09-20'; r[9] = RQ + '!45'; return r; });
+  w = sheetWorld(baseTabs(since));
+  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 40, comet(), 'ROSTER|w:2026-09-01 09:00:00.000|' + A + '|Comet Club');
+  check('a new-club response sent 09-01 and run late, its club enrolled since by another response: an existing club, ' +
+        'no Salesforce row', res.startsWith('existing club Comet Club (' + A + '): 0 girls added') && !sfRows(w).length, res);
 
   // SF Pending: only a row still pending counts as the club's (review of A1)
   const tabsWith = sfOld => Object.assign(baseTabs(), { 'SF Pending': baseTabs()['SF Pending'].concat(sfOld) });
   const old = status => ['2026-08-30', A, 'Comet Club', 'Africa', 3, 'Mentor Testperson', 'mentor@example.org', '', status, ''];
   w = sheetWorld(tabsWith([old('done'), old('cancelled by Ryan: enrolled by mistake')]));
-  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  res = run50(w);
   check('a new club under a name an old SF Pending row has, that row done (or closed by hand): a row of its own',
-        /^new club Comet Club/.test(res) && sfRows(w).length === 3 && sfRows(w)[2][8] === 'pending' &&
-        sfRows(w)[2][0] === '2026-09-28', JSON.stringify(sfRows(w).map(r => r[8])));
+        res === NEW && sfRows(w).length === 3 && sfRows(w)[2][8] === 'pending' && sfRows(w)[2][0] === '2026-09-28',
+        JSON.stringify(sfRows(w).map(r => r[8])));
   w = sheetWorld(tabsWith([old(' Pending ')]));
-  w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
+  run50(w);
   check('…one still pending (any capitals or spacing): no second one — sf_new_clubs.py marks a club\'s ONE pending row',
         sfRows(w).length === 1);
 
-  w = sheetWorld(baseTabs());
-  w.ctx.audit_ = () => { throw new Error('sheet unavailable'); };
-  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-  check('a new club, Audit failing after the Roster write: not an ERROR (FormLog has the summary); row and sync done',
-        /^new club Comet Club \(Fixture Partner Alpha\): 2 girls added/.test(res) && sfRows(w).length === 1 &&
-        w.notified.join() === 'newClubForm', res);
-
-  opts = { down: 'ClubRegistry' };
-  w = sheetWorld(baseTabs(), opts);
-  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-  check('ClubRegistry down: ERROR before the Roster is written — nothing imported, no Salesforce row, no sync request',
-        res === 'ERROR: sheet unavailable' && w.tabs.Roster.length === 1 && !sfRows(w).length && !w.notified.length, res);
-  opts.down = null;
-  res = w.ctx.runResponse_('ROSTER', w.sheet(RQ), 50, comet(), KEY);
-  check('…the retry imports it as if the first attempt had not happened',
-        /^new club Comet Club \(Fixture Partner Alpha\): 2 girls added/.test(res) && w.tabs.ClubRegistry.length === 2 &&
-        sfRows(w).length === 1 && w.notified.join() === 'newClubForm', res);
-
+  console.log('\n  a roster change: after the Roster write nothing fails the run');
   const change = () => ({ [HQ.ACTION]: HQ.ACTION_MOD, [HQ.PARTNER_MOD]: A, [HQ.CLUB_PREFIX + A + ')']: SUN,
                           [HQ.ADD]: 'Joy Blorptest', [HQ.REMOVE]: 'Mary Zibblewick\nNobody Here',
                           [HQ.MENTOR_EMAIL_MOD]: 'mentor@example.org' });
