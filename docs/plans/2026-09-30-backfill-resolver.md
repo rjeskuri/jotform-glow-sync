@@ -611,3 +611,69 @@ by it: its plan, held list and ledger were not touched.
 ### Clean-up
 The scratch directory (Roster export, result, raw copies, the checking script) was deleted
 after the run; no file holding a name was written in either checkout.
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "September back-fill: the resolver": the procedure
+
+No attendance reached Salesforce in September, so it is loaded afterwards from the forms'
+submissions. The first step is read-only ([design](2026-09-30-backfill-resolver.md)):
+
+```bash
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv     # a fresh export, every time
+python3 tools/backfill_resolve.py --roster data/roster_<date>.csv       # GET only; a few minutes (Africa)
+```
+
+- **What it writes**: `data/backfill_2026-09/resolved.json` - one row per (submission, ticked
+  roster) of the four regional forms, created from 2026-09-01 00:00 US Eastern on, no end date.
+  The club is the roster the mentor ticked girls in, never question 5; club, partner and the Club
+  Name the roster sends today are the sync's own dry run's word. Each row carries the ticked
+  names as a list, the attendance date (`yyyy-mm-dd`, or `""` with `date_missing`), module,
+  week, year, creator, photo links, question 5 as submitted, and its flags; the file's
+  `flag_vocabulary` lists every flag a row can carry. `raw/<region>.json` beside it is the
+  submissions as fetched. Every run overwrites all of them. `--region <name>` reads one form only and then needs `--out`
+  (another path under `data/`): the default path is the loader's file and always holds all four.
+- **They hold girls' names and mentors' contact details**: they stay under `data/`
+  (git-ignored). The tool refuses any other place inside the repository. It writes them for
+  their owner only: every file 0600 (also one that was there with a wider mode), every folder it
+  creates 0700, and the result's and the raw copies' folders under `data/` set to 0700 when they
+  were already there (outside `data/` a folder that was already there is left as it is). Never
+  paste from them; what the tool prints is counts only, and that is what goes into a plan or a
+  message.
+- **Read the report**: per form `submissions in range = with ticks + no ticks` and the `LEDGER`
+  line say every submission is accounted for. A submission with no tick has no row; its id is
+  under `no_ticks`. Nothing is collapsed (one club, one date, two submissions = two rows) and
+  nothing already delivered is dropped - both are the loader's decisions. A `!` line lists
+  submissions with no tick whose Contact IDs field still holds names: look at each in Jotform
+  (ticks taken back, or a roster question deleted since).
+- **Flags** (on a row, and counted per form): `multi_club`, `q5_differs`, `q18_empty`,
+  `q18_differs`, `typed_era`, `bare_shared_name`, `retired_club`, `no_account_name`,
+  `date_before_2026_09`, `date_missing`, `name_left_roster:<count>`,
+  `name_unknown_to_roster:<count>`, `name_has_comma`, `name_repeats`, `module_translated`,
+  `module_unresolved` - what each means is in the design's "Readings of the contract" and
+  "Contract changes". `retired_club` is not set for a club whose Roster rows are active under
+  another region, or none, while its question is on the form.
+- **The two name flags** are about a ticked name that is not an option of its roster today, and
+  are the only flags written with a count. `name_left_roster`: the club's Roster rows of that
+  name are all inactive - a girl who left; the loader sends her. `name_unknown_to_roster`: the
+  club's Roster rows, any status, do not have the name - the loader holds the session. A name
+  that is an active girl of the club, only spelled unlike today's option in capitals or spaces,
+  is not flagged; the report says how many there are when there is one.
+- **The module** of a row is the answer of the module dropdown the mentor used (the one the
+  Year answer names: questions 14, 92, 93), not question 98. Question 98 is a copy of the
+  option's visible text, and a browser's page translation rewrote it on some submissions (a
+  Spanish module name on Latin America's): those rows carry `module_translated` and the right
+  module. `module_unresolved`: the dropdown could not be told (no Year answer, no answer in
+  that year's dropdown, or an answer that is not one of its options today); the row keeps
+  question 98 and the loader holds it - look at the submission in Jotform. Week and year stay
+  questions 100 and 102 as submitted; the report's last table compares all three with their
+  dropdowns (`same` / `differ` / `source not determined`, per form) - a `differ` on the session
+  or year line has no flag, so read that table.
+- **When it stops** it names a submission id and a question id and writes no result: an answer
+  of a shape it does not know, a ticked roster it cannot identify, the sync's dry run failing
+  (run that command by hand), fewer submissions fetched than the form reports (run it again).
+  It never guesses. The raw copies of the forms fetched before it stopped are already the new
+  ones (look at the refused answer there); `resolved.json` is still the earlier run's - each
+  file says when it was fetched (`fetched_at_utc`).

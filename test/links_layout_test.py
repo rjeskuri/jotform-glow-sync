@@ -150,9 +150,9 @@ class Links(unittest.TestCase):
         self.assertEqual(links.element_html(links.PROBLEM.sentence, links.PROBLEM.url), live)
         self.assertEqual(links.href_of(live), links.PROBLEM_FORM_URL)
 
-    def test_the_urls_are_the_public_links_in_launch_md(self):
+    def test_the_urls_are_the_public_links_in_the_runbook(self):
         rows = dict(re.findall(r"^\| (.+?) \| (https://\S+) \|$",
-                               read(os.path.join(REPO, "docs", "LAUNCH.md")), re.M))
+                               read(os.path.join(REPO, "docs", "RUNBOOK.md")), re.M))
         roster = [u for label, u in rows.items() if label.startswith("Club Roster Form")]
         problem = [u for label, u in rows.items() if label.startswith("Something")]
         self.assertEqual(roster, [links.ROSTER_FORM_URL])

@@ -221,3 +221,15 @@ None of these is in the other session's set: `sync_attendance_form.py`, `form_st
 - The September recount under the final rules equals the one above (20.50 h for Sep 1-28);
   the descriptions of 09-01, 09-02, 09-04, 09-12 and 09-13 were redrafted per day and reviewed.
 
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "Automatic sync": the SyncLog's cut-over
+
+The cut-over:
+rows written before commit d9b4f6b reached the runner on GitHub carry the
+runner's America/Chicago time (one hour behind the sheet and the Audit tab;
+before 2026-09-02, when the sheet was on UTC, five hours), and a Mac
+`--synclog` run before then wrote the Mac's clock; the row's `run_url` gives
+the true time.

@@ -366,3 +366,87 @@ run (`nothing to do`), `form_status --rendered`, `add_translations.py --apply`, 
 - Still open: a template test submission (question 5 exactly the club, question 18 the ticked names);
   BACKLOG 48's remaining items (the 20 fused submissions before any Salesforce back-fill; the 16
   empty Contact_IDs; the stale-rules follow-up).
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "One club per submission": the rollout as run
+
+Rollout, with `AUTO_SYNC_APPLY=0` for the whole window. Each step needs
+Ryan's go. Only on a form the roster-order repair has finished ("Rosters
+above Submit": `form_status` says `layout: every roster above …`) — the
+CLEAN below needs it, and the warning's create moves the rosters' orders, so
+the repair's `--undo` refuses from then on. The template goes first; after
+it, U.S, Latin America, Asia, then Africa (smallest first), each with its
+`--region`:
+
+```bash
+python3 backup_forms.py --form 262352490535154                                         # note its stamp: the rollback restores it
+python3 tools/add_translations.py --audit --form 262352490535154                       # before: note the counts
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-guard            # dry run
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-guard --apply    # add it
+python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154                         # "Club guard: q<id>", nothing to do (else Jotform altered what was written: stop)
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv              # "club guard: q<id> (N clubs)", rules CLEAN
+python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --rendered   # HARD STOP: N options, N with data-calcvalue = value
+python3 tools/add_translations.py --form 262352490535154                               # dry run: the warning's entries appear
+python3 tools/add_translations.py --form 262352490535154 --apply
+python3 tools/add_translations.py --audit --form 262352490535154                       # the "before" counts plus one per club this apply created (see below); any other rise: stop
+```
+
+The dry run prints `UPDATE club picker (N clubs: calcValues)`, `CREATE club
+guard (below the Club picker)` and `REPLACE conditions (M + 2 rules)`, with
+`conditions: K kept, 2 new, 0 dropped`: the 2 new are the two guard rules;
+every other rule, the Contact_IDs sum included, is unchanged. Read on
+2026-09-29: U.S 12 clubs, 41 → 43 rules; Latin America 39, 68 → 70;
+Asia 96, 125 → 127. Africa (216 clubs, 255 → 257) and the template show
+`3 new, 1 dropped` while the SUPER GIRLS rule has not landed. The template
+also carries the roster creates and updates it is behind on (35 that day,
+the same ones the dry run without the flag plans).
+
+The translation audit counts every Club-picker option as an untranslated
+string (club names stay English), so after the apply it reads the "before"
+counts plus one per language for each club the apply created: the dry run's
+`CREATE roster` lines, 23 on the template on 2026-09-30, none on a form in
+step. The warning itself adds nothing once `add_translations.py --apply` has
+run: it is translated in every language the forms offer.
+
+**The `--rendered` check is a hard stop on the template.** How a
+multi-select lays out `calcValues` is unverified: a leading empty slot, as
+single-selects have, or none (`glow/sync.py PICKER_CALC_LEADING_EMPTY`). If
+the check reports any option whose `data-calcvalue` differs from its value,
+question 5 would receive a neighbouring club's name, with no warning.
+Restore the template's conditions, delete the element, clear the
+`calcValues` (below), flip the constant, and start again. The check also
+refuses to pass when the page lists a different number of options than the
+picker has ("rendered page lists N of the picker's M options"): an option it
+could not read is one it cannot vouch for. (All options
+"without" a `data-calcvalue` right after the apply can be a page served from
+before it: re-run the check a few minutes later before calling it a
+failure.) No regional form
+gets the guard until the template's rendered check is aligned.
+
+Check in the browser (the template, then each regional form):
+
+1. Pick one club: no warning; its roster and Submit show.
+2. Pick a second club: the warning appears below the picker and Submit is
+   gone. Remove it: the warning goes and Submit comes back, not greyed out
+   (the require rule's Disable must lift too).
+3. With two clubs picked, press Enter in the Partner Coordinator Email box
+   on a desktop: the form does not submit.
+4. Switch the language (e.g. Español): the warning is translated. Every
+   form saves the chosen language in the browser (`saveUserLanguage`), so
+   the next form opened there starts in it too; switch back to English.
+5. Chrome "Translate page" with one club picked: no warning, Submit shows.
+6. The builder's Conditions page shows no error marks.
+7. The template only: one test submission. Question 5 holds exactly the
+   club, and question 18 lists the ticked names.
+
+When every form passes, set `AUTO_SYNC_APPLY=1`. Then an `auto_sync.py` dry
+run shows every region `in-sync`.
+
+### "One club per submission": before the back-fill
+
+Before any Salesforce back-fill, split or assign the 20 fused question-5
+submissions by hand (BACKLOG 48). Nothing has reached Salesforce since
+2026-03-28, so none of them has created an Account yet.

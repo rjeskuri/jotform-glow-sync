@@ -314,3 +314,31 @@ Salesforce call).
 - Still Ryan's: GLOW → Google Forms → "Process any missed form responses" and read its preview (it
   should list only responses that arrived since 10:38 UTC, plus earlier `retry after ERROR` rows);
   the one-time wording menu item when he chooses.
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "Apps Script deploy": the same-name push
+
+**The same-name push (2026-09-30, Part 2 of
+[plans/2026-09-30-same-name-clubs.md](2026-09-30-same-name-clubs.md);
+build notes: [plans/2026-09-30-same-name-intake.md](2026-09-30-same-name-intake.md))**
+is a normal push: no new Google service, so no new scope and no
+re-authorisation (`make check` guards the list of services). Nothing runs
+at the push and no menu item is needed after it. From the next "Enroll a NEW
+club" response on, a club name another partner's club has is held — also
+when it is the partner's own club on file, once that has no active girl
+("Working the ReviewQueue"); from the next Monday e-mail on, each "waiting
+to be created in Salesforce" line starts with the exact account name — the
+club name, or `<club> - <partner>` when another partner's active club has
+the same name. That name is worked out from the Roster when the e-mail is
+sent. On a form the long or plain name is sticky (a club keeps `<club> -
+<partner>` after its namesake leaves, and keeps its plain name when a
+namesake turns up later), so the form's club list is the authority: a line
+with a shared name ends "NAME SHARED … use exactly that text" — look the
+club up in its attendance form's club list before creating the account. An
+account named otherwise than the form sends gets a stray twin in Salesforce
+at the club's first attendance. To undo the push, push the
+`appsscript/` that was deployed before it ("Same-name holds and a rollback
+below the same-name check", above).

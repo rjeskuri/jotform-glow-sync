@@ -66,3 +66,23 @@ picker recognised, and `AUTO_SYNC_APPLY` went back to 1.
 - Native-speaker review of the new translations (VIEWS for Odia).
 - Backlog 21: the 'Setidevi G.L.O.W club, Sokhel' orphan still sits on every form
   (one extra picker option); a sheet-side naming decision resolves it.
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "The Club picker": status and the same day's static fields
+
+**Status:** rolled out to the template and all four regional forms on
+2026-09-12 with leadership's approval (`plans/2026-09-12-picker-rollout.md`).
+
+The same
+day `tools/update_static_fields.py` renamed the mentor email field to
+"Partner Coordinator Email" and opened the Group Photo question (one photo,
+faces visible, 10 MB, HEIC accepted).
+
+### "The Club picker": the multi-select, counted
+
+The searchable component does let a
+mentor pick several clubs (20 submissions since 09-01; Jotform ignores
+`maxSelection` on dropdowns): the guard is "One club per submission" below.

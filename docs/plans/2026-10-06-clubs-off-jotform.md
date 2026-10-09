@@ -227,7 +227,7 @@ it gets its entry and rule back and an options update if the Roster moved on. Th
 Flipping the cell is the rollback of the marker; `deactivate_clubs.py --undo` (C) is the rollback
 of a deactivation. No snapshot is involved (and `restore_conditions.py` would refuse the
 pre-retirement conditions file anyway: its rules test entries the picker no longer lists -
-docs/RUNBOOK.md "Rollback" under "Automatic sync").
+docs/RUNBOOK.md "Automatic sync", its **Rollback**).
 
 **Refusals.** Without `--partners`, a roster with no show rule and no picker entry whose club is
 active in the Roster would be restored - 38 entries back on Africa by a forgotten flag. The same

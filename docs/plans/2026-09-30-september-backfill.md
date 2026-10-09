@@ -192,3 +192,85 @@ sessions in the five pilot clubs and Queens of Quest's 2 (until the names-dictio
 test report "Jotform Monthly Attendance (test)" (deployed 02:44 UTC, Attendance folder) shows
 September: 4,932 attendance rows, 24 partners, 149 clubs (back-fill plus live).
 The October risk noted above is gone: a club's first big submission no longer fails.
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "Back-fill of attendance into Salesforce": the procedure
+
+For Jotform submissions that never reached Salesforce (first case: September 2026, when the
+connection was dead - [plan](2026-09-30-september-backfill.md)). Never replay a submission
+as Jotform stored it: question 5 and the name list are wrong on part of the month, and
+Salesforce turns whatever it gets into accounts, contacts and attendance at once.
+
+**Before anything talks to Salesforce from the Mac: VPN off.** Salesforce freezes a user whose
+app or API connection comes from an anonymising VPN and revokes all their tokens, the Jotform
+connection's included (it happened 2026-09-30 12:16 UTC). Only another administrator can
+unfreeze; afterwards Jotform is re-authorised on the five forms and `integration_status.py` run.
+The two live commands below refuse without `--vpn-off`: the word that you checked.
+
+```bash
+python3 tools/backfill_resolve.py --roster data/roster_<date>.csv   # Jotform, GET only -> resolved.json
+python3 tools/sf_backfill.py snapshot --vpn-off       # Salesforce, read-only counts -> sf_state.json
+python3 tools/sf_backfill.py plan                     # offline -> plan.json, held.csv, a counts-only report
+python3 tools/sf_backfill.py send                     # dry run: the queue
+python3 tools/sf_backfill.py send --apply --vpn-off --limit 1   # Ryan's go; one batch, then look at it
+python3 tools/sf_backfill.py send --apply --vpn-off   # the rest, one batch per request, each read back
+python3 tools/sf_backfill.py status                   # what was sent; what a rollback would remove
+```
+
+Everything is in `data/backfill_2026-09/` (never committed; owner-only files).
+
+- The club is the roster that holds the ticks, the names are the ticks; one batch per club and
+  day; no batch without names (since 2026-10-07 03:22 UTC the processor refuses one anyway:
+  `Failed` "No participants submitted", no rows); nothing for a club and day Salesforce already
+  has - a batch of any status, or rows.
+- `held.csv` lists what waits, with **every** reason. Ryan decides in `decisions.csv`
+  (`key,decision`; several clauses joined with `;`), then `plan` again:
+  `skip` - leave it out; `use <submission id>[+<id>]` - which report(s) of a day reported twice
+  count; `date yyyy-mm-dd` - the right attendance date; `accept <reason>[+<reason>]` - send
+  although that reason applies. A clause releases only what it names. Reasons that cannot be
+  accepted (an unknown club name, a name with a comma, a day Salesforce holds an empty or failed
+  batch for) need their cause removed.
+- The login is the Salesforce CLI's (`sf org login web --alias glow`, by Ryan, VPN off). To check
+  it: `sf org display --target-org glow` (it hides the secrets). Never run `sf org auth
+  show-access-token`, `show-sfdx-auth-url` or `show-user-password` in a Claude session, and never
+  set `SF_TEMP_SHOW_SECRETS`: they print the token. The live gate catches `--apply`; it does not
+  catch a direct `sf` or `curl` call to Salesforce, so none is made outside this tool without
+  Ryan's go.
+- The date of a report that a `date` line moved is changed on that line (its original key), not
+  on the key of the day it now sits on; `use` picks among the reports of its own line's day.
+- The ledger (`ledger.csv`, append-only; a session's last line is its state):
+  - `ok` - sent and read back as planned.
+  - `not_saved` - **"refused the batch ... saved nothing"**: Salesforce rolled everything back
+    (a limit, most likely a very large club). That club waits, the others go on. Decide with
+    Ryan, then `send --apply --vpn-off --retry <key>`.
+  - `unknown` - **"A BATCH MAY BE IN SALESFORCE"**: the answer or the read-back was lost.
+    Nothing more is sent; the next `send --apply --vpn-off` looks the batch up by its own marker
+    (`Creator__c` "Jotform back-fill <account id> <submission ids>") before anything else, and calls it
+    "saved nothing" only ten minutes after the request, when Salesforce can no longer be working
+    on it.
+  - `CHECK` - **"is in Salesforce but not as planned"**: the batch exists and may hold part of
+    the attendance; its rows block that club and day. A `Failed` batch without rows blocks
+    nothing in Salesforce (the processor's duplicate check reads `Success` batches only), but this
+    tool still never adds to its day. On a `Success` the read-back also compares
+    `Girls_Present__c` with the batch's rows (since 2026-10-07): a different or empty count is a
+    `CHECK` too. Read its status message in Salesforce
+    (the tool never prints it: it can quote a girl's name). Then either remove the batch, its
+    attendance rows and the contacts it made (Ryan's go) and `close <key> --removed`, or, if it
+    is right after all, `close <key> --accepted`. After either: `snapshot` and `plan` again (a
+    plan made before a `close` is refused), and that club's later sessions are held for an
+    `accept club_has_earlier_contacts`.
+- **Rollback**: by id, never by a time window. `ledger.csv` has every batch id,
+  `created_contacts.csv` every contact a batch created. Remove the attendance rows of those
+  batches, the batches, then those contacts - only with Ryan's go - and `close <key> --removed`
+  for each.
+  - **WARNING (since 2026-10-07): the back-fill's contacts now carry live rows.** Every girl
+    ticked on a form since 2026-10-02 is booked on her existing contact, which is often the one
+    the back-fill made, and after the duplicate merge ("Duplicate girls in Salesforce", below)
+    the contact that stays is the back-fill's wherever a group had one. `Attendance__c.Contact__c`
+    is master-detail: **deleting a back-fill contact deletes every attendance row on it, the live
+    ones included.** Before removing a contact listed in `created_contacts.csv`, count its rows
+    whose batch is not in `ledger.csv`; if there is any, do not delete that contact (remove only
+    the back-fill's own rows and batches). A guard in `sf_backfill.py` for this is BACKLOG 78.

@@ -470,3 +470,53 @@ on Ryan's go, VPN off).
   English option.
 - Session -51 told (its "Jotform Sessions by Module Last Month" chart reads the corrected rows; no
   `gen.py` change).
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "The names dictionary and the module values": the batches with a translated module
+
+**The batches Salesforce held with a translated module** were corrected once, in place, by
+`tools/fix_module_values.py` ([plan](2026-10-06-module-selection.md), (b)): every
+`Attendance_Batch__c` since launch whose `Module__c` is not one of the template's module
+options, and the `Attendance__c` rows under it, which the processor copied the batch's module
+onto. **Applied 2026-10-07** (Ryan's go, VPN off): 6 batches (5 Success, 1 Failed) and their 43
+rows, all Latin America's, each paired with exactly one submission; ledger
+`data/module_fix_2026-10/ledger.csv`, 49 records `written`; the dry run since says `nothing to
+correct: 0 of 595 batches`, and `Module__c` since 2026-09-01 holds 17 values on both objects,
+all canonical English. The commands below stay for a check (the dry run is read-only) and for
+the rollback. The right value is the
+submission's own: the stored answer of the module dropdown its Year answer names, read as the
+back-fill resolver reads it. A batch is paired with **exactly one** submission - the same club
+(question 5), attendance date, question 98, year and session, on the form of its region, created
+within three hours of the batch - or it is listed as `UNMATCHED (<why>)` and left alone (a
+same-day re-send gives two candidates on purpose: correct those by hand, by id). Every run needs
+`JOTFORM_API_KEY`, the CLI login and `--vpn-off` (VPN off, as for the back-fill); until BACKLOG 53
+is decided the dry run itself runs with Ryan present (the CLI login is a read the gate does not see).
+
+```bash
+python3 tools/fix_module_values.py --vpn-off                       # dry run: the pairs, the UNMATCHED, "would write: B batches, M rows"
+python3 tools/fix_module_values.py --vpn-off --apply --limit 1     # Ryan's go: the first batch and its rows, each read back
+python3 tools/fix_module_values.py --vpn-off --apply               # the rest; then the dry run again -> "nothing to correct"
+python3 tools/fix_module_values.py --undo data/module_fix_2026-10/ledger.csv --vpn-off --apply   # rollback: `old` back by id
+```
+
+The dry run prints `canonical modules: 18 (template …: q14 5, q92 7, q93 8 options)`, then one
+line per batch: `<id>  <club>  <date>  <status>  '<Spanish>' -> '<English>'  (<region> <form>,
+submission 1 candidate(s), year 1, session 8; 14 rows; created <UTC>)`. Read the `created` stamps:
+a batch created after the module values went live on its form (Latin America: 2026-10-06 11:17
+UTC) means the fix did not take - tell the session that owns the module values and write nothing.
+`--apply` writes the batch, then each row, one PATCH per record, re-reads each by an explicit-field
+query and keeps a ledger (`data/module_fix_2026-10/ledger.csv`, owner only: ids, module names and
+outcomes - `open`, then `written` / `failed_<status>` / `check`); it stops at the first record not
+`written` and names the id and the HTTP status (never the answer's text). `check` means the write
+answered 204 but the value could not be confirmed (the re-read differed, or got no answer): look
+at the record. `--undo` reverses every `written` and `check` record and repeats an undo that did
+not take; a record still `open` is unknown - look at it in Salesforce. An update runs none of
+the processor (its trigger is after-insert only) and the rows' count is compared before and after.
+A batch without a module (a partner-reported aggregate, "Attendance totals and partner-reported
+counts") is out of scope and counted in one line. `--all-forms` reads the four forms whole for a
+batch whose region or window the narrow read cannot serve. Afterwards the dashboard's "Jotform
+Sessions by Module Last Month" has no Spanish bar: the Salesforce dashboard session is told the
+date of the apply and the ids in the ledger.

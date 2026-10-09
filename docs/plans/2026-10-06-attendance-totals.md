@@ -1151,3 +1151,54 @@ deployed.
 
 **Still open**: F, the intake for partner-reported counts (Ryan's decision, BACKLOG 72; its own
 plan). The first aggregate batch is also the first live proof that total and Jotform only part.
+
+## From the RUNBOOK (moved 2026-10-09)
+
+What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (the procedure as run, or its history), word for word (links re-pointed to this folder); the RUNBOOK keeps a stub that links here.
+
+### "Attendance totals and partner-reported counts": status
+
+ The field and the processor change (plan sections A and B) are
+**deployed since 2026-10-07 03:22 UTC** (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation
+`0AfRP000002gKnZ0AU`; rollback: redeploy `data/sf_totals_2026-10/before/`, the fields can stay).
+The one-off back-fill below (plan C) is done and the dashboard's totals (plan D) are deployed,
+both on 2026-10-07 ("Attendance dashboard in Salesforce"). Open: how the partners' counts come
+in (BACKLOG 72).
+
+### "Attendance totals and partner-reported counts": the one-off back-fill
+
+**The one-off back-fill** (`tools/sf_girls_present.py`) - **done 2026-10-07**, on Ryan's go, VPN
+off. The batches from before the deploy had the field empty, so the totals would have
+under-counted every one of them. `plan` read 606 batches (575 `Success`, 31 `Failed`; 2
+successes already counted by the new processor), `set --apply --limit 1` wrote BATCH-000000
+(2 = its 2 rows, read back and re-read independently), then the remaining 572: ledger
+(`data/sf_girls_present/ledger.csv`) 573 `open` → 573 `written`, no failure. `check` → `575
+Jotform Success batches; differ: 0, without a value: 0 -> OK`; SOQL: 0 `Success` batches without
+a value, and `SUM(Girls_Present__c)` over `Success` = 7,540 = `COUNT(Id)` of `Attendance__c`.
+Since then the processor sets the count on every new batch, and **`check` is the signal**
+(Signals, below). The commands, for the record and for a re-run (a second `set` finds `to set:
+0`; the CLI login, VPN off; the hook sees `--apply` only):
+
+```bash
+python3 tools/sf_girls_present.py plan --vpn-off            # read-only -> data/sf_girls_present/plan.csv (ids and counts)
+python3 tools/sf_girls_present.py set                       # dry run from the plan: "to set: N Success batches with no Girls present"
+python3 tools/sf_girls_present.py set --apply --vpn-off --limit 1   # Ryan's go: one batch, read back
+python3 tools/sf_girls_present.py set --apply --vpn-off     # the rest, one PATCH per batch, each re-read before and after
+python3 tools/sf_girls_present.py check --vpn-off           # "differ: 0, without a value: 0 -> OK"
+```
+
+It writes only a `Success` batch whose value is still empty, = its attendance rows (0 for the
+legacy blanks, BACKLOG 73); a `Failed` batch stays empty, as the processor leaves it, so the field
+means one thing; a batch with a value - a typed aggregate, or a count the processor set - is
+never touched, so a second `set` finds `to set: 0`. The ledger (`data/sf_girls_present/ledger.csv`,
+owner only: when, id, rows, value read back, outcome `open` then `written` / `failed_<status>` /
+`check` - 204 answered but the value not confirmed: look at the batch) says what was written; the
+run stops at the first thing not as planned. The rows are counted one GROUP BY per 200 batch ids
+(an aggregate query has a single page), so the check keeps working as the batches grow. A read
+Salesforce refuses for the field (HTTP 400: an org without it, or a login not on the System
+Administrator profile, the only one that can read it) stops `plan` and `check` with "is
+`Girls_Present__c` deployed?" and names the profile. An update runs none of the
+processor (after-insert trigger). After the run, read-only: `SELECT COUNT(Id) FROM
+Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Girls_Present__c = null` → 0, and
+`SELECT SUM(Girls_Present__c) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success'` =
+`SELECT COUNT(Id) FROM Attendance__c` (both re-read at the time; live submissions keep arriving).
