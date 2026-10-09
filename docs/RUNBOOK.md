@@ -1924,7 +1924,7 @@ wording; forms built before 2026-09-28 get it once, from the menu
 ## Apps Script deploy
 
 - **When:** any change under `appsscript/`.
-- **Status:** the 2026-10-09 cleanup's changes (the Club Roster Form handlers' write order, the rebuild's YES/NO, the dropdown update under the lock, the consolidations) are in the repository, not deployed: they wait for Ryan's push. No new Google service, so no re-authorization is expected ([plan](plans/2026-10-09-repo-cleanup.md)).
+- **Status:** the 2026-10-09 cleanup's changes (the Club Roster Form handlers' write order, the rebuild's YES/NO, the dropdown update under the lock, the consolidations) are in the repository, not deployed: they wait for Ryan's push. No new Google service, so no re-authorization is expected ([Result](plans/2026-10-09-repo-cleanup.md#result)).
 - **Dry run:** `make gs` (and `make check`).
 - **Apply:** `nvm use 18`, then `npm run clasp:push` at a quiet moment: Ryan, or Claude with the gate open. Ryan can run the push with Claude through the user-only `/deploy-appsscript` skill.
 - **Verify:** a new Google service: authorize at once, then "Process any missed form responses" and read its preview.
