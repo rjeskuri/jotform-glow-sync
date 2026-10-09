@@ -44,7 +44,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.salesforce import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, apex_trim,   # noqa: E402
-                             has_invisible, sf_match)
+                             has_invisible, plain, positive, sf_match)
 from glow.salesforce import API, NEXT_PAGE, Org, Refused, quoted   # noqa: E402,F401 (re-exported)
 
 DEFAULT_DIR = os.path.join(REPO, "data", "backfill_2026-09")
@@ -161,10 +161,6 @@ def save_private(path, text):
 
 
 # ---- Salesforce: glow/salesforce.py (Org, the CLI login, curl) ------------------------------------
-
-
-def plain(records):
-    return [{k: v for k, v in r.items() if k != "attributes"} for r in records]
 
 
 # ---- snapshot ------------------------------------------------------------------------------------
@@ -1016,13 +1012,6 @@ def cmd_status(args, paths):
         print(f"rollback would remove, by id: {len(good)} batches with their attendance rows (ledger.csv, batch_id) "
               f"and the {sum(int(r['contacts_created'] or 0) for r in good)} participant contacts they created "
               f"({rel(paths.contacts)}) - only with Ryan's go")
-
-
-def positive(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
 
 
 def main(argv=None, org=None):

@@ -38,8 +38,8 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.forms import REGIONS                                     # noqa: E402  (the four regional forms)
 from glow.salesforce import (CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE,   # noqa: E402
-                             PARTNERS, Org, Refused, apex_trim, has_invisible, quoted, read_partners,
-                             sf_match)
+                             PARTNERS, Org, Refused, apex_trim, has_invisible, plain, quoted,
+                             read_partners, sf_match)
 from glow.text import key, name_key                               # noqa: E402
 
 ACCOUNTS = "SELECT Id, Name, RecordTypeId, ParentId, Description, CreatedById FROM Account"
@@ -121,10 +121,6 @@ def pending_cell(values, partner, club):
             if len(row) > max(p, c, s) and key(row[p]) == key(partner) and key(row[c]) == key(club)
             and key(row[s]) == "pending"]
     return (rows[0], s + 1) if len(rows) == 1 else None
-
-
-def plain(records):
-    return [{k: v for k, v in r.items() if k != "attributes"} for r in records]
 
 
 # ---- the decisions (pure) ------------------------------------------------------------------------

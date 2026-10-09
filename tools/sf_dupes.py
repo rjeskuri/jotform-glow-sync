@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                          # noqa: E402
 from glow.cli import api_key                                   # noqa: E402
 from glow.jotform import Client, JotformError                   # noqa: E402
-from glow.salesforce import Org, Refused, quoted, sf_match      # noqa: E402
+from glow.salesforce import SF_ID, Org, Refused, plain, positive, quoted, sf_match   # noqa: E402
 from glow.sync import SF_NAME_SEP                               # noqa: E402
 from glow.text import key as plain_key                          # noqa: E402
 from sf_backfill import save_private, within                    # noqa: E402
@@ -63,7 +63,6 @@ STAMP = "%Y-%m-%dT%H:%M:%SZ"
 IN_CHUNK = 150                # ids per SOQL IN list
 APEX_TIMEOUT = 900            # seconds for one `sf apex run`
 SUBMISSION_PAGE, SUBMISSION_PAGES = 100, 5
-ID = re.compile(r"[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?")
 CONTACT_ID = re.compile(r"003[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?")
 ACCOUNT_ID = re.compile(r"001[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?")
 ALIAS = re.compile(r"[A-Za-z0-9_.-]+")
@@ -182,13 +181,6 @@ def iso_day(text):
     return day
 
 
-def positive(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
-
-
 def rel(path):
     path = os.path.abspath(path)
     return os.path.relpath(path, REPO) if path.startswith(REPO + os.sep) else path
@@ -199,13 +191,9 @@ def file_sha(path):
         return hashlib.sha256(fh.read()).hexdigest()
 
 
-def plain(records):
-    return [{k: v for k, v in r.items() if k != "attributes"} for r in records]
-
-
 def in_list(ids):
     for x in ids:
-        if not isinstance(x, str) or not ID.fullmatch(x):
+        if not isinstance(x, str) or not SF_ID.fullmatch(x):
             raise Refused("a record id that is not a plain Salesforce id - nothing done")
     return "(" + ", ".join(quoted(x) for x in ids) + ")"
 
@@ -309,8 +297,8 @@ def read_backfill(path):
     out = set()
     for n, line in enumerate(lines):
         cells = [c.strip() for c in line]
-        if len(cells) != 2 or not (ID.fullmatch(cells[0]) and CONTACT_ID.fullmatch(cells[1])):
-            if n == 0 and not ID.fullmatch(cells[0]):
+        if len(cells) != 2 or not (SF_ID.fullmatch(cells[0]) and CONTACT_ID.fullmatch(cells[1])):
+            if n == 0 and not SF_ID.fullmatch(cells[0]):
                 continue                      # a header line
             raise Refused(f"the back-fill's contact list has a line that is not 'batch id,contact id': line {n + 1}")
         out.add(cells[1])
@@ -478,10 +466,10 @@ def load_plan(path):
                   and [x for chunk in g["chunks"] for x in chunk] == merged
                   and all(1 <= len(chunk) <= CHUNK for chunk in g["chunks"])
                   and set(g["contacts"]) == set(members) and g["kind"] in ("identical", "normalized")
-                  and all(isinstance(r, list) and len(r) == 2 and ID.fullmatch(r[0]) and (DAY.fullmatch(r[1]) or r[1] == "")
+                  and all(isinstance(r, list) and len(r) == 2 and SF_ID.fullmatch(r[0]) and (DAY.fullmatch(r[1]) or r[1] == "")
                           for info in g["contacts"].values() for r in info["rows"])
-                  and all(ID.fullmatch(a) for info in g["contacts"].values() for a in info.get("affiliations", []))
-                  and all(ID.fullmatch(i) and ID.fullmatch(s) for info in g["contacts"].values()
+                  and all(SF_ID.fullmatch(a) for info in g["contacts"].values() for a in info.get("affiliations", []))
+                  and all(SF_ID.fullmatch(i) and SF_ID.fullmatch(s) for info in g["contacts"].values()
                           for i, s in info.get("dup_items", [])))
         except (KeyError, TypeError, ValueError):
             ok = False
@@ -588,7 +576,7 @@ def apex_text(plan, club, calls, done, rehearse, part, parts, made_at):
         kept_of[kept] = kept
         kept_of.update({x: kept for x in chunk})
     for x in [club] + list(kept_of):
-        if not ID.fullmatch(x):
+        if not SF_ID.fullmatch(x):
             raise Refused("a record id that is not a plain Salesforce id - nothing written")
     rows = sum(len(alive.get(x, ())) for x in kept_of)
     merged = sum(len(chunk) for _, chunk in calls)
@@ -1263,7 +1251,7 @@ def primary_of(org, contact):
     """The contact's NPSP Primary Affiliation: an account id, or None when blank."""
     found = org.query(f"SELECT Id, {CONTACT_PRIMARY} FROM Contact WHERE Id = {quoted(contact)}")
     value = found[0].get(CONTACT_PRIMARY) if len(found) == 1 else ""
-    if value is not None and not (isinstance(value, str) and ID.fullmatch(value)):
+    if value is not None and not (isinstance(value, str) and SF_ID.fullmatch(value)):
         raise Refused(f"kept contact {contact}: its Primary Affiliation could not be read - nothing more deleted")
     return value
 

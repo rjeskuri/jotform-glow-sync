@@ -38,6 +38,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
+from glow.salesforce import as_int, positive                # noqa: E402
 from sf_backfill import Org, Refused, now, open_private, quoted, save_private, within   # noqa: E402
 
 DEFAULT_DIR = os.path.join(REPO, "data", "sf_girls_present")
@@ -91,13 +92,14 @@ def creator_kind(text):
 
 
 def as_count(value):
-    """Girls_Present__c as Salesforce gives it (a double, or None when empty) -> int or None."""
+    """Girls_Present__c as Salesforce gives it (a double, or None when empty) -> int or None;
+    anything but a whole number is a refusal."""
     if value is None or value == "":
         return None
-    number = float(value)
-    if not number.is_integer():
+    number = as_int(value)
+    if number is None:
         raise Refused(f"{FIELD} holds {value!r}, not a whole number - look at it in Salesforce")
-    return int(number)
+    return number
 
 
 def no_field_hint(stop):
@@ -239,13 +241,6 @@ def cmd_check(args, paths, org):
         print(f"  differs: {batch_id}")
     if not healthy:
         sys.exit(1)
-
-
-def positive(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
 
 
 def main(argv=None, org=None):

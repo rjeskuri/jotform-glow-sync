@@ -37,6 +37,7 @@ from glow import forms                                              # noqa: E402
 from glow.cli import api_key                                       # noqa: E402
 from glow.jotform import Client, JotformError                       # noqa: E402
 from glow.sync import CLUB_NAME, MODULE_ID, MODULES, WEEK_ID, YEAR  # noqa: E402
+from glow.salesforce import as_int, positive                        # noqa: E402
 from backfill_resolve import PAGE, answer_of, attendance_date, copied_fields   # noqa: E402
 from sf_backfill import Org, Refused, now, open_private, quoted, within        # noqa: E402
 
@@ -83,18 +84,6 @@ def read_one(org, sobject, record_id):
 
 def region_of(batch):
     return ((batch.get("Account__r") or {}).get("Parent") or {}).get("Region__c")
-
-
-def as_int(value):
-    """A whole number from what Salesforce (a double) or Jotform (text) gives, else None."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value) if value.is_integer() else None
-    text = str(value).strip() if value is not None else ""
-    return int(text) if text.isascii() and text.isdigit() else None
 
 
 # ---- the Jotform side ----------------------------------------------------------------------------
@@ -365,13 +354,6 @@ def cmd_undo(args, org):
         write_one(org, path, row["batch_id"], row["sobject"], row["record_id"], holds, back, prefix="undo_")
         print(f"  put back {row['record_id']} ({row['sobject']}): {back!r}, read back equal")
     print(f"put back and read back: {len(todo)} records; ledger {os.path.relpath(path, REPO)}")
-
-
-def positive(text):
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
 
 
 def main(argv=None, org=None, client=None):

@@ -17,6 +17,7 @@ accounts on hold, how the attendance processor compares a submitted club name wi
 (sf_match), which names may hide nothing (has_invisible), and the partner map
 (glow/sf_partners.csv, read_partners).
 """
+import argparse
 import csv
 import json
 import os
@@ -40,6 +41,7 @@ CLUB_RECORD_TYPE = "012RP000002uklNYAQ"      # RecordType 'Club' on Account
 PARTNER_RECORD_TYPE = "0126A000000cdYFQAY"   # 'Household Account': every partner account has it
 # the two pilot Club accounts Ryan is checking: never a parent, never a link target
 ON_HOLD_ACCOUNTS = {"001RP00000nMZXfYAO", "001RP00000mgVVMYA2"}
+SF_ID = re.compile(r"[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?")   # any record id, 15 or 18 characters
 ACCOUNT_ID = re.compile(r"001[A-Za-z0-9]{15}")          # an Account's id as the API gives it: 18 characters
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARTNERS = os.path.join(REPO, "glow", "sf_partners.csv")
@@ -55,6 +57,23 @@ class Refused(Exception):
 def quoted(value):
     """A SOQL string literal."""
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def plain(records):
+    """Records without Salesforce's `attributes` entry."""
+    return [{k: v for k, v in r.items() if k != "attributes"} for r in records]
+
+
+def as_int(value):
+    """A whole number from what Salesforce (a double) or Jotform (text) gives, else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    text = str(value).strip() if value is not None else ""
+    return int(text) if text.isascii() and text.isdigit() else None
 
 
 def config_value(text):
@@ -267,6 +286,15 @@ def has_invisible(name):
                 or ord(c) in FILLERS:
             return True
     return False
+
+
+# ---- the tools' command lines ---------------------------------------------------------------------
+def positive(text):
+    """argparse type: a whole number of 1 or more (--limit, --max-new, --per-run)."""
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return value
 
 
 # ---- the partner map ------------------------------------------------------------------------------

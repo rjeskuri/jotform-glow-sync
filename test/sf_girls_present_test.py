@@ -203,6 +203,11 @@ class GirlsPresent(unittest.TestCase):
     def test_a_count_that_is_not_a_whole_number_is_a_refusal(self):
         self.org.batches[5][gp.FIELD] = 1.5
         self.assertIn("not a whole number", self.run_tool("plan", "--vpn-off")[1])
+        # glow.salesforce.as_int underneath: empty is None, a whole double or int its number, anything else refused
+        self.assertEqual([gp.as_count(v) for v in (None, "", 3.0, 3, 0.0)], [None, None, 3, 3, 0])
+        for value in (1.5, "x", True):
+            with self.subTest(value=value), self.assertRaises(gp.Refused):
+                gp.as_count(value)
 
     def test_the_rows_are_counted_in_chunks_of_batch_ids(self):
         def grouped_reads():
