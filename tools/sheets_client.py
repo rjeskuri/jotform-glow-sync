@@ -13,7 +13,6 @@ Usage (also importable):
     python3 tools/sheets_client.py tabs                     # list tabs + used rows
     python3 tools/sheets_client.py export "Enrollment Responses" out.csv
     python3 tools/sheets_client.py export-all DIR           # every tab -> DIR/<tab>.csv
-    python3 tools/sheets_client.py import "Enrollment Responses" in.csv   # one-time, never overwrites
 """
 import csv
 import json
@@ -282,15 +281,6 @@ def main():
         for title, _used, _, _ in list_tabs(svc):
             n = export_tab(svc, title, os.path.join(out_dir, title + ".csv"))
             print(f"  {title:<24} {n:>6} rows")
-    elif cmd == "import":
-        # one-time: put a CSV into a tab, refusing to overwrite existing data
-        title, src = sys.argv[2], sys.argv[3]
-        with open(src, newline="", encoding="utf-8-sig") as f:
-            rows = list(csv.reader(f))
-        if _has_tab(svc, title) and len(read_tab(svc, title)) > 1:
-            sys.exit(f"Tab '{title}' already holds data - not overwriting.")
-        write_tab(svc, title, rows)
-        print(f"{len(rows) - 1} data rows -> '{title}'")
     else:
         sys.exit(f"unknown command {cmd!r}")
 

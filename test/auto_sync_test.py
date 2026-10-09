@@ -651,6 +651,18 @@ class SheetsClientGet(unittest.TestCase):
         self.assertEqual(self.call(sc.time_zone, svc), "America/New_York")
         self.assertEqual(svc.fields, ["properties.timeZone"])
 
+    def test_the_one_time_import_command_is_gone(self):
+        # setup-era: it put a CSV into an empty tab, never valid after launch
+        from unittest import mock
+        sc = auto_sync.sc
+        self.assertNotIn(" import ", sc.__doc__)
+        with mock.patch.object(sc, "service", lambda: self.Svc({})), \
+                mock.patch.object(sc, "write_tab", side_effect=AssertionError("written")), \
+                mock.patch.object(sys, "argv", ["sheets_client.py", "import", "Roster", "roster.csv"]), \
+                self.assertRaises(SystemExit) as cm:
+            sc.main()
+        self.assertEqual(cm.exception.code, "unknown command 'import'")
+
 
 class ModuleValues(unittest.TestCase):
     """The module dropdowns' calcValues (glow/sync.py MODULE_CALC_VALUES): their own options
