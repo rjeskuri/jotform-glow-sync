@@ -29,6 +29,12 @@ def moved(plan):
     return read(os.path.join(REPO, "docs", "plans", plan + ".md")).split(MOVED, 1)[1]
 
 
+def backlog_item(number):
+    """One item of docs/BACKLOG.md, from its `### <number>.` heading to the next heading, as one line."""
+    doc = read(os.path.join(REPO, "docs", "BACKLOG.md"))
+    return " ".join(doc.split(f"\n### {number}. ", 1)[1].split("\n#", 1)[0].split())
+
+
 class RestoreConditionsGuard(RestoreConditionsFixture, unittest.TestCase):
     """restore_conditions.py: a snapshot whose rules test clubs the Club picker no
     longer offers is refused - restored, those clubs' rosters never show and the
@@ -118,12 +124,10 @@ class RosterRepairRunbook(unittest.TestCase):
         self.assertIn("then back to `1`", text)
 
     def test_what_expects_clean_waits_for_the_repair(self):
-        backlog = {l.split("|")[1].strip(): l for l in read(os.path.join(REPO, "docs", "BACKLOG.md"))
-                   .splitlines() if re.match(r"\| (~~45~~|46) \|", l)}
-        self.assertIn("after 47's repair", backlog["46"])
+        self.assertIn("after 47's repair", backlog_item("46"))
         # the partner list (45) was retired before it was deployed; what took its place
         # (the same-name switch, RUNBOOK "Club names two partners share") expects CLEAN too
-        self.assertIn("superseded 2026-09-30", backlog["~~45~~"])
+        self.assertIn("superseded 2026-09-30", backlog_item("45"))
         self.assertIn("the same-name switch", " ".join(self.section().split()))
 
 
@@ -298,8 +302,7 @@ class ContactIdsRunbook(unittest.TestCase):
         self.assertIn("Spanish on U.S only", step7)
         self.assertIn("template, Africa, Asia and Latin America it stays English", step7)
         self.assertIn("not a failure", step7)
-        backlog = read(os.path.join(REPO, "docs", "BACKLOG.md"))
-        item = next(l for l in backlog.splitlines() if l.startswith("| 57 |"))
+        item = backlog_item("57")
         self.assertIn(f"`{md5('This field is required.')[:8]}…`", item)      # the key, cut (check_secrets)
         self.assertIn("`base`", item)
 
@@ -320,8 +323,7 @@ class ContactIdsRunbook(unittest.TestCase):
                          "Ticks in one roster only are refused", "Ticks in both still go through",
                          "clears the picker and picks her club again"):
             self.assertIn(fragment, residual)
-        backlog = read(os.path.join(REPO, "docs", "BACKLOG.md"))
-        item = next(l for l in backlog.splitlines() if l.startswith("| 56 |"))
+        item = backlog_item("56")
         self.assertIn("ticks in one roster only are refused", item)
         self.assertIn("higher in the list", item)
 
