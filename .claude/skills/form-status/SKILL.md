@@ -1,6 +1,6 @@
 ---
 name: form-status
-description: Read-only readiness report of every live attendance form against the newest Roster and Partners exports (rules, integration, languages, club picker, retired rosters, drift). Optional argument: a form id to limit the report.
+description: Read-only readiness report of every live attendance form against the newest Roster and Partners exports (rules, integration, languages, club picker, retired rosters, drift). Takes an optional form id to limit the report.
 disable-model-invocation: true
 ---
 

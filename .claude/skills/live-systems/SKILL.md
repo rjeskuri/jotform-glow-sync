@@ -1,6 +1,6 @@
 ---
 name: live-systems
-description: What is live (the four regional Jotform attendance forms, the template, the master enrollment sheet, the deployed Apps Script, the automatic sync), every command that writes to them with its backup and rollback, and the backup → dry-run → go → apply → verify ritual. Load before any command with --apply, --prune or --rehearse, clasp push, upload_roster.py, auto_sync.py --apply or a gh switch of the sync, and before editing appsscript/ (Salesforce writes: the salesforce skill).
+description: What is live (the four regional Jotform attendance forms, the template, the master enrollment sheet, the deployed Apps Script, the automatic sync), every command that writes to them with its backup and rollback, and the backup → dry-run → go → apply → verify ritual. Load before any command with --apply, --prune or --rehearse, clasp push, upload_roster.py, auto_sync.py --apply or a gh switch of the sync, and before editing appsscript/ (Salesforce writes are in the salesforce skill).
 ---
 
 # Live systems

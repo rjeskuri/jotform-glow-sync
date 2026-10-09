@@ -1,6 +1,6 @@
 ---
 name: integrate
-description: Merge a worktree branch into main - what both sides changed, the doc conflict rules, make check, the privacy audit, what the unattended runner will do once main is pushed, then the worktree and branch removed. Argument: the branch (wf<N>/<slug> or fix/<slug>).
+description: Merge a worktree branch into main - what both sides changed, the doc conflict rules, make check, the privacy audit, what the unattended runner will do once main is pushed, then the worktree and branch removed. Takes the branch (wf<N>/<slug> or fix/<slug>).
 disable-model-invocation: true
 ---
 

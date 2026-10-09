@@ -1,6 +1,6 @@
 ---
 name: sync-preview
-description: Dry-run the Roster → Jotform sync for one region and summarise the planned calls (read-only; never adds --apply). Argument: the region (Africa | Asia | Latin America | U.S).
+description: Dry-run the Roster → Jotform sync for one region and summarise the planned calls (read-only; never adds --apply). Takes the region (Africa | Asia | Latin America | U.S).
 disable-model-invocation: true
 ---
 
