@@ -256,7 +256,7 @@ def check_page(client, fid, keys, present, page_of, sleep):
         return True
     if n is None:
         print("   public page: could not read its embedded store - check with tools/form_status.py "
-              f"--form {fid} --rendered in a few minutes")
+              f"--form {fid} --roster data/roster_<date>.csv --rendered in a few minutes")
         return False
     print(f"   public page: {n} {what} - re-rendering it (pagetitle posted back unchanged)")
     # the store is written by now: a failure from here on is reported as such (the callers'
@@ -270,11 +270,11 @@ def check_page(client, fid, keys, present, page_of, sleep):
             again = client.get(f"/form/{fid}/properties")
     except JotformError:          # never echoed
         print("   ! the re-render could not be done or confirmed (an error or a non-JSON answer from "
-              f"Jotform) - re-save the form in the builder, then tools/form_status.py --form {fid} --rendered")
+              f"Jotform) - re-save the form in the builder, then tools/form_status.py --form {fid} --roster data/roster_<date>.csv --rendered")
         return False
     if not title:
         print("   ! the form has no pagetitle to post back - re-save the form in the builder, then "
-              f"tools/form_status.py --form {fid} --rendered")
+              f"tools/form_status.py --form {fid} --roster data/roster_<date>.csv --rendered")
         return False
     same = isinstance(again, dict) and again.get("pagetitle") == title
     print(f"   pagetitle re-read: {'unchanged' if same else 'CHANGED - set it back'}")
@@ -312,7 +312,7 @@ def apply_form(client, fid, store, plan, options, stamp, page_of=public_page, sl
         sys.exit("Stopped: the re-read store still alters roster options - compare it with the saved store")
     if not check_page(client, fid, keys, True, page_of, sleep):
         sys.exit("The store is fixed but the public page could not be shown to serve it - "
-                 f"tools/form_status.py --form {fid} --rendered before going on")
+                 f"tools/form_status.py --form {fid} --roster data/roster_<date>.csv --rendered before going on")
 
 
 def merged_restore(saved, current):
@@ -373,7 +373,7 @@ def restore(client, fid, path, apply, options, stamp, page_of=public_page, sleep
                  f"{shown(saved_now)}")
     if not check_page(client, fid, back, False, page_of, sleep):
         sys.exit(f"Restored, but the public page could not be shown to serve it - tools/form_status.py "
-                 f"--form {fid} --rendered")
+                 f"--form {fid} --roster data/roster_<date>.csv --rendered")
 
 
 def main():

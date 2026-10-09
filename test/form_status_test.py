@@ -399,6 +399,39 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
             self.assertIn("→ CLEAN", out)
 
 
+class FormStatusRoster(unittest.TestCase):
+    """tools/form_status.py --roster: required (the old default was the pre-launch offline
+    build, BACKLOG 32), and an export with a byte-order mark reads like any other."""
+
+    def test_without_roster_it_refuses_and_names_the_export(self):
+        import contextlib
+        import io
+        from unittest import mock
+        built = []
+        env = {k: v for k, v in os.environ.items() if k != "JOTFORM_API_KEY"}
+        with mock.patch.object(form_status, "Client", lambda key: built.append(key)), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(sys, "argv", ["form_status.py", "--form", glow_forms.TEMPLATE]), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            form_status.main()
+        self.assertIn("--roster is required", str(cm.exception.code))
+        self.assertIn("python3 tools/sheets_client.py export Roster data/roster_<date>.csv",
+                      str(cm.exception.code))
+        self.assertEqual(built, [])                       # refused before the key or a read
+
+    def test_a_roster_export_with_a_byte_order_mark_is_read(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "roster.csv")
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write("partner,club,full_name,status,region\r\n"
+                        "Partner One,Alpha Club,Ana Example,active,Africa\r\n")
+            roster = form_status.load_roster(path)
+        self.assertEqual(list(roster), ["Africa"])
+        club, names, partner, _ = roster["Africa"]["alpha club"]
+        self.assertEqual((club, partner, len(names)), ("Alpha Club", "Partner One", 1))
+
+
 class FormStatusLayout(unittest.TestCase):
     """tools/form_status.py: the layout audit joins rule_problems (CLEAN needs
     none, and the runner's verify_report sees a relapse)."""

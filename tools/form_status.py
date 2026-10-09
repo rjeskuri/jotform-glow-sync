@@ -5,8 +5,7 @@ carrying the clubs the Roster says it should, with clean logic and the
 Salesforce integration intact?
 
 Read-only. Compares every form's club checkboxes against the Roster tab
-(data/roster_build/Roster.csv by default, or --roster <csv>), grouped by
-region, and reports what the Jotform API says about conditions, emails,
+(--roster <csv>, a fresh export: required), grouped by region, and reports what the Jotform API says about conditions, emails,
 integration, submissions and the enableFuzzy field, and whether every roster
 renders above the links and the Submit button (glow/layout.py; a roster below
 them makes the form NOT CLEAN - tools/fix_roster_order.py repairs it), and
@@ -39,8 +38,9 @@ status is not ENABLED has its region check and its served-page checks skipped.
 
 Usage:
     export JOTFORM_API_KEY=...
-    python3 tools/form_status.py                  # all six forms
-    python3 tools/form_status.py --form <ID> ...  # some
+    python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+    python3 tools/form_status.py --roster data/roster_<date>.csv                  # all five forms
+    python3 tools/form_status.py --roster data/roster_<date>.csv --form <ID> ...  # some
 """
 import argparse
 import csv
@@ -75,6 +75,7 @@ DEFUNCT = {glow_forms.DEFUNCT["master"]: ("master (defunct)", None),
            **{fid: (f"{region} (defunct)", region)
               for region, fid in glow_forms.DEFUNCT.items() if region != "master"}}
 ENABLE_FUZZY_QID = "109"
+ROSTER_EXPORT = "python3 tools/sheets_client.py export Roster data/roster_<date>.csv"
 
 
 def load_roster(path):
@@ -83,7 +84,7 @@ def load_roster(path):
     region check compares union against union), and per partner (a retired partner's
     share leaves the compare)."""
     by_region = defaultdict(dict)
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             if key(row.get("status")) != "active":
                 continue
@@ -1230,7 +1231,8 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--form", action="append")
-    ap.add_argument("--roster", default=os.path.join(REPO, "data", "roster_build", "Roster.csv"))
+    ap.add_argument("--roster", metavar="PATH",
+                    help="required: a fresh export of the Roster tab (" + ROSTER_EXPORT + ")")
     ap.add_argument("--partners", metavar="PATH",
                     help="an export of the Partners tab: its `jotform` column (no = the partner's clubs "
                          "are not on the attendance forms) tells a retired roster from a broken one; "
@@ -1247,6 +1249,11 @@ def main():
                          "is what glow/sync.py says, and the translation store the page embeds alters "
                          "no roster box it serves; prints the runtime build")
     args = ap.parse_args()
+    if not args.roster:
+        # no default: the one there was (data/roster_build/Roster.csv) is the pre-launch
+        # offline build - wrong counts, or a traceback (BACKLOG 32)
+        sys.exit(f"--roster is required: a fresh export of the Roster tab ({ROSTER_EXPORT}), "
+                 "then --roster data/roster_<date>.csv")
     if args.defunct:
         FORMS.update(DEFUNCT)
     client = Client(api_key())
