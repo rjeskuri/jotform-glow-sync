@@ -35,6 +35,9 @@ NEXT_PAGE_ALL = re.compile(r"/services/data/v\d+\.\d+/query(?:All)?/[A-Za-z0-9_-
 PLAIN_HOST = re.compile(r"https://[A-Za-z0-9.-]+(:\d+)?")
 UNSAFE = re.compile(r'[\x00-\x20\x7f"\\]')              # nothing a curl config line could misread
 SAY = re.compile(r"[^A-Za-z0-9 _.,:;'()/-]")            # what of an OAuth error may be repeated
+# Salesforce's error codes (DUPLICATES_DETECTED, UNABLE_TO_LOCK_ROW ...): capitals WITH an underscore,
+# which no name has - a bare capitalised word of an error text can be a girl's or a club's name
+ERROR_CODE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
 
 # ---- the org (read 2026-09-30)
 CLUB_RECORD_TYPE = "012RP000002uklNYAQ"      # RecordType 'Club' on Account
@@ -74,6 +77,12 @@ def as_int(value):
         return int(value) if value.is_integer() else None
     text = str(value).strip() if value is not None else ""
     return int(text) if text.isascii() and text.isdigit() else None
+
+
+def error_codes(text):
+    """The Salesforce error codes in an error text or answer, sorted - never its words: an error
+    message can quote a record's values, a girl's name among them (in capitals too)."""
+    return sorted(set(ERROR_CODE.findall(str(text or ""))))
 
 
 def config_value(text):

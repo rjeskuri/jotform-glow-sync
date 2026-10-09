@@ -677,6 +677,8 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         self.assertEqual(bf.outcome_of("Failed", "Error: STRING_TOO_LONG, First Name: data value too large: "
                                        "WILHELMINA ZIBBLEWICK"), "failed_STRING_TOO_LONG")
         self.assertEqual(bf.outcome_of("Failed", "Error: could not process AMARAZ ZIBBLEWICK"), "failed_other")
+        # any code is named (glow.salesforce.error_codes: capitals with an underscore), not only a known list
+        self.assertEqual(bf.outcome_of("Failed", "Error: NOT_FOUND, WILHELMINA ZIBBLEWICK"), "failed_NOT_FOUND")
         self.assertEqual(bf.outcome_of("AMARA ZIBBLEWICK", None), "no status_other")
 
 

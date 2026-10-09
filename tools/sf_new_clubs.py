@@ -38,8 +38,8 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.forms import REGIONS                                     # noqa: E402  (the four regional forms)
 from glow.salesforce import (CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE,   # noqa: E402
-                             PARTNERS, Org, Refused, add_vpn_flag, apex_trim, has_invisible, plain,
-                             quoted, read_partners, require_vpn_off, sf_match)
+                             PARTNERS, Org, Refused, add_vpn_flag, apex_trim, error_codes, has_invisible,
+                             plain, quoted, read_partners, require_vpn_off, sf_match)
 from glow.text import key, name_key                               # noqa: E402
 
 ACCOUNTS = "SELECT Id, Name, RecordTypeId, ParentId, Description, CreatedById FROM Account"
@@ -55,7 +55,6 @@ CONFIRM_CREATES = True      # each create also raises "created, check by hand" (
 CODE_IN = re.compile(r"GLOW club code ([A-Z0-9]+);")
 GIRL_ID = re.compile(r"([A-Z0-9]+)-[A-Z0-9]+-\d+")              # CLUBCODE-LASTCODE-NNN (appsscript/Ids.gs)
 PROVEN = set(" -.()'/")     # characters seen arriving intact in question 5 (600 batches, 2026-10-06)
-ERROR_WORD = re.compile(r"\b[A-Z][A-Z_]{3,}\b")
 
 Club = collections.namedtuple("Club", "region partner club value code")
 
@@ -268,11 +267,6 @@ def clubs_from(region, entries, codes, only_new=False):
     return out
 
 
-def error_words(answer):
-    """Salesforce's error codes only - an error message can quote a record's values."""
-    return sorted(set(ERROR_WORD.findall(json.dumps(answer)))) if answer else []
-
-
 # ---- the step the automatic sync runs -----------------------------------------------------------
 class Step:
     """One run's Salesforce work. Every problem ends in self.attention ((title, detail) pairs, the
@@ -380,7 +374,7 @@ class Step:
         if not new_id and not unknown:
             self.stopped.add(region)
             self.warn(f"{region}: {label} - Salesforce refused the create (HTTP {status})",
-                      (" ".join(error_words(answer)) or "no error code given")
+                      (" ".join(error_codes(json.dumps(answer))) or "no error code given")
                       + "\n\nBody for a hand create: " + json.dumps(body, ensure_ascii=False))
             return 0
         try:                                              # read back - or settle an unknown outcome

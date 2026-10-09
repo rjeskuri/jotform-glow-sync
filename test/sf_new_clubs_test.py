@@ -429,6 +429,20 @@ class SalesforceNewClubs(Fixture):
         self.assertNotIn("Quillfeather", text)
         self.assertIn("Body for a hand create", text)
 
+    def test_a_refusal_quoting_names_in_capitals_repeats_only_its_code(self):
+        class Shouting(FakeOrg):
+            def insert(self, sobject, body):
+                self.inserts.append(body)
+                return 400, [{"errorCode": "FIELD_CUSTOM_VALIDATION_EXCEPTION",
+                              "message": "DAWN CLUB: ZARA QUILLFEATHER IS NOT ALLOWED"}]
+        s = self.step(Shouting(base_accounts()))
+        s.prepare()
+        self.assertEqual(s.create("U.S", self.plan(("Dawn Club",))), 0)
+        detail = next(d for t, d in s.attention if "refused the create" in t)
+        self.assertTrue(detail.startswith("FIELD_CUSTOM_VALIDATION_EXCEPTION\n\nBody for a hand create: "), detail)
+        for word in ("QUILLFEATHER", "ZARA", "ALLOWED"):          # the club's own name is shown anyway
+            self.assertNotIn(word, json.dumps(s.attention) + "\n".join(s.logged))
+
     def test_an_unknown_outcome_is_settled_by_reading_back_and_never_retried(self):
         org = FakeOrg(base_accounts(), insert="unknown_saved")
         s = self.step(org)

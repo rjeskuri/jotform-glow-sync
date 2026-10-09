@@ -46,8 +46,8 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                          # noqa: E402
 from glow.cli import api_key                                   # noqa: E402
 from glow.jotform import Client, JotformError                   # noqa: E402
-from glow.salesforce import (SF_ID, Org, Refused, add_vpn_flag, plain, positive, quoted,   # noqa: E402
-                             require_vpn_off, sf_match)
+from glow.salesforce import (SF_ID, Org, Refused, add_vpn_flag, error_codes, plain, positive,   # noqa: E402
+                             quoted, require_vpn_off, sf_match)
 from glow.sync import SF_NAME_SEP                               # noqa: E402
 from glow.text import key as plain_key                          # noqa: E402
 from sf_backfill import save_private, within                    # noqa: E402
@@ -76,9 +76,6 @@ _IDS = r"(?:[A-Za-z0-9]{15,18}(?:,[A-Za-z0-9]{15,18})*)?"
 DIAG_SHAPE = re.compile(r"DIAG\|(?:ok\|[A-Za-z0-9]{15,18}|merged\|[A-Za-z0-9]{15,18}\|" + _IDS + r"\|" + _IDS
                         + r"|limits\|queries=\d+/\d+\|dml=\d+/\d+\|cpu=\d+/\d+)")
 FAIL_TOKEN = re.compile(r"DIAG\|fail\|[a-z ]+(?:\|[A-Za-z0-9]{15,18})?")
-# Salesforce's error codes (DUPLICATES_DETECTED, UNABLE_TO_LOCK_ROW ...): capitals WITH an underscore,
-# which no name has - a bare capitalized word of an error text can be a girl's name written in capitals
-ERROR_CODE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
 EXCEPTION_KIND = re.compile(r"(?:[A-Za-z0-9_]+\.)*[A-Za-z0-9_]*Exception(?=:)")
 NAME_FIELDS = ("Name", "FirstName", "LastName")
 RENAMEABLE = ("FirstName", "LastName")
@@ -205,11 +202,6 @@ def query_in(read, soql, ids):
     for i in range(0, len(ids), IN_CHUNK):
         out += read(soql.replace("{ids}", in_list(ids[i:i + IN_CHUNK])))
     return plain(out)
-
-
-def error_codes(text):
-    """The Salesforce error codes in an error text or answer - never its words (they can quote a name)."""
-    return sorted(set(ERROR_CODE.findall(str(text or ""))))
 
 
 def field_names(describe):

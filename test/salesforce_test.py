@@ -241,6 +241,22 @@ class OrgQueryAllAndDelete(unittest.TestCase):
 
 
 
+class ErrorCodes(unittest.TestCase):
+    """glow.salesforce.error_codes: Salesforce's codes (capitals with an underscore), never a word of
+    the message - a capitalised word there can be a girl's or a club's name."""
+
+    def test_codes_are_repeated_and_names_in_capitals_never(self):
+        said = ("System.DmlException: Insert failed. DUPLICATES_DETECTED, AMARA ZIBBLEWICK looks like ZARA "
+                "QUILLFEATHER: []; UNABLE_TO_LOCK_ROW; DUPLICATES_DETECTED")
+        self.assertEqual(salesforce.error_codes(said), ["DUPLICATES_DETECTED", "UNABLE_TO_LOCK_ROW"])
+        answer = [{"errorCode": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "message": "SUNRISE CLUB: WRONG"}]
+        self.assertEqual(salesforce.error_codes(json.dumps(answer)), ["FIELD_CUSTOM_VALIDATION_EXCEPTION"])
+        self.assertEqual(salesforce.error_codes(answer), ["FIELD_CUSTOM_VALIDATION_EXCEPTION"])
+        for nothing in (None, "", "AMARA ZIBBLEWICK", "Contact_IDs__c is wrong", "NPSP ERROR"):
+            with self.subTest(nothing):
+                self.assertEqual(salesforce.error_codes(nothing), [])
+
+
 class ToolCommandLines(unittest.TestCase):
     """What the Salesforce tools' command lines share: --vpn-off and its refusal, positive()."""
 

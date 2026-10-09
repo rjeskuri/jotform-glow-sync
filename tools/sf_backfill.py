@@ -44,7 +44,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.salesforce import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, apex_trim,   # noqa: E402
-                             add_vpn_flag, has_invisible, plain, positive, require_vpn_off, sf_match)
+                             add_vpn_flag, error_codes, has_invisible, plain, positive, require_vpn_off,
+                             sf_match)
 from glow.salesforce import API, NEXT_PAGE, Org, Refused, quoted   # noqa: E402,F401 (re-exported)
 
 DEFAULT_DIR = os.path.join(REPO, "data", "backfill_2026-09")
@@ -71,12 +72,6 @@ RELEASABLE = {"several_rosters_ticked", "name_unknown_to_roster", "date_before_s
               "date_after_submission", "club_has_earlier_contacts", "similar_names",
               "more_new_girls_than_proven"}
 DONE, OPEN, UNSETTLED = {"ok", "accepted"}, {"CHECK"}, {"sending", "unknown"}
-# the only words of a Salesforce error this tool repeats; the message itself can quote a girl's name
-ERROR_CODES = {"DUPLICATES_DETECTED", "STRING_TOO_LONG", "REQUIRED_FIELD_MISSING", "INVALID_FIELD",
-               "FIELD_CUSTOM_VALIDATION_EXCEPTION", "FIELD_INTEGRITY_EXCEPTION", "UNABLE_TO_LOCK_ROW",
-               "CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY", "INSUFFICIENT_ACCESS_OR_READONLY", "LIMIT_EXCEEDED",
-               "INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY", "INVALID_CROSS_REFERENCE_KEY",
-               "REQUEST_LIMIT_EXCEEDED", "INVALID_SESSION_ID", "JSON_PARSER_ERROR", "ENTITY_IS_DELETED"}
 
 
 def within(path, root):
@@ -746,8 +741,10 @@ def append_ledger(path, row, ledger=None):
 
 
 def known_code(text):
-    found = [word for word in re.findall(r"[A-Z][A-Z_]+", text or "") if word in ERROR_CODES]
-    return found[0] if found else "other"
+    """The only word of a Salesforce error this tool repeats: its error code (glow.salesforce.error_codes,
+    the first of them), else 'other' - the message itself can quote a girl's name."""
+    codes = error_codes(text)
+    return codes[0] if codes else "other"
 
 
 def outcome_of(status, message):
