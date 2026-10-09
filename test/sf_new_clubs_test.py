@@ -374,6 +374,20 @@ class SalesforceNewClubs(Fixture):
                 self.assertIn(says, detail)
                 self.assertNotIn("Body for a hand create", detail)            # never a body for a name in use
 
+    def test_a_name_equal_only_as_java_compares_case_is_the_club_s_account(self):
+        # equal lengths, unequal case-folds: Java's equalsIgnoreCase (glow.salesforce.sf_match) takes question 5
+        # 'Istanbul Girls' for the account 'ıstanbul Girls' (a dotless i), so the processor books there: no twin
+        # is created, and the check finds the club's one account
+        self.write_roster([("ISTANBUL", "Example Partner", "Istanbul Girls")])
+        org = FakeOrg(base_accounts() + [acct("001000000000000IST", "\u0131stanbul Girls", CLUB, P1)])
+        s = self.step(org)
+        s.prepare()
+        self.assertEqual(s.create("U.S", self.plan(("Istanbul Girls",))), 0)
+        self.assertEqual((org.inserts, s.attention), ([], []))
+        on_form = [{"qid": 1, "club": "Istanbul Girls", "value": "Istanbul Girls", "partner": "Example Partner"}]
+        self.assertEqual(s.check({"U.S": on_form}), (1, 0))
+        self.assertEqual(s.attention, [])
+
     def test_what_salesforce_has_is_judged_before_the_name_partner_and_code(self):
         self.write_roster([("SUNMOONX", "Example Partner", "Sun & Moon"), ("HOPELITE", "Example Partner", "Hope Light")])
         org = FakeOrg(base_accounts() + [acct("001000000000000SMX", "Sun & Moon", CLUB, P1, "GLOW club code SUNMOONX; x"),
