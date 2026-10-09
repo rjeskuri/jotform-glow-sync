@@ -42,7 +42,7 @@ they drift apart.
   `GLOW_SA_JSON` (the whole service-account file), `GLOW_SHEET_ID`; repository
   variable `AUTO_SYNC_APPLY` (`0` = dry runs only, `1` = writes).
 
-## The live gate (Claude Code)
+## Live gate (Claude Code)
 
 `.claude/hooks/live_gate.sh` blocks any command Claude runs that contains
 `--apply`, `--prune`, `clasp push`, `clasp:push` or `sheets_client.py import`,
@@ -1875,7 +1875,9 @@ spreadsheet's time zone changes (File → Settings) — the cause of the
 2026-09-13 replay; they are still recognised under any zone
 ([plans/2026-09-27-formlog-key.md](plans/2026-09-27-formlog-key.md)).
 
-**Rolling back `appsscript/`** (`git checkout <target> -- appsscript && npm
+### Rolling back `appsscript/`
+
+A rollback (`git checkout <target> -- appsscript && npm
 run clasp:push`) to a commit before `7a175c4` brings back the old menu item,
 which cannot read the new keys and would re-run everything processed since
 the deploy, without a preview. Roll back no further than `7a175c4`; it shows

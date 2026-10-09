@@ -224,7 +224,7 @@ HTML.
   this form in-sync"), and every later run reports `in-sync` until someone
   applies the sync by hand, because a rules-only difference is not a change
   to the runner. That gap already exists on `main` for the new club's
-  roster rule (RUNBOOK, "rules-only difference"); the guard makes it a
+  roster rule (RUNBOOK "Automatic sync": a rules-only difference); the guard makes it a
   blocked Submit rather than a missing roster. `form_status`'s "guard rule
   misses …" catches it only when the PUT was accepted but altered. The
   browser check covers the page-translation case.

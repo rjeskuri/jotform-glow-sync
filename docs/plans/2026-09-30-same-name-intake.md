@@ -192,7 +192,7 @@ Alpha Club).
 - **Rollback of this push** to the code before it: same-name holds stay held
   (the older code lists them as "no ReviewQueue item for this row and time"
   and never imports them); new same-name clubs are imported again and the
-  sync refuses them on the form side. RUNBOOK "Same-name holds and a
+  sync refuses them on the form side. RUNBOOK "Rolling back `appsscript/`", its paragraph "Same-name holds and a
   rollback below the same-name check". The floors of CLAUDE.md rule 11 are
   unchanged.
 - **Order with Part 1.** Pushed before the forms are switched, the intake
