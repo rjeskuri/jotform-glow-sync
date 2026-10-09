@@ -32,7 +32,7 @@ LIVE = {TEMPLATE: "template", **{fid: region for region, fid in REGIONALS.items(
 # human-readable label per id (what backup_forms.py prints)
 LABELS = {
     TEMPLATE: "template (every sync-logic change lands here first)",
-    **{fid: f"{region} (live from 2026-08-27)" for region, fid in REGIONALS.items()},
+    **{fid: f"{region} (live from 2026-09-01)" for region, fid in REGIONALS.items()},
     **{fid: f"{region} (defunct)" for region, fid in DEFUNCT.items()},
 }
 
