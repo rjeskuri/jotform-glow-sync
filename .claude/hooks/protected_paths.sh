@@ -15,6 +15,9 @@
 # whole path. That includes ~/.claude/settings*.json and ~/.claude/hooks/: the
 # user-level settings could switch the project's hooks off, so they are as
 # protected as the project's own. Case-insensitive, as the Mac's file system is.
+# The path as given and the path with its symbolic links resolved (python3's
+# realpath, which resolves the part that exists of a file not yet written) are
+# both read, against the project dir resolved the same way: either one blocks.
 set -u
 INPUT=$(cat)
 if command -v jq >/dev/null 2>&1; then
@@ -75,6 +78,11 @@ protected() {   # a scoped path
 
 BLOCKED=
 protected "$(scoped "$FP" "$ROOT")" && BLOCKED=1
+if [ -z "$BLOCKED" ] && command -v python3 >/dev/null 2>&1; then
+  REAL=$(python3 -c 'import os, sys; print("\n".join(os.path.realpath(a) for a in sys.argv[1:]))' "$FP" "$ROOT")
+  RFP="${REAL%$'\n'*}" RROOT="${REAL##*$'\n'}"
+  protected "$(scoped "$RFP" "$RROOT")" && BLOCKED=1
+fi
 [ -z "$BLOCKED" ] && exit 0
 echo "BLOCKED by .claude/hooks/protected_paths.sh: '$REL' holds personal data or secrets, is generated (Regions.gs comes from tools/derive_partner_regions.py --write), or is part of the Claude Code guardrails themselves - the gate must not be editable by the thing it gates. Change the generator, or ask Ryan to make guardrail changes himself (or with his explicit go outside this hook)." >&2
 exit 2

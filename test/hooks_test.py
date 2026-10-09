@@ -18,6 +18,7 @@ import concurrent.futures
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -46,7 +47,7 @@ class Hooks(unittest.TestCase):
             env["GLOW_LIVE_OK"] = live_ok
         done = subprocess.run([os.path.join(HOOKS, name)], input=json.dumps(
             {"tool_name": tool, "tool_input": tool_input}), env=env, capture_output=True, text=True,
-            timeout=30)
+            timeout=30, cwd=env["CLAUDE_PROJECT_DIR"] if os.path.isdir(env["CLAUDE_PROJECT_DIR"]) else None)
         return done.returncode, done.stderr
 
     def gate(self, command, live_ok=None):
@@ -270,6 +271,27 @@ class Hooks(unittest.TestCase):
                            (project + "-wf20/tools/x.py", 2)]:         # a sibling outside: its whole path
             with self.subTest(path=path):
                 self.assertEqual(self.edit(path, project=project), code, path)
+
+    def test_a_symbolic_link_into_a_protected_folder_is_followed(self):
+        # review of 2026-10-09: /tmp/alias-to-data/x.csv was allowed though it points into data/
+        root = self.tmp.name
+        for d in ("data", "credentials", "tools", os.path.join(".claude", "hooks")):
+            os.makedirs(os.path.join(root, d), exist_ok=True)
+        with open(os.path.join(root, "credentials", "config.json"), "w", encoding="utf-8") as f:
+            f.write("{}")
+        outside = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, outside, True)
+        os.symlink(os.path.join(root, "data"), os.path.join(outside, "alias-to-data"))
+        os.symlink(os.path.join(root, "data"), os.path.join(root, "tools", "shortcut"))
+        os.symlink(os.path.join(root, "credentials", "config.json"), os.path.join(root, "notes.json"))
+        os.symlink(os.path.join(root, ".claude", "hooks"), os.path.join(outside, "gates"))
+        os.symlink(os.path.join(root, "tools"), os.path.join(outside, "alias-to-tools"))
+        self.assert_edit([os.path.join(outside, "alias-to-data", "x.csv"),            # a file not yet written
+                          os.path.join(outside, "alias-to-data", "new", "y.csv"),
+                          os.path.join(root, "tools", "shortcut", "x.csv"), "tools/shortcut/x.csv",
+                          os.path.join(root, "notes.json"), "notes.json",
+                          os.path.join(outside, "gates", "live_gate.sh")], 2)
+        self.assert_edit([os.path.join(outside, "alias-to-tools", "x.py"), os.path.join(root, "tools", "x.py")], 0)
 
     def test_the_user_level_claude_settings_and_hooks_are_protected_too(self):
         # they could switch the project's hooks off (kept on purpose, review of 2026-10-09)
