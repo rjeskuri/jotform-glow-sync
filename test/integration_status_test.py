@@ -120,6 +120,22 @@ class IntegrationStatus(unittest.TestCase):
         out, stop = run(dict(live, **{OLD: block()}))
         self.assertIn("old Africa: STILL CONNECTED", out)
 
+    def test_a_failed_read_is_a_clean_exit_not_a_traceback(self):
+        # like every sibling tool, the script runs main under glow.cli.run: a gateway 504 is
+        # one line, not a traceback
+        import runpy
+        from unittest import mock
+        from glow import jotform
+
+        def down(client, path, **params):
+            raise jotform.JotformError(f"GET {path}: 504 Gateway Time-out")
+        with mock.patch.object(jotform.Client, "get", down), \
+                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                mock.patch.object(sys, "argv", ["integration_status.py", "--form", US]), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            runpy.run_path(os.path.join(REPO, "tools", "integration_status.py"), run_name="__main__")
+        self.assertEqual(cm.exception.code, f"GET /form/{US}/properties: 504 Gateway Time-out")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

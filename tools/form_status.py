@@ -5,9 +5,9 @@ carrying the clubs the Roster says it should, with clean logic and the
 Salesforce integration intact?
 
 Read-only. Compares every form's club checkboxes against the Roster tab
-(data/roster_build/Roster.csv by default, or --roster <csv>), grouped by
-region, and reports what the Jotform API says about conditions, emails,
-integration, submissions and the enableFuzzy field, and whether every roster
+(--roster <csv>, a fresh export: required), grouped by region, and reports
+what the Jotform API says about conditions, emails, integration, submissions
+and the enableFuzzy field, and whether every roster
 renders above the links and the Submit button (glow/layout.py; a roster below
 them makes the form NOT CLEAN - tools/fix_roster_order.py repairs it), and
 whether question 18 (Contact_IDs, the names sent to Salesforce) is calculated
@@ -39,16 +39,15 @@ status is not ENABLED has its region check and its served-page checks skipped.
 
 Usage:
     export JOTFORM_API_KEY=...
-    python3 tools/form_status.py                  # all six forms
-    python3 tools/form_status.py --form <ID> ...  # some
+    python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+    python3 tools/form_status.py --roster data/roster_<date>.csv                  # all five forms
+    python3 tools/form_status.py --roster data/roster_<date>.csv --form <ID> ...  # some
 """
 import argparse
-import csv
 import html
 import json
 import os
 import re
-import subprocess
 import sys
 from collections import defaultdict
 
@@ -60,13 +59,13 @@ from glow import sync as glow_sync         # noqa: E402  (question 18's and the 
 from glow import translation_lookup as tl  # noqa: E402  (the runtime's names dictionary, emulated)
 from glow import usage                     # noqa: E402  (Jotform's storage against the plan's limits)
 from glow.cli import api_key, run                   # noqa: E402
-from glow.jotform import Client, JotformError     # noqa: E402
+from glow.jotform import Client, JotformError, public_page     # noqa: E402
 from glow.links import order_of, shown_by_rules   # noqa: E402
 from glow.sync import (                    # noqa: E402  (shared with the sync tool)
-    GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, SF_NAME_SEP,
-    WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, club_picker, dropdown_options, has_calc_values,
+    CLUB_NAME, CONTACT_IDS, ENABLE_FUZZY, GUARD_DISABLES_SUBMIT, GUARD_NAME, GUARD_PROPS, MODULES, PARTNER,
+    SF_NAME_SEP, WEEKS, YEAR, aligned_calc_values, club_guards, club_partners, club_picker, dropdown_options, has_calc_values,
     inactive_retires, long_name_partner, partner_picker, picker_calc_values, read_partners_csv,
-    roster_names, roster_pairs, roster_removed, rule_parts, sheet_today)
+    _roster_rows, roster_names, roster_pairs, roster_removed, rule_parts, sheet_today)
 from glow.text import key, name_key        # noqa: E402
 
 FORMS = {glow_forms.TEMPLATE: ("template", None),
@@ -74,7 +73,7 @@ FORMS = {glow_forms.TEMPLATE: ("template", None),
 DEFUNCT = {glow_forms.DEFUNCT["master"]: ("master (defunct)", None),
            **{fid: (f"{region} (defunct)", region)
               for region, fid in glow_forms.DEFUNCT.items() if region != "master"}}
-ENABLE_FUZZY_QID = "109"
+ROSTER_EXPORT = "python3 tools/sheets_client.py export Roster data/roster_<date>.csv"
 
 
 def load_roster(path):
@@ -83,15 +82,14 @@ def load_roster(path):
     region check compares union against union), and per partner (a retired partner's
     share leaves the compare)."""
     by_region = defaultdict(dict)
-    with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if key(row.get("status")) != "active":
-                continue
-            region = row.get("region", "").strip() or "(no region)"
-            ck = key(row["club"])
-            entry = by_region[region].setdefault(ck, (row["club"], set(), row["partner"], {}))
-            entry[1].add(name_key(row["full_name"]))
-            entry[3].setdefault(key(row["partner"]), set()).add(name_key(row["full_name"]))
+    for row in _roster_rows(path):
+        if key(row.get("status")) != "active":
+            continue
+        region = row.get("region", "").strip() or "(no region)"
+        ck = key(row["club"])
+        entry = by_region[region].setdefault(ck, (row["club"], set(), row["partner"], {}))
+        entry[1].add(name_key(row["full_name"]))
+        entry[3].setdefault(key(row["partner"]), set()).add(name_key(row["full_name"]))
     return by_region
 
 
@@ -189,26 +187,13 @@ def off_picker(questions, conditions, owner_of=None):
     return out
 
 
-def load_partners(path):
-    """{key(club): {key(partner): partner}} for every Roster row - any status, all
-    regions: the partners a club's long name ("<club> - <partner>",
-    glow.sync.SF_NAME_SEP) may carry."""
-    pairs = {}
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            partner = " ".join((row.get("partner") or "").split())
-            club = " ".join((row.get("club") or "").split())
-            if partner and club:
-                pairs.setdefault((partner, club), True)
-    return club_partners(pairs)
-
-
-CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID = "5", "331", "18"
+# glow.sync's own ids; test/gs_parity_test.py reads them under these names
+CLUB_NAME_QID, PARTNER_QID, CONTACT_IDS_QID, ENABLE_FUZZY_QID = CLUB_NAME, PARTNER, CONTACT_IDS, ENABLE_FUZZY
 
 
 def picker_options(questions, picker):
     """The picker's options exactly as stored (what a multi-select's rules compare)."""
-    return [o for o in (questions[picker].get("options") or "").split("|") if o]
+    return dropdown_options(questions[picker])
 
 
 def _parsed(conditions):
@@ -293,7 +278,7 @@ def audit_club_guard(questions, conditions):
         return problems + [f"{len(buttons)} Submit buttons, expected 1 - the guard hides and "
                            "disables one"]
     submit = buttons[0]
-    want = {(picker, "isFilled", "")} | {(CLUB_NAME_QID, "notEquals", o) for o in options}
+    want = {(picker, "isFilled", "")} | {(CLUB_NAME, "notEquals", o) for o in options}
     rules = _parsed(conditions)
     shows = [(c, t, a) for c, t, a in rules
              if any(x.get("visibility") == "Show" and str(x.get("field")) == gid for x in a)]
@@ -312,7 +297,7 @@ def audit_club_guard(questions, conditions):
                 problems.append(f"guard rule {rid} ({what}): its actions are not "
                                 + " + ".join(f"{v} q{f}" for v, f in actions))
             have = {(str(t.get("field")), t.get("operator"), str(t.get("value") or "")) for t in terms}
-            missing = [o for o in options if (CLUB_NAME_QID, "notEquals", o) not in have]
+            missing = [o for o in options if (CLUB_NAME, "notEquals", o) not in have]
             extra = sorted(v or f"q{f} {op}" for f, op, v in have - want)
             if (picker, "isFilled", "") not in have:
                 problems.append(f"guard rule {rid} does not test that the Club picker is filled")
@@ -579,7 +564,7 @@ def rendered_rules(page, rosters):
         return None
     shape = glow_sync.contact_ids_layout(conds, rosters)
     calc = next((c for c in calcs if isinstance(c, dict)
-                 and str(c.get("resultField")) == CONTACT_IDS_QID), None)
+                 and str(c.get("resultField")) == CONTACT_IDS), None)
     return {"rules": len(conds), "position": shape["position"], "roster_rules": len(shape["roster_rules"]),
             "first_roster_rule": min(shape["roster_rules"]) if shape["roster_rules"] else None,
             "operands": None if calc is None else [x for x in str(calc.get("operands") or "").split(",") if x]}
@@ -778,18 +763,11 @@ def rendered_names_problems(r, page):
     return []
 
 
-def public_page(form_id):
-    """The form as a mentor's browser receives it (curl, like every call here)."""
-    out = subprocess.run(["curl", "-sSL", "--max-time", "90", f"https://form.jotform.com/{form_id}"],
-                         capture_output=True, text=True)
-    return out.stdout if out.returncode == 0 else ""
-
-
 def tested_values(questions, conditions):
     """{roster qid: the text its show rule tests on the club field} - the Club
     picker entry that shows it, which is also what question 5 sends for that
     club. A roster with no such rule, or several, is left out."""
-    club_field = club_picker(questions) or CLUB_NAME_QID
+    club_field = club_picker(questions) or CLUB_NAME
     rosters = {qid for qid, q in questions.items() if q.get("type") == "control_checkbox"}
     found = defaultdict(list)
     for _, terms, actions in _parsed(conditions):
@@ -817,7 +795,7 @@ def is_long_name(value, text):
 def audit_rules(questions, conditions, partners_of=None, retired=()):
     """Rule-level checks on a form's live conditions. Returns a list of
     problem strings (empty = clean) and a summary dict. partners_of: the
-    Roster's {key(club): {key(partner): partner}} (load_partners); with it a
+    Roster's {key(club): {key(partner): partner}} (roster_facts' holders); with it a
     long name's partner must be one the Roster has for that club. retired:
     roster qids that may have no show rule - a retired roster (the Roster says
     so), or one form_report reports in its own words; one that still has its
@@ -826,9 +804,8 @@ def audit_rules(questions, conditions, partners_of=None, retired=()):
     retired = {str(q) for q in retired}
     qids = set(questions)
     picker = club_picker(questions)
-    club_field = picker or CLUB_NAME_QID
+    club_field = picker or CLUB_NAME
     plist = partner_picker(questions)            # a retired partner list left on the form
-    partner_fields = {PARTNER_QID, plist} if plist else {PARTNER_QID}
     clubs = {qid: " ".join(q["text"].split()) for qid, q in questions.items()
              if q.get("type") == "control_checkbox"}
     shown_by = defaultdict(list)     # club qid -> [rule ids that show it]
@@ -862,7 +839,7 @@ def audit_rules(questions, conditions, partners_of=None, retired=()):
             problems.append(f"'{name}' (q{qid}) has {len(rules)} show-rules, expected 1")
             continue
         _, terms = rules[0]
-        partner_terms[qid] = [t for t in terms if str(t.get("field")) in partner_fields]
+        partner_terms[qid] = [t for t in terms if str(t.get("field")) == PARTNER]
         club_terms = [t for t in terms if str(t.get("field")) == club_field]
         value = " ".join(str(club_terms[0].get("value")).split()) if club_terms else None
         if value is None or not (key(value) == key(name) or (picker and is_long_name(value, name))):
@@ -1035,13 +1012,13 @@ def names_line(summary):
 def partner_box_line(box, picker):
     """The printed report's `partner box:` line, from form_report's `partner_box`."""
     if not box:
-        return f"no q{PARTNER_QID} on the form"
+        return f"no q{PARTNER} on the form"
     if box["shown_by_rules"]:
-        return (f"q{PARTNER_QID} shown by {box['shown_by_rules']} rule(s): rosters that share a "
+        return (f"q{PARTNER} shown by {box['shown_by_rules']} rule(s): rosters that share a "
                 "text are told apart by the typed partner")
     if box["hidden"]:
-        return f"q{PARTNER_QID} hidden, no rule shows it"
-    return (f"q{PARTNER_QID} VISIBLE to every mentor, and no rule uses it"
+        return f"q{PARTNER} hidden, no rule shows it"
+    return (f"q{PARTNER} VISIBLE to every mentor, and no rule uses it"
             + (" - the next sync apply hides it" if picker else ""))
 
 
@@ -1059,13 +1036,13 @@ def layout_line(lo):
 
 
 def form_report(form_id, client, roster_by_region, partners_of=None, facts=None):
-    """One form's report. partners_of: load_partners (the Roster's holders of each club
+    """One form's report. partners_of: roster_facts' holders (the Roster's holders of each club
     name); facts: roster_facts, with which the retired rosters are told from broken ones
     (none: a roster without its rule is a problem, as ever)."""
     label, region = FORMS.get(form_id) or DEFUNCT.get(form_id) or (form_id, None)
-    props = client.get(f"/form/{form_id}/properties", limit=1000)
+    props = client.get(f"/form/{form_id}/properties")
     questions = client.get(f"/form/{form_id}/questions", limit=1000)
-    info = client.get(f"/form/{form_id}", limit=1000)
+    info = client.get(f"/form/{form_id}")
     status = info.get("status")
 
     clubs = {}
@@ -1087,7 +1064,7 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
     autorespond = sum(1 for e in emails if e.get("type") == "autorespond")
     integ = props.get("integrations") or {}
     sf = bool(isinstance(integ, dict) and integ.get("salesforceV2"))
-    fuzzy = questions.get(ENABLE_FUZZY_QID, {})
+    fuzzy = questions.get(ENABLE_FUZZY, {})
     mentor_email = any(q.get("type") == "control_email" for q in questions.values())
 
     # retired rosters (docs/plans/2026-10-06-clubs-off-jotform.md): what the Roster says
@@ -1123,8 +1100,7 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
     rule_problems += shape_problems
     # question 18's names: the form's own translation dictionary must alter no roster option
     # (one more GET; a store that cannot be read or emulated is reported, not a problem)
-    lang = props.get("language")
-    lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
+    lang = glow_forms.language_of(props)
     names_problems, names_summary = audit_names(form_id, roster_options(questions), read_store(client, form_id),
                                                 lang.get("primaryLanguage") or tl.PRIMARY)
     rule_problems += names_problems
@@ -1144,14 +1120,14 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
             rule_problems.append(f"club picker lists {len(extra)} name(s) with no roster: {extra[:5]}")
         if questions[picker].get("required") != "Yes":
             rule_problems.append("club picker is not required")
-        if questions.get(CLUB_NAME_QID, {}).get("hidden") != "Yes":
+        if questions.get(CLUB_NAME, {}).get("hidden") != "Yes":
             rule_problems.append("club picker present but the Club Name textbox is still visible")
     languages = [x for x in str(lang.get("options", "")).split("|") if x]
     if len(languages) < 2:
         rule_problems.append(f"only {languages or ['no']} language(s) offered - the API clone "
                              "resets this; run tools/restore_translations.py")
     guards = club_guards(questions)
-    box = questions.get(PARTNER_QID)
+    box = questions.get(PARTNER)
     rep = {
         "rule_problems": rule_problems, "rule_summary": rule_summary,
         # rosters whose rule tests "<club> - <partner>": what question 5 sends for them
@@ -1159,10 +1135,10 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
         # the typed Partner box: hidden, or how many rules show it (informational: on a
         # picker form with no such rule the next sync apply hides it)
         "partner_box": ({"hidden": box.get("hidden") == "Yes",
-                         "shown_by_rules": len(rules_showing(conditions, PARTNER_QID))}
+                         "shown_by_rules": len(rules_showing(conditions, PARTNER))}
                         if box else None),
         "layout": layout.summary(questions),
-        "languages": languages, "club_picker": picker, "partner_picker": partner_picker(questions),
+        "languages": languages, "club_picker": picker,
         "club_guard": ({"qid": guards[0], "clubs": len(picker_options(questions, picker)) if picker else 0}
                        if guards else None),
         "picker_calc_values": bool(picker and has_calc_values(questions[picker])),
@@ -1230,7 +1206,8 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--form", action="append")
-    ap.add_argument("--roster", default=os.path.join(REPO, "data", "roster_build", "Roster.csv"))
+    ap.add_argument("--roster", metavar="PATH",
+                    help="required: a fresh export of the Roster tab (" + ROSTER_EXPORT + ")")
     ap.add_argument("--partners", metavar="PATH",
                     help="an export of the Partners tab: its `jotform` column (no = the partner's clubs "
                          "are not on the attendance forms) tells a retired roster from a broken one; "
@@ -1247,14 +1224,21 @@ def main():
                          "is what glow/sync.py says, and the translation store the page embeds alters "
                          "no roster box it serves; prints the runtime build")
     args = ap.parse_args()
+    if not args.roster:
+        # no default: the one there was (data/roster_build/Roster.csv) is the pre-launch
+        # offline build - wrong counts, or a traceback (BACKLOG 32)
+        sys.exit(f"--roster is required: a fresh export of the Roster tab ({ROSTER_EXPORT}), "
+                 "then --roster data/roster_<date>.csv")
     if args.defunct:
         FORMS.update(DEFUNCT)
     client = Client(api_key())
     storage = read_storage(client)        # once per run: account-wide, every report carries it
     marks = read_partners_csv(args.partners) if args.partners else None
     roster = load_roster(args.roster)
-    partners_of = load_partners(args.roster) or None     # an empty Roster vouches for no partner
-    facts = roster_facts(args.roster, marks) if partners_of else None
+    facts = roster_facts(args.roster, marks)
+    partners_of = facts["holders"] or None     # a Roster with no partner + club row vouches for no partner
+    if partners_of is None:
+        facts = None                           # ...and tells no retired roster from a broken one
 
     reports = [form_report(f, client, roster, partners_of, facts) for f in (args.form or FORMS)]
     for r in reports:
@@ -1293,9 +1277,6 @@ def main():
         print(f"   enableFuzzy: required={f['required']} selected={f['selected']!r} hidden={f['hidden']}")
         print(f"   languages: {len(r['languages'])} ({', '.join(r['languages'][:4])}{'…' if len(r['languages']) > 4 else ''})")
         print(f"   club picker: {'q' + r['club_picker'] if r['club_picker'] else 'none (mentors type the club name)'}")
-        if r.get("partner_picker"):
-            print(f"   partner picker: q{r['partner_picker']} (retired 2026-09-30: delete it in the "
-                  "builder)")
         if r["club_picker"]:
             print(f"   same-name clubs: {r['same_name_rosters']} rosters send '<club> - <partner>'")
         print(f"   partner box: {partner_box_line(r.get('partner_box'), r['club_picker'])}")

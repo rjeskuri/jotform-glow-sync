@@ -230,8 +230,8 @@ class SameNameFixture:
         else:
             qs["5"]["hidden"] = "No"
         if partner_list is not None:
-            qs["600"] = dict(sync.PARTNER_PICKER_PROPS, type="control_dropdown",
-                             name=sync.PARTNER_PICKER_NAME, order="7", options=partner_list)
+            qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME, "text": "Partner",
+                         "hidden": "Yes", "order": "7", "options": partner_list}
         if picker and not partner_of:
             qs["331"]["hidden"] = "Yes"
         if rules_switched is not None:
@@ -445,25 +445,29 @@ class FormStatusFixture:
 class RestoreConditionsFixture:
     """restore_conditions.main() against a fake Jotform and a snapshot in a temporary backups/
     folder. RestoreConditionsGuard inherits it; other TestCases borrow run_restore
-    (RestoreConditionsFixture.run_restore(self, ...))."""
+    (RestoreConditionsFixture.run_restore(self, ...)). After a run, self.restore_calls holds
+    the fake's calls in order and self.restore_files backups/999/ ({name: content})."""
 
     def run_restore(self, snapshot, questions, *extra):
         import contextlib
         import io
         import tempfile
         from unittest import mock
-        puts = []
+        puts, calls = [], []
+        self.restore_calls = calls
 
         class Fake:
             def __init__(self, key, apply=False):
                 pass
 
             def get(self, path):
+                calls.append(("GET", path))
                 if path.endswith("/questions"):
                     return copy.deepcopy(questions)
                 return {"conditions": puts[-1] if puts else [{"id": "live"}]}
 
             def put_json(self, path, payload, label):
+                calls.append(("PUT", path))
                 puts.append(payload["properties"]["conditions"])
 
         out = io.StringIO()
@@ -473,6 +477,7 @@ class RestoreConditionsFixture:
                       encoding="utf-8") as f:
                 json.dump({"conditions": snapshot}, f)
             with mock.patch.object(restore_conditions, "REPO", tmp), \
+                    mock.patch.object(restore_conditions.backup, "REPO", tmp), \
                     mock.patch.object(restore_conditions, "Client", Fake), \
                     mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
                     mock.patch.object(sys, "argv", ["restore_conditions.py", "--form", "999", *extra]), \
@@ -482,6 +487,11 @@ class RestoreConditionsFixture:
                     code = 0
                 except SystemExit as e:
                     code = e.code
+            folder = os.path.join(tmp, "backups", "999")
+            self.restore_files = {}
+            for name in sorted(os.listdir(folder)):
+                with open(os.path.join(folder, name), encoding="utf-8") as f:
+                    self.restore_files[name] = json.load(f)
         return code, out.getvalue(), puts
 
 

@@ -31,13 +31,13 @@ import argparse
 import csv
 import os
 import sys
-from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheets_client as sc
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+from glow import backup     # noqa: E402  (the stamp of the saved tabs)
 from glow.text import key   # noqa: E402
 
 BUILD = os.path.join(REPO, "data", "roster_build")
@@ -151,7 +151,7 @@ def main():
         return
 
     if any(live_rows.values()):
-        stamp = datetime.now().strftime("%Y-%m-%dT%H%M")
+        stamp = backup.stamp()
         prev = os.path.join(BUILD, "previous", stamp)
         os.makedirs(prev, exist_ok=True)
         for tab in TABS:

@@ -332,7 +332,7 @@ class LinkTool(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             stack.enter_context(mock.patch.object(add_feedback_link, "Client",
                                                   lambda key, apply=False: fake))
-            stack.enter_context(mock.patch.object(add_feedback_link, "snapshot", snapshot))
+            stack.enter_context(mock.patch.object(add_feedback_link.backup, "snapshot", snapshot))
             stack.enter_context(mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}))
             stack.enter_context(mock.patch.object(sys, "argv", ["add_feedback_link.py", *argv]))
             if clock:
@@ -585,10 +585,11 @@ class TranslationPlan(unittest.TestCase):
         # a same-stamp re-run after a failed POST must keep the true 'before'
         import tempfile
         from unittest import mock
+        from glow import translations
         self.assertIn("<form>-<stamp>-before.json", add_translations.__doc__)
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(add_translations, "REPO", tmp):
-            first = add_translations.save_store("123", {"es": {"k": "before"}}, "2026-09-28T100005")
-            again = add_translations.save_store("123", {"es": {"k": "half-written"}}, "2026-09-28T100005")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(translations, "REPO", tmp):
+            first = translations.save_store("123", {"es": {"k": "before"}}, "2026-09-28T100005")
+            again = translations.save_store("123", {"es": {"k": "half-written"}}, "2026-09-28T100005")
             self.assertNotEqual(first, again)
             self.assertTrue(first.endswith(os.path.join("translations", "123-2026-09-28T100005-before.json")))
             with open(first, encoding="utf-8") as f:
@@ -801,7 +802,7 @@ class FixRosterOrderTool(unittest.TestCase):
             stack.enter_context(mock.patch.object(fix_roster_order, "Client",
                                                   lambda key, apply=False: fake))
             stack.enter_context(mock.patch.object(
-                fix_roster_order, "snapshot", lambda fid, client, stamp: events.append("snap " + fid)))
+                fix_roster_order.backup, "snapshot", lambda fid, client, stamp: events.append("snap " + fid)))
             stack.enter_context(mock.patch.object(fake, "post_form", post_form))
             stack.enter_context(mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}))
             stack.enter_context(mock.patch.object(sys, "argv", ["fix_roster_order.py", *argv]))
@@ -1058,7 +1059,7 @@ class FixRosterOrderTool(unittest.TestCase):
         import tempfile
         from unittest import mock
         fid = glow_forms.TEMPLATE
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(fix_roster_order, "REPO", tmp):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(fix_roster_order.backup, "REPO", tmp):
             with self.assertRaises(SystemExit) as cm:
                 fix_roster_order.load_snapshot(fid, "2026-09-29T100000")
             self.assertIn(f"no snapshot backups/{fid}/questions-2026-09-29T100000.json", str(cm.exception.code))

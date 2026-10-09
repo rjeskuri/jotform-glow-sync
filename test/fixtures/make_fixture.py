@@ -114,7 +114,7 @@ def build_rows(rng):
     # 8. the same club name under two partners
     rows.append(row(alpha, "Stars", ["Thandi Cobblewynd", "Wanjiru Fennwhistle"]))
     rows.append(row(beta, "Stars", ["Ximena Marrowgate", "Yara Ostrivane", "Aisha Pellucidor"]))
-    # 10. "number of girls" deliberately off by four (needs_attention material)
+    # 10. "number of girls" deliberately off by four (a data-quality case)
     rows.append(row(gamma, "Miscounted", ["Bianca Thornquibble", "Camila Umberlash",
                                            "Diana Wrenfoldy"], count=7))
     # random filler clubs, deterministic under the seed

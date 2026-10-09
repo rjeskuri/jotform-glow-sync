@@ -40,6 +40,10 @@ YEAR = "94"          # GLOW Club Year dropdown (1|2|3)
 MODULES = {"1": "14", "2": "92", "3": "93"}       # year -> module dropdown qid
 WEEKS = {8: "15", 10: "95", 14: "96", 15: "97"}   # session count -> dropdown qid
 CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID = "18", "98", "100", "102"
+DATE = "17"          # the attendance date (Salesforce Attendance_Date__c)
+PHOTO = "19"         # Group Photo upload: required, off the Salesforce mapping since 2026-10-01
+CREATOR = "105"      # `creator` (Salesforce Creator__c)
+ENABLE_FUZZY = "109"  # `enableFuzzy` (Salesforce enable_fuzzy_matching__c)
 
 # The Club picker question is recognised by this Jotform field name on every
 # side (created by sync_attendance_form.py --club-picker, audited by
@@ -47,11 +51,9 @@ CONTACT_IDS, MODULE_ID, WEEK_ID, YEAR_ID = "18", "98", "100", "102"
 PICKER_NAME = "clubPicker"
 
 # The partner list (docs/plans/2026-09-28-partner-box.md) was built, never
-# deployed, and is RETIRED (2026-09-30, docs/plans/2026-09-30-same-name-clubs.md):
-# the sync refuses --partner-picker and a form carrying one. The name stays so
-# that refusal, the audit and the other tools still recognise such a question;
-# the rest of the partner-list code is dead and waits for its clean-up
-# (docs/BACKLOG.md).
+# deployed, and is RETIRED (2026-09-30, docs/plans/2026-09-30-same-name-clubs.md);
+# its code is gone (BACKLOG 50). The name stays so the sync can refuse a form
+# carrying one and tools/form_status.py can report it.
 PARTNER_PICKER_NAME = "partnerPicker"
 
 
@@ -63,17 +65,10 @@ def club_picker(questions):
 
 
 def partner_picker(questions):
-    """qid of the partner list, or None while the form has only the typed box."""
+    """qid of a retired partner list left on the form, or None (the typed box alone)."""
     return next((qid for qid, q in questions.items()
                  if q.get("type") == "control_dropdown" and q.get("name") == PARTNER_PICKER_NAME),
                 None)
-
-
-def partner_fields(questions):
-    """The fields a partner-gated rule may test: the typed box (q331) and,
-    once the form has it, the partner list."""
-    pp = partner_picker(questions)
-    return {PARTNER, pp} if pp else {PARTNER}
 
 
 # ------------------------------------------------- one club per submission
@@ -386,11 +381,7 @@ def roster_pairs(csv_path):
     True when the club has at least one active girl. Spellings are whitespace-
     collapsed; one entry per key(partner) + key(club), in the spelling of its
     first active row (what read_roster_csv returns), else of its first row."""
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
-    needed = {"partner", "club", "full_name", "status", "region"}
-    if not rows or not needed <= set(rows[0]):
-        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
+    rows = _roster_rows(csv_path)
     found = {}                       # (key, key) -> [partner, club, active]
     for r in rows:
         partner, club = " ".join(r["partner"].split()), " ".join(r["club"].split())
@@ -408,8 +399,7 @@ def roster_removed(csv_path):
     row that has both cells and a date (YYYY-MM-DD; other text is not a date
     here) - what says how long a club has had no active girl (RETIRE_INACTIVE,
     inactive_retires). {} for an export without the column."""
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
+    rows = _roster_rows(csv_path, needed=None)
     if not rows or "removed_date" not in rows[0]:
         return {}
     out = {}
@@ -418,6 +408,20 @@ def roster_removed(csv_path):
         if partner and club and re.fullmatch(r"\d{4}-\d{2}-\d{2}", when):
             out[(partner, club)] = max(out.get((partner, club), ""), when)
     return out
+
+
+ROSTER_NEEDED = ("partner", "club", "full_name", "status", "region")
+
+
+def _roster_rows(csv_path, needed=ROSTER_NEEDED):
+    """The rows of a Roster export, as dicts keyed by the header (a byte-order mark
+    ignored). One without the `needed` columns, or without any row, is refused; `needed`
+    None reads whatever the file holds."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    if needed is not None and (not rows or not set(needed) <= set(rows[0])):
+        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
+    return rows
 
 
 def _partners_rows(csv_path):
@@ -484,11 +488,7 @@ def roster_names(csv_path):
     same-named club of another (sync_attendance_form.py, the owner read-back):
     roster_pairs says who has a club of a name, this says whose girls a
     question holds. Python only - the Apps Script side has no such read."""
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
-    needed = {"partner", "club", "full_name", "status", "region"}
-    if not rows or not needed <= set(rows[0]):
-        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
+    rows = _roster_rows(csv_path)
     out = defaultdict(set)
     for r in rows:
         partner, club, name = key(r["partner"]), key(r["club"]), key(r["full_name"])
@@ -622,11 +622,7 @@ def read_roster_csv(csv_path, region=None):
     (partner, club) -> region. With no region, clubs_in_region is all_clubs.
     Rosters here never contain a duplicate name (the sheet rebuild already
     routed those to the ReviewQueue), so there is no 'frozen' set."""
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
-    needed = {"partner", "club", "full_name", "status", "region"}
-    if not rows or not needed <= set(rows[0]):
-        sys.exit("Not a Roster export: expected the columns " + ", ".join(sorted(needed)))
+    rows = _roster_rows(csv_path)
     clubs, region_by_ident = {}, {}
     for r in rows:
         if " ".join(r["status"].split()).lower() != "active":

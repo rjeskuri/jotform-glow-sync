@@ -170,6 +170,41 @@ class GlowClient(unittest.TestCase):
             c.get("/x")
         self.assertIn("curl could not be started", str(e.exception))
 
+    def test_the_public_page_is_one_keyless_curl_whose_failure_is_refused(self):
+        import subprocess as sp
+        from unittest import mock
+        with mock.patch.object(self.gj.subprocess, "run", self.fake(["<html>page</html>"])):
+            self.assertEqual(self.gj.public_page("123"), "<html>page</html>")
+        argv, = self.spawned
+        self.assertEqual(argv[:2], ["curl", "-sSL"])
+        self.assertEqual(argv[-1], "https://form.jotform.com/123")
+        self.assertIn("--max-time", argv)
+        self.assertFalse(any("apiKey" in a for a in argv))              # no key goes to a public page
+
+        def down(argv, **kw):
+            return sp.CompletedProcess(argv, 6, stdout="", stderr="curl: (6) Could not resolve host\n")
+        with mock.patch.object(self.gj.subprocess, "run", down), self.assertRaises(self.gj.JotformError) as e:
+            self.gj.public_page("123")
+        self.assertIn("public page of form 123: curl exited 6", str(e.exception))
+
+    def test_a_page_that_cannot_be_fetched_is_never_an_empty_one(self):
+        # switcher_flags --check-page read a network failure as "0 languages"; form_status
+        # --rendered as a page without its arrays; fix_name_translations' check stays its own
+        import subprocess as sp
+        from unittest import mock
+        import fix_name_translations
+        import switcher_flags
+
+        def down(argv, **kw):
+            return sp.CompletedProcess(argv, 28, stdout="", stderr="curl: (28) timed out\n")
+        with mock.patch.object(self.gj.subprocess, "run", down):
+            with self.assertRaises(self.gj.JotformError):
+                switcher_flags.page_flags("123")
+            self.assertIsNone(fix_name_translations.page_count("123", {"k"}, True, self.gj.public_page))
+        page = '<li data-lang="or" x>a</li><li data-lang="te">b<svg/></li>'
+        with mock.patch.object(self.gj.subprocess, "run", self.fake([page])):
+            self.assertEqual(switcher_flags.page_flags("123"), (False, {"or": False, "te": True}))
+
     def test_is_write_catches_every_shape(self):
         w = self.gj.is_write
         self.assertTrue(w(["-X", "POST", "u"]))
@@ -217,6 +252,42 @@ class GlowForms(unittest.TestCase):
         self.assertIsNone(forms.region_of(forms.DEFUNCT["Africa"]))
         ids = {forms.TEMPLATE, *forms.REGIONALS.values(), *forms.DEFUNCT.values()}
         self.assertEqual(len(ids), 10)
+
+    def test_the_language_property_in_every_shape_jotform_serves(self):
+        from glow import forms
+        lang = {"options": "English|Español", "primaryLanguage": "en"}
+        self.assertEqual(forms.language_of({"language": [lang]}), lang)      # a list of one
+        self.assertEqual(forms.language_of({"language": lang}), lang)        # a dict
+        for none in ({"language": []}, {"language": ""}, {}, None):
+            self.assertEqual(forms.language_of(none), {})
+
+    def test_every_tools_form_table_holds_glow_forms_ids_and_regions(self):
+        # the per-tool tables kept for their order (the rollout's, the regions-first loop) or
+        # their labels hold exactly glow.forms' ids and regions; dict equality ignores order.
+        # (test/gs_parity_test.py compared them with each other until Config.gs's FORMS went.)
+        import add_feedback_link
+        import add_language
+        import add_translations
+        import auto_sync
+        import backup_forms
+        import fix_name_translations
+        import fix_roster_order
+        import form_status
+        from glow import forms
+        for table in (add_translations.FORMS, add_feedback_link.FORMS, fix_roster_order.FORMS):
+            self.assertEqual(table, forms.LIVE)                          # id -> "template" or region
+        self.assertEqual(add_language.FORMS, {fid: forms.TITLES.get(region, forms.TEMPLATE_TITLE)
+                                              for fid, region in forms.LIVE.items()})
+        self.assertEqual(sorted(fix_name_translations.ORDER), sorted(forms.LIVE))
+        self.assertEqual(fix_name_translations.ORDER[0], forms.TEMPLATE)     # the rollout starts there
+        self.assertEqual(fix_name_translations.LABEL, forms.LIVE)
+        self.assertEqual(auto_sync.REGIONAL_FORMS, forms.REGIONALS)
+        self.assertEqual({fid: region for fid, (_, region) in form_status.FORMS.items()},
+                         {fid: forms.region_of(fid) for fid in forms.LIVE})
+        self.assertEqual(form_status.FORMS[forms.TEMPLATE][0], "template")
+        self.assertEqual({fid: region for fid, (_, region) in form_status.DEFUNCT.items()},
+                         {fid: None if name == "master" else name for name, fid in forms.DEFUNCT.items()})
+        self.assertEqual(set(backup_forms.FORMS), set(forms.LIVE) | set(forms.DEFUNCT.values()))
 
 
 class GlowCli(unittest.TestCase):
@@ -296,6 +367,91 @@ class GlowSyncHelpers(unittest.TestCase):
                     {"terms": json.dumps("a string"), "action": []}, "not a rule", None):
             with self.subTest(rule=bad):
                 self.assertIsNone(sync.rule_parts(bad))
+
+    def test_every_roster_reader_reads_one_way_and_refuses_one_way(self):
+        # glow.sync._roster_rows: utf-8-sig, by header, and one refusal for what is not an export
+        import tempfile
+        import form_status
+        from glow import sync
+        refusal = "Not a Roster export: expected the columns club, full_name, partner, region, status"
+        readers = (sync.roster_pairs, sync.roster_names, sync.read_roster_csv, form_status.load_roster)
+        with tempfile.TemporaryDirectory() as tmp:
+            other, roster = os.path.join(tmp, "other.csv"), os.path.join(tmp, "roster.csv")
+            with open(other, "w", encoding="utf-8") as f:
+                f.write("partner,club\nPartner One,Alpha Club\n")
+            with open(roster, "w", encoding="utf-8-sig", newline="") as f:
+                f.write("partner,club,full_name,status,region,removed_date\r\n"
+                        "Partner One,Alpha Club,Ana Example,active,Africa,\r\n"
+                        "Partner One,Alpha Club,Bea Example,inactive,Africa,2026-10-01\r\n")
+            for reader in readers:
+                with self.subTest(reader=reader.__name__):
+                    with self.assertRaises(SystemExit) as cm:
+                        reader(other)
+                    self.assertEqual(cm.exception.code, refusal)
+            self.assertEqual(sync.roster_removed(other), {})                  # no removed_date column: none
+            self.assertEqual(sync.roster_pairs(roster), {("Partner One", "Alpha Club"): True})
+            self.assertEqual(sync.roster_names(roster), {("partner one", "alpha club"): {"ana example", "bea example"}})
+            self.assertEqual(sync.read_roster_csv(roster)[0], {("Partner One", "Alpha Club"): ["Ana Example"]})
+            self.assertEqual(sync.roster_removed(roster), {("partner one", "alpha club"): "2026-10-01"})
+            self.assertEqual(list(form_status.load_roster(roster)), ["Africa"])
+
+
+class GlowBackup(unittest.TestCase):
+    """glow/backup.py: the one stamp (to the second), the snapshot files and the
+    conditions-only copy, in a temporary backups/ folder."""
+
+    class Fake:
+        def __init__(self):
+            self.reads = []
+
+        def get(self, path):
+            self.reads.append(path)
+            if path.endswith("/questions"):
+                return {"1": {"type": "control_head"}, "5": {"type": "control_textbox"}}
+            return {"conditions": [{"id": "1"}, {"id": "2"}], "emails": [{}],
+                    "integrations": {"salesforceV2": {"integrationAccountID": "x"}}}
+
+    def test_one_stamp_to_the_second(self):
+        import datetime as dt
+        from glow import backup
+        first, again = dt.datetime(2026, 9, 28, 10, 0, 5), dt.datetime(2026, 9, 28, 10, 0, 40)
+        self.assertEqual(backup.stamp(first), "2026-09-28T100005")
+        self.assertNotEqual(backup.stamp(first), backup.stamp(again))     # a re-run within the minute
+        self.assertRegex(backup.stamp(), r"^\d{4}-\d\d-\d\dT\d{6}$")
+
+    def test_no_tool_mints_a_minute_stamp(self):
+        from helpers.common import REPO, read
+        for folder in ("", "tools", "glow"):
+            for name in sorted(os.listdir(os.path.join(REPO, folder))):
+                if name.endswith(".py"):
+                    with self.subTest(file=os.path.join(folder, name)):
+                        self.assertNotIn('"%Y-%m-%dT%H%M"', read(os.path.join(REPO, folder, name)))
+
+    def test_snapshot_writes_the_stamp_and_latest(self):
+        import tempfile
+        from unittest import mock
+        from glow import backup
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(backup, "REPO", tmp):
+            fake = self.Fake()
+            s = backup.snapshot("123", fake, "2026-10-09T101530")
+            self.assertEqual(s, {"questions": 2, "conditions": 2, "emails": 1, "salesforce": "yes",
+                                 "stamp": "2026-10-09T101530"})
+            self.assertEqual(fake.reads, ["/form/123/questions", "/form/123/properties"])
+            self.assertEqual(sorted(os.listdir(os.path.join(tmp, "backups", "123"))),
+                             ["properties-2026-10-09T101530.json", "properties-latest.json",
+                              "questions-2026-10-09T101530.json", "questions-latest.json"])
+            self.assertEqual(backup.path("123", "properties"),
+                             os.path.join(tmp, "backups", "123", "properties-latest.json"))
+            path = backup.save_conditions("123", "2026-10-09T101530")
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"conditions": [{"id": "1"}, {"id": "2"}]})
+            # latest=False leaves the -latest files alone (restore_conditions' snapshot)
+            backup.snapshot("123", fake, "2026-10-09T101600", latest=False)
+            with open(backup.path("123", "properties"), encoding="utf-8") as f:
+                self.assertEqual(len(json.load(f)["conditions"]), 2)
+            self.assertTrue(os.path.exists(backup.path("123", "questions", "2026-10-09T101600")))
+            # no stamp given: one is minted, and returned
+            self.assertRegex(backup.snapshot("124", fake)["stamp"], r"^\d{4}-\d\d-\d\dT\d{6}$")
 
 
 class TranslationLookup(unittest.TestCase):

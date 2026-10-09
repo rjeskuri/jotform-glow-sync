@@ -52,18 +52,18 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TOOLS)
 sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
-import add_translations                                     # noqa: E402  (save_store: mode 600, never over a file)
-from form_status import embedded_store, public_page, roster_options   # noqa: E402
+from form_status import embedded_store, roster_options     # noqa: E402
+from glow import backup                                     # noqa: E402  (the stamp of the saved store)
 from glow import forms as glow_forms                        # noqa: E402
 from glow import translation_lookup as tl                   # noqa: E402
+from glow import translations                               # noqa: E402  (save_store: mode 600, never over a file)
 from glow.cli import api_key, run                                    # noqa: E402
-from glow.jotform import Client, JotformError               # noqa: E402
+from glow.jotform import Client, JotformError, public_page  # noqa: E402
 
 # template first, then the regional forms smallest first (the rollout's order)
 ORDER = [glow_forms.TEMPLATE] + [glow_forms.REGIONALS[r] for r in ("U.S", "Latin America", "Asia", "Africa")]
@@ -76,7 +76,7 @@ PAGE_WAIT, PAGE_TRIES = 20, 3           # seconds between reads of the public pa
 
 def shown(path):
     """A saved store's path as the RUNBOOK writes it (backups/translations/...)."""
-    return os.path.relpath(path, add_translations.REPO)
+    return os.path.relpath(path, translations.REPO)
 
 
 class Refused(Exception):
@@ -228,8 +228,12 @@ def post_sources(client, fid, before, want, label, saved):
 
 def page_count(fid, keys, present, page_of):
     """How many of `keys` the public page's embedded store holds in base/en (present=True) or
-    lacks (present=False); None when the page could not be read."""
-    store, _ = embedded_store(page_of(fid))
+    lacks (present=False); None when the page could not be read (fetched, or its store found)."""
+    try:
+        page = page_of(fid)
+    except JotformError:          # the store is written by now: the callers say so, and what to run
+        return None
+    store, _ = embedded_store(page)
     if store is None:
         return None
     held = {k for lang in SOURCES for k in store.get(lang, {})}
@@ -256,7 +260,7 @@ def check_page(client, fid, keys, present, page_of, sleep):
         return True
     if n is None:
         print("   public page: could not read its embedded store - check with tools/form_status.py "
-              f"--form {fid} --rendered in a few minutes")
+              f"--form {fid} --roster data/roster_<date>.csv --rendered in a few minutes")
         return False
     print(f"   public page: {n} {what} - re-rendering it (pagetitle posted back unchanged)")
     # the store is written by now: a failure from here on is reported as such (the callers'
@@ -270,11 +274,11 @@ def check_page(client, fid, keys, present, page_of, sleep):
             again = client.get(f"/form/{fid}/properties")
     except JotformError:          # never echoed
         print("   ! the re-render could not be done or confirmed (an error or a non-JSON answer from "
-              f"Jotform) - re-save the form in the builder, then tools/form_status.py --form {fid} --rendered")
+              f"Jotform) - re-save the form in the builder, then tools/form_status.py --form {fid} --roster data/roster_<date>.csv --rendered")
         return False
     if not title:
         print("   ! the form has no pagetitle to post back - re-save the form in the builder, then "
-              f"tools/form_status.py --form {fid} --rendered")
+              f"tools/form_status.py --form {fid} --roster data/roster_<date>.csv --rendered")
         return False
     same = isinstance(again, dict) and again.get("pagetitle") == title
     print(f"   pagetitle re-read: {'unchanged' if same else 'CHANGED - set it back'}")
@@ -294,7 +298,7 @@ def apply_form(client, fid, store, plan, options, stamp, page_of=public_page, sl
     if not keys:
         print("   nothing written")
         return
-    path = add_translations.save_store(fid, store, stamp)
+    path = translations.save_store(fid, store, stamp)
     print(f"   store saved: {shown(path)} (mode 600; the rollback: --restore)")
     want = {lang: {k: v for k, v in store[lang].items() if k not in keys} for lang in SOURCES}
     state, _, after = post_sources(client, fid, store, want,
@@ -312,7 +316,7 @@ def apply_form(client, fid, store, plan, options, stamp, page_of=public_page, sl
         sys.exit("Stopped: the re-read store still alters roster options - compare it with the saved store")
     if not check_page(client, fid, keys, True, page_of, sleep):
         sys.exit("The store is fixed but the public page could not be shown to serve it - "
-                 f"tools/form_status.py --form {fid} --rendered before going on")
+                 f"tools/form_status.py --form {fid} --roster data/roster_<date>.csv --rendered before going on")
 
 
 def merged_restore(saved, current):
@@ -364,7 +368,7 @@ def restore(client, fid, path, apply, options, stamp, page_of=public_page, sleep
         print("   --apply: save the current store (mode 600); POST base and en with those entries back "
               "(no other language); re-read and compare; read the public page")
         return
-    saved_now = add_translations.save_store(fid, current, stamp)
+    saved_now = translations.save_store(fid, current, stamp)
     print(f"   current store saved: {shown(saved_now)} (mode 600)")
     state, _, _ = post_sources(client, fid, current, want, f"{fid} POST base and en with {len(back)} key(s) back",
                                saved_now)
@@ -373,7 +377,7 @@ def restore(client, fid, path, apply, options, stamp, page_of=public_page, sleep
                  f"{shown(saved_now)}")
     if not check_page(client, fid, back, False, page_of, sleep):
         sys.exit(f"Restored, but the public page could not be shown to serve it - tools/form_status.py "
-                 f"--form {fid} --rendered")
+                 f"--form {fid} --roster data/roster_<date>.csv --rendered")
 
 
 def main():
@@ -393,7 +397,7 @@ def main():
         sys.exit("--apply and --restore take exactly one --form: the rollout is one form at a time, "
                  "template first (docs/RUNBOOK.md, \"The names dictionary and the module values\")")
     client = Client(api_key(), apply=args.apply)
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp()
     options = read_options(client)
     print("Roster options read from all five forms: "
           + ", ".join(f"{LABEL[f]} {len(options[f])}" for f in ORDER)
@@ -407,9 +411,7 @@ def main():
     plans, refused = {}, []
     for fid in [f for f in ORDER if f in forms]:
         props = get(client, f"/form/{fid}/properties", f"{LABEL[fid]}'s properties")
-        lang = props.get("language")
-        lang = lang[0] if isinstance(lang, list) and lang else (lang or {})
-        primary = lang.get("primaryLanguage") or tl.PRIMARY
+        primary = glow_forms.language_of(props).get("primaryLanguage") or tl.PRIMARY
         if primary != tl.PRIMARY:
             sys.exit(f"{LABEL[fid]}: primaryLanguage is {primary!r}, not {tl.PRIMARY!r} - this tool posts "
                      "base and en only; refusing rather than guessing")

@@ -72,11 +72,13 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 sys.path.insert(0, REPO)
 import sheets_client as sc  # noqa: E402  (Google libraries are imported lazily inside it)
+from glow import backup  # noqa: E402  (the conditions-only copy of the snapshot)
 from glow import forms as glow_forms  # noqa: E402
 from glow.cli import api_key  # noqa: E402
 from glow import usage  # noqa: E402  (Jotform's storage against the plan's limits; standard library)
 from glow.jotform import Client  # noqa: E402  (the one read this file makes itself: the usage)
 from glow.sync import SHEET_ZONE, sf_name_clashes  # noqa: E402  (standard library only)
+from glow.text import key  # noqa: E402
 from glow.salesforce import Org, client_credentials  # noqa: E402
 import sf_new_clubs as sfn  # noqa: E402  (new clubs' Salesforce accounts, BACKLOG 27)
 
@@ -103,8 +105,6 @@ REQUIRED_RX = re.compile(r"^  - REQUIRED roster '(?P<club>.+)' \(q(?P<qid>\d+): 
 DELETE_RX = re.compile(r"^  - DELETE roster '(?P<club>.+)' \(q(?P<qid>\d+), belongs to (?P<region>.+)\)$")
 REPLACE_RX = re.compile(r"^  - REPLACE conditions \((?P<rules>\d+) rules")
 PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs(?::[^)]*)?\)$")
-PARTNER_PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) partner picker "
-                               r"\((?P<partners>\d+) partners(?::[^)]*)?\)$")
 GUARD_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club guard \([^)]*\)$")
 # a module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES): never applied unattended
 # (check_bands) - the first rollout is by hand, template first; afterwards a difference means
@@ -142,10 +142,6 @@ RULES_OLDER = "which the Club picker does not list"
 CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
 
 
-def key(s):
-    return " ".join(str(s or "").split()).lower()
-
-
 # ------------------------------------------------------------ pure functions
 def module_entry(m):
     """A MODULE_RX match -> {"qid", "year", "modules"} (modules: 0 = the calcValues cleared)."""
@@ -155,7 +151,7 @@ def module_entry(m):
 def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
     plan = {"creates": [], "updates": [], "deletes": [], "requires": [], "picker": [],
-            "partner_picker": [], "club_guard": [], "modules": [], "retired": [], "restored": [],
+            "club_guard": [], "modules": [], "retired": [], "restored": [],
             "rules": None, "warnings": [], "roster_clubs": None, "roster_girls": None,
             "sf_names": None}     # sf_names: only the summary file has them
     for line in text.splitlines():
@@ -178,10 +174,6 @@ def parse_plan(text):
         m = PICKER_RX.match(line)
         if m:
             plan["picker"].append({"op": m["op"], "clubs": int(m["clubs"])})
-            continue
-        m = PARTNER_PICKER_RX.match(line)
-        if m:
-            plan["partner_picker"].append({"op": m["op"], "partners": int(m["partners"])})
             continue
         m = GUARD_RX.match(line)
         if m:
@@ -223,9 +215,6 @@ def plan_from_summary(summary):
                          for r in summary.get("requires", [])],
             "picker": [{"op": m["op"], "clubs": int(m["clubs"])}
                        for m in (PICKER_RX.match("  - " + c) for c in summary.get("calls", [])) if m],
-            "partner_picker": [{"op": m["op"], "partners": int(m["partners"])}
-                               for m in (PARTNER_PICKER_RX.match("  - " + c)
-                                         for c in summary.get("calls", [])) if m],
             "club_guard": [{"op": m["op"]} for m in (GUARD_RX.match("  - " + c)
                                                      for c in summary.get("calls", [])) if m],
             "modules": [module_entry(m) for m in (MODULE_RX.match("  - " + c)
@@ -293,20 +282,18 @@ def name_clashes(sf_names_by_region):
 
 def changes(plan):
     """Roster creates/updates/deletes, required flags written on their own, module dropdowns'
-    calcValues, plus a Club-picker, partner-list or club-guard update (never a create: the runner
-    passes none of --club-picker, --partner-picker and --club-guard, so a CREATE here means
-    someone else did)."""
+    calcValues, plus a Club-picker or club-guard update (never a create: the runner passes
+    neither --club-picker nor --club-guard, so a CREATE here means someone else did)."""
     return (len(plan["creates"]) + len(plan["updates"]) + len(plan["deletes"])
             + len(plan.get("requires", [])) + len(plan.get("modules", []))
-            + len(plan.get("picker", [])) + len(plan.get("partner_picker", []))
-            + len(plan.get("club_guard", [])))
+            + len(plan.get("picker", [])) + len(plan.get("club_guard", [])))
 
 
 def plan_summary(plan):
     """One line for the SyncLog detail and the attention title: the roster counts, then the
-    required flags written on their own, the module dropdowns' calcValues, and each Club-picker,
-    partner-list or club-guard write by name (only when planned), so a list-only apply does not
-    read as "0 create(s), 0 update(s)"."""
+    required flags written on their own, the module dropdowns' calcValues, and each Club-picker
+    or club-guard write by name (only when planned), so a list-only apply does not read as
+    "0 create(s), 0 update(s)"."""
     requires = plan.get("requires", [])
     values = sorted({r["required"] for r in requires})
     modules = plan.get("modules", [])
@@ -318,7 +305,6 @@ def plan_summary(plan):
             + (f", {len(retired)} retired" if retired else "")
             + (f", {len(restored)} restored" if restored else "")
             + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
-            + "".join(f", {m['op'].lower()} partner list" for m in plan.get("partner_picker", []))
             + "".join(f", {m['op'].lower()} club guard" for m in plan.get("club_guard", [])))
 
 
@@ -484,7 +470,7 @@ class Run:
         # cannot be misread as sheet time)
         self.started = datetime.datetime.now(datetime.timezone.utc)
         now = self.started.astimezone()
-        self.stamp = now.strftime("%Y-%m-%dT%H%M%S")
+        self.stamp = backup.stamp(now)
         self.when = now.strftime("%Y-%m-%d %H:%M:%S %z")
         self.mode = "apply" if args.apply else "dry-run"
         self.sf_names = {}        # region -> what each of its rosters sends to question 5
@@ -923,13 +909,8 @@ class Run:
         Salesforce integration settings, so only this file may leave the
         machine (the workflow artifact). Restore with:
         restore_conditions.py --form <id> --from conditions-<stamp>.json"""
-        src = os.path.join(REPO, "backups", form, "properties-latest.json")
         try:
-            with open(src, encoding="utf-8") as f:
-                props = json.load(f)
-            out = os.path.join(REPO, "backups", form, f"conditions-{self.stamp}.json")
-            with open(out, "w", encoding="utf-8") as f:
-                json.dump({"conditions": props.get("conditions", [])}, f, indent=1)
+            backup.save_conditions(form, self.stamp)
         except (OSError, ValueError) as err:
             self.log(f"  ! could not write the conditions-only copy: {err}")
 

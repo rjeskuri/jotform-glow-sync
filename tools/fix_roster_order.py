@@ -17,7 +17,7 @@ every form today; ten once the Club Roster Form link is on it).
 Dry run by default. Every form is planned before any is written; the tool
 refuses - on every form - rather than guess (two Submit buttons, a page
 break, a field a mentor can see below the links, a link below Submit). With
---apply, per form: a snapshot (backup_forms.py -> backups/<id>/), a re-read
+--apply, per form: a snapshot (glow/backup.py -> backups/<id>/), a re-read
 and re-plan (a form changed since the preview is not written), Submit first
 (then every roster is above it), the hidden fields, the links last; after
 the first write a re-read checks Jotform kept the order as sent and moved
@@ -50,11 +50,10 @@ import hashlib
 import json
 import os
 import sys
-from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-from backup_forms import snapshot                  # noqa: E402
+from glow import backup                            # noqa: E402  (the snapshot before a write)
 from glow import forms as glow_forms               # noqa: E402
 from glow import layout                            # noqa: E402
 from glow.cli import api_key, run, targets                           # noqa: E402
@@ -106,7 +105,7 @@ def plan_undo(questions, saved):
 
 def load_snapshot(form_id, stamp):
     """The questions backups/<id>/questions-<stamp>.json holds (read, never printed)."""
-    path = os.path.join(REPO, "backups", form_id, f"questions-{stamp}.json")
+    path = backup.path(form_id, "questions", stamp)
     if not os.path.exists(path):
         sys.exit(f"no snapshot backups/{form_id}/questions-{stamp}.json - --undo takes the stamp "
                  "this tool printed when it wrote the form")
@@ -214,7 +213,7 @@ def main():
     saved = {f: load_snapshot(f, args.undo) for f in chosen} if args.undo else {}
     # to the second: a re-run just after a stopped one must not snapshot the
     # half-moved form over the true "before" (the rollback path)
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    stamp = backup.stamp()
 
     def read(form_id):
         questions = client.get(f"/form/{form_id}/questions")
@@ -265,7 +264,7 @@ def main():
         # an API error on any read or write stops the run here: a 504 on the
         # probe or the verify re-read must not skip the verify unannounced
         try:
-            snapshot(form_id, client, stamp)              # the rollback path, before any write
+            backup.snapshot(form_id, client, stamp)       # the rollback path, before any write
             print(f"   snapshot: backups/{form_id}/questions-{stamp}.json (the rollback to the "
                   f"form as this run found it: --form {form_id} --undo {stamp})")
             before, rules_before = read(form_id)          # the form may have changed since the preview

@@ -16,10 +16,12 @@ from helpers.common import REPO
 import deactivate_clubs
 import disable_form
 import rename_club
+import sheets_client
 import switcher_flags
 import sync_attendance_form as sync
 import upload_roster
 from glow import forms as glow_forms
+from glow import text as glow_text
 
 
 class FakeSheet:
@@ -65,23 +67,18 @@ class FakeSheet:
 
 class FakeJotform:
     """The two GETs a move makes; q352 is the club's roster, q444 the picker.
-    gated: True = its rule tests the typed Partner box (q331); "list" = the form
-    has the partner list (q600) and the rule tests that instead."""
+    gated: its rule tests the typed Partner box (q331)."""
 
     def __init__(self, gated=False):
         self.gated = gated
 
     def get(self, path, **params):
         if path.endswith("/questions"):
-            qs = {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
-                  "444": {"type": "control_dropdown", "text": "Club Name"}}
-            if self.gated == "list":
-                qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
-            return qs
+            return {"352": {"type": "control_checkbox", "text": "Sunrise Club"},
+                    "444": {"type": "control_dropdown", "text": "Club Name"}}
         terms = [{"field": "444", "operator": "equals", "value": "Sunrise Club"}]
         if self.gated:
-            field = "600" if self.gated == "list" else sync.PARTNER
-            terms.insert(0, {"field": field, "operator": "equals", "value": "asoc demo"})
+            terms.insert(0, {"field": sync.PARTNER, "operator": "equals", "value": "asoc demo"})
         return {"conditions": [{"id": "1", "type": "field", "terms": json.dumps(terms),
                                 "action": json.dumps([{"visibility": "Show", "field": "352"}])}]}
 
@@ -123,13 +120,20 @@ class RenameClub(unittest.TestCase):
             rename_club.find_cells([["when", "action", "detail"]], "p", "a", "b")
 
     def test_col_letter_and_row_descriptions(self):
-        self.assertEqual([rename_club.col_letter(i) for i in (0, 2, 25, 26, 27)],
+        # the sheet-cell helpers live in tools/sheets_client.py (rename_club and
+        # deactivate_clubs import them)
+        sc = sheets_client
+        self.assertEqual([sc.col_letter(i) for i in (0, 2, 25, 26, 27)],
                          ["A", "C", "Z", "AA", "AB"])
-        self.assertEqual(rename_club.describe_rows([]), "no rows")
-        self.assertEqual(rename_club.describe_rows([7]), "row 7")
-        self.assertEqual(rename_club.describe_rows([3, 4, 5]), "rows 3-5")
-        self.assertEqual(rename_club.describe_rows([3, 5]), "rows 3, 5")
-        self.assertEqual(rename_club.a1("SF Pending", "C4"), "'SF Pending'!C4")
+        self.assertEqual(sc.describe_rows([]), "no rows")
+        self.assertEqual(sc.describe_rows([7]), "row 7")
+        self.assertEqual(sc.describe_rows([3, 4, 5]), "rows 3-5")
+        self.assertEqual(sc.describe_rows([3, 5]), "rows 3, 5")
+        self.assertEqual(sc.a1("SF Pending", "C4"), "'SF Pending'!C4")
+        self.assertEqual(sc.a1("Club's Tab"), "'Club''s Tab'")             # a whole tab, the quote doubled
+        self.assertEqual((sc.cell(["a", "b"], 1), sc.cell(["a"], 3), sc.cell(["a"], None)), ("b", "", ""))
+        self.assertEqual(sc.trimmed(["a", "", "b", "", ""]), ["a", "", "b"])
+        self.assertIs(rename_club.describe_rows, sc.describe_rows)
 
     # --- --new-partner: moving a club filed under a mistyped partner ---------------
     PARTNERS = [["partner", "region", "notes"],
@@ -144,12 +148,15 @@ class RenameClub(unittest.TestCase):
                 ["DEMOCLUB-SAMPLE-001", "Asociación Demo", "Demo Club", "Latin America", "C", "active"]]
 
     def test_cell_key_is_the_apps_script_key(self):
-        self.assertEqual(rename_club.cell_key(" Asoc\u200b  Demo\ufeff "), "asoc demo")
-        self.assertEqual(rename_club.tidy("a\u2060b  c "), "ab c")
+        t = glow_text          # tidy / cell_key / nfc_key live in glow/text.py beside key
+        self.assertEqual(t.cell_key(" Asoc\u200b  Demo\ufeff "), "asoc demo")
+        self.assertEqual(t.tidy("a\u2060b  c "), "ab c")
         # key_ folds neither accents nor Unicode form; nfc_key only fixes the form
-        self.assertNotEqual(rename_club.cell_key("Asociación"), rename_club.cell_key("Asociacion"))
-        self.assertNotEqual(rename_club.cell_key("Asociación"), rename_club.cell_key("Asociacio\u0301n"))
-        self.assertEqual(rename_club.nfc_key("Asociación"), rename_club.nfc_key("Asociacio\u0301n"))
+        self.assertNotEqual(t.cell_key("Asociación"), t.cell_key("Asociacion"))
+        self.assertNotEqual(t.cell_key("Asociación"), t.cell_key("Asociacio\u0301n"))
+        self.assertEqual(t.nfc_key("Asociación"), t.nfc_key("Asociacio\u0301n"))
+        # ...and glow.text.key keeps the invisible characters (BACKLOG 28)
+        self.assertNotEqual(t.key(" Asoc\u200b  Demo "), t.cell_key(" Asoc\u200b  Demo "))
 
     def test_find_cells_for_a_move_matches_the_old_partner_any_status(self):
         i_c, hits, clashes, regions = rename_club.find_cells(
@@ -190,12 +197,11 @@ class RenameClub(unittest.TestCase):
         broken = {"id": "4", "terms": "{not json", "action": "[]"}
         self.assertEqual(rename_club.partner_gated([plain, other, broken], {"352"}), [])
         self.assertEqual(rename_club.partner_gated([plain, gated, other], {"352"}), ["2"])
-        # on a form with the partner list the rule tests the list instead
+        # a term on any other field is no Partner term (the retired partner list's q600 included)
         listed = dict(gated, id="5", terms=[dict(gated["terms"][0], field="600"), gated["terms"][1]])
         self.assertEqual(rename_club.partner_gated([plain, listed], {"352"}), [])
-        self.assertEqual(rename_club.partner_gated([plain, listed], {"352"}, {sync.PARTNER, "600"}), ["5"])
 
-    def test_form_questions_names_the_partner_fields(self):
+    def test_form_questions_finds_the_rosters_by_name(self):
         class Client:
             def __init__(self, qs):
                 self.qs = qs
@@ -205,10 +211,9 @@ class RenameClub(unittest.TestCase):
         qs = {"352": {"type": "control_checkbox", "text": "Sunrise Club", "options": "A Girl|B  Girl"},
               "353": {"type": "control_checkbox", "text": "New Name"}}
         self.assertEqual(rename_club.form_questions(Client(qs), "1", "sunrise club", "New Name"),
-                         (["352"], ["353"], {sync.PARTNER}, {"352": {"a girl", "b girl"}}))
-        qs["600"] = {"type": "control_dropdown", "name": sync.PARTNER_PICKER_NAME}
-        self.assertEqual(rename_club.form_questions(Client(qs), "1", "Sunrise Club", "x")[2],
-                         {sync.PARTNER, "600"})
+                         (["352"], ["353"], {"352": {"a girl", "b girl"}}))
+        self.assertEqual(rename_club.form_questions(Client(qs), "1", "Sunrise Club", "x"),
+                         (["352"], [], {"352": {"a girl", "b girl"}}))
 
     # --- renaming a club the sync did not add (its name was another partner's club's) ---
     def stars_sheet(self):
@@ -307,7 +312,7 @@ class RenameClub(unittest.TestCase):
             src = f.read()
         gs_class = re.search(r"const INVISIBLE = /\[(.*?)\]/g;", src).group(1)
         self.assertEqual({int(h, 16) for h in re.findall(r"\\u([0-9A-Fa-f]{4})", gs_class)},
-                         {ord(c) for c in rename_club.INVISIBLE.pattern.strip("[]")})
+                         {ord(c) for c in glow_text.INVISIBLE.pattern.strip("[]")})
 
     # --- main() on an in-memory sheet (no network, fictional rows) ---------------
     MOVE = ["--partner", "asoc demo", "--club", "Sunrise Club",
@@ -427,10 +432,9 @@ class RenameClub(unittest.TestCase):
 
     def test_move_refuses_a_partner_gated_rule_and_sheet_only_apply(self):
         sheet = self.move_sheet()
-        for gated in (True, "list"):   # the typed box, or the partner list (main() passes its fields)
-            code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(gated), key="test")
-            self.assertIn("given Partner", str(code), gated)
-            self.assertEqual(sheet.batches, [], gated)
+        code, out = self.run_main(self.MOVE + ["--apply"], sheet, FakeJotform(gated=True), key="test")
+        self.assertIn("given Partner (the typed Partner box)", str(code))
+        self.assertEqual(sheet.batches, [])
         code, _ = self.run_main(self.MOVE + ["--sheet-only", "--apply"], sheet)
         self.assertIn("drop --sheet-only", str(code))
         self.assertEqual(sheet.batches, [])
@@ -1055,7 +1059,7 @@ class DisableForm(unittest.TestCase):
             env["JOTFORM_API_KEY"] = key
         buf = io.StringIO()
         with mock.patch.object(disable_form, "Client", lambda api_key, apply=False: api), \
-                mock.patch.object(disable_form.backup_forms, "snapshot", snapshot), \
+                mock.patch.object(disable_form.backup, "snapshot", snapshot), \
                 mock.patch.object(disable_form, "datetime", Clock), \
                 mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(sys, "argv", ["disable_form.py"] + argv), \
@@ -1167,6 +1171,15 @@ class DisableForm(unittest.TestCase):
         code, _ = self.run_main(["--form", self.US, "--message", "Paused.", "--apply"], StatusOnly())
         self.assertIn("messageOfLimitedForm did not change", str(code))
         self.assertIn("status DISABLED as wanted", str(code))
+
+    def test_the_backup_stamp_is_to_the_second(self):
+        # a minute stamp let a re-run within the minute write the half-changed form over the
+        # true "before" (glow/backup.py stamp)
+        api = FormApi()
+        code, out = self.run_main(["--form", self.US, "--apply"], api, today="2026-10-07 14:00:05")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([c for c in api.calls if c[0] == "BACKUP"], [("BACKUP", self.US, "2026-10-07T140005")])
+        self.assertIn(f"backups/{self.US}/*-2026-10-07T140005.json", out)
 
 
 class UploadRosterPartners(unittest.TestCase):

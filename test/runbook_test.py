@@ -93,6 +93,26 @@ class RestoreConditionsGuard(RestoreConditionsFixture, unittest.TestCase):
         self.assertEqual((code, puts), (0, []))
         self.assertIn("DRY RUN", out)
 
+    def test_apply_snapshots_the_live_form_before_the_put(self):
+        after = ClubGuardFixture.form(ClubGuardFixture())
+        code, out, puts = self.run_restore(after[1], after[0], "--apply")
+        self.assertEqual((code, puts), (0, [after[1]]))
+        calls = self.restore_calls
+        put = calls.index(("PUT", "/form/999/properties"))
+        # the snapshot's two reads come before the write
+        self.assertIn(("GET", "/form/999/questions"), calls[:put])
+        self.assertEqual(calls[put - 2:put], [("GET", "/form/999/questions"), ("GET", "/form/999/properties")])
+        stamped = sorted(n for n in self.restore_files if n != "properties-latest.json")
+        self.assertEqual([n.split("-", 1)[0] for n in stamped], ["properties", "questions"])
+        self.assertRegex(stamped[0], r"^properties-\d{4}-\d\d-\d\dT\d{6}\.json$")
+        self.assertEqual(self.restore_files[stamped[0]], {"conditions": [{"id": "live"}]})   # the form as it was
+        # the -latest file is still the snapshot that was restored: a re-run restores it again
+        self.assertEqual(self.restore_files["properties-latest.json"], {"conditions": after[1]})
+        self.assertIn(f"(to undo the restore: --from {stamped[0]})", out)
+        # a dry run writes nothing, not even the snapshot
+        code, out, puts = self.run_restore(after[1], after[0])
+        self.assertEqual((code, puts, list(self.restore_files)), (0, [], ["properties-latest.json"]))
+
 
 class RosterRepairRunbook(unittest.TestCase):
     """docs/RUNBOOK.md "Rosters above Submit": the runner is paused before the
@@ -167,7 +187,7 @@ class SameNameRunbook(unittest.TestCase):
         self.assertIn(auto_sync.SAME_NAME_REFUSED, text)
         self.assertIn(glow_sync.SF_NAME_SEP.join(("`<club>", "<partner>`")), text)
         src = read(os.path.join(REPO, "sync_attendance_form.py"))
-        for flag in ("--same-name-switch", "--q5-change-ok", "--partner-picker"):
+        for flag in ("--same-name-switch", "--q5-change-ok"):
             self.assertIn(flag, text)
             self.assertIn(f'"{flag}"', src)
         self.assertIn("HIDE partner textbox (q331: no rule shows it;", text)

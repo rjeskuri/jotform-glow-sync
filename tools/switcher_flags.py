@@ -16,7 +16,7 @@ Jotform's own India flag, copied from the Telugu row - Odia has no flag of
 its own and India is what Jotform's convention gives an Indian language).
 The tool builds the block between the two marker comments, GETs each form's
 injectCSS, replaces an earlier block or appends, POSTs it back and re-reads
-it. Dry run by default; --apply snapshots the form first (backup_forms.py:
+it. Dry run by default; --apply snapshots the form first (glow/backup.py:
 properties hold injectCSS). --check-page fetches the PUBLIC form page (no
 API) and reports, per language, whether the switcher row carries a flag.
 
@@ -29,22 +29,19 @@ import argparse
 import base64
 import os
 import re
-import subprocess
 import sys
-from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-import backup_forms                       # noqa: E402
+from glow import backup                   # noqa: E402  (the snapshot before a write)
 from glow import forms as glow_forms      # noqa: E402
 from glow.cli import api_key, run, targets                  # noqa: E402
-from glow.jotform import Client           # noqa: E402
+from glow.jotform import Client, public_page   # noqa: E402
 
 FLAGS = {"or": "or.svg"}                  # language code -> file under tools/switcher_flags/
 SVG_DIR = os.path.join(REPO, "tools", "switcher_flags")
 START, END = "/* GLOW switcher flags v2 */", "/* /GLOW switcher flags */"
 ANY_START = "/* GLOW switcher flags v"          # an earlier version's block is replaced too
-PUBLIC = "https://form.jotform.com/"
 
 
 def data_uri(svg):
@@ -82,10 +79,9 @@ def merge(existing, block):
 
 
 def page_flags(form_id):
-    """(has_block, {code: True/False}) from the public form page - read-only, no API key."""
-    out = subprocess.run(["curl", "-sS", "-L", "-A", "Mozilla/5.0", PUBLIC + form_id],
-                         capture_output=True, text=True)
-    html = out.stdout
+    """(has_block, {code: True/False}) from the public form page - read-only, no API key. A page
+    that cannot be fetched stops the run (glow.jotform.public_page), never reads as 0 languages."""
+    html = public_page(form_id)
     flags = {}
     for lang, inner in re.findall(r'<li data-lang="([^"]+)"[^>]*>(.*?)</li>', html, re.S):
         flags[lang] = "<svg" in inner
@@ -114,7 +110,7 @@ def main():
     client = Client(api_key(), apply=args.apply)
     block = css_block()
     print(f"CSS block: {len(block)} chars, flags for {', '.join(sorted(FLAGS))}\n")
-    stamp = datetime.now().strftime("%Y-%m-%dT%H%M")
+    stamp = backup.stamp()
     problems = 0
     for fid in form_ids:
         label = glow_forms.LABELS.get(fid, fid)
@@ -128,7 +124,7 @@ def main():
         print(f"== {label}  form {fid}: {verb} injectCSS ({len(current)} -> {len(wanted)} chars)")
         if not args.apply:
             continue
-        s = backup_forms.snapshot(fid, client, stamp)
+        s = backup.snapshot(fid, client, stamp)
         print(f"   backup_forms: {s['questions']} questions, {s['conditions']} conditions -> backups/{fid}/*-{stamp}.json")
         client.post_form(f"/form/{fid}/properties", {"properties[injectCSS]": wanted},
                          f"{fid} set injectCSS")

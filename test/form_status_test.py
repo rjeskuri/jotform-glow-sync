@@ -2,8 +2,7 @@
 """
 tools/form_status.py's audits: the rules (FormStatusAudit), the layout (FormStatusLayout), the
 module values and the names dictionary (ModuleAndNamesAudit) and Jotform's usage limits
-(JotformUsage); and what tools/add_translations.py counts as a string a mentor sees
-(TranslationAudit). Fictional names.
+(JotformUsage). Fictional names.
 """
 import copy
 import json
@@ -30,7 +29,7 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
 
     PARTNERS = {"stars": {"partner one": "Partner One", "partner two": "Partner Two"},
                 "alpha club": {"partner one": "Partner One"},
-                "beta club": {"partner two": "Partner Two"}}       # the Roster's, as load_partners gives
+                "beta club": {"partner two": "Partner Two"}}       # the Roster's, as roster_facts' holders give
 
     def form(self, **kw):
         return SameNameFixture.form(SameNameFixture(), **kw)
@@ -399,6 +398,39 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
             self.assertIn("→ CLEAN", out)
 
 
+class FormStatusRoster(unittest.TestCase):
+    """tools/form_status.py --roster: required (the old default was the pre-launch offline
+    build, BACKLOG 32), and an export with a byte-order mark reads like any other."""
+
+    def test_without_roster_it_refuses_and_names_the_export(self):
+        import contextlib
+        import io
+        from unittest import mock
+        built = []
+        env = {k: v for k, v in os.environ.items() if k != "JOTFORM_API_KEY"}
+        with mock.patch.object(form_status, "Client", lambda key: built.append(key)), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(sys, "argv", ["form_status.py", "--form", glow_forms.TEMPLATE]), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            form_status.main()
+        self.assertIn("--roster is required", str(cm.exception.code))
+        self.assertIn("python3 tools/sheets_client.py export Roster data/roster_<date>.csv",
+                      str(cm.exception.code))
+        self.assertEqual(built, [])                       # refused before the key or a read
+
+    def test_a_roster_export_with_a_byte_order_mark_is_read(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "roster.csv")
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write("partner,club,full_name,status,region\r\n"
+                        "Partner One,Alpha Club,Ana Example,active,Africa\r\n")
+            roster = form_status.load_roster(path)
+        self.assertEqual(list(roster), ["Africa"])
+        club, names, partner, _ = roster["Africa"]["alpha club"]
+        self.assertEqual((club, partner, len(names)), ("Alpha Club", "Partner One", 1))
+
+
 class FormStatusLayout(unittest.TestCase):
     """tools/form_status.py: the layout audit joins rule_problems (CLEAN needs
     none, and the runner's verify_report sees a relapse)."""
@@ -456,22 +488,6 @@ class FormStatusLayout(unittest.TestCase):
         line = form_status.layout_line(rep["layout"])
         self.assertNotIn("no link", line)
         self.assertEqual(line, "2 Submit buttons, expected 1 - rosters not checked")
-
-
-class TranslationAudit(unittest.TestCase):
-    """tools/add_translations.py: what counts as a string a mentor sees."""
-
-    def test_partner_names_are_not_strings_to_translate(self):
-        import add_translations
-        qs, _ = SameNameFixture.form(SameNameFixture(), partner_list="Partner One|Partner Two")
-        strings = add_translations.visible_strings(qs)
-        # the list's label is (already translated everywhere); its options stay English,
-        # so adding the list does not grow the audit's "untranslated" count
-        self.assertEqual(strings["Partner"], {"q331.text", "q600.text"})
-        self.assertNotIn("Partner One", strings)
-        self.assertNotIn("Partner Two", strings)
-        # other dropdowns' options are still counted (the module names are translated)
-        self.assertEqual(strings["Core 1"], {f"q{sync.MODULES['1']}.option"})
 
 
 class ModuleAndNamesAudit(unittest.TestCase):

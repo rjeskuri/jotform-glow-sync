@@ -13,7 +13,6 @@ Usage (also importable):
     python3 tools/sheets_client.py tabs                     # list tabs + used rows
     python3 tools/sheets_client.py export "Enrollment Responses" out.csv
     python3 tools/sheets_client.py export-all DIR           # every tab -> DIR/<tab>.csv
-    python3 tools/sheets_client.py import "Enrollment Responses" in.csv   # one-time, never overwrites
 """
 import csv
 import json
@@ -118,16 +117,52 @@ def list_tabs(svc):
 def read_tab(svc, title):
     """All values of a tab as a list of rows (strings; ragged rows padded)."""
     resp = svc.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id(), range=_range(title),
+        spreadsheetId=spreadsheet_id(), range=a1(title),
         valueRenderOption="FORMATTED_VALUE").execute()
     rows = resp.get("values", [])
     width = max((len(r) for r in rows), default=0)
     return [r + [""] * (width - len(r)) for r in rows]
 
 
-def _range(title, cell=None):
-    quoted = "'" + title.replace("'", "''") + "'"
-    return quoted + ("!" + cell if cell else "")
+def a1(tab, ref=None):
+    """A1 notation of a whole tab, or of a cell (or range) of it: 'SF Pending'!C4 (the
+    title quoted, a quote in it doubled)."""
+    return "'" + tab.replace("'", "''") + "'" + ("!" + ref if ref else "")
+
+
+def col_letter(index):
+    """0-based column index -> A1 column letters (0 -> A, 26 -> AA)."""
+    letters = ""
+    index += 1
+    while index:
+        index, rem = divmod(index - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
+def cell(row, i):
+    """A cell of a Sheets API row, which omits trailing empty cells ("" past the end, or
+    for no column at all: i None)."""
+    return row[i] if i is not None and i < len(row) else ""
+
+
+def trimmed(row):
+    """The row without its trailing empty cells - two reads of one row compare equal
+    whether or not the API padded it."""
+    row = list(row)
+    while row and row[-1] == "":
+        row.pop()
+    return row
+
+
+def describe_rows(rows):
+    """Sheet row numbers for a message: "no rows", "row 7", "rows 3-5", "rows 3, 5, ..."."""
+    if not rows:
+        return "no rows"
+    if len(rows) > 1 and rows == list(range(rows[0], rows[-1] + 1)):
+        return f"rows {rows[0]}-{rows[-1]}"
+    shown = ", ".join(map(str, rows[:8])) + (", ..." if len(rows) > 8 else "")
+    return ("row " if len(rows) == 1 else "rows ") + shown
 
 
 def ensure_tab(svc, title, rows_needed=0, cols_needed=0):
@@ -166,10 +201,10 @@ def write_tab(svc, title, rows):
     width = max((len(r) for r in rows), default=0)
     sheet_id = ensure_tab(svc, title, rows_needed=len(rows), cols_needed=width)
     svc.spreadsheets().values().clear(
-        spreadsheetId=spreadsheet_id(), range=_range(title), body={}).execute()
+        spreadsheetId=spreadsheet_id(), range=a1(title), body={}).execute()
     if rows:
         resp = svc.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id(), range=_range(title, "A1"),
+            spreadsheetId=spreadsheet_id(), range=a1(title, "A1"),
             valueInputOption="RAW", body={"values": rows}).execute()
         if resp.get("updatedRows") != len(rows):
             sys.exit(f"{title}: wrote {resp.get('updatedRows')} rows, expected {len(rows)}")
@@ -185,7 +220,7 @@ def append_rows(svc, title, rows):
     existing = len(read_tab(svc, title)) if _has_tab(svc, title) else 0
     ensure_tab(svc, title, rows_needed=existing + len(rows), cols_needed=width)
     resp = svc.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id(), range=_range(title, "A1"),
+        spreadsheetId=spreadsheet_id(), range=a1(title, "A1"),
         valueInputOption="RAW", insertDataOption="INSERT_ROWS",
         body={"values": rows}).execute()
     updated = resp.get("updates", {}).get("updatedRows")
@@ -195,17 +230,12 @@ def append_rows(svc, title, rows):
 
 def write_cell(svc, title, row, col, value):
     """One cell, RAW, by 1-based row and column; read back after."""
-    a1 = ""
-    n = col
-    while n:
-        n, r = divmod(n - 1, 26)
-        a1 = chr(65 + r) + a1
-    cell = f"{a1}{row}"
-    svc.spreadsheets().values().update(spreadsheetId=spreadsheet_id(), range=_range(title, cell),
+    spot = f"{col_letter(col - 1)}{row}"
+    svc.spreadsheets().values().update(spreadsheetId=spreadsheet_id(), range=a1(title, spot),
                                        valueInputOption="RAW", body={"values": [[value]]}).execute()
-    got = svc.spreadsheets().values().get(spreadsheetId=spreadsheet_id(), range=_range(title, cell)).execute()
+    got = svc.spreadsheets().values().get(spreadsheetId=spreadsheet_id(), range=a1(title, spot)).execute()
     if got.get("values", [[""]])[0][0] != value:
-        sys.exit(f"{title}!{cell}: wrote {value!r}, read back {got.get('values')!r}")
+        sys.exit(f"{title}!{spot}: wrote {value!r}, read back {got.get('values')!r}")
 
 
 def _has_tab(svc, title):
@@ -251,15 +281,6 @@ def main():
         for title, _used, _, _ in list_tabs(svc):
             n = export_tab(svc, title, os.path.join(out_dir, title + ".csv"))
             print(f"  {title:<24} {n:>6} rows")
-    elif cmd == "import":
-        # one-time: put a CSV into a tab, refusing to overwrite existing data
-        title, src = sys.argv[2], sys.argv[3]
-        with open(src, newline="", encoding="utf-8-sig") as f:
-            rows = list(csv.reader(f))
-        if _has_tab(svc, title) and len(read_tab(svc, title)) > 1:
-            sys.exit(f"Tab '{title}' already holds data - not overwriting.")
-        write_tab(svc, title, rows)
-        print(f"{len(rows) - 1} data rows -> '{title}'")
     else:
         sys.exit(f"unknown command {cmd!r}")
 

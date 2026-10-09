@@ -32,11 +32,18 @@ LIVE = {TEMPLATE: "template", **{fid: region for region, fid in REGIONALS.items(
 # human-readable label per id (what backup_forms.py prints)
 LABELS = {
     TEMPLATE: "template (every sync-logic change lands here first)",
-    **{fid: f"{region} (live from 2026-08-27)" for region, fid in REGIONALS.items()},
+    **{fid: f"{region} (live from 2026-09-01)" for region, fid in REGIONALS.items()},
     **{fid: f"{region} (defunct)" for region, fid in DEFUNCT.items()},
 }
 
 TITLES = {region: f"{region} Attendance Form" for region in REGIONALS}
+
+
+def language_of(props):
+    """A form's `language` property (GET /form/{id}/properties) as one dict: Jotform serves
+    it as a list of one, a dict, or not at all ({})."""
+    lang = (props or {}).get("language")
+    return lang[0] if isinstance(lang, list) and lang else (lang or {})
 
 
 def region_of(form_id):
