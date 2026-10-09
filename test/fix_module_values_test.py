@@ -23,6 +23,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import fix_module_values as fmv                            # noqa: E402
 from glow import forms                                     # noqa: E402
+from glow import jotform                                   # noqa: E402
 from glow.private_files import Ledger                      # noqa: E402
 from glow.sync import MODULES, YEAR                        # noqa: E402
 from helpers.fake_org import FakeOrg                      # noqa: E402
@@ -97,10 +98,12 @@ class ModuleOrg(FakeOrg):
 
 
 class FakeJotform:
-    """Reads only. One questions table serves the template and the regional forms, unless a form has its own."""
+    """Reads only. One questions table serves the template and the regional forms, unless a form has its own.
+    Submissions are paged by the client's own reader (glow.jotform.Client.submissions) over this get()."""
+    submissions = jotform.Client.submissions
 
     def __init__(self, submissions, qs=None):
-        self.submissions, self.qs, self.asked = submissions, qs or questions(), []     # form id -> [submission]
+        self.by_form, self.qs, self.asked = submissions, qs or questions(), []         # form id -> [submission]
         self.form_qs = {}                                                              # form id -> its own questions
 
     def get(self, path, **params):
@@ -108,7 +111,7 @@ class FakeJotform:
         parts = path.strip("/").split("/")
         if parts[2:] == ["questions"]:
             return copy.deepcopy(self.form_qs.get(parts[1], self.qs))
-        subs = self.submissions.get(parts[1], [])
+        subs = self.by_form.get(parts[1], [])
         if parts[2:] == ["submissions"]:
             if "filter" in params:
                 assert "%" not in params["filter"], "the client encodes the filter (glow.jotform.Client.url), not the tool"
@@ -155,8 +158,6 @@ class FixModuleValues(unittest.TestCase):
     def test_the_window_filter_reaches_jotform_encoded_once(self):
         import subprocess
         import urllib.parse
-
-        from glow import jotform
         urls = []
 
         def curl(argv, **kw):
@@ -165,7 +166,7 @@ class FixModuleValues(unittest.TestCase):
                                                stderr="")
         window = ("2026-09-24 08:03:00", "2026-09-24 14:03:00")
         with mock.patch.object(jotform.subprocess, "run", curl):
-            self.assertEqual(fmv.fetch(jotform.Client("KEY"), "123", window), [])
+            self.assertEqual(jotform.Client("KEY").submissions("123", fmv.window_filter(window)), [])
         flt = json.dumps({"created_at:gt": window[0], "created_at:lt": window[1]})
         self.assertIn("&filter=" + urllib.parse.quote(flt, safe=""), urls[0])     # as the tool encoded it before
         self.assertEqual(urllib.parse.parse_qs(urllib.parse.urlsplit(urls[0]).query)["filter"], [flt])
@@ -211,7 +212,7 @@ class FixModuleValues(unittest.TestCase):
             batch("a1l00000000000WHER", region="Europe"),
             batch("a1l00000000000GONE", created="2026-10-02T15:03:00.000+0000", date="2026-10-02"),  # option left the form
             batch(BATCH_A)]
-        self.jotform.submissions[LATAM] += [
+        self.jotform.by_form[LATAM] += [
             submission("9003", created="2026-09-30 11:02:00", date=("2026", "09", "30")),
             submission("9004", created="2026-09-30 11:04:00", date=("2026", "09", "30")),
             submission("9005", created="2026-10-01 11:02:00", date=("2026", "10", "01"), year="2", module="Community 201"),
@@ -236,7 +237,7 @@ class FixModuleValues(unittest.TestCase):
         regional = questions()
         regional[MODULES["1"]] = dropdown(OPTIONS["1"] + ["Regional Only"])
         self.jotform.form_qs[LATAM] = regional
-        self.jotform.submissions[LATAM][0] = submission("9001", module="Regional Only")   # stored on the form, unknown to the template
+        self.jotform.by_form[LATAM][0] = submission("9001", module="Regional Only")   # stored on the form, unknown to the template
         out = self.dry()
         self.assertIn(f"{BATCH_A}  Sunrise Club  2026-09-24  Success  'Toma de decisiones'  UNMATCHED ('Regional Only' is not a "
                       "template option)", out)
@@ -259,7 +260,7 @@ class FixModuleValues(unittest.TestCase):
 
     def test_all_forms_reads_the_four_forms_whole_and_serves_a_region_the_map_does_not_know(self):
         self.org.batches = [batch(BATCH_A, region="Europe")]
-        self.jotform.submissions[AFRICA] = [submission("9007", created="2026-09-24 11:02:30", form=AFRICA, club="River Club")]
+        self.jotform.by_form[AFRICA] = [submission("9007", created="2026-09-24 11:02:30", form=AFRICA, club="River Club")]
         self.assertIn("UNMATCHED (region 'Europe' names no form)", self.dry())
         self.jotform.asked.clear()
         out = self.dry("--all-forms")

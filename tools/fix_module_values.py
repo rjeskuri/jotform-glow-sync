@@ -5,7 +5,7 @@ question 98 before the module calcValues were live - and the Attendance__c rows 
 the processor copied the batch's module onto (docs/plans/2026-10-06-module-selection.md, (b)).
 
 The ground truth is the Jotform submission the batch came from: the stored answer of the module
-dropdown its Year answer names (tools/backfill_resolve.py copied_fields), read the same way the
+dropdown its Year answer names (glow/submissions.py copied_fields), read the same way the
 September back-fill read it. A batch is paired with exactly one submission - the same club (question
 5), attendance date, question 98, year and session, on the form of the batch's region, created within
 three hours of the batch - or it is listed as UNMATCHED and left alone.
@@ -24,26 +24,22 @@ JOTFORM_API_KEY.
 """
 import argparse
 import datetime
-import json
 import os
 import sys
-import zoneinfo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow import forms                                              # noqa: E402
 from glow.cli import api_key                                       # noqa: E402
-from glow.jotform import Client, JotformError                       # noqa: E402
+from glow.jotform import CLOCK, Client, JotformError                # noqa: E402
 from glow.sync import CLUB_NAME, MODULE_ID, MODULES, WEEK_ID, YEAR  # noqa: E402
 from glow.private_files import Ledger, last_rows, private_folder, rel, stamp  # noqa: E402
 from glow.salesforce import Org, Refused, add_vpn_flag, as_int, positive, quoted, require_vpn_off   # noqa: E402
-from backfill_resolve import PAGE, answer_of, attendance_date, copied_fields   # noqa: E402
+from glow.submissions import answer_of, attendance_date, copied_fields   # noqa: E402
 
 DEFAULT_DIR = os.path.join(REPO, "data", "module_fix_2026-10")
 SINCE = "2026-09-01"                         # batches created from this day on (UTC), the launch
 WINDOW = datetime.timedelta(hours=3)         # a submission's created_at against the batch's CreatedDate
-JOTFORM_CLOCK = zoneinfo.ZoneInfo("America/New_York")     # created_at as Jotform gives it: US Eastern
 # Account__r.Parent.Region__c (the partner account's region, read 2026-10-06) -> the attendance form
 SF_REGION_FORM = {"Africa": forms.REGIONALS["Africa"], "Asia": forms.REGIONALS["Asia"],
                   "South America": forms.REGIONALS["Latin America"], "North America": forms.REGIONALS["U.S"]}
@@ -88,33 +84,13 @@ def region_of(batch):
 # ---- the Jotform side ----------------------------------------------------------------------------
 def window_of(created):
     """(from, to) in Jotform's clock, three hours either side of a batch's CreatedDate."""
-    when = datetime.datetime.strptime(created, "%Y-%m-%dT%H:%M:%S.%f%z").astimezone(JOTFORM_CLOCK)
+    when = datetime.datetime.strptime(created, "%Y-%m-%dT%H:%M:%S.%f%z").astimezone(CLOCK)
     return tuple((when + sign * WINDOW).strftime("%Y-%m-%d %H:%M:%S") for sign in (-1, 1))
 
 
-def fetch(client, form_id, window=None):
-    """The submissions of a form, paged: the ones created inside `window` (Jotform's filter, which
-    glow.jotform.Client.url encodes), or the whole form."""
-    params = {}
-    if window:
-        params["filter"] = json.dumps({"created_at:gt": window[0], "created_at:lt": window[1]})
-    seen, out, offset = set(), [], 0
-    while True:
-        page = client.get(f"/form/{form_id}/submissions", limit=PAGE, offset=offset, **params)
-        if not isinstance(page, list) or not all(isinstance(s, dict) and s.get("id") for s in page):
-            raise Refused(f"form {form_id}: the submissions answer is not a list of submissions with ids")
-        for sub in page:
-            if sub["id"] not in seen:
-                seen.add(sub["id"])
-                out.append(sub)
-        if len(page) < PAGE:
-            break
-        offset += PAGE
-    if window is None:                       # the whole form: its own count is the check, as the resolver's
-        reported = int((client.get(f"/form/{form_id}") or {}).get("count") or 0)
-        if len(out) < reported:
-            raise Refused(f"form {form_id}: fetched {len(out)} submissions but the form reports {reported} - run again")
-    return out
+def window_filter(window):
+    """Jotform's submissions filter for the ones created strictly inside `window`."""
+    return {"created_at:gt": window[0], "created_at:lt": window[1]}
 
 
 class Jotform:
@@ -132,13 +108,13 @@ class Jotform:
         """[(form id, submission)] the batch may have come from, or a reason there are none."""
         if self.all_forms:
             if self.whole is None:
-                self.whole = [(fid, sub) for fid in forms.REGIONALS.values() for sub in fetch(self.client, fid)]
+                self.whole = [(fid, sub) for fid in forms.REGIONALS.values() for sub in self.client.submissions(fid)]
             return self.whole, None
         form_id = SF_REGION_FORM.get(region_of(batch))
         if not form_id:
             return [], f"region {region_of(batch)!r} names no form"
         window = window_of(batch["CreatedDate"])
-        return [(form_id, sub) for sub in fetch(self.client, form_id, window)
+        return [(form_id, sub) for sub in self.client.submissions(form_id, window_filter(window))
                 if window[0] < str(sub.get("created_at")) < window[1]], None
 
 

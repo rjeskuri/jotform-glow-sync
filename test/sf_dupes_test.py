@@ -30,6 +30,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_dupes as sd                  # noqa: E402
 from glow import forms                 # noqa: E402
+from glow.jotform import Client, JotformError   # noqa: E402
 from glow import salesforce            # noqa: E402
 
 UTC = datetime.timezone.utc
@@ -308,7 +309,8 @@ class FakeSF:
 
 class FakeJotform:
     """The regional forms' submissions (Jotform's clock: US Eastern), newest first as Jotform's default
-    order is (`oldest_first` plays an order the tool must not trust)."""
+    order is (`oldest_first` plays an order the tool must not trust), paged by the client's own reader."""
+    submissions = Client.submissions
 
     def __init__(self):
         self.latest = {fid: "2026-10-07 07:00:00" for fid in forms.REGIONALS.values()}   # 11:00 UTC
@@ -1003,6 +1005,8 @@ class SfDupesFlow(Harness):
         self.assertIn("compare them by hand", out)
 
         class Pages:                                # a submission arrived between the two page reads
+            submissions = Client.submissions
+
             def __init__(self, pages):
                 self.pages = pages
 
@@ -1016,6 +1020,18 @@ class SfDupesFlow(Harness):
         page3 = [{"id": "s1", "created_at": "2026-10-07 07:00:00", "status": "ACTIVE"}]
         with unittest.mock.patch.object(sd, "SUBMISSION_PAGE", 2):
             self.assertEqual(sd.submissions_since(Pages([page1, page2, page3]), "Africa", NOW), 2)
+        # every page newer than the run's start, up to the cap: refused, never a short count
+        newer = [[{"id": f"s{n}", "created_at": f"2026-10-07 08:{59 - n:02d}:00", "status": "ACTIVE"}] for n in range(3)]
+        with unittest.mock.patch.object(sd, "SUBMISSION_PAGE", 1), unittest.mock.patch.object(sd, "SUBMISSION_PAGES", 2), \
+                self.assertRaises(salesforce.Refused) as stop:
+            sd.submissions_since(Pages(newer), "Africa", NOW)
+        self.assertIn("more than 2 submissions on the Africa form", str(stop.exception))
+        with unittest.mock.patch.object(sd, "SUBMISSION_PAGE", 1), unittest.mock.patch.object(sd, "SUBMISSION_PAGES", 4):
+            self.assertEqual(sd.submissions_since(Pages(newer + [[]]), "Africa", NOW), 3)
+        # an answer without ids is Jotform's, not a count
+        with self.assertRaises(JotformError) as stop:
+            sd.submissions_since(Pages([[{"created_at": "2026-10-07 08:04:00"}]]), "Africa", NOW)
+        self.assertIn("the Africa form: the submissions answer is not a list of submissions with ids", str(stop.exception))
 
     def test_an_unknown_run_is_settled_only_on_what_salesforce_shows(self):
         os.makedirs(self.dir)

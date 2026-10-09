@@ -38,13 +38,12 @@ import subprocess
 import sys
 import traceback
 import unicodedata
-from zoneinfo import ZoneInfo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from glow import forms                                          # noqa: E402
 from glow.cli import api_key                                   # noqa: E402
-from glow.jotform import Client, JotformError                   # noqa: E402
+from glow.jotform import CLOCK, Client, JotformError            # noqa: E402
 from glow.private_files import load_json, private_folder, rel, save_private, sha256, stamp   # noqa: E402
 from glow.salesforce import (SF_ID, Org, Refused, add_vpn_flag, error_codes, plain, positive,   # noqa: E402
                              quoted, require_vpn_off, sf_match)
@@ -57,7 +56,6 @@ CHUNK = 2                     # Database.merge: one master and at most two dupli
 QUIET_MINUTES = 10            # no submission on the Africa or Asia form for this long before a write
 NPSP_WINDOW = ((20, 30), (21, 30))      # UTC: NPSP's nightly job
 QUIET_FORMS = ("Africa", "Asia")
-JOTFORM_CLOCK = ZoneInfo("America/New_York")     # Jotform's created_at
 MARKER = "SF_DUPES_REHEARSAL_END"
 IN_CHUNK = 150                # ids per SOQL IN list
 APEX_TIMEOUT = 900            # seconds for one `sf apex run`
@@ -160,7 +158,7 @@ def jotform_time(text):
         moment = datetime.datetime.strptime(str(text), "%Y-%m-%d %H:%M:%S")
     except ValueError:
         raise Refused("Jotform gave a submission time this tool cannot read - nothing written") from None
-    return moment.replace(tzinfo=JOTFORM_CLOCK).astimezone(datetime.timezone.utc)
+    return moment.replace(tzinfo=CLOCK).astimezone(datetime.timezone.utc)
 
 
 def iso_day(text):
@@ -851,44 +849,43 @@ def quiet_window(ctx):
 
 def latest_submission(jf, region):
     """The newest submission's time: the first of Jotform's default order (newest first, the order
-    tools/backfill_resolve.py pages by; no `orderby`, whose direction is not proven) or the form's
-    own last_submission, whichever is later."""
+    glow.jotform.Client.submissions pages by) or the form's own last_submission, whichever is later."""
     fid = forms.REGIONALS[region]
     info = jf.get(f"/form/{fid}")
-    page = jf.get(f"/form/{fid}/submissions", limit=1)
-    if not isinstance(page, list) or not isinstance(info, dict):
+    if not isinstance(info, dict):
         raise Refused(f"the {region} form's answer has a shape this tool does not know - nothing written")
-    times = [jotform_time(s.get("created_at")) for s in page if isinstance(s, dict)]
+    page = jf.submissions(fid, page=1, enough=lambda _page: True, label=f"the {region} form")
+    times = [jotform_time(s.get("created_at")) for s in page]
     if info.get("last_submission"):
         times.append(jotform_time(info["last_submission"]))
     return max(times) if times else None
 
 
 def submissions_since(jf, region, since):
-    """The form's submissions created since `since`, read page by page in Jotform's default order,
-    newest first. The order is checked, not assumed: a page that is not newest first refuses (the
-    count would otherwise stop early and say 0). A submission arriving meanwhile repeats one on the
-    next page: counted once, by id."""
-    fid, seen, last = forms.REGIONALS[region], {}, None
-    for page_no in range(SUBMISSION_PAGES):
-        page = jf.get(f"/form/{fid}/submissions", limit=SUBMISSION_PAGE, offset=page_no * SUBMISSION_PAGE)
-        if not isinstance(page, list) or not all(isinstance(s, dict) and s.get("id") for s in page):
-            raise Refused(f"the {region} form's submissions have a shape this tool does not know")
+    """How many of the form's submissions (not deleted) were created since `since`, read page by
+    page in Jotform's default order, newest first, until a page reaches back past `since`. The
+    order is checked, not assumed: a page that is not newest first refuses (the count would
+    otherwise stop early and say 0). A submission arriving meanwhile repeats one on the next page:
+    counted once, by id (glow.jotform.Client.submissions)."""
+    state = {"last": None, "pages": 0}
+
+    def enough(page):
         older = False
         for s in page:
             moment = jotform_time(s.get("created_at"))
-            if last is not None and moment > last:
+            if state["last"] is not None and moment > state["last"]:
                 raise Refused(f"the {region} form's submissions did not come newest first - compare them with the "
                               "batches by hand")
-            last = moment
-            if moment >= since:
-                seen[str(s["id"])] = s.get("status")
-            else:
-                older = True
-        if len(page) < SUBMISSION_PAGE or older:
-            return sum(1 for status in seen.values() if status != "DELETED")
-    raise Refused(f"more than {SUBMISSION_PAGE * SUBMISSION_PAGES} submissions on the {region} form since the run "
-                  "started - compare them with the batches by hand")
+            state["last"] = moment
+            older = older or moment < since
+        state["pages"] += 1
+        if not older and len(page) == SUBMISSION_PAGE and state["pages"] == SUBMISSION_PAGES:
+            raise Refused(f"more than {SUBMISSION_PAGE * SUBMISSION_PAGES} submissions on the {region} form since "
+                          "the run started - compare them with the batches by hand")
+        return older
+
+    subs = jf.submissions(forms.REGIONALS[region], page=SUBMISSION_PAGE, enough=enough, label=f"the {region} form")
+    return sum(1 for s in subs if jotform_time(s.get("created_at")) >= since and s.get("status") != "DELETED")
 
 
 def window_count(ctx, org, started):

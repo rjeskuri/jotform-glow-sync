@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 import backfill_resolve as br         # noqa: E402
 from glow import forms as glow_forms  # noqa: E402
 from glow import jotform as glow_jotform   # noqa: E402
+from glow import submissions as glow_submissions   # noqa: E402
 from glow.sync import MODULES, PICKER_NAME, SESSION_OVERRIDES, WEEKS, YEAR   # noqa: E402
 
 AFRICA, ASIA = glow_forms.REGIONALS["Africa"], glow_forms.REGIONALS["Asia"]
@@ -154,16 +155,18 @@ def submission(sid, ticks, created="2026-09-10 08:00:00", q5="Alpha Club", q18=A
 
 
 class FakeJotform:
-    """Reads only: there is no write method to call."""
+    """Reads only: there is no write method to call. Submissions are paged by the client's own
+    reader (glow.jotform.Client.submissions) over this get()."""
+    submissions = glow_jotform.Client.submissions
 
     def __init__(self, submissions=None, count=None, qs=None):
-        self.submissions = submissions or {}            # form id -> [submission, ...]
+        self.by_form = submissions or {}                # form id -> [submission, ...]
         self.count, self.qs, self.asked = count, qs, []
 
     def get(self, path, **params):
         self.asked.append((path, params))
         parts = path.strip("/").split("/")
-        subs = self.submissions.get(parts[1], [])
+        subs = self.by_form.get(parts[1], [])
         if parts[2:] == ["submissions"]:
             return json.loads(json.dumps(subs[params["offset"]:params["offset"] + params["limit"]]))
         if parts[2:] == ["questions"]:
@@ -212,8 +215,8 @@ class BackfillResolve(unittest.TestCase):
         argv = ["--roster", roster or self.roster_csv, "--out", out_path, *argv]
         out, code = io.StringIO(), None
         try:
-            with contextlib.redirect_stdout(out):
-                br.main(argv, client=client, plan_of=lambda *a: the_plan or plan())
+            with contextlib.redirect_stdout(out):        # as the tool runs: glow.cli.run (JotformError -> exit)
+                br.run(lambda: br.main(argv, client=client, plan_of=lambda *a: the_plan or plan()))
         except SystemExit as stop:
             code = stop.code
         result = None
@@ -485,7 +488,7 @@ class BackfillResolve(unittest.TestCase):
                                   ("2", "Elective - Healthy GLOW", "96"), ("2", "Elective - Girl Boss Basics", "95"),
                                   ("3", "Elective - Girl Boss Pro", "97"), ("3", "Power of Girls 301", "15")):
             with self.subTest(module=module):
-                self.assertEqual(br.session_dropdown(year, module), qid)
+                self.assertEqual(glow_submissions.session_dropdown(year, module), qid)
                 self.assertEqual(verdicts(year=year, module=module, week="Session 8")[:3], (["same"],) * 3)
                 self.assertEqual(verdicts(year=year, module=module, week="Session 8", q100="2")[1], ["differ"])
         # no source to compare with: counted apart
@@ -951,7 +954,7 @@ class BackfillResolve(unittest.TestCase):
             out = io.StringIO()
             with mock.patch.object(glow_jotform.subprocess, "run", answer), contextlib.redirect_stdout(out), \
                     self.assertRaises(glow_jotform.JotformError) as stop:
-                br.fetch_submissions(client, AFRICA, "Africa")
+                client.submissions(AFRICA, label="Africa")
             return str(stop.exception) + out.getvalue()
 
         said = fetch(curl(cut, "curl: (18) transfer closed with outstanding read data remaining", 18))
