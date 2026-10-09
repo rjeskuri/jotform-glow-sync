@@ -2805,6 +2805,27 @@ console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and A
   check('…its problem form ends with the device question, then the reply question (e-mail validated)',
         fbTitles.slice(-2).join('|') === WQ.FB_DEVICE + '|' + WQ.FB_EMAIL &&
         w.forms[w.props.FORM_FEEDBACK_ID].items[fbTitles.length - 1]._it.validation.kind === 'email');
+
+  // the document lock busy: the dropdowns are not filled, so stop before the triggers and say so
+  const busyOpts = { props: {}, lockBusy: true };
+  w = world(busyOpts);
+  const ran = [];
+  w.ctx.syncFormChoices = () => { ran.push('syncFormChoices'); return 0; };
+  w.ctx.installTriggers = () => { ran.push('installTriggers'); };
+  w.ctx.linkFormToSheet_ = () => null;
+  w.ctx.createGlowForms();
+  check('"Create the Google Forms" with the lock busy: forms made, no dropdowns, no triggers; it says so and to run it again',
+        !ran.length && !!w.props.FORM_ROSTER_ID && w.dialogs.length === 1 &&
+        /dropdowns are NOT filled and the triggers NOT installed/.test(w.dialogs[0]) &&
+        w.dialogs[0].includes('Run "Create the Google Forms" again') &&
+        w.audits.join() === 'createGlowForms: created: feedback, club roster; stopped before the dropdowns and ' +
+                            'triggers: another GLOW operation held the lock', w.audits.join(' | '));
+  busyOpts.lockBusy = false;
+  const formsBefore = Object.keys(w.forms).length;
+  w.ctx.createGlowForms();
+  check('…run again: the same forms reused, then the dropdowns and the triggers',
+        Object.keys(w.forms).length === formsBefore && ran.join() === 'syncFormChoices,installTriggers' &&
+        w.audits[1] === 'createGlowForms: both forms already existed', ran.join() + ' | ' + w.audits[1]);
 }
 
 console.log('\n  the handler reads the filled-in one of two same-titled columns (FormHandlers.gs)');

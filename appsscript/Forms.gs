@@ -123,9 +123,19 @@ function createGlowForms() {
     feedback.setDescription(feedbackDescription_(roster.getPublishedUrl()));
   }
 
-  syncFormChoicesFromMenu();   // under the document lock, like the menu item
+  // the dropdowns under the document lock, like the menu item; if it is busy, stop before the
+  // triggers and say so: a run again reuses the forms and finishes the job
+  const created = made.length ? 'created: ' + made.join(', ') : 'both forms already existed';
+  if (!withDocumentLock_(30000, function () { syncFormChoices(); return true; })) {
+    audit_('createGlowForms', created + '; stopped before the dropdowns and triggers: another ' +
+           'GLOW operation held the lock');
+    ui.alert('GLOW forms', 'The forms are there, but their dropdowns are NOT filled and the ' +
+             'triggers NOT installed: another GLOW operation was running. Run "Create the ' +
+             'Google Forms" again in a minute (it reuses the forms).', ui.ButtonSet.OK);
+    return;
+  }
   installTriggers();
-  audit_('createGlowForms', made.length ? 'created: ' + made.join(', ') : 'both forms already existed');
+  audit_('createGlowForms', created);
 
   ui.alert('GLOW forms', formLinksText_(roster, feedback) +
       '\n\nResponses land in the tabs "' + TAB.ROSTER_FORM + '" and "' + TAB.FEEDBACK +
