@@ -2532,7 +2532,7 @@ sharing stays as it is"):
   6. Check after: retrieve again and compare with the build. Run one changed report through the
      Analytics API, and compare its totals with SOQL.
 
-**Refreshing through the API** (read-only checks): `sf api request rest
+**Refreshing through the API** (the PUT is gated by the live gate: Ryan's go): `sf api request rest
 '/services/data/v62.0/analytics/dashboards/01ZRP00000BE2TR2A1' -o glow -X PUT -b '{}'`.
 - One partner's view: put `?filter1=<option id>` in the path. A `filters` list in the body is
   ignored, and each partner's view has its own cached results.

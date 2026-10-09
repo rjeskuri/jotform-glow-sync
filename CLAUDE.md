@@ -52,7 +52,7 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
    `--rehearse`, `clasp push`, the sync's GitHub switches (`gh variable|secret set`, `gh workflow
    run … apply=true`), Salesforce writes and deploys. `.claude/hooks/live_gate.sh` blocks them
    (`gh` and `sf` too) unless HE exported `GLOW_LIVE_OK=1` before launching; it is a seatbelt, not
-   the go: it misses the connectors, `sf api request rest`, a write through another program.
+   the go: it misses the connectors and a write through another program.
 2. The API key comes from `.env` / the environment, never a command line (command lines land in
    `.claude/settings.local.json` and transcripts — that leaked a key once).
 3. The sync rewrites ALL conditions on every run, so anything added to a form by hand is wiped:

@@ -20,8 +20,8 @@ enable|disable`, a `gh workflow run` that applies, `gh run rerun` and `gh api` w
 `actions/`; and always a self-approval (setting `GLOW_LIVE_OK`, writing a shell startup file or
 `.env`, `launchctl setenv`). A read-only command that only mentions a flag (`grep`, `cat`,
 `git log` …, alone) passes. The hook is a seatbelt, not the permission: **every live write needs
-Ryan's explicit go in this conversation**, gated or not (it does not see the connectors,
-`sf api request rest`, or a write through another program). RUNBOOK "Live gate (Claude Code)".
+Ryan's explicit go in this conversation**, gated or not (it does not see the connectors
+or a write through another program). RUNBOOK "Live gate (Claude Code)".
 
 ## Writers (one per row; every other command is read-only or writes only under `data/` and `backups/`)
 | Writer | What it changes | Saved before the write | Rollback |

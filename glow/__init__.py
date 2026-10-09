@@ -1,7 +1,7 @@
 """Shared library for the GLOW tooling (docs/intent/2026-09-01-shared-jotform-client.md).
 
 - glow.jotform:      the one curl-based Jotform client, dry-run gated; public_page()
-- glow.forms:        the one table of form ids (parity-tested against appsscript/Config.gs)
+- glow.forms:        the one table of form ids (Python-only)
 - glow.text:         normalization helpers shared by every tool (key, name_key; the sheet's
                      tidy / cell_key / nfc_key)
 - glow.sync:         the enrollment/Roster parsers and the structural question ids
