@@ -186,14 +186,12 @@ function processMissedResponses() {
   const outcomes = [];
   for (let i = 0; i < confirmed.length; i++) {
     if (Date.now() - started > MISSED.BUDGET_MS) break;
-    const lock = LockService.getDocumentLock();
     const wait = Math.max(0, Math.min(MISSED.LOCK_WAIT_MS, MISSED.BUDGET_MS - (Date.now() - started)));
-    if (!lock.tryLock(wait)) break;   // a submission is being processed, or out of time
-    try {
+    const ran = withDocumentLock_(wait, function () {
       outcomes.push(runConfirmed_(confirmed[i], snap));
-    } finally {
-      lock.releaseLock();
-    }
+      return true;
+    });
+    if (!ran) break;   // a submission is being processed, or out of time
     Utilities.sleep(MISSED.PAUSE_MS);
   }
   const left = confirmed.length - outcomes.length;

@@ -62,6 +62,23 @@ function audit_(action, detail) {
 }
 
 /**
+ * fn() under the document lock, which every entry point that changes the sheet
+ * or the forms takes (the form-submit trigger waits up to 120 s for it in
+ * onAnyFormSubmit), and fn's value. If the lock is not free within waitMs,
+ * busy() runs instead and its value is returned (no busy: undefined). Never
+ * take it around a dialog: a waiting trigger would time out.
+ */
+function withDocumentLock_(waitMs, fn, busy) {
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(waitMs)) return busy ? busy() : undefined;
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
  * Add issues to the ReviewQueue, skipping any that are already there and
  * still unresolved. Re-running the rebuild must not fill the tab with copies
  * of the same open question — but two different questions about the same
@@ -237,16 +254,9 @@ function loadRoster_() {
 function rebuildRosterFromResponses() {
   const ss = SpreadsheetApp.getActive();
   // IDs are minted here; two overlapping runs would hand out the same numbers
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(30000)) {
+  return withDocumentLock_(30000, function () { return rebuildRosterLocked_(ss); }, function () {
     ss.toast('Another rebuild is still running - try again in a minute.', 'GLOW', 8);
-    return;
-  }
-  try {
-    return rebuildRosterLocked_(ss);
-  } finally {
-    lock.releaseLock();
-  }
+  });
 }
 
 function rebuildRosterLocked_(ss) {

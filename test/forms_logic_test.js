@@ -457,17 +457,17 @@ console.log('\n  held rows, failed old rows');
 console.log('\n  the menu run itself (processMissedResponses; Google services stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']
+  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']   // Roster.gs: withDocumentLock_
       .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
   // Returns what ran and what Audit got, answering the YES/NO dialogs in turn.
-  const runMenu = (responses, log, replies) => {
+  const runMenu = (responses, log, replies, lockBusy) => {
     const ran = [], audits = [], dialogs = [];
     const ctx = vm.createContext({
       console,
       SpreadsheetApp: { getUi: () => ({
         alert: (title, text, buttons) => { dialogs.push(text); return buttons === 'YES_NO' ? replies.shift() : 'OK'; },
         Button: { YES: 'YES', NO: 'NO' }, ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' } }) },
-      LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
+      LockService: { getDocumentLock: () => ({ tryLock: () => !lockBusy, releaseLock: () => {} }) },
       Utilities: { sleep: () => {} },
     });
     vm.runInContext(src, ctx);
@@ -505,6 +505,10 @@ console.log('\n  the menu run itself (processMissedResponses; Google services st
   const nothing = runMenu([], [], []);
   check('nothing pending: one "Nothing to process." message, no Audit row',
         !nothing.ran.length && !nothing.audits.length && nothing.dialogs.join() === 'Nothing to process.');
+  const busy = runMenu(responses, [], ['YES', 'YES', 'YES'], true);
+  check('the document lock busy (a submission being processed): no row runs, "4 not started yet — run it again"',
+        !busy.ran.length && /^0 processed, 4 not started yet — run it again/.test(busy.dialogs[3]) &&
+        /; 4 left$/.test(busy.audits[1]), busy.dialogs[3]);
 }
 
 check('daysBetween_: whole days, NaN for a non-date',
@@ -2095,7 +2099,7 @@ const hd = loadGs(['Q', 'HOLD_PREFIX', 'HOLD_ISSUE', 'SAME_NAME_ISSUE', 'HOLD_IS
 console.log('\n  the menu run with held rows (processMissedResponses, runConfirmed_; Google services stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']
+  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'FormHandlers.gs']
       .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
   const tab = 'Roster Form Responses';
   const R = (row, wall, club) => ({ which: 'ROSTER', row, tab, stamp: cellAt(wall, -240), answers: newClubAnswers(club) });
@@ -2487,7 +2491,7 @@ console.log('\n  the plan (pure)');
 console.log('\n  the menu run and a fresh build (FormApp, the UI, the lock and Audit stubbed)');
 {
   const vm = require('vm');
-  const src = ['Config.gs', 'Normalize.gs', 'Forms.gs']
+  const src = ['Config.gs', 'Normalize.gs', 'Roster.gs', 'Forms.gs']   // Roster.gs: withDocumentLock_
       .map(f => fs.readFileSync(path.join(loadGs.GS_DIR, f), 'utf8')).join('\n');
   const ItemType = { TEXT: 'TEXT', PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', LIST: 'LIST',
                      MULTIPLE_CHOICE: 'MULTIPLE_CHOICE', PAGE_BREAK: 'PAGE_BREAK' };

@@ -489,16 +489,9 @@ function migrateCountryToRegion() {
   const ui = SpreadsheetApp.getUi();
   // the document lock every mutating entry point takes: two concurrent runs
   // would BOTH pass the "is the picker there yet?" check and insert twice
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(30000)) {
+  withDocumentLock_(30000, function () { migrateCountryToRegionLocked_(ui); }, function () {
     ss.toast('Another GLOW operation is still running - try again in a minute.', 'GLOW', 8);
-    return;
-  }
-  try {
-    migrateCountryToRegionLocked_(ui);
-  } finally {
-    lock.releaseLock();
-  }
+  });
 }
 
 function migrateCountryToRegionLocked_(ui) {
@@ -602,18 +595,14 @@ function migrateFormWording() {
              ui.ButtonSet.OK);
     return 0;
   }
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(30000)) {
+  const done = [];
+  const message = withDocumentLock_(30000, function () {
+    return migrateFormWordingLocked_(forms, plan, done);
+  });
+  if (message === undefined) {
     ui.alert('GLOW forms', 'Another GLOW operation is still running — nothing was changed. ' +
              'Try again in a minute.', ui.ButtonSet.OK);
     return 0;
-  }
-  const done = [];
-  let message;
-  try {
-    message = migrateFormWordingLocked_(forms, plan, done);
-  } finally {
-    lock.releaseLock();
   }
   ui.alert('GLOW forms', message, ui.ButtonSet.OK);
   return done.length;
