@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 The link elements and the roster layout on fake forms: tools/update_static_fields.py's header
-logo (HeaderImage), glow/links.py (Links), tools/add_feedback_link.py (LinkTool),
-tools/add_translations.py's plan (TranslationPlan), glow/layout.py (RosterLayout) and
-tools/fix_roster_order.py (FixRosterOrderTool).
+logo (HeaderImage) and Group Photo field (StaticFields), glow/links.py (Links),
+tools/add_feedback_link.py (LinkTool), tools/add_translations.py's plan (TranslationPlan),
+glow/layout.py (RosterLayout) and tools/fix_roster_order.py (FixRosterOrderTool).
 """
 import copy
 import json
@@ -91,6 +91,127 @@ class HeaderImage(unittest.TestCase):
         self.assertIsNotNone(size, "the header asset must be a PNG")
         props = update_static_fields.IMAGE_PROPS
         self.assertEqual(size, (int(props["width"]) * 2, int(props["height"]) * 2))
+
+
+# the Group Photo sublabel of 2026-09-12 (DECISIONS), on every form until the 2026-10-12 change
+# goes live (docs/plans/2026-10-12-photo-sublabel.md)
+OLD_PHOTO_SUBLABEL = ("Upload one photo of everyone in attendance today. "
+                      "All girl faces should be visible.")
+# the languages translations_additions.json carries the static-field strings in; Hindi and
+# Persian (the Asia form only) come from their own dictionaries through add_language.py
+ADDITIONS_LANGS = {"es", "fr", "th", "ur", "te", "vi", "ne", "km", "sw", "ar", "or"}
+
+
+def static_fields_form():
+    """The two questions update_static_fields.py maintains; the photo field as read on all five
+    live forms on 2026-10-12 (one file, allowMultiple 'Yes', the 2026-09-12 sublabel)."""
+    return {"332": {"qid": "332", "type": "control_email", "name": "mentorEmail",
+                    "text": "Partner Coordinator Email"},
+            "19": {"qid": "19", "type": "control_fileupload", "name": "photo", "text": "Group Photo",
+                   "subLabel": OLD_PHOTO_SUBLABEL, "required": "Yes", "limitFileSize": "Yes",
+                   "maxFileSize": "10240", "extensions": "jpg, jpeg, png, gif, heic",
+                   "fileLimit": "1", "allowMultiple": "Yes"}}
+
+
+class StaticFields(unittest.TestCase):
+    """tools/update_static_fields.py: the Group Photo's wording and its one-photo limit."""
+
+    class Fake:
+        """Jotform for update_static_fields.main(): one form's questions; a write is recorded
+        and, as glow.jotform.Client does, changes the form only when applied."""
+
+        def __init__(self, questions, apply):
+            self.questions, self.apply, self.writes = questions, apply, []
+
+        def get(self, path):
+            m = re.fullmatch(r"/form/\d+/question/(\d+)", path)
+            return copy.deepcopy(self.questions[m.group(1)] if m else self.questions)
+
+        def post_form(self, path, data, label):
+            self.writes.append((path, dict(data)))
+            if self.apply:
+                qid = re.fullmatch(r"/form/\d+/question/(\d+)", path).group(1)
+                self.questions[qid].update(
+                    {re.fullmatch(r"question\[(\w+)\]", k).group(1): v for k, v in data.items()})
+
+    def run_main(self, questions, *argv):
+        """(the fake after the run, stdout) of update_static_fields.main() on the template."""
+        import contextlib
+        import io
+        from unittest import mock
+        made, out = [], io.StringIO()
+
+        def client(key, apply=False):
+            made.append(self.Fake(questions, apply))
+            return made[-1]
+        with mock.patch.object(update_static_fields, "Client", client), \
+                mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                mock.patch.object(sys, "argv", ["update_static_fields.py", "--form",
+                                                glow_forms.TEMPLATE, *argv]), \
+                contextlib.redirect_stdout(out):
+            update_static_fields.main()
+        return made[0], out.getvalue()
+
+    def test_the_photo_sublabel_is_one_sentence_and_one_photo_stays_the_rule(self):
+        photo = update_static_fields.WANTED["photo"]
+        self.assertEqual(photo["subLabel"], "Upload one photo of everyone in attendance today.")
+        self.assertTrue(OLD_PHOTO_SUBLABEL.startswith(photo["subLabel"] + " "))   # its first sentence
+        self.assertEqual(photo["fileLimit"], "1")          # what holds a submission to one photo
+        self.assertNotIn("allowMultiple", photo)           # never written: fileLimit does the job
+
+    def test_on_the_live_forms_only_the_photo_sublabel_is_written(self):
+        new = update_static_fields.WANTED["photo"]["subLabel"]
+        path = f"/form/{glow_forms.TEMPLATE}/question/19"
+        fake, out = self.run_main(static_fields_form())                     # dry run
+        drift = [line.strip() for line in out.splitlines() if "->" in line]
+        self.assertEqual(drift, [f"photo (q19): subLabel: {OLD_PHOTO_SUBLABEL[:60]!r} -> {new!r}"])
+        self.assertIn("mentorEmail (q332): already as the guide wants it", out)
+        self.assertEqual(fake.writes, [(path, {"question[subLabel]": new})])
+        self.assertEqual(fake.questions["19"]["subLabel"], OLD_PHOTO_SUBLABEL)   # nothing applied
+        self.assertIn("DRY RUN", out)
+
+        fake, out = self.run_main(fake.questions, "--apply")
+        self.assertEqual(fake.writes, [(path, {"question[subLabel]": new})])
+        self.assertIn("photo (q19): written and verified", out)
+        photo = fake.questions["19"]
+        self.assertEqual((photo["subLabel"], photo["fileLimit"], photo["allowMultiple"]),
+                         (new, "1", "Yes"))
+
+        fake, out = self.run_main(fake.questions)                           # and then it reads clean
+        self.assertEqual(fake.writes, [])
+        self.assertIn("photo (q19): already as the guide wants it", out)
+
+    def test_every_wanted_wording_has_its_translations_queued(self):
+        # without them every other language would show the field in English
+        additions = add_translations.load_additions()
+        dicts = {lang: json.loads(read(os.path.join(REPO, "tools", f"translations_{lang}.json")))
+                 for lang in ("hi", "fa")}
+        for name, field in (("mentorEmail", "text"), ("photo", "subLabel")):
+            english = update_static_fields.WANTED[name][field]
+            self.assertEqual(set(additions[english]) - {"_note"}, ADDITIONS_LANGS, english)
+            for lang, words in dicts.items():
+                self.assertIn(english, words, lang)
+
+    def test_the_short_photo_sublabel_is_the_first_sentence_in_every_language(self):
+        # derived from the reviewed 2026-09-12 translations, never written afresh
+        new_en = update_static_fields.WANTED["photo"]["subLabel"]
+        raw = json.loads(read(os.path.join(REPO, "tools", "translations_additions.json")))
+        old, new = dict(raw[OLD_PHOTO_SUBLABEL]), dict(raw[new_en])
+        old.pop("_note")
+        for lang in ("hi", "fa"):
+            words = json.loads(read(os.path.join(REPO, "tools", f"translations_{lang}.json")))
+            old[lang], new[lang] = words[OLD_PHOTO_SUBLABEL], words[new_en]
+        self.assertEqual(set(new), set(old))
+        self.assertEqual(set(new), ADDITIONS_LANGS | {"hi", "fa"})
+        stops = set(".।۔។")                 # . and the danda, Urdu and Khmer full stops
+        for lang, text in new.items():
+            self.assertTrue(old[lang].startswith(text + " "), lang)
+            self.assertTrue(old[lang][len(text) + 1:].strip(), lang)          # a second sentence was cut
+            if lang == "th":
+                self.assertNotIn(" ", text)                # Thai separates its sentences by a space
+            else:
+                self.assertIn(text[-1], stops, lang)
+                self.assertFalse(stops & set(text[:-1]), lang)
 
 
 def apply_steps(questions, steps):
@@ -574,6 +695,27 @@ class TranslationPlan(unittest.TestCase):
         self.assertEqual(set(out), {md5("text_700"), md5(stored), md5("text_460")})
         self.assertEqual(out[md5("text_700")], glow_sync.guard_html("GG"))
         self.assertEqual(out[md5(stored)], glow_sync.guard_html("GG"))
+
+    def test_the_photo_sublabel_the_form_shows_is_the_one_planned(self):
+        new = update_static_fields.WANTED["photo"]["subLabel"]
+        qs = {**link_form(), **static_fields_form()}
+        qs["19"]["subLabel"] = new                           # after update_static_fields.py --apply
+        payload, sources = add_translations.plan_additions(qs, self.store(*self.OFFERED), self.additions)
+        for lang in ADDITIONS_LANGS:
+            self.assertEqual(payload[lang][md5(new)], self.additions[new][lang], lang)
+            self.assertNotIn(md5(OLD_PHOTO_SUBLABEL), payload[lang], lang)   # no form shows it
+        for lang in ("hi", "fa"):                           # add_language.py's, once base has it
+            self.assertNotIn(md5(new), payload.get(lang, {}), lang)
+        self.assertEqual(sources[md5(new)], new)            # base and en learn the new sentence
+        self.assertNotIn(md5(OLD_PHOTO_SUBLABEL), sources)
+        merged = add_translations.merge(self.store(*self.OFFERED), payload, sources)
+        self.assertEqual((merged["base"][md5(new)], merged["en"][md5(new)]), (new, new))
+        # while the form still shows the 2026-09-12 sentence nothing of the new one is planned:
+        # the translations can only follow the sublabel's write, never precede it
+        qs["19"]["subLabel"] = OLD_PHOTO_SUBLABEL
+        payload, sources = add_translations.plan_additions(qs, self.store(*self.OFFERED), self.additions)
+        self.assertNotIn(md5(new), {k for d in payload.values() for k in d} | set(sources))
+        self.assertIn(md5(OLD_PHOTO_SUBLABEL), payload["es"])
 
     def test_only_a_text_element_named_club_guard_is_translated(self):
         qs = self.guard_form()
