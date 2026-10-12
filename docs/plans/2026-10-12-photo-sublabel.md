@@ -1,7 +1,7 @@
 ---
 title: The Group Photo sublabel loses its sentence about faces; one photo per submission stays
 author: Claude (with Ryan)
-status: accepted         # Ryan asked for it in conversation 2026-10-12; the live steps wait for his go
+status: done             # live on all five forms 2026-10-12 09:10-09:15 UTC, Ryan's go; see Result
 created: 2026-10-12
 intent: none - Ryan's request of 2026-10-12
 ---
@@ -134,3 +134,23 @@ no undoing (unused while no form shows the sentence). The questions snapshot fro
   `add_language.py` hi/fa on Asia (+0 new) are unchanged; replayed in memory against the live
   stores with question 19 carrying the new sentence: 11 new entries per form plus `base`/`en`,
   then +1 Hindi and +1 Persian on Asia.
+
+## Result
+
+Live on 2026-10-12, 09:10-09:15 UTC, on Ryan's go ("let's push it now and go live"); `main` pushed
+first (`8b6a93f`), the runner unaffected. Before: both dry runs as in Proof; `backup_forms.py
+--form` on all five forms (exit 0); Asia hi/fa read `71 of 71`.
+
+- Template, Africa, Latin America: `photo (q19): written and verified`, then `11 new`, `stored`.
+- Asia and U.S: the sublabel `written and verified`; the translations POST answered a gateway
+  `Error #504 - Request timeout` and the tool stopped before its re-read. Both writes had landed:
+  the dry run read `(0 new)`, and the live store against the tool's `-before.json` showed +1 in
+  each of the 11 languages and in `base`/`en`, 0 entries lost, 0 changed (Asia's Hindi and
+  Persian untouched until their own step). Ran the rest of the sequence from where it stopped.
+- Asia: `add_language` hi and fa `+1 new, 72 of 72`, switcher unchanged.
+
+Verify, afterwards (reads): `update_static_fields.py` `photo (q19): already as the guide wants it`
+on all five; `add_translations.py` `(0 new)` on all five (304 entries, Asia 310); hi and fa `+0
+new, 72 of 72`; `form_status.py --partners` every form `→ CLEAN`, `0 flagged as error`,
+`salesforce yes`, U.S `[DISABLED]` (Ryan turned it off by hand the same day). Not done: the
+browser check of the public page in another language.
