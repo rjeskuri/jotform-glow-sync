@@ -68,8 +68,10 @@ straight after; non-English pages show the new sentence in English in between (s
 template first (not mentor-facing), then the regionals. The runner needs no pause: it never
 touches question 19 or the translations.
 
-Run from a checkout that has this change (`grep -n fileLimit tools/update_static_fields.py`
-finds it): an older checkout's tool would write `allowMultiple` No as well. Key from `.env`.
+Run from a checkout that has this change (`grep -c '"fileLimit": "1"' tools/update_static_fields.py`
+prints 1; an older checkout prints 0): an older checkout's tool would write `allowMultiple` No as
+well. The first dry run below is the real check: one subLabel line per form and nothing else.
+Key from `.env`.
 
 ```bash
 set -a; source .env; set +a
@@ -101,8 +103,8 @@ Each translation POST saves the form's whole store first (`backups/translations/
 ```bash
 python3 tools/update_static_fields.py          # "photo (q19): already as the guide wants it" x5, no "->" line
 python3 tools/add_translations.py              # "304 entries across 11 languages (0 new)" x4; Asia "310 ... across 13 (0 new)"
-python3 tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict tools/translations_hi.json      # +0 new, 72 of 72
-python3 tools/add_language.py --form 262383129464057 --code fa --name Persian --dict tools/translations_fa.json    # +0 new, 72 of 72
+python3 tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict tools/translations_hi.json      # +0 new, N of N: one more than before the apply
+python3 tools/add_language.py --form 262383129464057 --code fa --name Persian --dict tools/translations_fa.json    # +0 new, N of N: one more than before the apply
 python3 tools/form_status.py --roster data/roster_<date>.csv --partners data/partners_<date>.csv   # CLEAN, as before
 ```
 
