@@ -1,6 +1,16 @@
 """Set the static fields of the live attendance forms - the ones the sync never
 touches: wording, the Group Photo limits, and the header logo.
 
+  2026-10-12  photo         sublabel -> "Upload one photo of everyone in
+                              attendance today." (Ryan: the sentence about
+                              the girls' faces dropped). One photo stays the
+                              rule, and fileLimit 1 is what holds it, so it
+                              is checked here in place of allowMultiple "No",
+                              which reads 'Yes' on every form while each
+                              submission carries one file - this tool no
+                              longer writes allowMultiple
+                              (docs/plans/2026-10-12-photo-sublabel.md)
+
   2026-09-24  image         -> the Global Catalyst logo, displayed 205x103:
                 the same height as the Global Girls GLOW banner it replaces,
                 the width from the new logo's own 1.99:1 proportions so
@@ -48,12 +58,11 @@ WANTED = {
         "text": "Partner Coordinator Email",
     },
     "photo": {
-        "subLabel": "Upload one photo of everyone in attendance today. "
-                    "All girl faces should be visible.",
+        "subLabel": "Upload one photo of everyone in attendance today.",
         "limitFileSize": "Yes",
         "maxFileSize": "10240",
         "extensions": "jpg, jpeg, png, gif, heic",
-        "allowMultiple": "No",
+        "fileLimit": "1",            # one photo per submission
     },
 }
 

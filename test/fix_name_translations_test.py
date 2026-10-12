@@ -12,7 +12,7 @@ import sys
 import unittest
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
-from helpers.common import name_store
+from helpers.common import REPO, name_store
 import fix_name_translations
 from glow import forms as glow_forms
 from glow import translations
@@ -437,7 +437,8 @@ class FixNameTranslations(unittest.TestCase):
 class TranslationWriters(unittest.TestCase):
     """POST /form/{id}/translations REPLACES each language it carries (CLAUDE.md rule 9):
     add_language.py and restore_translations.py save the whole store before their POST, as
-    add_translations.py and fix_name_translations.py always did (glow/translations.py)."""
+    add_translations.py and fix_name_translations.py always did (glow/translations.py). And
+    add_language.py posts a string only once the form's base holds its English."""
 
     FORM = glow_forms.REGIONALS["Africa"]
     SOURCE = glow_forms.TEMPLATE
@@ -533,6 +534,26 @@ class TranslationWriters(unittest.TestCase):
         code, out = self.run_tool(add_language, ["--code", "or", "--name", "Oriya", "--form", self.FORM,
                                                  "--apply"], fake)
         self.assertEqual((code, len(fake.posts), os.listdir(self.folder())), (0, 1, []))
+
+    def test_add_language_posts_the_short_photo_sublabel_only_once_base_has_it(self):
+        # the live order (docs/plans/2026-10-12-photo-sublabel.md): the sublabel is written,
+        # add_translations.py teaches base/en the new sentence, then Hindi and Persian follow
+        import add_language
+        import update_static_fields
+        new = update_static_fields.WANTED["photo"]["subLabel"]
+        words = os.path.join(REPO, "tools", "translations_hi.json")
+        store = {"base": {}, "en": {}, "hi": {"k-old": "older entry"}}
+        fake = self.Fake(self, {self.FORM: copy.deepcopy(store)}, {self.FORM: {"options": "English|Hindi"}})
+        argv = ["--code", "hi", "--name", "Hindi", "--dict", words, "--form", self.FORM, "--apply"]
+        code, out = self.run_tool(add_language, argv, fake)
+        self.assertEqual((code, fake.posts), (0, []), out)              # base lacks it: nothing posted
+        self.assertIn("+0 new", out)
+        fake.stores[self.FORM]["base"][md5(new)] = new
+        code, out = self.run_tool(add_language, argv, fake)
+        self.assertEqual(code, 0, out)
+        self.assertIn("+1 new", out)
+        self.assertEqual(fake.stores[self.FORM]["hi"],
+                         {"k-old": "older entry", md5(new): add_language.load_dict(words)[new]})
 
     def test_restore_translations_saves_the_target_store_before_its_post(self):
         import restore_translations

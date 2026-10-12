@@ -155,6 +155,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - Club picker rolled out to all four regional forms with the training guide's wording ("Club Name" / "Select your Club Name to see your roster."); mentor email field renamed "Partner Coordinator Email"; Group Photo = one photo, faces visible, 10 MB, HEIC; club names stay English in every language while the surrounding text is translated (Odia included)
 - **Why:** leadership approval 2026-09-12 after consistent partner feedback — typed club names kept rosters from populating, and phone photos exceeded the 3 MB cap
 - **Consequences:** picker wording is generated (`PICKER_PROPS`) and the sync reverts hand edits; static-field wording goes through `tools/update_static_fields.py`; translations are applied only after a form has the picker; translations were written by us, native review pending
+- **2026-10-12:** the Group Photo sublabel no longer says "All girl faces should be visible." (2026-10-12 below); one photo stays.
 
 ### 2026-09-14 — A club is renamed in place
 
@@ -546,3 +547,11 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - What a tool repeats from a Salesforce answer in its output (ATTENTION items, ledger outcomes) is the answer's error codes, `glow.salesforce.error_codes()` (a code has an underscore; no name has), never its words ([plan](plans/2026-10-09-repo-cleanup.md), Phase 3).
 - **Why:** `sf_new_clubs.py` took every all-caps word of four letters or more from an answer, so a name Salesforce quoted in capitals could reach the runner's ATTENTION past `auto_sync.redact`, which knows full names only.
 - **Consequences:** any code is named (`failed_NOT_FOUND`, no longer `failed_other`); the words of an error are read in Salesforce, not in a log.
+
+### 2026-10-12 — The Group Photo sublabel drops "All girl faces should be visible."
+
+- The Group Photo (question 19) sublabel on the template and the four regional forms becomes "Upload one photo of everyone in attendance today."; this replaces the "faces visible" part of 2026-09-12. One photo per submission stays the rule: `fileLimit` 1 holds it, and `tools/update_static_fields.py` now checks that instead of writing `allowMultiple` No, which reads Yes on every form ([plan](plans/2026-10-12-photo-sublabel.md)).
+- The new sentence's translations are the first sentences of the existing ones; the two-sentence entries stay in the translation files, unused once the new sentence is live.
+- **Why:** Ryan's request, 2026-10-12.
+- **Rejected:** deleting the two-sentence translations from the files (it would delete nothing on a form and lose a rollback's source: the plan, The change 3); writing `allowMultiple` No as well (one photo per submission is the rule Ryan kept, and `fileLimit` 1 already enforces it).
+- **Consequences:** live once Ryan runs the plan's steps: per form the sublabel, then the translations (they can only follow it: the tools post what a form shows); the 2026-09-12 translations stay in every store, so a rollback is the old sublabel alone.

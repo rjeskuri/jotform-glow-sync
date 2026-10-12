@@ -112,6 +112,7 @@
   "or": "ଆପଣଙ୍କ କ୍ଲବ୍ ଖୋଜିବାକୁ ଟାଇପ୍ କରନ୍ତୁ"
  },
  "Upload one photo of everyone in attendance today. All girl faces should be visible.": {
+  "_note": "the Group Photo sublabel of 2026-09-12, until Ryan had its second sentence dropped on 2026-10-12 (docs/plans/2026-10-12-photo-sublabel.md): once no form shows it, add_translations.py never posts it again; kept for a rollback. The next entry's translations are the first sentences of these",
   "es": "Sube una foto de todas las asistentes de hoy. Todas las caras de las niñas deben ser visibles.",
   "fr": "Téléchargez une photo de toutes les personnes présentes aujourd'hui. Tous les visages des filles doivent être visibles.",
   "th": "อัปโหลดรูปถ่ายหนึ่งรูปของทุกคนที่เข้าร่วมวันนี้ ใบหน้าของเด็กหญิงทุกคนต้องมองเห็นได้",
@@ -123,6 +124,19 @@
   "sw": "Pakia picha moja ya wote waliohudhuria leo. Nyuso za wasichana wote zionekane.",
   "ar": "حمّل صورة واحدة لجميع الحاضرات اليوم. يجب أن تظهر وجوه جميع الفتيات.",
   "or": "ଆଜି ଉପସ୍ଥିତ ସମସ୍ତଙ୍କର ଗୋଟିଏ ଫଟୋ ଅପଲୋଡ୍ କରନ୍ତୁ। ସମସ୍ତ ଝିଅଙ୍କ ମୁହଁ ଦେଖାଯିବା ଆବଶ୍ୟକ।"
+ },
+ "Upload one photo of everyone in attendance today.": {
+  "es": "Sube una foto de todas las asistentes de hoy.",
+  "fr": "Téléchargez une photo de toutes les personnes présentes aujourd'hui.",
+  "th": "อัปโหลดรูปถ่ายหนึ่งรูปของทุกคนที่เข้าร่วมวันนี้",
+  "ur": "آج حاضر تمام افراد کی ایک تصویر اپ لوڈ کریں۔",
+  "te": "ఈరోజు హాజరైన అందరి ఒక ఫోటోను అప్‌లోడ్ చేయండి.",
+  "vi": "Tải lên một ảnh của tất cả những người tham dự hôm nay.",
+  "ne": "आज उपस्थित सबैको एउटा फोटो अपलोड गर्नुहोस्।",
+  "km": "បង្ហោះរូបថតមួយសន្លឹកនៃអ្នកចូលរួមទាំងអស់ថ្ងៃនេះ។",
+  "sw": "Pakia picha moja ya wote waliohudhuria leo.",
+  "ar": "حمّل صورة واحدة لجميع الحاضرات اليوم.",
+  "or": "ଆଜି ଉପସ୍ଥିତ ସମସ୍ତଙ୍କର ଗୋଟିଏ ଫଟୋ ଅପଲୋଡ୍ କରନ୍ତୁ।"
  },
  "Submit": {
   "_note": "the Submit button: Jotform's own pass covered es/fr/ar only, so just the missing languages are listed - never overwrite Jotform's entries. sw was wrongly assumed covered until 2026-09-26: absent from every store backup since 2026-08-27, the button kept the previously chosen language's text. 'Wasilisha' matches Jotform's own sw wording ('kuwasilisha fomu hii')",
