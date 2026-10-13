@@ -1,12 +1,12 @@
 {
   "env": {
-    "CLAUDE_VERIFY_CMD": "make check",
+    "CLAUDE_VERIFY_CMD": "scripts/verify.sh",
     "HARNESS_TEST_CMD": "scripts/harness_tests.sh {files}",
     "HARNESS_WORKTREE_SETUP": "test -d ../../../.venv && ln -sfn ../../../.venv .venv || true"
   },
   "permissions": {
     "allow": [
-      "Bash(make check)", "Bash(make test)", "Bash(make py)", "Bash(make gs)", "Bash(make secrets)",
+      "Bash(scripts/verify.sh)", "Bash(make check)", "Bash(make test)", "Bash(make py)", "Bash(make gs)", "Bash(make secrets)",
       "Bash(make docs-links)", "Bash(make fixtures-check)", "Bash(make lint)", "Bash(make help)",
       "Bash(npm test)", "Bash(npm run check)",
       "Bash(node test/:*)", "Bash(node scripts/check_gs.js)",

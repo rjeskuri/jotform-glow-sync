@@ -4,8 +4,8 @@ description: Scans a diff or the working tree for personal data (girls' names an
 tools: Read, Grep, Glob, Bash
 ---
 
-Scope: `git diff HEAD` (staged and unstaged) unless given a commit range (`/integrate` passes
-`main...<branch>`): then `git diff <range>`.
+Scope: `git diff HEAD` (staged and unstaged) unless given a commit range (`/land-checks` passes
+`origin/main...<branch>`): then `git diff <range>`.
 
 1. `python3 scripts/check_secrets.py` over the tree, and over the diff's added lines without their
    `+`, as `.githooks/pre-commit` does (with it, a decorator at column 0 reads as an e-mail address):

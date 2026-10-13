@@ -12,7 +12,8 @@ the only copy of a personal-data file. `B=$ARGUMENTS`; the worktree is `git work
 for `$B`.
 
 ## 1. Conflicts with main (in the worktree, on `$B`, never on main)
-`git merge main` when GitHub reports a conflict, then resolve:
+`git fetch origin && git merge origin/main` when GitHub reports a conflict (GitHub judges against
+`origin/main`; local `main` moves only when `harness-pr land` fast-forwards it), then resolve:
 - **`docs/BACKLOG.md`**: keep both sides' items and dated bullets; never renumber an item. Two new
   items with one number: the branch's takes the next free number, and every citation of it on
   the branch's side changes with it (`git grep -n "BACKLOG <n>"`).
@@ -26,11 +27,11 @@ for `$B`.
   are recomputed in the primary checkout (its transcripts are the project's), never hand-merged.
 
 ## 2. Privacy
-The `privacy-auditor` agent on `main...$B`.
+The `privacy-auditor` agent on `origin/main...$B`.
 
 ## 3. What the unattended runner does once `main` moves
 The auto-sync workflow runs `main`'s code only and, with `AUTO_SYNC_APPLY=1`, applies within its
-bands. Read `git diff main...$B -- glow/ tools/auto_sync.py tools/sf_new_clubs.py
+bands. Read `git diff origin/main...$B -- glow/ tools/auto_sync.py tools/sf_new_clubs.py
 sync_attendance_form.py .github/workflows/` for: a switch in `glow/sync.py` (`CONTACT_IDS_FIRST`,
 `ROSTERS_REQUIRED`, `MODULE_CALC_VALUES`, `RETIRE_INACTIVE`, …), what a sync plans that it did not
 before, the bands (`--max-*`), the Salesforce path (`SF_SYNC`). Tell Ryan in plain words what the

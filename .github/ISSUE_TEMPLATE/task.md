@@ -16,8 +16,8 @@ labels: ["task", "status:ready"]
 
 ## Tests that must pass
 Broad behavior first, specific cases after. One line each: where, and what it proves.
-- `tests/test_<area>.py::test_<behavior>`: <the contract it pins down>
-The existing suite (`<verify command>`) stays green.
+- `test/<area>_test.py: <Class>.test_<behavior>`: <the contract it pins down>
+The existing suite (`make check`) stays green.
 
 ## Context
 - `<path>`: <why it matters>

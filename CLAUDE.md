@@ -34,7 +34,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   bullets); new work is a ticket. Review against `REVIEW.md`.
 - Commits: subject ≤ 72 characters, `area: what changed`, blank line, a body that says why;
   trailers when they apply: `Plan: docs/plans/…`, `Backlog: N`, `Live: none | <what, when UTC,
-  Ryan's go>` (`.gitmessage`). Subjects before 2026-10-09 averaged 200+ characters, unreadable.
+  Ryan's go>` (`.gitmessage`), and the same trailers in the pull request's Summary: landing is a
+  squash merge, so the PR text is what reaches `main`. Subjects before 2026-10-09 averaged 200+
+  characters, unreadable.
 - Before `/harness:land`: `/land-checks` — the runner's next run, the privacy audit, and the
   worktree's `data/` and `backups/` (land deletes them; 2026-10-09: the only copies of 11 files).
 - Work log (invoiced monthly; RUNBOOK "Work log and invoices"): `--drop-stale` / `--rewrite-old`
