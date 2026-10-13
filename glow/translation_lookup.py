@@ -14,7 +14,7 @@ lookup, so the tools can count the roster options it alters and name the store
 entries responsible (tools/fix_name_translations.py, tools/form_status.py). It
 never prints anything: callers report counts and club names, never a girl's name.
 
-Read from Jotform's formTranslation.v2.js (the builds served on 2026-10-02,
+Read from Jotform's formTranslation.v2.js (READ_BUILDS lists every build compared; the builds served on 2026-10-02,
 62a8b57dd95 on the regional forms and fc726a121d4 on the template, are byte-
 identical; the runtime investigation of 2026-09-30 read build 9e75d6f1d83):
 
@@ -59,6 +59,17 @@ _INDEX = re.compile(r"^(?:0|[1-9][0-9]*)$")
 # simplifyfWord's replaceMap, in its order; each one replaced until none is left
 _SIMPLIFY = (("&gt;", ">"), ("&lt;", "<"), ("&emsp;", " "), ("&nbsp;", " "), ("<br>", " "),
              ("&amp;", "&"), ("\n", " "), ("\t", " "), ("  ", " "), ("\u3000", " "))
+
+# The runtime builds whose formTranslation.v2.js was read against this module (BACKLOG 64):
+# tools/form_status.py --rendered names any other build it finds as not compared yet. To add
+# one, diff setDictionary, trimMultiSpaces, sanitizeKeys, simplifyfWord and translateUncached
+# in the build's formTranslation.v2.js against this module, fix the module if they differ,
+# then add the id here.
+READ_BUILDS = frozenset({
+    "62a8b57dd95", "fc726a121d4",                  # read 2026-10-02 (regional forms, template)
+    "9e75d6f1d83",                                 # read 2026-09-30
+    "7a7e75787df", "9083adfcdff", "2bdb1ec3fa8",   # byte-identical to the 2026-10-02 builds (2026-10-06)
+})
 
 # The 2026-10-02 builds skip an entry missing in `en` or `base`; 9e75d6f1d83 filed it
 # under "undefined". The audits run both (BUILDS): a form can be served either.
