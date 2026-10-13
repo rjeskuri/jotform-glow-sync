@@ -9,7 +9,8 @@ answer itself, which can hold a girl's name): the caller says what it means for 
 import datetime
 
 from .sync import (
-    DATE, MODULE_ID, MODULES, SESSION_OVERRIDES, WEEK_ID, WEEKS, YEAR, YEAR_ID, has_calc_values)
+    DATE, MODULE_ID, MODULES, SESSION_OVERRIDES, WEEK_ID, WEEKS, YEAR, YEAR_ID, has_calc_values,
+    is_special_event)
 
 
 class Unreadable(ValueError):
@@ -110,8 +111,12 @@ def stored_option(sub, questions, qid):
 
 def session_dropdown(year, module):
     """The session dropdown the form shows for a year and a module (the sync's curriculum
-    cascade, build_conditions section B): the 8-session one for year 1, for another year
-    the one of the module (SESSION_OVERRIDES, else 8). None when that cannot be said."""
+    cascade, build_conditions section B): none for a special event (glow.sync.SPECIAL_EVENTS,
+    any year), else the 8-session one for year 1 (before 2026-10-13 shown on the year
+    alone), for another year the one of the module (SESSION_OVERRIDES, else 8). None when
+    there is none or that cannot be said."""
+    if module is not None and is_special_event(module):
+        return None
     if year == "1":
         return WEEKS[8]
     if year in MODULES and module is not None:
@@ -125,12 +130,18 @@ def copied_fields(sub, questions):
     that one, and a dropdown hidden again can keep an answer, so any other is ignored) - or
     None when it cannot be told: no guess. verdicts: {module | week | year: same | differ |
     undetermined} - whether question 98 / 100 / 102 as submitted is exactly what its
-    source dropdown holds (the module's value; the session's and the year's calcValue)."""
+    source dropdown holds (the module's value; the session's and the year's calcValue). A
+    special event (docs/plans/2026-10-13-special-events.md) is a module like any other and
+    has no session: question 100 is "same" when it is blank, "differ" when it holds one."""
     year, year_copy = stored_option(sub, questions, YEAR)
     module, _ = stored_option(sub, questions, MODULES.get(year))
     _, week_copy = stored_option(sub, questions, session_dropdown(year, module))
+    if module is not None and is_special_event(module):
+        week_copy = ""
 
     def verdict(qid, source):
+        if source == "":                            # no session: the copy must be blank
+            return "same" if answer_of(sub, qid) in (None, "") else "differ"
         return "undetermined" if source is None else "same" if answer_of(sub, qid) == source else "differ"
     return module, {"module": verdict(MODULE_ID, module), "week": verdict(WEEK_ID, week_copy),
                     "year": verdict(YEAR_ID, year_copy)}

@@ -688,9 +688,11 @@ class ModuleValues(unittest.TestCase):
     fake Africa form."""
 
     ROSTER, QIDS, MODULES, texts = SameNameFixture.ROSTER, SameNameFixture.QIDS, SameNameFixture.MODULES, SameNameFixture.texts
-    LINES = ["UPDATE module dropdown (q14, year 1: calcValues = its 1 options)",
-             "UPDATE module dropdown (q92, year 2: calcValues = its 2 options)",
-             "UPDATE module dropdown (q93, year 3: calcValues = its 1 options)"]
+    # each dropdown: its curriculum options and the special event (glow.sync.SPECIAL_EVENTS)
+    LINES = ["UPDATE module dropdown (q14, year 1: calcValues = its 2 options)",
+             "UPDATE module dropdown (q92, year 2: calcValues = its 3 options)",
+             "UPDATE module dropdown (q93, year 3: calcValues = its 2 options)"]
+    EVENT = "Special Event - Welcome Session"
 
     def setUp(self):
         SameNameFixture.setUp(self)
@@ -728,12 +730,12 @@ class ModuleValues(unittest.TestCase):
         self.assertEqual(fake.calls, self.LINES)
         self.assertIn("(conditions unchanged - skipping the rewrite)", out)
         self.assertEqual([w[1:] for w in fake.writes],
-                         [("/question/14", {"question[calcValues]": "|Core 1"}),
-                          ("/question/92", {"question[calcValues]": "|Core 2|Elective - Healthy GLOW"}),
-                          ("/question/93", {"question[calcValues]": "|Core 3"})])
-        want = [{"qid": "14", "year": "1", "modules": 1}, {"qid": "92", "year": "2", "modules": 2},
-                {"qid": "93", "year": "3", "modules": 1}]
-        self.assertEqual(summary["module_values"], want)
+                         [("/question/14", {"question[calcValues]": f"|Core 1|{self.EVENT}"}),
+                          ("/question/92", {"question[calcValues]": f"|Core 2|Elective - Healthy GLOW|{self.EVENT}"}),
+                          ("/question/93", {"question[calcValues]": f"|Core 3|{self.EVENT}"})])
+        want = [{"qid": "14", "year": "1", "modules": 2, "events": 0}, {"qid": "92", "year": "2", "modules": 3, "events": 0},
+                {"qid": "93", "year": "3", "modules": 2, "events": 0}]
+        self.assertEqual(summary["module_values"], [dict(m, events=[]) for m in want])
         plan = auto_sync.parse_plan(out)
         self.assertEqual((plan["modules"], auto_sync.plan_from_summary(summary)["modules"]), (want, want))
         self.assertEqual(auto_sync.changes(plan), 3)
@@ -751,11 +753,12 @@ class ModuleValues(unittest.TestCase):
             self.run_sync(fake)
             self.assertEqual(fake.calls, [self.LINES[1]], calc)
         qs, wire = self.form()
-        qs["92"]["options"] += "|Elective - STEM"                         # a module added in the builder
+        qs["92"]["options"] += "|Elective - STEM"     # a module added in the builder, after the event: kept there
         fake = FakeForm(qs, wire)
         self.run_sync(fake)
-        self.assertIn("UPDATE module dropdown (q92, year 2: calcValues = its 3 options)", fake.calls)
-        self.assertEqual(fake.writes[0][2], {"question[calcValues]": "|Core 2|Elective - Healthy GLOW|Elective - STEM"})
+        self.assertIn("UPDATE module dropdown (q92, year 2: calcValues = its 4 options)", fake.calls)
+        self.assertEqual(fake.writes[0][2], {"question[calcValues]": "|Core 2|Elective - Healthy GLOW|"
+                                                                     f"{self.EVENT}|Elective - STEM"})
 
     def test_the_rollback_clears_them(self):
         from unittest import mock
@@ -780,15 +783,17 @@ class ModuleValues(unittest.TestCase):
         for t in (text, busy):
             run = AutoSyncFixture.run_region(self, t, apply=True)
             self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
-            self.assertIn("- MODULE values q92 (year 2: 2 modules)", run.attention[0][1])
-        cleared = text.replace("= its 1 options)", "cleared)")
+            self.assertIn("- MODULE values q92 (year 2: 3 modules)", run.attention[0][1])
+        cleared = text.replace("= its 2 options)", "cleared)")
         self.assertIn("- MODULE values q14 (year 1: cleared)", AutoSyncFixture.run_region(self, cleared, apply=True)
                       .attention[0][1])
         self.assertFalse(auto_sync.MODULE_RX.match("  - UPDATE module dropdown (q14, year 1: calcValues)"))
         # the line is the sync's own
         joined = re.sub(r'"\s*\n\s*"', "", read(os.path.join(REPO, "sync_attendance_form.py")))
-        for fragment in ('f"UPDATE module dropdown (q{mqid}, year {year}: calcValues "',
-                         '(f"= its {len(options)} options)" if want else "cleared)")'):
+        for fragment in ('f"UPDATE module dropdown (q{mqid}, year {year}: "',
+                         '(f"{len(added)} event option(s) added ({\', \'.join(added)}); " if added else "")',
+                         '+ "calcValues "',
+                         '(f"= its {len(options)} options)" if want else "cleared)" if not same else "none)")'):
             self.assertIn(fragment, joined)
 
 

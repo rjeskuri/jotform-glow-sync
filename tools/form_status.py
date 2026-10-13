@@ -19,7 +19,11 @@ copies the module, not the text a translated page shows), whether the module
 chain keeps its shape (docs/plans/2026-10-06-module-selection.md: the year,
 module and session dropdowns single-select and required, and the form-level
 clearFieldOnHide as CLEAR_FIELD_ON_HIDE says, so a dropdown hidden by the Year
-rule never sends its answer) and whether the form's
+rule never sends its answer), whether every module dropdown lists each special
+event once and no rule shows a session for one, with the session bridge in front
+(docs/plans/2026-10-13-special-events.md: question 100 then reaches Salesforce
+blank for an event; a form without the options awaits a sync apply by hand) and
+whether the form's
 own translation dictionary alters any roster option (the runtime's lookup
 emulated, glow/translation_lookup.py, in every language the store holds: question
 18 would send another spelling of that girl's name; counts and club names only).
@@ -398,6 +402,97 @@ def audit_module_shape(questions, props):
     return problems, summary
 
 
+EVENTS_FIX = "a sync apply by hand, template first (RUNBOOK \"Special events\")"
+
+
+def audit_special_events(questions, conditions):
+    """The special events (docs/plans/2026-10-13-special-events.md): every module dropdown
+    lists each glow.sync.SPECIAL_EVENTS option exactly once, in that spelling, and no other
+    option with the prefix (their calcValues: audit_module_values); no rule shows a session
+    dropdown for an event, or on the year alone (the year-1 rule before 2026-10-13); and the
+    session bridge (glow.sync.week_bridge_layout) is there once, in its shape, before every
+    rule that shows a session dropdown and before the copies into question 100 - so an event
+    sends question 100 blank. A form without the options yet reads as awaiting a sync apply
+    by hand. Returns (problems, summary)."""
+    problems, listed = [], {}
+    events = glow_sync.special_event_options()
+    for year, qid in MODULES.items():
+        q = questions.get(qid)
+        if q is None:
+            continue                     # audit_module_shape reports it
+        options = dropdown_options(q)
+        listed[qid] = {e: options.count(e) for e in events}
+        plan = glow_sync.special_event_plan(options)
+        respelled = dict((want, have) for have, want in plan["respelled"])
+        for e, n in listed[qid].items():
+            if n == 0 and e in respelled:
+                problems.append(f"module dropdown q{qid} (year {year}) lists the special event as "
+                                f"'{respelled[e]}', not '{e}' - Salesforce receives the form's spelling; "
+                                "correct it in the builder")
+            elif n == 0:
+                problems.append(f"module dropdown q{qid} (year {year}) lacks the special event '{e}' - "
+                                f"awaiting {EVENTS_FIX}")
+            elif n > 1:
+                problems.append(f"module dropdown q{qid} (year {year}) lists '{e}' {n} times - remove the "
+                                "extra one(s) in the builder")
+        for o in plan["unknown"]:
+            problems.append(f"module dropdown q{qid} (year {year}) lists '{o}', which is no special event of "
+                            "glow/sync.py SPECIAL_EVENTS - a retired type is removed by hand in the builder "
+                            "(RUNBOOK \"Special events\")")
+    shape = glow_sync.week_bridge_layout(conditions)
+    if shape["event_rules"]:
+        problems.append(f"{len(shape['event_rules'])} rule(s) show a session dropdown without testing a "
+                        f"curriculum module (first: rule {shape['event_rules'][0] + 1}) - a special event "
+                        f"would show a session; awaiting {EVENTS_FIX}")
+    pos = shape["position"]
+    if pos is None:
+        problems.append("no session bridge (question 100 from the session dropdown shown) - a session picked "
+                        f"before switching to a special event would reach Salesforce; awaiting {EVENTS_FIX}")
+    else:
+        if len(shape["bridge"]) > 1:
+            problems.append(f"{len(shape['bridge'])} session bridges into question 100, expected 1 - the "
+                            "next sync apply rewrites the rules")
+        fields = set(glow_sync.WEEK_BRIDGE_FIELDS)
+        wrong = []
+        if not shape["ignore_hidden"]:
+            wrong.append("hidden session dropdowns not ignored")
+        if str(shape["link"]).lower() != "any":
+            wrong.append(f"link {shape['link']!r}, not Any")
+        untested = fields - {f for f, op in shape["terms"].items() if op == "isFilled"}
+        if untested:
+            wrong.append(f"its rule does not test {len(untested)} of the year, module and session dropdowns "
+                         "(isFilled)")
+        if fields - set(shape["operands"]):
+            wrong.append(f"{len(fields - set(shape['operands']))} of them not among its operands")
+        if wrong:
+            problems.append("the session bridge (question 100): " + "; ".join(wrong) + " - the next sync apply "
+                            "rewrites it")
+        late = [p for p in shape["session_rules"] + shape["copies"] if p < pos]
+        if late:
+            problems.append(f"the session bridge is rule {pos + 1} of {shape['count']}, after {len(late)} rule(s) "
+                            "that show a session dropdown or copy one into question 100 - Jotform walks a "
+                            "field's rules last to first, so it would run before them; the next sync apply "
+                            "puts it first")
+    summary = {"listed": listed, "rules": shape["count"], "bridge_rule": None if pos is None else pos + 1,
+               "session_rules": len(shape["session_rules"]), "copies": len(shape["copies"]),
+               "event_rules": len(shape["event_rules"])}
+    return problems, summary
+
+
+def special_events_line(summary):
+    """The printed report's `special events:` line, from form_report's `special_events`."""
+    if not summary:
+        return "not read"
+    listed = summary.get("listed") or {}
+    events = glow_sync.special_event_options()
+    once = [q for q, c in listed.items() if all(c.get(e) == 1 for e in events)]
+    head = (f"{len(events)} type(s) on {len(once)} of {len(listed)} module dropdowns"
+            if events else "none listed in glow/sync.py")
+    bridge = summary.get("bridge_rule")
+    return (head + "; session bridge " + (f"rule {bridge} of {summary['rules']}" if bridge else "missing")
+            + f", {summary['session_rules']} session rule(s), {summary['event_rules']} on no curriculum module")
+
+
 NAMES_FIX = "tools/fix_name_translations.py --form {form} (dry run first; RUNBOOK \"The names dictionary and the module values\")"
 
 
@@ -674,7 +769,8 @@ def rendered_problems(r, page):
     elif req["required"]:
         problems.append(f"rendered page: {req['required']} rosters still carry validate[required] although "
                         "glow/sync.py ROSTERS_REQUIRED is off")
-    return problems + rendered_module_problems(r, page) + rendered_names_problems(r, page)
+    return (problems + rendered_module_problems(r, page) + rendered_bridge_problems(r, page)
+            + rendered_names_problems(r, page))
 
 
 def rendered_select_attrs(page, qid):
@@ -682,6 +778,85 @@ def rendered_select_attrs(page, qid):
     in memory), or None when the page has no such select."""
     m = re.search(r'<select\b([^>]*\bname="q%s_[^"]*"[^>]*)>' % re.escape(str(qid)), page or "")
     return m.group(1) if m else None
+
+
+def rendered_event_options(page, qid):
+    """{event option: (times the select of question `qid` serves it, times with a data-calcvalue
+    equal to its value)} for each glow.sync.SPECIAL_EVENTS option; None when the page has no
+    such select."""
+    m = re.search(r'<select\b[^>]*\bname="q%s_[^"]*"[^>]*>(.*?)</select>' % re.escape(str(qid)),
+                  page or "", re.S)
+    if not m:
+        return None
+    out = {e: [0, 0] for e in glow_sync.special_event_options()}
+    for attrs in re.findall(r"<option\b([^>]*)>", m.group(1)):
+        value = re.search(r'(?<![\w-])value="([^"]*)"', attrs)
+        calc = re.search(r'\bdata-calcvalue="([^"]*)"', attrs)
+        v = html.unescape(value.group(1)) if value else None
+        if v in out:
+            out[v][0] += 1
+            out[v][1] += bool(calc and html.unescape(calc.group(1)) == v)
+    return {e: tuple(c) for e, c in out.items()}
+
+
+def rendered_week_bridge(page):
+    """The session bridge as the page serves it (qids and counts only): {"rules": how many
+    JotForm.setConditions holds, "position": the bridge's 0-based place (None: not there),
+    "late": rules before it that show a session dropdown or copy one into question 100,
+    "operands": the bridge's operands in JotForm.setCalculations (None: no entry),
+    "ignore_hidden": its ignoreHiddenFields there}. None when the page has neither array."""
+    conds, calcs = page_array(page, "setConditions"), page_array(page, "setCalculations")
+    if conds is None or calcs is None:
+        return None
+    shape = glow_sync.week_bridge_layout(conds)
+    pos = shape["position"]
+    calc = next((c for c in calcs if isinstance(c, dict) and str(c.get("resultField")) == WEEK_ID
+                 and str(c.get("equation") or "") == glow_sync.week_bridge_equation()), None)
+    flag = None if calc is None else calc.get("ignoreHiddenFields")
+    return {"rules": len(conds), "position": pos,
+            "late": None if pos is None else sum(1 for p in shape["session_rules"] + shape["copies"] if p < pos),
+            "operands": None if calc is None else [x for x in str(calc.get("operands") or "").split(",") if x],
+            "ignore_hidden": flag is True or str(flag).lower() in ("1", "true")}
+
+
+def rendered_bridge_problems(r, page):
+    """--rendered: the special-event options each module select serves, with their
+    data-calcvalue (adds r["rendered_events"]: {qid: {event: (served, aligned)} or None}), and the
+    session bridge as served (adds r["rendered_bridge"]): first among the session rules and the
+    copies, its operands kept (Jotform keeps an operand that is not in the equation: the Club
+    picker on question 18 is one), hidden dropdowns ignored."""
+    problems, seen = [], {}
+    for _year, qid in MODULES.items():
+        events = rendered_event_options(page, qid)
+        seen[qid] = events
+        if events is None:
+            continue                     # rendered_module_problems reports a missing select
+        for e, (served, aligned) in events.items():
+            if served != 1 or aligned != 1:
+                problems.append(f"rendered page: module dropdown q{qid} serves '{e}' {served} time(s), "
+                                f"{aligned} with its data-calcvalue - a page from before the apply (re-run in a "
+                                f"few minutes), else {EVENTS_FIX}")
+    r["rendered_events"] = seen
+    bridge = rendered_week_bridge(page)
+    r["rendered_bridge"] = bridge
+    if bridge is None or bridge["position"] is None:
+        problems.append("rendered page: no session bridge (question 100) in JotForm.setConditions - a page from "
+                        f"before the apply, or its layout changed; else {EVENTS_FIX}")
+        return problems
+    if bridge["late"]:
+        problems.append(f"rendered page: the session bridge is rule {bridge['position'] + 1} of {bridge['rules']}, "
+                        f"after {bridge['late']} rule(s) that show a session dropdown or copy one - it would run "
+                        "before them (a page from before the apply: re-run in a few minutes)")
+    missing = set(glow_sync.WEEK_BRIDGE_FIELDS) - set(bridge["operands"] or [])
+    if bridge["operands"] is None or missing:
+        problems.append("rendered page: the session bridge's entry in JotForm.setCalculations "
+                        + ("is missing" if bridge["operands"] is None else
+                           f"lacks {len(missing)} of its operands: " + ", ".join("q" + q for q in sorted(missing, key=int)))
+                        + f" - Jotform dropped them, or the page is from before the apply ({EVENTS_FIX})")
+    elif not bridge["ignore_hidden"]:
+        problems.append("rendered page: the session bridge does not ignore hidden fields - an event picked after a "
+                        f"session would send that session ({EVENTS_FIX})")
+    return problems
 
 
 def rendered_clear_field_on_hide(page):
@@ -1094,6 +1269,10 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
     # the chain's shape: one required single-select per step, hidden ones cleared at submit
     shape_problems, shape_summary = audit_module_shape(questions, props)
     rule_problems += shape_problems
+    # the special events: each event option once per module dropdown, no session for one,
+    # and question 100 blank for one (the session bridge)
+    event_problems, event_summary = audit_special_events(questions, conditions)
+    rule_problems += event_problems
     # question 18's names: the form's own translation dictionary must alter no roster option
     # (one more GET; a store that cannot be read or emulated is reported, not a problem)
     lang = glow_forms.language_of(props)
@@ -1143,6 +1322,9 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
         # (per kind, {qid: {"single", "required", "dropdown"}}, and "clearFieldOnHide"); the names
         # dictionary: counts and club names only ("checked": False when the store was not read)
         "module_values": module_summary, "module_shape": shape_summary, "names_dictionary": names_summary,
+        # {module qid: {event option: times listed}}, the session bridge's place (1-based, None:
+        # missing) and the rules that show a session dropdown (on no curriculum module: an event's)
+        "special_events": event_summary,
         "id": form_id, "label": label, "title": info.get("title"), "status": status,
         "submissions": int(info.get("count") or 0), "last_submission": info.get("last_submission"),
         "questions": len(questions), "club_questions": sum(len(v) for v in clubs.values()),
@@ -1217,8 +1399,10 @@ def main():
                          "the rosters' rules and lists the picker, every roster's boxes carry "
                          "validate[required], every module dropdown option's data-calcvalue equals "
                          "its value, no module select is served `multiple`, JotForm.clearFieldOnHide "
-                         "is what glow/sync.py says, and the translation store the page embeds alters "
-                         "no roster box it serves; prints the runtime build")
+                         "is what glow/sync.py says, each module select serves every special event once "
+                         "with its data-calcvalue, the session bridge (question 100) comes before the "
+                         "session rules and keeps its operands, and the translation store the page embeds "
+                         "alters no roster box it serves; prints the runtime build")
     args = ap.parse_args()
     if not args.roster:
         # no default: the one there was (data/roster_build/Roster.csv) is the pre-launch
@@ -1289,6 +1473,7 @@ def main():
               f"rosters required: {rs['required_rosters']} of {rs['clubs']}")
         print(f"   module values: {module_values_line(r.get('module_values'))}")
         print(f"   module shape: {module_shape_line(r.get('module_shape'))}")
+        print(f"   special events: {special_events_line(r.get('special_events'))}")
         print(f"   names dictionary: {names_line(r.get('names_dictionary'))}")
         if "rendered_skipped" in r:
             print(f"   rendered: skipped (form {r['rendered_skipped']})")
@@ -1322,6 +1507,14 @@ def main():
             s = r["rendered_shape"]
             print(f"   rendered shape: clearFieldOnHide {s['clearFieldOnHide'] or 'not found on the public page'}, "
                   f"module selects served multiple: {', '.join('q' + q for q in s['multi_select']) or 'none'}")
+        if "rendered_bridge" in r:
+            b, ev = r["rendered_bridge"], r.get("rendered_events") or {}
+            served = [q for q, c in ev.items() if c and all(n == (1, 1) for n in c.values())]
+            print(f"   rendered events: {len(served)} of {len(ev)} module selects serve each special event once "
+                  "with its data-calcvalue; session bridge "
+                  + ("not found on the public page" if b is None or b["position"] is None else
+                     f"rule {b['position'] + 1} of {b['rules']}, {b['late']} session rule(s) or copies before it, "
+                     f"operands kept: {'yes' if not set(glow_sync.WEEK_BRIDGE_FIELDS) - set(b['operands'] or []) else 'no'}"))
         if "rendered_names" in r:
             n = r["rendered_names"]
             print("   rendered names: " + (f"not checked ({n.get('why')})" if not n.get("checked") else

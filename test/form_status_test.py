@@ -503,19 +503,20 @@ class ModuleAndNamesAudit(unittest.TestCase):
         qs, _ = self.form()
         problems, summary = form_status.audit_module_values(qs)
         self.assertEqual(problems, [])
-        self.assertEqual(summary, {"14": {"options": 1, "aligned": True}, "92": {"options": 2, "aligned": True},
-                                   "93": {"options": 1, "aligned": True}})
+        # each dropdown carries its curriculum options and the special event (glow.sync.SPECIAL_EVENTS)
+        self.assertEqual(summary, {"14": {"options": 2, "aligned": True}, "92": {"options": 3, "aligned": True},
+                                   "93": {"options": 2, "aligned": True}})
         bare = copy.deepcopy(qs)
         for q in sync.MODULES.values():
             bare[q]["calcValues"] = ""
         shifted = copy.deepcopy(qs)
-        shifted["92"]["calcValues"] = "|Elective - Healthy GLOW|Core 2"
+        shifted["92"]["calcValues"] = "|Elective - Healthy GLOW|Core 2|Special Event - Welcome Session"
         problems = form_status.audit_module_values(bare)[0]
         self.assertEqual(len(problems), 3)
         self.assertIn("module dropdown q14 (year 1): no calcValues - question 98 (module_id, what Salesforce "
                       "stores) copies the visible text", problems[0])
         (problem,) = form_status.audit_module_values(shifted)[0]
-        self.assertIn("q92 (year 2): calcValues out of line with its 2 options (3 values) - question 98 would "
+        self.assertIn("q92 (year 2): calcValues out of line with its 3 options (4 values) - question 98 would "
                       "send another module", problem)
         gone = copy.deepcopy(qs)
         del gone["93"]
@@ -526,7 +527,7 @@ class ModuleAndNamesAudit(unittest.TestCase):
             (problem,) = form_status.audit_module_values(shifted)[0]
             self.assertIn("a sync apply by hand clears them", problem)
         self.assertEqual(form_status.module_values_line(summary),
-                         "q14 aligned (1 options), q92 aligned (2 options), q93 aligned (1 options)")
+                         "q14 aligned (2 options), q92 aligned (3 options), q93 aligned (2 options)")
 
     def test_the_names_audit_counts_and_names_clubs_never_girls(self):
         qs, _ = self.form()
@@ -588,7 +589,7 @@ class ModuleAndNamesAudit(unittest.TestCase):
         self.assertNotIn("cut-off", json.dumps(rep["names_dictionary"]))
         # the module half: a dropdown without calcValues is a rule problem, so the verify step fails
         rep = report(served_store(qs))
-        self.assertEqual(rep["module_values"]["14"], {"options": 1, "aligned": True})
+        self.assertEqual(rep["module_values"]["14"], {"options": 2, "aligned": True})
         self.assertFalse([p for p in rep["rule_problems"] if p.startswith("module dropdown")])
         bare = copy.deepcopy(qs)
         bare["14"]["calcValues"] = ""
@@ -612,7 +613,7 @@ class ModuleAndNamesAudit(unittest.TestCase):
 
         problems, r = rendered(served_modules_and_store(qs))
         self.assertEqual(problems, [])
-        self.assertEqual(r["rendered_modules"]["92"], {"options": 2, "aligned": 2, "differ": 0, "missing": 0})
+        self.assertEqual(r["rendered_modules"]["92"], {"options": 3, "aligned": 3, "differ": 0, "missing": 0})
         self.assertEqual(r["rendered_names"], {"checked": True, "options": 8, "altered": 0, "languages": 2,
                                                "by_language": {}})
         bare = copy.deepcopy(qs)
@@ -620,14 +621,14 @@ class ModuleAndNamesAudit(unittest.TestCase):
             bare[q]["calcValues"] = ""
         problems, _ = rendered(served_modules_and_store(bare))
         self.assertEqual(len(problems), 3)
-        self.assertIn("rendered page: module dropdown q14: 1 of 1 options carry no data-calcvalue", problems[0])
+        self.assertIn("rendered page: module dropdown q14: 2 of 2 options carry no data-calcvalue", problems[0])
         with mock.patch.object(glow_sync, "MODULE_CALC_VALUES", False):
             self.assertEqual(rendered(served_modules_and_store(bare), bare)[0], [])
         more = copy.deepcopy(qs)
         more["92"]["options"] += "|Elective - STEM"
         more["92"]["calcValues"] += "|Elective - STEM"
         (problem,), _ = rendered(served_modules_and_store(qs), more)
-        self.assertIn("rendered page lists 2 of module dropdown q92's 3 options", problem)
+        self.assertIn("rendered page lists 3 of module dropdown q92's 4 options", problem)
         # the embedded dictionary, not the API's: a page from before the fix is caught
         stale = served_store(qs, {md5("Jane  Doe"): ("Jane  Doe", "Jane  Doe")})
         (problem,), r = rendered(served_modules_and_store(qs, stale))
@@ -645,7 +646,7 @@ class ModuleAndNamesAudit(unittest.TestCase):
         self.assertIn("no embedded translation store", problems[4])
         self.assertFalse(r["rendered_names"]["checked"])
         self.assertEqual(r["rendered_shape"], {"clearFieldOnHide": None, "multi_select": []})
-        self.assertEqual(summary["14"]["options"], 1)
+        self.assertEqual(summary["14"]["options"], 2)
 
     def test_the_module_shape_is_pinned(self):
         """docs/plans/2026-10-06-module-selection.md (a): one required single-select per step of

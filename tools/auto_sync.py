@@ -32,9 +32,10 @@ rules that test a name the Club picker does not list (a restored backup, a
 half-finished hand apply) are never "in-sync": ATTENTION, apply by hand. Rules
 that calculate question 18 (the names sent to Salesforce) the old way, the
 required flag written on a roster that has no other change, and a module
-dropdown's calcValues, stop the region (ATTENTION): each is rolled out by hand,
-one form at a time, template first (docs/RUNBOOK.md, "The names list sent to
-Salesforce" and "The names dictionary and the module values"). The verify step's
+dropdown's calcValues or the special-event options appended with them, stop the
+region (ATTENTION): each is rolled out by hand, one form at a time, template
+first (docs/RUNBOOK.md, "The names list sent to Salesforce", "The names
+dictionary and the module values" and "Special events"). The verify step's
 form_status also audits the form's names dictionary; a store it could not read
 is a note. Once per run, after the regions, Jotform's storage is read against the
 account's plan (glow/usage.py): the line is logged, and a limit at 80 % or more -
@@ -108,9 +109,12 @@ PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+)
 GUARD_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club guard \([^)]*\)$")
 # a module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES): never applied unattended
 # (check_bands) - the first rollout is by hand, template first; afterwards a difference means
-# the dropdown was edited in the builder (docs/plans/2026-10-02-names-and-modules.md)
-MODULE_RX = re.compile(r"^  - UPDATE module dropdown \(q(?P<qid>\d+), year (?P<year>\d+): calcValues "
-                       r"(?:= its (?P<modules>\d+) options|cleared)\)$")
+# the dropdown was edited in the builder (docs/plans/2026-10-02-names-and-modules.md). The same
+# write may append special-event options (glow/sync.py SPECIAL_EVENTS): held the same way, a
+# new type is rolled out by hand, template first (docs/plans/2026-10-13-special-events.md)
+MODULE_RX = re.compile(r"^  - UPDATE module dropdown \(q(?P<qid>\d+), year (?P<year>\d+): "
+                       r"(?:(?P<events>\d+) event option\(s\) added \((?P<names>.+)\); )?calcValues "
+                       r"(?:= its (?P<modules>\d+) options|cleared|none)\)$")
 ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) girls\); "
                        r"(?P<all>\d+) clubs overall")
 # a roster retired (kept hidden, off the Club picker, no show rule) or restored to the
@@ -144,8 +148,10 @@ CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the ros
 
 # ------------------------------------------------------------ pure functions
 def module_entry(m):
-    """A MODULE_RX match -> {"qid", "year", "modules"} (modules: 0 = the calcValues cleared)."""
-    return {"qid": m["qid"], "year": m["year"], "modules": int(m["modules"] or 0)}
+    """A MODULE_RX match -> {"qid", "year", "modules", "events"} (modules: 0 = the calcValues
+    cleared, or none written; events: how many special-event options the write appends)."""
+    return {"qid": m["qid"], "year": m["year"], "modules": int(m["modules"] or 0),
+            "events": int(m["events"] or 0)}
 
 
 def parse_plan(text):
@@ -297,11 +303,13 @@ def plan_summary(plan):
     requires = plan.get("requires", [])
     values = sorted({r["required"] for r in requires})
     modules = plan.get("modules", [])
+    events = [m for m in modules if m.get("events")]
     retired, restored = plan.get("retired", []), plan.get("restored", [])
     return (f"{len(plan['creates'])} create(s), {len(plan['updates'])} update(s), "
             f"{len(plan['deletes'])} delete(s), {len(plan['warnings'])} warning(s)"
             + (f", required: {'/'.join(values)} on {len(requires)} roster(s)" if requires else "")
             + (f", module values on {len(modules)} dropdown(s)" if modules else "")
+            + (f", special-event options on {len(events)} dropdown(s)" if events else "")
             + (f", {len(retired)} retired" if retired else "")
             + (f", {len(restored)} restored" if restored else "")
             + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
@@ -354,9 +362,17 @@ def check_bands(plan, max_creates=5, max_updates=20, max_retires=5, max_restores
                        "names list sent to Salesforce\"), and afterwards a roster that lost the flag was "
                        "edited in the builder")
     modules = plan.get("modules", [])
-    if modules:
-        reasons.append(f"would write the calcValues of {len(modules)} module dropdown(s) "
-                       f"({', '.join('q' + m['qid'] for m in modules)}) - never unattended: the first "
+    events = [m for m in modules if m.get("events")]
+    values = [m for m in modules if not m.get("events")]
+    if events:
+        reasons.append(f"would add special-event option(s) to {len(events)} module dropdown(s) "
+                       f"({', '.join('q' + m['qid'] for m in events)}), with their calcValues - never "
+                       "unattended: a new type (glow/sync.py SPECIAL_EVENTS) is rolled out by hand, "
+                       "template first, with the browser check (docs/RUNBOOK.md, \"Special events\"); "
+                       "nothing applied here, roster changes included")
+    if values:
+        reasons.append(f"would write the calcValues of {len(values)} module dropdown(s) "
+                       f"({', '.join('q' + m['qid'] for m in values)}) - never unattended: the first "
                        "rollout is by hand, template first (docs/RUNBOOK.md, \"The names dictionary and "
                        "the module values\"), and afterwards a difference means a module dropdown was "
                        "edited in the builder; nothing applied here, roster changes included")
@@ -673,7 +689,9 @@ class Run:
                                    (f"\n- REQUIRED on {len(plan['requires'])} roster(s) with no other change"
                                     if plan.get("requires") else "") +
                                    "".join(f"\n- MODULE values q{m['qid']} (year {m['year']}: "
-                                           + (f"{m['modules']} modules)" if m["modules"] else "cleared)")
+                                           + (f"{m['modules']} modules" if m["modules"] else "cleared")
+                                           + (f", {m['events']} special-event option(s) added)"
+                                              if m.get("events") else ")")
                                            for m in plan.get("modules", [])) +
                                    "".join(f"\n- RETIRE {r['club']} (q{r['qid']}): {r['reason']}"
                                            for r in plan.get("retired", [])) +

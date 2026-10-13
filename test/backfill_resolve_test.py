@@ -23,6 +23,7 @@ import backfill_resolve as br         # noqa: E402
 from glow import forms as glow_forms  # noqa: E402
 from glow import jotform as glow_jotform   # noqa: E402
 from glow import submissions as glow_submissions   # noqa: E402
+from glow import sync as glow_sync   # noqa: E402
 from glow.sync import MODULES, PICKER_NAME, SESSION_OVERRIDES, WEEKS, YEAR   # noqa: E402
 
 AFRICA, ASIA = glow_forms.REGIONALS["Africa"], glow_forms.REGIONALS["Asia"]
@@ -519,6 +520,31 @@ class BackfillResolve(unittest.TestCase):
         self.assertRegex(out.getvalue(), r"session \(question 100\) +same +2 \(2\) +differ +1 \(0\) +source not determined +0 \(0\)\n")
         self.assertRegex(out.getvalue(), r"year \(question 102\) +same +2 \(1\) +differ +1 \(1\) +source not determined +0 \(0\)\n")
         self.assertNotIn(TRANSLATED, out.getvalue())
+
+    def test_a_special_event_reads_as_its_module_with_no_session(self):
+        # docs/plans/2026-10-13-special-events.md: the event is an option of every year's module
+        # dropdown and shows no session dropdown, so question 100 arrives blank - never Unreadable
+        event = glow_sync.special_event_options()[0]
+        qs = questions()
+        for qid in MODULES.values():
+            qs[qid]["options"] += "|" + event
+        for year in MODULES:
+            with self.subTest(year=year):
+                self.assertIsNone(glow_submissions.session_dropdown(year, event))
+                rows, _, counts = self.resolve([submission("9001", {"10": [AMARA]}, year=year, module=event,
+                                                           week=None)], qs=qs)
+                self.assertEqual((rows[0]["module"], rows[0]["module_week"], rows[0]["module_year"]),
+                                 (event, None, year))
+                self.assertFalse({"module_translated", "module_unresolved"} & set(rows[0]["flags"]))
+                got = {f: [v for v, n in c.items() if n] for f, c in counts["copied_fields"].items()}
+                self.assertEqual(got, {"module": ["same"], "week": ["same"], "year": ["same"]})
+        # a session that reached question 100 anyway (the form before the session bridge)
+        rows, _, counts = self.resolve([submission("9001", {"10": [AMARA]}, module=event, week=None, q100="3")],
+                                       qs=qs)
+        self.assertEqual((rows[0]["module"], counts["copied_fields"]["week"]["differ"]), (event, 1))
+        # the event's prefix in another case is still an event; a curriculum module is unchanged
+        self.assertIsNone(glow_submissions.session_dropdown("2", event.upper()))
+        self.assertEqual(glow_submissions.session_dropdown("1", "Decision Making"), WEEKS[8])
 
     def test_name_flags(self):
         comma = "Marrowgate, Beatrice"
