@@ -7,8 +7,8 @@ created: YYYY-MM-DD
 
 # Intent: <feature name>
 
-<!-- Optional: only to capture Ryan's ask before a plan exists. Small changes go straight to a
-     plan (docs/templates/plan.md), which can quote the ask in its `intent:` line. -->
+<!-- Optional: only to capture Ryan's ask before a ticket exists. New work is a ticket on the
+     board; a plan (docs/templates/plan.md) only beside a ticket whose change has a live rollout. -->
 
 ## Problem
 <the current state and the pain it causes — who feels it, how often>
