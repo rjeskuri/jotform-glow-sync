@@ -26,14 +26,11 @@
 3. Staff tell mentors (Ryan): the new option; one submission per club per day (a Welcome Session on a
    curriculum day is refused as a duplicate, whichever arrives second).
 
-**Work log — not updated, needs Ryan's decision.** `python3 tools/worklog.py update` exits 1
-without writing: the 2026-10-09 auto row has no work in this repo's transcripts (it came from the
-home-folder sessions, counted with `--transcripts`). `--drop-stale` only on Ryan's word; or make
-the row `manual` by hand, or recount it with `--transcripts <home folder>`. Then `update` logs
-2026-10-12 and 2026-10-13. Suggested 2026-10-13 description: "Designed, built and released a
-Special Events option on all the attendance forms, starting with Welcome Sessions, so clubs can
-record one-off sessions alongside the curriculum; reviewed, tested and checked on every form.
-Confirmed the photo upload limit (10 MB, one photo) on every form."
+**Work log — unblocked 2026-10-13 (Ryan: option 1).** The 2026-10-09 row is `manual`, 2.00 h
+(12:47-13:15, 13:57-15:23: the three home-folder GLOW sessions; the other home-folder sessions
+of 10-08..10-12 were other projects and are not billed). `update` now runs: 10-07 recounted to
+4.50 h (its afternoon was never counted), 10-12 1.50 h, 10-13 logged with written descriptions.
+Run `python3 tools/worklog.py update` once more at the end of the session (today's hours grow).
 
 Still open from before: the Africa 38-club retirement (Partners `jotform` = `no`, then the hand
 apply), the Apps Script deploy (`/deploy-appsscript`), deactivating the U.S clubs
