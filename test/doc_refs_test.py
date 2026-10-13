@@ -104,11 +104,12 @@ class DocsIndex(unittest.TestCase):
         text = docs_index.render([], [])
         header = " ".join(text.split("## Plans")[0].split())
         flat = header.lower()
-        self.assertIn("ticket", flat)
-        self.assertIn("live rollout", flat)
+        self.assertRegex(flat, r"new work.{0,40}ticket")
+        self.assertRegex(flat, r"plan.{0,40}ticket.{0,40}live rollout")    # the plan goes with the ticket
         for section in ("Rollout", "Rollback", "Result"):
             self.assertIn(section, header)
-        self.assertNotIn("beyond a one-line fix", flat)
+        for phrase in ("beyond a one-line fix", "every change", "any size", "whether or not"):
+            self.assertNotIn(phrase, flat)
         for status in docs_index.STATUSES:
             self.assertIn(f"`{status}`", header, status)
 
@@ -119,14 +120,25 @@ class DocsIndex(unittest.TestCase):
 
         plan = read("plan.md")
         body = refs.re.sub(r"<!--.*?-->", "", plan, flags=refs.re.S)   # a heading, not a mention in the comment
+        lines = plan.split("\n")
         for heading in ("## Rollout", "## Rollback", "## Risks", "## Proof", "## Result"):
             self.assertRegex(body, r"(?m)^" + refs.re.escape(heading) + r"\b", heading)
+            # and a line of guidance under it, not another heading straight after
+            at = next(i for i, line in enumerate(lines) if refs.re.match(refs.re.escape(heading) + r"\b", line))
+            after = [line.strip() for line in lines[at + 1:] if line.strip()]
+            self.assertTrue(after and not after[0].startswith("#") and refs.re.search(r"\w{3}", after[0]),
+                            f"{heading} has no guidance under it")
         keys, _ = docs_index.frontmatter(plan)
         self.assertEqual(set(keys), {"title", "author", "status", "done", "backlog", "created", "intent"})
-        for name in ("plan.md", "intent.md"):
+        banned = {"plan.md": ("beyond a one-line fix", "straight to a plan", "every change"),
+                  "intent.md": ("beyond a one-line fix", "straight to a plan")}
+        for name, phrases in banned.items():
             flat = " ".join(read(name).split()).lower()
-            for phrase in ("beyond a one-line fix", "straight to a plan"):
+            for phrase in phrases:
                 self.assertNotIn(phrase, flat, f"docs/templates/{name}")
+        intent = " ".join(read("intent.md").split()).lower()
+        self.assertNotRegex(intent, r"small change.{0,40}plan")
+        self.assertIn("ticket", intent)
 
 
 if __name__ == "__main__":
