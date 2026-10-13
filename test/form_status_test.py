@@ -430,6 +430,169 @@ class FormStatusRoster(unittest.TestCase):
         club, names, partner, _ = roster["Africa"]["alpha club"]
         self.assertEqual((club, partner, len(names)), ("Alpha Club", "Partner One", 1))
 
+    # ---- regions read the way the sync reads them (ticket #7) ----
+
+    @staticmethod
+    def write_roster(folder, rows, name="roster.csv"):
+        """A Roster export (partner, club, full_name, status, region) of fictional rows."""
+        import csv
+        path = os.path.join(folder, name)
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["partner", "club", "full_name", "status", "region"])
+            w.writerows(rows)
+        return path
+
+    def test_each_club_is_under_the_region_whose_sync_takes_it(self):
+        import tempfile
+        from glow.text import key, name_key
+        # one club per spelling, a different number of girls each, one region per club
+        spellings = ["Africa", "africa", " AFRICA ", "Latin  America", "latin america", "u.s", "U.S", "Asia"]
+        clubs = ["Alpha Club", "Beta Club", "Gamma Club", "Delta Club", "Epsilon Club", "Zeta Club",
+                 "Eta Club", "Theta Club"]
+        rows = []
+        for i, (club, region) in enumerate(zip(clubs, spellings)):
+            for g in range(i % 3 + 1):
+                rows.append([f"Partner {'One' if i % 2 else 'Two'}", club, f"Girl{i}{g} Example", "active", region])
+        rows.append(["Partner One", "Iota Club", "Ina Inactive", "inactive", "africa"])   # not active: no entry
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.write_roster(tmp, rows)
+            roster = form_status.load_roster(path)
+            self.assertEqual(set(roster), set(glow_forms.REGIONS))     # no 'africa', no 'Latin  America'
+            for region in glow_forms.REGIONS:
+                want, _, _ = glow_sync.read_roster_csv(path, region)   # the writer is the oracle
+                self.assertEqual(set(roster[region]), {key(club) for (_, club) in want}, region)
+                for (_, club), names in want.items():
+                    self.assertEqual(roster[region][key(club)][1], {name_key(n) for n in names}, club)
+        # the spread the table makes: 3 clubs on Africa, 2 on Latin America, 2 on U.S, 1 on Asia
+        self.assertEqual({r: len(c) for r, c in roster.items()},
+                         {"Africa": 3, "Latin America": 2, "U.S": 2, "Asia": 1})
+
+    def test_a_club_whose_rows_spell_its_region_two_ways_is_one_entry(self):
+        import tempfile
+        from glow.text import name_key
+        rows = [["Partner One", "Alpha Club", "Ana Example", "active", "africa "],   # lower case first
+                ["Partner One", "Alpha Club", "Bea Sample", "active", "Africa"],
+                ["Partner Two", "Beta Club", "Cora Test", "active", "Africa"],       # capitalized first
+                ["Partner Two", "Beta Club", "Dina Mock", "active", " AFRICA"],
+                ["Partner Two", "Beta Club", "Eva Dummy", "active", "africa"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = form_status.load_roster(self.write_roster(tmp, rows))
+        self.assertEqual(list(roster), ["Africa"])
+        self.assertEqual(set(roster["Africa"]), {"alpha club", "beta club"})
+        club, names, partner, by_partner = roster["Africa"]["alpha club"]
+        self.assertEqual((club, partner), ("Alpha Club", "Partner One"))
+        self.assertEqual(names, {name_key("Ana Example"), name_key("Bea Sample")})
+        self.assertEqual(by_partner, {"partner one": names})
+        club, names, partner, by_partner = roster["Africa"]["beta club"]
+        self.assertEqual(names, {name_key(n) for n in ("Cora Test", "Dina Mock", "Eva Dummy")})
+        self.assertEqual(by_partner, {"partner two": names})
+
+    # rows with regions no form has: '(no region)' 1 club / 1 girl, 'Afrika' 2 clubs / 4 girls,
+    # 'U.S.' 1 club / 2 girls; Africa (spelled 'africa') and Asia are forms' regions
+    NO_FORM_ROWS = [
+        ["Partner One", "Alpha Club", "Ana Example", "active", "U.S."],
+        ["Partner One", "Alpha Club", "Bea Sample", "active", "  U.S. "],
+        ["Partner Two", "Beta Club", "Cora Test", "active", "Afrika"],
+        ["Partner Two", "Gamma Club", "Dina Mock", "active", " Afrika"],
+        ["Partner Two", "Gamma Club", "Eva Dummy", "active", "Afrika"],
+        ["Partner Two", "Gamma Club", "Fay Fiction", "active", "Afrika  "],
+        ["Partner Three", "Delta Club", "Gia Pretend", "active", ""],
+        ["Partner One", "Epsilon Club", "Hana Invent", "active", "africa"],
+        ["Partner One", "Zeta Club", "Ida Imagine", "active", "Asia"],
+        ["Partner One", "Zeta Club", "Jo Madeup", "active", "Asia"],
+        ["Partner Three", "Eta Club", "Kim Unreal", "inactive", "Narnia"],     # not active: not counted
+    ]
+
+    def test_a_region_no_form_has_is_kept_as_typed_and_counted(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = form_status.load_roster(self.write_roster(tmp, self.NO_FORM_ROWS))
+            self.assertEqual(set(roster), {"Africa", "Asia", "U.S.", "Afrika", "(no region)"})
+            self.assertEqual(set(roster["U.S."]), {"alpha club"})
+            self.assertEqual(set(roster["Afrika"]), {"beta club", "gamma club"})
+            self.assertEqual(set(roster["(no region)"]), {"delta club"})
+            self.assertEqual(form_status.regions_without_form(roster),
+                             [("(no region)", 1, 1), ("Afrika", 2, 4), ("U.S.", 1, 2)])
+            # only blank regions: one entry, its own counts
+            blank = form_status.load_roster(self.write_roster(tmp, [
+                ["Partner One", "Alpha Club", "Ana Example", "active", ""],
+                ["Partner One", "Alpha Club", "Bea Sample", "active", "  "],
+                ["Partner Two", "Beta Club", "Cora Test", "active", ""],
+                ["Partner Two", "Gamma Club", "Dina Mock", "active", ""],
+                ["Partner Two", "Gamma Club", "Eva Dummy", "active", ""]], "blank.csv"))
+            self.assertEqual(form_status.regions_without_form(blank), [("(no region)", 3, 5)])
+            # every region a form's, however spelled: nothing listed, never a canonical region
+            clean = form_status.load_roster(self.write_roster(tmp, [
+                ["Partner One", "Alpha Club", "Ana Example", "active", " latin  AMERICA "],
+                ["Partner One", "Beta Club", "Bea Sample", "active", "u.s"],
+                ["Partner Two", "Gamma Club", "Cora Test", "active", "ASIA"],
+                ["Partner Two", "Delta Club", "Dina Mock", "active", "Africa"]], "clean.csv"))
+            self.assertEqual(form_status.regions_without_form(clean), [])
+        # a by_region built by hand: canonical regions are skipped, every other key counted
+        made = {"Africa": {"a": ("A", {"x", "y"}, "P", {})},
+                "Latin America": {"b": ("B", {"x"}, "P", {})},
+                "Oceania": {"c": ("C", {"x", "y", "z"}, "P", {}), "d": ("D", {"w"}, "P", {})},
+                "Europe": {"e": ("E", set(), "P", {})}}
+        self.assertEqual(form_status.regions_without_form(made), [("Europe", 1, 0), ("Oceania", 2, 4)])
+
+    def test_the_report_names_such_regions_in_counts_never_a_name(self):
+        import contextlib
+        import io
+        import tempfile
+        from unittest import mock
+
+        def report(path, *extra):
+            out = io.StringIO()
+            with mock.patch.object(form_status, "Client", lambda key: object()), \
+                    mock.patch.object(form_status, "read_storage", lambda client: {}), \
+                    mock.patch.object(form_status, "storage_status_line", lambda store: "storage: test"), \
+                    mock.patch.dict(form_status.FORMS, {}, clear=True), \
+                    mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                    mock.patch.object(sys, "argv", ["form_status.py", "--roster", path, *extra]), \
+                    contextlib.redirect_stdout(out):
+                form_status.main()
+            return out.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = self.write_roster(tmp, self.NO_FORM_ROWS)
+            out = report(bad)
+            lines = out.splitlines()
+            at = next(i for i, line in enumerate(lines) if line.startswith("Roster (active girls):"))
+            self.assertEqual(lines[at + 1],
+                             "! Roster: 7 active girl(s) in 4 club(s) carry a region no form has - they reach "
+                             "NO attendance form: '(no region)' 1 club(s), 'Afrika' 2 club(s), "
+                             "'U.S.' 1 club(s); fix the Partners tab, then GLOW -> Refresh regions from the "
+                             "Partners tab")
+            self.assertEqual(sum(1 for line in lines if line.startswith("! Roster:")), 1)
+            for _, club, girl, _, _ in self.NO_FORM_ROWS:            # counts and regions, never a name
+                self.assertNotIn(club, out)
+                self.assertNotIn(girl, out)
+            # --json keeps its shape: the JSON alone, no Roster line
+            self.assertEqual(json.loads(report(bad, "--json")), [])
+
+            # a different spread: the counts follow the export
+            other = self.write_roster(tmp, [
+                ["Partner One", "Alpha Club", "Ana Example", "active", "Oceania"],
+                ["Partner One", "Alpha Club", "Bea Sample", "active", "Oceania "],
+                ["Partner One", "Beta Club", "Cora Test", "active", " Oceania"],
+                ["Partner Two", "Gamma Club", "Dina Mock", "active", "Asia"]], "other.csv")
+            lines = report(other).splitlines()
+            self.assertIn("! Roster: 3 active girl(s) in 2 club(s) carry a region no form has - they reach "
+                          "NO attendance form: 'Oceania' 2 club(s); fix the Partners "
+                          "tab, then GLOW -> Refresh regions from the Partners tab", lines)
+
+            # every region a form's, however spelled: no ! Roster: line
+            clean = self.write_roster(tmp, [
+                ["Partner One", "Alpha Club", "Ana Example", "active", "africa"],
+                ["Partner One", "Beta Club", "Bea Sample", "active", " Latin  America"],
+                ["Partner Two", "Gamma Club", "Cora Test", "active", "u.s"],
+                ["Partner Two", "Delta Club", "Dina Mock", "active", "ASIA"]], "clean.csv")
+            out = report(clean)
+            self.assertIn("Roster (active girls):", out)
+            self.assertNotIn("! Roster", out)
+            self.assertNotIn("'africa'", out)                     # under its form's region
+
 
 class FormStatusLayout(unittest.TestCase):
     """tools/form_status.py: the layout audit joins rule_problems (CLEAN needs
