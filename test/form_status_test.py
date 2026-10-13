@@ -408,9 +408,48 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
             self.assertEqual(form_status.build_line(build), build + self.NOTE, build)
         self.assertEqual(form_status.build_line(None), "not found on the public page")
         # the line follows the READ_BUILDS set, not a list kept in the tool
+        from unittest import mock
         from glow import translation_lookup as tl
         for build in tl.READ_BUILDS:
             self.assertEqual(form_status.build_line(build), build)
+        # ... read at call time from the module attribute: a patched set decides, in both directions
+        with mock.patch.object(tl, "READ_BUILDS", frozenset({"0123456789a"})):
+            self.assertEqual(form_status.build_line("0123456789a"), "0123456789a")
+            self.assertEqual(form_status.build_line("62a8b57dd95"), "62a8b57dd95" + self.NOTE)
+            self.assertEqual(form_status.build_line("9e75d6f1d83"), "9e75d6f1d83" + self.NOTE)
+            self.assertEqual(form_status.build_line(None), "not found on the public page")
+        with mock.patch.object(tl, "READ_BUILDS", frozenset()):
+            self.assertEqual(form_status.build_line("9e75d6f1d83"), "9e75d6f1d83" + self.NOTE)
+        self.assertEqual(form_status.build_line("62a8b57dd95"), "62a8b57dd95")      # restored
+
+    def test_rendered_problems_sets_build_read_true_false_or_none(self):
+        from unittest import mock
+        from glow import translation_lookup as tl
+
+        def page(build):
+            return (f'<script src="https://cdn.jotfor.ms/s/static/{build}/static/jotform.forms.js"></script>'
+                    if build else "<p>no runtime here</p>")
+
+        def run(build):
+            r = {"club_picker": None, "roster_qids": []}
+            form_status.rendered_problems(r, page(build))
+            return r
+
+        for build in self.COMPARED:
+            r = run(build)
+            self.assertEqual((r["build"], r["build_read"]), (build, True), build)
+        for build in ("8705c008453", "bc6c80d556a", "18bdf84aedc", "0123456789a"):
+            r = run(build)
+            self.assertEqual((r["build"], r["build_read"]), (build, False), build)
+        r = run(None)
+        self.assertIsNone(r["build"])
+        self.assertIn("build_read", r)
+        self.assertIsNone(r["build_read"])
+        # follows the module's set at call time
+        with mock.patch.object(tl, "READ_BUILDS", frozenset({"0123456789a"})):
+            self.assertIs(run("0123456789a")["build_read"], True)
+            self.assertIs(run("9e75d6f1d83")["build_read"], False)
+            self.assertIsNone(run(None)["build_read"])
 
     def test_an_uncompared_build_is_named_and_the_form_stays_clean(self):
         import contextlib
@@ -442,11 +481,13 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
                   + "".join(f'<option data-calcvalue="{o}" value="{o}">{o}</option>'
                             for o in ClubGuardFixture.OPTIONS) + "</select>\n<!--rest-->")
 
-        def report(roster, *extra, strip_build=False, **served_kw):
+        shifted = select.replace('data-calcvalue="Beta Club"', 'data-calcvalue="Alpha Club"')
+
+        def report(roster, *extra, strip_build=False, picker=select, **served_kw):
             rest = served_rules_and_rosters(qs, wire, **served_kw)
             if strip_build:                                   # a page whose runtime script is gone
                 rest = re.sub(r'<script src="https://cdn\.jotfor\.ms/s/static/[^>]*></script>', "", rest)
-            served = select.replace("<!--rest-->", rest)
+            served = picker.replace("<!--rest-->", rest)
             out = io.StringIO()
             with mock.patch.object(form_status, "Client", lambda key: Fake()), \
                     mock.patch.object(form_status, "public_page", lambda fid: served), \
@@ -493,6 +534,29 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
             self.assertIsNone(rep["build"])
             self.assertIn("build_read", rep)
             self.assertIsNone(rep["build_read"])
+            # the report follows glow.translation_lookup.READ_BUILDS at call time
+            from glow import translation_lookup as tl
+            with mock.patch.object(tl, "READ_BUILDS", frozenset({"0123456789a"})):
+                out = report(roster, build="0123456789a")
+                self.assertEqual(build_lines(out), ["runtime build: 0123456789a"])
+                self.assertIn("→ CLEAN", out)
+                (rep,) = json.loads(report(roster, "--json", build="0123456789a"))
+                self.assertIs(rep["build_read"], True)
+                out = report(roster)                              # 9e75d6f1d83 is no longer compared
+                self.assertEqual(build_lines(out), [f"runtime build: 9e75d6f1d83{self.NOTE}"])
+                self.assertIn("→ CLEAN", out)
+                (rep,) = json.loads(report(roster, "--json"))
+                self.assertIs(rep["build_read"], False)
+            # an uncompared build does not skip the audit: a real problem is still flagged
+            for build in ("8705c008453", "9e75d6f1d83"):
+                out = report(roster, picker=shifted, build=build)
+                self.assertIn("would send another club's name", out, build)
+                self.assertNotIn("→ CLEAN", out, build)
+                self.assertEqual(len(build_lines(out)), 1, build)
+            out = report(roster, picker=shifted, build="8705c008453")
+            self.assertIn(f"runtime build: 8705c008453{self.NOTE}", out)
+            self.assertIn("would send another club's name", out)
+            self.assertNotIn("→ CLEAN", out)
 
 
 class FormStatusRoster(unittest.TestCase):
