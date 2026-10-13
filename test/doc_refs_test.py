@@ -173,7 +173,9 @@ class BacklogRules(unittest.TestCase):
         failing = [("42", "finished", False), ("6", "Open", False), ("13c", "done", True),
                    ("57", "done 2026-02-30", True), ("101", "done 14-10-2026", True),
                    ("3", "blocked", False), ("70", "done 2026-02-29", True), ("8", "done 2026-13-01", True),
-                   ("26", "in progress", False), ("64", "Dropped", False)]
+                   ("26", "in progress", False), ("64", "Dropped", False),
+                   # a valid status with trailing text is not a valid status
+                   ("19", "done 2026-10-15 (PR #12)", True), ("38", "open - waiting on a reply", False)]
         for num, status, done in failing:
             self.assert_one_problem(one_item(num, status, done), num, status)
         problem = refs.backlog_problems(one_item("42", "finished"))[0]
@@ -184,7 +186,9 @@ class BacklogRules(unittest.TestCase):
         ok = ("5. A made-up item", "Status: open\n\n- 2026-10-01: a bullet\n")
         cases = [("12", "12. No status line", "- 2026-10-01: a bullet\n- 2026-10-02: another\n"),
                  ("27a", "27a. Two status lines", "Status: open\n\n- 2026-10-01: a bullet\n\nStatus: in-progress\n"),
-                 ("33", "33. Status after a bullet", "- 2026-10-01: a bullet\n\nStatus: open\n")]
+                 ("33", "33. Status after a bullet", "- 2026-10-01: a bullet\n\nStatus: open\n"),
+                 # the bold shape is not a status line: the item has none
+                 ("48", "48. Bold status", "**Status:** open\n\n- 2026-10-01: a bullet\n")]
         for num, heading, body in cases:
             self.assert_one_problem(backlog([ok, (heading, body)]), num, heading)
             self.assert_one_problem(backlog([(heading, body), ok]), num, heading)
