@@ -14,9 +14,8 @@ for `$B`.
 ## 1. Conflicts with main (in the worktree, on `$B`, never on main)
 `git fetch origin && git merge origin/main` when GitHub reports a conflict (GitHub judges against
 `origin/main`; local `main` moves only when `harness-pr land` fast-forwards it), then resolve:
-- **`docs/BACKLOG.md`**: keep both sides' items and dated bullets; never renumber an item. Two new
-  items with one number: the branch's takes the next free number, and every citation of it on
-  the branch's side changes with it (`git grep -n "BACKLOG <n>"`).
+- **`docs/BACKLOG.md`**: keep both sides' dated bullets and the newer `Status:` line; never
+  renumber or add an item (new work is a ticket). `make doc-refs` checks the result.
 - **`docs/DECISIONS.md`**: keep both sides' sections, in date order.
 - **`docs/RUNBOOK.md`, `.claude/skills/*`**: keep both procedures; where they disagree, the newer
   dated decision wins (DECISIONS, the plans' dates) and the older text goes or points to it. Never
