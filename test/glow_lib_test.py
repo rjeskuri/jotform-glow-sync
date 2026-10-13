@@ -461,6 +461,13 @@ class TranslationLookup(unittest.TestCase):
 
     NAME = "Amara Fennwhistle"
 
+    def test_the_builds_read_are_the_six_backlog_64_names(self):
+        self.assertIsInstance(tl.READ_BUILDS, frozenset)
+        self.assertEqual(tl.READ_BUILDS, frozenset({"62a8b57dd95", "fc726a121d4", "9e75d6f1d83",
+                                                    "7a7e75787df", "9083adfcdff", "2bdb1ec3fa8"}))
+        for later in ("8705c008453", "bc6c80d556a", "18bdf84aedc"):      # seen since, not compared
+            self.assertNotIn(later, tl.READ_BUILDS)
+
     def test_javascripts_whitespace_simplify_and_key_order(self):
         self.assertEqual(tl.js_trim("\ufeff\u3000 Amara \u2028"), "Amara")
         self.assertEqual(tl.js_trim("\x85Amara\x1c"), "\x85Amara\x1c")      # whitespace to Python only
