@@ -847,8 +847,8 @@ operands in `JotForm.setCalculations`.
    today. No form's store translates a module option (read 2026-10-13: only `base`/`en` hold
    them; Swahili one of 18), so an event option is English in every language as the modules are.
    If module options ever get translations, the event gets them too ("Translations").
-2. `AUTO_SYNC_APPLY=0` (Ryan's go), then merge with `/integrate`: until a region's form carries
-   the new option, the runner holds it.
+2. `AUTO_SYNC_APPLY=0` (Ryan's go), then land it (`/land-checks`, `/harness:land`): until a
+   region's form carries the new option, the runner holds it.
 3. The template first: `backup_forms.py --form 262352490535154`, the sync's dry run (the three
    module lines and `REPLACE conditions`), Ryan's go, `--apply`, `form_status.py --rendered`
    CLEAN, then the browser checks below. Then Africa, Asia, Latin America and the U.S form
