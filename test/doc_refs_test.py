@@ -98,18 +98,32 @@ class DocsIndex(unittest.TestCase):
     def test_a_cell_never_breaks_the_table_or_turns_into_html(self):
         self.assertEqual(docs_index.cell("a | b <club> - <partner>"), "a \\| b &lt;club&gt; - &lt;partner&gt;")
 
+    # DECISIONS 2026-10-14: new work is a ticket; a plan is kept beside a ticket whose change has a
+    # live rollout, not beside every ticket. The conditional has to be said ("a ticket whose change
+    # has / with a / that has a live rollout"), and the wordings that widen it to all work are out.
+    CONDITION = r"(whose|with a|that has|that have|which has|when (its|the|a)|if (its|the|a))"
+    WIDENED = ("beyond a one-line fix", "straight to a plan", "every change", "any size", "whether or not")
+    WIDENED_RE = (r"(each|every|any|all) tickets?", r"however small", r"rollout or not", r"regardless",
+                  r"small (change|fix|work|tweak)s?.{0,40}plan")
+
+    def assert_not_widened(self, flat, where):
+        for phrase in self.WIDENED:
+            self.assertNotIn(phrase, flat, where)
+        for pattern in self.WIDENED_RE:
+            self.assertNotRegex(flat, pattern, where)
+
     def test_the_header_puts_a_plan_beside_a_live_rollouts_ticket(self):
-        # DECISIONS 2026-10-14: new work is a ticket; a plan is kept beside a ticket whose change has
-        # a live rollout. The header wraps, so its words are compared with whitespace collapsed.
+        # The header wraps, so its words are compared with whitespace collapsed.
         text = docs_index.render([], [])
         header = " ".join(text.split("## Plans")[0].split())
         flat = header.lower()
         self.assertRegex(flat, r"new work.{0,40}ticket")
-        self.assertRegex(flat, r"plan.{0,40}ticket.{0,40}live rollout")    # the plan goes with the ticket
+        # the plan goes with the ticket, and only a ticket whose change has a live rollout
+        self.assertRegex(flat, r"plan.{0,60}ticket.{0,30}" + self.CONDITION + r".{0,40}live rollout")
+        self.assertRegex(flat, r"intent.{0,40}optional|optional.{0,40}intent")
         for section in ("Rollout", "Rollback", "Result"):
             self.assertIn(section, header)
-        for phrase in ("beyond a one-line fix", "every change", "any size", "whether or not"):
-            self.assertNotIn(phrase, flat)
+        self.assert_not_widened(flat, "docs/plans/README.md header")
         for status in docs_index.STATUSES:
             self.assertIn(f"`{status}`", header, status)
 
@@ -130,15 +144,17 @@ class DocsIndex(unittest.TestCase):
                             f"{heading} has no guidance under it")
         keys, _ = docs_index.frontmatter(plan)
         self.assertEqual(set(keys), {"title", "author", "status", "done", "backlog", "created", "intent"})
-        banned = {"plan.md": ("beyond a one-line fix", "straight to a plan", "every change"),
-                  "intent.md": ("beyond a one-line fix", "straight to a plan")}
-        for name, phrases in banned.items():
-            flat = " ".join(read(name).split()).lower()
-            for phrase in phrases:
-                self.assertNotIn(phrase, flat, f"docs/templates/{name}")
+        # the plan template says when a plan exists: beside the ticket whose change has a live rollout
+        flat = " ".join(plan.split()).lower()
+        self.assertIn("live rollout", flat, "docs/templates/plan.md")
+        self.assertRegex(flat, r"(ticket|change)s?.{0,30}" + self.CONDITION + r".{0,40}live rollout",
+                         "docs/templates/plan.md")
+        self.assert_not_widened(flat, "docs/templates/plan.md")
+        # the intent template: optional, and it no longer sends a small change to a plan
         intent = " ".join(read("intent.md").split()).lower()
-        self.assertNotRegex(intent, r"small change.{0,40}plan")
         self.assertIn("ticket", intent)
+        self.assertIn("optional", intent)
+        self.assert_not_widened(intent, "docs/templates/intent.md")
 
 
 if __name__ == "__main__":
