@@ -6,14 +6,12 @@ follow). The data is rosters of girls — minors. Forms and sheet are LIVE since
 Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub Actions →
 `tools/auto_sync.py`. Procedures: `docs/RUNBOOK.md`. Design: `docs/ARCHITECTURE.md`.
 
-## Commands (run before saying "done"; paste the tail; fix the code, not the check)
+## Commands
 - Once per clone: `make venv` (with the ruff `make check` needs) and `make hooks` (pre-commit
   secret scan and ruff, the commit template). `make docs-index` after a plan's or intent's
   frontmatter changes.
-- `make check` — everything, offline. Healthy tail: `lint: ok`, `ALL CHECKS PASSED` ×4, `py: N
-  files parse, N scripts answer --help`, `Ran N tests … OK` (`make py`: unittest discover),
-  `gs: 10 files parse, 8 services, 0 unknown calls`, `secrets: clean`, `docs-links: ok`,
-  `doc-refs: ok`, `docs-index: ok`, `conflicts: none`, `fixtures: up to date`, `CHECK PASSED`.
+- `make check` — everything, offline: the verify command (CI and the stop hook run it); healthy
+  ends `CHECK PASSED`. Python tests: `make py` (unittest discover).
 - `python3 tools/form_status.py --roster data/roster_<date>.csv --partners data/partners_<date>.csv`
   — read-only, needs `JOTFORM_API_KEY`; `--roster` is required, `--partners` makes a retired
   roster read clean. Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`,
@@ -30,22 +28,20 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   tools in `tools/`; `sync_attendance_form.py` and the rollback pair stay at the root.
 - Fictional names only in tests, fixtures and docs (`test/fixtures/make_fixture.py`); girls' names
   never in logs (`auto_sync.redact`), commits, or this file.
-- Beyond a one-line fix: a plan in `docs/plans/` first (`status:` `proposed|accepted|in-progress|
-  blocked|done|superseded`); an intent is optional. A decision: a dated section at the end of
-  `docs/DECISIONS.md`. BACKLOG: a new item takes the next free number, an update is a dated
-  bullet, never renumber. Review against `REVIEW.md`.
+- A change with a live rollout keeps a plan in `docs/plans/` beside its ticket (Rollout, Rollback,
+  Result; `status:` `proposed|accepted|in-progress|blocked|done|superseded`). A decision: a dated
+  section at the end of `docs/DECISIONS.md`. BACKLOG items keep their numbers (updates are dated
+  bullets); new work is a ticket. Review against `REVIEW.md`.
 - Commits: subject ≤ 72 characters, `area: what changed`, blank line, a body that says why;
   trailers when they apply: `Plan: docs/plans/…`, `Backlog: N`, `Live: none | <what, when UTC,
-  Ryan's go>` (`.gitmessage`). Subjects before 2026-10-09 averaged 200+ characters, unreadable.
-- Branches: features in a worktree `.claude/worktrees/<name>` on `wf<N>/<slug>` (or
-  `fix/<slug>`); the primary checkout stays on `main`. Merge with `/integrate`, then delete branch
-  and worktree — first check its `data/` and `backups/` for files that exist nowhere else
-  (`git worktree remove` deletes them; on 2026-10-09 one held the only copies of 11 files).
-- Work log (invoiced monthly): `/harness:worklog` at the end of every session (`tools/worklog.py
-  update`; after travel `worklog.py zone`: RUNBOOK "Work log and invoices"). Descriptions: 1-3
-  plain, client-facing sentences, no names. Never edit `hours` of `auto` rows; `--drop-stale` /
-  `--rewrite-old` only on Ryan's word. Hours come from the primary checkout's transcript folder: a
-  session started from the home folder counts only if `--transcripts` names it (missed 2026-10-09).
+  Ryan's go>` (`.gitmessage`), and the same trailers in the pull request's Summary: landing is a
+  squash merge, so the PR text is what reaches `main`. Subjects before 2026-10-09 averaged 200+
+  characters, unreadable.
+- Before `/harness:land`: `/land-checks` — the runner's next run, the privacy audit, and the
+  worktree's `data/` and `backups/` (land deletes them; 2026-10-09: the only copies of 11 files).
+- Work log (invoiced monthly; RUNBOOK "Work log and invoices"): `--drop-stale` / `--rewrite-old`
+  only on Ryan's word; a session started from the home folder counts only if `--transcripts`
+  names it (missed 2026-10-09).
 
 ## Things Claude gets wrong
 1. Every live write needs Ryan's explicit go in this conversation: `--apply`, `--prune`,
