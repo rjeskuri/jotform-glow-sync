@@ -98,6 +98,36 @@ class DocsIndex(unittest.TestCase):
     def test_a_cell_never_breaks_the_table_or_turns_into_html(self):
         self.assertEqual(docs_index.cell("a | b <club> - <partner>"), "a \\| b &lt;club&gt; - &lt;partner&gt;")
 
+    def test_the_header_puts_a_plan_beside_a_live_rollouts_ticket(self):
+        # DECISIONS 2026-10-14: new work is a ticket; a plan is kept beside a ticket whose change has
+        # a live rollout. The header wraps, so its words are compared with whitespace collapsed.
+        text = docs_index.render([], [])
+        header = " ".join(text.split("## Plans")[0].split())
+        flat = header.lower()
+        self.assertIn("ticket", flat)
+        self.assertIn("live rollout", flat)
+        for section in ("Rollout", "Rollback", "Result"):
+            self.assertIn(section, header)
+        self.assertNotIn("beyond a one-line fix", flat)
+        for status in docs_index.STATUSES:
+            self.assertIn(f"`{status}`", header, status)
+
+    def test_the_plan_and_intent_templates_agree_with_the_index(self):
+        def read(name):
+            with open(os.path.join(REPO, "docs", "templates", name), encoding="utf-8") as f:
+                return f.read()
+
+        plan = read("plan.md")
+        body = refs.re.sub(r"<!--.*?-->", "", plan, flags=refs.re.S)   # a heading, not a mention in the comment
+        for heading in ("## Rollout", "## Rollback", "## Risks", "## Proof", "## Result"):
+            self.assertRegex(body, r"(?m)^" + refs.re.escape(heading) + r"\b", heading)
+        keys, _ = docs_index.frontmatter(plan)
+        self.assertEqual(set(keys), {"title", "author", "status", "done", "backlog", "created", "intent"})
+        for name in ("plan.md", "intent.md"):
+            flat = " ".join(read(name).split()).lower()
+            for phrase in ("beyond a one-line fix", "straight to a plan"):
+                self.assertNotIn(phrase, flat, f"docs/templates/{name}")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
