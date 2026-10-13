@@ -102,8 +102,10 @@ class DocsIndex(unittest.TestCase):
     # live rollout, not beside every ticket. The conditional has to be said ("a ticket whose change
     # has / with a / that has a live rollout"), and the wordings that widen it to all work are out.
     CONDITION = r"(whose|with a|that has|that have|which has|when (its|the|a)|if (its|the|a))"
-    WIDENED = ("beyond a one-line fix", "straight to a plan", "every change", "any size", "whether or not")
-    WIDENED_RE = (r"(each|every|any|all) tickets?", r"however small", r"rollout or not", r"regardless",
+    # "one.line", not the literal: epic #5's done-check greps the repository for the old phrase
+    WIDENED = ("straight to a plan", "every change", "any size", "whether or not")
+    WIDENED_RE = (r"beyond a one.line fix", r"(each|every|any|all) tickets?", r"however small",
+                  r"rollout or not", r"regardless",
                   r"small (change|fix|work|tweak)s?.{0,40}plan")
 
     def assert_not_widened(self, flat, where):
@@ -150,10 +152,12 @@ class DocsIndex(unittest.TestCase):
         self.assertRegex(flat, r"(ticket|change)s?.{0,30}" + self.CONDITION + r".{0,40}live rollout",
                          "docs/templates/plan.md")
         self.assert_not_widened(flat, "docs/templates/plan.md")
-        # the intent template: optional, and it no longer sends a small change to a plan
+        # the intent template: optional, and a plan only beside a ticket whose change has a live rollout
         intent = " ".join(read("intent.md").split()).lower()
         self.assertIn("ticket", intent)
         self.assertIn("optional", intent)
+        self.assertRegex(intent, r"plan.{0,60}(ticket|change)s?.{0,30}" + self.CONDITION + r".{0,40}live rollout",
+                         "docs/templates/intent.md")
         self.assert_not_widened(intent, "docs/templates/intent.md")
 
 
