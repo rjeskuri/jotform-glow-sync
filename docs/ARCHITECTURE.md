@@ -131,6 +131,7 @@ reads modules.
 | The sheet's time zone (`America/New_York`: the day `removed_date` is stamped in, which the no-active-girl rule compares "today" with) | `glow/sync.py SHEET_ZONE`, `sheet_today` | the spreadsheet's own setting (File → Settings), `getSpreadsheetTimeZone()` in `Roster.gs today_()` — not `appsscript.json`'s `timeZone`; no offline test can read it, so `tools/auto_sync.py` checks it on every run |
 | Response-tab header fragments | `glow/sync.py COL_PARTNER`, `COL_CLUB`, `COL_ROSTER` (`read_sheet`) | `Config.gs RESPONSE_COLS` (`readResponses_`) |
 | SyncLog columns | `tools/auto_sync.py SYNC_LOG_COLS` | `Roster.gs SYNC_LOG_COLS` |
+| `Roster`, `Partners` and `SyncLog` tab names | `tools/auto_sync.py ROSTER_TAB, PARTNERS_TAB, SYNC_LOG_TAB` | `Config.gs TAB` |
 | SF Pending columns (`test/sf_new_clubs_test.py` compares them) | `tools/sf_new_clubs.py SF_PENDING_COLS` | `FormHandlers.gs SF_PENDING_COLS` |
 | Region vocabulary `Africa / Asia / Latin America / U.S` | `glow/forms.py REGIONS` (the tools' strings follow it) | `Config.gs REGIONS` (the Club Roster Form's region picker), `Regions.gs` values, Partners tab |
 

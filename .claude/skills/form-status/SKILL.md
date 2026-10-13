@@ -14,3 +14,6 @@ disable-model-invocation: true
    given.
 4. Report per form: `CLEAN` or the problems, `submissions`, `club picker`, `languages`, and the
    `vs Roster` line (missing from form / extra / differs). Quote club names only; never girls'.
+   Healthy: every form `→ CLEAN` (with `--partners` a retired roster reads clean), `0 flagged as
+   error`, `salesforce yes`, `storage: … -> ok` (`warn` from 50 % of a limit, `!!` and a runner
+   ATTENTION from 80 %).

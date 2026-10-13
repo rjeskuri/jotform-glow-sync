@@ -8,18 +8,12 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 
 ## Commands
 - Once per clone: `make venv` (with the ruff `make check` needs) and `make hooks` (pre-commit
-  secret scan and ruff, the commit template). `make docs-index` after a plan's or intent's
-  frontmatter changes.
+  secret scan and ruff, the commit template).
 - `make check` — everything, offline: the verify command (CI and the stop hook run it); healthy
   ends `CHECK PASSED`. Python tests: `make py` (unittest discover).
-- `python3 tools/form_status.py --roster data/roster_<date>.csv --partners data/partners_<date>.csv`
-  — read-only, needs `JOTFORM_API_KEY`; `--roster` is required, `--partners` makes a retired
-  roster read clean. Healthy: every form `→ CLEAN`, `0 flagged as error`, `salesforce yes`,
-  `storage: … -> ok` (`warn` from 50 % of a limit, `!!` and a runner ATTENTION from 80 %).
 - `python3 tools/auto_sync.py` — the automatic loop as a dry run (writes nothing); healthy: every
-  region `in-sync` (a disabled form's `skipped - form DISABLED`).
-- `python3 sync_attendance_form.py <roster.csv> --roster --partners <partners.csv> --region Africa
-  --form 262382821971058` — dry run; `--apply` writes. Form ids: `docs/RUNBOOK.md`.
+  region `in-sync` (a disabled form's `skipped - form DISABLED`). Read-only form report and sync
+  dry run: `.claude/skills/form-status/SKILL.md`, `.claude/skills/sync-preview/SKILL.md`.
 
 ## Conventions
 - Dry run by default; `--apply` writes; back up before a live write (`backup_forms.py --form`),
@@ -35,13 +29,11 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 - Commits: subject ≤ 72 characters, `area: what changed`, blank line, a body that says why;
   trailers when they apply: `Plan: docs/plans/…`, `Backlog: N`, `Live: none | <what, when UTC,
   Ryan's go>` (`.gitmessage`), and the same trailers in the pull request's Summary: landing is a
-  squash merge, so the PR text is what reaches `main`. Subjects before 2026-10-09 averaged 200+
-  characters, unreadable.
+  squash merge, so the PR text is what reaches `main`.
 - Before `/harness:land`: `/land-checks` — the runner's next run, the privacy audit, and the
   worktree's `data/` and `backups/` (land deletes them; 2026-10-09: the only copies of 11 files).
 - Work log (invoiced monthly; RUNBOOK "Work log and invoices"): `--drop-stale` / `--rewrite-old`
-  only on Ryan's word; a session started from the home folder counts only if `--transcripts`
-  names it (missed 2026-10-09).
+  only on Ryan's word; a home-folder session counts only if `--transcripts` names it.
 
 ## Things Claude gets wrong
 1. Every live write needs Ryan's explicit go in this conversation: `--apply`, `--prune`,
@@ -63,11 +55,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
    sheet's ReviewQueue say so. A partner whose clubs do not report through Jotform is marked `no`
    in the Partners tab's `jotform` column instead — its rosters are retired, kept hidden and off
    the Club picker (RUNBOOK "Clubs that do not use Jotform"); never a blank region.
-7. In BOTH Python and `appsscript/`, checked by `test/gs_parity_test.py` — change both:
-   `SF_NAME_SEP`, `REGIONS`, `ROSTER_COLS`, `PARTNER_COLS` (`tools/build_roster_offline.js` too),
-   `SYNC_LOG_COLS`, the runner's tab names, `RESPONSE_COLS`; `SF_PENDING_COLS` (by
-   `test/sf_new_clubs_test.py`). qids, form ids, `SESSION_OVERRIDES`: Python only. `glow/sync.py
-   SHEET_ZONE` is the sheet's own zone (America/New_York), not `appsscript.json`'s `timeZone`.
+7. In BOTH Python and `appsscript/`, checked by `test/gs_parity_test.py` — change both (list:
+   docs/ARCHITECTURE.md "Constants that exist on both sides"). qids, form ids, `SESSION_OVERRIDES`:
+   Python only. `glow/sync.py SHEET_ZONE` is the sheet's own zone, not `appsscript.json`'s `timeZone`.
 8. `appsscript/Regions.gs` is hand-kept data (its "GENERATED" header is stale), protected by the
    edit hook; the sheet's Partners tab wins over it. `data/`, `backups/`, `credentials/` hold PII
    or secrets: never commit, quote or print their contents.
@@ -77,10 +67,6 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
     rows and strips `•`/`*` too — known divergences, do not silently fix one side.
 11. Node 18 + clasp 2.4.2 are pinned. A new Google service in a `.gs` file adds an OAuth scope, and
     until the owner re-authorizes, the form-submit trigger FAILS HARD (`make gs` fails on a 9th
-    service). Never roll `appsscript/` back before `7a175c4`, nor before `986a325` once the Feedback
-    tab has two reply columns. To push or roll back: load `/deploy-appsscript`.
-12. Salesforce: VPN off before any `sf` call (Salesforce freezes the user); the tools take
-    `--vpn-off`. Reads: the read-only connector (`Global_Glow_SF` `soqlQuery`) or Ryan's `sf`
-    alias `glow`. Writes: the write connector (`Global_Glow_Full_Access`), one record per call, on
-    Ryan's go, never from a subagent; or the plan/apply tools with ledgers. Metadata: retrieve →
-    check-only validate → Ryan's go → quick deploy → read back. Load `.claude/skills/salesforce`.
+    service). Push, rollback and its floors: `.claude/skills/deploy-appsscript/SKILL.md`.
+12. Salesforce: VPN off before any `sf` call (Salesforce freezes the user); the tools take `--vpn-off`.
+    Writes only on Ryan's go, never from a subagent. Access: `.claude/skills/salesforce/SKILL.md`.
