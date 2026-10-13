@@ -1,7 +1,8 @@
 ---
 title: Special events - ad-hoc sessions as module options, the first "Welcome Session"
 author: Claude (with Ryan's decisions of 2026-10-13)
-status: in-progress      # accepted by Ryan 2026-10-13 (in conversation): module option, same-day rule kept, all three years; built on wf22/special-events 2026-10-13 (Build notes), not live
+status: done             # live on all five forms 2026-10-13 (Result); accepted by Ryan 2026-10-13 (in conversation): module option, same-day rule kept, all three years
+done: 2026-10-13
 created: 2026-10-13
 intent: none - Ryan's request of 2026-10-13
 ---
@@ -232,3 +233,31 @@ removed in the builder (the retirement is incomplete); the session bridge recomp
 for every module change, which also repairs the case it was stale for before (back to a module
 whose session dropdown kept an older pick); no switch constant for the bridge: its rollback is
 the conditions snapshot, as the plan says.
+
+## Result (2026-10-13, Ryan's go for each write)
+- Merged into `main` as `0512f5c` (`/integrate`; `make check` 688 tests OK, privacy audit clean).
+  `AUTO_SYNC_APPLY=0` from 08:29 UTC (Ryan).
+- Exports `data/roster_2026-10-13T0835Z.csv` / `partners_…` (7,334 roster rows, 51 partners).
+- **Template**: backup `2026-10-13T173626`; applied by Ryan: the three module lines, `REPLACE
+  conditions (404 rules)`, and the template's roster catch-up (4 new rosters, 23 updated, the
+  Club picker at 368 clubs: the runner never syncs the template). `form_status --rendered` CLEAN:
+  session bridge rule 370 of 404, events served with their `data-calcvalue`, operands kept.
+- **Browser check (Ryan, template, no submission)**: the stale-session case passes: an event
+  picked after a session leaves question 100 blank. The template (`5e754e1f052`) and the
+  regional forms (`58cfd8e943b`) serve a byte-identical `jotform.forms.js` (md5 `d518c1e7…`), so
+  it holds for the regional forms too.
+- **No test submission** (Ryan: not a fake copy). So a blank `Module_Week__c` through the
+  Salesforce integration is still unproven: read the first real Welcome Session batch
+  (`Module__c = 'Special Event - Welcome Session'`: status `Success`, `Module_Week__c` null, rows
+  created). If none arrives for a submission that Jotform holds, the integration refused the blank
+  number: the submission is the record; back-fill it and decide the fix (e.g. 0) with Ryan.
+- **Regional forms**: backups `2026-10-13T175210` (Africa), `175211` (Asia), `175212` (Latin
+  America), `175213` (U.S); dry runs showed only the special-events lines (no roster change);
+  applied by Ryan: Africa 260 rules, Asia 131, Latin America 74, U.S 47 (disabled,
+  `--disabled-ok`). `form_status --rendered` on all five: CLEAN (U.S: page checks skipped,
+  disabled).
+- `tools/auto_sync.py` dry run with the merged code: Africa, Asia, Latin America `in-sync`, U.S
+  `skipped - form DISABLED`.
+- Left: push `main` (the runner runs `origin/main`: the old code would put the old rules back on
+  the next roster change), THEN `AUTO_SYNC_APPLY=1`; staff tell mentors (the new option; one
+  submission per club per day).

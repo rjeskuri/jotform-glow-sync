@@ -12,7 +12,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
-| 2026-10-13 | Special events - ad-hoc sessions as module options, the first "Welcome Session" | in-progress |  | [2026-10-13-special-events.md](2026-10-13-special-events.md) |
+| 2026-10-13 | Special events - ad-hoc sessions as module options, the first "Welcome Session" | done 2026-10-13 |  | [2026-10-13-special-events.md](2026-10-13-special-events.md) |
 | 2026-10-12 | The Group Photo sublabel loses its sentence about faces; one photo per submission stays | done |  | [2026-10-12-photo-sublabel.md](2026-10-12-photo-sublabel.md) |
 | 2026-10-09 | Repo cleanup: organize, consolidate, lint (no rewrite) | in-progress | 32, 50, 53 | [2026-10-09-repo-cleanup.md](2026-10-09-repo-cleanup.md) |
 | 2026-10-09 | Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped | blocked | 60 | [2026-10-09-attendance-reports-public.md](2026-10-09-attendance-reports-public.md) |

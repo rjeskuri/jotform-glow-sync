@@ -786,7 +786,7 @@ The procedure as run and what the dry run prints: [plan](plans/2026-10-06-module
 ## Special events
 
 - **When:** staff add a type of ad-hoc session or retire one; `form_status` reports a special event missing, twice or misspelled, a session rule for one, or the session bridge missing or out of place.
-- **Status:** built 2026-10-13 ([plan](plans/2026-10-13-special-events.md)), not live: every form awaits its hand apply, template first.
+- **Status:** live on all five forms since 2026-10-13 ([plan and Result](plans/2026-10-13-special-events.md#result-2026-10-13-ryans-go-for-each-write)); the first type is "Welcome Session".
 - **Dry run:** the sync's dry run, per form: one module line per dropdown and one `REPLACE conditions`.
 - **Apply:** its `--apply` by hand, one form per run, template first, Ryan's go; the runner never applies an event line.
 - **Verify:** `form_status.py --rendered` CLEAN; on the template also the browser checks below.
