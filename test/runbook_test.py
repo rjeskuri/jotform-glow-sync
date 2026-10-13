@@ -3,8 +3,10 @@
 docs/RUNBOOK.md against the code: its procedures quote the tools' own commands and lines, in a
 safe order (RosterRepairRunbook, SameNameRunbook, ContactIdsRunbook, NamesAndModulesRunbook);
 and restore_conditions.py refuses a snapshot whose rules test clubs the Club picker no longer
-offers (RestoreConditionsGuard).
+offers (RestoreConditionsGuard); the work log runs on the harness plugin's harness-worklog, and
+the retired tools/worklog.py is named only where the docs say how to restore it (WorkLogRunbook).
 """
+import glob
 import json
 import os
 import re
@@ -407,6 +409,75 @@ class NamesAndModulesRunbook(unittest.TestCase):
         self.assertIn(f"module shape: {line}", text)
         for fragment in ("dontClear", "`enable`", "never a sync apply", "JotForm.clearFieldOnHide"):
             self.assertIn(fragment, text)
+
+
+class WorkLogRunbook(unittest.TestCase):
+    """The work log behind the monthly invoice runs on the harness plugin's `harness-worklog`
+    (`/harness:worklog`); this repository's tools/worklog.py is retired (ticket #10): no live doc
+    runs it, and docs/ARCHITECTURE.md "Retired tools" says how to get it and its tests back."""
+
+    RETIRED = "tools/worklog.py"
+    HEADING = "\n## Work log and invoices\n"
+
+    def section(self):
+        """docs/RUNBOOK.md from `## Work log and invoices` to the next level-1 or level-2 heading."""
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        self.assertIn(self.HEADING, doc, "docs/RUNBOOK.md: keep the heading `## Work log and invoices` word for "
+                                         "word (CLAUDE.md and the table of contents quote it)")
+        text = doc.split(self.HEADING, 1)[1]
+        for nxt in ("\n## ", "\n# "):
+            text = text.split(nxt, 1)[0]
+        return text
+
+    def retired_section(self, doc):
+        """docs/ARCHITECTURE.md `## Retired tools`, to the next level-2 heading."""
+        self.assertIn("\n## Retired tools\n", doc, "docs/ARCHITECTURE.md: keep its `## Retired tools` section")
+        return doc.split("\n## Retired tools\n", 1)[1].split("\n## ", 1)[0]
+
+    def test_the_work_log_section_runs_harness_worklog(self):
+        text = self.section()
+        flat = " ".join(text.split())
+        for command in ("harness-worklog update", "harness-worklog add --date", "harness-worklog export --month",
+                        "harness-worklog zone", "harness-worklog describe"):
+            # assertTrue, not assertIn: the message says what to fix without dumping the whole section
+            self.assertTrue(command in flat, f"docs/RUNBOOK.md \"Work log and invoices\": name `{command}` (every "
+                                             "`python3 tools/worklog.py <cmd>` becomes `harness-worklog <cmd>`)")
+        self.assertFalse(self.RETIRED in text, "docs/RUNBOOK.md \"Work log and invoices\" still runs tools/worklog.py: "
+                                               "the commands are `harness-worklog <cmd>`")
+
+    def test_no_live_doc_runs_the_retired_tool(self):
+        skills = sorted(glob.glob(os.path.join(REPO, ".claude", "skills", "*", "SKILL.md")))
+        self.assertTrue(skills, "no .claude/skills/*/SKILL.md found: the glob is wrong")
+        docs = ["CLAUDE.md", "README.md", os.path.join("docs", "RUNBOOK.md")] + [os.path.relpath(p, REPO) for p in skills]
+        named = [d for d in docs if self.RETIRED in read(os.path.join(REPO, d))]
+        self.assertEqual(named, [], f"these live docs still name {self.RETIRED}: point them at `harness-worklog` / "
+                                    "`/harness:worklog`")
+        arch = read(os.path.join(REPO, "docs", "ARCHITECTURE.md"))
+        outside = arch.replace(self.retired_section(arch), "", 1)
+        self.assertFalse(self.RETIRED in outside, f"docs/ARCHITECTURE.md names {self.RETIRED} outside `## Retired "
+                                                "tools`: the Components row becomes `worklog/worklog.csv`, "
+                                                "`worklog/timezones.csv`")
+        self.assertFalse(os.path.exists(os.path.join(REPO, *self.RETIRED.split("/"))),
+                         f"{self.RETIRED} still exists: `git rm` it (harness-worklog replaced it)")
+
+    def test_the_retired_tool_can_be_restored(self):
+        rows = []
+        for line in self.retired_section(read(os.path.join(REPO, "docs", "ARCHITECTURE.md"))).splitlines():
+            line = line.strip()
+            if line.startswith("|") and not set(line) <= set("|-: "):
+                rows.append([c.strip() for c in line.strip("|").split("|")])
+        for path in (self.RETIRED, "test/worklog_test.py"):
+            mine = [r for r in rows if r[0] == f"`{path}`"]
+            self.assertEqual(len(mine), 1, f"docs/ARCHITECTURE.md \"Retired tools\": add exactly one row whose first "
+                                           f"cell is `{path}` (found {len(mine)})")
+            restore = mine[0][-1]
+            self.assertIn("git show ", restore, f"\"Retired tools\" row `{path}`: its last cell (Restore with) needs "
+                                                f"the command `git show <commit>:{path}`")
+            self.assertIn(f":{path}", restore, f"\"Retired tools\" row `{path}`: the restore command must name "
+                                               f"`:{path}` (it prints that file)")
+            self.assertRegex(restore, r"git show [0-9a-f]{7,40}\^?:" + re.escape(path),
+                             f"\"Retired tools\" row `{path}`: restore with `git show <commit>:{path}`, a commit "
+                             "that still holds the file")
 
 
 if __name__ == "__main__":
