@@ -14,9 +14,15 @@
   ~72 lines, #13 form_status names an uncompared runtime build); epic #6 "Finish the harness v2
   adoption" (#10 retire `tools/worklog.py`, #14 document the monthly chore, blocked by #10; #15
   October chore, `status:blocked` on purpose so dispatch skips it).
-- **Overnight**: a dispatch loop (session `jotform-glow-sync-be`, scratchpad `dispatch_loop.sh`)
-  runs `harness-work runs --sweep` and `harness-work dispatch --max 3` every 20 min; #7, #8, #9
-  launched headless at 16:12 UTC. Runs: `harness-work runs`; logs `~/.claude/harness/runs/`.
+- **Overnight (done 17:53 UTC)**: every headless run ended ok; #7–#13 are in review as ready PRs
+  #18, #17, #19, #22, #20, #21, #23, CI green, each with a Fable review whose findings were fixed
+  and a clean re-review. Pre-land check in a scratch clone: squash-landing all seven in the order
+  below is conflict-free and the result ends `VERIFY OK`; no worktree holds `data/` or `backups/`
+  files; every branch is pushed and clean; the privacy audit of the combined diff found nothing
+  (the home-folder paths in five PR bodies' tracebacks were trimmed; one nit: #18's test rosters
+  use surnames like Sample/Mock instead of `make_fixture.py`'s list, precedent on main). Runner: `glow/forms.py` gains `canonical_region` and
+  `glow/translation_lookup.py` `READ_BUILDS`, both used only by `tools/form_status.py`; nothing
+  `auto_sync.py` runs changes. #14 waits for #10 to close; nothing else is dispatchable.
 - Harness-side issues filed by the harness session from this repo's findings: Harness #25
   (work log drops pasted, `!` and slash-command messages), #26 (sessions inside ticket worktrees
   are not counted), #27 (land restores main-checkout files identical to the landed content).
@@ -24,9 +30,11 @@
   both go to `main` through #15.
 
 ## Next steps
-1. Morning: `harness-board board`; review and land the ready PRs (`/land-checks <branch>`, then
-   `/harness:land`). Land #7 before #13 and #9 before #11 (shared files); #10 before #14 runs.
-   A no-tests ticket (#8, #12) that stalled in needs-input: run it interactively, do not redispatch.
+1. Morning: review and land, in this order (the one simulated): PR #17 (#8), #18 (#7), #23 (#13),
+   #19 (#9), #20 (#11), #21 (#12), #22 (#10); `/land-checks <branch>`, then `/harness:land`. Then
+   #14 is dispatchable. Worth your eye: #21 moves rule 12's connector names, "one record per call"
+   and the metadata sequence, and rule 11's floors, out of CLAUDE.md into their skills (as the
+   ticket said), and drops `make docs-index` (RUNBOOK "Checks" holds it); CLAUDE.md is 72 lines.
 2. Ryan's questions: #12 stops at ~72 lines; go to ~60 by shortening rules 3, 4, 6, 7, 9, 10, 11
    to one line plus a skill pointer? Should `make doc-refs` refuse a new BACKLOG number (> 86)?
    Drop `.env` and `credentials/` from `.worktreeinclude` for dispatched runs (no ticket needs
