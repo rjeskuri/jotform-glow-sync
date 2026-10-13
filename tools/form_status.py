@@ -89,12 +89,19 @@ def load_roster(path):
     for row in _roster_rows(path):
         if key(row.get("status")) != "active":
             continue
-        region = row.get("region", "").strip() or "(no region)"
+        region = glow_forms.canonical_region(row.get("region")) or "(no region)"   # as the sync reads it
         ck = key(row["club"])
         entry = by_region[region].setdefault(ck, (row["club"], set(), row["partner"], {}))
         entry[1].add(name_key(row["full_name"]))
         entry[3].setdefault(key(row["partner"]), set()).add(name_key(row["full_name"]))
     return by_region
+
+
+def regions_without_form(by_region):
+    """[(region, clubs, girls)] sorted by region, for every load_roster key that is not a
+    form's region ("(no region)" included): those girls reach no attendance form."""
+    return [(region, len(clubs), sum(len(entry[1]) for entry in clubs.values()))
+            for region, clubs in sorted(by_region.items()) if region not in glow_forms.REGIONS]
 
 
 def roster_facts(path, marks):
@@ -1447,6 +1454,12 @@ def main():
     print("Roster (active girls):", shown, "clubs per region"
           + ("; not on Jotform: " + ", ".join(f"{r} {n}" for r, n in sorted(off.items()) if n)
              if any(off.values()) else ""))
+    nowhere = regions_without_form(roster)     # counts and region texts only, never a name
+    if nowhere:
+        print(f"! Roster: {sum(g for *_, g in nowhere)} active girl(s) in {sum(c for _, c, _ in nowhere)} "
+              "club(s) carry a region no form has - they reach NO attendance form: "
+              + ", ".join(f"'{r}' {c} club(s)" for r, c, _ in nowhere)
+              + "; fix the Partners tab, then GLOW -> Refresh regions from the Partners tab")
     print(storage_status_line(storage) + "\n")
     for r in reports:
         print(f"== {r['label']}  {r['id']}  \"{r['title']}\"  [{r['status'] or 'status not reported'}]")
