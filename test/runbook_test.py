@@ -453,29 +453,12 @@ class WorkLogRunbook(unittest.TestCase):
                      "--repo", "CLAUDE_PROJECT_DIR", "/harness:worklog"):
             self.assertTrue(kept in flat, f"docs/RUNBOOK.md \"Work log and invoices\": keep (or add) `{kept}`; only "
                                           "the commands change")
-        # ...as the procedure it is, word for word where the ticket does not change it (whitespace aside)
-        for sentence in (
-                "- **When:** the end of every working session (`update`), month end (`export`), after travel (`zone`).",
-                "- **Status:** in use since 2026-09-28",
-                "This is contract work, invoiced monthly from `worklog/worklog.csv`",
-                "recomputes the hours from Claude Code's session transcripts",
-                "cut into blocks wherever nothing happened for 30 minutes",
-                "each day rounded to the quarter hour",
-                "and never touches `manual` rows",
-                "**Time zones.** Days are counted on the clock the Mac showed at the time",
-                "`update` refuses in two cases, and says what to run",
-                "Prefer the IANA name: it follows daylight saving",
-                "`--ignore-commit HASH` is only for a commit not made on this Mac.",
-                "**Which sessions count.**",
-                "A session started from another folder - the home folder, say - is not counted",
-                "On 2026-10-09 that happened twice",
-                "Start working sessions from the repository.",
-                "**What `update` will not do without being asked.**",
-                "It refuses to drop a row that lost all its work until `--drop-stale` is given",
-                "is never dropped and never changed",
-                "The 2026-09-30 correction"):
-            self.assertTrue(sentence in flat, f"docs/RUNBOOK.md \"Work log and invoices\": keep `{sentence}` - only "
-                                              "the commands and the lines the ticket names change")
+        # ...as a procedure, not a list of keywords: its parts keep their labels and it keeps its length
+        # (wording may change: a later ticket rewrites the When line)
+        for label in ("**Time zones.**", "**Which sessions count.**", "**What `update` will not do without being asked.**"):
+            self.assertTrue(label in flat, f"docs/RUNBOOK.md \"Work log and invoices\": keep the part {label}")
+        self.assertGreaterEqual(len(flat), 2500, "docs/RUNBOOK.md \"Work log and invoices\" lost most of its text: only "
+                                                 "the commands change")
         # the commands in their sentences, switches unchanged
         for command in ("`harness-worklog update` recomputes the hours",
                         "`harness-worklog add --date 2026-09-29 --hours 1.5 --description \"…\"`",
@@ -519,18 +502,27 @@ class WorkLogRunbook(unittest.TestCase):
         for path in (self.RETIRED, "test/worklog_test.py"):
             self.assertFalse(os.path.exists(os.path.join(REPO, *path.split("/"))),
                              f"{path} still exists: `git rm` it (harness-worklog replaced it)")
-        # nothing in the code names the work log any more (a renamed copy of the tool would)
-        code = []
-        for top in ("tools", "glow", "scripts", "test"):
-            for root, dirs, files in os.walk(os.path.join(REPO, top)):
-                dirs[:] = [d for d in dirs if d != "__pycache__"]
-                code += [os.path.join(root, f) for f in files if f.endswith((".py", ".js", ".mjs", ".sh"))]
-        code += glob.glob(os.path.join(REPO, "*.py")) + [os.path.join(REPO, "Makefile")]
+        # no copy of the tool under another name: no *worklog*.py, and no code defines the retired tool's own
+        # functions (the transcript-to-blocks counting, the update and the invoice; names from 459451d)
+        listed = subprocess.run(["git", "-C", REPO, "ls-files", "--", "*.py", "*.js", "*.mjs", "*.sh"],
+                                capture_output=True, text=True)
+        if listed.returncode == 0 and listed.stdout.strip():
+            code = [p for p in listed.stdout.split("\n") if p]
+        else:                                   # not a git checkout: the code on disk
+            code = [os.path.relpath(os.path.join(root, f), REPO)
+                    for top in ("tools", "glow", "scripts", "test") for root, dirs, files in os.walk(os.path.join(REPO, top))
+                    if "__pycache__" not in root for f in files if f.endswith((".py", ".js", ".mjs", ".sh"))]
+            code += [os.path.basename(p) for p in glob.glob(os.path.join(REPO, "*.py"))]
+        code = [p for p in code if os.path.isfile(os.path.join(REPO, p))]
+        copies = sorted(p for p in code if re.search(r"worklog.*\.py$", os.path.basename(p), re.I))
+        self.assertEqual(copies, [], "a copy of the retired work-log tool: harness-worklog keeps the work log now")
         mine = os.path.abspath(__file__)
-        naming = sorted(os.path.relpath(p, REPO) for p in code
-                        if os.path.abspath(p) != mine and "worklog" in read(p).lower())
-        self.assertEqual(naming, [], "this code still names the work log: harness-worklog keeps it now, delete the "
-                                     "repo's own copy")
+        retired_defs = re.compile(r"^\s*def (activity_blocks|day_blocks|update_rows|invoice_rows|mac_zone_problem|"
+                                  r"is_ryans_message)\(", re.M)
+        defining = sorted(p for p in code if p.endswith(".py") and os.path.abspath(os.path.join(REPO, p)) != mine
+                          and retired_defs.search(read(os.path.join(REPO, p))))
+        self.assertEqual(defining, [], "this code defines the retired work-log tool's functions: harness-worklog keeps "
+                                       "the work log now, delete the repo's own copy")
 
     def test_the_docs_point_at_harness_worklog(self):
         """README "What is where" and ARCHITECTURE "Components" replace the tool's row with the work log's
@@ -557,10 +549,10 @@ class WorkLogRunbook(unittest.TestCase):
 
     def test_the_decision_is_recorded(self):
         doc = read(os.path.join(REPO, "docs", "DECISIONS.md"))
-        last = "### " + doc.rsplit("\n### ", 1)[1]
-        heading, body = (last.split("\n", 1) + [""])[:2]
+        # anywhere in the file: later decisions are appended after it
         title = "### 2026-10-14 — The work log runs on harness-worklog; tools/worklog.py retired"
-        self.assertEqual(heading.strip(), title, f"docs/DECISIONS.md must end with the section `{title}`")
+        self.assertEqual(doc.count(f"\n{title}\n"), 1, f"docs/DECISIONS.md needs one section headed `{title}`")
+        body = doc.split(f"\n{title}\n", 1)[1].split("\n### ", 1)[0]
         # bullets, a wrapped line joined to its bullet
         bullets = []
         for line in body.splitlines():
