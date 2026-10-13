@@ -23,5 +23,5 @@ Result); it gets its status and `done:` date, and `make docs-index` updates the 
 **intent** stays optional: it only captures Ryan's ask before a plan exists. A choice a future
 reader would re-litigate goes into DECISIONS; BACKLOG items keep their numbers and get dated
 bullets, and new work is a ticket. A change is reviewed against
-[../REVIEW.md](../REVIEW.md), with `scripts/verify.sh` (`make check`, then `VERIFY OK`) as the
-definition of done. `CLAUDE.md` at the root is the one-page institutional memory for Claude.
+[../REVIEW.md](../REVIEW.md): every line of the ticket's Definition of done holds and
+`scripts/verify.sh` (`make check`, then `VERIFY OK`) passes. `CLAUDE.md` at the root is the one-page institutional memory for Claude.
