@@ -24,7 +24,10 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
                                a form without the picker, are told apart by
                                the typed Partner box
        B. CURRICULUM CASCADE - GLOW year -> module dropdown;
-                               year+module -> session dropdown (8/10/14/15)
+                               year+module -> session dropdown (8/10/14/15;
+                               a special event shows none), headed by the
+                               session bridge: question 100 from the session
+                               dropdown shown, blank for an event
        C. SALESFORCE BRIDGE  - one aggregate Contact_IDs calculation +
                                module_id / week_id / year_id copies; with
                                the Club picker the Contact_IDs sum is rule 0
@@ -35,7 +38,9 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
                                -> show the warning, hide + disable Submit
   4. Keeps each module dropdown's calcValues equal to its own options
      (glow/sync.py MODULE_CALC_VALUES), so question 98 (module_id) copies the
-     module itself, never the text a browser's page translation shows.
+     module itself, never the text a browser's page translation shows; and
+     appends the special-event options a module dropdown lacks
+     ("Special Event - <type>", glow/sync.py SPECIAL_EVENTS) in the same write.
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -98,11 +103,11 @@ from glow.sync import (             # noqa: E402  - the parsers and structural i
     CLUB_NAME, CONTACT_IDS, GUARD_DISABLES_SUBMIT,   # shared with the
     GUARD_NAME, GUARD_PROPS, JOTFORM_COL,
     MODULE_ID, MODULES, PARTNER, PARTNER_PICKER_NAME, PICKER_NAME, SESSION_OVERRIDES,  # other tools and
-    SF_NAME_SEP, WARNINGS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners, club_picker,
-    dropdown_options, has_calc_values, inactive_retires, long_name_partner,
+    SF_NAME_SEP, WARNINGS, WEEK_BRIDGE_FIELDS, WEEK_ID, WEEKS, YEAR, YEAR_ID, club_guards, club_partners,
+    club_picker, dropdown_options, has_calc_values, inactive_retires, is_special_event, long_name_partner,
     partner_picker, partners_marker_present, picker_calc_values, read_partners_csv,
     read_roster_csv, read_sheet, roster_names, roster_pairs, roster_removed, rule_parts,   # against Config.gs
-    sf_club_name, shared_club_names, sheet_today, warn,
+    sf_club_name, shared_club_names, sheet_today, special_event_plan, warn, week_bridge_equation,
 )
 from glow import sync as glow_sync  # noqa: E402  - CONTACT_IDS_FIRST, CONTACT_IDS_PICKER_OPERAND and
 #                                     ROSTERS_REQUIRED are read through the module at run time, so
@@ -150,6 +155,14 @@ RULES_OLDER = "which the Club picker does not list"
 # raises ATTENTION and does not apply that region (docs/plans/2026-09-30-
 # contact-ids.md).
 CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
+# A fifth: the form carries (or this run gives it) a special-event option, but the live
+# rules let an event show a session dropdown or send a session in question 100 - no
+# session bridge, or one out of place, or a session rule on no curriculum module (an
+# apply that stopped after the module writes, or the option added in the builder). The
+# next dry run plans a rules-only REPLACE, which the runner does not count as a change:
+# on this warning it raises ATTENTION and applies nothing there; the rewrite is a hand
+# apply (docs/plans/2026-10-13-special-events.md)
+WEEK_BRIDGE_STALE = "the form's rules let a special event show or send a session"
 # A retired roster that comes back (docs/plans/2026-10-06-clubs-off-jotform.md)
 # has no rule to read what it sent: when its name is one two partners have had
 # it is restored with its long name, listed as a question-5 change from this
@@ -310,14 +323,22 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
                 [mk_show(PARTNER)]))
 
     # B. curriculum cascade
+    # ...headed by the session bridge (glow/sync.py WEEK_BRIDGE_FIELDS): question 100
+    # from the session dropdown shown, "" when none is (a special event). Before every
+    # rule that shows a session dropdown and before the copies below, so in the walk of
+    # each field it tests it runs last; minted here, its ids follow the order
+    conds.append(mk_calc_rule([mk_term(f, "isFilled") for f in WEEK_BRIDGE_FIELDS], WEEK_ID,
+                              ",".join(WEEK_BRIDGE_FIELDS), week_bridge_equation(), ignore_hidden=True))
     for year, module_qid in MODULES.items():
         conds.append(mk_field_rule([mk_term(YEAR, "equals", year)],
                                    [mk_show(module_qid)]))
-    conds.append(mk_field_rule([mk_term(YEAR, "equals", "1")],
-                               [mk_show(WEEKS[8])]))  # every year-1 module is 8 sessions
-    for year in ("2", "3"):
+    # one rule per module of every year (year 1: the 8-session dropdown for each); a
+    # special event (glow/sync.py SPECIAL_EVENTS) has no session, so no rule shows one
+    for year in MODULES:
         for module in module_options[year]:
-            n = SESSION_OVERRIDES.get(module, 8)
+            if is_special_event(module):
+                continue
+            n = 8 if year == "1" else SESSION_OVERRIDES.get(module, 8)
             conds.append(mk_field_rule(
                 [mk_term(MODULES[year], "equals", module),
                  mk_term(YEAR, "equals", year)],
@@ -543,7 +564,21 @@ def main():
             existing.setdefault(norm(q["text"]).lower(), []).append(qid)
             form_text[qid] = norm(q["text"])
 
-    module_options = {year: dropdown_options(questions[mqid]) for year, mqid in MODULES.items()}
+    # each module dropdown's options as this run leaves them: its own, then the special-event
+    # options it lacks (glow/sync.py SPECIAL_EVENTS; written below with its calcValues), so
+    # the rules - and a dry run - are the whole result
+    events = {year: special_event_plan(dropdown_options(questions[mqid])) for year, mqid in MODULES.items()}
+    module_options = {year: dropdown_options(questions[mqid]) + events[year]["add"]
+                      for year, mqid in MODULES.items()}
+    for year, mqid in MODULES.items():
+        for option in events[year]["unknown"]:
+            warn(f"  ! module dropdown q{mqid} (year {year}) lists '{option}', which is no special event "
+                 "of glow/sync.py SPECIAL_EVENTS: left as it is (a retired type is removed by hand in the "
+                 "builder; docs/RUNBOOK.md, \"Special events\")")
+        for have, want in events[year]["respelled"]:
+            warn(f"  ! module dropdown q{mqid} (year {year}) lists '{have}', spelled unlike '{want}' "
+                 "(glow/sync.py SPECIAL_EVENTS): Salesforce receives the form's spelling - correct it in "
+                 "the builder; not added again")
 
     picker_qid = club_picker(questions)
     if picker_qid:
@@ -675,6 +710,14 @@ def main():
             why.append(f"the Club picker (q{picker_qid}) is not one of its operands")
         warn(f"  ! {CONTACT_IDS_STALE}: {'; '.join(why)} - the rewrite puts it right; apply this "
              "form by hand (docs/RUNBOOK.md, \"The names list sent to Salesforce\")")
+
+    # the special events' rules the old way (glow/sync.py week_bridge_stale): on a form that
+    # carries, or after this run will carry, an event option - the runner reads this line too
+    if any(is_special_event(o) for options in module_options.values() for o in options):
+        stale_bridge = glow_sync.week_bridge_stale(props.get("conditions", []))
+        if stale_bridge:
+            warn(f"  ! {WEEK_BRIDGE_STALE}: {'; '.join(stale_bridge)} - the rewrite puts it right; apply "
+                 "this form by hand (docs/RUNBOOK.md, \"Special events\")")
 
     # the picker's options as the form holds them: what a mentor can pick today
     listed = {}
@@ -1290,18 +1333,30 @@ def main():
     # the option itself, never its visible text, which a browser's page translation
     # rewrites. Kept in step on every run; off, they are cleared. The runner never
     # applies these lines unattended: the first rollout is by hand, template first,
-    # and afterwards a difference means a module dropdown was edited in the builder
+    # and afterwards a difference means a module dropdown was edited in the builder.
+    # The special-event options a dropdown lacks (glow/sync.py SPECIAL_EVENTS) are
+    # appended in the same write - options and calcValues never out of step on the
+    # form - and held by the runner the same way (tools/auto_sync.py MODULE_RX)
     module_values = []
     for year, mqid in MODULES.items():
         current = questions[mqid]
-        options = dropdown_options(current)
+        options, added = module_options[year], events[year]["add"]
         want = glow_sync.module_calc_values(options)
-        if (current.get("calcValues") or "") == want or (not want and not has_calc_values(current)):
+        same = (current.get("calcValues") or "") == want or (not want and not has_calc_values(current))
+        if same and not added:
             continue
-        module_values.append({"qid": mqid, "year": year, "modules": len(options) if want else 0})
-        jf.post_form(f"/question/{mqid}", {"question[calcValues]": want},
-                     f"UPDATE module dropdown (q{mqid}, year {year}: calcValues "
-                     + (f"= its {len(options)} options)" if want else "cleared)"))
+        fields = {"question[options]": "|".join(options)} if added else {}
+        if not same:
+            fields["question[calcValues]"] = want
+        # the calcValues part says what is written: aligned ("set"), cleared - or, with the
+        # options alone, already right ("unchanged") or none while MODULE_CALC_VALUES is off
+        calc = ("set" if want else "cleared") if not same else "unchanged" if want else "none"
+        module_values.append({"qid": mqid, "year": year, "modules": len(options) if calc == "set" else 0,
+                              "events": added, "calc": calc})
+        jf.post_form(f"/question/{mqid}", fields,
+                     f"UPDATE module dropdown (q{mqid}, year {year}: "
+                     + (f"{len(added)} event option(s) added ({', '.join(added)}); " if added else "")
+                     + "calcValues " + (f"= its {len(options)} options" if calc == "set" else calc) + ")")
 
     # --- regenerate all conditions -----------------------------------------
     # The API stores each condition's terms/action as JSON-encoded STRINGS
@@ -1376,7 +1431,8 @@ def main():
             "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
             # rosters whose required flag alone is written (no other change to them)
             "requires": [{"qid": q, "club": c, "required": want_required} for q, c in to_require],
-            # module dropdowns whose calcValues are written (modules: 0 = cleared)
+            # module dropdowns written: calc set (modules: how many) / cleared / unchanged / none,
+            # and the special-event options appended (events)
             "module_values": module_values,
             # rosters this plan takes off the picker (kept hidden, no show rule), how many
             # the form already holds retired, retired rosters restored to the picker, and

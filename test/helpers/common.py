@@ -33,6 +33,14 @@ def read(path):
         return f.read()
 
 
+def module_lists(modules, events=True):
+    """{year: [option, ...]} of a {year: "a|b"} table (SameNameFixture.MODULES), with the
+    special-event options the sync appends (glow.sync.SPECIAL_EVENTS) when `events`: the
+    module dropdowns of a form in step."""
+    return {y: o.split("|") + (glow_sync.special_event_options() if events else [])
+            for y, o in modules.items()}
+
+
 def apps_script_same_name(rows, pairs=(), probes=()):
     """What appsscript/ makes of a Roster, run in Node exactly as the JS tests run
     it (test/load_gs.js; no Google API): {"sep": Config.gs SF_NAME_SEP, "shared":
@@ -209,11 +217,13 @@ class SameNameFixture:
               "331": {"type": "control_textbox", "text": "Partner", "order": "7", "name": "partner"},
               "94": {"type": "control_dropdown", "text": "GLOW Club Year", "options": "1|2|3", "order": "9",
                      "required": "Yes"}}
+        modules = module_lists(self.MODULES)
         for n, (year, mq) in enumerate(sync.MODULES.items()):
-            # in step: the calcValues the sync writes (glow.sync.MODULE_CALC_VALUES)
-            qs[mq] = {"type": "control_dropdown", "text": "Module", "options": self.MODULES[year],
+            # in step: the special-event options and the calcValues the sync writes
+            # (glow.sync.SPECIAL_EVENTS, MODULE_CALC_VALUES)
+            qs[mq] = {"type": "control_dropdown", "text": "Module", "options": "|".join(modules[year]),
                       "order": str(10 + n), "required": "Yes",
-                      "calcValues": glow_sync.module_calc_values(self.MODULES[year].split("|"))}
+                      "calcValues": glow_sync.module_calc_values(modules[year])}
         for n, wq in enumerate(sync.WEEKS.values()):
             qs[wq] = {"type": "control_dropdown", "text": "Session", "order": str(13 + n), "required": "Yes"}
         for q in (sync.CONTACT_IDS, sync.MODULE_ID, sync.WEEK_ID, sync.YEAR_ID):
@@ -236,7 +246,6 @@ class SameNameFixture:
             qs["331"]["hidden"] = "Yes"
         if rules_switched is not None:
             option_of, partner_of = self.texts(roster, rules_switched, long)
-        modules = {y: o.split("|") for y, o in self.MODULES.items()}
         conds = sync.build_conditions(option_of, partner_of, modules, picker="500" if picker else None)
         if box_hidden is not None:
             qs["331"]["hidden"] = box_hidden
@@ -351,7 +360,7 @@ class ClubGuardFixture:
         for q_id, q in qs.items():
             q.setdefault("qid", q_id)
         option_of, partner_of = self.texts(roster, switched)
-        conds = sync.build_conditions(option_of, partner_of, {y: o.split("|") for y, o in self.MODULES.items()},
+        conds = sync.build_conditions(option_of, partner_of, module_lists(self.MODULES),
                                       picker="500", picker_options=options, guard="700" if guard else None,
                                       submit="2" if guard else None)
         return qs, [dict(c, terms=json.dumps(c["terms"]), action=json.dumps(c["action"])) for c in conds]

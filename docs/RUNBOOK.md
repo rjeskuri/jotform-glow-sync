@@ -248,7 +248,7 @@ not count as a change and never applies on its own: run the dry run and
 `--apply` by hand. When the same region also has a roster change, the
 runner's ordinary apply rewrites the rules and nothing more is needed.
 
-Three things **stop a region** even when a roster change is planned
+Four things **stop a region** even when a roster change is planned
 (`attention`, nothing applied). First, the sync's warning that **question 18
 is calculated the old way** (`question 18 (Contact_IDs) is not recalculated
 after the rosters change`). Second, a **`REQUIRED roster` line**: the required
@@ -256,9 +256,15 @@ flag written on a roster that has no other change. Both are rolled out by
 hand, one form at a time ("The names list sent to Salesforce"). Once a form
 is rolled out, the runner creates rosters required and applies an options
 update that also sets the flag (`UPDATE roster … ; required: Yes`). Third, an
-**`UPDATE module dropdown` line**: a module dropdown's `calcValues`, rolled
-out by hand, template first, and afterwards only a builder edit brings it
-back ("The names dictionary and the module values"). After every apply the
+**`UPDATE module dropdown` line**: a module dropdown's `calcValues` or the
+special-event options appended with them, rolled out by hand, template first,
+and afterwards only a builder edit brings it back ("The names dictionary and
+the module values", "Special events"). Fourth, the sync's warning that **the
+form's rules let a special event show or send a session** (the option on the
+form, the rules from before it: an apply that stopped after the module
+writes, or the option added in the builder); its dry run plans only `REPLACE
+conditions`, which is never `in-sync` here, and the rewrite is applied by hand
+("Special events"). After every apply the
 verify step also audits the form's names dictionary; a store it could not
 read is a note in the log, not `applied-unverified`.
 
@@ -776,6 +782,107 @@ python3 tools/fix_module_values.py --undo data/module_fix_2026-10/ledger.csv --v
 ```
 
 The procedure as run and what the dry run prints: [plan](plans/2026-10-06-module-selection.md#from-the-runbook-moved-2026-10-09).
+
+## Special events
+
+- **When:** staff add a type of ad-hoc session or retire one; `form_status` reports a special event missing, twice or misspelled, a session rule for one, or the session bridge missing or out of place.
+- **Status:** built 2026-10-13 ([plan](plans/2026-10-13-special-events.md)), not live: every form awaits its hand apply, template first.
+- **Dry run:** the sync's dry run, per form: one module line per dropdown and one `REPLACE conditions`.
+- **Apply:** its `--apply` by hand, one form per run, template first, Ryan's go; the runner never applies an event line.
+- **Verify:** `form_status.py --rendered` CLEAN; on the template also the browser checks below.
+- **Rollback:** `restore_conditions.py --from` the snapshot for the rules; the options removed in the builder (below).
+
+A special event is an ad-hoc session outside the curriculum (Ryan, 2026-10-13: the first type
+is "Welcome Session"). It is one more option of every year's module dropdown (q14, q92, q93),
+`Special Event - <type>`, as the electives are `Elective - <name>` (`glow/sync.py`
+`SPECIAL_EVENT_PREFIX`, `SPECIAL_EVENTS`). An event shows no session dropdown, so Salesforce
+receives `Module__c` = the option's text, `Module_Week__c` blank and `Module_Year__c` the year;
+nothing changes in Salesforce. One batch per club and date still holds: a Welcome Session on a
+day the club also holds a curriculum session is refused as a duplicate, whichever arrives
+second, so mentors submit one per day (DECISIONS 2026-10-13).
+
+The sync owns the event options. It appends a missing one after the curriculum options, in
+`SPECIAL_EVENTS` order, in the same write as the dropdown's `calcValues`:
+`UPDATE module dropdown (q14, year 1: 1 event option(s) added (Special Event - Welcome Session); calcValues = its 6 options)`
+(q92: 8, q93: 9 on the template, read 2026-10-13). It never removes, renames or reorders an
+option: one that starts with the prefix but is no type of `SPECIAL_EVENTS` is warned about and
+left alone (`! module dropdown q14 (year 1) lists 'Special Event - …', which is no special event
+of glow/sync.py SPECIAL_EVENTS: left as it is`), and one in another case or spacing counts as
+present (warned, never added twice). The rules come from the options the form will have, so the
+dry run shows the whole result: every curriculum module of every year has its own session rule
+(year 1: the 8-session dropdown; years 2 and 3: `SESSION_OVERRIDES`), an event has none, and
+the **session bridge** heads the cascade. The bridge is one calculation into question 100 over
+the session dropdowns shown (`{15}{95}{96}{97}`, hidden fields ignored), tested on and listing as
+operands the year, module and session dropdowns (`WEEK_BRIDGE_FIELDS`). Jotform walks a field's
+rules last to first, so in each of those fields' walks it runs after the session dropdowns are
+shown or hidden: a mentor who picked a session and then switched to the event leaves question
+100 blank, and one who switches back gets the session again. The four copy rules stay. On the
+template the first apply plans `conditions: 394 kept, 6 new, 1 dropped` (the bridge, five year-1
+rules; the year-1 rule on the year alone goes).
+
+**The runner never applies an event line** (`check_bands`: "would add special-event option(s)
+to 3 module dropdown(s) (q14, q92, q93), with their calcValues - never unattended"): the region
+reads `attention`, its roster changes included, until its form carries the options. Nor does it
+read a form as `in-sync` whose options are there but whose rules are not (an apply that stopped
+after the three module writes, or the option added in the builder): the sync warns `! the form's
+rules let a special event show or send a session: …` (a session rule on the year alone or for an
+event, the bridge missing, doubled, out of shape or out of place) and plans only `REPLACE
+conditions`; the runner raises ATTENTION and applies nothing there. Run that form's dry run and
+its `--apply` by hand. A line that writes the options alone says so: `calcValues unchanged)` (the
+values were already right) or `calcValues none)` (`MODULE_CALC_VALUES` off).
+
+**`tools/form_status.py`** reports a form NOT CLEAN until it carries each type once per module
+dropdown in the exact spelling, no rule shows a session dropdown for an event or on the year
+alone, and the bridge is there once, in its shape, before every session rule and every copy
+into question 100. Before the apply each of these reads `awaiting a sync apply by hand, template
+first (RUNBOOK "Special events")`. The report line reads `special events: 1 type(s) on 3 of 3
+module dropdowns; session bridge rule N of M, S session rule(s), 0 on no curriculum module`.
+`--rendered` also checks that each module select serves every event once with its
+`data-calcvalue`, and that the page's bridge comes before the session rules and keeps its
+operands in `JotForm.setCalculations`.
+
+**Add a type** (one line, then a hand rollout):
+
+1. Add it to `SPECIAL_EVENTS` in `glow/sync.py` on a branch, `make check`. Translations: none
+   today. No form's store translates a module option (read 2026-10-13: only `base`/`en` hold
+   them; Swahili one of 18), so an event option is English in every language as the modules are.
+   If module options ever get translations, the event gets them too ("Translations").
+2. `AUTO_SYNC_APPLY=0` (Ryan's go), then merge with `/integrate`: until a region's form carries
+   the new option, the runner holds it.
+3. The template first: `backup_forms.py --form 262352490535154`, the sync's dry run (the three
+   module lines and `REPLACE conditions`), Ryan's go, `--apply`, `form_status.py --rendered`
+   CLEAN, then the browser checks below. Then Africa, Asia, Latin America and the U.S form
+   (disabled: `--disabled-ok`), each backup, dry run, go, apply, CLEAN, on the same day.
+4. `AUTO_SYNC_APPLY=1` (Ryan's go); `tools/auto_sync.py` dry run: every region `in-sync`.
+5. Staff tell mentors: the new option, and one submission per club per day.
+
+**Retire a type** (by hand): take it out of `SPECIAL_EVENTS` first and merge (else the next
+apply adds it back), then delete the option in the builder on each form's three module
+dropdowns. The next sync dry run plans one module line per dropdown (its `calcValues`
+realigned), applied by hand. Until the option is deleted, the sync warns and `form_status`
+reports it. Salesforce history stays: the batches keep their `Module__c`, and a report can still
+select events by `Module__c` starting with `Special Event - `.
+
+**Browser checks** (the template, before any regional form; nothing submitted until the last
+step). The session bridge is a reading of Jotform's runtime (build `f4bbef18bb2`), not yet seen
+working:
+
+- In each year the event is the module dropdown's last option, and picking it shows no session
+  dropdown.
+- Pick a curriculum module and a session, then switch to the event: question 100 must be blank.
+  In the browser console, `document.getElementById('input_100').value` returns `""`. Switch back
+  to the module: the session still shows, and the same check returns its number.
+- Change the year after picking a session: question 100 is blank until a session of the new
+  year's module shows.
+- One test submission by the plan's recipe (Rollout, step 2): a club and date that already have
+  a `Success` batch. It arrives `Failed` "Duplicate" with `Module__c` = the event's text and
+  `Module_Week__c` blank (read back by SOQL, counts and fields only); then delete the submission.
+
+**Rollback**, per form, the runner paused: `restore_conditions.py --from` the conditions
+snapshot of the apply puts the rules back. Delete the event option in the builder on the three
+module dropdowns (tooling never deletes a question or an option); the sync's next dry run then
+plans the realigned `calcValues`. Merge a revert of the branch only once every form is rolled
+back.
 
 ## Translations
 

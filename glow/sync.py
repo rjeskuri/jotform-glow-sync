@@ -340,7 +340,133 @@ def roster_required():
     """The `required` value every roster question carries (ROSTERS_REQUIRED)."""
     return "Yes" if ROSTERS_REQUIRED else "No"
 
-# Sessions per module. Modules not listed default to 8 sessions.
+
+# ------------------------------------------- the session Salesforce stores
+# Question 100 (WEEK_ID) copies the session dropdown the mentor used: one copy
+# rule per session dropdown (WEEKS), which runs only when that dropdown changes.
+# So a mentor who picked a session and then switched to a special event (no
+# session dropdown) left the earlier session in question 100 - the hidden
+# dropdown is emptied at submit, question 100 (always-hidden) is not
+# (CLEAR_FIELD_ON_HIDE above) - and so did one who went back to a module whose
+# session dropdown kept an older pick. The SESSION BRIDGE (build_conditions,
+# docs/plans/2026-10-13-special-events.md) is one more calculation into question
+# 100 over the session dropdowns SHOWN: the equation {15}{95}{96}{97} with
+# ignoreHiddenFields (a hidden operand contributes ""), tested on - and with as
+# operands - the year, every module and every session dropdown, and placed before
+# every rule that shows a session dropdown and before the copies. Jotform walks a
+# field's rules last to first (index 0 last: CONTACT_IDS_FIRST above), so in the
+# walk of each of those fields it runs after the session dropdowns are shown or
+# hidden and after the copy; its operands' change listeners run it once more after
+# every rule. An event, or no module, leaves no session dropdown shown: question
+# 100 is "". Read in jotform.forms.js build f4bbef18bb2 (md5 13fc45a826,
+# 2026-10-13): checkCalculation writes a number field's output with everything but
+# "-0-9." stripped, so "" empties it (an empty EQUATION would not do: the runtime's
+# runAllCalculations skips one); isCalculationOperandHidden is the form-field-hidden
+# class on the operand's <li> or section, which the template serves on every
+# session dropdown until a rule shows it; a select operand reads its chosen
+# option's data-calcvalue, and the "Please Select" placeholder (value "") reads ""
+# under the new default theme the template is served with
+# (JotForm.newDefaultTheme = true). A runtime reading, not a contract: proven in a
+# browser on the template before any regional form (the plan's Rollout, step 2).
+WEEK_BRIDGE_FIELDS = (YEAR, *MODULES.values(), *WEEKS.values())
+
+
+def week_bridge_equation():
+    """The session bridge's equation: one {qid} per session dropdown, in WEEKS order."""
+    return "".join("{%s}" % q for q in WEEKS.values())
+
+
+def week_bridge_layout(conditions):
+    """Where question 100's rules sit among `conditions` (the order the form holds and
+    serves them): {"count": rules, "bridge": [positions of every calculation into
+    WEEK_ID whose equation is the bridge's], "position": the first or None, "terms":
+    {field: operator} it tests, "link", "operands": [its operands], "ignore_hidden":
+    bool, "copies": [positions of the other calculations into WEEK_ID], "session_rules":
+    [positions of the rules that show a session dropdown], "event_rules": [positions of
+    those that test no curriculum module of the year's dropdown - a special event, or
+    no module term at all (the year-1 rule before 2026-10-13): an event would show a
+    session]}."""
+    out = {"count": len(conditions or []), "bridge": [], "position": None, "terms": {}, "link": None,
+           "operands": [], "ignore_hidden": False, "copies": [], "session_rules": [], "event_rules": []}
+    weeks, modules = set(WEEKS.values()), set(MODULES.values())
+    for pos, rule in enumerate(conditions or []):
+        parts = rule_parts(rule)
+        if parts is None:
+            continue
+        terms, actions = parts
+        for a in actions:
+            if str(a.get("resultField")) != WEEK_ID:
+                continue
+            if str(a.get("equation") or "") != week_bridge_equation():
+                out["copies"].append(pos)
+                continue
+            out["bridge"].append(pos)
+            if out["position"] is None:
+                flag = a.get("ignoreHiddenFields")
+                out.update(position=pos, link=rule.get("link"),
+                           terms={str(t.get("field")): t.get("operator") for t in terms},
+                           operands=[x for x in str(a.get("operands") or "").split(",") if x],
+                           ignore_hidden=flag is True or str(flag).lower() in ("1", "true"))
+        if any(a.get("visibility") == "Show" and str(a.get("field")) in weeks for a in actions):
+            out["session_rules"].append(pos)
+            curriculum = [t for t in terms if str(t.get("field")) in modules and t.get("operator") == "equals"
+                          and not is_special_event(t.get("value"))]
+            if not curriculum or any(str(t.get("field")) in modules and is_special_event(t.get("value"))
+                                     for t in terms):
+                out["event_rules"].append(pos)
+    return out
+
+
+def week_bridge_faults(shape):
+    """What is wrong with the shape of the session bridge week_bridge_layout found (its
+    "position" set): [] when it is the one build_conditions writes."""
+    fields, wrong = set(WEEK_BRIDGE_FIELDS), []
+    if not shape["ignore_hidden"]:
+        wrong.append("hidden session dropdowns not ignored")
+    if str(shape["link"]).lower() != "any":
+        wrong.append(f"link {shape['link']!r}, not Any")
+    untested = fields - {f for f, op in shape["terms"].items() if op == "isFilled"}
+    if untested:
+        wrong.append(f"its rule does not test {len(untested)} of the year, module and session dropdowns "
+                     "(isFilled)")
+    unlisted = fields - set(shape["operands"])
+    if unlisted:
+        wrong.append(f"{len(unlisted)} of them not among its operands")
+    return wrong
+
+
+def week_bridge_stale(conditions):
+    """How the live rules let a special event show or send a session: [] when they are in the
+    shape build_conditions writes, or when there are no rules to compare (the rewrite adds
+    them). Else one phrase per fault: a rule that shows a session dropdown on no curriculum
+    module (the year-1 rule before 2026-10-13, or an event's), the session bridge missing,
+    doubled, in another shape, or after a session rule or copy. The sync warns with these
+    on a form that carries (or will carry) an event option, and the runner applies no such
+    form unattended (tools/auto_sync.py WEEK_BRIDGE_STALE)."""
+    if not conditions:
+        return []
+    shape, why = week_bridge_layout(conditions), []
+    if shape["event_rules"]:
+        why.append(f"{len(shape['event_rules'])} rule(s) show a session dropdown without testing a curriculum "
+                   f"module (first: rule {shape['event_rules'][0] + 1})")
+    pos = shape["position"]
+    if pos is None:
+        why.append("no session bridge, so question 100 keeps a session picked before the event")
+        return why
+    if len(shape["bridge"]) > 1:
+        why.append(f"{len(shape['bridge'])} session bridges into question 100")
+    faults = week_bridge_faults(shape)
+    if faults:
+        why.append("the session bridge: " + "; ".join(faults))
+    late = [p for p in shape["session_rules"] + shape["copies"] if p < pos]
+    if late:
+        why.append(f"the session bridge is rule {pos + 1} of {shape['count']}, after {len(late)} session "
+                   "rule(s) or copies")
+    return why
+
+
+# Sessions per module. Modules not listed default to 8 sessions (a special
+# event, below, has none). Year 1 shows the 8-session dropdown for every module.
 # EDIT HERE when the curriculum changes; the cascade rules are generated
 # from this table and from the module dropdowns' live option lists.
 SESSION_OVERRIDES = {
@@ -348,6 +474,49 @@ SESSION_OVERRIDES = {
     "Elective - Girl Boss Basics": 10,
     "Elective - Girl Boss Pro": 15,
 }
+
+# ------------------------------------------------------------ special events
+# Ad-hoc sessions a club holds outside the curriculum (Ryan, 2026-10-13;
+# docs/plans/2026-10-13-special-events.md): each is one more option of EVERY
+# module dropdown (MODULES, all three years), "Special Event - <type>", as the
+# electives are "Elective - <name>". An event shows no session dropdown, so
+# question 100 (WEEK_ID) reaches Salesforce blank and Module__c is the option's
+# text. The sync owns these options: it appends a missing one after the
+# curriculum options, in this order, in the same write as the dropdown's
+# calcValues; it never removes, renames or reorders one. An option that starts
+# with the prefix but is not listed here is warned about and left alone (a
+# retired type is removed by hand in the builder: RUNBOOK "Special events").
+# EDIT HERE to add a type; the rollout is by hand, template first (the runner
+# holds the write: tools/auto_sync.py). Python only - Apps Script never reads
+# modules.
+SPECIAL_EVENT_PREFIX = "Special Event - "
+SPECIAL_EVENTS = ("Welcome Session",)
+
+
+def special_event_options():
+    """The module-dropdown option of each SPECIAL_EVENTS type, in order."""
+    return [SPECIAL_EVENT_PREFIX + e for e in SPECIAL_EVENTS]
+
+
+def is_special_event(option):
+    """Whether a module option is a special event: it starts with SPECIAL_EVENT_PREFIX,
+    compared as Jotform's runtime `equals` compares (case and spacing ignored) - a type
+    no longer in SPECIAL_EVENTS included: it still has no sessions."""
+    return key(option).startswith(key(SPECIAL_EVENT_PREFIX))
+
+
+def special_event_plan(options):
+    """What a module dropdown with these options (dropdown_options) lacks and carries:
+    {"add": the SPECIAL_EVENTS options it does not list, in SPECIAL_EVENTS order - the
+    sync appends them; "unknown": its options that start with the prefix but are none
+    of SPECIAL_EVENTS (left alone, warned about); "respelled": [(on the form, wanted)]
+    for an event it lists in another case or spacing (counted as present: never added
+    twice)}. Compared with glow.text.key."""
+    wanted = {key(o): o for o in special_event_options()}
+    have = {key(o) for o in options}
+    return {"add": [o for k, o in wanted.items() if k not in have],
+            "unknown": [o for o in options if is_special_event(o) and key(o) not in wanted],
+            "respelled": [(o, wanted[key(o)]) for o in options if key(o) in wanted and o != wanted[key(o)]]}
 
 # Warnings are printed as they happen and collected for --summary-json
 # (tools/auto_sync.py decides from them whether a plan is safe to apply).
