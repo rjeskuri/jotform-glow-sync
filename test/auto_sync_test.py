@@ -733,8 +733,9 @@ class ModuleValues(unittest.TestCase):
                          [("/question/14", {"question[calcValues]": f"|Core 1|{self.EVENT}"}),
                           ("/question/92", {"question[calcValues]": f"|Core 2|Elective - Healthy GLOW|{self.EVENT}"}),
                           ("/question/93", {"question[calcValues]": f"|Core 3|{self.EVENT}"})])
-        want = [{"qid": "14", "year": "1", "modules": 2, "events": 0}, {"qid": "92", "year": "2", "modules": 3, "events": 0},
-                {"qid": "93", "year": "3", "modules": 2, "events": 0}]
+        want = [{"qid": "14", "year": "1", "modules": 2, "events": 0, "calc": "set"},
+                {"qid": "92", "year": "2", "modules": 3, "events": 0, "calc": "set"},
+                {"qid": "93", "year": "3", "modules": 2, "events": 0, "calc": "set"}]
         self.assertEqual(summary["module_values"], [dict(m, events=[]) for m in want])
         plan = auto_sync.parse_plan(out)
         self.assertEqual((plan["modules"], auto_sync.plan_from_summary(summary)["modules"]), (want, want))
@@ -792,8 +793,8 @@ class ModuleValues(unittest.TestCase):
         joined = re.sub(r'"\s*\n\s*"', "", read(os.path.join(REPO, "sync_attendance_form.py")))
         for fragment in ('f"UPDATE module dropdown (q{mqid}, year {year}: "',
                          '(f"{len(added)} event option(s) added ({\', \'.join(added)}); " if added else "")',
-                         '+ "calcValues "',
-                         '(f"= its {len(options)} options)" if want else "cleared)" if not same else "none)")'):
+                         'calc = ("set" if want else "cleared") if not same else "unchanged" if want else "none"',
+                         '+ "calcValues " + (f"= its {len(options)} options" if calc == "set" else calc) + ")")'):
             self.assertIn(fragment, joined)
 
 

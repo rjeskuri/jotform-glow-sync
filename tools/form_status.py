@@ -423,12 +423,17 @@ def audit_special_events(questions, conditions):
         options = dropdown_options(q)
         listed[qid] = {e: options.count(e) for e in events}
         plan = glow_sync.special_event_plan(options)
-        respelled = dict((want, have) for have, want in plan["respelled"])
+        # every entry in another case or spacing, whether or not the exact one is listed too:
+        # a mentor who picks it sends Salesforce that spelling
+        for have, want in plan["respelled"]:
+            problems.append(f"module dropdown q{qid} (year {year}) lists the special event as '{have}', "
+                            f"not '{want}' - Salesforce receives the form's spelling; "
+                            + ("remove it in the builder (the exact option is listed too)" if listed[qid][want]
+                               else "correct it in the builder"))
+        respelled = {want for _, want in plan["respelled"]}
         for e, n in listed[qid].items():
             if n == 0 and e in respelled:
-                problems.append(f"module dropdown q{qid} (year {year}) lists the special event as "
-                                f"'{respelled[e]}', not '{e}' - Salesforce receives the form's spelling; "
-                                "correct it in the builder")
+                continue                 # reported above
             elif n == 0:
                 problems.append(f"module dropdown q{qid} (year {year}) lacks the special event '{e}' - "
                                 f"awaiting {EVENTS_FIX}")
@@ -452,18 +457,7 @@ def audit_special_events(questions, conditions):
         if len(shape["bridge"]) > 1:
             problems.append(f"{len(shape['bridge'])} session bridges into question 100, expected 1 - the "
                             "next sync apply rewrites the rules")
-        fields = set(glow_sync.WEEK_BRIDGE_FIELDS)
-        wrong = []
-        if not shape["ignore_hidden"]:
-            wrong.append("hidden session dropdowns not ignored")
-        if str(shape["link"]).lower() != "any":
-            wrong.append(f"link {shape['link']!r}, not Any")
-        untested = fields - {f for f, op in shape["terms"].items() if op == "isFilled"}
-        if untested:
-            wrong.append(f"its rule does not test {len(untested)} of the year, module and session dropdowns "
-                         "(isFilled)")
-        if fields - set(shape["operands"]):
-            wrong.append(f"{len(fields - set(shape['operands']))} of them not among its operands")
+        wrong = glow_sync.week_bridge_faults(shape)
         if wrong:
             problems.append("the session bridge (question 100): " + "; ".join(wrong) + " - the next sync apply "
                             "rewrites it")
@@ -782,21 +776,31 @@ def rendered_select_attrs(page, qid):
 
 def rendered_event_options(page, qid):
     """{event option: (times the select of question `qid` serves it, times with a data-calcvalue
-    equal to its value)} for each glow.sync.SPECIAL_EVENTS option; None when the page has no
-    such select."""
+    equal to its value, times with one that differs)} for each glow.sync.SPECIAL_EVENTS option;
+    None when the page has no such select."""
     m = re.search(r'<select\b[^>]*\bname="q%s_[^"]*"[^>]*>(.*?)</select>' % re.escape(str(qid)),
                   page or "", re.S)
     if not m:
         return None
-    out = {e: [0, 0] for e in glow_sync.special_event_options()}
+    out = {e: [0, 0, 0] for e in glow_sync.special_event_options()}
     for attrs in re.findall(r"<option\b([^>]*)>", m.group(1)):
         value = re.search(r'(?<![\w-])value="([^"]*)"', attrs)
         calc = re.search(r'\bdata-calcvalue="([^"]*)"', attrs)
         v = html.unescape(value.group(1)) if value else None
         if v in out:
             out[v][0] += 1
-            out[v][1] += bool(calc and html.unescape(calc.group(1)) == v)
+            if calc:
+                out[v][1 if html.unescape(calc.group(1)) == v else 2] += 1
     return {e: tuple(c) for e, c in out.items()}
+
+
+def event_served_ok(counts):
+    """Whether a module select serves an event option as glow/sync.py says (counts from
+    rendered_event_options): once, with its data-calcvalue (MODULE_CALC_VALUES on) - or, the
+    switch off, once and with no data-calcvalue other than its value, as rendered_module_problems
+    asks of every module option."""
+    served, aligned, differ = counts
+    return served == 1 and (aligned == 1 if glow_sync.MODULE_CALC_VALUES else not differ)
 
 
 def rendered_week_bridge(page):
@@ -831,11 +835,12 @@ def rendered_bridge_problems(r, page):
         seen[qid] = events
         if events is None:
             continue                     # rendered_module_problems reports a missing select
-        for e, (served, aligned) in events.items():
-            if served != 1 or aligned != 1:
+        for e, counts in events.items():
+            if not event_served_ok(counts):
+                served, aligned, differ = counts
                 problems.append(f"rendered page: module dropdown q{qid} serves '{e}' {served} time(s), "
-                                f"{aligned} with its data-calcvalue - a page from before the apply (re-run in a "
-                                f"few minutes), else {EVENTS_FIX}")
+                                f"{aligned} with its data-calcvalue" + (f", {differ} with another" if differ else "")
+                                + f" - a page from before the apply (re-run in a few minutes), else {EVENTS_FIX}")
     r["rendered_events"] = seen
     bridge = rendered_week_bridge(page)
     r["rendered_bridge"] = bridge
@@ -1509,9 +1514,10 @@ def main():
                   f"module selects served multiple: {', '.join('q' + q for q in s['multi_select']) or 'none'}")
         if "rendered_bridge" in r:
             b, ev = r["rendered_bridge"], r.get("rendered_events") or {}
-            served = [q for q, c in ev.items() if c and all(n == (1, 1) for n in c.values())]
+            served = [q for q, c in ev.items() if c and all(event_served_ok(n) for n in c.values())]
             print(f"   rendered events: {len(served)} of {len(ev)} module selects serve each special event once "
-                  "with its data-calcvalue; session bridge "
+                  + ("with its data-calcvalue" if glow_sync.MODULE_CALC_VALUES else "(module values off)")
+                  + "; session bridge "
                   + ("not found on the public page" if b is None or b["position"] is None else
                      f"rule {b['position'] + 1} of {b['rules']}, {b['late']} session rule(s) or copies before it, "
                      f"operands kept: {'yes' if not set(glow_sync.WEEK_BRIDGE_FIELDS) - set(b['operands'] or []) else 'no'}"))

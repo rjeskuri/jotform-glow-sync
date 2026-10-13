@@ -214,6 +214,17 @@ for the event.
 `form_status --rendered` on the template (read-only): 9 problems, all this plan's ("lacks the
 special event" ×3, the year-1 rule, no bridge, the served page ×4), runtime build `f4bbef18bb2`.
 
+**Review fixes** (after `f8b612e`, same day): (1) the options on a form with the rules from
+before them - an apply that stopped after the three module writes, or the option added in the
+builder - read `in-sync` to the runner, since a rules-only REPLACE is no change to it; now the
+sync warns `! the form's rules let a special event show or send a session: …`
+(`glow/sync.py` `week_bridge_stale`) on a form that carries or will carry an event option, and
+the runner raises ATTENTION on it and applies nothing there, as for question 18 the old way;
+(2) `form_status` reports every event option in another spelling, the exact one listed or not;
+(3) a module line that writes the options alone ends `calcValues unchanged)` or `calcValues
+none)`, and the runner's ATTENTION list tells them from `cleared`; (4) `--rendered` asks the
+event options for their `data-calcvalue` only while `MODULE_CALC_VALUES` is on.
+
 **Decided while building** (the smallest choice; Ryan may overrule): an event option in another
 case or spacing counts as present (warned, never appended twice; `form_status` asks for the exact
 spelling); a prefixed option that is no `SPECIAL_EVENTS` type makes the form NOT CLEAN until

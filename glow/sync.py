@@ -417,6 +417,54 @@ def week_bridge_layout(conditions):
     return out
 
 
+def week_bridge_faults(shape):
+    """What is wrong with the shape of the session bridge week_bridge_layout found (its
+    "position" set): [] when it is the one build_conditions writes."""
+    fields, wrong = set(WEEK_BRIDGE_FIELDS), []
+    if not shape["ignore_hidden"]:
+        wrong.append("hidden session dropdowns not ignored")
+    if str(shape["link"]).lower() != "any":
+        wrong.append(f"link {shape['link']!r}, not Any")
+    untested = fields - {f for f, op in shape["terms"].items() if op == "isFilled"}
+    if untested:
+        wrong.append(f"its rule does not test {len(untested)} of the year, module and session dropdowns "
+                     "(isFilled)")
+    unlisted = fields - set(shape["operands"])
+    if unlisted:
+        wrong.append(f"{len(unlisted)} of them not among its operands")
+    return wrong
+
+
+def week_bridge_stale(conditions):
+    """How the live rules let a special event show or send a session: [] when they are in the
+    shape build_conditions writes, or when there are no rules to compare (the rewrite adds
+    them). Else one phrase per fault: a rule that shows a session dropdown on no curriculum
+    module (the year-1 rule before 2026-10-13, or an event's), the session bridge missing,
+    doubled, in another shape, or after a session rule or copy. The sync warns with these
+    on a form that carries (or will carry) an event option, and the runner applies no such
+    form unattended (tools/auto_sync.py WEEK_BRIDGE_STALE)."""
+    if not conditions:
+        return []
+    shape, why = week_bridge_layout(conditions), []
+    if shape["event_rules"]:
+        why.append(f"{len(shape['event_rules'])} rule(s) show a session dropdown without testing a curriculum "
+                   f"module (first: rule {shape['event_rules'][0] + 1})")
+    pos = shape["position"]
+    if pos is None:
+        why.append("no session bridge, so question 100 keeps a session picked before the event")
+        return why
+    if len(shape["bridge"]) > 1:
+        why.append(f"{len(shape['bridge'])} session bridges into question 100")
+    faults = week_bridge_faults(shape)
+    if faults:
+        why.append("the session bridge: " + "; ".join(faults))
+    late = [p for p in shape["session_rules"] + shape["copies"] if p < pos]
+    if late:
+        why.append(f"the session bridge is rule {pos + 1} of {shape['count']}, after {len(late)} session "
+                   "rule(s) or copies")
+    return why
+
+
 # Sessions per module. Modules not listed default to 8 sessions (a special
 # event, below, has none). Year 1 shows the 8-session dropdown for every module.
 # EDIT HERE when the curriculum changes; the cascade rules are generated

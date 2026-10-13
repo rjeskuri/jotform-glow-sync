@@ -204,12 +204,12 @@ class EventSync(unittest.TestCase):
         self.assertNotIn(EVENT, [m for _, m, _, _ in session_rules(written)])
         self.assertIn("conditions: ", out)
         self.assertEqual(summary["module_values"],
-                         [{"qid": "14", "year": "1", "modules": 2, "events": [EVENT]},
-                          {"qid": "92", "year": "2", "modules": 3, "events": [EVENT]},
-                          {"qid": "93", "year": "3", "modules": 2, "events": [EVENT]}])
+                         [{"qid": "14", "year": "1", "modules": 2, "events": [EVENT], "calc": "set"},
+                          {"qid": "92", "year": "2", "modules": 3, "events": [EVENT], "calc": "set"},
+                          {"qid": "93", "year": "3", "modules": 2, "events": [EVENT], "calc": "set"}])
         # the runner reads the same plan from the printed lines and from the summary, and holds it
-        want = [{"qid": q, "year": y, "modules": n, "events": 1} for q, y, n in (("14", "1", 2), ("92", "2", 3),
-                                                                                   ("93", "3", 2))]
+        want = [{"qid": q, "year": y, "modules": n, "events": 1, "calc": "set"}
+                for q, y, n in (("14", "1", 2), ("92", "2", 3), ("93", "3", 2))]
         self.assertEqual((auto_sync.parse_plan(out)["modules"], auto_sync.plan_from_summary(summary)["modules"]),
                          (want, want))
         # applied, the form is in step: nothing more
@@ -255,7 +255,7 @@ class EventSync(unittest.TestCase):
                                         f"({EVENT}); calcValues none)")
         self.assertEqual(fake.writes[0][2], {"question[options]": f"Core 1|{EVENT}"})
         (entry,) = [m for m in auto_sync.parse_plan(out)["modules"] if m["qid"] == "14"]
-        self.assertEqual(entry, {"qid": "14", "year": "1", "modules": 0, "events": 1})
+        self.assertEqual(entry, {"qid": "14", "year": "1", "modules": 0, "events": 1, "calc": "none"})
 
 
 class Runner(unittest.TestCase):
@@ -337,6 +337,12 @@ class Audit(unittest.TestCase):
         spelled = copy.deepcopy(qs)
         spelled["93"]["options"] = spelled["93"]["options"].replace(EVENT, EVENT.lower())
         self.assertIn(f"lists the special event as '{EVENT.lower()}', not '{EVENT}'", only(spelled))
+        self.assertIn("correct it in the builder", only(spelled))
+        # the exact option AND one in another case: still reported (a mentor may pick the other)
+        both = copy.deepcopy(qs)
+        both["92"]["options"] += "|" + EVENT.upper()
+        self.assertIn(f"lists the special event as '{EVENT.upper()}', not '{EVENT}' - Salesforce receives the "
+                      "form's spelling; remove it in the builder (the exact option is listed too)", only(both))
         retired = copy.deepcopy(qs)
         retired["14"]["options"] += "|Special Event - Old Fair"
         self.assertIn("lists 'Special Event - Old Fair', which is no special event", only(retired))
@@ -390,7 +396,7 @@ class Audit(unittest.TestCase):
         page = served_rules_and_rosters(qs, wire)
         r = {}
         self.assertEqual(form_status.rendered_bridge_problems(r, page), [])
-        self.assertEqual(r["rendered_events"], {q: {EVENT: (1, 1)} for q in sync.MODULES.values()})
+        self.assertEqual(r["rendered_events"], {q: {EVENT: (1, 1, 0)} for q in sync.MODULES.values()})
         self.assertEqual((r["rendered_bridge"]["late"], r["rendered_bridge"]["ignore_hidden"]), (0, True))
         self.assertEqual(r["rendered_bridge"]["operands"], list(glow_sync.WEEK_BRIDGE_FIELDS))
         # a page from before the apply: no event option served, no bridge
@@ -404,6 +410,21 @@ class Audit(unittest.TestCase):
         bare["14"]["calcValues"] = "|Core 1"
         (problem,) = form_status.rendered_bridge_problems({}, served_rules_and_rosters(bare, wire))
         self.assertIn("q14 serves 'Special Event - Welcome Session' 1 time(s), 0 with its data-calcvalue", problem)
+        # MODULE_CALC_VALUES off (the generated rollback): no data-calcvalue is asked for, as for
+        # every module option; one other than the value still is a problem
+        with mock.patch.object(glow_sync, "MODULE_CALC_VALUES", False):
+            bare = copy.deepcopy(qs)
+            for q in sync.MODULES.values():
+                bare[q]["calcValues"] = ""
+            r = {}
+            self.assertEqual(form_status.rendered_bridge_problems(r, served_rules_and_rosters(bare, wire)), [])
+            self.assertEqual(r["rendered_events"]["14"], {EVENT: (1, 0, 0)})
+            other = copy.deepcopy(qs)
+            other["14"]["calcValues"] = "|Core 1|Special Event - Something Else"
+            (problem,) = form_status.rendered_bridge_problems({}, served_rules_and_rosters(other, wire))
+            self.assertIn("q14 serves 'Special Event - Welcome Session' 1 time(s), 0 with its data-calcvalue, "
+                          "1 with another", problem)
+            self.assertFalse(form_status.event_served_ok((0, 0, 0)))
         # Jotform dropping the operands that are not in the equation, or the hidden-fields flag
         calcs = re.search(r"JotForm\.setCalculations\((.*?)\);", page, re.S)
         served = json.loads(calcs.group(1))
@@ -419,6 +440,117 @@ class Audit(unittest.TestCase):
         (problem,) = form_status.rendered_bridge_problems({}, served_rules_and_rosters(qs, late))
         self.assertIn("after 8 rule(s) that show a session dropdown or copy one", problem)
         self.assertEqual(module_lists({"1": "Core 1"}), {"1": ["Core 1", EVENT]})
+
+
+class StaleRules(unittest.TestCase):
+    """A form that carries the event option but whose live rules are the old way (an apply that
+    stopped after the module writes, or the option added in the builder): the dry run plans a
+    rules-only REPLACE, which the runner never reads as in-sync."""
+
+    ROSTER, QIDS, MODULES, texts = SameNameFixture.ROSTER, SameNameFixture.QIDS, SameNameFixture.MODULES, SameNameFixture.texts
+
+    def setUp(self):
+        SameNameFixture.setUp(self)
+
+    def tearDown(self):
+        SameNameFixture.tearDown(self)
+
+    def run_sync(self, fake, *extra):
+        return SameNameFixture.run_sync(self, fake, *extra)
+
+    def summary(self, fake, *extra):
+        return SameNameFixture.summary(self, fake, *extra)
+
+    def options_in_step_rules_old(self):
+        qs, wire = SameNameFixture.form(self, switched=True)
+        return qs, before_rollout(qs, wire)[1]
+
+    def test_the_layout_says_what_is_stale(self):
+        qs, wire = SameNameFixture.form(self, switched=True)
+        self.assertEqual(glow_sync.week_bridge_stale(wire), [])
+        self.assertEqual(glow_sync.week_bridge_stale([]), [])                     # nothing to compare
+        old = before_rollout(qs, wire)[1]
+        self.assertEqual(glow_sync.week_bridge_stale(old), [
+            "1 rule(s) show a session dropdown without testing a curriculum module (first: rule 9)",
+            "no session bridge, so question 100 keeps a session picked before the event"])
+        pos = glow_sync.week_bridge_layout(wire)["position"]
+        late = wire[:pos] + wire[pos + 1:] + [wire[pos]]
+        (why,) = glow_sync.week_bridge_stale(late)
+        self.assertRegex(why, r"^the session bridge is rule \d+ of \d+, after 8 session rule\(s\) or copies$")
+        terms, (action,) = glow_sync.rule_parts(wire[pos])
+        shaped = wire[:pos] + [dict(wire[pos], action=json.dumps([dict(action, ignoreHiddenFields=False)]))] \
+            + wire[pos + 1:]
+        self.assertEqual(glow_sync.week_bridge_stale(shaped), ["the session bridge: hidden session dropdowns not ignored"])
+        doubled = wire[:pos + 1] + [wire[pos]] + wire[pos + 1:]
+        self.assertEqual(glow_sync.week_bridge_stale(doubled), ["2 session bridges into question 100"])
+
+    def test_options_in_step_with_old_rules_is_attention_never_in_sync(self):
+        self.assertEqual(auto_sync.WEEK_BRIDGE_STALE, sync.WEEK_BRIDGE_STALE)
+        fake = FakeForm(*self.options_in_step_rules_old())
+        summary, out = self.summary(fake)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertRegex(fake.calls[0], r"^REPLACE conditions \(\d+ rules\)$")      # rules only
+        (warning,) = [w for w in summary["warnings"] if sync.WEEK_BRIDGE_STALE in w]
+        self.assertTrue(warning.startswith(f"  ! {sync.WEEK_BRIDGE_STALE}: 1 rule(s) show a session dropdown"))
+        self.assertIn("apply this form by hand (docs/RUNBOOK.md, \"Special events\")", warning)
+        for plan in (auto_sync.parse_plan(out), auto_sync.plan_from_summary(summary)):
+            self.assertEqual((auto_sync.changes(plan), len(auto_sync.week_bridge_stale(plan))), (0, 1))
+            (reason,) = auto_sync.check_bands(plan)
+            self.assertIn("the form's rules let a special event show a session dropdown or send a session "
+                          "(question 100) - the rules-only rewrite is applied by hand", reason)
+        busy = out.replace("  - REPLACE", "  - CREATE roster 'Gamma Club' (2 girls)\n  - REPLACE")
+        for text, apply, summ in ((out, False, None), (out, True, None), (busy, True, None), (out, True, summary)):
+            run = AutoSyncFixture.run_region(self, text, apply=apply, summary=summ)
+            self.assertEqual(run.synced, [False])                        # never an apply, not even with a new club
+            self.assertEqual([r[7] for r in run.results], ["attention"])
+            (title, detail), = run.attention
+            self.assertIn("Africa: not applied", title)
+            self.assertIn(sync.WEEK_BRIDGE_STALE, detail)
+
+    def test_new_rules_read_in_sync_and_a_form_without_events_is_not_asked(self):
+        qs, wire = SameNameFixture.form(self, switched=True)
+        # a rules-only difference that leaves the special events' rules in shape (a copy rule
+        # deleted in the builder): in-sync, as every rules-only plan
+        gone = [c for c in wire if not any(a.get("resultField") == sync.YEAR_ID for a in glow_sync.rule_parts(c)[1])]
+        fake = FakeForm(qs, gone)
+        _, out = self.run_sync(fake)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertNotIn(sync.WEEK_BRIDGE_STALE, out)
+        run = AutoSyncFixture.run_region(self, out, apply=True)
+        self.assertEqual(([r[7] for r in run.results], run.attention), (["in-sync"], []))
+        # the form in step: nothing at all
+        fake = FakeForm(qs, wire)
+        self.assertEqual((self.run_sync(fake)[0], fake.calls), (0, []))
+        # no event anywhere (no type listed, none on the form): old rules are nobody's business here
+        bare_qs, old = before_rollout(qs, wire)
+        with mock.patch.object(glow_sync, "SPECIAL_EVENTS", ()):
+            _, out = self.run_sync(FakeForm(bare_qs, old))
+        self.assertNotIn(sync.WEEK_BRIDGE_STALE, out)
+
+    def test_a_write_of_the_options_alone_says_so_and_is_held(self):
+        qs, wire = SameNameFixture.form(self, switched=True)
+        # the option deleted in the builder, its calcValues left aligned to the full list
+        qs["14"]["options"] = "Core 1"
+        fake = FakeForm(qs, wire)
+        _, out = self.run_sync(fake)
+        line = (f"UPDATE module dropdown (q14, year 1: 1 event option(s) added ({EVENT}); calcValues unchanged)")
+        self.assertEqual(fake.calls[0], line)
+        self.assertEqual(fake.writes[0][2], {"question[options]": f"Core 1|{EVENT}"})
+        plan = auto_sync.parse_plan(out)
+        self.assertEqual(plan["modules"], [{"qid": "14", "year": "1", "modules": 0, "events": 1, "calc": "unchanged"}])
+        (reason,) = auto_sync.check_bands(plan)
+        self.assertIn("would add special-event option(s) to 1 module dropdown(s) (q14)", reason)
+        run = AutoSyncFixture.run_region(self, out, apply=True)
+        self.assertEqual([r[7] for r in run.results], ["attention"])
+        self.assertIn("- MODULE values q14 (year 1: calcValues unchanged, 1 special-event option(s) added)",
+                      run.attention[0][1])
+        # the ATTENTION list tells "no calcValues" (options alone, values off) from "cleared"
+        for words, attention in (("calcValues none", "no calcValues"), ("calcValues cleared", "cleared")):
+            text = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
+                    f"  - UPDATE module dropdown (q14, year 1: 1 event option(s) added ({EVENT}); {words})\n")
+            run = AutoSyncFixture.run_region(self, text, apply=True)
+            self.assertIn(f"- MODULE values q14 (year 1: {attention}, 1 special-event option(s) added)",
+                          run.attention[0][1])
 
 
 class RunbookQuotes(unittest.TestCase):
@@ -447,6 +579,13 @@ class RunbookQuotes(unittest.TestCase):
         self.assertIn("`{15}{95}{96}{97}`", text)
         self.assertEqual(glow_sync.week_bridge_equation(), "{15}{95}{96}{97}")
         self.assertIn("`restore_conditions.py --from`", text)
+        # the stale-rules warning, here and in "Automatic sync"
+        self.assertIn(f"`! {sync.WEEK_BRIDGE_STALE}: …`", text)
+        self.assertIn("`calcValues unchanged)`", text)
+        whole = " ".join(read(os.path.join(REPO, "docs", "RUNBOOK.md")).split())
+        self.assertIn(f"Fourth, the sync's warning that **{sync.WEEK_BRIDGE_STALE}**", whole)
+        self.assertIn(f'WEEK_BRIDGE_STALE = "{auto_sync.WEEK_BRIDGE_STALE}"', read(os.path.join(REPO, "tools", "auto_sync.py")))
+        self.assertIn("{WEEK_BRIDGE_STALE}: ", read(os.path.join(REPO, "sync_attendance_form.py")))
 
 
 if __name__ == "__main__":

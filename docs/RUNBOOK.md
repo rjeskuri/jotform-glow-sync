@@ -248,7 +248,7 @@ not count as a change and never applies on its own: run the dry run and
 `--apply` by hand. When the same region also has a roster change, the
 runner's ordinary apply rewrites the rules and nothing more is needed.
 
-Three things **stop a region** even when a roster change is planned
+Four things **stop a region** even when a roster change is planned
 (`attention`, nothing applied). First, the sync's warning that **question 18
 is calculated the old way** (`question 18 (Contact_IDs) is not recalculated
 after the rosters change`). Second, a **`REQUIRED roster` line**: the required
@@ -256,9 +256,15 @@ flag written on a roster that has no other change. Both are rolled out by
 hand, one form at a time ("The names list sent to Salesforce"). Once a form
 is rolled out, the runner creates rosters required and applies an options
 update that also sets the flag (`UPDATE roster … ; required: Yes`). Third, an
-**`UPDATE module dropdown` line**: a module dropdown's `calcValues`, rolled
-out by hand, template first, and afterwards only a builder edit brings it
-back ("The names dictionary and the module values"). After every apply the
+**`UPDATE module dropdown` line**: a module dropdown's `calcValues` or the
+special-event options appended with them, rolled out by hand, template first,
+and afterwards only a builder edit brings it back ("The names dictionary and
+the module values", "Special events"). Fourth, the sync's warning that **the
+form's rules let a special event show or send a session** (the option on the
+form, the rules from before it: an apply that stopped after the module
+writes, or the option added in the builder); its dry run plans only `REPLACE
+conditions`, which is never `in-sync` here, and the rewrite is applied by hand
+("Special events"). After every apply the
 verify step also audits the form's names dictionary; a store it could not
 read is a note in the log, not `applied-unverified`.
 
@@ -816,7 +822,14 @@ rules; the year-1 rule on the year alone goes).
 
 **The runner never applies an event line** (`check_bands`: "would add special-event option(s)
 to 3 module dropdown(s) (q14, q92, q93), with their calcValues - never unattended"): the region
-reads `attention`, its roster changes included, until its form carries the options.
+reads `attention`, its roster changes included, until its form carries the options. Nor does it
+read a form as `in-sync` whose options are there but whose rules are not (an apply that stopped
+after the three module writes, or the option added in the builder): the sync warns `! the form's
+rules let a special event show or send a session: …` (a session rule on the year alone or for an
+event, the bridge missing, doubled, out of shape or out of place) and plans only `REPLACE
+conditions`; the runner raises ATTENTION and applies nothing there. Run that form's dry run and
+its `--apply` by hand. A line that writes the options alone says so: `calcValues unchanged)` (the
+values were already right) or `calcValues none)` (`MODULE_CALC_VALUES` off).
 
 **`tools/form_status.py`** reports a form NOT CLEAN until it carries each type once per module
 dropdown in the exact spelling, no rule shows a session dropdown for an event or on the year

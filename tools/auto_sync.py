@@ -30,7 +30,8 @@ raise ATTENTION without stopping anything (docs/RUNBOOK.md, "Club names two
 partners share"). A conditions rewrite alone is not a change to it, so roster
 rules that test a name the Club picker does not list (a restored backup, a
 half-finished hand apply) are never "in-sync": ATTENTION, apply by hand. Rules
-that calculate question 18 (the names sent to Salesforce) the old way, the
+that calculate question 18 (the names sent to Salesforce) the old way, rules
+that let a special event show or send a session on a form that carries one, the
 required flag written on a roster that has no other change, and a module
 dropdown's calcValues or the special-event options appended with them, stop the
 region (ATTENTION): each is rolled out by hand, one form at a time, template
@@ -114,7 +115,7 @@ GUARD_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club guard \([^)]*\)$")
 # new type is rolled out by hand, template first (docs/plans/2026-10-13-special-events.md)
 MODULE_RX = re.compile(r"^  - UPDATE module dropdown \(q(?P<qid>\d+), year (?P<year>\d+): "
                        r"(?:(?P<events>\d+) event option\(s\) added \((?P<names>.+)\); )?calcValues "
-                       r"(?:= its (?P<modules>\d+) options|cleared|none)\)$")
+                       r"(?:= its (?P<modules>\d+) options|(?P<calc>cleared|unchanged|none))\)$")
 ROSTER_RX = re.compile(r"^Roster: (?P<clubs>\d+) active clubs.*\((?P<girls>\d+) girls\); "
                        r"(?P<all>\d+) clubs overall")
 # a roster retired (kept hidden, off the Club picker, no show rule) or restored to the
@@ -144,14 +145,25 @@ RULES_OLDER = "which the Club picker does not list"
 # (docs/plans/2026-09-30-contact-ids.md) - nor the required flag on rosters that have no
 # other change (REQUIRED roster lines: on a form not rolled out yet, every roster)
 CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
+# the form carries a special-event option but its live rules let an event show a session
+# dropdown or send a session in question 100 (an apply that stopped after the module writes,
+# or the option added in the builder): the dry run plans a rules-only REPLACE, never "in-sync"
+# here - the rewrite is a hand apply (docs/plans/2026-10-13-special-events.md)
+WEEK_BRIDGE_STALE = "the form's rules let a special event show or send a session"
+
+
+# what a module write does to the calcValues, as the ATTENTION list says it (module_entry's calc)
+MODULE_CALC_WORDS = {"set": "{} modules", "cleared": "cleared", "unchanged": "calcValues unchanged",
+                     "none": "no calcValues"}
 
 
 # ------------------------------------------------------------ pure functions
 def module_entry(m):
-    """A MODULE_RX match -> {"qid", "year", "modules", "events"} (modules: 0 = the calcValues
-    cleared, or none written; events: how many special-event options the write appends)."""
+    """A MODULE_RX match -> {"qid", "year", "modules", "events", "calc"}: calc is what the write
+    does to the calcValues - "set" (to its `modules` options), "cleared", "unchanged" or "none"
+    (the options alone written; modules 0) - and events how many special-event options it appends."""
     return {"qid": m["qid"], "year": m["year"], "modules": int(m["modules"] or 0),
-            "events": int(m["events"] or 0)}
+            "events": int(m["events"] or 0), "calc": m["calc"] or "set"}
 
 
 def parse_plan(text):
@@ -256,6 +268,11 @@ def contact_ids_stale(plan):
     return [w for w in plan["warnings"] if CONTACT_IDS_STALE in w]
 
 
+def week_bridge_stale(plan):
+    """The warnings saying the live rules let a special event show or send a session."""
+    return [w for w in plan["warnings"] if WEEK_BRIDGE_STALE in w]
+
+
 def odd_jotform_values(plan):
     """The warnings saying a Partners-tab jotform cell holds something other than yes / no / blank."""
     return [w for w in plan["warnings"] if JOTFORM_VALUE in w]
@@ -355,6 +372,11 @@ def check_bands(plan, max_creates=5, max_updates=20, max_retires=5, max_restores
                        "Salesforce) the old way - the new rules are rolled out by hand, one form at a "
                        "time, with the browser checks (docs/RUNBOOK.md, \"The names list sent to "
                        "Salesforce\"); nothing applied here, roster changes included")
+    if week_bridge_stale(plan):
+        reasons.append("the form's rules let a special event show a session dropdown or send a session "
+                       "(question 100) - the rules-only rewrite is applied by hand, one form at a time, "
+                       "with the browser checks (docs/RUNBOOK.md, \"Special events\"); nothing applied "
+                       "here, roster changes included")
     requires = plan.get("requires", [])
     if requires:
         reasons.append(f"would write the required flag on {len(requires)} roster(s) that have no other "
@@ -650,8 +672,9 @@ class Run:
         n = changes(plan)
         # a change of what an existing club sends to question 5 stops the region even
         # when nothing else is planned: a rules-only difference is not a "change" here,
-        # and this one must never read as in-sync - nor question 18's rules the old way
-        if n == 0 and not q5_changes(plan) and not contact_ids_stale(plan):
+        # and this one must never read as in-sync - nor question 18's rules the old way, nor
+        # rules that let a special event show or send a session
+        if n == 0 and not q5_changes(plan) and not contact_ids_stale(plan) and not week_bridge_stale(plan):
             # …nor may rules that test a name the picker does not list: those clubs' rosters
             # do not show (with the club guard their mentors cannot submit), and the
             # conditions rewrite that repairs it is not applied unattended
@@ -689,7 +712,8 @@ class Run:
                                    (f"\n- REQUIRED on {len(plan['requires'])} roster(s) with no other change"
                                     if plan.get("requires") else "") +
                                    "".join(f"\n- MODULE values q{m['qid']} (year {m['year']}: "
-                                           + (f"{m['modules']} modules" if m["modules"] else "cleared")
+                                           + MODULE_CALC_WORDS.get(m.get("calc", "set"), "{} modules")
+                                           .format(m["modules"])
                                            + (f", {m['events']} special-event option(s) added)"
                                               if m.get("events") else ")")
                                            for m in plan.get("modules", [])) +

@@ -155,6 +155,14 @@ RULES_OLDER = "which the Club picker does not list"
 # raises ATTENTION and does not apply that region (docs/plans/2026-09-30-
 # contact-ids.md).
 CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
+# A fifth: the form carries (or this run gives it) a special-event option, but the live
+# rules let an event show a session dropdown or send a session in question 100 - no
+# session bridge, or one out of place, or a session rule on no curriculum module (an
+# apply that stopped after the module writes, or the option added in the builder). The
+# next dry run plans a rules-only REPLACE, which the runner does not count as a change:
+# on this warning it raises ATTENTION and applies nothing there; the rewrite is a hand
+# apply (docs/plans/2026-10-13-special-events.md)
+WEEK_BRIDGE_STALE = "the form's rules let a special event show or send a session"
 # A retired roster that comes back (docs/plans/2026-10-06-clubs-off-jotform.md)
 # has no rule to read what it sent: when its name is one two partners have had
 # it is restored with its long name, listed as a question-5 change from this
@@ -702,6 +710,14 @@ def main():
             why.append(f"the Club picker (q{picker_qid}) is not one of its operands")
         warn(f"  ! {CONTACT_IDS_STALE}: {'; '.join(why)} - the rewrite puts it right; apply this "
              "form by hand (docs/RUNBOOK.md, \"The names list sent to Salesforce\")")
+
+    # the special events' rules the old way (glow/sync.py week_bridge_stale): on a form that
+    # carries, or after this run will carry, an event option - the runner reads this line too
+    if any(is_special_event(o) for options in module_options.values() for o in options):
+        stale_bridge = glow_sync.week_bridge_stale(props.get("conditions", []))
+        if stale_bridge:
+            warn(f"  ! {WEEK_BRIDGE_STALE}: {'; '.join(stale_bridge)} - the rewrite puts it right; apply "
+                 "this form by hand (docs/RUNBOOK.md, \"Special events\")")
 
     # the picker's options as the form holds them: what a mentor can pick today
     listed = {}
@@ -1332,13 +1348,15 @@ def main():
         fields = {"question[options]": "|".join(options)} if added else {}
         if not same:
             fields["question[calcValues]"] = want
-        module_values.append({"qid": mqid, "year": year, "modules": len(options) if want else 0,
-                              "events": added})
+        # the calcValues part says what is written: aligned ("set"), cleared - or, with the
+        # options alone, already right ("unchanged") or none while MODULE_CALC_VALUES is off
+        calc = ("set" if want else "cleared") if not same else "unchanged" if want else "none"
+        module_values.append({"qid": mqid, "year": year, "modules": len(options) if calc == "set" else 0,
+                              "events": added, "calc": calc})
         jf.post_form(f"/question/{mqid}", fields,
                      f"UPDATE module dropdown (q{mqid}, year {year}: "
                      + (f"{len(added)} event option(s) added ({', '.join(added)}); " if added else "")
-                     + "calcValues "
-                     + (f"= its {len(options)} options)" if want else "cleared)" if not same else "none)"))
+                     + "calcValues " + (f"= its {len(options)} options" if calc == "set" else calc) + ")")
 
     # --- regenerate all conditions -----------------------------------------
     # The API stores each condition's terms/action as JSON-encoded STRINGS
@@ -1413,7 +1431,8 @@ def main():
             "deletes": [{"qid": q, "club": c, "region": r} for q, c, r in to_delete],
             # rosters whose required flag alone is written (no other change to them)
             "requires": [{"qid": q, "club": c, "required": want_required} for q, c in to_require],
-            # module dropdowns whose calcValues are written (modules: 0 = cleared)
+            # module dropdowns written: calc set (modules: how many) / cleared / unchanged / none,
+            # and the special-event options appended (events)
             "module_values": module_values,
             # rosters this plan takes off the picker (kept hidden, no show rule), how many
             # the form already holds retired, retired rosters restored to the picker, and
