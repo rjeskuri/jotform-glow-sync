@@ -10,19 +10,22 @@ intent: <Ryan's ask in his words, with its date> | docs/intent/YYYY-MM-DD-<slug>
 
 # Plan: <feature name>
 
-<!-- Required for anything beyond a one-line fix, and committed before the code. Add the plan to
-     the index with `make docs-index`. When it is done: a "## Result" section (what ran, with
-     Ryan's go, and how it was verified), the status, and `done:`. -->
+<!-- Kept beside the ticket when its change has a live rollout (CLAUDE.md, Conventions); new work
+     is a ticket. When it is done: a Result (what ran, with Ryan's go, and how it was verified), the
+     status and `done:`, then `make docs-index`. -->
 
-## Files that change
-<paths, one line each, with what changes in them>
-
-## Order of work
-1. <step — the repo stays green after each one>
+## Rollout (live; each step on Ryan's go)
+1. <live step: the backup first, the command, and the read-back that proves it>
 2. …
+
+## Rollback
+<how each live step is undone, with the backup or command it uses>
 
 ## Risks
 <what could break, and the mitigation for each; live-system steps named explicitly>
 
 ## Proof
 <exact commands and the healthy lines expected; `make check` output pasted when done>
+
+## Result
+<what ran and when (UTC), with Ryan's go, and how it was verified; filled in when done>

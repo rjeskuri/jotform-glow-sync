@@ -1,9 +1,10 @@
 # Plans and intents
 
 Generated from each file's frontmatter by `make docs-index` (`scripts/docs_index.py`);
-`make check` fails when this file is stale, so it is never edited by hand. A plan is required
-for anything beyond a one-line fix and is committed before the code; an intent is optional, to
-capture Ryan's ask before a plan exists ([templates](../templates/)). A status is one of
+`make check` fails when this file is stale, so it is never edited by hand. New work is a ticket
+on the board (DECISIONS 2026-10-14); a plan here is kept beside a ticket whose change has a live
+rollout (Rollout, Rollback, Result). An intent is optional, to capture Ryan's ask before a
+ticket exists ([templates](../templates/)). A status is one of
 `proposed`, `accepted`, `in-progress`, `blocked`, `done`, `superseded`,
 with an optional comment after a `#`; a done one carries `done: YYYY-MM-DD`, and `backlog:`
 names the BACKLOG items a plan is about. Newest first.

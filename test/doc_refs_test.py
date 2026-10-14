@@ -98,6 +98,68 @@ class DocsIndex(unittest.TestCase):
     def test_a_cell_never_breaks_the_table_or_turns_into_html(self):
         self.assertEqual(docs_index.cell("a | b <club> - <partner>"), "a \\| b &lt;club&gt; - &lt;partner&gt;")
 
+    # DECISIONS 2026-10-14: new work is a ticket; a plan is kept beside a ticket whose change has a
+    # live rollout, not beside every ticket. The conditional has to be said ("a ticket whose change
+    # has / with a / that has a live rollout"), and the wordings that widen it to all work are out.
+    CONDITION = r"(whose|with a|that has|that have|which has|when (its|the|a)|if (its|the|a))"
+    # "one.line", not the literal: epic #5's done-check greps the repository for the old phrase
+    WIDENED = ("straight to a plan", "every change", "any size", "whether or not")
+    WIDENED_RE = (r"beyond a one.line fix", r"(each|every|any|all) tickets?", r"however small",
+                  r"rollout or not", r"regardless",
+                  r"small (change|fix|work|tweak)s?.{0,40}plan")
+
+    def assert_not_widened(self, flat, where):
+        for phrase in self.WIDENED:
+            self.assertNotIn(phrase, flat, where)
+        for pattern in self.WIDENED_RE:
+            self.assertNotRegex(flat, pattern, where)
+
+    def test_the_header_puts_a_plan_beside_a_live_rollouts_ticket(self):
+        # The header wraps, so its words are compared with whitespace collapsed.
+        text = docs_index.render([], [])
+        header = " ".join(text.split("## Plans")[0].split())
+        flat = header.lower()
+        self.assertRegex(flat, r"new work.{0,40}ticket")
+        # the plan goes with the ticket, and only a ticket whose change has a live rollout
+        self.assertRegex(flat, r"plan.{0,60}ticket.{0,30}" + self.CONDITION + r".{0,40}live rollout")
+        self.assertRegex(flat, r"intent.{0,40}optional|optional.{0,40}intent")
+        for section in ("Rollout", "Rollback", "Result"):
+            self.assertIn(section, header)
+        self.assert_not_widened(flat, "docs/plans/README.md header")
+        for status in docs_index.STATUSES:
+            self.assertIn(f"`{status}`", header, status)
+
+    def test_the_plan_and_intent_templates_agree_with_the_index(self):
+        def read(name):
+            with open(os.path.join(REPO, "docs", "templates", name), encoding="utf-8") as f:
+                return f.read()
+
+        plan = read("plan.md")
+        body = refs.re.sub(r"<!--.*?-->", "", plan, flags=refs.re.S)   # a heading, not a mention in the comment
+        lines = plan.split("\n")
+        for heading in ("## Rollout", "## Rollback", "## Risks", "## Proof", "## Result"):
+            self.assertRegex(body, r"(?m)^" + refs.re.escape(heading) + r"\b", heading)
+            # and a line of guidance under it, not another heading straight after
+            at = next(i for i, line in enumerate(lines) if refs.re.match(refs.re.escape(heading) + r"\b", line))
+            after = [line.strip() for line in lines[at + 1:] if line.strip()]
+            self.assertTrue(after and not after[0].startswith("#") and refs.re.search(r"\w{3}", after[0]),
+                            f"{heading} has no guidance under it")
+        keys, _ = docs_index.frontmatter(plan)
+        self.assertEqual(set(keys), {"title", "author", "status", "done", "backlog", "created", "intent"})
+        # the plan template says when a plan exists: beside the ticket whose change has a live rollout
+        flat = " ".join(plan.split()).lower()
+        self.assertIn("live rollout", flat, "docs/templates/plan.md")
+        self.assertRegex(flat, r"(ticket|change)s?.{0,30}" + self.CONDITION + r".{0,40}live rollout",
+                         "docs/templates/plan.md")
+        self.assert_not_widened(flat, "docs/templates/plan.md")
+        # the intent template: optional, and a plan only beside a ticket whose change has a live rollout
+        intent = " ".join(read("intent.md").split()).lower()
+        self.assertIn("ticket", intent)
+        self.assertIn("optional", intent)
+        self.assertRegex(intent, r"plan.{0,60}(ticket|change)s?.{0,30}" + self.CONDITION + r".{0,40}live rollout",
+                         "docs/templates/intent.md")
+        self.assert_not_widened(intent, "docs/templates/intent.md")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
