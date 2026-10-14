@@ -32,8 +32,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   squash merge, so the PR text is what reaches `main`.
 - Before `/harness:land`: `/land-checks` — the runner's next run, the privacy audit, and the
   worktree's `data/` and `backups/` (land deletes them; 2026-10-09: the only copies of 11 files).
-- Work log (invoiced monthly; RUNBOOK "Work log and invoices"): `--drop-stale` / `--rewrite-old`
-  only on Ryan's word; a home-folder session counts only if `--transcripts` names it.
+- Work log (invoiced monthly; RUNBOOK "Work log and invoices"): `/harness:worklog` runs in the main
+  checkout; the month's chore ticket commits the log and the handoff. `--drop-stale` /
+  `--rewrite-old` only on Ryan's word; a home-folder session counts only if `--transcripts` names it.
 
 ## Things Claude gets wrong
 1. Every live write needs Ryan's explicit go in this conversation: `--apply`, `--prune`,
@@ -69,5 +70,4 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
     until the owner re-authorizes, the form-submit trigger FAILS HARD (`make gs` fails on a 9th
     service). Push, rollback and its floors: `.claude/skills/deploy-appsscript/SKILL.md`.
 12. Salesforce: VPN off before any `sf` call (Salesforce freezes the user); the tools take `--vpn-off`.
-    Writes only on Ryan's go, one record per call, never from a subagent.
-    Access: `.claude/skills/salesforce/SKILL.md`.
+    Writes only on Ryan's go, one record per call, never from a subagent; `.claude/skills/salesforce`.

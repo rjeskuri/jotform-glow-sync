@@ -22,8 +22,11 @@ for `$B`.
   rename a heading: tools and docs quote them (`make doc-refs`).
 - **Generated files** are regenerated, never hand-merged: `docs/plans/README.md` (`make
   docs-index`), `test/fixtures/enrollment_sample.csv` and `expected.json` (`make fixtures`).
-- **`worklog/worklog.csv`**: take main's rows (`git checkout main -- worklog/worklog.csv`); hours
-  are recomputed in the primary checkout (its transcripts are the project's), never hand-merged.
+- **`worklog/worklog.csv`, `docs/agent/handoff.md`**: only the month's work-log chore changes them
+  (RUNBOOK "Work log and invoices"). A branch that changes either (a `/harness:handoff` run
+  or a hand edit inside its worktree) is reported to Ryan; on his word the branch's copy
+  moves to the main checkout and the branch takes `origin/main`'s copy back
+  (`git checkout origin/main -- <path>`).
 
 ## 2. Privacy
 The `privacy-auditor` agent on `origin/main...$B`.
@@ -46,6 +49,13 @@ only (never open them):
 `cd <worktree> && find data backups -type f 2>/dev/null | while read -r f; do cmp -s "$f" "<primary checkout>/$f" || echo "$f"; done`.
 Anything listed: ask Ryan, and move it to the same path in the primary checkout (`mv -n`) on his
 word.
+
+## 5. The month's work-log chore PR
+After the month's last `/harness:worklog` and a final refresh of the PR:
+`cmp "<primary checkout>/$f" "<worktree>/$f"` prints nothing for `f` = `worklog/worklog.csv` and
+`docs/agent/handoff.md` (anything printed: refresh the PR first). Then `/harness:land`: it restores
+the primary checkout's byte-identical copies before the fast-forward, and a copy that differs
+blocks the pull ("main not pulled") instead of being lost (RUNBOOK "Work log and invoices").
 
 ## Report
 The three answers (conflicts resolved and how, the audit, what the runner will do), any file moved,
