@@ -684,7 +684,7 @@ class SheetsClientGet(unittest.TestCase):
 
 
 # Written when Welcome Session was the only special event: pinned to that world, so what it tests
-# (calcValues alignment, the runner's hold) does not move with the live type list. The two-type
+# (calcValues alignment, the runner's apply) does not move with the live type list. The two-type
 # state is test/special_events_test.py (IdgSync).
 @mock.patch.object(glow_sync, "SPECIAL_EVENTS", ("Welcome Session",))
 class ModuleValues(unittest.TestCase):

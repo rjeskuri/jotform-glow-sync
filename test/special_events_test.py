@@ -1091,6 +1091,20 @@ class IdgDocs(unittest.TestCase):
 
         def first(*patterns):
             return next((i for i, s in enumerate(steps) if all(re.search(p, s) for p in patterns)), None)
+
+        def units(step):
+            """Each list item of a step (the step itself included) with its nested items, and each
+            sentence of an item's own lines: where one statement of the Rollout can sit."""
+            lines = step.split("\n")
+            marks = [(0, -1)] + [(i, len(m.group(1))) for i, l in enumerate(lines)
+                                 if i and (m := re.match(r"( *)(?:[-*]|\d+\.)\s", l))]
+            out = []
+            for k, (i, depth) in enumerate(marks):
+                end = next((j for j, d in marks[k + 1:] if d <= depth), len(lines))
+                own_end = marks[k + 1][0] if k + 1 < len(marks) else len(lines)
+                out.append(" ".join(" ".join(lines[i:end]).split()))
+                out += re.split(r"(?<=[.!?])\s+(?=[A-Z])", " ".join(" ".join(lines[i:own_end]).split()))
+            return out
         template = first(r"(?i)template", r"(?i)\bappl")
         land = first(r"#40", r"(?i)\bland")
         runner = first(r"(?i)\brunner", r"(?i)next run")
@@ -1103,13 +1117,28 @@ class IdgDocs(unittest.TestCase):
         for want in (r"(?i)ryan.s\b.{0,30}\bgo\b", r"(?i)backup", r"(?i)dry run", r"--rendered --partners",
                      r"(?i)browser"):
             self.assertRegex(t, want)
+        # the template step runs the sync's apply itself, not only says "applies" in its heading
+        self.assertTrue(re.search(r"(?i)\bthe sync.s apply\b", t)
+                        or ("sync_attendance_form.py" in t and re.search(r"--apply\b", t)),
+                        "the template step does not carry the sync's apply (--apply on its command)")
         for want in ("Africa", "Asia", "Latin America", "--rendered --partners"):
             self.assertIn(want, r)
-        us = first(r"U\.S\b")
-        self.assertIsNotNone(us, "the disabled U.S form is not placed")
-        self.assertRegex(steps[us], r"(?i)disabled")
-        self.assertRegex(steps[us], r"(?i)template")                      # applied like the template
-        self.assertGreaterEqual(us, template)
+        # the disabled U.S form is applied, in a sentence or bullet of its own (one that names no
+        # enabled region, so the runner step's other wording cannot stand in for it): an apply verb
+        # with the sync's --disabled-ok or "the same way as the template", on Ryan's go (which "the
+        # same way as the template" carries), verified with form_status --rendered --partners
+        us = [i for i, s in enumerate(steps) for u in units(s)
+              if re.search(r"U\.S\b", u) and not re.search(r"Africa|Asia|Latin America", u)
+              and all(re.search(p, u) for p in (
+                  r"(?i)\bdisabled\b",
+                  r"(?i)\bappl(?:y|ies|ied|ying)\b",
+                  r"--disabled-ok|(?i:same way as the template)",
+                  r"(?i:ryan.s\b.{0,30}\bgo\b|same way as the template)",
+                  r"--rendered --partners"))]
+        self.assertTrue(us, "no sentence or bullet applies the disabled U.S form (an apply with "
+                            "--disabled-ok or the same way as the template, on Ryan's go, verified "
+                            "with --rendered --partners)")
+        self.assertGreaterEqual(us[0], template)
 
     def test_the_plans_index_is_the_generated_one(self):
         sys.path.insert(0, os.path.join(REPO, "scripts"))
