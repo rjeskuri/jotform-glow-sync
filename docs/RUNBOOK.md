@@ -284,7 +284,13 @@ template and a disabled form are applied by hand (the sync's dry run and
 `--apply`, Ryan's go). The next run is the next roster change, at the latest
 the morning backstop, or one started from the Actions tab on Ryan's go. After
 every apply the verify step also audits the form's names dictionary; a store
-it could not read is a note in the log, not `applied-unverified`.
+it could not read is a note in the log, not `applied-unverified`. An apply that
+rewrote the rules (`REPLACE conditions`) or a module dropdown is also checked on
+the served page (`form_status.py --rendered`, the check hand rollouts stop on):
+a problem there reads `applied-with-problems`, an ATTENTION naming the form and
+its `rendered page` line; a page that cannot be read (it can lag the API by
+seconds) is read once more after a short wait, then it is a note in the log
+(`note: served page of form … not read …`), not a failure.
 
 Once per run, after the regions, the runner also reads **Jotform's storage**
 against the account's plan and logs the same `storage:` line `form_status.py`

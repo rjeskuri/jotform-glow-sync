@@ -5,7 +5,8 @@ plan parsing, the safety bands, the blank-region guard, verification and redacti
 (AutoSyncPlan); SyncLog's `when` (SheetWhen); tools/sheets_client.py's spreadsheets.get
 (SheetsClientGet); the module dropdowns' calcValues, which the runner applies like a roster
 change (ModuleValues); and the five generated rollout lines the runner applies on its next run,
-within the bands, with the bands that still hold such a region (RolloutLines).
+within the bands, with the bands that still hold such a region (RolloutLines); and the served
+page read after an apply that rewrote the rules or a module dropdown (RenderedVerify).
 """
 import json
 import os
@@ -1032,6 +1033,198 @@ class RolloutLines(AutoSyncFixture, unittest.TestCase):
             run = self.run_region(text)
             self.assertEqual([r[7:9] for r in run.results],
                              [["in-sync", ""] if not warnings else ["dry-run", "would apply: " + want]], want)
+
+
+class RenderedVerify(AutoSyncFixture, unittest.TestCase):
+    """Ticket #34: after an apply that rewrote the rules (a REPLACE conditions line) or a module
+    dropdown (an UPDATE module dropdown line), the runner also reads the served page
+    (tools/form_status.py --rendered, a call of its own beside the definition verify, which stays
+    as it was); a problem on the page reads applied-with-problems with an ATTENTION entry naming
+    the form and the problem; a page that cannot be read is retried once after a short wait
+    (time.sleep in auto_sync, patched to zero by the fixture) and is then a note, never a failure.
+    An apply without such a line reads no page. Fictional clubs only."""
+
+    HEAD, DRY = RolloutLines.HEAD, RolloutLines.DRY
+    CREATE = "  - CREATE roster 'Gamma Club' (2 girls)\n"
+    UPDATE = "  - UPDATE roster 'Alpha Club' (q10, 3 girls)\n"
+    # plans that rewrite neither the rules nor a module dropdown: today's verify, no page read
+    NO_PAGE = {
+        "a new roster": HEAD + DRY + CREATE,
+        "a roster update": HEAD + DRY + UPDATE,
+        "an update carrying its required flag": HEAD + DRY + "  - UPDATE roster 'Alpha Club' (q10, 3 girls; required: Yes)\n",
+        "a REQUIRED line alone": HEAD + DRY + "  - REQUIRED roster 'Alpha Club' (q10: Yes)\n",
+        "creates, updates and REQUIRED lines": (HEAD + DRY + CREATE + UPDATE
+                                                + "  - REQUIRED roster 'Beta Club' (q11: No)\n"
+                                                + "  - REQUIRED roster 'Delta Club' (q12: No)\n"),
+    }
+    # plans that do: the page is read after the apply
+    PAGE = {
+        "question 18 rules rewritten": HEAD + RolloutLines.CONTACT_IDS_WARNING + DRY + "  - REPLACE conditions (23 rules)\n",
+        "special-event rules rewritten": HEAD + RolloutLines.WEEK_BRIDGE_WARNING + DRY + "  - REPLACE conditions (40 rules)\n",
+        "a new roster and its rules": HEAD + DRY + CREATE + "  - REPLACE conditions (24 rules)\n",
+        "an update and its rules": (HEAD + DRY + UPDATE
+                                    + "  - REPLACE conditions (57 rules + ~1 more once the new rosters exist)\n"),
+        "module calcValues": HEAD + DRY + "".join(f"  - {l}\n" for l in ModuleValues.LINES),
+        "one module dropdown cleared": HEAD + DRY + "  - UPDATE module dropdown (q14, year 1: calcValues cleared)\n",
+        "special-event options and rules": (HEAD + DRY + "".join(f"  - {l}\n" for l in RolloutLines.EVENT_LINES)
+                                            + "  - REPLACE conditions (40 rules)\n"),
+        "a new roster and a module dropdown": (HEAD + DRY + CREATE
+                                               + "  - UPDATE module dropdown (q92, year 2: calcValues = its 3 options)\n"),
+    }
+    # what form_status.py --rendered says of a page (its own wording, fictional numbers)
+    PROBLEMS = ["rendered page: question 18 is rule 22 of 23 in JotForm.setConditions, after the rosters' rules",
+                "--rendered: the public page has no Club picker select (page not served, or its markup changed)",
+                "rendered page: module dropdown q92: 1 of 4 options carry a data-calcvalue other than their value",
+                "rendered page: the session bridge is rule 12 of 40, after the session rules it must precede"]
+
+    def page_notes(self, run):
+        return [l for l in run.lines if "note" in l.lower() and "page" in l.lower()]
+
+    def assert_page_read(self, run, region, msg):
+        """Each rendered read is tools/form_status.py for this region's form, as JSON, with the roster."""
+        form = auto_sync.REGIONAL_FORMS[region]
+        for argv in run.rendered:
+            self.assertTrue(any(str(a).endswith("form_status.py") for a in argv), (msg, argv))
+            self.assertIn("--json", argv, msg)
+            self.assertIn("--roster", argv, msg)
+            self.assertIn("--form", argv, msg)
+            self.assertEqual(argv[argv.index("--form") + 1], form, (msg, argv))
+
+    def test_the_served_page_is_read_only_after_a_rules_or_module_apply(self):
+        for region in auto_sync.REGIONAL_FORMS:
+            for cases, reads in ((self.NO_PAGE, 0), (self.PAGE, 1)):
+                for kind, text in cases.items():
+                    msg = (region, kind)
+                    run = self.run_region(text, apply=True, region=region)
+                    # the definition verify is kept as it was: one call, after the apply
+                    self.assertEqual(run.steps, RolloutLines.APPLY_STEPS, msg)
+                    self.assertEqual(len(run.rendered), reads, msg)
+                    self.assert_page_read(run, region, msg)
+                    self.assertEqual([r[7] for r in run.results], ["applied"], msg)
+                    self.assertTrue(run.results[0][8].endswith("; verified clean"), (msg, run.results[0][8]))
+                    self.assertEqual((run.attention, self.page_notes(run)), ([], []), msg)
+                    self.assertFalse(run.failed, msg)
+        # a dry run or a region held by a band applies nothing, so reads no page
+        delete = "  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n"
+        for kind, text in self.PAGE.items():
+            run = self.run_region(text, apply=False)
+            self.assertEqual((run.steps, run.rendered, [r[7] for r in run.results]), (["sync"], [], ["dry-run"]), kind)
+            run = self.run_region(text + delete, apply=True)
+            self.assertEqual((run.steps, run.rendered, [r[7] for r in run.results]), (["sync"], [], ["attention"]), kind)
+        # rules-only without a warning is in-sync: nothing applied, nothing read
+        run = self.run_region(self.HEAD + self.DRY + "  - REPLACE conditions (23 rules)\n", apply=True)
+        self.assertEqual((run.steps, run.rendered, [r[7] for r in run.results]), (["sync"], [], ["in-sync"]))
+
+    def test_the_summary_file_decides_whether_the_page_is_read(self):
+        # the runner reads the plan from the sync's --summary-json file when there is one: the
+        # page read follows that plan, not the printed lines
+        creates_only = {"creates": [{"club": "Gamma Club", "partner": "Partner One", "girls": 2}],
+                        "updates": [], "deletes": [], "rules": None, "warnings": [],
+                        "calls": ["CREATE roster 'Gamma Club' (2 girls)"]}
+        rules = {"creates": [], "updates": [], "deletes": [], "rules": 23,
+                 "warnings": RolloutLines.CONTACT_IDS_WARNING.splitlines(),
+                 "calls": ["REPLACE conditions (23 rules)"]}
+        modules = {"creates": [], "updates": [], "deletes": [], "rules": None, "warnings": [],
+                   "calls": list(ModuleValues.LINES)}
+        cases = [(self.PAGE["a new roster and its rules"], creates_only, 0),
+                 (self.NO_PAGE["a new roster"], rules, 1),
+                 (self.NO_PAGE["a roster update"], modules, 1)]
+        for region in ("Asia", "Latin America"):
+            for text, summary, reads in cases:
+                msg = (region, summary["calls"])
+                run = self.run_region(text, apply=True, summary=summary, region=region)
+                self.assertEqual(run.steps, RolloutLines.APPLY_STEPS, msg)
+                self.assertEqual(len(run.rendered), reads, msg)
+                self.assert_page_read(run, region, msg)
+                self.assertEqual(([r[7] for r in run.results], run.attention), (["applied"], []), msg)
+
+    def test_a_rendered_problem_reads_applied_with_problems_naming_the_form_and_the_problem(self):
+        kinds = list(self.PAGE)
+        regions = list(auto_sync.REGIONAL_FORMS)
+        for i, kind in enumerate(kinds):
+            region = regions[i % len(regions)]
+            form = auto_sync.REGIONAL_FORMS[region]
+            problem = self.PROBLEMS[i % len(self.PROBLEMS)]
+            msg = (region, kind, problem)
+            # (the page says it on every read: a re-read does not make it go away)
+            run = self.run_region(self.PAGE[kind], apply=True, region=region, rendered=[[problem]] * 3)
+            self.assertGreaterEqual(len(run.rendered), 1, msg)
+            self.assert_page_read(run, region, msg)
+            self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
+            self.assertIn(problem, run.results[0][8], msg)
+            self.assertNotIn("verified clean", run.results[0][8], msg)
+            named = [(t, d) for t, d in run.attention if problem in t + "\n" + d]
+            self.assertTrue(named, (msg, run.attention))
+            self.assertTrue(any(form in t + "\n" + d for t, d in named), (msg, named))
+            # the same apply with a clean page is applied: the problem came from the page
+            clean = self.run_region(self.PAGE[kind], apply=True, region=region)
+            self.assertEqual(([r[7] for r in clean.results], clean.attention), (["applied"], []), msg)
+        # two problems on the page: both named
+        run = self.run_region(self.PAGE["special-event options and rules"], apply=True, region="U.S",
+                              rendered=[self.PROBLEMS[2:]] * 3)
+        self.assertEqual([r[7] for r in run.results], ["applied-with-problems"])
+        text = "\n".join(t + "\n" + d for t, d in run.attention)
+        for p in self.PROBLEMS[2:]:
+            self.assertIn(p, text)
+        self.assertIn(auto_sync.REGIONAL_FORMS["U.S"], text)
+        # a problem of the definition and one of the page: both reach the ATTENTION list
+        definition = "1 roster rule(s) test a club the picker lists twice"
+        run = self.run_region(self.PAGE["a new roster and its rules"], apply=True, problems=[definition],
+                              rendered=[[self.PROBLEMS[0]]] * 3)
+        self.assertEqual([r[7] for r in run.results], ["applied-with-problems"])
+        text = "\n".join(t + "\n" + d for t, d in run.attention)
+        self.assertIn(definition, text)
+        self.assertIn(self.PROBLEMS[0], text)
+
+    def test_an_unreadable_page_is_a_note_after_exactly_one_retry(self):
+        # the read fails (the command exits non-zero, prints no JSON, or a list with no report)
+        # on the first try and on the retry; a third answer that would also fail catches a
+        # second retry
+        unreadable = [["exit", "exit", "exit"], ["garbage", "garbage", "garbage"], ["empty", "empty", "empty"],
+                      ["exit", "garbage", "exit"], ["garbage", "empty", "exit"]]
+        kinds = list(self.PAGE)
+        regions = list(auto_sync.REGIONAL_FORMS)
+        for i, kind in enumerate(kinds):
+            for j, pages in enumerate(unreadable):
+                region = regions[(i + j) % len(regions)]
+                msg = (region, kind, pages)
+                run = self.run_region(self.PAGE[kind], apply=True, region=region, rendered=pages)
+                self.assertEqual(len(run.rendered), 2, msg)                     # one try, one retry
+                self.assert_page_read(run, region, msg)
+                first = run.events.index("rendered")
+                second = run.events.index("rendered", first + 1)
+                self.assertIn("sleep", run.events[first + 1:second], (msg, run.events))   # a wait between
+                self.assertTrue(run.slept and all(0 < s <= 60 for s in run.slept), (msg, run.slept))
+                # a note, not a failure: applied (the definition verified clean), no ATTENTION
+                self.assertEqual([r[7] for r in run.results], ["applied"], msg)
+                self.assertEqual(run.steps, RolloutLines.APPLY_STEPS, msg)
+                self.assertEqual(run.attention, [], msg)
+                self.assertFalse(run.failed, msg)
+                self.assertTrue(self.page_notes(run), (msg, run.lines))
+        # an unreadable page does not hide a problem of the definition
+        definition = "2 condition(s) test a question the form does not have"
+        run = self.run_region(self.PAGE["module calcValues"], apply=True, problems=[definition],
+                              rendered=["exit", "exit", "exit"])
+        self.assertEqual((len(run.rendered), [r[7] for r in run.results]), (2, ["applied-with-problems"]))
+        self.assertIn(definition, "\n".join(t + "\n" + d for t, d in run.attention))
+
+    def test_a_page_that_reads_on_the_retry_is_judged_on_what_it_serves(self):
+        for i, (kind, text) in enumerate(self.PAGE.items()):
+            first = ("exit", "garbage", "empty")[i % 3]
+            # clean on the retry: applied, verified clean, no note
+            run = self.run_region(text, apply=True, rendered=[first, []])
+            self.assertEqual(len(run.rendered), 2, kind)
+            self.assertEqual([r[7] for r in run.results], ["applied"], kind)
+            self.assertTrue(run.results[0][8].endswith("; verified clean"), (kind, run.results[0][8]))
+            self.assertEqual((run.attention, self.page_notes(run)), ([], []), kind)
+            # a problem on the retry: applied-with-problems, the problem named
+            problem = self.PROBLEMS[i % len(self.PROBLEMS)]
+            run = self.run_region(text, apply=True, rendered=[first, [problem], [problem]])
+            self.assertIn(len(run.rendered), (2, 3), kind)
+            self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], kind)
+            self.assertIn(problem, run.results[0][8], kind)
+            self.assertTrue(any(problem in t + "\n" + d and auto_sync.REGIONAL_FORMS["Africa"] in t + "\n" + d
+                                for t, d in run.attention), (kind, run.attention))
 
 
 if __name__ == "__main__":
