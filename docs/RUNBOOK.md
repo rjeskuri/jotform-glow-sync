@@ -787,7 +787,7 @@ The procedure as run and what the dry run prints: [plan](plans/2026-10-06-module
 
 - **When:** staff add a type of ad-hoc session or retire one; `form_status` reports a special event missing, twice or misspelled, a session rule for one, or the session bridge missing or out of place.
 - **Status:** live on all five forms since 2026-10-13 ([plan and Result](plans/2026-10-13-special-events.md#result-2026-10-13-ryans-go-for-each-write)); the types are "Welcome Session", live on all five forms since 2026-10-13, and "IDG Celebrations", added to `SPECIAL_EVENTS` 2026-10-14, rollout pending ([plan](plans/2026-10-14-idg-celebrations.md)).
-- **Dry run:** the sync's dry run, per form: one module line per dropdown and one `REPLACE conditions`.
+- **Dry run:** the sync's dry run, per form: one module line per dropdown. On a form whose rules are stale (the rollout of 2026-10-13), also one `REPLACE conditions`; for a type added after that, `(conditions unchanged - skipping the rewrite)`, unless roster changes come with it (then `REPLACE conditions` too, as on the template, which the runner never syncs).
 - **Apply:** its `--apply` by hand, one form per run, template first, Ryan's go; the runner never applies an event line.
 - **Verify:** `form_status.py --rendered` CLEAN; on the template also the browser checks below.
 - **Rollback:** `restore_conditions.py --from` the snapshot for the rules; the options removed in the builder (below).
@@ -850,7 +850,8 @@ operands in `JotForm.setCalculations`.
 2. `AUTO_SYNC_APPLY=0` (Ryan's go), then land it (`/land-checks`, `/harness:land`): until a
    region's form carries the new option, the runner holds it.
 3. The template first: `backup_forms.py --form 262352490535154`, the sync's dry run (the three
-   module lines and `REPLACE conditions`), Ryan's go, `--apply`, `form_status.py --rendered`
+   module lines; `REPLACE conditions` only with roster changes or stale rules, else
+   `(conditions unchanged - skipping the rewrite)`), Ryan's go, `--apply`, `form_status.py --rendered`
    CLEAN, then the browser checks below. Then Africa, Asia, Latin America and the U.S form
    (disabled: `--disabled-ok`), each backup, dry run, go, apply, CLEAN, on the same day.
 4. `AUTO_SYNC_APPLY=1` (Ryan's go); `tools/auto_sync.py` dry run: every region `in-sync`.

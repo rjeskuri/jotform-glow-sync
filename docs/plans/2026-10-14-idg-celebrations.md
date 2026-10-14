@@ -38,14 +38,16 @@ his choice, is `Special Event - IDG Celebrations`. Ticket #26, epic #25.
    1. `python3 backup_forms.py --form 262352490535154`.
    2. The sync's dry run (the command of RUNBOOK "The Club picker", on a fresh roster export):
       `python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-picker`.
-      Expect exactly three module lines, one event option added each:
+      Expect three module lines, one event option added each:
       `UPDATE module dropdown (q14, year 1: 1 event option(s) added (Special Event - IDG Celebrations); calcValues = its 7 options)`,
       and q92 with 9, q93 with 10 (Welcome Session is already there; on 2026-10-13 they had 6, 8
-      and 9). No `REPLACE conditions`, since the session bridge is already in place and the new
-      event takes no rule, and no `!` warning. If conditions or roster lines appear, stop and read
-      why before any apply.
+      and 9). The session bridge is already in place and the new event takes no rule, so the
+      module lines alone change nothing in the rules (`(conditions unchanged - skipping the
+      rewrite)`). The template is the one form the runner never syncs, so a fresh export normally
+      brings its roster catch-up too, and `REPLACE conditions` with it: expected, and applied in
+      the same run. Stop and read why only on a `!` line or a session rule for an event.
    3. Ryan's go, then the same command with `--apply`.
-   4. `python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --rendered`
+   4. `python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --partners data/partners_<date>.csv --rendered`
       CLEAN, `special events: 2 type(s) on 3 of 3 module dropdowns`.
    5. Browser check on the template, nothing submitted: in each year the new option is the last
       of the module dropdown (after Welcome Session) and picking it shows no session dropdown
@@ -54,8 +56,9 @@ his choice, is `Special Event - IDG Celebrations`. Ticket #26, epic #25.
    `262383455778067`, **U.S** `262382706852058` (disabled: `--disabled-ok`), the same day, each
    with its backup (`backup_forms.py --form <id>`), dry run
    (`python3 sync_attendance_form.py data/roster_<date>.csv --roster --partners data/partners_<date>.csv --region <region> --form <id>`;
-   the same three module lines and nothing else), Ryan's go, `--apply`, and
-   `form_status.py --rendered` CLEAN.
+   the runner keeps these rosters current, so expect the three module lines and nothing else),
+   Ryan's go, `--apply`, and `python3 tools/form_status.py --form <id> --roster
+   data/roster_<date>.csv --partners data/partners_<date>.csv --rendered` CLEAN.
 4. `AUTO_SYNC_APPLY=1` (`gh variable set`), Ryan's go; `python3 tools/auto_sync.py`: every
    region `in-sync` (the disabled U.S form `skipped - form DISABLED`).
 5. Staff tell mentors: the new option, and one submission per club per day.
@@ -85,9 +88,10 @@ Salesforce history stays: batches keep their `Module__c`.
 ## Proof
 Healthy output after the rollout:
 - Each dry run before `--apply`: three `UPDATE module dropdown … 1 event option(s) added
-  (Special Event - IDG Celebrations)` lines, nothing else.
-- `python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv [--partners
-  data/partners_<date>.csv] --rendered` on each of the five forms: CLEAN, `special events: 2
+  (Special Event - IDG Celebrations)` lines. On a regional form nothing else; on the template
+  also its roster catch-up and `REPLACE conditions`, expected.
+- `python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv --partners
+  data/partners_<date>.csv --rendered` on each of the five forms: CLEAN, `special events: 2
   type(s) on 3 of 3 module dropdowns`.
 - `python3 tools/auto_sync.py`: Africa, Asia and Latin America `in-sync`, U.S `skipped - form
   DISABLED`.
