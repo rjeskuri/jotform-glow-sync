@@ -93,16 +93,27 @@ PAUSED_RX = re.compile(r"\brunner('s)? (is |stays |was |kept |held )?(paused|hel
                        re.I)
 
 
+def emergency_state(sentence):
+    """Whether `sentence` names the emergency stop as a state - during it the next run is a dry run -
+    and not as a step of a land ("before the land, use the emergency stop", "… first, then land")."""
+    return bool(re.search(r"(?i)\bemergency\b", sentence) and re.search(r"(?i)\bdry[- ]run\b", sentence)
+                and not re.search(r"(?i)\b(before|first|then)\b[^.]*\bland|\bland\w*\b[^.]*\b(first|then)\b", sentence))
+
+
 def toggles(text):
-    """TOGGLE_RX's matches in `text` (flattened), but for one negated right before ("no step sets
-    `AUTO_SYNC_APPLY` to 0") and "the emergency stop (`AUTO_SYNC_APPLY` at `0`)", which names the
-    state, not a step; an `AUTO_SYNC_APPLY=` counts always."""
+    """TOGGLE_RX's matches in `text` (flattened), but for one negated in its own clause right before
+    ("no step sets `AUTO_SYNC_APPLY` to 0"; "if it is not ready, set the switch to 0" still counts),
+    and "the emergency stop (`AUTO_SYNC_APPLY` at `0`)" in a sentence that names that state
+    (emergency_state); an `AUTO_SYNC_APPLY=` counts always."""
     text = flat(text)
     out = []
     for m in TOGGLE_RX.finditer(text):
-        before = text[max(0, m.start() - 40):m.start()]
-        named = re.search(r"\b(no|never|not|nor|without)\W+(\w+\W+){0,2}$|\bemergency\s+$", before, re.I)
-        if m.group(0).startswith("AUTO_SYNC_APPLY=") or not named:
+        before = re.split(r"[,;:()]", text[max(0, m.start() - 40):m.start()])[-1]
+        negated = re.search(r"\b(no|never|not|nor|without)\W+(\w+\W+){0,2}$", before, re.I)
+        start = max(text.rfind(". ", 0, m.start()) + 1, 0)
+        end = text.find(". ", m.end())
+        state = re.search(r"\bemergency\s+$", before, re.I) and emergency_state(text[start:end if end >= 0 else None])
+        if m.group(0).startswith("AUTO_SYNC_APPLY=") or not (negated or state):
             out.append(m.group(0))
     return out
 
@@ -1051,14 +1062,13 @@ class RolloutProcedures(unittest.TestCase):
             self.assertNotIn(self.OFF, text, name)
             self.assertEqual(toggles(text), [], name)
             for s in sentences(text, "."):
-                if "emergency" not in s.lower():
+                if not emergency_state(s):
                     self.assertIsNone(self.PAUSED_RX.search(s), (name, s))
             self.assertIsNone(self.ESCAPE_RX.search(text), name)
             self.assertIsNone(self.NOT_THE_RUNNER_RX.search(text), name)
             self.assertEqual(self.hand_clauses(text), [], name)
         # …and step 3 says the land rolls nothing out while the emergency stop is on: that run is a dry run
-        self.assertTrue([s for s in sentences(step3, ".") if re.search(r"(?i)\bemergency\b", s)
-                         and re.search(r"(?i)\bdry[- ]run\b", s)],
+        self.assertTrue([s for s in sentences(step3, ".") if emergency_state(s)],
                         "/land-checks step 3: say that during the emergency stop the next run is a dry run")
         # the plan template's Rollout guidance: the merge rolls a generated change out on the runner's
         # next run; the Rollout lists the hand steps only
