@@ -23,8 +23,8 @@ for `$B`.
 - **Generated files** are regenerated, never hand-merged: `docs/plans/README.md` (`make
   docs-index`), `test/fixtures/enrollment_sample.csv` and `expected.json` (`make fixtures`).
 - **`worklog/worklog.csv`, `docs/agent/handoff.md`**: only the month's work-log chore changes them
-  (RUNBOOK "Work log and invoices"). A branch that changes either (a `harness-worklog` or
-  `/harness:handoff` run inside its worktree) is reported to Ryan; on his word the branch's copy
+  (RUNBOOK "Work log and invoices"). A branch that changes either (a `/harness:handoff` run
+  or a hand edit inside its worktree) is reported to Ryan; on his word the branch's copy
   moves to the main checkout and the branch takes `origin/main`'s copy back
   (`git checkout origin/main -- <path>`).
 
@@ -51,11 +51,11 @@ Anything listed: ask Ryan, and move it to the same path in the primary checkout 
 word.
 
 ## 5. The month's work-log chore PR
+After the month's last `/harness:worklog` and a final refresh of the PR:
 `cmp "<primary checkout>/$f" "<worktree>/$f"` prints nothing for `f` = `worklog/worklog.csv` and
-`docs/agent/handoff.md` (anything printed: refresh the PR first). Then Ryan restores the two paths
-in the primary checkout by hand (`git checkout -- worklog/worklog.csv docs/agent/handoff.md`; the
-branch guard refuses Claude's, and `git merge --ff-only` aborts on a dirty path), then
-`/harness:land`.
+`docs/agent/handoff.md` (anything printed: refresh the PR first). Then `/harness:land`: it restores
+the primary checkout's byte-identical copies before the fast-forward, and a copy that differs
+blocks the pull ("main not pulled") instead of being lost (RUNBOOK "Work log and invoices").
 
 ## Report
 The three answers (conflicts resolved and how, the audit, what the runner will do), any file moved,

@@ -2849,9 +2849,9 @@ ticket"):
 1. During the month `/harness:worklog` (`harness-worklog`) and `/harness:handoff` write both
    files in the main checkout, which stays dirty on those two paths: the log finds its
    transcripts through the main checkout's path, and the session brief reads the handoff there.
-   Never run `harness-worklog` in a ticket worktree without `--repo <main checkout>` (it would
-   read the worktree's transcript folder). Other pull requests never change the two paths, so
-   they land while the main checkout's copies are dirty.
+   A `harness-worklog` run inside a ticket worktree uses the main checkout's log anyway;
+   `--repo <main checkout>` is for a run from outside the repository. Other pull requests never
+   change the two paths, so they land while the main checkout's copies are dirty.
 2. One ticket a month, titled "Commit the work log and handoff, YYYY-MM", its body the previous
    month's with the dates changed:
    `harness-board task create --title "Commit the work log and handoff, YYYY-MM" --type chore --size S --no-tests --needs-local --body-file <file>`.
@@ -2861,14 +2861,13 @@ ticket"):
    `t/N-<slug>`), copies both files from the main checkout into the worktree, runs
    `scripts/verify.sh`, commits, pushes and opens the PR. Later sessions refresh the PR the same
    way (copy, commit, push); it stays open until month end.
-4. Month end (Ryan, before invoicing): after the month's last `/harness:worklog`, refresh once
-   more, then check that `cmp <main checkout>/<path> <worktree>/<path>` prints nothing for both
-   paths; if it prints anything, refresh first.
-5. Right before `/harness:land`, Ryan runs by hand in the main checkout
-   `git checkout -- worklog/worklog.csv docs/agent/handoff.md`, then `/land-checks` and
-   `/harness:land`. By hand because `git merge --ff-only` in the main checkout aborts on a dirty
-   path even when it is byte-identical (verified), and `branch_guard` refuses Claude's
-   `git checkout -- <path>` on `main`.
+4. Month end (Ryan, before invoicing), in this order: the month's last `/harness:worklog`; a
+   final refresh of the PR; `cmp <main checkout>/<path> <worktree>/<path>` prints nothing for
+   both paths (if it prints anything, refresh first); `/land-checks` (its step 5 repeats the
+   `cmp`).
+5. `/harness:land`. It restores the main checkout's copies that are byte-identical to the landed
+   content before it fast-forwards `main` (since Harness e372870), so the main checkout ends
+   clean; a copy that differs blocks the pull ("main not pulled") instead of being lost.
 6. After the land: `harness-worklog export --month YYYY-MM [--rate N] --out invoice-YYYY-MM.csv`,
    then create next month's ticket (step 2).
 
@@ -2895,11 +2894,13 @@ does. `update` refuses in two cases, and says what to run:
 `harness-worklog zone` (no arguments) shows the timeline, the Mac's zone and the commit
 offsets since the last row.
 
-**Which sessions count.** `update` reads this project's transcript folder only
-(`~/.claude/projects/` + the checkout's path, every character other than a letter or a
-digit as `-`; run it in the main checkout, or pass `--repo <main checkout>`. It reads the
-transcript folder of the repo path it resolves: `--repo`, else `$CLAUDE_PROJECT_DIR`, else the
-git top level).
+**Which sessions count.** `update` reads this project's transcript folders only
+(`~/.claude/projects/` + the main checkout's path, every character other than a letter or a
+digit as `-`, and one folder per ticket worktree under `.claude/worktrees/`, kept after the
+worktree is removed). It resolves the repo from `--repo`, else `$CLAUDE_PROJECT_DIR`, else the
+git top level, and a linked worktree stands for its main checkout (since Harness 07a4835): a run
+inside a ticket worktree reads and writes the main checkout's log; `--repo <main checkout>` is
+for a run from outside the repository.
 A session started from another folder - the home folder, say - is not counted,
 whatever it worked on.
 On 2026-10-09 that happened twice (the attendance-reports work and the repo-cleanup
