@@ -363,8 +363,9 @@ class ContactIds(unittest.TestCase):
     """Question 18 (Contact_IDs, the names Salesforce stores) is recalculated after
     the rosters show or hide, and at least one girl is ticked
     (docs/plans/2026-09-30-contact-ids.md): the rule order and operand, the
-    required rosters, the sync's warning and writes, the runner's refusal, the
-    audits in every combination of the constants. Fictional names."""
+    required rosters, the sync's warning and writes, the runner's apply of both
+    (docs/DECISIONS.md, 2026-10-14), the audits in every combination of the
+    constants. Fictional names."""
 
     CLUBS, PARTNERS = ConditionBuilder.CLUBS, ConditionBuilder.PARTNERS
     OPTIONS = ConditionBuilder.OPTIONS
@@ -625,73 +626,115 @@ class ContactIds(unittest.TestCase):
             self.assertFalse([c for c in fake.calls if c.startswith("REQUIRED")])
 
     # ---- the runner
+    # the warning's ending since 2026-10-14 (docs/DECISIONS.md): the runner applies the rewrite on its
+    # next run; the template (not in REGIONAL_FORMS) and a disabled form (skipped) are hand applies
+    RUNNER_APPLIES = ("the rewrite puts it right; the runner applies it on its next run (the template and a "
+                      "disabled form by hand: docs/RUNBOOK.md, \"The names list sent to Salesforce\")")
     STALE_DRY_RUN = (
         "Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n"
         f"  ! {sync.CONTACT_IDS_STALE}: its calculation is rule 22 of 23, after the rosters' rules, so a "
         "change of club calculates it before the rosters show or hide; the Club picker (q500) is not "
-        "one of its operands - the rewrite puts it right; apply this form by hand (docs/RUNBOOK.md, "
-        "\"The names list sent to Salesforce\")\n"
+        f"one of its operands - {RUNNER_APPLIES}\n"
         "  conditions: 22 kept, 1 new, 1 dropped\n"
         "\nDRY RUN (use --apply to write):\n"
         "  - REPLACE conditions (23 rules)\n")
+    HEAD = "Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
 
     def run_region(self, text, apply=False, summary=None):
         return AutoSyncFixture.run_region(self, text, apply=apply, summary=summary)
 
-    def test_the_runner_never_applies_a_region_whose_question_18_is_the_old_way(self):
+    def test_the_runner_applies_a_region_whose_question_18_is_the_old_way(self):
         self.assertEqual(auto_sync.CONTACT_IDS_STALE, sync.CONTACT_IDS_STALE)
+        # the sync's own warning on a form whose rules are the old way: its new ending
+        qs, wire = self.form((False, False, True))
+        summary, out = self.summary(FakeForm(qs, wire))
+        (warning,) = sync.WARNINGS
+        self.assertTrue(warning.startswith(f"  ! {sync.CONTACT_IDS_STALE}: "), warning)
+        self.assertTrue(warning.endswith(" - " + self.RUNNER_APPLIES), warning)
+        self.assertNotIn("apply this form by hand", warning)
+        self.assertEqual(summary["warnings"], [warning])
+        # the fabricated dry run, the same plan with a new club, and the summary file: all applied
         plan = auto_sync.parse_plan(self.STALE_DRY_RUN)
         self.assertEqual((auto_sync.changes(plan), len(auto_sync.contact_ids_stale(plan))), (0, 1))
-        (reason,) = auto_sync.check_bands(plan)
-        self.assertIn("calculate question 18 (Contact_IDs, the names sent to Salesforce) the old way", reason)
-        self.assertIn("by hand", reason)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        detail = "0 create(s), 0 update(s), 0 delete(s), 1 warning(s), question 18 rules rewritten"
         busy = self.STALE_DRY_RUN.replace("  - REPLACE", "  - CREATE roster 'Gamma Club' (2 girls)\n  - REPLACE")
-        summary = {"creates": [], "updates": [], "deletes": [], "rules": 23, "calls": ["REPLACE conditions (23 rules)"],
-                   "warnings": [l for l in self.STALE_DRY_RUN.splitlines() if l.startswith("  ! ")]}
-        for text, apply, summ in ((self.STALE_DRY_RUN, False, None), (self.STALE_DRY_RUN, True, None),
-                                  (busy, True, None), (self.STALE_DRY_RUN, True, summary)):
-            run = self.run_region(text, apply=apply, summary=summ)
-            self.assertEqual(run.synced, [False], text)               # never an apply: not even with a new club
-            self.assertEqual([r[7] for r in run.results], ["attention"])
-            self.assertIn("the old way", run.results[0][8])
-            (title, detail), = run.attention
-            self.assertIn("Africa: not applied", title)
-            self.assertIn(sync.CONTACT_IDS_STALE, detail)
-        # in step: a rules-only plan is in-sync as ever
+        summary_file = {"creates": [], "updates": [], "deletes": [], "rules": 23,
+                        "calls": ["REPLACE conditions (23 rules)"],
+                        "warnings": [l for l in self.STALE_DRY_RUN.splitlines() if l.startswith("  ! ")]}
+        for text, summ, want in ((self.STALE_DRY_RUN, None, detail),
+                                 (busy, None, "1 create(s), 0 update(s), 0 delete(s), 1 warning(s), "
+                                              "question 18 rules rewritten"),
+                                 (self.STALE_DRY_RUN, summary_file, detail)):
+            run = self.run_region(text, apply=True, summary=summ)
+            self.assertEqual(run.synced, [False, True], text)              # the dry run, then the apply
+            self.assertEqual(run.steps, ["sync", "backup", "save conditions", "sync --apply", "verify"], text)
+            self.assertEqual([r[7:9] for r in run.results], [["applied", want + "; verified clean"]], text)
+            self.assertEqual(run.attention, [], text)
+            run = self.run_region(text, apply=False, summary=summ)
+            self.assertEqual((run.synced, run.steps), ([False], ["sync"]), text)
+            self.assertEqual([r[7:9] for r in run.results], [["dry-run", "would apply: " + want]], text)
+            self.assertEqual(run.attention, [], text)
+        # the sync's real dry run drives the runner the same way
+        run = self.run_region(out, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results], run.attention), ([False, True], ["applied"], []))
+        self.assertEqual(run.steps, ["sync", "backup", "save conditions", "sync --apply", "verify"])
+        self.assertEqual(run.results[0][8], detail + "; verified clean")
+        # in step: a rules-only plan without the warning is in-sync as ever
         quiet = "\n".join(l for l in self.STALE_DRY_RUN.splitlines() if "! " not in l) + "\n"
-        run = self.run_region(quiet)
-        self.assertEqual(([r[7] for r in run.results], run.attention), (["in-sync"], []))
+        for apply in (False, True):
+            run = self.run_region(quiet, apply=apply)
+            self.assertEqual((run.synced, [r[7] for r in run.results], run.attention), ([False], ["in-sync"], []))
 
-    def test_the_runner_writes_the_required_flag_only_with_a_change_it_already_makes(self):
-        text = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n"
-                "\nDRY RUN (use --apply to write):\n"
-                "  - UPDATE roster 'Alpha Club' (q10, 3 girls; required: Yes)\n"
+    def test_the_runner_writes_the_required_flag_on_its_own_too(self):
+        text = (self.HEAD
+                + "  - UPDATE roster 'Alpha Club' (q10, 3 girls; required: Yes)\n"
                 "  - CREATE roster 'Gamma Club' (2 girls)\n")
         plan = auto_sync.parse_plan(text)
         self.assertEqual([(u["qid"], u["girls"]) for u in plan["updates"]], [("10", 3)])
         self.assertEqual((plan["requires"], auto_sync.check_bands(plan)), ([], []))
         run = self.run_region(text, apply=True)
         self.assertEqual((run.synced, [r[7] for r in run.results]), ([False, True], ["applied"]))
-        # one roster's flag on its own is never applied unattended - nor 200 of them
+        # a roster's flag on its own is applied under the default bands - and 200 of them, Yes or No:
+        # the lines come from a constant (ROSTERS_REQUIRED), not the export, so flipping it for every
+        # roster is one rollout, and they never count against --max-updates
         for n in (1, 200):
-            alone = text + "".join(f"  - REQUIRED roster 'Club {i}' (q{100 + i}: Yes)\n" for i in range(n))
-            plan = auto_sync.parse_plan(alone)
-            self.assertEqual(len(plan["requires"]), n)
-            self.assertIn(f"required: Yes on {n} roster(s)", auto_sync.plan_summary(plan))
-            (reason,) = auto_sync.check_bands(plan, max_updates=1000)
-            self.assertIn(f"would write the required flag on {n} roster(s) that have no other change", reason)
-            run = self.run_region(alone, apply=True)
-            self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
-            self.assertIn(f"- REQUIRED on {n} roster(s) with no other change", run.attention[0][1])
-            # …the rollback's "No" too
-            plan = auto_sync.parse_plan(alone.replace(": Yes)", ": No)"))
-            self.assertIn("required: No on", auto_sync.plan_summary(plan))
-            self.assertEqual(len(auto_sync.check_bands(plan, max_updates=1000)), 1)
-        # nothing else planned: never in-sync
-        only = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to "
-                "write):\n  - REQUIRED roster 'Alpha Club' (q10: Yes)\n")
-        run = self.run_region(only, apply=True)
+            for value in ("Yes", "No"):
+                alone = text + "".join(f"  - REQUIRED roster 'Club {i}' (q{100 + i}: {value})\n" for i in range(n))
+                plan = auto_sync.parse_plan(alone)
+                self.assertEqual(len(plan["requires"]), n)
+                self.assertEqual(auto_sync.changes(plan), n + 2)
+                self.assertEqual(auto_sync.check_bands(plan), [], (n, value))
+                want = f"1 create(s), 1 update(s), 0 delete(s), 0 warning(s), required: {value} on {n} roster(s)"
+                self.assertEqual(auto_sync.plan_summary(plan), want)
+                run = self.run_region(alone, apply=True)
+                self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                                 ([False, True], [["applied", want + "; verified clean"]], []), (n, value))
+                # the flags alone, against a band of no update at all
+                flags = self.HEAD + "".join(f"  - REQUIRED roster 'Club {i}' (q{100 + i}: {value})\n" for i in range(n))
+                self.assertEqual(auto_sync.check_bands(auto_sync.parse_plan(flags), max_updates=0), [], (n, value))
+                self.assertEqual(auto_sync.check_bands(auto_sync.parse_plan(flags), max_updates=n - 1), [], (n, value))
+        # ...while roster updates still count: 21 against the default band
+        updates = self.HEAD + "".join(f"  - UPDATE roster 'Club {i}' (q{100 + i}, 3 girls)\n" for i in range(21))
+        self.assertEqual(len(auto_sync.check_bands(auto_sync.parse_plan(updates))), 1)
+        # nothing else planned: applied, never in-sync
+        for value in ("Yes", "No"):
+            only = self.HEAD + f"  - REQUIRED roster 'Alpha Club' (q10: {value})\n"
+            plan = auto_sync.parse_plan(only)
+            self.assertEqual((auto_sync.changes(plan), auto_sync.check_bands(plan)), (1, []))
+            want = f"0 create(s), 0 update(s), 0 delete(s), 0 warning(s), required: {value} on 1 roster(s)"
+            run = self.run_region(only, apply=True)
+            self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                             ([False, True], [["applied", want + "; verified clean"]], []), value)
+            self.assertEqual(run.steps, ["sync", "backup", "save conditions", "sync --apply", "verify"], value)
+            run = self.run_region(only)
+            self.assertEqual((run.synced, [r[7:9] for r in run.results]), ([False], [["dry-run", "would apply: " + want]]))
+        # held by a band (a delete), the ATTENTION list still counts the flags
+        held = only + "  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n"
+        run = self.run_region(held, apply=True)
         self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+        self.assertTrue(run.results[0][8].startswith("would delete 1 roster question(s)"), run.results[0][8])
+        self.assertIn("- REQUIRED on 1 roster(s) with no other change", run.attention[0][1])
 
     # ---- form_status: every combination of the constants
     def audit(self, qs, wire):

@@ -441,8 +441,9 @@ def week_bridge_stale(conditions):
     them). Else one phrase per fault: a rule that shows a session dropdown on no curriculum
     module (the year-1 rule before 2026-10-13, or an event's), the session bridge missing,
     doubled, in another shape, or after a session rule or copy. The sync warns with these
-    on a form that carries (or will carry) an event option, and the runner applies no such
-    form unattended (tools/auto_sync.py WEEK_BRIDGE_STALE)."""
+    on a form that carries (or will carry) an event option; the runner matches the warning
+    (tools/auto_sync.py WEEK_BRIDGE_STALE), never reads the rules-only plan as in-sync, and
+    applies the rewrite on its next run (the template and a disabled form by hand)."""
     if not conditions:
         return []
     shape, why = week_bridge_layout(conditions), []
@@ -486,9 +487,11 @@ SESSION_OVERRIDES = {
 # calcValues; it never removes, renames or reorders one. An option that starts
 # with the prefix but is not listed here is warned about and left alone (a
 # retired type is removed by hand in the builder: RUNBOOK "Special events").
-# EDIT HERE to add a type; the rollout is by hand, template first (the runner
-# holds the write: tools/auto_sync.py). Python only - Apps Script never reads
-# modules.
+# EDIT HERE to add a type: the template first, by hand from the branch (its
+# browser checks), then the merge - the runner applies it to every enabled
+# regional form on its next run; the template and a disabled form are applied
+# by hand (docs/DECISIONS.md 2026-10-14; RUNBOOK "Special events"). Python only
+# - Apps Script never reads modules.
 SPECIAL_EVENT_PREFIX = "Special Event - "
 SPECIAL_EVENTS = ("Welcome Session", "IDG Celebrations")
 

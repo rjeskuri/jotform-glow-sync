@@ -3,7 +3,8 @@
 Special events (docs/plans/2026-10-13-special-events.md): "Special Event - <type>" as one more
 option of every module dropdown, with no session dropdown and question 100 blank - the constants
 (glow/sync.py), the cascade and the session bridge (build_conditions), the sync's one write per
-module dropdown, the runner holding that write, form_status's audits (API and served page).
+module dropdown, the runner applying that write on its next run (docs/DECISIONS.md, 2026-10-14),
+form_status's audits (API and served page).
 glow/submissions.py's reading of an event: test/backfill_resolve_test.py. On SameNameFixture's
 fake Africa form; fictional names.
 """
@@ -233,7 +234,7 @@ class EventSync(unittest.TestCase):
                          [{"qid": "14", "year": "1", "modules": 2, "events": [EVENT], "calc": "set"},
                           {"qid": "92", "year": "2", "modules": 3, "events": [EVENT], "calc": "set"},
                           {"qid": "93", "year": "3", "modules": 2, "events": [EVENT], "calc": "set"}])
-        # the runner reads the same plan from the printed lines and from the summary, and holds it
+        # the runner reads the same plan from the printed lines and from the summary (Runner: applied)
         want = [{"qid": q, "year": y, "modules": n, "events": 1, "calc": "set"}
                 for q, y, n in (("14", "1", 2), ("92", "2", 3), ("93", "3", 2))]
         self.assertEqual((auto_sync.parse_plan(out)["modules"], auto_sync.plan_from_summary(summary)["modules"]),
@@ -285,32 +286,43 @@ class EventSync(unittest.TestCase):
 
 
 class Runner(unittest.TestCase):
-    """tools/auto_sync.py: an event-option write stops the region like the module values."""
+    """tools/auto_sync.py: an event-option write is applied on the runner's next run like the
+    module values, within the bands (docs/DECISIONS.md, 2026-10-14)."""
 
-    TEXT = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
-            + "".join(f"  - {line}\n" for line in EventSync.LINES) + "  - REPLACE conditions (40 rules)\n")
+    HEAD = "Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
+    TEXT = HEAD + "".join(f"  - {line}\n" for line in EventSync.LINES) + "  - REPLACE conditions (40 rules)\n"
+    DETAIL = ("0 create(s), 0 update(s), 0 delete(s), 0 warning(s), module values on 3 dropdown(s), "
+              "special-event options on 3 dropdown(s)")
 
-    def test_the_line_is_read_and_the_region_held(self):
+    def test_the_line_is_read_and_the_region_applied(self):
         plan = auto_sync.parse_plan(self.TEXT)
         self.assertEqual([m["events"] for m in plan["modules"]], [1, 1, 1])
         self.assertEqual(auto_sync.changes(plan), 3)
-        self.assertIn(", module values on 3 dropdown(s), special-event options on 3 dropdown(s)",
-                      auto_sync.plan_summary(plan))
-        (reason,) = auto_sync.check_bands(plan)
-        self.assertIn("would add special-event option(s) to 3 module dropdown(s) (q14, q92, q93), with their "
-                      "calcValues - never unattended", reason)
-        self.assertIn("\"Special events\"", reason)
-        for text in (self.TEXT, self.TEXT + "  - CREATE roster 'Gamma Club' (2 girls)\n"):
+        self.assertEqual(auto_sync.plan_summary(plan), self.DETAIL)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        self.assertEqual(auto_sync.check_bands(plan, max_updates=0), [])   # a module line is no roster update
+        for text, want in ((self.TEXT, self.DETAIL),
+                           (self.TEXT + "  - CREATE roster 'Gamma Club' (2 girls)\n",
+                            self.DETAIL.replace("0 create(s)", "1 create(s)"))):
             run = AutoSyncFixture.run_region(self, text, apply=True)
-            self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
-            self.assertIn("- MODULE values q92 (year 2: 3 modules, 1 special-event option(s) added)",
-                          run.attention[0][1])
-        # an event write next to a plain calcValues write: two reasons
+            self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                             ([False, True], [["applied", want + "; verified clean"]], []), text)
+            run = AutoSyncFixture.run_region(self, text)
+            self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                             ([False], [["dry-run", "would apply: " + want]], []), text)
+        # an event write next to a plain calcValues write: applied all the same
         mixed = self.TEXT.replace(EventSync.LINES[1], "UPDATE module dropdown (q92, year 2: calcValues = its 3 options)")
-        reasons = auto_sync.check_bands(auto_sync.parse_plan(mixed))
-        self.assertEqual(len(reasons), 2)
-        self.assertIn("(q14, q93)", reasons[0])
-        self.assertIn("would write the calcValues of 1 module dropdown(s) (q92)", reasons[1])
+        plan = auto_sync.parse_plan(mixed)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        self.assertEqual(auto_sync.plan_summary(plan), self.DETAIL.replace("options on 3", "options on 2"))
+        run = AutoSyncFixture.run_region(self, mixed, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results]), ([False, True], ["applied"]))
+        # held by a band (a delete), the ATTENTION list still names each dropdown's write
+        run = AutoSyncFixture.run_region(self, self.TEXT + "  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n",
+                                         apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+        self.assertTrue(run.results[0][8].startswith("would delete 1 roster question(s)"), run.results[0][8])
+        self.assertIn("- MODULE values q92 (year 2: 3 modules, 1 special-event option(s) added)", run.attention[0][1])
 
     def test_the_format_is_the_syncs_and_nothing_else_matches(self):
         rx = auto_sync.MODULE_RX
@@ -473,7 +485,12 @@ class Audit(unittest.TestCase):
 class StaleRules(unittest.TestCase):
     """A form that carries the event option but whose live rules are the old way (an apply that
     stopped after the module writes, or the option added in the builder): the dry run plans a
-    rules-only REPLACE, which the runner never reads as in-sync."""
+    rules-only REPLACE, which the runner never reads as in-sync and applies on its next run
+    (docs/DECISIONS.md, 2026-10-14)."""
+
+    # the warning's ending since 2026-10-14; the runner matches on the constant before the colon
+    RUNNER_APPLIES = ("the rewrite puts it right; the runner applies it on its next run (the template and a "
+                      "disabled form by hand: docs/RUNBOOK.md, \"Special events\")")
 
     ROSTER, QIDS, MODULES, texts = SameNameFixture.ROSTER, SameNameFixture.QIDS, SameNameFixture.MODULES, SameNameFixture.texts
 
@@ -512,28 +529,33 @@ class StaleRules(unittest.TestCase):
         doubled = wire[:pos + 1] + [wire[pos]] + wire[pos + 1:]
         self.assertEqual(glow_sync.week_bridge_stale(doubled), ["2 session bridges into question 100"])
 
-    def test_options_in_step_with_old_rules_is_attention_never_in_sync(self):
+    def test_options_in_step_with_old_rules_is_applied_never_in_sync(self):
         self.assertEqual(auto_sync.WEEK_BRIDGE_STALE, sync.WEEK_BRIDGE_STALE)
         fake = FakeForm(*self.options_in_step_rules_old())
         summary, out = self.summary(fake)
         self.assertEqual(len(fake.calls), 1)
         self.assertRegex(fake.calls[0], r"^REPLACE conditions \(\d+ rules\)$")      # rules only
-        (warning,) = [w for w in summary["warnings"] if sync.WEEK_BRIDGE_STALE in w]
+        (warning,) = summary["warnings"]
         self.assertTrue(warning.startswith(f"  ! {sync.WEEK_BRIDGE_STALE}: 1 rule(s) show a session dropdown"))
-        self.assertIn("apply this form by hand (docs/RUNBOOK.md, \"Special events\")", warning)
+        self.assertTrue(warning.endswith(" - " + self.RUNNER_APPLIES), warning)
+        self.assertNotIn("apply this form by hand", warning)
+        detail = "0 create(s), 0 update(s), 0 delete(s), 1 warning(s), special-event rules rewritten"
         for plan in (auto_sync.parse_plan(out), auto_sync.plan_from_summary(summary)):
             self.assertEqual((auto_sync.changes(plan), len(auto_sync.week_bridge_stale(plan))), (0, 1))
-            (reason,) = auto_sync.check_bands(plan)
-            self.assertIn("the form's rules let a special event show a session dropdown or send a session "
-                          "(question 100) - the rules-only rewrite is applied by hand", reason)
+            self.assertEqual(auto_sync.check_bands(plan), [])
+            self.assertEqual(auto_sync.plan_summary(plan), detail)
         busy = out.replace("  - REPLACE", "  - CREATE roster 'Gamma Club' (2 girls)\n  - REPLACE")
-        for text, apply, summ in ((out, False, None), (out, True, None), (busy, True, None), (out, True, summary)):
-            run = AutoSyncFixture.run_region(self, text, apply=apply, summary=summ)
-            self.assertEqual(run.synced, [False])                        # never an apply, not even with a new club
-            self.assertEqual([r[7] for r in run.results], ["attention"])
-            (title, detail), = run.attention
-            self.assertIn("Africa: not applied", title)
-            self.assertIn(sync.WEEK_BRIDGE_STALE, detail)
+        for text, summ, want in ((out, None, detail), (busy, None, detail.replace("0 create(s)", "1 create(s)")),
+                                 (out, summary, detail)):
+            run = AutoSyncFixture.run_region(self, text, apply=True, summary=summ)
+            self.assertEqual(run.synced, [False, True], text)                # the dry run, then the apply
+            self.assertEqual(run.steps, ["sync", "backup", "save conditions", "sync --apply", "verify"], text)
+            self.assertEqual([r[7:9] for r in run.results], [["applied", want + "; verified clean"]], text)
+            self.assertEqual(run.attention, [], text)
+            run = AutoSyncFixture.run_region(self, text, apply=False, summary=summ)
+            self.assertEqual((run.synced, run.steps), ([False], ["sync"]), text)
+            self.assertEqual([r[7:9] for r in run.results], [["dry-run", "would apply: " + want]], text)
+            self.assertEqual(run.attention, [], text)
 
     def test_new_rules_read_in_sync_and_a_form_without_events_is_not_asked(self):
         qs, wire = SameNameFixture.form(self, switched=True)
@@ -555,7 +577,7 @@ class StaleRules(unittest.TestCase):
             _, out = self.run_sync(FakeForm(bare_qs, old))
         self.assertNotIn(sync.WEEK_BRIDGE_STALE, out)
 
-    def test_a_write_of_the_options_alone_says_so_and_is_held(self):
+    def test_a_write_of_the_options_alone_says_so_and_is_applied(self):
         qs, wire = SameNameFixture.form(self, switched=True)
         # the option deleted in the builder, its calcValues left aligned to the full list
         qs["14"]["options"] = "Core 1"
@@ -566,17 +588,28 @@ class StaleRules(unittest.TestCase):
         self.assertEqual(fake.writes[0][2], {"question[options]": f"Core 1|{EVENT}"})
         plan = auto_sync.parse_plan(out)
         self.assertEqual(plan["modules"], [{"qid": "14", "year": "1", "modules": 0, "events": 1, "calc": "unchanged"}])
-        (reason,) = auto_sync.check_bands(plan)
-        self.assertIn("would add special-event option(s) to 1 module dropdown(s) (q14)", reason)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        detail = ("0 create(s), 0 update(s), 0 delete(s), 0 warning(s), module values on 1 dropdown(s), "
+                  "special-event options on 1 dropdown(s)")
         run = AutoSyncFixture.run_region(self, out, apply=True)
-        self.assertEqual([r[7] for r in run.results], ["attention"])
-        self.assertIn("- MODULE values q14 (year 1: calcValues unchanged, 1 special-event option(s) added)",
-                      run.attention[0][1])
-        # the ATTENTION list tells "no calcValues" (options alone, values off) from "cleared"
-        for words, attention in (("calcValues none", "no calcValues"), ("calcValues cleared", "cleared")):
-            text = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
-                    f"  - UPDATE module dropdown (q14, year 1: 1 event option(s) added ({EVENT}); {words})\n")
+        self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                         ([False, True], [["applied", detail + "; verified clean"]], []))
+        run = AutoSyncFixture.run_region(self, out)
+        self.assertEqual((run.synced, [r[7:9] for r in run.results]), ([False], [["dry-run", "would apply: " + detail]]))
+        # every shape of the line is applied; held by a band (a delete), the ATTENTION list tells
+        # "calcValues unchanged" from "no calcValues" (options alone, values off) and "cleared"
+        delete = "  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n"
+        for words, attention in (("calcValues unchanged", "calcValues unchanged"), ("calcValues none", "no calcValues"),
+                                 ("calcValues cleared", "cleared")):
+            text = (Runner.HEAD
+                    + f"  - UPDATE module dropdown (q14, year 1: 1 event option(s) added ({EVENT}); {words})\n")
+            self.assertEqual(auto_sync.check_bands(auto_sync.parse_plan(text)), [], words)
             run = AutoSyncFixture.run_region(self, text, apply=True)
+            self.assertEqual((run.synced, [r[7] for r in run.results], run.attention),
+                             ([False, True], ["applied"], []), words)
+            run = AutoSyncFixture.run_region(self, text + delete, apply=True)
+            self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]), words)
+            self.assertTrue(run.results[0][8].startswith("would delete 1 roster question(s)"), run.results[0][8])
             self.assertIn(f"- MODULE values q14 (year 1: {attention}, 1 special-event option(s) added)",
                           run.attention[0][1])
 
@@ -594,11 +627,9 @@ class RunbookQuotes(unittest.TestCase):
                 "calcValues = its 6 options)")
         self.assertIn(line, text)
         self.assertTrue(auto_sync.MODULE_RX.match("  - " + line))
-        self.assertIn("would add special-event option(s) to 3 module dropdown(s) (q14, q92, q93), with their "
-                      "calcValues - never unattended", text)
-        reason = auto_sync.check_bands(auto_sync.parse_plan(Runner.TEXT))[0]
-        self.assertIn("would add special-event option(s) to 3 module dropdown(s) (q14, q92, q93), with their "
-                      "calcValues - never unattended", reason)
+        # the runner's hold is gone (docs/DECISIONS.md, 2026-10-14): no reason of its to quote
+        self.assertNotIn("never unattended", text)
+        self.assertEqual(auto_sync.check_bands(auto_sync.parse_plan(Runner.TEXT)), [])
         warning = "which is no special event of glow/sync.py SPECIAL_EVENTS: left as it is"
         self.assertIn(warning, text)
         self.assertIn(warning, re.sub(r'"\s*\n\s*"', "", read(os.path.join(REPO, "sync_attendance_form.py"))))
@@ -610,8 +641,9 @@ class RunbookQuotes(unittest.TestCase):
         # the stale-rules warning, here and in "Automatic sync"
         self.assertIn(f"`! {sync.WEEK_BRIDGE_STALE}: …`", text)
         self.assertIn("`calcValues unchanged)`", text)
-        whole = " ".join(read(os.path.join(REPO, "docs", "RUNBOOK.md")).split())
-        self.assertIn(f"Fourth, the sync's warning that **{sync.WEEK_BRIDGE_STALE}**", whole)
+        runner = " ".join(read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+                          .split("## Automatic sync", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn(sync.WEEK_BRIDGE_STALE, runner)
         self.assertIn(f'WEEK_BRIDGE_STALE = "{auto_sync.WEEK_BRIDGE_STALE}"', read(os.path.join(REPO, "tools", "auto_sync.py")))
         self.assertIn("{WEEK_BRIDGE_STALE}: ", read(os.path.join(REPO, "sync_attendance_form.py")))
 
@@ -785,9 +817,16 @@ class IdgSync(unittest.TestCase):
         self.assertFalse([m for _, m, _, _ in session_rules(written) if m in (WELCOME, IDG)])
         self.assertTrue(session_rules(written))                      # the curriculum modules keep theirs
 
-    # --- the runner: the dry run's own output is read and held ---------------------------------
+    # --- the runner: the dry run's own output is read and applied on its next run --------------
+    # (docs/DECISIONS.md, 2026-10-14; the template and a disabled form by hand: docs/plans/
+    # 2026-10-14-idg-celebrations.md, Rollout)
 
-    def test_the_runner_never_applies_the_new_option_unattended(self):
+    DETAIL = ("0 create(s), 0 update(s), 0 delete(s), 0 warning(s), module values on 3 dropdown(s), "
+              "special-event options on 3 dropdown(s)")
+    APPLY_STEPS = ["sync", "backup", "save conditions", "sync --apply", "verify"]
+    DELETE = "  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n"
+
+    def test_the_runner_applies_the_new_option_on_its_next_run(self):
         qs, wire = live_state()
         summary, out = self.summary(FakeForm(qs, wire))
         want = [{"qid": q, "year": y, "modules": n, "events": 1, "calc": "set"}
@@ -795,24 +834,50 @@ class IdgSync(unittest.TestCase):
         plan = auto_sync.parse_plan(out)
         self.assertEqual((plan["modules"], auto_sync.plan_from_summary(summary)["modules"]), (want, want))
         self.assertEqual(auto_sync.changes(plan), 3)
-        (reason,) = auto_sync.check_bands(plan)
-        self.assertIn("would add special-event option(s) to 3 module dropdown(s) (q14, q92, q93), with their "
-                      "calcValues - never unattended", reason)
-        for text in (out, out + "  - CREATE roster 'Gamma Club' (2 girls)\n"):
-            for sm in (None, summary):
-                run = AutoSyncFixture.run_region(self, text, apply=True, summary=sm)
-                self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
-                self.assertIn("- MODULE values q92 (year 2: 4 modules, 1 special-event option(s) added)",
-                              run.attention[0][1])
-        # a form lacking both types: two options a dropdown, still one reason, still held
+        for p in (plan, auto_sync.plan_from_summary(summary)):
+            self.assertEqual(auto_sync.check_bands(p), [])                   # no band: nothing holds it
+            self.assertEqual(auto_sync.check_bands(p, max_updates=0), [])    # a module line is no roster update
+            self.assertEqual(auto_sync.plan_summary(p), self.DETAIL)
+        # applied (backed up, applied, verified) from the printed lines and from the summary file
+        # (the sync's own, of the plan without the club), alone and with a new club in the same
+        # plan; a dry run says what it would apply
+        busy = out + "  - CREATE roster 'Gamma Club' (2 girls)\n"
+        for text, sm, detail in ((out, None, self.DETAIL), (out, summary, self.DETAIL),
+                                 (busy, None, self.DETAIL.replace("0 create(s)", "1 create(s)"))):
+            run = AutoSyncFixture.run_region(self, text, apply=True, summary=sm)
+            self.assertEqual(run.synced, [False, True], text)                # the dry run, then the apply
+            self.assertEqual(run.steps, self.APPLY_STEPS, text)
+            self.assertEqual([r[7:9] for r in run.results], [["applied", detail + "; verified clean"]], text)
+            self.assertEqual(run.attention, [], text)
+            run = AutoSyncFixture.run_region(self, text, apply=False, summary=sm)
+            self.assertEqual((run.synced, run.steps), ([False], ["sync"]), text)
+            self.assertEqual([r[7:9] for r in run.results], [["dry-run", "would apply: " + detail]], text)
+            self.assertEqual(run.attention, [], text)
+        # held by a bad-data band (a delete): the dry run only, that band's one reason, and the
+        # ATTENTION's Planned: list still names each dropdown's write
+        run = AutoSyncFixture.run_region(self, out + self.DELETE, apply=True)
+        self.assertEqual((run.synced, run.steps, [r[7] for r in run.results]), ([False], ["sync"], ["attention"]))
+        self.assertTrue(run.results[0][8].startswith("would delete 1 roster question(s)"), run.results[0][8])
+        self.assertNotIn("never unattended", run.results[0][8])
+        (title, detail), = run.attention
+        self.assertTrue(title.startswith("Africa: not applied - 0 create(s), "), title)
+        self.assertIn("- MODULE values q92 (year 2: 4 modules, 1 special-event option(s) added)", detail)
+        # a form lacking both types: two options a dropdown, applied all the same
         qs, wire = shaped(q14=["Core 1"], q92=["Core 2", "Elective - Healthy GLOW"], q93=["Core 3"])
         summary, out = self.summary(FakeForm(qs, wire))
         plan = auto_sync.parse_plan(out)
         self.assertEqual([m["events"] for m in plan["modules"]], [2, 2, 2])
-        self.assertEqual(len(auto_sync.check_bands(plan)), 1)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        self.assertEqual(auto_sync.plan_summary(plan), self.DETAIL)
         run = AutoSyncFixture.run_region(self, out, apply=True, summary=summary)
+        self.assertEqual((run.synced, run.steps, [r[7:9] for r in run.results], run.attention),
+                         ([False, True], self.APPLY_STEPS, [["applied", self.DETAIL + "; verified clean"]], []))
+        run = AutoSyncFixture.run_region(self, out, apply=False, summary=summary)
+        self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                         ([False], [["dry-run", "would apply: " + self.DETAIL]], []))
+        run = AutoSyncFixture.run_region(self, out + self.DELETE, apply=True)
         self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
-        self.assertIn("2 special-event option(s) added", run.attention[0][1])
+        self.assertIn("- MODULE values q92 (year 2: 4 modules, 2 special-event option(s) added)", run.attention[0][1])
 
 
 class IdgRules(unittest.TestCase):
@@ -1004,17 +1069,76 @@ class IdgDocs(unittest.TestCase):
         for name in names[:4]:                                            # real content, not one token
             self.assertGreaterEqual(len(sections[name].split()), 20, name)
         rollout, rollback = sections["Rollout"], sections["Rollback"]
-        self.assertIn("AUTO_SYNC_APPLY", rollout)
-        self.assertRegex(rollout, r"(?i)template")
-        self.assertRegex(rollout, r"(?i)template.{0,200}first|first.{0,200}template")
-        self.assertRegex(rollout, r"(?i)ryan.s go")
-        self.assertIn("--apply", rollout)
+        # the Rollout's order: test_the_rollout_is_the_template_by_hand_then_the_land_then_the_runners_next_run
+        self.assertRegex(rollout, r"(?i)ryan.s\b.{0,30}\bgo\b")
         self.assertIn("form_status", rollout)
         self.assertIn("restore_conditions.py", rollback)
         self.assertRegex(rollback, r"(?i)builder")
         self.assertIn("SPECIAL_EVENTS", rollback)
         self.assertIn("Module_Week__c", sections["Risks"])
         self.assertEqual(sections["Result"].strip(), "")                  # nothing to report yet
+
+    def test_the_rollout_is_the_template_by_hand_then_the_land_then_the_runners_next_run(self):
+        # Ryan's sequence (#30, 2026-10-14): Claude applies the template on his in-session go
+        # (backup, dry run, apply, form_status --rendered --partners CLEAN, the browser checks),
+        # then Ryan lands #40, then the runner's next run adds the option to Africa, Asia and
+        # Latin America, each verified with form_status --rendered --partners; the disabled U.S
+        # form is applied like the template. A step is a top-level numbered item (its indented
+        # sub-steps belong to it); AUTO_SYNC_APPLY is neither required nor forbidden.
+        rollout = self.sections()[0]["Rollout"]
+        steps = re.split(r"^\d+\.\s", rollout, flags=re.M)[1:]
+        self.assertGreaterEqual(len(steps), 3, rollout)
+
+        def first(*patterns):
+            return next((i for i, s in enumerate(steps) if all(re.search(p, s) for p in patterns)), None)
+
+        def units(step):
+            """Each list item of a step (the step itself included) with its nested items, and each
+            sentence of an item's own lines: where one statement of the Rollout can sit."""
+            lines = step.split("\n")
+            marks = [(0, -1)] + [(i, len(m.group(1))) for i, l in enumerate(lines)
+                                 if i and (m := re.match(r"( *)(?:[-*]|\d+\.)\s", l))]
+            out = []
+            for k, (i, depth) in enumerate(marks):
+                end = next((j for j, d in marks[k + 1:] if d <= depth), len(lines))
+                own_end = marks[k + 1][0] if k + 1 < len(marks) else len(lines)
+                out.append(" ".join(" ".join(lines[i:end]).split()))
+                out += re.split(r"(?<=[.!?])\s+(?=[A-Z])", " ".join(" ".join(lines[i:own_end]).split()))
+            return out
+        template = first(r"(?i)template", r"(?i)\bappl")
+        land = first(r"#40", r"(?i)\bland")
+        runner = first(r"(?i)\brunner", r"(?i)next run")
+        self.assertIsNotNone(template, "no step applies the template")
+        self.assertIsNotNone(land, "no step lands #40")
+        self.assertIsNotNone(runner, "no step says the runner's next run applies the regional forms")
+        self.assertLess(template, land, "the template is applied before #40 lands")
+        self.assertLess(land, runner, "the runner's next run comes after the land")
+        t, r = steps[template], steps[runner]
+        for want in (r"(?i)ryan.s\b.{0,30}\bgo\b", r"(?i)backup", r"(?i)dry run", r"--rendered --partners",
+                     r"(?i)browser"):
+            self.assertRegex(t, want)
+        # the template step runs the sync's apply itself, not only says "applies" in its heading
+        self.assertTrue(re.search(r"(?i)\bthe sync.s apply\b", t)
+                        or ("sync_attendance_form.py" in t and re.search(r"--apply\b", t)),
+                        "the template step does not carry the sync's apply (--apply on its command)")
+        for want in ("Africa", "Asia", "Latin America", "--rendered --partners"):
+            self.assertIn(want, r)
+        # the disabled U.S form is applied, in a sentence or bullet of its own (one that names no
+        # enabled region, so the runner step's other wording cannot stand in for it): an apply verb
+        # with the sync's --disabled-ok or "the same way as the template", on Ryan's go (which "the
+        # same way as the template" carries), verified with form_status --rendered --partners
+        us = [i for i, s in enumerate(steps) for u in units(s)
+              if re.search(r"U\.S\b", u) and not re.search(r"Africa|Asia|Latin America", u)
+              and all(re.search(p, u) for p in (
+                  r"(?i)\bdisabled\b",
+                  r"(?i)\bappl(?:y|ies|ied|ying)\b",
+                  r"--disabled-ok|(?i:same way as the template)",
+                  r"(?i:ryan.s\b.{0,30}\bgo\b|same way as the template)",
+                  r"--rendered --partners"))]
+        self.assertTrue(us, "no sentence or bullet applies the disabled U.S form (an apply with "
+                            "--disabled-ok or the same way as the template, on Ryan's go, verified "
+                            "with --rendered --partners)")
+        self.assertGreaterEqual(us[0], template)
 
     def test_the_plans_index_is_the_generated_one(self):
         sys.path.insert(0, os.path.join(REPO, "scripts"))

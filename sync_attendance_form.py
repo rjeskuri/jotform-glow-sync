@@ -151,17 +151,19 @@ RULES_OLDER = "which the Club picker does not list"
 # A fourth: the live rules calculate question 18 (the names Salesforce stores)
 # the old way - after the rosters' rules, or without the Club picker among its
 # operands (glow/sync.py CONTACT_IDS_FIRST / CONTACT_IDS_PICKER_OPERAND). The
-# rewrite is one REPLACE conditions per form, rolled out by hand: the runner
-# raises ATTENTION and does not apply that region (docs/plans/2026-09-30-
-# contact-ids.md).
+# rewrite is one REPLACE conditions per form; the runner matches this text,
+# never reads the rules-only plan as in-sync, and applies the rewrite to every
+# enabled regional form on its next run (the template and a disabled form are
+# applied by hand; the first rollout: docs/plans/2026-09-30-contact-ids.md).
 CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
 # A fifth: the form carries (or this run gives it) a special-event option, but the live
 # rules let an event show a session dropdown or send a session in question 100 - no
 # session bridge, or one out of place, or a session rule on no curriculum module (an
 # apply that stopped after the module writes, or the option added in the builder). The
 # next dry run plans a rules-only REPLACE, which the runner does not count as a change:
-# on this warning it raises ATTENTION and applies nothing there; the rewrite is a hand
-# apply (docs/plans/2026-10-13-special-events.md)
+# on this warning it applies the rewrite all the same, to every enabled regional form on
+# its next run (the template and a disabled form are applied by hand; the first rollout:
+# docs/plans/2026-10-13-special-events.md)
 WEEK_BRIDGE_STALE = "the form's rules let a special event show or send a session"
 # A retired roster that comes back (docs/plans/2026-10-06-clubs-off-jotform.md)
 # has no rule to read what it sent: when its name is one two partners have had
@@ -697,7 +699,8 @@ def main():
         return "" if qid in inferred else current_partner_of.get(qid, "")
 
     # question 18 the old way (glow/sync.py CONTACT_IDS_FIRST / _PICKER_OPERAND):
-    # the rewrite below fixes it, but only by hand - the runner reads this line
+    # the rewrite below fixes it; the runner matches this line (tools/auto_sync.py
+    # CONTACT_IDS_STALE) and applies the rewrite on its next run
     stale_ids = glow_sync.contact_ids_stale(props.get("conditions", []), form_text, picker_qid)
     if stale_ids:
         shape = glow_sync.contact_ids_layout(props.get("conditions", []), form_text)
@@ -708,16 +711,18 @@ def main():
                        "show or hide")
         if "operand" in stale_ids:
             why.append(f"the Club picker (q{picker_qid}) is not one of its operands")
-        warn(f"  ! {CONTACT_IDS_STALE}: {'; '.join(why)} - the rewrite puts it right; apply this "
-             "form by hand (docs/RUNBOOK.md, \"The names list sent to Salesforce\")")
+        warn(f"  ! {CONTACT_IDS_STALE}: {'; '.join(why)} - the rewrite puts it right; the runner "
+             "applies it on its next run (the template and a disabled form by hand: docs/RUNBOOK.md, "
+             "\"The names list sent to Salesforce\")")
 
     # the special events' rules the old way (glow/sync.py week_bridge_stale): on a form that
     # carries, or after this run will carry, an event option - the runner reads this line too
     if any(is_special_event(o) for options in module_options.values() for o in options):
         stale_bridge = glow_sync.week_bridge_stale(props.get("conditions", []))
         if stale_bridge:
-            warn(f"  ! {WEEK_BRIDGE_STALE}: {'; '.join(stale_bridge)} - the rewrite puts it right; apply "
-                 "this form by hand (docs/RUNBOOK.md, \"Special events\")")
+            warn(f"  ! {WEEK_BRIDGE_STALE}: {'; '.join(stale_bridge)} - the rewrite puts it right; the "
+                 "runner applies it on its next run (the template and a disabled form by hand: "
+                 "docs/RUNBOOK.md, \"Special events\")")
 
     # the picker's options as the form holds them: what a mentor can pick today
     listed = {}
@@ -1243,8 +1248,8 @@ def main():
             pending.append((club, partner))
     # the required flag (glow/sync.py ROSTERS_REQUIRED): with an options update in
     # the same write (the POST merges), else on its own, LAST in the run (below) - a
-    # line the runner never applies unattended, so making every roster required is a
-    # hand apply per form
+    # line the runner applies like a roster change, never counted against its
+    # --max-updates (flipping the constant is one rollout for every roster)
     want_required = glow_sync.roster_required()
 
     def required_differs(qid):
@@ -1331,12 +1336,14 @@ def main():
     # --- the module dropdowns' calcValues (glow/sync.py MODULE_CALC_VALUES) --
     # their own options, so question 98 (module_id, what Salesforce stores) copies
     # the option itself, never its visible text, which a browser's page translation
-    # rewrites. Kept in step on every run; off, they are cleared. The runner never
-    # applies these lines unattended: the first rollout is by hand, template first,
-    # and afterwards a difference means a module dropdown was edited in the builder.
-    # The special-event options a dropdown lacks (glow/sync.py SPECIAL_EVENTS) are
-    # appended in the same write - options and calcValues never out of step on the
-    # form - and held by the runner the same way (tools/auto_sync.py MODULE_RX)
+    # rewrites. Kept in step on every run; off, they are cleared. The runner applies
+    # these lines like a roster change (tools/auto_sync.py MODULE_RX): since the first
+    # rollout a difference means a module dropdown was edited in the builder, and the
+    # next run realigns it. The special-event options a dropdown lacks (glow/sync.py
+    # SPECIAL_EVENTS) are appended in the same write - options and calcValues never
+    # out of step on the form - so a type merged to main reaches every enabled
+    # regional form on the runner's next run; the template and a disabled form are
+    # applied by hand
     module_values = []
     for year, mqid in MODULES.items():
         current = questions[mqid]

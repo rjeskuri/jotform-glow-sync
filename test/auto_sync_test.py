@@ -3,8 +3,9 @@
 Offline tests for the automatic sync's runner, tools/auto_sync.py, on fabricated output: the
 plan parsing, the safety bands, the blank-region guard, verification and redaction
 (AutoSyncPlan); SyncLog's `when` (SheetWhen); tools/sheets_client.py's spreadsheets.get
-(SheetsClientGet); and the module dropdowns' calcValues, which the runner never applies
-unattended (ModuleValues).
+(SheetsClientGet); the module dropdowns' calcValues, which the runner applies like a roster
+change (ModuleValues); and the five generated rollout lines the runner applies on its next run,
+within the bands, with the bands that still hold such a region (RolloutLines).
 """
 import json
 import os
@@ -280,7 +281,7 @@ class AutoSyncPlan(AutoSyncFixture, unittest.TestCase):
             run = self.run_region(self.STALE_RULES_DRY_RUN, apply=apply)
             self.assertEqual([r[7] for r in run.results], ["attention"], apply)
             self.assertIn("1 roster rule(s) test a name the Club picker does not list", run.results[0][8])
-            self.assertEqual(run.synced, [False])              # a rules-only write is never unattended
+            self.assertEqual(run.synced, [False])              # the RULES_OLDER rewrite stays a hand apply
             (title, detail), = run.attention
             self.assertIn("Africa: 1 roster rule(s) test a name the Club picker does not list", title)
             self.assertIn("- ! 'Stars' (q11): its rule tests 'Stars'", detail)
@@ -683,14 +684,14 @@ class SheetsClientGet(unittest.TestCase):
 
 
 # Written when Welcome Session was the only special event: pinned to that world, so what it tests
-# (calcValues alignment, the runner's hold) does not move with the live type list. The two-type
+# (calcValues alignment, the runner's apply) does not move with the live type list. The two-type
 # state is test/special_events_test.py (IdgSync).
 @mock.patch.object(glow_sync, "SPECIAL_EVENTS", ("Welcome Session",))
 class ModuleValues(unittest.TestCase):
     """The module dropdowns' calcValues (glow/sync.py MODULE_CALC_VALUES): their own options
     after a single-select's empty slot, written and kept in step by the sync, cleared by
-    the generated rollback, never applied by the runner unattended; on SameNameFlow's
-    fake Africa form."""
+    the generated rollback, applied by the runner like a roster change (docs/DECISIONS.md,
+    2026-10-14); on SameNameFlow's fake Africa form."""
 
     ROSTER, QIDS, MODULES, texts = SameNameFixture.ROSTER, SameNameFixture.QIDS, SameNameFixture.MODULES, SameNameFixture.texts
     # each dropdown: its curriculum options and the special event (glow.sync.SPECIAL_EVENTS)
@@ -778,21 +779,32 @@ class ModuleValues(unittest.TestCase):
             fake = FakeForm(*self.form(calc=False))
             self.assertEqual((self.run_sync(fake)[0], fake.calls), (0, []))
 
-    def test_the_runner_never_applies_them(self):
+    def test_the_runner_applies_them(self):
         text = ("Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
                 + "".join(f"  - {l}\n" for l in self.LINES))
         plan = auto_sync.parse_plan(text)
-        self.assertIn(", module values on 3 dropdown(s)", auto_sync.plan_summary(plan))
-        (reason,) = auto_sync.check_bands(plan)
-        self.assertIn("would write the calcValues of 3 module dropdown(s) (q14, q92, q93) - never unattended", reason)
+        self.assertEqual(auto_sync.changes(plan), 3)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        self.assertEqual(auto_sync.check_bands(plan, max_updates=0), [])   # not counted against --max-updates
+        summary = "0 create(s), 0 update(s), 0 delete(s), 0 warning(s), module values on 3 dropdown(s)"
+        self.assertEqual(auto_sync.plan_summary(plan), summary)
         busy = text + "  - CREATE roster 'Gamma Club' (2 girls)\n"
-        for t in (text, busy):
-            run = AutoSyncFixture.run_region(self, t, apply=True)
-            self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
-            self.assertIn("- MODULE values q92 (year 2: 3 modules)", run.attention[0][1])
         cleared = text.replace("= its 2 options)", "cleared)")
-        self.assertIn("- MODULE values q14 (year 1: cleared)", AutoSyncFixture.run_region(self, cleared, apply=True)
-                      .attention[0][1])
+        for t, want in ((text, summary), (busy, summary.replace("0 create(s)", "1 create(s)")), (cleared, summary)):
+            run = AutoSyncFixture.run_region(self, t, apply=True)
+            self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                             ([False, True], [["applied", want + "; verified clean"]], []), t)
+            run = AutoSyncFixture.run_region(self, t)
+            self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                             ([False], [["dry-run", "would apply: " + want]], []), t)
+        # held by a band (a delete, never done unattended), the ATTENTION list still names each write
+        delete = "  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n"
+        run = AutoSyncFixture.run_region(self, text + delete, apply=True)
+        self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+        self.assertTrue(run.results[0][8].startswith("would delete 1 roster question(s)"), run.results[0][8])
+        self.assertIn("- MODULE values q92 (year 2: 3 modules)", run.attention[0][1])
+        self.assertIn("- MODULE values q14 (year 1: cleared)",
+                      AutoSyncFixture.run_region(self, cleared + delete, apply=True).attention[0][1])
         self.assertFalse(auto_sync.MODULE_RX.match("  - UPDATE module dropdown (q14, year 1: calcValues)"))
         # the line is the sync's own
         joined = re.sub(r'"\s*\n\s*"', "", read(os.path.join(REPO, "sync_attendance_form.py")))
@@ -801,6 +813,225 @@ class ModuleValues(unittest.TestCase):
                          'calc = ("set" if want else "cleared") if not same else "unchanged" if want else "none"',
                          '+ "calcValues " + (f"= its {len(options)} options" if calc == "set" else calc) + ")")'):
             self.assertIn(fragment, joined)
+
+
+class RolloutLines(AutoSyncFixture, unittest.TestCase):
+    """The five generated rollout lines (docs/DECISIONS.md, 2026-10-14: a merged form change rolls
+    out through the runner; review and tests are the gate): question 18 calculated the old way
+    (CONTACT_IDS_STALE), the stale special-event session bridge (WEEK_BRIDGE_STALE), a REQUIRED
+    roster line on its own, the module dropdowns' calcValues, and the special-event options
+    appended with them. Each is applied on the runner's next run like a roster change, within the
+    bands; the bad-data bands still hold a region that carries one. The texts are the sync's own
+    lines, as test/sync_conditions_test.py ContactIds and test/special_events_test.py build them."""
+
+    HEAD = "Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n"
+    DRY = "\nDRY RUN (use --apply to write):\n"
+    # the two warnings, with the ending the sync prints since 2026-10-14 (the runner matches on
+    # the constant before the colon, never on the ending)
+    CONTACT_IDS_WARNING = (
+        f"  ! {auto_sync.CONTACT_IDS_STALE}: its calculation is rule 22 of 23, after the rosters' rules, so a "
+        "change of club calculates it before the rosters show or hide; the Club picker (q500) is not one of "
+        "its operands - the rewrite puts it right; the runner applies it on its next run (the template and a "
+        "disabled form by hand: docs/RUNBOOK.md, \"The names list sent to Salesforce\")\n")
+    WEEK_BRIDGE_WARNING = (
+        f"  ! {auto_sync.WEEK_BRIDGE_STALE}: 1 rule(s) show a session dropdown without testing a curriculum "
+        "module (first: rule 9); no session bridge, so question 100 keeps a session picked before the event - "
+        "the rewrite puts it right; the runner applies it on its next run (the template and a disabled form "
+        "by hand: docs/RUNBOOK.md, \"Special events\")\n")
+    EVENT = "Special Event - Welcome Session"
+    EVENT_LINES = [f"UPDATE module dropdown (q14, year 1: 1 event option(s) added ({EVENT}); calcValues = its 2 options)",
+                   f"UPDATE module dropdown (q92, year 2: 1 event option(s) added ({EVENT}); calcValues = its 3 options)",
+                   f"UPDATE module dropdown (q93, year 3: 1 event option(s) added ({EVENT}); calcValues = its 2 options)"]
+    COUNTS = "0 create(s), 0 update(s), 0 delete(s)"
+    # an apply, as the fixture records the run's steps: the dry run, the backup, the conditions
+    # snapshot, the apply, the verify - each once, in that order; a dry run or a held region: the
+    # dry run alone
+    APPLY_STEPS = ["sync", "backup", "save conditions", "sync --apply", "verify"]
+    # kind -> (the warning lines, the plan lines, the SyncLog detail of its apply, the line the
+    # ATTENTION list shows when a band holds it)
+    KINDS = {
+        "question 18 the old way": (CONTACT_IDS_WARNING, ["REPLACE conditions (23 rules)"],
+                                    f"{COUNTS}, 1 warning(s), question 18 rules rewritten",
+                                    f"Warnings:\n- ! {auto_sync.CONTACT_IDS_STALE}:"),
+        "stale session bridge": (WEEK_BRIDGE_WARNING, ["REPLACE conditions (40 rules)"],
+                                 f"{COUNTS}, 1 warning(s), special-event rules rewritten",
+                                 f"Warnings:\n- ! {auto_sync.WEEK_BRIDGE_STALE}:"),
+        "REQUIRED roster alone": ("", ["REQUIRED roster 'Alpha Club' (q10: Yes)"],
+                                  f"{COUNTS}, 0 warning(s), required: Yes on 1 roster(s)",
+                                  "- REQUIRED on 1 roster(s) with no other change"),
+        "module calcValues": ("", ModuleValues.LINES,
+                              f"{COUNTS}, 0 warning(s), module values on 3 dropdown(s)",
+                              "- MODULE values q92 (year 2: 3 modules)"),
+        "special-event options": ("", EVENT_LINES + ["REPLACE conditions (40 rules)"],
+                                  f"{COUNTS}, 0 warning(s), module values on 3 dropdown(s), "
+                                  "special-event options on 3 dropdown(s)",
+                                  "- MODULE values q92 (year 2: 3 modules, 1 special-event option(s) added)"),
+    }
+    # the bad-data triggers (the Definition of done): the extra lines, the runner's --max-* overrides,
+    # and the start of the one reason the band gives
+    TRIGGERS = {
+        "a delete": ("  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n", {},
+                     "would delete 1 roster question(s)"),
+        "more than --max-creates": ("".join(f"  - CREATE roster 'New Club {i}' ({i + 1} girls)\n" for i in range(6)),
+                                    {}, "would create 6 clubs at once (band: 5)"),
+        "more than --max-updates": ("".join(f"  - UPDATE roster 'Club {i}' (q{200 + i}, 3 girls)\n" for i in range(21)),
+                                    {}, "would update 21 rosters at once (band: 20)"),
+        "more than --max-retires": ("".join(f"  ~ retired roster 'Club {i}' (q{300 + i}): no active girl in the "
+                                            "Roster\n" for i in range(3)) + "  - UPDATE club picker (3 clubs: options)\n",
+                                    {"max_retires": 2}, "would take 3 clubs off the Club picker at once (band: 2)"),
+        "more than --max-restores": ("".join(f"  ~ restored roster 'Club {i}' (q{300 + i}): back on the Club "
+                                             "picker\n" for i in range(4)) + "  - UPDATE club picker (7 clubs: options)\n",
+                                     {"max_restores": 3}, "would put 4 clubs back on the Club picker at once (band: 3)"),
+        "no shared names": (f"  ! 'Old Name Club' (q120): proposed roster {auto_sync.NO_SHARED_NAMES} - verify it "
+                            "is the same club before applying\n  - UPDATE roster 'Old Name Club' (q120, 14 girls)\n",
+                            {}, "a roster would be replaced by one that shares no names with the current one"),
+        "a question-5 change": (f"  ! 'Beta Club 2' (q13): {auto_sync.SF_NAME_CHANGE} from 'Beta Club' to 'Beta "
+                                "Club 2' - rename its Salesforce account first; an --apply needs --q5-change-ok\n",
+                                {}, "question 5 (what Salesforce reads) would change for 1 existing club(s)"),
+        "a truncated export": ("".join(f"  ? 'Club {i}' (q{400 + i}) {auto_sync.NOT_IN_EXPORT} - keeping its "
+                                       "current roster\n" for i in range(6)),
+                               {}, "6 clubs are on the form but missing from the export (region has 4 clubs"),
+        "a restore from an export without the jotform column": (
+            f"  ! Partners tab: the export has no 'jotform' {auto_sync.JOTFORM_COLUMN} - a retired roster of an "
+            "active club would be restored; check the header (Partners!D1) before applying (docs/RUNBOOK.md, "
+            "\"Clubs that do not use Jotform\")\n"
+            "  ~ restored roster 'Delta Club' (q14): back on the Club picker\n"
+            "  - UPDATE club picker (4 clubs: options)\n",
+            {}, "would put 1 club(s) back on the Club picker from a Partners export that has no jotform column"),
+    }
+
+    def text(self, kind, extra=""):
+        warnings, lines, _, _ = self.KINDS[kind]
+        return self.HEAD + warnings + self.DRY + "".join(f"  - {l}\n" for l in lines) + extra
+
+    def summary_file(self, kind):
+        """The same plan as the sync's --summary-json file gives it to the runner."""
+        warnings, lines, _, _ = self.KINDS[kind]
+        rules = [int(l.split("(")[1].split()[0]) for l in lines if l.startswith("REPLACE conditions")]
+        return {"creates": [], "updates": [], "deletes": [], "rules": rules[0] if rules else None,
+                "calls": lines, "warnings": [w for w in warnings.splitlines()],
+                "requires": [{"qid": m["qid"], "club": m["club"], "required": m["required"]}
+                             for m in (auto_sync.REQUIRED_RX.match("  - " + l) for l in lines) if m]}
+
+    def test_each_generated_rollout_line_is_applied_on_the_next_run(self):
+        for kind, (_, _, detail, _) in self.KINDS.items():
+            text = self.text(kind)
+            plan = auto_sync.parse_plan(text)
+            self.assertEqual(auto_sync.check_bands(plan), [], kind)
+            self.assertEqual(auto_sync.plan_summary(plan), detail, kind)
+            # a REQUIRED or module line comes from a constant, not the export: not an update
+            self.assertEqual(auto_sync.check_bands(plan, max_updates=0), [], kind)
+            run = self.run_region(text, apply=True)
+            self.assertEqual(run.synced, [False, True], kind)                  # the dry run, then the apply
+            self.assertEqual(run.steps, self.APPLY_STEPS, kind)                # backed up, applied, verified
+            self.assertEqual([r[7:9] for r in run.results], [["applied", detail + "; verified clean"]], kind)
+            self.assertEqual(run.attention, [], kind)
+            run = self.run_region(text, apply=False)
+            self.assertEqual((run.synced, run.steps), ([False], ["sync"]), kind)
+            self.assertEqual([r[7:9] for r in run.results], [["dry-run", "would apply: " + detail]], kind)
+            self.assertEqual(run.attention, [], kind)
+            # the summary file gives the same plan and the same apply
+            run = self.run_region(text, apply=True, summary=self.summary_file(kind))
+            self.assertEqual((run.synced, run.steps, [r[7:9] for r in run.results], run.attention),
+                             ([False, True], self.APPLY_STEPS, [["applied", detail + "; verified clean"]], []), kind)
+            # with a roster change in the same plan: one apply carries both
+            busy = self.text(kind, "  - CREATE roster 'Gamma Club' (2 girls)\n")
+            run = self.run_region(busy, apply=True)
+            self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                             ([False, True], [["applied", detail.replace("0 create(s)", "1 create(s)", 1)
+                                               + "; verified clean"]], []), kind)
+
+    def test_the_bad_data_bands_still_hold_a_region_that_carries_a_rollout_line(self):
+        for kind, (_, _, _, planned) in self.KINDS.items():
+            for trigger, (extra, band, reason) in self.TRIGGERS.items():
+                text = self.text(kind, extra)
+                plan = auto_sync.parse_plan(text)
+                reasons = auto_sync.check_bands(plan, **band)
+                self.assertEqual(len(reasons), 1, (kind, trigger, reasons))     # that band's reason only
+                self.assertTrue(reasons[0].startswith(reason), (kind, trigger, reasons[0]))
+                run = self.run_region(text, apply=True, **band)
+                self.assertEqual((run.synced, run.steps), ([False], ["sync"]), (kind, trigger))   # the dry run only
+                self.assertEqual([r[7:9] for r in run.results], [["attention", reasons[0]]], (kind, trigger))
+                held = [(t, d) for t, d in run.attention if t.startswith("Africa: not applied")]
+                self.assertEqual(len(held), 1, (kind, trigger, [t for t, _ in run.attention]))
+                (title, detail), = held
+                self.assertTrue(title.startswith("Africa: not applied - " + ("6" if "creates" in trigger else "0")
+                                                 + " create(s), "), (kind, trigger, title))
+                self.assertIn("- " + reasons[0], detail, (kind, trigger))
+                self.assertIn(planned, detail, (kind, trigger))                 # the Planned: list still names it
+                # the one ATTENTION besides is the export's missing column, said before the bands
+                self.assertEqual(len(run.attention), 2 if "jotform column" in trigger else 1, (kind, trigger))
+
+    def test_a_rules_only_rollout_is_applied_and_never_in_sync(self):
+        replace = "  - REPLACE conditions (23 rules)\n"
+        for warning, suffix in ((self.CONTACT_IDS_WARNING, "question 18 rules rewritten"),
+                                (self.WEEK_BRIDGE_WARNING, "special-event rules rewritten")):
+            text = self.HEAD + warning + self.DRY + replace
+            plan = auto_sync.parse_plan(text)
+            self.assertEqual((auto_sync.changes(plan), plan["rules"], auto_sync.check_bands(plan)), (0, 23, []))
+            detail = f"{self.COUNTS}, 1 warning(s), {suffix}"
+            run = self.run_region(text, apply=True)
+            self.assertEqual((run.synced, run.steps, [r[7:9] for r in run.results], run.attention),
+                             ([False, True], self.APPLY_STEPS, [["applied", detail + "; verified clean"]], []), suffix)
+            run = self.run_region(text)
+            self.assertEqual((run.synced, run.steps, [r[7:9] for r in run.results], run.attention),
+                             ([False], ["sync"], [["dry-run", "would apply: " + detail]], []), suffix)
+            # the same plan without the warning stays in-sync, as every rules-only plan
+            quiet = self.HEAD + self.DRY + replace
+            for apply in (False, True):
+                run = self.run_region(quiet, apply=apply)
+                self.assertEqual((run.synced, run.steps, [r[7:9] for r in run.results], run.attention),
+                                 ([False], ["sync"], [["in-sync", ""]], []), apply)
+        # rules that test a name the Club picker does not list: attention, nothing applied, as before
+        stale = (self.HEAD + f"  ! 'Stars' (q11): its rule tests 'Stars', {auto_sync.RULES_OLDER} (it lists 'Stars - "
+                 "Partner One') - the rules and the picker are out of step (a restored backup, an apply that "
+                 "stopped half-way?): until an --apply rewrites the rules this roster does not show\n"
+                 + self.DRY + "  - REPLACE conditions (20 rules)\n")
+        self.assertEqual(auto_sync.check_bands(auto_sync.parse_plan(stale)), [])
+        for apply in (False, True):
+            run = self.run_region(stale, apply=apply)
+            self.assertEqual((run.synced, run.steps), ([False], ["sync"]), apply)
+            self.assertEqual([r[7:9] for r in run.results],
+                             [["attention", "1 roster rule(s) test a name the Club picker does not list - apply by hand"]])
+            (title, detail), = run.attention
+            self.assertTrue(title.startswith("Africa: 1 roster rule(s) test a name the Club picker does not list"), title)
+            self.assertIn("- ! 'Stars' (q11): its rule tests 'Stars'", detail)
+
+    def test_the_synclog_detail_names_the_rules_rewrite(self):
+        picker = "  - UPDATE club picker (4 clubs: options)\n"
+        create = "  - CREATE roster 'Gamma Club' (2 girls)\n"
+        replace = "  - REPLACE conditions (23 rules)\n"
+        shared = f"  ! 'Old Name Club' (q120): proposed roster {auto_sync.NO_SHARED_NAMES} - verify it\n"
+        cases = [(self.CONTACT_IDS_WARNING, "", f"{self.COUNTS}, 1 warning(s), question 18 rules rewritten"),
+                 (self.WEEK_BRIDGE_WARNING, "", f"{self.COUNTS}, 1 warning(s), special-event rules rewritten"),
+                 # both, after every other part, question 18 first
+                 (self.CONTACT_IDS_WARNING + self.WEEK_BRIDGE_WARNING, picker,
+                  f"{self.COUNTS}, 2 warning(s), update club picker, question 18 rules rewritten, "
+                  "special-event rules rewritten"),
+                 (self.WEEK_BRIDGE_WARNING + self.CONTACT_IDS_WARNING, create,
+                  "1 create(s), 0 update(s), 0 delete(s), 2 warning(s), question 18 rules rewritten, "
+                  "special-event rules rewritten"),
+                 # without the warnings, nothing is named - another warning of the sync is no rewrite
+                 ("", "", f"{self.COUNTS}, 0 warning(s)"),
+                 (shared, "  - UPDATE roster 'Old Name Club' (q120, 14 girls)\n",
+                  "0 create(s), 1 update(s), 0 delete(s), 1 warning(s)")]
+        for warnings, lines, want in cases:
+            text = self.HEAD + warnings + self.DRY + lines + replace
+            plan = auto_sync.parse_plan(text)
+            self.assertEqual(auto_sync.plan_summary(plan), want)
+            summary = {"creates": [{"club": "Gamma Club", "partner": "P", "girls": 2}] if lines == create else [],
+                       "updates": [{"qid": "120", "club": "Old Name Club", "girls": 14}] if warnings == shared else [],
+                       "deletes": [], "rules": 23, "warnings": warnings.splitlines(),
+                       "calls": [l.strip()[2:] for l in (lines + replace).splitlines()]}
+            self.assertEqual(auto_sync.plan_summary(auto_sync.plan_from_summary(summary)), want)
+            if warnings == shared:
+                continue                                 # held by its band: no SyncLog apply row
+            run = self.run_region(text, apply=True)
+            self.assertEqual([r[7:9] for r in run.results],
+                             [["in-sync", ""] if not warnings else ["applied", want + "; verified clean"]], want)
+            run = self.run_region(text)
+            self.assertEqual([r[7:9] for r in run.results],
+                             [["in-sync", ""] if not warnings else ["dry-run", "would apply: " + want]], want)
 
 
 if __name__ == "__main__":

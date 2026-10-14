@@ -8,8 +8,10 @@ description: What is live (the four regional Jotform attendance forms, the templ
 Live since 2026-09-01: the four regional attendance forms (ids in `docs/RUNBOOK.md`), the
 template `262352490535154` (not mentor-facing, but every logic change lands there first), the
 master enrollment Google Sheet and the Apps Script bound to it, the automatic sync (GitHub
-Actions, `main`'s code), and — through the forms — Salesforce, whose writers, gates and
-rollbacks are in `.claude/skills/salesforce`.
+Actions, `main`'s code: a form change the sync generates is rolled out by its merge — the runner
+applies it to every enabled regional form on its next run; the template and a disabled form are
+applied by hand; DECISIONS 2026-10-14), and — through the forms — Salesforce, whose writers,
+gates and rollbacks are in `.claude/skills/salesforce`.
 
 ## The gate
 `.claude/hooks/live_gate.sh` blocks these unless Ryan exported `GLOW_LIVE_OK=1` before launching
@@ -78,9 +80,12 @@ writing a translation language without GET + merge first.
   runs `main`'s constants: merge the constants-off commit only once every form is rolled back, then
   `AUTO_SYNC_APPLY=1`; never while any form is still rolled out (the runner would put the old rule
   order back on it with its next roster change).
-- The module dropdowns' `calcValues`: generated, so `glow/sync.py` `MODULE_CALC_VALUES = False` on
-  a branch and the sync applied by hand per form; the runner never applies those lines
-  (docs/RUNBOOK.md, "The names dictionary and the module values").
+- The module dropdowns' `calcValues` and the special-event options: generated, so `glow/sync.py`
+  `MODULE_CALC_VALUES = False` (or the type out of `SPECIAL_EVENTS`) on a branch and the sync
+  applied by hand per form, the runner paused; the runner applies those lines as it applies a
+  roster change, so a form rolled back by hand while `main` disagrees is rolled forward, and the
+  constants-off commit is merged only once every form is rolled back, as with question 18
+  (docs/RUNBOOK.md, "The names dictionary and the module values", "Special events").
 - Questions: never deleted by tooling; a wrongly created question is removed in the builder.
 - Apps Script: `git checkout <previously deployed commit> -- appsscript && npm run clasp:push` —
   never below the floors in docs/RUNBOOK.md, "Rolling back `appsscript/`" (`7a175c4`; `986a325`

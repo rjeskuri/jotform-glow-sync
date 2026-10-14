@@ -84,7 +84,9 @@ class AutoSyncFixture:
         later step (backup, apply, verify) answers ok and a clean form_status report -
         or one whose region check says `region_check`. status: what the form's status
         read answers (an exception: the read raised, after its retries); band: the
-        runner's --max-* overrides."""
+        runner's --max-* overrides. The run's `synced` lists each sync call's apply flag;
+        its `steps` every sync, backup, conditions snapshot and verify call in order
+        ("sync", "backup", "save conditions", "sync --apply", "verify" is a full apply)."""
         import tempfile
         import types
         from unittest import mock
@@ -100,19 +102,26 @@ class AutoSyncFixture:
             args = types.SimpleNamespace(apply=apply, out=out, max_creates=5, max_updates=20,
                                          trigger="test", run_url="", **band)
             run = auto_sync.Run(args)
-            run.synced = []
+            run.synced, run.steps = [], []
 
             def sync_(csv_path, region, form, apply, summary_path=None):
                 run.synced.append(apply)
+                run.steps.append("sync --apply" if apply else "sync")
                 if summary is not None and summary_path:
                     with open(summary_path, "w", encoding="utf-8") as f:
                         json.dump(summary, f)
                 return types.SimpleNamespace(returncode=0, stdout=text, stderr="")
 
+            def cmd_(argv, label):
+                run.steps.append(label)                  # "backup" and "verify" are the run's own labels
+                return types.SimpleNamespace(returncode=0, stdout=json.dumps([clean]), stderr="")
+
+            def save_(form):
+                run.steps.append("save conditions")
+
             with mock.patch.object(run, "sync", sync_), mock.patch.object(run, "read_status", status_), \
-                    mock.patch.object(run, "cmd", lambda *a, **k: types.SimpleNamespace(
-                        returncode=0, stdout=json.dumps([clean]), stderr="")), \
-                    mock.patch.object(run, "save_conditions", lambda form: None), \
+                    mock.patch.object(run, "cmd", cmd_), \
+                    mock.patch.object(run, "save_conditions", save_), \
                     mock.patch("builtins.print"):
                 run.region("Africa", os.path.join(out, "roster.csv"))
         return run
