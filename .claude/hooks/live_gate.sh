@@ -82,20 +82,132 @@ PATTERN+="|${SELF})"
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
 MATCH=$(printf '%s' "$FLAT" | grep -Eo "$PATTERN" | head -1) || true
 # gh api: a write on ANY path (since 2026-10-14; before, only under actions/ or to
-# /dispatches) - a method other than GET (-X, -XPOST, --method, --method=, in any case);
-# fields or an input file (-f, -F, --field, --raw-field, --input: they make it a POST)
-# with no explicit GET (with GET they are the query string); or graphql (a mutation can
-# hide in -F query=@file).
-GH_METHOD='(^|[[:space:]])(-X|--method)[[:space:]=]*["'\'']?'
+# /dispatches). The command is read as shell words (python3's shlex: quotes, $'...',
+# pflag shorthand bundles such as -iXDELETE or -iF name=x), each gh [-R x] api segment up
+# to the next ; | & ( ) < > or line break, and a quoted string that holds one (bash -c
+# "gh api ...") is read the same way. A write is a method other than GET (-X, -XPOST,
+# -X=POST, --method, --method=, in any case), fields or an input file (-f, -F, --field,
+# --raw-field, --input: they make it a POST) with no explicit GET (with GET they are the
+# query string), or graphql (a mutation can hide in -F query=@file). A method inside a
+# value is a value. Whatever cannot be read - an unbalanced quote, an escape in $'...', a
+# short flag gh api does not have, a flag without its value, no python3 - counts as a
+# write: the gate fails closed and asks.
+# (the Python holds no single quote and no backtick: chr(39) and chr(96) stand in, so the
+# heredoc reads the same under any shell's eye; read -d '' takes it whole, no $( ) parsing)
+IFS= read -r -d '' GH_API_PY <<'PY' || true
+import re, shlex, sys
+VALUE_LONG = {"cache", "field", "header", "hostname", "input", "jq", "method", "preview", "raw-field", "template"}
+FIELD_LONG = {"field", "raw-field", "input"}
+VALUE_SHORT, BOOL_SHORT, OPS = "FHqXpft", "ih", set("();<>|&")
+GH_WORD = re.compile(r"(^|[^\w./-])gh\s")
+Q, BT = chr(39), chr(96)
+
+def words_of(text):
+    text = text.replace("\\\n", " ").replace("\r\n", "\n").replace("\r", " ; ").replace("\n", " ; ")
+    if "$" + Q in text:
+        if re.search(r"\$" + Q + "[^" + Q + r"]*\\", text):
+            raise ValueError("an escape in ANSI-C quoting")
+        text = text.replace("$" + Q, Q)
+    lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    return list(lex)
+
+def is_op(w):
+    return bool(w) and all(c in OPS for c in w)
+
+def is_gh(w):
+    w = w.lstrip(BT)
+    return w == "gh" or w.endswith("/gh")
+
+def segment(words, j):
+    """From the word after api to the next operator: (end, verdict)."""
+    n, method, fields, graphql, positional = len(words), [], False, False, False
+    while j < n and not is_op(words[j]):
+        w = words[j]
+        if positional or w == "-" or not w.startswith("-"):
+            if w == "graphql" or w.endswith("/graphql"):
+                graphql = True
+        elif w == "--":
+            positional = True
+        elif w.startswith("--"):
+            name, eq, val = w[2:].partition("=")
+            if name in VALUE_LONG and not eq:
+                j += 1
+                if j >= n or is_op(words[j]):
+                    return j, "write:with --%s and no value (a write)" % name
+                val = words[j]
+            if name == "method":
+                method.append(val)
+            elif name in FIELD_LONG:
+                fields = True
+        else:
+            k = 1
+            while k < len(w):
+                c = w[k]
+                if c in BOOL_SHORT:
+                    k += 1
+                    continue
+                if c not in VALUE_SHORT:
+                    return j, "write:with a short flag gh api does not have (a write)"
+                rest = w[k + 1:]
+                if rest.startswith("="):
+                    val = rest[1:]
+                elif rest:
+                    val = rest
+                else:
+                    j += 1
+                    if j >= n or is_op(words[j]):
+                        return j, "write:with -%s and no value (a write)" % c
+                    val = words[j]
+                if c == "X":
+                    method.append(val)
+                elif c in "Ff":
+                    fields = True
+                break
+        j += 1
+    if graphql:
+        return j, "write:graphql (a mutation writes)"
+    for m in method:
+        if m.upper() != "GET":
+            return j, "write:with the method %s" % (m if re.fullmatch(r"[A-Za-z]+", m) else "spelt unreadably")
+    if fields and not method:
+        return j, "write:with fields or --input and no GET method (a POST)"
+    return j, "read"
+
+def scan(text, depth):
+    words = words_of(text)
+    i, n = 0, len(words)
+    while i < n:
+        w = words[i]
+        if is_gh(w):
+            j = i + 1
+            while j < n and (words[j] in ("-R", "--repo") or words[j].startswith("--repo=") or (words[j].startswith("-R") and len(words[j]) > 2)):
+                j += 2 if words[j] in ("-R", "--repo") else 1
+            if j < n and words[j] == "api":
+                j, verdict = segment(words, j + 1)
+                if verdict != "read":
+                    return verdict
+                i = j
+                continue
+        elif depth < 3 and re.search(r"\s", w) and GH_WORD.search(w):
+            verdict = scan(w, depth + 1)
+            if verdict != "read":
+                return verdict
+        i += 1
+    return "read"
+
+try:
+    print(scan(sys.stdin.read(), 0))
+except Exception as e:
+    print("write:that could not be read as shell words (%s: a write)" % e.__class__.__name__)
+PY
 if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]"; then
-  if printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]+graphql([^[:alnum:]_-]|$)"; then
-    MATCH="gh api graphql (a mutation writes)"
-  elif printf '%s' "$FLAT" | grep -Eiq "${GH_METHOD}(POST|PUT|PATCH|DELETE)"; then
-    MATCH="gh api with a POST, PUT, PATCH or DELETE method"
-  elif printf '%s' "$FLAT" | grep -Eq '(^|[[:space:]])(-[fF]|--(field|raw-field|input)([[:space:]=]|$))' \
-      && ! printf '%s' "$FLAT" | grep -Eiq "${GH_METHOD}GET([^[:alnum:]_]|$)"; then
-    MATCH="gh api with fields or --input and no GET method (a POST)"
-  fi
+  VERDICT=$(printf '%s' "$CMD" | python3 -c "$GH_API_PY") || VERDICT=
+  case "$VERDICT" in
+    read) ;;
+    write:*) MATCH="gh api ${VERDICT#write:}" ;;
+    *) MATCH="gh api that could not be read as shell words (no python3: a write)" ;;
+  esac
 fi
 # sf api request: any GraphQL call (a mutation writes), and a REST call that writes - a method
 # other than GET (the CLI offers GET POST PUT PATCH HEAD DELETE OPTIONS TRACE), a body (-b,

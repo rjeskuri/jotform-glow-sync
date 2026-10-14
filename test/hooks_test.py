@@ -74,10 +74,7 @@ class Hooks(unittest.TestCase):
         env["CLAUDE_PROJECT_DIR"] = project or self.tmp.name
         if live_ok is not None:
             env["GLOW_LIVE_OK"] = live_ok
-        data = {"hook_event_name": "PreToolUse", "session_id": uuid.uuid4().hex[:12], "cwd": env["CLAUDE_PROJECT_DIR"],
-                "tool_name": tool, "tool_input": tool_input}
-        if mode is not None:
-            data["permission_mode"] = mode
+        data = self.pretooluse(tool, tool_input, env["CLAUDE_PROJECT_DIR"], mode)
         if agent is True:
             data["agent_id"] = "agent-" + uuid.uuid4().hex
             data["agent_type"] = agent_type or "harness:coder"
@@ -91,8 +88,24 @@ class Hooks(unittest.TestCase):
                               cwd=env["CLAUDE_PROJECT_DIR"] if os.path.isdir(env["CLAUDE_PROJECT_DIR"]) else None)
         return Run(done.returncode, done.stdout, done.stderr)
 
+    @staticmethod
+    def pretooluse(tool, tool_input, cwd, mode):
+        """The input as Claude Code sends it to a PreToolUse hook, for a fictional session:
+        session_id, transcript_path, cwd, hook_event_name, tool_name, tool_input, tool_use_id and
+        permission_mode (left out when `mode` is None)."""
+        session = str(uuid.uuid4())
+        data = {"session_id": session,
+                "transcript_path": os.path.join(os.path.expanduser("~"), ".claude", "projects",
+                                                "-Users-someone-jotform-glow-sync", session + ".jsonl"),
+                "cwd": cwd, "hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": dict(tool_input),
+                "tool_use_id": "toolu_01" + uuid.uuid4().hex[:22].upper()}
+        if mode is not None:
+            data["permission_mode"] = mode
+        return data
+
     def gate(self, command, live_ok=None, mode="default", **kw):
-        run = self.run_hook("live_gate.sh", {"command": command}, live_ok, mode=mode, **kw)
+        run = self.run_hook("live_gate.sh", {"command": command, "description": "Run one command for the test"},
+                            live_ok, mode=mode, **kw)
         # the one answer no input may ever get: Claude Code would skip Ryan's prompt
         self.assertNotEqual(self.verdict(run), "allow", f"{command!r} (mode {mode!r}, {kw}, "
                                                         f"GLOW_LIVE_OK {live_ok}) was ALLOWED: {run.out}")
@@ -371,6 +384,24 @@ class Hooks(unittest.TestCase):
         "gh api repos/o/r/issues -f title=GETTING_STARTED",
         "gh api repos/o/r/issues/1/comments -f body=target",
         "gh api --method PUT repos/o/r/pulls/1/merge -f merge_method=GET",
+        # the method or field flag in a combined shorthand (pflag: -iX DELETE is -i -X DELETE,
+        # -iXPOST is -i -X POST, -if body=x is -i -f body=x) or quoted the shell's other ways
+        # (review of PR #41)
+        "gh api -iX DELETE repos/o/r/labels/x",
+        "gh api -iXPOST repos/o/r/issues -f title=x",
+        "gh api -iXDELETE repos/o/r/labels/x",
+        "gh api -iF name=x repos/o/r/labels",
+        "gh api -if body=x repos/o/r/issues/1/comments",
+        "gh api -X$'POST' repos/o/r/issues -f title=x",
+        "gh api --method=$'DELETE' repos/o/r/labels/x",
+        "gh api -X \"PUT\" repos/o/r/pulls/1/merge",
+        "gh api -i --method DELETE repos/o/r/labels/x",
+        # a GET inside a field's value is a value, not the method: the fields make it a POST
+        "gh api repos/o/r/issues/36/comments -f body='use curl -X GET first'",
+        "gh api repos/o/r/issues -f body=\"--method GET\"",
+        "gh api repos/o/r/issues -f title='--method=get'",
+        "gh api repos/o/r/issues -f note='-X GET' -f title=x",
+        "gh api repos/o/r/issues/1/comments --raw-field body='gh api -X GET repos/o/r/issues'",
     ]
     GH_API_READS = [
         "gh api repos/o/r/pulls/1/reviews",                              # the harness loop's reads
@@ -392,6 +423,12 @@ class Hooks(unittest.TestCase):
         "gh api --method=get repos/o/r/issues -f state=open",
         "gh api repos/o/r/issues -f state=open -X GET",
         "gh api repos/o/r/issues -F per_page=100 --method GET",
+        # a real GET in a combined shorthand or quoted; a method inside a value is a value
+        "gh api -iX GET repos/o/r/issues -f per_page=100",
+        "gh api -iXGET repos/o/r/issues -f per_page=100",
+        "gh api -X $'GET' repos/o/r/issues -f per_page=100",
+        "gh api -X GET repos/o/r/issues -f q='see -X POST'",
+        "gh api --method GET search/issues -f q='--method DELETE'",
     ]
 
     def test_every_live_command_asks_ryan_and_is_logged(self):
@@ -476,13 +513,16 @@ class Hooks(unittest.TestCase):
         for mode in ("default", "bypassPermissions", None):
             self.assert_silent(self.GH_API_READS, mode=mode)
         self.assert_silent(self.GH_API_READS, agent=True)
-        self.assertEqual(self.logged(), {})
+        with self.subTest("nothing logged for the reads"):
+            self.assertEqual(self.logged(), {})
+        before = self.logged()
         for command, run in self.runs(self.GH_API_WRITES):
             with self.subTest(command=command):
                 self.assertEqual(self.verdict(run), "ask", self.show(run))
                 self.check_reason(command, self.reason(run))
                 self.assertIn("gh api", self.reason(run))               # the prompt says what it is
-        self.assertEqual(self.logged(), {"ASKED": len(self.GH_API_WRITES)})
+        with self.subTest("one ASKED per write"):
+            self.assertEqual(self.logged()["ASKED"] - before["ASKED"], len(self.GH_API_WRITES))
         self.assert_denies(self.GH_API_WRITES, mode="dontAsk")
         self.assert_denies(self.GH_API_WRITES, agent=True)
 
@@ -542,6 +582,29 @@ class Hooks(unittest.TestCase):
                     self.assertNotIn("GLOW_LIVE_OK=1", run.err)         # no longer a way through
         self.assertEqual(sum(self.logged().values()), len(cases))
         self.assertEqual(self.logged()["ASKED"] + self.refused(), len(cases))
+
+    def test_the_real_pretooluse_input_is_read_as_claude_code_sends_it(self):
+        # the whole input of a main-session Bash call, spelt out: it asks; with the subagent
+        # fields on top it denies; the description is not the command
+        live = "python3 sync_attendance_form.py roster.csv --roster --region Africa --form 1 --apply"
+        session = "5b3f2c1e-7d9a-4e8b-9c1d-2a3b4c5d6e7f"
+        main = {"session_id": session,
+                "transcript_path": os.path.expanduser(f"~/.claude/projects/-Users-someone-jotform-glow-sync/{session}.jsonl"),
+                "cwd": self.tmp.name, "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                "tool_input": {"command": live, "description": "Apply the roster to the Africa form"},
+                "tool_use_id": "toolu_01Xy7Qk2Lm9Np4Rs6Tv8Wz1B", "permission_mode": "default"}
+        run = self.run_hook("live_gate.sh", {}, raw=json.dumps(main))
+        self.assertEqual(self.verdict(run), "ask", self.show(run))
+        self.check_reason(live, self.reason(run))
+        sub = dict(main, agent_id="agent-9f8e7d6c5b4a", agent_type="harness:coder")
+        run = self.run_hook("live_gate.sh", {}, raw=json.dumps(sub))
+        self.assertEqual(self.verdict(run), "deny", self.show(run))
+        read = dict(main, tool_input={"command": "grep -n -- '--apply' docs/RUNBOOK.md",
+                                      "description": "Find --apply in the runbook"})
+        run = self.run_hook("live_gate.sh", {}, raw=json.dumps(read))
+        self.assertEqual(self.verdict(run), "silent", self.show(run))
+        self.assertEqual(self.logged()["ASKED"], 1)
+        self.assertEqual(self.refused(), 1)
 
     def test_an_input_the_hook_cannot_read_never_lets_a_command_through(self):
         # no command: nothing to judge, so no decision (the ticket's step 1); stdin that is not the
