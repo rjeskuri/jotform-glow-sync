@@ -140,6 +140,20 @@ class RestoreRefusals(unittest.TestCase):
             self.folder_exists = os.path.isdir(path)
             return code, out.getvalue(), calls, sorted(os.listdir(path)) if self.folder_exists else []
 
+    def properties_without_conditions(self, n):
+        """A raw GET /properties of form n as backup.snapshot() stores it, with its conditions
+        key removed (a form with no rules): built at run time from the fixture, keys and values
+        varying with n, so no fixed set of dicts matches it."""
+        props = {"id": str(240000000000000 + 7919 * n), "title": f"Demo Attendance {n}",
+                 "status": ("ENABLED", "DISABLED")[n % 2], "height": str(500 + 13 * n),
+                 "formWidth": str(600 + n), "styles": ("nova", "tile")[n % 2],
+                 "emails": [{"type": "notification", "to": f"demo{n}@example.org"}][:n % 2 + 1],
+                 "questionCount": str(len(self.qs) + n),
+                 f"extra_{n}": {"nested": {"level": n, "items": list(range(n))}},
+                 "conditions": copy.deepcopy(self.wire)}
+        props.pop("conditions")
+        return props
+
     def test_control_a_snapshot_with_conditions_is_restored(self):
         code, out, calls, files = self.run_restore({"conditions": self.wire}, "--apply")
         self.assertEqual(code, 0)
@@ -172,7 +186,11 @@ class RestoreRefusals(unittest.TestCase):
                 self.assertFalse(self.folder_exists)     # the refusal did not create the folder either
 
     def test_a_snapshot_that_holds_no_conditions_is_refused_before_anything_is_read_or_written(self):
-        for empty in ({"conditions": []}, [], {"conditions": None}):
+        # {} and a properties dict without a conditions key: backup.snapshot() stores the raw
+        # GET /properties, which has no conditions key on a form with no rules (#38)
+        for empty in ({"conditions": []}, [], {"conditions": None}, {},
+                      {"title": "Demo Attendance", "status": "ENABLED"},
+                      *(self.properties_without_conditions(n) for n in (1, 2, 5, 11))):
             for extra in ((), ("--apply",), ("--apply", "--force")):
                 with self.subTest(snapshot=empty, extra=extra):
                     code, out, calls, files = self.run_restore(empty, *extra)
@@ -186,6 +204,18 @@ class RestoreRefusals(unittest.TestCase):
                                                    name="conditions-x.json")
         self.assertTrue(str(code).endswith("conditions-x.json holds no conditions - refusing to wipe the form"))
         self.assertEqual((out, calls), ("", []))
+
+    def test_a_from_snapshot_without_a_conditions_key_is_refused(self):
+        # #38: the --from path is named in the refusal, and nothing is read or written
+        for extra in (("--from", "properties-y.json"), ("--apply", "--from", "properties-y.json"),
+                      ("--apply", "--force", "--from", "properties-y.json")):
+            for snapshot in ({}, self.properties_without_conditions(3), self.properties_without_conditions(8)):
+                with self.subTest(snapshot=snapshot.get("title"), extra=extra):
+                    code, out, calls, files = self.run_restore(snapshot, *extra, name="properties-y.json")
+                    self.assertEqual(code, f"{os.path.join(self.folder, 'properties-y.json')} holds no "
+                                           "conditions - refusing to wipe the form")
+                    self.assertEqual((out, calls), ("", []))
+                    self.assertEqual(files, ["properties-y.json"])
 
 
 class MinActiveFloor(unittest.TestCase):
