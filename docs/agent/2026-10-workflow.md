@@ -2,7 +2,7 @@
 
 Written 2026-10-14 on `t/48-workflow-improvements-to-make`, read-only: the board (#1-#48, PRs
 #2-#44), the session transcripts of 2026-10-12 to 2026-10-14 (cited by the first 8 characters of
-their id, which is the `.jsonl` file name under `~/.claude/projects/-Users-ryaneskuri-jotform-glow-sync*/`),
+their id, which is the `.jsonl` file name under `~/.claude/projects/<this repo>*/`),
 this repository's `.claude/`, and the harness plugin's source (`~/portfolio_projects/harness`,
 plugin 0.2.0; GitHub `rjeskuri/Harness`, its issues to #76). Nothing was filed, applied or
 changed outside this file.
