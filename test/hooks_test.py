@@ -178,7 +178,7 @@ class Hooks(unittest.TestCase):
         self.assertIsNotNone(matched, f"no matched \"...\" in the reason: {reason!r}")
         # the matched text is the command's own, except for the gh/sf api writes, whose match
         # is a description - and only when the command is one
-        api_cli = re.search(r"(^|[^\w.-])(gh|sf|sfdx)\s[^;&|]*\bapi\b", flat)
+        api_cli = re.search(r"""(^|[^\w.-])["']?(gh|sf|sfdx)["']?\s[^;&|]*\bapi\b""", flat)
         self.assertTrue(matched.group(1) in flat or (api_cli and matched.group(1).startswith(("gh api", "sf api"))),
                         f"the matched text {matched.group(1)!r} is not in the command {flat!r}")
         if command in self.TRIGGERS:
@@ -402,6 +402,21 @@ class Hooks(unittest.TestCase):
         "gh api repos/o/r/issues -f title='--method=get'",
         "gh api repos/o/r/issues -f note='-X GET' -f title=x",
         "gh api repos/o/r/issues/1/comments --raw-field body='gh api -X GET repos/o/r/issues'",
+        # a # starts a comment only at the start of a word, and only to the end of its line
+        # (review of PR #41, round 2: the shell-word reader dropped the rest of the command)
+        "# add the label\ngh api repos/o/r/labels -f name=x",
+        "gh api repos/o/r/issues/1 # read the state\ngh api -X DELETE repos/o/r/issues/1/labels/x",
+        "gh api repos/o/r/issues#x -XPOST",
+        "gh api -X GET repos/o/r/issues -f q=bug#12; gh api -X DELETE repos/o/r/labels/x",
+        "gh api repos/o/r/pulls/1 --jq .state # then\ngh api -XPUT repos/o/r/pulls/1/merge",
+        "gh api repos/o/r/issues -f body='#1 done'",                     # a quoted # is data
+        "gh api repos/o/r/issues -f title=\"#12 again\"",
+        # gh or api quoted, or split over a continued line, is still gh api
+        "gh \"api\" -X POST repos/o/r/issues",
+        "\"gh\" api -X POST repos/o/r/issues",
+        "gh \\\n  api -X POST repos/o/r/issues",
+        "gh 'api' -X POST repos/o/r/issues",
+        "'gh' api -XPOST repos/o/r/issues",
     ]
     GH_API_READS = [
         "gh api repos/o/r/pulls/1/reviews",                              # the harness loop's reads
@@ -429,6 +444,11 @@ class Hooks(unittest.TestCase):
         "gh api -X $'GET' repos/o/r/issues -f per_page=100",
         "gh api -X GET repos/o/r/issues -f q='see -X POST'",
         "gh api --method GET search/issues -f q='--method DELETE'",
+        # a comment at the start of a word runs to the end of its line, and no further
+        "gh api repos/o/r/pulls/1  # check",
+        "gh api repos/o/r/pulls/1 # then -X DELETE it",
+        "# -X DELETE later\ngh api repos/o/r/pulls/1",
+        "gh api repos/o/r/pulls/1 # check\ngh api repos/o/r/pulls/2",
     ]
 
     def test_every_live_command_asks_ryan_and_is_logged(self):

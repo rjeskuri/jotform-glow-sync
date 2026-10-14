@@ -82,16 +82,19 @@ PATTERN+="|${SELF})"
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
 MATCH=$(printf '%s' "$FLAT" | grep -Eo "$PATTERN" | head -1) || true
 # gh api: a write on ANY path (since 2026-10-14; before, only under actions/ or to
-# /dispatches). The command is read as shell words (python3's shlex: quotes, $'...',
-# pflag shorthand bundles such as -iXDELETE or -iF name=x), each gh [-R x] api segment up
-# to the next ; | & ( ) < > or line break, and a quoted string that holds one (bash -c
-# "gh api ...") is read the same way. A write is a method other than GET (-X, -XPOST,
-# -X=POST, --method, --method=, in any case), fields or an input file (-f, -F, --field,
-# --raw-field, --input: they make it a POST) with no explicit GET (with GET they are the
-# query string), or graphql (a mutation can hide in -F query=@file). A method inside a
-# value is a value. Whatever cannot be read - an unbalanced quote, an escape in $'...', a
-# short flag gh api does not have, a flag without its value, no python3 - counts as a
-# write: the gate fails closed and asks.
+# /dispatches). Any command with a gh word (quoted, escaped or by full path too) and the
+# text api is read as shell words by python3: comments go first, as bash reads them (a #
+# at the start of a word, to the end of its line; quoted or escaped it is data; a
+# backslash-newline does not continue a comment), then backslash-newline joins, $'...'
+# and shlex (quotes, pflag shorthand bundles such as -iXDELETE or -iF name=x). Each
+# gh [-R x] api segment up to the next ; | & ( ) < > or line break is judged, and a quoted
+# string that holds one (bash -c "gh api ...", eval) is read the same way. A write is a
+# method other than GET (-X, -XPOST, -X=POST, --method, --method=, in any case), fields
+# or an input file (-f, -F, --field, --raw-field, --input: they make it a POST) with no
+# explicit GET (with GET they are the query string), or graphql (a mutation can hide in
+# -F query=@file). A method inside a value is a value. Whatever cannot be read - an
+# unbalanced quote, an escape in $'...', a short flag gh api does not have, a flag without
+# its value, no python3 - counts as a write: the gate fails closed and asks.
 # (the Python holds no single quote and no backtick: chr(39) and chr(96) stand in, so the
 # heredoc reads the same under any shell's eye; read -d '' takes it whole, no $( ) parsing)
 IFS= read -r -d '' GH_API_PY <<'PY' || true
@@ -100,15 +103,55 @@ VALUE_LONG = {"cache", "field", "header", "hostname", "input", "jq", "method", "
 FIELD_LONG = {"field", "raw-field", "input"}
 VALUE_SHORT, BOOL_SHORT, OPS = "FHqXpft", "ih", set("();<>|&")
 GH_WORD = re.compile(r"(^|[^\w./-])gh\s")
-Q, BT = chr(39), chr(96)
+Q, DQ, BT = chr(39), chr(34), chr(96)
+
+def strip_comments(text):
+    """As bash reads them: a # at the start of a word opens a comment to the end of its
+    line; inside quotes or after a backslash it is data. Quotes are tracked here, so a
+    comment never starts inside one and an unbalanced quote is refused."""
+    out, i, n, q, start = [], 0, len(text), "", True
+    while i < n:
+        c = text[i]
+        if q == Q:
+            if c == Q:
+                q = ""
+        elif q == DQ:
+            if c == "\\" and i + 1 < n:
+                out.append(c)
+                i += 1
+                c = text[i]
+            elif c == DQ:
+                q = ""
+        elif c == "\\" and i + 1 < n:
+            out.append(c)
+            i += 1
+            c = text[i]
+            start = False
+        elif c == "#" and start:
+            j = text.find("\n", i)
+            if j < 0:
+                break
+            i = j
+            continue
+        elif c in (Q, DQ):
+            q, start = c, False
+        else:
+            start = c in " \t\n();<>|&"
+        out.append(c)
+        i += 1
+    if q:
+        raise ValueError("an unbalanced quote")
+    return "".join(out)
 
 def words_of(text):
-    text = text.replace("\\\n", " ").replace("\r\n", "\n").replace("\r", " ; ").replace("\n", " ; ")
+    text = strip_comments(text.replace("\r\n", "\n").replace("\r", "\n"))
+    text = text.replace("\\\n", "").replace("\n", " ; ")
     if "$" + Q in text:
         if re.search(r"\$" + Q + "[^" + Q + r"]*\\", text):
             raise ValueError("an escape in ANSI-C quoting")
         text = text.replace("$" + Q, Q)
     lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lex.commenters = ""
     lex.whitespace_split = True
     return list(lex)
 
@@ -201,7 +244,10 @@ try:
 except Exception as e:
     print("write:that could not be read as shell words (%s: a write)" % e.__class__.__name__)
 PY
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]"; then
+# a gh word anywhere - "gh", 'gh', \gh, /usr/local/bin/gh, gh continued onto the next line -
+# and the text api: the Python decides whether api is the subcommand
+if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' \
+    && printf '%s' "$FLAT" | grep -q api; then
   VERDICT=$(printf '%s' "$CMD" | python3 -c "$GH_API_PY") || VERDICT=
   case "$VERDICT" in
     read) ;;
