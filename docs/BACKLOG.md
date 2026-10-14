@@ -235,6 +235,7 @@ Status: blocked-on-ryan
 Status: open
 
 - Close the Python ↔ Apps Script parity gaps (partner-less rows, `•`/`*` bullets, invisible characters in partner/club cells, region case) — `docs/intent/2026-09-01-parity-partnerless-rows.md`
+- 2026-10-14: the region gap is closed (ticket #7): `tools/form_status.py load_roster` files each club under `glow.forms.canonical_region` of its region cell, the same case- and spacing-blind comparison as `read_roster_csv`, so the audit and the runner's verify compare a form against the clubs the sync puts on it; a region no form has (or a blank one) stays as typed and the report's `! Roster:` line counts it, counts and region texts only. The other three gaps stay open (CLAUDE.md rule 10).
 
 ### 30. A daily drift check; agent evals in CI
 

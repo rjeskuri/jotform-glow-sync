@@ -289,6 +289,26 @@ class GlowForms(unittest.TestCase):
                          {fid: None if name == "master" else name for name, fid in forms.DEFUNCT.items()})
         self.assertEqual(set(backup_forms.FORMS), set(forms.LIVE) | set(forms.DEFUNCT.values()))
 
+    def test_canonical_region_is_the_syncs_comparison(self):
+        # read_roster_csv takes a row for a region when " ".join(cell.split()).lower() equals the
+        # region's .lower(): every such spelling is that REGIONS entry, anything else its own
+        # whitespace-collapsed text
+        from glow import forms
+        self.assertEqual(set(forms.REGIONS), {"Africa", "Asia", "Latin America", "U.S"})
+        for region in forms.REGIONS:
+            variants = {region, region.upper(), region.lower(), f"  {region}  ", f"\t{region.lower()}\n",
+                        region.replace(" ", "  "), " " + region.upper().replace(" ", "   ") + " ",
+                        region.swapcase()}
+            for v in variants:
+                self.assertEqual(forms.canonical_region(v), region, repr(v))
+        self.assertEqual(forms.canonical_region(" latin  AMERICA "), "Latin America")
+        self.assertEqual(forms.canonical_region("u.s"), "U.S")
+        others = {"U.S.": "U.S.", "USA": "USA", "Afrika": "Afrika", "": "",
+                  "  Afrika  ": "Afrika", "u.s.": "u.s.", "Latin  Americas": "Latin Americas",
+                  " south   ASIA ": "south ASIA", "LatinAmerica": "LatinAmerica", "   ": ""}
+        for text, want in others.items():
+            self.assertEqual(forms.canonical_region(text), want, repr(text))
+
 
 class GlowCli(unittest.TestCase):
     """glow/cli.py: the API key every tool reads and the forms a --form selects."""

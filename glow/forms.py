@@ -5,6 +5,7 @@ side never needed them; its unused copies were removed 2026-10-09).
 The regional forms went live 2026-09-01 (cloned from the template 2026-08-27);
 the defunct forms are the pre-launch ones, kept as archives.
 """
+from glow.text import key
 
 TEMPLATE = "262352490535154"
 TEMPLATE_TITLE = "Attendance Form (Template)"
@@ -50,3 +51,11 @@ def region_of(form_id):
     """The region a live form serves, or None (template / unknown / defunct)."""
     region = LIVE.get(form_id)
     return region if region in REGIONALS else None
+
+
+def canonical_region(text):
+    """A region cell as the sync reads it (glow/sync.py read_roster_csv compares it
+    whitespace-collapsed and lower-cased): the REGIONS entry it matches, in that entry's
+    spelling, else the text with its whitespace collapsed ("" stays "")."""
+    k = key(text)
+    return next((r for r in REGIONS if key(r) == k), " ".join(str(text or "").split()))

@@ -203,8 +203,6 @@ reads modules.
   (`newClubHoldReasons_`) included, compares the cell exactly. The sheet's
   own code only writes `active` / `inactive`; a status typed by hand in
   another case reaches the forms and reads as not active at intake.
-- `read_roster_csv` matches `--region` case-insensitively; `form_status.py`
-  matches the region string exactly.
 - The Partners tab's `jotform` marker: Python decides from it what the forms
   carry (`read_partners_csv`, compared with `glow.text.key`); Apps Script reads
   it only for the mentor e-mails' wording (`key_`, which drops invisible
