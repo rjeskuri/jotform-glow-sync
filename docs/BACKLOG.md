@@ -538,12 +538,6 @@ Status: open
 
 - The Apex, the reports and dashboard with their generator (`gen.py`), and the permission sets exist only in gitignored folders under `data/` on one Mac (`data/sf_dashboard_2026-10-02/`, RUNBOOK "Attendance dashboard in Salesforce"). Move the metadata into git as a `salesforce/` sfdx project - metadata only, no record data and no names - and deploy check-only from there
 
-### 83. Scoped live-gate approval
-
-Status: open
-
-- `GLOW_LIVE_OK=1` opens the live gate for every write of a whole Claude Code session; it was open on 10 days so far (`.claude/live_gate.log`). Proposed: `GLOW_LIVE_OK=<tool|form|all>` with an expiry, so an approval covers one tool or one form for a stated time. The hooks are protected files: Ryan's change
-
 ### 84. Retire `tools/fix_module_values.py`
 
 Status: open
@@ -750,6 +744,13 @@ Status: done 2026-10-07
 - **The attendance processor's name match** (from `docs/plans/2026-10-07-sf-duplicate-girls.md`, "Not in this plan"): it compares a ticked name with the club's contacts exactly (capitals ignored), so any spacing difference makes a new contact, and it reads the club's contacts without `ORDER BY`, so with two copies of a girl the row goes to whichever comes first.
 - Fix: `normalizeSpace()` on both sides of the comparison and `ORDER BY CreatedDate` on the contacts. Vendor code (`AttendanceBatchProcessor`): its own plan, a check-only deploy, Ryan's go
 - **Done 2026-10-07** ([plan](plans/2026-10-07-processor-name-spacing.md)): names cleaned when parsed (format characters removed, any whitespace run one space), both sides compared clean, new girls stored clean, the club's contacts read oldest first; validated 33/33, deployed 04:38 UTC, proven rolled back
+
+### 83. Scoped live-gate approval
+
+Status: done 2026-10-14
+
+- `GLOW_LIVE_OK=1` opens the live gate for every write of a whole Claude Code session; it was open on 10 days so far (`.claude/live_gate.log`). Proposed: `GLOW_LIVE_OK=<tool|form|all>` with an expiry, so an approval covers one tool or one form for a stated time. The hooks are protected files: Ryan's change
+- 2026-10-14: done another way: a per-command approval prompt in the session, Ryan's answer the go; `GLOW_LIVE_OK` no longer opens the gate (ticket #36; DECISIONS 2026-10-14, "The live gate asks Ryan in the session; GLOW_LIVE_OK no longer opens it"; RUNBOOK "Live gate (Claude Code)")
 
 ## Explicitly not planned
 

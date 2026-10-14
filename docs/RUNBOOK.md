@@ -2070,14 +2070,14 @@ wording; forms built before 2026-09-28 get it once, from the menu
 - **When:** any change under `appsscript/`.
 - **Status:** the 2026-10-09 cleanup's changes (the Club Roster Form handlers' write order, the rebuild's YES/NO, the dropdown update under the lock, the consolidations) are in the repository, not deployed: they wait for Ryan's push. No new Google service, so no re-authorization is expected ([Result](plans/2026-10-09-repo-cleanup.md#result)).
 - **Dry run:** `make gs` (and `make check`).
-- **Apply:** `nvm use 18`, then `npm run clasp:push` at a quiet moment: Ryan, or Claude with the gate open. Ryan can run the push with Claude through the user-only `/deploy-appsscript` skill.
+- **Apply:** `nvm use 18`, then `npm run clasp:push` at a quiet moment: Ryan, or Claude on his yes to the gate's prompt. Ryan can run the push with Claude through the user-only `/deploy-appsscript` skill.
 - **Verify:** a new Google service: authorize at once, then "Process any missed form responses" and read its preview.
 - **Rollback:** a push of the previously deployed `appsscript/` ("Rolling back `appsscript/`", below).
 
 ```bash
 make gs                 # parse, pinned services, calls that resolve (below)
 nvm use 18              # clasp 2.4.2: the npm scripts refuse any other Node
-npm run clasp:push      # gated: GLOW_LIVE_OK=1 for Claude, or run it yourself
+npm run clasp:push      # gated: Claude asks, your answer is the go; or run it yourself
 ```
 
 `make gs` (`scripts/check_gs.js`) checks offline what would otherwise fail only live,
@@ -2806,41 +2806,71 @@ Three hooks in `.claude/hooks/`, wired in `.claude/settings.json`, guard what
 Claude runs and writes. The hooks are the source of truth (their header
 comments list every case); this is the summary.
 
-**`live_gate.sh`** (every Bash command) blocks a command that can change a live
-system unless `GLOW_LIVE_OK=1` was exported in Ryan's shell **before** Claude
-Code was started:
+**`live_gate.sh`** (every Bash command) puts a command that can change a live
+system to Ryan as an approval prompt in the session (a PreToolUse `ask`); his
+answer is the go. Nothing pre-approves one and the hook never answers `allow`;
+since 2026-10-14 `GLOW_LIVE_OK` no longer opens the gate (DECISIONS 2026-10-14).
+Live:
 
 - the tools' write flags: `--apply`, `--prune`, `--rehearse` (`sf_dupes.py`'s
   production run, rolled back), `clasp push` / `clasp:push`, and
   `sheets_client.py import` (a subcommand removed 2026-10-09, still in the pattern);
 - the raw APIs the tools wrap: `api.jotform.com`, the Sheets writes
-  (`values().update|append|clear`, `batchUpdate`, `apply_changes=True`),
-  GitHub repository dispatches;
+  (`values().update|append|clear`, `batchUpdate`, `apply_changes=True`);
 - Salesforce through `sf` or `sfdx`: a deploy (`project deploy
   start|quick|validate`, a check-only one too; `deploy metadata`), `project
   delete source`, `data create|update|delete|upsert|import`, `apex run`, the
-  `force:` apex, source, mdapi and data commands, and the REST API itself
-  (`.salesforce.com/services/`);
+  `force:` apex, source, mdapi and data commands, the REST API itself
+  (`.salesforce.com/services/`), `sf api request graphql`, and `sf api request
+  rest` with a method other than GET, a body (`-b`) or a request file (`-f`);
 - the automatic sync's switches on GitHub: `gh variable|secret
   set|delete|remove`, `gh workflow enable|disable`, `gh workflow run` that
-  applies (`apply` true, inputs from a file or as JSON), `gh run rerun`, and a
-  `gh api` write under `actions/` or to `/dispatches`;
-- self-approval, always, even with the variable set: a command that sets
-  `GLOW_LIVE_OK`, or one that writes a file the next launch takes its
-  environment from (`~/.zshrc` and the other shell startup files, `.envrc`,
-  `.env`: a redirect, `tee`, `sed -i`, `perl -i`), or `launchctl setenv`.
+  applies (`apply` true, inputs from a file or as JSON), `gh run rerun` (a
+  `-R`/`--repo` may stand between the words);
+- `gh api` writes and reads alike where the sync's switches live: a command with
+  a `gh` word, the word `api`, and `actions/`, `dispatches` or `graphql`
+  anywhere - the Actions API (variables, secrets, workflows, runs), a repository
+  dispatch, GraphQL (a mutation can hide in a query file) - whatever the method;
+  so is `api.github.com/…` on those paths (curl, a script). Every other `gh api`
+  call (issues, comments, labels, the harness's reads) is ungated.
 
-A read-only command that only mentions a flag passes: its first word is `grep`,
-`rg` (not `--pre`), `cat`, `head`, `tail`, `wc`, `ls`, or `git
-log|show|diff|grep|blame|status`, and it has no `;`, `&`, `|`, backtick, `$(`,
-`<(`, `>` or line break. Every decision on a live command is logged to
-`.claude/live_gate.log`. The gate reads the command's text: a write through
-another program, a flag assembled at run time, and the session's connector
-tools (Salesforce through claude.ai) are not seen - it guards against mistakes,
-not intent. To let Claude write to a live system: read the dry run, check the
-backup exists, then either run the command yourself or restart Claude Code with
-the variable exported. Running commands yourself in a terminal is never
-affected.
+The patterns are matched as text, never parsed: in any case, on the command on
+one line, with each backslash-newline removed, and with quotes and backslashes
+removed (`gh 'workflow' run`, `--ap""ply` match). Text that only names a live
+command (a commit message, a PR body, a heredoc) asks too. A read-only command
+that only mentions a flag passes: its first word is `grep`, `rg` (not `--pre`),
+`cat`, `head`, `tail`, `wc`, `ls`, or `git log|show|diff|grep|blame|status`,
+and it has no `;`, `&`, `|`, backtick, `$(`, `<(`, `>` or line break.
+
+Refused outright (a `deny`), whatever the mode:
+
+- a self-approval: a command that sets `GLOW_LIVE_OK`, or writes a file the
+  next launch takes its environment from (`~/.zshrc` and the other shell
+  startup files, `.envrc`, `.env`: a redirect, `tee`, `sed -i`, `perl -i`), or
+  `launchctl setenv`;
+- a live command from a subagent (an `agent_id` in the hook's input): the main
+  session asks Ryan;
+- a live command in a session that cannot prompt: a permission mode other than
+  `default`, `acceptEdits`, `auto` or `plan` - `bypassPermissions`, `dontAsk`,
+  a missing or unknown one - which covers headless and dispatched runs. Run it
+  in an interactive session, or Ryan runs it in his terminal.
+
+Every decision on a live command is appended to `.claude/live_gate.log`
+(gitignored) with its mode: `ASKED` for a prompt, `BLOCKED` for a refusal (also
+when no decision could be built; the hook then exits 2). `.claude/settings.json`
+backs the hook: `ask` rules for the live families (`npm run clasp*`, `npx
+clasp`, `gh variable|secret set|delete`, `gh workflow run|enable|disable`, `gh
+run rerun`, `sf project deploy start|quick|validate|resume`, `sf apex run`, `sf
+data create|update|delete|upsert|import`), and `onFailure: block`, so a hook
+that fails stops the command. `Bash(gh api:*)` is in `allow` (the harness reads
+with it): any other `gh api` call runs without a prompt, while the hook's `ask`
+still prompts on `actions/`, `dispatches` and `graphql`.
+
+The hook is a seatbelt, not the go: it reads the command's text, so a write
+through another program, a flag assembled at run time, and the session's
+connector tools (Salesforce through claude.ai) are not seen - it guards against
+mistakes, not intent. Before answering yes: read the dry run and check the
+backup exists. Running commands yourself in a terminal is never affected.
 
 **`protected_paths.sh`** (every Edit and Write) blocks an edit of anything under
 `data/`, `backups/` or `credentials/` (its `README.md` and
