@@ -40,7 +40,7 @@ and apply forms, in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 | `tools/rename_club.py`, `tools/deactivate_clubs.py`, `tools/disable_form.py` | A club renamed or moved to another partner; clubs taken off the forms (`--undo` puts the rows back); a regional form switched off or on |
 | `tools/add_translations.py`, `add_language.py`, `restore_translations.py`, `switcher_flags.py`, `add_feedback_link.py`, `update_static_fields.py` | Languages and the switcher's flags, the links above Submit (problem report, Club Roster Form), the fields the sync never touches (labels, photo limits, header logo) |
 | `tools/sf_new_clubs.py`, `tools/sf_dupes.py` | New clubs' Salesforce accounts (`check`: read only); one Salesforce contact per girl (`check` monthly; `plan`, `merge`) |
-| `tools/worklog.py` | The work log behind the monthly invoice |
+| `worklog/worklog.csv`, `worklog/timezones.csv` | The work log behind the monthly invoice, kept by the harness plugin's `harness-worklog` (`/harness:worklog`; RUNBOOK "Work log and invoices") |
 | **Kept for undo or a future incident** | |
 | `tools/fix_module_values.py` | The 2026-10-07 correction of Spanish module values in Salesforce; kept for its `--undo` until the end of October 2026 |
 | `tools/sf_girls_present.py` | The back-fill of `Girls_Present__c` (done); its read-only `check` stays useful |

@@ -2820,10 +2820,12 @@ the added lines of every commit, plus ruff on the staged `.py` files.
 ## Work log and invoices
 
 - **When:** the end of every working session (`update`), month end (`export`), after travel (`zone`).
-- **Status:** in use since 2026-09-28 ([Result](plans/2026-09-28-worklog.md#result)).
+- **Status:** in use since 2026-09-28 ([Result](plans/2026-09-28-worklog.md#result)); the harness
+  plugin's `harness-worklog` replaced the repo's own work-log tool on 2026-10-14, after
+  reproducing every row byte for byte.
 
 This is contract work, invoiced monthly from `worklog/worklog.csv` (date, hours, blocks,
-description, source, zone). `python3 tools/worklog.py update` recomputes the hours from Claude
+description, source, zone). `harness-worklog update` recomputes the hours from Claude
 Code's session transcripts: all sessions merged into one timeline, cut into blocks wherever
 nothing happened for 30 minutes, a block counting only if Ryan wrote in it (an agent working
 alone is not billed), each block on the day it **started** (a session past midnight stays on its
@@ -2831,9 +2833,11 @@ first day), each day rounded to the quarter hour. It keeps a written description
 one from the commits made during that day's blocks, and never touches `manual` rows. It
 recomputes the last 14 days, reaching back to the last logged day when the log is behind (never
 past 29 days), or from `--since`. Claude Code deletes a session's transcript about 30 days after
-its last activity, so run `update` at the end of every session (CLAUDE.md asks Claude to). Work
-outside Claude Code: `python3 tools/worklog.py add --date 2026-09-29 --hours 1.5 --description "…"`.
-At month end: `python3 tools/worklog.py export --month 2026-09 [--rate 60] --out invoice-2026-09.csv`.
+its last activity, so run `update` at the end of every session (`/harness:worklog` at the end of
+every session runs it). `harness-worklog describe --date <yyyy-mm-dd> --text "…"` writes a day's
+client-facing description (`/harness:worklog` does this after `update`). Work outside Claude
+Code: `harness-worklog add --date 2026-09-29 --hours 1.5 --description "…"`.
+At month end: `harness-worklog export --month 2026-09 [--rate 60] --out invoice-2026-09.csv`.
 
 **Time zones.** Days are counted on the clock the Mac showed at the time, which moves when Ryan
 travels. `worklog/timezones.csv` records it (`since` = a UTC instant, `zone` = an IANA name like
@@ -2842,7 +2846,7 @@ does. `update` refuses in two cases, and says what to run:
 
 - the Mac's own zone (read from `/etc/localtime`, whatever `TZ` the shell sets) is not the
   timeline's zone now → record the switch:
-  `python3 tools/worklog.py zone --since <instant> --zone <IANA name>`. Any moment between the
+  `harness-worklog zone --since <instant> --zone <IANA name>`. Any moment between the
   last session on the old clock and the first on the new one gives the same hours. The tool
   bounds it by the last commit made on the old clock and the first made on the new one, and
   suggests the clock-change time (or the idle stretch just before the session after it, or the
@@ -2855,12 +2859,14 @@ does. `update` refuses in two cases, and says what to run:
   (`zone` records only a switch after the last row). `--ignore-commit HASH` is only for a commit
   not made on this Mac.
 
-`python3 tools/worklog.py zone` (no arguments) shows the timeline, the Mac's zone and the commit
+`harness-worklog zone` (no arguments) shows the timeline, the Mac's zone and the commit
 offsets since the last row.
 
 **Which sessions count.** `update` reads this project's transcript folder only
 (`~/.claude/projects/` + the checkout's path, every character other than a letter or a
-digit as `-`; run it in the main checkout - in a worktree it reads the worktree's folder).
+digit as `-`; run it in the main checkout, or pass `--repo <main checkout>`. It reads the
+transcript folder of the repo path it resolves: `--repo`, else `$CLAUDE_PROJECT_DIR`, else the
+git top level).
 A session started from another folder - the home folder, say - is not counted,
 whatever it worked on.
 On 2026-10-09 that happened twice (the attendance-reports work and the repo-cleanup
