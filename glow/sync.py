@@ -490,7 +490,7 @@ SESSION_OVERRIDES = {
 # holds the write: tools/auto_sync.py). Python only - Apps Script never reads
 # modules.
 SPECIAL_EVENT_PREFIX = "Special Event - "
-SPECIAL_EVENTS = ("Welcome Session",)
+SPECIAL_EVENTS = ("Welcome Session", "IDG Celebrations")
 
 
 def special_event_options():

@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import unittest
+from unittest import mock
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import AutoSyncFixture, FakeForm, REPO, SameNameFixture, read
@@ -681,6 +682,10 @@ class SheetsClientGet(unittest.TestCase):
         self.assertEqual(cm.exception.code, "unknown command 'import'")
 
 
+# Written when Welcome Session was the only special event: pinned to that world, so what it tests
+# (calcValues alignment, the runner's hold) does not move with the live type list. The two-type
+# state is test/special_events_test.py (IdgSync).
+@mock.patch.object(glow_sync, "SPECIAL_EVENTS", ("Welcome Session",))
 class ModuleValues(unittest.TestCase):
     """The module dropdowns' calcValues (glow/sync.py MODULE_CALC_VALUES): their own options
     after a single-select's empty slot, written and kept in step by the sync, cleared by
