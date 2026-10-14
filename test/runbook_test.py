@@ -637,14 +637,19 @@ class RunnerRunbook(unittest.TestCase):
 
     @staticmethod
     def bullets(doc, title):
-        """A DECISIONS section's top-level bullets, each flattened (a sub-bullet stays in its bullet)."""
+        """A DECISIONS section's top-level bullets, each flattened (a sub-bullet stays in its bullet).
+        The section runs from its `### ` heading to the next `### ` heading, or the end of the file."""
         body = doc.split(f"\n### {title}\n", 1)[1].split("\n### ", 1)[0]
         return [" ".join(b.split()) for b in ("\n" + body).split("\n- ")[1:]]
 
     def test_the_decision_is_recorded_and_the_three_it_amends_point_at_it(self):
         doc = read(os.path.join(REPO, "docs", "DECISIONS.md"))
+        # one section headed by it, anywhere in the file: later decisions (epic #29's task 3 among
+        # them) are appended after it, so it is pinned by date order - below the three it amends,
+        # whose bullets say "below" - never as the file's last heading
+        self.assertEqual(doc.count(f"\n### {self.DECISION}\n"), 1,
+                         f"docs/DECISIONS.md needs one section headed `### {self.DECISION}`")
         headings = [l[4:].strip() for l in doc.splitlines() if l.startswith("### ")]
-        self.assertEqual(headings[-1], self.DECISION)                     # the file ends with it
         bullets = self.bullets(doc, self.DECISION)
         self.assertTrue(bullets and not bullets[0].startswith("**"), bullets[:1])   # the decision itself first
         labelled = [b for b in bullets if b.startswith("**")]
@@ -664,6 +669,7 @@ class RunnerRunbook(unittest.TestCase):
         self.assertIn("switch", consequences)
         for title in self.AMENDED:
             self.assertIn(title, headings, title)
+            self.assertLess(headings.index(title), headings.index(self.DECISION), (title, "is amended from below"))
             dated = [b for b in self.bullets(doc, title) if b.startswith(("2026-10-14", "**2026-10-14"))]
             self.assertTrue(any(self.DECISION_TITLE in b for b in dated), (title, dated))
 
