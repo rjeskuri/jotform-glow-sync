@@ -56,8 +56,10 @@ his choice, is `Special Event - IDG Celebrations`. Ticket #26, epic #25.
    `262383455778067`, **U.S** `262382706852058` (disabled: `--disabled-ok`), the same day, each
    with its backup (`backup_forms.py --form <id>`), dry run
    (`python3 sync_attendance_form.py data/roster_<date>.csv --roster --partners data/partners_<date>.csv --region <region> --form <id>`;
-   the runner keeps these rosters current, so expect the three module lines and nothing else),
-   Ryan's go, `--apply`, and `python3 tools/form_status.py --form <id> --roster
+   expect the three module lines. The runner normally keeps these rosters current, but step 1
+   holds every region from the landing, so a Roster change in that window also shows as roster
+   lines and `REPLACE conditions`: legitimate, applied in the same run. Stop only on a `!` line
+   or a session rule for an event), Ryan's go, `--apply`, and `python3 tools/form_status.py --form <id> --roster
    data/roster_<date>.csv --partners data/partners_<date>.csv --rendered` CLEAN.
 4. `AUTO_SYNC_APPLY=1` (`gh variable set`), Ryan's go; `python3 tools/auto_sync.py`: every
    region `in-sync` (the disabled U.S form `skipped - form DISABLED`).
@@ -88,8 +90,10 @@ Salesforce history stays: batches keep their `Module__c`.
 ## Proof
 Healthy output after the rollout:
 - Each dry run before `--apply`: three `UPDATE module dropdown … 1 event option(s) added
-  (Special Event - IDG Celebrations)` lines. On a regional form nothing else; on the template
-  also its roster catch-up and `REPLACE conditions`, expected.
+  (Special Event - IDG Celebrations)` lines. Roster lines and `REPLACE conditions` may come
+  with them (normally on the template, whose roster catch-up the runner never does; on a regional
+  form only for a Roster change since the landing, when the runner was held): expected. Stop
+  only on a `!` line or a session rule for an event.
 - `python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv --partners
   data/partners_<date>.csv --rendered` on each of the five forms: CLEAN, `special events: 2
   type(s) on 3 of 3 module dropdowns`.
