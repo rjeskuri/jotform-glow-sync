@@ -272,7 +272,14 @@ the module writes, or the option added in the builder); its rules-only
 `REPLACE conditions` is never `in-sync` either, the runner applies it on its
 next run, and `detail` says `special-event rules rewritten`. The bad-data bands
 above still hold a region that carries one of these lines, and its ATTENTION
-lists them under `Planned:`. The runner syncs the regional forms only: the
+says which: the title carries the plan's summary (the words an apply's `detail`
+would carry: `required: … on N roster(s)`, `module values on N dropdown(s)`,
+`special-event options on N dropdown(s)`, `question 18 rules rewritten`,
+`special-event rules rewritten`); a `REQUIRED roster` or module line is listed
+under `Planned:` (`REQUIRED on N roster(s) with no other change`, `MODULE
+values q…`); either warning sits under `Warnings:`, and its rules-only `REPLACE
+conditions` is no `Planned:` line, so the warning is where to look for the
+rewrite. The runner syncs the regional forms only: the
 template and a disabled form are applied by hand (the sync's dry run and
 `--apply`, Ryan's go). The next run is the next roster change, at the latest
 the morning backstop, or one started from the Actions tab on Ryan's go. After
