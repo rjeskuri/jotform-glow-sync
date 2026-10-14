@@ -82,14 +82,17 @@ PATTERN+="|${SELF})"
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
 MATCH=$(printf '%s' "$FLAT" | grep -Eo "$PATTERN" | head -1) || true
 # gh api: a write on ANY path (since 2026-10-14; before, only under actions/ or to
-# /dispatches). Any command with a gh word (quoted, escaped, =gh or by full path too) is
-# read as shell words by python3: comments go first, as bash reads them (a # at the start
-# of a word, to the end of its line; quoted or escaped it is data, so is one glued to the
-# ) of a $(...), $((...)), <(...) or >(...); a backslash-newline does not continue a
-# comment), then backslash-newline joins, $'...'
-# and shlex (quotes, pflag shorthand bundles such as -iXDELETE or -iF name=x). Each
-# gh [-R x] api segment up to the next ; | & ( ) < > or line break is judged, and a quoted
-# string that holds one (bash -c "gh api ...", eval) is read the same way. A write is a
+# /dispatches). The settings ask on every command that starts gh api (Bash(gh api:*)); the
+# hook asks on the shapes that rule misses - bash -c, sh -c, eval, gh by its full path, a
+# quoted or split gh or api - and on every write. A command that holds a gh word (=gh and
+# a path ending in /gh too) and the word api, once continued lines are joined and the quote
+# and backslash characters removed (so g""h, g\h, 'gh' and a""pi count; a gh pr or gh issue
+# body without api is never read), is read as shell words by python3: backslash-newline
+# joins, $'...' and shlex (quotes, pflag shorthand bundles such as -iXDELETE or -iF name=x).
+# A # is text, never a comment (Ryan, 2026-10-14: reading comments as bash does let writes
+# hide behind "$(...)", backticks, ${x:- #}, heredocs and zsh =(...)). Each gh [-R x] api
+# segment up to the next ; | & ( ) < > or line break is judged, and a quoted string that
+# holds gh and api the same way (bash -c "gh api ...", eval) is read in turn. A write is a
 # method other than GET (-X, -XPOST, -X=POST, --method, --method=, in any case), fields
 # or an input file (-f, -F, --field, --raw-field, --input: they make it a POST) with no
 # explicit GET (with GET they are the query string), or graphql (a mutation can hide in
@@ -103,65 +106,31 @@ import re, shlex, sys
 VALUE_LONG = {"cache", "field", "header", "hostname", "input", "jq", "method", "preview", "raw-field", "template"}
 FIELD_LONG = {"field", "raw-field", "input"}
 VALUE_SHORT, BOOL_SHORT, OPS = "FHqXpft", "ih", set("();<>|&")
-GH_WORD = re.compile(r"(^|[^\w./-])gh\s")
 Q, DQ, BT = chr(39), chr(34), chr(96)
 QS = "[" + DQ + Q + "]"
+# the pre-filter, the same as the shell applies to the whole command
+GH_BARE, API_BARE = re.compile(r"(^|[^\w.-])gh([^\w.-]|$)"), re.compile(r"(^|\W)api(\W|$)")
+QUOTES_BS = re.compile(r"\$?" + QS + r"|\\")
 # the gh ... api text as the command spells it (quotes, =gh, a continued line, -R x), to
 # quote in the prompt: a reader sees the words of the command, the description follows
 GH_RAW = re.compile("[=\\\\]?" + QS + "?gh" + QS + r"?[\s\\]+(?:(?:-R|--repo)[=\s]*\S+[\s\\]+)?"
                     + QS + "*a" + QS + "*p" + QS + "*i" + QS + "*")
 
-def strip_comments(text):
-    """As bash reads them: a # at the start of a word opens a comment to the end of its
-    line; inside quotes or after a backslash it is data. Quotes are tracked here, so a
-    comment never starts inside one and an unbalanced quote is refused. The ) that closes
-    $(...), $((...)), <(...) or >(...) is part of its word; the ) of a subshell ends one."""
-    out, i, n, q, start, parens = [], 0, len(text), "", True, []
-    while i < n:
-        c = text[i]
-        if q == Q:
-            if c == Q:
-                q = ""
-        elif q == DQ:
-            if c == "\\" and i + 1 < n:
-                out.append(c)
-                i += 1
-                c = text[i]
-            elif c == DQ:
-                q = ""
-        elif c == "\\" and i + 1 < n:
-            out.append(c)
-            i += 1
-            c = text[i]
-            start = False
-        elif c == "#" and start:
-            j = text.find("\n", i)
-            if j < 0:
-                break
-            i = j
-            continue
-        elif c in (Q, DQ):
-            q, start = c, False
-        elif c == "(":
-            parens.append(out[-1] if out and out[-1] in "$<>" else "")
-            start = True
-        elif c == ")":
-            start = not (parens and parens.pop())
-        else:
-            start = c in " \t\n;<>|&"
-        out.append(c)
-        i += 1
-    if q:
-        raise ValueError("an unbalanced quote")
-    return "".join(out)
+def gh_and_api(text):
+    """A gh word and the word api, once continued lines are joined and the quote and
+    backslash characters removed (with the $ of $"..." and of ANSI-C quoting)."""
+    bare = QUOTES_BS.sub("", text.replace("\\\r\n", "").replace("\\\n", ""))
+    return bool(GH_BARE.search(bare) and API_BARE.search(bare))
 
 def words_of(text):
-    text = strip_comments(text.replace("\r\n", "\n").replace("\r", "\n"))
+    """Shell words and operators; a # is a word like any other (commenters is empty)."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\\\n", "").replace("\n", " ; ")
     if "$" + Q in text:
         if re.search(r"\$" + Q + "[^" + Q + r"]*\\", text):
             raise ValueError("an escape in ANSI-C quoting")
         text = text.replace("$" + Q, Q)
+    text = text.replace("$" + DQ, DQ)                  # $"..." reads as "..."
     lex = shlex.shlex(text, posix=True, punctuation_chars=True)
     lex.commenters = ""
     lex.whitespace_split = True
@@ -244,7 +213,7 @@ def scan(text, depth):
                     return verdict
                 i = j
                 continue
-        elif depth < 3 and re.search(r"\s", w) and GH_WORD.search(w):
+        elif depth < 3 and re.search(r"\s", w) and gh_and_api(w):
             verdict = scan(w, depth + 1)
             if verdict != "read":
                 return verdict
@@ -261,10 +230,19 @@ if verdict != "read":
     found = GH_RAW.search(raw)
     print(found.group(0).replace("\r", " ").replace("\n", " ") if found else "")
 PY
-# a gh word anywhere - "gh", 'gh', \gh, =gh, /usr/local/bin/gh, gh continued onto the next
-# line: the Python decides whether api is the subcommand, after quote removal (a""pi too)
+# the pre-filter: a gh word ("gh", 'gh', g""h, g\h, \gh, =gh, /usr/local/bin/gh, g\<newline>h)
+# and the word api (a""pi, a\pi, ap$'i'), once backslash-newlines are joined and the quote and
+# backslash characters removed (with the $ of $'...' and $"..."). The Python decides whether
+# api is gh's subcommand.
+JOIN=$'\\\n' JOIN_CRLF=$'\\\r\n' ANSI_C="\$'" LOCALE='$"'
+BARE=${CMD//"$JOIN_CRLF"/}
+BARE=${BARE//"$JOIN"/}
+BARE=${BARE//"$ANSI_C"/}
+BARE=${BARE//"$LOCALE"/}
+BARE=$(printf '%s' "$BARE" | tr -d '\\"'"'" | tr '\n\r' '  ')
 WHY=
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)'; then
+if [ -z "$MATCH" ] && printf '%s' "$BARE" | grep -Eq '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' \
+    && printf '%s' "$BARE" | grep -Eq '(^|[^[:alnum:]_])api([^[:alnum:]_]|$)'; then
   VERDICT=$(printf '%s' "$CMD" | python3 -c "$GH_API_PY") || VERDICT=
   case "$VERDICT" in
     read) ;;
