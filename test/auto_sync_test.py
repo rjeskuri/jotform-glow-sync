@@ -281,7 +281,7 @@ class AutoSyncPlan(AutoSyncFixture, unittest.TestCase):
             run = self.run_region(self.STALE_RULES_DRY_RUN, apply=apply)
             self.assertEqual([r[7] for r in run.results], ["attention"], apply)
             self.assertIn("1 roster rule(s) test a name the Club picker does not list", run.results[0][8])
-            self.assertEqual(run.synced, [False])              # a rules-only write is never unattended
+            self.assertEqual(run.synced, [False])              # the RULES_OLDER rewrite stays a hand apply
             (title, detail), = run.attention
             self.assertIn("Africa: 1 roster rule(s) test a name the Club picker does not list", title)
             self.assertIn("- ! 'Stars' (q11): its rule tests 'Stars'", detail)

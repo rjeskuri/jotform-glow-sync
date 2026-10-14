@@ -234,7 +234,7 @@ class EventSync(unittest.TestCase):
                          [{"qid": "14", "year": "1", "modules": 2, "events": [EVENT], "calc": "set"},
                           {"qid": "92", "year": "2", "modules": 3, "events": [EVENT], "calc": "set"},
                           {"qid": "93", "year": "3", "modules": 2, "events": [EVENT], "calc": "set"}])
-        # the runner reads the same plan from the printed lines and from the summary, and holds it
+        # the runner reads the same plan from the printed lines and from the summary (Runner: applied)
         want = [{"qid": q, "year": y, "modules": n, "events": 1, "calc": "set"}
                 for q, y, n in (("14", "1", 2), ("92", "2", 3), ("93", "3", 2))]
         self.assertEqual((auto_sync.parse_plan(out)["modules"], auto_sync.plan_from_summary(summary)["modules"]),
@@ -817,9 +817,16 @@ class IdgSync(unittest.TestCase):
         self.assertFalse([m for _, m, _, _ in session_rules(written) if m in (WELCOME, IDG)])
         self.assertTrue(session_rules(written))                      # the curriculum modules keep theirs
 
-    # --- the runner: the dry run's own output is read and held ---------------------------------
+    # --- the runner: the dry run's own output is read and applied on its next run --------------
+    # (docs/DECISIONS.md, 2026-10-14; the template and a disabled form by hand: docs/plans/
+    # 2026-10-14-idg-celebrations.md, Rollout)
 
-    def test_the_runner_never_applies_the_new_option_unattended(self):
+    DETAIL = ("0 create(s), 0 update(s), 0 delete(s), 0 warning(s), module values on 3 dropdown(s), "
+              "special-event options on 3 dropdown(s)")
+    APPLY_STEPS = ["sync", "backup", "save conditions", "sync --apply", "verify"]
+    DELETE = "  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n"
+
+    def test_the_runner_applies_the_new_option_on_its_next_run(self):
         qs, wire = live_state()
         summary, out = self.summary(FakeForm(qs, wire))
         want = [{"qid": q, "year": y, "modules": n, "events": 1, "calc": "set"}
@@ -827,24 +834,50 @@ class IdgSync(unittest.TestCase):
         plan = auto_sync.parse_plan(out)
         self.assertEqual((plan["modules"], auto_sync.plan_from_summary(summary)["modules"]), (want, want))
         self.assertEqual(auto_sync.changes(plan), 3)
-        (reason,) = auto_sync.check_bands(plan)
-        self.assertIn("would add special-event option(s) to 3 module dropdown(s) (q14, q92, q93), with their "
-                      "calcValues - never unattended", reason)
-        for text in (out, out + "  - CREATE roster 'Gamma Club' (2 girls)\n"):
-            for sm in (None, summary):
-                run = AutoSyncFixture.run_region(self, text, apply=True, summary=sm)
-                self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
-                self.assertIn("- MODULE values q92 (year 2: 4 modules, 1 special-event option(s) added)",
-                              run.attention[0][1])
-        # a form lacking both types: two options a dropdown, still one reason, still held
+        for p in (plan, auto_sync.plan_from_summary(summary)):
+            self.assertEqual(auto_sync.check_bands(p), [])                   # no band: nothing holds it
+            self.assertEqual(auto_sync.check_bands(p, max_updates=0), [])    # a module line is no roster update
+            self.assertEqual(auto_sync.plan_summary(p), self.DETAIL)
+        # applied (backed up, applied, verified) from the printed lines and from the summary file
+        # (the sync's own, of the plan without the club), alone and with a new club in the same
+        # plan; a dry run says what it would apply
+        busy = out + "  - CREATE roster 'Gamma Club' (2 girls)\n"
+        for text, sm, detail in ((out, None, self.DETAIL), (out, summary, self.DETAIL),
+                                 (busy, None, self.DETAIL.replace("0 create(s)", "1 create(s)"))):
+            run = AutoSyncFixture.run_region(self, text, apply=True, summary=sm)
+            self.assertEqual(run.synced, [False, True], text)                # the dry run, then the apply
+            self.assertEqual(run.steps, self.APPLY_STEPS, text)
+            self.assertEqual([r[7:9] for r in run.results], [["applied", detail + "; verified clean"]], text)
+            self.assertEqual(run.attention, [], text)
+            run = AutoSyncFixture.run_region(self, text, apply=False, summary=sm)
+            self.assertEqual((run.synced, run.steps), ([False], ["sync"]), text)
+            self.assertEqual([r[7:9] for r in run.results], [["dry-run", "would apply: " + detail]], text)
+            self.assertEqual(run.attention, [], text)
+        # held by a bad-data band (a delete): the dry run only, that band's one reason, and the
+        # ATTENTION's Planned: list still names each dropdown's write
+        run = AutoSyncFixture.run_region(self, out + self.DELETE, apply=True)
+        self.assertEqual((run.synced, run.steps, [r[7] for r in run.results]), ([False], ["sync"], ["attention"]))
+        self.assertTrue(run.results[0][8].startswith("would delete 1 roster question(s)"), run.results[0][8])
+        self.assertNotIn("never unattended", run.results[0][8])
+        (title, detail), = run.attention
+        self.assertTrue(title.startswith("Africa: not applied - 0 create(s), "), title)
+        self.assertIn("- MODULE values q92 (year 2: 4 modules, 1 special-event option(s) added)", detail)
+        # a form lacking both types: two options a dropdown, applied all the same
         qs, wire = shaped(q14=["Core 1"], q92=["Core 2", "Elective - Healthy GLOW"], q93=["Core 3"])
         summary, out = self.summary(FakeForm(qs, wire))
         plan = auto_sync.parse_plan(out)
         self.assertEqual([m["events"] for m in plan["modules"]], [2, 2, 2])
-        self.assertEqual(len(auto_sync.check_bands(plan)), 1)
+        self.assertEqual(auto_sync.check_bands(plan), [])
+        self.assertEqual(auto_sync.plan_summary(plan), self.DETAIL)
         run = AutoSyncFixture.run_region(self, out, apply=True, summary=summary)
+        self.assertEqual((run.synced, run.steps, [r[7:9] for r in run.results], run.attention),
+                         ([False, True], self.APPLY_STEPS, [["applied", self.DETAIL + "; verified clean"]], []))
+        run = AutoSyncFixture.run_region(self, out, apply=False, summary=summary)
+        self.assertEqual((run.synced, [r[7:9] for r in run.results], run.attention),
+                         ([False], [["dry-run", "would apply: " + self.DETAIL]], []))
+        run = AutoSyncFixture.run_region(self, out + self.DELETE, apply=True)
         self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
-        self.assertIn("2 special-event option(s) added", run.attention[0][1])
+        self.assertIn("- MODULE values q92 (year 2: 4 modules, 2 special-event option(s) added)", run.attention[0][1])
 
 
 class IdgRules(unittest.TestCase):
@@ -1036,17 +1069,47 @@ class IdgDocs(unittest.TestCase):
         for name in names[:4]:                                            # real content, not one token
             self.assertGreaterEqual(len(sections[name].split()), 20, name)
         rollout, rollback = sections["Rollout"], sections["Rollback"]
-        self.assertIn("AUTO_SYNC_APPLY", rollout)
-        self.assertRegex(rollout, r"(?i)template")
-        self.assertRegex(rollout, r"(?i)template.{0,200}first|first.{0,200}template")
-        self.assertRegex(rollout, r"(?i)ryan.s go")
-        self.assertIn("--apply", rollout)
+        # the Rollout's order: test_the_rollout_is_the_template_by_hand_then_the_land_then_the_runners_next_run
+        self.assertRegex(rollout, r"(?i)ryan.s\b.{0,30}\bgo\b")
         self.assertIn("form_status", rollout)
         self.assertIn("restore_conditions.py", rollback)
         self.assertRegex(rollback, r"(?i)builder")
         self.assertIn("SPECIAL_EVENTS", rollback)
         self.assertIn("Module_Week__c", sections["Risks"])
         self.assertEqual(sections["Result"].strip(), "")                  # nothing to report yet
+
+    def test_the_rollout_is_the_template_by_hand_then_the_land_then_the_runners_next_run(self):
+        # Ryan's sequence (#30, 2026-10-14): Claude applies the template on his in-session go
+        # (backup, dry run, apply, form_status --rendered --partners CLEAN, the browser checks),
+        # then Ryan lands #40, then the runner's next run adds the option to Africa, Asia and
+        # Latin America, each verified with form_status --rendered --partners; the disabled U.S
+        # form is applied like the template. A step is a top-level numbered item (its indented
+        # sub-steps belong to it); AUTO_SYNC_APPLY is neither required nor forbidden.
+        rollout = self.sections()[0]["Rollout"]
+        steps = re.split(r"^\d+\.\s", rollout, flags=re.M)[1:]
+        self.assertGreaterEqual(len(steps), 3, rollout)
+
+        def first(*patterns):
+            return next((i for i, s in enumerate(steps) if all(re.search(p, s) for p in patterns)), None)
+        template = first(r"(?i)template", r"(?i)\bappl")
+        land = first(r"#40", r"(?i)\bland")
+        runner = first(r"(?i)\brunner", r"(?i)next run")
+        self.assertIsNotNone(template, "no step applies the template")
+        self.assertIsNotNone(land, "no step lands #40")
+        self.assertIsNotNone(runner, "no step says the runner's next run applies the regional forms")
+        self.assertLess(template, land, "the template is applied before #40 lands")
+        self.assertLess(land, runner, "the runner's next run comes after the land")
+        t, r = steps[template], steps[runner]
+        for want in (r"(?i)ryan.s\b.{0,30}\bgo\b", r"(?i)backup", r"(?i)dry run", r"--rendered --partners",
+                     r"(?i)browser"):
+            self.assertRegex(t, want)
+        for want in ("Africa", "Asia", "Latin America", "--rendered --partners"):
+            self.assertIn(want, r)
+        us = first(r"U\.S\b")
+        self.assertIsNotNone(us, "the disabled U.S form is not placed")
+        self.assertRegex(steps[us], r"(?i)disabled")
+        self.assertRegex(steps[us], r"(?i)template")                      # applied like the template
+        self.assertGreaterEqual(us, template)
 
     def test_the_plans_index_is_the_generated_one(self):
         sys.path.insert(0, os.path.join(REPO, "scripts"))
