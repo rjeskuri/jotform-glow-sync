@@ -12,6 +12,7 @@ import copy
 import json
 import os
 import re
+import sys
 import unittest
 from unittest import mock
 
@@ -25,7 +26,15 @@ from glow import forms as glow_forms
 from glow import sync as glow_sync
 
 EVENT = "Special Event - Welcome Session"
+WELCOME = EVENT
+IDG = "Special Event - IDG Celebrations"        # the second type (ticket #26): after Welcome Session
 WEEK_COPIES = 4                                  # one calculation per session dropdown into question 100
+
+# The mechanism classes below were written when Welcome Session was the only type: their literals
+# (one option added, "its 2 options", the form "before the rollout") describe a one-type world.
+# They stay meaningful by pinning the constant to that world; the live two-type list is pinned by
+# Constants, IdgSync, IdgRules, IdgAudit and IdgDocs.
+ONE_TYPE = mock.patch.object(glow_sync, "SPECIAL_EVENTS", ("Welcome Session",))
 
 
 def parsed(conds):
@@ -73,13 +82,29 @@ def before_rollout(qs, wire):
 class Constants(unittest.TestCase):
     def test_the_type_list_and_the_prefix(self):
         self.assertEqual((glow_sync.SPECIAL_EVENT_PREFIX, glow_sync.SPECIAL_EVENTS),
-                         ("Special Event - ", ("Welcome Session",)))
-        self.assertEqual(glow_sync.special_event_options(), [EVENT])
-        for option in (EVENT, "special event -  Welcome Session", "Special Event - Retired Type"):
+                         ("Special Event - ", ("Welcome Session", "IDG Celebrations")))
+        self.assertEqual(glow_sync.special_event_options(), [WELCOME, IDG])     # Welcome first: never reordered
+        for option in (WELCOME, IDG, "special event -  Welcome Session", "special EVENT - idg   celebrations",
+                       "Special Event - Retired Type"):
             self.assertTrue(glow_sync.is_special_event(option), option)
         for option in ("Elective - Healthy GLOW", "Relationships 101", "", None, "Event - Welcome Session"):
             self.assertFalse(glow_sync.is_special_event(option), option)
 
+    def test_the_live_plan_of_a_dropdown_appends_what_is_missing_in_type_order(self):
+        plan = glow_sync.special_event_plan
+        # the live state: Welcome Session there, IDG Celebrations to come, after it
+        self.assertEqual(plan(["Core 1", WELCOME]), {"add": [IDG], "unknown": [], "respelled": []})
+        self.assertEqual(plan(["Core 1"])["add"], [WELCOME, IDG])
+        self.assertEqual(plan(["Core 1", IDG])["add"], [WELCOME])
+        # both there, in either order, anywhere: nothing to add
+        for options in (["Core 1", WELCOME, IDG], ["Core 1", IDG, WELCOME], [IDG, "Core 1", WELCOME]):
+            self.assertEqual(plan(options), {"add": [], "unknown": [], "respelled": []}, options)
+        self.assertEqual(plan(["Core 1", WELCOME, "special event - idg  celebrations"]),
+                         {"add": [], "unknown": [], "respelled": [("special event - idg  celebrations", IDG)]})
+        self.assertEqual(plan(["Core 1", WELCOME, "Special Event - Old Fair"]),
+                         {"add": [IDG], "unknown": ["Special Event - Old Fair"], "respelled": []})
+
+    @ONE_TYPE
     def test_the_plan_of_a_dropdown(self):
         plan = glow_sync.special_event_plan
         self.assertEqual(plan(["Core 1"]), {"add": [EVENT], "unknown": [], "respelled": []})
@@ -158,6 +183,7 @@ class Cascade(unittest.TestCase):
         self.assertEqual(glow_sync.week_bridge_layout(bad)["event_rules"], [1])
 
 
+@ONE_TYPE
 class EventSync(unittest.TestCase):
     """sync_attendance_form.main on SameNameFixture's form: the event options and the
     module calcValues in one write per dropdown, the rules from the options after it."""
@@ -311,6 +337,7 @@ class Runner(unittest.TestCase):
             self.assertFalse(rx.match("  - " + line), line)
 
 
+@ONE_TYPE
 class Audit(unittest.TestCase):
     """tools/form_status.py audit_special_events, the report and --rendered."""
 
@@ -454,6 +481,7 @@ class Audit(unittest.TestCase):
         self.assertEqual(module_lists({"1": "Core 1"}), {"1": ["Core 1", EVENT]})
 
 
+@ONE_TYPE
 class StaleRules(unittest.TestCase):
     """A form that carries the event option but whose live rules are the old way (an apply that
     stopped after the module writes, or the option added in the builder): the dry run plans a
@@ -606,7 +634,7 @@ class RunbookQuotes(unittest.TestCase):
         self.assertIn(warning, text)
         self.assertIn(warning, re.sub(r'"\s*\n\s*"', "", read(os.path.join(REPO, "sync_attendance_form.py"))))
         self.assertIn("awaiting " + form_status.EVENTS_FIX, text)
-        self.assertIn("special events: 1 type(s) on 3 of 3 module dropdowns; session bridge rule N of M", text)
+        self.assertIn("special events: 2 type(s) on 3 of 3 module dropdowns; session bridge rule N of M", text)
         self.assertIn("`{15}{95}{96}{97}`", text)
         self.assertEqual(glow_sync.week_bridge_equation(), "{15}{95}{96}{97}")
         self.assertIn("`restore_conditions.py --from`", text)
@@ -618,6 +646,416 @@ class RunbookQuotes(unittest.TestCase):
         self.assertIn(sync.WEEK_BRIDGE_STALE, runner)
         self.assertIn(f'WEEK_BRIDGE_STALE = "{auto_sync.WEEK_BRIDGE_STALE}"', read(os.path.join(REPO, "tools", "auto_sync.py")))
         self.assertIn("{WEEK_BRIDGE_STALE}: ", read(os.path.join(REPO, "sync_attendance_form.py")))
+
+
+# ---------------------------------------------------------------------------------------------
+# The second type, "IDG Celebrations" (ticket #26), on the live list of two types. Literal options
+# and calcValues throughout: nothing here asks the code under test what the answer is. The live
+# state is a form that already carries Welcome Session on q14, q92 and q93 (rollout 2026-10-13).
+
+CURRICULUM = {"14": ["Core 1"], "92": ["Core 2", "Elective - Healthy GLOW"], "93": ["Core 3"]}
+
+
+def shaped(**by_qid):
+    """(questions, wire conditions) of SameNameFixture's in-step Africa form with the module
+    dropdowns set to literal option lists (default: the curriculum, Welcome Session, IDG
+    Celebrations) and calcValues aligned to them (an empty slot, then each option). The rules are
+    the in-step ones: an event has no session rule, so they do not depend on the event options.
+    shaped(q14=[...]) sets q14's options."""
+    qs, wire = SameNameFixture.form(SameNameFixture(), switched=True)
+    for qid, curriculum in CURRICULUM.items():
+        options = by_qid.get("q" + qid, curriculum + [WELCOME, IDG])
+        qs[qid]["options"] = "|".join(options)
+        qs[qid]["calcValues"] = "|" + "|".join(options)
+    return qs, wire
+
+
+def live_state():
+    """The forms as they are live: Welcome Session on q14, q92 and q93, nothing after it."""
+    return shaped(**{"q" + q: c + [WELCOME] for q, c in CURRICULUM.items()})
+
+
+def after_writes(qs, writes):
+    """The questions once the sync's module writes have been applied (payload keys as Jotform's API)."""
+    qs = copy.deepcopy(qs)
+    for _method, path, payload in writes:
+        if path.startswith("/question/") and payload and "question[options]" in payload:
+            qs[path.rsplit("/", 1)[1]]["options"] = payload["question[options]"]
+            if "question[calcValues]" in payload:
+                qs[path.rsplit("/", 1)[1]]["calcValues"] = payload["question[calcValues]"]
+    return qs
+
+
+class IdgSync(unittest.TestCase):
+    """sync_attendance_form.main (a dry run, then --apply on the fake form) with the live list of
+    two types, and what the runner makes of the dry run's own output."""
+
+    ROSTER, QIDS, MODULES, texts = SameNameFixture.ROSTER, SameNameFixture.QIDS, SameNameFixture.MODULES, SameNameFixture.texts
+    LIVE_LINES = [f"UPDATE module dropdown (q14, year 1: 1 event option(s) added ({IDG}); calcValues = its 3 options)",
+                  f"UPDATE module dropdown (q92, year 2: 1 event option(s) added ({IDG}); calcValues = its 4 options)",
+                  f"UPDATE module dropdown (q93, year 3: 1 event option(s) added ({IDG}); calcValues = its 3 options)"]
+
+    def setUp(self):
+        SameNameFixture.setUp(self)
+
+    def tearDown(self):
+        SameNameFixture.tearDown(self)
+
+    def run_sync(self, fake, *extra):
+        return SameNameFixture.run_sync(self, fake, *extra)
+
+    def summary(self, fake, *extra):
+        return SameNameFixture.summary(self, fake, *extra)
+
+    def test_a_form_with_welcome_session_gets_exactly_one_option_added_per_dropdown(self):
+        qs, wire = live_state()
+        fake = FakeForm(qs, wire)
+        summary, out = self.summary(fake)
+        self.assertEqual(fake.calls, self.LIVE_LINES)                # no rules rewrite: the rules are in step
+        self.assertIn("(conditions unchanged - skipping the rewrite)", out)
+        # the new option goes after Welcome Session, which stays where it is; calcValues cover every option
+        self.assertEqual([w[1:] for w in fake.writes], [
+            ("/question/14", {"question[options]": f"Core 1|{WELCOME}|{IDG}",
+                              "question[calcValues]": f"|Core 1|{WELCOME}|{IDG}"}),
+            ("/question/92", {"question[options]": f"Core 2|Elective - Healthy GLOW|{WELCOME}|{IDG}",
+                              "question[calcValues]": f"|Core 2|Elective - Healthy GLOW|{WELCOME}|{IDG}"}),
+            ("/question/93", {"question[options]": f"Core 3|{WELCOME}|{IDG}",
+                              "question[calcValues]": f"|Core 3|{WELCOME}|{IDG}"})])
+        self.assertEqual(summary["module_values"],
+                         [{"qid": "14", "year": "1", "modules": 3, "events": [IDG], "calc": "set"},
+                          {"qid": "92", "year": "2", "modules": 4, "events": [IDG], "calc": "set"},
+                          {"qid": "93", "year": "3", "modules": 3, "events": [IDG], "calc": "set"}])
+
+    def test_every_write_only_appends_and_its_calcvalues_line_up_with_its_options(self):
+        # nothing removed, renamed or reordered: the form's options are a prefix of the written ones
+        # and the one appended is the new type; calcValues = the empty slot, then each option
+        for label, (qs, wire), added in (("live", live_state(), [IDG]),
+                                         ("hand-ordered", shaped(q14=[WELCOME, "Core 1"], q92=[
+                                             "Core 2", WELCOME, "Elective - Healthy GLOW"], q93=["Core 3"]),
+                                          None)):
+            with self.subTest(label):
+                fake = FakeForm(qs, wire)
+                self.run_sync(fake)
+                self.assertTrue(fake.writes)
+                for _m, path, payload in fake.writes:
+                    qid = path.rsplit("/", 1)[1]
+                    before = qs[qid]["options"].split("|")
+                    written = payload["question[options]"].split("|")
+                    self.assertEqual(written[:len(before)], before, qid)
+                    self.assertEqual(written[len(before):], added if added else
+                                     [e for e in (WELCOME, IDG) if e not in before], qid)
+                    self.assertEqual(payload["question[calcValues]"].split("|"), [""] + written, qid)
+                    if WELCOME in before:                            # where it was, it stays
+                        self.assertEqual(written.index(WELCOME), before.index(WELCOME), qid)
+
+    def test_after_the_apply_the_form_is_in_step_and_a_second_run_writes_nothing(self):
+        qs, wire = live_state()
+        fake = FakeForm(qs, wire, apply=True)
+        self.assertEqual(self.run_sync(fake, "--apply")[0], 0)
+        self.assertEqual(len(fake.writes), 3)
+        applied = after_writes(qs, fake.writes)
+        self.assertEqual({q: applied[q]["options"] for q in CURRICULUM},
+                         {"14": f"Core 1|{WELCOME}|{IDG}",
+                          "92": f"Core 2|Elective - Healthy GLOW|{WELCOME}|{IDG}",
+                          "93": f"Core 3|{WELCOME}|{IDG}"})
+        again = FakeForm(applied, wire)
+        self.assertEqual((self.run_sync(again)[0], again.calls), (0, []))
+        self.assertEqual(form_status.audit_special_events(applied, wire)[0], [])
+        self.assertEqual(form_status.audit_module_values(applied)[0], [])
+
+    def test_the_options_missing_in_other_states_are_appended_in_type_order_and_nothing_else_moves(self):
+        cases = (
+            # (label, the dropdowns' options, the options written: {qid: options}; {} = no write)
+            ("neither type yet", dict(q14=["Core 1"], q92=["Core 2", "Elective - Healthy GLOW"], q93=["Core 3"]),
+             {"14": f"Core 1|{WELCOME}|{IDG}", "92": f"Core 2|Elective - Healthy GLOW|{WELCOME}|{IDG}",
+              "93": f"Core 3|{WELCOME}|{IDG}"}),
+            ("the new type added by hand ahead of the first", dict(q92=["Core 2", "Elective - Healthy GLOW", IDG]),
+             {"92": f"Core 2|Elective - Healthy GLOW|{IDG}|{WELCOME}"}),
+            ("Welcome Session moved to the top by hand", dict(q14=[WELCOME, "Core 1"]),
+             {"14": f"{WELCOME}|Core 1|{IDG}"}),
+            ("both there, the new one first", dict(q93=["Core 3", IDG, WELCOME]), {}),
+            ("a retired type kept", dict(q14=["Core 1", WELCOME, "Special Event - Old Fair"]),
+             {"14": f"Core 1|{WELCOME}|Special Event - Old Fair|{IDG}"}),
+        )
+        for label, options, want in cases:
+            with self.subTest(label):
+                # a dropdown not named keeps the full list; "neither" starts all three bare
+                start = shaped(**options)
+                fake = FakeForm(*start)
+                self.run_sync(fake)
+                got = {w[1].rsplit("/", 1)[1]: w[2]["question[options]"] for w in fake.writes
+                       if "question[options]" in (w[2] or {})}
+                self.assertEqual(got, want)
+                self.assertEqual(len(fake.writes), len(want))        # nothing but those writes: rules in step
+        # both spelled differently in the case of the new one: counted as present, warned, never added twice
+        qs, wire = shaped(q93=["Core 3", WELCOME, IDG.upper()])
+        fake = FakeForm(qs, wire)
+        code, out = self.run_sync(fake)
+        self.assertIn(f"lists '{IDG.upper()}', spelled unlike '{IDG}'", out)
+        self.assertFalse([w for w in fake.writes if "question[options]" in (w[2] or {})])
+
+    def test_neither_type_yet_is_one_write_per_dropdown_naming_both_and_the_rules_get_no_event_rule(self):
+        # the form from before 2026-10-13: no options, the old rules (a year-1 rule on the year alone,
+        # no bridge) - the first apply of both types at once
+        bare = dict(q14=["Core 1"], q92=["Core 2", "Elective - Healthy GLOW"], q93=["Core 3"])
+        qs, wire = shaped(**bare)
+        old = before_rollout(qs, wire)[1]
+        fake = FakeForm(qs, old)
+        self.run_sync(fake)
+        self.assertEqual(fake.calls[:3], [
+            f"UPDATE module dropdown (q14, year 1: 2 event option(s) added ({WELCOME}, {IDG}); "
+            "calcValues = its 3 options)",
+            f"UPDATE module dropdown (q92, year 2: 2 event option(s) added ({WELCOME}, {IDG}); "
+            "calcValues = its 4 options)",
+            f"UPDATE module dropdown (q93, year 3: 2 event option(s) added ({WELCOME}, {IDG}); "
+            "calcValues = its 3 options)"])
+        self.assertRegex(fake.calls[3], r"^REPLACE conditions \(\d+ rules\)$")
+        written = fake.writes[3][2]["properties"]["conditions"]
+        self.assertTrue(sync.same_conditions(written, shaped()[1]))
+        shape = glow_sync.week_bridge_layout(written)
+        self.assertEqual((len(shape["bridge"]), shape["event_rules"]), (1, []))
+        self.assertFalse([m for _, m, _, _ in session_rules(written) if m in (WELCOME, IDG)])
+        self.assertTrue(session_rules(written))                      # the curriculum modules keep theirs
+
+    # --- the runner: the dry run's own output is read and held ---------------------------------
+
+    def test_the_runner_never_applies_the_new_option_unattended(self):
+        qs, wire = live_state()
+        summary, out = self.summary(FakeForm(qs, wire))
+        want = [{"qid": q, "year": y, "modules": n, "events": 1, "calc": "set"}
+                for q, y, n in (("14", "1", 3), ("92", "2", 4), ("93", "3", 3))]
+        plan = auto_sync.parse_plan(out)
+        self.assertEqual((plan["modules"], auto_sync.plan_from_summary(summary)["modules"]), (want, want))
+        self.assertEqual(auto_sync.changes(plan), 3)
+        (reason,) = auto_sync.check_bands(plan)
+        self.assertIn("would add special-event option(s) to 3 module dropdown(s) (q14, q92, q93), with their "
+                      "calcValues - never unattended", reason)
+        for text in (out, out + "  - CREATE roster 'Gamma Club' (2 girls)\n"):
+            for sm in (None, summary):
+                run = AutoSyncFixture.run_region(self, text, apply=True, summary=sm)
+                self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+                self.assertIn("- MODULE values q92 (year 2: 4 modules, 1 special-event option(s) added)",
+                              run.attention[0][1])
+        # a form lacking both types: two options a dropdown, still one reason, still held
+        qs, wire = shaped(q14=["Core 1"], q92=["Core 2", "Elective - Healthy GLOW"], q93=["Core 3"])
+        summary, out = self.summary(FakeForm(qs, wire))
+        plan = auto_sync.parse_plan(out)
+        self.assertEqual([m["events"] for m in plan["modules"]], [2, 2, 2])
+        self.assertEqual(len(auto_sync.check_bands(plan)), 1)
+        run = AutoSyncFixture.run_region(self, out, apply=True, summary=summary)
+        self.assertEqual((run.synced, [r[7] for r in run.results]), ([False], ["attention"]))
+        self.assertIn("2 special-event option(s) added", run.attention[0][1])
+
+
+class IdgRules(unittest.TestCase):
+    """build_conditions with both types among the module options."""
+
+    CLUBS = {"10": "Alpha Club", "11": "Beta Club"}
+
+    def build(self, modules, picker=None):
+        return sync.build_conditions(self.CLUBS, {}, modules, picker=picker,
+                                     picker_options=list(self.CLUBS.values()) if picker else None)
+
+    def test_neither_event_gets_a_session_rule_and_the_bridge_still_heads_the_cascade(self):
+        self.assertEqual(glow_sync.special_event_options(), [WELCOME, IDG])
+        modules = {"1": ["Core 1", "Core 1b", WELCOME, IDG],
+                   "2": ["Core 2", "Elective - Healthy GLOW", IDG, WELCOME],
+                   "3": ["Elective - Girl Boss Pro", WELCOME, "Special Event - Old Fair", IDG]}
+        for picker in (None, "500"):
+            with self.subTest(picker=picker):
+                conds = self.build(modules, picker)
+                # exactly the curriculum's rules, none for either event
+                self.assertEqual(session_rules(conds), [
+                    ("14", "Core 1", "1", "15"), ("14", "Core 1b", "1", "15"),
+                    ("92", "Core 2", "2", "15"), ("92", "Elective - Healthy GLOW", "2", "96"),
+                    ("93", "Elective - Girl Boss Pro", "3", "97")])
+                for _, terms, _actions in parsed(conds):
+                    self.assertFalse([t for t in terms if t.get("value") in (WELCOME, IDG)], terms)
+                shape = glow_sync.week_bridge_layout(conds)
+                self.assertEqual((len(shape["bridge"]), len(shape["copies"]), shape["event_rules"]),
+                                 (1, WEEK_COPIES, []))
+                pos = shape["position"]
+                self.assertEqual(pos, (1 if picker else 0) + len(self.CLUBS))   # first of section B
+                self.assertTrue(all(p > pos for p in shape["session_rules"] + shape["copies"]))
+                self.assertEqual(glow_sync.week_bridge_stale(conds), [])
+        # the events add nothing: the same rules as for the curriculum alone
+        bare = {y: [o for o in opts if not glow_sync.is_special_event(o)] for y, opts in modules.items()}
+        self.assertTrue(sync.same_conditions(self.build(modules, "500"), self.build(bare, "500")))
+
+
+class IdgAudit(unittest.TestCase):
+    """tools/form_status.py with the live list of two types: a form lacking the new one is NOT CLEAN."""
+
+    FIX = 'awaiting a sync apply by hand, template first (RUNBOOK "Special events")'
+
+    def report(self, qs, wire):
+        qs = copy.deepcopy(qs)
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+
+        class Fake:
+            def get(self, path, **params):
+                if path.endswith("/questions"):
+                    return copy.deepcopy(qs)
+                if path.endswith("/properties"):
+                    return {"conditions": wire, "clearFieldOnHide": "disable",
+                            "language": [{"options": "English (US)|Español", "primaryLanguage": "en"}]}
+                if path.endswith("/translations"):
+                    return served_store(qs)
+                return {"title": "t", "status": "ENABLED", "count": "0"}
+        return form_status.form_report(glow_forms.TEMPLATE, Fake(), {})
+
+    def test_a_form_with_both_types_is_clean(self):
+        qs, wire = shaped()
+        problems, summary = form_status.audit_special_events(qs, wire)
+        self.assertEqual(problems, [])
+        self.assertEqual(summary["listed"], {q: {WELCOME: 1, IDG: 1} for q in ("14", "92", "93")})
+        self.assertTrue(form_status.special_events_line(summary).startswith(
+            "2 type(s) on 3 of 3 module dropdowns; session bridge rule "))
+        rep = self.report(qs, wire)
+        self.assertEqual([p for p in rep["rule_problems"] if "event" in p or "bridge" in p], [])
+
+    def test_the_live_form_lacking_the_new_type_is_not_clean_until_the_apply(self):
+        qs, wire = live_state()
+        problems, summary = form_status.audit_special_events(qs, wire)
+        self.assertEqual(len(problems), 3)
+        for qid, year, problem in zip(("14", "92", "93"), ("1", "2", "3"), problems):
+            self.assertTrue(problem.startswith(f"module dropdown q{qid} (year {year}) lacks the special event "
+                                               f"'{IDG}'"), problem)
+            self.assertIn(self.FIX, problem)
+        self.assertEqual(summary["listed"], {q: {WELCOME: 1, IDG: 0} for q in ("14", "92", "93")})
+        self.assertIn("2 type(s) on 0 of 3 module dropdowns", form_status.special_events_line(summary))
+        # the report: NOT CLEAN (rule problems), and the runner's verify step reads it as a problem
+        rep = self.report(qs, wire)
+        self.assertEqual(len([p for p in rep["rule_problems"] if IDG in p]), 3)
+        clean = {"error_conditions": 0, "salesforce": True, "languages": ["a"] * 12,
+                 "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []}}
+        verdict, _ = auto_sync.verify_report(dict(clean, rule_problems=rep["rule_problems"]))
+        self.assertTrue(any("awaiting a sync apply by hand" in p for p in verdict))
+        # applied (the option on every dropdown): clean again
+        applied_qs, applied_wire = shaped()
+        self.assertEqual([p for p in self.report(applied_qs, applied_wire)["rule_problems"]
+                          if "event" in p or "bridge" in p], [])
+
+    def test_each_dropdown_and_each_type_is_audited_on_its_own(self):
+        # one dropdown lacking it: one problem, naming that dropdown
+        qs, wire = shaped(q93=["Core 3", WELCOME])
+        (problem,) = form_status.audit_special_events(qs, wire)[0]
+        self.assertTrue(problem.startswith("module dropdown q93 (year 3) lacks the special event " + f"'{IDG}'"))
+        # one lacking Welcome Session instead: that is the one named
+        qs, wire = shaped(q14=["Core 1", IDG])
+        (problem,) = form_status.audit_special_events(qs, wire)[0]
+        self.assertTrue(problem.startswith(f"module dropdown q14 (year 1) lacks the special event '{WELCOME}'"))
+        # neither type anywhere: one problem per type per dropdown
+        qs, wire = shaped(q14=["Core 1"], q92=["Core 2", "Elective - Healthy GLOW"], q93=["Core 3"])
+        problems = form_status.audit_special_events(qs, wire)[0]
+        self.assertEqual(len(problems), 6)
+        self.assertEqual(len([p for p in problems if f"'{IDG}'" in p]), 3)
+        self.assertEqual(len([p for p in problems if f"'{WELCOME}'" in p]), 3)
+        # the new type twice, or in another spelling, is reported like Welcome Session is
+        qs, wire = shaped(q92=["Core 2", "Elective - Healthy GLOW", WELCOME, IDG, IDG])
+        (problem,) = form_status.audit_special_events(qs, wire)[0]
+        self.assertIn(f"lists '{IDG}' 2 times", problem)
+        qs, wire = shaped(q93=["Core 3", WELCOME, IDG.lower()])
+        (problem,) = form_status.audit_special_events(qs, wire)[0]
+        self.assertIn(f"lists the special event as '{IDG.lower()}', not '{IDG}'", problem)
+
+    def test_the_served_page_must_serve_the_new_option_too(self):
+        qs, wire = shaped()
+        r = {}
+        self.assertEqual(form_status.rendered_bridge_problems(r, served_rules_and_rosters(qs, wire)), [])
+        self.assertEqual(r["rendered_events"], {q: {WELCOME: (1, 1, 0), IDG: (1, 1, 0)} for q in ("14", "92", "93")})
+        # a page from before the apply: Welcome Session served, the new one not
+        problems = form_status.rendered_bridge_problems({}, served_rules_and_rosters(*live_state()))
+        self.assertEqual(len(problems), 3)
+        for qid, problem in zip(("14", "92", "93"), problems):
+            self.assertIn(f"rendered page: module dropdown q{qid} serves '{IDG}' 0 time(s)", problem)
+
+
+class IdgDocs(unittest.TestCase):
+    """The plan beside the ticket, and the RUNBOOK's "Special events" naming both types."""
+
+    PLAN = os.path.join(REPO, "docs", "plans", "2026-10-14-idg-celebrations.md")
+
+    def runbook_section(self):
+        doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
+        self.assertEqual(doc.count("\n## Special events\n"), 1)         # the heading is unchanged
+        return doc.split("\n## Special events\n", 1)[1].split("\n## ", 1)[0]
+
+    def test_the_runbook_status_line_names_both_types(self):
+        section = self.runbook_section()
+        (status,) = [l for l in section.split("\n") if l.startswith("- **Status:**")]
+        for name in ("Welcome Session", "IDG Celebrations"):
+            self.assertIn(name, status)
+        self.assertLess(status.index("Welcome Session"), status.index("IDG Celebrations"))
+        # it links this ticket's plan, and no sentence of the section still calls Welcome Session the
+        # first or only type (Status line and body alike)
+        self.assertIn("plans/2026-10-14-idg-celebrations.md", status)
+        flat = " ".join(section.split())
+        for stale in ("the first type is", "first type", "only type", "only special event"):
+            self.assertNotIn(stale, flat.lower())
+        # the report line it quotes is the tool's, for two types
+        text = " ".join(self.runbook_section().split())
+        self.assertIn("special events: 2 type(s) on 3 of 3 module dropdowns; session bridge rule N of M", text)
+        self.assertNotIn("special events: 1 type(s)", " ".join(read(os.path.join(REPO, "docs", "RUNBOOK.md")).split()))
+
+    def sections(self):
+        """{heading word: body} of the plan's `## ` sections (comments removed), the plan's text."""
+        text = re.sub(r"<!--.*?-->", "", read(self.PLAN), flags=re.S)          # missing file: the red state
+        parts = re.split(r"^## ", text, flags=re.M)[1:]
+        return {p.split("\n", 1)[0].split()[0].strip(":"): p.split("\n", 1)[1] if "\n" in p else ""
+                for p in parts}, text
+
+    def test_the_plan_carries_a_plans_frontmatter_and_says_what_it_is_about(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        sections, text = self.sections()
+        keys, h1 = docs_index.frontmatter(read(self.PLAN))
+        template, _ = docs_index.frontmatter(read(os.path.join(REPO, "docs", "templates", "plan.md")))
+        self.assertEqual(set(template), {"title", "author", "status", "done", "backlog", "created", "intent"})
+        self.assertLessEqual(set(keys), set(template))                  # no key a plan does not carry
+        for key_ in ("title", "author", "status", "created", "intent"):
+            self.assertTrue(keys.get(key_, "").partition("#")[0].strip(), key_)
+        self.assertIn("IDG Celebrations", keys["title"])
+        self.assertEqual(docs_index.status_of(keys["status"])[0], "accepted")
+        self.assertRegex(keys["created"], r"^2026-10-14$")
+        self.assertEqual(keys.get("backlog", "").partition("#")[0].strip(), "")      # none
+        self.assertEqual(keys.get("done", "").partition("#")[0].strip(), "")         # not done until the rollout
+        self.assertIn("IDG Celebrations", h1)
+        self.assertIn("IDG Celebrations", " ".join(sections.values()))     # the body says it too
+        self.assertIn("SPECIAL_EVENTS", text)
+
+    def test_the_plan_has_a_real_rollout_rollback_risks_proof_and_an_empty_result(self):
+        sections, text = self.sections()
+        headings = [h for h in re.findall(r"^## (.+)$", text, re.M)]
+        names = ("Rollout", "Rollback", "Risks", "Proof", "Result")
+        for name in names:
+            self.assertEqual(len([h for h in headings if h.startswith(name)]), 1, name)
+        order = [next(i for i, h in enumerate(headings) if h.startswith(n)) for n in names]
+        self.assertEqual(order, sorted(order))
+        for name in names[:4]:                                            # real content, not one token
+            self.assertGreaterEqual(len(sections[name].split()), 20, name)
+        rollout, rollback = sections["Rollout"], sections["Rollback"]
+        self.assertIn("AUTO_SYNC_APPLY", rollout)
+        self.assertRegex(rollout, r"(?i)template")
+        self.assertRegex(rollout, r"(?i)template.{0,200}first|first.{0,200}template")
+        self.assertRegex(rollout, r"(?i)ryan.s go")
+        self.assertIn("--apply", rollout)
+        self.assertIn("form_status", rollout)
+        self.assertIn("restore_conditions.py", rollback)
+        self.assertRegex(rollback, r"(?i)builder")
+        self.assertIn("SPECIAL_EVENTS", rollback)
+        self.assertIn("Module_Week__c", sections["Risks"])
+        self.assertEqual(sections["Result"].strip(), "")                  # nothing to report yet
+
+    def test_the_plans_index_is_the_generated_one(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        plans, p1 = docs_index.entries("plans")
+        intents, p2 = docs_index.entries("intent")
+        self.assertEqual((p1, p2), ([], []))
+        self.assertIn("2026-10-14-idg-celebrations.md", [p["name"] for p in plans])    # missing plan: red
+        self.assertEqual(read(os.path.join(REPO, "docs", "plans", "README.md")), docs_index.render(plans, intents))
 
 
 if __name__ == "__main__":

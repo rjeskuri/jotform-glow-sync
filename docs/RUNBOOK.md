@@ -815,16 +815,16 @@ The procedure as run and what the dry run prints: [plan](plans/2026-10-06-module
 ## Special events
 
 - **When:** staff add a type of ad-hoc session or retire one; `form_status` reports a special event missing, twice or misspelled, a session rule for one, or the session bridge missing or out of place.
-- **Status:** live on all five forms since 2026-10-13 ([plan and Result](plans/2026-10-13-special-events.md#result-2026-10-13-ryans-go-for-each-write)); the first type is "Welcome Session".
-- **Dry run:** the sync's dry run, per form: one module line per dropdown and one `REPLACE conditions`.
+- **Status:** live on all five forms since 2026-10-13 ([plan and Result](plans/2026-10-13-special-events.md#result-2026-10-13-ryans-go-for-each-write)); the types are "Welcome Session", live on all five forms since 2026-10-13, and "IDG Celebrations", added to `SPECIAL_EVENTS` 2026-10-14, rollout pending ([plan](plans/2026-10-14-idg-celebrations.md)).
+- **Dry run:** the sync's dry run, per form: one module line per dropdown. On a form whose rules are stale (the rollout of 2026-10-13), also one `REPLACE conditions`; for a type added after that, `(conditions unchanged - skipping the rewrite)`, unless roster changes come with it (then `REPLACE conditions` too, as on the template, which the runner never syncs).
 - **Apply:** the template first, by hand from the branch (its `--apply`, Ryan's go, then the browser checks); then the merge: the runner applies it to every enabled regional form on its next run; the template and a disabled form are applied by hand.
 - **Verify:** `form_status.py --rendered` CLEAN; on the template also the browser checks below.
 - **Rollback:** `restore_conditions.py --from` the snapshot for the rules; the options removed in the builder (below).
 
-A special event is an ad-hoc session outside the curriculum (Ryan, 2026-10-13: the first type
-is "Welcome Session"). It is one more option of every year's module dropdown (q14, q92, q93),
-`Special Event - <type>`, as the electives are `Elective - <name>` (`glow/sync.py`
-`SPECIAL_EVENT_PREFIX`, `SPECIAL_EVENTS`). An event shows no session dropdown, so Salesforce
+A special event is an ad-hoc session outside the curriculum (Ryan: "Welcome Session"
+on 2026-10-13, "IDG Celebrations" on 2026-10-14). It is one more option of every year's module
+dropdown (q14, q92, q93), `Special Event - <type>`, as the electives are `Elective - <name>`
+(`glow/sync.py` `SPECIAL_EVENT_PREFIX`, `SPECIAL_EVENTS`). An event shows no session dropdown, so Salesforce
 receives `Module__c` = the option's text, `Module_Week__c` blank and `Module_Year__c` the year;
 nothing changes in Salesforce. One batch per club and date still holds: a Welcome Session on a
 day the club also holds a curriculum session is refused as a duplicate, whichever arrives
@@ -867,7 +867,7 @@ dropdown in the exact spelling, no rule shows a session dropdown for an event or
 alone, and the bridge is there once, in its shape, before every session rule and every copy
 into question 100. Before the apply each of these reads `awaiting a sync apply by hand, template
 first (RUNBOOK "Special events")` (the hint's wording predates DECISIONS 2026-10-14: on a
-regional form the apply is the runner's next run). The report line reads `special events: 1
+regional form the apply is the runner's next run). The report line reads `special events: 2
 type(s) on 3 of 3 module dropdowns; session bridge rule N of M, S session rule(s), 0 on no
 curriculum module`.
 `--rendered` also checks that each module select serves every event once with its
@@ -884,7 +884,8 @@ operands in `JotForm.setCalculations`.
    runner writes nothing; applying, it would add the option to every enabled regional form on
    its next run.
 3. The template first: `backup_forms.py --form 262352490535154`, the sync's dry run (the three
-   module lines and `REPLACE conditions`), Ryan's go, `--apply`, `form_status.py --rendered`
+   module lines; `REPLACE conditions` only with roster changes or stale rules, else
+   `(conditions unchanged - skipping the rewrite)`), Ryan's go, `--apply`, `form_status.py --rendered`
    CLEAN, then the browser checks below. Then Africa, Asia, Latin America and the U.S form
    (disabled: `--disabled-ok`), each backup, dry run, go, apply, CLEAN, on the same day.
 4. `AUTO_SYNC_APPLY=1` (Ryan's go); `tools/auto_sync.py` dry run: every region `in-sync`.

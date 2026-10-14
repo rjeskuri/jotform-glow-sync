@@ -493,7 +493,7 @@ SESSION_OVERRIDES = {
 # by hand (docs/DECISIONS.md 2026-10-14; RUNBOOK "Special events"). Python only
 # - Apps Script never reads modules.
 SPECIAL_EVENT_PREFIX = "Special Event - "
-SPECIAL_EVENTS = ("Welcome Session",)
+SPECIAL_EVENTS = ("Welcome Session", "IDG Celebrations")
 
 
 def special_event_options():
