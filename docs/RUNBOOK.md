@@ -2867,7 +2867,12 @@ ticket"):
    `cmp`).
 5. `/harness:land`. It restores the main checkout's copies that are byte-identical to the landed
    content before it fast-forwards `main` (since Harness e372870), so the main checkout ends
-   clean; a copy that differs blocks the pull ("main not pulled") instead of being lost.
+   clean; a copy that differs blocks the pull ("main not pulled") instead of being lost. By then
+   the PR is merged and its worktree and branch are gone: copy the two files aside, Ryan runs
+   `git checkout -- worklog/worklog.csv docs/agent/handoff.md` by hand in the main checkout
+   (`branch_guard` refuses Claude's on `main`), `/harness:land <PR>` again (a merged PR resumes at
+   the fetch and fast-forward), then copy the two files back; next month's chore carries the
+   newer rows.
 6. After the land: `harness-worklog export --month YYYY-MM [--rate N] --out invoice-YYYY-MM.csv`,
    then create next month's ticket (step 2).
 
