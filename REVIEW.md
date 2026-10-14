@@ -1,7 +1,8 @@
 # REVIEW.md — reviewing a change in this repository
 
-Input: the diff, the `docs/plans/*.md` (or `docs/intent/*.md`) it claims to implement, and the
-pasted `make check` output. Do not report anything `make check` already enforces: ruff
+Input: the diff; the ticket it closes (Request, Definition of done); for a change with a live
+rollout, its `docs/plans/*.md`; and the PR's Verify section (the tail of `scripts/verify.sh`:
+`make check`, then `VERIFY OK`). Do not report anything `make check` already enforces: ruff
 (`ruff.toml`), syntax and the `--help` smoke, the Python and JS tests (the Python ↔ Apps Script
 parity tests among them), `.gs` parsing, the 8 pinned Google services and every call or
 menu/trigger handler resolving, secret/PII/id patterns, absolute paths and relative links, quoted
@@ -33,15 +34,16 @@ conflict markers, fixture freshness.
    `test/gs_parity_test.py` (or `test/sf_new_clubs_test.py`) changed with it. qids, form ids and
    `SESSION_OVERRIDES` are Python-only. `appsscript/Regions.gs` is hand-kept data: a change uses
    the region vocabulary exactly.
-5. **Compliance with the plan** — the files touched match "Files that change"; the Proof commands
-   were run and their output pasted; anything outside the plan is named and justified; new
-   decisions are dated sections in `docs/DECISIONS.md`; commit subjects ≤ 72 characters with the
-   trailers that apply (CLAUDE.md, Conventions).
+5. **Compliance with the ticket** — every Definition-of-done line holds; the files touched are the
+   ones the ticket's Outline and Context name, and anything else is named and justified in the PR;
+   for a live rollout, a plan with Rollout and Rollback exists, and no live step ran without
+   Ryan's go (`Live:`); new decisions are dated sections in `docs/DECISIONS.md`; the PR title is
+   at most 72 characters and its Summary carries the trailers that apply (CLAUDE.md, Conventions).
 
 ## Severity
 
 - **Important** (must fix before merge): every pass-2 and pass-3 finding, correctness bugs, parity
-  breaks, a missing or failing Proof.
+  breaks, a Definition-of-done line that does not hold, or a verify that does not end `VERIFY OK`.
 - **Nit**: style, naming, wording. Report at most five; summarise the rest as a count.
 
 ## Skip
@@ -53,4 +55,4 @@ instead), anything `make check` enforces.
 ## Output
 
 `path:line — finding — why it matters — suggested fix`, grouped by pass, Important first.
-End with: `Verified: make check output pasted? yes/no` and `Live systems touched? none / list`.
+End with: `Verified: the PR's Verify section ends VERIFY OK? yes/no` and `Live systems touched? none / list`.

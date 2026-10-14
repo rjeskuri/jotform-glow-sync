@@ -51,7 +51,7 @@ and apply forms, in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 | **Everything else** | |
 | `appsscript/` | The scripts bound to the sheet: roster ids, form handlers, generated Google Forms, the sync notification — deployed with `npm run clasp:push` ([appsscript/INSTALL.md](appsscript/INSTALL.md)) |
 | `test/` | Python tests found by `python3 -m unittest discover -s test -p '*_test.py'`, one file per subject (`sync_conditions_test.py`, `auto_sync_test.py`, `form_status_test.py`, `gs_parity_test.py`, `hooks_test.py`, …; shared fixtures as mixins in `test/helpers/common.py`); JavaScript suites `test/*_test.js` run the `.gs` code in Node (`test/load_gs.js`); `test/fixtures/` the synthetic enrollment with fictional names |
-| `scripts/` | The checks behind `make check`: every `.py` parses and answers `--help` (`check_py.py`), `.gs` parsing, pinned Google services and resolvable calls (`check_gs.js`), secrets and personal data (`check_secrets.py`), links (`check_docs_links.py`), quoted RUNBOOK sections and BACKLOG numbers (`check_doc_refs.py`), the plans index (`docs_index.py`); outside `make check`, `capture_readonly.sh`, a GET-only capture of the audit and the sync's dry runs to diff before and after a refactor |
+| `scripts/` | The checks behind `make check`: every `.py` parses and answers `--help` (`check_py.py`), `.gs` parsing, pinned Google services and resolvable calls (`check_gs.js`), secrets and personal data (`check_secrets.py`), links (`check_docs_links.py`), quoted RUNBOOK sections and BACKLOG numbers (`check_doc_refs.py`), the plans index (`docs_index.py`); outside `make check`, `harness_tests.sh` (runs the test files a ticket names: Python by basename through `unittest discover -s test`, JS with `node`), `verify.sh` (the verify command: `make check`, then `VERIFY OK`) and `capture_readonly.sh`, a GET-only capture of the audit and the sync's dry runs to diff before and after a refactor |
 | `.githooks/` | `pre-commit` for commits made outside Claude Code (installed by `make hooks`) |
 | `Makefile` | `make check` (lint, tests, the checks above, conflict markers, the fixture), `make lint`, `make docs-index`, `make help` |
 | `.claude/` | Claude Code guardrails: hooks that block live-system writes and edits of personal data, secrets or the guardrails themselves, and scan every written file; skills for the Jotform API, the privacy policy, the live systems and Salesforce; agents |
@@ -59,8 +59,8 @@ and apply forms, in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 ## Docs
 
 [docs/README.md](docs/README.md) is the index: runbook, architecture, decisions, backlog, and
-the plans under `docs/plans` (an intent under `docs/intent` is optional; the launch notes are in
-`docs/archive`).
+the plans under `docs/plans` (kept only for changes with a live rollout, beside their ticket; an
+intent under `docs/intent` is optional; the launch notes are in `docs/archive`).
 `CLAUDE.md` is the one-page briefing for Claude; `REVIEW.md` the review policy.
 
 ## Safety properties
