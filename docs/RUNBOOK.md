@@ -865,9 +865,10 @@ out of place) and plans only `REPLACE conditions`, which the runner applies on i
 **`tools/form_status.py`** reports a form NOT CLEAN until it carries each type once per module
 dropdown in the exact spelling, no rule shows a session dropdown for an event or on the year
 alone, and the bridge is there once, in its shape, before every session rule and every copy
-into question 100. Before the apply each of these reads `awaiting a sync apply by hand, template
-first (RUNBOOK "Special events")` (the hint's wording predates DECISIONS 2026-10-14: on a
-regional form the apply is the runner's next run). The report line reads `special events: 2
+into question 100. Before the apply each of these reads, on an enabled regional form, `awaiting
+the runner's next run (or the sync's apply by hand now) (RUNBOOK "Special events")`, and on the
+template or a disabled form, `awaiting a sync apply by hand, template first (RUNBOOK "Special
+events")`. The report line reads `special events: 2
 type(s) on 3 of 3 module dropdowns; session bridge rule N of M, S session rule(s), 0 on no
 curriculum module`.
 `--rendered` also checks that each module select serves every event once with its
