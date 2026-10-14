@@ -89,9 +89,11 @@ class RestoreRefusals(unittest.TestCase):
     def setUp(self):
         self.qs, self.wire = ClubGuardFixture.form(ClubGuardFixture())
 
-    def run_restore(self, snapshot, *extra, name="properties-latest.json"):
-        """(exit code, stdout, every call the fake saw, backups/999/ file names afterwards).
-        snapshot: what to save as backups/999/<name>; None saves nothing."""
+    def run_restore(self, snapshot, *extra, name="properties-latest.json", folder=True):
+        """(exit code, stdout, every call the fake saw, backups/999/ file names afterwards; []
+        when the folder is absent - self.folder_exists says which).
+        snapshot: what to save as backups/999/<name>; None saves nothing.
+        folder: False leaves backups/999/ uncreated (a clone that never ran backup_forms.py)."""
         calls = []
         questions = self.qs
 
@@ -117,10 +119,11 @@ class RestoreRefusals(unittest.TestCase):
 
         out = io.StringIO()
         with tempfile.TemporaryDirectory() as tmp:
-            folder = os.path.join(tmp, "backups", "999")
-            os.makedirs(folder)
+            path = os.path.join(tmp, "backups", "999")
+            if folder:
+                os.makedirs(path)
             if snapshot is not None:
-                with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
+                with open(os.path.join(path, name), "w", encoding="utf-8") as f:
                     json.dump(snapshot, f)
             with mock.patch.object(restore_conditions, "REPO", tmp), \
                     mock.patch.object(restore_conditions.backup, "REPO", tmp), \
@@ -133,8 +136,9 @@ class RestoreRefusals(unittest.TestCase):
                     code = 0
                 except SystemExit as e:
                     code = e.code
-            self.folder = folder
-            return code, out.getvalue(), calls, sorted(os.listdir(folder))
+            self.folder = path
+            self.folder_exists = os.path.isdir(path)
+            return code, out.getvalue(), calls, sorted(os.listdir(path)) if self.folder_exists else []
 
     def test_control_a_snapshot_with_conditions_is_restored(self):
         code, out, calls, files = self.run_restore({"conditions": self.wire}, "--apply")
@@ -158,10 +162,14 @@ class RestoreRefusals(unittest.TestCase):
                 self.assertEqual(files, ["conditions-latest.json"])      # no snapshot of the form either
 
     def test_no_backup_folder_at_all_is_refused_too(self):
-        code, out, calls, files = self.run_restore(None, "--apply")
-        self.assertTrue(str(code).startswith("No snapshot at "))
-        self.assertIn("run backup_forms.py first", str(code))
-        self.assertEqual((out, calls, files), ("", [], []))
+        # a fresh clone: backups/999/ itself does not exist (run_restore must not create it)
+        for extra in ((), ("--apply",), ("--apply", "--force")):
+            with self.subTest(extra=extra):
+                code, out, calls, files = self.run_restore(None, *extra, folder=False)
+                self.assertEqual(code, f"No snapshot at {os.path.join(self.folder, 'properties-latest.json')} "
+                                       "- run backup_forms.py first")
+                self.assertEqual((out, calls), ("", []))
+                self.assertFalse(self.folder_exists)     # the refusal did not create the folder either
 
     def test_a_snapshot_that_holds_no_conditions_is_refused_before_anything_is_read_or_written(self):
         for empty in ({"conditions": []}, [], {"conditions": None}):
