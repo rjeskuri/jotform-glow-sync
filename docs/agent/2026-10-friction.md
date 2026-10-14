@@ -17,22 +17,22 @@ the mechanism, a candidate to narrow.
 
 | # | Stop (code) | Count (source) | Hand work per stop | Class | Smallest change | Size / risk |
 |---|---|---|---|---|---|---|
-| 1 | `live_gate.sh`: a live flag that sits only in **text**: a heredoc body (`cat > doc <<EOF`, `git commit -F -`), a commit message, a `harness-board` question | gate log: 199 of 429 entries are text and 94 more are no-network python heredocs that edit files. Transcripts: 21 heredoc bodies, 1 commit message, 1 board question among 83 blocks [E1, E5] | main session: today, one approval prompt for Ryan (estimate 15–30 s each: read the reason, answer). Subagent or dispatched run: **denied**, so 1–3 extra tool calls to rephrase, or the stage stalls | (c) | No hook change ("prompt, don't parse" stands). Text goes through files: `git commit -F <file>`, `gh pr/issue --body-file`, docs through Write/Edit, never `cat > file <<EOF`. One line in CLAUDE.md rule 1 and in the live-systems skill's "The gate" | S / low |
-| 2 | `live_gate.sh`: a **read-only pipeline** that mentions a flag (`grep -n -- --apply X \| head`, `sed -n`, `echo`) | transcripts: grep 10, git grep 1, sed 3, echo 3 of 83 blocks. Gate log: grep 48, echo 5 [E1, E5] | as #1. The exemption covers a read-only command only when it stands alone, so one pipe makes it ask, or deny in a subagent | (c) | In `read_only()`, accept `\|` between segments when every segment starts with a word that cannot write a file: `grep head tail cat wc ls cut`. Not `sort` (`sort -o F`), `uniq` (`uniq IN OUT`), `rg` (`--pre` runs a program) or `sed` (`w`, `-i`). Move the self-approval check ahead of the exemption: today `read_only` exits before the `SELF` refusal (`live_gate.sh`, `read_only && exit 0` sits above `if has "$SELF"`), so a passing pipeline must not skip it. Every other operator still asks, and so does any word not on the list. `sed` and `echo` are not on it, so their 6 transcript stops (sed 3, echo 3) remain; the change covers at most the 11 grep ones | S / high (gate, protected file) |
-| 3 | `live_gate.sh` **subagent rule**: any match in a subagent is denied, mentions included | transcripts, harness era (2026-10-13/14, 2 days): 35 of 48 blocks came from subagents. 32 of the 35 are still denied by today's hook (re-run on the same commands; 3 now pass); none was a real write [E5] | the subagent rewrites or gives up. The orchestrator or Ryan picks it up | (a) for real writes; the mentions are #1 and #2 | Nothing on its own: #1 and #2 take away the mentions. Keep the rule: a live write never comes from a subagent | — |
+| 1 | `live_gate.sh`: a live flag that sits only in **text**: a heredoc body (`cat > doc <<EOF`, `git commit -F -`), a commit message, a `harness-board` question | gate log: 199 of 429 entries are text and 94 more are no-network python heredocs that edit files. Transcripts: 21 heredoc bodies, 1 commit message, 1 board question among 81 blocks [E1, E5] | main session: today, one approval prompt for Ryan (estimate 15–30 s each: read the reason, answer). Subagent or dispatched run: **denied**, so 1–3 extra tool calls to rephrase, or the stage stalls | (c) | No hook change ("prompt, don't parse" stands). Text goes through files: `git commit -F <file>`, `gh pr/issue --body-file`, docs through Write/Edit, never `cat > file <<EOF`. One line in CLAUDE.md rule 1 and in the live-systems skill's "The gate" | S / low |
+| 2 | `live_gate.sh`: a **read-only pipeline** that mentions a flag (`grep -n -- --apply X \| head`, `sed -n`, `echo`) | transcripts: grep 10, git grep 1, sed 3, echo 3 of 81 blocks. Gate log: grep 48, echo 5 [E1, E5] | as #1. The exemption covers a read-only command only when it stands alone, so one pipe makes it ask, or deny in a subagent | (c) | In `read_only()`, accept `\|` between segments when every segment starts with a word that cannot write a file: `grep head tail cat wc ls cut`. Not `sort` (`sort -o F`), `uniq` (`uniq IN OUT`), `rg` (`--pre` runs a program) or `sed` (`w`, `-i`). Move the self-approval check ahead of the exemption: today `read_only` exits before the `SELF` refusal (`live_gate.sh`, `read_only && exit 0` sits above `if has "$SELF"`), so a passing pipeline must not skip it. Every other operator still asks, and so does any word not on the list. `sed`, `echo` and `git` are not on it, so their 7 transcript stops (sed 3, echo 3, git grep 1) remain; the change covers at most the 10 grep ones. `git grep` stays out: it could join only without `-O`/`--open-files-in-pager`, which runs a program, and that is 1 stop | S / high (gate, protected file) |
+| 3 | `live_gate.sh` **subagent rule**: any match in a subagent is denied, mentions included | transcripts, harness era (2026-10-13/14, 2 days): 33 of 46 blocks came from subagents. 31 of the 33 are still denied by today's hook (re-run on the same commands; 2 now pass); none was a real write [E5] | the subagent rewrites or gives up. The orchestrator or Ryan picks it up | (a) for real writes; the mentions are #1 and #2 | Nothing on its own: #1 and #2 take away the mentions. Keep the rule: a live write never comes from a subagent | — |
 | 4 | `.claude/settings.json` deny rule `Read(./.env)`: a Bash command that names `.env` (to see whether the key file exists, or to read or source it) is denied in every mode, main sessions too | transcripts: 39 "Permission to use Bash … denied", 32 of them in subagents. **36 of the 39 name `.env` itself** (first words of the denied part: head 20, ls 7, grep 2, others 7); 1 names a path outside the project; 2 have no cause found. Not a missing allow rule: `Bash(ls:*)` and `Bash(wc:*)` are allowed, and all 7 `ls` and the 1 `wc` denials name `.env` [E6] | 1–2 extra tool calls (estimate); the agent drops the check or asks | (a): it keeps the API key out of transcripts (CLAUDE.md rule 2) | Keep the rule. One line in the agent prompts (#48): the tools load the key themselves and refuse without it (`glow/cli.py`), so nothing needs to name `.env`. Do **not** add `Bash(cat:*)`/`Bash(head:*)` either: they would read `data/` silently, past the `Read(./data/**)` ask. Remove the dead rules (the "Settings rules that never match" row below the top 10) | S / low |
 | 5 | `protected_paths.sh` on `.claude/hooks/*` and `.claude/settings*.json`: Ryan applies every guardrail change by hand | 2 tickets since 2026-10-13 (#3 "Ryan's edit", #36 "Ryan applied the hook and settings", git log bodies of `459451d`, `e5b04f8`). #36: 1 needs-input; 11 assistant messages in one session asked Ryan to apply a guardrail patch (**estimate**, a regex) [E2, E6]. Transcripts: 2 blocks on hooks [E6] | high: Ryan reviews the diff, copies the files and re-runs verify, every review round (estimate 10–20 min per round, from #36: needs-input 03:20Z, PR 03:42Z) | (a) | Keep the block. Make the hand step one command: `scripts/apply_guardrails.sh <worktree>`. Ryan runs it; it prints the diff of `.guardrails/` against `.claude/`, asks y/n, copies, removes `.guardrails/` and runs `test/hooks_test.py`. `protected_paths.sh` protects the script's own path too: `scripts/` is not protected today, so an agent could edit the script Ryan runs (and the diff it shows him) and get around the block this row keeps. That makes it a hook change, applied by hand once | S / high (adds a protected path) |
-| 6 | `protected_paths.sh` on `data/`: new work files (a Salesforce metadata package, a helper script) under `data/<dated>/` | transcripts: 10 blocks in 8 sessions, 2026-09-28 … 2026-10-14 [E6] | 1–3 tool calls: the file is generated by a script instead (estimate). No Ryan time | (a) for existing exports; (c) for new work files | No hook change (`data/` holds minors' names). The Salesforce metadata skill #48 proposes says builds are generated by a script or kept in the scratchpad | S / low |
+| 6 | `protected_paths.sh` on `data/`: new work files (a Salesforce metadata package, a helper script) under `data/<dated>/` | transcripts: 10 blocks in 6 sessions, 2026-09-28 … 2026-10-14 [E6] | 1–3 tool calls: the file is generated by a script instead (estimate). No Ryan time | (a) for existing exports; (c) for new work files | No hook change (`data/` holds minors' names). The Salesforce metadata skill #48 proposes says builds are generated by a script or kept in the scratchpad | S / low |
 | 7 | Plan document for every change with a live rollout (CLAUDE.md conventions, `docs/templates/plan.md`, `docs_index.py --check`) | 44 plans, all added since 2026-09-01: `git log --diff-filter=A --name-only --format= -- docs/plans`, README left out, unique paths: 44, all still on disk; `docs_index.py --check`: "ok (44 plans, 11 intents)". (`--since=2026-09-01` gives 42: it drops the 2 plans added on 2026-09-01 itself in `4eee550`.) 0 check failures found in transcripts [E6] | authoring, not a stop: about one plan per working day (estimate, from the count) | (b) for a generated form change whose rollout is now the merge (#30); (a) for hand rollouts | A plan only when hand steps remain (the template, a disabled form, Salesforce, Apps Script). A generated change carries `Live:` in its PR. One line in CLAUDE.md and the template | S / low |
 | 8 | Prose-pinning tests: `test/runbook_test.py` (32 tests in 7 classes; 52 doc references), `special_events_test.py` `RunbookQuotes`/`IdgDocs`, `doc_refs_test.py` | `runbook_test.py` has changed in 9 commits since it was created on 2026-10-09. The breaker "cheat passed" twice on doc tests only (#30 Resolution); #31 breaker fail ×2 (`harness-work` attempts) [E2, E3]. Transcripts: 1 failing result named a runbook class [E6] | each doc ticket rewrites pinned quotes (#31 updates 3, and must keep 4 classes "unchanged"). Breaker rounds cost tokens, not Ryan's time | (b) for sentence quotes of historical plans; (a) for pinned commands, form ids and headings | Keep the pins on commands, ids and headings (`doc_refs` already guards headings). Drop sentence-level quotes of plans that ran (`RosterRepairRunbook`, `SameNameRunbook`) | M / low |
-| 9 | `sync_attendance_form.py` refusal flags: `--q5-change-ok`, `--same-name-switch`, `--disabled-ok`, `--prune` on a form with submissions; `auto_sync.py --min-active` | transcripts, failed commands that name the flag: q5 2, same-name 3, disabled 2, prune 3; min-active/floor 8 (**estimate**, a loose marker) [E6]. Gate log, real applies that carried a flag: `--same-name-switch` 4, `--disabled-ok` 1 [E1] | one re-run with the flag after reading why (a minute, estimate). On Ryan's go | (a) | Keep them all. One question: does the disabled U.S form still need every form change by hand (`--disabled-ok`, #31's "Add a type" step 4)? If not, that hand step goes | S / low (a question first) |
+| 9 | `sync_attendance_form.py` refusal flags: `--q5-change-ok`, `--same-name-switch`, `--disabled-ok`, `--prune` on a form with submissions; `auto_sync.py --min-active` | transcripts, failed commands that name the flag: q5 2, same-name 3, disabled 2, prune 3; min-active/floor 9 (**estimate**, a loose marker) [E6]. Gate log, real applies that carried a flag: `--same-name-switch` 4, `--disabled-ok` 1 [E1] | one re-run with the flag after reading why (a minute, estimate). On Ryan's go | (a) | Keep them all. One question: does the disabled U.S form still need every form change by hand (`--disabled-ok`, #31's "Add a type" step 4)? If not, that hand step goes | S / low (a question first) |
 | 10 | `--vpn-off` (`glow/salesforce.py require_vpn_off`) | transcripts: 5 failed commands with the VPN marker (**estimate**, the marker also matches other text); gate log: 13 real applies carried `--vpn-off` [E1, E6] | one re-run, after Ryan confirms the VPN is off | (a) | Keep. Salesforce freezes the user (CLAUDE.md rule 12) | — |
 
 Below the top 10, still live but rarely or never stopping work:
 
 | Stop | Count (source) | Class | Change |
 |---|---|---|---|
-| `live_gate.sh` self-approval rule: the `GLOW_LIVE_OK=` text (and startup-file writes) | 17 gate-log entries, **all mentions**: none sets the variable [E1]. 16 transcript blocks are mentions too (one is this investigation's own script) [E5]. Denied in every mode | (c), and (b) for the variable: since #36 `GLOW_LIVE_OK` grants nothing, so setting it opens nothing | Ryan kept the self-approval blocks in #36. Proposal: drop the `GLOW_LIVE_OK=` alternative; keep the startup-file writes and `launchctl setenv` (a). His decision |
+| `live_gate.sh` self-approval rule: the `GLOW_LIVE_OK=` text (and startup-file writes) | 17 gate-log entries, **all mentions**: none sets the variable [E1]. 15 transcript blocks are mentions too [E5]. Denied in every mode | (c), and (b) for the variable: since #36 `GLOW_LIVE_OK` grants nothing, so setting it opens nothing | Ryan kept the self-approval blocks in #36. Proposal: drop the `GLOW_LIVE_OK=` alternative; keep the startup-file writes and `launchctl setenv` (a). His decision |
 | `auto_sync.py check_bands`: the bands that remain | **0** of 210 runs held on a remaining band. All 7 region holds (2 runs, 2026-10-02 and 2026-10-14) were the two rollout holds #30 removed [E4] | (a) | none |
 | Runner dry runs while `AUTO_SYNC_APPLY=0` | 40 of 210 runs (2026-09-02 … 09-12 at launch, 24 runs; 2026-09-30 … 10-01, 16 runs). Roster changes waited for a later run [E4] | (b) | #31 (in review) stops the toggling; the switch stays for emergencies |
 | Branch guard (harness `branch_guard.py`) | 4 refusals on main, 2026-10-14, 2 sessions [E6] | (a) | none |
@@ -112,30 +112,35 @@ scratch). Mode `default`:
     12 skipped (form DISABLED), 7 attention.
   - ATTENTION printed in 3 runs (8 items).
   - SyncLog was not read: it lives in the live sheet, and no offline copy is in the repository.
-- **[E5] Transcripts, live-gate blocks.** 1,064 jsonl files (33 main sessions, 1,031 subagents)
-  under `~/.claude/projects/<this repo>*`. 83 results carry
+- **[E5] Transcripts, live-gate blocks.** The cut-off is E1's, **2026-10-14 13:37 UTC** (the
+  transcripts stamp UTC), and this ticket's own sessions (the `t-46-…` project folder) are
+  excluded. 1,009 transcript files with a record before the cut-off (32 main sessions, 977
+  subagents) under `~/.claude/projects/<this repo>*`. 81 results carry
   `BLOCKED by .claude/hooks/live_gate.sh`; each was joined to its own tool call and
   classified:
   - real 3 (all in main sessions);
   - text 41;
   - no-network scripts 14;
   - network scripts 4;
-  - self-approval mentions 16;
-  - unclassified 5.
+  - self-approval mentions 15;
+  - unclassified 4.
 
-  Harness era (2026-10-13/14): 48 blocks, 35 of them in subagents.
-- **[E6] Transcripts, other stops** (error tool results by fixed message text):
+  Harness era (2026-10-13/14): 46 blocks, 33 of them in subagents.
+- **[E6] Transcripts, other stops** (error tool results by fixed message text; E5's cut-off,
+  2026-10-14 13:37 UTC, and E5's exclusion of this ticket's sessions):
   - in the repository's code:
     - protected_paths 12 (`data/` 10, hooks 2);
     - "Permission to use Bash … denied" 39: 36 name `.env` (the `Read(./.env)` deny rule),
-      1 a path outside the project, 2 no cause found (row 4);
+      1 a path outside the project, 2 no cause found (row 4). 2 more results, in subagents,
+      quote the message inside a Bash command's output (transcript counting) and are not
+      denials;
     - harness branch guard on main 4;
   - Ryan's own answers and fixed rules: Ryan rejected 12, a settings deny rule 4, a built-in
     denial 4;
   - outside the repository's code, so not ranked:
-    - the Claude Code auto-mode classifier: no verdict 100 (2026-09-14 … 09-30), denied 23;
+    - the Claude Code auto-mode classifier: no verdict 100 (2026-09-14 … 09-30), denied 25;
     - Claude Code worktree isolation 84;
-    - harness role and read-only guards 80, mostly "python opens a file for writing" in
+    - harness role and read-only guards 81, mostly "python opens a file for writing" in
       subagents (2026-10-12 … 14; #48's harness side);
     - connector session expired 35.
 
@@ -148,8 +153,8 @@ scratch). Mode `default`:
 - `AUTO_SYNC_APPLY` toggles Ryan made in his own terminal: not logged anywhere offline, so only
   their effect is counted (E4's dry runs);
 - SyncLog rows: in the live sheet;
-- gate-log entries after the E1 cut-off (2026-10-14 22:37 JST), and the `t-46-…` log (this
-  ticket's own agents).
+- gate-log entries and transcript records after the cut-off (2026-10-14 22:37 JST, 13:37 UTC),
+  and this ticket's own `t-46-…` gate log and sessions.
 
 ## Proposed tickets
 
