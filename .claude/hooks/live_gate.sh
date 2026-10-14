@@ -21,9 +21,10 @@
 # Fast: a few greps, no network. Every decision on a live command is appended to
 # .claude/live_gate.log (gitignored), with the mode it was taken in.
 #
-# Limits: the gate reads the command's text. A write through another program (cp,
-# an editor, a script), or a flag assembled at run time, is not seen: it guards
-# against mistakes, not against intent.
+# Limits: the gate reads the command's text, never its shell words. A write through
+# another program (cp, an editor, a script), or a flag assembled at run time, is not
+# seen: it guards against mistakes, not against intent. Text that only names a live
+# command (a commit message, a PR body) asks too, unless it is read-only and alone.
 #
 # A read-only command that only mentions a live flag (grep -n -- '--apply'
 # docs/RUNBOOK.md) passes: its first word is grep, rg, cat, head, tail, wc or ls,
@@ -67,7 +68,7 @@ PATTERN+="|${SF}data[[:space:]]+(create|update|delete|upsert|import)|${SF}apex[[
 PATTERN+="|${SF}force:(apex:execute|source:(deploy|delete|push)|mdapi:deploy|data:(record|bulk|tree):)|\.salesforce\.com/services/"
 # GitHub: the sync's switches (repository variables and secrets: SF_SYNC, AUTO_SYNC_APPLY),
 # the workflow itself, a run that applies (apply given true, from a file, by expansion, or
-# inputs as JSON) and a rerun (it repeats the recorded inputs); gh api writes are below.
+# inputs as JSON) and a rerun (it repeats the recorded inputs); gh api is below.
 GH='(^|[^[:alnum:]_.-])gh[[:space:]]+((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
 APPLY_ON='apply["'\'']?[[:space:]]*[=:][[:space:]]*["'\'']?([Tt][Rr][Uu][Ee]|1|[$@`])'
 PATTERN+="|${GH}(variable|secret)[[:space:]]+(set|delete|remove)|${GH}workflow[[:space:]]+(enable|disable)|${GH}run[[:space:]]+rerun"
@@ -77,191 +78,36 @@ STARTUP='(\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bashrc|\.bash_profile|\.bash_lo
 WRITES='(>|tee[[:space:]]|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i)[^;&|]*'
 SELF="GLOW_LIVE_OK\\+?=|${WRITES}${STARTUP}|launchctl[[:space:]]+setenv"
 PATTERN+="|${SELF})"
-# matched on one line: a command continued with \ (gh workflow run x \ -f apply=true) or
-# spread over lines is still one command
+# Prompt, don't parse (Ryan, 2026-10-14): the command is matched as text, never read as
+# shell words - a reader fails open on every gap between it and the shell, a text pattern
+# fails closed. Every pattern is tried, in any case, on the command on one line (a command
+# continued with \ or spread over lines is still one command) and on a copy with the quote
+# and backslash characters removed (gh 'workflow' run, g""h, var\iable, --ap""ply).
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
-MATCH=$(printf '%s' "$FLAT" | grep -Eo "$PATTERN" | head -1) || true
-# gh api: a write on ANY path (since 2026-10-14; before, only under actions/ or to
-# /dispatches). The settings ask on every command that starts gh api (Bash(gh api:*)); the
-# hook asks on the shapes that rule misses - bash -c, sh -c, eval, gh by its full path, a
-# quoted or split gh or api - and on every write. A command that holds a gh word (=gh and
-# a path ending in /gh too) and the word api, once continued lines are joined and the quote
-# and backslash characters removed (so g""h, g\h, 'gh' and a""pi count; a gh pr or gh issue
-# body without api is never read), is read as shell words by python3: backslash-newline
-# joins, $'...' and shlex (quotes, pflag shorthand bundles such as -iXDELETE or -iF name=x).
-# A # is text, never a comment (Ryan, 2026-10-14: reading comments as bash does let writes
-# hide behind "$(...)", backticks, ${x:- #}, heredocs and zsh =(...)). Each gh [-R x] api
-# segment up to the next ; | & ( ) < > or line break is judged, and a quoted string that
-# holds gh and api the same way (bash -c "gh api ...", eval) is read in turn. A write is a
-# method other than GET (-X, -XPOST, -X=POST, --method, --method=, in any case), fields
-# or an input file (-f, -F, --field, --raw-field, --input: they make it a POST) with no
-# explicit GET (with GET they are the query string), or graphql (a mutation can hide in
-# -F query=@file). A method inside a value is a value. Whatever cannot be read - an
-# unbalanced quote, an escape in $'...', a short flag gh api does not have, a flag without
-# its value, no python3 - counts as a write: the gate fails closed and asks.
-# (the Python holds no single quote and no backtick: chr(39) and chr(96) stand in, so the
-# heredoc reads the same under any shell's eye; read -d '' takes it whole, no $( ) parsing)
-IFS= read -r -d '' GH_API_PY <<'PY' || true
-import re, shlex, sys
-VALUE_LONG = {"cache", "field", "header", "hostname", "input", "jq", "method", "preview", "raw-field", "template"}
-FIELD_LONG = {"field", "raw-field", "input"}
-VALUE_SHORT, BOOL_SHORT, OPS = "FHqXpft", "ih", set("();<>|&")
-Q, DQ, BT = chr(39), chr(34), chr(96)
-QS = "[" + DQ + Q + "]"
-# the pre-filter, the same as the shell applies to the whole command
-GH_BARE, API_BARE = re.compile(r"(^|[^\w.-])gh([^\w.-]|$)"), re.compile(r"(^|\W)api(\W|$)")
-QUOTES_BS = re.compile(r"\$?" + QS + r"|\\")
-# the gh ... api text as the command spells it (quotes, =gh, a continued line, -R x), to
-# quote in the prompt: a reader sees the words of the command, the description follows
-GH_RAW = re.compile("[=\\\\]?" + QS + "?gh" + QS + r"?[\s\\]+(?:(?:-R|--repo)[=\s]*\S+[\s\\]+)?"
-                    + QS + "*a" + QS + "*p" + QS + "*i" + QS + "*")
-
-def gh_and_api(text):
-    """A gh word and the word api, once continued lines are joined and the quote and
-    backslash characters removed (with the $ of $"..." and of ANSI-C quoting)."""
-    bare = QUOTES_BS.sub("", text.replace("\\\r\n", "").replace("\\\n", ""))
-    return bool(GH_BARE.search(bare) and API_BARE.search(bare))
-
-def words_of(text):
-    """Shell words and operators; a # is a word like any other (commenters is empty)."""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = text.replace("\\\n", "").replace("\n", " ; ")
-    if "$" + Q in text:
-        if re.search(r"\$" + Q + "[^" + Q + r"]*\\", text):
-            raise ValueError("an escape in ANSI-C quoting")
-        text = text.replace("$" + Q, Q)
-    text = text.replace("$" + DQ, DQ)                  # $"..." reads as "..."
-    lex = shlex.shlex(text, posix=True, punctuation_chars=True)
-    lex.commenters = ""
-    lex.whitespace_split = True
-    return list(lex)
-
-def is_op(w):
-    return bool(w) and all(c in OPS for c in w)
-
-def is_gh(w):
-    w = w.lstrip(BT).lstrip("=")
-    return w == "gh" or w.endswith("/gh")
-
-def segment(words, j):
-    """From the word after api to the next operator: (end, verdict)."""
-    n, method, fields, graphql, positional = len(words), [], False, False, False
-    while j < n and not is_op(words[j]):
-        w = words[j]
-        if positional or w == "-" or not w.startswith("-"):
-            if w == "graphql" or w.endswith("/graphql"):
-                graphql = True
-        elif w == "--":
-            positional = True
-        elif w.startswith("--"):
-            name, eq, val = w[2:].partition("=")
-            if name in VALUE_LONG and not eq:
-                j += 1
-                if j >= n or is_op(words[j]):
-                    return j, "write:with --%s and no value (a write)" % name
-                val = words[j]
-            if name == "method":
-                method.append(val)
-            elif name in FIELD_LONG:
-                fields = True
-        else:
-            k = 1
-            while k < len(w):
-                c = w[k]
-                if c in BOOL_SHORT:
-                    k += 1
-                    continue
-                if c not in VALUE_SHORT:
-                    return j, "write:with a short flag gh api does not have (a write)"
-                rest = w[k + 1:]
-                if rest.startswith("="):
-                    val = rest[1:]
-                elif rest:
-                    val = rest
-                else:
-                    j += 1
-                    if j >= n or is_op(words[j]):
-                        return j, "write:with -%s and no value (a write)" % c
-                    val = words[j]
-                if c == "X":
-                    method.append(val)
-                elif c in "Ff":
-                    fields = True
-                break
-        j += 1
-    if graphql:
-        return j, "write:graphql (a mutation writes)"
-    for m in method:
-        if m.upper() != "GET":
-            return j, "write:with the method %s" % (m if re.fullmatch(r"[A-Za-z]+", m) else "spelt unreadably")
-    if fields and not method:
-        return j, "write:with fields or --input and no GET method (a POST)"
-    return j, "read"
-
-def scan(text, depth):
-    words = words_of(text)
-    i, n = 0, len(words)
-    while i < n:
-        w = words[i]
-        if is_gh(w):
-            j = i + 1
-            while j < n and (words[j] in ("-R", "--repo") or words[j].startswith("--repo=") or (words[j].startswith("-R") and len(words[j]) > 2)):
-                j += 2 if words[j] in ("-R", "--repo") else 1
-            if j < n and words[j] == "api":
-                j, verdict = segment(words, j + 1)
-                if verdict != "read":
-                    return verdict
-                i = j
-                continue
-        elif depth < 3 and re.search(r"\s", w) and gh_and_api(w):
-            verdict = scan(w, depth + 1)
-            if verdict != "read":
-                return verdict
-        i += 1
-    return "read"
-
-raw = sys.stdin.read()
-try:
-    verdict = scan(raw, 0)
-except Exception as e:
-    verdict = "write:that could not be read as shell words (%s: a write)" % e.__class__.__name__
-print(verdict)
-if verdict != "read":
-    found = GH_RAW.search(raw)
-    print(found.group(0).replace("\r", " ").replace("\n", " ") if found else "")
-PY
-# the pre-filter: a gh word ("gh", 'gh', g""h, g\h, \gh, =gh, /usr/local/bin/gh, g\<newline>h)
-# and the word api (a""pi, a\pi, ap$'i'), once backslash-newlines are joined and the quote and
-# backslash characters removed (with the $ of $'...' and $"..."). The Python decides whether
-# api is gh's subcommand.
-JOIN=$'\\\n' JOIN_CRLF=$'\\\r\n' ANSI_C="\$'" LOCALE='$"'
-BARE=${CMD//"$JOIN_CRLF"/}
-BARE=${BARE//"$JOIN"/}
-BARE=${BARE//"$ANSI_C"/}
-BARE=${BARE//"$LOCALE"/}
-BARE=$(printf '%s' "$BARE" | tr -d '\\"'"'" | tr '\n\r' '  ')
-WHY=
-if [ -z "$MATCH" ] && printf '%s' "$BARE" | grep -Eq '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' \
-    && printf '%s' "$BARE" | grep -Eq '(^|[^[:alnum:]_])api([^[:alnum:]_]|$)'; then
-  VERDICT=$(printf '%s' "$CMD" | python3 -c "$GH_API_PY") || VERDICT=
-  case "$VERDICT" in
-    read) ;;
-    write:*)   # line 1 write:<description>; line 2 the command's own gh ... api text, if found
-      DESC=${VERDICT%%$'\n'*}; DESC=${DESC#write:}
-      SNIPPET=${VERDICT#*$'\n'}; [ "$SNIPPET" = "$VERDICT" ] && SNIPPET=
-      if [ -n "$SNIPPET" ]; then MATCH=$SNIPPET; WHY=" (gh api $DESC)"; else MATCH="gh api $DESC"; fi ;;
-    *) MATCH="gh api that could not be read as shell words (no python3: a write)" ;;
-  esac
+BARE=$(printf '%s' "$FLAT" | tr -d '\\"'"'")
+TEXTS=$FLAT$'\n'$BARE
+has() { printf '%s\n' "$TEXTS" | grep -Eiq -e "$1"; }
+first() { printf '%s\n' "$TEXTS" | grep -Eio -e "$1" | head -1; }
+MATCH=$(first "$PATTERN") || true
+# gh api: a gh word (any case, a path ending in /gh, =gh) and the word api, with actions/,
+# dispatches or graphql anywhere in the command: the Actions API (the sync's variables,
+# secrets, workflows and runs), a repository dispatch, GraphQL (a mutation can hide in
+# -F query=@file). Live whatever the method - a read of them asks too. Every other gh api
+# call (issues, comments, labels, the harness's resume reads) is ungated, as before 2026-10-14,
+# and so is a message that mentions gh api without those words.
+if [ -z "$MATCH" ] && has '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' && has '(^|[^[:alnum:]_])api([^[:alnum:]_]|$)'; then
+  ON=$(first 'actions/|dispatches|graphql' | tr '[:upper:]' '[:lower:]')
+  [ -n "$ON" ] && MATCH="gh api on $ON"
 fi
 # sf api request: any GraphQL call (a mutation writes), and a REST call that writes - a method
 # other than GET (the CLI offers GET POST PUT PATCH HEAD DELETE OPTIONS TRACE), a body (-b,
 # --body) or a request file (-f, --file: it carries its own method and body). A relative path
 # (/services/data/...) does not name the host, so the URL pattern above does not see it.
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
+if [ -z "$MATCH" ] && has "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
   MATCH="sf api request graphql"
 fi
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${SF}api[[:space:]]+request[[:space:]]+rest" \
-    && printf '%s' "$FLAT" | grep -Eiq '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file)'; then
+if [ -z "$MATCH" ] && has "${SF}api[[:space:]]+request[[:space:]]+rest" \
+    && has '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file)'; then
   MATCH="sf api request rest that writes"
 fi
 [ -z "$MATCH" ] && exit 0
@@ -307,7 +153,7 @@ decide() {
 # refused: a deny decision with the reason, or - should no JSON come out - exit 2 with
 # the reason on stderr, which blocks just the same
 refuse() {
-  REASON="BLOCKED by .claude/hooks/live_gate.sh - matched \"$MATCH\"$WHY in: $SHOWN
+  REASON="BLOCKED by .claude/hooks/live_gate.sh - matched \"$MATCH\" in: $SHOWN
 $1
 $RUNBOOK"
   OUT=$(decide deny "$REASON") || OUT=
@@ -319,7 +165,7 @@ $RUNBOOK"
   printf '%s\n' "$REASON" >&2
   exit 2
 }
-if printf '%s' "$FLAT" | grep -Eq "$SELF"; then
+if has "$SELF"; then
   refuse "The command approves itself: it sets GLOW_LIVE_OK, or writes a file the next launch
 reads its environment from. Nothing pre-approves a live command - Ryan's answer to the
 session's prompt is the only go, and GLOW_LIVE_OK grants nothing since 2026-10-14."
@@ -334,13 +180,14 @@ case "$MODE" in
 default, acceptEdits, auto and plan can). Run it in an interactive session, or Ryan runs it
 in his terminal." ;;
 esac
-REASON="LIVE command - matched \"$MATCH\"$WHY in: $SHOWN
+REASON="LIVE command - matched \"$MATCH\" in: $SHOWN
 It can change a live system: the Jotform attendance forms, the master enrollment Google
 Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches on GitHub
 (live since 2026-09-01). Ryan's answer here is the go; nothing pre-approves it. Yes only
 after the dry run was read and the backup exists (backup_forms.py / sheets_client.py
 export-all). Direct API access (curl to api.jotform.com, Sheets write snippets, GitHub
-dispatches, gh api writes) is gated exactly like the tool flags.
+dispatches, gh api on actions/, dispatches or graphql) is gated exactly like the tool
+flags. The gate matches text: a message that only names a live command asks too.
 $RUNBOOK"
 OUT=$(decide ask "$REASON") || OUT=
 if [ -n "$OUT" ]; then

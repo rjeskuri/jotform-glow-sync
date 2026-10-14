@@ -38,9 +38,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 
 ## Things Claude gets wrong
 1. Every live write needs Ryan's explicit go: `--apply`, `--prune`, `--rehearse`, `clasp push`,
-   the sync's GitHub switches (`gh variable|secret set`, `gh workflow run … apply=true`), `gh api`
-   writes, Salesforce writes and deploys. `.claude/hooks/live_gate.sh` makes each an approval
-   prompt; his answer to it is the go (a headless run or a subagent cannot answer one: refused).
+   the sync's GitHub switches (`gh variable|secret set`, `gh workflow run … apply=true`, `gh api`
+   on `actions/`), Salesforce writes and deploys. `.claude/hooks/live_gate.sh` makes each an
+   approval prompt; his answer is the go (a headless run or a subagent cannot answer one: refused).
    It is a seatbelt, not the go: it misses the connectors and a write through another program.
 2. The API key comes from `.env` / the environment, never a command line (command lines land in
    `.claude/settings.local.json` and transcripts — that leaked a key once).

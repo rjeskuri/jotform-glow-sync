@@ -8,13 +8,14 @@ decision; 0 and an ask JSON: Ryan is asked in the session; 2, or a deny JSON: re
     (since 2026-10-14 GLOW_LIVE_OK pre-approves nothing), and is refused outright when the
     session cannot show him the prompt (permission_mode bypassPermissions, dontAsk, missing or
     unknown), from a subagent, and when the command approves itself; a read-only command that
-    only mentions a live flag passes, a chained one does not; every gh api write is live. A #
-    is text, never a comment (Ryan, 2026-10-14: reading comments as bash does let writes hide),
-    and the gh api reader runs only when the command holds a gh word and the text api once
-    quote and backslash characters are removed (a PR or issue body is not read);
-  - .claude/settings.json: the permission rules behind the hook (every gh api command asks and
-    none is allowed, since 2026-10-14; ask rules for the live families; the hook entry that
-    blocks on failure);
+    only mentions a live flag passes, a chained one does not. "Prompt, don't parse" (Ryan,
+    2026-10-14): the command is matched as text - as written and with quote and backslash
+    characters removed, in any case - never read as shell words. A gh api call is live when the
+    command holds a gh word, api, and actions/, dispatches or graphql anywhere, whatever the
+    method; every other gh api call is ungated, as on main;
+  - .claude/settings.json: the permission rules behind the hook (gh api allowed and never asked:
+    an ask would stall the harness's resume reads; ask rules for the live families; the hook
+    entry that blocks on failure);
   - .claude/hooks/protected_paths.sh (Edit|Write|MultiEdit): data/, backups/, credentials/,
     .env, the generated Regions.gs and the guardrails themselves are refused in every copy of the
     repository (main checkout, worktree, sibling checkout) and for a relative path;
@@ -32,6 +33,7 @@ import concurrent.futures
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -56,6 +58,13 @@ UNKNOWN_MODES = ["yolo", "foo", "", "Default", "DEFAULT", "acceptEdits ", "defau
                  "default auto", "bypasspermissions", "manual", "ask"]
 
 Run = collections.namedtuple("Run", "code out err")
+
+
+def nest(command, depth):
+    """The command run through `bash -c` depth times, each level quoted as the shell needs it."""
+    for _ in range(depth):
+        command = "bash -c " + shlex.quote(command)
+    return command
 
 
 @unittest.skipUnless(os.access(BASH, os.X_OK), "no /bin/bash to run the hooks with")
@@ -180,13 +189,15 @@ class Hooks(unittest.TestCase):
         shown = reason.replace("\r", " ").replace("\n", " ")
         matched = re.search(r'matched "(.+?)"', reason)
         self.assertIsNotNone(matched, f"no matched \"...\" in the reason: {reason!r}")
-        # the matched text is the command's own, except for the gh/sf api writes, whose match
-        # is a description - and only when the command is one, read as the shell reads it too
-        # (continued lines joined, quotes and backslashes removed: g""h a\pi is gh api)
-        cli = r"""(^|[^\w.-])["']?(gh|sf|sfdx)["']?\s[^;&|]*\bapi\b"""
-        bare = re.sub(r"""["'\\]""", "", command.replace("\\\r\n", "").replace("\\\n", ""))
-        api_cli = re.search(cli, flat) or re.search(cli, bare.replace("\r", " ").replace("\n", " "))
-        self.assertTrue(matched.group(1) in flat or (api_cli and matched.group(1).startswith(("gh api", "sf api"))),
+        # the matched text is the command's own - as written or with its quote and backslash
+        # characters removed, in any case (gh "variable" set, GH variable set) - except for the
+        # gh/sf api rules, whose match may be a description, and only when the command holds a
+        # gh or sf word and api
+        bare = re.sub(r"""["'\\]""", "", flat)
+        found = matched.group(1).lower()
+        api_cli = (re.search(r"(^|[^\w.-])(gh|sf|sfdx)([^\w.-]|$)", bare, re.I) and "api" in bare.lower())
+        self.assertTrue(found in flat.lower() or found in bare.lower()
+                        or (api_cli and found.startswith(("gh api", "sf api"))),
                         f"the matched text {matched.group(1)!r} is not in the command {flat!r}")
         if command in self.TRIGGERS:
             self.assertIn(self.TRIGGERS[command], reason, f"the reason does not name the family's trigger: {reason!r}")
@@ -298,7 +309,8 @@ class Hooks(unittest.TestCase):
     SAMPLE = [LIVE[0], "cd appsscript && npx clasp push -f", "python3 tools/sheets_client.py import Roster roster.csv",
               "curl -sS -X PUT 'https://api.jotform.com/form/1/properties?apiKey=x' -d @rules.json",
               "gh variable set SF_SYNC --body apply", "gh workflow run auto-sync.yml -f apply=true",
-              "gh api repos/o/r/issues -f title=x", "sf project deploy start --source-dir force-app -o glow",
+              "gh api -X PATCH repos/o/r/actions/variables/SF_SYNC -f value=apply",
+              "sf project deploy start --source-dir force-app -o glow",
               "python3 tools/sf_dupes.py merge --plan data/plan.json --rehearse"]
     # what the prompt must name for one command of each family: its own trigger
     TRIGGERS = {
@@ -325,6 +337,11 @@ class Hooks(unittest.TestCase):
             ".salesforce.com/services/",
         "sf api request rest '/services/data/v60.0/sobjects/Account/001x' -X PATCH --body '{}'": "sf api request rest",
         "sf api request graphql --body '{\"query\": \"mutation { x }\"}'": "sf api request graphql",
+        # matched with quotes removed, in any case
+        "gh 'workflow' run auto-sync.yml -f apply=true": "workflow run",
+        "gh \"variable\" set SF_SYNC --body apply": "variable set", "GH variable set X --body 1": "variable set",
+        "SF data delete record -s Contact -i 003000000000001": "data delete",
+        "python3 sync_attendance_form.py x --ap\"\"ply": "--apply",
     }
     # a command that approves itself: the flag in the command, or written where the next launch
     # reads its environment (review of 2026-10-09)
@@ -345,8 +362,10 @@ class Hooks(unittest.TestCase):
              "python3 sync_attendance_form.py roster.csv --roster --region Africa --form 1",
              "gh run list", "gh run view 123", "gh workflow list", "gh variable list",
              "gh secret list", "gh workflow view auto-sync.yml", "gh run download 1234",
-             "gh api repos/o/r/actions/variables", "gh api -X GET repos/o/r/actions/runs --jq '.total_count'",
-             "gh api repos/o/r/actions/runs/1234/logs > run.zip",
+             # (gh api reads of actions/ moved to GH_API_LIVE, 2026-10-14: they ask, whatever the method)
+             # the gh api rule needs all three: a gh word, api, and actions/, dispatches or graphql
+             "ls .github/actions/ && make check", "curl -s https://example.com/api/graphql -o out.json",
+             "gh run list --json name,url | grep actions/", "gh pr list --search graphql",
              "gh workflow run auto-sync.yml", "gh workflow run auto-sync.yml -f apply=false",
              "sf org list", "sf data query -q 'SELECT Id FROM Account' -o glow",
              "sf project deploy report --job-id 0Af000000000001", "sfdx force:org:list",
@@ -359,185 +378,103 @@ class Hooks(unittest.TestCase):
              "cat ~/.zshrc", "grep -n PATH ~/.zshrc", "tail -5 ~/.bash_profile", "ls -la ~/.zshrc",
              "wc -l .envrc", "cp ~/.zshrc ~/.zshrc.bak", "echo x > ~/.zshrc.bak", "source .env",
              "python3 tools/sf_dupes.py plan", "git status"]
-    # gh api: a write is a method other than GET, or fields / --input (which make it a POST)
-    # without an explicit GET, or any graphql call - on any path, not only actions/ or /dispatches
-    GH_API_WRITES = [
-        "gh api -X PATCH repos/o/r/issues/1 -f title=x",
-        "gh api repos/o/r/issues -f title=x",
-        "gh api repos/o/r/issues/1/comments --raw-field body=x",
-        "gh api --method DELETE repos/o/r/git/refs/heads/x",
-        "gh api -XPUT repos/o/r/pulls/1/merge",
-        "gh api repos/o/r/contents/a.md --input body.json",
+    # gh api, "prompt, don't parse" (Ryan, 2026-10-14). The read/write reader of 9794ffe..a2cf749
+    # is withdrawn: four reviews found it failing open on each gap between it and the shell. A
+    # gh word - any case, a path ending /gh, =gh, split by quotes or a backslash - and api, and
+    # actions/, dispatches or graphql anywhere in the command: live whatever the method, GETs too
+    GH_API_LIVE = [
+        # the method does not count: reads of the Actions API, of dispatches and graphql ask too
+        "gh api repos/o/r/actions/variables",
+        "gh api -X GET repos/o/r/actions/runs --jq '.total_count'",
+        "gh api repos/o/r/actions/runs/1234/logs > run.zip",
+        "gh api --paginate repos/o/r/actions/secrets",
+        "gh api --method GET repos/o/r/actions/variables -f per_page=100",
         "gh api graphql -f query='query { viewer { login } }'",
+        "gh api repos/o/r/dispatches",
+        # ... and the writes
+        "gh api -X PATCH repos/o/r/actions/variables/SF_SYNC -f value=apply",
+        "gh api repos/o/r/actions/workflows/auto-sync.yml/dispatches -f ref=main -f 'inputs[apply]=true'",
+        "gh api repos/o/r/dispatches -f event_type=roster-changed",
         "gh api graphql -F query=@m.graphql",
-        "gh -R o/r api repos/o/r/labels -f name=x",
-        # the same writes spelt otherwise
-        "gh api -X post repos/o/r/issues -f title=x",                    # the method in any case
-        "gh api --method=patch repos/o/r/issues/1 -f state=closed",
-        "gh api -F name=x repos/o/r/labels",                             # the field before the path
-        "gh api --field body=x repos/o/r/issues/1/comments",
-        "gh api repos/o/r/pulls/1/reviews -f event=APPROVE",           # the loop's path, written to
-        "gh api repos/o/r/issues/36/comments -f body='done'",
-        "gh api user/repos -f name=scratch",                             # not under repos/
+        "gh -R o/r api repos/o/r/actions/variables/X -X DELETE",
+        "gh api -iXDELETE repos/o/r/actions/secrets/X",
         "gh api orgs/o/actions/variables -f name=SF_SYNC -f value=x",
-        "gh --repo o/r api repos/o/r/labels -F name=x",
-        "gh api graphql -f query='mutation { x }'",
-        "gh api -X DELETE repos/o/r/labels/x",
-        "gh api repos/o/r/git/refs -f ref=refs/heads/x -f sha=abc",
-        # GET as a value or inside a word is no method
-        "gh api -X POST repos/o/r/issues -f title=GET",
-        "gh api -X DELETE repos/o/r/labels/BUDGET",
-        "gh api -X PATCH repos/o/r/contents/TARGET.md -f message=x",
-        "gh api repos/o/r/issues -f title=GETTING_STARTED",
-        "gh api repos/o/r/issues/1/comments -f body=target",
-        "gh api --method PUT repos/o/r/pulls/1/merge -f merge_method=GET",
-        # the method or field flag in a combined shorthand (pflag: -iX DELETE is -i -X DELETE,
-        # -iXPOST is -i -X POST, -if body=x is -i -f body=x) or quoted the shell's other ways
-        # (review of PR #41)
-        "gh api -iX DELETE repos/o/r/labels/x",
-        "gh api -iXPOST repos/o/r/issues -f title=x",
-        "gh api -iXDELETE repos/o/r/labels/x",
-        "gh api -iF name=x repos/o/r/labels",
-        "gh api -if body=x repos/o/r/issues/1/comments",
-        "gh api -X$'POST' repos/o/r/issues -f title=x",
-        "gh api --method=$'DELETE' repos/o/r/labels/x",
-        "gh api -X \"PUT\" repos/o/r/pulls/1/merge",
-        "gh api -i --method DELETE repos/o/r/labels/x",
-        # a GET inside a field's value is a value, not the method: the fields make it a POST
-        "gh api repos/o/r/issues/36/comments -f body='use curl -X GET first'",
-        "gh api repos/o/r/issues -f body=\"--method GET\"",
-        "gh api repos/o/r/issues -f title='--method=get'",
-        "gh api repos/o/r/issues -f note='-X GET' -f title=x",
-        "gh api repos/o/r/issues/1/comments --raw-field body='gh api -X GET repos/o/r/issues'",
-        # a # is text wherever it stands, never a comment (Ryan, 2026-10-14; before, a # at the
-        # start of a word was read as bash reads a comment, and the reader dropped what followed)
-        "# add the label\ngh api repos/o/r/labels -f name=x",
-        "gh api repos/o/r/issues/1 # read the state\ngh api -X DELETE repos/o/r/issues/1/labels/x",
-        "gh api repos/o/r/issues#x -XPOST",
-        "gh api -X GET repos/o/r/issues -f q=bug#12; gh api -X DELETE repos/o/r/labels/x",
-        "gh api repos/o/r/pulls/1 --jq .state # then\ngh api -XPUT repos/o/r/pulls/1/merge",
-        "gh api repos/o/r/issues -f body='#1 done'",                     # a quoted # is data
-        "gh api repos/o/r/issues -f title=\"#12 again\"",
-        # ... so a write method after a # on the gh api line is a flag of that command (it asks
-        # since 2026-10-14; before, it was a comment and passed)
-        "gh api repos/o/r/pulls/1 # then -X DELETE it",
-        # gh or api quoted, or split over a continued line, is still gh api
-        "gh \"api\" -X POST repos/o/r/issues",
-        "\"gh\" api -X POST repos/o/r/issues",
-        "gh \\\n  api -X POST repos/o/r/issues",
-        "gh 'api' -X POST repos/o/r/issues",
-        "'gh' api -XPOST repos/o/r/issues",
-        # a # glued to the ) of $(...), $((...)), <(...) or >(...) is text, and the ; still splits
-        "echo $(echo x)#t; gh api -X POST repos/o/r/issues",
-        "$((1+1))#n; gh api -X DELETE repos/o/r/labels/x",
-        "cat <(echo x)#t; gh api -X PUT repos/o/r/pulls/1/merge",
-        "echo x > >(cat)#t; gh api -XPATCH repos/o/r/issues/1 -f state=closed",
-        "(true)#c\ngh api -X POST repos/o/r/issues",
-        # zsh expands =gh to gh's path; a split or quoted api is still api
-        "=gh api -X POST repos/o/r/issues",
-        "gh a\"\"pi -X POST repos/o/r/issues",
-        "gh 'a'pi -XPOST repos/o/r/issues",
-        # what the settings' ask rule Bash(gh api:*) misses (research on 2.1.299, 2026-10-14), so
-        # the hook is the only layer: a shell or eval running the text, gh by its full path, and
-        # a quoted or split subcommand word
-        "bash -c \"gh api -X POST repos/o/r/issues\"",
-        "sh -c 'gh api repos/o/r/labels -f name=x'",
-        "zsh -c \"gh api -XDELETE repos/o/r/labels/x\"",
-        "eval \"gh api --method PATCH repos/o/r/issues/1 -f state=closed\"",
-        "/opt/homebrew/bin/gh api -X POST repos/o/r/issues",
-        "/usr/local/bin/gh api graphql -f query=x",
-        "gh ap\"\"i -X POST repos/o/r/issues",
-        "gh 'api' repos/o/r/labels -f name=x",
-    ]
-    # a # is text (2026-10-14): each of these hid its write from the reader at 014d2ab, which
-    # took the # for a comment's start and dropped the rest of the line (review of PR #41 at
-    # 014d2ab): inside "$(...)" quotes, in backticks, in ${x:- #}, after a heredoc body whose
-    # apostrophe the reader took for a quote, after zsh's =(...), after a case pattern's ) in $(...)
-    HASH_IS_TEXT = [
+        # shapes the reader did not see through (reviews of PR #41): a # it took for a comment,
+        # a redirection between the path and the method, a substitution before or inside the
+        # command, eval, a shell, gh found at run time, four shells deep
         "gh pr comment 41 --body \"$(printf \"Closes #36\")\" && gh api repos/o/r/actions/variables/X -X PATCH -f value=true",
         "echo `echo #`; gh api -X PATCH repos/o/r/actions/variables/X -f value=true",
         "echo ${x:- #}; gh api -X PATCH repos/o/r/actions/variables/X -f value=true",
         "cat <<'EOF'\ndon't\nEOF\necho ' # '; gh api -X PATCH repos/o/r/actions/variables/X -f value=true",
-        "cat =(echo x)#t; gh api -X POST repos/o/r/issues",
-        "echo $(case a in a) echo y;; esac)#t; gh api -X POST repos/o/r/issues",
-        # the same hiding places in front of the other kinds of write: fields, graphql, --input,
-        # --raw-field, a bundled method, --method
-        "gh issue comment 36 --body \"$(printf \"see #36\")\"; gh api repos/o/r/labels -f name=x",
         "echo `echo #`; gh api graphql -F query=@m.graphql",
-        "echo ${x:- #}; gh api repos/o/r/contents/a.md --input body.json",
-        "gh issue comment 36 --body-file - <<'EOF'\nIt's done\nEOF\necho ' # '; gh api -XDELETE repos/o/r/labels/x",
-        "cat =(true)#t; gh api repos/o/r/issues/1/comments --raw-field body=x",
-        "x=$(case $1 in -h) echo h;; esac)#c; gh api --method DELETE repos/o/r/git/refs/heads/x",
+        "gh api repos/o/r/actions/variables/SF_SYNC >/dev/null -X PATCH -f value=apply",
+        "gh api repos/o/r/actions/variables/SF_SYNC 2>&1 -X PATCH -f value=apply",
+        "$(true)gh api -X PATCH repos/o/r/actions/variables/SF_SYNC -f value=apply",
+        "gh $(true) api repos/o/r/actions/variables/SF_SYNC -X PATCH -f value=apply",
+        "eval 'gh api -X PATCH repos/o/r/actions/variables/SF_SYNC -f value=apply'",
+        "bash -c \"gh api repos/o/r/actions/secrets/X -X DELETE\"",
+        "sh -c 'gh api repos/o/r/dispatches -f event_type=x'",
+        "$(which gh) api repos/o/r/actions/variables/SF_SYNC -X PATCH -f value=apply",
+        nest("gh api -X PATCH repos/o/r/actions/variables/SF_SYNC -f value=apply", 4),
+        # the gh word and api spelt otherwise
+        "/opt/homebrew/bin/gh api repos/o/r/actions/variables",
+        "=gh api graphql -f query=x",
+        "GH api repos/o/r/actions/variables",
+        "Gh API repos/o/r/actions/runs",
+        "g\"\"h api repos/o/r/dispatches -f event_type=x",
+        "g\\h api repos/o/r/actions/variables",
+        "'gh' api repos/o/r/actions/runs",
+        "gh 'api' graphql -f query=x",
+        "gh a\"\"pi repos/o/r/actions/variables",
+        "gh ap\\i repos/o/r/actions/secrets",
     ]
-    # the gh api reader runs when the command holds a gh word and the text api once the quote and
-    # backslash characters are removed (2026-10-14): a gh split by quotes or a backslash is gh
-    SPLIT_GH_WRITES = [
-        "g\"\"h api -X POST repos/o/r/issues",
-        "g\\h api -X POST repos/o/r/issues",
-        "g''h api -XPOST repos/o/r/issues -f title=x",
-        "g\"h\" api repos/o/r/labels -f name=x",
-        "\"g\"h api repos/o/r/contents/a.md --input body.json",
-        "g\"\"h a\\pi graphql -f query=x",
-        "echo ok; g\"\"h api -XPATCH repos/o/r/issues/1 -f state=closed",
-        "\\gh api --method DELETE repos/o/r/labels/x",
-        "gh a\"\"pi -X POST repos/o/r/issues",
-        "'gh' api -X POST repos/o/r/issues",
-        "=gh api -X POST repos/o/r/issues",
-    ]
-    # ... and a split gh that only reads is read like any other: no prompt
-    SPLIT_GH_READS = ["g\"\"h api repos/o/r/pulls/1/reviews", "g\\h api --paginate repos/o/r/pulls/1/reviews",
-                      "'gh' api repos/o/r/pulls/1", "gh ap\"\"i repos/o/r/pulls/1"]
-    # a gh command with no api in it is never read as shell words, so a PR or issue body's odd
-    # apostrophe (a heredoc is not shell syntax) cannot refuse it in a dispatched run (review of
-    # 014d2ab); with api in its text but no gh api command, the reader runs and finds none
-    GH_TEXT_SILENT = [
-        "gh issue comment 36 --body-file - <<'EOF'\nIt's done.\nEOF",
-        "gh pr create --title x --body \"$(cat <<'EOF'\nThe Ryan's note\nEOF\n)\"",
-        "gh pr comment 41 --body-file - <<'EOF'\nRyan's go is on the ticket.\nEOF",
-        "gh pr comment 41 --body-file - <<'EOF'\nDon't merge yet; it's #36.\nEOF",
-        "gh pr comment 41 --body \"Closes #36\"",
-        "gh pr create --title \"api docs\" --body \"Closes #36\"",
-        "gh issue create --title x --body-file - <<'EOF'\nSee the api notes in #36.\nEOF",
-    ]
-    # a read with a comment that holds no write of its own command: the gate may pass it or ask
-    # (a # is text); it never refuses it in the session and never allows it. The -X DELETE on
-    # the line before gh is not a flag of gh api (orchestrator, 2026-10-14: silent or ask)
-    GH_API_COMMENTED_READS = ["gh api repos/o/r/pulls/1  # check",
-                              "gh api repos/o/r/pulls/1 # check\ngh api repos/o/r/pulls/2",
-                              "# -X DELETE later\ngh api repos/o/r/pulls/1"]
-    GH_API_READS = [
-        "gh api repos/o/r/pulls/1/reviews",                              # the harness loop's reads
+    # every other gh api call is ungated, as on main (Ryan, 2026-10-14): the harness's resume
+    # reads, and writes to issues, comments and labels - silent in every mode and from a subagent
+    GH_API_UNGATED = [
+        "gh api repos/o/r/issues -f title=x",
+        "gh api repos/o/r/pulls/1/reviews",
         "gh api --paginate repos/o/r/pulls/1/reviews",
         "gh api repos/o/r/pulls/1/reviews/2/comments",
-        "gh api -X GET repos/o/r/issues -f state=open",                  # with GET the fields are the query
-        "gh api --method GET search/issues -f q=x",
-        "gh api repos/o/r/actions/variables",
-        "gh api -X GET repos/o/r/actions/variables -f per_page=100",
-        "gh api user", "gh api repos/o/r/pulls/1 --jq .state",
-        "gh api -H 'Accept: application/vnd.github+json' repos/o/r/pulls/1",
-        "gh api --paginate 'repos/o/r/issues?state=open'",
-        "gh api -XGET repos/o/r/issues -F per_page=100",
-        "gh api --method=GET repos/o/r/issues -f state=open",
-        "gh -R o/r api repos/o/r/pulls/1/reviews",
-        "gh api -i repos/o/r/pulls/1",
-        # the method in any case, and after the fields
-        "gh api -X get repos/o/r/issues -f state=open",
-        "gh api --method=get repos/o/r/issues -f state=open",
-        "gh api repos/o/r/issues -f state=open -X GET",
-        "gh api repos/o/r/issues -F per_page=100 --method GET",
-        # a real GET in a combined shorthand or quoted; a method inside a value is a value
-        "gh api -iX GET repos/o/r/issues -f per_page=100",
-        "gh api -iXGET repos/o/r/issues -f per_page=100",
-        "gh api -X $'GET' repos/o/r/issues -f per_page=100",
-        "gh api -X GET repos/o/r/issues -f q='see -X POST'",
-        "gh api --method GET search/issues -f q='--method DELETE'",
-        # (the comment cases moved, 2026-10-14: a # is text; see GH_API_COMMENTED_READS, and the
-        # one whose gh api line holds -X DELETE after the # now asks, in GH_API_WRITES)
-        # a read run by a shell, by eval or by gh's full path is still a read
-        "bash -c \"gh api repos/o/r/pulls/1\"", "eval \"gh api --paginate repos/o/r/pulls/1/reviews\"",
-        "/opt/homebrew/bin/gh api repos/o/r/pulls/1/reviews",
-        # =gh is a word of its own only as a command; gh without api is not gh api
+        "gh api repos/o/r/issues/1/comments -f body=x",
+        "gh api -X DELETE repos/o/r/labels/x",
+        "gh api user", "gh api -X GET search/issues -f q=x", "gh -R o/r api repos/o/r/pulls/1/reviews",
+        "gh api repos/o/r/pulls/1  # check", "# -X DELETE later\ngh api repos/o/r/pulls/1",
+        "bash -c \"gh api repos/o/r/pulls/1\"", "/opt/homebrew/bin/gh api repos/o/r/pulls/1/reviews",
+        "g\"\"h api repos/o/r/pulls/1/reviews", "GH api repos/o/r/issues/1",
         "echo =gh", "gh pr view 1",
+    ]
+    # prose that mentions gh api - a commit message, a PR or issue body (a heredoc with an odd
+    # apostrophe too), a question on the board - is text, not a command: silent in every mode,
+    # headless and from a subagent included (review of 014d2ab: the reader refused these)
+    PROSE = [
+        "git commit -m \"every gh api command asks; Ryan's go\"",
+        "gh pr create --title x --body-file - <<'EOF'\nThe gate no longer reads gh api commands; it's text now.\nEOF",
+        "harness-board needs-input 37 --question \"Should a gh api read ask? The hook doesn't parse it.\"",
+        "gh issue comment 36 --body-file - <<'EOF'\nIt's done.\nEOF",
+        "gh pr create --title x --body \"$(cat <<'EOF'\nThe Ryan's note on gh api\nEOF\n)\"",
+        "gh pr comment 41 --body \"gh api reads stay ungated; it's as on main\"",
+    ]
+    # prose that also names actions/, dispatches or graphql: an accepted over-ask (Ryan,
+    # 2026-10-14) - silent or the prompt, never refused in the session
+    PROSE_OVER_ASK = ["git commit -m \"live gate: gh api under actions/ asks; Ryan's go\"",
+                      "gh pr comment 41 --body \"gh api graphql calls ask now; it's greedy\""]
+    # the live families with a quoted or split word, or in capitals: matched as written and with
+    # quote and backslash characters removed, in any case (Ryan, 2026-10-14)
+    SPELT_OTHERWISE = [
+        "gh 'workflow' run auto-sync.yml -f apply=true",
+        "gh \"variable\" set SF_SYNC --body apply",
+        "GH variable set X --body 1",
+        "SF data delete record -s Contact -i 003000000000001",
+        "gh secret \"set\" JOTFORM_API_KEY",
+        "Gh Workflow Disable auto-sync.yml",
+        "sf \"apex\" run -f merge.apex",
+        "g\"\"h run rerun 1234",
+        "gh var\\iable delete SF_SYNC",
+        "npx clasp \"push\" -f",
+        "SFDX force:source:deploy -p force-app",
+        "Sf Project Deploy Start -d force-app",
+        "python3 sync_attendance_form.py x --ap\"\"ply",
+        "curl -X PUT https://API.JOTFORM.COM/form/1/properties -d @rules.json",
     ]
 
     def test_every_live_command_asks_ryan_and_is_logged(self):
@@ -586,7 +523,8 @@ class Hooks(unittest.TestCase):
                     "git log --oneline --grep=--apply", "git show HEAD -- '*--apply*'",
                     "git diff main -- docs/RUNBOOK.md --apply", "git grep -n 'sf apex run' -- docs",
                     "git blame -L 1,5 docs/RUNBOOK.md --apply", "git status --apply",
-                    "  grep -c 'gh variable set SF_SYNC' CLAUDE.md"]
+                    "  grep -c 'gh variable set SF_SYNC' CLAUDE.md",
+                    "grep -n \"gh api repos/o/r/actions/variables\" docs/RUNBOOK.md"]
         for mode in ("default", "bypassPermissions", None):
             self.assert_silent(mentions, mode=mode)
         self.assert_silent(mentions, agent=True)
@@ -618,81 +556,42 @@ class Hooks(unittest.TestCase):
         self.assertEqual(self.logged(), {"ASKED": len(chained)})
         self.assert_denies(chained, mode="bypassPermissions")           # ... and only there
 
-    def test_every_gh_api_write_asks_not_only_under_actions(self):
-        for mode in ("default", "bypassPermissions", None):
-            self.assert_silent(self.GH_API_READS, mode=mode)
-        self.assert_silent(self.GH_API_READS, agent=True)
-        with self.subTest("nothing logged for the reads"):
+    def test_a_gh_api_call_on_actions_dispatches_or_graphql_asks_whatever_the_method(self):
+        # "prompt, don't parse" (Ryan, 2026-10-14): the greedy text rule, so no shell construct
+        # hides the call and no GET passes; refused where no prompt can be shown, and from a subagent
+        for mode in ASK_MODES:
+            self.assert_asks(self.GH_API_LIVE, mode=mode)
+        with self.subTest("one ASKED per call"):
+            self.assertEqual(self.logged(), {"ASKED": len(self.GH_API_LIVE) * len(ASK_MODES)})
+        for mode in NO_PROMPT_MODES + ["foo"]:
+            self.assert_denies(self.GH_API_LIVE, mode=mode)
+        self.assert_denies(self.GH_API_LIVE, agent=True, saying=("agent",))
+
+    def test_every_other_gh_api_call_is_ungated(self):
+        # as on main: an issue, a comment, a label, the harness's resume reads - no prompt, and no
+        # refusal in a headless run or a subagent (a refusal there would stall the harness)
+        for mode in ("default", "dontAsk", "bypassPermissions", "auto", None):
+            self.assert_silent(self.GH_API_UNGATED, mode=mode)
+        self.assert_silent(self.GH_API_UNGATED, agent=True)
+        self.assertEqual(self.logged(), {})
+
+    def test_prose_that_mentions_gh_api_passes_in_every_mode(self):
+        for mode in ASK_MODES + NO_PROMPT_MODES + ["foo"]:
+            self.assert_silent(self.PROSE, mode=mode)
+        self.assert_silent(self.PROSE, agent=True)
+        with self.subTest("nothing logged for the prose"):
             self.assertEqual(self.logged(), {})
-        before = self.logged()
-        for command, run in self.runs(self.GH_API_WRITES):
-            with self.subTest(command=command):
-                self.assertEqual(self.verdict(run), "ask", self.show(run))
-                self.check_reason(command, self.reason(run))
-                self.assertIn("gh api", self.reason(run))               # the prompt says what it is
-        with self.subTest("one ASKED per write"):
-            self.assertEqual(self.logged()["ASKED"] - before["ASKED"], len(self.GH_API_WRITES))
-        self.assert_denies(self.GH_API_WRITES, mode="dontAsk")
-        self.assert_denies(self.GH_API_WRITES, agent=True)
-        # a read with a harmless comment: passes or asks, never refused in the session
-        before = self.logged()
-        asked = 0
-        for command, run in self.runs(self.GH_API_COMMENTED_READS):
+        # with actions/, dispatches or graphql in it too: the prompt is an accepted over-ask
+        for command, run in self.runs(self.PROSE_OVER_ASK):
             with self.subTest(command=command):
                 self.assertIn(self.verdict(run), ("silent", "ask"), self.show(run))
-                asked += self.verdict(run) == "ask"
-        with self.subTest("only the asks are logged"):
-            self.assertEqual(self.logged() - before, collections.Counter({"ASKED": asked}) if asked else collections.Counter())
 
-    def test_a_hash_is_text_so_nothing_after_it_hides_a_write(self):
-        # Ryan, 2026-10-14, after the review of 014d2ab: reading comments as bash does failed open
-        # (no decision, and the old allow rule Bash(gh api repos/:*) then ran the PATCH); a # is
-        # text everywhere, so the write after it is seen
-        for command, run in self.runs(self.HASH_IS_TEXT):
-            with self.subTest(command=command):
-                self.assertEqual(self.verdict(run), "ask", self.show(run))
-                self.check_reason(command, self.reason(run))
-                self.assertIn("gh api", self.reason(run))
-        with self.subTest("one ASKED per write"):
-            self.assertEqual(self.logged(), {"ASKED": len(self.HASH_IS_TEXT)})
-        for mode in ("dontAsk", "bypassPermissions", None):            # a dispatched run: refused
-            self.assert_denies(self.HASH_IS_TEXT, mode=mode, saying=("interactive", "terminal"))
-        self.assert_denies(self.HASH_IS_TEXT, agent=True, saying=("agent",))
-
-    def test_the_gh_api_reader_runs_when_gh_and_api_survive_quote_removal(self):
-        # the pre-filter (2026-10-14): a gh word AND the text api once quote and backslash
-        # characters are removed. g""h, g\h, 'gh', =gh and a""pi are gh api and are read ...
-        for command, run in self.runs(self.SPLIT_GH_WRITES):
-            with self.subTest(command=command):
-                self.assertEqual(self.verdict(run), "ask", self.show(run))
-                self.check_reason(command, self.reason(run))
-                self.assertIn("gh api", self.reason(run))
-        with self.subTest("one ASKED per write"):
-            self.assertEqual(self.logged(), {"ASKED": len(self.SPLIT_GH_WRITES)})
-        self.assert_denies(self.SPLIT_GH_WRITES, mode="dontAsk", saying=("interactive", "terminal"))
-        self.assert_denies(self.SPLIT_GH_WRITES, agent=True, saying=("agent",))
-        # ... a split gh that only reads passes, and a gh command with no api in its text is never
-        # read: a heredoc body's apostrophe asks nothing, here or in a dispatched run
-        before = self.logged()
-        for mode in ("default", "dontAsk", "bypassPermissions", "auto", None):
-            self.assert_silent(self.SPLIT_GH_READS + self.GH_TEXT_SILENT, mode=mode)
-        self.assert_silent(self.SPLIT_GH_READS + self.GH_TEXT_SILENT, agent=True)
-        with self.subTest("nothing logged for the reads and the PR texts"):
-            self.assertEqual(self.logged(), before)
-
-    def test_a_gh_word_split_by_a_continued_line_is_still_gh(self):
-        # g\<newline>h is the word gh to the shell (a backslash-newline is removed), as gh \<newline>
-        # api already is; Bash(gh api:*) cannot see it, so the gate is the only layer
-        commands = ["g\\\nh api -X POST repos/o/r/issues -f title=x",
-                    "gh a\\\npi repos/o/r/labels -f name=x",
-                    "g\\\nh \\\n  api -XDELETE repos/o/r/labels/x"]
-        for command, run in self.runs(commands):
-            with self.subTest(command=command):
-                self.assertEqual(self.verdict(run), "ask", self.show(run))
-                self.check_reason(command, self.reason(run))
-        with self.subTest("one ASKED per write"):
-            self.assertEqual(self.logged(), {"ASKED": len(commands)})
-        self.assert_silent(["g\\\nh api repos/o/r/pulls/1/reviews"], mode="dontAsk")
+    def test_the_live_families_match_with_quoted_words_and_in_any_case(self):
+        self.assert_asks(self.SPELT_OTHERWISE)
+        with self.subTest("one ASKED per command"):
+            self.assertEqual(self.logged(), {"ASKED": len(self.SPELT_OTHERWISE)})
+        self.assert_denies(self.SPELT_OTHERWISE, mode="dontAsk", saying=("interactive", "terminal"))
+        self.assert_denies(self.SPELT_OTHERWISE, agent=True, saying=("agent",))
 
     def test_a_session_that_cannot_show_a_prompt_is_refused(self):
         # a headless or dispatched run, or a mode that skips prompts, cannot carry Ryan's go: the
@@ -896,16 +795,15 @@ class GateSettings(unittest.TestCase):
     def covering(self, kind, command):
         return [rule for rule in self.permissions.get(kind, []) if self.matches(rule, command)]
 
-    # the reads the harness loop once ran through gh api: it no longer runs gh api from Bash
-    # (Ryan, 2026-10-14), so they ask like every other gh api command
+    # the harness's resume reads: allowed and never asked - an ask rule stalls them in a dispatched
+    # run (Ryan, 2026-10-14, "prompt, don't parse"); the hook asks on the live gh api calls
     LOOP_READS = ["gh api --paginate repos/o/r/pulls/36/reviews", "gh api repos/o/r/pulls/36/reviews/7/comments",
                   "gh api repos/o/r/pulls/36/reviews"]
+    # whatever the call, settings neither ask nor refuse it: the hook decides
     GH_API_OTHERS = ["gh api graphql -f query='query { viewer { login } }'", "gh api user", "gh api",
-                     "gh api -X DELETE repos/o/r/git/refs/heads/x", "gh api --method DELETE repos/o/r/labels/x",
-                     "gh api -XPUT repos/o/r/pulls/1/merge", "gh api orgs/o/actions/variables -f name=x",
-                     "gh api user/repos -f name=scratch", "gh api --paginate repos/o/r/issues",
-                     "gh api -X PATCH repos/o/r/actions/variables/X -f value=true",
-                     "gh api repos/o/r/actions/variables"]
+                     "gh api -X DELETE repos/o/r/labels/x", "gh api repos/o/r/issues -f title=x",
+                     "gh api --paginate repos/o/r/issues", "gh api repos/o/r/actions/variables",
+                     "gh api -X PATCH repos/o/r/actions/variables/X -f value=true"]
     # what a session issues without a prompt: never behind an ask rule (gh pr and gh issue carry
     # the PR and issue bodies, heredocs included)
     PLAIN = ["gh pr view 36 --json state", "gh issue list", "gh run list", "gh variable list", "gh secret list",
@@ -932,9 +830,9 @@ class GateSettings(unittest.TestCase):
                       "sf data upsert bulk -s Contact -f contacts.csv -i Id",
                       "sf data import tree -f accounts.json"]
     CLASP_PUSH = ["npm run clasp:push", "npm run clasp:push -- --force", "npx clasp push", "npx clasp push -f"]
-    # as of 2026-10-14: what the ticket leaves alone (Bash(npm run clasp:*) may be replaced: it
-    # never covered npm run clasp:push, see CLASP_PUSH)
-    ASK_BEFORE = ["Read(./data/**)", "Read(./backups/**)", "Bash(git tag:*)",
+    # as of 2026-10-14: what the ticket leaves alone, with Bash(npm run clasp*) (Bash(npm run
+    # clasp:*) never covered npm run clasp:push, see CLASP_PUSH)
+    ASK_BEFORE = ["Read(./data/**)", "Read(./backups/**)", "Bash(git tag:*)", "Bash(npm run clasp*)",
                   "Bash(npx clasp:*)", "Bash(python3 tools/derive_partner_regions.py:*)",
                   "Bash(python3 test/fixtures/make_fixture.py --write)", "Bash(make fixtures)"]
     DENY_BEFORE = ["Read(./credentials/service-account.json)", "Read(./credentials/config.json)",
@@ -943,28 +841,21 @@ class GateSettings(unittest.TestCase):
     ALLOW_KEPT = ["Bash(scripts/verify.sh)", "Bash(make check)", "Bash(make py)", "Bash(node test/:*)",
                   "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(python3 tools/form_status.py:*)",
                   "Bash(python3 backup_forms.py:*)", "Bash(python3 tools/sheets_client.py export:*)",
-                  "Bash(harness-*:*)", "Bash(gh issue:*)", "Bash(gh pr:*)", "Bash(git worktree:*)",
+                  "Bash(harness-*:*)", "Bash(gh issue:*)", "Bash(gh pr:*)", "Bash(gh api:*)", "Bash(git worktree:*)",
                   "Bash(git fetch:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)"]
 
-    def test_every_gh_api_command_asks_and_none_is_allowed(self):
-        # Ryan, 2026-10-14 (reverses the ticket's first requirement, "no ask rule starts
-        # Bash(gh api"): the harness no longer runs gh api from Bash, so every gh api command asks
-        # through settings, the loop's reads included, and no allow rule names gh api. The rule
-        # needs the space before the wildcard (Bash(gh api repos/:*) never matched a real call,
-        # research on 2.1.299): Bash(gh api:*) or Bash(gh api *). It is denied in every
-        # headless mode; the hook still asks on the shapes it misses (bash -c, eval, a full path,
-        # a quoted subcommand word).
+    def test_gh_api_is_allowed_and_no_ask_rule_names_it(self):
+        # "prompt, don't parse" (Ryan, 2026-10-14): main's Bash(gh api:*) allow is back and no ask
+        # rule starts Bash(gh api - one would stall the harness's resume reads in a dispatched run;
+        # the hook asks on the live gh api calls (actions/, dispatches, graphql)
         allow, ask = self.permissions["allow"], self.permissions["ask"]
-        self.assertTrue({"Bash(gh api:*)", "Bash(gh api *)"} & set(ask), f"no Bash(gh api:*) ask rule: {ask}")
-        for rule in allow:
-            self.assertFalse(rule.replace(" ", "").startswith("Bash(ghapi"), f"{rule}: an allow rule on gh api")
+        self.assertIn("Bash(gh api:*)", allow)
+        for rule in ask:
+            self.assertFalse(rule.replace(" ", "").startswith("Bash(ghapi"), f"{rule}: an ask rule on gh api")
         for command in self.LOOP_READS + self.GH_API_OTHERS:
             with self.subTest(command=command):
-                self.assertTrue(self.covering("ask", command), f"no ask rule for {command!r}")
-                self.assertEqual(self.covering("allow", command), [], "allowed without a prompt")
-        for command in ["gh -R o/r api repos/o/r/labels -f name=x", "gh --repo o/r api repos/o/r/pulls/1"]:
-            with self.subTest(command=command):                         # nor does any rule allow it with -R
-                self.assertEqual(self.covering("allow", command), [], "allowed without a prompt")
+                self.assertTrue(self.covering("allow", command), f"no allow rule for {command!r}")
+                self.assertEqual(self.covering("ask", command), [], "an ask rule would stall a dispatched run")
         for rule in self.ALLOW_KEPT:                                    # nothing else in the list changed
             self.assertIn(rule, allow)
         for rule in self.ASK_BEFORE:
@@ -972,7 +863,7 @@ class GateSettings(unittest.TestCase):
 
     def test_ask_rules_back_the_hook_for_the_live_families(self):
         # explicit ask rules prompt in every mode, bypassPermissions included: the layer under the hook
-        for command in self.ASKED_FAMILIES + self.LOOP_READS:
+        for command in self.ASKED_FAMILIES:
             with self.subTest(command=command):
                 self.assertTrue(self.covering("ask", command), f"no ask rule for {command!r}")
         # the Apps Script push, both ways it is spelt: Bash(npm run clasp:*) is "npm run clasp" and a
@@ -981,7 +872,7 @@ class GateSettings(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(self.covering("ask", command), f"no ask rule for {command!r} (a word break "
                                                                f"is needed after a :* rule's prefix)")
-        for command in self.PLAIN:
+        for command in self.PLAIN + self.LOOP_READS:
             with self.subTest(command=command):
                 self.assertEqual(self.covering("ask", command), [], "a read would prompt")
         for rule in self.ASK_BEFORE:

@@ -22,7 +22,7 @@
       "Bash(python3 tools/sheets_client.py tabs)", "Bash(python3 tools/sheets_client.py whoami)",
       "Bash(python3 tools/sheets_client.py export:*)",
       "Bash(ls:*)", "Bash(wc:*)", "Bash(which:*)", "Bash(git commit:*)", "Bash(git push:*)",
-      "Bash(harness-*:*)", "Bash(gh issue:*)", "Bash(gh pr:*)",
+      "Bash(harness-*:*)", "Bash(gh issue:*)", "Bash(gh pr:*)", "Bash(gh api:*)",
       "Bash(git worktree:*)", "Bash(git fetch:*)", "Bash(git add:*)"
     ],
     "ask": [
@@ -32,7 +32,7 @@
       "Bash(python3 tools/derive_partner_regions.py:*)",
       "Bash(python3 test/fixtures/make_fixture.py --write)", "Bash(make fixtures)",
       "Bash(gh variable set:*)", "Bash(gh variable delete:*)", "Bash(gh secret set:*)", "Bash(gh secret delete:*)",
-      "Bash(gh workflow run:*)", "Bash(gh workflow enable:*)", "Bash(gh workflow disable:*)", "Bash(gh run rerun:*)", "Bash(gh api:*)",
+      "Bash(gh workflow run:*)", "Bash(gh workflow enable:*)", "Bash(gh workflow disable:*)", "Bash(gh run rerun:*)",
       "Bash(sf project deploy:*)", "Bash(sf apex run:*)",
       "Bash(sf data create:*)", "Bash(sf data update:*)", "Bash(sf data delete:*)", "Bash(sf data upsert:*)", "Bash(sf data import:*)"
     ],
