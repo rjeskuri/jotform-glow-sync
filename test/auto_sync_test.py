@@ -1360,6 +1360,21 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
             self.assertIn(problem, run.results[0][8], msg)
             self.assertTrue(any(problem in t + "\n" + d and form in t + "\n" + d for t, d in run.attention),
                             (msg, run.attention))
+            # a problem, then an unreadable re-read: the first read's problem stands (an unreadable
+            # re-read never clears what the page showed), with a note that the re-read failed;
+            # a clean third answer catches a third read
+            for unreadable in ("exit", "garbage", "empty"):
+                umsg = msg + (unreadable,)
+                run = self.run_region(text, apply=True, region=region, rendered=[[problem], unreadable, []])
+                self.assertEqual(len(run.rendered), 2, umsg)
+                self.assert_page_read(run, region, umsg)
+                self.assertEqual(run.events, twice, umsg)
+                self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], umsg)
+                self.assertEqual(run.results[0][8].count(problem), 1, (umsg, run.results[0][8]))
+                self.assertTrue(any(problem in t + "\n" + d and form in t + "\n" + d for t, d in run.attention),
+                                (umsg, run.attention))
+                self.assertTrue(any(form in l for l in self.page_notes(run)), (umsg, run.lines))
+                self.assertFalse(run.failed, umsg)
             # a clean first read: one read, no wait
             run = self.run_region(text, apply=True, region=region, rendered=[[], [problem]])
             self.assertEqual((len(run.rendered), run.slept), (1, []), msg)

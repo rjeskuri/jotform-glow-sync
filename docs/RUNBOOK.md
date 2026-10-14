@@ -291,7 +291,9 @@ a problem there reads `applied-with-problems`, an ATTENTION naming the form and
 its `rendered page` line. The page can lag the API by seconds, so a page that
 cannot be read or that shows problems is read once more after a short wait and
 the second read is judged; a page unreadable both times is a note in the log
-(`note: served page of form … not read …`), not a failure.
+(`note: served page of form … not read …`), not a failure. Problems the first
+read showed stand when the re-read cannot be read (`note: … re-read failed …
+judged on the first read`).
 
 Once per run, after the regions, the runner also reads **Jotform's storage**
 against the account's plan and logs the same `storage:` line `form_status.py`
