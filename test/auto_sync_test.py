@@ -1077,6 +1077,12 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
                 "rendered page: module dropdown q92: 1 of 4 options carry a data-calcvalue other than their value",
                 "rendered page: the session bridge is rule 12 of 40, after the session rules it must precede"]
 
+    # SameNameFixture's fake Africa form, for the summaries the sync itself writes
+    ROSTER, QIDS, MODULES, texts = SameNameFixture.ROSTER, SameNameFixture.QIDS, SameNameFixture.MODULES, SameNameFixture.texts
+
+    def run_sync(self, fake, *extra, **kw):
+        return SameNameFixture.run_sync(self, fake, *extra, **kw)
+
     def page_notes(self, run):
         return [l for l in run.lines if "note" in l.lower() and "page" in l.lower()]
 
@@ -1104,6 +1110,10 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
                     self.assertTrue(run.results[0][8].endswith("; verified clean"), (msg, run.results[0][8]))
                     self.assertEqual((run.attention, self.page_notes(run)), ([], []), msg)
                     self.assertFalse(run.failed, msg)
+                    # the page is read after the apply and the definition verify, with no wait
+                    # before it; a clean page is read once
+                    self.assertEqual(run.events, RolloutLines.APPLY_STEPS + ["rendered"] * reads, msg)
+                    self.assertEqual(run.slept, [], msg)
         # a dry run or a region held by a band applies nothing, so reads no page
         delete = "  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n"
         for kind, text in self.PAGE.items():
@@ -1117,26 +1127,94 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
 
     def test_the_summary_file_decides_whether_the_page_is_read(self):
         # the runner reads the plan from the sync's --summary-json file when there is one: the
-        # page read follows that plan, not the printed lines
-        creates_only = {"creates": [{"club": "Gamma Club", "partner": "Partner One", "girls": 2}],
-                        "updates": [], "deletes": [], "rules": None, "warnings": [],
-                        "calls": ["CREATE roster 'Gamma Club' (2 girls)"]}
-        rules = {"creates": [], "updates": [], "deletes": [], "rules": 23,
-                 "warnings": RolloutLines.CONTACT_IDS_WARNING.splitlines(),
-                 "calls": ["REPLACE conditions (23 rules)"]}
-        modules = {"creates": [], "updates": [], "deletes": [], "rules": None, "warnings": [],
-                   "calls": list(ModuleValues.LINES)}
-        cases = [(self.PAGE["a new roster and its rules"], creates_only, 0),
-                 (self.NO_PAGE["a new roster"], rules, 1),
-                 (self.NO_PAGE["a roster update"], modules, 1)]
+        # page read follows that plan, not the printed lines. The summaries have the shape the
+        # sync writes (sync_attendance_form.py --summary-json): `rules` is ALWAYS the count of
+        # the rules the form would have (an integer), whether or not a REPLACE conditions call is
+        # planned - only `calls` says whether the rules are rewritten
+        def summary(calls, rules, creates=(), updates=(), requires=(), warnings=""):
+            return {"creates": [{"club": c, "partner": "Partner One", "girls": g} for c, g in creates],
+                    "updates": [{"qid": q, "club": c, "girls": g} for q, c, g in updates],
+                    "deletes": [], "requires": [{"qid": q, "club": c, "required": r} for q, c, r in requires],
+                    "module_values": [], "retired": [], "restored": [], "rules": rules,
+                    "warnings": warnings.splitlines(), "calls": list(calls)}
+        create = ("Gamma Club", 2)
+        update = ("10", "Alpha Club", 3)
+        cases = [
+            # no conditions rewrite and no module dropdown: no page read, whatever the rules count
+            (self.PAGE["a new roster and its rules"],
+             summary(["CREATE roster 'Gamma Club' (2 girls)"], 24, creates=[create]), 0),
+            (self.PAGE["an update and its rules"],
+             summary(["UPDATE roster 'Alpha Club' (q10, 3 girls)"], 57, updates=[update]), 0),
+            (self.PAGE["question 18 rules rewritten"],
+             summary(["REQUIRED roster 'Alpha Club' (q10: Yes)"], 22, requires=[("10", "Alpha Club", "Yes")]), 0),
+            (self.PAGE["a new roster and a module dropdown"],
+             summary(["CREATE roster 'Gamma Club' (2 girls)", "UPDATE roster 'Alpha Club' (q10, 3 girls)",
+                      "REQUIRED roster 'Beta Club' (q11: No)"], 31,
+                     creates=[create], updates=[update], requires=[("11", "Beta Club", "No")]), 0),
+            # a REPLACE conditions call or a module dropdown call: one page read
+            (self.NO_PAGE["a new roster"],
+             summary(["REPLACE conditions (23 rules)"], 23, warnings=RolloutLines.CONTACT_IDS_WARNING), 1),
+            (self.NO_PAGE["a roster update"],
+             summary(["CREATE roster 'Gamma Club' (2 girls)",
+                      "REPLACE conditions (24 rules + ~1 more once the new rosters exist)"], 24,
+                     creates=[create]), 1),
+            (self.NO_PAGE["a REQUIRED line alone"], summary(ModuleValues.LINES, 22), 1),
+            (self.NO_PAGE["a new roster"],
+             summary(["REQUIRED roster 'Alpha Club' (q10: Yes)",
+                      "UPDATE module dropdown (q93, year 3: calcValues cleared)"], 19,
+                     requires=[("10", "Alpha Club", "Yes")]), 1),
+        ]
         for region in ("Asia", "Latin America"):
-            for text, summary, reads in cases:
-                msg = (region, summary["calls"])
-                run = self.run_region(text, apply=True, summary=summary, region=region)
+            for text, s, reads in cases:
+                msg = (region, s["calls"])
+                run = self.run_region(text, apply=True, summary=s, region=region)
                 self.assertEqual(run.steps, RolloutLines.APPLY_STEPS, msg)
                 self.assertEqual(len(run.rendered), reads, msg)
                 self.assert_page_read(run, region, msg)
                 self.assertEqual(([r[7] for r in run.results], run.attention), (["applied"], []), msg)
+                # the SyncLog's rules column still reports the summary's count, rewrite or not
+                self.assertEqual(auto_sync.plan_from_summary(s)["rules"], s["rules"], msg)
+                self.assertEqual([r[6] for r in run.results], [s["rules"]], msg)
+
+    def test_a_real_sync_summary_decides_whether_the_page_is_read(self):
+        # the summary file as sync_attendance_form.main() writes it, on the fake Africa form
+        # (SameNameFixture) in step but for one difference: the page is read exactly when the
+        # sync plans a conditions rewrite or a module dropdown write
+        import copy
+        SameNameFixture.setUp(self)
+        self.addCleanup(SameNameFixture.tearDown, self)
+        qs, wire = SameNameFixture.form(self, switched=True)
+        flipped = copy.deepcopy(qs)
+        flipped["10"]["required"] = "No" if qs["10"]["required"] == "Yes" else "Yes"
+        no_calc = copy.deepcopy(qs)
+        for q in sync.MODULES.values():
+            del no_calc[q]["calcValues"]
+        both = copy.deepcopy(no_calc)
+        both["10"]["required"] = flipped["10"]["required"]
+        more = dict(self.ROSTER)
+        more[("Partner One", "Alpha Club")] = self.ROSTER[("Partner One", "Alpha Club")] + ["Zoe Quillfeather"]
+        new = dict(self.ROSTER)
+        new[("Partner One", "Gamma Club")] = ["Amara Pellucidor", "Beatrice Marrowgate"]
+        cases = [("a required flag alone", flipped, None, 0),
+                 ("module calcValues", no_calc, None, 1),
+                 ("a required flag and module calcValues", both, None, 1),
+                 ("a roster update", qs, more, 1),
+                 ("a new roster", qs, new, 1)]
+        for kind, form, roster, reads in cases:
+            s, out = SameNameFixture.summary(self, FakeForm(form, wire), roster=roster)
+            replace = [c for c in s["calls"] if c.startswith("REPLACE conditions")]
+            # the shape the review found: an integer rules count with or without the rewrite
+            self.assertIsInstance(s["rules"], int, kind)
+            self.assertTrue(s["calls"], kind)
+            for region in ("Africa", "Asia"):
+                msg = (region, kind, s["calls"])
+                run = self.run_region(out, apply=True, summary=s, region=region)
+                self.assertEqual(run.steps, RolloutLines.APPLY_STEPS, msg)
+                self.assertEqual(len(run.rendered), reads, msg)
+                self.assertEqual(bool(reads), bool(replace or auto_sync.plan_from_summary(s)["modules"]), msg)
+                self.assert_page_read(run, region, msg)
+                self.assertEqual(([r[7] for r in run.results], run.attention), (["applied"], []), msg)
+                self.assertEqual([r[6] for r in run.results], [s["rules"]], msg)
 
     def test_a_rendered_problem_reads_applied_with_problems_naming_the_form_and_the_problem(self):
         kinds = list(self.PAGE)
@@ -1146,9 +1224,10 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
             form = auto_sync.REGIONAL_FORMS[region]
             problem = self.PROBLEMS[i % len(self.PROBLEMS)]
             msg = (region, kind, problem)
-            # (the page says it on every read: a re-read does not make it go away)
+            # (the page says it on every read: a re-read does not make it go away; a page with
+            # problems is read once more after the wait, and never a third time)
             run = self.run_region(self.PAGE[kind], apply=True, region=region, rendered=[[problem]] * 3)
-            self.assertGreaterEqual(len(run.rendered), 1, msg)
+            self.assertEqual(len(run.rendered), 2, msg)
             self.assert_page_read(run, region, msg)
             self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
             self.assertIn(problem, run.results[0][8], msg)
@@ -1162,7 +1241,7 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
         # two problems on the page: both named
         run = self.run_region(self.PAGE["special-event options and rules"], apply=True, region="U.S",
                               rendered=[self.PROBLEMS[2:]] * 3)
-        self.assertEqual([r[7] for r in run.results], ["applied-with-problems"])
+        self.assertEqual((len(run.rendered), [r[7] for r in run.results]), (2, ["applied-with-problems"]))
         text = "\n".join(t + "\n" + d for t, d in run.attention)
         for p in self.PROBLEMS[2:]:
             self.assertIn(p, text)
@@ -1171,7 +1250,7 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
         definition = "1 roster rule(s) test a club the picker lists twice"
         run = self.run_region(self.PAGE["a new roster and its rules"], apply=True, problems=[definition],
                               rendered=[[self.PROBLEMS[0]]] * 3)
-        self.assertEqual([r[7] for r in run.results], ["applied-with-problems"])
+        self.assertEqual((len(run.rendered), [r[7] for r in run.results]), (2, ["applied-with-problems"]))
         text = "\n".join(t + "\n" + d for t, d in run.attention)
         self.assertIn(definition, text)
         self.assertIn(self.PROBLEMS[0], text)
@@ -1195,6 +1274,8 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
                 second = run.events.index("rendered", first + 1)
                 self.assertIn("sleep", run.events[first + 1:second], (msg, run.events))   # a wait between
                 self.assertTrue(run.slept and all(0 < s <= 60 for s in run.slept), (msg, run.slept))
+                # after the apply and the verify; one wait, and none before the first read
+                self.assertEqual(run.events, RolloutLines.APPLY_STEPS + ["rendered", "sleep", "rendered"], msg)
                 # a note, not a failure: applied (the definition verified clean), no ATTENTION
                 self.assertEqual([r[7] for r in run.results], ["applied"], msg)
                 self.assertEqual(run.steps, RolloutLines.APPLY_STEPS, msg)
@@ -1220,11 +1301,96 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
             # a problem on the retry: applied-with-problems, the problem named
             problem = self.PROBLEMS[i % len(self.PROBLEMS)]
             run = self.run_region(text, apply=True, rendered=[first, [problem], [problem]])
-            self.assertIn(len(run.rendered), (2, 3), kind)
+            self.assertEqual(len(run.rendered), 2, kind)                     # never a third read
             self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], kind)
             self.assertIn(problem, run.results[0][8], kind)
             self.assertTrue(any(problem in t + "\n" + d and auto_sync.REGIONAL_FORMS["Africa"] in t + "\n" + d
                                 for t, d in run.attention), (kind, run.attention))
+
+    def attention_text(self, run):
+        return "\n".join(t + "\n" + d for t, d in run.attention)
+
+    def test_a_page_with_problems_is_read_once_more_and_the_second_read_is_judged(self):
+        # a lagging page usually reads fine and serves the OLD rules or calcValues: a read that
+        # shows problems is read once more after the wait, and the second read is the one
+        # judged; two reads at most in all, and no wait before the first
+        regions = list(auto_sync.REGIONAL_FORMS)
+        twice = RolloutLines.APPLY_STEPS + ["rendered", "sleep", "rendered"]
+        for i, (kind, text) in enumerate(self.PAGE.items()):
+            region = regions[i % len(regions)]
+            form = auto_sync.REGIONAL_FORMS[region]
+            problem = self.PROBLEMS[i % len(self.PROBLEMS)]
+            other = self.PROBLEMS[(i + 1) % len(self.PROBLEMS)]
+            msg = (region, kind, problem)
+            # the problem was the lag: clean on the re-read -> applied, verified clean, nothing said
+            run = self.run_region(text, apply=True, region=region, rendered=[[problem], [], [problem]])
+            self.assertEqual(len(run.rendered), 2, msg)
+            self.assert_page_read(run, region, msg)
+            self.assertEqual(run.events, twice, msg)
+            self.assertEqual(len(run.slept), 1, msg)
+            self.assertTrue(0 < run.slept[0] <= 60, (msg, run.slept))
+            self.assertEqual([r[7] for r in run.results], ["applied"], msg)
+            self.assertTrue(run.results[0][8].endswith("; verified clean"), (msg, run.results[0][8]))
+            self.assertNotIn(problem, run.results[0][8], msg)
+            self.assertEqual(run.attention, [], msg)
+            self.assertFalse(run.failed, msg)
+            # the problem on both reads: applied-with-problems naming the form and the problem,
+            # said once (not once per read), and no third read
+            run = self.run_region(text, apply=True, region=region, rendered=[[problem], [problem], []])
+            self.assertEqual(run.events, twice, msg)
+            self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
+            self.assertEqual(run.results[0][8].count(problem), 1, (msg, run.results[0][8]))
+            self.assertEqual(self.attention_text(run).count(problem), 1, (msg, run.attention))
+            self.assertTrue(any(problem in t + "\n" + d and form in t + "\n" + d for t, d in run.attention),
+                            (msg, run.attention))
+            self.assertFalse(run.failed, msg)
+            # a different problem on the re-read: the second read is judged, the first forgotten
+            run = self.run_region(text, apply=True, region=region, rendered=[[problem], [other], []])
+            self.assertEqual(run.events, twice, msg)
+            self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
+            self.assertIn(other, run.results[0][8], msg)
+            self.assertNotIn(problem, run.results[0][8], msg)
+            self.assertIn(other, self.attention_text(run), msg)
+            self.assertNotIn(problem, self.attention_text(run), msg)
+            # unreadable, then a problem: judged on the problem, two reads
+            first = ("exit", "garbage", "empty")[i % 3]
+            run = self.run_region(text, apply=True, region=region, rendered=[first, [problem], []])
+            self.assertEqual(run.events, twice, msg)
+            self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
+            self.assertIn(problem, run.results[0][8], msg)
+            self.assertTrue(any(problem in t + "\n" + d and form in t + "\n" + d for t, d in run.attention),
+                            (msg, run.attention))
+            # a clean first read: one read, no wait
+            run = self.run_region(text, apply=True, region=region, rendered=[[], [problem]])
+            self.assertEqual((len(run.rendered), run.slept), (1, []), msg)
+            self.assertEqual([r[7] for r in run.results], ["applied"], msg)
+
+    def test_a_definition_problem_with_a_clean_page_is_said_once_and_reads_the_page_once(self):
+        # the page's report repeats the definition's rule_problems: they are not the page's own,
+        # so they are said once (from the definition verify) and do not cause a re-read
+        definitions = ["1 roster rule(s) test a club the picker lists twice",
+                       "2 condition(s) test a question the form does not have",
+                       "question 18 is rule 4 of 9, after the rosters' rules"]
+        regions = list(auto_sync.REGIONAL_FORMS)
+        for i, (kind, text) in enumerate(self.PAGE.items()):
+            region = regions[i % len(regions)]
+            definition = definitions[i % len(definitions)]
+            msg = (region, kind, definition)
+            run = self.run_region(text, apply=True, region=region, problems=[definition])
+            self.assertEqual((len(run.rendered), run.slept), (1, []), msg)
+            self.assertEqual(run.events, RolloutLines.APPLY_STEPS + ["rendered"], msg)
+            self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
+            self.assertEqual(run.results[0][8].count(definition), 1, (msg, run.results[0][8]))
+            self.assertEqual(len(run.attention), 1, (msg, run.attention))
+            self.assertEqual(self.attention_text(run).count(definition), 1, (msg, run.attention))
+            # ...and with a problem of the page's own on both reads: each said once
+            problem = self.PROBLEMS[i % len(self.PROBLEMS)]
+            run = self.run_region(text, apply=True, region=region, problems=[definition],
+                                  rendered=[[problem], [problem]])
+            self.assertEqual(len(run.rendered), 2, msg)
+            for said in (definition, problem):
+                self.assertEqual(run.results[0][8].count(said), 1, (msg, said, run.results[0][8]))
+                self.assertEqual(self.attention_text(run).count(said), 1, (msg, said, run.attention))
 
 
 if __name__ == "__main__":

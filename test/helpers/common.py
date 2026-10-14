@@ -95,9 +95,9 @@ class AutoSyncFixture:
         "garbage" (output that is not JSON) or "empty" (a JSON list with no report); past the
         list, a clean page. problems: the definition verify's rule_problems (the page read
         reports them too, as form_status.py --rendered does). time.sleep in auto_sync is
-        patched to return at once: the run's `slept` lists its arguments, `events` the order
-        of the page reads ("rendered") and the waits ("sleep"). region: the region run (its
-        form: auto_sync.REGIONAL_FORMS[region])."""
+        patched to return at once: the run's `slept` lists its arguments, `events` everything in
+        order: each step as `steps` names it, the page reads ("rendered") and the waits
+        ("sleep"). region: the region run (its form: auto_sync.REGIONAL_FORMS[region])."""
         import tempfile
         import types
         from unittest import mock
@@ -117,9 +117,13 @@ class AutoSyncFixture:
             run = auto_sync.Run(args)
             run.synced, run.steps, run.rendered, run.slept, run.events = [], [], [], [], []
 
+            def step(label):
+                run.steps.append(label)
+                run.events.append(label)
+
             def sync_(csv_path, region, form, apply, summary_path=None):
                 run.synced.append(apply)
-                run.steps.append("sync --apply" if apply else "sync")
+                step("sync --apply" if apply else "sync")
                 if summary is not None and summary_path:
                     with open(summary_path, "w", encoding="utf-8") as f:
                         json.dump(summary, f)
@@ -140,7 +144,7 @@ class AutoSyncFixture:
                     served = dict(clean, rule_problems=clean["rule_problems"] + list(page),
                                   rendered_required={"rosters": 4, "required": 4})
                     return types.SimpleNamespace(returncode=0, stdout=json.dumps([served]), stderr="")
-                run.steps.append(label)                  # "backup" and "verify" are the run's own labels
+                step(label)                              # "backup" and "verify" are the run's own labels
                 return types.SimpleNamespace(returncode=0, stdout=json.dumps([clean]), stderr="")
 
             def sleep_(seconds):
@@ -148,7 +152,7 @@ class AutoSyncFixture:
                 run.events.append("sleep")
 
             def save_(form):
-                run.steps.append("save conditions")
+                step("save conditions")
 
             with mock.patch.object(run, "sync", sync_), mock.patch.object(run, "read_status", status_), \
                     mock.patch.object(run, "cmd", cmd_), \
