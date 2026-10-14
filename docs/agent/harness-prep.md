@@ -92,4 +92,12 @@ There are no tests-first, session-brief or notification instructions in `CLAUDE.
    content (the three read-only tool commands into `form-status`/`sync-preview`, rules 9 and 11
    into `jotform-api`/`deploy-appsscript`); the numbered rules are cited elsewhere, so a move has
    to keep the numbers. Not done: your call.
+   - 2026-10-14 (#12): 86 → 72 lines, every rule number and first sentence kept. The
+     `form_status.py` and sync dry-run commands went to `.claude/skills/form-status` (its healthy
+     lines added to step 4) and `.claude/skills/sync-preview`; rule 7's list to ARCHITECTURE
+     "Constants that exist on both sides" (which gained the runner's tab names); rule 11's floors
+     to `deploy-appsscript`; rule 12's connectors, alias and metadata steps to `salesforce`
+     "Access"; the work-log detail to RUNBOOK; `make docs-index` to RUNBOOK "Checks" (`make
+     check` fails on a stale index). Dropped: commit subjects before 2026-10-09 averaged 200+
+     characters (`git log` shows it). Rule 9 unchanged; about 60 would mean rewording rules.
 9. Once you accept this, record the adoption as a dated section in `docs/DECISIONS.md`.
