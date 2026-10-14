@@ -12,11 +12,15 @@ Keep the references into the docs alive, offline:
   (GitHub's slugs), the runbook's table of contents included;
 - every BACKLOG item a file cites by number (`BACKLOG 50`, `backlog item 1`,
   `BACKLOG 41/43/46`) exists, and a title it quotes (`BACKLOG "Gold versus retention"`)
-  is in an item's heading.
+  is in an item's heading;
+- docs/BACKLOG.md keeps the rules its header states: every `### <id>. <title>` has one
+  `Status:` line, first, from the vocabulary (a `done` date a real one), done and dropped
+  items sit under `## Done` and the others above it, no number twice, no other `###` heading.
 
 docs/archive/ is history and is not read. Tools and tests that print or assert a section
 name are what this protects: renaming a heading breaks them silently otherwise.
 """
+import datetime
 import os
 import re
 import subprocess
@@ -118,13 +122,97 @@ def backlog_items(text):
     return items
 
 
+ITEM_HEADING = re.compile(r"(\d+[a-z]?)\. \S.*")
+STATUS_LINE = re.compile(r"Status:[ \t]*(.*?)\s*$")
+STATUS_VALUE = re.compile(r"open|in-progress|blocked-on-ryan|dropped|done (\d{4})-(\d{2})-(\d{2})")
+STATUSES = "open | in-progress | blocked-on-ryan | done YYYY-MM-DD | dropped"
+
+
+def backlog_sections(text):
+    """(heading text, below Done, body lines) of every `###` section outside fenced code; a
+    section ends at the next heading of level 1-3. Everything after `## Done` (the "Explicitly
+    not planned" section too) counts as below Done."""
+    sections, fence, below, body = [], None, False, None
+    for line in text.splitlines():
+        m = re.match(r"\s*(```+|~~~+)", line)
+        if m or fence is not None:
+            if m and fence is None:
+                fence = m.group(1)[:3]
+            elif m and line.strip().startswith(fence):
+                fence = None
+            if body is not None:
+                body.append(None)           # fenced: content, but never a Status line
+            continue
+        h = re.match(r"(#{1,3})\s+(.+?)\s*#*\s*$", line)
+        if h:
+            body = None
+            if len(h.group(1)) == 2 and norm(h.group(2)) == "Done":
+                below = True
+            elif len(h.group(1)) == 3:
+                body = []
+                sections.append((h.group(2), below, body))
+        elif body is not None:
+            body.append(line)
+    return sections
+
+
+def backlog_problems(text):
+    """The rules docs/BACKLOG.md's header states, one problem per broken rule: every
+    `### <id>. <title>` has one `Status:` line, first, from the vocabulary; done or dropped
+    items sit under `## Done`, the others above it; no id twice; no other `###` heading."""
+    problems, seen = [], set()
+    for heading, below, body in backlog_sections(text):
+        m = ITEM_HEADING.fullmatch(heading)
+        if not m:
+            problems.append(f"heading '### {heading}' is not '<id>. <title>' (<id> a number, "
+                            "maybe one letter)")
+            continue
+        item = f"item {m.group(1)}"
+        if m.group(1) in seen:
+            problems.append(f"{item}: the number is used twice - an item's number is never reused")
+        seen.add(m.group(1))
+        statuses = [s.group(1) for s in (STATUS_LINE.fullmatch(ln or "") for ln in body) if s]
+        first = next((ln for ln in body if ln is None or ln.strip()), None)
+        if not statuses:
+            problems.append(f"{item}: no 'Status:' line")
+            continue
+        if len(statuses) > 1:
+            problems.append(f"{item}: {len(statuses)} 'Status:' lines, not one")
+        elif not STATUS_LINE.fullmatch(first or ""):
+            problems.append(f"{item}: the 'Status:' line is not the first line after the heading")
+        value = statuses[0]
+        v = STATUS_VALUE.fullmatch(value)
+        if not v or (v.group(1) and not real_date(*v.groups())):
+            problems.append(f"{item}: status '{value}' is not one of {STATUSES}")
+            continue
+        finished = value == "dropped" or value.startswith("done")
+        if finished and not below:
+            problems.append(f"{item}: status '{value}' sits above '## Done' - a done or dropped "
+                            "item moves under it")
+        elif not finished and below:
+            problems.append(f"{item}: status '{value}' sits under '## Done' - only done or dropped "
+                            "items go there")
+    return problems
+
+
+def real_date(y, m, d):
+    try:
+        datetime.date(int(y), int(m), int(d))
+        return True
+    except ValueError:
+        return False
+
+
 def main():
     files = tracked()
     runbook = read(RUNBOOK)
     names = section_names(runbook)
-    items = backlog_items(read(BACKLOG))
+    backlog = read(BACKLOG)
+    items = backlog_items(backlog)
     anchors = {}
     failures, counts = [], {"sections": 0, "anchors": 0, "items": 0}
+    failures += [f"{BACKLOG}: {p}" for p in backlog_problems(backlog)]
+    checked = sum(1 for h, _, _ in backlog_sections(backlog) if ITEM_HEADING.fullmatch(h))
     for rel in files:
         text = read(rel)
         flat = flatten(text, rel.endswith(CODE_SUFFIXES))
@@ -159,10 +247,11 @@ def main():
         print("  FAIL " + f)
     if failures:
         print(f"doc-refs: {len(failures)} FAILURE(S) - rename the reference, not the heading "
-              "(tools and tests quote headings)")
+              f"(tools and tests quote headings); {BACKLOG}: the rules in its header")
         sys.exit(1)
     print(f"doc-refs: ok ({counts['sections']} RUNBOOK section references, {counts['anchors']} "
-          f"anchors, {counts['items']} BACKLOG references resolve)")
+          f"anchors, {counts['items']} BACKLOG references resolve; {checked} BACKLOG items "
+          "keep its rules)")
 
 
 if __name__ == "__main__":

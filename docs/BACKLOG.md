@@ -5,14 +5,15 @@ dropped ones under [Done](#done) at the end. Until 2026-10-09 this was one table
 launch week, ordered by what unblocked the most; "Effort" is in consultant days, and
 **needs Ryan** marks what the tooling cannot do alone.
 
-- **A new item** goes at the end of its theme with the next free number - one more than
-  the highest here (`grep -oE '^### [0-9]+' docs/BACKLOG.md | cut -c5- | sort -n | tail -1`).
-  Never reuse, letter or renumber an item: code and docs cite them by number
-  ("BACKLOG 50"), and `make check` fails on a cited number that does not exist.
+- **New work** is a ticket on the board, not a new item here (DECISIONS 2026-10-14).
+- **An item keeps its number**: never reused, lettered or renumbered. Code and docs cite
+  items by number ("BACKLOG 50"), and `make check` fails on a cited number that does not exist.
 - **An update** is a dated bullet at the end of the item (`- YYYY-MM-DD: …`) and, when it
   changes, the `Status:` line; earlier bullets stay as they are.
 - **Status** is one of `open`, `in-progress`, `blocked-on-ryan`, `done YYYY-MM-DD` or
-  `dropped`. A done or dropped item moves to "Done", number and text unchanged.
+  `dropped`. A done or dropped item moves to "Done", number and text unchanged. `make
+  doc-refs` checks both: one `Status:` line right under each item's heading, from that list,
+  and the done and dropped items under "Done", the others above it.
 - A larger item has an intent under `docs/intent/` or a plan under `docs/plans/`.
 
 ## Launch follow-ups

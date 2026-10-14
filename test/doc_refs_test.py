@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
 scripts/check_doc_refs.py: the reference shapes it reads (in prose and in string literals
-continued over lines), what counts as a RUNBOOK section, GitHub's anchors, BACKLOG items.
+continued over lines), what counts as a RUNBOOK section, GitHub's anchors, BACKLOG items,
+the rules docs/BACKLOG.md states for itself.
 scripts/docs_index.py: the frontmatter it reads, the status vocabulary, the index's cells.
 """
+import contextlib
+import io
 import os
 import sys
 import unittest
+from unittest import mock
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import REPO
@@ -77,6 +81,160 @@ class DocRefs(unittest.TestCase):
         self.assertEqual(refs.BACKLOG_TITLE_REF.search('BACKLOG "Gold versus retention"').group(1),
                          "Gold versus retention")
 
+
+STATUSES = "open | in-progress | blocked-on-ryan | done YYYY-MM-DD | dropped"
+
+
+def one_item(num, status, done=False):
+    """A made-up backlog of one item `num` with `status`, under a theme or under ## Done."""
+    item = f"### {num}. A made-up item\n\nStatus: {status}\n\n- 2026-10-01: a bullet\n"
+    theme = "- nothing open\n" if done else item
+    finished = item if done else ""
+    return (f"# Backlog\n\nA made-up header.\n\n## A theme\n\n{theme}\n## Done\n\n{finished}\n"
+            "## Explicitly not planned\n\n- nothing\n")
+
+
+def backlog(open_items, done_items=()):
+    """A made-up backlog: (heading, body) pairs above ## Done, then under it."""
+    def section(items):
+        return "".join(f"### {h}\n\n{body}\n" for h, body in items)
+    return (f"# Backlog\n\nA made-up header.\n\n## A theme\n\n{section(open_items)}## Done\n\n"
+            f"{section(done_items)}## Explicitly not planned\n\n- nothing\n")
+
+
+def names_item(problem, num):
+    return refs.re.search(rf"\bitem {refs.re.escape(num)}\b", problem) is not None
+
+
+def run_main(backlog_text=None):
+    """check_doc_refs.main() over the repository with docs/BACKLOG.md's text replaced by
+    `backlog_text` (every other path reads the real file): (exit code, stdout)."""
+    real_read = refs.read
+
+    def fake_read(rel):
+        if backlog_text is not None and os.path.normpath(rel) == os.path.normpath(refs.BACKLOG):
+            return backlog_text
+        return real_read(rel)
+
+    out, code = io.StringIO(), 0
+    with mock.patch.object(refs, "read", fake_read), contextlib.redirect_stdout(out):
+        try:
+            refs.main()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+    return code, out.getvalue()
+
+
+def items_counted(output):
+    """The ok line's count of the BACKLOG items checked: `... <n> BACKLOG items ...`."""
+    m = refs.re.search(r"doc-refs: ok\b.*?\b(\d+) BACKLOG items\b", output)
+    return int(m.group(1)) if m else None
+
+
+class BacklogRules(unittest.TestCase):
+    """backlog_problems(text) -> list[str]: the rules docs/BACKLOG.md states for itself, one
+    problem per broken rule, each naming the item (`item <id>: ...`) or the bad heading."""
+
+    def assert_one_problem(self, text, name, label, heading=False):
+        problems = refs.backlog_problems(text)
+        self.assertEqual(len(problems), 1, f"{label}: {problems}")
+        named = name in problems[0] if heading else names_item(problems[0], name)
+        self.assertTrue(named, f"{label}: {problems[0]!r} does not name {name}")
+
+    def test_the_committed_backlog_keeps_its_rules(self):
+        text = refs.read(refs.BACKLOG)
+        self.assertEqual(refs.backlog_problems(text), [])
+        # the items to check: every `### <id>. <title>` heading, found independently here
+        ids = refs.re.findall(r"(?m)^### (\d+[a-z]?)\. ", text)
+        self.assertEqual(set(ids), set(refs.backlog_items(text)))
+        self.assertEqual(len(ids), len(set(ids)))
+        # doc-refs passes on the committed backlog, and its ok line counts the items it checked
+        code, output = run_main()
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("FAIL", output)
+        self.assertEqual(items_counted(output), len(refs.backlog_items(text)), output)
+        # the count follows the backlog: two more valid made-up items, two more counted
+        more = text.replace("\n## Done\n", "\n### 998. A made-up open item\n\nStatus: open\n\n"
+                            "## Done\n\n### 999. A made-up finished item\n\nStatus: done 2026-10-14\n\n", 1)
+        self.assertNotEqual(more, text)
+        self.assertEqual(refs.backlog_problems(more), [])
+        code, output = run_main(more)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(items_counted(output), len(ids) + 2, output)
+
+    def test_each_status_is_from_the_vocabulary_with_a_real_date(self):
+        passing = [("7", "open", False), ("31b", "in-progress", False), ("120", "blocked-on-ryan", False),
+                   ("4", "dropped", True), ("88", "done 2026-10-14", True), ("9a", "done 2024-02-29", True),
+                   ("15", "done 2025-12-31", True)]
+        for num, status, done in passing:
+            self.assertEqual(refs.backlog_problems(one_item(num, status, done)), [], status)
+        # an invalid status is a vocabulary problem only: the done-like ones sit under ## Done,
+        # the others above it, so placement adds no second problem
+        failing = [("42", "finished", False), ("6", "Open", False), ("13c", "done", True),
+                   ("57", "done 2026-02-30", True), ("101", "done 14-10-2026", True),
+                   ("3", "blocked", False), ("70", "done 2026-02-29", True), ("8", "done 2026-13-01", True),
+                   ("26", "in progress", False), ("64", "Dropped", False),
+                   # a valid status with trailing text is not a valid status
+                   ("19", "done 2026-10-15 (PR #12)", True), ("38", "open - waiting on a reply", False)]
+        for num, status, done in failing:
+            self.assert_one_problem(one_item(num, status, done), num, status)
+        problem = refs.backlog_problems(one_item("42", "finished"))[0]
+        self.assertIn("'finished'", problem)
+        self.assertIn(STATUSES, problem)
+
+    def test_an_item_needs_exactly_one_status_line_first(self):
+        ok = ("5. A made-up item", "Status: open\n\n- 2026-10-01: a bullet\n")
+        cases = [("12", "12. No status line", "- 2026-10-01: a bullet\n- 2026-10-02: another\n"),
+                 ("27a", "27a. Two status lines", "Status: open\n\n- 2026-10-01: a bullet\n\nStatus: in-progress\n"),
+                 ("33", "33. Status after a bullet", "- 2026-10-01: a bullet\n\nStatus: open\n"),
+                 # the bold shape is not a status line: the item has none
+                 ("48", "48. Bold status", "**Status:** open\n\n- 2026-10-01: a bullet\n")]
+        for num, heading, body in cases:
+            self.assert_one_problem(backlog([ok, (heading, body)]), num, heading)
+            self.assert_one_problem(backlog([(heading, body), ok]), num, heading)
+        # a status line belongs to the item it follows: the next item's does not count
+        text = backlog([("12. No status line", "- 2026-10-01: a bullet\n"), ("13. Fine", "Status: open\n")])
+        self.assert_one_problem(text, "12", "the next item's status")
+        # a heading followed straight by its status line is fine
+        self.assertEqual(refs.backlog_problems("## A theme\n### 5. Tight\nStatus: open\n- a bullet\n## Done\n"), [])
+
+    def test_finished_items_sit_under_done_and_others_above(self):
+        ok_open = ("5. Open", "Status: open\n")
+        ok_done = ("6. Done", "Status: done 2026-09-30\n")
+        cases = [("21", [ok_open, ("21. Done above", "Status: done 2026-10-01\n")], [ok_done]),
+                 ("44b", [ok_open, ("44b. Dropped above", "Status: dropped\n")], [ok_done]),
+                 ("50", [ok_open], [ok_done, ("50. Open below", "Status: open\n")]),
+                 ("61", [ok_open], [("61. In progress below", "Status: in-progress\n"), ok_done]),
+                 ("77", [ok_open], [ok_done, ("77. Blocked below", "Status: blocked-on-ryan\n")])]
+        for num, above, below in cases:
+            self.assert_one_problem(backlog(above, below), num, num)
+        self.assertEqual(refs.backlog_problems(backlog([ok_open], [ok_done])), [])
+
+    def test_a_number_used_twice_or_a_heading_without_one_is_named(self):
+        for num in ("17", "2c", "93"):
+            text = backlog([(f"{num}. First", "Status: open\n"), ("40. Other", "Status: open\n")],
+                           [(f"{num}. Second", "Status: done 2026-10-02\n")])
+            self.assert_one_problem(text, num, f"{num} twice")
+        for heading in ("Notes", "9 Without the dot", "Ideas for later"):
+            text = backlog([("40. Other", "Status: open\n"), (heading, "- 2026-10-01: a bullet\n")])
+            self.assert_one_problem(text, heading, heading, heading=True)
+
+    def test_doc_refs_fails_on_a_broken_backlog(self):
+        real = refs.read(refs.BACKLOG)
+        broken = {
+            "997": real.replace("\n## Done\n", "\n### 997. A made-up item\n\nStatus: finished\n\n## Done\n", 1),
+            "996": real.replace("\n## Done\n", "\n### 996. A made-up item\n\nStatus: open\n\n"
+                                "### 996. Again\n\nStatus: open\n\n## Done\n", 1),
+            "995": real.replace("\n## Done\n", "\n## Done\n\n### 995. A made-up item\n\nStatus: open\n\n", 1),
+        }
+        for num, text in broken.items():
+            self.assertNotEqual(text, real)
+            code, output = run_main(text)
+            self.assertNotEqual(code, 0, output)
+            fails = [line for line in output.splitlines() if "FAIL docs/BACKLOG.md:" in line]
+            self.assertTrue(fails, output)
+            self.assertTrue(any(names_item(line, num) for line in fails), output)
+            self.assertNotIn("doc-refs: ok", output)
 
 
 class DocsIndex(unittest.TestCase):
