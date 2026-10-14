@@ -1,4 +1,4 @@
-# Handoff — 2026-10-14 (overnight)
+# Handoff — 2026-10-14 (overnight; landing ~09:30 JST)
 
 ## State
 - **Harness v2 adopted**: PR #2 (`1e2f769`, the prep inventory `docs/agent/harness-prep.md`, the
@@ -26,15 +26,16 @@
 - Harness-side issues filed by the harness session from this repo's findings: Harness #25
   (work log drops pasted, `!` and slash-command messages), #26 (sessions inside ticket worktrees
   are not counted), #27 (land restores main-checkout files identical to the landed content).
+- **Landed 2026-10-14 morning (Ryan's go)**: #17, #18, #23, #19, #20, #21, #22 in that order,
+  after the land checks (privacy audit clean, no worktree data, runner unchanged: `--json` output
+  is unchanged and the new `! Roster:` line prints in text mode only). #21 got one commit first:
+  rule 12 keeps "one record per call". Epic #5 closed; epic #6 1 of 3 (#10 done). `main` at
+  `2e031b4`. `tools/worklog.py` is gone: `harness-worklog` only.
 - The main checkout is dirty on `worklog/worklog.csv` (the 10-14 row) and this file, by design:
   both go to `main` through #15.
 
 ## Next steps
-1. Morning: review and land, in this order (the one simulated): PR #17 (#8), #18 (#7), #23 (#13),
-   #19 (#9), #20 (#11), #21 (#12), #22 (#10); `/land-checks <branch>`, then `/harness:land`. Then
-   #14 is dispatchable. Worth your eye: #21 moves rule 12's connector names, "one record per call"
-   and the metadata sequence, and rule 11's floors, out of CLAUDE.md into their skills (as the
-   ticket said), and drops `make docs-index` (RUNBOOK "Checks" holds it); CLAUDE.md is 72 lines.
+1. #14 (document the monthly chore) is dispatchable now that #10 is closed.
 2. Ryan's questions: #12 stops at ~72 lines; go to ~60 by shortening rules 3, 4, 6, 7, 9, 10, 11
    to one line plus a skill pointer? Should `make doc-refs` refuse a new BACKLOG number (> 86)?
    Drop `.env` and `credentials/` from `.worktreeinclude` for dispatched runs (no ticket needs
