@@ -397,6 +397,167 @@ class FormStatusAudit(FormStatusFixture, unittest.TestCase):
             self.assertIn("rendered picker: 0 options", out)
             self.assertIn("→ CLEAN", out)
 
+    COMPARED = ("62a8b57dd95", "fc726a121d4", "9e75d6f1d83", "7a7e75787df", "9083adfcdff", "2bdb1ec3fa8")
+    NOTE = " (not compared with glow/translation_lookup.py yet: BACKLOG 64)"
+
+    def test_the_build_line_names_a_build_not_yet_compared(self):
+        for build in self.COMPARED:                                   # compared: the id alone
+            self.assertEqual(form_status.build_line(build), build)
+        for build in ("8705c008453", "bc6c80d556a", "18bdf84aedc",   # later builds, then made-up ones
+                      "0123456789a", "deadbeef", "62a8b57dd96", "9e75d6f1d8"):
+            self.assertEqual(form_status.build_line(build), build + self.NOTE, build)
+        self.assertEqual(form_status.build_line(None), "not found on the public page")
+        # the line follows the READ_BUILDS set, not a list kept in the tool
+        from unittest import mock
+        from glow import translation_lookup as tl
+        for build in tl.READ_BUILDS:
+            self.assertEqual(form_status.build_line(build), build)
+        # ... read at call time from the module attribute: a patched set decides, in both directions
+        with mock.patch.object(tl, "READ_BUILDS", frozenset({"0123456789a"})):
+            self.assertEqual(form_status.build_line("0123456789a"), "0123456789a")
+            self.assertEqual(form_status.build_line("62a8b57dd95"), "62a8b57dd95" + self.NOTE)
+            self.assertEqual(form_status.build_line("9e75d6f1d83"), "9e75d6f1d83" + self.NOTE)
+            self.assertEqual(form_status.build_line(None), "not found on the public page")
+        with mock.patch.object(tl, "READ_BUILDS", frozenset()):
+            self.assertEqual(form_status.build_line("9e75d6f1d83"), "9e75d6f1d83" + self.NOTE)
+        self.assertEqual(form_status.build_line("62a8b57dd95"), "62a8b57dd95")      # restored
+
+    def test_rendered_problems_sets_build_read_true_false_or_none(self):
+        from unittest import mock
+        from glow import translation_lookup as tl
+
+        def page(build):
+            return (f'<script src="https://cdn.jotfor.ms/s/static/{build}/static/jotform.forms.js"></script>'
+                    if build else "<p>no runtime here</p>")
+
+        def run(build):
+            r = {"club_picker": None, "roster_qids": []}
+            form_status.rendered_problems(r, page(build))
+            return r
+
+        for build in self.COMPARED:
+            r = run(build)
+            self.assertEqual((r["build"], r["build_read"]), (build, True), build)
+        for build in ("8705c008453", "bc6c80d556a", "18bdf84aedc", "0123456789a"):
+            r = run(build)
+            self.assertEqual((r["build"], r["build_read"]), (build, False), build)
+        r = run(None)
+        self.assertIsNone(r["build"])
+        self.assertIn("build_read", r)
+        self.assertIsNone(r["build_read"])
+        # follows the module's set at call time
+        with mock.patch.object(tl, "READ_BUILDS", frozenset({"0123456789a"})):
+            self.assertIs(run("0123456789a")["build_read"], True)
+            self.assertIs(run("9e75d6f1d83")["build_read"], False)
+            self.assertIsNone(run(None)["build_read"])
+
+    def test_an_uncompared_build_is_named_and_the_form_stays_clean(self):
+        import contextlib
+        import io
+        import re
+        import tempfile
+        from unittest import mock
+        qs, wire = self.guard_form()
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+
+        class Fake:
+            def get(self, path, **params):
+                if path.endswith("/questions"):
+                    return copy.deepcopy(qs)
+                if path.endswith("/properties"):
+                    return {"conditions": wire, "language": [{"options": "English (US)|Español"}],
+                            "clearFieldOnHide": "disable"}
+                if path == "/user/usage":
+                    return {"uploads": "1340458410", "submissions": "474", "total_submissions": "690",
+                            "monthly_usage_reset_date": "2026-10-21 00:00:00", "form_count": "5"}
+                if path == "/user":
+                    return {"account_type": "https://api.jotform.com/system/plan/SILVER"}
+                if path == "/system/plan/SILVER":
+                    return {"name": "SILVER", "limits": {"uploads": 10738466816, "submissions": 2500}}
+                return {"title": "t", "status": "ENABLED", "count": "0"}
+
+        select = ('<select name="q500_clubPicker[]" multiple="">'
+                  + "".join(f'<option data-calcvalue="{o}" value="{o}">{o}</option>'
+                            for o in ClubGuardFixture.OPTIONS) + "</select>\n<!--rest-->")
+
+        shifted = select.replace('data-calcvalue="Beta Club"', 'data-calcvalue="Alpha Club"')
+
+        def report(roster, *extra, strip_build=False, picker=select, **served_kw):
+            rest = served_rules_and_rosters(qs, wire, **served_kw)
+            if strip_build:                                   # a page whose runtime script is gone
+                rest = re.sub(r'<script src="https://cdn\.jotfor\.ms/s/static/[^>]*></script>', "", rest)
+            served = picker.replace("<!--rest-->", rest)
+            out = io.StringIO()
+            with mock.patch.object(form_status, "Client", lambda key: Fake()), \
+                    mock.patch.object(form_status, "public_page", lambda fid: served), \
+                    mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                    mock.patch.object(sys, "argv", ["form_status.py", "--form", glow_forms.TEMPLATE,
+                                                    "--roster", roster, "--rendered", *extra]), \
+                    contextlib.redirect_stdout(out):
+                form_status.main()
+            return out.getvalue()
+
+        def build_lines(out):
+            return [ln.strip() for ln in out.splitlines() if ln.strip().startswith("runtime build:")]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            roster = os.path.join(tmp, "roster.csv")
+            with open(roster, "w", encoding="utf-8") as f:
+                f.write("partner,club,full_name,status,region\n")
+                for (partner, club), names in ClubGuardFixture.ROSTER.items():
+                    f.write(f"{partner},{club},{names[0]},active,Africa\n")
+            # an uncompared build: the note, and the form stays CLEAN
+            for build in ("8705c008453", "bc6c80d556a", "0123456789a"):
+                out = report(roster, build=build)
+                self.assertEqual(build_lines(out), [f"runtime build: {build}{self.NOTE}"], build)
+                self.assertIn(f"runtime build: {build} (not compared", out)
+                self.assertIn("→ CLEAN", out, build)
+                (rep,) = json.loads(report(roster, "--json", build=build))
+                self.assertIs(rep["build_read"], False, build)
+                self.assertEqual(rep["build"], build)
+                self.assertEqual(rep["rule_problems"], [])
+            # the default build and other compared ones: the line is exactly the id, nothing after it
+            out = report(roster)
+            self.assertEqual(build_lines(out), ["runtime build: 9e75d6f1d83"])
+            self.assertIn("→ CLEAN", out)
+            (rep,) = json.loads(report(roster, "--json"))
+            self.assertIs(rep["build_read"], True)
+            for build in ("62a8b57dd95", "2bdb1ec3fa8"):
+                self.assertEqual(build_lines(report(roster, build=build)), [f"runtime build: {build}"], build)
+                (rep,) = json.loads(report(roster, "--json", build=build))
+                self.assertIs(rep["build_read"], True, build)
+            # a page with no build: the line says so, and build_read is None (not False)
+            out = report(roster, strip_build=True)
+            self.assertEqual(build_lines(out), ["runtime build: not found on the public page"])
+            (rep,) = json.loads(report(roster, "--json", strip_build=True))
+            self.assertIsNone(rep["build"])
+            self.assertIn("build_read", rep)
+            self.assertIsNone(rep["build_read"])
+            # the report follows glow.translation_lookup.READ_BUILDS at call time
+            from glow import translation_lookup as tl
+            with mock.patch.object(tl, "READ_BUILDS", frozenset({"0123456789a"})):
+                out = report(roster, build="0123456789a")
+                self.assertEqual(build_lines(out), ["runtime build: 0123456789a"])
+                self.assertIn("→ CLEAN", out)
+                (rep,) = json.loads(report(roster, "--json", build="0123456789a"))
+                self.assertIs(rep["build_read"], True)
+                out = report(roster)                              # 9e75d6f1d83 is no longer compared
+                self.assertEqual(build_lines(out), [f"runtime build: 9e75d6f1d83{self.NOTE}"])
+                self.assertIn("→ CLEAN", out)
+                (rep,) = json.loads(report(roster, "--json"))
+                self.assertIs(rep["build_read"], False)
+            # an uncompared build does not skip the audit: a real problem is still flagged
+            for build in ("8705c008453", "9e75d6f1d83"):
+                out = report(roster, picker=shifted, build=build)
+                self.assertIn("would send another club's name", out, build)
+                self.assertNotIn("→ CLEAN", out, build)
+                self.assertEqual(len(build_lines(out)), 1, build)
+            out = report(roster, picker=shifted, build="8705c008453")
+            self.assertIn(f"runtime build: 8705c008453{self.NOTE}", out)
+            self.assertIn("would send another club's name", out)
+            self.assertNotIn("→ CLEAN", out)
+
 
 class FormStatusRoster(unittest.TestCase):
     """tools/form_status.py --roster: required (the old default was the pre-launch offline

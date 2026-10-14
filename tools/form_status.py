@@ -645,6 +645,17 @@ def runtime_build(page):
     return m.group(1) if m else None
 
 
+def build_line(build):
+    """The `runtime build:` line's text: the id alone for a build whose formTranslation.v2.js was
+    compared with glow/translation_lookup.py (READ_BUILDS, read at call time), the id with a note
+    for any other, and a notice when the page names none. Never a problem: CLEAN is unchanged."""
+    if build is None:
+        return "not found on the public page"
+    if build in tl.READ_BUILDS:
+        return build
+    return f"{build} (not compared with glow/translation_lookup.py yet: BACKLOG 64)"
+
+
 def rendered_rules(page, rosters):
     """Question 18 as the page serves it (counts and qids only): {"rules": how many
     JotForm.setConditions holds, "position": the 0-based place of question 18's
@@ -704,11 +715,13 @@ def rendered_retired(page, rosters):
 
 def rendered_problems(r, page):
     """--rendered: what the served page says against what the API audit expects,
-    each expectation from glow/sync.py's constants. Adds r["build"], r["rendered_rules"],
+    each expectation from glow/sync.py's constants. Adds r["build"], r["build_read"] (True: the
+    build is in translation_lookup.READ_BUILDS; None: no build found), r["rendered_rules"],
     r["rendered_required"] (and r["rendered"], the picker's calcValues; r["rendered_retired"]
     when the form has retired rosters) and returns problems."""
     problems = []
     r["build"] = runtime_build(page)
+    r["build_read"] = None if r["build"] is None else r["build"] in tl.READ_BUILDS
     retired = r.get("retired_qids") or []
     if retired:
         counts = rendered_retired(page, retired)
@@ -1496,7 +1509,7 @@ def main():
         if "rendered_skipped" in r:
             print(f"   rendered: skipped (form {r['rendered_skipped']})")
         if "build" in r:
-            print(f"   runtime build: {r['build'] or 'not found on the public page'}")
+            print(f"   runtime build: {build_line(r['build'])}")
         if "rendered_retired" in r:
             c = r["rendered_retired"]
             print(f"   rendered retired: {len(r['retired_qids'])} retired rosters, {c['always_hidden']} always-hidden")
