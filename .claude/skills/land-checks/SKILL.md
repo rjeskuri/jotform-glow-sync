@@ -35,7 +35,9 @@ The `privacy-auditor` agent on `origin/main...$B`.
 The land is the rollout. The auto-sync workflow runs `main`'s code only and applies within its
 bands, so a form change the sync generates reaches every enabled regional form on the runner's
 next run: the next roster change, the morning backstop, or a run from the Actions tab (RUNBOOK
-"Automatic sync"; DECISIONS 2026-10-14). Read `git diff origin/main...$B -- glow/
+"Automatic sync"; DECISIONS 2026-10-14). If the emergency stop is on (`AUTO_SYNC_APPLY` at `0`,
+during a rollback), the next run is a dry run: the land rolls nothing out until the rollback
+switches it back to `1`. Read `git diff origin/main...$B -- glow/
 tools/auto_sync.py tools/sf_new_clubs.py sync_attendance_form.py .github/workflows/` for: a
 switch in `glow/sync.py` (`CONTACT_IDS_FIRST`, `ROSTERS_REQUIRED`, `MODULE_CALC_VALUES`,
 `RETIRE_INACTIVE`, …), what a sync plans that it did not before, the bands (`--max-*`), the

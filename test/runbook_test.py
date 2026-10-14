@@ -95,13 +95,14 @@ PAUSED_RX = re.compile(r"\brunner('s)? (is |stays |was |kept |held )?(paused|hel
 
 def toggles(text):
     """TOGGLE_RX's matches in `text` (flattened), but for one negated right before ("no step sets
-    `AUTO_SYNC_APPLY` to 0"); an `AUTO_SYNC_APPLY=` counts always."""
+    `AUTO_SYNC_APPLY` to 0") and "the emergency stop (`AUTO_SYNC_APPLY` at `0`)", which names the
+    state, not a step; an `AUTO_SYNC_APPLY=` counts always."""
     text = flat(text)
     out = []
     for m in TOGGLE_RX.finditer(text):
         before = text[max(0, m.start() - 40):m.start()]
-        if m.group(0).startswith("AUTO_SYNC_APPLY=") or not re.search(r"\b(no|never|not|nor|without)\W+(\w+\W+){0,2}$",
-                                                                       before, re.I):
+        named = re.search(r"\b(no|never|not|nor|without)\W+(\w+\W+){0,2}$|\bemergency\s+$", before, re.I)
+        if m.group(0).startswith("AUTO_SYNC_APPLY=") or not named:
             out.append(m.group(0))
     return out
 
@@ -819,6 +820,9 @@ class RolloutProcedures(unittest.TestCase):
     STOP_RX = re.compile(r"emergency|rollback|\bstop(s|ping)? the (automation|runner)\b", re.I)
     MERGE_LAST = ("once every form is rolled back", "while any form is still rolled out")
     REGIONS = ("Africa", "Asia", "Latin America")
+    # an escape hatch: a change not ready lands anyway ("unless Ryan … and lands it anyway")
+    ESCAPE_RX = re.compile(r"\b(unless|except|anyway|even if|regardless)\b[^.]*\bland|"
+                           r"\bland\w*\b[^.]*\b(anyway|unless|except|even if|regardless)\b", re.I)
     # a hand rollout of the enabled regional forms instead of (or ahead of) the runner
     NOT_THE_RUNNER_RX = re.compile(r"\b(do not|don't|no need to|without|rather than|instead of)\b[^.;]{0,20}"
                                    r"\b(wait|rely|the runner)|\bdo not rely\b|\binstead of the runner\b", re.I)
@@ -1040,14 +1044,22 @@ class RolloutProcedures(unittest.TestCase):
         self.assertNotIn("AUTO_SYNC_APPLY", report)
         self.assertNotIn("must be `0`", report)
         self.assertIn("/harness:land", report)
-        # no way round it in either: no switch, no held runner, no "unless", no hand rollout instead
+        # no way round it in either: no step that sets the switch or holds the runner, no escape hatch
+        # that lands a change not ready anyway, no hand rollout instead. The emergency stop may be
+        # named as a state (during it the next run is a dry run), and a band's hold of a plan noted
         for name, text in (("/land-checks step 3", step3), ("/land-checks Report", report)):
-            self.assertNotIn("AUTO_SYNC_APPLY", text, name)
+            self.assertNotIn(self.OFF, text, name)
             self.assertEqual(toggles(text), [], name)
-            self.assertIsNone(self.PAUSED_RX.search(text), name)
-            self.assertNotRegex(text, r"(?i)\b(unless|except|anyway|held|hold\w*|paus\w*)\b", name)
+            for s in sentences(text, "."):
+                if "emergency" not in s.lower():
+                    self.assertIsNone(self.PAUSED_RX.search(s), (name, s))
+            self.assertIsNone(self.ESCAPE_RX.search(text), name)
             self.assertIsNone(self.NOT_THE_RUNNER_RX.search(text), name)
             self.assertEqual(self.hand_clauses(text), [], name)
+        # …and step 3 says the land rolls nothing out while the emergency stop is on: that run is a dry run
+        self.assertTrue([s for s in sentences(step3, ".") if re.search(r"(?i)\bemergency\b", s)
+                         and re.search(r"(?i)\bdry[- ]run\b", s)],
+                        "/land-checks step 3: say that during the emergency stop the next run is a dry run")
         # the plan template's Rollout guidance: the merge rolls a generated change out on the runner's
         # next run; the Rollout lists the hand steps only
         rollout = flat(md_part(self.PLAN_TEMPLATE, "## Rollout"))
