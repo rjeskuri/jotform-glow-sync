@@ -13,8 +13,9 @@
 #     the next launch reads its environment from - ~/.zshrc and the other shell
 #     startup files, a direnv .envrc, the repository's .env (sourced with set -a):
 #     a redirect, tee, sed -i or perl -i into one, or launchctl setenv;
-#   - a subagent (agent_id or agent_type in the input): a live write never comes
-#     from one; the main session asks Ryan;
+#   - a subagent (agent_id in the input): a live write never comes from one; the
+#     main session asks Ryan. agent_type alone is no subagent: Claude Code sends it on
+#     the main thread of a session started with --agent, which gets its mode's decision;
 #   - a session that cannot show him the prompt: permission_mode other than
 #     exactly default, acceptEdits, auto or plan - so bypassPermissions, dontAsk,
 #     a missing or an unknown value (a headless or dispatched run).
@@ -33,16 +34,17 @@
 set -u
 INPUT=$(cat)
 # three fields from the input: the permission mode as JSON text (so "default" stays
-# apart from a missing, numeric or oddly spelt value), whether an agent is named, then
-# the command. Unreadable input gives no fields, hence no command and no decision.
+# apart from a missing, numeric or oddly spelt value), whether it comes from a subagent
+# (an agent_id), then the command. Unreadable input gives no fields, hence no command and
+# no decision.
 if command -v jq >/dev/null 2>&1; then
-  FIELDS=$(printf '%s' "$INPUT" | jq -r '[(.permission_mode | @json), ((has("agent_id") or has("agent_type")) | tostring), (.tool_input.command | if type == "string" then . else "" end)] | join("\n")')
+  FIELDS=$(printf '%s' "$INPUT" | jq -r '[(.permission_mode | @json), (has("agent_id") | tostring), (.tool_input.command | if type == "string" then . else "" end)] | join("\n")')
 else
   FIELDS=$(printf '%s' "$INPUT" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 mode = json.dumps(d.get("permission_mode"))
-agent = "true" if ("agent_id" in d or "agent_type" in d) else "false"
+agent = "true" if "agent_id" in d else "false"
 cmd = (d.get("tool_input") or {}).get("command")
 print(mode)
 print(agent)
@@ -62,17 +64,21 @@ esac
 # delete of metadata, data writes, anonymous Apex, the REST API itself, and
 # --rehearse (sf_dupes.py's production DML, rolled back).
 SF='(^|[^[:alnum:]_.-])sf(dx)?[[:space:]]+'
-PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|api\.jotform\.com|api\.github\.com/repos/[^[:space:]]*/dispatches|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
+PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|api\.jotform\.com|api\.github\.com/[^[:space:]]*(actions/|dispatches|graphql)|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
 PATTERN+="|${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}deploy[[:space:]]+metadata|${SF}project[[:space:]]+delete[[:space:]]+source"
 PATTERN+="|${SF}data[[:space:]]+(create|update|delete|upsert|import)|${SF}apex[[:space:]]+run"
 PATTERN+="|${SF}force:(apex:execute|source:(deploy|delete|push)|mdapi:deploy|data:(record|bulk|tree):)|\.salesforce\.com/services/"
 # GitHub: the sync's switches (repository variables and secrets: SF_SYNC, AUTO_SYNC_APPLY),
 # the workflow itself, a run that applies (apply given true, from a file, by expansion, or
-# inputs as JSON) and a rerun (it repeats the recorded inputs); gh api is below.
-GH='(^|[^[:alnum:]_.-])gh[[:space:]]+((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
+# inputs as JSON) and a rerun (it repeats the recorded inputs); gh api is below. A -R x,
+# --repo x or --repo=x may stand before or between the words (gh variable -R o/r set).
+# The GitHub API by its URL (curl, a script) is live on the paths the gh api rule below
+# names: the Actions API, a dispatch and GraphQL, whatever the method.
+REPO='((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
+GH="(^|[^[:alnum:]_.-])gh[[:space:]]+${REPO}"
 APPLY_ON='apply["'\'']?[[:space:]]*[=:][[:space:]]*["'\'']?([Tt][Rr][Uu][Ee]|1|[$@`])'
-PATTERN+="|${GH}(variable|secret)[[:space:]]+(set|delete|remove)|${GH}workflow[[:space:]]+(enable|disable)|${GH}run[[:space:]]+rerun"
-PATTERN+="|${GH}workflow[[:space:]]+run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+run"
+PATTERN+="|${GH}(variable|secret)[[:space:]]+${REPO}(set|delete|remove)|${GH}workflow[[:space:]]+${REPO}(enable|disable)|${GH}run[[:space:]]+${REPO}rerun"
+PATTERN+="|${GH}workflow[[:space:]]+${REPO}run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+${REPO}run"
 # self-approval: the flag in the command, or written where the next launch picks it up
 STARTUP='(\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bashrc|\.bash_profile|\.bash_login|\.profile|\.envrc|\.env)([^[:alnum:]_.-]|$)'
 WRITES='(>|tee[[:space:]]|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i)[^;&|]*'
@@ -81,11 +87,17 @@ PATTERN+="|${SELF})"
 # Prompt, don't parse (Ryan, 2026-10-14): the command is matched as text, never read as
 # shell words - a reader fails open on every gap between it and the shell, a text pattern
 # fails closed. Every pattern is tried, in any case, on the command on one line (a command
-# continued with \ or spread over lines is still one command) and on a copy with the quote
-# and backslash characters removed (gh 'workflow' run, g""h, var\iable, --ap""ply).
+# continued with \ or spread over lines is still one command), on the same with each
+# backslash-newline (LF or CRLF) removed, as the shell removes it inside a word (--ap\<LF>ply
+# is --apply), and on both with the quote and backslash characters removed (gh 'workflow'
+# run, g""h, var\iable, --ap""ply).
+JOIN=$'\\\n' JOIN_CRLF=$'\\\r\n'
+JOINED=${CMD//"$JOIN_CRLF"/}
+JOINED=${JOINED//"$JOIN"/}
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
-BARE=$(printf '%s' "$FLAT" | tr -d '\\"'"'")
-TEXTS=$FLAT$'\n'$BARE
+JOINED=$(printf '%s' "$JOINED" | tr '\n\r' '  ')
+bare() { printf '%s' "$1" | tr -d '\\"'"'"; }
+TEXTS=$FLAT$'\n'$(bare "$FLAT")$'\n'$JOINED$'\n'$(bare "$JOINED")
 has() { printf '%s\n' "$TEXTS" | grep -Eiq -e "$1"; }
 first() { printf '%s\n' "$TEXTS" | grep -Eio -e "$1" | head -1; }
 MATCH=$(first "$PATTERN") || true
@@ -171,8 +183,8 @@ reads its environment from. Nothing pre-approves a live command - Ryan's answer 
 session's prompt is the only go, and GLOW_LIVE_OK grants nothing since 2026-10-14."
 fi
 if [ "$AGENT" = "true" ]; then
-  refuse "A subagent never runs a live command (the input names an agent: agent_id or
-agent_type). The main session asks Ryan, and his answer to that prompt is the go."
+  refuse "A subagent never runs a live command (the input carries an agent_id). The main
+session asks Ryan, and his answer to that prompt is the go."
 fi
 case "$MODE" in
   '"default"' | '"acceptEdits"' | '"auto"' | '"plan"') ;;
@@ -185,9 +197,10 @@ It can change a live system: the Jotform attendance forms, the master enrollment
 Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches on GitHub
 (live since 2026-09-01). Ryan's answer here is the go; nothing pre-approves it. Yes only
 after the dry run was read and the backup exists (backup_forms.py / sheets_client.py
-export-all). Direct API access (curl to api.jotform.com, Sheets write snippets, GitHub
-dispatches, gh api on actions/, dispatches or graphql) is gated exactly like the tool
-flags. The gate matches text: a message that only names a live command asks too.
+export-all). Direct API access (curl to api.jotform.com, Sheets write snippets, the
+GitHub API - gh api or api.github.com - on actions/, dispatches or graphql) is gated
+exactly like the tool flags. The gate matches text: a message that only names a live
+command asks too.
 $RUNBOOK"
 OUT=$(decide ask "$REASON") || OUT=
 if [ -n "$OUT" ]; then

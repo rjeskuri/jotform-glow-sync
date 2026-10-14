@@ -7,7 +7,8 @@ decision; 0 and an ask JSON: Ryan is asked in the session; 2, or a deny JSON: re
   - .claude/hooks/live_gate.sh (Bash): every live-system command asks Ryan in the session
     (since 2026-10-14 GLOW_LIVE_OK pre-approves nothing), and is refused outright when the
     session cannot show him the prompt (permission_mode bypassPermissions, dontAsk, missing or
-    unknown), from a subagent, and when the command approves itself; a read-only command that
+    unknown), from a subagent (agent_id in the input; agent_type alone is a main session started
+    with --agent), and when the command approves itself; a read-only command that
     only mentions a live flag passes, a chained one does not. "Prompt, don't parse" (Ryan,
     2026-10-14): the command is matched as text - as written and with quote and backslash
     characters removed, in any case - never read as shell words. A gh api call is live when the
@@ -193,15 +194,18 @@ class Hooks(unittest.TestCase):
         # characters removed, in any case (gh "variable" set, GH variable set) - except for the
         # gh/sf api rules, whose match may be a description, and only when the command holds a
         # gh or sf word and api
+        # (and with a backslash-newline joined, as the shell joins it: --ap\<newline>ply is --apply)
+        joined = command.replace("\\\r\n", "").replace("\\\n", "").replace("\r", " ").replace("\n", " ")
         bare = re.sub(r"""["'\\]""", "", flat)
+        joined_bare = re.sub(r"""["'\\]""", "", joined)
+        texts = [t.lower() for t in (flat, bare, joined, joined_bare)]
         found = matched.group(1).lower()
-        api_cli = (re.search(r"(^|[^\w.-])(gh|sf|sfdx)([^\w.-]|$)", bare, re.I) and "api" in bare.lower())
-        self.assertTrue(found in flat.lower() or found in bare.lower()
-                        or (api_cli and found.startswith(("gh api", "sf api"))),
+        api_cli = (re.search(r"(^|[^\w.-])(gh|sf|sfdx)([^\w.-]|$)", joined_bare, re.I) and "api" in joined_bare.lower())
+        self.assertTrue(any(found in t for t in texts) or (api_cli and found.startswith(("gh api", "sf api"))),
                         f"the matched text {matched.group(1)!r} is not in the command {flat!r}")
         if command in self.TRIGGERS:
             self.assertIn(self.TRIGGERS[command], reason, f"the reason does not name the family's trigger: {reason!r}")
-        self.assertIn(flat[:20], shown, f"the reason does not name the command: {reason!r}")
+        self.assertTrue(flat[:20] in shown or joined[:20] in shown, f"the reason does not name the command: {reason!r}")
         self.assertIn("live", reason.lower(), f"the reason does not say why: {reason!r}")
         self.assertIn("RUNBOOK", reason, reason)
         self.assertIn("Live gate (Claude Code)", reason, reason)          # the RUNBOOK section
@@ -342,6 +346,9 @@ class Hooks(unittest.TestCase):
         "gh \"variable\" set SF_SYNC --body apply": "variable set", "GH variable set X --body 1": "variable set",
         "SF data delete record -s Contact -i 003000000000001": "data delete",
         "python3 sync_attendance_form.py x --ap\"\"ply": "--apply",
+        # matched with a backslash-newline joined
+        "python3 sync_attendance_form.py x --ap\\\nply": "--apply", "gh vari\\\nable set X --body 1": "variable set",
+        "sf apex r\\\nun -f merge.apex": "apex run",
     }
     # a command that approves itself: the flag in the command, or written where the next launch
     # reads its environment (review of 2026-10-09)
@@ -369,6 +376,7 @@ class Hooks(unittest.TestCase):
              "gh workflow run auto-sync.yml", "gh workflow run auto-sync.yml -f apply=false",
              "sf org list", "sf data query -q 'SELECT Id FROM Account' -o glow",
              "sf project deploy report --job-id 0Af000000000001", "sfdx force:org:list",
+             "sf project deploy preview --source-dir force-app -o glow",
              "sf project retrieve start -m ApexClass:GlowSync", "sfdx force:data:soql:query -q 'SELECT Id FROM Account'",
              "sf api request rest '/services/data/v60.0/query?q=SELECT+Id+FROM+Account' -o glow",
              "sf api request rest /services/data/v60.0/limits", "sf api request rest /services/data/v60.0/ -X GET",
@@ -476,6 +484,52 @@ class Hooks(unittest.TestCase):
         "python3 sync_attendance_form.py x --ap\"\"ply",
         "curl -X PUT https://API.JOTFORM.COM/form/1/properties -d @rules.json",
     ]
+    # a backslash-newline (LF or CRLF) inside a word: the shell removes it and joins the word
+    # (review of 253135b), so the text is matched with those joined - one or more per family
+    CONTINUED_WORDS = [
+        "python3 sync_attendance_form.py x --ap\\\nply",
+        "python3 sync_attendance_form.py x --pr\\\r\nune",
+        "gh vari\\\nable set X --body 1",
+        "g\\\nh variable set SF_SYNC --body apply",
+        "gh secret s\\\r\net JOTFORM_API_KEY",
+        "gh workflow run auto-sync.yml -f ap\\\nply=true",
+        "gh run re\\\nrun 1234",
+        "gh api repos/o/r/acti\\\nons/variables/X -X PATCH",
+        "gh api gra\\\r\nphql -f query=x",
+        "sf apex r\\\nun -f merge.apex",
+        "sf data del\\\nete record -s Contact -i 003000000000001",
+        "npx clasp pu\\\nsh -f",
+        "curl -X PUT https://api.jot\\\nform.com/form/1/properties -d @rules.json",
+        "python3 tools/sf_dupes.py merge --reh\\\r\nearse",
+    ]
+    # gh's -R/--repo between a family's words (gh variable -R o/r set): the family still asks
+    # (review of 253135b) ...
+    FLAGS_BETWEEN = [
+        "gh variable -R o/r set X --body 1",
+        "gh secret -R o/r set X",
+        "gh workflow -R o/r disable x.yml",
+        "gh run -R o/r rerun 1",
+        "gh variable --repo o/r delete SF_SYNC",
+        "gh secret --repo=o/r remove X",
+        "gh workflow --repo o/r enable auto-sync.yml",
+        "gh workflow -R o/r run auto-sync.yml -f apply=true",
+    ]
+    # ... and the same commands with a verb that changes nothing stay silent
+    FLAGS_BETWEEN_READS = ["gh variable list", "gh run list", "gh variable -R o/r list", "gh run -R o/r list",
+                           "gh secret --repo o/r list", "gh workflow -R o/r view auto-sync.yml",
+                           "gh workflow -R o/r run auto-sync.yml"]
+    # the GitHub API by its URL (curl, a script): api.github.com with actions/, dispatches or
+    # graphql is live whatever the method, as gh api is (review of 253135b)
+    GITHUB_URL_LIVE = [
+        "curl -sS https://api.github.com/repos/o/r/actions/variables/AUTO_SYNC_APPLY -X PATCH -d '{\"value\": \"true\"}'",
+        "curl -X POST https://api.github.com/repos/o/r/actions/workflows/auto-sync.yml/dispatches -d @in.json",
+        "curl -s https://api.github.com/repos/o/r/actions/secrets",
+        "curl -X POST https://api.github.com/graphql -d @query.json",
+        "curl -X PATCH https://API.GITHUB.COM/repos/o/r/actions/variables/SF_SYNC -d @v.json",
+        "python3 -c \"import requests; requests.patch('https://api.github.com/repos/o/r/actions/variables/SF_SYNC')\"",
+    ]
+    GITHUB_URL_READS = ["curl https://api.github.com/repos/o/r/pulls/1",
+                        "curl -s 'https://api.github.com/repos/o/r/issues?state=open'"]
 
     def test_every_live_command_asks_ryan_and_is_logged(self):
         for mode in ASK_MODES:
@@ -593,6 +647,42 @@ class Hooks(unittest.TestCase):
         self.assert_denies(self.SPELT_OTHERWISE, mode="dontAsk", saying=("interactive", "terminal"))
         self.assert_denies(self.SPELT_OTHERWISE, agent=True, saying=("agent",))
 
+    def test_a_word_continued_on_the_next_line_is_one_word(self):
+        for mode in ASK_MODES:
+            self.assert_asks(self.CONTINUED_WORDS, mode=mode)
+        with self.subTest("one ASKED per command"):
+            self.assertEqual(self.logged(), {"ASKED": len(self.CONTINUED_WORDS) * len(ASK_MODES)})
+        for mode in NO_PROMPT_MODES:
+            self.assert_denies(self.CONTINUED_WORDS, mode=mode, saying=("interactive", "terminal"))
+        self.assert_denies(self.CONTINUED_WORDS, agent=True, saying=("agent",))
+
+    def test_a_repo_flag_between_the_family_words_does_not_hide_it(self):
+        self.assert_asks(self.FLAGS_BETWEEN)
+        with self.subTest("one ASKED per command"):
+            self.assertEqual(self.logged(), {"ASKED": len(self.FLAGS_BETWEEN)})
+        self.assert_denies(self.FLAGS_BETWEEN, mode="dontAsk", saying=("interactive", "terminal"))
+        self.assert_denies(self.FLAGS_BETWEEN, agent=True, saying=("agent",))
+        before = self.logged()
+        for mode in ("default", "dontAsk", None):
+            self.assert_silent(self.FLAGS_BETWEEN_READS, mode=mode)
+        self.assert_silent(self.FLAGS_BETWEEN_READS, agent=True)
+        with self.subTest("nothing logged for the reads"):
+            self.assertEqual(self.logged(), before)
+
+    def test_the_github_api_by_url_asks_on_its_live_paths(self):
+        for mode in ASK_MODES:
+            self.assert_asks(self.GITHUB_URL_LIVE, mode=mode)
+        with self.subTest("one ASKED per command"):
+            self.assertEqual(self.logged(), {"ASKED": len(self.GITHUB_URL_LIVE) * len(ASK_MODES)})
+        self.assert_denies(self.GITHUB_URL_LIVE, mode="dontAsk", saying=("interactive", "terminal"))
+        self.assert_denies(self.GITHUB_URL_LIVE, agent=True, saying=("agent",))
+        before = self.logged()
+        for mode in ("default", "dontAsk", None):
+            self.assert_silent(self.GITHUB_URL_READS, mode=mode)
+        self.assert_silent(self.GITHUB_URL_READS, agent=True)
+        with self.subTest("nothing logged for the reads"):
+            self.assertEqual(self.logged(), before)
+
     def test_a_session_that_cannot_show_a_prompt_is_refused(self):
         # a headless or dispatched run, or a mode that skips prompts, cannot carry Ryan's go: the
         # command is refused with a message that says where it can run (fail closed)
@@ -620,7 +710,8 @@ class Hooks(unittest.TestCase):
 
     def test_a_subagent_never_gets_the_prompt(self):
         # CLAUDE.md: live writes never from a subagent; the main session asks Ryan. The input
-        # says "subagent" with agent_id (any value) or agent_type (any name): either is enough
+        # says "subagent" with agent_id (any value). agent_type alone is a main session started
+        # with --agent (review of 253135b): it is no subagent, and gets the mode's decision
         runs = 0
         for mode in ASK_MODES + NO_PROMPT_MODES:
             self.assert_denies(self.SAMPLE, mode=mode, agent=True, saying=("agent",))   # a fresh id each
@@ -631,11 +722,17 @@ class Hooks(unittest.TestCase):
         for agent_id in ids:                                            # the id alone, whatever it is
             self.assert_denies(self.SAMPLE, agent=agent_id, saying=("agent",))
         runs += len(self.SAMPLE) * len(ids)
-        for agent_type in ("Explore", "harness:coder", "general-purpose"):     # the type alone
-            self.assert_denies(self.SAMPLE, agent_type=agent_type, saying=("agent",))
-        runs += len(self.SAMPLE) * 3
         self.assertEqual(self.refused(), runs)
         self.assertNotIn("ASKED", self.logged())
+        # the type alone: a main session (claude --agent x) - asked where a prompt can show, refused
+        # where none can, never refused for being an agent
+        types = ("Explore", "harness:coder", "general-purpose")
+        for agent_type in types:
+            for mode in ASK_MODES:
+                self.assert_asks(self.SAMPLE, mode=mode, agent_type=agent_type)
+            self.assert_denies(self.SAMPLE, mode="dontAsk", agent_type=agent_type, saying=("interactive", "terminal"))
+        self.assertEqual(self.logged()["ASKED"], len(self.SAMPLE) * len(ASK_MODES) * len(types))
+        self.assertEqual(self.refused(), runs + len(self.SAMPLE) * len(types))
 
     def test_the_gate_never_allows_and_never_stays_silent_on_a_live_command(self):
         # whatever the mode, the caller and the environment: Ryan's prompt or a refusal, logged
@@ -666,11 +763,15 @@ class Hooks(unittest.TestCase):
         sub = dict(main, agent_id="agent-9f8e7d6c5b4a", agent_type="harness:coder")
         run = self.run_hook("live_gate.sh", {}, raw=json.dumps(sub))
         self.assertEqual(self.verdict(run), "deny", self.show(run))
+        # a main session started with --agent names its type and no agent_id: it asks
+        with_agent = dict(main, agent_type="harness:coder")
+        run = self.run_hook("live_gate.sh", {}, raw=json.dumps(with_agent))
+        self.assertEqual(self.verdict(run), "ask", self.show(run))
         read = dict(main, tool_input={"command": "grep -n -- '--apply' docs/RUNBOOK.md",
                                       "description": "Find --apply in the runbook"})
         run = self.run_hook("live_gate.sh", {}, raw=json.dumps(read))
         self.assertEqual(self.verdict(run), "silent", self.show(run))
-        self.assertEqual(self.logged()["ASKED"], 1)
+        self.assertEqual(self.logged()["ASKED"], 2)
         self.assertEqual(self.refused(), 1)
 
     def test_an_input_the_hook_cannot_read_never_lets_a_command_through(self):
@@ -812,7 +913,10 @@ class GateSettings(unittest.TestCase):
              "git status", "make check", "scripts/verify.sh", "python3 tools/auto_sync.py",
              "python3 sync_attendance_form.py roster.csv --roster --region Africa --form 1",
              "grep -n -- '--apply' docs/RUNBOOK.md", "sf org list",
-             "sf data query -q 'SELECT Id FROM Account' -o glow", "sf project retrieve start -m ApexClass:GlowSync"]
+             "sf data query -q 'SELECT Id FROM Account' -o glow", "sf project retrieve start -m ApexClass:GlowSync",
+             # the deploy verbs that only read (review of 253135b: Bash(sf project deploy:*) asked on them)
+             "sf project deploy report --job-id 0Af000000000001",
+             "sf project deploy preview --source-dir force-app -o glow"]
     # the live families a prefix rule can name: the sync's switches on GitHub, the Apps Script
     # push, the Salesforce deploys, data writes and anonymous Apex. Not --apply, --prune,
     # --rehearse, api.jotform.com or apply=true: those sit anywhere in a command, and a rule like
@@ -823,6 +927,10 @@ class GateSettings(unittest.TestCase):
                       "gh workflow disable auto-sync.yml", "gh run rerun 1234",
                       "npx clasp push -f", "npm run clasp:push",
                       "sf project deploy start --source-dir force-app -o glow",
+                      # the deploy verbs that deploy, or wait on one (review of 253135b)
+                      "sf project deploy quick --job-id 0Af000000000001 -o glow",
+                      "sf project deploy validate --source-dir force-app -o glow",
+                      "sf project deploy resume --job-id 0Af000000000001",
                       "sf apex run --file merge.apex -o glow",
                       "sf data create record -s Account -v \"Name='Sunrise Club'\" -o glow",
                       "sf data update record -s Account -i 001000000000001 -v \"Name=X\"",

@@ -33,7 +33,8 @@
       "Bash(python3 test/fixtures/make_fixture.py --write)", "Bash(make fixtures)",
       "Bash(gh variable set:*)", "Bash(gh variable delete:*)", "Bash(gh secret set:*)", "Bash(gh secret delete:*)",
       "Bash(gh workflow run:*)", "Bash(gh workflow enable:*)", "Bash(gh workflow disable:*)", "Bash(gh run rerun:*)",
-      "Bash(sf project deploy:*)", "Bash(sf apex run:*)",
+      "Bash(sf project deploy start:*)", "Bash(sf project deploy quick:*)", "Bash(sf project deploy validate:*)",
+      "Bash(sf project deploy resume:*)", "Bash(sf apex run:*)",
       "Bash(sf data create:*)", "Bash(sf data update:*)", "Bash(sf data delete:*)", "Bash(sf data upsert:*)", "Bash(sf data import:*)"
     ],
     "deny": [
