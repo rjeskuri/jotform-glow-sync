@@ -1,19 +1,31 @@
 #!/bin/bash
 # PreToolUse hook (Bash): the live-system gate.
 #
-# Blocks any command that can change a LIVE system - the Jotform forms, the
-# master Google Sheet, the deployed Apps Script, Salesforce, or the automatic
-# sync's switches on GitHub - unless GLOW_LIVE_OK=1 was exported by the human
-# BEFORE launching Claude Code. A command that sets GLOW_LIVE_OK itself is
-# always blocked (no self-approval), and so is one that writes a file the next
-# launch reads its environment from - ~/.zshrc and the other shell startup files,
-# a direnv .envrc, the repository's .env (sourced with set -a): a redirect, tee,
-# sed -i or perl -i into one, or launchctl setenv. Fast: a few greps, no network.
-# Every decision on a live command is appended to .claude/live_gate.log (gitignored).
+# A command that can change a LIVE system - the Jotform forms, the master Google
+# Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches
+# on GitHub - is put to Ryan as an approval prompt in the session: an "ask"
+# decision on stdout, and his answer to that prompt is the go. Nothing
+# pre-approves it. Since 2026-10-14 GLOW_LIVE_OK grants nothing (a session-wide
+# approval stayed open for 10 days, and a dispatched run inherits the
+# environment), and the hook never answers "allow". It refuses outright (a "deny"
+# decision), whatever the mode:
+#   - a command that approves itself: one that sets GLOW_LIVE_OK, or writes a file
+#     the next launch reads its environment from - ~/.zshrc and the other shell
+#     startup files, a direnv .envrc, the repository's .env (sourced with set -a):
+#     a redirect, tee, sed -i or perl -i into one, or launchctl setenv;
+#   - a subagent (agent_id in the input): a live write never comes from one; the
+#     main session asks Ryan. agent_type alone is no subagent: Claude Code sends it on
+#     the main thread of a session started with --agent, which gets its mode's decision;
+#   - a session that cannot show him the prompt: permission_mode other than
+#     exactly default, acceptEdits, auto or plan - so bypassPermissions, dontAsk,
+#     a missing or an unknown value (a headless or dispatched run).
+# Fast: a few greps, no network. Every decision on a live command is appended to
+# .claude/live_gate.log (gitignored), with the mode it was taken in.
 #
-# Limits: the gate reads the command's text. A write through another program (cp,
-# an editor, a script), or a flag assembled at run time, is not seen: it guards
-# against mistakes, not against intent.
+# Limits: the gate reads the command's text, never its shell words. A write through
+# another program (cp, an editor, a script), or a flag assembled at run time, is not
+# seen: it guards against mistakes, not against intent. Text that only names a live
+# command (a commit message, a PR body) asks too, unless it is read-only and alone.
 #
 # A read-only command that only mentions a live flag (grep -n -- '--apply'
 # docs/RUNBOOK.md) passes: its first word is grep, rg, cat, head, tail, wc or ls,
@@ -21,11 +33,29 @@
 # break, so nothing else runs (nor rg --pre / git grep -O, which run a program).
 set -u
 INPUT=$(cat)
+# three fields from the input: the permission mode as JSON text (so "default" stays
+# apart from a missing, numeric or oddly spelt value), whether it comes from a subagent
+# (an agent_id), then the command. Unreadable input gives no fields, hence no command and
+# no decision.
 if command -v jq >/dev/null 2>&1; then
-  CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')
+  FIELDS=$(printf '%s' "$INPUT" | jq -r '[(.permission_mode | @json), (has("agent_id") | tostring), (.tool_input.command | if type == "string" then . else "" end)] | join("\n")')
 else
-  CMD=$(printf '%s' "$INPUT" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("tool_input") or {}).get("command") or "")')
+  FIELDS=$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+mode = json.dumps(d.get("permission_mode"))
+agent = "true" if "agent_id" in d else "false"
+cmd = (d.get("tool_input") or {}).get("command")
+print(mode)
+print(agent)
+print(cmd if isinstance(cmd, str) else "", end="")')
 fi
+MODE=${FIELDS%%$'\n'*}
+REST=${FIELDS#*$'\n'}
+case "$REST" in
+  *$'\n'*) AGENT=${REST%%$'\n'*}; CMD=${REST#*$'\n'} ;;
+  *) AGENT=$REST; CMD= ;;
+esac
 [ -z "$CMD" ] && exit 0
 
 # Tool flags AND the raw API shapes the tools wrap - a direct curl PUT to
@@ -34,42 +64,62 @@ fi
 # delete of metadata, data writes, anonymous Apex, the REST API itself, and
 # --rehearse (sf_dupes.py's production DML, rolled back).
 SF='(^|[^[:alnum:]_.-])sf(dx)?[[:space:]]+'
-PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|api\.jotform\.com|api\.github\.com/repos/[^[:space:]]*/dispatches|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
+PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|api\.jotform\.com|api\.github\.com/[^[:space:]]*(actions/|dispatches|graphql)|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
 PATTERN+="|${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}deploy[[:space:]]+metadata|${SF}project[[:space:]]+delete[[:space:]]+source"
 PATTERN+="|${SF}data[[:space:]]+(create|update|delete|upsert|import)|${SF}apex[[:space:]]+run"
 PATTERN+="|${SF}force:(apex:execute|source:(deploy|delete|push)|mdapi:deploy|data:(record|bulk|tree):)|\.salesforce\.com/services/"
 # GitHub: the sync's switches (repository variables and secrets: SF_SYNC, AUTO_SYNC_APPLY),
 # the workflow itself, a run that applies (apply given true, from a file, by expansion, or
-# inputs as JSON) and a rerun (it repeats the recorded inputs); gh api writes are below.
-GH='(^|[^[:alnum:]_.-])gh[[:space:]]+((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
+# inputs as JSON) and a rerun (it repeats the recorded inputs); gh api is below. A -R x,
+# --repo x or --repo=x may stand before or between the words (gh variable -R o/r set).
+# The GitHub API by its URL (curl, a script) is live on the paths the gh api rule below
+# names: the Actions API, a dispatch and GraphQL, whatever the method.
+REPO='((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
+GH="(^|[^[:alnum:]_.-])gh[[:space:]]+${REPO}"
 APPLY_ON='apply["'\'']?[[:space:]]*[=:][[:space:]]*["'\'']?([Tt][Rr][Uu][Ee]|1|[$@`])'
-PATTERN+="|${GH}(variable|secret)[[:space:]]+(set|delete|remove)|${GH}workflow[[:space:]]+(enable|disable)|${GH}run[[:space:]]+rerun"
-PATTERN+="|${GH}workflow[[:space:]]+run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+run"
+PATTERN+="|${GH}(variable|secret)[[:space:]]+${REPO}(set|delete|remove)|${GH}workflow[[:space:]]+${REPO}(enable|disable)|${GH}run[[:space:]]+${REPO}rerun"
+PATTERN+="|${GH}workflow[[:space:]]+${REPO}run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+${REPO}run"
 # self-approval: the flag in the command, or written where the next launch picks it up
 STARTUP='(\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bashrc|\.bash_profile|\.bash_login|\.profile|\.envrc|\.env)([^[:alnum:]_.-]|$)'
 WRITES='(>|tee[[:space:]]|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i)[^;&|]*'
 SELF="GLOW_LIVE_OK\\+?=|${WRITES}${STARTUP}|launchctl[[:space:]]+setenv"
 PATTERN+="|${SELF})"
-# matched on one line: a command continued with \ (gh workflow run x \ -f apply=true) or
-# spread over lines is still one command
+# Prompt, don't parse (Ryan, 2026-10-14): the command is matched as text, never read as
+# shell words - a reader fails open on every gap between it and the shell, a text pattern
+# fails closed. Every pattern is tried, in any case, on the command on one line (a command
+# continued with \ or spread over lines is still one command), on the same with each
+# backslash-newline (LF or CRLF) removed, as the shell removes it inside a word (--ap\<LF>ply
+# is --apply), and on both with the quote and backslash characters removed (gh 'workflow'
+# run, g""h, var\iable, --ap""ply).
+JOIN=$'\\\n' JOIN_CRLF=$'\\\r\n'
+JOINED=${CMD//"$JOIN_CRLF"/}
+JOINED=${JOINED//"$JOIN"/}
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
-MATCH=$(printf '%s' "$FLAT" | grep -Eo "$PATTERN" | head -1) || true
-# gh api: a write - a method other than GET, or fields / --input, which make it a POST - on
-# the Actions API (variables, secrets, workflows, runs) or to a repository dispatch
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]" \
-    && printf '%s' "$FLAT" | grep -Eq '(actions/|/dispatches)' \
-    && printf '%s' "$FLAT" | grep -Eiq '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE)|-[fF]|--field|--raw-field|--input)'; then
-  MATCH="gh api write under actions/ or to dispatches"
+JOINED=$(printf '%s' "$JOINED" | tr '\n\r' '  ')
+bare() { printf '%s' "$1" | tr -d '\\"'"'"; }
+TEXTS=$FLAT$'\n'$(bare "$FLAT")$'\n'$JOINED$'\n'$(bare "$JOINED")
+has() { printf '%s\n' "$TEXTS" | grep -Eiq -e "$1"; }
+first() { printf '%s\n' "$TEXTS" | grep -Eio -e "$1" | head -1; }
+MATCH=$(first "$PATTERN") || true
+# gh api: a gh word (any case, a path ending in /gh, =gh) and the word api, with actions/,
+# dispatches or graphql anywhere in the command: the Actions API (the sync's variables,
+# secrets, workflows and runs), a repository dispatch, GraphQL (a mutation can hide in
+# -F query=@file). Live whatever the method - a read of them asks too. Every other gh api
+# call (issues, comments, labels, the harness's resume reads) is ungated, as before 2026-10-14,
+# and so is a message that mentions gh api without those words.
+if [ -z "$MATCH" ] && has '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' && has '(^|[^[:alnum:]_])api([^[:alnum:]_]|$)'; then
+  ON=$(first 'actions/|dispatches|graphql' | tr '[:upper:]' '[:lower:]')
+  [ -n "$ON" ] && MATCH="gh api on $ON"
 fi
 # sf api request: any GraphQL call (a mutation writes), and a REST call that writes - a method
 # other than GET (the CLI offers GET POST PUT PATCH HEAD DELETE OPTIONS TRACE), a body (-b,
 # --body) or a request file (-f, --file: it carries its own method and body). A relative path
 # (/services/data/...) does not name the host, so the URL pattern above does not see it.
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
+if [ -z "$MATCH" ] && has "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
   MATCH="sf api request graphql"
 fi
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${SF}api[[:space:]]+request[[:space:]]+rest" \
-    && printf '%s' "$FLAT" | grep -Eiq '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file)'; then
+if [ -z "$MATCH" ] && has "${SF}api[[:space:]]+request[[:space:]]+rest" \
+    && has '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file)'; then
   MATCH="sf api request rest that writes"
 fi
 [ -z "$MATCH" ] && exit 0
@@ -95,23 +145,70 @@ read_only() {
 }
 read_only && exit 0
 
+# A live command: one decision, logged with the mode and the caller, never "allow".
 LOG="${CLAUDE_PROJECT_DIR:-.}/.claude/live_gate.log"
-if [ "${GLOW_LIVE_OK:-}" = "1" ] && ! printf '%s' "$FLAT" | grep -Eq "$SELF"; then
-  printf '%s ALLOWED %s\n' "$(date '+%F %T')" "$CMD" >> "$LOG"
+CALLER=
+[ "$AGENT" = "true" ] && CALLER=" agent"
+log() { printf '%s %s mode=%s%s %s\n' "$(date '+%F %T')" "$1" "$MODE" "$CALLER" "$CMD" >> "$LOG"; }
+SHOWN=${FLAT:0:300}
+[ ${#FLAT} -gt 300 ] && SHOWN="$SHOWN ..."
+RUNBOOK='See docs/RUNBOOK.md, "Live gate (Claude Code)".'
+# the decision as Claude Code reads it: JSON on stdout, built by jq or python, never
+# interpolated by hand (the matched text and the command can hold quotes)
+decide() {
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg d "$1" --arg r "$2" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $d, permissionDecisionReason: $r}}'
+  else
+    python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": sys.argv[1], "permissionDecisionReason": sys.argv[2]}}))' "$1" "$2"
+  fi
+}
+# refused: a deny decision with the reason, or - should no JSON come out - exit 2 with
+# the reason on stderr, which blocks just the same
+refuse() {
+  REASON="BLOCKED by .claude/hooks/live_gate.sh - matched \"$MATCH\" in: $SHOWN
+$1
+$RUNBOOK"
+  OUT=$(decide deny "$REASON") || OUT=
+  log BLOCKED
+  if [ -n "$OUT" ]; then
+    printf '%s\n' "$OUT"
+    exit 0
+  fi
+  printf '%s\n' "$REASON" >&2
+  exit 2
+}
+if has "$SELF"; then
+  refuse "The command approves itself: it sets GLOW_LIVE_OK, or writes a file the next launch
+reads its environment from. Nothing pre-approves a live command - Ryan's answer to the
+session's prompt is the only go, and GLOW_LIVE_OK grants nothing since 2026-10-14."
+fi
+if [ "$AGENT" = "true" ]; then
+  refuse "A subagent never runs a live command (the input carries an agent_id). The main
+session asks Ryan, and his answer to that prompt is the go."
+fi
+case "$MODE" in
+  '"default"' | '"acceptEdits"' | '"auto"' | '"plan"') ;;
+  *) refuse "This session cannot show Ryan the approval prompt (permission_mode $MODE; only
+default, acceptEdits, auto and plan can). Run it in an interactive session, or Ryan runs it
+in his terminal." ;;
+esac
+REASON="LIVE command - matched \"$MATCH\" in: $SHOWN
+It can change a live system: the Jotform attendance forms, the master enrollment Google
+Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches on GitHub
+(live since 2026-09-01). Ryan's answer here is the go; nothing pre-approves it. Yes only
+after the dry run was read and the backup exists (backup_forms.py / sheets_client.py
+export-all). Direct API access (curl to api.jotform.com, Sheets write snippets, the
+GitHub API - gh api or api.github.com - on actions/, dispatches or graphql) is gated
+exactly like the tool flags. The gate matches text: a message that only names a live
+command asks too.
+$RUNBOOK"
+OUT=$(decide ask "$REASON") || OUT=
+if [ -n "$OUT" ]; then
+  log ASKED
+  printf '%s\n' "$OUT"
   exit 0
 fi
-printf '%s BLOCKED %s\n' "$(date '+%F %T')" "$CMD" >> "$LOG"
-cat >&2 <<EOF
-BLOCKED by .claude/hooks/live_gate.sh - matched "$MATCH".
-This command can change a LIVE system (the Jotform attendance forms, the master
-enrollment Google Sheet, the deployed Apps Script, Salesforce, or the automatic
-sync's switches on GitHub). They went live 2026-09-01.
-To proceed: (1) show the dry-run output first, (2) back up (backup_forms.py /
-sheets_client.py export-all), (3) get Ryan's explicit go in this conversation,
-then EITHER Ryan runs the command himself in a terminal OR Ryan restarts Claude
-Code with GLOW_LIVE_OK=1 exported in his shell. Putting GLOW_LIVE_OK= inside the
-command does not count. Direct API access (curl to api.jotform.com, Sheets write
-snippets, GitHub dispatches) is gated exactly like the tool flags - use the repo
-tools and their dry runs. See docs/RUNBOOK.md, "Live gate".
-EOF
+# no ask could be built (jq and python3 both failed): refuse rather than let it through
+log BLOCKED
+printf '%s\n' "BLOCKED by .claude/hooks/live_gate.sh - the ask decision could not be built. $REASON" >&2
 exit 2
