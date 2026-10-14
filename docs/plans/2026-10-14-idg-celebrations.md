@@ -36,7 +36,7 @@ his choice, is `Special Event - IDG Celebrations`. Ticket #26, epic #25.
    (`/land-checks`, `/harness:land`).
 2. **Template** `262352490535154` first:
    1. `python3 backup_forms.py --form 262352490535154`.
-   2. The sync's dry run (the command of RUNBOOK "Club picker", on a fresh roster export):
+   2. The sync's dry run (the command of RUNBOOK "The Club picker", on a fresh roster export):
       `python3 sync_attendance_form.py data/roster_<date>.csv --roster --form 262352490535154 --club-picker`.
       Expect exactly three module lines, one event option added each:
       `UPDATE module dropdown (q14, year 1: 1 event option(s) added (Special Event - IDG Celebrations); calcValues = its 7 options)`,
