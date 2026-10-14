@@ -22,8 +22,11 @@ for `$B`.
   rename a heading: tools and docs quote them (`make doc-refs`).
 - **Generated files** are regenerated, never hand-merged: `docs/plans/README.md` (`make
   docs-index`), `test/fixtures/enrollment_sample.csv` and `expected.json` (`make fixtures`).
-- **`worklog/worklog.csv`**: take main's rows (`git checkout main -- worklog/worklog.csv`); hours
-  are recomputed in the primary checkout (its transcripts are the project's), never hand-merged.
+- **`worklog/worklog.csv`, `docs/agent/handoff.md`**: only the month's work-log chore changes them
+  (RUNBOOK "Work log and invoices"). A branch that changes either (a `harness-worklog` or
+  `/harness:handoff` run inside its worktree) is reported to Ryan; on his word the branch's copy
+  moves to the main checkout and the branch takes `origin/main`'s copy back
+  (`git checkout origin/main -- <path>`).
 
 ## 2. Privacy
 The `privacy-auditor` agent on `origin/main...$B`.
@@ -46,6 +49,13 @@ only (never open them):
 `cd <worktree> && find data backups -type f 2>/dev/null | while read -r f; do cmp -s "$f" "<primary checkout>/$f" || echo "$f"; done`.
 Anything listed: ask Ryan, and move it to the same path in the primary checkout (`mv -n`) on his
 word.
+
+## 5. The month's work-log chore PR
+`cmp "<primary checkout>/$f" "<worktree>/$f"` prints nothing for `f` = `worklog/worklog.csv` and
+`docs/agent/handoff.md` (anything printed: refresh the PR first). Then Ryan restores the two paths
+in the primary checkout by hand (`git checkout -- worklog/worklog.csv docs/agent/handoff.md`; the
+branch guard refuses Claude's, and `git merge --ff-only` aborts on a dirty path), then
+`/harness:land`.
 
 ## Report
 The three answers (conflicts resolved and how, the audit, what the runner will do), any file moved,

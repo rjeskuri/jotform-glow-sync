@@ -32,8 +32,9 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
   squash merge, so the PR text is what reaches `main`.
 - Before `/harness:land`: `/land-checks` — the runner's next run, the privacy audit, and the
   worktree's `data/` and `backups/` (land deletes them; 2026-10-09: the only copies of 11 files).
-- Work log (invoiced monthly; RUNBOOK "Work log and invoices"): `--drop-stale` / `--rewrite-old`
-  only on Ryan's word; a home-folder session counts only if `--transcripts` names it.
+- Work log (invoiced monthly; RUNBOOK "Work log and invoices"): `/harness:worklog` runs in the main
+  checkout; the month's chore ticket commits the log and the handoff. `--drop-stale` /
+  `--rewrite-old` only on Ryan's word; a home-folder session counts only if `--transcripts` names it.
 
 ## Things Claude gets wrong
 1. Every live write needs Ryan's explicit go in this conversation: `--apply`, `--prune`,

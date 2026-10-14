@@ -2819,7 +2819,8 @@ the added lines of every commit, plus ruff on the staged `.py` files.
 
 ## Work log and invoices
 
-- **When:** the end of every working session (`update`), month end (`export`), after travel (`zone`).
+- **When:** the end of every working session (`update`), month end (the work-log chore PR lands,
+  then `export`), after travel (`zone`).
 - **Status:** in use since 2026-09-28 ([Result](plans/2026-09-28-worklog.md#result)); the harness
   plugin's `harness-worklog` replaced the repo's own work-log tool on 2026-10-14, after
   reproducing every row byte for byte.
@@ -2837,7 +2838,39 @@ its last activity, so run `update` at the end of every session (`/harness:worklo
 every session runs it). `harness-worklog describe --date <yyyy-mm-dd> --text "…"` writes a day's
 client-facing description (`/harness:worklog` does this after `update`). Work outside Claude
 Code: `harness-worklog add --date 2026-09-29 --hours 1.5 --description "…"`.
-At month end: `harness-worklog export --month 2026-09 [--rate 60] --out invoice-2026-09.csv`.
+At month end, once the month's chore PR has landed (below):
+`harness-worklog export --month 2026-09 [--rate 60] --out invoice-2026-09.csv`.
+
+**Committing the log and the handoff (one chore ticket a month).** `branch_guard` refuses
+commits on `main`, so `worklog/worklog.csv` and `docs/agent/handoff.md` reach it through a
+ticket (DECISIONS "2026-10-14 — The work log and the handoff reach main through a monthly chore
+ticket"):
+
+1. During the month `/harness:worklog` (`harness-worklog`) and `/harness:handoff` write both
+   files in the main checkout, which stays dirty on those two paths: the log finds its
+   transcripts through the main checkout's path, and the session brief reads the handoff there.
+   Never run `harness-worklog` in a ticket worktree without `--repo <main checkout>` (it would
+   read the worktree's transcript folder). Other pull requests never change the two paths, so
+   they land while the main checkout's copies are dirty.
+2. One ticket a month, titled "Commit the work log and handoff, YYYY-MM", its body the previous
+   month's with the dates changed:
+   `harness-board task create --title "Commit the work log and handoff, YYYY-MM" --type chore --size S --no-tests --needs-local --body-file <file>`.
+   `--no-tests` because on a ticket branch `tests_first` counts `worklog/worklog.csv` as source
+   (`*.csv` is not exempt).
+3. Its session runs `harness-work start N` (worktree `.claude/worktrees/t-N-<slug>`, branch
+   `t/N-<slug>`), copies both files from the main checkout into the worktree, runs
+   `scripts/verify.sh`, commits, pushes and opens the PR. Later sessions refresh the PR the same
+   way (copy, commit, push); it stays open until month end.
+4. Month end (Ryan, before invoicing): after the month's last `/harness:worklog`, refresh once
+   more, then check that `cmp <main checkout>/<path> <worktree>/<path>` prints nothing for both
+   paths; if it prints anything, refresh first.
+5. Right before `/harness:land`, Ryan runs by hand in the main checkout
+   `git checkout -- worklog/worklog.csv docs/agent/handoff.md`, then `/land-checks` and
+   `/harness:land`. By hand because `git merge --ff-only` in the main checkout aborts on a dirty
+   path even when it is byte-identical (verified), and `branch_guard` refuses Claude's
+   `git checkout -- <path>` on `main`.
+6. After the land: `harness-worklog export --month YYYY-MM [--rate N] --out invoice-YYYY-MM.csv`,
+   then create next month's ticket (step 2).
 
 **Time zones.** Days are counted on the clock the Mac showed at the time, which moves when Ryan
 travels. `worklog/timezones.csv` records it (`since` = a UTC instant, `zone` = an IANA name like
