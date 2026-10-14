@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
 The Claude Code guardrail hooks, run as Claude Code runs them: the tool input as JSON on
-standard input, the decision in the exit code (0 lets the command or edit through, 2 blocks it).
+standard input, the decision in the exit code and on standard output (0 and nothing: no
+decision; 0 and an ask JSON: Ryan is asked in the session; 2, or a deny JSON: refused).
 
-  - .claude/hooks/live_gate.sh (Bash): every live-system command is blocked unless the human
-    exported GLOW_LIVE_OK=1 before launching, and a command that sets it itself always is; a
-    read-only command that only mentions a live flag passes, a chained one does not;
+  - .claude/hooks/live_gate.sh (Bash): every live-system command asks Ryan in the session
+    (since 2026-10-14 GLOW_LIVE_OK pre-approves nothing), and is refused outright when the
+    session cannot show him the prompt (permission_mode bypassPermissions, dontAsk, missing or
+    unknown), from a subagent, and when the command approves itself; a read-only command that
+    only mentions a live flag passes, a chained one does not; every gh api write is live;
+  - .claude/settings.json: the permission rules behind the hook (gh api allowed only for the
+    harness loop's reads, ask rules for the live families, the hook entry that blocks on failure);
   - .claude/hooks/protected_paths.sh (Edit|Write|MultiEdit): data/, backups/, credentials/,
     .env, the generated Regions.gs and the guardrails themselves are refused in every copy of the
     repository (main checkout, worktree, sibling checkout) and for a relative path;
   - .githooks/pre-commit, in a scratch repository: the lines a commit adds are scanned for
     secrets, and ruff checks every added, changed or renamed .py file as staged.
 
+The hooks are read from $GLOW_HOOKS_DIR (default .claude/hooks) and the settings from
+$GLOW_SETTINGS_FILE, else $GLOW_SETTINGS_JSON (default .claude/settings.json): no agent may edit
+.claude/, so a candidate staged elsewhere is proven here before Ryan applies it by hand.
 CLAUDE_PROJECT_DIR is a temporary folder, so the gate's log never lands in the repository, and
 GLOW_LIVE_OK is removed from the environment unless a test sets it.
 """
@@ -25,12 +33,25 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import REPO
 
-HOOKS = os.path.join(REPO, ".claude", "hooks")
+HOOKS = os.environ.get("GLOW_HOOKS_DIR") or os.path.join(REPO, ".claude", "hooks")
+SETTINGS = (os.environ.get("GLOW_SETTINGS_FILE") or os.environ.get("GLOW_SETTINGS_JSON")
+            or os.path.join(REPO, ".claude", "settings.json"))
 BASH = "/bin/bash"                  # the hooks' shebang
+
+# the permission modes Claude Code puts in the hook's input: in exactly these four, spelt exactly
+# so, a prompt can reach Ryan; in the other two, with the field missing (None), and with any
+# other spelling (Manual arrives as "default", never "manual") nobody can answer one
+ASK_MODES = ["default", "acceptEdits", "auto", "plan"]
+NO_PROMPT_MODES = ["bypassPermissions", "dontAsk", None]
+UNKNOWN_MODES = ["yolo", "foo", "", "Default", "DEFAULT", "acceptEdits ", "default\n", " plan", "auto\t",
+                 "default auto", "bypasspermissions", "manual", "ask"]
+
+Run = collections.namedtuple("Run", "code out err")
 
 
 @unittest.skipUnless(os.access(BASH, os.X_OK), "no /bin/bash to run the hooks with")
@@ -43,26 +64,89 @@ class Hooks(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_hook(self, name, tool_input, live_ok=None, tool="Bash", project=None):
+    def run_hook(self, name, tool_input, live_ok=None, tool="Bash", project=None, mode="default", agent=None,
+                 agent_type=None, extra=None, raw=None):
+        """The hook on one tool call: exit code, stdout, stderr. `mode` is the input's
+        permission_mode (None leaves it out); `agent` an agent_id (True: a fresh one, with an
+        agent_type), `agent_type` that field alone; `extra` fields are set last (a null, a
+        number); `raw` replaces the whole of stdin."""
         env = {k: v for k, v in os.environ.items() if k != "GLOW_LIVE_OK"}
         env["CLAUDE_PROJECT_DIR"] = project or self.tmp.name
         if live_ok is not None:
             env["GLOW_LIVE_OK"] = live_ok
-        done = subprocess.run([os.path.join(HOOKS, name)], input=json.dumps(
-            {"tool_name": tool, "tool_input": tool_input}), env=env, capture_output=True, text=True,
-            timeout=30, cwd=env["CLAUDE_PROJECT_DIR"] if os.path.isdir(env["CLAUDE_PROJECT_DIR"]) else None)
-        return done.returncode, done.stderr
+        data = {"hook_event_name": "PreToolUse", "session_id": uuid.uuid4().hex[:12], "cwd": env["CLAUDE_PROJECT_DIR"],
+                "tool_name": tool, "tool_input": tool_input}
+        if mode is not None:
+            data["permission_mode"] = mode
+        if agent is True:
+            data["agent_id"] = "agent-" + uuid.uuid4().hex
+            data["agent_type"] = agent_type or "harness:coder"
+        elif agent is not None:
+            data["agent_id"] = agent
+        if agent_type is not None:
+            data["agent_type"] = agent_type
+        data.update(extra or {})
+        done = subprocess.run([os.path.join(HOOKS, name)], input=json.dumps(data) if raw is None else raw, env=env,
+                              capture_output=True, text=True, timeout=30,
+                              cwd=env["CLAUDE_PROJECT_DIR"] if os.path.isdir(env["CLAUDE_PROJECT_DIR"]) else None)
+        return Run(done.returncode, done.stdout, done.stderr)
 
-    def gate(self, command, live_ok=None):
-        return self.run_hook("live_gate.sh", {"command": command}, live_ok)[0]
+    def gate(self, command, live_ok=None, mode="default", **kw):
+        run = self.run_hook("live_gate.sh", {"command": command}, live_ok, mode=mode, **kw)
+        # the one answer no input may ever get: Claude Code would skip Ryan's prompt
+        self.assertNotEqual(self.verdict(run), "allow", f"{command!r} (mode {mode!r}, {kw}, "
+                                                        f"GLOW_LIVE_OK {live_ok}) was ALLOWED: {run.out}")
+        return run
+
+    @staticmethod
+    def verdict(run):
+        """What Claude Code does with the hook's answer: "silent" (no decision: the normal
+        permission flow), "ask" (Ryan's prompt), "deny" (an exit 2, or a deny decision), "allow",
+        or a description of an answer it could not read."""
+        text = run.out.strip()
+        if run.code == 2:
+            return "deny" if '"ask"' not in text else "exit 2 but an ask on stdout: " + text
+        if run.code != 0:
+            return f"exit {run.code}: {run.err}"
+        if not text:
+            return "silent"
+        try:
+            out = json.loads(text)["hookSpecificOutput"]
+            if out["hookEventName"] != "PreToolUse":
+                return "wrong hookEventName: " + text
+            return out["permissionDecision"]
+        except (ValueError, KeyError, TypeError):
+            return "unreadable stdout: " + text
+
+    @staticmethod
+    def reason(run):
+        try:
+            return json.loads(run.out)["hookSpecificOutput"].get("permissionDecisionReason") or ""
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return ""
+
+    @staticmethod
+    def show(run):
+        return f"exit {run.code}; stdout {run.out!r}; stderr {run.err[:400]!r}"
+
+    LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d (ASKED|ALLOWED|BLOCKED|DENIED) (.*)$", re.M)
+
+    def log_lines(self):
+        """[(decision, the rest of the line)] of the gate's log (a logged command may span lines)."""
+        if not os.path.exists(self.log):
+            return []
+        with open(self.log, encoding="utf-8") as f:
+            return self.LINE.findall(f.read())
 
     def logged(self):
-        """How many decisions of each kind the log holds (a logged command may span lines)."""
-        if not os.path.exists(self.log):
-            return collections.Counter()
-        with open(self.log, encoding="utf-8") as f:
-            return collections.Counter(re.findall(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d (ALLOWED|BLOCKED) ",
-                                                  f.read(), re.M))
+        """How many decisions of each kind the log holds."""
+        return collections.Counter(decision for decision, _ in self.log_lines())
+
+    def refused(self):
+        """The refusals logged, under either word for one."""
+        counts = self.logged()
+        self.assertNotIn("ALLOWED", counts, "the gate logged an ALLOWED: nothing is pre-approved")
+        return counts["BLOCKED"] + counts["DENIED"]
 
     @staticmethod
     def all_of(fn, items):
@@ -70,10 +154,48 @@ class Hooks(unittest.TestCase):
         with concurrent.futures.ThreadPoolExecutor(8) as pool:
             return list(pool.map(fn, items))
 
-    def assert_gate(self, commands, code, live_ok=None):
-        for command, got in zip(commands, self.all_of(lambda c: self.gate(c, live_ok), commands)):
-            with self.subTest(command=command):
-                self.assertEqual(got, code, command)
+    def runs(self, commands, **kw):
+        return list(zip(commands, self.all_of(lambda c: self.gate(c, **kw), commands)))
+
+    def check_reason(self, command, reason):
+        """The prompt's text: the matched text, the command, why, and where to read more."""
+        flat = command.replace("\r", " ").replace("\n", " ")
+        shown = reason.replace("\r", " ").replace("\n", " ")
+        matched = re.search(r'matched "(.+?)"', reason)
+        self.assertIsNotNone(matched, f"no matched \"...\" in the reason: {reason!r}")
+        # the matched text is the command's own, except for the gh/sf api writes, whose match
+        # is a description - and only when the command is one
+        api_cli = re.search(r"(^|[^\w.-])(gh|sf|sfdx)\s[^;&|]*\bapi\b", flat)
+        self.assertTrue(matched.group(1) in flat or (api_cli and matched.group(1).startswith(("gh api", "sf api"))),
+                        f"the matched text {matched.group(1)!r} is not in the command {flat!r}")
+        if command in self.TRIGGERS:
+            self.assertIn(self.TRIGGERS[command], reason, f"the reason does not name the family's trigger: {reason!r}")
+        self.assertIn(flat[:20], shown, f"the reason does not name the command: {reason!r}")
+        self.assertIn("live", reason.lower(), f"the reason does not say why: {reason!r}")
+        self.assertIn("RUNBOOK", reason, reason)
+        self.assertIn("Live gate (Claude Code)", reason, reason)          # the RUNBOOK section
+
+    def assert_asks(self, commands, **kw):
+        for command, run in self.runs(commands, **kw):
+            with self.subTest(command=command, **kw):
+                self.assertEqual(self.verdict(run), "ask", self.show(run))
+                self.check_reason(command, self.reason(run))
+
+    def assert_denies(self, commands, saying=(), **kw):
+        """Refused: exit 2 (and no ask on stdout), or a deny decision; the message, on stderr or
+        in the deny's reason, holds one of `saying`."""
+        for command, run in self.runs(commands, **kw):
+            with self.subTest(command=command, **kw):
+                self.assertEqual(self.verdict(run), "deny", self.show(run))
+                message = run.err + self.reason(run)
+                if saying:
+                    self.assertTrue(any(s in message.lower() for s in saying),
+                                    f"none of {saying} in the message: {message!r}")
+
+    def assert_silent(self, commands, **kw):
+        for command, run in self.runs(commands, **kw):
+            with self.subTest(command=command, **kw):
+                self.assertEqual(self.verdict(run), "silent", self.show(run))
 
     def assert_edit(self, paths, code):
         for path, got in zip(paths, self.all_of(self.edit, paths)):
@@ -152,71 +274,180 @@ class Hooks(unittest.TestCase):
         "sfdx api request rest /services/data/v60.0/sobjects/Account/001x -X PUT -b @a.json",
         "sf api request graphql --body '{\"query\": \"mutation { x }\"}'", "sf api request graphql --body @query.txt",
     ]
+    # one of each family, for the tests that walk the modes
+    SAMPLE = [LIVE[0], "cd appsscript && npx clasp push -f", "python3 tools/sheets_client.py import Roster roster.csv",
+              "curl -sS -X PUT 'https://api.jotform.com/form/1/properties?apiKey=x' -d @rules.json",
+              "gh variable set SF_SYNC --body apply", "gh workflow run auto-sync.yml -f apply=true",
+              "gh api repos/o/r/issues -f title=x", "sf project deploy start --source-dir force-app -o glow",
+              "python3 tools/sf_dupes.py merge --plan data/plan.json --rehearse"]
+    # what the prompt must name for one command of each family: its own trigger
+    TRIGGERS = {
+        LIVE[0]: "--apply", LIVE[1]: "--prune",
+        "cd appsscript && npx clasp push -f": "clasp push", "npm run clasp:push": "clasp:push",
+        "python3 tools/sheets_client.py import Roster roster.csv": "sheets_client.py import",
+        "python3 tools/auto_sync.py --apply-salesforce": "--apply",
+        "curl -sS -X PUT 'https://api.jotform.com/form/1/properties?apiKey=x' -d @rules.json": "api.jotform.com",
+        "curl -X POST https://api.github.com/repos/owner/repo/dispatches -d '{}'": "api.github.com/repos/owner/repo/dispatches",
+        "python3 -c 'import sync_attendance_form as s; s.Jotform(k, 1, apply_changes=True)'": "apply_changes=True",
+        "python3 -c 'svc.spreadsheets().values().update(body=b).execute()'": "values().update",
+        "python3 -c 'svc.spreadsheets().batchUpdate(body=b).execute()'": "batchUpdate",
+        "gh variable set SF_SYNC --body apply": "gh variable set", "gh secret set JOTFORM_API_KEY": "gh secret set",
+        "gh workflow run auto-sync.yml -f apply=true": "gh workflow run", "gh run rerun 1234": "gh run rerun",
+        "gh workflow disable auto-sync.yml": "gh workflow disable", "gh variable delete SF_SYNC": "gh variable delete",
+        "gh api -X PATCH repos/o/r/actions/variables/SF_SYNC -f value=apply": "gh api",
+        "sf project deploy start --source-dir force-app -o glow": "sf project deploy start",
+        "sf data create record -s Account -v \"Name='Sunrise Club'\" -o glow": "sf data create",
+        "sf apex run --file merge.apex -o glow": "sf apex run",
+        "python3 tools/sf_dupes.py merge --plan data/plan.json --rehearse": "--rehearse",
+        "sfdx force:source:deploy -p force-app": "force:source:deploy",
+        "sf deploy metadata -d force-app": "sf deploy metadata",
+        "curl -X PATCH https://example.my.salesforce.com/services/data/v60.0/sobjects/Account/001x -d @a.json":
+            ".salesforce.com/services/",
+        "sf api request rest '/services/data/v60.0/sobjects/Account/001x' -X PATCH --body '{}'": "sf api request rest",
+        "sf api request graphql --body '{\"query\": \"mutation { x }\"}'": "sf api request graphql",
+    }
+    # a command that approves itself: the flag in the command, or written where the next launch
+    # reads its environment (review of 2026-10-09)
+    SELF_APPROVING = ["GLOW_LIVE_OK=1 python3 tools/auto_sync.py --apply-salesforce",
+                      "export GLOW_LIVE_OK=1",
+                      "env GLOW_LIVE_OK=1 python3 sync_attendance_form.py x --apply",
+                      "GLOW_LIVE_OK+=1 python3 sync_attendance_form.py x --apply",
+                      "echo GLOW_LIVE_OK=1 >> ~/.zshrc"]
+    STARTUP_WRITES = ["printf 'export GLOW_LIVE_OK\\x3d1' >> ~/.zshrc",
+                      "printf 'export X\\x3d1\\n' > $HOME/.zprofile", "echo x | tee -a ~/.zshenv",
+                      "echo x | tee ~/.bashrc", "cat snippet >> ~/.bash_profile", "echo x >>~/.profile",
+                      "echo x > ~/.zlogin", "sed -i '' 's/a/b/' ~/.zshrc", "sed -e 's/a/b/' -i ~/.bash_login",
+                      "sed --in-place 's/a/b/' ~/.bashrc", "perl -pi -e 's/a/b/' ~/.zshrc",
+                      "echo 'export A=1' > .envrc", "printf 'A\\x3d1' >> .env",
+                      "launchctl setenv GLOW_LIVE_OK 1"]
+    READS = ["ls", "make check", "python3 tools/auto_sync.py",
+             "python3 tools/form_status.py --roster r.csv --partners p.csv",
+             "python3 sync_attendance_form.py roster.csv --roster --region Africa --form 1",
+             "gh run list", "gh run view 123", "gh workflow list", "gh variable list",
+             "gh secret list", "gh workflow view auto-sync.yml", "gh run download 1234",
+             "gh api repos/o/r/actions/variables", "gh api -X GET repos/o/r/actions/runs --jq '.total_count'",
+             "gh api repos/o/r/actions/runs/1234/logs > run.zip",
+             "gh workflow run auto-sync.yml", "gh workflow run auto-sync.yml -f apply=false",
+             "sf org list", "sf data query -q 'SELECT Id FROM Account' -o glow",
+             "sf project deploy report --job-id 0Af000000000001", "sfdx force:org:list",
+             "sf project retrieve start -m ApexClass:GlowSync", "sfdx force:data:soql:query -q 'SELECT Id FROM Account'",
+             "sf api request rest '/services/data/v60.0/query?q=SELECT+Id+FROM+Account' -o glow",
+             "sf api request rest /services/data/v60.0/limits", "sf api request rest /services/data/v60.0/ -X GET",
+             "sf api request rest /services/data/v60.0/ --stream-to-file out.txt --include",
+             "python3 tools/sf_dupes.py check",
+             # the startup files read, or a copy of one written
+             "cat ~/.zshrc", "grep -n PATH ~/.zshrc", "tail -5 ~/.bash_profile", "ls -la ~/.zshrc",
+             "wc -l .envrc", "cp ~/.zshrc ~/.zshrc.bak", "echo x > ~/.zshrc.bak", "source .env",
+             "python3 tools/sf_dupes.py plan", "git status"]
+    # gh api: a write is a method other than GET, or fields / --input (which make it a POST)
+    # without an explicit GET, or any graphql call - on any path, not only actions/ or /dispatches
+    GH_API_WRITES = [
+        "gh api -X PATCH repos/o/r/issues/1 -f title=x",
+        "gh api repos/o/r/issues -f title=x",
+        "gh api repos/o/r/issues/1/comments --raw-field body=x",
+        "gh api --method DELETE repos/o/r/git/refs/heads/x",
+        "gh api -XPUT repos/o/r/pulls/1/merge",
+        "gh api repos/o/r/contents/a.md --input body.json",
+        "gh api graphql -f query='query { viewer { login } }'",
+        "gh api graphql -F query=@m.graphql",
+        "gh -R o/r api repos/o/r/labels -f name=x",
+        # the same writes spelt otherwise
+        "gh api -X post repos/o/r/issues -f title=x",                    # the method in any case
+        "gh api --method=patch repos/o/r/issues/1 -f state=closed",
+        "gh api -F name=x repos/o/r/labels",                             # the field before the path
+        "gh api --field body=x repos/o/r/issues/1/comments",
+        "gh api repos/o/r/pulls/1/reviews -f event=APPROVE",           # the loop's path, written to
+        "gh api repos/o/r/issues/36/comments -f body='done'",
+        "gh api user/repos -f name=scratch",                             # not under repos/
+        "gh api orgs/o/actions/variables -f name=SF_SYNC -f value=x",
+        "gh --repo o/r api repos/o/r/labels -F name=x",
+        "gh api graphql -f query='mutation { x }'",
+        "gh api -X DELETE repos/o/r/labels/x",
+        "gh api repos/o/r/git/refs -f ref=refs/heads/x -f sha=abc",
+        # GET as a value or inside a word is no method
+        "gh api -X POST repos/o/r/issues -f title=GET",
+        "gh api -X DELETE repos/o/r/labels/BUDGET",
+        "gh api -X PATCH repos/o/r/contents/TARGET.md -f message=x",
+        "gh api repos/o/r/issues -f title=GETTING_STARTED",
+        "gh api repos/o/r/issues/1/comments -f body=target",
+        "gh api --method PUT repos/o/r/pulls/1/merge -f merge_method=GET",
+    ]
+    GH_API_READS = [
+        "gh api repos/o/r/pulls/1/reviews",                              # the harness loop's reads
+        "gh api --paginate repos/o/r/pulls/1/reviews",
+        "gh api repos/o/r/pulls/1/reviews/2/comments",
+        "gh api -X GET repos/o/r/issues -f state=open",                  # with GET the fields are the query
+        "gh api --method GET search/issues -f q=x",
+        "gh api repos/o/r/actions/variables",
+        "gh api -X GET repos/o/r/actions/variables -f per_page=100",
+        "gh api user", "gh api repos/o/r/pulls/1 --jq .state",
+        "gh api -H 'Accept: application/vnd.github+json' repos/o/r/pulls/1",
+        "gh api --paginate 'repos/o/r/issues?state=open'",
+        "gh api -XGET repos/o/r/issues -F per_page=100",
+        "gh api --method=GET repos/o/r/issues -f state=open",
+        "gh -R o/r api repos/o/r/pulls/1/reviews",
+        "gh api -i repos/o/r/pulls/1",
+        # the method in any case, and after the fields
+        "gh api -X get repos/o/r/issues -f state=open",
+        "gh api --method=get repos/o/r/issues -f state=open",
+        "gh api repos/o/r/issues -f state=open -X GET",
+        "gh api repos/o/r/issues -F per_page=100 --method GET",
+    ]
 
-    def test_every_live_command_is_blocked_and_logged(self):
-        self.assert_gate(self.LIVE, 2)
-        self.assertEqual(self.logged(), {"BLOCKED": len(self.LIVE)})
+    def test_every_live_command_asks_ryan_and_is_logged(self):
+        for mode in ASK_MODES:
+            self.assert_asks(self.LIVE, mode=mode)
+        self.assertEqual(self.logged(), {"ASKED": len(self.LIVE) * len(ASK_MODES)})
 
-    def test_the_humans_go_lets_them_through_and_is_logged(self):
-        self.assert_gate(self.LIVE, 0, live_ok="1")
-        self.assertEqual(self.logged(), {"ALLOWED": len(self.LIVE)})
-        self.assert_gate(["python3 sync_attendance_form.py x --apply"], 2, live_ok="yes")   # only "1"
+    def test_glow_live_ok_no_longer_skips_the_prompt(self):
+        # 2026-10-14: a session-wide pre-approval was open for 10 days (BACKLOG 83), and a
+        # dispatched run inherits the environment; the prompt is the only approval
+        self.assert_asks(self.LIVE, live_ok="1")
+        self.assertEqual(self.logged(), {"ASKED": len(self.LIVE)})
+        self.assert_asks(["python3 sync_attendance_form.py x --apply"], live_ok="yes")
+        self.assert_denies(self.SAMPLE, live_ok="1", mode="bypassPermissions")
+        self.assert_denies(self.SAMPLE, live_ok="1", agent=True)
 
-    def test_a_command_that_approves_itself_is_blocked_even_with_the_go(self):
+    def test_a_command_that_approves_itself_is_blocked_outright(self):
+        commands = self.SELF_APPROVING + self.STARTUP_WRITES
+        runs = 0
         for live_ok in (None, "1"):
-            self.assert_gate(["GLOW_LIVE_OK=1 python3 tools/auto_sync.py --apply-salesforce",
-                              "export GLOW_LIVE_OK=1",
-                              "env GLOW_LIVE_OK=1 python3 sync_attendance_form.py x --apply",
-                              "GLOW_LIVE_OK+=1 python3 sync_attendance_form.py x --apply",
-                              "echo GLOW_LIVE_OK=1 >> ~/.zshrc"], 2, live_ok)
-            # ... or writes it where the next launch reads its environment (review of 2026-10-09)
-            self.assert_gate(["printf 'export GLOW_LIVE_OK\\x3d1' >> ~/.zshrc",
-                              "printf 'export X\\x3d1\\n' > $HOME/.zprofile", "echo x | tee -a ~/.zshenv",
-                              "echo x | tee ~/.bashrc", "cat snippet >> ~/.bash_profile", "echo x >>~/.profile",
-                              "echo x > ~/.zlogin", "sed -i '' 's/a/b/' ~/.zshrc", "sed -e 's/a/b/' -i ~/.bash_login",
-                              "sed --in-place 's/a/b/' ~/.bashrc", "perl -pi -e 's/a/b/' ~/.zshrc",
-                              "echo 'export A=1' > .envrc", "printf 'A\\x3d1' >> .env",
-                              "launchctl setenv GLOW_LIVE_OK 1"], 2, live_ok)
+            for mode in ASK_MODES + NO_PROMPT_MODES:
+                for command, run in self.runs(commands, live_ok=live_ok, mode=mode):
+                    with self.subTest(command=command, live_ok=live_ok, mode=mode):
+                        self.assertEqual(self.verdict(run), "deny", self.show(run))
+                        # the old way out is gone: nothing tells Claude to relaunch with the flag
+                        self.assertNotIn("restart", (run.err + self.reason(run)).lower())
+                runs += len(commands)
+        self.assertEqual(self.refused(), runs)
+        self.assertNotIn("ASKED", self.logged())
 
     def test_reads_and_dry_runs_pass(self):
-        self.assert_gate(["ls", "make check", "python3 tools/auto_sync.py",
-                          "python3 tools/form_status.py --roster r.csv --partners p.csv",
-                          "python3 sync_attendance_form.py roster.csv --roster --region Africa --form 1",
-                          "gh run list", "gh run view 123", "gh workflow list", "gh variable list",
-                          "gh secret list", "gh workflow view auto-sync.yml", "gh run download 1234",
-                          "gh api repos/o/r/actions/variables", "gh api -X GET repos/o/r/actions/runs --jq '.total_count'",
-                          "gh api repos/o/r/actions/runs/1234/logs > run.zip",
-                          "gh api -X PATCH repos/o/r/issues/1 -f title=x",       # not a switch of the sync
-                          "gh workflow run auto-sync.yml", "gh workflow run auto-sync.yml -f apply=false",
-                          "sf org list", "sf data query -q 'SELECT Id FROM Account' -o glow",
-                          "sf project deploy report --job-id 0Af000000000001", "sfdx force:org:list",
-                          "sf project retrieve start -m ApexClass:GlowSync", "sfdx force:data:soql:query -q 'SELECT Id FROM Account'",
-                          "sf api request rest '/services/data/v60.0/query?q=SELECT+Id+FROM+Account' -o glow",
-                          "sf api request rest /services/data/v60.0/limits", "sf api request rest /services/data/v60.0/ -X GET",
-                          "sf api request rest /services/data/v60.0/ --stream-to-file out.txt --include",
-                          "python3 tools/sf_dupes.py check",
-                          # the startup files read, or a copy of one written
-                          "cat ~/.zshrc", "grep -n PATH ~/.zshrc", "tail -5 ~/.bash_profile", "ls -la ~/.zshrc",
-                          "wc -l .envrc", "cp ~/.zshrc ~/.zshrc.bak", "echo x > ~/.zshrc.bak", "source .env",
-                          "python3 tools/sf_dupes.py plan", "git status"], 0)
+        for mode in ("default", "bypassPermissions", None, "foo"):
+            self.assert_silent(self.READS, mode=mode)
+        self.assert_silent(self.READS, agent=True)
+        self.assert_silent(self.READS, live_ok="1")
         self.assertEqual(self.logged(), {})
 
     def test_a_read_only_command_that_only_mentions_a_live_flag_passes(self):
         # 20 of the 31 blocks logged by 2026-10-09 were these: grep, git, cat on the docs
-        self.assert_gate(["grep -n -- '--apply' docs/RUNBOOK.md",
-                          "grep -rn 'GLOW_LIVE_OK=' docs .claude",
-                          "rg -n -- '--apply-salesforce' docs tools",
-                          "cat docs/plans/2026-10-06-sf-new-club-accounts.md --apply",
-                          "head -50 docs/RUNBOOK.md --prune", "tail -n 5 .claude/live_gate.log --apply",
-                          "wc -l --apply", "ls --apply",
-                          "git log --oneline --grep=--apply", "git show HEAD -- '*--apply*'",
-                          "git diff main -- docs/RUNBOOK.md --apply", "git grep -n 'sf apex run' -- docs",
-                          "git blame -L 1,5 docs/RUNBOOK.md --apply", "git status --apply",
-                          "  grep -c 'gh variable set SF_SYNC' CLAUDE.md"], 0)
+        mentions = ["grep -n -- '--apply' docs/RUNBOOK.md",
+                    "grep -rn 'GLOW_LIVE_OK=' docs .claude",
+                    "rg -n -- '--apply-salesforce' docs tools",
+                    "cat docs/plans/2026-10-06-sf-new-club-accounts.md --apply",
+                    "head -50 docs/RUNBOOK.md --prune", "tail -n 5 .claude/live_gate.log --apply",
+                    "wc -l --apply", "ls --apply",
+                    "git log --oneline --grep=--apply", "git show HEAD -- '*--apply*'",
+                    "git diff main -- docs/RUNBOOK.md --apply", "git grep -n 'sf apex run' -- docs",
+                    "git blame -L 1,5 docs/RUNBOOK.md --apply", "git status --apply",
+                    "  grep -c 'gh variable set SF_SYNC' CLAUDE.md"]
+        for mode in ("default", "bypassPermissions", None):
+            self.assert_silent(mentions, mode=mode)
+        self.assert_silent(mentions, agent=True)
         self.assertEqual(self.logged(), {})                    # nothing live: nothing to log
 
     def test_a_read_only_word_is_no_cover_for_a_second_command(self):
-        self.assert_gate([
+        chained = [
             "grep x; python3 tools/auto_sync.py --apply-salesforce",
             "grep x && python3 sync_attendance_form.py x --apply",
             "grep x || python3 sync_attendance_form.py x --apply",
@@ -236,12 +467,100 @@ class Hooks(unittest.TestCase):
             "git -C . log --grep=--apply", "GREP=1 grep -- --apply docs",
             # the characters count even quoted: a regex alternation is not read-only enough
             "grep -nE -- '--apply|--prune' docs/RUNBOOK.md",
-        ], 2)
+        ]
+        self.assert_asks(chained)                                       # Ryan decides, in the session
+        self.assertEqual(self.logged(), {"ASKED": len(chained)})
+        self.assert_denies(chained, mode="bypassPermissions")           # ... and only there
+
+    def test_every_gh_api_write_asks_not_only_under_actions(self):
+        for mode in ("default", "bypassPermissions", None):
+            self.assert_silent(self.GH_API_READS, mode=mode)
+        self.assert_silent(self.GH_API_READS, agent=True)
+        self.assertEqual(self.logged(), {})
+        for command, run in self.runs(self.GH_API_WRITES):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(run), "ask", self.show(run))
+                self.check_reason(command, self.reason(run))
+                self.assertIn("gh api", self.reason(run))               # the prompt says what it is
+        self.assertEqual(self.logged(), {"ASKED": len(self.GH_API_WRITES)})
+        self.assert_denies(self.GH_API_WRITES, mode="dontAsk")
+        self.assert_denies(self.GH_API_WRITES, agent=True)
+
+    def test_a_session_that_cannot_show_a_prompt_is_refused(self):
+        # a headless or dispatched run, or a mode that skips prompts, cannot carry Ryan's go: the
+        # command is refused with a message that says where it can run (fail closed)
+        for mode in ASK_MODES:
+            self.assert_asks(self.SAMPLE, mode=mode)
+        for mode in NO_PROMPT_MODES:
+            self.assert_denies(self.SAMPLE, mode=mode, saying=("interactive", "terminal"))
+        # only the four spellings above ask: anything else is unknown, and fails closed
+        for mode in UNKNOWN_MODES:
+            self.assert_denies(self.SAMPLE, mode=mode)
+        odd = [{"permission_mode": v} for v in (None, 1, True, ["default"], {"mode": "default"})]
+        for fields in odd:
+            self.assert_denies(self.SAMPLE, mode=None, extra=fields)
+        self.assertEqual(self.logged()["ASKED"], len(self.SAMPLE) * len(ASK_MODES))
+        self.assertEqual(self.refused(), len(self.SAMPLE) * (len(NO_PROMPT_MODES) + len(UNKNOWN_MODES) + len(odd)))
+        # every decision line says which mode it was taken in
+        for mode in [m for m in ASK_MODES + NO_PROMPT_MODES if m]:
+            before = len(self.log_lines())
+            self.gate(self.SAMPLE[0], mode=mode)
+            lines = self.log_lines()
+            self.assertEqual(len(lines), before + 1, lines[before:])
+            decision, rest = lines[-1]
+            self.assertIn(decision, ("ASKED",) if mode in ASK_MODES else ("BLOCKED", "DENIED"))
+            self.assertIn(mode, rest, f"the log line does not name the mode: {decision} {rest}")
+
+    def test_a_subagent_never_gets_the_prompt(self):
+        # CLAUDE.md: live writes never from a subagent; the main session asks Ryan. The input
+        # says "subagent" with agent_id (any value) or agent_type (any name): either is enough
+        runs = 0
+        for mode in ASK_MODES + NO_PROMPT_MODES:
+            self.assert_denies(self.SAMPLE, mode=mode, agent=True, saying=("agent",))   # a fresh id each
+            runs += len(self.SAMPLE)
+        self.assert_denies(self.SAMPLE, agent=True, live_ok="1", saying=("agent",))
+        runs += len(self.SAMPLE)
+        ids = [uuid.uuid4().hex, str(uuid.uuid4()), "agent-" + uuid.uuid4().hex[:8], "a1", "0", "Explore-2"]
+        for agent_id in ids:                                            # the id alone, whatever it is
+            self.assert_denies(self.SAMPLE, agent=agent_id, saying=("agent",))
+        runs += len(self.SAMPLE) * len(ids)
+        for agent_type in ("Explore", "harness:coder", "general-purpose"):     # the type alone
+            self.assert_denies(self.SAMPLE, agent_type=agent_type, saying=("agent",))
+        runs += len(self.SAMPLE) * 3
+        self.assertEqual(self.refused(), runs)
+        self.assertNotIn("ASKED", self.logged())
+
+    def test_the_gate_never_allows_and_never_stays_silent_on_a_live_command(self):
+        # whatever the mode, the caller and the environment: Ryan's prompt or a refusal, logged
+        cases = [(command, mode, agent, live_ok) for command in self.SAMPLE
+                 for mode in ASK_MODES + NO_PROMPT_MODES + ["foo", "Default", "default\n"]
+                 for agent in (None, True) for live_ok in (None, "1")]
+        for case, run in zip(cases, self.all_of(lambda c: self.gate(c[0], live_ok=c[3], mode=c[1], agent=c[2]), cases)):
+            with self.subTest(case=case):
+                self.assertIn(self.verdict(run), ("ask", "deny"), self.show(run))
+                if run.err:
+                    self.assertNotIn("GLOW_LIVE_OK=1", run.err)         # no longer a way through
+        self.assertEqual(sum(self.logged().values()), len(cases))
+        self.assertEqual(self.logged()["ASKED"] + self.refused(), len(cases))
+
+    def test_an_input_the_hook_cannot_read_never_lets_a_command_through(self):
+        # no command: nothing to judge, so no decision (the ticket's step 1); stdin that is not the
+        # hook's JSON: no decision or a refusal - never an allow, never a crash (exit 0 or 2 only)
+        for tool_input in ({}, {"description": "x"}, {"command": ""}, {"command": None}):
+            with self.subTest(tool_input=tool_input):
+                run = self.run_hook("live_gate.sh", tool_input)
+                self.assertEqual(self.verdict(run), "silent", self.show(run))
+        for raw in ("", "not json", "{", "[]", "null", '{"tool_input": "--apply"}',
+                    '{"tool_name": "Bash", "tool_input": {"command": "x --apply"', "\x00"):
+            with self.subTest(raw=raw):
+                run = self.run_hook("live_gate.sh", {}, raw=raw)
+                self.assertIn(self.verdict(run), ("silent", "deny"), self.show(run))
+        self.assertEqual(self.logged(), {})
 
     # ---- protected_paths.sh
     def edit(self, path, project=None):
         return self.run_hook("protected_paths.sh", {"file_path": path, "content": "x"}, tool="Write",
-                             project=project)[0]
+                             project=project).code
 
     def test_protected_paths_are_refused_wherever_the_checkout_lives(self):
         root = self.tmp.name                         # CLAUDE_PROJECT_DIR
@@ -257,7 +576,7 @@ class Hooks(unittest.TestCase):
                           root + "//data///x.csv", root + "/./data/x.csv", root + "/tools/../data/x.csv",
                           root + "/Data/x.csv", root + "/APPSSCRIPT/regions.gs",         # the Mac ignores case
                           root + "/data/credentials/README.md", root + "/backups/.env.example"], 2)
-        _, why = self.run_hook("protected_paths.sh", {"file_path": root + "/data/x.csv"}, tool="Edit")
+        why = self.run_hook("protected_paths.sh", {"file_path": root + "/data/x.csv"}, tool="Edit").err
         self.assertIn("BLOCKED by .claude/hooks/protected_paths.sh: 'data/x.csv'", why)
 
     def test_the_exceptions_and_ordinary_files_are_editable(self):
@@ -269,7 +588,7 @@ class Hooks(unittest.TestCase):
                     "test/fixtures/enrollment_sample.csv", "tools/database.py", "metadata/x.json"]
         self.assert_edit([os.path.join(home, rel) for home in (root, worktree) for rel in ordinary]
                          + ["docs/plans/x.md", "./tools/auto_sync.py"], 0)
-        self.assertEqual(self.run_hook("protected_paths.sh", {})[0], 0)        # no path: nothing to judge
+        self.assertEqual(self.run_hook("protected_paths.sh", {}).code, 0)        # no path: nothing to judge
 
     def test_a_checkout_that_lives_under_a_data_folder_stays_editable(self):
         # inside the project only the part below it is read (review of 2026-10-09: every edit of
@@ -316,6 +635,119 @@ class Hooks(unittest.TestCase):
                           os.path.join(home, ".claude", "hooks", "gate.sh")], 2)
         self.assert_edit([os.path.join(home, ".claude", "CLAUDE.md"), os.path.join(home, "notes", "todo.md")], 0)
 
+
+class GateSettings(unittest.TestCase):
+    """.claude/settings.json, the second layer behind live_gate.sh: the rules read as Claude Code
+    reads them (Bash(x:*) is a literal prefix; otherwise * stands for any text and a lone trailing
+    " *" also matches the bare command; a rule matches the whole command), and the hook entries."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(SETTINGS, encoding="utf-8") as f:
+            cls.settings = json.load(f)
+        cls.permissions = cls.settings["permissions"]
+
+    @staticmethod
+    def matches(rule, command):
+        if not (rule.startswith("Bash(") and rule.endswith(")")):
+            return rule == "Bash"
+        body = rule[5:-1]
+        if body.endswith(":*"):
+            return command.startswith(body[:-2])
+        if "*" not in body:
+            return command == body
+        if body.endswith(" *") and body.count("*") == 1 and command == body[:-2]:
+            return True
+        return re.fullmatch(".*".join(re.escape(part) for part in body.split("*")), command, re.S) is not None
+
+    def covering(self, kind, command):
+        return [rule for rule in self.permissions.get(kind, []) if self.matches(rule, command)]
+
+    # what the harness loop and a session issue without a prompt: never behind an ask rule
+    LOOP_READS = ["gh api --paginate repos/o/r/pulls/36/reviews", "gh api repos/o/r/pulls/36/reviews/7/comments",
+                  "gh api repos/o/r/pulls/36/reviews"]
+    PLAIN = ["gh pr view 36 --json state", "gh issue list", "gh run list", "gh variable list", "gh secret list",
+             "gh workflow list", "gh workflow view auto-sync.yml", "harness-board show 36 --markdown",
+             "git status", "make check", "scripts/verify.sh", "python3 tools/auto_sync.py",
+             "python3 sync_attendance_form.py roster.csv --roster --region Africa --form 1",
+             "grep -n -- '--apply' docs/RUNBOOK.md", "sf org list",
+             "sf data query -q 'SELECT Id FROM Account' -o glow", "sf project retrieve start -m ApexClass:GlowSync"]
+    # the live families a prefix rule can name: the sync's switches on GitHub, the Apps Script
+    # push, the Salesforce deploys, data writes and anonymous Apex. Not --apply, --prune,
+    # --rehearse, api.jotform.com or apply=true: those sit anywhere in a command, and a rule like
+    # Bash(*--apply*) would prompt on every grep of the docs (20 of 31 blocks by 2026-10-09)
+    ASKED_FAMILIES = ["gh variable set SF_SYNC --body apply", "gh variable delete SF_SYNC",
+                      "gh secret set JOTFORM_API_KEY", "gh secret delete GLOW_SA_JSON",
+                      "gh workflow run auto-sync.yml -f apply=true", "gh workflow enable auto-sync.yml",
+                      "gh workflow disable auto-sync.yml", "gh run rerun 1234",
+                      "npx clasp push -f", "npm run clasp:push",
+                      "sf project deploy start --source-dir force-app -o glow",
+                      "sf apex run --file merge.apex -o glow",
+                      "sf data create record -s Account -v \"Name='Sunrise Club'\" -o glow",
+                      "sf data update record -s Account -i 001000000000001 -v \"Name=X\"",
+                      "sf data delete record -s Contact -i 003000000000001",
+                      "sf data upsert bulk -s Contact -f contacts.csv -i Id",
+                      "sf data import tree -f accounts.json"]
+    # as of 2026-10-14: what the ticket leaves alone
+    ASK_BEFORE = ["Read(./data/**)", "Read(./backups/**)", "Bash(git tag:*)", "Bash(npm run clasp:*)",
+                  "Bash(npx clasp:*)", "Bash(python3 tools/derive_partner_regions.py:*)",
+                  "Bash(python3 test/fixtures/make_fixture.py --write)", "Bash(make fixtures)"]
+    DENY_BEFORE = ["Read(./credentials/service-account.json)", "Read(./credentials/config.json)",
+                   "Read(./.env)", "Read(./.env.local)", "Read(./.claude/settings.local.json)",
+                   "Read(~/.clasprc.json)", "Read(~/.config/gcloud/**)"]
+    ALLOW_KEPT = ["Bash(scripts/verify.sh)", "Bash(make check)", "Bash(make py)", "Bash(node test/:*)",
+                  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(python3 tools/form_status.py:*)",
+                  "Bash(python3 backup_forms.py:*)", "Bash(python3 tools/sheets_client.py export:*)",
+                  "Bash(harness-*:*)", "Bash(gh issue:*)", "Bash(gh pr:*)", "Bash(git worktree:*)",
+                  "Bash(git fetch:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)"]
+
+    def test_gh_api_is_allowed_only_for_the_loops_reads(self):
+        allow = self.permissions["allow"]
+        self.assertNotIn("Bash(gh api:*)", allow)                       # a write anywhere was ungated
+        self.assertIn("Bash(gh api repos/:*)", allow)
+        self.assertIn("Bash(gh api --paginate repos/:*)", allow)
+        for command in self.LOOP_READS:
+            with self.subTest(command=command):
+                self.assertTrue(self.covering("allow", command), f"no allow rule for {command!r}")
+                self.assertEqual(self.covering("ask", command), [])
+        for command in ["gh api graphql -f query='query { viewer { login } }'", "gh api user",
+                        "gh api -X DELETE repos/o/r/git/refs/heads/x", "gh api --method DELETE repos/o/r/labels/x",
+                        "gh api -XPUT repos/o/r/pulls/1/merge", "gh api orgs/o/actions/variables -f name=x",
+                        "gh -R o/r api repos/o/r/labels -f name=x", "gh api user/repos -f name=scratch"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.covering("allow", command), [], "allowed without a prompt")
+        for rule in self.permissions["ask"]:
+            self.assertFalse(rule.startswith("Bash(gh api"), f"{rule}: an ask on gh api stops a dispatched run")
+        for rule in self.ALLOW_KEPT:                                    # nothing else in the list changed
+            self.assertIn(rule, allow)
+
+    def test_ask_rules_back_the_hook_for_the_live_families(self):
+        # explicit ask rules prompt in every mode, bypassPermissions included: the layer under the hook
+        for command in self.ASKED_FAMILIES:
+            with self.subTest(command=command):
+                self.assertTrue(self.covering("ask", command), f"no ask rule for {command!r}")
+        for command in self.LOOP_READS + self.PLAIN:
+            with self.subTest(command=command):
+                self.assertEqual(self.covering("ask", command), [], "a read would prompt")
+        for rule in self.ASK_BEFORE:
+            self.assertIn(rule, self.permissions["ask"])
+        self.assertEqual(self.permissions["deny"], self.DENY_BEFORE)
+        self.assertEqual(sorted(self.settings["env"]), ["CLAUDE_VERIFY_CMD", "HARNESS_TEST_CMD", "HARNESS_WORKTREE_SETUP"])
+
+    def test_the_live_gate_still_runs_on_every_bash_command(self):
+        pre = self.settings["hooks"]["PreToolUse"]
+        gates = [h for entry in pre if entry.get("matcher") == "Bash" for h in entry["hooks"]
+                 if h.get("type") == "command" and h.get("command", "").endswith("/.claude/hooks/live_gate.sh")]
+        self.assertEqual(len(gates), 1, pre)
+        self.assertEqual(gates[0].get("onFailure"), "block")            # a timed-out hook must not let a write through
+        timeout = gates[0].get("timeout")
+        self.assertIsInstance(timeout, int)
+        self.assertNotIsInstance(timeout, bool)
+        self.assertGreaterEqual(timeout, 1)
+        edits = [h for entry in pre if entry.get("matcher") == "Edit|Write|MultiEdit" for h in entry["hooks"]]
+        self.assertTrue(any(h.get("command", "").endswith("/.claude/hooks/protected_paths.sh") for h in edits), pre)
+        post = [h for entry in self.settings["hooks"]["PostToolUse"] for h in entry["hooks"]]
+        self.assertTrue(any(h.get("command", "").endswith("/.claude/hooks/secret_scan.sh") for h in post), post)
 
 
 RUFF = shutil.which("ruff") or (os.path.join(REPO, ".venv", "bin", "ruff")

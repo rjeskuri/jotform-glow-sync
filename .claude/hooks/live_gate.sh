@@ -1,15 +1,25 @@
 #!/bin/bash
 # PreToolUse hook (Bash): the live-system gate.
 #
-# Blocks any command that can change a LIVE system - the Jotform forms, the
-# master Google Sheet, the deployed Apps Script, Salesforce, or the automatic
-# sync's switches on GitHub - unless GLOW_LIVE_OK=1 was exported by the human
-# BEFORE launching Claude Code. A command that sets GLOW_LIVE_OK itself is
-# always blocked (no self-approval), and so is one that writes a file the next
-# launch reads its environment from - ~/.zshrc and the other shell startup files,
-# a direnv .envrc, the repository's .env (sourced with set -a): a redirect, tee,
-# sed -i or perl -i into one, or launchctl setenv. Fast: a few greps, no network.
-# Every decision on a live command is appended to .claude/live_gate.log (gitignored).
+# A command that can change a LIVE system - the Jotform forms, the master Google
+# Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches
+# on GitHub - is put to Ryan as an approval prompt in the session: an "ask"
+# decision on stdout, and his answer to that prompt is the go. Nothing
+# pre-approves it. Since 2026-10-14 GLOW_LIVE_OK grants nothing (a session-wide
+# approval stayed open for 10 days, and a dispatched run inherits the
+# environment), and the hook never answers "allow". It refuses outright (a "deny"
+# decision), whatever the mode:
+#   - a command that approves itself: one that sets GLOW_LIVE_OK, or writes a file
+#     the next launch reads its environment from - ~/.zshrc and the other shell
+#     startup files, a direnv .envrc, the repository's .env (sourced with set -a):
+#     a redirect, tee, sed -i or perl -i into one, or launchctl setenv;
+#   - a subagent (agent_id or agent_type in the input): a live write never comes
+#     from one; the main session asks Ryan;
+#   - a session that cannot show him the prompt: permission_mode other than
+#     exactly default, acceptEdits, auto or plan - so bypassPermissions, dontAsk,
+#     a missing or an unknown value (a headless or dispatched run).
+# Fast: a few greps, no network. Every decision on a live command is appended to
+# .claude/live_gate.log (gitignored), with the mode it was taken in.
 #
 # Limits: the gate reads the command's text. A write through another program (cp,
 # an editor, a script), or a flag assembled at run time, is not seen: it guards
@@ -21,11 +31,28 @@
 # break, so nothing else runs (nor rg --pre / git grep -O, which run a program).
 set -u
 INPUT=$(cat)
+# three fields from the input: the permission mode as JSON text (so "default" stays
+# apart from a missing, numeric or oddly spelt value), whether an agent is named, then
+# the command. Unreadable input gives no fields, hence no command and no decision.
 if command -v jq >/dev/null 2>&1; then
-  CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')
+  FIELDS=$(printf '%s' "$INPUT" | jq -r '[(.permission_mode | @json), ((has("agent_id") or has("agent_type")) | tostring), (.tool_input.command | if type == "string" then . else "" end)] | join("\n")')
 else
-  CMD=$(printf '%s' "$INPUT" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("tool_input") or {}).get("command") or "")')
+  FIELDS=$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+mode = json.dumps(d.get("permission_mode"))
+agent = "true" if ("agent_id" in d or "agent_type" in d) else "false"
+cmd = (d.get("tool_input") or {}).get("command")
+print(mode)
+print(agent)
+print(cmd if isinstance(cmd, str) else "", end="")')
 fi
+MODE=${FIELDS%%$'\n'*}
+REST=${FIELDS#*$'\n'}
+case "$REST" in
+  *$'\n'*) AGENT=${REST%%$'\n'*}; CMD=${REST#*$'\n'} ;;
+  *) AGENT=$REST; CMD= ;;
+esac
 [ -z "$CMD" ] && exit 0
 
 # Tool flags AND the raw API shapes the tools wrap - a direct curl PUT to
@@ -54,12 +81,21 @@ PATTERN+="|${SELF})"
 # spread over lines is still one command
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
 MATCH=$(printf '%s' "$FLAT" | grep -Eo "$PATTERN" | head -1) || true
-# gh api: a write - a method other than GET, or fields / --input, which make it a POST - on
-# the Actions API (variables, secrets, workflows, runs) or to a repository dispatch
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]" \
-    && printf '%s' "$FLAT" | grep -Eq '(actions/|/dispatches)' \
-    && printf '%s' "$FLAT" | grep -Eiq '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE)|-[fF]|--field|--raw-field|--input)'; then
-  MATCH="gh api write under actions/ or to dispatches"
+# gh api: a write on ANY path (since 2026-10-14; before, only under actions/ or to
+# /dispatches) - a method other than GET (-X, -XPOST, --method, --method=, in any case);
+# fields or an input file (-f, -F, --field, --raw-field, --input: they make it a POST)
+# with no explicit GET (with GET they are the query string); or graphql (a mutation can
+# hide in -F query=@file).
+GH_METHOD='(^|[[:space:]])(-X|--method)[[:space:]=]*["'\'']?'
+if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]"; then
+  if printf '%s' "$FLAT" | grep -Eq "${GH}api[[:space:]]+graphql([^[:alnum:]_-]|$)"; then
+    MATCH="gh api graphql (a mutation writes)"
+  elif printf '%s' "$FLAT" | grep -Eiq "${GH_METHOD}(POST|PUT|PATCH|DELETE)"; then
+    MATCH="gh api with a POST, PUT, PATCH or DELETE method"
+  elif printf '%s' "$FLAT" | grep -Eq '(^|[[:space:]])(-[fF]|--(field|raw-field|input)([[:space:]=]|$))' \
+      && ! printf '%s' "$FLAT" | grep -Eiq "${GH_METHOD}GET([^[:alnum:]_]|$)"; then
+    MATCH="gh api with fields or --input and no GET method (a POST)"
+  fi
 fi
 # sf api request: any GraphQL call (a mutation writes), and a REST call that writes - a method
 # other than GET (the CLI offers GET POST PUT PATCH HEAD DELETE OPTIONS TRACE), a body (-b,
@@ -95,23 +131,68 @@ read_only() {
 }
 read_only && exit 0
 
+# A live command: one decision, logged with the mode and the caller, never "allow".
 LOG="${CLAUDE_PROJECT_DIR:-.}/.claude/live_gate.log"
-if [ "${GLOW_LIVE_OK:-}" = "1" ] && ! printf '%s' "$FLAT" | grep -Eq "$SELF"; then
-  printf '%s ALLOWED %s\n' "$(date '+%F %T')" "$CMD" >> "$LOG"
+CALLER=
+[ "$AGENT" = "true" ] && CALLER=" agent"
+log() { printf '%s %s mode=%s%s %s\n' "$(date '+%F %T')" "$1" "$MODE" "$CALLER" "$CMD" >> "$LOG"; }
+SHOWN=${FLAT:0:300}
+[ ${#FLAT} -gt 300 ] && SHOWN="$SHOWN ..."
+RUNBOOK='See docs/RUNBOOK.md, "Live gate (Claude Code)".'
+# the decision as Claude Code reads it: JSON on stdout, built by jq or python, never
+# interpolated by hand (the matched text and the command can hold quotes)
+decide() {
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg d "$1" --arg r "$2" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $d, permissionDecisionReason: $r}}'
+  else
+    python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": sys.argv[1], "permissionDecisionReason": sys.argv[2]}}))' "$1" "$2"
+  fi
+}
+# refused: a deny decision with the reason, or - should no JSON come out - exit 2 with
+# the reason on stderr, which blocks just the same
+refuse() {
+  REASON="BLOCKED by .claude/hooks/live_gate.sh - matched \"$MATCH\" in: $SHOWN
+$1
+$RUNBOOK"
+  OUT=$(decide deny "$REASON") || OUT=
+  log BLOCKED
+  if [ -n "$OUT" ]; then
+    printf '%s\n' "$OUT"
+    exit 0
+  fi
+  printf '%s\n' "$REASON" >&2
+  exit 2
+}
+if printf '%s' "$FLAT" | grep -Eq "$SELF"; then
+  refuse "The command approves itself: it sets GLOW_LIVE_OK, or writes a file the next launch
+reads its environment from. Nothing pre-approves a live command - Ryan's answer to the
+session's prompt is the only go, and GLOW_LIVE_OK grants nothing since 2026-10-14."
+fi
+if [ "$AGENT" = "true" ]; then
+  refuse "A subagent never runs a live command (the input names an agent: agent_id or
+agent_type). The main session asks Ryan, and his answer to that prompt is the go."
+fi
+case "$MODE" in
+  '"default"' | '"acceptEdits"' | '"auto"' | '"plan"') ;;
+  *) refuse "This session cannot show Ryan the approval prompt (permission_mode $MODE; only
+default, acceptEdits, auto and plan can). Run it in an interactive session, or Ryan runs it
+in his terminal." ;;
+esac
+REASON="LIVE command - matched \"$MATCH\" in: $SHOWN
+It can change a live system: the Jotform attendance forms, the master enrollment Google
+Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches on GitHub
+(live since 2026-09-01). Ryan's answer here is the go; nothing pre-approves it. Yes only
+after the dry run was read and the backup exists (backup_forms.py / sheets_client.py
+export-all). Direct API access (curl to api.jotform.com, Sheets write snippets, GitHub
+dispatches, gh api writes) is gated exactly like the tool flags.
+$RUNBOOK"
+OUT=$(decide ask "$REASON") || OUT=
+if [ -n "$OUT" ]; then
+  log ASKED
+  printf '%s\n' "$OUT"
   exit 0
 fi
-printf '%s BLOCKED %s\n' "$(date '+%F %T')" "$CMD" >> "$LOG"
-cat >&2 <<EOF
-BLOCKED by .claude/hooks/live_gate.sh - matched "$MATCH".
-This command can change a LIVE system (the Jotform attendance forms, the master
-enrollment Google Sheet, the deployed Apps Script, Salesforce, or the automatic
-sync's switches on GitHub). They went live 2026-09-01.
-To proceed: (1) show the dry-run output first, (2) back up (backup_forms.py /
-sheets_client.py export-all), (3) get Ryan's explicit go in this conversation,
-then EITHER Ryan runs the command himself in a terminal OR Ryan restarts Claude
-Code with GLOW_LIVE_OK=1 exported in his shell. Putting GLOW_LIVE_OK= inside the
-command does not count. Direct API access (curl to api.jotform.com, Sheets write
-snippets, GitHub dispatches) is gated exactly like the tool flags - use the repo
-tools and their dry runs. See docs/RUNBOOK.md, "Live gate".
-EOF
+# no ask could be built (jq and python3 both failed): refuse rather than let it through
+log BLOCKED
+printf '%s\n' "BLOCKED by .claude/hooks/live_gate.sh - the ask decision could not be built. $REASON" >&2
 exit 2

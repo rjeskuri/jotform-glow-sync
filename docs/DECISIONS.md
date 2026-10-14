@@ -87,6 +87,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - Live-system gate is a PreToolUse hook keyed on an environment variable set outside the agent
 - **Why:** the playbook's "deterministic control layer"; a command cannot approve itself
 - **Consequences:** `GLOW_LIVE_OK=1` exported before launching Claude Code, or Ryan runs the command
+- 2026-10-14: the variable opens nothing any more; the hook asks Ryan in the session instead (2026-10-14 — The live gate asks Ryan in the session; GLOW_LIVE_OK no longer opens it)
 
 ### 2026-09-01 — The leaked Jotform key rotated; settings.local holds no rules
 
@@ -589,3 +590,10 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Why:** Ryan, 2026-10-14. `branch_guard` refuses commits on `main`. The log lives in the main checkout (`harness-worklog` resolves a ticket worktree to it, since Harness 07a4835), and the session brief reads the handoff there. On a ticket branch the CSV counts as source (`*.csv` is not exempt from `tests_first`), hence `no-tests`.
 - **Rejected:** `worklog/**` under `HARNESS_SOURCE_EXEMPT` (the other option in `docs/agent/harness-prep.md` "Before you adopt" 4).
 - **Consequences:** the main checkout is dirty on the two paths all month; `/harness:land` cleans it, restoring the copies byte-identical to the landed content before the fast-forward (since Harness e372870), and a copy that differs blocks the pull instead of being lost; a ticket is created each month.
+
+### 2026-10-14 — The live gate asks Ryan in the session; GLOW_LIVE_OK no longer opens it
+
+- `.claude/hooks/live_gate.sh` answers a live command with a PreToolUse `ask` decision: Claude Code shows Ryan the approval prompt (the matched trigger, the command, the RUNBOOK section) and his answer is the go, one command at a time. It never answers `allow`. It denies, whatever the mode, a command that approves itself, a subagent (`agent_id` or `agent_type` in the input) and a session that cannot show the prompt (`permission_mode` other than exactly `default`, `acceptEdits`, `auto` or `plan`: `bypassPermissions`, `dontAsk`, a missing or an unknown value). Every `gh api` write asks, on any path (a POST, PUT, PATCH or DELETE method; fields or `--input` with no GET; any `graphql`). `.claude/settings.json` allows `gh api` only in the harness loop's read shapes (`gh api repos/`, `gh api --paginate repos/`), backs the hook with ask rules for the live families, and blocks the command when the hook fails or times out (`onFailure: "block"`). The log line carries the mode (ticket #36).
+- **Why:** Ryan, 2026-10-14: "this kind of blocker slows us down" - with the harness and the test reviews, a restart with `GLOW_LIVE_OK=1` was the only way to let Claude write, and that pre-approval was session-wide (one stayed open for 10 days, BACKLOG 83) and travels into every dispatched run (`harness-work dispatch` passes its environment on). An approval per command, where Ryan sees the command, is what rule 1 always meant.
+- **Rejected:** `permissions.ask` rules alone (prefix matches: they cannot see `--apply`, `api.jotform.com` or `apply=true` inside a command, nor express the read-only exception or the self-approval refusal); keeping `GLOW_LIVE_OK` as a pre-approval beside the prompt.
+- **Consequences:** every live command is a prompt; a headless or dispatched run never runs one (its ask is denied); every `gh api` write is gated, not only `actions/`; the hook and the settings stay owner edits (`protected_paths.sh`): Ryan applies the reviewed patch by hand. The RUNBOOK, the skills, README and `.env.example` follow in #37.
