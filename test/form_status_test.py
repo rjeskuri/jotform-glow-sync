@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import (ClubGuardFixture, FormStatusFixture, SameNameFixture, link_form,
@@ -814,6 +815,10 @@ class FormStatusLayout(unittest.TestCase):
         self.assertEqual(line, "2 Submit buttons, expected 1 - rosters not checked")
 
 
+# Written when Welcome Session was the only special event: pinned to that world, so the module
+# audit it tests does not move with the live type list. The two-type state is
+# test/special_events_test.py (IdgAudit).
+@mock.patch.object(glow_sync, "SPECIAL_EVENTS", ("Welcome Session",))
 class ModuleAndNamesAudit(unittest.TestCase):
     """tools/form_status.py: the module dropdowns' calcValues (as MODULE_CALC_VALUES says)
     and the form's names dictionary (emulated), through the API and on the served page;

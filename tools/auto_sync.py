@@ -29,13 +29,16 @@ the sync did not add because its name is in use, and a name two clubs send,
 raise ATTENTION without stopping anything (docs/RUNBOOK.md, "Club names two
 partners share"). A conditions rewrite alone is not a change to it, so roster
 rules that test a name the Club picker does not list (a restored backup, a
-half-finished hand apply) are never "in-sync": ATTENTION, apply by hand. Rules
-that calculate question 18 (the names sent to Salesforce) the old way, rules
-that let a special event show or send a session on a form that carries one, the
-required flag written on a roster that has no other change, and a module
-dropdown's calcValues or the special-event options appended with them, stop the
-region (ATTENTION): each is rolled out by hand, one form at a time, template
-first (docs/RUNBOOK.md, "The names list sent to Salesforce", "The names
+half-finished hand apply) are never "in-sync": ATTENTION, apply by hand. The
+generated rollout lines - rules that calculate question 18 (the names sent to
+Salesforce) the old way, rules that let a special event show or send a session
+on a form that carries one (each a rules-only plan that is never "in-sync"
+either), the required flag written on a roster that has no other change, and a
+module dropdown's calcValues or the special-event options appended with them -
+are applied like a roster change, within the bands: once the change is merged,
+the runner applies it to every enabled regional form on its next run; the
+template and a disabled form are applied by hand (docs/DECISIONS.md,
+2026-10-14; docs/RUNBOOK.md, "The names list sent to Salesforce", "The names
 dictionary and the module values" and "Special events"). The verify step's
 form_status also audits the form's names dictionary; a store it could not read
 is a note. Once per run, after the regions, Jotform's storage is read against the
@@ -102,17 +105,20 @@ CREATE_RX = re.compile(r"^  - CREATE roster '(?P<club>.+)' \((?P<girls>\d+) girl
 # an options update may carry the roster's required flag in the same write
 UPDATE_RX = re.compile(r"^  - UPDATE roster '(?P<club>.+)' \(q(?P<qid>\d+), (?P<girls>\d+) girls"
                        r"(?:; required: (?P<required>Yes|No))?\)$")
-# ...else it is written on its own: never applied unattended (check_bands)
+# ...else it is written on its own: applied like a roster change, and never counted against
+# --max-updates (the lines come from a constant, not the export: one rollout for every roster)
 REQUIRED_RX = re.compile(r"^  - REQUIRED roster '(?P<club>.+)' \(q(?P<qid>\d+): (?P<required>Yes|No)\)$")
 DELETE_RX = re.compile(r"^  - DELETE roster '(?P<club>.+)' \(q(?P<qid>\d+), belongs to (?P<region>.+)\)$")
 REPLACE_RX = re.compile(r"^  - REPLACE conditions \((?P<rules>\d+) rules")
 PICKER_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club picker \((?P<clubs>\d+) clubs(?::[^)]*)?\)$")
 GUARD_RX = re.compile(r"^  - (?P<op>CREATE|UPDATE) club guard \([^)]*\)$")
-# a module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES): never applied unattended
-# (check_bands) - the first rollout is by hand, template first; afterwards a difference means
-# the dropdown was edited in the builder (docs/plans/2026-10-02-names-and-modules.md). The same
-# write may append special-event options (glow/sync.py SPECIAL_EVENTS): held the same way, a
-# new type is rolled out by hand, template first (docs/plans/2026-10-13-special-events.md)
+# a module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES): applied like a roster change,
+# never counted against --max-updates. Since the first rollout (by hand, 2026-10-06:
+# docs/plans/2026-10-02-names-and-modules.md) a difference means the dropdown was edited in the
+# builder, and the next run realigns it. The same write may append special-event options
+# (glow/sync.py SPECIAL_EVENTS): a type merged to main reaches every enabled regional form on
+# the next run; the template and a disabled form are applied by hand (docs/DECISIONS.md,
+# 2026-10-14; docs/plans/2026-10-13-special-events.md)
 MODULE_RX = re.compile(r"^  - UPDATE module dropdown \(q(?P<qid>\d+), year (?P<year>\d+): "
                        r"(?:(?P<events>\d+) event option\(s\) added \((?P<names>.+)\); )?calcValues "
                        r"(?:= its (?P<modules>\d+) options|(?P<calc>cleared|unchanged|none))\)$")
@@ -140,15 +146,18 @@ SAME_NAME_REFUSED = "not added: give it a different name"
 # a roster's rule tests a text the picker does not list: that roster does not show, and
 # only a conditions rewrite - which the runner does not count as a change - repairs it
 RULES_OLDER = "which the Club picker does not list"
-# the live rules calculate question 18 (the names Salesforce stores) the old way: the
-# rewrite is rolled out by hand, one form at a time, so the region is never applied here
-# (docs/plans/2026-09-30-contact-ids.md) - nor the required flag on rosters that have no
-# other change (REQUIRED roster lines: on a form not rolled out yet, every roster)
+# the live rules calculate question 18 (the names Salesforce stores) the old way (an old
+# snapshot restored, a constant turned off and on again): the dry run plans a rules-only
+# REPLACE, which is never "in-sync" on this warning - the rewrite is applied like a roster
+# change, and the SyncLog detail says "question 18 rules rewritten" (plan_summary). The
+# required flag on rosters that have no other change (REQUIRED roster lines) is applied the
+# same way (the first rollout, by hand: docs/plans/2026-09-30-contact-ids.md)
 CONTACT_IDS_STALE = "question 18 (Contact_IDs) is not recalculated after the rosters change"
 # the form carries a special-event option but its live rules let an event show a session
 # dropdown or send a session in question 100 (an apply that stopped after the module writes,
 # or the option added in the builder): the dry run plans a rules-only REPLACE, never "in-sync"
-# here - the rewrite is a hand apply (docs/plans/2026-10-13-special-events.md)
+# here - the rewrite is applied like a roster change, "special-event rules rewritten" in the
+# SyncLog detail (docs/plans/2026-10-13-special-events.md)
 WEEK_BRIDGE_STALE = "the form's rules let a special event show or send a session"
 
 
@@ -314,9 +323,10 @@ def changes(plan):
 
 def plan_summary(plan):
     """One line for the SyncLog detail and the attention title: the roster counts, then the
-    required flags written on their own, the module dropdowns' calcValues, and each Club-picker
-    or club-guard write by name (only when planned), so a list-only apply does not read as
-    "0 create(s), 0 update(s)"."""
+    required flags written on their own, the module dropdowns' calcValues, each Club-picker
+    or club-guard write by name, and last the rules rewrite a warning asks for (question 18
+    the old way, the special-event session bridge) - each only when planned, so a list-only
+    or rules-only apply does not read as "0 create(s), 0 update(s)"."""
     requires = plan.get("requires", [])
     values = sorted({r["required"] for r in requires})
     modules = plan.get("modules", [])
@@ -330,7 +340,9 @@ def plan_summary(plan):
             + (f", {len(retired)} retired" if retired else "")
             + (f", {len(restored)} restored" if restored else "")
             + "".join(f", {m['op'].lower()} club picker" for m in plan.get("picker", []))
-            + "".join(f", {m['op'].lower()} club guard" for m in plan.get("club_guard", [])))
+            + "".join(f", {m['op'].lower()} club guard" for m in plan.get("club_guard", []))
+            + (", question 18 rules rewritten" if contact_ids_stale(plan) else "")
+            + (", special-event rules rewritten" if week_bridge_stale(plan) else ""))
 
 
 def check_bands(plan, max_creates=5, max_updates=20, max_retires=5, max_restores=5):
@@ -367,37 +379,6 @@ def check_bands(plan, max_creates=5, max_updates=20, max_retires=5, max_restores
                        "club(s) - rename each Salesforce account named in the warnings first, then "
                        "apply this region by hand with --q5-change-ok (docs/RUNBOOK.md, \"Club names "
                        "two partners share\")")
-    if contact_ids_stale(plan):
-        reasons.append("the form's rules calculate question 18 (Contact_IDs, the names sent to "
-                       "Salesforce) the old way - the new rules are rolled out by hand, one form at a "
-                       "time, with the browser checks (docs/RUNBOOK.md, \"The names list sent to "
-                       "Salesforce\"); nothing applied here, roster changes included")
-    if week_bridge_stale(plan):
-        reasons.append("the form's rules let a special event show a session dropdown or send a session "
-                       "(question 100) - the rules-only rewrite is applied by hand, one form at a time, "
-                       "with the browser checks (docs/RUNBOOK.md, \"Special events\"); nothing applied "
-                       "here, roster changes included")
-    requires = plan.get("requires", [])
-    if requires:
-        reasons.append(f"would write the required flag on {len(requires)} roster(s) that have no other "
-                       "change - never unattended: the first rollout is by hand (docs/RUNBOOK.md, \"The "
-                       "names list sent to Salesforce\"), and afterwards a roster that lost the flag was "
-                       "edited in the builder")
-    modules = plan.get("modules", [])
-    events = [m for m in modules if m.get("events")]
-    values = [m for m in modules if not m.get("events")]
-    if events:
-        reasons.append(f"would add special-event option(s) to {len(events)} module dropdown(s) "
-                       f"({', '.join('q' + m['qid'] for m in events)}), with their calcValues - never "
-                       "unattended: a new type (glow/sync.py SPECIAL_EVENTS) is rolled out by hand, "
-                       "template first, with the browser check (docs/RUNBOOK.md, \"Special events\"); "
-                       "nothing applied here, roster changes included")
-    if values:
-        reasons.append(f"would write the calcValues of {len(values)} module dropdown(s) "
-                       f"({', '.join('q' + m['qid'] for m in values)}) - never unattended: the first "
-                       "rollout is by hand, template first (docs/RUNBOOK.md, \"The names dictionary and "
-                       "the module values\"), and afterwards a difference means a module dropdown was "
-                       "edited in the builder; nothing applied here, roster changes included")
     stale = sum(1 for w in plan["warnings"] if NOT_IN_EXPORT in w)
     n = plan["roster_clubs"] or 0
     if stale > max(5, n // 10):
@@ -672,8 +653,10 @@ class Run:
         n = changes(plan)
         # a change of what an existing club sends to question 5 stops the region even
         # when nothing else is planned: a rules-only difference is not a "change" here,
-        # and this one must never read as in-sync - nor question 18's rules the old way, nor
-        # rules that let a special event show or send a session
+        # and this one must never read as in-sync. Nor may question 18's rules the old way
+        # or rules that let a special event show or send a session: either warning sends
+        # the rules-only plan on to the bands and the apply (the rewrite is the rollout, and
+        # plan_summary names it), so a form in that state is never left as it is
         if n == 0 and not q5_changes(plan) and not contact_ids_stale(plan) and not week_bridge_stale(plan):
             # …nor may rules that test a name the picker does not list: those clubs' rosters
             # do not show (with the club guard their mentors cannot submit), and the

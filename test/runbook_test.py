@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 docs/RUNBOOK.md against the code: its procedures quote the tools' own commands and lines, in a
-safe order (RosterRepairRunbook, SameNameRunbook, ContactIdsRunbook, NamesAndModulesRunbook);
-and restore_conditions.py refuses a snapshot whose rules test clubs the Club picker no longer
+safe order (RosterRepairRunbook, SameNameRunbook, ContactIdsRunbook, NamesAndModulesRunbook); no
+live doc or tool says the runner holds a generated rollout line (RunnerRunbook; docs/DECISIONS.md,
+2026-10-14); and restore_conditions.py refuses a snapshot whose rules test clubs the Club picker no longer
 offers (RestoreConditionsGuard); the work log runs on the harness plugin's harness-worklog, and
 the retired tools/worklog.py is named only where the docs say how to restore it (WorkLogRunbook).
 """
@@ -246,9 +247,11 @@ class SameNameRunbook(unittest.TestCase):
 
 class ContactIdsRunbook(unittest.TestCase):
     """docs/RUNBOOK.md "The names list sent to Salesforce": what it quotes is the
-    code's own, the rollout (as run, moved to docs/plans/2026-09-30-contact-ids.md) is
+    code's own, the rollout (as run, moved to docs/plans/2026-09-30-contact-ids.md) was
     backed up, previewed, applied and verified in that order with the runner paused,
-    the console check prints counts only, and the rollback is the constants."""
+    the console check prints counts only, and the rollback is the constants. Since
+    2026-10-14 (docs/DECISIONS.md) the runner applies the warning's rewrite and the
+    REQUIRED lines on its next run; the section says so."""
 
     def section(self):
         doc = read(os.path.join(REPO, "docs", "RUNBOOK.md"))
@@ -266,6 +269,9 @@ class ContactIdsRunbook(unittest.TestCase):
             self.assertIn(name, text)
             self.assertTrue(hasattr(glow_sync, name), name)
         self.assertIn("question 18: rule 1 of N, the Club picker an operand: yes", text)
+        # the runner applies both lines now: the section no longer says it never does
+        self.assertNotIn("**never applies** a region", text)
+        self.assertNotIn("never applies these lines", text)
         runner = " ".join(read(os.path.join(REPO, "docs", "RUNBOOK.md"))
                           .split("## Automatic sync", 1)[1].split("\n## ", 1)[0].split())
         self.assertIn(auto_sync.CONTACT_IDS_STALE, runner)
@@ -304,13 +310,13 @@ class ContactIdsRunbook(unittest.TestCase):
         self.assertLess(m, flat.index("```bash"))
         self.assertLess(m, flat.rindex("`AUTO_SYNC_APPLY=1`"))
         self.assertIn("nobody applies the template from another checkout", flat)
-        # proven with the runner's own refusal, which older code never gives
+        # the plan keeps, as history, the refusal the runner gave then (older code never gave it);
+        # since 2026-10-14 the runner gives none: it applies that region (docs/DECISIONS.md)
+        quoted = flat.split("with the reason \"", 1)[1].split("\"", 1)[0]
+        self.assertTrue(quoted.startswith("the form's rules calculate question 18"), quoted)
         plan = auto_sync.parse_plan("DRY RUN (use --apply to write):\n  - REPLACE conditions (40 rules)\n"
                                     f"  ! {auto_sync.CONTACT_IDS_STALE}: rule 39 of 40\n")
-        (reason,) = auto_sync.check_bands(plan)
-        quoted = flat.split("with the reason \"", 1)[1].split("\"", 1)[0]
-        for part in quoted.split(" … "):
-            self.assertIn(part, reason)
+        self.assertEqual(auto_sync.check_bands(plan), [])
         skill = " ".join(read(os.path.join(REPO, ".claude", "skills", "live-systems", "SKILL.md")).split())
         self.assertIn("so merge right after the template's rollout", skill)
 
@@ -402,7 +408,8 @@ class NamesAndModulesRunbook(unittest.TestCase):
                                          "3. U.S, Latin America, Asia, Africa, smallest first",
                                          "then `AUTO_SYNC_APPLY=1`")]
         self.assertEqual(order, sorted(order))
-        self.assertIn("never unattended", text)
+        # the runner applies a module line now (docs/DECISIONS.md, 2026-10-14): no hold to quote
+        self.assertNotIn("never unattended", text)
         self.assertIn("--restore backups/translations/<id>-<stamp>-before.json", text)
         # the module chain's shape (docs/plans/2026-10-06-module-selection.md): the line is the tool's own
         qs, _ = SameNameFixture.form(SameNameFixture(), switched=True)
@@ -410,6 +417,261 @@ class NamesAndModulesRunbook(unittest.TestCase):
         self.assertIn(f"module shape: {line}", text)
         for fragment in ("dontClear", "`enable`", "never a sync apply", "JotForm.clearFieldOnHide"):
             self.assertIn(fragment, text)
+
+
+class RunnerRunbook(unittest.TestCase):
+    """A merged generated form change reaches every enabled regional form on the runner's next
+    run; review and the tests are the gate (docs/DECISIONS.md, 2026-10-14). The live docs and the
+    tools say so in the ticket's words, and none of them says - in those words or others - that
+    the runner holds one of the five rollout lines; the template (not in REGIONAL_FORMS) and a
+    disabled form (skipped) are applied by hand, and the docs say that too. The shape a rewrite
+    keeps: "never applies" is gone from the runner's four RUNBOOK sections (the RULES_OLDER
+    paragraph apart), its ARCHITECTURE row and the two sync skills; a `check_bands` reason a
+    section quotes is one the code still gives; in "Automatic sync" the paragraph that names a
+    rollout line says the runner applies it on its next run, and no paragraph lists one as what
+    stops a region; each rollout section's Apply line is the runner's, a hand apply named only
+    for the template and a disabled form; the DECISIONS section carries the file's Why, Rejected
+    and Consequences bullets, and the three sections it amends name it."""
+
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    # the RUNBOOK sections about the runner's behaviour on a rollout line: the runner's own,
+    # then the three that each have one
+    SECTIONS = ["Automatic sync", "The names list sent to Salesforce",
+                "The names dictionary and the module values", "Special events"]
+    ROLLOUTS = SECTIONS[1:]
+    SKILLS = [os.path.join(REPO, ".claude", "skills", s, "SKILL.md") for s in ("live-systems", "sync-preview")]
+    # the ticket's words (2026-10-14), as every live doc about the runner must carry them
+    APPLIES = "the runner applies it to every enabled regional form on its next run"
+    BY_HAND = "the template and a disabled form are applied by hand"
+    DECISION_TITLE = "Merged form changes roll out through the runner; review and tests are the gate"
+    DECISION = "2026-10-14 — " + DECISION_TITLE
+    AMENDED = ["2026-09-30 — Question 18 recalculated; at least one girl ticked",
+               "2026-10-02 — Stale name translations removed; module values pinned",
+               "2026-10-13 — Special events are module options; the same-day rule stays; all three years"]
+    LIVE = ["docs/RUNBOOK.md", "docs/ARCHITECTURE.md", "README.md", ".claude/skills", "tools/auto_sync.py",
+            "sync_attendance_form.py", "glow/sync.py"]
+    HOLDS = ["never unattended", "never applies a module line", "never applies an event line",
+             "never applies these lines", "never applies those lines", "the runner holds it",
+             "runner refuses those lines", "refuses every rolled-back region", "applies nothing there"]
+    # the same hold in other words - the synonyms a rewrite could reach for, and the stale phrases
+    # of the comments the ticket lists. Each hits only a sentence that must change: none of the
+    # bad-data bands ("nothing applied", "is held"), RULES_OLDER ("does not apply a rules-only
+    # difference"), a question-5 change ("never applies it", in sections outside SECTIONS), the
+    # template's or a disabled form's hand apply, or an AUTO_SYNC_APPLY step (task 2) says any of these
+    OTHER_WORDS = ["not unattended", "applies nothing", "until the form is rolled out by hand",
+                   "never applied unattended", "never applied here", "but only by hand", "is a hand apply",
+                   "hand apply per form", "keeps it back", "holds it back", "roster changes included",
+                   "nothing applied here", "rolled out by hand, one form at a time",
+                   "rolled out by hand, template first", "region the runner holds", "runner refuses",
+                   "runner rejects", "holds the write", "applies no such form", "held by the runner"]
+    HOLD_RX = re.compile(r"(never applies|does not apply|doesn't apply|will not apply|won't apply|is not applying)"
+                         r"\**\s+(a region|that region|the region|this region|such a region|these lines|those lines|"
+                         r"such lines|a module line|an event line|the rewrite|the five|it|them|one|the write|"
+                         r"the lines)\b", re.IGNORECASE)
+    # "Automatic sync": how a paragraph names one of the five rollout lines (the SyncLog detail's
+    # "… rules rewritten" is the apply's own name, not a line), and how one says a region stops
+    KIND_RX = re.compile(r"question 18(?! rules rewritten)|REQUIRED roster|module dropdown|calcValues|"
+                         r"special[ -]event(?! rules rewritten)", re.IGNORECASE)
+    STOP_RX = re.compile(r"\bstop(s|ping)? (a|the|that|this|its|each|every) region\b", re.IGNORECASE)
+    NEGATED = ("no longer ", "not ", "never ", "nothing ", "none ", "neither ", "without ")
+    # what a paragraph may say of the template and a disabled form only (their clauses are dropped first)
+    HELD = ["nothing applied", "nothing is applied", "applies nothing", "by hand", "one form at a time"]
+    # a rollout section's Apply line
+    APPLY_RX = re.compile(r"\bthe runner applies (it|them|the rewrite|these lines)\b.*\bon its next run\b", re.IGNORECASE)
+    HEAD = "Roster: 4 active clubs in Africa (8 girls); 300 clubs overall\n\nDRY RUN (use --apply to write):\n"
+    # the bad-data triggers (the Definition of done), each alone: the one reason its band gives.
+    # Together they are every reason the runner still has
+    TRIGGERS = [
+        ("  - DELETE roster 'Elsewhere' (q140, belongs to Asia)\n", {}),
+        ("".join(f"  - CREATE roster 'New Club {i}' ({i + 1} girls)\n" for i in range(6)), {}),
+        ("".join(f"  - UPDATE roster 'Club {i}' (q{200 + i}, 3 girls)\n" for i in range(21)), {}),
+        ("".join(f"  ~ retired roster 'Club {i}' (q{300 + i}): no active girl in the Roster\n" for i in range(3))
+         + "  - UPDATE club picker (3 clubs: options)\n", {"max_retires": 2}),
+        ("".join(f"  ~ restored roster 'Club {i}' (q{300 + i}): back on the Club picker\n" for i in range(4))
+         + "  - UPDATE club picker (7 clubs: options)\n", {"max_restores": 3}),
+        (f"  ! 'Old Name Club' (q120): proposed roster {auto_sync.NO_SHARED_NAMES} - verify it is the same club "
+         "before applying\n  - UPDATE roster 'Old Name Club' (q120, 14 girls)\n", {}),
+        (f"  ! 'Beta Club 2' (q13): {auto_sync.SF_NAME_CHANGE} from 'Beta Club' to 'Beta Club 2' - rename its "
+         "Salesforce account first; an --apply needs --q5-change-ok\n", {}),
+        ("".join(f"  ? 'Club {i}' (q{400 + i}) {auto_sync.NOT_IN_EXPORT} - keeping its current roster\n"
+                 for i in range(6)), {}),
+        (f"  ! Partners tab: the export has no 'jotform' {auto_sync.JOTFORM_COLUMN} - a retired roster of an "
+         "active club would be restored; check the header (Partners!D1) before applying (docs/RUNBOOK.md, "
+         "\"Clubs that do not use Jotform\")\n  ~ restored roster 'Delta Club' (q14): back on the Club picker\n"
+         "  - UPDATE club picker (4 clubs: options)\n", {}),
+    ]
+
+    @staticmethod
+    def flat(text):
+        return " ".join(text.split())
+
+    def section(self, title):
+        return read(self.RUNBOOK).split(f"\n## {title}\n", 1)[1].split("\n## ", 1)[0]
+
+    def paragraphs(self, title):
+        """The section's paragraphs, each flattened."""
+        return [self.flat(p) for p in self.section(title).split("\n\n") if p.strip()]
+
+    def architecture_row(self):
+        """The runner's row of docs/ARCHITECTURE.md's table, flattened."""
+        rows = [l for l in read(os.path.join(REPO, "docs", "ARCHITECTURE.md")).splitlines()
+                if l.startswith("| `tools/auto_sync.py` |")]
+        self.assertEqual(len(rows), 1)
+        return self.flat(rows[0])
+
+    def apply_line(self, title):
+        """The section's `- **Apply:**` header line, flattened."""
+        section = self.section(title)
+        self.assertIn("\n- **Apply:**", section, title)
+        return self.flat(section.split("- **Apply:**", 1)[1].split("\n- **", 1)[0])
+
+    @staticmethod
+    def regional(text):
+        """`text` without its clauses (to a `;` or `.`) about the template or a disabled form: what
+        is said of the regional forms, which the runner syncs."""
+        return " ".join(c for c in re.split(r"[;.]", text) if not re.search(r"template|disabled form", c, re.I))
+
+    def stops(self, paragraph):
+        """The paragraph's 'stops a region' phrases that are not negated ("no longer stops …")."""
+        return [m.group(0) for m in self.STOP_RX.finditer(paragraph)
+                if not paragraph[:m.start()].lower().endswith(self.NEGATED)]
+
+    def band_reasons(self):
+        """Every reason check_bands gives today: one per bad-data trigger, each plan alone."""
+        reasons = []
+        for extra, band in self.TRIGGERS:
+            got = auto_sync.check_bands(auto_sync.parse_plan(self.HEAD + extra), **band)
+            self.assertEqual(len(got), 1, (extra.splitlines()[0], got))
+            reasons += got
+        return reasons
+
+    def test_the_live_docs_say_the_runner_applies_a_merged_change(self):
+        texts = {f"RUNBOOK '{t}'": self.flat(self.section(t)) for t in self.SECTIONS}
+        texts["ARCHITECTURE runner row"] = self.architecture_row()
+        texts["live-systems skill"] = self.flat(read(self.SKILLS[0]))
+        for name, text in texts.items():
+            self.assertTrue(self.APPLIES in text.lower(), (name, "lacks: " + self.APPLIES))
+            self.assertTrue(self.BY_HAND in text.lower(), (name, "lacks: " + self.BY_HAND))
+
+    def test_each_rollout_sections_apply_line_is_the_runners(self):
+        # the header says the runner applies the lines on its next run, and no clause that names the
+        # runner gives a hand apply (`--apply`, "by hand"); where the sync is the section's only tool,
+        # a hand apply is named for the template and a disabled form alone, which the runner does not
+        # sync (the names dictionary's header keeps the names tool's own `--apply`, a hand tool)
+        hand = ("--apply", "by hand", "one form per run")
+        for title in self.ROLLOUTS:
+            line = self.apply_line(title)
+            self.assertRegex(line, self.APPLY_RX, title)
+            self.assertNotIn("never applies", line.lower(), (title, line))
+            for clause in re.split(r"[;.]", line.lower()):
+                if "runner" in clause and not re.search(r"template|disabled form", clause):
+                    self.assertEqual([w for w in hand if w in clause], [], (title, clause))
+            if title != "The names dictionary and the module values":
+                self.assertEqual([w for w in hand if w in self.regional(line).lower()], [], (title, line))
+
+    def test_no_scoped_doc_says_never_applies(self):
+        scopes = {}
+        for title in self.SECTIONS:
+            # the RULES_OLDER paragraph stays: rules that test a name the Club picker does not list
+            # are a rules-only difference the runner still does not apply on its own
+            scopes[f"RUNBOOK '{title}'"] = " ".join(p for p in self.paragraphs(title) if auto_sync.RULES_OLDER not in p)
+        scopes["ARCHITECTURE runner row"] = self.architecture_row()
+        for path in self.SKILLS:
+            scopes[os.path.relpath(path, REPO)] = self.flat(read(path))
+        self.assertEqual([name for name, text in scopes.items() if "never applies" in text.lower()], [])
+        # the question-5 refusal is no part of this: its sections ("Renaming a club", "Club names two
+        # partners share", outside SECTIONS) keep their words
+        whole = self.flat(read(self.RUNBOOK))
+        for kept in ("the runner never applies a question-5 change",
+                     "refuses `--apply` without `--q5-change-ok`, and the runner never applies it (ATTENTION",
+                     "`--apply` refuses without `--q5-change-ok`, and the runner never applies that region"):
+            self.assertTrue(kept in whole, "the question-5 refusal's words changed: " + kept)
+
+    def test_each_quoted_band_reason_is_one_the_runner_still_gives(self):
+        reasons = self.band_reasons()
+        self.assertEqual(len(reasons), len(self.TRIGGERS))
+        texts = {f"RUNBOOK '{t}'": self.flat(self.section(t)) for t in self.SECTIONS}
+        texts["ARCHITECTURE runner row"] = self.architecture_row()
+        texts.update((os.path.relpath(p, REPO), self.flat(read(p))) for p in self.SKILLS)
+        # a doc quotes a reason as (`check_bands`: "…"), an ellipsis standing for a cut
+        quoted = [(name, q) for name, text in texts.items()
+                  for q in re.findall(r"`check_bands`[^\"]{0,40}\"([^\"]+)\"", text)]
+        for name, quote in quoted:
+            for part in re.split(r"\s*…\s*", quote):
+                self.assertTrue(any(part in r for r in reasons), (name, part))
+
+    def test_the_runner_section_applies_every_rollout_line_and_lists_none_as_a_stopper(self):
+        named = [p for p in self.paragraphs("Automatic sync") if self.KIND_RX.search(p)]
+        self.assertTrue(named)                   # the three quotes the ticket keeps live here
+        for p in named:
+            # says the runner applies it on its next run …
+            self.assertTrue(re.search(r"\bthe runner applies\b", p, re.I), ("lacks 'the runner applies'", p[:90]))
+            self.assertTrue("next run" in p, ("lacks 'next run'", p[:90]))
+            # … and not that it stops the region or is applied by hand (the template and a
+            # disabled form apart)
+            self.assertEqual(self.stops(p), [], p[:90])
+            held = self.regional(p).lower()
+            self.assertEqual([w for w in self.HELD if w in held], [], p[:90])
+
+    def test_no_live_doc_says_the_runner_holds_a_rollout_line(self):
+        # the Definition of done's own command
+        argv = ["git", "grep", "-n", "-i"] + [a for p in self.HOLDS for a in ("-e", p)] + ["--"] + self.LIVE
+        done = subprocess.run(argv, cwd=REPO, capture_output=True, text=True)
+        self.assertEqual(done.stdout, "")          # every hit is a line that still says it holds
+        self.assertEqual(done.returncode, 1, done.stderr)      # git grep: 1 is "no match", 0 a match
+
+    def test_no_live_doc_says_it_in_other_words(self):
+        # over whitespace-flattened text, so a wrapped sentence or a split string literal is read
+        # whole: the Definition of done's phrases again, then the other words
+        targets = {f"RUNBOOK '{t}'": self.flat(self.section(t)) for t in self.SECTIONS}
+        targets["ARCHITECTURE runner row"] = self.architecture_row()
+        targets["README.md"] = self.flat(read(os.path.join(REPO, "README.md")))
+        for path in sorted(glob.glob(os.path.join(REPO, ".claude", "skills", "*", "SKILL.md"))):
+            targets[os.path.relpath(path, REPO)] = self.flat(read(path))
+        for name in ("tools/auto_sync.py", "sync_attendance_form.py", "glow/sync.py"):
+            targets[name] = self.flat(re.sub(r'"\s*\n\s*"', "", read(os.path.join(REPO, name))))
+        found = [(name, phrase) for name, text in targets.items()
+                 for phrase in self.HOLDS + self.OTHER_WORDS if phrase in text.lower()]
+        found += [(name, m.group(0)) for name, text in targets.items() for m in [self.HOLD_RX.search(text)] if m]
+        self.assertEqual(found, [])
+
+    @staticmethod
+    def bullets(doc, title):
+        """A DECISIONS section's top-level bullets, each flattened (a sub-bullet stays in its bullet).
+        The section runs from its `### ` heading to the next `### ` heading, or the end of the file."""
+        body = doc.split(f"\n### {title}\n", 1)[1].split("\n### ", 1)[0]
+        return [" ".join(b.split()) for b in ("\n" + body).split("\n- ")[1:]]
+
+    def test_the_decision_is_recorded_and_the_three_it_amends_point_at_it(self):
+        doc = read(os.path.join(REPO, "docs", "DECISIONS.md"))
+        # one section headed by it, anywhere in the file: later decisions (epic #29's task 3 among
+        # them) are appended after it, so it is pinned by date order - below the three it amends,
+        # whose bullets say "below" - never as the file's last heading
+        self.assertEqual(doc.count(f"\n### {self.DECISION}\n"), 1,
+                         f"docs/DECISIONS.md needs one section headed `### {self.DECISION}`")
+        headings = [l[4:].strip() for l in doc.splitlines() if l.startswith("### ")]
+        bullets = self.bullets(doc, self.DECISION)
+        self.assertTrue(bullets and not bullets[0].startswith("**"), bullets[:1])   # the decision itself first
+        labelled = [b for b in bullets if b.startswith("**")]
+        labels = [b.split(":**", 1)[0][2:] for b in labelled]
+        # the file's own labels, in its order
+        self.assertEqual([l for l in labels if l in ("Why", "Rejected", "Consequences")],
+                         ["Why", "Rejected", "Consequences"], labels)
+        by = dict(zip(labels, (b.split(":**", 1)[1] for b in labelled)))
+        self.assertIn("no longer be needed", by["Why"])                   # Ryan's words, 2026-10-14
+        self.assertIn("hold", by["Rejected"].lower())                     # keeping the holds
+        consequences = by["Consequences"]
+        self.assertIn("every enabled regional form", consequences)
+        self.assertIn("next run", consequences)
+        self.assertIn(self.BY_HAND, consequences.lower())
+        self.assertRegex(consequences, r"\broll(ed|s)? forward\b")       # a form rolled back by hand
+        self.assertIn("AUTO_SYNC_APPLY", consequences)                    # stays the emergency off switch
+        self.assertIn("switch", consequences)
+        for title in self.AMENDED:
+            self.assertIn(title, headings, title)
+            self.assertLess(headings.index(title), headings.index(self.DECISION), (title, "is amended from below"))
+            dated = [b for b in self.bullets(doc, title) if b.startswith(("2026-10-14", "**2026-10-14"))]
+            self.assertTrue(any(self.DECISION_TITLE in b for b in dated), (title, dated))
 
 
 class WorkLogRunbook(unittest.TestCase):

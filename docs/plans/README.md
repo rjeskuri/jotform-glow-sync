@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-10-14 | Special event "IDG Celebrations" on every attendance form, after "Welcome Session" | accepted |  | [2026-10-14-idg-celebrations.md](2026-10-14-idg-celebrations.md) |
 | 2026-10-13 | Special events - ad-hoc sessions as module options, the first "Welcome Session" | done 2026-10-13 |  | [2026-10-13-special-events.md](2026-10-13-special-events.md) |
 | 2026-10-12 | The Group Photo sublabel loses its sentence about faces; one photo per submission stays | done |  | [2026-10-12-photo-sublabel.md](2026-10-12-photo-sublabel.md) |
 | 2026-10-09 | Repo cleanup: organize, consolidate, lint (no rewrite) | in-progress | 32, 50, 53 | [2026-10-09-repo-cleanup.md](2026-10-09-repo-cleanup.md) |
