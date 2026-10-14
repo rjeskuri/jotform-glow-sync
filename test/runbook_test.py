@@ -5,7 +5,9 @@ safe order (RosterRepairRunbook, SameNameRunbook, ContactIdsRunbook, NamesAndMod
 live doc or tool says the runner holds a generated rollout line (RunnerRunbook; docs/DECISIONS.md,
 2026-10-14); and restore_conditions.py refuses a snapshot whose rules test clubs the Club picker no longer
 offers (RestoreConditionsGuard); the work log runs on the harness plugin's harness-worklog, and
-the retired tools/worklog.py is named only where the docs say how to restore it (WorkLogRunbook).
+the retired tools/worklog.py is named only where the docs say how to restore it (WorkLogRunbook);
+no rollout step toggles AUTO_SYNC_APPLY, which stays the emergency off switch (RolloutProcedures;
+ticket #31).
 """
 import glob
 import json
@@ -31,6 +33,77 @@ def moved(plan):
     """What docs/RUNBOOK.md said of a finished one-time procedure until 2026-10-09, moved word for
     word to the end of its plan (the RUNBOOK keeps a stub that links there)."""
     return read(os.path.join(REPO, "docs", "plans", plan + ".md")).split(MOVED, 1)[1]
+
+
+LIVE_SYSTEMS = os.path.join(REPO, ".claude", "skills", "live-systems", "SKILL.md")
+
+
+def flat(text):
+    return " ".join(text.split())
+
+
+def md_part(path, heading):
+    """A Markdown file's part under the first heading line that starts with `heading` (`## The
+    ritual`, `## 3.`), that line included, to the next heading of its level or higher. A missing
+    heading fails: a test never passes on an empty part."""
+    doc = read(path)
+    m = re.search(r"^" + re.escape(heading) + r"(?!\w).*$", doc, re.M)
+    if not m:
+        raise AssertionError(f"{os.path.relpath(path, REPO)}: no heading starting `{heading}`")
+    level = len(heading) - len(heading.lstrip("#"))
+    rest = doc[m.start():]
+    nxt = re.search(r"\n#{1,%d} " % level, rest)
+    return rest[:nxt.start()] if nxt else rest
+
+
+def sentences(text, ends=".;:"):
+    """`text` (flattened) cut after each of `ends`."""
+    return [s for s in re.split(r"(?<=[%s])\s+" % re.escape(ends), flat(text)) if s.strip()]
+
+
+# ticket #31's rollback model: the merge of the constants-off commit (or the revert) IS the rollback
+# for every enabled regional form. What the old model said, in its words or others: merge only after
+# every form is rolled back by hand
+MERGE_LAST_RX = re.compile(r"\b(after|once|until|when|only when)\b[^.;:]{0,25}\b(all|every|each)\b[^.;:]{0,20}\bforms?\b|"
+                           r"\brolled back by hand\b|"
+                           r"\broll(ed|ing)? (it|them|each form|every form|all (the )?forms|the forms) back by hand\b", re.I)
+MERGE_IS_ROLLBACK_RX = re.compile(r"\bis the rollback\b|\brolls? (back )?every enabled regional form\b", re.I)
+
+
+def merge_last(text):
+    """The sentences of `text` that merge only once the forms are rolled back (by hand)."""
+    return [s for s in sentences(text) if re.search(r"merg", s, re.I) and MERGE_LAST_RX.search(s)]
+
+
+def merge_is_rollback(text):
+    """The sentences of `text` that say the merge is the rollback (a `;` keeps the sentence whole:
+    "merge the constants-off commit or the revert; that is the rollback")."""
+    return [s for s in sentences(text, ".") if re.search(r"merg", s, re.I) and MERGE_IS_ROLLBACK_RX.search(s)]
+
+
+# a step that sets the switch or holds the runner, in the ticket's words or others: "AUTO_SYNC_APPLY=0",
+# "flip the repository variable off", "hold the runner off", "switch it back on"…
+TOGGLE_RX = re.compile(
+    r"AUTO_SYNC_APPLY=|gh variable set AUTO_SYNC_APPLY|"
+    r"\b(flip|hold|pause|stop|set|switch|turn|put|keep)(s|ped|ping|ting|ing|ed|d)?\b(\W+\w+){0,3}?\W+"
+    r"`?(runner|variable|switch|AUTO_SYNC_APPLY)\b`?((\W+\w+){0,3}?\W+`?(off|zero|0|1)\b|\W+(back\W+)?on\b)", re.I)
+# the runner paused or held, said any way
+PAUSED_RX = re.compile(r"\brunner('s)? (is |stays |was |kept |held )?(paused|held|stopped|switched off|off)\b|"
+                       r"\b(pause|hold|stop)(s|d|ped|ping|ing)? the runner\b|\bheld off\b|\bhold\w* (it|the runner) off\b",
+                       re.I)
+
+
+def toggles(text):
+    """TOGGLE_RX's matches in `text` (flattened), but for one negated right before ("no step sets
+    `AUTO_SYNC_APPLY` to 0"); an `AUTO_SYNC_APPLY=` counts always."""
+    text = flat(text)
+    out = []
+    for m in TOGGLE_RX.finditer(text):
+        before = text[max(0, m.start() - 40):m.start()]
+        if m.group(0).startswith("AUTO_SYNC_APPLY=") or not re.search(r"\b(no|never|not|nor|without)\W+(\w+\W+){0,2}$",
+                                                                       before, re.I):
+            out.append(m.group(0))
+    return out
 
 
 def backlog_item(number):
@@ -317,8 +390,27 @@ class ContactIdsRunbook(unittest.TestCase):
         plan = auto_sync.parse_plan("DRY RUN (use --apply to write):\n  - REPLACE conditions (40 rules)\n"
                                     f"  ! {auto_sync.CONTACT_IDS_STALE}: rule 39 of 40\n")
         self.assertEqual(auto_sync.check_bands(plan), [])
-        skill = " ".join(read(os.path.join(REPO, ".claude", "skills", "live-systems", "SKILL.md")).split())
-        self.assertIn("so merge right after the template's rollout", skill)
+        # the live-systems skill today (ticket #31): the merge is the rollout, so the template - which
+        # the runner never syncs - is applied from the ticket branch before the land, not merged after
+        never = " ".join(md_part(LIVE_SYSTEMS, "## Never").split())
+        self.assertNotIn("merge right after the template's rollout", never)
+        self.assertNotIn("before the first regional form", never)
+        clauses = [c for c in re.split(r";\s|\.\s", never) if "template" in c and "ticket branch" in c]
+        self.assertTrue([c for c in clauses if re.search(r"before (the land|`?/harness:land`?)", c)],
+                        ("**Never**: the template is applied from the ticket branch before the land", clauses))
+        # …and the ritual opens by saying so: a generated form change is rolled out by its merge; the
+        # ritual is for the template, a disabled form and every other writer
+        ritual = md_part(LIVE_SYSTEMS, "## The ritual")
+        self.assertIn("Dry run and read the plan", ritual)                 # its steps stay
+        lead = " ".join(ritual.split("Dry run and read the plan", 1)[0].split()).lower()
+        for word in ("merge", "template", "disabled form", "other writer"):
+            self.assertIn(word, lead, ("**The ritual**'s first line", lead))
+        # …and adds no regional form to the ritual's hand steps, for now or "until" anything: a regional
+        # form it names is a disabled one, or the enabled ones the runner (the merge) reaches
+        self.assertNotRegex(lead, r"\b(until|unless|trusted|for now|meanwhile)\b")
+        self.assertEqual(toggles(lead), [])
+        for m in re.finditer(r"regional forms?\b", lead):
+            self.assertRegex(lead[:m.start()], r"\b(disabled|enabled)\s+$", ("**The ritual**'s first line", lead))
 
     def test_the_required_message_is_english_on_four_forms(self):
         # only U.S's translation store holds the `base` entry of Jotform's required text
@@ -370,12 +462,36 @@ class ContactIdsRunbook(unittest.TestCase):
         self.assertIn("REQUIRED roster '<club>' (q…: No)", rollback)
         self.assertIn("restore_conditions.py", rollback)
         self.assertLess(rollback.index("`False`"), rollback.index("restore_conditions.py"))   # the second path
-        # the runner runs main's constants: merged only once every form is rolled back
-        self.assertIn("Once every form is rolled back, merge the constants-off commit to `main`, and only then "
-                      "set `AUTO_SYNC_APPLY=1`", rollback)
-        self.assertIn("Never merge a constants-off commit while any form is still rolled out", rollback)
-        skill = " ".join(read(os.path.join(REPO, ".claude", "skills", "live-systems", "SKILL.md")).split())
-        self.assertIn("merge the constants-off commit only once every form is rolled back", skill)
+        # since 2026-10-14 (ticket #31) the merge is the rollback: the runner runs main's constants and
+        # rolls every enabled regional form back on its next run; the old model (roll every form back
+        # by hand with the runner paused, merge last, then switch it on) is gone
+        for old in ("Once every form is rolled back, merge the constants-off commit",
+                    "Never merge a constants-off commit while any form is still rolled out",
+                    "once every form is rolled back", "per form, the runner paused"):
+            self.assertNotIn(old, rollback)
+        # …in other words too ("merge … after all forms are rolled back by hand")
+        self.assertEqual(merge_last(rollback), [])
+        self.assertTrue([s for s in merge_is_rollback(rollback) if "constants-off" in s],
+                        "the Rollback says merging the constants-off commit is the rollback")
+        for fragment in ("every enabled regional form", "next run",
+                         "next roster change",                 # a rule-order-only difference waits for it
+                         "from `main`"):                       # at once: a hand apply from main, no stop
+            self.assertIn(fragment, rollback)
+        self.assertIn("the template and a disabled form", rollback.lower())   # by hand
+        # one form alone: main disagrees, so the runner rolls it forward unless the emergency switch
+        # stops it, and the switch goes back to 1 once main and the forms agree
+        self.assertRegex(rollback, r"\broll\w*( \w+)? forward\b")
+        self.assertIn("emergency", rollback.lower())
+        self.assertIn("AUTO_SYNC_APPLY=0", rollback)
+        self.assertRegex(rollback[rollback.index("AUTO_SYNC_APPLY=0"):], r"AUTO_SYNC_APPLY=1|back to `1`")
+        # the live-systems skill quotes the same model
+        part = md_part(LIVE_SYSTEMS, "## Rollback beyond the table")
+        self.assertNotIn("only once every form is rolled back", flat(part))
+        self.assertEqual(merge_last(part), [])
+        q18 = [flat(b) for b in ("\n" + part).split("\n- ")[1:] if "CONTACT_IDS_FIRST" in b]
+        self.assertEqual(len(q18), 1, "the skill's question-18 rollback bullet")
+        self.assertTrue([s for s in merge_is_rollback(q18[0]) if "constants-off" in s], q18[0])
+        self.assertIn("next run", q18[0])
 
 
 class NamesAndModulesRunbook(unittest.TestCase):
@@ -672,6 +788,290 @@ class RunnerRunbook(unittest.TestCase):
             self.assertLess(headings.index(title), headings.index(self.DECISION), (title, "is amended from below"))
             dated = [b for b in self.bullets(doc, title) if b.startswith(("2026-10-14", "**2026-10-14"))]
             self.assertTrue(any(self.DECISION_TITLE in b for b in dated), (title, dated))
+
+
+class RolloutProcedures(unittest.TestCase):
+    """A form change the sync generates is rolled out by its merge: the runner applies it to every
+    enabled regional form on its next run (docs/DECISIONS.md, 2026-10-14). So no rollout step in a
+    live doc (docs/RUNBOOK.md, .claude/skills/*/SKILL.md, docs/templates/plan.md) toggles
+    `AUTO_SYNC_APPLY`, which stays the emergency off switch, normally `1` (ticket #31; Ryan,
+    2026-10-14: rollbacks and incidents may still set it to `0`, rollouts never touch it). "Add a
+    type" applies the template from the ticket branch before the land and leaves the enabled
+    regional forms to the runner; a rollback that still stops the runner calls the switch the
+    emergency stop and switches it back; /land-checks and the plan template say the land is the
+    rollout. The historical plans and the as-run summaries are not live procedure (the classes
+    above pin them as run)."""
+
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    LAND_CHECKS = os.path.join(REPO, ".claude", "skills", "land-checks", "SKILL.md")
+    PLAN_TEMPLATE = os.path.join(REPO, "docs", "templates", "plan.md")
+    TEMPLATE_FORM = "262352490535154"
+    # the RUNBOOK sections whose rollbacks the ticket rewrites
+    ROLLBACKS = ["One club per submission (the club guard)", "The names list sent to Salesforce",
+                 "The names dictionary and the module values", "Special events"]
+    # …of which these still stop the runner with the switch: the club guard (its steps 1 and 6 are
+    # kept) and question 18's one form alone (main disagrees with it, so the runner rolls it forward)
+    STOPPING = ROLLBACKS[:2]
+    OFF = "AUTO_SYNC_APPLY=0"
+    ON_RX = re.compile(r"AUTO_SYNC_APPLY=1|back\s+to\s+`1`|then\s+`1`")
+    PAUSED_RX = PAUSED_RX
+    # what a stop that is no rollout step says
+    STOP_RX = re.compile(r"emergency|rollback|\bstop(s|ping)? the (automation|runner)\b", re.I)
+    MERGE_LAST = ("once every form is rolled back", "while any form is still rolled out")
+    REGIONS = ("Africa", "Asia", "Latin America")
+    # a hand rollout of the enabled regional forms instead of (or ahead of) the runner
+    NOT_THE_RUNNER_RX = re.compile(r"\b(do not|don't|no need to|without|rather than|instead of)\b[^.;]{0,20}"
+                                   r"\b(wait|rely|the runner)|\bdo not rely\b|\binstead of the runner\b", re.I)
+
+    def section(self, title):
+        doc = read(self.RUNBOOK)
+        self.assertTrue(f"\n## {title}\n" in doc, f"docs/RUNBOOK.md: keep the heading `## {title}` word for word")
+        return doc.split(f"\n## {title}\n", 1)[1].split("\n## ", 1)[0]
+
+    @staticmethod
+    def units(text):
+        """A doc's paragraphs, each flattened; a header bullet (`- **Apply:** …`) and a table row each
+        a unit of its own. A numbered list stays one paragraph."""
+        out = []
+        for p in re.split(r"\n[ \t]*\n", text):
+            out += [flat(u) for u in re.split(r"\n(?=- \*\*|\|)", p) if u.strip()]
+        return out
+
+    def rollback(self, title):
+        """The section's text from its `**Rollback**` paragraph (not the `- **Rollback:**` header line)
+        to its end: what comes before is the rollout, kept as run."""
+        section = self.section(title)
+        self.assertIn("**Rollback**", section, title)
+        return section.split("**Rollback**", 1)[1]
+
+    def add_a_type(self):
+        events = self.section("Special events")
+        for label in ("**Add a type**", "**Retire a type**"):
+            self.assertIn(label, events)
+        return events.split("**Add a type**", 1)[1].split("**Retire a type**", 1)[0]
+
+    def retire_a_type(self):
+        events = self.section("Special events")
+        for label in ("**Retire a type**", "**Browser checks**"):
+            self.assertIn(label, events)
+        return events.split("**Retire a type**", 1)[1].split("**Browser checks**", 1)[0]
+
+    @staticmethod
+    def hand_clauses(text):
+        """The clauses of `text` that apply something by hand, other than the template, a disabled form
+        or a builder edit (tooling never deletes an option)."""
+        return [c for c in re.split(r"[.;]\s", flat(text))
+                if re.search(r"\bby hand\b", c, re.I) and not re.search(r"template|disabled|builder", c, re.I)]
+
+    @staticmethod
+    def live_docs():
+        return ([os.path.join(REPO, "docs", "RUNBOOK.md"), os.path.join(REPO, "docs", "templates", "plan.md")]
+                + sorted(glob.glob(os.path.join(REPO, ".claude", "skills", "*", "SKILL.md"))))
+
+    def test_no_rollout_step_toggles_the_runner(self):
+        targets = {
+            'RUNBOOK "Special events" **Add a type**': self.add_a_type(),
+            'RUNBOOK "Special events" **Retire a type**': self.retire_a_type(),
+            "live-systems **The ritual**": md_part(LIVE_SYSTEMS, "## The ritual"),
+            "/land-checks": read(self.LAND_CHECKS),
+            "docs/templates/plan.md Rollout": md_part(self.PLAN_TEMPLATE, "## Rollout"),
+        }
+        for name, text in targets.items():
+            self.assertGreater(len(flat(text)), 40, name)          # found, not an empty part
+        toggling = {name: found for name, text in targets.items() for found in [toggles(text)] if found}
+        self.assertEqual(toggling, {}, "these rollout procedures still set AUTO_SYNC_APPLY or hold the runner: the "
+                                       "merge is the rollout")
+        # every RUNBOOK rollout paragraph (`**Rollout**`, `- **Rollout:**`, a `### Rollout` part) too
+        doc = read(self.RUNBOOK)
+        rollouts = [u for u in self.units(doc) if re.match(r"(- )?\*\*Rollout\b|#+ Rollout\b", u)]
+        rollouts += [flat(p) for p in re.findall(r"\n### Rollout[^\n]*\n(.*?)(?=\n#{1,3} |\Z)", doc, re.S)]
+        self.assertTrue(rollouts)
+        self.assertEqual([u[:100] for u in rollouts if toggles(u)], [])
+        # and every AUTO_SYNC_APPLY=0 left in a live doc is a rollback's or an incident's stop
+        for path in self.live_docs():
+            for u in self.units(read(path)):
+                if self.OFF in u:
+                    self.assertRegex(u, self.STOP_RX, (os.path.relpath(path, REPO), "sets AUTO_SYNC_APPLY=0 outside a "
+                                                       "rollback or emergency stop", u[:160]))
+
+    def test_add_a_type_applies_the_template_before_the_land_and_lets_the_runner_do_the_rest(self):
+        text = flat(self.add_a_type())
+        self.assertNotIn("AUTO_SYNC_APPLY", text)
+        self.assertEqual(toggles(text), [])
+        self.assertIsNone(self.PAUSED_RX.search(text))           # the runner is never held for it
+        # in this order: the template by hand from the ticket branch, the land, the runner on the
+        # enabled regional forms, the disabled form by hand
+        steps = [("the template's backup", re.escape(f"backup_forms.py --form {self.TEMPLATE_FORM}")),
+                 ("its dry run", r"dry run"),
+                 ("its --apply", re.escape("--apply")),
+                 ("form_status --rendered", re.escape("form_status.py --rendered")),
+                 ("CLEAN", r"CLEAN"),
+                 ("the browser checks", r"browser checks"),
+                 ("the land", re.escape("/harness:land")),
+                 ("the runner's next run", r"runner's next run|\brunner\b[^.]*?\bnext run\b"),
+                 ("the disabled form's --apply --disabled-ok", re.escape("--apply --disabled-ok"))]
+        at, pos = {}, 0
+        for name, rx in steps:
+            m = re.compile(rx).search(text, pos)
+            self.assertTrue(m, f"\"Add a type\": no {name} after {text[max(0, pos - 60):pos]!r}")
+            at[name], pos = m.start(), m.end()
+        land = at["the land"]
+        self.assertIn("Ryan's go", text[:land])                  # the template's apply is on his go
+        self.assertIn("ticket", text[:land])                     # from the ticket branch / worktree
+        # after the land: the runner, on every enabled regional form, read back per region
+        after = text[land:]
+        for fragment in ("enabled regional form", "roster change", "SyncLog", "applied", "form_status", "CLEAN"):
+            self.assertIn(fragment, after)
+        # no regional form is applied by hand after the land: the only --apply there is the disabled form's
+        self.assertEqual(re.findall(r"--apply(?! --disabled-ok)", after), [])
+        # …nor by any other name: no region named, no hand step but the disabled form's (or the
+        # template's), and nothing that skips or overtakes the runner
+        self.assertEqual([r for r in self.REGIONS if r in after], [])
+        self.assertEqual(self.hand_clauses(after), [])
+        self.assertIsNone(self.NOT_THE_RUNNER_RX.search(after))
+        disabled = [s for s in re.split(r"\n\s*\d+\. ", "\n" + self.add_a_type()) if "--disabled-ok" in s]
+        self.assertEqual(len(disabled), 1)
+        self.assertIn("disabled form", flat(disabled[0]))
+        self.assertIn("by hand", flat(disabled[0]))
+        # Retire a type (Outline 2): the type out of SPECIAL_EVENTS and merged before the builder
+        # deletes the option; the runner applies the realigned calcValues on its next run; the
+        # template and a disabled form by hand; no toggle, no hold, no regional form by hand
+        retire = flat(self.retire_a_type())
+        self.assertNotIn("AUTO_SYNC_APPLY", retire)
+        self.assertEqual(toggles(retire), [])
+        self.assertIsNone(self.PAUSED_RX.search(retire))
+        for fragment in ("SPECIAL_EVENTS", "merge", "builder", "calcValues", "runner", "next run", "template",
+                         "disabled form", "by hand"):
+            self.assertIn(fragment, retire)
+        self.assertLess(retire.index("merge"), retire.index("builder"))
+        self.assertRegex(retire, r"\brunner\b[^.]*\bnext run\b")
+        self.assertEqual(self.hand_clauses(retire), [])
+        self.assertEqual([r for r in self.REGIONS if r in retire], [])
+        self.assertIsNone(self.NOT_THE_RUNNER_RX.search(retire))
+
+    def test_the_switch_is_the_emergency_stop(self):
+        runner = self.section("Automatic sync")
+        self.assertIn("**Switches:**", runner)
+        block = runner.split("**Switches:**", 1)[1].split("\n\n**", 1)[0]
+        bullets = [flat(b) for b in ("\n" + block.strip()).split("\n- ")[1:]]
+        switch = [b for b in bullets if "AUTO_SYNC_APPLY" in b and not b.startswith("Manual runs")]
+        self.assertEqual(len(switch), 1, bullets)
+        switch = switch[0]
+        self.assertRegex(switch, r"normally `?(AUTO_SYNC_APPLY=)?1`?")
+        self.assertRegex(switch, r"`(AUTO_SYNC_APPLY=)?0`[^.;]{0,60}emergency off[- ]switch|"
+                                 r"emergency off[- ]switch[^.;]{0,60}`(AUTO_SYNC_APPLY=)?0`")
+        self.assertNotIn("start here", switch)
+        self.assertNotIn("read a day of SyncLog rows", switch)
+        # a rollout never sets it
+        self.assertTrue([s for s in re.split(r"(?<=[.;])\s", switch)
+                         if re.search(r"\brollouts?\b", s, re.I) and re.search(r"\b(never|no)\b", s, re.I)], switch)
+        # …and gives no second use of 0 (a quiet day, a held rollout): outside the emergency clause, nothing
+        # turns it off or holds the runner
+        for clause in re.split(r"[.;:()]\s*|,\s+(?=(?:and|but|or|so|unless|except)\b)", switch):
+            if clause and "emergency" not in clause.lower():
+                self.assertNotRegex(clause, r"(?i)\b(flip\w*|hold\w*|held|paus\w*|zero|quiet|off|unless|except)\b|"
+                                            r"to `?0`?", ("the Switches bullet sets it for something else", switch))
+                self.assertEqual(toggles(clause), [], switch)
+        # the manual-run bullet stays
+        self.assertTrue([b for b in bullets if b.startswith("Manual runs from the Actions tab apply only when both")])
+
+    def test_a_rollback_that_stops_the_runner_says_emergency_and_switches_it_back(self):
+        stops = {}
+        for title in self.ROLLBACKS:
+            section = self.section(title)
+            for u in self.units(section):
+                if self.OFF in u:
+                    self.assertTrue("emergency" in u.lower(), (title, "a stop of the runner that is no emergency", u[:160]))
+            for m in re.finditer(re.escape(self.OFF), section):
+                self.assertTrue(self.ON_RX.search(section, m.end()), (title, "switch it back to 1 after", section[m.start():m.start() + 120]))
+            stops[title] = section.count(self.OFF)
+            # the merge-last model is gone, in its words or others: the merge (or the revert) is the rollback
+            rollback = flat(self.rollback(title)) if title != self.ROLLBACKS[0] else flat(section)
+            self.assertEqual([p for p in self.MERGE_LAST if p in rollback], [], title)
+            self.assertEqual(merge_last(rollback), [], title)
+        # the names dictionary's Modules bullet: merging the constants-off commit is that rollback
+        modules = [flat(b) for b in ("\n" + self.rollback("The names dictionary and the module values")).split("\n- ")[1:]
+                   if b.startswith("Modules")]
+        self.assertEqual(len(modules), 1, "the names dictionary's Rollback keeps its `- Modules` bullet")
+        self.assertTrue([s for s in merge_is_rollback(modules[0]) if "constants-off" in s], modules[0])
+        for title in self.STOPPING:
+            self.assertGreater(stops[title], 0, f"\"{title}\": its rollback still stops the runner with {self.OFF}")
+        # where the merge is the rollback, a paused runner is an emergency, said so
+        for title in self.ROLLBACKS[1:]:
+            for u in self.units(self.rollback(title)):
+                if self.PAUSED_RX.search(u):
+                    self.assertTrue("emergency" in u.lower(), (title, "a stop of the runner that is no emergency", u[:160]))
+        # a special-event type: revert its merge first, then the builder, the runner realigns on its
+        # next run; the bridge rules off at once: the emergency switch, restore_conditions.py --from,
+        # the revert, then 1
+        events = flat(self.rollback("Special events"))
+        self.assertIn("revert", events)
+        self.assertIn("builder", events)
+        self.assertLess(events.index("revert"), events.index("builder"))
+        self.assertIn("next run", events)
+        pos = 0
+        for name, rx in (("the emergency switch", r"emergency"), ("restore_conditions.py --from", r"restore_conditions\.py[^.;]*--from"),
+                         ("the revert", r"revert"), ("the switch back to 1", self.ON_RX.pattern)):
+            m = re.compile(rx).search(events, pos)
+            self.assertTrue(m, f"\"Special events\" Rollback: no {name} after {events[max(0, pos - 60):pos]!r}")
+            pos = m.end()
+        # the live-systems skill: its writer rows and its Rollback beyond the table say so too
+        rows = [u for u in self.units(md_part(LIVE_SYSTEMS, "## Writers")) if u.startswith("|") and self.OFF in u]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertTrue("emergency" in row.lower(), ("live-systems writer row", row[:160]))
+        beyond = md_part(LIVE_SYSTEMS, "## Rollback beyond the table")
+        for b in ("\n" + beyond).split("\n- ")[1:]:
+            b = flat(b)
+            if self.OFF in b or self.PAUSED_RX.search(b):
+                self.assertTrue("emergency" in b.lower(), ("live-systems Rollback beyond the table", b[:160]))
+            self.assertEqual([p for p in self.MERGE_LAST if p in b], [], b[:160])
+            self.assertEqual(merge_last(b), [], b[:160])
+
+    def test_land_checks_and_the_plan_template_say_the_merge_is_the_rollout(self):
+        step3 = flat(md_part(self.LAND_CHECKS, "## 3."))
+        self.assertIn("next run", step3)
+        self.assertNotIn(self.OFF, step3)
+        self.assertIn("plain words", step3)                      # Ryan is told what the next run applies
+        self.assertRegex(step3, r"(?i)\bis the rollout\b")       # the land is the rollout
+        self.assertIn("every enabled regional form", step3)
+        self.assertRegex(step3, r"(\bnot|n't)( yet)? land(ed|s)?\b")   # a change not ready for them does not land yet
+        report = flat(md_part(self.LAND_CHECKS, "## Report"))
+        self.assertNotIn("AUTO_SYNC_APPLY", report)
+        self.assertNotIn("must be `0`", report)
+        self.assertIn("/harness:land", report)
+        # no way round it in either: no switch, no held runner, no "unless", no hand rollout instead
+        for name, text in (("/land-checks step 3", step3), ("/land-checks Report", report)):
+            self.assertNotIn("AUTO_SYNC_APPLY", text, name)
+            self.assertEqual(toggles(text), [], name)
+            self.assertIsNone(self.PAUSED_RX.search(text), name)
+            self.assertNotRegex(text, r"(?i)\b(unless|except|anyway|held|hold\w*|paus\w*)\b", name)
+            self.assertIsNone(self.NOT_THE_RUNNER_RX.search(text), name)
+            self.assertEqual(self.hand_clauses(text), [], name)
+        # the plan template's Rollout guidance: the merge rolls a generated change out on the runner's
+        # next run; the Rollout lists the hand steps only
+        rollout = flat(md_part(self.PLAN_TEMPLATE, "## Rollout"))
+        self.assertRegex(rollout, r"(?i)\bmerg")
+        for fragment in ("enabled regional form", "next run", "template", "disabled form"):
+            self.assertIn(fragment, rollout)
+        # said as a fact: the merge is the rollout, or the merge's change is applied to (rolls out to)
+        # every enabled regional form - not a merge to distrust and follow by hand
+        self.assertTrue([s for s in sentences(rollout, ".") if re.search(r"(?i)merg", s) and re.search(
+            r"(?i)\bis the rollout\b|\b(applies|apply|applied|rolls|rolled)\b[^.]*\bevery enabled regional form\b", s)],
+            rollout)
+        self.assertIsNone(self.NOT_THE_RUNNER_RX.search(rollout))
+        self.assertEqual(self.hand_clauses(rollout), [], "a hand step on a regional form in the template's Rollout")
+        self.assertIsNone(re.search(r"(?i)\bafter the land\b[^.;]*\bby hand\b|\bby hand\b[^.;]*\bafter the land\b",
+                                    rollout))
+        self.assertEqual([r for r in self.REGIONS if r in rollout], [])
+        self.assertIsNone(self.PAUSED_RX.search(rollout))
+        self.assertRegex(rollout, r"before (the land|`?/harness:land`?)")      # the template's hand step
+        self.assertRegex(rollout, r"(?i)translation|builder")                # writers other than the sync
+        self.assertRegex(rollout, r"(?i)read[- ]?back")
+        # the template keeps its parts
+        template = read(self.PLAN_TEMPLATE)
+        for heading in ("\n## Rollback\n", "\n## Risks\n", "\n## Proof\n", "\n## Result\n"):
+            self.assertIn(heading, template)
 
 
 class WorkLogRunbook(unittest.TestCase):

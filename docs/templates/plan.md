@@ -15,11 +15,21 @@ intent: <Ryan's ask in his words, with its date> | docs/intent/YYYY-MM-DD-<slug>
      status and `done:`, then `make docs-index`. -->
 
 ## Rollout (live; each step on Ryan's go)
+<!-- The merge is the rollout for a form change the sync generates: once it lands, the runner
+     applies it to every enabled regional form on its next run (DECISIONS 2026-10-14). List the
+     hand steps only: the template, from the ticket branch before the land, when the change needs
+     browser checks (the runner never syncs it); a disabled form (`--disabled-ok`); writers other
+     than the sync (translations, builder edits); and the read-back after the runner's run (each
+     region's SyncLog row `applied`, `form_status.py` CLEAN per form). No step sets
+     `AUTO_SYNC_APPLY`. -->
 1. <live step: the backup first, the command, and the read-back that proves it>
 2. …
 
 ## Rollback
-<how each live step is undone, with the backup or command it uses>
+<how each live step is undone, with the backup or command it uses; for a generated form change,
+the revert or constants-off commit, merged: the runner rolls every enabled regional form back on
+its next run. `AUTO_SYNC_APPLY=0` only as the emergency switch, set back to `1` before the
+rollback ends>
 
 ## Risks
 <what could break, and the mitigation for each; live-system steps named explicitly>
