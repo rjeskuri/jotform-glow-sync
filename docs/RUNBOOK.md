@@ -248,25 +248,36 @@ not count as a change and never applies on its own: run the dry run and
 `--apply` by hand. When the same region also has a roster change, the
 runner's ordinary apply rewrites the rules and nothing more is needed.
 
-Four things **stop a region** even when a roster change is planned
-(`attention`, nothing applied). First, the sync's warning that **question 18
-is calculated the old way** (`question 18 (Contact_IDs) is not recalculated
-after the rosters change`). Second, a **`REQUIRED roster` line**: the required
-flag written on a roster that has no other change. Both are rolled out by
-hand, one form at a time ("The names list sent to Salesforce"). Once a form
-is rolled out, the runner creates rosters required and applies an options
-update that also sets the flag (`UPDATE roster … ; required: Yes`). Third, an
-**`UPDATE module dropdown` line**: a module dropdown's `calcValues` or the
-special-event options appended with them, rolled out by hand, template first,
-and afterwards only a builder edit brings it back ("The names dictionary and
-the module values", "Special events"). Fourth, the sync's warning that **the
-form's rules let a special event show or send a session** (the option on the
-form, the rules from before it: an apply that stopped after the module
-writes, or the option added in the builder); its dry run plans only `REPLACE
-conditions`, which is never `in-sync` here, and the rewrite is applied by hand
-("Special events"). After every apply the
-verify step also audits the form's names dictionary; a store it could not
-read is a note in the log, not `applied-unverified`.
+Four generated **rollout lines** are applied like a roster change, within the
+bands (DECISIONS 2026-10-14: the merge is the rollout; review and the tests
+are the gate). First, the sync's warning that **question 18 is calculated the
+old way** (`question 18 (Contact_IDs) is not recalculated after the rosters
+change`): its rules-only `REPLACE conditions` is never `in-sync`; the runner
+applies it to every enabled regional form on its next run, and the SyncLog
+`detail` says `question 18 rules rewritten`. Second, a **`REQUIRED roster`
+line**: the required flag written on a roster that has no other change; the
+runner applies it on its next run, and such lines never count against
+`--max-updates` (they come from a constant, not the export, so flipping
+`ROSTERS_REQUIRED` is one rollout for every roster). It also creates rosters
+required and applies an options update that sets the flag (`UPDATE roster … ;
+required: Yes`). Third, an **`UPDATE module dropdown` line**: a module
+dropdown's `calcValues` or the special-event options appended with them, not
+counted against `--max-updates` either; the runner applies it on its next run,
+so a new type in `SPECIAL_EVENTS`, a constant flipped, or a dropdown edited in
+the builder reaches every enabled regional form that way ("The names
+dictionary and the module values", "Special events"). Fourth, the sync's
+warning that **the form's rules let a special event show or send a session**
+(the option on the form, the rules from before it: an apply that stopped after
+the module writes, or the option added in the builder); its rules-only
+`REPLACE conditions` is never `in-sync` either, the runner applies it on its
+next run, and `detail` says `special-event rules rewritten`. The bad-data bands
+above still hold a region that carries one of these lines, and its ATTENTION
+lists them under `Planned:`. The runner syncs the regional forms only: the
+template and a disabled form are applied by hand (the sync's dry run and
+`--apply`, Ryan's go). The next run is the next roster change, at the latest
+the morning backstop, or one started from the Actions tab on Ryan's go. After
+every apply the verify step also audits the form's names dictionary; a store
+it could not read is a note in the log, not `applied-unverified`.
 
 Once per run, after the regions, the runner also reads **Jotform's storage**
 against the account's plan and logs the same `storage:` line `form_status.py`
@@ -294,7 +305,9 @@ against it, and the exit code is unaffected — "Disabling a regional form").
 creates, updates, deletes and warnings, then the rosters retired and restored
 (`…, 38 retired`), then names a Club-picker or
 club-guard write when there is one (`…, update club picker`): such a
-write is applied like a roster change. The Partner-box hide (`HIDE partner
+write is applied like a roster change. A rules rewrite the apply carries is
+named last (`…, question 18 rules rewritten`, `…, special-event rules
+rewritten`). The Partner-box hide (`HIDE partner
 textbox`, "Club names two partners share") is neither counted nor named in
 `detail`: it only ever rides along with a counted change, and the run's log
 (the row's `run_url`, or `data/auto_sync/<stamp>.log`) shows the line. The Audit tab additionally gets
@@ -513,7 +526,7 @@ stale `calcValues` and send the neighbouring club's name to question 5.
 - **When:** the sync warns that question 18 is calculated the old way, or plans `REQUIRED roster` lines; `form_status` reports the rule order, the operand or a roster not required.
 - **Status:** live on all five forms since 2026-10-02 02:04 UTC, the template since 2026-10-01 16:37 UTC ([Result](plans/2026-09-30-contact-ids.md#result-2026-10-0102-with-ryans-go-you-have-my-go-push-things)).
 - **Dry run:** the sync's dry run (the manual loop).
-- **Apply:** its `--apply` by hand: the runner never applies these lines.
+- **Apply:** the merge: the runner applies it to every enabled regional form on its next run; the template and a disabled form are applied by hand (the sync's `--apply`, Ryan's go).
 - **Verify:** `form_status.py --rendered`: `question 18: rule 1 of N, … operand: yes`, every roster required.
 - **Rollback:** the constants, below.
 
@@ -564,19 +577,23 @@ What the tools say:
   its `JotForm.setCalculations` entry lists the picker, and that every roster's
   boxes carry `validate[required]`. It also prints the runtime build, all as
   counts.
-- The runner (`tools/auto_sync.py`) **never applies** a region whose sync warns
-  as above, nor one that would write `REQUIRED roster` lines. The region is
-  `attention`, roster changes included, so a forgotten `AUTO_SYNC_APPLY=1`
-  cannot roll this out. It does apply an `UPDATE roster … ; required: Yes` and
-  creates rosters with the flag.
+- The runner (`tools/auto_sync.py`) applies both like a roster change, within
+  the bands (DECISIONS 2026-10-14): a region whose sync warns as above is never
+  `in-sync`; its rules-only `REPLACE conditions` is applied on the next run and
+  the SyncLog `detail` says `question 18 rules rewritten`. `REQUIRED roster`
+  lines are applied the same way and never count against `--max-updates` (they
+  come from the constant, not the export). It also applies an `UPDATE roster …
+  ; required: Yes` and creates rosters with the flag.
 
 **Rollout** (once per form; done on all five forms 2026-10-01/02): the template first, the
 merge, then U.S, Latin America, Asia and Africa, each with a backup, the dry run, `--apply`,
 a second dry run, `form_status.py --rendered` (a hard stop) and the browser checks (a
 console line that prints counts only), the runner paused throughout - as run, with each
-form's dry run, in the [plan](plans/2026-09-30-contact-ids.md#from-the-runbook-moved-2026-10-09). A region the runner holds
-for the old rule order (an old snapshot restored, a constant turned off) is applied by
-hand: its sync's dry run, `--apply`, then `form_status.py --rendered`.
+form's dry run, in the [plan](plans/2026-09-30-contact-ids.md#from-the-runbook-moved-2026-10-09). A regional form back on
+the old rule order (an old snapshot restored, a constant turned off and on again) is rewritten
+by the runner on its next run, the SyncLog row `applied` with `question 18 rules rewritten`;
+the template and a disabled form are applied by hand: the sync's dry run, `--apply`, then
+`form_status.py --rendered`.
 
 **Rollback** (generated, per form, the runner paused): set
 `CONTACT_IDS_FIRST`, `CONTACT_IDS_PICKER_OPERAND` and `ROSTERS_REQUIRED` in
@@ -587,22 +604,22 @@ the old shape. One constant alone works the same way, for example the
 required flag alone if a mentor cannot submit. The second path is
 `restore_conditions.py --form <id> --from properties-<stamp>.json` from the
 backup. It brings the old rules back and says so ("the snapshot calculates
-question 18 … the old way"). The form then reads NOT CLEAN, and the runner
-refuses its region until the sync is applied or the constants are off. It
-does not touch the required flags. Neither path touches the picker, the
-guard, question 5 or the integration.
+question 18 … the old way"). The form then reads NOT CLEAN, and while the
+runner applies with the constants on `main`, a rolled-back region is rolled
+forward again on its next run (the sync warns as above and the runner applies
+the rewrite). It does not touch the required flags. Neither path touches the
+picker, the guard, question 5 or the integration.
 
 The runner runs `main`'s constants. Once every form is rolled back, merge the
 constants-off commit to `main`, and only then set `AUTO_SYNC_APPLY=1`. Until
-then `main`'s runner refuses every rolled-back region, and its ATTENTION
-points to the rollout: do not follow that pointer. If only some forms are
-rolled back, leave `main`'s constants as they are (they apply to every form):
-those regions stay `attention`, and their roster changes are applied by hand
-from the constants-off branch until the forms are rolled forward. Never merge
-a constants-off commit while any form is still rolled out: with the order
-constants off the runner puts the old rule order back on those forms with
-their next roster change, unattended (a difference in the rules alone is not
-a change to it).
+then a rolled-back region is rolled forward again while the runner applies: a
+form rolled back by hand stays rolled back only while the runner is paused or
+`main` agrees with it. Never merge a constants-off commit while any form is
+still rolled out: with the constants off the runner puts the old shape back on
+every enabled regional form on its next run (the `REQUIRED roster … No` lines
+are a change to it, and the rules rewrite rides along in the same apply); the
+order constants off alone give a rules-only plan, which it applies with the
+next roster change (a difference in the rules alone is not a change to it).
 
 Left open: Jotform never recalculates at submit. The order is Jotform's
 internal behaviour, not a contract (`--rendered` prints the build). Back-button
@@ -623,7 +640,7 @@ ticks a girl of a club she does not hold.
 - **When:** `form_status` reports a names dictionary that alters a roster option, or module values out of line; a module added or reordered in the builder.
 - **Status:** fixes 1 and 4 of the plan, live on all five forms since 2026-10-06 11:22 UTC ([Result](plans/2026-10-02-names-and-modules.md#result-2026-10-06-with-ryans-go)).
 - **Dry run:** `tools/fix_name_translations.py --form <id>`; the sync's dry run for the module lines.
-- **Apply:** the same with `--apply`, one form per run, Ryan's go; the runner never applies a module line.
+- **Apply:** names: the tool with `--apply`, one form per run, Ryan's go. Modules: generated, so the merge is the apply: the runner applies it to every enabled regional form on its next run; the template and a disabled form are applied by hand.
 - **Verify:** `form_status.py --rendered`: names 0 altered, module values aligned.
 - **Rollback:** names `--restore`, modules `MODULE_CALC_VALUES = False` (below).
 
@@ -703,7 +720,8 @@ dry run on a fixed form says `nothing to remove`.
 `UPDATE module dropdown (q14, year 1: calcValues = its 5 options)` (q92: 7,
 q93: 8; the same on all five forms, read 2026-10-02). After the apply the next
 dry run has nothing to say about them. A module added or reordered in the
-builder later makes the line come back: the realignment is one more hand apply.
+builder later makes the line come back: the runner realigns a regional form on
+its next run; the template and a disabled form are realigned by hand.
 
 **`tools/form_status.py`** reports a form NOT CLEAN when a module dropdown's
 `calcValues` are missing or out of line with its options (`module values: q14
@@ -736,12 +754,14 @@ own settings, or the form's setting that clears hidden field values), then
 re-run the report - never a sync apply: the sync writes none of it (its one
 properties write carries `conditions` alone).
 
-**The runner never applies a module line unattended** (`check_bands`: "would
-write the calcValues of 3 module dropdown(s) (q14, q92, q93) - never
-unattended"): the region reads `attention`, its roster changes included,
-until the form is rolled out by hand. After the rollout a module line means a
-module dropdown was edited in the builder: apply that form by hand after
-reading its dry run. The names tool is never run by the runner.
+**The runner applies a module line like a roster change** (DECISIONS
+2026-10-14; the lines never count against `--max-updates`): the runner applies
+it to every enabled regional form on its next run; the template and a disabled
+form are applied by hand. Since the rollout a module line means a module
+dropdown was edited in the builder: the next run realigns the regional form
+(the SyncLog `detail` says `module values on N dropdown(s)`), and that form's
+dry run is worth reading for what the edit was. The names tool is never run by
+the runner.
 
 **Rollout** (once per form; done on all five forms 2026-10-06): the template first, the
 merge, then the regional forms smallest first - per form a backup, the names tool's dry
@@ -762,11 +782,13 @@ dictionary that alters a name again: the names tool on that form, dry run first.
 - Modules (generated): set `MODULE_CALC_VALUES = False` in `glow/sync.py` on
   a branch. The sync's dry run then plans `UPDATE module dropdown (q14, year 1:
   calcValues cleared)` for each dropdown that carries them; apply it by hand,
-  and `form_status` is CLEAN under the constant. The runner refuses those
-  lines as it refuses the others, so a constants-off commit on `main` rolls
-  nothing back unattended; as with question 18, merge it only once every form
-  is rolled back. The second path is the questions file `backup_forms.py`
-  wrote (`calcValues` was `""` on every module dropdown before the rollout).
+  and `form_status` is CLEAN under the constant. The runner applies those
+  lines as it applies the others, so a constants-off commit on `main` rolls
+  every enabled regional form back on the runner's next run, and a form rolled
+  back by hand while `main` disagrees is rolled forward; as with question 18,
+  merge it only once every form is rolled back. The second path is the questions
+  file `backup_forms.py` wrote (`calcValues` was `""` on every module dropdown
+  before the rollout).
 
 Neither touches the rosters, the rules, question 5 or the integration.
 
@@ -788,7 +810,7 @@ The procedure as run and what the dry run prints: [plan](plans/2026-10-06-module
 - **When:** staff add a type of ad-hoc session or retire one; `form_status` reports a special event missing, twice or misspelled, a session rule for one, or the session bridge missing or out of place.
 - **Status:** live on all five forms since 2026-10-13 ([plan and Result](plans/2026-10-13-special-events.md#result-2026-10-13-ryans-go-for-each-write)); the first type is "Welcome Session".
 - **Dry run:** the sync's dry run, per form: one module line per dropdown and one `REPLACE conditions`.
-- **Apply:** its `--apply` by hand, one form per run, template first, Ryan's go; the runner never applies an event line.
+- **Apply:** the template first, by hand from the branch (its `--apply`, Ryan's go, then the browser checks); then the merge: the runner applies it to every enabled regional form on its next run; the template and a disabled form are applied by hand.
 - **Verify:** `form_status.py --rendered` CLEAN; on the template also the browser checks below.
 - **Rollback:** `restore_conditions.py --from` the snapshot for the rules; the options removed in the builder (below).
 
@@ -820,23 +842,27 @@ shown or hidden: a mentor who picked a session and then switched to the event le
 template the first apply plans `conditions: 394 kept, 6 new, 1 dropped` (the bridge, five year-1
 rules; the year-1 rule on the year alone goes).
 
-**The runner never applies an event line** (`check_bands`: "would add special-event option(s)
-to 3 module dropdown(s) (q14, q92, q93), with their calcValues - never unattended"): the region
-reads `attention`, its roster changes included, until its form carries the options. Nor does it
-read a form as `in-sync` whose options are there but whose rules are not (an apply that stopped
-after the three module writes, or the option added in the builder): the sync warns `! the form's
-rules let a special event show or send a session: …` (a session rule on the year alone or for an
-event, the bridge missing, doubled, out of shape or out of place) and plans only `REPLACE
-conditions`; the runner raises ATTENTION and applies nothing there. Run that form's dry run and
-its `--apply` by hand. A line that writes the options alone says so: `calcValues unchanged)` (the
-values were already right) or `calcValues none)` (`MODULE_CALC_VALUES` off).
+**The runner applies an event line like a roster change** (DECISIONS 2026-10-14; the line never
+counts against `--max-updates`): once a type is merged, the runner applies it to every enabled
+regional form on its next run, the SyncLog `detail` naming it (`…, module values on 3
+dropdown(s), special-event options on 3 dropdown(s)`); the template and a disabled form are
+applied by hand. Nor does it read a form as `in-sync` whose options are there but whose rules
+are not (an apply that stopped after the three module writes, or the option added in the
+builder): the sync warns `! the form's rules let a special event show or send a session: …` (a
+session rule on the year alone or for an event, the bridge missing, doubled, out of shape or
+out of place) and plans only `REPLACE conditions`, which the runner applies on its next run
+(`detail`: `special-event rules rewritten`). A line that writes the options alone says so:
+`calcValues unchanged)` (the values were already right) or `calcValues none)`
+(`MODULE_CALC_VALUES` off).
 
 **`tools/form_status.py`** reports a form NOT CLEAN until it carries each type once per module
 dropdown in the exact spelling, no rule shows a session dropdown for an event or on the year
 alone, and the bridge is there once, in its shape, before every session rule and every copy
 into question 100. Before the apply each of these reads `awaiting a sync apply by hand, template
-first (RUNBOOK "Special events")`. The report line reads `special events: 1 type(s) on 3 of 3
-module dropdowns; session bridge rule N of M, S session rule(s), 0 on no curriculum module`.
+first (RUNBOOK "Special events")` (the hint's wording predates DECISIONS 2026-10-14: on a
+regional form the apply is the runner's next run). The report line reads `special events: 1
+type(s) on 3 of 3 module dropdowns; session bridge rule N of M, S session rule(s), 0 on no
+curriculum module`.
 `--rendered` also checks that each module select serves every event once with its
 `data-calcvalue`, and that the page's bridge comes before the session rules and keeps its
 operands in `JotForm.setCalculations`.
@@ -847,8 +873,9 @@ operands in `JotForm.setCalculations`.
    today. No form's store translates a module option (read 2026-10-13: only `base`/`en` hold
    them; Swahili one of 18), so an event option is English in every language as the modules are.
    If module options ever get translations, the event gets them too ("Translations").
-2. `AUTO_SYNC_APPLY=0` (Ryan's go), then land it (`/land-checks`, `/harness:land`): until a
-   region's form carries the new option, the runner holds it.
+2. `AUTO_SYNC_APPLY=0` (Ryan's go), then land it (`/land-checks`, `/harness:land`): paused, the
+   runner writes nothing; applying, it would add the option to every enabled regional form on
+   its next run.
 3. The template first: `backup_forms.py --form 262352490535154`, the sync's dry run (the three
    module lines and `REPLACE conditions`), Ryan's go, `--apply`, `form_status.py --rendered`
    CLEAN, then the browser checks below. Then Africa, Asia, Latin America and the U.S form
@@ -859,7 +886,8 @@ operands in `JotForm.setCalculations`.
 **Retire a type** (by hand): take it out of `SPECIAL_EVENTS` first and merge (else the next
 apply adds it back), then delete the option in the builder on each form's three module
 dropdowns. The next sync dry run plans one module line per dropdown (its `calcValues`
-realigned), applied by hand. Until the option is deleted, the sync warns and `form_status`
+realigned), which the runner applies to a regional form on its next run (the template and a
+disabled form by hand). Until the option is deleted, the sync warns and `form_status`
 reports it. Salesforce history stays: the batches keep their `Module__c`, and a report can still
 select events by `Module__c` starting with `Special Event - `.
 
@@ -882,7 +910,8 @@ working:
 snapshot of the apply puts the rules back. Delete the event option in the builder on the three
 module dropdowns (tooling never deletes a question or an option); the sync's next dry run then
 plans the realigned `calcValues`. Merge a revert of the branch only once every form is rolled
-back.
+back: while the type is still on `main` and the runner applies, its next run puts the option
+and the rules back on a regional form rolled back by hand (it is rolled forward).
 
 ## Translations
 
