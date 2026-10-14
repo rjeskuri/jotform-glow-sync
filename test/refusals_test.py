@@ -196,10 +196,45 @@ class MinActiveFloor(unittest.TestCase):
     DRY_RUN = ("Roster: 2 active clubs in Africa (3 girls); 3 clubs overall\n\nDRY RUN (use --apply to "
                "write):\n  - CREATE roster 'Gamma Club' (2 girls)\n")
 
-    def run_main(self, *extra, rows=None):
+    SF_ENV = {"SF_SYNC": "apply", "SF_CLIENT_ID": "demo-client-id", "SF_CLIENT_SECRET": "demo-secret"}
+
+    def run_main(self, *extra, rows=None, sf_env=None):
         """(exit code, stdout, syncs, client calls, files in --out): the sync children Run.sync
-        was asked to start as (region, apply), and everything the runner's Jotform client saw."""
+        was asked to start as (region, apply), and everything the runner's Jotform client saw.
+        Salesforce is always faked (never a real login); self.sf_calls lists what it was asked
+        to do, and sf_env (SF_ENV: dummy values) switches the step on in the environment."""
         syncs, client_calls = [], []
+        self.sf_calls = sf_calls = []
+
+        class Org:
+            def __init__(self, login=None, **kw):
+                sf_calls.append(("Org", login))
+
+        def client_credentials(cid, secret):
+            sf_calls.append(("client_credentials", cid, secret))
+            return "demo-login"
+
+        class Step:
+            def __init__(self, mode, org, roster_csv, **kw):
+                sf_calls.append(("Step", mode))
+                self.mode, self.created, self.attention = mode, [], []
+                self.broken, self.today = None, "2026-01-01"
+
+            def prepare(self):
+                sf_calls.append(("prepare",))
+
+            def create(self, region, plan):
+                sf_calls.append(("create", region))
+
+            def check(self, *a, **kw):
+                sf_calls.append(("check",))
+                return 0, 0
+
+            def warn(self, title, detail=""):
+                self.attention.append((title, detail))
+
+            def close(self):
+                sf_calls.append(("close",))
 
         def sync_(run, csv_path, region, form, apply, summary_path=None):
             syncs.append((region, apply))
@@ -229,8 +264,12 @@ class MinActiveFloor(unittest.TestCase):
             argv = ["auto_sync.py", "--roster", roster, "--partners", tab, "--out", work,
                     "--region", "Africa", *extra]
             with mock.patch.object(sys, "argv", argv), \
-                    mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}), \
+                    mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only", "SF_SYNC": "off",
+                                                 **(sf_env or {})}), \
                     mock.patch.object(auto_sync, "Client", Client), \
+                    mock.patch.object(auto_sync, "Org", Org), \
+                    mock.patch.object(auto_sync, "client_credentials", client_credentials), \
+                    mock.patch.object(auto_sync.sfn, "Step", Step), \
                     mock.patch.object(auto_sync.Run, "sync", sync_), \
                     mock.patch.object(auto_sync.Run, "read_status", lambda self, form: "ENABLED"), \
                     mock.patch.object(auto_sync.Run, "check_storage", lambda self, read: None), \
@@ -272,6 +311,37 @@ class MinActiveFloor(unittest.TestCase):
                     self.assertEqual((syncs, client_calls), ([], []))
                     self.assertIn(self.refusal(self.ACTIVE, floor), "\n".join(self.logs))   # the log file too
                     self.assertNotIn("ATTENTION.md", files)
+
+    def test_below_the_floor_the_salesforce_step_never_starts(self):
+        # the step is switched on (apply, secrets, --apply-salesforce) and would log in and read
+        # Salesforce; on a truncated export it must not even start
+        for floor in (self.ACTIVE + 1, 1000):
+            for extra in ((), ("--apply",)):
+                with self.subTest(floor=floor, extra=extra):
+                    code, out, syncs, _, _ = self.run_main(
+                        "--min-active", str(floor), "--apply-salesforce", *extra, sf_env=self.SF_ENV)
+                    self.assertEqual(code, 1)
+                    self.assertIn(self.refusal(self.ACTIVE, floor), out)
+                    self.assertEqual((syncs, self.sf_calls), ([], []))
+                    self.assertNotIn("SF:", out)
+
+    def test_control_past_the_floor_the_same_salesforce_setup_starts_the_step(self):
+        # the same environment on an export that meets the floor: the fake IS used, so the
+        # "never starts" test above cannot pass merely because Salesforce was off
+        code, out, syncs, _, _ = self.run_main("--min-active", str(self.ACTIVE), "--apply-salesforce",
+                                               sf_env=self.SF_ENV)
+        self.assertEqual(code, 0)
+        self.assertIn(("client_credentials", "demo-client-id", "demo-secret"), self.sf_calls)
+        self.assertIn(("Step", "apply"), self.sf_calls)
+        self.assertIn(("prepare",), self.sf_calls)
+        self.assertIn(("close",), self.sf_calls)
+        self.assertIn("SF: apply, as GLOW Sync", out)
+        # plan mode (no --apply-salesforce): the step still starts, as a plan
+        self.run_main("--min-active", str(self.ACTIVE), sf_env=self.SF_ENV)
+        self.assertIn(("Step", "plan"), self.sf_calls)
+        # and with SF_SYNC off (the default of run_main) nothing starts
+        self.run_main("--min-active", str(self.ACTIVE))
+        self.assertEqual(self.sf_calls, [])
 
     def test_the_default_floor_is_1000_active_rows(self):
         code, out, syncs, client_calls, _ = self.run_main("--apply")
