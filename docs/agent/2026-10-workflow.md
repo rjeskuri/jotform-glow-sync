@@ -40,7 +40,7 @@ subscription as Harness #50 designed (every dispatched session on 10-14 from 02:
 | 8 | The work skill assumes agents run in the background | harness plugin | M | med | 15 min | 69 async Agent calls on 10-14 vs 36 synchronous on 10-13; Harness #19 |
 | 9 | Guardrail tickets iterate on a draft copy of the hook; Ryan applies once | this repo | M | high | 15 min | a4973cb2: 7 `git apply` runs on #36; #36 needs-input 2026-10-14T03:20Z |
 | 10 | Ultrareview: connect the GitHub app once; the harness checks access up front | this repo (Ryan, once) + harness plugin | S | low | 10 min | #30 2026-10-14T03:50Z; skipped again on PR #41 |
-| 11 | The reviewer may run the verify and test commands | harness plugin | S | med | 10 min | ~20 `readonly_bash` refusals in 9cc90947, 1e3bf26b, 08393fd6, a4973cb2 |
+| 11 | The reviewer may run its narrower checks: other `make` targets, `git fetch`, scratch redirects | harness plugin | S | med | 10 min | ~20 `readonly_bash` refusals in 9cc90947, 1e3bf26b, 08393fd6, a4973cb2 |
 | 12 | A `/sf-metadata` skill and a script that writes the package under `data/` | this repo | M | low | 15 min | a4973cb2 07:14-07:15 |
 | 13 | `/land-checks` re-reads the open tickets a landing changes | this repo | S | low | 10 min | #37 outline vs #36's final design; #14's DoD changed in review |
 | 14 | `harness-red` accepts a pin ticket with a mutation proof | harness plugin | S | low | 5 min | eae5999c 02:23, 02:27 (#32); epic #5 "no tests-only tasks" |
@@ -187,13 +187,18 @@ itself is tested. Overlaps #46 (which carries PR #41's leftover gate gaps): deci
 private repository (not verified here whether it was done). Harness: draft H7 (check access at
 `/harness:work` start on a risk:high ticket; report a setup error with the fix, not needs-input).
 
-## 11. The reviewer may run the verify and test commands (harness plugin; S, med; est. 10 min/week)
+## 11. The reviewer may run its narrower checks (harness plugin; S, med; est. 10 min/week)
 
-**Problem.** `readonly_bash` refused about 20 reviewer commands that only run checks or write to a
-scratch file: `make gs`, `make py`, `make check > …`, `git fetch`, `git branch --contains`,
-`git check-ignore`, `harness-board show … > file` (9cc90947, 1e3bf26b, 08393fd6, a4973cb2). The
-reviewer then reasons about results it could have run. **Fix.** Draft H8. Risk medium: a verify
-command can write (here `make check` writes nothing tracked).
+**Problem.** `readonly_bash` already runs the verify and test commands (`scripts/verify.sh` and
+`scripts/harness_tests.sh` are plain scripts; `make check`, `test` and `lint` are allowed). It
+refused about 20 reviewer commands of four other kinds: `make` targets other than those three
+(`make gs`, `make py`; `MAKE_TARGETS`, `readonly_bash.py`:91), output redirects (`make check > …`,
+`harness-board show … > file`), `git fetch`, and `git branch --contains <rev>` and
+`git check-ignore` (not reading forms) (9cc90947, 1e3bf26b, 08393fd6, a4973cb2). The reviewer then
+reran the whole suite or reasoned about results it could have run. **Fix.** Draft H8. Risk medium:
+a project's `make` target can write or deploy, so the allowed targets need a per-project list.
+**Saved (estimate):** unchanged by the narrower scope: the ~20 refusals counted were all of these
+kinds.
 
 ## 12. A `/sf-metadata` skill and a package builder (this repo; M, low; est. 15 min/week)
 
@@ -227,7 +232,9 @@ the breaker's mutation run became the proof. Epic #5 decided "no tests-only task
 
 **Problem.** `$M` not split (a4973cb2 07:14, item 12). In this session (4348a8f6): an `echo` of a
 `====` separator failed (zsh `=word` expansion: "=== not found") and an unquoted
-`--include=*.md` failed ("no matches found"). The global CLAUDE.md names BSD tools but not zsh.
+`--include=*.md` failed ("no matches found"). The global CLAUDE.md (and the harness's
+`user/CLAUDE.md`:5) says "macOS with zsh" but names none of its traps: an unquoted `$VAR` is not
+word-split, a bare `=word` expands to a command's path, an unquoted glob with no match is an error.
 **Fix.** Draft H10: three lines in the harness's `user/CLAUDE.md` template (arrays, not split
 strings; quote globs; no bare `=word`).
 
@@ -433,13 +440,14 @@ none duplicates an open one. They wait for the harness hold to lift (2026-10-16)
 > At `/harness:work` start on a risk:high ticket, check access once; on that error, report a setup
 > problem with the fix (`/web-setup`, give the GitHub app the repository), not needs-input.
 
-**H8. readonly_bash: the reviewer runs the project's verify and test commands**
+**H8. readonly_bash: the reviewer's narrower checks**
 > ## Request
-> About 20 reviewer commands were refused in one project: `make py`, `make check > file`,
-> `git fetch`, `git branch --contains`, a board read redirected to a file.
+> About 20 reviewer commands were refused in one project: `make py`, `make gs`,
+> `make check > file`, `git fetch`, `git branch --contains`, a board read redirected to a file.
+> The verify and test commands already run (plain scripts; `make check`, `test`, `lint`).
 > ## Outline
-> Allow `$CLAUDE_VERIFY_CMD`, `$HARNESS_TEST_CMD`, the `make` targets those run, `git fetch`,
-> `git branch --contains`, `git check-ignore`, and a redirect into the session scratchpad.
+> Allow the `make` targets a project lists as read-only (beside `MAKE_TARGETS`), `git fetch`,
+> `git branch --contains <rev>`, `git check-ignore`, and a redirect into the session scratchpad.
 
 **H9. harness-red: a pin ticket**
 > ## Request
@@ -451,8 +459,9 @@ none duplicates an open one. They wait for the harness hold to lift (2026-10-16)
 
 **H10. user CLAUDE.md template: zsh**
 > ## Request
-> Three zsh traps in one project in a day: an unquoted `$M` passed every flag as one argument; a
-> bare `====` failed (`=word` expansion); an unquoted `--include=*.md` failed (no matches found).
+> The template says "macOS with zsh" but not its traps. Three in one project in a day: an unquoted
+> `$M` passed every flag as one argument (no word splitting); a bare `====` failed (`=word`
+> expansion); an unquoted `--include=*.md` failed (no matches found).
 > ## Outline
 > Three lines under the macOS note: flags in an array (`args=(…); cmd "${args[@]}"`), quote every
 > glob a tool should see, no bare `=word`.
