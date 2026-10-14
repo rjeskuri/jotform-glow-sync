@@ -22,7 +22,8 @@ clearFieldOnHide as CLEAR_FIELD_ON_HIDE says, so a dropdown hidden by the Year
 rule never sends its answer), whether every module dropdown lists each special
 event once and no rule shows a session for one, with the session bridge in front
 (docs/plans/2026-10-13-special-events.md: question 100 then reaches Salesforce
-blank for an event; a form without the options awaits a sync apply by hand) and
+blank for an event; a form without the options awaits the runner's next run, or on the
+template and a disabled form a sync apply by hand) and
 whether the form's
 own translation dictionary alters any roster option (the runtime's lookup
 emulated, glow/translation_lookup.py, in every language the store holds: question
@@ -320,16 +321,29 @@ def audit_club_guard(questions, conditions):
     return problems
 
 
-MODULE_FIX = ("question 98 (module_id, what Salesforce stores) copies the visible text, which a "
-              "browser's page translation rewrites; a sync apply by hand writes them (RUNBOOK \"The "
-              "names dictionary and the module values\")")
+HAND_FIX = "a sync apply by hand"
+RUNNER_FIX = "the runner's next run (or the sync's apply by hand now)"
 
 
-def audit_module_values(questions):
+def fixer(form_id=None, status="ENABLED"):
+    """Who repairs drift the sync generates (DECISIONS 2026-10-14): the runner's next run on an
+    enabled regional form, a sync apply by hand on the template, a disabled form or any other id.
+    The audits take it as `by`; their default is the hand phrase."""
+    return RUNNER_FIX if status == "ENABLED" and form_id in glow_forms.REGIONALS.values() else HAND_FIX
+
+
+def module_fix(by=HAND_FIX):
+    return ("question 98 (module_id, what Salesforce stores) copies the visible text, which a "
+            f"browser's page translation rewrites; {by} writes them (RUNBOOK \"The "
+            "names dictionary and the module values\")")
+
+
+def audit_module_values(questions, by=HAND_FIX):
     """The module dropdowns (glow.sync.MODULES), as glow/sync.py MODULE_CALC_VALUES says:
     on, each carries calcValues equal to its own options after the single-select's empty
     slot; off, none - or, if it still carries some, aligned ones (misaligned, question
-    98 would send a neighbouring module). Returns (problems, {qid: {"options", "aligned"}})."""
+    98 would send a neighbouring module). `by`: who repairs it (fixer). Returns
+    (problems, {qid: {"options", "aligned"}})."""
     problems, summary = [], {}
     for year, qid in MODULES.items():
         q = questions.get(qid)
@@ -345,11 +359,11 @@ def audit_module_values(questions):
                             + (f"calcValues out of line with its {len(options)} options "
                                f"({len(have.split('|'))} values) - question 98 would send another "
                                "module; " if has_calc_values(q) else "no calcValues - ")
-                            + MODULE_FIX)
+                            + module_fix(by))
         elif not glow_sync.MODULE_CALC_VALUES and has_calc_values(q) and not aligned:
             problems.append(f"module dropdown q{qid} (year {year}): calcValues out of line with its "
-                            f"{len(options)} options - question 98 would send another module; a sync "
-                            "apply by hand clears them (glow/sync.py MODULE_CALC_VALUES is off)")
+                            f"{len(options)} options - question 98 would send another module; {by} "
+                            "clears them (glow/sync.py MODULE_CALC_VALUES is off)")
     return problems, summary
 
 
@@ -409,19 +423,22 @@ def audit_module_shape(questions, props):
     return problems, summary
 
 
-EVENTS_FIX = "a sync apply by hand, template first (RUNBOOK \"Special events\")"
+def events_fix(by=HAND_FIX):
+    """The hint of a form awaiting the special events: by hand, the template goes first."""
+    return by + (", template first" if by == HAND_FIX else "") + " (RUNBOOK \"Special events\")"
 
 
-def audit_special_events(questions, conditions):
+def audit_special_events(questions, conditions, by=HAND_FIX):
     """The special events (docs/plans/2026-10-13-special-events.md): every module dropdown
     lists each glow.sync.SPECIAL_EVENTS option exactly once, in that spelling, and no other
     option with the prefix (their calcValues: audit_module_values); no rule shows a session
     dropdown for an event, or on the year alone (the year-1 rule before 2026-10-13); and the
     session bridge (glow.sync.week_bridge_layout) is there once, in its shape, before every
     rule that shows a session dropdown and before the copies into question 100 - so an event
-    sends question 100 blank. A form without the options yet reads as awaiting a sync apply
-    by hand. Returns (problems, summary)."""
+    sends question 100 blank. A form without the options yet reads as awaiting `by` (fixer).
+    Returns (problems, summary)."""
     problems, listed = [], {}
+    fix = events_fix(by)
     events = glow_sync.special_event_options()
     for year, qid in MODULES.items():
         q = questions.get(qid)
@@ -443,7 +460,7 @@ def audit_special_events(questions, conditions):
                 continue                 # reported above
             elif n == 0:
                 problems.append(f"module dropdown q{qid} (year {year}) lacks the special event '{e}' - "
-                                f"awaiting {EVENTS_FIX}")
+                                f"awaiting {fix}")
             elif n > 1:
                 problems.append(f"module dropdown q{qid} (year {year}) lists '{e}' {n} times - remove the "
                                 "extra one(s) in the builder")
@@ -455,11 +472,11 @@ def audit_special_events(questions, conditions):
     if shape["event_rules"]:
         problems.append(f"{len(shape['event_rules'])} rule(s) show a session dropdown without testing a "
                         f"curriculum module (first: rule {shape['event_rules'][0] + 1}) - a special event "
-                        f"would show a session; awaiting {EVENTS_FIX}")
+                        f"would show a session; awaiting {fix}")
     pos = shape["position"]
     if pos is None:
         problems.append("no session bridge (question 100 from the session dropdown shown) - a session picked "
-                        f"before switching to a special event would reach Salesforce; awaiting {EVENTS_FIX}")
+                        f"before switching to a special event would reach Salesforce; awaiting {fix}")
     else:
         if len(shape["bridge"]) > 1:
             problems.append(f"{len(shape['bridge'])} session bridges into question 100, expected 1 - the "
@@ -850,6 +867,7 @@ def rendered_bridge_problems(r, page):
     copies, its operands kept (Jotform keeps an operand that is not in the equation: the Club
     picker on question 18 is one), hidden dropdowns ignored."""
     problems, seen = [], {}
+    fix = events_fix(fixer(r.get("id")))
     for _year, qid in MODULES.items():
         events = rendered_event_options(page, qid)
         seen[qid] = events
@@ -860,13 +878,13 @@ def rendered_bridge_problems(r, page):
                 served, aligned, differ = counts
                 problems.append(f"rendered page: module dropdown q{qid} serves '{e}' {served} time(s), "
                                 f"{aligned} with its data-calcvalue" + (f", {differ} with another" if differ else "")
-                                + f" - a page from before the apply (re-run in a few minutes), else {EVENTS_FIX}")
+                                + f" - a page from before the apply (re-run in a few minutes), else {fix}")
     r["rendered_events"] = seen
     bridge = rendered_week_bridge(page)
     r["rendered_bridge"] = bridge
     if bridge is None or bridge["position"] is None:
         problems.append("rendered page: no session bridge (question 100) in JotForm.setConditions - a page from "
-                        f"before the apply, or its layout changed; else {EVENTS_FIX}")
+                        f"before the apply, or its layout changed; else {fix}")
         return problems
     if bridge["late"]:
         problems.append(f"rendered page: the session bridge is rule {bridge['position'] + 1} of {bridge['rules']}, "
@@ -877,10 +895,10 @@ def rendered_bridge_problems(r, page):
         problems.append("rendered page: the session bridge's entry in JotForm.setCalculations "
                         + ("is missing" if bridge["operands"] is None else
                            f"lacks {len(missing)} of its operands: " + ", ".join("q" + q for q in sorted(missing, key=int)))
-                        + f" - Jotform dropped them, or the page is from before the apply ({EVENTS_FIX})")
+                        + f" - Jotform dropped them, or the page is from before the apply ({fix})")
     elif not bridge["ignore_hidden"]:
         problems.append("rendered page: the session bridge does not ignore hidden fields - an event picked after a "
-                        f"session would send that session ({EVENTS_FIX})")
+                        f"session would send that session ({fix})")
     return problems
 
 
@@ -897,6 +915,7 @@ def rendered_module_problems(r, page):
     chain's shape as served (adds r["rendered_shape"]: the page's clearFieldOnHide and the
     module selects served with a `multiple` attribute), as CLEAR_FIELD_ON_HIDE says."""
     problems, seen, multi = [], {}, []
+    fix = module_fix(fixer(r.get("id")))
     for _year, qid in MODULES.items():
         counts = rendered_calc_values(page, qid)
         seen[qid] = counts
@@ -913,7 +932,7 @@ def rendered_module_problems(r, page):
                                                or counts["aligned"] != counts["options"]):
             problems.append(f"rendered page: module dropdown q{qid}: {counts['missing']} of {counts['options']} "
                             f"options carry no data-calcvalue, {counts['differ']} one other than their value "
-                            "(a page from before the apply: re-run in a few minutes) - " + MODULE_FIX)
+                            "(a page from before the apply: re-run in a few minutes) - " + fix)
         elif glow_sync.MODULE_CALC_VALUES and want is not None and counts["options"] != want:
             problems.append(f"rendered page lists {counts['options']} of module dropdown q{qid}'s {want} options "
                             "- a page from before the apply or a layout this check cannot read: do not treat "
@@ -988,8 +1007,9 @@ def is_long_name(value, text):
     return key(value).startswith(head) and len(key(value)) > len(head)
 
 
-def audit_rules(questions, conditions, partners_of=None, retired=()):
-    """Rule-level checks on a form's live conditions. Returns a list of
+def audit_rules(questions, conditions, partners_of=None, retired=(), by=HAND_FIX):
+    """Rule-level checks on a form's live conditions (`by`: who repairs a generated rule or
+    flag, fixer). Returns a list of
     problem strings (empty = clean) and a summary dict. partners_of: the
     Roster's {key(club): {key(partner): partner}} (roster_facts' holders); with it a
     long name's partner must be one the Roster has for that club. retired:
@@ -1065,7 +1085,7 @@ def audit_rules(questions, conditions, partners_of=None, retired=()):
         problems.append(f"partner list (q{plist}) on the form: the partner list was retired "
                         "2026-09-30 and the sync refuses a form carrying one - delete it in the "
                         "builder")
-    ids_problems, shape = audit_contact_ids(questions, conditions)
+    ids_problems, shape = audit_contact_ids(questions, conditions, by)
     problems += ids_problems
     problems += audit_picker(questions, conditions) + audit_club_guard(questions, conditions)
     summary = {"clubs": len(clubs), "show_rules": sum(len(v) for v in shown_by.values()),
@@ -1079,11 +1099,12 @@ def audit_rules(questions, conditions, partners_of=None, retired=()):
     return problems, summary
 
 
-def audit_contact_ids(questions, conditions):
+def audit_contact_ids(questions, conditions, by=HAND_FIX):
     """Question 18 (Contact_IDs, the names Salesforce stores as present) and the
     at-least-one-girl guard, each expectation derived from glow/sync.py's
     constants, so a fallback or the generated rollback (a constant off) is clean
-    once applied (docs/plans/2026-09-30-contact-ids.md). Returns (problems,
+    once applied (docs/plans/2026-09-30-contact-ids.md); `by`: who repairs the rest (fixer).
+    Returns (problems,
     glow.sync.contact_ids_layout of the rules)."""
     picker = club_picker(questions)
     rosters = {qid for qid, q in questions.items() if q.get("type") == "control_checkbox"}
@@ -1094,10 +1115,10 @@ def audit_contact_ids(questions, conditions):
     if off and want == "Yes":
         problems.append(f"{len(off)} of {len(rosters)} roster(s) not required (first q{off[0]}): a mentor "
                         "can send her club with no girl ticked - Salesforce stores an empty batch that "
-                        "blocks the club's day; a sync apply by hand sets the flag")
+                        f"blocks the club's day; {by} sets the flag")
     elif off:
         problems.append(f"{len(off)} of {len(rosters)} roster(s) required (first q{off[0]}) although "
-                        "glow/sync.py ROSTERS_REQUIRED is off - a sync apply by hand clears the flag")
+                        f"glow/sync.py ROSTERS_REQUIRED is off - {by} clears the flag")
     if shape["position"] is None:
         return problems + ["no Contact_IDs aggregate calculation found"], shape
     if len(shape["calc_rules"]) > 1:
@@ -1130,10 +1151,10 @@ def audit_contact_ids(questions, conditions):
             problems.append(f"question 18 (Contact_IDs) is calculated by rule {shape['position'] + 1} of "
                             f"{shape['count']}, after {len(before)} rule(s) that show a roster: on a change "
                             "of club Jotform calculates it before the rosters show or hide (another club's "
-                            "girls sent, or none) - a sync apply by hand puts it first")
+                            f"girls sent, or none) - {by} puts it first")
     if glow_sync.CONTACT_IDS_PICKER_OPERAND and picker not in operands:
-        problems.append(f"the Club picker (q{picker}) is not one of question 18's operands - a sync apply "
-                        "by hand adds it")
+        problems.append(f"the Club picker (q{picker}) is not one of question 18's operands - {by} "
+                        "adds it")
     # every field a roster rule tests must make question 18 re-run after the rosters: as a
     # term of its rule (then Jotform's walk for that field ends with it: the order), else -
     # with the order off - as an operand
@@ -1281,7 +1302,8 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
     awaiting = sorted((q for q in should if q not in off), key=int)
     quiet = set(should) | set(stray)       # the rosters whose missing rule is explained, or reported below
 
-    rule_problems, rule_summary = audit_rules(questions, conditions, partners_of, retired=quiet)
+    by = fixer(form_id, status)       # who repairs a generated rule, flag or value: the runner or a hand
+    rule_problems, rule_summary = audit_rules(questions, conditions, partners_of, retired=quiet, by=by)
     for q in stray:
         rule_problems.append(f"'{text_of[q]}' (q{q}) is off the Club picker but its club is active in the "
                              "Roster - pass --partners if its partner is not on Jotform, else the next sync "
@@ -1289,14 +1311,14 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
     # a roster rendering below the links / Submit shows a mentor her names under the button
     rule_problems += layout.audit_layout(questions)
     # question 98's module: each module dropdown's calcValues (glow/sync.py MODULE_CALC_VALUES)
-    module_problems, module_summary = audit_module_values(questions)
+    module_problems, module_summary = audit_module_values(questions, by)
     rule_problems += module_problems
     # the chain's shape: one required single-select per step, hidden ones cleared at submit
     shape_problems, shape_summary = audit_module_shape(questions, props)
     rule_problems += shape_problems
     # the special events: each event option once per module dropdown, no session for one,
     # and question 100 blank for one (the session bridge)
-    event_problems, event_summary = audit_special_events(questions, conditions)
+    event_problems, event_summary = audit_special_events(questions, conditions, by)
     rule_problems += event_problems
     # question 18's names: the form's own translation dictionary must alter no roster option
     # (one more GET; a store that cannot be read or emulated is reported, not a problem)

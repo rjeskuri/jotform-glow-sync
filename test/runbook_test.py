@@ -1096,6 +1096,57 @@ class RolloutProcedures(unittest.TestCase):
             self.assertIn(heading, template)
 
 
+class FixHintsRunbook(unittest.TestCase):
+    """tools/form_status.py's fix hints name who repairs the drift by form kind (ticket #33; their
+    wording is pinned in test/special_events_test.py and test/form_status_test.py): on an enabled
+    regional form the runner's next run (or the sync's apply by hand now), on the template and a
+    disabled form a sync apply by hand. The docs that quote them say both, and carry no caveat
+    that the hint predates the runner's applying it."""
+
+    REGIONAL = "the runner's next run (or the sync's apply by hand now)"
+    TEMPLATE = 'awaiting a sync apply by hand, template first (RUNBOOK "Special events")'
+
+    def flat(self, *path):
+        return " ".join(read(os.path.join(REPO, *path)).split())
+
+    def test_the_runbook_quotes_the_hint_of_each_form_kind(self):
+        doc = self.flat("docs", "RUNBOOK.md")
+        special = doc.split("## Special events ", 1)[1].split(" ## ", 1)[0]
+        self.assertIn(self.REGIONAL, special)
+        self.assertIn(self.TEMPLATE, special)
+        # one sentence says both, each tied to its kind of form: the regional quote to "an enabled
+        # regional form", the hand quote to "the template" and "a disabled form"
+        sentences = [s for s in re.split(r"(?<=[.!?]) (?=[A-Z`(])", special) if self.REGIONAL in s]
+        self.assertEqual(len(sentences), 1, "the regional hint is quoted in more than one sentence")
+        (sentence,) = sentences
+        self.assertIn("Before the apply each of these reads", sentence)
+        self.assertIn(self.TEMPLATE, sentence)
+        labels = ("an enabled regional form", "the template", "a disabled form")
+        for label in labels:
+            self.assertIn(label, sentence)
+
+        def nearest(quote):
+            """The kind label whose occurrence is closest to the quote, before or after it."""
+            at = sentence.index(quote)
+            return min((abs(m.start() - at), label) for label in labels
+                       for m in re.finditer(re.escape(label), sentence))[1]
+        self.assertEqual(nearest(self.REGIONAL), "an enabled regional form")
+        self.assertIn(nearest(self.TEMPLATE), ("the template", "a disabled form"))
+
+    def test_no_doc_calls_the_hint_stale(self):
+        for doc in (self.flat("docs", "RUNBOOK.md"), self.flat("docs", "ARCHITECTURE.md")):
+            self.assertNotIn("wording predates", doc)
+            self.assertNotIn("hint's wording", doc)
+
+    def test_the_architecture_row_says_who_repairs_a_form_awaiting_the_apply(self):
+        row = next(line for line in read(os.path.join(REPO, "docs", "ARCHITECTURE.md")).splitlines()
+                   if line.startswith("| `tools/form_status.py`"))
+        self.assertIn("the runner's next run", row)
+        self.assertIn("a sync apply by hand", row)          # the template and a disabled form
+        self.assertIn("disabled", row)
+        self.assertIn("template", row)
+
+
 class WorkLogRunbook(unittest.TestCase):
     """The work log behind the monthly invoice runs on the harness plugin's `harness-worklog`
     (`/harness:worklog`); this repository's tools/worklog.py is retired (ticket #10): no live doc
