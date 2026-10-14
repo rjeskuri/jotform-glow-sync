@@ -417,6 +417,17 @@ class Hooks(unittest.TestCase):
         "gh \\\n  api -X POST repos/o/r/issues",
         "gh 'api' -X POST repos/o/r/issues",
         "'gh' api -XPOST repos/o/r/issues",
+        # the ) closing $(...), $((...)), <(...) or >(...) does not end a word, so a # glued
+        # to it is no comment and the ; still splits (review of PR #41, final round)
+        "echo $(echo x)#t; gh api -X POST repos/o/r/issues",
+        "$((1+1))#n; gh api -X DELETE repos/o/r/labels/x",
+        "cat <(echo x)#t; gh api -X PUT repos/o/r/pulls/1/merge",
+        "echo x > >(cat)#t; gh api -XPATCH repos/o/r/issues/1 -f state=closed",
+        "(true)#c\ngh api -X POST repos/o/r/issues",                   # a comment ends at its line
+        # zsh expands =gh to gh's path; a split or quoted api is still api
+        "=gh api -X POST repos/o/r/issues",
+        "gh a\"\"pi -X POST repos/o/r/issues",
+        "gh 'a'pi -XPOST repos/o/r/issues",
     ]
     GH_API_READS = [
         "gh api repos/o/r/pulls/1/reviews",                              # the harness loop's reads
@@ -449,6 +460,8 @@ class Hooks(unittest.TestCase):
         "gh api repos/o/r/pulls/1 # then -X DELETE it",
         "# -X DELETE later\ngh api repos/o/r/pulls/1",
         "gh api repos/o/r/pulls/1 # check\ngh api repos/o/r/pulls/2",
+        # =gh is a word of its own only as a command; gh without api is not gh api
+        "echo =gh", "gh pr view 1",
     ]
 
     def test_every_live_command_asks_ryan_and_is_logged(self):

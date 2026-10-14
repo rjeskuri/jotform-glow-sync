@@ -82,10 +82,11 @@ PATTERN+="|${SELF})"
 FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
 MATCH=$(printf '%s' "$FLAT" | grep -Eo "$PATTERN" | head -1) || true
 # gh api: a write on ANY path (since 2026-10-14; before, only under actions/ or to
-# /dispatches). Any command with a gh word (quoted, escaped or by full path too) and the
-# text api is read as shell words by python3: comments go first, as bash reads them (a #
-# at the start of a word, to the end of its line; quoted or escaped it is data; a
-# backslash-newline does not continue a comment), then backslash-newline joins, $'...'
+# /dispatches). Any command with a gh word (quoted, escaped, =gh or by full path too) is
+# read as shell words by python3: comments go first, as bash reads them (a # at the start
+# of a word, to the end of its line; quoted or escaped it is data, so is one glued to the
+# ) of a $(...), $((...)), <(...) or >(...); a backslash-newline does not continue a
+# comment), then backslash-newline joins, $'...'
 # and shlex (quotes, pflag shorthand bundles such as -iXDELETE or -iF name=x). Each
 # gh [-R x] api segment up to the next ; | & ( ) < > or line break is judged, and a quoted
 # string that holds one (bash -c "gh api ...", eval) is read the same way. A write is a
@@ -104,12 +105,18 @@ FIELD_LONG = {"field", "raw-field", "input"}
 VALUE_SHORT, BOOL_SHORT, OPS = "FHqXpft", "ih", set("();<>|&")
 GH_WORD = re.compile(r"(^|[^\w./-])gh\s")
 Q, DQ, BT = chr(39), chr(34), chr(96)
+QS = "[" + DQ + Q + "]"
+# the gh ... api text as the command spells it (quotes, =gh, a continued line, -R x), to
+# quote in the prompt: a reader sees the words of the command, the description follows
+GH_RAW = re.compile("[=\\\\]?" + QS + "?gh" + QS + r"?[\s\\]+(?:(?:-R|--repo)[=\s]*\S+[\s\\]+)?"
+                    + QS + "*a" + QS + "*p" + QS + "*i" + QS + "*")
 
 def strip_comments(text):
     """As bash reads them: a # at the start of a word opens a comment to the end of its
     line; inside quotes or after a backslash it is data. Quotes are tracked here, so a
-    comment never starts inside one and an unbalanced quote is refused."""
-    out, i, n, q, start = [], 0, len(text), "", True
+    comment never starts inside one and an unbalanced quote is refused. The ) that closes
+    $(...), $((...)), <(...) or >(...) is part of its word; the ) of a subshell ends one."""
+    out, i, n, q, start, parens = [], 0, len(text), "", True, []
     while i < n:
         c = text[i]
         if q == Q:
@@ -135,8 +142,13 @@ def strip_comments(text):
             continue
         elif c in (Q, DQ):
             q, start = c, False
+        elif c == "(":
+            parens.append(out[-1] if out and out[-1] in "$<>" else "")
+            start = True
+        elif c == ")":
+            start = not (parens and parens.pop())
         else:
-            start = c in " \t\n();<>|&"
+            start = c in " \t\n;<>|&"
         out.append(c)
         i += 1
     if q:
@@ -159,7 +171,7 @@ def is_op(w):
     return bool(w) and all(c in OPS for c in w)
 
 def is_gh(w):
-    w = w.lstrip(BT)
+    w = w.lstrip(BT).lstrip("=")
     return w == "gh" or w.endswith("/gh")
 
 def segment(words, j):
@@ -239,19 +251,27 @@ def scan(text, depth):
         i += 1
     return "read"
 
+raw = sys.stdin.read()
 try:
-    print(scan(sys.stdin.read(), 0))
+    verdict = scan(raw, 0)
 except Exception as e:
-    print("write:that could not be read as shell words (%s: a write)" % e.__class__.__name__)
+    verdict = "write:that could not be read as shell words (%s: a write)" % e.__class__.__name__
+print(verdict)
+if verdict != "read":
+    found = GH_RAW.search(raw)
+    print(found.group(0).replace("\r", " ").replace("\n", " ") if found else "")
 PY
-# a gh word anywhere - "gh", 'gh', \gh, /usr/local/bin/gh, gh continued onto the next line -
-# and the text api: the Python decides whether api is the subcommand
-if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' \
-    && printf '%s' "$FLAT" | grep -q api; then
+# a gh word anywhere - "gh", 'gh', \gh, =gh, /usr/local/bin/gh, gh continued onto the next
+# line: the Python decides whether api is the subcommand, after quote removal (a""pi too)
+WHY=
+if [ -z "$MATCH" ] && printf '%s' "$FLAT" | grep -Eq '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)'; then
   VERDICT=$(printf '%s' "$CMD" | python3 -c "$GH_API_PY") || VERDICT=
   case "$VERDICT" in
     read) ;;
-    write:*) MATCH="gh api ${VERDICT#write:}" ;;
+    write:*)   # line 1 write:<description>; line 2 the command's own gh ... api text, if found
+      DESC=${VERDICT%%$'\n'*}; DESC=${DESC#write:}
+      SNIPPET=${VERDICT#*$'\n'}; [ "$SNIPPET" = "$VERDICT" ] && SNIPPET=
+      if [ -n "$SNIPPET" ]; then MATCH=$SNIPPET; WHY=" (gh api $DESC)"; else MATCH="gh api $DESC"; fi ;;
     *) MATCH="gh api that could not be read as shell words (no python3: a write)" ;;
   esac
 fi
@@ -309,7 +329,7 @@ decide() {
 # refused: a deny decision with the reason, or - should no JSON come out - exit 2 with
 # the reason on stderr, which blocks just the same
 refuse() {
-  REASON="BLOCKED by .claude/hooks/live_gate.sh - matched \"$MATCH\" in: $SHOWN
+  REASON="BLOCKED by .claude/hooks/live_gate.sh - matched \"$MATCH\"$WHY in: $SHOWN
 $1
 $RUNBOOK"
   OUT=$(decide deny "$REASON") || OUT=
@@ -336,7 +356,7 @@ case "$MODE" in
 default, acceptEdits, auto and plan can). Run it in an interactive session, or Ryan runs it
 in his terminal." ;;
 esac
-REASON="LIVE command - matched \"$MATCH\" in: $SHOWN
+REASON="LIVE command - matched \"$MATCH\"$WHY in: $SHOWN
 It can change a live system: the Jotform attendance forms, the master enrollment Google
 Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches on GitHub
 (live since 2026-09-01). Ryan's answer here is the go; nothing pre-approves it. Yes only
