@@ -32,15 +32,21 @@ for `$B`.
 The `privacy-auditor` agent on `origin/main...$B`.
 
 ## 3. What the unattended runner does once `main` moves
-The auto-sync workflow runs `main`'s code only and, with `AUTO_SYNC_APPLY=1`, applies within its
-bands. Read `git diff origin/main...$B -- glow/ tools/auto_sync.py tools/sf_new_clubs.py
-sync_attendance_form.py .github/workflows/` for: a switch in `glow/sync.py` (`CONTACT_IDS_FIRST`,
-`ROSTERS_REQUIRED`, `MODULE_CALC_VALUES`, `RETIRE_INACTIVE`, …), what a sync plans that it did not
-before, the bands (`--max-*`), the Salesforce path (`SF_SYNC`). Tell Ryan in plain words what the
-next run will do differently; a change that must not reach a form unattended waits with
-`AUTO_SYNC_APPLY=0` (RUNBOOK "Automatic sync", Switches; RUNBOOK "The names list sent to
-Salesforce": the runner runs `main`'s constants). An `appsscript/` change is not live until
-`/deploy-appsscript`.
+The land is the rollout. The auto-sync workflow runs `main`'s code only and applies within its
+bands, so a form change the sync generates reaches every enabled regional form on the runner's
+next run: the next roster change, the morning backstop, or a run from the Actions tab (RUNBOOK
+"Automatic sync"; DECISIONS 2026-10-14). If the emergency stop is on (`AUTO_SYNC_APPLY` at `0`,
+during a rollback), the next run is a dry run: the land rolls nothing out until the rollback
+switches it back to `1`. Read `git diff origin/main...$B -- glow/
+tools/auto_sync.py tools/sf_new_clubs.py sync_attendance_form.py .github/workflows/` for: a
+switch in `glow/sync.py` (`CONTACT_IDS_FIRST`, `ROSTERS_REQUIRED`, `MODULE_CALC_VALUES`,
+`RETIRE_INACTIVE`, …), what a sync plans that it did not before, the bands (`--max-*`), the
+Salesforce path (`SF_SYNC`). Tell Ryan in plain words what the next run will apply, on which
+forms, and what each region's SyncLog row will say. A change that is not ready for every enabled
+regional form does not land yet: it stays on its branch until it is. The runner never syncs the
+template or a disabled form: name the steps they take by hand (the template from the ticket
+branch before the land, a disabled form from `main` after it). An `appsscript/` change is not
+live until `/deploy-appsscript`.
 
 ## 4. The worktree's `data/` and `backups/`
 Land runs `git worktree remove`, which **deletes gitignored files without asking**, and on
@@ -58,5 +64,6 @@ the primary checkout's byte-identical copies before the fast-forward, and a copy
 blocks the pull ("main not pulled") instead of being lost (RUNBOOK "Work log and invoices").
 
 ## Report
-The three answers (conflicts resolved and how, the audit, what the runner will do), any file moved,
-and whether `AUTO_SYNC_APPLY` must be `0` first. Ryan lands with `/harness:land`.
+The three answers (conflicts resolved and how, the audit, what the next run will apply and on
+which forms), any file moved, and the template's or a disabled form's steps still to take. Ryan
+lands with `/harness:land`.

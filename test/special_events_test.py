@@ -1150,6 +1150,10 @@ class IdgDocs(unittest.TestCase):
         # it links this ticket's plan, and no sentence of the section still calls Welcome Session the
         # first or only type (Status line and body alike)
         self.assertIn("plans/2026-10-14-idg-celebrations.md", status)
+        # rolled out 2026-10-14 (the plan's Result): no longer pending, live on the forms
+        idg = status[status.index("IDG Celebrations"):]
+        self.assertNotRegex(idg, r"(?i)\bpending\b")
+        self.assertRegex(idg, r"(?i)\blive\b[^.;]*2026-10-14|2026-10-14[^.;]*\blive\b")
         flat = " ".join(section.split())
         for stale in ("the first type is", "first type", "only type", "only special event"):
             self.assertNotIn(stale, flat.lower())
@@ -1176,15 +1180,21 @@ class IdgDocs(unittest.TestCase):
         for key_ in ("title", "author", "status", "created", "intent"):
             self.assertTrue(keys.get(key_, "").partition("#")[0].strip(), key_)
         self.assertIn("IDG Celebrations", keys["title"])
-        self.assertEqual(docs_index.status_of(keys["status"])[0], "accepted")
+        # done: rolled out on all five forms 2026-10-14 (ticket #31's comment, Ryan's go)
+        self.assertEqual(docs_index.status_of(keys["status"])[0], "done")
         self.assertRegex(keys["created"], r"^2026-10-14$")
         self.assertEqual(keys.get("backlog", "").partition("#")[0].strip(), "")      # none
-        self.assertEqual(keys.get("done", "").partition("#")[0].strip(), "")         # not done until the rollout
+        self.assertEqual(keys.get("done", "").partition("#")[0].strip(), "2026-10-14")
+        # …and the generated index says so (`make docs-index`)
+        rows = [l for l in read(os.path.join(REPO, "docs", "plans", "README.md")).splitlines()
+                if "(2026-10-14-idg-celebrations.md)" in l]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual([c.strip() for c in rows[0].strip().strip("|").split("|")][2].split()[0], "done", rows[0])
         self.assertIn("IDG Celebrations", h1)
         self.assertIn("IDG Celebrations", " ".join(sections.values()))     # the body says it too
         self.assertIn("SPECIAL_EVENTS", text)
 
-    def test_the_plan_has_a_real_rollout_rollback_risks_proof_and_an_empty_result(self):
+    def test_the_plan_has_a_real_rollout_rollback_risks_proof_and_result(self):
         sections, text = self.sections()
         headings = [h for h in re.findall(r"^## (.+)$", text, re.M)]
         names = ("Rollout", "Rollback", "Risks", "Proof", "Result")
@@ -1202,7 +1212,29 @@ class IdgDocs(unittest.TestCase):
         self.assertRegex(rollback, r"(?i)builder")
         self.assertIn("SPECIAL_EVENTS", rollback)
         self.assertIn("Module_Week__c", sections["Risks"])
-        self.assertEqual(sections["Result"].strip(), "")                  # nothing to report yet
+        # the Result of the 2026-10-14 rollout (ticket #31's comment): what ran, on whose go, how it
+        # was verified, and what is still open - its facts, in any words; not the template's placeholder
+        result = " ".join(sections["Result"].split())
+        self.assertGreaterEqual(len(result.split()), 60, result)
+        self.assertIsNone(re.search(r"<[a-z][^>]*>|\bTODO\b|\bTBD\b|\bXXX\b|filled in when done", result), result)
+        self.assertIn("2026-10-14", result)
+        for fact in ("6690700",                     # PR #40 (#30) landed
+                     "38519656203",                 # the runner's run that applied the regional forms
+                     "41f4d6815a6",                 # the template's runtime build, read with --rendered
+                     "CLEAN", "Africa", "Asia", "Latin America", "U.S", "--rendered"):
+            self.assertIn(fact, result)
+        self.assertRegex(result, r"(?i)\btemplate\b")
+        self.assertRegex(result, r"#40\b")
+        self.assertRegex(result, r"(?i)ryan")                                  # whose go
+        # the switch was never touched: said, not set
+        self.assertRegex(result, r"AUTO_SYNC_APPLY[^.;]{0,60}\b(never|not|untouched)\b|"
+                                 r"\b(never|not)\b[^.;]{0,60}AUTO_SYNC_APPLY")
+        self.assertNotIn("AUTO_SYNC_APPLY=", result)
+        # still open: staff telling mentors, and the first IDG batch read in Salesforce (blank week unproven)
+        self.assertRegex(result, r"(?i)\b(open|still|pending|not yet|to do|remains?)\b")
+        self.assertRegex(result, r"(?i)\bmentors?\b")
+        self.assertIn("Salesforce", result)
+        self.assertIn("Module_Week__c", result)
 
     def test_the_rollout_is_the_template_by_hand_then_the_land_then_the_runners_next_run(self):
         # Ryan's sequence (#30, 2026-10-14): Claude applies the template on his in-session go
