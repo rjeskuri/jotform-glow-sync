@@ -117,6 +117,12 @@ processor, the forms and the Jotform mapping are untouched.
    - The plan's Result, and the work log.
 
 ## Rollback
+> **Superseded 2026-10-16** (Ryan: "I don't want to overwrite with an old package"): never
+> redeploy a copy under `data/sf_dashboard_2026-10-02/` (`before/`, `after/`, `fix1/`, `after2/`,
+> `totals1/`, ...) or a `gen.py` build; each would overwrite later changes. Every dashboard or
+> report deploy starts from a fresh retrieve of what is live; the only rollback for the
+> 2026-10-15 change is `data/sf_totals2_2026-10-15/before/` (RUNBOOK
+> "Attendance dashboard in Salesforce", Rollback). As planned on 2026-10-02:
 - Delete the new reports and the dashboard (`destructiveChanges.xml`).
 - Redeploy the test report's "before" copy.
 

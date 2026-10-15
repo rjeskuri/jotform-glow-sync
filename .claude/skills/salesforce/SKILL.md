@@ -46,6 +46,9 @@ description: Salesforce for this project - what lives there (attendance batches 
   the validation (`sf project deploy quick -o glow -i <validation id>`) or the same `start` without
   `--dry-run` → retrieve again and compare with the build. The hook gates the check-only run too;
   Claude Code's auto mode may refuse a production deploy (2026-10-02): then Ryan runs it.
+  **Never redeploy an older build** (Ryan, 2026-10-16): every deploy, a rollback included, edits a
+  fresh retrieve of what is live; a `before/` is a rollback only for its own change and only while
+  a retrieve still equals that change's `after/` (DECISIONS 2026-10-16).
 - **Names never reach the conversation, a log or the repo.** SOQL selects explicit fields: counts,
   ids, dates, statuses, club names. Never select a Contact's name, `Contact_IDs__c` or
   `Status_Message__c` (filter on them, do not print them), never `GET /sobjects/<type>/<id>`.
@@ -64,7 +67,7 @@ description: Salesforce for this project - what lives there (attendance batches 
 | `tools/sf_dupes.py rename --apply` | A stored name's whitespace | Hook, `--vpn-off` | The `renames` old values |
 | `tools/sf_dupes.py cleanup --apply` | Extra affiliations and duplicate-rule sets deleted | Hook, `--vpn-off` | Each deleted record is saved in the rollback file first |
 | `tools/auto_sync.py --apply-salesforce` (GitHub Actions, as GLOW Sync, through `tools/sf_new_clubs.py`) | Creates new clubs' Club accounts (at most 5 per region per run) and marks their SF Pending rows | `SF_SYNC=apply` and `AUTO_SYNC_APPLY=1`, repository variables that only Ryan changes | `SF_SYNC=off`; a created account is deleted only while it has no Contacts and no attendance |
-| `sf project deploy validate`, `start`, `quick` | Metadata | Hook (check-only too) | Redeploy the `before/` retrieve; a `destructiveChanges.xml` for new components |
+| `sf project deploy validate`, `start`, `quick` | Metadata | Hook (check-only too) | Redeploy that change's own `before/` retrieve once a fresh retrieve equals its `after/`, never an older build; a `destructiveChanges.xml` for new components |
 | `sf apex run` (the rolled-back proof of a processor change) | Inserts inside a transaction that ends in `Database.rollback` | Hook; the script pasted in full first | Nothing left, unless the script misses its rollback call |
 | `sf data create`, `update`, `delete`, `upsert`, `import` | Records | Hook | Prefer the write connector (one record) or a tool with a ledger |
 | `sf api request rest` with a method other than GET, a body (`-b`/`--body`) or a request file (`-f`/`--file`); `sf api request graphql` | Anything | Hook (a GET without a body or file passes: a read) | As for the record or metadata it changed |

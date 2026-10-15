@@ -213,6 +213,9 @@ For later:
 5. Check-only deploy from `public_2026-10-09/`: `sf project deploy start --dry-run -o glow -d
    force-app`, with the JSON written to a file. 0 errors, 5 components. Nothing changes in the
    org.
+   > **Done 2026-10-09 - never rerun** (2026-10-16): `public_2026-10-09/` is superseded. Every
+   > dashboard or report deploy starts from a fresh retrieve of what is live; the only rollback
+   > for the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/`.
 6. Docs on the branch: RUNBOOK (Access), BACKLOG 27 / 60 / 79, DECISIONS, this plan's Result;
    `make check`.
 7. Ryan: the steps below.
@@ -222,6 +225,10 @@ For later:
    Users → Login): the Attendance folders are not listed under Reports or Dashboards. This is the
    "before".
 2. **Deploy**:
+   > **Done 2026-10-09 (by the metadata dates) - never rerun: it would overwrite the 2026-10-15
+   > dashboard** (the total as Jotform plus the three partners; noted 2026-10-16). Every
+   > dashboard or report deploy starts from a fresh retrieve of what is live; the only rollback
+   > for the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/`.
    ```bash
    cd ~/jotform-glow-sync/data/sf_dashboard_2026-10-02/public_2026-10-09
    sf project deploy start --dry-run -o glow -d force-app    # check only, once more
@@ -251,7 +258,10 @@ For later:
    - the scheduled job exists (`CronTrigger`).
 
 ## Rollback
-- **Labels**: deploy the two files from `before_public_2026-10-09/` (the report and the dashboard).
+- **Labels** (rewritten 2026-10-16; never deploy `before_public_2026-10-09/`: its dashboard would
+  overwrite the 2026-10-15 one): retrieve what is live first (the report and the dashboard) into
+  a new dated folder; change only the label in that copy; check-only (`--dry-run`); Ryan's go;
+  deploy; retrieve again and compare with the edited copy.
 - **Shares**: in each folder, Share → remove "All Internal Users". Or `DELETE
   /services/data/v62.0/folders/{id}/shares/{shareId}` (the id from a GET of `/shares`). Do not
   rely on deploying the share-less folder files from the backup: whether a deploy removes a
@@ -304,7 +314,7 @@ For later:
   - Not checked: the folders' shares, the set's assignments, the refresh schedule.
   - `public_2026-10-09/` is superseded: never redeploy it. Its dashboard would overwrite the
     2026-10-15 one (the total as Jotform plus the three partners; rollback of that change:
-    `data/sf_totals2_2026-10-15/before/`). The Rollback below still holds for the shares, the
+    `data/sf_totals2_2026-10-15/before/`). The Rollback above still holds for the shares, the
     permission set and the refresh; for the labels, retrieve first and change only the label.
 - **Backup** (05:14 UTC, read only): `data/sf_dashboard_2026-10-02/before_public_2026-10-09/`.
   - It holds 24 files: the 13 reports, the report types `Attendance_Totals` and

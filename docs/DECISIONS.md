@@ -315,6 +315,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - The attendance processor (Apex `AttendanceBatchProcessor`, the vendor's class) was changed in production: a submission's new girls are created with one insert, a name submitted twice counts once, a failure message is cut to the field's 255 characters
 - **Why:** one insert per girl ran NPSP's Contact triggers per girl, and NPSP's own 100-query limit refused - and rolled back entirely - any submission with more than about 24 new girls, live or back-filled; a long failure message rolled a submission back instead of recording it
 - **Consequences:** Ryan's go; validated in production with the tests, reviewed, deployed 03:25 UTC, proven with a rolled-back 47-girl run; rollback = redeploy `data/sf_processor_2026-10-02/before` ([plan](plans/2026-10-02-attendance-processor-one-insert.md))
+- 2026-10-16: that rollback is superseded - never redeploy `data/sf_processor_2026-10-02/before`: it would undo the processor's 2026-10-07 changes (the blank backstop, `Girls_Present__c`, the name cleaning); a rollback starts from a fresh retrieve (the 2026-10-16 decision below)
 
 ### 2026-10-02 — Stale name translations removed; module values pinned
 
@@ -622,3 +623,11 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Why:** Ryan, 2026-10-15: "There are 3 African partners that were specified that will give their attendance through Salesforce only. Any other clubs' attendance through Salesforce should be filtered out."
 - **Rejected:** the total of the 2026-10-06 decision (deployed 2026-10-07), the sum over every `Success` batch (it would count any club's Salesforce entry); a "Girls reached (distinct)" tile (the ticket's first outline).
 - **Consequences:** the two Total reports carry the filter logic `1 AND (2 OR 3) AND 4 AND 5`; a fourth partner that reports through Salesforce needs its name added to filter 3 of both reports, on Ryan's go.
+
+### 2026-10-16 — A Salesforce dashboard or report deploy starts from a fresh retrieve; old packages are never redeployed
+
+- Every dashboard or report deploy, a rollback included, starts from a fresh retrieve of what is live, edited only where it changes; no older package under `data/sf_dashboard_2026-10-02/` (`before/`, `build/`, `after/`, `fix1/`, `after2/`, `totals1/`, `live_2026-10-07/`, `public_2026-10-09/`, `before_public_2026-10-09/`) or `gen.py` build is redeployed, nor an older Apex copy (`data/sf_processor_2026-10-02/before`, `data/sf_totals_2026-10/before/`): a `before/` is a rollback only for its own change, while a retrieve still equals that change's `after/`
+- The only rollback for the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/`, after a retrieve shows nothing was deployed since (equal to its `after/`)
+- **Why:** Ryan, 2026-10-16 (ticket #35 review): "I don't want to overwrite with an old package so make sure that doesn't happen." Steps and rollbacks in older plans still read as procedure and would have overwritten the 2026-10-15 dashboard
+- **Rejected:** keeping the old rollbacks with a "check first" caveat (one missed caveat overwrites live work)
+- **Consequences:** the old steps in `docs/plans/2026-10-02-attendance-dashboard.md`, `2026-10-02-attendance-processor-one-insert.md`, `2026-10-06-attendance-totals.md` and `2026-10-09-attendance-reports-public.md` are marked superseded or done-never-rerun; RUNBOOK "Attendance dashboard in Salesforce" (Rollback), `.claude/skills/salesforce` and `docs/agent/2026-10-workflow.md` carry the rule

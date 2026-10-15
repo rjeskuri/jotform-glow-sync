@@ -83,7 +83,9 @@ Two more gaps show up in the same place:
   weekly counts are never added on top (double counting).
 - **Sequencing**: dashboard and report changes go through `gen.py` after session -51's `fix1`
   (deployed 2026-10-06 09:29 UTC), told to -51 first; nothing here touches the forms, which
-  session -54 is rolling out to.
+  session -54 is rolling out to. (Superseded 2026-10-16: `gen.py` is behind what is live and is
+  never used; every dashboard or report change starts from a fresh retrieve, DECISIONS
+  2026-10-16.)
 - Deploys of the vendor's Apex class run the org's tests in production (there is no sandbox
   login in use); Ryan decided on 2026-10-02 not to coordinate with the other administrator.
 

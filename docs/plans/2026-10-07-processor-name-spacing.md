@@ -91,5 +91,7 @@ found by the clean spelling.
 - Rollback: redeploy `data/sf_totals_2026-10/deployed/` (the 03:22 UTC version with the blank
   backstop and `Girls_Present__c`) - **not** `data/sf_totals_2026-10/before/`, which would undo
   both. The new build: retrieve it from the org (`sf project retrieve start -m
-  ApexClass:AttendanceBatchProcessor ...`).
+  ApexClass:AttendanceBatchProcessor ...`). Since 2026-10-16 (DECISIONS): first retrieve the two
+  classes and the trigger and compare with this deploy's build; if they differ, something was
+  deployed since - stop and start from that retrieve.
 

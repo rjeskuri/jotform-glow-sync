@@ -339,7 +339,9 @@ disable-model-invocation: true
    auto mode may refuse a production deploy: then Ryan runs it).
 6. **Go and deploy.** Ryan's go; `sf project deploy quick -i <validation id>`.
 7. **Read back.** Retrieve into `after/`, `diff -r` against the build; counts only into the plan.
-8. **Rollback.** Redeploy `before/`; a `destructiveChanges.xml` for a new component.
+8. **Rollback.** Redeploy `before/` only while a fresh retrieve still equals `after/` (else
+   something was deployed since: start from that retrieve), never an older build (DECISIONS
+   2026-10-16); a `destructiveChanges.xml` for a new component.
 
 ### `reconcile-count` (model-invocable)
 

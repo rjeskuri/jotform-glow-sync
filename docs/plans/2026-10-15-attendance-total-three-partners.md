@@ -72,7 +72,11 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
 
 ## Rollback
 
-VPN off, Ryan's go: redeploy the metadata retrieved before the change,
+First (2026-10-16) retrieve what is live and compare it with `data/sf_totals2_2026-10-15/after/`:
+if they differ, something was deployed since - stop and start from that retrieve instead. This is
+the only rollback for this change; no older dashboard package (`data/sf_dashboard_2026-10-02/`'s
+`public_2026-10-09/`, `before_public_2026-10-09/`, `totals1/`, `gen.py`'s build) is ever
+redeployed. Then VPN off, Ryan's go: redeploy the metadata retrieved before the change,
 `cd data/sf_totals2_2026-10-15/before && sf project deploy start --dry-run -o glow -d force-app`,
 then the same without `--dry-run`, and retrieve again to compare with `before/`. The dashboard and
 the two Total reports return to the `totals1/` filter. The new report
@@ -84,6 +88,12 @@ dashboard no longer uses it. Revert this ticket's RUNBOOK change with it.
 - **A partner's batch typed under a club outside the three partners** is left out of the total.
   Mitigation: the intake contract (RUNBOOK "Attendance totals and partner-reported counts") names
   the club by its Salesforce Account name, whose parent is the partner.
+- **A double count while the 38 clubs are still on the Africa Club picker** (added 2026-10-16): a
+  typed monthly aggregate for one of those clubs (filter branch 3) plus that club's Jotform
+  batches in the same month (branch 2) would both count; the processor's club-and-day lock blocks
+  only the same date. Mitigation: the intake (BACKLOG 72) must not type a count for a club that
+  still submits on Jotform until the retirement ([plan](2026-10-06-clubs-off-jotform.md)) is
+  applied. Today: 0 batches since 1 September from the three partners' clubs (SOQL, 2026-10-16).
 - **A renamed partner account** drops out of filter 3 (it matches the names). Mitigation: rename
   the filter values with the account, as for the dashboard's Partner filter.
 - **Leadership's number stays unexplained**: the Result reports what the numbers are, by session

@@ -10,6 +10,15 @@ intent: docs/intent/2026-10-06-attendance-totals.md
 
 # Plan: attendance totals that include the three partners, "did not submit" and "blank" views, and a blank is never a success
 
+> **2026-10-16: the deploy and rollback steps below are history, not procedure** (Ryan: "I don't
+> want to overwrite with an old package"). Never redeploy `data/sf_totals_2026-10/before/` (it
+> would also undo the processor's name cleaning of 2026-10-07 04:38 UTC), nor any copy under
+> `data/sf_dashboard_2026-10-02/` (`before/`, `after/`, `fix1/`, `after2/`, `totals1/`) or a
+> `gen.py` build (each would overwrite the 2026-10-09 and 2026-10-15 changes). Every dashboard,
+> report or Apex deploy starts from a fresh retrieve of what is live; the only rollback for the
+> 2026-10-15 change is `data/sf_totals2_2026-10-15/before/` (RUNBOOK
+> "Attendance dashboard in Salesforce", Rollback).
+
 ## Context
 
 Ryan's decisions of 2026-10-06 (in conversation), as they bear on this plan:
@@ -644,7 +653,8 @@ fill must be done before D's totals are read, or every batch from before the dep
 - **The vendor's Apex class, in production, again** (Studio Infinite Lives; no sandbox login in
   use). Mitigation as on 2026-10-02: retrieve first, check-only validate with the org's tests,
   an independent review of the diff, Ryan's quick deploy at a quiet moment, read back, a
-  rolled-back proof; rollback = redeploy `before/` (the fields can stay). A deploy swaps the class
+  rolled-back proof; rollback = redeploy `before/` (the fields can stay; superseded 2026-10-16,
+  see the note at the top). A deploy swaps the class
   between transactions; a submission at that second completes on either version.
 - **A live blank changes outcome**: from a `Success` that blocked the day to a `Failed` that
   blocks nothing. Intended; the Jotform side is unaffected (the insert succeeds either way). The
@@ -1070,8 +1080,8 @@ All Salesforce steps on 2026-10-07 in one CLI sitting, each write on Ryan's go, 
   and `TestContactTriggerHandler`): 26 of 26 tests passed (23 + 3), `AttendanceBatchProcessor`
   coverage 93% (92% before).
 - Quick deploy `0AfRP000002gKqn0AE` at 2026-10-07 03:22 UTC, on Ryan's go. Retrieved back
-  afterwards: what is live equals what was built (`data/sf_totals_2026-10/after/`; the rollback is
-  `before/`, redeployed - the fields can stay).
+  afterwards: what is live equals what was built (`data/sf_totals_2026-10/after/`; the rollback was
+  `before/`, redeployed - the fields can stay; superseded 2026-10-16, see the note at the top).
 - Fields: `Attendance_Batch__c.Girls_Present__c` and `Girls_Enrolled__c`, both Number(18, 0), read
   and edit on the System Administrator profile (`Admin`) only. `Girls_Enrolled__c` is empty and on
   no report (BACKLOG 58).
@@ -1164,7 +1174,8 @@ What `docs/RUNBOOK.md` carried for this plan until its 2026-10-09 restructure (t
 
  The field and the processor change (plan sections A and B) are
 **deployed since 2026-10-07 03:22 UTC** (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation
-`0AfRP000002gKnZ0AU`; rollback: redeploy `data/sf_totals_2026-10/before/`, the fields can stay).
+`0AfRP000002gKnZ0AU`; rollback: redeploy `data/sf_totals_2026-10/before/`, the fields can stay
+[superseded 2026-10-16: never redeploy it, see the note at the top]).
 The one-off back-fill below (plan C) is done and the dashboard's totals (plan D) are deployed,
 both on 2026-10-07 ("Attendance dashboard in Salesforce"). Open: how the partners' counts come
 in (BACKLOG 72).

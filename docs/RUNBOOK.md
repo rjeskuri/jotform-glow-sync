@@ -2512,13 +2512,21 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - **When:** reading or typing an attendance total; the monthly `check`.
 - **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); open: how the partners' counts come in (BACKLOG 72; [Result](plans/2026-10-06-attendance-totals.md#result)).
 - **Verify:** the Signals, below.
-- **Rollback:** of the 2026-10-15 rule, redeploy `data/sf_totals2_2026-10-15/before/` ("Attendance dashboard in Salesforce", Rollback); of the field, redeploy `data/sf_totals_2026-10/before/` (the fields can stay).
+- **Rollback:** of the 2026-10-15 rule, redeploy `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve shows nothing was deployed since ("Attendance dashboard in Salesforce", Rollback); of the field (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live first and undo only that change in the copy ([plan](plans/2026-10-07-processor-name-spacing.md), Result). The fields can stay.
 
 Three partners' clubs are to report their attendance through Salesforce only (Ryan, 2026-10-06).
 Their retirement from the forms is pending: [plan](plans/2026-10-06-clubs-off-jotform.md) is in
 progress and nothing is applied, so the Partners tab's `jotform` column is not yet `no` for them
 and their 38 clubs are still on the Africa Club picker. Until then a Jotform batch from one of
-those clubs counts once, through the Jotform branch of the filter (2, below). Leadership wants one attendance total that includes them, shown beside the figure from the forms
+those clubs counts once, through the Jotform branch of the filter (2, below).
+- **The double count left open until the retirement is applied**: a typed monthly aggregate for one
+  of those 38 clubs (branch 3) plus that club's Jotform batches in the same month (branch 2) would
+  both count. The processor's club-and-day lock blocks only a batch for the same date, and the
+  aggregate is dated the last day of the month. So the intake (BACKLOG 72) must not type a count
+  for a club that still submits on Jotform until the retirement is applied. Today nothing is
+  double counted: 0 batches since 1 September from the three partners' clubs (SOQL, 2026-10-16).
+
+Leadership wants one attendance total that includes them, shown beside the figure from the forms
 alone (Ryan, 2026-10-15).
 
 **The field.** `Attendance_Batch__c.Girls_Present__c` (Number, "Girls present") is the one
@@ -2774,11 +2782,17 @@ sharing stays as it is"):
 - Salesforce allows one refresh a minute.
 
 **Rollback:**
-- Test report: `cd before && sf project deploy start --dry-run -o glow -d force-app`, then
-  without `--dry-run`.
+- **The rule (Ryan, 2026-10-16: "I don't want to overwrite with an old package")**: every
+  dashboard or report deploy, a rollback included, starts from a fresh retrieve of what is live.
+  The only rollback for the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/` (below).
+  Never redeploy an older package: `data/sf_dashboard_2026-10-02/`'s `before/`, `build/`,
+  `after/`, `after2/`, `fix1/`, `totals1/`, `live_2026-10-07/`, `public_2026-10-09/`,
+  `before_public_2026-10-09/`, or a `gen.py` build - each would overwrite later changes.
+- Test report: superseded 2026-10-16 - do not redeploy `before/` (it would undo the 2026-10-09
+  label). To undo a change to it, retrieve it, edit only that change in the copy, check-only,
+  Ryan's go, deploy.
 - The new components: delete them with a `destructiveChanges.xml`. Never delete
-  `Jotform_Monthly_Attendance_test`; it predates this work and is restored above. The new
-  components are:
+  `Jotform_Monthly_Attendance_test`; it predates this work. The new components are:
   - the reports `Jotform_Attendance_by_Week`, `Jotform_Attendance_by_Month`,
     `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month`,
     `Jotform_Sessions_by_Module_Last_Month` and `Jotform_Clubs_No_Attendance_Last_Month`;
@@ -2788,9 +2802,13 @@ sharing stays as it is"):
     `Clubs_Not_Submitting_Last_14_Days`, `Clubs_Not_Submitting_Since_1_Sept` and
     `Blank_Submissions`, then - **last**, after the six reports that use it - the report type
     `Attendance_Totals`; never `Attendance_Batches` (the vendor's report type). The dashboard
-    itself rolls back to `after2/`'s first (redeploy it, or the copy in `live_2026-10-07/`
-    retrieved just before; the six reports and the type may stay).
-- The 2026-10-15 change (the total as Jotform plus the three partners, ticket #35): VPN off,
+    itself is never rolled back by redeploying `after2/` or `live_2026-10-07/` (superseded
+    2026-10-16: they would undo the 2026-10-09 and 2026-10-15 changes); before the six reports go,
+    retrieve it, remove the `totals1/` tiles in that copy, check-only, Ryan's go, deploy (the six
+    reports and the type may stay).
+- The 2026-10-15 change (the total as Jotform plus the three partners, ticket #35): first
+  retrieve the four components and compare with `data/sf_totals2_2026-10-15/after/`; if they
+  differ, something was deployed since - stop and start from that retrieve. Then VPN off,
   Ryan's go, then `cd data/sf_totals2_2026-10-15/before && sf project deploy start --dry-run -o
   glow -d force-app`, then the same without `--dry-run`; retrieve again and compare with
   `before/`. The dashboard and the two Total reports then go back to the `totals1/` filter (every
