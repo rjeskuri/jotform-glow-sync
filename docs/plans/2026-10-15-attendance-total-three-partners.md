@@ -60,7 +60,8 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
 1. Backup: retrieve the live dashboard `Jotform_Attendance_test`, the reports
    `Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month`,
    `Jotform_Attendance_by_Partner_by_Month` and the report type `Attendance_Totals` into
-   `data/sf_totals2_2026-10-15/before/` (the rollback).
+   `data/sf_totals2_2026-10-15/before/` (the rollback, of the three changed components only:
+   Rollback, below).
 2. Build the four components (Build, above).
 3. Check-only validate: `sf project deploy start --dry-run -o glow -d force-app`. The first run
    (`0AfRP000002h9YL0AY`) failed only on two descriptions over 255 characters; after shortening

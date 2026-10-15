@@ -2512,7 +2512,7 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - **When:** reading or typing an attendance total; the monthly `check`.
 - **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); open: how the partners' counts come in (BACKLOG 72; [Result](plans/2026-10-06-attendance-totals.md#result)).
 - **Verify:** the Signals, below.
-- **Rollback:** of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after` (else stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
+- **Rollback:** of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
 
 Three partners' clubs are to report their attendance through Salesforce only (Ryan, 2026-10-06).
 Their retirement from the forms is pending: [plan](plans/2026-10-06-clubs-off-jotform.md) is in
@@ -2765,7 +2765,8 @@ sharing stays as it is"):
      `Jotform_Total_Attendance_Last_Month` of 2026-10-15; and the report type
      `Attendance_Totals`), the test report and the dashboard
      (`Dashboard:Attendance/Jotform_Attendance_test`), into a new dated folder (as
-     `data/sf_totals2_2026-10-15/before/`). It is the rollback and the starting point; compare it
+     `data/sf_totals2_2026-10-15/before/`). It is the starting point and, for only the components
+     the change then makes, the rollback (Rollback, below); compare it
      with `data/sf_totals2_2026-10-15/after/` (or the latest read-back) to see whether anything
      changed in Salesforce since.
   2. Copy that retrieve and edit the copy, only the files that change. A new partner's Partner

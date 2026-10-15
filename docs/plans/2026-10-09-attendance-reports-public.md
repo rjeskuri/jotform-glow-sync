@@ -215,7 +215,11 @@ For later:
    org.
    > **Done 2026-10-09 - never rerun** (2026-10-16): `public_2026-10-09/` is superseded. Every
    > dashboard or report deploy starts from a fresh retrieve of what is live; the only rollback
-   > for the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/`.
+   > for the 2026-10-15 change is its three changed components (the dashboard
+   > `Attendance/Jotform_Attendance_test`, the reports `Attendance/Total_Attendance_Last_Month`
+   > and `Attendance/Total_Attendance_by_Partner_by_Month`) from
+   > `data/sf_totals2_2026-10-15/before/` (RUNBOOK "Attendance dashboard in Salesforce",
+   > Rollback).
 6. Docs on the branch: RUNBOOK (Access), BACKLOG 27 / 60 / 79, DECISIONS, this plan's Result;
    `make check`.
 7. Ryan: the steps below.
@@ -228,7 +232,11 @@ For later:
    > **Done 2026-10-09 (by the metadata dates) - never rerun: it would overwrite the 2026-10-15
    > dashboard** (the total as Jotform plus the three partners; noted 2026-10-16). Every
    > dashboard or report deploy starts from a fresh retrieve of what is live; the only rollback
-   > for the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/`.
+   > for the 2026-10-15 change is its three changed components (the dashboard
+   > `Attendance/Jotform_Attendance_test`, the reports `Attendance/Total_Attendance_Last_Month`
+   > and `Attendance/Total_Attendance_by_Partner_by_Month`) from
+   > `data/sf_totals2_2026-10-15/before/` (RUNBOOK "Attendance dashboard in Salesforce",
+   > Rollback).
    ```bash
    cd ~/jotform-glow-sync/data/sf_dashboard_2026-10-02/public_2026-10-09
    sf project deploy start --dry-run -o glow -d force-app    # check only, once more
@@ -313,8 +321,11 @@ For later:
   2026-10-15 retrieve of ticket #35. The deploy id is not known here.
   - Not checked: the folders' shares, the set's assignments, the refresh schedule.
   - `public_2026-10-09/` is superseded: never redeploy it. Its dashboard would overwrite the
-    2026-10-15 one (the total as Jotform plus the three partners; rollback of that change:
-    `data/sf_totals2_2026-10-15/before/`). The Rollback above still holds for the shares, the
+    2026-10-15 one (the total as Jotform plus the three partners; rollback of that change: only
+    its three changed components, the dashboard `Attendance/Jotform_Attendance_test` and the
+    reports `Attendance/Total_Attendance_Last_Month` and
+    `Attendance/Total_Attendance_by_Partner_by_Month`, from `data/sf_totals2_2026-10-15/before/`;
+    RUNBOOK "Attendance dashboard in Salesforce", Rollback). The Rollback above still holds for the shares, the
     permission set and the refresh; for the labels, retrieve first and change only the label.
 - **Backup** (05:14 UTC, read only): `data/sf_dashboard_2026-10-02/before_public_2026-10-09/`.
   - It holds 24 files: the 13 reports, the report types `Attendance_Totals` and

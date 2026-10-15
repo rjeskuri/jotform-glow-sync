@@ -69,8 +69,9 @@ found by the clean spelling.
   the old or the new code, both complete.
 - **Rollback**: redeploy `before` (the 03:22 UTC version), only the two classes this change
   deploys. Since 2026-10-16 (DECISIONS): first retrieve the two classes and the trigger fresh and
-  compare them with `data/sf_processor_2026-10-07/after`; if they differ, something was deployed
-  since - stop and build the rollback from that retrieve (Result, below).
+  compare them with `data/sf_processor_2026-10-07/after`, ignoring a missing final newline
+  (Salesforce stores the test class without it); any other difference means something was
+  deployed since - stop and build the rollback from that retrieve (Result, below).
 - The class is the vendor's (Studio Infinite Lives); Ryan decided not to coordinate with the other
   administrator for these changes (2026-10-02).
 
@@ -98,6 +99,7 @@ found by the clean spelling.
   trigger. Since 2026-10-16 (DECISIONS): first retrieve the two classes and the trigger fresh
   (`sf project retrieve start -m ApexClass:AttendanceBatchProcessor ...`, VPN off) and compare them
   with this deploy's build, `data/sf_processor_2026-10-07/after` (the read-back equalled it
-  except the test class's final newline, above); if they differ, something was deployed since -
-  stop and build the rollback from that retrieve instead.
+  except the test class's final newline, above: ignore a missing final newline when comparing);
+  any other difference means something was deployed since - stop and build the rollback from
+  that retrieve instead.
 
