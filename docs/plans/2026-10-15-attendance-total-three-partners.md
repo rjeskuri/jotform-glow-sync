@@ -21,9 +21,12 @@ Salesforce-entered counts.
 - Before this change the total (`totals1/`, 2026-10-07) summed `Girls_Present__c` over every
   `Success` batch, whatever club typed it into Salesforce
   ([plan](2026-10-06-attendance-totals.md)).
-- The three partners whose clubs report through Salesforce instead of Jotform are Education and
-  English for You, Tumaini La Maisha and Ng'aa Maskani (the Partners tab's `jotform` = `no`;
-  [plan](2026-10-06-clubs-off-jotform.md)).
+- The three partners whose clubs are to report through Salesforce only (Ryan, 2026-10-06) are
+  Education and English for You, Tumaini La Maisha and Ng'aa Maskani. Their retirement from the
+  forms is pending: [plan](2026-10-06-clubs-off-jotform.md) is in progress and nothing is
+  applied, so the Partners tab's `jotform` column is not yet `no` for them and their 38 clubs are
+  still on the Africa Club picker. Until then a Jotform batch from one of those clubs counts once,
+  through the Jotform branch of the filter (2, Build).
 - Ryan's decisions of 2026-10-15:
   - Total attendance = the Jotform attendance plus the Salesforce-entered counts of the three
     partners; any other club's attendance entered in Salesforce (a `Success` batch whose

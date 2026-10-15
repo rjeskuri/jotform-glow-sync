@@ -2696,8 +2696,17 @@ sharing stays as it is"):
 - **Photos**: none in Salesforce since 2026-10-01; they are in Google Drive ("Photos", above).
 
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
-- Everything is in `data/sf_dashboard_2026-10-02/`. `gen.py` builds every report, the batch
-  report type `Attendance_Totals` and the dashboard into `build/`, from:
+- **`gen.py` is behind what is live: never use it as it is.** It builds `totals1/` (2026-10-07)
+  and was not updated for the 2026-10-09 Access change or the 2026-10-15 change (the total as
+  Jotform plus the three partners, the new report `Jotform_Total_Attendance_Last_Month`, the four
+  tiles); a deploy of its build would undo them on the dashboard and the two Total reports. The
+  2026-10-15 change was made by editing a fresh retrieve (`data/sf_totals2_2026-10-15/before/`),
+  and the deployed state was retrieved back into `data/sf_totals2_2026-10-15/after/` (0
+  differences from the build): that is what is live today. A change starts from a fresh retrieve
+  of what is live and edits that (The steps, below).
+- What built `totals1/` and the copies before it is in `data/sf_dashboard_2026-10-02/`. `gen.py`
+  builds every report, the batch report type `Attendance_Totals` and the dashboard into `build/`,
+  from:
   - `partners.json`: the Partner filter values;
   - `before/`: the test report as it was;
   - the deployed copies (`after/`, `fix1/`, `after2/`, `totals1/`): the dashboard's running
@@ -2741,15 +2750,22 @@ sharing stays as it is"):
   `gen.py` only in those.
 - **The steps:**
   1. Back up what is live: `sf project retrieve start -o glow` the reports below (the six
-     `Jotform_*`, the six of `totals1/` and the report type `Attendance_Totals`), the test report
-     and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a dated folder
-     beside the others.
-  2. Edit `gen.py` or `partners.json`, then `python3 gen.py`.
-  3. Copy only the changed files into a new folder with `sfdx-project.json` (as `fix1/`).
+     `Jotform_*` of the first deploy; the six of `totals1/`, the two Total reports
+     `Total_Attendance_Last_Month` and `Total_Attendance_by_Partner_by_Month` among them;
+     `Jotform_Total_Attendance_Last_Month` of 2026-10-15; and the report type
+     `Attendance_Totals`), the test report and the dashboard
+     (`Dashboard:Attendance/Jotform_Attendance_test`), into a new dated folder (as
+     `data/sf_totals2_2026-10-15/before/`). It is the rollback and the starting point; compare it
+     with `data/sf_totals2_2026-10-15/after/` (or the latest read-back) to see whether anything
+     changed in Salesforce since.
+  2. Copy that retrieve and edit the copy, only the files that change. A new partner's Partner
+     filter value is in the dashboard's XML; add it to `partners.json` as well, so the lists stay
+     one. Not `gen.py` (above).
+  3. Keep only the changed files in a new folder with `sfdx-project.json` (as `fix1/`).
   4. Check-only: `cd` there, then `sf project deploy start --dry-run -o glow -d force-app`.
   5. Ryan's go; then the same command without `--dry-run`.
-  6. Check after: retrieve again and compare with the build. Run one changed report through the
-     Analytics API, and compare its totals with SOQL.
+  6. Check after: retrieve again into a dated folder (as `after/`) and compare with the edited
+     copy. Run one changed report through the Analytics API, and compare its totals with SOQL.
 
 **Refreshing through the API** (the PUT is gated by the live gate: Ryan's go): `sf api request rest
 '/services/data/v62.0/analytics/dashboards/01ZRP00000BE2TR2A1' -o glow -X PUT -b '{}'`.
