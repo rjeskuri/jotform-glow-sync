@@ -1433,24 +1433,60 @@ class AttendanceTotalsRunbook(unittest.TestCase):
                               "the total - a positive statement (\"any other … is filtered out of the total\"), "
                               "not \"no other … is left out\"")
 
-    def test_the_total_is_no_longer_every_success_batch(self):
-        text = flat(self.totals())
-        where = f"RUNBOOK section {self.TOTALS[3:]!r}"
-        # the old definition: the total is the sum over Success batches, with no restriction after it
-        old = re.compile(r"total attendance\W{0,5}(=|is)\s*the sum over (all |every )?`?Success`? batch(es)?\s*[;.,)]",
-                         re.I)
-        self.assertNotRegex(text, old, f"{where} still says the total is the sum over every `Success` batch")
-        self.assertNotRegex(text, r"(?i)\b(sum|total) (over|of) (all|every) `?Success`? batch",
-                            f"{where} still says the total covers every `Success` batch")
-        self.assertNotRegex(text, r"(?i)\bwhatever (its |their |the )?source",
-                            f"{where} still counts a batch \"whatever its source\"")
-        # a sum over `Success` batches says whose: never every club or source
-        for m in re.finditer(r"(?i)\b(sum|total)\s+(over|of)\s+(the\s+)?`?Success`?\s+batch(es)?\b([^.;]{0,80})", text):
+    # the 2026-10-07 rule, which ticket #35 replaced: the total is the sum over every `Success` batch.
+    # The definition with no restriction after it ("Total attendance = [the] SUM over `Success` batches;")
+    OLD_RULE = re.compile(r"total attendance\W{0,5}(=|is)\s*(the\s+)?sum over (all |every )?`?Success`? batch(es)?"
+                          r"\s*[;.,)]", re.I)
+    EVERY_BATCH = re.compile(r"\b(sum|total) (over|of) (all|every) `?Success`? batch", re.I)
+    WHATEVER = re.compile(r"\bwhatever (its |their |the )?source", re.I)
+    SUM_OVER = re.compile(r"\b(sum|total)\s+(over|of)\s+(the\s+)?`?Success`?\s+batch(es)?\b([^.;]{0,80})", re.I)
+
+    def unrestricted(self, text):
+        """The phrases of `text` that state the total as the sum over `Success` batches with no
+        restriction: the old definition, every/all batches, "whatever its source", or a sum over
+        `Success` batches that never says whose (or says every club's)."""
+        text = flat(text)
+        found = [m.group(0) for rx in (self.OLD_RULE, self.EVERY_BATCH, self.WHATEVER) for m in rx.finditer(text)]
+        for m in self.SUM_OVER.finditer(text):
             after = m.group(5)
-            self.assertNotRegex(after, r"(?i)\b(every|all|any)\s+(clubs?|sources?|batch(es)?|partners?)\b",
-                                f"{where}: \"{m.group(0)}\" sums every club's `Success` batches")
-            self.assertRegex(after, r"(?i)\b(whose|where|which|that|Jotform|three|3)\b",
-                             f"{where}: \"{m.group(0)}\" sums `Success` batches without saying whose")
+            if (re.search(r"(?i)\b(every|all|any)\s+(clubs?|sources?|batch(es)?|partners?)\b", after)
+                    or not re.search(r"(?i)\b(whose|where|which|that|Jotform|three|3)\b", after)):
+                found.append(m.group(0))
+        return found
+
+    def test_the_total_is_no_longer_every_success_batch(self):
+        # neither the totals section nor the dashboard's still states the old unrestricted rule
+        for title, text in ((self.TOTALS, self.totals()), (self.DASHBOARD, self.dashboard())):
+            self.assertEqual(self.unrestricted(text), [],
+                             f"RUNBOOK section {title[3:]!r} still states the total as the sum over every "
+                             "`Success` batch (whatever its source): say whose batches it sums (Jotform plus the "
+                             "three partners)")
+
+    def test_a_decision_stating_the_old_total_points_at_the_new_rule(self):
+        """docs/DECISIONS.md's header: a decision that amends an earlier one says so, and the earlier one
+        gets a dated bullet pointing at it. An entry that states the total as the sum over `Success`
+        batches without a restriction is followed, in that entry, by a dated line pointing at the
+        2026-10-15 rule (its date and the three partners, or ticket #35)."""
+        path = os.path.join(REPO, "docs", "DECISIONS.md")
+        entries = re.split(r"(?m)^(?=### )", read(path))[1:]
+        self.assertTrue(entries, "docs/DECISIONS.md: no `### ` decision entries")
+        # a dated line (bullet or not) that names 2026-10-15 near its start and the new rule
+        pointer = re.compile(r"^\s*(?:-\s+)?.{0,40}?\b2026-10-15\b.*?(\b(three|3)\b.{0,60}\bpartners?\b|#35\b)", re.I)
+        rejected = re.compile(r"^\s*-\s+\*\*Rejected:?\*\*", re.I)
+        unpointed = []
+        for entry in entries:
+            lines = entry.split("\n")
+            pointers = [i for i, line in enumerate(lines) if pointer.search(line)]
+            # where the entry states the old rule as its own (not in a Rejected bullet, not in the pointer)
+            stated = [i for i, line in enumerate(lines)
+                      if i not in pointers and not rejected.search(line) and self.unrestricted(line)]
+            if stated and not any(p > max(stated) for p in pointers):
+                unpointed.append(lines[0].strip())
+        self.assertEqual(unpointed, [],
+                         f"docs/DECISIONS.md: {unpointed} state total attendance as the sum over every `Success` "
+                         "batch with no dated line after it pointing at the 2026-10-15 rule (Jotform plus the three "
+                         "partners, ticket #35); add one to each, e.g. \"- 2026-10-15: amended - the total is Jotform "
+                         "plus the three partners (#35)\"")
 
     def test_both_measures_are_named_and_the_monthly_report_stays_out(self):
         for title, text in ((self.TOTALS, self.totals()), (self.DASHBOARD, self.dashboard())):

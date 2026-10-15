@@ -114,8 +114,9 @@ Attendance Last Month" 7,227 = SOQL `SELECT COUNT(Id) FROM Attendance__c WHERE A
 - Since 1 September: 10,329 attendances, 3,441 distinct girls, 209 clubs.
 - Double counting: 0 Contact + date pairs appear twice since 1 September (no girl is counted twice
   on the same date); 0 attendance rows without a batch.
-- Months: separated by `Attendance_Date__c`, the session date. The September back-fill created
-  about 4,978 September-dated rows on 2026-10-02, which a report by `CreatedDate` would put in
+- Months: separated by `Attendance_Date__c`, the session date. About 4,978 September-dated rows
+  were created on 2026-10-02 (the September back-fill's 4,712 plus live submissions), which a
+  report by `CreatedDate` would put in
   October.
 - Leadership's "about 4 thousand": no figure near 4,000 was found in these counts; Ryan,
   2026-10-15: report what the numbers actually are.

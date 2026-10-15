@@ -360,6 +360,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Total attendance = SUM over `Success` batches; "Jotform only" = the same with `Creator__c` starting `Jotform`; distinct-girl figures are Jotform only and say so**
 - **Why:** deployed 2026-10-07 03:22 UTC (0AfRP000002gKqn0AE): the field (plan 2 A) and the count on new batches (B); the back-fill of the older batches (C) done 2026-10-07 (573 batches set; SUM over `Success` = the attendance rows, 7,540). One object, one report type, one filter for the label; aggregates have no names, so no distinct count can include them
 - **Consequences:** a one-off back-fill of the existing successes by `tools/sf_girls_present.py` (C), right after the field is deployed and before the totals go on the dashboard; the Monthly Report's weekly counts are never summed into attendance; `Girls_Enrolled__c` is created empty for BACKLOG 58 if Ryan agrees ([plan](plans/2026-10-06-attendance-totals.md))
+- 2026-10-15: amended - the total is Jotform plus the three partners (Education and English for You, Tumaini La Maisha, Ng'aa Maskani); any other Salesforce-entered attendance is left out (#35, see the 2026-10-15 entry)
 
 ### 2026-10-06 — "Did not submit" and "blank" defined
 
@@ -447,6 +448,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - ([plan](plans/2026-10-09-attendance-reports-public.md))
 - **Why:** leadership and staff get the attendance dashboard and its reports in Salesforce instead of administrators only
 - **Consequences:** the share opens everything in the folders, the March pilot dashboard and its 5 reports included; the dashboard runs as Ryan and shows the whole organisation to every internal user; to be deployed by Ryan from `data/sf_dashboard_2026-10-02/public_2026-10-09/` (check-only `0AfRP000002gXhZ0AU`); whether a folder deploy replaces shares is not documented, so a folder is deployed only from a fresh retrieve and a share removed in the folder's Share dialog
+- 2026-10-15: deployed 2026-10-09 ~05:35 UTC, by the metadata dates (the deploy id is not known); `public_2026-10-09/` is superseded and never redeployed: its dashboard would overwrite the 2026-10-15 one (RUNBOOK "Attendance dashboard in Salesforce", Access)
 
 ### 2026-10-09 — One read-only permission set for the attendance reports
 
@@ -616,7 +618,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 
 ### 2026-10-15 — Total attendance is Jotform plus the three Salesforce-reporting partners
 
-- Total attendance = the Jotform attendance plus the Salesforce-entered counts of Education and English for You, Tumaini La Maisha and Ng'aa Maskani, the three partners whose clubs report through Salesforce (Partners tab `jotform` = `no`). Any other club's attendance entered in Salesforce is left out of the total. The dashboard shows "Total attendance (Jotform + 3 partners)" beside "Attendance (Jotform only)"; there is no distinct-girls tile; the Monthly Report is never added to attendance (ticket #35; [plan](plans/2026-10-15-attendance-total-three-partners.md); RUNBOOK "Attendance totals and partner-reported counts").
+- Total attendance = the Jotform attendance plus the Salesforce-entered counts of Education and English for You, Tumaini La Maisha and Ng'aa Maskani, the three partners whose clubs are to report through Salesforce only. Their retirement from the forms (the Partners tab's `jotform` = `no`) is pending ([plan](plans/2026-10-06-clubs-off-jotform.md), nothing applied); until then a Jotform batch from their clubs counts once, through the Jotform branch of the filter. Any other club's attendance entered in Salesforce is left out of the total. The dashboard shows "Total attendance (Jotform + 3 partners)" beside "Attendance (Jotform only)"; there is no distinct-girls tile; the Monthly Report is never added to attendance (ticket #35; [plan](plans/2026-10-15-attendance-total-three-partners.md); RUNBOOK "Attendance totals and partner-reported counts").
 - **Why:** Ryan, 2026-10-15: "There are 3 African partners that were specified that will give their attendance through Salesforce only. Any other clubs' attendance through Salesforce should be filtered out."
-- **Rejected:** the 2026-10-07 total over every `Success` batch (it would count any club's Salesforce entry); a "Girls reached (distinct)" tile (the ticket's first outline).
+- **Rejected:** the total of the 2026-10-06 decision (deployed 2026-10-07), the sum over every `Success` batch (it would count any club's Salesforce entry); a "Girls reached (distinct)" tile (the ticket's first outline).
 - **Consequences:** the two Total reports carry the filter logic `1 AND (2 OR 3) AND 4 AND 5`; a fourth partner that reports through Salesforce needs its name added to filter 3 of both reports, on Ryan's go.

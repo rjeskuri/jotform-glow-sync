@@ -1,7 +1,7 @@
 ---
 title: Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped
 author: Claude (with Ryan's decisions of 2026-10-09)
-status: blocked          # built and validated check-only 2026-10-09 (0AfRP000002gXhZ0AU, 5 of 5, 0 errors; after the review's fixes); waiting for Ryan (deploy, refresh schedule, assignment)
+status: in-progress      # deployed 2026-10-09 ~05:35 UTC by the metadata dates (read 2026-10-15, Result); shares, refresh schedule and assignment not checked
 backlog: 60
 created: 2026-10-09
 intent: none - Ryan's decisions of 2026-10-09 in conversation (DECISIONS); BACKLOG 60
@@ -296,6 +296,16 @@ For later:
   decision keeps it as it is.
 
 ## Result (2026-10-09, build and check-only; nothing deployed, no record written)
+- **2026-10-15: deployed 2026-10-09 ~05:35 UTC**, by the metadata dates (read only, SOQL on
+  PermissionSet, Report and Dashboard): the permission set `Attendance_Report_Viewer` and the
+  report `Jotform_Monthly_Attendance_test` (now labelled "Jotform Monthly Attendance") were last
+  modified 2026-10-09 05:35 UTC, and the dashboard's title had lost "(test)" before the
+  2026-10-15 retrieve of ticket #35. The deploy id is not known here.
+  - Not checked: the folders' shares, the set's assignments, the refresh schedule.
+  - `public_2026-10-09/` is superseded: never redeploy it. Its dashboard would overwrite the
+    2026-10-15 one (the total as Jotform plus the three partners; rollback of that change:
+    `data/sf_totals2_2026-10-15/before/`). The Rollback below still holds for the shares, the
+    permission set and the refresh; for the labels, retrieve first and change only the label.
 - **Backup** (05:14 UTC, read only): `data/sf_dashboard_2026-10-02/before_public_2026-10-09/`.
   - It holds 24 files: the 13 reports, the report types `Attendance_Totals` and
     `Accounts_Contacts_Attendance` (the second retrieved after the review, 05:2x UTC; both

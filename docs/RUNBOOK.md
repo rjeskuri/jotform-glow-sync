@@ -2514,9 +2514,11 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - **Verify:** the Signals, below.
 - **Rollback:** of the 2026-10-15 rule, redeploy `data/sf_totals2_2026-10-15/before/` ("Attendance dashboard in Salesforce", Rollback); of the field, redeploy `data/sf_totals_2026-10/before/` (the fields can stay).
 
-Three partners' clubs do not use Jotform and report their attendance through Salesforce instead
-(the Partners tab's `jotform` column says `no`; [plan](plans/2026-10-06-clubs-off-jotform.md)).
-Leadership wants one attendance total that includes them, shown beside the figure from the forms
+Three partners' clubs are to report their attendance through Salesforce only (Ryan, 2026-10-06).
+Their retirement from the forms is pending: [plan](plans/2026-10-06-clubs-off-jotform.md) is in
+progress and nothing is applied, so the Partners tab's `jotform` column is not yet `no` for them
+and their 38 clubs are still on the Africa Club picker. Until then a Jotform batch from one of
+those clubs counts once, through the Jotform branch of the filter (2, below). Leadership wants one attendance total that includes them, shown beside the figure from the forms
 alone (Ryan, 2026-10-15).
 
 **The field.** `Attendance_Batch__c.Girls_Present__c` (Number, "Girls present") is the one
@@ -2542,8 +2544,9 @@ an aggregate and succeeds with no rows.
 - The dashboard shows the two side by side, labelled "Total attendance (Jotform + 3 partners)" and
   "Attendance (Jotform only)".
 - Both count attendances (girls × sessions). Months separate by `Attendance_Date__c` (the session
-  date), never by when the batch was created: the September back-fill created about 4,978
-  September-dated rows on 2026-10-02, which a report by created date would put in October.
+  date), never by when the batch was created: about 4,978 September-dated rows were created on
+  2026-10-02 (the September back-fill's 4,712 plus live submissions), which a report by created
+  date would put in October.
 - The Monthly Report's weekly counts are never added to attendance, in either measure.
 - A girl counted twice in one month on two sources would be a double count: a club reports on one
   source only.
@@ -2565,7 +2568,8 @@ form, a Salesforce screen flow, a sheet import: BACKLOG 72, Ryan's decision) wri
 The processor's club-and-day lock still applies: an aggregate `Success` for a club and date makes
 a Jotform batch for that date a `Failed` "Duplicate", and attendance rows on that date make an
 aggregate `Failed` "Attendance already exists" - which is why aggregates are dated the last day of
-the month, a day the three partners' clubs never send a Jotform batch for.
+the month, a day the three partners' clubs will not send a Jotform batch for once they are off the
+forms (pending, above).
 
 **The one-off back-fill** (`tools/sf_girls_present.py`) - **done 2026-10-07**, on Ryan's go:
 every `Success` batch from before the deploy got its count (= its attendance rows; 573
@@ -2592,7 +2596,7 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
 ## Attendance dashboard in Salesforce
 
 - **When:** a new partner (the Partner filter), a new staff user (the permission set), a report change.
-- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); the 2026-10-09 Access change is validated check-only and waits for Ryan's deploy ([Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
+- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
 - **Dry run:** the check-only deploy (`--dry-run`), step 4 of "The steps".
 - **Apply:** the same without `--dry-run`, Ryan's go (VPN off).
 - **Verify:** retrieve again and compare with the build; one report's totals against SOQL.
@@ -2601,7 +2605,7 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
 Since 2026-10-02 the dashboard **"Jotform Attendance"** (dashboard folder Attendance,
 DeveloperName `Jotform_Attendance_test`) shows the Jotform attendance as charts, built only
 from data Salesforce already has ([plan and result](plans/2026-10-02-attendance-dashboard.md)).
-Its label carries "(test)" until Ryan deploys the 2026-10-09 change (Access, below).
+Its label lost "(test)" with the 2026-10-09 Access deploy (below); the DeveloperName keeps it.
 
 What it shows - four headline numbers, weekly and monthly charts, last month by partner and
 by module, the clubs with no attendance or not submitting, the blank submissions - and how to
@@ -2641,9 +2645,16 @@ month" settles around the 20th; a club without a partner; the refresh is a snaps
 **Access** (Ryan's decisions of 2026-10-09,
 [plan](plans/2026-10-09-attendance-reports-public.md); they reverse his 2026-10-06 "folder
 sharing stays as it is"):
-- **Status**: built and validated check-only on 2026-10-09 (`0AfRP000002gXhZ0AU`, 5 of 5, 0
-  errors). Until Ryan deploys `data/sf_dashboard_2026-10-02/public_2026-10-09/`, both folders stay
-  hidden and only System Administrators (View All Data) see them.
+- **Status**: deployed 2026-10-09 ~05:35 UTC, by the metadata dates. The permission set
+  `Attendance_Report_Viewer` and the report `Jotform_Monthly_Attendance_test` (now labelled
+  "Jotform Monthly Attendance") were last modified 2026-10-09 05:35 UTC, and the dashboard's title
+  had lost "(test)" before the 2026-10-15 retrieve (SOQL on PermissionSet, Report and Dashboard,
+  2026-10-15). The deploy id is not known here; the check-only before it was `0AfRP000002gXhZ0AU`
+  (5 of 5, 0 errors). Not checked on 2026-10-15: the folders' shares (the shares API, below), the
+  set's assignments and the daily refresh.
+- **Never redeploy `data/sf_dashboard_2026-10-02/public_2026-10-09/`**: it is superseded, and its
+  dashboard would overwrite the 2026-10-15 one (the total as Jotform plus the three partners). The
+  rollback of the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/` (Rollback, below).
 - **Both Attendance folders are shared as Viewer with All Internal Users**: `folderShares` View,
   `AllInternalUsers`, `Organization`. Never a guest or portal group.
   - The share opens everything in the folders, including the March pilot dashboard "Attendance"
@@ -2652,7 +2663,7 @@ sharing stays as it is"):
     `Folder.AccessType` reads `Hidden` even on a shared folder.
   - Whether a folder deploy replaces or adds shares is not documented. Deploy a folder only from a
     fresh retrieve, and remove a share in the folder's Share dialog.
-- **"(test)" is dropped** by the same deploy: "Jotform Attendance" and "Jotform Monthly
+- **"(test)" was dropped** by the same deploy (2026-10-09): "Jotform Attendance" and "Jotform Monthly
   Attendance". The DeveloperNames stay (`Jotform_Attendance_test`,
   `Jotform_Monthly_Attendance_test`), so the paths below are unchanged.
 - **Permission set `Attendance_Report_Viewer`**, read only. The dashboard runs as Ryan and shows
