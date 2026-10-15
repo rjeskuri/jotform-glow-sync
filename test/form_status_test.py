@@ -853,8 +853,10 @@ class ModuleAndNamesAudit(unittest.TestCase):
         with mock.patch.object(glow_sync, "MODULE_CALC_VALUES", False):
             self.assertEqual((form_status.audit_module_values(bare)[0], form_status.audit_module_values(qs)[0]),
                              ([], []))
+            # who clears them depends on the form kind (FixHintsByFormKind): the audit alone
+            # does not know it, so only the part both kinds share is pinned here
             (problem,) = form_status.audit_module_values(shifted)[0]
-            self.assertIn("a sync apply by hand clears them", problem)
+            self.assertIn(" clears them (glow/sync.py MODULE_CALC_VALUES is off)", problem)
         self.assertEqual(form_status.module_values_line(summary),
                          "q14 aligned (2 options), q92 aligned (3 options), q93 aligned (2 options)")
 
@@ -1190,6 +1192,164 @@ class JotformUsage(unittest.TestCase):
         self.assertFalse(form_status.storage_status_line(store).startswith("!!"))
         store = form_status.read_storage(self.Fake(**{"/user/usage": {"uploads": str(self.CAP_UP), "submissions": "1"}}))
         self.assertTrue(form_status.storage_status_line(store).startswith("!! storage: upload space 10.00 GiB of 10.00 GiB (100.0%) -> alarm;"))
+
+
+# ---- ticket #33: each fix hint names who repairs the drift, by form kind
+
+RUNNER = "the runner's next run (or the sync's apply by hand now)"     # an enabled regional form
+HAND = "a sync apply by hand"                                           # the template, a disabled form
+# (form id, Jotform status, label): the kinds a report can be for
+REGIONAL_KINDS = tuple((fid, "ENABLED", f"{region} enabled") for region, fid in glow_forms.REGIONALS.items())
+HAND_KINDS = ((glow_forms.TEMPLATE, "ENABLED", "template"),
+              (glow_forms.TEMPLATE, "DISABLED", "template, status disabled"),
+              # a regional form whose status is anything but ENABLED is not the runner's: disabled,
+              # deleted, or a status Jotform did not report (None)
+              *((fid, status, f"{region} {status or 'no status'}")
+                for region, fid in glow_forms.REGIONALS.items() for status in ("DISABLED", "DELETED", None)),
+              # an enabled form that is none of the four regionals: a retired (defunct) form, an unknown id
+              *((fid, "ENABLED", f"defunct {fid} enabled") for fid in form_status.DEFUNCT),
+              ("999", "ENABLED", "unknown id enabled"))
+# --rendered reads enabled forms only and takes the kind from r["id"]: the four regionals, then the
+# ids that get the hand wording (the template, a retired form, an unknown id, no id at all)
+RENDERED_REGIONAL = tuple(glow_forms.REGIONALS.values())
+RENDERED_HAND = (glow_forms.TEMPLATE, *form_status.DEFUNCT, "999", None)
+
+
+def rendered_r(form_id, **rest):
+    """The report dict --rendered is handed for `form_id` (None: a dict with no id)."""
+    return dict(rest, **({} if form_id is None else {"id": form_id}))
+
+
+def hint_report(qs, wire, form_id, status):
+    """form_report for `form_id` as Jotform reports `status`, over a fake form with these
+    questions and rules (nothing else in the form is under test)."""
+    qs = copy.deepcopy(qs)
+    for q_id, q in qs.items():
+        q.setdefault("qid", q_id)
+
+    class Fake:
+        def get(self, path, **params):
+            if path.endswith("/questions"):
+                return copy.deepcopy(qs)
+            if path.endswith("/properties"):
+                return {"conditions": wire, "clearFieldOnHide": "disable",
+                        "language": [{"options": "English (US)|Español", "primaryLanguage": "en"}]}
+            if path.endswith("/translations"):
+                return served_store(qs)
+            return {"title": "t", "count": "0", **({} if status is None else {"status": status})}
+    return form_status.form_report(form_id, Fake(), {})
+
+
+def built_with(first=True, operand=True, required=True):
+    """The guard form as the sync generates it with question 18's three constants so set."""
+    import contextlib
+    with contextlib.ExitStack() as stack:
+        for name, value in (("CONTACT_IDS_FIRST", first), ("CONTACT_IDS_PICKER_OPERAND", operand),
+                            ("ROSTERS_REQUIRED", required)):
+            stack.enter_context(mock.patch.object(glow_sync, name, value))
+        return ClubGuardFixture.form(ClubGuardFixture())
+
+
+class FixHintsByFormKind(unittest.TestCase):
+    """The fix hints of form_status's problems name who repairs the drift: on an enabled regional
+    form the runner's next run (or the sync's apply by hand now), on the template and on a disabled
+    form (the runner syncs neither) a sync apply by hand. Read through form_report, for every kind
+    of form and for each hint's own drift; docs/DECISIONS.md, 2026-10-14."""
+
+    def check_kinds(self, qs, wire, fragment, tail, count=1):
+        """For every form kind, the `count` problems containing `fragment` carry RUNNER + tail on
+        an enabled regional form, HAND + tail on any other, and never the other kind's words."""
+        for form_id, status, label in REGIONAL_KINDS + HAND_KINDS:
+            with self.subTest(label):
+                problems = hint_report(qs, wire, form_id, status)["rule_problems"]
+                found = [p for p in problems if fragment in p]
+                self.assertEqual(len(found), count, (fragment, problems))
+                for p in found:
+                    if (form_id, status, label) in REGIONAL_KINDS:
+                        self.assertIn(RUNNER + tail, p)
+                        self.assertNotIn(HAND, p)
+                    else:
+                        self.assertIn(HAND + tail, p)
+                        self.assertNotIn("runner", p.lower())
+                        self.assertNotIn("sync's apply", p)
+
+    def test_the_module_values_hint_when_calcvalues_are_missing(self):
+        qs, wire = SameNameFixture.form(SameNameFixture(), switched=True)
+        qs = copy.deepcopy(qs)
+        for q in glow_sync.MODULES.values():
+            qs[q]["calcValues"] = ""
+        # the three module dropdowns, one problem each: question 98 copies the visible text
+        self.check_kinds(qs, wire, "no calcValues - question 98 (module_id", " writes them", count=3)
+
+    def test_the_module_values_hint_when_calcvalues_are_out_of_line(self):
+        qs, wire = SameNameFixture.form(SameNameFixture(), switched=True)
+        qs = copy.deepcopy(qs)
+        qs["92"]["calcValues"] = "|Elective - Healthy GLOW|Core 2|Special Event - Welcome Session"
+        self.check_kinds(qs, wire, "q92 (year 2): calcValues out of line", " writes them")
+
+    def test_the_module_values_hint_when_the_constant_is_off(self):
+        qs, wire = SameNameFixture.form(SameNameFixture(), switched=True)
+        qs = copy.deepcopy(qs)
+        qs["92"]["calcValues"] = "|Elective - Healthy GLOW|Core 2|Special Event - Welcome Session"
+        with mock.patch.object(glow_sync, "MODULE_CALC_VALUES", False):
+            self.check_kinds(qs, wire, "calcValues out of line", " clears them (glow/sync.py MODULE_CALC_VALUES is off)")
+
+    def test_the_required_flag_hints(self):
+        # ROSTERS_REQUIRED on, the rosters built without the flag
+        qs, wire = built_with(required=False)
+        self.check_kinds(qs, wire, "roster(s) not required", " sets the flag")
+        # ROSTERS_REQUIRED off (the generated rollback), the rosters still required
+        qs, wire = built_with(required=True)
+        with mock.patch.object(glow_sync, "ROSTERS_REQUIRED", False):
+            self.check_kinds(qs, wire, "although glow/sync.py ROSTERS_REQUIRED is off", " clears the flag")
+
+    def test_the_question_18_hints(self):
+        # Contact_IDs calculated after the rosters (CONTACT_IDS_FIRST on, the form built with it off)
+        qs, wire = built_with(first=False)
+        self.check_kinds(qs, wire, "is calculated by rule", " puts it first")
+        # the Club picker an operand of question 18 (on, the form built without it)
+        qs, wire = built_with(operand=False)
+        self.check_kinds(qs, wire, "is not one of question 18's operands", " adds it")
+
+    def test_a_clean_form_says_nothing_of_either(self):
+        qs, wire = built_with()
+        for form_id, status, label in REGIONAL_KINDS + HAND_KINDS:
+            problems = hint_report(qs, wire, form_id, status)["rule_problems"]
+            self.assertEqual([p for p in problems if RUNNER in p or HAND in p], [], label)
+
+    def test_the_builder_only_hint_is_left_alone(self):
+        # a problem only a builder edit repairs never offers a sync apply (SHAPE_FIX), on any kind
+        qs, wire = SameNameFixture.form(SameNameFixture(), switched=True)
+        qs = copy.deepcopy(qs)
+        qs["93"]["multipleSelections"] = "Yes"
+        for form_id, status, label in REGIONAL_KINDS + HAND_KINDS:
+            found = [p for p in hint_report(qs, wire, form_id, status)["rule_problems"]
+                     if "module dropdown q93 (year 3) is a multi-select" in p]
+            self.assertEqual(len(found), 1, label)
+            self.assertIn("never a sync apply", found[0])
+            self.assertNotIn("runner", found[0].lower())
+
+    def test_the_served_page_hint_names_the_runner_on_a_regional_form_only(self):
+        # --rendered reads enabled forms only and tells the kind by r["id"]: only the four regionals
+        # are the runner's; the template, a retired form, an unknown id and no id get the hand wording
+        qs, _ = SameNameFixture.form(SameNameFixture(), switched=True)
+        bare = copy.deepcopy(qs)
+        for q in glow_sync.MODULES.values():
+            bare[q]["calcValues"] = ""
+        summary = form_status.audit_module_values(qs)[1]
+        page = served_modules_and_store(bare)
+        for form_id in RENDERED_REGIONAL + RENDERED_HAND:
+            with self.subTest(form_id=form_id):
+                problems = form_status.rendered_module_problems(rendered_r(form_id, module_values=summary), page)
+                self.assertEqual(len(problems), 3)
+                for p in problems:
+                    self.assertIn("carry no data-calcvalue", p)
+                    if form_id in RENDERED_REGIONAL:
+                        self.assertIn(RUNNER + " writes them", p)
+                        self.assertNotIn(HAND, p)
+                    else:
+                        self.assertIn(HAND + " writes them", p)
+                        self.assertNotIn("runner", p.lower())
 
 
 if __name__ == "__main__":

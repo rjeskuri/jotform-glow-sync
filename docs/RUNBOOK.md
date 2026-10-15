@@ -331,8 +331,10 @@ a `syncRequested … → HTTP 204` row every time the sheet sends the event.
 
 **Switches:**
 
-- Repository variable `AUTO_SYNC_APPLY`: `0` = every run is a dry run (start
-  here; read a day of SyncLog rows), `1` = runs apply within the bands.
+- Repository variable `AUTO_SYNC_APPLY`: normally `1`, so runs apply within the
+  bands. `0` is the emergency off switch (every run is a dry run), set only by a
+  rollback or an incident, which sets it back to `1` before it ends. A rollout
+  never sets it: the merge is the rollout.
 - Script Properties `SYNC_DISPATCH_REPO` / `SYNC_DISPATCH_TOKEN` unset = the
   sheet sends nothing (the daily run still happens).
 - Manual runs from the Actions tab apply only when both `AUTO_SYNC_APPLY=1`
@@ -508,11 +510,14 @@ audit, the `--club-guard` dry run and `--apply`, a second dry run, `form_status.
 translations and the browser checks, with the runner paused - as run, with what each
 form's dry run showed, in the [plan](plans/2026-09-29-club-guard.md#from-the-runbook-moved-2026-10-09).
 
-Rollback, per form (the runner paused from the first step to the last).
-While the `clubGuard` element exists, any apply regenerates the guard rules,
-so the element goes before the runner resumes.
+Rollback, per form. The guard is on `main`, so a form rolled back alone
+disagrees with it: this rollback stops the runner with the emergency switch
+from the first step to the last. While the `clubGuard` element exists, any
+apply regenerates the guard rules, so the element goes before the switch goes
+back to `1`.
 
-1. `AUTO_SYNC_APPLY=0`, then `python3 backup_forms.py --form <id>`.
+1. The emergency switch, `AUTO_SYNC_APPLY=0` (Ryan's go), then
+   `python3 backup_forms.py --form <id>`.
 2. `python3 restore_conditions.py --form <id> --from properties-<stamp>.json`
    (dry run, then `--apply`). `<stamp>` is the backup taken just before the
    `--club-guard --apply`, not `properties-latest.json`. On a form switched
@@ -531,7 +536,8 @@ so the element goes before the runner resumes.
    GIRLS spelling rule (`1 new, 1 dropped` with no roster change) unless an
    apply had already landed it. Back up, then `--apply`.
 6. `tools/form_status.py --form <id> --roster …`: rules CLEAN, `club guard:
-   none`. Then `AUTO_SYNC_APPLY=1`.
+   none`. Then `AUTO_SYNC_APPLY=1` (Ryan's go), which ends the emergency stop:
+   `main` and the form agree again.
 
 Do not revert the merge while any Club picker carries `calcValues`: clear
 them first (step 4) and re-read to confirm. The old code would keep the
@@ -611,31 +617,35 @@ by the runner on its next run, the SyncLog row `applied` with `question 18 rules
 the template and a disabled form are applied by hand: the sync's dry run, `--apply`, then
 `form_status.py --rendered`.
 
-**Rollback** (generated, per form, the runner paused): set
+**Rollback** (generated: merging the constants-off commit is the rollback): set
 `CONTACT_IDS_FIRST`, `CONTACT_IDS_PICKER_OPERAND` and `ROSTERS_REQUIRED` in
-`glow/sync.py` to `False` on a branch. The dry run then plans `REPLACE
+`glow/sync.py` to `False` on a ticket branch. The dry run then plans `REPLACE
 conditions` (`1 new, 1 dropped`) and `REQUIRED roster '<club>' (q…: No)` for
-every roster, with no warning. Apply it by hand, and `form_status` is CLEAN on
-the old shape. One constant alone works the same way, for example the
-required flag alone if a mentor cannot submit. The second path is
+every roster, with no warning; applied, `form_status` is CLEAN on the old
+shape. One constant alone works the same way, for example the required flag
+alone if a mentor cannot submit. Merging the constants-off commit to `main` is
+the rollback for every enabled regional form: the runner runs `main`'s
+constants and puts the old shape back on its next run (the `REQUIRED roster …
+No` lines are a change to it, and the rules rewrite rides along in the same
+apply). The rule-order constants alone give a rules-only plan, which waits for
+each region's next roster change (a difference in the rules alone is not a
+change to the runner). To roll a regional form back at once, apply it from
+`main` once the commit is in (backup, the sync's dry run, `--apply`, Ryan's
+go): no stop is needed, because `main` agrees. The template and a disabled form
+are applied by hand the same way (`--disabled-ok` on a disabled form).
+
+One form alone cannot stay rolled back while `main` disagrees with it: the
+runner rolls it forward again on its next run (the sync warns as above and the
+runner applies the rewrite). If that is ever needed (a mentor cannot submit on
+one form), first stop the runner with the emergency switch, `AUTO_SYNC_APPLY=0`
+(Ryan's go); then apply that form's rollback (the constants-off branch's dry
+run and `--apply`, or the second path below); and switch it back,
+`AUTO_SYNC_APPLY=1`, when `main` and the forms agree. The second path is
 `restore_conditions.py --form <id> --from properties-<stamp>.json` from the
 backup. It brings the old rules back and says so ("the snapshot calculates
-question 18 … the old way"). The form then reads NOT CLEAN, and while the
-runner applies with the constants on `main`, a rolled-back region is rolled
-forward again on its next run (the sync warns as above and the runner applies
-the rewrite). It does not touch the required flags. Neither path touches the
-picker, the guard, question 5 or the integration.
-
-The runner runs `main`'s constants. Once every form is rolled back, merge the
-constants-off commit to `main`, and only then set `AUTO_SYNC_APPLY=1`. Until
-then a rolled-back region is rolled forward again while the runner applies: a
-form rolled back by hand stays rolled back only while the runner is paused or
-`main` agrees with it. Never merge a constants-off commit while any form is
-still rolled out: with the constants off the runner puts the old shape back on
-every enabled regional form on its next run (the `REQUIRED roster … No` lines
-are a change to it, and the rules rewrite rides along in the same apply); the
-order constants off alone give a rules-only plan, which it applies with the
-next roster change (a difference in the rules alone is not a change to it).
+question 18 … the old way"), and the form then reads NOT CLEAN. It does not
+touch the required flags. Neither path touches the picker, the guard, question
+5 or the integration.
 
 Left open: Jotform never recalculates at submit. The order is Jotform's
 internal behaviour, not a contract (`--rendered` prints the build). Back-button
@@ -786,9 +796,9 @@ run and `--apply`, the sync's dry run and `--apply` (the three module lines), `f
 each form's dry run showed, in the [plan](plans/2026-10-02-names-and-modules.md#from-the-runbook-moved-2026-10-09). A
 dictionary that alters a name again: the names tool on that form, dry run first.
 
-**Rollback**, per form, the runner paused:
+**Rollback**:
 
-- Names: `python3 tools/fix_name_translations.py --form <id> --restore
+- Names (per form): `python3 tools/fix_name_translations.py --form <id> --restore
   backups/translations/<id>-<stamp>-before.json` (a dry run: the entries it
   puts back, per dictionary), then the same with `--apply`. It puts back every
   `base`/`en` entry of the saved store that the form no longer has, in the
@@ -796,15 +806,18 @@ dictionary that alters a name again: the names tool on that form, dry run first.
   it is first, re-reads and compares, and reads the page. Rolling back
   re-opens the defect: only if something else broke.
 - Modules (generated): set `MODULE_CALC_VALUES = False` in `glow/sync.py` on
-  a branch. The sync's dry run then plans `UPDATE module dropdown (q14, year 1:
-  calcValues cleared)` for each dropdown that carries them; apply it by hand,
-  and `form_status` is CLEAN under the constant. The runner applies those
-  lines as it applies the others, so a constants-off commit on `main` rolls
-  every enabled regional form back on the runner's next run, and a form rolled
-  back by hand while `main` disagrees is rolled forward; as with question 18,
-  merge it only once every form is rolled back. The second path is the questions
-  file `backup_forms.py` wrote (`calcValues` was `""` on every module dropdown
-  before the rollout).
+  a ticket branch. The sync's dry run then plans `UPDATE module dropdown (q14,
+  year 1: calcValues cleared)` for each dropdown that carries them; applied,
+  `form_status` is CLEAN under the constant. Merging the constants-off commit
+  is the rollback: the runner applies those lines as it applies the others, so
+  it rolls every enabled regional form back on its next run. To roll one back
+  at once, apply it from `main` once the commit is in: no stop is needed,
+  because `main` agrees. The template and a disabled form are applied by hand.
+  One form alone cannot stay rolled back while `main` disagrees (the runner
+  rolls it forward): as with question 18, that needs the emergency switch
+  ("The names list sent to Salesforce", Rollback). The second path is the
+  questions file `backup_forms.py` wrote (`calcValues` was `""` on every module
+  dropdown before the rollout).
 
 Neither touches the rosters, the rules, question 5 or the integration.
 
@@ -824,11 +837,11 @@ The procedure as run and what the dry run prints: [plan](plans/2026-10-06-module
 ## Special events
 
 - **When:** staff add a type of ad-hoc session or retire one; `form_status` reports a special event missing, twice or misspelled, a session rule for one, or the session bridge missing or out of place.
-- **Status:** live on all five forms since 2026-10-13 ([plan and Result](plans/2026-10-13-special-events.md#result-2026-10-13-ryans-go-for-each-write)); the types are "Welcome Session", live on all five forms since 2026-10-13, and "IDG Celebrations", added to `SPECIAL_EVENTS` 2026-10-14, rollout pending ([plan](plans/2026-10-14-idg-celebrations.md)).
+- **Status:** live on all five forms since 2026-10-13 ([plan and Result](plans/2026-10-13-special-events.md#result-2026-10-13-ryans-go-for-each-write)); the types are "Welcome Session", live on all five forms since 2026-10-13, and "IDG Celebrations", live on all five forms since 2026-10-14 ([plan and Result](plans/2026-10-14-idg-celebrations.md#result); still open: staff telling mentors, and the first IDG Celebrations batch in Salesforce to read).
 - **Dry run:** the sync's dry run, per form: one module line per dropdown. On a form whose rules are stale (the rollout of 2026-10-13), also one `REPLACE conditions`; for a type added after that, `(conditions unchanged - skipping the rewrite)`, unless roster changes come with it (then `REPLACE conditions` too, as on the template, which the runner never syncs).
 - **Apply:** the template first, by hand from the branch (its `--apply`, Ryan's go, then the browser checks); then the merge: the runner applies it to every enabled regional form on its next run; the template and a disabled form are applied by hand.
 - **Verify:** `form_status.py --rendered` CLEAN; on the template also the browser checks below.
-- **Rollback:** `restore_conditions.py --from` the snapshot for the rules; the options removed in the builder (below).
+- **Rollback:** the type's merge reverted first, then the option deleted in the builder; `restore_conditions.py --from` the snapshot only when the rules must come off at once (below).
 
 A special event is an ad-hoc session outside the curriculum (Ryan: "Welcome Session"
 on 2026-10-13, "IDG Celebrations" on 2026-10-14). It is one more option of every year's module
@@ -874,38 +887,43 @@ out of place) and plans only `REPLACE conditions`, which the runner applies on i
 **`tools/form_status.py`** reports a form NOT CLEAN until it carries each type once per module
 dropdown in the exact spelling, no rule shows a session dropdown for an event or on the year
 alone, and the bridge is there once, in its shape, before every session rule and every copy
-into question 100. Before the apply each of these reads `awaiting a sync apply by hand, template
-first (RUNBOOK "Special events")` (the hint's wording predates DECISIONS 2026-10-14: on a
-regional form the apply is the runner's next run). The report line reads `special events: 2
+into question 100. Before the apply each of these reads, on an enabled regional form, `awaiting
+the runner's next run (or the sync's apply by hand now) (RUNBOOK "Special events")`, and on the
+template or a disabled form, `awaiting a sync apply by hand, template first (RUNBOOK "Special
+events")`. The report line reads `special events: 2
 type(s) on 3 of 3 module dropdowns; session bridge rule N of M, S session rule(s), 0 on no
 curriculum module`.
 `--rendered` also checks that each module select serves every event once with its
 `data-calcvalue`, and that the page's bridge comes before the session rules and keeps its
 operands in `JotForm.setCalculations`.
 
-**Add a type** (one line, then a hand rollout):
+**Add a type** (one line; the template before the land, then the merge is the rollout):
 
-1. Add it to `SPECIAL_EVENTS` in `glow/sync.py` on a branch, `make check`. Translations: none
-   today. No form's store translates a module option (read 2026-10-13: only `base`/`en` hold
+1. Add it to `SPECIAL_EVENTS` in `glow/sync.py` on the ticket branch, `make check`. Translations:
+   none today. No form's store translates a module option (read 2026-10-13: only `base`/`en` hold
    them; Swahili one of 18), so an event option is English in every language as the modules are.
    If module options ever get translations, the event gets them too ("Translations").
-2. `AUTO_SYNC_APPLY=0` (Ryan's go), then land it (`/land-checks`, `/harness:land`): paused, the
-   runner writes nothing; applying, it would add the option to every enabled regional form on
-   its next run.
-3. The template first: `backup_forms.py --form 262352490535154`, the sync's dry run (the three
-   module lines; `REPLACE conditions` only with roster changes or stale rules, else
-   `(conditions unchanged - skipping the rewrite)`), Ryan's go, `--apply`, `form_status.py --rendered`
-   CLEAN, then the browser checks below. Then Africa, Asia, Latin America and the U.S form
-   (disabled: `--disabled-ok`), each backup, dry run, go, apply, CLEAN, on the same day.
-4. `AUTO_SYNC_APPLY=1` (Ryan's go); `tools/auto_sync.py` dry run: every region `in-sync`.
+2. The template, before the land, from the ticket's worktree (the runner never syncs it):
+   `backup_forms.py --form 262352490535154`, the sync's dry run (the three module lines;
+   `REPLACE conditions` only with roster changes or stale rules, else `(conditions unchanged -
+   skipping the rewrite)`), Ryan's go, `--apply`, `form_status.py --rendered` CLEAN, then the
+   browser checks below.
+3. Land it (`/land-checks`, `/harness:land`): the land is the rollout. The runner adds the
+   option to every enabled regional form on its next run: the next roster change, the morning
+   backstop, or a run from the Actions tab on Ryan's go. Read each region's SyncLog row
+   (`applied`, its `detail` naming `special-event options on 3 dropdown(s)`) and confirm
+   `form_status.py --rendered` CLEAN on each of those forms.
+4. A disabled form (today the U.S form), by hand on the same day, from `main`: its backup, the
+   sync's dry run, Ryan's go, `--apply --disabled-ok`, then `form_status.py` CLEAN.
 5. Staff tell mentors: the new option, and one submission per club per day.
 
-**Retire a type** (by hand): take it out of `SPECIAL_EVENTS` first and merge (else the next
-apply adds it back), then delete the option in the builder on each form's three module
+**Retire a type**: take it out of `SPECIAL_EVENTS` on a ticket branch and merge that first (else
+the next apply adds it back), then delete the option in the builder on each form's three module
 dropdowns. The next sync dry run plans one module line per dropdown (its `calcValues`
-realigned), which the runner applies to a regional form on its next run (the template and a
-disabled form by hand). Until the option is deleted, the sync warns and `form_status`
-reports it. Salesforce history stays: the batches keep their `Module__c`, and a report can still
+realigned), and the runner applies the realigned `calcValues` to every enabled regional form on
+its next run. The template and a disabled form are applied by hand (the backup, the sync's dry
+run, Ryan's go, `--apply`, with `--disabled-ok` on a disabled form). Until the option is
+deleted, the sync warns and `form_status` reports it. Salesforce history stays: the batches keep their `Module__c`, and a report can still
 select events by `Module__c` starting with `Special Event - `.
 
 **Browser checks** (the template, before any regional form; nothing submitted until the last
@@ -923,12 +941,18 @@ working:
   a `Success` batch. It arrives `Failed` "Duplicate" with `Module__c` = the event's text and
   `Module_Week__c` blank (read back by SOQL, counts and fields only); then delete the submission.
 
-**Rollback**, per form, the runner paused: `restore_conditions.py --from` the conditions
-snapshot of the apply puts the rules back. Delete the event option in the builder on the three
-module dropdowns (tooling never deletes a question or an option); the sync's next dry run then
-plans the realigned `calcValues`. Merge a revert of the branch only once every form is rolled
-back: while the type is still on `main` and the runner applies, its next run puts the option
-and the rules back on a regional form rolled back by hand (it is rolled forward).
+**Rollback**: revert the type's merge first (a revert on a ticket branch, landed like any
+change): while the type is on `main`, the next apply adds the option back. Then delete the event
+option in the builder on each form's three module dropdowns (tooling never deletes a question or
+an option). The runner realigns `calcValues` on every enabled regional form on its next run; the
+template and a disabled form are applied by hand (the sync's dry run, Ryan's go, `--apply`, with
+`--disabled-ok` on a disabled form).
+
+When the bridge rules must come off at once (a mentor cannot submit): first the emergency
+switch, `AUTO_SYNC_APPLY=0` (Ryan's go), since the runner would roll a form forward while `main`
+disagrees with it; then `restore_conditions.py --form <id> --from` the conditions snapshot of
+the apply, per form; then the revert, landed; then `AUTO_SYNC_APPLY=1` once `main` and the forms
+agree.
 
 ## Translations
 

@@ -113,7 +113,7 @@ def main():
         sys.exit(f"No snapshot at {path} - run backup_forms.py first")
     with open(path, encoding="utf-8") as f:
         saved = json.load(f)
-    conditions = saved["conditions"] if isinstance(saved, dict) else saved
+    conditions = saved.get("conditions") if isinstance(saved, dict) else saved
     if not conditions:
         sys.exit(f"{path} holds no conditions - refusing to wipe the form")
     bad = unreadable_rules(conditions)
