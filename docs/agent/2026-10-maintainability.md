@@ -1,8 +1,11 @@
 # Maintainability risks going forward (2026-10)
 
 Ticket #47, epic #45 (steady state). Written 2026-10-15 on `t/47-identify-the-maintainability-r`.
-Its numbers were refreshed after the rebase onto `main` at `0fbd63c`, which includes #31, #33,
-#38 and #48. The work was offline: no Jotform, Salesforce or Google call, and nothing under
+Its numbers were refreshed twice:
+- after the rebase onto `main` at `0fbd63c`, which includes #31, #33, #38 and #48;
+- after the merge of `main` at `0a8201d`, which includes #37.
+
+"The rebased branch" below means the branch as of that merge. The work was offline: no Jotform, Salesforce or Google call, and nothing under
 `data/`, `backups/` or `credentials/` was read. What lives there is taken from what the tracked
 docs and code say.
 
@@ -210,8 +213,9 @@ cost.
 
 ### F. Stale RUNBOOK Status lines; its size (L3 C2 E2)
 
-- **Size.** `docs/RUNBOOK.md` is 3,002 lines on the rebased branch.
-  - It has 37 `##` sections, 31 `Status` lines, 100 lines inside code fences, and 179 lines
+- **Size.** `docs/RUNBOOK.md` is 3,039 lines on the branch, after the merge of `main` at
+  `0a8201d` (which includes #37).
+  - It has 37 `##` sections, 31 `Status` lines, 100 lines inside code fences, and 181 lines
     that carry a `2026-` date.
   - The largest `##` sections: "Club accounts in Salesforce" (182 lines with its `###`
     parts), "Automatic sync" (181), "The names dictionary and the module values" (173),
@@ -225,9 +229,6 @@ cost.
     pushed". `main` was pushed on 2026-10-13 (`docs/agent/handoff.md:13`).
   - **"Disabling a regional form"** (`:1252`) says the first run (the U.S form) is not recorded.
     The U.S form is `DISABLED` (`docs/agent/handoff.md:5`, `:12`).
-  - **`GLOW_LIVE_OK`** still appears in the "Live gate (Claude Code)" section and in the clasp
-    comment (`:2104`, `:2834`, `:2853`), but it no longer opens the gate (DECISIONS
-    2026-10-14). #37 fixes this.
   - **The handoff.** `docs/agent/handoff.md:33` runs the retired `tools/worklog.py`, and
     `:15-16` describe the runner hold that DECISIONS 2026-10-14 removed. The handoff reaches
     `main` only through the monthly chore (#15). The next `/harness:handoff` rewrites it.
@@ -235,8 +236,12 @@ cost.
   recorded": `:991`, `:1079`, `:1115`, `:1252`, `:1639`, `:2026`, `:2095`, `:2262` and `:2572`.
   A Status line that waits on a person goes stale the day the person acts. A `needs-input`
   ticket on the board does not.
-- **Fixed since the first draft.** #31 updated the "Special events" Status: IDG Celebrations
-  has been live since 2026-10-14, and its plan is `done`.
+- **Fixed since the first draft.**
+  - #31 updated the "Special events" Status: IDG Celebrations has been live since
+    2026-10-14, and its plan is `done`.
+  - #37 (landed 2026-10-15, `0a8201d`) rewrote the "Live gate (Claude Code)" section and the
+    clasp comment (`:2104`). `GLOW_LIVE_OK` now appears only as the setting that no longer
+    opens the gate (`:2836`) and as a refused self-approval (`:2871`).
 - **Cost.** Claude reads the RUNBOOK as the truth. A stale status sends a session to redo a live
   step, or to skip one.
 
@@ -405,15 +410,15 @@ cost.
 
 ### P. Two backlogs: BACKLOG.md and the board (L3 C1 E2)
 
-- **`docs/BACKLOG.md`** runs to 758 lines and has 94 item sections: 42 `open`, 8
-  `in-progress`, 20 `blocked-on-ryan`, 18 `done` and 6 `dropped`. New work is a ticket
-  (DECISIONS 2026-10-14), so 70 live items sit outside the board.
+- **`docs/BACKLOG.md`** runs to 759 lines and has 94 item sections: 41 `open`, 8
+  `in-progress`, 20 `blocked-on-ryan`, 19 `done` and 6 `dropped`. New work is a ticket
+  (DECISIONS 2026-10-14), so 69 live items sit outside the board.
 - **Items already overtaken:**
   - Item 47 ends "re-count 35's empty submissions for two weeks (to 2026-10-14)". The window
     has closed and no result is recorded.
   - Item 31, plan mode by default after launch week, predates the harness.
   - Item 53 is `in-progress`, but #36 gated `sf` and `gh api` writes.
-  - Item 83 closes with #37.
+  - Item 83 is `done 2026-10-14` (#37) and already sits under "Done".
   - Item 1a, the key rotation, has been `blocked-on-ryan` since launch.
 - **Cost.** Nothing breaks. The plan is split across two places, so a session has to read both.
 
@@ -597,60 +602,69 @@ Re-estimated against the rebased branch:
 - about 55 after T8 and T9;
 - about 100 if the back-fill tools retire too.
 
-Against that, the Routine list adds about 30. The net is within ±3 % of 3,002 lines, so the
+Against that, the Routine list adds about 30. The net is within ±3 % of 3,039 lines, so the
 RUNBOOK's length is not a risk to buy down; its Status lines are.
 
 ### Headings that must stay
 
-A move must not rename any of these. **Refs** counts the tracked files whose text quotes the
-heading in `scripts/check_doc_refs.py`'s patterns (run on the rebased branch). **Read by tests,
-scripts and tools** comes from a re-audit: every file in `test/` and `scripts/` that opens a doc
-by name (`git grep` for `RUNBOOK.md`, `ARCHITECTURE.md`, `BACKLOG.md`, `DECISIONS.md`), and
-every tool or `.gs` file that prints the heading. Substring matches of short headings
-("Translations", "Photos", "The forms") that are not about the RUNBOOK were dropped. A heading
-read by a test needs a test change to rename; one printed by a tool needs a code change.
+A move must not rename any of these. The table has two columns of evidence.
 
-| Heading | Refs | Read by tests, scripts and tools |
+**Refs** counts the tracked files whose text quotes the heading in `scripts/check_doc_refs.py`'s
+patterns. The run is on the branch after the merge of `0a8201d`, and leaves this file out.
+
+**Quoted or read by** comes from a full sweep, on the same branch, of every tracked file outside
+`docs/`. That includes the code, the tests, `scripts/`, `.github/workflows/`, `appsscript/`,
+`.env.example`, the hooks and the skills. A file is listed when it:
+- splits or searches on the heading, or
+- quotes it after a quote mark, `## ` or `RUNBOOK, `, including a string continued over lines.
+
+Matches that only share words with a short heading were checked by hand and dropped (for
+example, a docstring that starts "The Club picker's answer").
+
+Renaming a heading quoted in code or a skill changes that file. Renaming one read by a test
+changes the test.
+
+| Heading | Refs | Quoted or read by (file:line) |
 |---|---|---|
-| The forms | 3 | `glow/links.py` (message) |
+| The forms | 3 | `glow/links.py:34` |
 | Keeping the forms in step with the Roster (the manual loop) | 0 | none |
-| Automatic sync | 11 | `test/runbook_test.py` (`SameNameRunbook`, `ContactIdsRunbook`, `RunnerRunbook`, `RolloutProcedures` "**Switches:**"); `test/special_events_test.py` (`RunbookQuotes`); `.github/workflows/auto-sync.yml`, `appsscript/Dispatch.gs` (messages) |
+| Automatic sync | 11 | `test/runbook_test.py:310`, `:361`, `:558`, `:567`, `:599`, `:732`, `:968` (`SameNameRunbook`, `ContactIdsRunbook`, `RunnerRunbook`, `RolloutProcedures` "**Switches:**"); `test/special_events_test.py:646`, `:650` (`RunbookQuotes`); `test/doc_refs_test.py:41`, `:53`; `test/dispatch_test.js:6`; `.github/workflows/auto-sync.yml:12`; `appsscript/Dispatch.gs:6`, `:81`; land-checks skill `:38` |
 | Backup and restore (Jotform) | 0 | none |
 | The Club picker (mentors choose their club instead of typing it) | 1 | none |
-| One club per submission (the club guard) | 5 | `test/runbook_test.py` (`RolloutProcedures.ROLLBACKS`) |
-| The names list sent to Salesforce | 11 | `test/runbook_test.py` (`ContactIdsRunbook`, `RunnerRunbook`, `RolloutProcedures`); `test/sync_conditions_test.py`, `test/auto_sync_test.py` (quoted messages); `sync_attendance_form.py`, `restore_conditions.py`, `tools/auto_sync.py`, `tools/form_status.py` |
-| The names dictionary and the module values | 7 | `test/runbook_test.py` (`NamesAndModulesRunbook`, `RunnerRunbook`, `RolloutProcedures`); `tools/auto_sync.py`, `tools/form_status.py`, `tools/fix_name_translations.py` |
-| Special events | 10 | `test/runbook_test.py` (`RunnerRunbook`, `RolloutProcedures` "**Add a type**" / "**Retire a type**", `FixHintsRunbook`); `test/special_events_test.py` (`RunbookQuotes`, `IdgDocs`: the heading exactly once, its Status line names both types; `EventHintsByFormKind`: the tool's hint); `test/auto_sync_test.py`; `glow/sync.py`, `sync_attendance_form.py`, `tools/auto_sync.py`, `tools/form_status.py` |
-| Translations | 2 | none |
+| One club per submission (the club guard) | 5 | `test/runbook_test.py:822` (`RolloutProcedures.ROLLBACKS`); `tools/form_status.py:764`; `scripts/check_doc_refs.py:8-9`, `test/doc_refs_test.py:56`, `:60` (the checker's own examples) |
+| The names list sent to Salesforce | 11 | `test/runbook_test.py:334`, `:343`, `:567`, `:822` (`ContactIdsRunbook`, `RunnerRunbook`, `RolloutProcedures`); `test/sync_conditions_test.py:519`, `:632`; `test/auto_sync_test.py:835`; `sync_attendance_form.py:716`; `restore_conditions.py:63`; `tools/auto_sync.py:41`; `tools/form_status.py:783`, `:787`, `:799`; live-systems skill `:95`; sync-preview skill `:30` |
+| The names dictionary and the module values | 6 | `test/runbook_test.py:510`, `:517`, `:568`, `:697`, `:823`, `:1008` (`NamesAndModulesRunbook`, `RunnerRunbook`, `RolloutProcedures`); `tools/auto_sync.py:41`; `tools/fix_name_translations.py:398`; `tools/form_status.py:338`, `:371`, `:514`; live-systems skill `:102` |
+| Special events | 10 | `test/runbook_test.py:568`, `:823`, `:863`, `:869`, `:888-889`, `:1022`, `:1031`, `:1107`, `:1114` (`RunnerRunbook`, `RolloutProcedures` "**Add a type**" / "**Retire a type**", `FixHintsRunbook`); `test/special_events_test.py:361`, `:494`, `:619`, `:623`, `:639`, `:927`, `:1075`, `:1080`, `:1135`, `:1141-1142` (`RunbookQuotes`; `IdgDocs`: the heading exactly once, its Status line names both types; `EventHintsByFormKind`: the tool's hint); `test/auto_sync_test.py:840`; `glow/sync.py:489`, `:493`; `sync_attendance_form.py:579`, `:725`; `tools/auto_sync.py:42`; `tools/form_status.py:428`, `:470`; live-systems skill `:103` |
+| Translations | 2 | live-systems skill `:38-40` |
 | Links above Submit (problem report, Club Roster Form) | 2 | none |
-| Rosters above Submit | 3 | none (`RosterRepairRunbook` reads the plan's moved copy) |
-| Header logo | 3 | `tools/update_static_fields.py` |
-| Photos | 7 | `tools/auto_sync.py`, `tools/integration_status.py` |
-| Disabling a regional form | 4 | `tools/deactivate_clubs.py`, `tools/disable_form.py` |
+| Rosters above Submit | 3 | `test/runbook_test.py:221`, `test/links_layout_test.py:790` (a docstring and a comment; `RosterRepairRunbook` reads the plan's moved copy) |
+| Header logo | 3 | `tools/update_static_fields.py:21`; live-systems skill `:43` |
+| Photos | 7 | `tools/auto_sync.py:48`, `:845`, `:852`; `tools/integration_status.py:49`; `test/doc_refs_test.py:41`; jotform-api skill `references/forms-and-account.md:40` |
+| Disabling a regional form | 4 | `sync_attendance_form.py:490`; `tools/deactivate_clubs.py:421`; `tools/disable_form.py:28` |
 | Building a new regional form (not maintenance) | 1 | none |
-| Renaming a club | 4 | `test/runbook_test.py` (`SameNameRunbook` splits on it); `tools/rename_club.py`, `tools/sf_new_clubs.py` |
-| Moving a club to another partner (a mistyped partner) | 5 | `test/forms_logic_test.js` (`:2280-2286`: the ReviewQueue's same-name row must name it); `tools/rename_club.py` |
-| Club names two partners share | 11 | `test/runbook_test.py` (`SameNameRunbook`); `test/retired_rosters_test.py`, `test/forms_logic_test.js` (quoted messages); `sync_attendance_form.py`, `tools/auto_sync.py`, `tools/rename_club.py` |
-| `### The one-time switch` | 0 | none in the RUNBOOK (`SameNameRunbook` reads the plan's copy) |
-| Clubs that do not use Jotform | 11 | `test/retired_rosters_test.py`, `test/auto_sync_test.py` (quoted messages); `glow/sync.py`, `sync_attendance_form.py`, `tools/auto_sync.py` |
-| Deactivating a club | 3 | `test/club_tools_test.py` (the tool's output); `tools/deactivate_clubs.py` |
-| Roster rebuild and upload (offline path) | 4 | `appsscript/Roster.gs` (message) |
-| Working the ReviewQueue | 10 | `test/forms_logic_test.js` (`:2276-2286`: a bold row per `REVIEW_ISSUES`, the same-name row's wording); `scripts/check_doc_refs.py` (the table's issue names); `appsscript/FormHandlers.gs` |
-| Missed form responses | 6 | `test/forms_logic_test.js` (`:2287-2289`); `appsscript/FormHandlers.gs`; `scripts/check_gs.js` (comment) |
-| Google Forms wording | 3 | `test/forms_logic_test.js` (`:2434-2440`: its Rollback bullet); `appsscript/FormHandlers.gs`, `appsscript/Forms.gs` |
-| Apps Script deploy | 5 | `test/forms_logic_test.js` (`:2024-2027`: the rollback names `986a325` and the held new clubs) |
-| `### Rolling back appsscript/` | 4 | the deploy and live-systems skills |
+| Renaming a club | 4 | `test/runbook_test.py:300`, `:317`, `:710` (`SameNameRunbook` splits on it); `test/doc_refs_test.py:39-40`; `tools/rename_club.py:56`, `:601`; `tools/sf_new_clubs.py:214`; live-systems skill `:46`; salesforce skill `:20` |
+| Moving a club to another partner (a mistyped partner) | 5 | `appsscript/FormHandlers.gs:1126`; `test/forms_logic_test.js:2284` (the ReviewQueue's same-name row must name it); `tools/rename_club.py:56`, `:583`; `test/doc_refs_test.py:52` |
+| Club names two partners share | 11 | `test/runbook_test.py:238`, `:244`, `:252` (`SameNameRunbook`); `test/retired_rosters_test.py:293`; `test/doc_refs_test.py:33-38`, `:51`; `sync_attendance_form.py:55`; `tools/auto_sync.py:29`, `:626`, `:678`, `:792`; `tools/rename_club.py:592`; live-systems skill `:85` |
+| `### The one-time switch` | 0 | none in the RUNBOOK: `test/runbook_test.py:255` and `test/doc_refs_test.py:67` read the plan's copy |
+| Clubs that do not use Jotform | 11 | `glow/sync.py:634`; `sync_attendance_form.py:520`, `:1008`; `tools/auto_sync.py:636`, `:648`, `:815`; `tools/form_status.py:750`; `test/runbook_test.py:628`; `test/retired_rosters_test.py:429`, `:486`, `:583`; `test/auto_sync_test.py:897` |
+| Deactivating a club | 3 | `tools/deactivate_clubs.py:62`, `:380`; `test/club_tools_test.py:804` (the tool's output) |
+| Roster rebuild and upload (offline path) | 3 | `appsscript/Roster.gs:258` |
+| Working the ReviewQueue | 10 | `appsscript/FormHandlers.gs:134`, `:1072`, `:1222`; `test/forms_logic_test.js:2277`, `:2279` (a bold row per `REVIEW_ISSUES`, the same-name row's wording); `scripts/check_doc_refs.py:88` (the table's issue names); `test/doc_refs_test.py:57` |
+| Missed form responses | 6 | `appsscript/FormHandlers.gs:21`, `:130`; `test/forms_logic_test.js:2075`, `:2287-2288`; `scripts/check_gs.js:29`; deploy-appsscript skill `:11`, `:40` |
+| Google Forms wording | 3 | `appsscript/FormHandlers.gs:1024`; `appsscript/Forms.gs:584`; `test/forms_logic_test.js:2435` (its Rollback bullet) |
+| Apps Script deploy | 4 | `test/forms_logic_test.js:2024` (the rollback names `986a325` and the held new clubs); deploy-appsscript skill `:10` |
+| `### Rolling back appsscript/` | 4 | deploy-appsscript skill `:11`, `:54`; live-systems skill `:106`; `test/doc_refs_test.py:61` |
 | Data-quality report | 0 | none |
-| Club accounts in Salesforce | 6 | `tools/auto_sync.py`, `tools/sf_new_clubs.py` |
-| `### New clubs' accounts, automatically` | 3 | `tools/sf_new_clubs.py` |
-| Duplicate girls in Salesforce | 2 | `tools/sf_dupes.py` |
-| Attendance totals and partner-reported counts | 4 | the salesforce skill |
-| Attendance dashboard in Salesforce | 5 | the salesforce skill |
-| September back-fill: the resolver | 2 | `tools/backfill_resolve.py` |
-| Back-fill of attendance into Salesforce | 5 | `tools/sf_backfill.py`, `glow/salesforce.py` (message) |
-| Credentials | 4 | `tools/backfill_resolve.py`, `tools/fix_module_values.py`, `tools/integration_status.py`, `tools/sheets_client.py` |
-| Live gate (Claude Code) | 5 | `test/hooks_test.py:211` (the gate's reason); `.claude/hooks/live_gate.sh` |
-| Work log and invoices | 7 | `test/runbook_test.py` (`WorkLogRunbook`: the heading word for word, and the bold "Time zones.", "Which sessions count." and "What `update` will not do without being asked." paragraphs) |
+| Club accounts in Salesforce | 6 | `.github/workflows/auto-sync.yml:12`; `tools/auto_sync.py:855`; `tools/sf_new_clubs.py:192`; salesforce skill `:88` |
+| `### New clubs' accounts, automatically` | 3 | `tools/sf_new_clubs.py:309`; salesforce skill `:76` |
+| Duplicate girls in Salesforce | 2 | `tools/sf_dupes.py:900`, `:1091`, `:1271`; salesforce skill `:89` |
+| Attendance totals and partner-reported counts | 3 | salesforce skill `:16` |
+| Attendance dashboard in Salesforce | 5 | salesforce skill `:23`, `:91` |
+| September back-fill: the resolver | 2 | `tools/backfill_resolve.py:6` |
+| Back-fill of attendance into Salesforce | 5 | `tools/sf_backfill.py:732`, `:780`, `:822`; `glow/salesforce.py:117`; salesforce skill `:92` |
+| Credentials | 3 | `tools/backfill_resolve.py:522`; `tools/fix_module_values.py:328`; `tools/integration_status.py:116`; salesforce skill `:92` |
+| Live gate (Claude Code) | 5 | `.claude/hooks/live_gate.sh:155`; `test/hooks_test.py:211` (the gate's reason); `.env.example:17`; live-systems skill `:29`; salesforce skill `:93` |
+| Work log and invoices | 7 | `test/runbook_test.py:1158-1211` (`WorkLogRunbook`: the heading word for word, and the bold "Time zones.", "Which sessions count." and "What `update` will not do without being asked." paragraphs); land-checks skill `:26`, `:64` |
 | Checks | 1 | none |
 
 ### Tests that read more than a heading
@@ -700,7 +714,7 @@ Name these in any ticket that moves text.
 
 ### The other docs
 
-- **BACKLOG.md: freeze it.** Its rules, `doc-refs` and the references stay. Triage the 70 live
+- **BACKLOG.md: freeze it.** Its rules, `doc-refs` and the references stay. Triage the 69 live
   items once (T14). Each becomes:
   - a ticket, if it is wanted within six months;
   - `dropped`;
@@ -717,8 +731,8 @@ Name these in any ticket that moves text.
 
 Nothing is filed; Ryan picks (epic #45). Size and risk use the board's labels. Value is what the
 risk ranking says the ticket removes. The overlaps were re-checked with
-`gh issue list --state open --limit 100` on 2026-10-15. Open now: #6, #15, #29, #34, #35, #37,
-#45, #46, #47. #31, #33, #38 and #48 are closed. In the table, "WF" means
+`gh issue list --state open --limit 100` on 2026-10-15, after #37 landed. Open now: #6, #15,
+#29, #34, #35, #45, #46, #47. #31, #33, #37, #38 and #48 are closed. In the table, "WF" means
 `docs/agent/2026-10-workflow.md` (#48, landed).
 
 | # | Title | Size | Risk | Value | Overlap |
@@ -728,7 +742,7 @@ risk ranking says the ticket removes. The overlaps were re-checked with
 | T3 | Compare the uncompared Jotform runtime builds; add them to `READ_BUILDS` (BACKLOG 64) | S | low (offline after one GET per page) | medium-high (C) | #34 (the runner reads `--rendered` after a rules change, and could carry the build note) |
 | T4 | Salesforce metadata into git as a `salesforce/` sfdx project, metadata only, deployed check-only from there (BACKLOG 82). Reconcile with WF item 12 (below the table). | M | low (no deploy) | high (E; makes #35's dashboard change reviewable) | #35 (do T4 first, or let #35 start the project); WF item 12 and its proposed ticket "Add `tools/sf_package.py` and the `/sf-metadata` skill" |
 | T5 | A read-only delivery check: each form's submissions against `Attendance_Batch__c` per day, counts only; record token expiries in RUNBOOK "Credentials" | M | low (read only) | high (D) | #34 (the same verify step in `tools/auto_sync.py`); BACKLOG 27 (the runner's Salesforce credentials; until then from the Mac); BACKLOG 62 |
-| T6 | Status sweep: the RUNBOOK contents, the stale Status lines of item F, the drifted plan statuses; waiting steps become `needs-input` tickets | S | low | medium (F, R) | #37 (in review: the Live gate section and `GLOW_LIVE_OK`); #35 (the Attendance totals section); #15 (the handoff's stale lines land through the monthly chore, not here) |
+| T6 | Status sweep: the RUNBOOK contents, the stale Status lines of item F, the drifted plan statuses; waiting steps become `needs-input` tickets | S | low | medium (F, R) | #35 (the Attendance totals section). #37 landed and fixed the Live gate section, so the sweep leaves it alone.; #15 (the handoff's stale lines land through the monthly chore, not here) |
 | T7 | A "Routine" list at the top of the RUNBOOK, linking the sections | S | low | medium (F) | WF item 1 (a `/form-rollout` skill) is the per-change procedure; this is the recurring one |
 | T8 | Retire `tools/fix_module_values.py` (after 2026-11-01) and `tools/sf_girls_present.py` (its check moved), with their ARCHITECTURE rows and RUNBOOK paragraphs | S | low | low-medium (Q) | none (BACKLOG 84) |
 | T9 | Retire the legacy enrollment path and the Rebuild menu item after Ryan confirms (BACKLOG 39, 28), in two parts: (a) Python, fixtures and `upload_roster.py` (M); (b) Apps Script with the next push (S) | M + S | medium (sync argument parsing; a push) | medium (N; shrinks J by two bridges, a constant and four divergences) | #46 (legacy code); T2 (part (b) rides on the next push) |
@@ -736,7 +750,7 @@ risk ranking says the ticket removes. The overlaps were re-checked with
 | T11 | Record the Salesforce CLI version and the working harness commit; an offline test over a recorded `--json` answer of each CLI shape the tools read | S | low | medium (G, H) | WF "Inventory" (the plugin's cache label; its upgrade waits for 2026-10-16); #6 (the harness v2 adoption epic) |
 | T12 | Make `test/hooks_test.py` fast (51-76 s of a 58-82 s Python suite) | S-M | low (tests only; the hooks unchanged) | medium (M) | WF item 6 (the stop hook in a red worktree) and item 9 (hook tests on a draft copy); #46 |
 | T13 | Write down the off-Mac copy of `data/` and `backups/`, or its absence (a decision under the `child-privacy` rules) | S | medium (minors' data) | medium (K) | none |
-| T14 | BACKLOG triage: the 70 live items become tickets, `dropped` or parked; the header says the file is frozen | S-M | low | low-medium (P) | #37 (closes item 83) |
+| T14 | BACKLOG triage: the 69 live items become tickets, `dropped` or parked; the header says the file is frozen | S-M | low | low-medium (P) | none (item 83 already `done 2026-10-14`, through #37) |
 
 **T4 and the workflow doc's item 12.** They point in opposite directions. Item 12 builds and
 retrieves packages under `data/sf_<topic>_<date>/`, because the Write tool may not write
@@ -748,8 +762,11 @@ there; T4 moves the metadata into git. One direction should win:
     girls.
   - `/sf-metadata` (item 12) runs against that project: build in git, check-only, Ryan's go,
     quick deploy, then retrieve and compare.
-  - Only the live "before" retrieve, the rollback copy, stays under `data/`, and that retrieve is
-    committed after the deploy.
+  - The live "before" retrieve is the rollback copy. It stays under `data/`, which is
+    gitignored and never committed (CLAUDE.md rule 8).
+  - What reaches git is the after-state: once the quick deploy is read back, the retrieved
+    metadata is written into `salesforce/` and committed on the ticket branch. A plain
+    `diff -r` against the build proves the two are equal.
   - `tools/sf_package.py` is then a small helper for the retrieve, and the `protected_paths`
     obstacle in item 12 disappears for the build itself.
 - **Item 12 as landed.** The source stays in `data/`, item E keeps its score, and K's loss risk
