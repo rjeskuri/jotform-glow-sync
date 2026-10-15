@@ -784,9 +784,14 @@ class Run:
         if problems:
             self.attention.append((f"{region}: applied, but the form still has problems",
                                    "\n".join("- " + p for p in problems)
+                                   # the next run's dry run plans from the definition only, so a
+                                   # problem only the page shows reads in-sync there: say so
                                    + (f"\n\nThe 'rendered page' line(s) are what form {form}'s public "
-                                      "page serves; check by hand: python3 tools/form_status.py "
-                                      f"--form {form} --roster <roster.csv> --rendered"
+                                      "page serves. The runner's next run will not repair them: it "
+                                      "plans from the form's definition, not the page. Check by hand: "
+                                      f"python3 tools/form_status.py --form {form} --roster "
+                                      "<roster.csv> --rendered; if the problem stays, re-save the "
+                                      "form in the Jotform builder and check again."
                                       if page else "")
                                    # the region check goes by club name, so a club the sync did not
                                    # add shows up here until it is renamed: say so, never filter it

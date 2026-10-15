@@ -288,8 +288,13 @@ it could not read is a note in the log, not `applied-unverified`. An apply that
 rewrote the rules (`REPLACE conditions`) or a module dropdown is also checked on
 the served page (`form_status.py --rendered`, the check hand rollouts stop on):
 a problem there reads `applied-with-problems`, an ATTENTION naming the form and
-its `rendered page` line. The page can lag the API by seconds, so a page that
-cannot be read or that shows problems is read once more after a short wait and
+its `rendered page` line. The runner's next run does not repair such a
+problem: its dry run plans from the form's definition, not the page, and plans
+nothing for it (the region reads `in-sync`). Re-check the page with
+`form_status.py --form … --roster … --rendered`; if the problem stays,
+re-save the form in the Jotform builder and check again. The page can lag the
+API by seconds, so a page that cannot be read or that shows problems is read
+once more after a short wait and
 the second read is judged; a page unreadable both times is a note in the log
 (`note: served page of form … not read …`), not a failure. Problems the first
 read showed stand when the re-read cannot be read (`note: … re-read failed …

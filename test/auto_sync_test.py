@@ -1407,6 +1407,106 @@ class RenderedVerify(AutoSyncFixture, unittest.TestCase):
                 self.assertEqual(run.results[0][8].count(said), 1, (msg, said, run.results[0][8]))
                 self.assertEqual(self.attention_text(run).count(said), 1, (msg, said, run.attention))
 
+    # Ryan's review of PR #42 (2026-10-15): a problem seen ONLY on the served page is not
+    # repaired by the runner's next run - its dry run plans from the definition, which is clean,
+    # so the region reads in-sync and nothing is written. The ATTENTION must say so and name the
+    # remedies: re-check with form_status.py --rendered, or re-save the form. Matched on
+    # meaning-bearing fragments, one sentence at a time, so the wording is the coder's.
+    NEGATION = re.compile(r"\b(not|never|cannot|nothing|no)\b|n't\b", re.I)
+    REPAIR = re.compile(r"\b(repair|fix|correct|mend)", re.I)
+    RESAVE = re.compile(r"\bre-?sav(e|ing)\b|\bsav(e|ing)\b[^.\n]*\bagain\b", re.I)
+
+    def says_next_run_will_not_repair(self, text):
+        """A sentence (or line) that names the next run, a negation and a repair."""
+        return any("next run" in s.lower() and self.NEGATION.search(s) and self.REPAIR.search(s)
+                   for s in re.split(r"(?<=[.!?])\s+|\n", text))
+
+    def assert_page_remedies(self, run, form, problem, msg):
+        named = [t + "\n" + d for t, d in run.attention if problem in t + "\n" + d]
+        self.assertEqual(len(named), 1, (msg, run.attention))
+        text = named[0]
+        self.assertTrue(self.says_next_run_will_not_repair(text), (msg, text))
+        # remedy 1: re-check the served page by hand, on this form
+        self.assertIn("form_status.py", text, msg)
+        self.assertIn("--rendered", text, msg)
+        self.assertRegex(text, r"--form\s+" + re.escape(form) + r"\b", msg)
+        # remedy 2: re-save the form (Jotform renders the page anew)
+        self.assertRegex(text, self.RESAVE, msg)
+
+    def assert_no_page_remedies(self, run, msg):
+        text = self.attention_text(run)
+        self.assertFalse(self.says_next_run_will_not_repair(text), (msg, text))
+        self.assertNotRegex(text, self.RESAVE, msg)
+
+    def test_a_problem_only_the_page_shows_says_the_next_run_will_not_repair_it(self):
+        regions = list(auto_sync.REGIONAL_FORMS)
+        for i, (kind, text) in enumerate(self.PAGE.items()):
+            region = regions[i % len(regions)]
+            form = auto_sync.REGIONAL_FORMS[region]
+            problem = self.PROBLEMS[i % len(self.PROBLEMS)]
+            other = self.PROBLEMS[(i + 2) % len(self.PROBLEMS)]
+            # the definition is clean (no `problems`); the page shows the problem: on both reads,
+            # on the re-read after an unreadable first read, or on the first read before an
+            # unreadable re-read (which stands); and two page problems at once
+            for pages, said in (([[problem], [problem]], problem),
+                                ([("exit", "garbage", "empty")[i % 3], [problem]], problem),
+                                ([[problem], ("exit", "garbage", "empty")[(i + 1) % 3]], problem),
+                                ([[problem, other], [problem, other]], other)):
+                msg = (region, kind, pages)
+                run = self.run_region(text, apply=True, region=region, rendered=pages)
+                self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
+                self.assert_page_remedies(run, form, said, msg)
+            # the same apply with a clean page: nothing to say, nothing about the next run
+            run = self.run_region(text, apply=True, region=region)
+            self.assertEqual(([r[7] for r in run.results], run.attention), (["applied"], []), kind)
+
+    def test_without_a_problem_of_the_page_the_attention_does_not_say_the_next_run_will_not_repair(self):
+        # a problem of the definition alone is what the next run's dry run plans from: the
+        # sentence about the page (and its re-save remedy) must not appear
+        definitions = [dict(problems=["1 roster rule(s) test a club the picker lists twice"]),
+                       dict(problems=["2 condition(s) test a question the form does not have"]),
+                       dict(region_check={"missing_from_form": ["Gamma Club"]}),
+                       dict(region_check={"rosters_out_of_date": [["Alpha Club", 3, 4]]})]
+        regions = list(auto_sync.REGIONAL_FORMS)
+        n = 0
+        for cases, page in ((self.PAGE, "clean"), (self.PAGE, "unreadable"), (self.NO_PAGE, "not read")):
+            for kind, text in cases.items():
+                region = regions[n % len(regions)]
+                definition = definitions[n % len(definitions)]
+                n += 1
+                msg = (region, kind, page, definition)
+                rendered = ["exit", "exit", "exit"] if page == "unreadable" else None
+                run = self.run_region(text, apply=True, region=region, rendered=rendered, **definition)
+                self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
+                self.assertEqual(len(run.attention), 1, (msg, run.attention))
+                self.assert_no_page_remedies(run, msg)
+        # the page's problem was the lag (clean on the re-read): applied, nothing said
+        run = self.run_region(self.PAGE["question 18 rules rewritten"], apply=True, region="Asia",
+                              rendered=[[self.PROBLEMS[0]], []])
+        self.assertEqual(([r[7] for r in run.results], run.attention), (["applied"], []))
+
+    def test_a_definition_problem_beside_a_page_problem_still_says_the_page_is_not_repaired(self):
+        # Both at once: the next run plans from the definition, so it may rewrite the rules for
+        # the definition's problem - but whether that rewrite also changes what the page serves
+        # is unknown, and when the sync's own apply just left the definition this way the next
+        # dry run likely plans nothing either. So the page's problem keeps its sentence and both
+        # remedies whatever the definition says; the definition's problem is listed as before.
+        definitions = ["1 roster rule(s) test a club the picker lists twice",
+                       "2 condition(s) test a question the form does not have",
+                       "question 18 is rule 4 of 9, after the rosters' rules"]
+        regions = list(auto_sync.REGIONAL_FORMS)
+        for i, (kind, text) in enumerate(self.PAGE.items()):
+            region = regions[(i + 1) % len(regions)]
+            form = auto_sync.REGIONAL_FORMS[region]
+            definition = definitions[i % len(definitions)]
+            problem = self.PROBLEMS[(i + 1) % len(self.PROBLEMS)]
+            msg = (region, kind, definition, problem)
+            run = self.run_region(text, apply=True, region=region, problems=[definition],
+                                  rendered=[[problem], [problem]])
+            self.assertEqual([r[7] for r in run.results], ["applied-with-problems"], msg)
+            self.assertIn(definition, self.attention_text(run), msg)
+            self.assert_page_remedies(run, form, problem, msg)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
