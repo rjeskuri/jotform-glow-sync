@@ -71,7 +71,8 @@ description: Salesforce for this project - what lives there (attendance batches 
 
 `SF_SYNC` is `off` (or unset: no login), `plan` (reads, checks, and turns every account it would
 create into an ATTENTION item with the exact body) or `apply`. `gh variable set SF_SYNC …` and
-`gh variable set AUTO_SYNC_APPLY …` are Ryan's to run; the hook blocks them for Claude (RUNBOOK
+`gh variable set AUTO_SYNC_APPLY …` are Ryan's to decide; the hook puts them to him as an
+approval prompt when Claude runs one, and his yes is the go (RUNBOOK
 "New clubs' accounts, automatically").
 
 ## Where the files go
