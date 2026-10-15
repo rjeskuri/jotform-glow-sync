@@ -612,14 +612,27 @@ A move must not rename any of these. The table has two columns of evidence.
 **Refs** counts the tracked files whose text quotes the heading in `scripts/check_doc_refs.py`'s
 patterns. The run is on the branch after the merge of `0a8201d`, and leaves this file out.
 
-**Quoted or read by** comes from a full sweep, on the same branch, of every tracked file outside
-`docs/`. That includes the code, the tests, `scripts/`, `.github/workflows/`, `appsscript/`,
-`.env.example`, the hooks and the skills. A file is listed when it:
-- splits or searches on the heading, or
-- quotes it after a quote mark, `## ` or `RUNBOOK, `, including a string continued over lines.
+**Quoted or read by** comes from a sweep, on the same branch, of every tracked file outside
+`docs/`: `git ls-files ':!docs/'`, 150 files. The sweep covers:
+- code: the Python, the JavaScript and `appsscript/*.gs`;
+- the tests and `scripts/`;
+- `.github/workflows/`, the hooks and `.env.example`;
+- the Markdown: `CLAUDE.md`, `README.md`, `REVIEW.md`, `appsscript/INSTALL.md`, and the
+  skills and agents under `.claude/`.
 
-Matches that only share words with a short heading were checked by hand and dropped (for
-example, a docstring that starts "The Club picker's answer").
+A file is listed when it:
+- quotes the heading in `scripts/check_doc_refs.py`'s patterns, run on each file on its own
+  (strings and comments continued over lines are joined, and `"A" / "B"` and `"A" and "B"`
+  lists count);
+- splits or searches the RUNBOOK on the heading (`## <heading>`); or
+- quotes the heading after a quote mark.
+
+The `test/doc_refs_test.py` entries are the checker's own example strings. Matches that only
+share words with a short heading were checked by hand and dropped, for example:
+- a docstring that starts "The Club picker's answer";
+- "The forms are …" in `Forms.gs`;
+- the jotform-api reference's own `## Translations` heading;
+- a DECISIONS title that starts "Special events".
 
 Renaming a heading quoted in code or a skill changes that file. Renaming one read by a test
 changes the test.
@@ -628,43 +641,43 @@ changes the test.
 |---|---|---|
 | The forms | 3 | `glow/links.py:34` |
 | Keeping the forms in step with the Roster (the manual loop) | 0 | none |
-| Automatic sync | 11 | `test/runbook_test.py:310`, `:361`, `:558`, `:567`, `:599`, `:732`, `:968` (`SameNameRunbook`, `ContactIdsRunbook`, `RunnerRunbook`, `RolloutProcedures` "**Switches:**"); `test/special_events_test.py:646`, `:650` (`RunbookQuotes`); `test/doc_refs_test.py:41`, `:53`; `test/dispatch_test.js:6`; `.github/workflows/auto-sync.yml:12`; `appsscript/Dispatch.gs:6`, `:81`; land-checks skill `:38` |
+| Automatic sync | 11 | `test/runbook_test.py:310`, `:361`, `:558`, `:567`, `:599`, `:732`, `:968` (`SameNameRunbook`, `ContactIdsRunbook`, `RunnerRunbook`, `RolloutProcedures` "**Switches:**"); `test/special_events_test.py:646`, `:650` (`RunbookQuotes`); `test/doc_refs_test.py:41`, `:53`; `test/dispatch_test.js:6`; `.github/workflows/auto-sync.yml:12`; `appsscript/Dispatch.gs:6`, `:81`; `appsscript/INSTALL.md:120`; land-checks skill `:38` |
 | Backup and restore (Jotform) | 0 | none |
 | The Club picker (mentors choose their club instead of typing it) | 1 | none |
 | One club per submission (the club guard) | 5 | `test/runbook_test.py:822` (`RolloutProcedures.ROLLBACKS`); `tools/form_status.py:764`; `scripts/check_doc_refs.py:8-9`, `test/doc_refs_test.py:56`, `:60` (the checker's own examples) |
-| The names list sent to Salesforce | 11 | `test/runbook_test.py:334`, `:343`, `:567`, `:822` (`ContactIdsRunbook`, `RunnerRunbook`, `RolloutProcedures`); `test/sync_conditions_test.py:519`, `:632`; `test/auto_sync_test.py:835`; `sync_attendance_form.py:716`; `restore_conditions.py:63`; `tools/auto_sync.py:41`; `tools/form_status.py:783`, `:787`, `:799`; live-systems skill `:95`; sync-preview skill `:30` |
+| The names list sent to Salesforce | 11 | `test/runbook_test.py:334`, `:343`, `:567`, `:822` (`ContactIdsRunbook`, `RunnerRunbook`, `RolloutProcedures`); `test/sync_conditions_test.py:519`, `:632`; `test/auto_sync_test.py:835`; `sync_attendance_form.py:716`; `restore_conditions.py:63`; `tools/auto_sync.py:41`; `tools/form_status.py:783`, `:787`, `:799`; live-systems skill `:76`, `:95`; sync-preview skill `:30` |
 | The names dictionary and the module values | 6 | `test/runbook_test.py:510`, `:517`, `:568`, `:697`, `:823`, `:1008` (`NamesAndModulesRunbook`, `RunnerRunbook`, `RolloutProcedures`); `tools/auto_sync.py:41`; `tools/fix_name_translations.py:398`; `tools/form_status.py:338`, `:371`, `:514`; live-systems skill `:102` |
 | Special events | 10 | `test/runbook_test.py:568`, `:823`, `:863`, `:869`, `:888-889`, `:1022`, `:1031`, `:1107`, `:1114` (`RunnerRunbook`, `RolloutProcedures` "**Add a type**" / "**Retire a type**", `FixHintsRunbook`); `test/special_events_test.py:361`, `:494`, `:619`, `:623`, `:639`, `:927`, `:1075`, `:1080`, `:1135`, `:1141-1142` (`RunbookQuotes`; `IdgDocs`: the heading exactly once, its Status line names both types; `EventHintsByFormKind`: the tool's hint); `test/auto_sync_test.py:840`; `glow/sync.py:489`, `:493`; `sync_attendance_form.py:579`, `:725`; `tools/auto_sync.py:42`; `tools/form_status.py:428`, `:470`; live-systems skill `:103` |
 | Translations | 2 | live-systems skill `:38-40` |
-| Links above Submit (problem report, Club Roster Form) | 2 | none |
+| Links above Submit (problem report, Club Roster Form) | 2 | `appsscript/INSTALL.md:124` |
 | Rosters above Submit | 3 | `test/runbook_test.py:221`, `test/links_layout_test.py:790` (a docstring and a comment; `RosterRepairRunbook` reads the plan's moved copy) |
 | Header logo | 3 | `tools/update_static_fields.py:21`; live-systems skill `:43` |
 | Photos | 7 | `tools/auto_sync.py:48`, `:845`, `:852`; `tools/integration_status.py:49`; `test/doc_refs_test.py:41`; jotform-api skill `references/forms-and-account.md:40` |
 | Disabling a regional form | 4 | `sync_attendance_form.py:490`; `tools/deactivate_clubs.py:421`; `tools/disable_form.py:28` |
 | Building a new regional form (not maintenance) | 1 | none |
 | Renaming a club | 4 | `test/runbook_test.py:300`, `:317`, `:710` (`SameNameRunbook` splits on it); `test/doc_refs_test.py:39-40`; `tools/rename_club.py:56`, `:601`; `tools/sf_new_clubs.py:214`; live-systems skill `:46`; salesforce skill `:20` |
-| Moving a club to another partner (a mistyped partner) | 5 | `appsscript/FormHandlers.gs:1126`; `test/forms_logic_test.js:2284` (the ReviewQueue's same-name row must name it); `tools/rename_club.py:56`, `:583`; `test/doc_refs_test.py:52` |
-| Club names two partners share | 11 | `test/runbook_test.py:238`, `:244`, `:252` (`SameNameRunbook`); `test/retired_rosters_test.py:293`; `test/doc_refs_test.py:33-38`, `:51`; `sync_attendance_form.py:55`; `tools/auto_sync.py:29`, `:626`, `:678`, `:792`; `tools/rename_club.py:592`; live-systems skill `:85` |
+| Moving a club to another partner (a mistyped partner) | 5 | `appsscript/FormHandlers.gs:1126`; `test/forms_logic_test.js:1833`, `:2284` (the ReviewQueue's same-name row must name it); `tools/rename_club.py:56`, `:583`; `test/doc_refs_test.py:40`, `:49`, `:52` |
+| Club names two partners share | 11 | `CLAUDE.md:54`; `test/runbook_test.py:238`, `:244`, `:252` (`SameNameRunbook`), `:710`; `test/retired_rosters_test.py:293`; `test/doc_refs_test.py:33-38`, `:51`; `sync_attendance_form.py:55`; `tools/auto_sync.py:29`, `:626`, `:678`, `:792`; `tools/rename_club.py:592`; live-systems skill `:85` |
 | `### The one-time switch` | 0 | none in the RUNBOOK: `test/runbook_test.py:255` and `test/doc_refs_test.py:67` read the plan's copy |
-| Clubs that do not use Jotform | 11 | `glow/sync.py:634`; `sync_attendance_form.py:520`, `:1008`; `tools/auto_sync.py:636`, `:648`, `:815`; `tools/form_status.py:750`; `test/runbook_test.py:628`; `test/retired_rosters_test.py:429`, `:486`, `:583`; `test/auto_sync_test.py:897` |
+| Clubs that do not use Jotform | 11 | `CLAUDE.md:58`; `glow/sync.py:634`; `sync_attendance_form.py:520`, `:1008`; `tools/auto_sync.py:636`, `:648`, `:815`; `tools/form_status.py:750`; `test/runbook_test.py:628`; `test/retired_rosters_test.py:429`, `:486`, `:583`; `test/auto_sync_test.py:897` |
 | Deactivating a club | 3 | `tools/deactivate_clubs.py:62`, `:380`; `test/club_tools_test.py:804` (the tool's output) |
-| Roster rebuild and upload (offline path) | 3 | `appsscript/Roster.gs:258` |
-| Working the ReviewQueue | 10 | `appsscript/FormHandlers.gs:134`, `:1072`, `:1222`; `test/forms_logic_test.js:2277`, `:2279` (a bold row per `REVIEW_ISSUES`, the same-name row's wording); `scripts/check_doc_refs.py:88` (the table's issue names); `test/doc_refs_test.py:57` |
-| Missed form responses | 6 | `appsscript/FormHandlers.gs:21`, `:130`; `test/forms_logic_test.js:2075`, `:2287-2288`; `scripts/check_gs.js:29`; deploy-appsscript skill `:11`, `:40` |
-| Google Forms wording | 3 | `appsscript/FormHandlers.gs:1024`; `appsscript/Forms.gs:584`; `test/forms_logic_test.js:2435` (its Rollback bullet) |
-| Apps Script deploy | 4 | `test/forms_logic_test.js:2024` (the rollback names `986a325` and the held new clubs); deploy-appsscript skill `:10` |
-| `### Rolling back appsscript/` | 4 | deploy-appsscript skill `:11`, `:54`; live-systems skill `:106`; `test/doc_refs_test.py:61` |
+| Roster rebuild and upload (offline path) | 3 | `appsscript/Roster.gs:258`; `appsscript/INSTALL.md:73` |
+| Working the ReviewQueue | 10 | `appsscript/FormHandlers.gs:134`, `:1072`, `:1222` (and an issue name of its table, "Form response could not be processed"); `appsscript/INSTALL.md:91`, `:142`; `test/forms_logic_test.js:2277`, `:2279` (a bold row per `REVIEW_ISSUES`, the same-name row's wording); `scripts/check_doc_refs.py:88` (the table's issue names); `test/doc_refs_test.py:57` |
+| Missed form responses | 6 | `appsscript/FormHandlers.gs:21`, `:130`; `appsscript/INSTALL.md:66`, `:149`; `test/forms_logic_test.js:2075`, `:2287-2288`; `scripts/check_gs.js:29`; deploy-appsscript skill `:11`, `:40` |
+| Google Forms wording | 3 | `appsscript/FormHandlers.gs:1024`; `appsscript/Forms.gs:584`; `appsscript/INSTALL.md:156`; `test/forms_logic_test.js:2435` (its Rollback bullet) |
+| Apps Script deploy | 4 | `appsscript/INSTALL.md:41`; `test/forms_logic_test.js:2024-2025` (the rollback names `986a325` and the held new clubs); deploy-appsscript skill `:10`, `:49` |
+| `### Rolling back appsscript/` | 4 | deploy-appsscript skill `:11`, `:54`; live-systems skill `:106`; `test/doc_refs_test.py:57`, `:61` |
 | Data-quality report | 0 | none |
 | Club accounts in Salesforce | 6 | `.github/workflows/auto-sync.yml:12`; `tools/auto_sync.py:855`; `tools/sf_new_clubs.py:192`; salesforce skill `:88` |
-| `### New clubs' accounts, automatically` | 3 | `tools/sf_new_clubs.py:309`; salesforce skill `:76` |
+| `### New clubs' accounts, automatically` | 3 | `tools/sf_new_clubs.py:309`; salesforce skill `:76`, `:88-89` |
 | Duplicate girls in Salesforce | 2 | `tools/sf_dupes.py:900`, `:1091`, `:1271`; salesforce skill `:89` |
-| Attendance totals and partner-reported counts | 3 | salesforce skill `:16` |
+| Attendance totals and partner-reported counts | 3 | salesforce skill `:16`, `:90-91` |
 | Attendance dashboard in Salesforce | 5 | salesforce skill `:23`, `:91` |
 | September back-fill: the resolver | 2 | `tools/backfill_resolve.py:6` |
-| Back-fill of attendance into Salesforce | 5 | `tools/sf_backfill.py:732`, `:780`, `:822`; `glow/salesforce.py:117`; salesforce skill `:92` |
+| Back-fill of attendance into Salesforce | 5 | `tools/sf_backfill.py:732`, `:780`, `:822`; `glow/salesforce.py:117`; `README.md:48`; salesforce skill `:92` |
 | Credentials | 3 | `tools/backfill_resolve.py:522`; `tools/fix_module_values.py:328`; `tools/integration_status.py:116`; salesforce skill `:92` |
-| Live gate (Claude Code) | 5 | `.claude/hooks/live_gate.sh:155`; `test/hooks_test.py:211` (the gate's reason); `.env.example:17`; live-systems skill `:29`; salesforce skill `:93` |
-| Work log and invoices | 7 | `test/runbook_test.py:1158-1211` (`WorkLogRunbook`: the heading word for word, and the bold "Time zones.", "Which sessions count." and "What `update` will not do without being asked." paragraphs); land-checks skill `:26`, `:64` |
+| Live gate (Claude Code) | 5 | `.claude/hooks/live_gate.sh:155`; `test/hooks_test.py:211` (the gate's reason); `.env.example:17`; `appsscript/INSTALL.md:39` (as "Live gate"); live-systems skill `:29`; salesforce skill `:93` |
+| Work log and invoices | 7 | `test/runbook_test.py:1158-1211` (`WorkLogRunbook`: the heading word for word, and the bold "Time zones.", "Which sessions count." and "What `update` will not do without being asked." paragraphs, and the contents link at `:1177-1178`); `CLAUDE.md:35`; `README.md:43`; land-checks skill `:26`, `:64` |
 | Checks | 1 | none |
 
 ### Tests that read more than a heading
