@@ -72,16 +72,31 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
 
 ## Rollback
 
-First (2026-10-16) retrieve what is live and compare it with `data/sf_totals2_2026-10-15/after/`:
-if they differ, something was deployed since - stop and start from that retrieve instead. This is
-the only rollback for this change; no older dashboard package (`data/sf_dashboard_2026-10-02/`'s
-`public_2026-10-09/`, `before_public_2026-10-09/`, `totals1/`, `gen.py`'s build) is ever
-redeployed. Then VPN off, Ryan's go: redeploy the metadata retrieved before the change,
-`cd data/sf_totals2_2026-10-15/before && sf project deploy start --dry-run -o glow -d force-app`,
-then the same without `--dry-run`, and retrieve again to compare with `before/`. The dashboard and
-the two Total reports return to the `totals1/` filter. The new report
-`Jotform_Total_Attendance_Last_Month` can stay, or goes with a `destructiveChanges.xml` after the
-dashboard no longer uses it. Revert this ticket's RUNBOOK change with it.
+The deploy changed three components: the dashboard `Attendance/Jotform_Attendance_test` and the
+reports `Attendance/Total_Attendance_Last_Month` and `Attendance/Total_Attendance_by_Partner_by_Month`
+(and created `Attendance/Jotform_Total_Attendance_Last_Month`). `data/sf_totals2_2026-10-15/before/`
+holds five (those three, the report `Attendance/Jotform_Attendance_by_Partner_by_Month` and the
+report type `Attendance_Totals`, both unchanged by this deploy); `after/` holds the four deployed.
+The rollback redeploys only the three changed components from `before/`; the other two are never
+deployed from it (2026-10-16: a later change to them would be overwritten).
+
+1. VPN off. Retrieve those three components fresh (`sf project retrieve start -o glow -m ...`, the
+   three names below) and compare them with the same files in `data/sf_totals2_2026-10-15/after/`.
+   If any differs, someone changed it since - stop: build the rollback from that fresh retrieve
+   (edit only this change out of the copy), never from `before/`.
+2. Equal: Ryan's go, then from within `data/sf_totals2_2026-10-15/before/`:
+   `sf project deploy start --dry-run -o glow -m "Dashboard:Attendance/Jotform_Attendance_test"
+   -m "Report:Attendance/Total_Attendance_Last_Month"
+   -m "Report:Attendance/Total_Attendance_by_Partner_by_Month"`, then the same without `--dry-run`.
+   Never `-d force-app` there (it would redeploy all five).
+3. Retrieve the three again and compare with `before/`. The dashboard and the two Total reports
+   are back on the `totals1/` filter.
+
+This is the only rollback for this change; no older dashboard package
+(`data/sf_dashboard_2026-10-02/`'s `public_2026-10-09/`, `before_public_2026-10-09/`, `totals1/`,
+`gen.py`'s build) is ever redeployed. The new report `Jotform_Total_Attendance_Last_Month` can stay
+(the dashboard no longer references it after step 2), or goes with a `destructiveChanges.xml` after
+step 3. Revert this ticket's RUNBOOK change with it.
 
 ## Risks
 

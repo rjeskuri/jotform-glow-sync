@@ -2512,7 +2512,7 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - **When:** reading or typing an attendance total; the monthly `check`.
 - **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); open: how the partners' counts come in (BACKLOG 72; [Result](plans/2026-10-06-attendance-totals.md#result)).
 - **Verify:** the Signals, below.
-- **Rollback:** of the 2026-10-15 rule, redeploy `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve shows nothing was deployed since ("Attendance dashboard in Salesforce", Rollback); of the field (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live first and undo only that change in the copy ([plan](plans/2026-10-07-processor-name-spacing.md), Result). The fields can stay.
+- **Rollback:** of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after` (else stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
 
 Three partners' clubs are to report their attendance through Salesforce only (Ryan, 2026-10-06).
 Their retirement from the forms is pending: [plan](plans/2026-10-06-clubs-off-jotform.md) is in
@@ -2662,7 +2662,8 @@ sharing stays as it is"):
   set's assignments and the daily refresh.
 - **Never redeploy `data/sf_dashboard_2026-10-02/public_2026-10-09/`**: it is superseded, and its
   dashboard would overwrite the 2026-10-15 one (the total as Jotform plus the three partners). The
-  rollback of the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/` (Rollback, below).
+  rollback of the 2026-10-15 change is its three changed components from
+  `data/sf_totals2_2026-10-15/before/` (Rollback, below).
 - **Both Attendance folders are shared as Viewer with All Internal Users**: `folderShares` View,
   `AllInternalUsers`, `Organization`. Never a guest or portal group.
   - The share opens everything in the folders, including the March pilot dashboard "Attendance"
@@ -2750,8 +2751,9 @@ sharing stays as it is"):
   - `data/sf_totals2_2026-10-15/`: the 2026-10-15 change (the total as Jotform plus the three
     partners). `before/` is what was live just before it (the dashboard, the reports
     `Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month`,
-    `Jotform_Attendance_by_Partner_by_Month` and the report type `Attendance_Totals`), the
-    rollback; `after/` is the read-back of the deploy (0 differences from the build).
+    `Jotform_Attendance_by_Partner_by_Month` and the report type `Attendance_Totals`); the
+    rollback deploys only the three of them the deploy changed (Rollback, below); `after/` is the
+    read-back of the deploy (0 differences from the build).
 - After a deploy, Salesforce writes `expandOthers` true on every report chart and drops or adds a
   few default attributes on the dashboard (for `totals1/`: `useReportChart` dropped,
   `showPicturesOnCharts` and the owner added, apostrophes escaped). A retrieve differs from
@@ -2784,7 +2786,8 @@ sharing stays as it is"):
 **Rollback:**
 - **The rule (Ryan, 2026-10-16: "I don't want to overwrite with an old package")**: every
   dashboard or report deploy, a rollback included, starts from a fresh retrieve of what is live.
-  The only rollback for the 2026-10-15 change is `data/sf_totals2_2026-10-15/before/` (below).
+  The only rollback for the 2026-10-15 change is the three components it changed, from
+  `data/sf_totals2_2026-10-15/before/` (below).
   Never redeploy an older package: `data/sf_dashboard_2026-10-02/`'s `before/`, `build/`,
   `after/`, `after2/`, `fix1/`, `totals1/`, `live_2026-10-07/`, `public_2026-10-09/`,
   `before_public_2026-10-09/`, or a `gen.py` build - each would overwrite later changes.
@@ -2806,14 +2809,23 @@ sharing stays as it is"):
     2026-10-16: they would undo the 2026-10-09 and 2026-10-15 changes); before the six reports go,
     retrieve it, remove the `totals1/` tiles in that copy, check-only, Ryan's go, deploy (the six
     reports and the type may stay).
-- The 2026-10-15 change (the total as Jotform plus the three partners, ticket #35): first
-  retrieve the four components and compare with `data/sf_totals2_2026-10-15/after/`; if they
-  differ, something was deployed since - stop and start from that retrieve. Then VPN off,
-  Ryan's go, then `cd data/sf_totals2_2026-10-15/before && sf project deploy start --dry-run -o
-  glow -d force-app`, then the same without `--dry-run`; retrieve again and compare with
-  `before/`. The dashboard and the two Total reports then go back to the `totals1/` filter (every
-  `Success` batch, from any club); revert ticket #35's RUNBOOK change with it. The new report `Jotform_Total_Attendance_Last_Month` may stay (nothing else uses
-  it once the dashboard is back), or goes with a `destructiveChanges.xml` after the dashboard.
+- The 2026-10-15 change (the total as Jotform plus the three partners, ticket #35): it changed
+  three components, the dashboard `Attendance/Jotform_Attendance_test` and the reports
+  `Attendance/Total_Attendance_Last_Month` and `Attendance/Total_Attendance_by_Partner_by_Month`
+  (and created `Attendance/Jotform_Total_Attendance_Last_Month`). `data/sf_totals2_2026-10-15/before/`
+  holds five components (also `Attendance/Jotform_Attendance_by_Partner_by_Month` and the report
+  type `Attendance_Totals`, which that deploy did not change: never deploy those two from it);
+  `after/` holds the four deployed. VPN off; first retrieve the three changed components fresh and
+  compare them with the same files in `after/`; if any differs, someone changed it since - stop
+  and build the rollback from that fresh retrieve instead. If they are equal: Ryan's go, then from
+  within `data/sf_totals2_2026-10-15/before/` `sf project deploy start --dry-run -o glow -m
+  "Dashboard:Attendance/Jotform_Attendance_test" -m "Report:Attendance/Total_Attendance_Last_Month"
+  -m "Report:Attendance/Total_Attendance_by_Partner_by_Month"`, then the same without
+  `--dry-run` (never `-d force-app` there: it would redeploy all five); retrieve the three again
+  and compare with `before/`. The dashboard and the two Total reports then go back to the
+  `totals1/` filter (every `Success` batch, from any club); revert ticket #35's RUNBOOK change
+  with it. The new report `Jotform_Total_Attendance_Last_Month` may stay (the dashboard no longer
+  references it after the rollback), or goes with a `destructiveChanges.xml` after the dashboard.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
 
