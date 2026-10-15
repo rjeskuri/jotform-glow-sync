@@ -2510,13 +2510,14 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 ## Attendance totals and partner-reported counts
 
 - **When:** reading or typing an attendance total; the monthly `check`.
-- **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; open: how the partners' counts come in (BACKLOG 72; [Result](plans/2026-10-06-attendance-totals.md#result)).
+- **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); open: how the partners' counts come in (BACKLOG 72; [Result](plans/2026-10-06-attendance-totals.md#result)).
 - **Verify:** the Signals, below.
-- **Rollback:** redeploy `data/sf_totals_2026-10/before/` (the fields can stay).
+- **Rollback:** of the 2026-10-15 rule, redeploy `data/sf_totals2_2026-10-15/before/` ("Attendance dashboard in Salesforce", Rollback); of the field, redeploy `data/sf_totals_2026-10/before/` (the fields can stay).
 
-Three partners' clubs do not use Jotform and report a monthly count per
-club instead; leadership wants one attendance total that includes them, with the per-girl figures
-labelled "Jotform only".
+Three partners' clubs do not use Jotform and report their attendance through Salesforce instead
+(the Partners tab's `jotform` column says `no`; [plan](plans/2026-10-06-clubs-off-jotform.md)).
+Leadership wants one attendance total that includes them, shown beside the figure from the forms
+alone (Ryan, 2026-10-15).
 
 **The field.** `Attendance_Batch__c.Girls_Present__c` (Number, "Girls present") is the one
 attendance count. Since the deploy the attendance processor sets it when a Jotform batch
@@ -2524,10 +2525,28 @@ succeeds (= the attendance rows it created) and clears it on every `Failed` path
 partner-reported total is typed into it. A batch with no names and no count is `Failed` "No
 participants submitted" (no rows, blocks nothing); a batch with no names and a count above 0 is
 an aggregate and succeeds with no rows.
-Total attendance = the sum over `Success` batches; "Jotform only" = the same over batches whose
-`Creator__c` starts with `Jotform`. A girl counted twice in one month on two sources would be a
-double count: a club reports on one source only, and the Monthly Report's weekly counts are
-never summed into attendance.
+
+**The two measures** (Ryan's decisions of 2026-10-15, ticket #35):
+- **Total attendance** = the Jotform attendance plus the Salesforce-entered counts of the three
+  partners Education and English for You, Tumaini La Maisha and Ng'aa Maskani.
+  In the reports it is the sum of `Girls_Present__c` over `Success` batches whose `Creator__c`
+  starts with `Jotform` or whose club's parent account (`Account__c.Parent`) is one of those three
+  partners: filter logic `1 AND (2 OR 3) AND 4 AND 5`, where 1 is `Processing_Status__c` =
+  `Success`, 2 `Creator__c` starts with `Jotform`, 3 the parent equals one of the three names, and
+  4 and 5 are the Partner and Club filters. A Jotform batch from one of the three partners' clubs
+  counts once.
+- Any other club's attendance entered in Salesforce (a `Success` batch whose `Creator__c` does
+  not start with `Jotform`, from a club outside the three partners) is left out of the total.
+- **"Jotform only"** = the sum of `Girls_Present__c` over `Success` batches whose `Creator__c`
+  starts with `Jotform`: the attendance rows made from the forms.
+- The dashboard shows the two side by side, labelled "Total attendance (Jotform + 3 partners)" and
+  "Attendance (Jotform only)".
+- Both count attendances (girls × sessions). Months separate by `Attendance_Date__c` (the session
+  date), never by when the batch was created: the September back-fill created about 4,978
+  September-dated rows on 2026-10-02, which a report by created date would put in October.
+- The Monthly Report's weekly counts are never added to attendance, in either measure.
+- A girl counted twice in one month on two sources would be a double count: a club reports on one
+  source only.
 
 **The intake contract** - whatever carries a partner's count into Salesforce (a small Jotform
 form, a Salesforce screen flow, a sheet import: BACKLOG 72, Ryan's decision) writes one
@@ -2539,7 +2558,7 @@ form, a Salesforce screen flow, a sheet import: BACKLOG 72, Ryan's decision) wri
 | `Attendance_Date__c` | the **last day of the month** reported (a partner that gives per-session counts dates them the session day instead) |
 | `Girls_Present__c` | the count, above 0 (0 or empty with no names is `Failed` "No participants submitted") |
 | `Contact_IDs__c` | **empty** - no names, ever |
-| `Creator__c` | `Partner report` (the label the reports use; any other value not starting with `Jotform` also stays out of the Jotform-only view) |
+| `Creator__c` | `Partner report` (the label the reports use). The batch counts in the total only from a club of the three partners; it never counts in the Jotform-only view, which takes only `Creator__c` values starting with `Jotform` |
 | `Module__c`, `Module_Week__c`, `Module_Year__c` | optional; empty keeps the batch out of the by-module report only (it counts rows) |
 | `enable_fuzzy_matching__c` | false |
 
@@ -2560,6 +2579,10 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
   `differ` is a Jotform `Success` batch whose count is not its rows; a `without a value` is a
   `Success` batch the processor or the back-fill did not count. Aggregate batches are not compared
   (no rows by design).
+- The dashboard's last-month tiles: until the first partner-reported count arrives, "Total
+  attendance (Jotform + 3 partners)" equals "Attendance (Jotform only)" and `SELECT COUNT(Id) FROM
+  Attendance__c WHERE Attendance_Date__c = LAST_MONTH` (September 2026: 7,227 each, read
+  2026-10-15). Afterwards the difference is the three partners' counts for the month.
 - Blank submissions: `SELECT COUNT(Id) FROM Attendance_Batch__c WHERE Status_Message__c = 'No
   participants submitted'` grows only with real blanks; each is a club to ask, not a day blocked.
 - Club accounts without a parent: still exactly the two pilot accounts ("Club accounts in
@@ -2569,7 +2592,7 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
 ## Attendance dashboard in Salesforce
 
 - **When:** a new partner (the Partner filter), a new staff user (the permission set), a report change.
-- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the 2026-10-09 Access change is validated check-only and waits for Ryan's deploy ([Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
+- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); the 2026-10-09 Access change is validated check-only and waits for Ryan's deploy ([Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
 - **Dry run:** the check-only deploy (`--dry-run`), step 4 of "The steps".
 - **Apply:** the same without `--dry-run`, Ryan's go (VPN off).
 - **Verify:** retrieve again and compare with the build; one report's totals against SOQL.
@@ -2581,10 +2604,22 @@ from data Salesforce already has ([plan and result](plans/2026-10-02-attendance-
 Its label carries "(test)" until Ryan deploys the 2026-10-09 change (Access, below).
 
 What it shows - four headline numbers, weekly and monthly charts, last month by partner and
-by module, the clubs with no attendance or not submitting, the blank submissions, total
-attendance beside the Jotform-only figures - and how to read its numbers (a session, a
-blank and "did not submit" defined; late submissions, so "last month" settles around the
-20th; a club without a partner; the refresh is a snapshot): [plan](plans/2026-10-02-attendance-dashboard.md#from-the-runbook-moved-2026-10-09).
+by module, the clubs with no attendance or not submitting, the blank submissions - and how to
+read its numbers (a session, a blank and "did not submit" defined; late submissions, so "last
+month" settles around the 20th; a club without a partner; the refresh is a snapshot): [plan](plans/2026-10-02-attendance-dashboard.md#from-the-runbook-moved-2026-10-09).
+
+**The two attendance measures** (since 2026-10-15, ticket #35,
+[plan](plans/2026-10-15-attendance-total-three-partners.md)):
+- The top row is four tiles: "Total attendance (Jotform + 3 partners)" and "Attendance (Jotform
+  only)" for last month, then "Girls who attended (Jotform only)" last month and this month.
+- The monthly chart's header is "Total attendance per month (Jotform + 3 partners)"; the "How to
+  read this dashboard" box defines both measures and says the Monthly Report is never added.
+- How the total is computed (Jotform plus the three partners' Salesforce-entered counts, every
+  other Salesforce entry left out) is in "Attendance totals and partner-reported counts".
+- The reports behind them: `Total_Attendance_Last_Month` and
+  `Total_Attendance_by_Partner_by_Month` (the total's filter), and `Jotform_Total_Attendance_Last_Month`
+  ("Jotform Total Attendance Last Month", new: `Success` batches whose `Creator__c` starts with
+  `Jotform`, last month, the sum of `Girls_Present__c`).
 
 **Filters:**
 - The dashboard's **Partner** filter covers every component. It holds the 49 partner names
@@ -2684,6 +2719,11 @@ sharing stays as it is"):
     `Total_Attendance_Last_Month` 00ORP000009c8ib2AA, `Clubs_Not_Submitting_Last_14_Days`
     00ORP000009c8iY2AQ, `Clubs_Not_Submitting_Since_1_Sept` 00ORP000009c8iZ2AQ,
     `Blank_Submissions` 00ORP000009c8iX2AQ.
+  - `data/sf_totals2_2026-10-15/`: the 2026-10-15 change (the total as Jotform plus the three
+    partners). `before/` is what was live just before it (the dashboard, the reports
+    `Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month`,
+    `Jotform_Attendance_by_Partner_by_Month` and the report type `Attendance_Totals`), the
+    rollback; `after/` is the read-back of the deploy (0 differences from the build).
 - After a deploy, Salesforce writes `expandOthers` true on every report chart and drops or adds a
   few default attributes on the dashboard (for `totals1/`: `useReportChart` dropped,
   `showPicturesOnCharts` and the owner added, apostrophes escaped). A retrieve differs from
@@ -2723,6 +2763,12 @@ sharing stays as it is"):
     `Attendance_Totals`; never `Attendance_Batches` (the vendor's report type). The dashboard
     itself rolls back to `after2/`'s first (redeploy it, or the copy in `live_2026-10-07/`
     retrieved just before; the six reports and the type may stay).
+- The 2026-10-15 change (the total as Jotform plus the three partners, ticket #35): VPN off,
+  Ryan's go, then `cd data/sf_totals2_2026-10-15/before && sf project deploy start --dry-run -o
+  glow -d force-app`, then the same without `--dry-run`; retrieve again and compare with
+  `before/`. The dashboard and the two Total reports then go back to the `totals1/` filter (every
+  `Success` batch, from any club); revert ticket #35's RUNBOOK change with it. The new report `Jotform_Total_Attendance_Last_Month` may stay (nothing else uses
+  it once the dashboard is back), or goes with a `destructiveChanges.xml` after the dashboard.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
 

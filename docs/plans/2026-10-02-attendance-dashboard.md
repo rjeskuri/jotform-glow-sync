@@ -291,7 +291,10 @@ label until the same deploy) shows a chart with its rows collapsed. Its filters 
 - **Total attendance** (since `totals1/`, 2026-10-07) sums `Girls_Present__c` over `Success`
   batches - the Jotform rows plus the monthly counts partners without Jotform report
   (`Creator__c` `Partner report`; "Attendance totals and partner-reported counts"). Until a
-  partner's first count arrives (BACKLOG 72) the Jotform-only figures equal the totals. "Girls who
+  partner's first count arrives (BACKLOG 72) the Jotform-only figures equal the totals.
+  (2026-10-15, ticket #35: the total now adds only the three partners' Salesforce-entered counts
+  to the Jotform rows, and any other Salesforce entry is left out; RUNBOOK "Attendance totals and
+  partner-reported counts", [plan](2026-10-15-attendance-total-three-partners.md).) "Girls who
   attended" stays Jotform only (a reported count has no names) and counts each girl once. "Did
   not submit" in the 14-day and since-1-September windows means no batch of any status dated in
   the window (a refused duplicate counts as submitted); the 14-day window is today plus the 14

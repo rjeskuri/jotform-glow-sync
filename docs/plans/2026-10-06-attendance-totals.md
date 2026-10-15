@@ -861,7 +861,9 @@ seven existing reports still built byte-identical to `after2/`.
    success to the rows created; a partner-reported total is typed into it, with `Creator__c`
    `Partner report`, per club per month, dated the last day of the month. **Total attendance =
    SUM over `Success` batches; "Jotform only" = the same with `Creator__c` starting `Jotform`.
-   Distinct-girl figures are Jotform only and say so.** Why: one object, one report type, one
+   Distinct-girl figures are Jotform only and say so.** (2026-10-15, ticket #35: the total now
+   counts only the Jotform batches and the three partners' clubs;
+   [plan](2026-10-15-attendance-total-three-partners.md).) Why: one object, one report type, one
    filter for the label; aggregates have no names, so no distinct count can include them.
    Consequences: a one-off back-fill of the 538 existing successes (C); the Monthly Report's
    weekly counts are never summed into attendance; `Girls_Enrolled__c` is created empty for

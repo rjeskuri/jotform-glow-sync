@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-10-15 | The dashboard's total attendance counts Jotform plus the three Salesforce-reporting partners only, shown beside Jotform only | done 2026-10-15 | 72 | [2026-10-15-attendance-total-three-partners.md](2026-10-15-attendance-total-three-partners.md) |
 | 2026-10-14 | Special event "IDG Celebrations" on every attendance form, after "Welcome Session" | done 2026-10-14 |  | [2026-10-14-idg-celebrations.md](2026-10-14-idg-celebrations.md) |
 | 2026-10-13 | Special events - ad-hoc sessions as module options, the first "Welcome Session" | done 2026-10-13 |  | [2026-10-13-special-events.md](2026-10-13-special-events.md) |
 | 2026-10-12 | The Group Photo sublabel loses its sentence about faces; one photo per submission stays | done |  | [2026-10-12-photo-sublabel.md](2026-10-12-photo-sublabel.md) |
