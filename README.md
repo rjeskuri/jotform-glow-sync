@@ -67,9 +67,10 @@ intent under `docs/intent` is optional; the launch notes are in `docs/archive`).
 
 - Dry run by default everywhere; `--apply` is required to write anything. In Claude Code the
   live gate (`.claude/hooks/live_gate.sh`) puts each write command it recognises to the human as
-  an approval prompt, and refuses it where no prompt can be shown (headless, `bypassPermissions`,
-  `dontAsk`, a subagent); `GLOW_LIVE_OK` no longer opens it. Salesforce writes through the
-  session's connector are not seen by it and need the human's go.
+  an approval prompt, and refuses it from a subagent or in `bypassPermissions` or `dontAsk` mode;
+  a headless run in `default` mode gets the hook's ask, which Claude Code denies; `GLOW_LIVE_OK`
+  no longer opens it. Salesforce writes through the session's connector are not seen by it and
+  need the human's go.
 - A snapshot before every live write, stamped to the second (`backups/<form>/`): the runner
   and most writers take their own; by hand, `backup_forms.py --form` before the sync or
   `update_static_fields.py`. The translation writers save the whole store before a POST

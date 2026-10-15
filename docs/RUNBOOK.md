@@ -2402,10 +2402,10 @@ record id:
 ### The merge (Ryan's go for every `--apply` and every `--rehearse`)
 
 A rehearsal runs the merges' DML in production and then throws, so Salesforce rolls it back: it
-leaves nothing behind, but it locks the club's records and runs NPSP's triggers meanwhile, and the
-live-gate hook does not catch `--rehearse`. Every `--apply` and `--rehearse` reads Jotform first
-(no submission in the last 10 minutes) and the regional forms afterwards (`merge`): put
-`JOTFORM_API_KEY` in `.env` or the environment, or it refuses before anything runs.
+leaves nothing behind, but it locks the club's records and runs NPSP's triggers meanwhile; the
+live-gate hook asks on `--rehearse` like on any live command. Every `--apply` and `--rehearse`
+reads Jotform first (no submission in the last 10 minutes) and the regional forms afterwards
+(`merge`): put `JOTFORM_API_KEY` in `.env` or the environment, or it refuses before anything runs.
 
 ```bash
 python3 tools/sf_dupes.py plan --vpn-off --roster data/roster_<stamp>.csv     # read-only -> data/sf_dupes_<date>/merge_plan.json
@@ -2852,14 +2852,21 @@ Refused outright (a `deny`), whatever the mode:
   session asks Ryan;
 - a live command in a session that cannot prompt: a permission mode other than
   `default`, `acceptEdits`, `auto` or `plan` - `bypassPermissions`, `dontAsk`,
-  a missing or unknown one - which covers headless and dispatched runs. Run it
-  in an interactive session, or Ryan runs it in his terminal.
+  a missing or unknown one. Run it in an interactive session, or Ryan runs it
+  in his terminal.
+
+A headless or dispatched run (`claude -p`) in one of the four prompting modes,
+`default` for one, gets the hook's `ask`, and Claude Code denies it, since no one
+can answer the prompt: a headless run never runs a live command, whatever its
+mode (DECISIONS 2026-10-14).
 
 Every decision on a live command is appended to `.claude/live_gate.log`
-(gitignored) with its mode: `ASKED` for a prompt, `BLOCKED` for a refusal (also
-when no decision could be built; the hook then exits 2). `.claude/settings.json`
-backs the hook: `ask` rules for the live families (`npm run clasp*`, `npx
-clasp`, `gh variable|secret set|delete`, `gh workflow run|enable|disable`, `gh
+(gitignored) with its mode: `ASKED` for the hook's `ask`, `BLOCKED` for its
+refusal (also when no decision could be built; the hook then exits 2). `ASKED`
+means a prompt was shown only in an interactive session: a headless run's ask is
+logged `ASKED` too, though Claude Code denied it and nothing ran.
+`.claude/settings.json` backs the hook: `ask` rules for the live families (`npm
+run clasp*`, `npx clasp`, `gh variable|secret set|delete`, `gh workflow run|enable|disable`, `gh
 run rerun`, `sf project deploy start|quick|validate|resume`, `sf apex run`, `sf
 data create|update|delete|upsert|import`), and `onFailure: block`, so a hook
 that fails stops the command. `Bash(gh api:*)` is in `allow` (the harness reads

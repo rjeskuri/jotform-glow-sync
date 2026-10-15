@@ -22,7 +22,8 @@ set|delete`, `gh workflow enable|disable`, a `gh workflow run` that applies, `gh
 any `gh api` (or `api.github.com`) call on `actions/`, `dispatches` or `graphql`. It refuses
 outright a self-approval (setting `GLOW_LIVE_OK`, which no longer opens the gate, writing a shell
 startup file or `.env`, `launchctl setenv`), a live command from a subagent, and one in a session
-that cannot prompt (`bypassPermissions`, `dontAsk`, headless or dispatched runs). A read-only
+that cannot prompt (`bypassPermissions`, `dontAsk`, a missing mode); a headless or dispatched run
+in `default` mode gets the ask, which Claude Code denies (logged `ASKED`). A read-only
 command that only mentions a flag (`grep`, `cat`, `git log` …, alone) passes. The hook is a
 seatbelt, not the permission: **every live write needs Ryan's explicit go in this conversation**,
 gated or not (it does not see the connectors or a write through another program). RUNBOOK "Live
