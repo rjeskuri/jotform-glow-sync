@@ -114,15 +114,20 @@ cost, then to the item letter.
 | 16 | N. Legacy enrollment path and the Rebuild menu item | 1 | 3 | 3 | 3 | T9 (M + S) |
 | 17 | S. Node 18 + clasp 2.4.2 | 1 | 2 | 2 | 2 | watch; a clasp 3 move is one M ticket |
 | 18 | T. Dashboard Partner filter at 49 of 50; two partner lists | 1 | 2 | 2 | 2 | watch |
-| 19 | Q. One-off tools and one-time menu items | 2 | 1 | 2 | 2 | T8 (S); T15 (M) for `fix_roster_order.py` |
-| 20 | R. Plan and intent statuses drift | 2 | 1 | 2 | 2 | T6 (S) |
+| 19 | R. Plan and intent statuses drift | 2 | 1 | 2 | 2 | T6 (S) |
+| 20 | Q. One-off tools and one-time menu items | 2 | 1 | 3 | 2 | T8 (S), T15 (M), T9 (M + S) and conditions |
 | 21 | V. DECISIONS.md growth | 1 | 1 | 1 | 1 | none |
 | 22 | U. `FormHandlers.gs` at 1,353 lines | 1 | 1 | 2 | 1 | none (BACKLOG 86) |
 
-Rescored on 2026-10-15 against the effort scale. B, C, G, H, L, M, Q and R move from E1 to
-E2, because each needs a ticket, and N moves from E2 to E3, because T9 is two tickets. The top
-five are the same five risks, in a new order. F scores E2 because T6 alone removes its risk;
-T7 is a convenience.
+Rescored on 2026-10-15 against the effort scale:
+- B, C, G, H, L, M and R move from E1 to E2, because each needs a ticket.
+- N moves from E2 to E3, because T9 is two tickets.
+- Q moves from E1 to E3. No one ticket clears it: T8 retires two tools, and the rest wait on
+  T15, T9 and conditions (see its section).
+
+The top five are the same five risks, in a new order. The only other item that cites two
+tickets is F, which scores E2 because T6 alone removes its risk (its section says so).
+J cites T9 and BACKLOG 28 and is scored E3.
 
 ## The items, with evidence
 
@@ -253,6 +258,9 @@ T7 is a convenience.
     opens the gate (`:2836`) and as a refused self-approval (`:2871`).
 - **Cost.** Claude reads the RUNBOOK as the truth. A stale status sends a session to redo a live
   step, or to skip one.
+- **Effort E2.** T6 (S) alone removes the risk: it corrects the stale lines, and it moves the
+  waiting into `needs-input` tickets, so Status lines stop going stale. T7, the Routine list, is
+  a convenience on top and is not needed for the score.
 
 ### G. Salesforce CLI unpinned; tools read its JSON (L2 C2 E2)
 
@@ -450,7 +458,7 @@ T7 is a convenience.
   The first and the third are Ryan's: protected files and his token.
 - **Cost.** Nothing breaks. The plan is split across two places, so a session has to read both.
 
-### Q. One-off tools and one-time menu items (L2 C1 E2)
+### Q. One-off tools and one-time menu items (L2 C1 E3)
 
 - **Why they cost.** Each one-off must keep passing `make check` against today's `glow/`
   (DECISIONS 2026-10-09, "Finished one-offs are deleted, not archived").
@@ -462,6 +470,13 @@ T7 is a convenience.
     `links_layout_test.py`, which is not counted.
   - 4 one-time or pre-launch GLOW menu items (`appsscript/Menu.gs:8-9`, `:18-21`, `:27`).
 - **The candidates with their dates** are under [Retirement candidates](#retirement-candidates).
+- **Effort E3.** No single ticket removes the item. T8 (S) retires only
+  `fix_module_values.py` and `sf_girls_present.py`. The rest wait on other work:
+  - `fix_roster_order.py` on T15 (M), itself an amendment that needs Ryan's go;
+  - the Rebuild menu item on T9 (M + S);
+  - the back-fill tools on BACKLOG items 76 and 78;
+  - `fix_name_translations.py` on BACKLOG 63;
+  - the other one-time menu items on the Audit tab (BACKLOG 85, 43) and an Apps Script push.
 
 ### R. Plan and intent statuses drift (L2 C1 E2)
 
@@ -537,7 +552,7 @@ it needs Ryan's go (CLAUDE.md rule 1).
 | `tools/fix_module_values.py`, `test/fix_module_values_test.py` | The one-off `Module__c` correction of 2026-10-07 and its `--undo` | **2026-11-01**, when the undo window closes at the end of October (BACKLOG 84). RUNBOOK "The names dictionary and the module values" keeps a one-line SOQL audit in place of its paragraph (`:815-826`). The ledger stays in `data/`. | `git show <commit>^:tools/fix_module_values.py`; the test likewise |
 | `tools/sf_girls_present.py`, its test | The one-off `Girls_Present__c` back-fill (done 2026-10-07, 573 written). It has no undo command (`.claude/skills/salesforce/SKILL.md:61`). Its `check` is a health check (`docs/RUNBOOK.md:2558`). | When its two `check` counts move into RUNBOOK "Attendance totals and partner-reported counts" as SOQL, or into the monthly `sf_dupes.py check`. Earliest 2026-11-01, after one clean monthly look. | `git show <commit>^:tools/sf_girls_present.py` |
 | `tools/sf_backfill.py`, `tools/backfill_resolve.py`, `glow/submissions.py` (147 lines), their tests (`test/sf_backfill_test.py`, `test/backfill_resolve_test.py`, which also tests `glow/submissions.py`) | The September back-fill, done 2026-10-02. The RUNBOOK keeps both tools as the incident procedure (`:2758-2766`), but the window is hard-coded (`backfill_resolve.py:54-57`), and rollback by contact is now dangerous (`:2778-2785`). `glow/submissions.py` is used only by `backfill_resolve.py` and `fix_module_values.py` (`git grep`). | When BACKLOG items 76 (11 held sessions) and 78 (the guard) are settled, T8 has retired `fix_module_values.py`, and Ryan chooses between generalising the window (flags, not constants) and retiring both. BACKLOG 65's `q18_empty` watch uses the resolver, so move it first. With the tools gone, `glow/submissions.py` goes too, with its line in `glow/__init__.py` and its ARCHITECTURE row. | `git show <commit>^:tools/sf_backfill.py`, `…:tools/backfill_resolve.py`, `…:glow/submissions.py` (all from the one deleting commit) |
-| `tools/fix_roster_order.py` (and `FixRosterOrderTool` in `test/links_layout_test.py`) | The one-time repair of 2026-09-30 (BACKLOG 47). RUNBOOK "Rosters above Submit" (`:1053-1075`) keeps its relapse and new-form procedure. | **Not yet.** It is still the fix `form_status.py` prints (`glow/layout.py:30` `FIX`, pinned by `test/links_layout_test.py:913`). #33 (closed 2026-10-14) reworded the other fix hints but left this one, and nothing open covers it. T15 (proposed below) gives it a home: the sync moves the tail below the last roster itself (`glow/layout.py` `plan_tail_moves`), so `FIX` and its test name the runner's next run. The tool can go once T15 has landed and no form has needed it for six months (2027-04-01). | `git show <commit>^:tools/fix_roster_order.py` |
+| `tools/fix_roster_order.py` (and `FixRosterOrderTool` in `test/links_layout_test.py`) | The one-time repair of 2026-09-30 (BACKLOG 47). RUNBOOK "Rosters above Submit" (`:1053-1075`) keeps its relapse and new-form procedure. | **Not yet.** It is still the fix `form_status.py` prints (`glow/layout.py:30` `FIX`, pinned by `test/links_layout_test.py:913`). #33 (closed 2026-10-14) reworded the other fix hints but left this one, and nothing open covers it. T15 (proposed below) gives it a home: the sync moves the tail below the last roster itself (`glow/layout.py` `plan_tail_moves`), so `FIX` and its test name the runner's next run. T15 amends DECISIONS 2026-09-29, which made this repair a hand-run, gated tool separate from the runner, so it needs Ryan's go and a new dated DECISIONS entry first. The tool can go once T15 has landed and no form has needed it for six months (2027-04-01). If Ryan keeps the 2026-09-29 decision, the tool stays and is not a retirement candidate. | `git show <commit>^:tools/fix_roster_order.py` |
 | `tools/fix_name_translations.py` | Removed 55 stale dictionary entries (2026-10-06). It has `--restore`, and BACKLOG 63's pruning would be built here. | When BACKLOG 63 is dropped or done. `NamesAndModulesRunbook` (`test/runbook_test.py:509`) pins its commands in the RUNBOOK and changes with it. | `git show <commit>^:tools/fix_name_translations.py` |
 | GLOW menu: `migrateCountryToRegion`, `retireOldEnrollmentForm` (`appsscript/Forms.gs`) | One-time migrations (BACKLOG items 38 and 6) | When the live Audit tab shows each has run, or its item is settled another way (BACKLOG 85) | `git show <commit>^:appsscript/Forms.gs` and `Menu.gs`, then a push |
 | GLOW menu: `migrateFormWording` | The one-time wording run (BACKLOG 43, not yet run) | After Ryan's run is recorded | As above |
@@ -792,7 +807,7 @@ risk ranking says the ticket removes. The overlaps were re-checked with
 | T12 | Make `test/hooks_test.py` fast (51-76 s of a 58-82 s Python suite) | S-M | low (tests only; the hooks unchanged) | medium (M) | WF item 6 (the stop hook in a red worktree) and item 9 (hook tests on a draft copy); #46 |
 | T13 | Write down the off-Mac copy of `data/` and `backups/`, or its absence (a decision under the `child-privacy` rules) | S | medium (minors' data) | medium (K) | none |
 | T14 | BACKLOG triage: the 69 live items become tickets, `dropped` or parked; the header says the file is frozen. First: item 31 `dropped`; 1a narrowed to the read-only key; 47 closed with its recount recorded; 53's four open parts kept or made a ticket (two are Ryan's: the settings denial and the token switch) | S-M | low | low-medium (P) | none open: item 83 is already `done 2026-10-14` through #37, and #36 left item 53's open parts as they were |
-| T15 | The sync repairs a roster below the links: it applies `glow/layout.py` `plan_tail_moves` as an order write, and `FIX` (`glow/layout.py:30`, pinned by `test/links_layout_test.py:913`) names the runner's next run instead of `tools/fix_roster_order.py` | M | medium (an order write the runner applies to live forms; tests first) | low-medium (Q; it unblocks the `fix_roster_order.py` retirement) | #33 (closed; it left this hint); epic #29 (the hint follow-ups); #34 (the runner's verify after an apply would check the layout as served) |
+| T15 | The sync repairs a roster below the links: it applies `glow/layout.py` `plan_tail_moves` as an order write, and `FIX` (`glow/layout.py:30`, pinned by `test/links_layout_test.py:913`) names the runner's next run instead of `tools/fix_roster_order.py`. **This amends an accepted decision.** DECISIONS 2026-09-29 ("Every roster renders above the links and Submit") made the repair a one-time, hand-run, gated tool and rejected tail moves on unattended runs. Its plan says "the sync still never writes the links or Submit" and keeps the repair separate from the runner (`docs/plans/2026-09-29-rosters-above-submit.md:71-73`). T15 needs Ryan's go and a new dated DECISIONS entry before it is planned. If he keeps the 2026-09-29 decision, T15 is dropped and `fix_roster_order.py` stays as the hand-run repair. | M | high (it reverses an accepted design; the unattended runner would write the order of the links and Submit on live forms; tests first) | low-medium (Q; it unblocks the `fix_roster_order.py` retirement) | #33 (closed; it left this hint); epic #29 (the hint follow-ups); #34 (the runner's verify after an apply would check the layout as served) |
 
 **T4 and the workflow doc's item 12.** They point in opposite directions. Item 12 builds and
 retrieves packages under `data/sf_<topic>_<date>/`, because the Write tool may not write
