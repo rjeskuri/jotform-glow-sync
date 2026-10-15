@@ -25,20 +25,20 @@ Where an item touches their scope, it says so.
 1. **Jotform's upload space runs out.** The Group Photo is required. At October's pace, uploads
    pass 50 % of Silver's 10 GiB around mid-December 2026 and reach the cap around mid-March
    2027 (BACKLOG 68). Nobody has decided between Gold and a retention policy.
-2. **The live Apps Script is not the code in `appsscript/`.** The 15 commits of 2026-10-09
-   wait for a push (`docs/RUNBOOK.md:2095`). No `appsscript-deployed-*` tag exists locally or on
-   `origin`, so git cannot say which commit is deployed. The deploy skill's rollback starts from
-   that tag.
-3. **Jotform's runtime changes weekly, and our emulation of it is pinned.** Six builds have
-   been compared (`glow/translation_lookup.py:68-71`). At least three builds served since
-   2026-10-06 have not (BACKLOG 64).
-4. **An integration can lapse without an alarm.** Any of these can stop working silently: the
+2. **An integration can lapse without an alarm.** Any of these can stop working silently: the
    Jotform → Salesforce connection, the Drive token, the sheet's dispatch token and the CLI
    login. No automated check compares Jotform submissions with Salesforce batches.
-5. **The Salesforce source lives only in gitignored `data/` on one Mac.** That covers the
+3. **The Salesforce source lives only in gitignored `data/` on one Mac.** That covers the
    processor's Apex, the dashboard generator and the permission sets (BACKLOG 82). #35 needs to
    change that dashboard now. The workflow doc's item 12 would keep building packages under
    `data/`. T4 reconciles the two.
+4. **The live Apps Script is not the code in `appsscript/`.** The 15 commits of 2026-10-09
+   wait for a push (`docs/RUNBOOK.md:2095`). No `appsscript-deployed-*` tag exists locally or on
+   `origin`, so git cannot say which commit is deployed. The deploy skill's rollback starts from
+   that tag.
+5. **Jotform's runtime changes weekly, and our emulation of it is pinned.** Six builds have
+   been compared (`glow/translation_lookup.py:68-71`). At least three builds served since
+   2026-10-06 have not (BACKLOG 64).
 
 **Top 3 actions:**
 
@@ -81,39 +81,48 @@ see item F and "Doc consolidation".
 
 | Score | Meaning |
 |---|---|
-| 1 | under half a day, or one decision by Ryan |
-| 2 | a ticket of size S or M |
+| 1 | no ticket: under half a day, or one decision by Ryan |
+| 2 | one ticket of size S or M |
 | 3 | a ticket of size L, or several tickets |
 
+Each item's effort is scored from the size of the ticket it points at. Where an item points at
+two tickets but one of them removes the risk on its own, the score follows that one, and the
+item's section says so.
+
 **Rank.** Sort by L × C, highest first. Ties go to the lower effort first, then to the higher
-cost.
+cost, then to the item letter.
 
 ## Ranked list
 
 | # | Item | L | C | E | L×C | Proposal |
 |---|---|---|---|---|---|---|
-| 1 | A. Jotform upload space reaches the cap | 3 | 3 | 1 | 9 | T1 |
-| 2 | B. Live Apps Script ≠ `appsscript/`; deploy not recorded | 3 | 2 | 1 | 6 | T2 |
-| 3 | C. Jotform runtime builds not compared | 3 | 2 | 1 | 6 | T3 |
-| 4 | D. An integration lapses silently | 2 | 3 | 2 | 6 | T5 |
-| 5 | E. Salesforce metadata only in `data/` | 2 | 3 | 2 | 6 | T4 |
-| 6 | F. Stale RUNBOOK Status lines; its size | 3 | 2 | 2 | 6 | T6, T7 |
-| 7 | G. Salesforce CLI unpinned; tools read its JSON | 2 | 2 | 1 | 4 | T11 |
-| 8 | H. The harness commit that works is recorded nowhere; the invoice runs on it | 2 | 2 | 1 | 4 | T11 |
-| 9 | I. Python 3.10 EOL, unpinned Google libraries on the live runner | 2 | 2 | 2 | 4 | T10 |
-| 10 | J. Python ↔ Apps Script duplicated rules | 2 | 2 | 3 | 4 | T9 shrinks it |
-| 11 | K. `data/` and `backups/` exist on one Mac only | 1 | 3 | 1 | 3 | T13 |
-| 12 | L. OAuth scopes not pinned in the manifest | 1 | 3 | 1 | 3 | none (guarded) |
-| 13 | M. `hooks_test.py` is most of the verify run | 3 | 1 | 1 | 3 | T12 |
-| 14 | N. Legacy enrollment path and the Rebuild menu item | 1 | 3 | 2 | 3 | T9 |
-| 15 | O. Tests that pin prose | 3 | 1 | 2 | 3 | none here (#46) |
-| 16 | P. Two backlogs: BACKLOG.md and the board | 3 | 1 | 2 | 3 | T14 |
-| 17 | Q. One-off tools and one-time menu items | 2 | 1 | 1 | 2 | T8 |
-| 18 | R. Plan and intent statuses drift | 2 | 1 | 1 | 2 | T6 |
-| 19 | S. Node 18 + clasp 2.4.2 | 1 | 2 | 2 | 2 | watch |
-| 20 | T. Dashboard Partner filter at 49 of 50; two partner lists | 1 | 2 | 2 | 2 | watch |
+| 1 | A. Jotform upload space reaches the cap | 3 | 3 | 1 | 9 | T1 (a decision) |
+| 2 | D. An integration lapses silently | 2 | 3 | 2 | 6 | T5 (M) |
+| 3 | E. Salesforce metadata only in `data/` | 2 | 3 | 2 | 6 | T4 (M) |
+| 4 | B. Live Apps Script ≠ `appsscript/`; deploy not recorded | 3 | 2 | 2 | 6 | T2 (S) |
+| 5 | C. Jotform runtime builds not compared | 3 | 2 | 2 | 6 | T3 (S) |
+| 6 | F. Stale RUNBOOK Status lines; its size | 3 | 2 | 2 | 6 | T6 (S); T7 (S) optional |
+| 7 | G. Salesforce CLI unpinned; tools read its JSON | 2 | 2 | 2 | 4 | T11 (S) |
+| 8 | H. The harness commit that works is recorded nowhere; the invoice runs on it | 2 | 2 | 2 | 4 | T11 (S) |
+| 9 | I. Python 3.10 EOL, unpinned Google libraries on the live runner | 2 | 2 | 2 | 4 | T10 (M) |
+| 10 | J. Python ↔ Apps Script duplicated rules | 2 | 2 | 3 | 4 | T9 (M + S) and BACKLOG 28 |
+| 11 | K. `data/` and `backups/` exist on one Mac only | 1 | 3 | 1 | 3 | T13 (a decision) |
+| 12 | L. OAuth scopes not pinned in the manifest | 1 | 3 | 2 | 3 | none: guarded; BACKLOG 37's rest would be one S ticket |
+| 13 | M. `hooks_test.py` is most of the verify run | 3 | 1 | 2 | 3 | T12 (S-M) |
+| 14 | O. Tests that pin prose | 3 | 1 | 2 | 3 | none here (#46) |
+| 15 | P. Two backlogs: BACKLOG.md and the board | 3 | 1 | 2 | 3 | T14 (S-M) |
+| 16 | N. Legacy enrollment path and the Rebuild menu item | 1 | 3 | 3 | 3 | T9 (M + S) |
+| 17 | S. Node 18 + clasp 2.4.2 | 1 | 2 | 2 | 2 | watch; a clasp 3 move is one M ticket |
+| 18 | T. Dashboard Partner filter at 49 of 50; two partner lists | 1 | 2 | 2 | 2 | watch |
+| 19 | Q. One-off tools and one-time menu items | 2 | 1 | 2 | 2 | T8 (S); T15 (M) for `fix_roster_order.py` |
+| 20 | R. Plan and intent statuses drift | 2 | 1 | 2 | 2 | T6 (S) |
 | 21 | V. DECISIONS.md growth | 1 | 1 | 1 | 1 | none |
 | 22 | U. `FormHandlers.gs` at 1,353 lines | 1 | 1 | 2 | 1 | none (BACKLOG 86) |
+
+Rescored on 2026-10-15 against the effort scale. B, C, G, H, L, M, Q and R move from E1 to
+E2, because each needs a ticket, and N moves from E2 to E3, because T9 is two tickets. The top
+five are the same five risks, in a new order. F scores E2 because T6 alone removes its risk;
+T7 is a convenience.
 
 ## The items, with evidence
 
@@ -133,7 +142,7 @@ cost.
 - **Fix.** One decision, made before the warning. A retention policy would also starve
   `tools/backfill_resolve.py` and the question-18 comparison for the purged months.
 
-### B. Live Apps Script ≠ `appsscript/`; deploy not recorded (L3 C2 E1)
+### B. Live Apps Script ≠ `appsscript/`; deploy not recorded (L3 C2 E2)
 
 - **Undeployed code.** The `Status` of RUNBOOK "Apps Script deploy" (`docs/RUNBOOK.md:2095`)
   says the 2026-10-09 cleanup's changes are in the repository and not deployed. They include
@@ -151,7 +160,7 @@ cost.
   is N commits ahead of the last deploy tag". That would sit beside the workflow doc's item 13,
   which adds a step to `/land-checks` too.
 
-### C. Jotform runtime builds not compared (L3 C2 E1)
+### C. Jotform runtime builds not compared (L3 C2 E2)
 
 - **What we emulate.** `glow/translation_lookup.py` emulates `formTranslation.v2.js`.
   `READ_BUILDS` holds 6 builds (`:68-71`).
@@ -245,7 +254,7 @@ cost.
 - **Cost.** Claude reads the RUNBOOK as the truth. A stale status sends a session to redo a live
   step, or to skip one.
 
-### G. Salesforce CLI unpinned; tools read its JSON (L2 C2 E1)
+### G. Salesforce CLI unpinned; tools read its JSON (L2 C2 E2)
 
 - **What the tools depend on.**
   - `glow/salesforce.py:108` reads the JSON of `sf org display` and
@@ -261,7 +270,7 @@ cost.
 - **Cost.** The Mac's Salesforce tools stop: the monthly `sf_dupes.py check` and any back-fill.
   The runner uses client credentials, not the CLI, so it is unaffected.
 
-### H. The harness commit that works is recorded nowhere; the invoice runs on it (L2 C2 E1)
+### H. The harness commit that works is recorded nowhere; the invoice runs on it (L2 C2 E2)
 
 - **What the workflow doc found** (its "Inventory", Harness plugin):
   - The plugin comes from a directory marketplace, `~/portfolio_projects/harness`.
@@ -348,7 +357,7 @@ cost.
   like the original: encrypted and owner only (the `child-privacy` skill). This item only asks
   that the answer be written down.
 
-### L. OAuth scopes not pinned in the manifest (L1 C3 E1)
+### L. OAuth scopes not pinned in the manifest (L1 C3 E2)
 
 - **The gap.** BACKLOG 37 is in progress: `appsscript/appsscript.json` has no `oauthScopes`
   list. A new Google service makes the form-submit trigger fail hard until the owner
@@ -356,7 +365,7 @@ cost.
 - **Already guarded.** `scripts/check_gs.js` pins the 8 services and fails on a ninth (`make
   gs`). The likelihood is low in steady state, so no new ticket.
 
-### M. `hooks_test.py` is most of the verify run (L3 C1 E1)
+### M. `hooks_test.py` is most of the verify run (L3 C1 E2)
 
 - **Measured on 2026-10-15, before the rebase.** `scripts/verify.sh` took 87.9 s wall, and the
   Python suite ran 738 tests in 82.4 s. `test/hooks_test.py` alone took 75.9 s for 29 tests.
@@ -367,7 +376,7 @@ cost.
 - **Overlap.** The workflow doc's item 6 (the stop hook in a red worktree, a harness-plugin
   fix) and #46.
 
-### N. Legacy enrollment path and the Rebuild menu item (L1 C3 E2)
+### N. Legacy enrollment path and the Rebuild menu item (L1 C3 E3)
 
 - **No one calls the path.** `sync_attendance_form.py:528` calls `read_sheet()` only without
   `--roster`. No doc, skill or tool runs the sync without `--roster` (`git grep`), and the
@@ -413,16 +422,35 @@ cost.
 - **`docs/BACKLOG.md`** runs to 759 lines and has 94 item sections: 41 `open`, 8
   `in-progress`, 20 `blocked-on-ryan`, 19 `done` and 6 `dropped`. New work is a ticket
   (DECISIONS 2026-10-14), so 69 live items sit outside the board.
-- **Items already overtaken:**
-  - Item 47 ends "re-count 35's empty submissions for two weeks (to 2026-10-14)". The window
-    has closed and no result is recorded.
-  - Item 31, plan mode by default after launch week, predates the harness.
-  - Item 53 is `in-progress`, but #36 gated `sf` and `gh api` writes.
-  - Item 83 is `done 2026-10-14` (#37) and already sits under "Done".
-  - Item 1a, the key rotation, has been `blocked-on-ryan` since launch.
+- **Items that are overtaken, or closable once one fact is recorded.** Each was checked against
+  the repository on 2026-10-15.
+  - **Item 31** (plan mode by default, `defaultMode: plan`) is overtaken.
+    - Every session now runs in `auto`, and a project file cannot set it.
+    - The workflow doc's Inventory says "do not add a project `defaultMode`".
+    - `.claude/settings.json` has none.
+    - It can be `dropped`.
+  - **Item 1a** (rotate the Jotform key) is half done.
+    - The rotation itself is recorded: DECISIONS 2026-09-01, "The leaked Jotform key rotated",
+      and RUNBOOK "Credentials" (`:2795`, "the key was rotated").
+    - What is left is the read-only key for monitoring.
+  - **Item 47** is closable once its recount is recorded. It ends "re-count 35's empty
+    submissions for two weeks (to 2026-10-14)": the window has closed, and BACKLOG has no
+    result yet.
+- **Item 53 is still open; it is not overtaken.** The `sf`/`sfdx` write gating came from the
+  2026-10-09 commits (its own bullets: `8a04c16`, `cc43d1b`, `d9c7053`, `8d24497`), and
+  `sf api request` writes are gated too (`.claude/hooks/live_gate.sh:114-123`). Still open:
+  - `.claude/settings.json` has no read denial of `~/.sf` / `~/.sfdx`;
+  - `live_gate.sh` does not gate `sf org auth show-access-token`, which prints the token
+    (`git grep` finds no match);
+  - `.github/workflows/auto-sync.yml:16` still has the `repository_dispatch` trigger, to drop
+    once the sheet's token is switched;
+  - the `settings.local.json` moves of its third bullet. That file is Ryan's and was not read
+    here.
+
+  The first and the third are Ryan's: protected files and his token.
 - **Cost.** Nothing breaks. The plan is split across two places, so a session has to read both.
 
-### Q. One-off tools and one-time menu items (L2 C1 E1)
+### Q. One-off tools and one-time menu items (L2 C1 E2)
 
 - **Why they cost.** Each one-off must keep passing `make check` against today's `glow/`
   (DECISIONS 2026-10-09, "Finished one-offs are deleted, not archived").
@@ -432,10 +460,10 @@ cost.
     `glow/submissions.py` (147 lines).
   - Their tests: another 3,443 lines (435 + 264 + 1,090 + 1,059 + 595), plus their share of
     `links_layout_test.py`, which is not counted.
-  - 4 one-time or pre-launch GLOW menu items (`appsscript/Menu.gs:8-9`, `:18-21`, `:26`).
+  - 4 one-time or pre-launch GLOW menu items (`appsscript/Menu.gs:8-9`, `:18-21`, `:27`).
 - **The candidates with their dates** are under [Retirement candidates](#retirement-candidates).
 
-### R. Plan and intent statuses drift (L2 C1 E1)
+### R. Plan and intent statuses drift (L2 C1 E2)
 
 - **The count.** 44 plans (12,593 lines) and 11 intents: 37 `done`, 10 `in-progress`, 5
   `blocked`, 2 `proposed`, 1 `superseded`.
@@ -509,7 +537,7 @@ it needs Ryan's go (CLAUDE.md rule 1).
 | `tools/fix_module_values.py`, `test/fix_module_values_test.py` | The one-off `Module__c` correction of 2026-10-07 and its `--undo` | **2026-11-01**, when the undo window closes at the end of October (BACKLOG 84). RUNBOOK "The names dictionary and the module values" keeps a one-line SOQL audit in place of its paragraph (`:815-826`). The ledger stays in `data/`. | `git show <commit>^:tools/fix_module_values.py`; the test likewise |
 | `tools/sf_girls_present.py`, its test | The one-off `Girls_Present__c` back-fill (done 2026-10-07, 573 written). It has no undo command (`.claude/skills/salesforce/SKILL.md:61`). Its `check` is a health check (`docs/RUNBOOK.md:2558`). | When its two `check` counts move into RUNBOOK "Attendance totals and partner-reported counts" as SOQL, or into the monthly `sf_dupes.py check`. Earliest 2026-11-01, after one clean monthly look. | `git show <commit>^:tools/sf_girls_present.py` |
 | `tools/sf_backfill.py`, `tools/backfill_resolve.py`, `glow/submissions.py` (147 lines), their tests (`test/sf_backfill_test.py`, `test/backfill_resolve_test.py`, which also tests `glow/submissions.py`) | The September back-fill, done 2026-10-02. The RUNBOOK keeps both tools as the incident procedure (`:2758-2766`), but the window is hard-coded (`backfill_resolve.py:54-57`), and rollback by contact is now dangerous (`:2778-2785`). `glow/submissions.py` is used only by `backfill_resolve.py` and `fix_module_values.py` (`git grep`). | When BACKLOG items 76 (11 held sessions) and 78 (the guard) are settled, T8 has retired `fix_module_values.py`, and Ryan chooses between generalising the window (flags, not constants) and retiring both. BACKLOG 65's `q18_empty` watch uses the resolver, so move it first. With the tools gone, `glow/submissions.py` goes too, with its line in `glow/__init__.py` and its ARCHITECTURE row. | `git show <commit>^:tools/sf_backfill.py`, `…:tools/backfill_resolve.py`, `…:glow/submissions.py` (all from the one deleting commit) |
-| `tools/fix_roster_order.py` (and `FixRosterOrderTool` in `test/links_layout_test.py`) | The one-time repair of 2026-09-30 (BACKLOG 47). RUNBOOK "Rosters above Submit" (`:1053-1075`) keeps its relapse and new-form procedure. | **Not yet.** It is still the fix `form_status.py` prints (`glow/layout.py:30` `FIX`, pinned by `test/links_layout_test.py:913`). It can go once that hint names a sync apply instead, which is one of epic #29's follow-ups ("form_status's 'sync apply by hand' hints"), and no form has needed it for six months (2027-04-01). | `git show <commit>^:tools/fix_roster_order.py` |
+| `tools/fix_roster_order.py` (and `FixRosterOrderTool` in `test/links_layout_test.py`) | The one-time repair of 2026-09-30 (BACKLOG 47). RUNBOOK "Rosters above Submit" (`:1053-1075`) keeps its relapse and new-form procedure. | **Not yet.** It is still the fix `form_status.py` prints (`glow/layout.py:30` `FIX`, pinned by `test/links_layout_test.py:913`). #33 (closed 2026-10-14) reworded the other fix hints but left this one, and nothing open covers it. T15 (proposed below) gives it a home: the sync moves the tail below the last roster itself (`glow/layout.py` `plan_tail_moves`), so `FIX` and its test name the runner's next run. The tool can go once T15 has landed and no form has needed it for six months (2027-04-01). | `git show <commit>^:tools/fix_roster_order.py` |
 | `tools/fix_name_translations.py` | Removed 55 stale dictionary entries (2026-10-06). It has `--restore`, and BACKLOG 63's pruning would be built here. | When BACKLOG 63 is dropped or done. `NamesAndModulesRunbook` (`test/runbook_test.py:509`) pins its commands in the RUNBOOK and changes with it. | `git show <commit>^:tools/fix_name_translations.py` |
 | GLOW menu: `migrateCountryToRegion`, `retireOldEnrollmentForm` (`appsscript/Forms.gs`) | One-time migrations (BACKLOG items 38 and 6) | When the live Audit tab shows each has run, or its item is settled another way (BACKLOG 85) | `git show <commit>^:appsscript/Forms.gs` and `Menu.gs`, then a push |
 | GLOW menu: `migrateFormWording` | The one-time wording run (BACKLOG 43, not yet run) | After Ryan's run is recorded | As above |
@@ -757,13 +785,14 @@ risk ranking says the ticket removes. The overlaps were re-checked with
 | T5 | A read-only delivery check: each form's submissions against `Attendance_Batch__c` per day, counts only; record token expiries in RUNBOOK "Credentials" | M | low (read only) | high (D) | #34 (the same verify step in `tools/auto_sync.py`); BACKLOG 27 (the runner's Salesforce credentials; until then from the Mac); BACKLOG 62 |
 | T6 | Status sweep: the RUNBOOK contents, the stale Status lines of item F, the drifted plan statuses; waiting steps become `needs-input` tickets | S | low | medium (F, R) | #35 (the Attendance totals section). #37 landed and fixed the Live gate section, so the sweep leaves it alone.; #15 (the handoff's stale lines land through the monthly chore, not here) |
 | T7 | A "Routine" list at the top of the RUNBOOK, linking the sections | S | low | medium (F) | WF item 1 (a `/form-rollout` skill) is the per-change procedure; this is the recurring one |
-| T8 | Retire `tools/fix_module_values.py` (after 2026-11-01) and `tools/sf_girls_present.py` (its check moved), with their ARCHITECTURE rows and RUNBOOK paragraphs | S | low | low-medium (Q) | none (BACKLOG 84) |
+| T8 | Retire `tools/fix_module_values.py` (after 2026-11-01) and `tools/sf_girls_present.py` (its check moved), with their ARCHITECTURE rows and RUNBOOK paragraphs | S | low | low-medium (Q) | none open (BACKLOG 84). `tools/fix_roster_order.py` is not here: its retirement waits on T15. |
 | T9 | Retire the legacy enrollment path and the Rebuild menu item after Ryan confirms (BACKLOG 39, 28), in two parts: (a) Python, fixtures and `upload_roster.py` (M); (b) Apps Script with the next push (S) | M + S | medium (sync argument parsing; a push) | medium (N; shrinks J by two bridges, a constant and four divergences) | #46 (legacy code); T2 (part (b) rides on the next push) |
 | T10 | Python 3.12 and a runner lockfile (BACKLOG 80, 81) | M | medium (CI runs the live sync: a dry run, then one watched apply) | medium (I) | none |
 | T11 | Record the Salesforce CLI version and the working harness commit; an offline test over a recorded `--json` answer of each CLI shape the tools read | S | low | medium (G, H) | WF "Inventory" (the plugin's cache label; its upgrade waits for 2026-10-16); #6 (the harness v2 adoption epic) |
 | T12 | Make `test/hooks_test.py` fast (51-76 s of a 58-82 s Python suite) | S-M | low (tests only; the hooks unchanged) | medium (M) | WF item 6 (the stop hook in a red worktree) and item 9 (hook tests on a draft copy); #46 |
 | T13 | Write down the off-Mac copy of `data/` and `backups/`, or its absence (a decision under the `child-privacy` rules) | S | medium (minors' data) | medium (K) | none |
-| T14 | BACKLOG triage: the 69 live items become tickets, `dropped` or parked; the header says the file is frozen | S-M | low | low-medium (P) | none (item 83 already `done 2026-10-14`, through #37) |
+| T14 | BACKLOG triage: the 69 live items become tickets, `dropped` or parked; the header says the file is frozen. First: item 31 `dropped`; 1a narrowed to the read-only key; 47 closed with its recount recorded; 53's four open parts kept or made a ticket (two are Ryan's: the settings denial and the token switch) | S-M | low | low-medium (P) | none open: item 83 is already `done 2026-10-14` through #37, and #36 left item 53's open parts as they were |
+| T15 | The sync repairs a roster below the links: it applies `glow/layout.py` `plan_tail_moves` as an order write, and `FIX` (`glow/layout.py:30`, pinned by `test/links_layout_test.py:913`) names the runner's next run instead of `tools/fix_roster_order.py` | M | medium (an order write the runner applies to live forms; tests first) | low-medium (Q; it unblocks the `fix_roster_order.py` retirement) | #33 (closed; it left this hint); epic #29 (the hint follow-ups); #34 (the runner's verify after an apply would check the layout as served) |
 
 **T4 and the workflow doc's item 12.** They point in opposite directions. Item 12 builds and
 retrieves packages under `data/sf_<topic>_<date>/`, because the Write tool may not write
