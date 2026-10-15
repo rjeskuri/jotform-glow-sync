@@ -1,8 +1,8 @@
 ---
 title: Special event "IDG Celebrations" on every attendance form, after "Welcome Session"
 author: Claude (with Ryan's decisions of 2026-10-14)
-status: accepted         # Ryan accepted it in conversation on 2026-10-14
-done:
+status: done             # live on all five forms 2026-10-14 (Result); accepted by Ryan in conversation on 2026-10-14
+done: 2026-10-14
 backlog:
 created: 2026-10-14
 intent: Ryan, 2026-10-14 - "Under the new special module created yesterday we need "IDG Celebrations" added as a new option now."
@@ -123,3 +123,20 @@ Healthy output after the rollout:
 - After the first event: the SOQL read above.
 
 ## Result
+2026-10-14, Ryan's go for each write. `AUTO_SYNC_APPLY` was never touched.
+
+- Exports `data/roster_2026-10-14T0549Z.csv` / `partners_…`.
+- **Template** `262352490535154`: applied by Ryan, the backup first. The sync's apply printed the
+  three `UPDATE module dropdown` lines adding `Special Event - IDG Celebrations` (`calcValues`
+  7, 9 and 10 on q14, q92, q93). `form_status.py --rendered --partners`: CLEAN, runtime build
+  `41f4d6815a6`.
+- **U.S** `262382706852058` (disabled): applied by Ryan the same way (`--disabled-ok`);
+  `form_status` CLEAN, the rendered checks skipped (DISABLED).
+- PR #40 (#30, the runner applies merged generated form changes) landed as `6690700`.
+- **The runner**: run `38519656203` (started from the Actions tab, `apply=true`) applied the
+  option on Africa, Asia and Latin America: 0 creates, updates, deletes and warnings; verified
+  clean. Claude re-read all three with `form_status.py --rendered --partners`: CLEAN, each module
+  select serving both events once with its `data-calcvalue`.
+- Open: staff tell mentors (the new option; one submission per club per day). The first
+  `Special Event - IDG Celebrations` batch in Salesforce is still to be read: a blank
+  `Module_Week__c` through the integration stays unproven (Risks).

@@ -356,8 +356,9 @@ class Audit(unittest.TestCase):
         old_qs, old = before_rollout(qs, wire)
         problems, summary = form_status.audit_special_events(old_qs, old)
         self.assertEqual(len(problems), 5)
-        self.assertTrue(all("awaiting a sync apply by hand, template first (RUNBOOK \"Special events\")" in p
-                            for p in problems))
+        # who repairs it depends on the form kind (FixHintsByFormKind); the audit alone says it is
+        # awaited, and where the procedure is
+        self.assertTrue(all("awaiting " in p and "(RUNBOOK \"Special events\")" in p for p in problems))
         self.assertIn("module dropdown q14 (year 1) lacks the special event 'Special Event - Welcome Session'",
                       problems[0])
         self.assertIn("1 rule(s) show a session dropdown without testing a curriculum module", problems[3])
@@ -633,7 +634,11 @@ class RunbookQuotes(unittest.TestCase):
         warning = "which is no special event of glow/sync.py SPECIAL_EVENTS: left as it is"
         self.assertIn(warning, text)
         self.assertIn(warning, re.sub(r'"\s*\n\s*"', "", read(os.path.join(REPO, "sync_attendance_form.py"))))
-        self.assertIn("awaiting " + form_status.EVENTS_FIX, text)
+        # the hint by form kind (ticket #33): the runner's next run on an enabled regional form, a
+        # sync apply by hand on the template and a disabled form - the RUNBOOK quotes both
+        self.assertIn('awaiting a sync apply by hand, template first (RUNBOOK "Special events")', text)
+        self.assertIn("the runner's next run (or the sync's apply by hand now)", text)
+        self.assertNotIn("wording predates", text)
         self.assertIn("special events: 2 type(s) on 3 of 3 module dropdowns; session bridge rule N of M", text)
         self.assertIn("`{15}{95}{96}{97}`", text)
         self.assertEqual(glow_sync.week_bridge_equation(), "{15}{95}{96}{97}")
@@ -955,12 +960,16 @@ class IdgAudit(unittest.TestCase):
         for qid, year, problem in zip(("14", "92", "93"), ("1", "2", "3"), problems):
             self.assertTrue(problem.startswith(f"module dropdown q{qid} (year {year}) lacks the special event "
                                                f"'{IDG}'"), problem)
-            self.assertIn(self.FIX, problem)
+            self.assertIn("awaiting ", problem)
         self.assertEqual(summary["listed"], {q: {WELCOME: 1, IDG: 0} for q in ("14", "92", "93")})
         self.assertIn("2 type(s) on 0 of 3 module dropdowns", form_status.special_events_line(summary))
-        # the report: NOT CLEAN (rule problems), and the runner's verify step reads it as a problem
+        # the report: NOT CLEAN (rule problems), and the runner's verify step reads it as a problem;
+        # this one is the template's report, which the runner does not sync: a sync apply by hand
         rep = self.report(qs, wire)
         self.assertEqual(len([p for p in rep["rule_problems"] if IDG in p]), 3)
+        for p in rep["rule_problems"]:
+            if IDG in p:
+                self.assertIn(self.FIX, p)
         clean = {"error_conditions": 0, "salesforce": True, "languages": ["a"] * 12,
                  "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []}}
         verdict, _ = auto_sync.verify_report(dict(clean, rule_problems=rep["rule_problems"]))
@@ -1005,6 +1014,123 @@ class IdgAudit(unittest.TestCase):
             self.assertIn(f"rendered page: module dropdown q{qid} serves '{IDG}' 0 time(s)", problem)
 
 
+RUNNER = "the runner's next run (or the sync's apply by hand now)"     # an enabled regional form
+HAND = "a sync apply by hand"                                           # the template, a disabled form
+REGIONAL_KINDS = tuple((fid, "ENABLED", f"{region} enabled") for region, fid in glow_forms.REGIONALS.items())
+HAND_KINDS = ((glow_forms.TEMPLATE, "ENABLED", "template"),
+              (glow_forms.TEMPLATE, "DISABLED", "template, status disabled"),
+              # a regional form whose status is anything but ENABLED is not the runner's: disabled,
+              # deleted, or a status Jotform did not report (None)
+              *((fid, status, f"{region} {status or 'no status'}")
+                for region, fid in glow_forms.REGIONALS.items() for status in ("DISABLED", "DELETED", None)),
+              # an enabled form that is none of the four regionals: a retired (defunct) form, an unknown id
+              *((fid, "ENABLED", f"defunct {fid} enabled") for fid in form_status.DEFUNCT),
+              ("999", "ENABLED", "unknown id enabled"))
+# --rendered reads enabled forms only and takes the kind from r["id"]: the four regionals, then the
+# ids that get the hand wording (the template, a retired form, an unknown id, no id at all)
+RENDERED_REGIONAL = tuple(glow_forms.REGIONALS.values())
+RENDERED_HAND = (glow_forms.TEMPLATE, *form_status.DEFUNCT, "999", None)
+
+
+class EventHintsByFormKind(unittest.TestCase):
+    """Ticket #33: the special-event problems say who repairs the drift - on an enabled regional form
+    the runner's next run (or the sync's apply by hand now), on the template and a disabled form a
+    sync apply by hand - in the report (API) and in --rendered (the served page; enabled forms only).
+    docs/DECISIONS.md, 2026-10-14."""
+
+    def report(self, qs, wire, form_id, status):
+        qs = copy.deepcopy(qs)
+        for q_id, q in qs.items():
+            q.setdefault("qid", q_id)
+
+        class Fake:
+            def get(self, path, **params):
+                if path.endswith("/questions"):
+                    return copy.deepcopy(qs)
+                if path.endswith("/properties"):
+                    return {"conditions": wire, "clearFieldOnHide": "disable",
+                            "language": [{"options": "English (US)|Español", "primaryLanguage": "en"}]}
+                if path.endswith("/translations"):
+                    return served_store(qs)
+                return {"title": "t", "count": "0", **({} if status is None else {"status": status})}
+        return form_status.form_report(form_id, Fake(), {})
+
+    def before(self):
+        """The in-step form before the rollout, with both live types missing."""
+        return before_rollout(*shaped())
+
+    def test_every_awaited_event_problem_names_who_repairs_it_by_form_kind(self):
+        qs, wire = self.before()
+        # the three sites of audit_special_events: the options, the rules that show a session for an
+        # event, the missing bridge (Welcome Session missing from the 3 dropdowns)
+        sites = (("lacks the special event", 3), ("show a session dropdown without testing a curriculum module", 1),
+                 ("no session bridge (question 100", 1))
+        for form_id, status, label in REGIONAL_KINDS + HAND_KINDS:
+            with self.subTest(label):
+                problems = self.report(qs, wire, form_id, status)["rule_problems"]
+                for fragment, count in sites:
+                    found = [p for p in problems if fragment in p]
+                    self.assertEqual(len(found), count, (fragment, problems))
+                    for p in found:
+                        self.assertIn('(RUNBOOK "Special events")', p)
+                        if (form_id, status, label) in REGIONAL_KINDS:
+                            self.assertIn("awaiting " + RUNNER, p)
+                            self.assertNotIn(HAND, p)
+                        else:
+                            self.assertIn('awaiting a sync apply by hand, template first (RUNBOOK "Special events")', p)
+                            self.assertNotIn("runner", p.lower())
+
+    def test_the_hint_follows_the_drift_not_a_constant(self):
+        # the live state (Welcome Session there, IDG Celebrations to come): three problems, one per
+        # dropdown, on every kind; and the in-step form says nothing of either
+        qs, wire = live_state()
+        for form_id, status, label in REGIONAL_KINDS + HAND_KINDS:
+            with self.subTest(label):
+                found = [p for p in self.report(qs, wire, form_id, status)["rule_problems"] if IDG in p]
+                self.assertEqual(len(found), 3)
+                want = "awaiting " + (RUNNER if (form_id, status, label) in REGIONAL_KINDS else HAND)
+                self.assertTrue(all(want in p for p in found), found)
+        qs, wire = shaped()
+        for form_id, status, label in REGIONAL_KINDS + HAND_KINDS:
+            problems = self.report(qs, wire, form_id, status)["rule_problems"]
+            self.assertEqual([p for p in problems if "event" in p or "bridge" in p or RUNNER in p], [], label)
+
+    def test_the_served_page_hints_name_the_runner_on_a_regional_form_only(self):
+        # --rendered reads enabled forms only: a regional form and the template
+        old = served_rules_and_rosters(*self.before())
+        qs, wire = shaped()
+        page = served_rules_and_rosters(qs, wire)
+        calcs = re.search(r"JotForm\.setCalculations\((.*?)\);", page, re.S)
+        served = json.loads(calcs.group(1))
+
+        def edited(**change):
+            return page.replace(calcs.group(1), json.dumps(
+                [dict(c, **change) if c["resultField"] == sync.WEEK_ID and len(c["equation"]) > 6 else c
+                 for c in served]))
+        cases = (("options and bridge missing", old, 3 + 1),       # Welcome Session on 3 dropdowns, then the bridge
+                 ("operands dropped", edited(operands="15,95,96,97"), 1),
+                 ("hidden fields not ignored", edited(ignoreHiddenFields="0"), 1))
+        for label, html, count in cases:
+            for form_id in RENDERED_REGIONAL + RENDERED_HAND:
+                with self.subTest(label, form=form_id):
+                    problems = form_status.rendered_bridge_problems({} if form_id is None else {"id": form_id}, html)
+                    self.assertEqual(len(problems), count, problems)
+                    for p in problems:
+                        if form_id in RENDERED_REGIONAL:
+                            self.assertIn(RUNNER, p)
+                            self.assertNotIn(HAND, p)
+                        else:
+                            self.assertIn(HAND, p)
+                            self.assertNotIn("runner", p.lower())
+        # a problem with no fix to offer (the bridge out of place: the next apply puts it right)
+        # is not given one on any kind
+        pos = glow_sync.week_bridge_layout(wire)["position"]
+        late = served_rules_and_rosters(qs, wire[:pos] + wire[pos + 1:] + [wire[pos]])
+        for form_id in (glow_forms.REGIONALS["Africa"], glow_forms.TEMPLATE, "999", None):
+            (problem,) = form_status.rendered_bridge_problems({} if form_id is None else {"id": form_id}, late)
+            self.assertNotIn("runner", problem.lower())
+
+
 class IdgDocs(unittest.TestCase):
     """The plan beside the ticket, and the RUNBOOK's "Special events" naming both types."""
 
@@ -1024,6 +1150,10 @@ class IdgDocs(unittest.TestCase):
         # it links this ticket's plan, and no sentence of the section still calls Welcome Session the
         # first or only type (Status line and body alike)
         self.assertIn("plans/2026-10-14-idg-celebrations.md", status)
+        # rolled out 2026-10-14 (the plan's Result): no longer pending, live on the forms
+        idg = status[status.index("IDG Celebrations"):]
+        self.assertNotRegex(idg, r"(?i)\bpending\b")
+        self.assertRegex(idg, r"(?i)\blive\b[^.;]*2026-10-14|2026-10-14[^.;]*\blive\b")
         flat = " ".join(section.split())
         for stale in ("the first type is", "first type", "only type", "only special event"):
             self.assertNotIn(stale, flat.lower())
@@ -1050,15 +1180,21 @@ class IdgDocs(unittest.TestCase):
         for key_ in ("title", "author", "status", "created", "intent"):
             self.assertTrue(keys.get(key_, "").partition("#")[0].strip(), key_)
         self.assertIn("IDG Celebrations", keys["title"])
-        self.assertEqual(docs_index.status_of(keys["status"])[0], "accepted")
+        # done: rolled out on all five forms 2026-10-14 (ticket #31's comment, Ryan's go)
+        self.assertEqual(docs_index.status_of(keys["status"])[0], "done")
         self.assertRegex(keys["created"], r"^2026-10-14$")
         self.assertEqual(keys.get("backlog", "").partition("#")[0].strip(), "")      # none
-        self.assertEqual(keys.get("done", "").partition("#")[0].strip(), "")         # not done until the rollout
+        self.assertEqual(keys.get("done", "").partition("#")[0].strip(), "2026-10-14")
+        # …and the generated index says so (`make docs-index`)
+        rows = [l for l in read(os.path.join(REPO, "docs", "plans", "README.md")).splitlines()
+                if "(2026-10-14-idg-celebrations.md)" in l]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual([c.strip() for c in rows[0].strip().strip("|").split("|")][2].split()[0], "done", rows[0])
         self.assertIn("IDG Celebrations", h1)
         self.assertIn("IDG Celebrations", " ".join(sections.values()))     # the body says it too
         self.assertIn("SPECIAL_EVENTS", text)
 
-    def test_the_plan_has_a_real_rollout_rollback_risks_proof_and_an_empty_result(self):
+    def test_the_plan_has_a_real_rollout_rollback_risks_proof_and_result(self):
         sections, text = self.sections()
         headings = [h for h in re.findall(r"^## (.+)$", text, re.M)]
         names = ("Rollout", "Rollback", "Risks", "Proof", "Result")
@@ -1076,7 +1212,29 @@ class IdgDocs(unittest.TestCase):
         self.assertRegex(rollback, r"(?i)builder")
         self.assertIn("SPECIAL_EVENTS", rollback)
         self.assertIn("Module_Week__c", sections["Risks"])
-        self.assertEqual(sections["Result"].strip(), "")                  # nothing to report yet
+        # the Result of the 2026-10-14 rollout (ticket #31's comment): what ran, on whose go, how it
+        # was verified, and what is still open - its facts, in any words; not the template's placeholder
+        result = " ".join(sections["Result"].split())
+        self.assertGreaterEqual(len(result.split()), 60, result)
+        self.assertIsNone(re.search(r"<[a-z][^>]*>|\bTODO\b|\bTBD\b|\bXXX\b|filled in when done", result), result)
+        self.assertIn("2026-10-14", result)
+        for fact in ("6690700",                     # PR #40 (#30) landed
+                     "38519656203",                 # the runner's run that applied the regional forms
+                     "41f4d6815a6",                 # the template's runtime build, read with --rendered
+                     "CLEAN", "Africa", "Asia", "Latin America", "U.S", "--rendered"):
+            self.assertIn(fact, result)
+        self.assertRegex(result, r"(?i)\btemplate\b")
+        self.assertRegex(result, r"#40\b")
+        self.assertRegex(result, r"(?i)ryan")                                  # whose go
+        # the switch was never touched: said, not set
+        self.assertRegex(result, r"AUTO_SYNC_APPLY[^.;]{0,60}\b(never|not|untouched)\b|"
+                                 r"\b(never|not)\b[^.;]{0,60}AUTO_SYNC_APPLY")
+        self.assertNotIn("AUTO_SYNC_APPLY=", result)
+        # still open: staff telling mentors, and the first IDG batch read in Salesforce (blank week unproven)
+        self.assertRegex(result, r"(?i)\b(open|still|pending|not yet|to do|remains?)\b")
+        self.assertRegex(result, r"(?i)\bmentors?\b")
+        self.assertIn("Salesforce", result)
+        self.assertIn("Module_Week__c", result)
 
     def test_the_rollout_is_the_template_by_hand_then_the_land_then_the_runners_next_run(self):
         # Ryan's sequence (#30, 2026-10-14): Claude applies the template on his in-session go

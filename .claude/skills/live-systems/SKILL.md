@@ -42,11 +42,16 @@ or a write through another program). RUNBOOK "Live gate (Claude Code)".
 | `tools/rename_club.py --apply` | A club's name or partner in the sheet's tabs and on its form | The tabs (`data/rename_club/<stamp>/`), a form snapshot | Those tabs and `restore_conditions.py` (RUNBOOK "Renaming a club") |
 | `tools/deactivate_clubs.py --apply` | Roster rows' `status` and `removed_date`, one Audit row | The Roster tab (`data/deactivate_clubs/<stamp>/`) | `--undo <dir> --apply` |
 | `tools/upload_roster.py --apply` | The sheet's roster tabs (the offline path) | The tabs it replaces (`data/roster_build/previous/<stamp>/`) | Those tabs, or the `export-all` you took |
-| `tools/auto_sync.py --apply` | What the sync writes, per region, within the bands; a SyncLog row | A conditions snapshot per form (`backups/<form>/conditions-<stamp>.json`) | `restore_conditions.py --from` it; stop: `AUTO_SYNC_APPLY=0` |
+| `tools/auto_sync.py --apply` | What the sync writes, per region, within the bands; a SyncLog row | A conditions snapshot per form (`backups/<form>/conditions-<stamp>.json`) | `restore_conditions.py --from` it; a merged form change: its revert or constants-off commit, merged (the next run rolls the forms back); an emergency stop: `AUTO_SYNC_APPLY=0`, back to `1` when `main` and the forms agree |
 | `npm run clasp:push` / `npx clasp push` | The deployed Apps Script | The last deployed commit (`/deploy-appsscript`) | That commit pushed again, never below the floors (below) |
-| `gh variable set AUTO_SYNC_APPLY`, `gh workflow run auto-sync.yml -f apply=true` | Whether, and when, the runner writes | — | `AUTO_SYNC_APPLY=0`, or clear the Script Properties `SYNC_DISPATCH_REPO` / `SYNC_DISPATCH_TOKEN` |
+| `gh variable set AUTO_SYNC_APPLY`, `gh workflow run auto-sync.yml -f apply=true` | Whether, and when, the runner writes: `AUTO_SYNC_APPLY` is normally `1`, and a rollout never sets it | — | The emergency off switch, in a rollback or an incident only: `AUTO_SYNC_APPLY=0`, set back to `1` before it ends; or clear the Script Properties `SYNC_DISPATCH_REPO` / `SYNC_DISPATCH_TOKEN` |
 
 ## The ritual
+A form change the sync generates is rolled out by its merge: the runner applies it to every
+enabled regional form on its next run, and the read-back is each region's SyncLog row and
+`form_status.py`. The ritual is for the template (from the ticket branch, before the land), a
+disabled form, and every other writer in the table.
+
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).
 2. Back up the exact thing you will write: `backup_forms.py --form <id>`,
    `sheets_client.py export-all data/live_<date>`, or note the last pushed commit for Apps Script.
@@ -65,7 +70,8 @@ Account first — the sync refuses it without `--q5-change-ok`; `sync_attendance
 from a checkout without the same-name code once a form is switched (older code puts it back on
 the plain names), or without the question-18 code once a form is rolled out (older code puts
 the Contact_IDs sum back after the roster rules: docs/RUNBOOK.md, "The names list sent to
-Salesforce"; so merge right after the template's rollout, before the first regional form);
+Salesforce"; so the template is applied from the ticket branch before the land, and a disabled
+form from `main` after it);
 writing a translation language without GET + merge first.
 
 ## Rollback beyond the table
@@ -73,19 +79,24 @@ writing a translation language without GET + merge first.
   History as the second path. It refuses a snapshot whose rules test clubs the Club picker no
   longer offers (any from before a form's `--same-name-switch`, or before a rename): run the
   sync instead (docs/RUNBOOK.md, "Club names two partners share", has the switch's own rollback).
-- Question 18's rule order and operand and the rosters' required flag: generated, so the rollback
-  is `glow/sync.py`'s `CONTACT_IDS_FIRST` / `CONTACT_IDS_PICKER_OPERAND` / `ROSTERS_REQUIRED`
-  turned off on a branch and the sync applied by hand per form (docs/RUNBOOK.md, "The names list
-  sent to Salesforce"); `restore_conditions.py` is the second path for the rules only. The runner
-  runs `main`'s constants: merge the constants-off commit only once every form is rolled back, then
-  `AUTO_SYNC_APPLY=1`; never while any form is still rolled out (the runner would put the old rule
-  order back on it with its next roster change).
+- Question 18's rule order and operand and the rosters' required flag: generated, so
+  `glow/sync.py`'s `CONTACT_IDS_FIRST` / `CONTACT_IDS_PICKER_OPERAND` / `ROSTERS_REQUIRED` are
+  turned off on a ticket branch, and merging the constants-off commit is the rollback: the runner
+  runs `main`'s constants and rolls every enabled regional form back on its next run (a
+  rule-order-only difference waits for each region's next roster change; to roll a form back at
+  once, apply it from `main`, no stop needed). The template and a disabled form are applied by
+  hand. One form alone cannot stay rolled back while `main` disagrees (the runner rolls it
+  forward): that needs the emergency switch, `AUTO_SYNC_APPLY=0`, set back to `1` when `main` and
+  the forms agree. `restore_conditions.py` is the second path for the rules only
+  (docs/RUNBOOK.md, "The names list sent to Salesforce").
 - The module dropdowns' `calcValues` and the special-event options: generated, so `glow/sync.py`
-  `MODULE_CALC_VALUES = False` (or the type out of `SPECIAL_EVENTS`) on a branch and the sync
-  applied by hand per form, the runner paused; the runner applies those lines as it applies a
-  roster change, so a form rolled back by hand while `main` disagrees is rolled forward, and the
-  constants-off commit is merged only once every form is rolled back, as with question 18
-  (docs/RUNBOOK.md, "The names dictionary and the module values", "Special events").
+  `MODULE_CALC_VALUES = False` (or the type's merge reverted) on a ticket branch, and merging it
+  is the rollback: the runner rolls every enabled regional form back on its next run. A
+  special-event option is then deleted in the builder on each form's three module dropdowns (the
+  revert first, else the next apply adds it back), and the runner realigns `calcValues`. The
+  template and a disabled form are applied by hand; one form alone, as with question 18, only
+  under the emergency switch (docs/RUNBOOK.md, "The names dictionary and the module values",
+  "Special events").
 - Questions: never deleted by tooling; a wrongly created question is removed in the builder.
 - Apps Script: `git checkout <previously deployed commit> -- appsscript && npm run clasp:push` —
   never below the floors in docs/RUNBOOK.md, "Rolling back `appsscript/`" (`7a175c4`; `986a325`
