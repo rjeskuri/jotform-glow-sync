@@ -1092,7 +1092,8 @@ partner names and form ids only. The U.S half (step 9) was not part of it.
   extra, 0 differ, 38 retired.
 - **The runner** (`tools/auto_sync.py --roster … --partners …`, dry run, 00:52 UTC): Africa
   `in-sync`, Asia `in-sync`, Latin America `in-sync`, U.S `skipped - form DISABLED` (the U.S form
-  was already disabled; how and when is step 9's record, not this one).
+  was already disabled; how and when is step 9's record, not this one). It raised no ATTENTION
+  item (0 ATTENTION lines, 2026-10-16 00:52 UTC).
 - **Not in this record:** the headless-Chrome `validateAll` check and the public-page searches of
   step 7 (the `--rendered` counts above are the served-page evidence recorded), and the
   `AUTO_SYNC_APPLY` switch of steps 7 and 10.
@@ -1101,6 +1102,10 @@ partner names and form ids only. The U.S half (step 9) was not part of it.
   (backup, dry run, the apply on Ryan's go). The two backups above record each form before its
   apply; `restore_conditions.py --from` one of them is refused while the picker no longer lists the
   38 (its docstring: `--force`, then the sync straight after), so the cells are the way back.
+  Between clearing the cells and the hand applies every runner run plans 38 restores (more than
+  `--max-restores` 5): Africa reads `attention`, the run exits 2 (a failed workflow and its
+  e-mail) and Africa's ordinary roster changes are held. So clear the cells and do the hand
+  applies (template, Africa) in one sitting, like the rollout.
 
 What remains of this plan: step 9 (the U.S clubs' deactivation; the U.S form's switch-off and
 whether the API did it are not recorded here), step 10 (`AUTO_SYNC_APPLY`, not recorded here),

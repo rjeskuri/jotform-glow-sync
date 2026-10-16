@@ -488,7 +488,7 @@ Status: open
 Status: blocked-on-ryan
 
 - **Club accounts for clubs on no form** (from the photos/clubs-off-Jotform plans, 2026-10-06): the automatic sync creates accounts only for clubs it puts on a form, so a new club of a partner that does not use Jotform (jotform=no) gets none and stays in SF Pending for a hand create. A second trigger, "an active Roster club on no form with no account", would close it: Ryan's decision
-- 2026-10-16: the gap is live - Education and English for You, Tumaini La Maisha and Ng'aa Maskani are marked `jotform=no` and their 38 clubs are off the forms (ticket #56; [Result](plans/2026-10-06-clubs-off-jotform.md#result)); a new club of theirs now gets no automatic account and needs a hand create from SF Pending before its first aggregate batch.
+- 2026-10-16: the gap is live - Education and English for You, Tumaini La Maisha and Ng'aa Maskani are marked `jotform=no` and their 38 clubs are off the forms (ticket #56; [Result](plans/2026-10-06-clubs-off-jotform.md#result)); a new club of theirs now gets no automatic account and needs a hand create from SF Pending before its first aggregate batch. While `SF_SYNC` is not `apply` (RUNBOOK "New clubs' accounts, automatically") every new club, on a form or not, is a hand create from SF Pending, so the jotform=no gap only matters once `SF_SYNC` is `apply`.
 
 ### 76. Days where Salesforce holds fewer rows than ticks
 

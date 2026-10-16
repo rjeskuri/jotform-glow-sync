@@ -2530,24 +2530,18 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - **Verify:** the Signals, below.
 - **Rollback:** of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
 
-Three partners' clubs are to report their attendance through Salesforce only (Ryan, 2026-10-06).
-Their retirement from the forms is pending: [plan](plans/2026-10-06-clubs-off-jotform.md) is in
-progress and nothing is applied, so the Partners tab's `jotform` column is not yet `no` for them
-and their 38 clubs are still on the Africa Club picker. Until then a Jotform batch from one of
-those clubs counts once, through the Jotform branch of the filter (2, below).
-2026-10-16: the retirement is applied - the three partners are marked `no` and their 38 clubs are
-off the template's and the Africa form's Club picker (~00:40 / ~00:50 UTC, Ryan's go; both forms
-CLEAN; [Result](plans/2026-10-06-clubs-off-jotform.md#result)), so no new Jotform batch can come
-from them through the picker.
-- **The double count left open until the retirement is applied**: a typed monthly aggregate for one
-  of those 38 clubs (branch 3) plus that club's Jotform batches in the same month (branch 2) would
-  both count. The processor's club-and-day lock blocks only a batch for the same date, and the
-  aggregate is dated the last day of the month. So the intake (BACKLOG 72) must not type a count
-  for a club that still submits on Jotform until the retirement is applied. Today nothing is
-  double counted: 0 batches since 1 September from the three partners' clubs (SOQL, 2026-10-16).
-  2026-10-16: applied (above) - the path through the Jotform picker is closed for these 38 clubs;
-  a count typed for a month in which one of them sent a Jotform batch before the retirement would
-  still add to it (none since 1 September).
+Three partners' clubs report their attendance through Salesforce only (Ryan, 2026-10-06). Since
+2026-10-16 the three partners are marked `no` in the Partners tab's `jotform` column and their 38
+clubs are off the template's and the Africa form's Club picker
+([plan](plans/2026-10-06-clubs-off-jotform.md), [Result](plans/2026-10-06-clubs-off-jotform.md#result)):
+their attendance reaches Salesforce only as typed counts (branch 3 of the filter, below).
+- **Double counting**: a typed monthly aggregate for one of those 38 clubs (branch 3) plus that
+  club's Jotform batches in the same month (branch 2) would both count; the processor's
+  club-and-day lock blocks only a batch for the same date, and the aggregate is dated the last day
+  of the month. The Jotform path for these clubs is closed (none sent a batch since 1 September),
+  so a count typed for them counts once. A count typed for a club of another partner is left out
+  by the filter. If one of the three partners is unmarked again (its clubs back on the picker), the
+  risk returns: stop typing its counts before its clubs submit on Jotform again.
 
 Leadership wants one attendance total that includes them, shown beside the figure from the forms
 alone (Ryan, 2026-10-15).
