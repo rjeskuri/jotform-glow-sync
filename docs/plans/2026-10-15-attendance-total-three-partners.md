@@ -26,7 +26,9 @@ Salesforce-entered counts.
   forms is pending: [plan](2026-10-06-clubs-off-jotform.md) is in progress and nothing is
   applied, so the Partners tab's `jotform` column is not yet `no` for them and their 38 clubs are
   still on the Africa Club picker. Until then a Jotform batch from one of those clubs counts once,
-  through the Jotform branch of the filter (2, Build).
+  through the Jotform branch of the filter (2, Build). 2026-10-16: the retirement is applied (the
+  three partners marked `no`, their 38 clubs off the template's and the Africa form's Club picker,
+  both forms CLEAN, Ryan's go, ticket #56; [Result](2026-10-06-clubs-off-jotform.md#result)).
 - Ryan's decisions of 2026-10-15:
   - Total attendance = the Jotform attendance plus the Salesforce-entered counts of the three
     partners; any other club's attendance entered in Salesforce (a `Success` batch whose
@@ -110,6 +112,8 @@ step 3. Revert this ticket's RUNBOOK change with it.
   only the same date. Mitigation: the intake (BACKLOG 72) must not type a count for a club that
   still submits on Jotform until the retirement ([plan](2026-10-06-clubs-off-jotform.md)) is
   applied. Today: 0 batches since 1 September from the three partners' clubs (SOQL, 2026-10-16).
+  2026-10-16: the retirement is applied (~00:40 / ~00:50 UTC, template and Africa): the double
+  count's path through the Jotform picker is closed for these clubs.
 - **A renamed partner account** drops out of filter 3 (it matches the names). Mitigation: rename
   the filter values with the account, as for the dashboard's Partner filter.
 - **Leadership's number stays unexplained**: the Result reports what the numbers are, by session
