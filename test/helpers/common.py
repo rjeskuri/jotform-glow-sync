@@ -79,20 +79,33 @@ class AutoSyncFixture:
     """auto_sync.Run.region over a fabricated dry run. AutoSyncPlan inherits it; other TestCases
     borrow run_region (AutoSyncFixture.run_region(self, ...))."""
 
-    def run_region(self, text, apply=False, summary=None, region_check=None, status="ENABLED", **band):
+    def run_region(self, text, apply=False, summary=None, region_check=None, status="ENABLED",
+                   rendered=None, problems=None, region="Africa", **band):
         """auto_sync.Run.region("Africa") over a fabricated dry run; with apply, every
         later step (backup, apply, verify) answers ok and a clean form_status report -
         or one whose region check says `region_check`. status: what the form's status
         read answers (an exception: the read raised, after its retries); band: the
         runner's --max-* overrides. The run's `synced` lists each sync call's apply flag;
         its `steps` every sync, backup, conditions snapshot and verify call in order
-        ("sync", "backup", "save conditions", "sync --apply", "verify" is a full apply)."""
+        ("sync", "backup", "save conditions", "sync --apply", "verify" is a full apply).
+        The served-page read (a form_status.py call with --rendered, a call of its own beside
+        the definition verify) is not a step: each one's argv is in the run's `rendered`, and
+        the reads answer, in turn, the items of `rendered`: a list of the page's rule problems
+        (the page read fine), "exit" (the call exits 1, as when the page cannot be fetched),
+        "garbage" (output that is not JSON) or "empty" (a JSON list with no report); past the
+        list, a clean page. problems: the definition verify's rule_problems (the page read
+        reports them too, as form_status.py --rendered does). time.sleep in auto_sync is
+        patched to return at once: the run's `slept` lists its arguments, `events` everything in
+        order: each step as `steps` names it, the page reads ("rendered") and the waits
+        ("sleep"). region: the region run (its form: auto_sync.REGIONAL_FORMS[region])."""
         import tempfile
         import types
         from unittest import mock
-        clean = {"error_conditions": 0, "salesforce": True, "rule_problems": [], "languages": ["a"] * 12,
+        clean = {"error_conditions": 0, "salesforce": True, "rule_problems": list(problems or []),
+                 "languages": ["a"] * 12,
                  "region_check": {"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": [],
                                   **(region_check or {})}}
+        pages = list(rendered or [])
 
         def status_(form):
             if isinstance(status, Exception):
@@ -102,28 +115,51 @@ class AutoSyncFixture:
             args = types.SimpleNamespace(apply=apply, out=out, max_creates=5, max_updates=20,
                                          trigger="test", run_url="", **band)
             run = auto_sync.Run(args)
-            run.synced, run.steps = [], []
+            run.synced, run.steps, run.rendered, run.slept, run.events = [], [], [], [], []
+
+            def step(label):
+                run.steps.append(label)
+                run.events.append(label)
 
             def sync_(csv_path, region, form, apply, summary_path=None):
                 run.synced.append(apply)
-                run.steps.append("sync --apply" if apply else "sync")
+                step("sync --apply" if apply else "sync")
                 if summary is not None and summary_path:
                     with open(summary_path, "w", encoding="utf-8") as f:
                         json.dump(summary, f)
                 return types.SimpleNamespace(returncode=0, stdout=text, stderr="")
 
             def cmd_(argv, label):
-                run.steps.append(label)                  # "backup" and "verify" are the run's own labels
+                if "--rendered" in argv:
+                    run.rendered.append(list(argv))
+                    run.events.append("rendered")
+                    page = pages.pop(0) if pages else []
+                    if page == "exit":
+                        return types.SimpleNamespace(returncode=1, stdout="", stderr=(
+                            "urllib.error.URLError: <urlopen error [Errno 60] Operation timed out>"))
+                    if page == "garbage":
+                        return types.SimpleNamespace(returncode=0, stdout="<!DOCTYPE html><html>", stderr="")
+                    if page == "empty":
+                        return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
+                    served = dict(clean, rule_problems=clean["rule_problems"] + list(page),
+                                  rendered_required={"rosters": 4, "required": 4})
+                    return types.SimpleNamespace(returncode=0, stdout=json.dumps([served]), stderr="")
+                step(label)                              # "backup" and "verify" are the run's own labels
                 return types.SimpleNamespace(returncode=0, stdout=json.dumps([clean]), stderr="")
 
+            def sleep_(seconds):
+                run.slept.append(seconds)
+                run.events.append("sleep")
+
             def save_(form):
-                run.steps.append("save conditions")
+                step("save conditions")
 
             with mock.patch.object(run, "sync", sync_), mock.patch.object(run, "read_status", status_), \
                     mock.patch.object(run, "cmd", cmd_), \
                     mock.patch.object(run, "save_conditions", save_), \
+                    mock.patch("auto_sync.time.sleep", sleep_), \
                     mock.patch("builtins.print"):
-                run.region("Africa", os.path.join(out, "roster.csv"))
+                run.region(region, os.path.join(out, "roster.csv"))
         return run
 
 

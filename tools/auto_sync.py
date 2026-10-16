@@ -41,8 +41,11 @@ template and a disabled form are applied by hand (docs/DECISIONS.md,
 2026-10-14; docs/RUNBOOK.md, "The names list sent to Salesforce", "The names
 dictionary and the module values" and "Special events"). The verify step's
 form_status also audits the form's names dictionary; a store it could not read
-is a note. Once per run, after the regions, Jotform's storage is read against the
-account's plan (glow/usage.py): the line is logged, and a limit at 80 % or more -
+is a note. An apply that rewrote the rules or a module dropdown is verified on
+the served page as well (form_status.py --rendered): a problem there reads
+applied-with-problems, an ATTENTION naming the form; a page that cannot be read
+is read once more after a short wait, then it is a note. Once per run, after
+the regions, Jotform's storage is read against the account's plan (glow/usage.py): the line is logged, and a limit at 80 % or more -
 upload space in all, or submissions in the monthly cycle, each on its own - is an
 ATTENTION, because at 100 % Jotform disables the forms (docs/RUNBOOK.md,
 "Photos", step 7); a read that fails is a log line, never a failed run.
@@ -97,6 +100,11 @@ SYNC_LOG_TAB = "SyncLog"
 SYNC_LOG_COLS = ["when", "trigger", "region", "mode", "creates", "updates",
                  "rules", "result", "detail", "run_url"]
 MIN_LANGUAGES = 12
+# after an apply that rewrote the rules or a module dropdown the served page is read too
+# (form_status.py --rendered); it can lag the API's write by seconds, so a page that could
+# not be read, or that shows problems, is read once more after this wait (the second read is
+# judged; a page unreadable both times is a note)
+PAGE_RETRY_WAIT = 10
 DEFAULT_OUT = os.path.join(REPO, "data", "auto_sync")
 
 # The sync tool's plan lines (sync_attendance_form.py; test/auto_sync_test.py
@@ -179,7 +187,8 @@ def parse_plan(text):
     """The sync tool's dry-run output -> what it plans to do."""
     plan = {"creates": [], "updates": [], "deletes": [], "requires": [], "picker": [],
             "club_guard": [], "modules": [], "retired": [], "restored": [],
-            "rules": None, "warnings": [], "roster_clubs": None, "roster_girls": None,
+            "rules": None, "rules_written": False, "warnings": [], "roster_clubs": None,
+            "roster_girls": None,
             "sf_names": None}     # sf_names: only the summary file has them
     for line in text.splitlines():
         m = REQUIRED_RX.match(line)
@@ -220,7 +229,7 @@ def parse_plan(text):
             continue
         m = REPLACE_RX.match(line)
         if m:
-            plan["rules"] = int(m["rules"])
+            plan["rules"], plan["rules_written"] = int(m["rules"]), True
             continue
         m = ROSTER_RX.match(line)
         if m:
@@ -250,7 +259,10 @@ def plan_from_summary(summary):
                         for r in summary.get("retired", [])],
             "restored": [{"qid": r["qid"], "club": r["club"], "reason": r["reason"]}
                          for r in summary.get("restored", [])],
+            # the count of the rules the form would have, rewritten or not: only a REPLACE
+            # conditions call says they are written
             "rules": summary.get("rules"),
+            "rules_written": any(REPLACE_RX.match("  - " + c) for c in summary.get("calls", [])),
             "warnings": [w.strip() for w in summary.get("warnings", [])],
             "roster_clubs": summary.get("roster_clubs"),
             "roster_girls": summary.get("roster_girls"),
@@ -762,9 +774,25 @@ class Run:
         problems, notes = verify_report(rep)
         for note in notes:
             self.log("  note: " + note)
+        # what the definition cannot show: the page as served (the rules' order in
+        # JotForm.setConditions, the options' data-calcvalue), read only when this apply
+        # rewrote the rules or a module dropdown - the checks hand rollouts stopped on
+        page = []
+        if plan.get("rules_written") or plan.get("modules"):
+            page = self.verify_page(form, csv_path, rep)
+            problems += page
         if problems:
             self.attention.append((f"{region}: applied, but the form still has problems",
                                    "\n".join("- " + p for p in problems)
+                                   # the next run's dry run plans from the definition only, so a
+                                   # problem only the page shows reads in-sync there: say so
+                                   + (f"\n\nThe 'rendered page' line(s) are what form {form}'s public "
+                                      "page serves. The runner's next run will not repair them: it "
+                                      "plans from the form's definition, not the page. Check by hand: "
+                                      f"python3 tools/form_status.py --form {form} --roster "
+                                      "<roster.csv> --rendered; if the problem stays, re-save the "
+                                      "form in the Jotform builder and check again."
+                                      if page else "")
                                    # the region check goes by club name, so a club the sync did not
                                    # add shows up here until it is renamed: say so, never filter it
                                    # (the same line would hide a real drift of its namesake's roster)
@@ -777,6 +805,49 @@ class Run:
             self.result(region, plan, "applied-with-problems", summary + "; " + "; ".join(problems))
         else:
             self.result(region, plan, "applied", summary + "; verified clean")
+
+    def verify_page(self, form, csv_path, rep):
+        """form_status.py --rendered for `form` -> the problems its served page adds to `rep`
+        (the definition's report, whose rule_problems the page's report repeats). The page can
+        lag the API's write, so a page that cannot be read or that shows problems is read once
+        more after PAGE_RETRY_WAIT seconds (two reads at most) and the second read is judged.
+        A page unreadable both times is logged as a note and judged clean: the definition
+        verified. Problems the first read showed stand when the re-read cannot be read."""
+        argv = ([sys.executable, os.path.join(TOOLS, "form_status.py"), "--form", form,
+                 "--roster", csv_path, "--json", "--rendered"]
+                + (["--partners", self.partners] if self.partners else []))
+        seen = [str(p) for p in rep.get("rule_problems") or []]
+        first = []                                # the first read's problems, when it showed some
+        why = None
+        for attempt in range(2):
+            if attempt:
+                self.log(f"  served page of form {form} "
+                         + (f"shows {len(first)} problem(s)" if first else f"not read ({why})")
+                         + f" - again in {PAGE_RETRY_WAIT}s")
+                time.sleep(PAGE_RETRY_WAIT)
+            r = self.cmd(argv, "verify page")
+            if r.returncode != 0:
+                why = f"form_status exited {r.returncode}"
+                continue
+            try:
+                served = json.loads(r.stdout)[0]
+                problems = [p for p in (str(p) for p in served.get("rule_problems") or []) if p not in seen]
+            except ValueError:
+                why = "its output is not JSON"
+                continue
+            except (IndexError, KeyError, TypeError, AttributeError):
+                why = "its JSON holds no report"
+                continue
+            if not problems or attempt:
+                return problems
+            first = problems
+        if first:
+            # never let an unreadable re-read clear a problem the page has shown
+            self.log(f"  note: served page of form {form} re-read failed ({why}) - judged on the first read")
+            return first
+        self.log(f"  note: served page of form {form} not read ({why}, twice) - run "
+                 f"tools/form_status.py --form {form} --rendered by hand")
+        return []
 
     def check_names(self):
         """Across the regions of this run: no two clubs may send the same name to
