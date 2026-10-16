@@ -66,7 +66,9 @@ failing one stayed, with their attendance rows, and blocked a retry).
   arriving at that second runs the old or the new code, both complete.
 - **Behaviour change for a repeated name**: intended (it was a fault); the Jotform rosters never
   repeat a name.
-- **Rollback**: redeploy the retrieved originals (`before`).
+- **Rollback**: redeploy the retrieved originals (`before`). **Superseded 2026-10-16**: never
+  redeploy it - it would undo the processor's 2026-10-07 changes; a rollback starts from a fresh
+  retrieve of what is live (DECISIONS 2026-10-16).
 - The class is the vendor's (Studio Infinite Lives); Ryan decided not to coordinate with the other
   administrator for these Salesforce changes.
 

@@ -76,7 +76,8 @@ Preview (a mock-up built from the live layout, sent to Ryan 2026-09-30): the scr
 - **Two people deploying one component.** The other administrator's next deploy from their own
   copy would silently remove the checkbox. Step 2 is the only guard.
 - **Production deploy without a sandbox run** if Ryan has no sandbox login: the validate step and
-  the tests are the safety net; rollback is redeploying the retrieved originals (the field can stay).
+  the tests are the safety net; rollback is redeploying the retrieved originals (the field can stay),
+  checked first since 2026-10-16 (Result, last bullet).
 - **The CLI login froze Ryan's user once** (2026-09-30). Not repeated until the cause is removed.
 - **Reports that read the weekly counts** will show 0 for partners who tick the box and skip the
   weeks. Whether empty should be stored as blank instead is Ryan's decision (not in this change).
@@ -101,7 +102,7 @@ off (13:14 UTC).
 
 - Retrieved from production: the component `dHIS2Forms`, `dHIS2Controller` and its three test
   classes. Copies as they were and as deployed: `data/sf_monthly_report_2026-09-30/before` and
-  `after` (not committed; the rollback is redeploying `before`).
+  `after` (not committed; the rollback is redeploying `before`, checked first - last bullet).
 - Deployed 13:26:31 UTC (validation 0AfRP000002fgtN0AQ, then quick deploy 0AfRP000002fgwb0AA), five
   components: the field `DHIS2__c.Attendance_submitted_electronically__c` (checkbox, default
   unticked), the component (checkbox and warning at the top of Girls' Reach; loaded and saved), the
@@ -119,3 +120,9 @@ off (13:14 UTC).
   a save through the live form itself (the automated test covers save, read-back and untick).
 - Open: other profiles that should see the field; whether an empty week should be stored as blank
   instead of 0.
+- Rollback, since 2026-10-16 (DECISIONS; `.claude/skills/salesforce`): first retrieve the changed
+  components fresh (VPN off) and compare them with `data/sf_monthly_report_2026-09-30/after`; if
+  any differs, someone deployed since (another administrator works on this form) - stop and build
+  the rollback from that fresh retrieve, never from `before`. If they are equal, Ryan's go:
+  redeploy from `before` only the components this change changed (`dHIS2Forms`,
+  `dHIS2Controller`, `dHIS2ControllerTest`), check-only first; the field can stay.

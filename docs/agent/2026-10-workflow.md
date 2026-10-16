@@ -339,7 +339,13 @@ disable-model-invocation: true
    auto mode may refuse a production deploy: then Ryan runs it).
 6. **Go and deploy.** Ryan's go; `sf project deploy quick -i <validation id>`.
 7. **Read back.** Retrieve into `after/`, `diff -r` against the build; counts only into the plan.
-8. **Rollback.** Redeploy `before/`; a `destructiveChanges.xml` for a new component.
+8. **Rollback.** Redeploy only the components the change made, from its `before/`, and only
+   while a fresh retrieve of them still equals `after/` (else something was deployed since: start
+   from that retrieve), never an older build (DECISIONS 2026-10-16); a `destructiveChanges.xml`
+   for a new component. The 2026-10-15 change: only its three changed components (the dashboard
+   `Attendance/Jotform_Attendance_test`, the reports `Attendance/Total_Attendance_Last_Month` and
+   `Attendance/Total_Attendance_by_Partner_by_Month`) from `data/sf_totals2_2026-10-15/before/`
+   (RUNBOOK "Attendance dashboard in Salesforce", Rollback).
 
 ### `reconcile-count` (model-invocable)
 

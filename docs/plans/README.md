@@ -13,11 +13,12 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-10-15 | The dashboard's total attendance counts Jotform plus the three Salesforce-reporting partners only, shown beside Jotform only | done 2026-10-15 | 72 | [2026-10-15-attendance-total-three-partners.md](2026-10-15-attendance-total-three-partners.md) |
 | 2026-10-14 | Special event "IDG Celebrations" on every attendance form, after "Welcome Session" | done 2026-10-14 |  | [2026-10-14-idg-celebrations.md](2026-10-14-idg-celebrations.md) |
 | 2026-10-13 | Special events - ad-hoc sessions as module options, the first "Welcome Session" | done 2026-10-13 |  | [2026-10-13-special-events.md](2026-10-13-special-events.md) |
 | 2026-10-12 | The Group Photo sublabel loses its sentence about faces; one photo per submission stays | done |  | [2026-10-12-photo-sublabel.md](2026-10-12-photo-sublabel.md) |
 | 2026-10-09 | Repo cleanup: organize, consolidate, lint (no rewrite) | in-progress | 32, 50, 53 | [2026-10-09-repo-cleanup.md](2026-10-09-repo-cleanup.md) |
-| 2026-10-09 | Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped | blocked | 60 | [2026-10-09-attendance-reports-public.md](2026-10-09-attendance-reports-public.md) |
+| 2026-10-09 | Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped | in-progress | 60 | [2026-10-09-attendance-reports-public.md](2026-10-09-attendance-reports-public.md) |
 | 2026-10-07 | One Salesforce contact per girl - merge the duplicates the altered names made, then release Queens of Quest | done 2026-10-07 | 61, 76, 77, 78 | [2026-10-07-sf-duplicate-girls.md](2026-10-07-sf-duplicate-girls.md) |
 | 2026-10-07 | Attendance processor - a name with extra spaces or invisible characters finds its girl | done 2026-10-07 | 75 | [2026-10-07-processor-name-spacing.md](2026-10-07-processor-name-spacing.md) |
 | 2026-10-06 | Salesforce club accounts created automatically for new clubs (BACKLOG 27) | blocked | 27 | [2026-10-06-sf-new-club-accounts.md](2026-10-06-sf-new-club-accounts.md) |

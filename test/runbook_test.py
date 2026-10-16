@@ -7,13 +7,16 @@ live doc or tool says the runner holds a generated rollout line (RunnerRunbook; 
 offers (RestoreConditionsGuard); the work log runs on the harness plugin's harness-worklog, and
 the retired tools/worklog.py is named only where the docs say how to restore it (WorkLogRunbook);
 no rollout step toggles AUTO_SYNC_APPLY, which stays the emergency off switch (RolloutProcedures;
-ticket #31).
+ticket #31); total attendance is Jotform plus the three Salesforce-reporting partners only, both
+measures labelled, the Monthly Report never added, a plan for the live change (AttendanceTotalsRunbook;
+ticket #35).
 """
 import glob
 import json
 import os
 import re
 import subprocess
+import sys
 import unittest
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
@@ -1354,6 +1357,212 @@ class WorkLogRunbook(unittest.TestCase):
                                           "so the command breaks once it lands")
             shown = subprocess.run(git + ["show", f"{rev}:{path}"], capture_output=True, text=True).stdout
             self.assertTrue("worklog" in shown, f"`git show {rev}:{path}` is not the work log")
+
+
+class AttendanceTotalsRunbook(unittest.TestCase):
+    """Ticket #35 (Ryan's scope change of 2026-10-15): total attendance is the Jotform attendance
+    plus the Salesforce-entered counts of ONLY the three partners that report through Salesforce
+    instead of Jotform (docs/plans/2026-10-06-clubs-off-jotform.md); any other attendance typed into
+    Salesforce is left out of the total. The dashboard shows both numbers, labelled "Jotform + 3
+    partners" and "Jotform only" (no distinct-girls tile); the Monthly Report is never added to
+    attendance. A plan in docs/plans/ carries the live change. Counts only: no figures are pinned.
+
+    The docs must SAY the rule, not merely contain its words: a statement that negates it ("the total
+    is not Jotform plus the three partners", "no other attendance is left out", "nothing is called
+    …") or calls it historical does not count."""
+
+    longMessage = False         # the messages say what to fix; the whole section is not repeated
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    TOTALS = "## Attendance totals and partner-reported counts"
+    DASHBOARD = "## Attendance dashboard in Salesforce"
+    PARTNERS = ("Education and English for You", "Tumaini La Maisha", "Ng['’]aa Maskani")
+    TOTAL_LABEL = re.compile(r"Jotform \+ (3|three) partners", re.I)
+    JOTFORM_ONLY = re.compile(r"Jotform[- ]only", re.I)
+    # a statement that denies what it names, or calls it the past
+    NEGATION = re.compile(r"\b(not|no|never|nothing|none|nor|neither|without|no longer|instead of|rather than)\b|"
+                          r"n['’]t\b", re.I)
+    STALE = re.compile(r"\b(historical|historic|former|formerly|old|used to|legacy|retired|obsolete)\b", re.I)
+    # "a batch whose `Creator__c` does not start with `Jotform`" names the left-out batches; it denies nothing
+    NOT_JOTFORM = re.compile(r"\bdo(es)? not (start|begin) with\b|\bnot starting with\b", re.I)
+    # the definition: total (attendance) =|is|means [the sum of] the Jotform attendance … plus|+|and … three partners
+    DEFINE = re.compile(r"\btotal(?: attendance)?\b[^.=]{0,80}?(?:=|\bis\b|\bmeans\b)\s*(?:the\s+)?"
+                        r"(?:sum\s+(?:of|over)\s+)?(?:the\s+)?(?:`?Success`?\s+)?\W?Jotform\b[^.;+]{0,40}?"
+                        r"\b(?:attendance|batch(?:es)?|counts?|rows|figures?|submissions?|number)\b"
+                        r"[^.]{0,120}?(?:\bplus\b|\+|\band\b)[^.]{0,80}?\b(?:three|3)\b[^.]{0,40}?\bpartners?\b", re.I)
+
+    def totals(self):
+        return md_part(self.RUNBOOK, self.TOTALS)
+
+    def dashboard(self):
+        return md_part(self.RUNBOOK, self.DASHBOARD)
+
+    def denies(self, text):
+        return bool(self.NEGATION.search(self.NOT_JOTFORM.sub(" ", text)))
+
+    def definitions(self, text):
+        """The sentences of `text` that define the total as Jotform plus the three partners, the
+        definition (and the 40 characters before it) neither negated nor called historical."""
+        out = []
+        for s in sentences(text, "."):
+            for m in self.DEFINE.finditer(s):
+                if not self.denies(s[max(0, m.start() - 40):m.end()]) and not self.STALE.search(m.group(0)):
+                    out.append(s)
+                    break
+        return out
+
+    def test_the_total_is_jotform_plus_the_three_named_partners(self):
+        where = f"RUNBOOK section {self.TOTALS[3:]!r}"
+        defining = self.definitions(self.totals())
+        self.assertTrue(defining, f"{where}: no sentence defines the total as Jotform attendance plus the three "
+                                  "partners' Salesforce-entered counts (\"Total attendance = the Jotform attendance "
+                                  "plus … the three partners …\", not negated)")
+        named = [s for s in defining if all(re.search(n, s) for n in self.PARTNERS)]
+        self.assertTrue(named, f"{where}: the sentence that defines the total names the three partners "
+                               f"({', '.join(self.PARTNERS)})")
+
+    def test_other_salesforce_entered_attendance_is_left_out_of_the_total(self):
+        other = re.compile(r"\b(any|every|all|each)\b[^.;]{0,15}\bother\b", re.I)
+        out = re.compile(r"\b(left|kept|filtered|held|stays?|staying)\s+out\s+of\s+(the\s+)?total\b(?!['’]s)|"
+                         r"\bexcluded\s+from\s+(the\s+)?total\b(?!['’]s)|"
+                         r"\btotal\b[^.;]{0,30}\b(leaves|filters|keeps)\s+out\b|\btotal\b[^.;]{0,30}\bexcludes\b", re.I)
+        said = [s for s in sentences(self.totals(), ".;")
+                if other.search(s) and re.search(r"Salesforce|Creator__c", s) and out.search(s)
+                and not self.denies(s)]
+        self.assertTrue(said, f"RUNBOOK section {self.TOTALS[3:]!r}: say that any other club's attendance entered in "
+                              "Salesforce (a batch whose `Creator__c` does not start with `Jotform`) is left out of "
+                              "the total - a positive statement (\"any other … is filtered out of the total\"), "
+                              "not \"no other … is left out\"")
+
+    # the 2026-10-07 rule, which ticket #35 replaced: the total is the sum over every `Success` batch.
+    # The definition with no restriction after it ("Total attendance = [the] SUM over `Success` batches;")
+    OLD_RULE = re.compile(r"total attendance\W{0,5}(=|is)\s*(the\s+)?sum over (all |every )?`?Success`? batch(es)?"
+                          r"\s*[;.,)]", re.I)
+    EVERY_BATCH = re.compile(r"\b(sum|total) (over|of) (all|every) `?Success`? batch", re.I)
+    WHATEVER = re.compile(r"\bwhatever (its |their |the )?source", re.I)
+    SUM_OVER = re.compile(r"\b(sum|total)\s+(over|of)\s+(the\s+)?`?Success`?\s+batch(es)?\b([^.;]{0,80})", re.I)
+
+    def unrestricted(self, text):
+        """The phrases of `text` that state the total as the sum over `Success` batches with no
+        restriction: the old definition, every/all batches, "whatever its source", or a sum over
+        `Success` batches that never says whose (or says every club's)."""
+        text = flat(text)
+        found = [m.group(0) for rx in (self.OLD_RULE, self.EVERY_BATCH, self.WHATEVER) for m in rx.finditer(text)]
+        for m in self.SUM_OVER.finditer(text):
+            after = m.group(5)
+            if (re.search(r"(?i)\b(every|all|any)\s+(clubs?|sources?|batch(es)?|partners?)\b", after)
+                    or not re.search(r"(?i)\b(whose|where|which|that|Jotform|three|3)\b", after)):
+                found.append(m.group(0))
+        return found
+
+    def test_the_total_is_no_longer_every_success_batch(self):
+        # neither the totals section nor the dashboard's still states the old unrestricted rule
+        for title, text in ((self.TOTALS, self.totals()), (self.DASHBOARD, self.dashboard())):
+            self.assertEqual(self.unrestricted(text), [],
+                             f"RUNBOOK section {title[3:]!r} still states the total as the sum over every "
+                             "`Success` batch (whatever its source): say whose batches it sums (Jotform plus the "
+                             "three partners)")
+
+    def test_a_decision_stating_the_old_total_points_at_the_new_rule(self):
+        """docs/DECISIONS.md's header: a decision that amends an earlier one says so, and the earlier one
+        gets a dated bullet pointing at it. An entry that states the total as the sum over `Success`
+        batches without a restriction is followed, in that entry, by a dated line pointing at the
+        2026-10-15 rule (its date and the three partners, or ticket #35)."""
+        path = os.path.join(REPO, "docs", "DECISIONS.md")
+        entries = re.split(r"(?m)^(?=### )", read(path))[1:]
+        self.assertTrue(entries, "docs/DECISIONS.md: no `### ` decision entries")
+        # a dated line (bullet or not) that names 2026-10-15 near its start and the new rule
+        pointer = re.compile(r"^\s*(?:-\s+)?.{0,40}?\b2026-10-15\b.*?(\b(three|3)\b.{0,60}\bpartners?\b|#35\b)", re.I)
+        rejected = re.compile(r"^\s*-\s+\*\*Rejected:?\*\*", re.I)
+        unpointed = []
+        for entry in entries:
+            lines = entry.split("\n")
+            pointers = [i for i, line in enumerate(lines) if pointer.search(line)]
+            # where the entry states the old rule as its own (not in a Rejected bullet, not in the pointer)
+            stated = [i for i, line in enumerate(lines)
+                      if i not in pointers and not rejected.search(line) and self.unrestricted(line)]
+            if stated and not any(p > max(stated) for p in pointers):
+                unpointed.append(lines[0].strip())
+        self.assertEqual(unpointed, [],
+                         f"docs/DECISIONS.md: {unpointed} state total attendance as the sum over every `Success` "
+                         "batch with no dated line after it pointing at the 2026-10-15 rule (Jotform plus the three "
+                         "partners, ticket #35); add one to each, e.g. \"- 2026-10-15: amended - the total is Jotform "
+                         "plus the three partners (#35)\"")
+
+    def test_both_measures_are_named_and_the_monthly_report_stays_out(self):
+        for title, text in ((self.TOTALS, self.totals()), (self.DASHBOARD, self.dashboard())):
+            # both labels, side by side, in a statement that neither denies them nor calls them historical
+            both = [s for s in sentences(text, ".")
+                    if self.TOTAL_LABEL.search(s) and self.JOTFORM_ONLY.search(s)
+                    and not self.denies(s) and not self.STALE.search(s)]
+            self.assertTrue(both, f"RUNBOOK section {title[3:]!r}: name the two measures side by side, by their labels "
+                                  "\"Jotform + 3 partners\" (the total) and \"Jotform only\", in a statement that is "
+                                  "not negated")
+        # "Jotform only" keeps its definition: the batches whose Creator__c starts with Jotform
+        only = [s for s in sentences(self.totals(), ".;")
+                if self.JOTFORM_ONLY.search(s) and "Creator__c" in s and re.search(r"\bstarts? with `?Jotform", s)
+                and not self.denies(s)]
+        self.assertTrue(only, f"RUNBOOK section {self.TOTALS[3:]!r}: \"Jotform only\" is the batches whose `Creator__c` "
+                              "starts with `Jotform`")
+        # the dashboard says how its total is computed: the definition, or the totals section by name
+        dash = self.dashboard()
+        how = self.definitions(dash) or [
+            s for s in sentences(dash, ".")
+            if self.TOTALS[3:] in s and (self.TOTAL_LABEL.search(s) or re.search(r"\btotal\b", s, re.I))
+            and not self.denies(s)]
+        self.assertTrue(how, f"RUNBOOK section {self.DASHBOARD[3:]!r}: say how the dashboard's total is computed (Jotform "
+                             f"plus the three partners), or point to \"{self.TOTALS[3:]}\" for it")
+        # Ryan, 2026-10-15: no "Girls reached (distinct)" tile
+        self.assertNotRegex(flat(dash), r"(?i)girls reached",
+                            "the dashboard has no \"Girls reached (distinct)\" tile (Ryan, 2026-10-15)")
+        # the Monthly Report is never added to attendance: the never/not ties to added/summed and to the total
+        never = re.compile(
+            r"Monthly Report[^.;]{0,80}?\b(never|not)\s+(\w+\s+){0,2}?(added|summed|counted|included)\b[^.;]{0,30}?"
+            r"\b(attendance|total)\b|"
+            r"\b(never|not)\s+(\w+\s+){0,2}?(add|sum|count|include)\w*\b[^.;]{0,40}?Monthly Report[^.;]{0,40}?"
+            r"\b(attendance|total)\b", re.I)
+        self.assertTrue([s for s in sentences(self.totals(), ".;") if never.search(s)],
+                        f"RUNBOOK section {self.TOTALS[3:]!r}: say the Monthly Report is never added to attendance")
+
+    def test_a_plan_carries_the_live_change(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        # the plan names #35 in its head: the frontmatter, the title or the paragraphs before the first section
+        plans = [p for p in sorted(glob.glob(os.path.join(REPO, "docs", "plans", "*.md")))
+                 if os.path.basename(p) != "README.md"
+                 and re.search(r"(?<![\w#])#35\b", read(p).split("\n## ", 1)[0])]
+        self.assertTrue(plans, "docs/plans/: no plan names ticket #35 in its frontmatter, title or opening paragraph "
+                               "(the dashboard's two measures are a live change: CLAUDE.md conventions)")
+        for path in plans:
+            name = os.path.relpath(path, REPO)
+            text = read(path)
+            keys, _ = docs_index.frontmatter(text)
+            self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+            _, problem = docs_index.status_of(keys["status"])
+            self.assertIsNone(problem, f"{name}: {problem}")
+            self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+            bodies = {}
+            for heading, least in (("## Rollout", 40), ("## Rollback", 15)):
+                part = md_part(path, heading)
+                body = flat(part.split("\n", 1)[1] if "\n" in part else "")
+                self.assertNotRegex(body, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: `{heading}` is a placeholder")
+                self.assertGreaterEqual(len(re.findall(r"\w+", body)), least,
+                                        f"{name}: `{heading}` says too little (at least {least} words): the steps")
+                bodies[heading] = body
+            rollout, rollback = bodies["## Rollout"], bodies["## Rollback"]
+            self.assertRegex(rollout, r"(?i)\bdeploy", f"{name}: the Rollout deploys the dashboard")
+            self.assertRegex(rollout, r"(?i)check-only|--dry-run", f"{name}: the Rollout validates check-only first")
+            self.assertRegex(rollout, r"(?i)\bgo\b", f"{name}: the Rollout's deploy waits for Ryan's go")
+            self.assertRegex(rollout, r"(?i)read (it |them )?back|retrieve",
+                             f"{name}: the Rollout reads the deploy back (retrieve and compare)")
+            self.assertRegex(rollback, r"(?i)\bre-?deploy", f"{name}: the Rollback redeploys the previous metadata")
+            self.assertRegex(rollback, r"(?i)\bbefore\b|retriev|previous",
+                             f"{name}: the Rollback names the metadata it restores (the retrieve from before)")
+            whole = flat(text)
+            self.assertRegex(whole, self.TOTAL_LABEL, f"{name}: the plan names the total \"Jotform + 3 partners\"")
+            self.assertRegex(whole, self.JOTFORM_ONLY, f"{name}: the plan names the \"Jotform only\" measure")
+            self.assertRegex(whole, r"(?i)dashboard", f"{name}: the plan is about the dashboard change")
+            for partner in self.PARTNERS:
+                self.assertRegex(whole, partner, f"{name}: the plan names the partner {partner!r}")
 
 
 if __name__ == "__main__":
