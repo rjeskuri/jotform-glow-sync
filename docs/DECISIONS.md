@@ -623,6 +623,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Why:** Ryan, 2026-10-15: "There are 3 African partners that were specified that will give their attendance through Salesforce only. Any other clubs' attendance through Salesforce should be filtered out."
 - **Rejected:** the total of the 2026-10-06 decision (deployed 2026-10-07), the sum over every `Success` batch (it would count any club's Salesforce entry); a "Girls reached (distinct)" tile (the ticket's first outline).
 - **Consequences:** the two Total reports carry the filter logic `1 AND (2 OR 3) AND 4 AND 5`; a fourth partner that reports through Salesforce needs its name added to filter 3 of both reports, on Ryan's go.
+- 2026-10-16: the retirement is applied - the three partners are marked `no` and their 38 clubs are off the template's and the Africa form's Club picker (Ryan's go, ticket #56; [Result](plans/2026-10-06-clubs-off-jotform.md#result)); the double count's path through the Jotform picker is closed for these clubs.
 
 ### 2026-10-16 — A Salesforce dashboard or report deploy starts from a fresh retrieve; old packages are never redeployed
 

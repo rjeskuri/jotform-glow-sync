@@ -465,6 +465,7 @@ Status: open
 - **The retired rosters' option lists stay on the forms** (751 names on the Africa form, 155 on the U.S form once its clubs are deactivated): a retired roster is hidden, off the Club picker and never written to ([plan](plans/2026-10-06-clubs-off-jotform.md); RUNBOOK "Clubs that do not use Jotform"), so the names stay in its options and in the form's `base`/`en` translation store exactly as today - nothing new is written anywhere.
 - Blanking them would be the first write of an empty option list to a checkbox question (untested; the disabled U.S form is unreachable) and would have to clear the store's entries too (63).
 - Ryan's default 2026-10-06: leave them; a later, tested step with his go if staff ask
+- 2026-10-16: the three partners' 38 rosters are retired on the template and the Africa form (ticket #56; [Result](plans/2026-10-06-clubs-off-jotform.md#result)); their option lists stay, as above. The U.S clubs are not deactivated (the template's dry run retired 38, none for "no active girl"), so the U.S part of this item is still to come.
 
 ### 72. The intake for partner-reported attendance counts is not decided
 
@@ -487,6 +488,7 @@ Status: open
 Status: blocked-on-ryan
 
 - **Club accounts for clubs on no form** (from the photos/clubs-off-Jotform plans, 2026-10-06): the automatic sync creates accounts only for clubs it puts on a form, so a new club of a partner that does not use Jotform (jotform=no) gets none and stays in SF Pending for a hand create. A second trigger, "an active Roster club on no form with no account", would close it: Ryan's decision
+- 2026-10-16: the gap is live - Education and English for You, Tumaini La Maisha and Ng'aa Maskani are marked `jotform=no` and their 38 clubs are off the forms (ticket #56; [Result](plans/2026-10-06-clubs-off-jotform.md#result)); a new club of theirs now gets no automatic account and needs a hand create from SF Pending before its first aggregate batch. While `SF_SYNC` is not `apply` (RUNBOOK "New clubs' accounts, automatically") every new club, on a form or not, is a hand create from SF Pending, so the jotform=no gap only matters once `SF_SYNC` is `apply`.
 
 ### 76. Days where Salesforce holds fewer rows than ticks
 

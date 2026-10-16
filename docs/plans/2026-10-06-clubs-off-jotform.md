@@ -1,7 +1,7 @@
 ---
 title: Clubs that do not report through Jotform leave the forms - a Partners-tab marker for the three partners, deactivation of the U.S clubs, the U.S form disabled
 author: Claude (with Ryan's decisions of 2026-10-06; code and docs read on `main` 9d58ce4 and the branch wf10/four-issues, Jotform GET, Salesforce read connector, 2026-10-06; revised after two reviews the same day)
-status: in-progress      # built 2026-10-07 (Build notes), merged into main 2026-10-09 (79208cd); nothing applied yet. Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
+status: in-progress      # built 2026-10-07 (Build notes), merged into main 2026-10-09 (79208cd); the three partners' 38 clubs retired on the template and Africa 2026-10-16 on Ryan's go, both CLEAN (Result, ticket #56); remains the U.S half (step 9: its 11 clubs' deactivation; the form's switch-off not recorded here) and steps 10-11 (not recorded here). Ryan 2026-10-06 (in conversation), with the defaults of the "Open decisions" unless noted in the plan
 backlog: 71, 74
 created: 2026-10-06
 intent: docs/intent/2026-10-06-clubs-off-jotform.md
@@ -1053,3 +1053,60 @@ goes; the session's work-log entry is the orchestrator's (not run from this work
   - RUNBOOK "Deactivating a club" refers to T3a's section as "the section on clubs that do not use
     Jotform" rather than by a quoted heading this branch cannot see, so a heading change cannot
     orphan it (`check_docs_links.py` checks file links only).
+
+## Result
+
+### 2026-10-16 - the three partners' 38 clubs off the template and the Africa form (steps 5-8; ticket #56)
+
+Run in the main session on `main`'s code (merged 2026-10-09, so step 8's merge was already done),
+every write on Ryan's go in the conversation; times UTC (the Mac's clock read JST, +0900). Counts,
+partner names and form ids only. The U.S half (step 9) was not part of it.
+
+- **Step 5, the marker.** Ryan set `No` in the Partners tab's `jotform` column for Education and
+  English for You, Tumaini La Maisha and Ng'aa Maskani. The Partners export, read back 00:34 UTC:
+  49 partners, 3 marked `no`.
+- **Read-only checks before any write.** The sync's dry runs with `--partners`: the template 38
+  `~ retired roster` lines (6 / 16 / 16 by partner), Club picker 330 clubs, 366 rules, plus 6
+  roster UPDATEs (the template's usual lag: it is synced by hand); Africa 38 retired (6 / 16 / 16),
+  picker 186 clubs, 222 rules. No `!` or `?` line on either. The counts are above the Proof's (182 /
+  213 on Africa, 326 / 357 on the template) because the Roster has grown since 2026-10-07.
+- **Step 6, B's count** (`tools/deactivate_clubs.py --partner … --check-only` on the Africa form,
+  377 submissions since 2026-09-01): Education and English for You 0, Tumaini La Maisha 1 (2026-09-25,
+  picked together with another club - the accidental one B expected), Ng'aa Maskani 0. Salesforce
+  (read): 0 attendance batches since 1 September from the three partners' clubs.
+- **Step 7, the template 262352490535154.** Backup (`backup_forms.py --form`) 00:37 UTC: 394
+  questions, 404 conditions (`backups/262352490535154/*-2026-10-16T093705.json`, the Mac's local
+  stamp). The apply on Ryan's go, ~00:40 UTC: UPDATE club picker (330 clubs), 6 roster UPDATEs,
+  REPLACE conditions (366 rules; 364 kept, 2 new, 40 dropped). Second dry run: no change.
+  `form_status --partners --rendered` CLEAN: retired rosters 38 (not on Jotform 38); rendered 38
+  retired, 38 always-hidden; picker 330 options, every `data-calcvalue` equal to its value;
+  question 18's rule 1 of 366; 368 rosters with `validate[required]` (6,982 boxes); 330 show-rules
+  for 330 live rosters.
+- **Step 8, Africa 262382821971058.** Before the apply `form_status` read CLEAN with `38 await
+  retirement`. Backup 00:46 UTC: 250 questions, 260 conditions
+  (`backups/262382821971058/*-2026-10-16T094658.json`). The apply on Ryan's go, ~00:50 UTC: UPDATE
+  club picker (186 clubs), REPLACE conditions (222 rules; 220 kept, 2 new, 40 dropped). Second dry
+  run: `nothing to do - form already matches the sheet`. `form_status --partners --rendered` CLEAN:
+  38 retired, 38 always-hidden; picker 186 options; question 18's rule 1 of 222; 224 rosters with
+  `validate[required]` (4,309 boxes); 186 show-rules for 186 live rosters; vs Roster 0 missing, 0
+  extra, 0 differ, 38 retired.
+- **The runner** (`tools/auto_sync.py --roster … --partners …`, dry run, 00:52 UTC): Africa
+  `in-sync`, Asia `in-sync`, Latin America `in-sync`, U.S `skipped - form DISABLED` (the U.S form
+  was already disabled; how and when is step 9's record, not this one). It raised no ATTENTION
+  item (0 ATTENTION lines, 2026-10-16 00:52 UTC).
+- **Not in this record:** the headless-Chrome `validateAll` check and the public-page searches of
+  step 7 (the `--rendered` counts above are the served-page evidence recorded), and the
+  `AUTO_SYNC_APPLY` switch of steps 7 and 10.
+- **Rollback.** Clear the three cells (RUNBOOK "Clubs that do not use Jotform", "The way back"): the
+  runner restores at most 5 per region per run, so the 38 come back by a hand apply per form
+  (backup, dry run, the apply on Ryan's go). The two backups above record each form before its
+  apply; `restore_conditions.py --from` one of them is refused while the picker no longer lists the
+  38 (its docstring: `--force`, then the sync straight after), so the cells are the way back.
+  Between clearing the cells and the hand applies every runner run plans 38 restores (more than
+  `--max-restores` 5): Africa reads `attention`, the run exits 2 (a failed workflow and its
+  e-mail) and Africa's ordinary roster changes are held. So clear the cells and do the hand
+  applies (template, Africa) in one sitting, like the rollout.
+
+What remains of this plan: step 9 (the U.S clubs' deactivation; the U.S form's switch-off and
+whether the API did it are not recorded here), step 10 (`AUTO_SYNC_APPLY`, not recorded here),
+step 11 (the Apps Script e-mail wording, not recorded as pushed), and BACKLOG 71 and 74.

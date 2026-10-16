@@ -1650,7 +1650,7 @@ lines counted before the apply, the verify and the browser checks - and its roll
 ## Clubs that do not use Jotform
 
 - **When:** a partner's clubs stop (or start again) reporting through Jotform: the Partners tab's `jotform` cell.
-- **Status:** built 2026-10-07 on wf10 (merged into `main` 2026-10-09; the runner runs it once `main` is pushed); the first rollout (38 rosters on Africa) is a hand apply ([plan](plans/2026-10-06-clubs-off-jotform.md)).
+- **Status:** built 2026-10-07 on wf10 (merged into `main` 2026-10-09). First rollout done 2026-10-16 on Ryan's go: the three partners below marked `no`, their 38 rosters retired by hand on the template (~00:40 UTC) and the Africa form (~00:50 UTC), both `form_status --partners --rendered` CLEAN (38 retired, 38 always-hidden), the runner's dry run `in-sync` ([plan, Result](plans/2026-10-06-clubs-off-jotform.md#result)).
 - **Dry run:** the sync's dry run with `--partners`: the `~ retired roster` lines.
 - **Apply:** backup, `--apply` with Ryan's go (more than 5 per region: by hand), a second dry run.
 - **Verify:** `form_status.py --partners --rendered`: CLEAN, `rendered retired: N retired rosters, N always-hidden`.
@@ -1658,7 +1658,8 @@ lines counted before the apply, the verify and the browser checks - and its roll
 
 Some partners report attendance to GLOW directly (a monthly total per club),
 not through the attendance forms: Education and English for You, Tumaini La
-Maisha and Ng'aa Maskani since 2026-10-06
+Maisha and Ng'aa Maskani since 2026-10-06, their 38 clubs off the template's
+and the Africa form's Club picker since 2026-10-16
 ([plans/2026-10-06-clubs-off-jotform.md](plans/2026-10-06-clubs-off-jotform.md)).
 Their clubs stay in the Roster — the girls are active and enrolled, their ids
 are kept, the Club Roster Form still lists the clubs — but they leave the
@@ -1714,7 +1715,7 @@ constant (change the constant if the sheet's zone was changed on purpose).
 **The bands.** The runner retires at most 5 rosters and restores at most 5
 per region per run (`--max-retires`, `--max-restores`); more is `attention`,
 nothing applied, "apply by hand after checking" — the first rollout (38 on
-Africa) is a hand apply in any case: backup, dry run, `--apply` with Ryan's
+the template and Africa, 2026-10-16) was a hand apply in any case: backup, dry run, `--apply` with Ryan's
 go, second dry run, then `form_status.py --partners --rendered` (CLEAN,
 `retired rosters: 38 (not on Jotform 38, no active girl 0)` and `rendered
 retired: 38 retired rosters, 38 always-hidden`). The audit's `vs Roster` line
@@ -1728,7 +1729,8 @@ validates a required field only when its element carries neither
 alone, and `form_status.py --rendered` counts exactly that for the retired
 rosters (`rendered retired: N retired rosters, N always-hidden` — fewer is a
 PROBLEM: stop, no mentor could submit). Proven on the template before any
-regional form (the plan's step 7).
+regional form (the plan's step 7; 2026-10-16: 38 retired, 38 always-hidden on
+the template, then on Africa).
 
 **The way back.** Clear the cell (or write `yes`): the next run restores the
 rosters (`~ restored roster '<club>' (q…): back on the Club picker`, their
@@ -2528,17 +2530,18 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - **Verify:** the Signals, below.
 - **Rollback:** of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
 
-Three partners' clubs are to report their attendance through Salesforce only (Ryan, 2026-10-06).
-Their retirement from the forms is pending: [plan](plans/2026-10-06-clubs-off-jotform.md) is in
-progress and nothing is applied, so the Partners tab's `jotform` column is not yet `no` for them
-and their 38 clubs are still on the Africa Club picker. Until then a Jotform batch from one of
-those clubs counts once, through the Jotform branch of the filter (2, below).
-- **The double count left open until the retirement is applied**: a typed monthly aggregate for one
-  of those 38 clubs (branch 3) plus that club's Jotform batches in the same month (branch 2) would
-  both count. The processor's club-and-day lock blocks only a batch for the same date, and the
-  aggregate is dated the last day of the month. So the intake (BACKLOG 72) must not type a count
-  for a club that still submits on Jotform until the retirement is applied. Today nothing is
-  double counted: 0 batches since 1 September from the three partners' clubs (SOQL, 2026-10-16).
+Three partners' clubs report their attendance through Salesforce only (Ryan, 2026-10-06). Since
+2026-10-16 the three partners are marked `no` in the Partners tab's `jotform` column and their 38
+clubs are off the template's and the Africa form's Club picker
+([plan](plans/2026-10-06-clubs-off-jotform.md), [Result](plans/2026-10-06-clubs-off-jotform.md#result)):
+their attendance reaches Salesforce only as typed counts (branch 3 of the filter, below).
+- **Double counting**: a typed monthly aggregate for one of those 38 clubs (branch 3) plus that
+  club's Jotform batches in the same month (branch 2) would both count; the processor's
+  club-and-day lock blocks only a batch for the same date, and the aggregate is dated the last day
+  of the month. The Jotform path for these clubs is closed (none sent a batch since 1 September),
+  so a count typed for them counts once. A count typed for a club of another partner is left out
+  by the filter. If one of the three partners is unmarked again (its clubs back on the picker), the
+  risk returns: stop typing its counts before its clubs submit on Jotform again.
 
 Leadership wants one attendance total that includes them, shown beside the figure from the forms
 alone (Ryan, 2026-10-15).
@@ -2591,7 +2594,7 @@ The processor's club-and-day lock still applies: an aggregate `Success` for a cl
 a Jotform batch for that date a `Failed` "Duplicate", and attendance rows on that date make an
 aggregate `Failed` "Attendance already exists" - which is why aggregates are dated the last day of
 the month, a day the three partners' clubs will not send a Jotform batch for once they are off the
-forms (pending, above).
+forms (applied 2026-10-16, above).
 
 **The one-off back-fill** (`tools/sf_girls_present.py`) - **done 2026-10-07**, on Ryan's go:
 every `Success` batch from before the deploy got its count (= its attendance rows; 573

@@ -1,7 +1,7 @@
 ---
 title: Clubs that do not report through Jotform leave the attendance forms, without leaving the roster
 author: Ryan Eskuri (decisions of 2026-10-06, captured by Claude)
-status: in-progress   # its plan is built and merged, nothing applied yet
+status: in-progress   # plan built and merged; the three partners' 38 clubs retired on the template and Africa 2026-10-16 on Ryan's go (plan Result, ticket #56); remains the U.S half (step 9) and steps 10-11
 created: 2026-10-06
 ---
 
