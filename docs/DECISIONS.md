@@ -362,6 +362,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Why:** deployed 2026-10-07 03:22 UTC (0AfRP000002gKqn0AE): the field (plan 2 A) and the count on new batches (B); the back-fill of the older batches (C) done 2026-10-07 (573 batches set; SUM over `Success` = the attendance rows, 7,540). One object, one report type, one filter for the label; aggregates have no names, so no distinct count can include them
 - **Consequences:** a one-off back-fill of the existing successes by `tools/sf_girls_present.py` (C), right after the field is deployed and before the totals go on the dashboard; the Monthly Report's weekly counts are never summed into attendance; `Girls_Enrolled__c` is created empty for BACKLOG 58 if Ryan agrees ([plan](plans/2026-10-06-attendance-totals.md))
 - 2026-10-15: amended - the total is Jotform plus the three partners (Education and English for You, Tumaini La Maisha, Ng'aa Maskani); any other Salesforce-entered attendance is left out (#35, see the 2026-10-15 entry)
+- 2026-10-19: amended - the three partners' figure is not typed per club: it is their Monthly Report's Monthly Max, one `Partner report` batch per partner per month on the partner account (#60, see the 2026-10-19 entry)
 
 ### 2026-10-06 — "Did not submit" and "blank" defined
 
@@ -624,6 +625,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Rejected:** the total of the 2026-10-06 decision (deployed 2026-10-07), the sum over every `Success` batch (it would count any club's Salesforce entry); a "Girls reached (distinct)" tile (the ticket's first outline).
 - **Consequences:** the two Total reports carry the filter logic `1 AND (2 OR 3) AND 4 AND 5`; a fourth partner that reports through Salesforce needs its name added to filter 3 of both reports, on Ryan's go.
 - 2026-10-16: the retirement is applied - the three partners are marked `no` and their 38 clubs are off the template's and the Africa form's Club picker (Ryan's go, ticket #56; [Result](plans/2026-10-06-clubs-off-jotform.md#result)); the double count's path through the Jotform picker is closed for these clubs.
+- 2026-10-19: amended for the three partners only - their monthly figure is their Monthly Report's Monthly Max, copied as one `Partner report` batch per partner per month; "the Monthly Report is never added" still holds for every other partner (see the 2026-10-19 entry, #60).
 
 ### 2026-10-16 — A Salesforce dashboard or report deploy starts from a fresh retrieve; old packages are never redeployed
 
@@ -632,3 +634,12 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Why:** Ryan, 2026-10-16 (ticket #35 review): "I don't want to overwrite with an old package so make sure that doesn't happen." Steps and rollbacks in older plans still read as procedure and would have overwritten the 2026-10-15 dashboard
 - **Rejected:** keeping the old rollbacks with a "check first" caveat (one missed caveat overwrites live work)
 - **Consequences:** the old steps in `docs/plans/2026-10-02-attendance-dashboard.md`, `2026-10-02-attendance-processor-one-insert.md`, `2026-10-06-attendance-totals.md` and `2026-10-09-attendance-reports-public.md` are marked superseded or done-never-rerun; RUNBOOK "Attendance dashboard in Salesforce" (Rollback), `.claude/skills/salesforce` and `docs/agent/2026-10-workflow.md` carry the rule
+
+### 2026-10-19 — The three Salesforce-reporting partners' monthly figure is their Monthly Report's Monthly Max
+
+- The monthly figure of Education and English for You, Tumaini La Maisha and Ng'aa Maskani is their Monthly Report's "Monthly Max" (`DHIS2__c.Monthly_Total__c`, roughly the month's unique girls), copied by `tools/sf_partner_monthly.py` as one `Attendance_Batch__c` per partner per month: `Account_Name__c` = the partner's Account name, dated the month's last day, `Creator__c` `Partner report`, no names (ticket #60; [plan](plans/2026-10-19-partner-monthly-max.md); RUNBOOK "Attendance totals and partner-reported counts").
+- This replaces "the Monthly Report is never added to attendance" (2026-10-06, 2026-10-15) for these three partners only; every other partner's Monthly Report stays out, and its weekly counts are never summed. It also replaces the per-club intake contract (BACKLOG 72): no separate intake, no per-club counts.
+- The dashboard's measure becomes girls who attended: Jotform girls plus the three partners' Monthly Max (#59, which changes the dashboard to read these batches).
+- **Why:** Ryan, 2026-10-19: no separate intake; the number is the one their Monthly Report already carries. The partners file it anyway (between the 5th and the 12th of the next month), so nothing new is asked of them.
+- **Rejected:** the intake options of BACKLOG 72 (a small Jotform form, a Salesforce screen flow, a sheet import - all per club); summing the Monthly Report's weekly counts ([plan](plans/2026-10-06-attendance-totals.md), "Not chosen": a partner that ticks "submitted electronically" and still types counts would be counted twice).
+- **Consequences:** a monthly run after the reports are filed (about the 12th), dry run first and `--apply --vpn-off` on Ryan's go; the batches sit on the partner accounts, which the 2026-10-15 total's filter 3 (the club's parent is one of the three) does not match until #59; a Monthly Report corrected after the copy becomes an update on the next run (old → new, the ledger keeps the old count).

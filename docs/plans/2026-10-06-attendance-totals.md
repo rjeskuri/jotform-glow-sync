@@ -573,6 +573,9 @@ Not chosen (for the record): summing the Monthly Report's weekly counts (`DHIS2_
 is partner-month with week slots that look like session days, not clubs; a partner that ticks
 "submitted electronically" and still types counts (one did on 2026-10-05) would be counted
 twice. The Monthly Report is never added to attendance totals.
+2026-10-19: now chosen for the three Salesforce-reporting partners only - not the weekly counts
+but the report's "Monthly Max" (`Monthly_Total__c`), one `Partner report` batch per partner per
+month (#60, [plan](2026-10-19-partner-monthly-max.md); DECISIONS 2026-10-19).
 
 ## Files that change
 
