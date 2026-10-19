@@ -269,7 +269,7 @@ class PartnerOrg:
         acc_id = self.acc.get(partner) or {OTHER_PARTNER: self.other_id, LOOKALIKE: self.lookalike_id}[partner]
         self.reports.append({"Id": fresh_id("a0D"), "Name": f"MR-{len(self.reports) + 1:05d}",
                              "Account__c": acc_id, "Account__r": {"Name": partner},
-                             "YearMonth__c": f"{year:04d}{month:02d}",
+                             "YearMonth__c": float(f"{year:04d}{month:02d}"),   # a number field: 202609.0
                              "Monthly_Total__c": None if total is None else float(total),
                              "Notes__c": f"weekly sheet kept by {GIRL}"})
 
@@ -338,7 +338,7 @@ class PartnerOrg:
         assert sobject == "Attendance_Batch__c", sobject
         assert isinstance(body, dict), "one record per request"
         self.inserts.append(copy.deepcopy(body))
-        if self.refuse_insert:
+        if self.refuse_insert is True or self.refuse_insert == body.get("Account_Name__c"):    # all, or one partner's
             return 400, [{"errorCode": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "message": "refused"}]
         wanted = str(body.get("Account_Name__c", "")).strip().casefold()
         acc = next((a for a in self.accounts if a["Name"].casefold() == wanted), None)
@@ -550,7 +550,7 @@ class Refusals(Harness):
         if kind == "two":
             org.report(partner, 2026, 9, 455)
         if kind in BAD_VALUES:
-            report = next(r for r in org.reports if r["Account__r"]["Name"] == partner and r["YearMonth__c"] == "202609")
+            report = next(r for r in org.reports if r["Account__r"]["Name"] == partner and r["YearMonth__c"] == 202609.0)
             report["Monthly_Total__c"] = BAD_VALUES[kind]
         return partner, totals
 
@@ -606,6 +606,67 @@ class Refusals(Harness):
                 self.assertEqual(org.updates, [])
                 self.assertEqual(sorted(b["Account_Name__c"] for b in org.inserts), sorted(p for p in PARTNERS if p != partner))
                 self.assertEqual(len(org.partner_batches(partner, "2026-09-30")), 2)
+
+    def assert_refused_alone(self, partner, totals=(137, 262, 389)):
+        """With --apply: `partner` refused and named, nothing written for it, the other two inserted with
+        their counts, the run non-zero."""
+        org = self.org
+        said = self.refused("--month", "2026-09", "--apply", "--vpn-off")
+        self.assertIn(partner, said)
+        self.assertEqual([b for b in org.inserts if str(b.get("Account_Name__c")).casefold() == partner.casefold()], [])
+        self.assertEqual(org.updates, [])
+        self.assertEqual(sorted((b["Account_Name__c"], b["Girls_Present__c"]) for b in org.inserts),
+                         sorted((p, t) for p, t in zip(PARTNERS, totals) if p != partner))
+        self.assert_private(said)
+        return said
+
+    def test_a_partner_whose_name_no_single_account_carries_exactly_is_refused(self):
+        """The processor matches Account_Name__c against every Account ignoring case: the partner's
+        Account missing, a second Account differing only in capitals, or the partner's Account in other
+        capitals make the batch's account a guess."""
+        for partner in PARTNERS:
+            for case in ("missing", "a second in capitals", "stored in other capitals"):
+                with self.subTest(partner=partner, case=case):
+                    org = self.fresh()
+                    org.month(2026, 9, (137, 262, 389))
+                    mine = next(a for a in org.accounts if a["Id"] == org.acc[partner])
+                    if case == "missing":
+                        org.accounts.remove(mine)
+                    elif case == "a second in capitals":
+                        org.accounts.append({"Id": fresh_id("001"), "Name": partner.upper(), "Description": ""})
+                    else:
+                        mine["Name"] = partner.lower()
+                    said = self.refused("--month", "2026-09", "--vpn-off")         # the dry run: the others planned
+                    self.assertIn(partner, said)
+                    for other, total in zip(PARTNERS, (137, 262, 389)):
+                        if other != partner:
+                            self.assertTrue(self.has_number(self.line_of(said, other), total), said)
+                    self.assert_nothing_written()
+                    self.assert_refused_alone(partner)
+
+    def test_another_success_batch_on_the_partners_day_refuses_an_insert(self):
+        """A partner that needs an insert, whose account and day already hold a Success batch of another
+        creator, is refused before sending: the processor would answer Failed 'Duplicate'. A Failed one
+        on the day, or a Success one on another day, does not refuse."""
+        for index, partner in enumerate(PARTNERS):
+            for creator in ("Jotform", "Jotform back-fill 5001", "Manual entry"):
+                with self.subTest(partner=partner, creator=creator):
+                    org = self.fresh()
+                    org.month(2026, 9, (137, 262, 389))
+                    org.batch(org.acc[partner], "2026-09-30", 17 + index, creator=creator, names=GIRL)
+                    said = self.refused("--month", "2026-09", "--vpn-off")
+                    self.assertIn(partner, said)
+                    self.assert_nothing_written()
+                    self.assert_refused_alone(partner)
+        for index, partner in enumerate(PARTNERS):
+            with self.subTest(partner=partner, case="Failed on the day, Success the day before"):
+                org = self.fresh()
+                org.month(2026, 9, (137, 262, 389))
+                org.batch(org.acc[partner], "2026-09-30", None, creator="Jotform", status="Failed", names=GIRL)
+                org.batch(org.acc[partner], "2026-09-29", 17 + index, creator="Jotform", names=GIRL)
+                self.ok("--month", "2026-09", "--apply", "--vpn-off")
+                self.assertEqual(sorted((b["Account_Name__c"], b["Girls_Present__c"]) for b in org.inserts),
+                                 sorted(zip(PARTNERS, (137, 262, 389))))
 
     def test_two_reports_refuse_even_when_an_existing_batch_matches_one_of_them(self):
         self.org.month(2026, 9, (137, 262, 389))
@@ -794,6 +855,42 @@ class Apply(Harness):
                 self.assertTrue(os.path.exists(os.path.join(self.dir, "ledger.csv")))
                 self.assertIn(bad[0]["Id"], "\n".join(self.ledger_text()))   # the rollback needs its id
                 self.assert_private(said)
+
+    def test_a_failed_write_or_a_bad_read_back_stops_the_run(self):
+        """In the fixed order, the partner whose write fails (HTTP 400) or reads back wrong is the last
+        one sent: no insert or update for the partners after it."""
+        for index, partner in enumerate(PARTNERS):
+            for fault in ("insert refused", "read back Failed", "update refused", "update drifts"):
+                with self.subTest(partner=partner, fault=fault):
+                    org = self.fresh()
+                    org.month(2026, 9, (137, 262, 389))
+                    if fault.startswith("update"):
+                        for p in PARTNERS:                       # all three in place with an old count: three updates
+                            org.batch(org.acc[p], "2026-09-30", 100)
+                        target = org.partner_batches(partner, "2026-09-30")[0]["Id"]
+                        original = org.update
+
+                        def update(sobject, record_id, body, original=original, org=org, target=target, fault=fault):
+                            if record_id == target:
+                                org.refuse_update = fault == "update refused"
+                                org.drift_update = fault == "update drifts"
+                            return original(sobject, record_id, body)
+                        org.update = update
+                    elif fault == "insert refused":
+                        org.refuse_insert = partner
+                    else:
+                        original = org.insert
+
+                        def insert(sobject, body, original=original, org=org, partner=partner):
+                            if body.get("Account_Name__c") == partner:
+                                org.processor = {"Processing_Status__c": "Failed", "Girls_Present__c": None}
+                            return original(sobject, body)
+                        org.insert = insert
+                    said = self.refused("--month", "2026-09", "--apply", "--vpn-off")
+                    self.assertIn(partner, said)
+                    sent = [b["Account_Name__c"] for b in org.inserts] + \
+                        [next(b["Account_Name__c"] for b in org.batches if b["Id"] == u[1]) for u in org.updates]
+                    self.assertEqual(sent, list(PARTNERS[:index + 1]), f"sent after the failure:\n{said}")
 
     def test_an_update_that_does_not_read_back_is_reported_as_a_failure(self):
         self.org.month(2026, 9, (137, 262, 389))

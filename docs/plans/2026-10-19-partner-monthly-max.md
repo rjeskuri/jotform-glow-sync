@@ -42,7 +42,9 @@ combined number: Jotform girls plus the three partners' Monthly Max.
   `Partner report`, `Contact_IDs__c` empty, `enable_fuzzy_matching__c` false); skip one already
   in place with the same count; update `Girls_Present__c` alone (old → new) on one with another
   count; refuse a partner with no Monthly Report or more than one, a Monthly Max blank, 0,
-  negative or not whole, or two `Success` `Partner report` batches on its day. A refused partner
+  negative or not whole, two `Success` `Partner report` batches on its day, or (when it needs an
+  insert) another `Success` batch of any creator on its account and day, which the processor's
+  lock would make `Failed` "Duplicate". A refused partner
   gets no write; the others are planned and written; the run ends non-zero.
 - Dry run by default (still needs `--vpn-off`: it reads Salesforce); `--apply --vpn-off` writes
   one insert or update per request, reads each back (`Success`, `Account__c` = the partner
@@ -62,7 +64,8 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
    (Education and English for You), read back by the tool: `Success`, on the partner account, 110.
 3. Ryan's go: the same without `--limit` (the other two; the first is skipped as in place).
 4. Read back: `SELECT Account__r.Name, Girls_Present__c, Processing_Status__c FROM
-   Attendance_Batch__c WHERE Creator__c = 'Partner report' AND Attendance_Date__c = 2026-09-30` -
+   Attendance_Batch__c WHERE Creator__c = 'Partner report' AND Attendance_Date__c = 2026-09-30
+   AND Account__r.Name IN ('Education and English for You', 'Tumaini La Maisha', 'Ng\'aa Maskani')` -
    three `Success` rows, sum 745 = `SELECT SUM(Monthly_Total__c) FROM DHIS2__c` over the three
    partner accounts' September 2026 reports (`YearMonth__c` 202609). A second dry run says
    every partner unchanged, skipped. No new Account (club accounts without a parent: still the two

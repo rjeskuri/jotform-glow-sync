@@ -2616,7 +2616,8 @@ python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off           
   count as existing.
 - Refused, and named, with no write for that partner: no Monthly Report for the month or more than
   one, a Monthly Max blank, 0, negative or not whole, no single Account with the partner's exact
-  name, or two `Success` `Partner report` batches on its day. The other partners are still
+  name, two `Success` `Partner report` batches on its day, or - when it needs an insert - another
+  `Success` batch (any other `Creator__c`) on the partner account and day. The other partners are still
   planned and written; the run ends non-zero. Fix the report in Salesforce (or ask the partner)
   and run again: what is in place is skipped.
 - `--apply`: one insert or update per request, each read back (`Success`, on the partner account,
@@ -2624,9 +2625,10 @@ python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off           
   counts writes only. The ledger `data/sf_partner_monthly/ledger.csv` (owner only, never committed)
   keeps every write's batch id, partner, month, date, old and new count: the rollback (above).
 
-The processor's club-and-day lock is per Account and date: the partner account has no Jotform
-batches, so the monthly batch blocks nothing and nothing blocks it but a second `Success` on the
-same day (which the tool refuses before sending).
+The processor's club-and-day lock is per Account and date: any `Success` batch on the partner
+account and the month's last day, whatever its `Creator__c`, would make the insert `Failed`
+"Duplicate". The partner account has no Jotform batches, so none is expected; if one is there and
+no `Partner report` batch is, the tool refuses that partner before sending (the others still go).
 
 **The one-off back-fill** (`tools/sf_girls_present.py`) - **done 2026-10-07**, on Ryan's go:
 every `Success` batch from before the deploy got its count (= its attendance rows; 573
@@ -2646,7 +2648,9 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
   dashboard (filter 3 does not match the partner account, above).
 - The monthly copy, after its run: `SELECT Account__r.Name, Girls_Present__c, Processing_Status__c
   FROM Attendance_Batch__c WHERE Creator__c = 'Partner report' AND Attendance_Date__c = <the
-  month's last day>` → three `Success` rows, one per partner, whose sum equals `SELECT
+  month's last day> AND Account__r.Name IN ('Education and English for You', 'Tumaini La Maisha',
+  'Ng\'aa Maskani')` (SOQL escapes the apostrophe with a backslash) → three `Success` rows, one
+  per partner, whose sum equals `SELECT
   SUM(Monthly_Total__c) FROM DHIS2__c` over the three partners' reports for the month (September
   2026: 110 + 320 + 315 = 745, read 2026-10-19); a second dry run says every partner unchanged,
   skipped. A refused partner is a Monthly Report to fix or chase (most often: not filed yet).

@@ -22,8 +22,9 @@ Attendance_Batch__c per partner per month:
 Run it after the three Monthly Reports are filed (about the 12th of the next month). A partner is
 refused - reported, no write, the run ends non-zero, the other partners still planned and written -
 when it has no Monthly Report for the month or more than one, a Monthly Max that is blank, 0,
-negative or not whole, no single Account carrying its name, or more than one Success Partner report
-batch on its account and day. A partner with one such batch already: the same count is skipped, a
+negative or not whole, no single Account carrying its name, more than one Success Partner report
+batch on its account and day, or - when it needs an insert - a Success batch of another creator on
+its account and day (the processor's per-Account-and-date lock would answer Failed 'Duplicate'). A partner with one such batch already: the same count is skipped, a
 different one is an update of Girls_Present__c alone (a PATCH runs none of the processor), shown
 old -> new. The current month, or a later one, is refused before Salesforce is asked.
 
@@ -114,13 +115,14 @@ def reports(org, acc_ids, year, month):
 
 
 def batches(org, acc_ids, day):
-    """account id -> its Success Partner report batches dated `day` (id, count)."""
+    """account id -> its Success batches dated `day`, any creator (id, creator, count). The
+    processor's lock is per Account and date: any Success there makes an insert Failed 'Duplicate'."""
     if not acc_ids:
         return {}
     out = {}
-    for b in org.query(f"SELECT Id, Account__c, Girls_Present__c FROM {SOBJECT} WHERE Account__c IN ("
+    for b in org.query(f"SELECT Id, Account__c, Creator__c, Girls_Present__c FROM {SOBJECT} WHERE Account__c IN ("
                        + ", ".join(quoted(a) for a in acc_ids) + f") AND Attendance_Date__c = {day} "
-                       f"AND Creator__c = {quoted(CREATOR)} AND Processing_Status__c = {quoted(OK)}"):
+                       f"AND Processing_Status__c = {quoted(OK)}"):
         out.setdefault(b["Account__c"], []).append(b)
     return out
 
@@ -150,13 +152,18 @@ def plan(org, year, month):
                      "not a whole number above 0")
             continue
         e["new"] = total
-        mine = there.get(acc[partner], [])
+        on_day = there.get(acc[partner], [])
+        mine = [b for b in on_day if b.get("Creator__c") == CREATOR]
         if len(mine) > 1:
             e.update(action="refused", why=f"{len(mine)} {OK} {CREATOR} batches dated {day} - one at most; "
                      "remove the extra one in Salesforce")
             continue
         if not mine:
-            e["action"] = "insert"
+            if on_day:
+                e.update(action="refused", why=f"{len(on_day)} other {OK} batch(es) on the partner account dated {day} - "
+                         "the processor would answer Failed 'Duplicate'; look at them in Salesforce")
+            else:
+                e["action"] = "insert"
             continue
         old = count_of(mine[0].get(FIELD))
         e.update(batch_id=mine[0]["Id"], old=old)
