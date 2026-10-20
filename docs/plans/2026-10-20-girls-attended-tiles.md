@@ -58,33 +58,47 @@ judgement calls, the offline checks), `DIFF.md` (the dashboard and the permissio
   reports `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`,
   `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month` (only this dashboard
   was retrieved, so another dashboard's use of them is unchecked).
-- Least sure (BUILD.md): the summary formula's token
-  `Attendance__c.Contact__c:UNIQUE + Attendance_Batch__c.Partner_Girls__c:SUM`, about 75%; the
-  alternatives to try if the check-only refuses it are listed there.
+- Unverified until the check-only deploy (BUILD.md, judgement calls 1 and 2): the summary
+  formula's token `Attendance__c.Contact__c:UNIQUE + Attendance_Batch__c.Partner_Girls__c:SUM`
+  (about 75%) and the `FORMULA1` chartSummary with no aggregate (about 90%). If the check-only
+  refuses either, fix all three reports and the dashboard the same way, in the fallback order of
+  `data/sf_girls_tiles_2026-10-20/build/BUILD.md`, and check-only again.
 
-## Rollout (live; each step on Ryan's go)
+## Rollout (live, two phases; each deploy on Ryan's go)
 
-All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesforce`).
+All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesforce`). The
+reports are deployed and checked against SOQL before the dashboard reads them.
 1. Retrieve fresh the components `build/package.xml` lists that exist today (the dashboard, the
    permission set) into a dated folder and compare with `data/sf_girls_tiles_2026-10-20/before/`.
    Equal: go on. Different: someone changed them since - stop and rebuild from that retrieve.
-2. Check-only deploy of `build/`: from within `data/sf_girls_tiles_2026-10-20/build/`, `sf project
-   deploy start --dry-run -o glow -d force-app`. A refused summary formula: the alternatives in
-   `BUILD.md`, then check-only again.
-3. Ryan's go in the conversation; then the same command without `--dry-run` deploys.
-4. Read back: retrieve the eight components into `data/sf_girls_tiles_2026-10-20/after/` and
-   compare with `build/` (expected: only Salesforce's own defaults, RUNBOOK "Attendance dashboard
-   in Salesforce", Changing it).
-5. SOQL per tile. Last month's tile must equal `COUNT_DISTINCT(Contact__c)` over the month's
-   Jotform `Attendance__c` rows (batch `Creator__c` starting with `Jotform`, batch `Success`) +
-   `SUM(Girls_Present__c)` over the three partners' `Partner report` batches (September 2026:
-   the Jotform figure + 745). This is also the blank `Contact__c` check: each row-less batch gives the report one row
-   with a blank `Contact__c`; equal means the unique count ignores it, one more means the blank
-   counts as a girl - stop and ask Ryan (subtract it in the formula, or roll back). This month's
-   tile: the same with `THIS_MONTH`, partner part 0.
-6. Assign nothing: the permission set's assignments are unchanged. Refresh the dashboard (Ryan's
-   go, RUNBOOK "Attendance dashboard in Salesforce", Refreshing through the API) and record the
-   numbers in Result.
+2. The two manifests in `data/sf_girls_tiles_2026-10-20/build/` (written from `package.xml` if
+   they are not there yet): `package-phase1.xml` = the field `Attendance_Batch__c.Partner_Girls__c`,
+   the partial Admin profile, the permission set `Attendance_Report_Viewer`, the report type
+   `Attendance_Batches_and_Girls` and the three reports (seven components); `package-phase2.xml` =
+   the dashboard `Attendance/Jotform_Attendance_test`.
+3. Phase 1: from within `build/`, check-only `sf project deploy start --dry-run -o glow -x
+   package-phase1.xml`; Ryan's go in the conversation; then the same command minus `--dry-run`
+   deploys.
+4. Check the reports before the dashboard (counts only). The ids: SOQL `SELECT Id, DeveloperName
+   FROM Report WHERE DeveloperName IN ('Girls_Attended_Last_Month', 'Girls_Attended_This_Month')`.
+   Each report's `FORMULA1` grand total: `sf api request rest
+   '/services/data/v62.0/analytics/reports/<id>?includeDetails=false' -o glow`, a GET with no
+   body. Compare with SOQL (RUNBOOK "Attendance totals and partner-reported counts", Signals):
+   last month must equal `COUNT_DISTINCT(Contact__c)` over the month's Jotform `Attendance__c`
+   rows + `SUM(Girls_Present__c)` over the three partners' `Partner report` batches (2026-10-20:
+   2,888 + 745 = 3,633); this month the same with `THIS_MONTH` (2,893 + 0). This is the blank
+   `Contact__c` check: each row-less batch gives the report one row with a blank `Contact__c`.
+   Equal means the unique count ignores it. One more means the blank counts as a girl; 745 less
+   means filter 5 (the Partner filter's `Parent` contains "") drops the partner batches, whose
+   parent is blank. Either way: stop and ask Ryan before phase 2.
+5. Phase 2: from within `build/`, check-only `sf project deploy start --dry-run -o glow -x
+   package-phase2.xml`; Ryan's go; then the same command minus `--dry-run` deploys the dashboard.
+6. Refresh the dashboard (Ryan's go, RUNBOOK "Attendance dashboard in Salesforce", Refreshing
+   through the API). Read back: retrieve the eight components into
+   `data/sf_girls_tiles_2026-10-20/after/` and compare with `build/` (expected: only Salesforce's
+   own defaults, RUNBOOK "Attendance dashboard in Salesforce", Changing it). Then each tile against
+   SOQL, as in step 4, and record the numbers in Result. The permission set's assignments are
+   unchanged.
 
 ## Rollback
 
@@ -92,24 +106,35 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
 the change; it is a rollback only for this change, while a retrieve still equals `build/` (or
 `after/`) - DECISIONS 2026-10-16.
 1. VPN off. Retrieve the dashboard and the permission set fresh and compare with `after/` (or
-   `build/`); if either differs, stop and build the rollback from that fresh retrieve instead.
+   `build/`; after phase 1 alone, the permission set and `before/`'s dashboard); if either
+   differs, stop and build the rollback from that fresh retrieve instead.
 2. Equal: Ryan's go. From `data/sf_girls_tiles_2026-10-20/before/`, redeploy only the dashboard
-   `Attendance/Jotform_Attendance_test` and the permission set `Attendance_Report_Viewer`: copy the
-   two files into a new folder with `sfdx-project.json`, check-only, then deploy. The rest of
-   `before/` is never deployed from it.
-3. Then delete the five new components with a `destructiveChanges.xml`, in this order: the
-   reports `Girls_Attended_Last_Month`, `Girls_Attended_This_Month` and `Girls_Attended_by_Month`,
-   then the report type `Attendance_Batches_and_Girls`, then the field
-   `Attendance_Batch__c.Partner_Girls__c` (its Admin profile entry goes with it).
+   and the permission set: copy `before/dashboards/Attendance/Jotform_Attendance_test.dashboard-meta.xml`
+   to `<new folder>/force-app/main/default/dashboards/Attendance/` and
+   `before/permissionsets/Attendance_Report_Viewer.permissionset-meta.xml` to
+   `<new folder>/force-app/main/default/permissionsets/`, beside an `sfdx-project.json` (as
+   `build/`'s), then within `<new folder>` `sf project deploy start --dry-run -o glow -d force-app`
+   and the same command minus `--dry-run`. After phase 1 alone, the permission set only. The rest
+   of `before/` is never deployed from it.
+3. Delete the five new components in three destructive deploys, in this order, each a
+   `destructiveChanges.xml` beside an empty `package.xml`, check-only first, on Ryan's go:
+   - first the reports `Girls_Attended_Last_Month`, `Girls_Attended_This_Month` and
+     `Girls_Attended_by_Month` (they may also go as the `destructiveChangesPre.xml` of the
+     report type's deploy);
+   - then the report type `Attendance_Batches_and_Girls`;
+   - then the field `Attendance_Batch__c.Partner_Girls__c` (its Admin profile entry goes with
+     it).
 4. Retrieve again and compare with `before/`; revert #59's docs change with it.
 
 ## Risks
 
-- **The summary formula's token** may be refused by the check-only deploy (BUILD.md, about 75%).
-  Mitigation: the listed alternatives, or build the formula once in the report builder and
-  retrieve it.
-- **A blank `Contact__c` counted as one girl** would make each tile one too high. Mitigation: the
-  SOQL check of Rollout step 5 before anyone reads the tiles.
+- **The summary formula's token and the `FORMULA1` chartSummary** are unverified until the
+  check-only deploy (BUILD.md: about 75% and 90%). Mitigation: if refused, the same fix in all
+  three reports and the dashboard, in BUILD.md's fallback order, or build the formula once in
+  the report builder and retrieve it.
+- **A blank `Contact__c` counted as one girl** would make each tile one too high; **filter 5
+  dropping the partner batches** would make last month's 745 too low. Mitigation: the reports'
+  SOQL check of Rollout step 4, before the dashboard is deployed.
 - **The Partner filter** set to one of the three partners shows only its Jotform girls (0 since
   2026-10-16): its batch sits on the partner account, whose parent is blank. Stated in the RUNBOOK.
 - **A renamed partner account** drops out of filter 4 (it matches the names). Mitigation: rename
@@ -119,10 +144,10 @@ the change; it is a rollback only for this change, while a retrieve still equals
 
 - `scripts/harness_tests.sh test/runbook_test.py` (class `GirlsAttendedTilesRunbook`) and
   `scripts/verify.sh` → `VERIFY OK`.
-- Live: the read-back (0 differences beyond Salesforce's defaults) and each tile against SOQL
-  (Rollout step 5).
+- Live: the two reports against SOQL between the phases (Rollout step 4), the read-back (0
+  differences beyond Salesforce's defaults) and each tile against SOQL (step 6).
 
 ## Result
 
 Not deployed yet: built 2026-10-20 in `data/sf_girls_tiles_2026-10-20/build/`, checked offline
-only (BUILD.md); the check-only deploy and the deploy wait for Ryan's go.
+only (BUILD.md); both phases' check-only deploys and deploys wait for Ryan's go.
