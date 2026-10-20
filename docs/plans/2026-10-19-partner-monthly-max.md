@@ -1,7 +1,8 @@
 ---
 title: The three Salesforce-reporting partners' Monthly Max copied into attendance, one Partner report batch per partner per month
 author: Claude (with Ryan's decision of 2026-10-19)
-status: accepted         # ticket #60; the tool and the docs built 2026-10-19; the first live run (September 2026) waits for Ryan's go
+status: done             # ticket #60; the tool and the docs built 2026-10-19; September 2026 copied on Ryan's go 2026-10-20, 3 batches, 745 (Result)
+done: 2026-10-20
 backlog: 72
 created: 2026-10-19
 intent: none - Ryan's request of 2026-10-19 (ticket #60)
@@ -29,6 +30,8 @@ combined number: Jotform girls plus the three partners' Monthly Max.
   the Monthly Report is never added to attendance (DECISIONS 2026-10-19).
 - The dashboard's total (filter 3: the club's parent is one of the three partners) does not take
   a batch on the partner account itself; #59 changes the dashboard to read these batches.
+  2026-10-20: still so after the September 2026 copy - its three batches (745) are in the data,
+  not in the dashboard's total, until #59.
 
 ## Build
 
@@ -100,4 +103,18 @@ From `data/sf_partner_monthly/ledger.csv` (each batch's last row is its state):
 
 ## Result
 
-Not run yet.
+September 2026 copied on Ryan's go, 2026-10-20, VPN off, through the CLI login `glow` (the ledger:
+the main checkout's `data/sf_partner_monthly/ledger.csv`, which survives landing).
+1. Dry run `--month 2026-09 --vpn-off`: three inserts planned - Education and English for You
+   110, Tumaini La Maisha 320, Ng'aa Maskani 315; exit 0.
+2. `--month 2026-09 --apply --vpn-off --limit 1`: Education and English for You inserted, 110,
+   read back equal (batch `a1lRP000006PsZdYAK`, created 07:33:11 UTC). Read back again through the
+   connector: `Success`, dated 2026-09-30, on the partner account `001RP000002nJZPYA2`.
+3. `--month 2026-09 --apply --vpn-off`: Education and English for You skipped (unchanged);
+   Tumaini La Maisha 320 (`a1lRP000006PsbFYAS`, 07:38:14 UTC) and Ng'aa Maskani 315
+   (`a1lRP000006PscrYAC`, 07:38:15 UTC) inserted, read back equal; exit 0.
+4. SOQL afterwards: `Partner report` `Success` batches dated 2026-09-30 on the three partner
+   accounts: 3, `SUM(Girls_Present__c)` 745 = `SUM(DHIS2__c.Monthly_Total__c)` for `YearMonth__c`
+   202609 on the three partners (3 reports, 745). Accounts created that day: 0 (no stray account).
+
+The dashboard's total does not count these three batches yet (filter 3, Context): #59.
