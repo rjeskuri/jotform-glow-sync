@@ -2982,10 +2982,16 @@ sharing stays as it is"):
      deploys, in this order, each a `destructiveChanges.xml` beside an empty `package.xml`,
      check-only first, on Ryan's go:
      - first the reports `Girls_Attended_Last_Month`, `Girls_Attended_This_Month` and
-       `Girls_Attended_by_Month` (they may also go as the `destructiveChangesPre.xml` of the
-       report type's deploy);
-     - then the report type `Attendance_Batches_and_Girls`;
-     - then the field `Attendance_Batch__c.Partner_Girls__c`.
+       `Girls_Attended_by_Month` (`Report` members `Attendance/Girls_Attended_Last_Month` and so
+       on; they may also go as the `--pre-destructive-changes` file of the report type's deploy);
+     - then the report type `Attendance_Batches_and_Girls` (`ReportType`);
+     - then the field `Attendance_Batch__c.Partner_Girls__c` (`CustomField`).
+
+     Each deploy is its own folder holding an empty `package.xml` (`<Package>` with only
+     `<version>62.0</version>`) and a `destructiveChanges.xml` listing that deploy's components.
+     Within the folder, check-only: `sf project deploy start --dry-run -o glow --manifest
+     package.xml --post-destructive-changes destructiveChanges.xml`; then Ryan's go and the same
+     command minus `--dry-run`. The next deploy starts after this one succeeded.
   4. Retrieve the dashboard and the permission set again and compare with `before/`. The four
      reports #59 stopped using are back on the dashboard; revert #59's RUNBOOK change with it.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not

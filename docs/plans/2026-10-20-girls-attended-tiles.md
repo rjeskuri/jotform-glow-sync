@@ -94,7 +94,9 @@ reports are deployed and checked against SOQL before the dashboard reads them.
 5. Phase 2: from within `build/`, check-only `sf project deploy start --dry-run -o glow -x
    package-phase2.xml`; Ryan's go; then the same command minus `--dry-run` deploys the dashboard.
 6. Refresh the dashboard (Ryan's go, RUNBOOK "Attendance dashboard in Salesforce", Refreshing
-   through the API). Read back: retrieve the eight components into
+   through the API). Read back, once for both phases: phase 1 is checked between the phases by
+   its numbers alone (step 4, through the Analytics API), and the retrieve-and-compare runs here,
+   after phase 2, over all eight components of both phases - retrieve them into
    `data/sf_girls_tiles_2026-10-20/after/` and compare with `build/` (expected: only Salesforce's
    own defaults, RUNBOOK "Attendance dashboard in Salesforce", Changing it). Then each tile against
    SOQL, as in step 4, and record the numbers in Result. The permission set's assignments are
@@ -119,11 +121,17 @@ the change; it is a rollback only for this change, while a retrieve still equals
 3. Delete the five new components in three destructive deploys, in this order, each a
    `destructiveChanges.xml` beside an empty `package.xml`, check-only first, on Ryan's go:
    - first the reports `Girls_Attended_Last_Month`, `Girls_Attended_This_Month` and
-     `Girls_Attended_by_Month` (they may also go as the `destructiveChangesPre.xml` of the
-     report type's deploy);
-   - then the report type `Attendance_Batches_and_Girls`;
-   - then the field `Attendance_Batch__c.Partner_Girls__c` (its Admin profile entry goes with
-     it).
+     `Girls_Attended_by_Month` (`Report` members `Attendance/Girls_Attended_Last_Month` and so on;
+     they may also go as the `--pre-destructive-changes` file of the report type's deploy);
+   - then the report type `Attendance_Batches_and_Girls` (`ReportType`);
+   - then the field `Attendance_Batch__c.Partner_Girls__c` (`CustomField`; its Admin profile
+     entry goes with it).
+
+   Each deploy is its own folder holding an empty `package.xml` (`<Package>` with only
+   `<version>62.0</version>`) and a `destructiveChanges.xml` listing that deploy's components.
+   Within the folder, check-only: `sf project deploy start --dry-run -o glow --manifest
+   package.xml --post-destructive-changes destructiveChanges.xml`; then Ryan's go and the same
+   command minus `--dry-run`. The next deploy starts after this one succeeded.
 4. Retrieve again and compare with `before/`; revert #59's docs change with it.
 
 ## Risks
