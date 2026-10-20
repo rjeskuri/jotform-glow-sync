@@ -2988,7 +2988,9 @@ sharing stays as it is"):
      - then the field `Attendance_Batch__c.Partner_Girls__c` (`CustomField`).
 
      Each deploy is its own folder holding an empty `package.xml` (`<Package>` with only
-     `<version>62.0</version>`) and a `destructiveChanges.xml` listing that deploy's components.
+     `<version>62.0</version>`) and a `destructiveChanges.xml` listing that deploy's components,
+     beside an `sfdx-project.json` (as in step 2) and the empty `force-app/` folder it names:
+     `--manifest` needs an SFDX project.
      Within the folder, check-only: `sf project deploy start --dry-run -o glow --manifest
      package.xml --post-destructive-changes destructiveChanges.xml`; then Ryan's go and the same
      command minus `--dry-run`. The next deploy starts after this one succeeded.
