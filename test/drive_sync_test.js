@@ -423,6 +423,87 @@ console.log('\nplanMoves_ — unknown regions, empty subfolders, other folders')
         same(norm(withUs.plan).unknown, ['src-eu']), withUs.error || JSON.stringify(norm(withUs.plan)));
 }
 
+console.log('\nplanMoves_ — a merge that moves nothing does not claim the name');
+{
+  const name = 'Golden Flames 2026-10-13';
+  const sub = (id, fname, size) => ({ id, name, files: [file(id + '-f', fname, size, 120)] });
+  const tg = target('Africa', [{ id: 'there', name, files: [{ id: 't-1', name: 'IMG_100.jpg', size: 1000 }] }]);
+  for (const order of [['allKept', 'newOne'], ['newOne', 'allKept']]) {
+    const subs = { allKept: sub('allKept', 'IMG_100.jpg', 1000), newOne: sub('newOne', 'IMG_101.jpg', 2000) };
+    const r = plan([{ id: 'src-af', name: 'Attendance photos - Africa', subfolders: order.map(k => subs[k]) }], tg, NOW, 10);
+    const byId = Object.fromEntries(list(r.plan, 'merges').map(m => [m.id, m]));
+    check('same name twice in My Drive, one copy entirely on the Shared Drive already (' + order.join(', ') + '): ' +
+          'the other copy still merges this run',
+          !!byId.newOne && byId.newOne.into === 'there' && same((byId.newOne.files || []).map(fid), ['newOne-f']),
+          r.error || JSON.stringify(norm(r.plan)));
+    check('…and the all-kept copy is a merge of nothing (kept), never `waiting`',
+          !!byId.allKept && !(byId.allKept.files || []).length && same((byId.allKept.kept || []).map(fid), ['allKept-f']) &&
+          !list(r.plan, 'waiting').length, r.error || JSON.stringify(norm(r.plan)));
+  }
+}
+
+console.log('\nplanMoves_ — run after run, the plan carried out each time, everything settles');
+{
+  // the plan applied to the model, as the mover would apply it to Drive
+  const apply = (sources, targets, p) => {
+    for (const s of sources) {
+      const region = s.name.slice(PREFIX.length);
+      for (const m of list(p, 'moves').filter(x => x.region === region)) {
+        const i = s.subfolders.findIndex(x => x.id === m.id);
+        if (i >= 0) targets[region].subfolders.push(s.subfolders.splice(i, 1)[0]);
+      }
+      for (const m of list(p, 'merges').filter(x => x.region === region)) {
+        const from = s.subfolders.find(x => x.id === m.id), into = targets[region].subfolders.find(x => x.id === m.into);
+        for (const f of (m.files || []).map(fid)) {
+          const i = from ? from.files.findIndex(x => x.id === f) : -1;
+          if (i >= 0 && into) into.files.push(from.files.splice(i, 1)[0]);
+        }
+      }
+    }
+  };
+  const settled = p => !!p && !list(p, 'moves').length && !list(p, 'merges').some(m => (m.files || []).length) &&
+                       !list(p, 'waiting').length;
+  for (let seed = 1; seed <= 6; seed++) {
+    const r = prng(100 + seed);
+    let n = 0;
+    const id = p => p + seed + '-' + (++n);
+    const names = ['Bright Stars 2026-10-14', 'Rising Lights 2026-10-14', 'Golden Flames 2026-10-13'];
+    const targets = { Africa: { id: 'tgt-af-' + seed, subfolders: [] }, Asia: { id: 'tgt-as-' + seed, subfolders: [] } };
+    const sources = ['Africa', 'Asia'].map(region => ({ id: id('src'), name: PREFIX + region, subfolders: [] }));
+    for (const s of sources) {
+      const region = s.name.slice(PREFIX.length);
+      for (const nm of names) {
+        if (r() < 0.5) {   // already on the Shared Drive once
+          targets[region].subfolders.push({ id: id('tsub'), name: nm, files: [100, 101].filter(() => r() < 0.6)
+            .map(k => ({ id: id('t'), name: 'IMG_' + k + '.jpg', size: k * 10 })) });
+        }
+        const copies = 1 + Math.floor(r() * 3);   // the same subfolder name up to three times in My Drive
+        for (let c = 0; c < copies; c++) {
+          s.subfolders.push({ id: id('sub'), name: nm, files: [100, 101, 102].filter(() => r() < 0.6)
+            .map(k => ({ id: id('f'), name: 'IMG_' + k + '.jpg', size: r() < 0.7 ? k * 10 : k * 10 + 1, updated: NOW - OLD * MIN })) });
+        }
+      }
+    }
+    let last = null, runsUsed = 0, error = '', twice = [];
+    for (let run = 0; run < 10; run++) {
+      const got = plan(sources, targets, NOW + run * MIN, 10);
+      if (got.error) { error = got.error; break; }
+      runsUsed = run + 1;
+      last = got.plan;
+      if (settled(last)) break;
+      apply(sources, targets, last);
+      for (const [region, t] of Object.entries(targets)) {
+        const count = {};
+        for (const x of t.subfolders) count[x.name] = (count[x.name] || 0) + 1;
+        twice = twice.concat(Object.keys(count).filter(k => count[k] > 1).map(k => region + ': ' + k));
+      }
+    }
+    check('seed ' + seed + ': same-name copies settle run by run (' + runsUsed + ' of at most 10): nothing left waiting or to move',
+          !error && settled(last), error || JSON.stringify(norm(last)));
+    check('seed ' + seed + ': no run made a second same-name folder on the Shared Drive', !error && !twice.length, error || twice.join(', '));
+  }
+}
+
 console.log('\nplanMoves_ — the dry run: a plan and no side effects');
 {
   const { sources, targets } = layout(42, NOW, 10);
@@ -475,11 +556,37 @@ const INTROSPECTION = new Set(['toString', 'valueOf', 'toJSON', 'constructor', '
 const BY_ID = c => /ById$/.test(c) || ['Drive.Files.get', 'Drive.Files.update', 'Drive.Drives.get'].includes(c);
 const WRITES = c => /\.(moveTo|createFolder|addFile|removeFile|addFolder|removeFolder)$/.test(c) || c === 'Drive.Files.update';
 
-/** Fake Google services recording every member asked for ('Type.member'). mode: 'ids' | 'empty'. */
-function fakeEnv(mode) {
-  const calls = [];
-  let D = Date;
-  let n = 0;
+// Script Properties: SOURCE_FOLDER_<KEY> and TARGET_FOLDER_<KEY> per region (drive-sync/README.md)
+const PROP_KEYS = { Africa: 'AFRICA', Asia: 'ASIA', 'Latin America': 'LATIN_AMERICA', 'U.S': 'US', Template: 'TEMPLATE' };
+// the fake My Drive: Africa has a settled, a still-uploading and a resubmitted subfolder; Asia one settled one
+const FAKE_SOURCES = {
+  Africa: [['Bright Stars 2026-10-14', [['IMG_4471.jpg', 2048, OLD], ['IMG_4472.jpg', 4096, OLD]]],
+           ['Rising Lights 2026-10-15', [['IMG_4480.jpg', 1500, 1]]],
+           ['Golden Flames 2026-10-13', [['IMG_5501.jpg', 3000, OLD], ['IMG_5502.jpg', 3100, OLD]]]],
+  Asia: [['Morning Wings 2026-10-13', [['IMG_6001.jpg', 5000, OLD]]]],
+  'Latin America': [], 'U.S': [], Template: [],
+};
+// the fake Shared Drive: Africa already holds the resubmission's name, with one of its two photos
+const FAKE_TARGETS = { Africa: [['Golden Flames 2026-10-13', [['IMG_5501.jpg', 3000]]]], Asia: [], 'Latin America': [], 'U.S': [], Template: [] };
+const SOURCE_SUBS = Object.values(FAKE_SOURCES).reduce((a, s) => a + s.length, 0);
+const FILE_STEMS = ['IMG_4471', 'IMG_4472', 'IMG_4480', 'IMG_5501', 'IMG_5502', 'IMG_6001', 'IMG_9000', 'receipt'];
+const EXPECTED_MOVES = ['S:Africa/Bright Stars 2026-10-14 -> T:Africa', 'S:Asia/Morning Wings 2026-10-13 -> T:Asia',
+                        'S:Africa/Golden Flames 2026-10-13/IMG_5502.jpg -> T:Africa/Golden Flames 2026-10-13'].sort();
+
+/**
+ * Fake Google services recording every member asked for ('Type.member'), the moves made, the log
+ * and the source subfolders read. mode: 'ids' (every SOURCE_/TARGET_FOLDER_<KEY> set, and any
+ * other property a fictional id) | 'empty' (no Script Properties). opt: failMoveOf (a subfolder
+ * name whose moveTo throws), moveAdvanceMin / readAdvanceMin (the clock jumps on each move / on
+ * each source subfolder's files read), targetName / sourceName ({region: folder name}).
+ */
+function fakeEnv(mode, opt) {
+  opt = opt || {};
+  const calls = [], moved = [], attempted = [], logs = [], read = new Set();
+  const clock = { t: Date.now() };
+  const t0 = clock.t;
+  let D = Date, n = 0;
+  const meta = new WeakMap(), byId = {};
   const wrap = (type, obj) => new Proxy(obj, {
     get(t, k) {
       if (typeof k !== 'string' || INTROSPECTION.has(k)) return t[k];
@@ -489,63 +596,111 @@ function fakeEnv(mode) {
   });
   const iter = items => { let i = 0; return wrap('Iterator', { hasNext: () => i < items.length, next: () => items[i++],
                                                               getContinuationToken: () => null }); };
-  const fakeFile = (name, size, ageMin) => {
-    const id = 'fake-file-' + (++n);
-    return wrap('File', { getId: () => id, getName: () => name, getSize: () => size, getMimeType: () => 'image/jpeg',
-                          getLastUpdated: () => new D(Date.now() - ageMin * MIN), getDateCreated: () => new D(Date.now() - ageMin * MIN),
-                          moveTo: () => undefined, getParents: () => iter([]), isTrashed: () => false });
-  };
-  const fakeFolder = (name, kids, files) => {
-    const id = 'fake-folder-' + (++n);
-    const self = wrap('Folder', {
-      getId: () => id, getName: () => name, getFolders: () => iter(kids()), getFiles: () => iter(files()),
-      getFoldersByName: x => iter(kids().filter(k => k.getName() === x)), getFilesByName: x => iter(files().filter(f => f.getName() === x)),
-      createFolder: x => fakeFolder(x, () => [], () => []), moveTo: () => self, addFile: () => self, removeFile: () => self,
-      addFolder: () => self, removeFolder: () => self, getLastUpdated: () => new D(Date.now() - OLD * MIN),
-      getDateCreated: () => new D(Date.now() - OLD * MIN), getParents: () => iter([]), isTrashed: () => false,
-      searchFolders: () => iter(kids()), searchFiles: () => iter(files()),
-    });
+  const label = x => (meta.get(x) || { label: '?' }).label;
+  const move = (self, dest) => {
+    attempted.push(label(self));
+    if (opt.failMoveOf && meta.get(self).name === opt.failMoveOf) throw new Error('Drive said no (fake)');
+    moved.push(label(self) + ' -> ' + label(dest));
+    if (opt.moveAdvanceMin) clock.t += opt.moveAdvanceMin * MIN;
     return self;
   };
-  const sub = (name, ageMin) => fakeFolder(name, () => [], () => [fakeFile('IMG_100.jpg', 2048, ageMin), fakeFile('IMG_101.jpg', 4096, ageMin + 5)]);
-  const root = fakeFolder('My Drive', () => [
-    fakeFolder(PREFIX + 'Africa', () => [sub('Bright Stars 2026-10-14', OLD), sub('Rising Lights 2026-10-15', 1)], () => []),
-    fakeFolder(PREFIX + 'Asia', () => [sub('Morning Wings 2026-10-13', OLD)], () => []),
-    fakeFolder('Receipts', () => [sub('Silver Roots 2026-10-01', OLD)], () => [fakeFile('receipt.pdf', 100, OLD)]),
-  ], () => [fakeFile('IMG_300.jpg', 1000, OLD)]);
+  const mkFile = (where, name, size, ageMin) => {
+    const id = 'fake-file-' + (++n);
+    const self = wrap('File', {
+      getId: () => id, getName: () => name, getSize: () => size, getMimeType: () => 'image/jpeg',
+      getLastUpdated: () => new D(t0 - ageMin * MIN), getDateCreated: () => new D(t0 - ageMin * MIN),
+      moveTo: dest => move(self, dest), getParents: () => iter([]), isTrashed: () => false,
+    });
+    meta.set(self, { name, label: where + '/' + name });
+    byId[id] = self;
+    return self;
+  };
+  const mkFolder = (lbl, name, kids, files, isSourceSub) => {
+    const id = 'fake-folder-' + (++n);
+    const self = wrap('Folder', {
+      getId: () => id, getName: () => name, getFolders: () => iter(kids),
+      getFiles: () => {
+        if (isSourceSub) { read.add(lbl); if (opt.readAdvanceMin) clock.t += opt.readAdvanceMin * MIN; }
+        return iter(files);
+      },
+      getFoldersByName: x => iter(kids.filter(k => meta.get(k).name === x)),
+      getFilesByName: x => iter(files.filter(f => meta.get(f).name === x)),
+      createFolder: x => mkFolder(lbl + '/' + x, x, [], [], false), moveTo: dest => move(self, dest),
+      addFile: () => self, removeFile: () => self, addFolder: () => self, removeFolder: () => self,
+      getLastUpdated: () => new D(t0 - OLD * MIN), getDateCreated: () => new D(t0 - OLD * MIN),
+      getParents: () => iter([]), isTrashed: () => false, searchFolders: () => iter(kids), searchFiles: () => iter(files),
+    });
+    meta.set(self, { name, label: lbl });
+    byId[id] = self;
+    return self;
+  };
+  const propId = k => 'fake-id-' + String(k).replace(/[^A-Za-z0-9]+/g, '-');
+  const sourceFolders = [], propFolders = {};
+  for (const region of REGIONS) {
+    const subs = FAKE_SOURCES[region].map(([nm, fl]) => {
+      const where = 'S:' + region + '/' + nm;
+      return mkFolder(where, nm, [], fl.map(([f, size, age]) => mkFile(where, f, size, age)), true);
+    });
+    const src = mkFolder('S:' + region, (opt.sourceName || {})[region] || PREFIX + region, subs, [], false);
+    const tsubs = FAKE_TARGETS[region].map(([nm, fl]) => {
+      const where = 'T:' + region + '/' + nm;
+      return mkFolder(where, nm, [], fl.map(([f, size]) => mkFile(where, f, size, OLD)), false);
+    });
+    const tgt = mkFolder('T:' + region, (opt.targetName || {})[region] || region, tsubs, [], false);
+    sourceFolders.push(src);
+    propFolders[propId('SOURCE_FOLDER_' + PROP_KEYS[region])] = src;
+    propFolders[propId('TARGET_FOLDER_' + PROP_KEYS[region])] = tgt;
+  }
+  const receiptsSub = mkFolder('S:Receipts/Silver Roots 2026-10-01', 'Silver Roots 2026-10-01', [],
+                               [mkFile('S:Receipts/Silver Roots 2026-10-01', 'receipt.pdf', 100, OLD)], false);
+  const receipts = mkFolder('S:Receipts', 'Receipts', [receiptsSub], [], false);
+  const top = sourceFolders.concat(receipts);
+  const root = mkFolder('S:root', 'My Drive', top, [mkFile('S:root', 'IMG_9000.jpg', 1000, OLD)], false);
   const trigger = wrap('Trigger', { getHandlerFunction: () => 'other', getUniqueId: () => 'fake-trigger', getEventType: () => undefined,
                                     getTriggerSource: () => undefined });
   const builder = wrap('TriggerBuilder', {});
   for (const k of ALLOW.TriggerBuilder) Object.defineProperty(builder, k, { value: () => (k === 'create' ? trigger : builder) });
-  const propsValue = k => (mode === 'ids' ? 'fake-id-' + String(k).replace(/[^A-Za-z0-9]+/g, '-') : null);
+  const propsValue = k => (mode === 'ids' ? propId(k) : null);
   const props = wrap('Properties', {
     getProperty: propsValue,
     getProperties: () => (mode === 'ids' ? new Proxy({}, { get: (_, k) => (typeof k === 'string' ? propsValue(k) : undefined) }) : {}),
     getKeys: () => [], setProperty: () => props, setProperties: () => props, deleteProperty: () => props,
   });
   const lock = wrap('Lock', { tryLock: () => true, waitLock: () => undefined, releaseLock: () => undefined, hasLock: () => true });
+  const say = (...a) => { logs.push(a.map(String).join(' ')); };
   const globals = {
     DriveApp: wrap('DriveApp', {
-      getFolders: () => root.getFolders(), getFoldersByName: x => root.getFoldersByName(x), getFolderById: () => root,
-      getFileById: () => fakeFile('IMG_100.jpg', 2048, OLD), getRootFolder: () => root, searchFolders: () => root.getFolders(),
-      searchFiles: () => root.getFiles(), getFiles: () => root.getFiles(), getFilesByName: x => root.getFilesByName(x),
+      getFolders: () => iter(top), getFoldersByName: x => iter(top.filter(k => meta.get(k).name === x)),
+      // an id handed out by getId(); a SOURCE_/TARGET_FOLDER_<KEY> property's folder; else (another property's id) the root
+      getFolderById: x => byId[x] || propFolders[x] || root,
+      getFileById: x => { if (byId[x]) return byId[x]; throw new Error('No item with the given ID (fake)'); },
+      getRootFolder: () => root, searchFolders: () => iter(top), searchFiles: () => iter([]),
+      getFiles: () => iter([]), getFilesByName: () => iter([]),
     }),
     Drive: wrap('Drive', {
-      Files: wrap('Drive.Files', { list: () => ({ files: [], items: [] }), get: id => ({ id, name: 'x', parents: [] }), update: () => ({}) }),
-      Drives: wrap('Drive.Drives', { get: id => ({ id, name: 'x' }), list: () => ({ drives: [] }) }),
+      Files: wrap('Drive.Files', { list: () => ({ files: [], items: [] }), get: x => ({ id: x, name: 'x', parents: [] }), update: () => ({}) }),
+      Drives: wrap('Drive.Drives', { get: x => ({ id: x, name: 'x' }), list: () => ({ drives: [] }) }),
     }),
     ScriptApp: wrap('ScriptApp', { newTrigger: () => builder, getProjectTriggers: () => [trigger], deleteTrigger: () => undefined }),
     PropertiesService: wrap('PropertiesService', { getScriptProperties: () => props }),
     LockService: wrap('LockService', { getScriptLock: () => lock }),
     Utilities: wrap('Utilities', { formatDate: d => new Date(d).toISOString(), sleep: () => undefined }),
-    Logger: wrap('Logger', { log: () => undefined }),
+    Logger: wrap('Logger', { log: say }),
     Session: wrap('Session', { getScriptTimeZone: () => 'America/Chicago' }),
-    console: { log() {}, info() {}, warn() {}, error() {} },
+    console: { log: say, info: say, warn: say, error: say },
   };
   for (const s of ['MailApp', 'GmailApp', 'UrlFetchApp', 'SpreadsheetApp', 'CacheService', 'DocumentApp', 'FormApp']) {
     globals[s] = wrap(s, {});
   }
-  return { calls, globals, setDate: d => { D = d; } };
+  /** The sandbox's clock: `new Date()` and `Date.now()` read clock.t (moved by the fakes). */
+  const install = c => {
+    c.__fakeClock = () => clock.t;
+    vm.runInContext('(function () { const R = Date, now = __fakeClock;' +
+                    ' class FakeDate extends R { constructor(...a) { if (a.length) super(...a); else super(now()); }' +
+                    ' static now() { return now(); } } Date = FakeDate; })(); delete globalThis.__fakeClock;', c);
+    D = vm.runInContext('Date', c);
+  };
+  return { calls, moved, attempted, logs, read, globals, install };
 }
 
 const violations = calls => calls.filter(c => {
@@ -555,31 +710,72 @@ const violations = calls => calls.filter(c => {
 });
 
 const ENTRIES = GS.length ? loadGs.declarations(GS_SRC).filter(nm => !nm.endsWith('_') && ctx && typeof ctx[nm] === 'function') : [];
-function runEntries(mode) {
-  return ENTRIES.map(name => {
-    const env = fakeEnv(mode);
-    let threw = '';
-    try {
-      const c = loadGs.sandbox(GS, env.globals);
-      env.setDate(vm.runInContext('Date', c));
-      vm.runInContext(name + '();', c, { timeout: 5000 });
-    } catch (e) { threw = String(e && e.message || e); }
-    return { name, calls: env.calls, threw };
-  });
+function runEntry(name, mode, opt) {
+  const env = fakeEnv(mode, opt);
+  let threw = '';
+  try {
+    const c = loadGs.sandbox(GS, env.globals);
+    env.install(c);
+    vm.runInContext(name + '();', c, { timeout: 5000 });
+  } catch (e) { threw = String(e && e.message || e); }
+  return Object.assign({ name, threw, text: env.logs.join('\n') }, env);
 }
+const runEntries = (mode, opt) => ENTRIES.map(name => runEntry(name, mode, opt));
+const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
 {
   check('there are entry points (top-level functions not ending in `_`)', ENTRIES.length > 0, ENTRIES.join(', ') || 'none');
   const full = runEntries('ids');
   const bad = full.flatMap(r => violations(r.calls).map(c => r.name + ': ' + c));
-  check('with fictional ids in Script Properties, every call is in the allow-list (no sharing, links, copies, trash, mail)',
+  check('with every region set up in Script Properties, every call (the full apply path included) is in the allow-list ' +
+        '(no sharing, links, copies, trash, mail)',
         ENTRIES.length > 0 && !bad.length, ENTRIES.length ? [...new Set(bad)].join(', ') : 'no entry points');
+  const summary = rs => rs.map(r => r.name + ': ' + (r.threw || 'ok') + ' [' + r.calls.length + ' calls, ' + r.moved.length + ' moves]').join('; ');
   check('…and at least one entry point reads the fake Drive (the run is not vacuous)',
-        full.some(r => r.calls.some(c => /^(DriveApp|Drive)\./.test(c))),
-        full.map(r => r.name + ': ' + (r.threw || 'ok') + ' [' + r.calls.length + ' calls]').join('; '));
+        full.some(r => r.read.size > 0), summary(full));
+  const applier = full.filter(r => r.moved.length)[0];
+  check('one entry point is the real run: settled subfolders moved whole, the resubmission\'s new photo merged, ' +
+        'nothing else (not the uploading one, not the kept photo, not Receipts)',
+        !!applier && !applier.threw && same(applier.moved.slice().sort(), EXPECTED_MOVES),
+        applier ? applier.name + ': ' + (applier.threw || '') + ' ' + show(applier.moved.slice().sort(), EXPECTED_MOVES) : summary(full));
+  check('…its log has the counts and the folder names, and no file name',
+        !!applier && /\d/.test(applier.text) && ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13', 'Golden Flames 2026-10-13']
+          .every(x => applier.text.includes(x)) && !fileNamesIn(applier.text).length,
+        applier ? 'file names logged: ' + fileNamesIn(applier.text).join(', ') : 'no applier');
+  const dry = full.find(r => r.read.size > 0 && !r.attempted.length && !r.threw &&
+                         ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13'].every(x => r.text.includes(x)));
+  check('one entry point is the dry run: reads both drives, logs what it would move by folder name, moves nothing, no file name',
+        !!dry && !fileNamesIn(dry.text).length, dry ? dry.name + ': ' + fileNamesIn(dry.text).join(', ') : summary(full));
   const empty = runEntries('empty');
   const byId = empty.flatMap(r => r.calls.filter(c => BY_ID(c) || WRITES(c)).map(c => r.name + ': ' + c));
   check('with NO Script Properties, no entry point opens anything by id or changes anything (no id is hard-coded)',
         ENTRIES.length > 0 && !byId.length, ENTRIES.length ? [...new Set(byId)].join(', ') : 'no entry points');
+
+  const A = applier ? applier.name : null;
+  const failed = A ? runEntry(A, 'ids', { failMoveOf: 'Bright Stars 2026-10-14' }) : null;
+  const others = EXPECTED_MOVES.filter(m => !m.startsWith('S:Africa/Bright Stars'));
+  check('a move that fails: the other moves still happen, MOVE_FAILED is logged, and the run ends with an error',
+        !!failed && !!failed.threw && others.every(m => failed.moved.includes(m)) && /MOVE_FAILED/.test(failed.text + failed.threw) &&
+        !fileNamesIn(failed.text).length,
+        failed ? 'threw: ' + (failed.threw || 'no') + '; moved ' + JSON.stringify(failed.moved) : 'no applier');
+  const late = A ? runEntry(A, 'ids', { moveAdvanceMin: 7 }) : null;
+  check('the clock past the run\'s time budget after the first move: no further move, TIME_BUDGET logged',
+        !!late && late.attempted.length === 1 && /TIME_BUDGET/.test(late.text),
+        late ? 'moves tried ' + late.attempted.length + '; ' + (late.threw || '') + ' log: ' + late.text.slice(-300) : 'no applier');
+  const slow = A ? runEntry(A, 'ids', { readAdvanceMin: 3 }) : null;
+  const unreadMoved = slow ? slow.moved.filter(m => ![...slow.read].some(r => m.startsWith(r))) : ['no applier'];
+  check('reading slow (3 minutes a subfolder): it stops reading new subfolders well before the budget and logs TIME_BUDGET',
+        !!slow && slow.read.size < SOURCE_SUBS && /TIME_BUDGET/.test(slow.text),
+        slow ? 'read ' + slow.read.size + ' of ' + SOURCE_SUBS + '; ' + (slow.threw || '') + ' log: ' + slow.text.slice(-300) : 'no applier');
+  check('…and nothing it did not read is moved', !!slow && !unreadMoved.length, unreadMoved.join(', '));
+  for (const [what, opt] of [['TARGET_FOLDER_AFRICA is a folder named "Africa photos"', { targetName: { Africa: 'Africa photos' } }],
+                             ['TARGET_FOLDER_ASIA is a folder named "asia"', { targetName: { Asia: 'asia' } }],
+                             ['SOURCE_FOLDER_AFRICA is a folder named "Attendance photos - Africa (old)"',
+                              { sourceName: { Africa: 'Attendance photos - Africa (old)' } }]]) {
+    const r = A ? runEntry(A, 'ids', opt) : null;
+    check(what + ': CONFIG refused, and no move at all (not even the other regions\')',
+          !!r && /CONFIG refused/.test(r.threw + '\n' + r.text) && !r.attempted.length,
+          r ? 'threw: ' + (r.threw || 'no') + '; moves tried ' + JSON.stringify(r.attempted) : 'no applier');
+  }
 }
 
 // ---------------------------------------------------------------- the project around it
