@@ -661,3 +661,11 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - the reports `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month` are no longer used by the dashboard and kept until Ryan decides which to delete;
     - 2026-10-21: all four deleted on Ryan's go, 05:22 UTC (deploy `0AfRP000002hhq90AA`); restore one from `data/sf_girls_tiles_2026-10-20/before/` (#59; RUNBOOK "Attendance dashboard in Salesforce");
   - a fourth Salesforce-reporting partner needs its account added to filter 4 of the three reports and to `tools/sf_partner_monthly.py`, on Ryan's go.
+
+### 2026-10-21 — Retired Salesforce reports and dashboards are moved to Decommissioned, never deleted; a copy goes there before each change
+
+- A Monthly Report (`DHIS2__c`) report or dashboard that epic #68 retires is moved to the hidden folder "Decommissioned" (a report folder and a dashboard folder, both labelled so, visible to administrators only) and keeps its Id; nothing is deleted in this epic (ticket #69; [plan](plans/2026-10-21-sf-reporting-inventory.md); RUNBOOK "Monthly Report dashboards in Salesforce").
+- Before a report or dashboard changes, a copy of it as it was goes to Decommissioned, carrying its source Id and the ticket, in addition to the `before/` retrieve.
+- **Why:** Ryan, 2026-10-21: "Create a decommissioned folder to put any old copies in in case we need to revert any changes." A copy in Salesforce is one a Salesforce user opens and restores with Save As or a move.
+- **Rejected:** deleting the retired reports and dashboards (an undo would rebuild them from metadata, with new Ids and their links and subscriptions gone); archiving them only in `data/` (the `before/` retrieves), which Salesforce users cannot reach and only a metadata deploy restores.
+- **Consequences:** two more folders, both hidden; every later task of epic #68 copies a report or dashboard into Decommissioned before it changes one, and moves a retired one there (`tools/sf_report_folders.py`, #71); the shares API is the measure of the folders' privacy (`Folder.AccessType` reads `Hidden` even on a shared folder); the RUNBOOK section "Monthly Report dashboards in Salesforce" and `.claude/skills/salesforce` carry the rule.
