@@ -14,18 +14,24 @@ Alert and no Block, because an alert refuses a record created by code (BACKLOG 5
 processor, tools/sf_new_clubs.py) - the Contact rule "First & Last & Account" unchanged,
 administrators alone setting a flag by hand, flagged records shown in the kept reports with the flags
 as a filter; a plan carries the rolled-back `sf apex run` proof before the deploy, the check-only,
-Ryan's go, the read-back and the next day's batch check, and its Rollback deactivates the rule; a
-dated DECISIONS entry records the definitions as Ryan's provisional answers pending GLOW; the
-salesforce skill points at the section. Every part a test reads is swept for what would contradict
-the rules (contradictions()): the rule set to Alert or Block (said any way, unless denied where it is
-said, without a time limit), a flagged record deleted, merged or kept out of the reports, a softener
-on the proof, the check-only, the go or the read-back. Counts and ids only: no figure from the org
-is pinned.
+Ryan's go (his answer after the check-only's result), the read-back and the next day's batch check,
+in that order, the proof's script quoted in an ```apex block ending in `Database.rollback(sp);`, and
+its Rollback deactivates the rule in the org by a named action; the RUNBOOK states the rule's exact
+settings (`actionOnInsert`/`actionOnUpdate` Allow, no `alertText`, the MatchingRuleItems); a dated
+DECISIONS entry records the definitions as Ryan's provisional answers pending GLOW; the salesforce
+skill's "What lives there" points at the section. Every part a test reads is swept for what would
+contradict the rules (contradictions()): the rule set to Alert or Block (said any way, unless denied
+where it is said, without a time limit) or stopping a save in other words (a halt, pop-up, message,
+prompt, refusal), a flagged record deleted, merged, hidden or kept out of the reports (said any way),
+a softener on the proof, the check-only, the go or the read-back. Counts and ids only: no figure
+from the org is pinned.
 
 DuplicateAccountGroups: glow.salesforce.duplicate_account_groups(accounts), the Python side of the
 Account matching rule for the read-back and the monthly check - the groups of Accounts the rule
 would report, computed from `SELECT Id, Name, ParentId, RecordTypeId FROM Account` - over fictional
-accounts with every criterion varied on its own.
+accounts with every criterion varied on its own: any whitespace run (tab, no-break space) is one
+space, casefold (Straße = STRASSE), ParentId "" = null = missing, RecordTypeId missing = null, and
+the `<club> - <partner>` names get no special case (only another parent keeps twins apart).
 """
 import copy
 import glob
@@ -64,7 +70,7 @@ class DuplicateRuleDocs(unittest.TestCase):
     RULE_IDIOM = re.compile(r"\b(never|not|nothing|no|without|instead of|rather than|nor)\b[^.;,]{0,25}?"
                             r"\b(alert|block|warn|delet|merg|exclud|stop|refus|reject|flag|match)\w*|"
                             r"\b(no|without)\s+(an?\s+)?(attendance|batch(es)?|Monthly Reports?|parent|partner|"
-                            r"submission)\b", re.I)
+                            r"submission|`?alertText`?)\b", re.I)
     REPORT_ONLY = re.compile(r"(?i)\breports?\b[^.;]{0,10}?\bonly\b")
     ALERT_DENIED = re.compile(r"(?i)\b(no|without|never|not|nor)\s+(an?\s+|the\s+)?alert")
     BLOCK_DENIED = re.compile(r"(?i)\b(no|without|never|not|nor|or)\s+(an?\s+|the\s+)?block")   # "never Alert or Block"
@@ -107,6 +113,24 @@ class DuplicateRuleDocs(unittest.TestCase):
                           r"when possible|as time allows|may be omitted|can be omitted)\b")
     NO_ROLLBACK = re.compile(r"(?i)\bno rollback\b|\bnothing to roll back\b|\bcannot be rolled back\b|"
                              r"\bno way (back|to roll back)\b")
+    # the rule stopping a save, said in other words: a save, insert, record, the processor or a create paired
+    # with a halt, stop, turn-away, pop-up, message, prompt, refusal or rejection - unless denied where it is
+    # said, the cost form ("an alert refuses a record created by code") or a conditional ("if an insert is
+    # refused, the Rollback follows")
+    SAVE = re.compile(r"(?i)\b(saves?|saving|inserts?|inserting|records?|processor|creat\w*)\b")
+    STOPS = re.compile(r"(?i)\bhalt\w*|\bstop\w*|\bturn(s|ed|ing)?\s+away|\bpop-?ups?\b|\bmessages?\b|\bprompt\w*|"
+                       r"\brefus\w*|\breject\w*")
+    COST = re.compile(r"(?i)\b(alert|block)\w*")
+    CONDITIONAL = re.compile(r"(?i)\b(if|should|in case|would|could|were)\b")
+    # flagged records kept out of the reports, said in other words (the phrases are the hiding: a negation
+    # before them does not make them a denial, but for "filtered out" and "= false")
+    HIDDEN = re.compile(r"(?i)\bdoes not appear\b|\bnot appear\b|\bkeeps? only\b|\bonly clean\b|=\s*false\b|"
+                        r"\bunflagged only\b|\bfiltered out\b")
+    HIDDEN_DENIABLE = re.compile(r"(?i)\bfiltered out\b|=\s*false\b")
+    # the one merge a clause may name: one girl's duplicate contacts (tools/sf_dupes.py), in a clause that also
+    # says flagged records are not merged by it
+    GIRL_WORDS = re.compile(r"(?i)\b(contacts?|girls?)\b")
+    NOT_FOR_FLAG = re.compile(r"(?i)\b(never|not|no|nor)\b[^.;]{0,40}?\bflag")
 
     def denies(self, text):
         return bool(self.NEGATION.search(self.RULE_IDIOM.sub(" ", text)))
@@ -134,22 +158,54 @@ class DuplicateRuleDocs(unittest.TestCase):
             out.append(f"sets the rule to {m.group(0)!r}: {s[:160]!r}")
         return out
 
+    def stops_a_save(self, s):
+        """The clauses' stop words (STOPS) paired with a save, insert, record, the processor or a create, but for
+        one denied where it is said, the cost form (an alert or block as the subject) or a conditional."""
+        if not self.SAVE.search(s):
+            return []
+        out = []
+        for m in self.STOPS.finditer(s):
+            local = self.local(s, m)
+            if self.NEGATION.search(local) or self.COST.search(local) or self.CONDITIONAL.search(local):
+                continue
+            out.append(f"stops a save in other words ({m.group(0)!r}): {s[:160]!r}")
+            break
+        return out
+
+    def removes_flagged(self, s):
+        """A flagged, duplicate or obsolete record deleted, merged, hidden or excluded in clause `s`, not denied
+        where it is said. A field or the flag itself may be removed. The one merge a clause may name is one
+        girl's duplicate contacts (`tools/sf_dupes.py`), in a clause that also says flagged records are not
+        merged by it. The hiding phrases (HIDDEN) count even after a negation, but for "filtered out" and
+        "= false"."""
+        if not self.FLAGGED.search(s):
+            return []
+        for m in self.HIDDEN.finditer(s):
+            if self.HIDDEN_DENIABLE.fullmatch(m.group(0)) and self.locally_denied(s, m):
+                continue
+            return [f"keeps flagged records out of the reports ({m.group(0)!r}): {s[:160]!r}"]
+        scrubbed = self.FIELD_OR_FLAG.sub(" ", s)
+        for m in self.REMOVAL.finditer(scrubbed):
+            if self.locally_denied(scrubbed, m):
+                continue
+            if m.group(0).lower().startswith("merg") and self.GIRL_WORDS.search(scrubbed) \
+                    and self.NOT_FOR_FLAG.search(scrubbed):
+                continue
+            return [f"removes, merges or hides flagged records ({m.group(0)!r}): {s[:160]!r}"]
+        return []
+
     def contradictions(self, text, rollback=False):
         """The clauses of `text` that contradict the rules: the rule's action is Alert or Block (not denied
-        where it is said, or denied with a time limit); a flagged, duplicate or obsolete record deleted,
-        merged, hidden or excluded (not denied; a field or the flag itself may be removed; the merge path of
-        `tools/sf_dupes.py` is its own); a softener not itself denied. With `rollback`, "no rollback" is one."""
+        where it is said, or denied with a time limit), or it stops a save said in other words; a flagged,
+        duplicate or obsolete record deleted, merged, hidden or kept out of the reports (removes_flagged); a
+        softener not itself denied. With `rollback`, "no rollback" is one."""
         out = []
         girls = re.compile(self.Q + re.escape(self.GIRLS) + self.QE)
         for s in self.clauses(text, ".;:?!"):
             kept = girls.sub(" ", s)
             out += self.alert_or_block(kept)
-            if "sf_dupes" not in kept and self.FLAGGED.search(kept):
-                scrubbed = self.FIELD_OR_FLAG.sub(" ", kept)
-                for m in self.REMOVAL.finditer(scrubbed):
-                    if not self.locally_denied(scrubbed, m):
-                        out.append(f"removes, merges or hides flagged records ({m.group(0)!r}): {s[:160]!r}")
-                        break
+            out += self.stops_a_save(kept)
+            out += self.removes_flagged(kept)
             for m in self.SOFTENER.finditer(s):
                 if not self.locally_denied(s, m):
                     out.append(f"softens a rule ({m.group(0)!r}): {s[:160]!r}")
@@ -161,10 +217,11 @@ class DuplicateRuleDocs(unittest.TestCase):
     def assertNoContradiction(self, text, where, **kw):
         found = self.contradictions(text, **kw)
         self.assertEqual(found, [], f"{where}: contradicts the rules (the Account rule is Report only, never Alert or "
-                                    "Block - name Alert or Block only to deny them or as the cost, `an alert refuses a "
-                                    "record created by code`; a flagged record is never deleted, merged, hidden or "
-                                    "excluded; the proof, the check-only, the go and the read-back are never "
-                                    "optional): " + "; ".join(found))
+                                    "Block and never stops, halts, refuses or prompts on a save - name Alert or Block "
+                                    "only to deny them or as the cost, `an alert refuses a record created by code`; a "
+                                    "flagged record is never deleted, merged, hidden, filtered out or kept out of the "
+                                    "reports; the proof, the check-only, the go and the read-back are never optional): "
+                                    + "; ".join(found))
 
     # --- reading the docs ---------------------------------------------------------------------------------
 
@@ -208,11 +265,13 @@ class DuplicateRuleDocs(unittest.TestCase):
         return new[0]
 
     def skill_item(self):
-        items = re.findall(r"(?m)^- .*(?:\n(?!- |\n|#).*)*", read(self.SKILL))
+        """The `- …` item of the skill's `## What lives there` part (beside Accounts and Reports and dashboards,
+        not under Access or the writers) that names the RUNBOOK section in double quotes."""
+        items = re.findall(r"(?m)^- .*(?:\n(?!- |\n|#).*)*", md_part(self.SKILL, "## What lives there"))
         title = re.compile(self.Q + re.escape(self.SECTION[3:]) + self.QE)
         found = [i for i in items if title.search(flat(i))]
-        self.assertTrue(found, ".claude/skills/salesforce/SKILL.md: no `- …` item under \"What lives there\" that names "
-                               f"the RUNBOOK section {self.SECTION[3:]!r} in double quotes")
+        self.assertTrue(found, ".claude/skills/salesforce/SKILL.md: no `- …` item under `## What lives there` that "
+                               f"names the RUNBOOK section {self.SECTION[3:]!r} in double quotes")
         return found[0]
 
     # --- the RUNBOOK section ----------------------------------------------------------------------------
@@ -311,6 +370,29 @@ class DuplicateRuleDocs(unittest.TestCase):
                       f"{where}: the Verify names the error code `DUPLICATES_DETECTED` that no batch may fail with")
         self.assertNoContradiction(part, where)
 
+    def test_the_runbook_states_the_rules_exact_settings(self):
+        """The metadata as deployed, in the RUNBOOK (the XML itself lives in data/, not in git): the Duplicate
+        Rule's `actionOnInsert` and `actionOnUpdate` are `Allow` with no `alertText`; the Matching Rule's
+        items are Name (exact, case-insensitive), ParentId and RecordTypeId; the Rollback deactivates the rule."""
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        part = self.section()
+        text = self.norm(part)
+        self.assertTrue(self.said(part, r"actionOnInsert", r"actionOnUpdate", r"\bAllow\b"),
+                        f"{where}: say `actionOnInsert` and `actionOnUpdate` are `Allow`, in one sentence")
+        self.assertRegex(text, r"(?i)\b(no|without|empty|blank)\s+`?alertText`?\b|\balertText\b[^.;]{0,25}?"
+                               r"\b(empty|none|absent|unset|blank|omitted)\b",
+                         f"{where}: say the rule has no `alertText` (nothing is shown to a user)")
+        self.assertRegex(text, r"(?i)MatchingRuleItems?|matching rule items?",
+                         f"{where}: name the Matching Rule's items (`MatchingRuleItems`)")
+        self.assertTrue(self.said(part, r"\bName\b", r"(?i)\bexact\w*\b", r"(?i)case-insensitive|ignoring (capitals|case)|"
+                                                                            r"(capitals|case) ignored",
+                                  r"ParentId", r"RecordTypeId"),
+                        f"{where}: give the Matching Rule's items in one sentence: Name (exact, case-insensitive), "
+                        "ParentId and RecordTypeId")
+        self.assertTrue(self.said(part, r"(?i)\brollback\b", r"(?i)\bdeactivat\w*|\binactive\b|isActive"),
+                        f"{where}: the Rollback deactivates the Duplicate Rule (`isActive` false), said in the section")
+        self.assertNoContradiction(part, where)
+
     def test_the_contact_rule_stays_report_only(self):
         where = f"RUNBOOK section {self.SECTION[3:]!r}"
         part = self.section()
@@ -325,8 +407,8 @@ class DuplicateRuleDocs(unittest.TestCase):
                         "sentence")
         self.assertTrue(self.said(part, r"sf_dupes", r"(?i)\bunchanged\b|\bnot change\w*|\bnever change\w*|\bits own key\b|"
                                                      r"\buntouched\b|\bno change\b|\bleaves?\b|\bas it is\b"),
-                        f"{where}: say the merge of one girl's duplicate contacts (`tools/sf_dupes.py`, its own key) is "
-                        "unchanged by the flags, in one sentence")
+                        f"{where}: say `tools/sf_dupes.py` still merges one girl's duplicate contacts by its own key and "
+                        "never merges a record for being flagged, in one sentence")
         self.assertNoContradiction(part, where)
 
     # --- the plan ---------------------------------------------------------------------------------------
@@ -341,12 +423,20 @@ class DuplicateRuleDocs(unittest.TestCase):
         self.assertIn("status", keys, f"{name}: frontmatter `status:`")
         word, problem = docs_index.status_of(keys["status"])
         self.assertIsNone(problem, f"{name}: {problem}")
-        self.assertNotEqual(word, "superseded", f"{name}: the plan is the change in force")
+        self.assertIn(word, ("accepted", "in-progress", "done"),
+                      f"{name}: the plan is accepted, in-progress or done once implemented (not {word!r})")
         if word == "done":
             self.assertRegex(keys.get("done", ""), r"^\d{4}-\d\d-\d\d", f"{name}: a done plan carries `done:`")
         self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
                          f"{name}: name ticket #84 in the frontmatter, the title or the opening paragraph")
         self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        result = self.norm(md_part(path, "## Result").split("\n", 1)[1] if "\n" in md_part(path, "## Result") else "")
+        self.assertTrue(re.search(r"[A-Za-z]{3,}", result), f"{name}: `## Result` is empty")
+        if re.search(r"(?i)\bpending\b", result) or not re.search(r"\d{4}-\d\d-\d\d", result):
+            for what, rx in (("the deploy", r"(?i)\bdeploy\w*"), ("the proof", r"(?i)\bproof\b"),
+                             ("the read-back", r"(?i)\bread-?back\b|\bread back\b|after/|\bretriev\w*"),
+                             ("the next day's check", r"(?i)\bnext day\b|\bday after\b|\bfollowing day\b")):
+                self.assertRegex(result, rx, f"{name}: a pending `## Result` lists what is pending: {what}")
         raw, bodies = {}, {}
         for heading, least in (("## Rollout", 60), ("## Rollback", 15)):
             part = md_part(path, heading)
@@ -381,25 +471,69 @@ class DuplicateRuleDocs(unittest.TestCase):
         # DuplicateRecordSet appears only while the rule is active: the proof runs with the rule live, and a
         # refused insert means the Rollback), the read-back, the next day's check
         steps = self.steps(rollout)
-        self.assertGreaterEqual(len(steps), 4, f"{name}: number the Rollout's steps (`1. …`, at least four)")
-        proof = [i for i, s in enumerate(steps) if "sf apex run" in s]
-        self.assertTrue(proof, f"{name}: a Rollout step runs the proof with `sf apex run`")
-        deploy = [i for i, s in enumerate(steps) if re.search(r"sf project deploy (quick|start)\b(?![^.;]{0,60}--dry-run)", s)]
-        self.assertTrue(deploy, f"{name}: a Rollout step deploys with `sf project deploy quick -o glow -i <validation id>` "
-                                "(or `start` without `--dry-run`)")
-        self.assertLess(deploy[0], proof[0], f"{name}: the `sf apex run` proof is the step right after the deploy: the "
-                                             "rule must be active for a DuplicateRecordSet to appear and for the proof "
-                                             "to show the rule stops neither insert (a refused insert means the Rollback)")
-        check = [i for i, s in enumerate(steps) if re.search(r"(?i)check-only|--dry-run|sf project deploy validate", s)]
-        self.assertTrue(check and check[0] <= deploy[0], f"{name}: the check-only (`sf project deploy validate` or "
-                                                        "`--dry-run`) comes before the deploy")
-        go = [i for i, s in enumerate(steps) if re.search(r"Ryan['’]s go\b", s)]
-        self.assertTrue(go and go[0] <= deploy[0], f"{name}: the deploy waits for Ryan's go (a step at or before it)")
-        proof_text = " ".join(steps[proof[0]:proof[0] + 2])
-        self.assertIn("Database.rollback", flat(rollout), f"{name}: the proof's script ends in `Database.rollback`")
-        self.assertRegex(proof_text, r"(?i)\b(refus|fail|reject)\w*[^.;]{0,80}?\b(deactivat\w*|rollback)\b|"
-                                     r"\b(deactivat\w*|rollback)\b[^.;]{0,80}?\b(refus|fail|reject)\w*",
-                         f"{name}: the proof step says a refused insert means the Rollback (deactivate the rule) at once")
+        self.assertGreaterEqual(len(steps), 6, f"{name}: number the Rollout's steps (`1. …`, at least six: the retrieve, "
+                                               "the check-only, Ryan's go, the deploy, the proof, the read-back, the "
+                                               "next day)")
+        def first(rx):
+            return next((i for i, s in enumerate(steps) if re.search(rx, s)), None)
+
+        retrieve = first(r"before/")
+        self.assertIsNotNone(retrieve, f"{name}: a Rollout step retrieves what is live into `before/`")
+        check = first(r"(?i)check-only|--dry-run|sf project deploy validate")
+        self.assertIsNotNone(check, f"{name}: a Rollout step is the check-only (`sf project deploy validate` or `--dry-run`)")
+        go = first(r"Ryan['’]s (go|answer|yes)\b")
+        self.assertIsNotNone(go, f"{name}: a Rollout step is Ryan's go")
+        deploy = first(r"sf project deploy (quick|start)\b(?![^.;]{0,60}--dry-run)")
+        self.assertIsNotNone(deploy, f"{name}: a Rollout step deploys with `sf project deploy quick -o glow -i <validation "
+                                     "id>` (or `start` without `--dry-run`)")
+        proof = first(r"sf apex run")
+        self.assertIsNotNone(proof, f"{name}: a Rollout step runs the proof with `sf apex run`")
+        after = first(r"after/")
+        self.assertIsNotNone(after, f"{name}: a Rollout step retrieves into `after/` and compares")
+        self.assertTrue(retrieve < check < go < deploy,
+                        f"{name}: the Rollout's steps come in this order, each its own step: the retrieve into `before/` "
+                        f"(step {retrieve + 1}), the check-only (step {check + 1}), Ryan's go (step {go + 1}), the "
+                        f"deploy (step {deploy + 1})")
+        self.assertTrue(re.search(r"(?i)\b(answer\w*|repl\w*|says|said|yes)\b", steps[go])
+                        and re.search(r"(?i)\b(check-only|validat\w*|result)\b", steps[go]),
+                        f"{name}: Ryan's go is his answer, given after the check-only's result is shown to him (the "
+                        "go step says so)")
+        self.assertNotRegex(flat_rollout, r"(?i)\btaken as (the|his|a) go\b|\bcounts? as (the|his|a) go\b|\bno further "
+                                          r"prompt\b|\bstanding go\b|\bblanket go\b|\bgo in advance\b|\b(earlier|previous|"
+                                          r"prior) go\b|\bwithout (asking|a prompt|his answer)\b|move forward[^.;]{0,60}?"
+                                          r"\b(is|as|was) (the|his|a) go\b",
+                            f"{name}: nothing said earlier is the go: the go is Ryan's answer to this deploy's prompt")
+        self.assertTrue(deploy < proof and (proof == deploy + 1 or proof < after),
+                        f"{name}: the `sf apex run` proof is the step right after the deploy (before the read-back): the "
+                        "rule must be active for a DuplicateRecordSet to appear and for the proof to show the rule "
+                        "stops neither insert")
+        self.assertGreaterEqual(after, deploy, f"{name}: after the deploy, retrieve into `after/` and compare")
+        proof_text = " ".join(steps[proof:proof + 2])
+        self.assertRegex(proof_text, r"(?i)\bif\b[^.;]{0,40}?\b(refus|fail|reject)\w*[^.;]{0,80}?\b(deactivat\w*|rollback)\b|"
+                                     r"\b(should|were)\b[^.;]{0,40}?\b(refus|fail|reject)\w*[^.;]{0,80}?\b(deactivat\w*|"
+                                     r"rollback)\b",
+                         f"{name}: the proof step says that if an insert is refused, the Rollback (deactivate the rule) "
+                         "follows at once")
+        self.assertNotRegex(proof_text, r"(?i)\bcommented\b|\bleft in\b|\bremain\w*|\bstay\w*|\blive test data\b|"
+                                        r"\bkept in the org\b|\bcommit\w*",
+                            f"{name}: nothing of the proof stays in the org: no commented-out rollback, no records left "
+                            "in, no live test data")
+        self.assertRegex(proof_text, r"(?i)\brolled back\b|\bnothing is kept\b",
+                         f"{name}: the proof step says everything is rolled back (nothing is kept)")
+        # the script itself, quoted in the plan: a savepoint, the inserts, the DuplicateRecordSet query, and the
+        # rollback as its last statement
+        blocks = re.findall(r"(?ms)^```apex[^\n]*\n(.*?)^```", text)
+        self.assertTrue(blocks, f"{name}: quote the proof's script in full in a ```apex block")
+        code = blocks[0]
+        sp = re.search(r"Savepoint\s+(\w+)\s*=\s*Database\.setSavepoint\(\)", code)
+        self.assertTrue(sp, f"{name}: the ```apex block starts from a savepoint, `Savepoint sp = Database.setSavepoint();`")
+        self.assertRegex(code, r"(?m)^\s*insert\b", f"{name}: the ```apex block inserts the fictional Accounts")
+        self.assertIn("DuplicateRecordSet", code, f"{name}: the ```apex block queries the `DuplicateRecordSet` that appears")
+        statements = [ln.strip() for ln in code.splitlines() if ln.strip() and not ln.strip().startswith("//")]
+        self.assertRegex(statements[-1], r"^Database\.rollback\(" + sp.group(1) + r"\);\s*(//.*)?$",
+                         f"{name}: the ```apex block's last statement is `Database.rollback({sp.group(1)});` (not "
+                         f"commented out; got {statements[-1]!r})")
+        self.assertNotRegex(code, r"//[^\n]*Database\.rollback", f"{name}: the rollback is not commented out")
         self.assertTrue([s for s in self.clauses(proof_text, ".;") if "Database_rollback" in s
                          and re.search(r"(?i)\b(ends?|ending|last|final|closes?)\b", s)],
                         f"{name}: say the proof's script ends in `Database.rollback` (one sentence of the proof step)")
@@ -414,8 +548,8 @@ class DuplicateRuleDocs(unittest.TestCase):
         self.assertTrue(self.said(proof_text, r"(?i)\b(both|two|2)\b", r"(?i)\binserts?\b|\bDML\b", r"(?i)\bsucceed\w*"),
                         f"{name}: the proof shows both inserts succeed (the rule stops neither)")
         # the read-back: retrieve into after/ and compare; both rules active, four fields; the Contact rule the same
-        after = [i for i, s in enumerate(steps) if "after/" in s and re.search(r"(?i)\bcompar\w*|\bdiff\b", s)]
-        self.assertTrue(after and after[0] >= deploy[0], f"{name}: after the deploy, retrieve into `after/` and compare")
+        self.assertTrue(re.search(r"(?i)\bcompar\w*|\bdiff\b", steps[after]),
+                        f"{name}: the `after/` step compares the retrieve with the build")
         self.assertRegex(flat_rollout, r"(?i)\b(both rules|the two rules|DuplicateRule and MatchingRule|MatchingRule and DuplicateRule)\b"
                                        r"[^.;]{0,60}?\bactive\b|\bactive\b[^.;]{0,60}?\b(both rules|the two rules)\b|IsActive",
                          f"{name}: the read-back's SOQL shows both rules active")
@@ -428,16 +562,25 @@ class DuplicateRuleDocs(unittest.TestCase):
         # the next day
         day_after = [i for i, s in enumerate(steps) if "DUPLICATES_DETECTED" in s and "Failed" in s
                      and re.search(r"(?i)\bnext day\b|\bday after\b|\bfollowing day\b|\btomorrow\b|\b24 hours\b", s)]
-        self.assertTrue(day_after and day_after[0] > proof[0],
+        self.assertTrue(day_after and day_after[0] > proof,
                         f"{name}: the next day's step (after the proof) checks that no batch is `Failed` with "
                         "`DUPLICATES_DETECTED`")
         self.assertIn("auto_sync", flat_rollout, f"{name}: the next day's step checks the Salesforce plan of "
                                                  "`tools/auto_sync.py` is unchanged")
         self.assertNoContradiction(rollout, f"{name}: `## Rollout`")
-        # the Rollback deactivates the rule
+        # the Rollback deactivates the rule in the org, by a named action
         self.assertTrue(self.said(rollback, r"(?i)\bdeactivat\w*|\binactive\b|isActive>?\s*false|active\s*=\s*false",
                                   r"(?i)\brule\b"),
                         f"{name}: the Rollback deactivates the Duplicate Rule (one sentence, not negated)")
+        self.assertRegex(bodies["## Rollback"], r"sf project deploy (start|quick)\b|sf data update record\b[^.;]{0,80}?"
+                                                r"--sobject DuplicateRule\b|\bSetup\b[^.;]{0,60}?\bDuplicate Rules?\b|"
+                                                r"\bDuplicate Rules?\b[^.;]{0,60}?\bSetup\b",
+                         f"{name}: the Rollback names the action on the org: a `sf project deploy start|quick` of the rule "
+                         "with `isActive` false, `sf data update record --sobject DuplicateRule …`, or the Setup path")
+        self.assertNotRegex(bodies["## Rollback"], r"(?i)\brepository copy\b|\bin this plan\b|\bstay\w* as deployed\b|"
+                                                   r"\bseparate decision\b|\blater ticket\b|\bonly in the repo\b|"
+                                                   r"\bon disk only\b|\bnot (be )?deployed\b",
+                            f"{name}: the Rollback acts on the org, not on a file in the repository or a later ticket")
         self.assertNoContradiction(rollback, f"{name}: `## Rollback`", rollback=True)
 
     # --- DECISIONS and the skill ------------------------------------------------------------------------
@@ -560,6 +703,13 @@ class DuplicateAccountGroups(unittest.TestCase):
             ("capitals differ", "Golden Eagles", "GOLDEN eagles", P1, P1, CLUB, CLUB, True),
             ("spacing differs (double, leading, trailing)", "Golden Eagles", "  Golden  Eagles ", P1, P1, CLUB, CLUB, True),
             ("capitals and spacing differ", "golden eagles", "GOLDEN  EAGLES", P1, P1, CLUB, CLUB, True),
+            ("three spaces against a tab (any whitespace run is one space)", "Golden   Eagles", "Golden\tEagles",
+             P1, P1, CLUB, CLUB, True),
+            ("a no-break space", "Golden Eagles", "golden eagles", P1, P1, CLUB, CLUB, True),
+            ("ß against SS (casefold, not lower)", "Straße Club", "STRASSE CLUB", P1, P1, CLUB, CLUB, True),
+            ("the deliberate long name twice under one partner (only another parent keeps twins apart)",
+             "Golden Eagles - Partner One", "golden eagles - partner one", P1, P1, CLUB, CLUB, True),
+            ("ParentId empty against null (both partner-less)", "Golden Eagles", "Golden Eagles", "", None, CLUB, CLUB, True),
             ("both partner-less (the processor's strays)", "Golden Eagles", "golden eagles", None, None, CLUB, CLUB, True),
             ("one word more", "Golden Eagles", "Golden Eagles Club", P1, P1, CLUB, CLUB, False),
             ("one letter more", "Golden Eagles", "Golden Eagless", P1, P1, CLUB, CLUB, False),
@@ -586,15 +736,27 @@ class DuplicateAccountGroups(unittest.TestCase):
         self.assertEqual(self.groups([account(1, "Shining Stars")]), [], "one account: no groups")
         self.assertEqual(self.groups([account(1, "Shining Stars"), account(2, "Rising Moons"), account(3, "Blue Herons", parent=None)]),
                          [], "distinct names: no groups")
-        # a missing ParentId key is a partner-less account, as `null` is
-        a, b = account(4, "Blue Herons", parent=None), {"Id": aid(5), "Name": "blue herons", "RecordTypeId": CLUB}
-        self.assertEqual(self.groups([a, b]), [sorted([a["Id"], b["Id"]])],
-                         "an account without a ParentId key is partner-less, like one whose ParentId is null")
         # three of one club and two of another: two groups, every twin in its group, no Id in both
         accounts = [account(1, "Shining Stars"), account(2, "Rising Moons"), account(3, "shining stars"),
                     account(4, "rising moons"), account(5, "Shining  Stars")]
         self.assertEqual(self.groups(accounts), [[aid(1), aid(3), aid(5)], [aid(2), aid(4)]],
                          "a group per name, each with every twin, no Id in two groups")
+
+    def test_a_missing_or_empty_parent_or_record_type_is_one_value(self):
+        """`ParentId` "" (a CSV export), null (the API) and a missing key are the same partner-less value; a
+        missing or null `RecordTypeId` is one value too (never a KeyError), and differs from a Club's."""
+        a = {"Id": aid(1), "Name": "Blue Herons", "ParentId": "", "RecordTypeId": CLUB}
+        b = {"Id": aid(2), "Name": "blue herons", "ParentId": None, "RecordTypeId": CLUB}
+        c = {"Id": aid(3), "Name": "BLUE HERONS", "RecordTypeId": CLUB}
+        self.assertEqual(self.groups([a, b, c]), [[aid(1), aid(2), aid(3)]],
+                         'ParentId "", null and a missing key are one partner-less value')
+        d = {"Id": aid(4), "Name": "Blue Herons", "ParentId": None}
+        e = {"Id": aid(5), "Name": "blue herons", "ParentId": None, "RecordTypeId": None}
+        self.assertEqual(self.groups([d, e]), [[aid(4), aid(5)]],
+                         "a missing RecordTypeId and a null one are one value (no KeyError)")
+        self.assertEqual(self.groups([b, d]), [], "a Club and an account without a record type are not twins")
+        self.assertEqual(self.groups([account(6, "Blue Herons", parent=P1), d]), [],
+                         "a partnered account and a partner-less one are not twins")
 
 
 if __name__ == "__main__":
