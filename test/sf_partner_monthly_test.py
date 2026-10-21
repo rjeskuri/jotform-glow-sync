@@ -32,6 +32,8 @@ import unittest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
+sys.path.insert(0, os.path.join(REPO, "test", "fixtures"))
+import make_fixture                                        # noqa: E402  (the invented name pools)
 import sf_partner_monthly as spm                           # noqa: E402
 
 EEFY, TLM, NGAA = "Education and English for You", "Tumaini La Maisha", "Ng'aa Maskani"
@@ -45,7 +47,11 @@ ALNUM = string.ascii_letters + string.digits
 def fresh_id(prefix):
     """A new 18-character record id each time: a tool that hard-codes an id cannot pass."""
     return prefix + "".join(random.choice(ALNUM) for _ in range(18 - len(prefix)))
-GIRL = "Zelphine Quorrow"                    # a fictional girl's name: in fields the tool must never select
+# A fictional girl's name, in fields the tool must never select. Built from make_fixture's FIRST/LAST
+# pools (the project's source of fictional names; LAST names are invented, so no real roster has the pair).
+# Fixed indexes, not random, so a failure reproduces.
+GIRL_FIRST, GIRL_LAST = make_fixture.FIRST[12], make_fixture.LAST[1]
+GIRL = f"{GIRL_FIRST} {GIRL_LAST}"
 REPORT = "Partner report"
 
 
@@ -375,6 +381,14 @@ class PartnerOrg:
 
 
 # ---- the tests -----------------------------------------------------------------------------------
+class CanaryName(unittest.TestCase):
+    def test_canary_comes_from_the_fixture_name_pools(self):
+        first, last = GIRL.split(" ")
+        self.assertIn(first, make_fixture.FIRST)
+        self.assertIn(last, make_fixture.LAST)
+        self.assertEqual(GIRL, f"{first} {last}")
+
+
 class Harness(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
