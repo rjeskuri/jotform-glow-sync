@@ -263,8 +263,12 @@ class DecommissionedFoldersDocs(unittest.TestCase):
         where = f"RUNBOOK section {self.INTERACTIVE[3:]!r}"
         text = self.norm(self.interactive())
         self.assertIn("GlowDemoController", text, f"{where}: name the other controller `GlowDemoController`")
-        self.assertRegex(text, r"(?i)\bLightning (record |app |home )?page\b|\bFlexiPage\b",
-                         f"{where}: say where it is hosted (the Lightning page / FlexiPage)")
+        # its host is the Lightning tab (CustomTab) `Glow_Interactive_Dashboard`, said as such, not negated
+        # (a mention of a Lightning page or FlexiPage proves nothing: "no FlexiPage embeds the LWC")
+        self.assertTrue([s for s in self.clauses(text) if "Glow_Interactive_Dashboard" in s
+                         and re.search(r"(?i)\b(Lightning\s+)?tab\b|\bCustomTab\b", s) and not self.denies(s)],
+                        f"{where}: say where it is hosted - the tab (CustomTab) `Glow_Interactive_Dashboard`, in a "
+                        "sentence that is not negated")
         self.assertRegex(text, r"data/sf_reporting_\d{4}-\d\d-\d\d/before/",
                          f"{where}: name the retrieve folder `data/sf_reporting_<date>/before/`")
         self.assertTrue([s for s in self.clauses(text) if "2026-01-04" in s and re.search(r"(?i)\bunchanged\b|"
