@@ -1,7 +1,7 @@
 ---
 title: Salesforce club accounts created automatically for new clubs (BACKLOG 27)
 author: Claude (with Ryan)
-status: blocked          # accepted by Ryan 2026-10-06; built 2026-10-07 and in main; the Salesforce and GitHub setup is Ryan's and not done as of 2026-10-09 (BACKLOG 27)
+status: blocked          # accepted by Ryan 2026-10-06; built 2026-10-07 and in main; 2026-10-21: the sync runs as Ryan's own user, the External Client App GLOW Sync exists; the GitHub secrets and SF_SYNC=plan are Ryan's and not done (BACKLOG 27, ticket #66)
 backlog: 27
 created: 2026-10-06
 intent: none - Ryan's request of 2026-10-06 ("look at doing the salesforce clubs records automatically")
@@ -368,3 +368,29 @@ consumer keys (`3MVG9…`) and 64-hex consumer secrets, in either case.
 setup, the two secrets and `SF_SYNC=plan` (RUNBOOK "New clubs' accounts, automatically", setup
 steps 1-3 and 5-6).
 
+## Amendment 2026-10-21 (ticket #66): the sync runs as Ryan's own user
+
+Ryan's word, 2026-10-21: the sync runs as his own Salesforce user; no "GLOW Sync" integration user
+and no "GLOW Club Sync" permission set ([DECISIONS 2026-10-21](../DECISIONS.md)). This replaces,
+where it differs, the text above, which is kept as the design history.
+
+- **Setup steps 1-2 (user, permission set) are dropped.** Step 3 became: the External Client App
+  "GLOW Sync", client credentials flow, Run As **Ryan's user**, scope `Api`, created 2026-10-21
+  through the Metadata API (check-only, then deploy `0AfRP000002hjdR0AQ` for the app and OAuth
+  settings and `0AfRP000002hjiH0AQ` for the policies), on Ryan's go. Policies: admin approved
+  users pre-authorized, IP relaxation Bypass, session 15 minutes, no refresh token. Salesforce
+  generated the consumer key and secret; they are not in any file here and are copied by Ryan into
+  the GitHub secrets.
+- **"Owner GLOW Sync", `CreatedById = GLOW Sync`** (Order of work step 7, Rollback) no longer
+  hold: creator and owner are Ryan. The sync's accounts are told apart by the Description
+  `GLOW club code <code>; created by the automatic sync <date>`.
+- **Risks (Risks section)**: "GLOW Sync frozen" is now "Ryan's user frozen", which also revokes
+  the Jotform connection (as on 2026-09-30); the GitHub secret holds administrator access; the
+  first create runs NPSP's and Mailchimp's triggers as an administrator, not a minimum-access
+  user. RUNBOOK "New clubs' accounts, automatically" carries the steps.
+- **Open**: the Metadata reference says a Run As user "must have the API Only permission"; the
+  deploy accepted Ryan's System Administrator user. Whether a token is issued is proven by the
+  first plan run.
+- **The code still says "GLOW Sync"** (`SF: plan, as GLOW Sync`, the describe hint naming the
+  permission set, `glow/salesforce.py`'s "never Ryan" docstrings): wording only, now naming the
+  app; a code ticket may change it.
