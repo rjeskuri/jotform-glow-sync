@@ -1287,16 +1287,21 @@ then the folders by name (club and date; never a file's name or contents).
 - **move**: the whole subfolder went to the Shared Drive.
 - **merge**: that name was already there once (a resubmission): its files went in one by one,
   beside what is there; **kept** files (same name and size already there) stay in My Drive. A
-  subfolder of kept files is logged again every run until Ryan deletes it by hand after a look;
-  the mover never trashes anything.
+  subfolder of kept files only (`0 file(s) in`) changes nothing, never holds up a same-name copy
+  with new photos, and is logged again every run until Ryan deletes it by hand after a look; the
+  mover never trashes anything.
 - **waiting**: a file changed less than 10 minutes ago, or another subfolder of the same name
-  moved this run; the next run takes it.
+  moved or merged files this run; the next run takes it (a backlog of same-name copies clears
+  one per run).
+- **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
+  moving at 4.5; what it did not read is not touched, and the next run carries on.
 - **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
   hand (pick the right folder), or rename one of the two there.
 - **UNKNOWN**: a folder that is no region's; left alone.
 - **CONFIG refused**: a Script Property is missing or wrong (half a pair, an id used twice, a
-  source folder not named `Attendance photos - <Region>`); nothing moved. Fix it in Project
-  Settings → Script Properties.
+  source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
+  `Africa`, `Asia`, `Latin America`, `U.S` or `Template`); nothing read, nothing moved. Fix the
+  property in Project Settings → Script Properties, or the folder's name.
 - **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a move; the run ends in an error and Google
   sends the owner its failure summary. On the first move, a permission error means Ryan's role on
   the Shared Drive must be raised to Manager ([plan](plans/2026-10-21-drive-photo-mover.md),

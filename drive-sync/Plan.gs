@@ -17,7 +17,8 @@
  *          move into that folder, `kept` (ids) stay because a file of the same name and size is
  *          already there; nothing on the Shared Drive is ever replaced
  * waiting  [{region, id, name}]  a file changed less than settleMinutes ago (still uploading), or
- *          a subfolder of the same name in that region is moved or merged this run
+ *          a subfolder of the same name in that region is moved, or merged with files, this run
+ *          (a merge whose files are all kept moves nothing and never waits)
  * refused  [{region, id, name}]  two or more subfolders of that name on the Shared Drive already
  * unknown  [{id, name}]          `Attendance photos - <x>` where x is no region, or has no target
  *
@@ -55,19 +56,28 @@ function planMoves_(sourceFolders, targetFolders, now, settleMinutes) {
         plan.refused.push(entry);
         continue;
       }
-      if (Object.prototype.hasOwnProperty.call(acted, sub.name)) {
-        plan.waiting.push(entry);
-        continue;
-      }
-      acted[sub.name] = true;
+      const claimed = Object.prototype.hasOwnProperty.call(acted, sub.name);
       if (!there.length) {
+        if (claimed) {
+          plan.waiting.push(entry);
+          continue;
+        }
+        acted[sub.name] = true;
         plan.moves.push({ region: region, id: sub.id, name: sub.name, to: target.id });
         continue;
       }
       const isDuplicate = f => there[0].files.some(t => t.name === f.name && t.size === f.size);
-      plan.merges.push({ region: region, id: sub.id, name: sub.name, into: there[0].id,
-                         files: sub.files.filter(f => !isDuplicate(f)).map(f => f.id),
-                         kept: sub.files.filter(isDuplicate).map(f => f.id) });
+      const merge = { region: region, id: sub.id, name: sub.name, into: there[0].id,
+                      files: sub.files.filter(f => !isDuplicate(f)).map(f => f.id),
+                      kept: sub.files.filter(isDuplicate).map(f => f.id) };
+      // a merge that moves nothing (every file already there) changes nothing, so it does not
+      // claim the name: a same-name copy with new photos still merges this run
+      if (merge.files.length && claimed) {
+        plan.waiting.push(entry);
+        continue;
+      }
+      if (merge.files.length) acted[sub.name] = true;
+      plan.merges.push(merge);
     }
   }
   return plan;

@@ -13,7 +13,12 @@
  *   SOURCE_FOLDER_<KEY>   the id of `Attendance photos - <Region>` in Ryan's My Drive
  *   TARGET_FOLDER_<KEY>   the id of that region's folder on the Shared Drive
  * with <KEY> AFRICA, ASIA, LATIN_AMERICA, US, TEMPLATE. A region with neither is skipped; one of
- * a pair alone, an id used twice, or no pair at all is refused before anything is opened.
+ * a pair alone, an id used twice, or no pair at all is refused before anything is opened; a
+ * source folder not named exactly `Attendance photos - <Region>`, or a target folder not named
+ * exactly `<Region>`, is refused before any subfolder is read.
+ *
+ * A run reads for at most half its time budget, then moves for the rest (TIME_BUDGET either way:
+ * what was not read or not moved waits for the next run).
  *
  * The log holds counts and folder names (`<Club Name> <Attendance Date>`), never a file's name
  * or contents. Nothing here shares, links, copies, trashes or e-mails anything: a file only
@@ -96,56 +101,80 @@ function runMover_(apply) {
     return;
   }
   try {
-    const folders = {};   // id -> Folder, every folder the plan can name
-    const sources = [], targets = {};
-    for (const c of config) {
-      const source = DriveApp.getFolderById(c.source);
-      const target = DriveApp.getFolderById(c.target);
-      if (source.getName() !== PHOTO_PREFIX + c.region) {
-        throw new Error('CONFIG refused: SOURCE_FOLDER_' + REGION_KEYS[c.region] + ' is a folder named "' +
-                        source.getName() + '", not "' + PHOTO_PREFIX + c.region + '"');
-      }
-      const described = describeSource_(source, folders);
-      sources.push(described);
-      folders[target.getId()] = target;
-      targets[c.region] = describeTarget_(target, described.subfolders.map(s => s.name), folders);
-    }
-    const plan = planMoves_(sources, targets, new Date(), SETTLE_MINUTES);
+    const opened = openRegionFolders_(config);
+    const read = readDrives_(opened, started + RUN_BUDGET_MS / 2);
+    const plan = planMoves_(read.sources, read.targets, new Date(), SETTLE_MINUTES);
     logPlan_(plan, config, apply);
-    if (apply) carryOut_(plan, folders, started + RUN_BUDGET_MS);
+    if (apply) carryOut_(plan, read.folders, started + RUN_BUDGET_MS);
   } finally {
     lock.releaseLock();
   }
 }
 
-/** {id, name, subfolders: [{id, name, files: [{id, name, size, updated}]}]}; trashed items left out. */
-function describeSource_(folder, folders) {
-  const subfolders = [];
-  const it = folder.getFolders();
-  while (it.hasNext()) {
-    const sub = it.next();
-    if (sub.isTrashed()) continue;
-    folders[sub.getId()] = sub;
-    subfolders.push({ id: sub.getId(), name: sub.getName(), files: describeFiles_(sub, true) });
-  }
-  return { id: folder.getId(), name: folder.getName(), subfolders: subfolders };
-}
-
-/** {id, subfolders}: only the subfolders named like one of `names` (all the planner compares with). */
-function describeTarget_(folder, names, folders) {
-  const subfolders = [], done = {};
-  for (const name of names) {
-    if (Object.prototype.hasOwnProperty.call(done, name)) continue;
-    done[name] = true;
-    const it = folder.getFoldersByName(name);
-    while (it.hasNext()) {
-      const sub = it.next();
-      if (sub.isTrashed()) continue;
-      folders[sub.getId()] = sub;
-      subfolders.push({ id: sub.getId(), name: sub.getName(), files: describeFiles_(sub, false) });
+/**
+ * [{region, source, target}] as Folders, every name checked before any subfolder is read: the
+ * source exactly `Attendance photos - <Region>`, the target exactly `<Region>`.
+ */
+function openRegionFolders_(config) {
+  const opened = config.map(c => ({ region: c.region, source: DriveApp.getFolderById(c.source),
+                                    target: DriveApp.getFolderById(c.target) }));
+  const problems = [];
+  for (const o of opened) {
+    const key = REGION_KEYS[o.region];
+    if (o.source.getName() !== PHOTO_PREFIX + o.region) {
+      problems.push('SOURCE_FOLDER_' + key + ' is a folder named "' + o.source.getName() + '", not "' +
+                    PHOTO_PREFIX + o.region + '"');
+    }
+    if (o.target.getName() !== o.region) {
+      problems.push('TARGET_FOLDER_' + key + ' is a folder named "' + o.target.getName() + '", not "' + o.region + '"');
     }
   }
-  return { id: folder.getId(), subfolders: subfolders };
+  if (problems.length) throw new Error('CONFIG refused: ' + problems.join('; '));
+  return opened;
+}
+
+/**
+ * The planner's inputs: per region the source subfolders with their files, and beside each one
+ * the target's subfolders of the same name (all the planner compares with), so a subfolder read
+ * always has its target side read too. Past `readBy` no further subfolder is read
+ * (TIME_BUDGET): what was not read is not in the plan, and waits for the next run.
+ */
+function readDrives_(opened, readBy) {
+  const folders = {};   // id -> Folder, every folder the plan can name
+  const sources = [], targets = {};
+  let stopped = false, count = 0;
+  for (const o of opened) {
+    const source = { id: o.source.getId(), name: o.source.getName(), subfolders: [] };
+    const target = { id: o.target.getId(), subfolders: [] };
+    folders[target.id] = o.target;
+    sources.push(source);
+    targets[o.region] = target;
+    const looked = {};
+    const it = stopped ? null : o.source.getFolders();
+    while (it && it.hasNext()) {
+      if (Date.now() > readBy) {
+        stopped = true;
+        break;
+      }
+      const sub = it.next();
+      if (sub.isTrashed()) continue;
+      const name = sub.getName();
+      folders[sub.getId()] = sub;
+      source.subfolders.push({ id: sub.getId(), name: name, files: describeFiles_(sub, true) });
+      count++;
+      if (Object.prototype.hasOwnProperty.call(looked, name)) continue;
+      looked[name] = true;
+      const same = o.target.getFoldersByName(name);
+      while (same.hasNext()) {
+        const t = same.next();
+        if (t.isTrashed()) continue;
+        folders[t.getId()] = t;
+        target.subfolders.push({ id: t.getId(), name: t.getName(), files: describeFiles_(t, false) });
+      }
+    }
+  }
+  if (stopped) console.log('TIME_BUDGET: reading stopped after ' + count + ' subfolder(s); the rest waits for the next run');
+  return { sources: sources, targets: targets, folders: folders };
 }
 
 function describeFiles_(folder, withDates) {

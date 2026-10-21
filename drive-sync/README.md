@@ -29,8 +29,9 @@ points), `appsscript.json` (time zone America/New_York, the sheet's; the two sco
 
 ## Setup (once, Ryan)
 
-1. **The Shared Drive.** A company Shared Drive with one folder per region in use (Africa, Asia,
-   Latin America, Template; U.S only if that form is re-enabled). Members: the named list only
+1. **The Shared Drive.** A company Shared Drive with one folder per region in use, named exactly
+   `Africa`, `Asia`, `Latin America`, `Template` (and `U.S` only if that form is re-enabled):
+   the mover refuses a target folder with any other name. Members: the named list only
    (the CEO and Ryan); never "anyone with the link". Ryan's company account is at least a
    **Content manager** (moving items in needs it; see the plan's Risks on moving folders).
 2. **The project.** Signed in as the company account, script.google.com → New project, named
@@ -54,9 +55,10 @@ points), `appsscript.json` (time zone America/New_York, the sheet's; the two sco
    | `SOURCE_FOLDER_TEMPLATE` / `TARGET_FOLDER_TEMPLATE` | the template's test folder |
    | `SOURCE_FOLDER_US` / `TARGET_FOLDER_US` | U.S, only if that form is re-enabled |
 
-   A region with neither property is skipped. Half a pair, the same id twice, no pair at all, or
-   a source folder not named exactly `Attendance photos - <Region>`: the run refuses
-   (`CONFIG refused …`) before it moves anything.
+   A region with neither property is skipped. Half a pair, the same id twice, no pair at all, a
+   source folder not named exactly `Attendance photos - <Region>`, or a target folder not named
+   exactly the region (`Africa`, `Asia`, `Latin America`, `U.S`, `Template`): the run refuses
+   (`CONFIG refused …`) before it reads a subfolder or moves anything.
 5. **Dry run.** In the editor, run `previewMoves`; accept Google's authorisation (Drive, and the
    trigger scope). Executions → its log: one line per region, `would move N, would merge N (…),
    waiting N, refused N`, then the folder names. Nothing changes.

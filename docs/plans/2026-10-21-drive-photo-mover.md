@@ -44,14 +44,18 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
     in beside what is there; a file with the same name **and** size already there stays in My
     Drive (`kept`); nothing on the Shared Drive is replaced (a move never overwrites);
   - its name there **twice or more**: **refused**, the mover does not pick one (moved by hand);
-  - two settled subfolders of one name in one region: one moves or merges, the other waits for
-    the next run (never two same-name folders created by one run).
+  - two settled subfolders of one name in one region: one moves or merges files, the other waits
+    for the next run (never two same-name folders created by one run); a merge whose files are
+    all kept moves nothing, so it never holds up the other copy and never waits itself.
 - **The run** (`drive-sync/Mover.gs`): the folder ids come from Script Properties
   (`SOURCE_FOLDER_<KEY>`, `TARGET_FOLDER_<KEY>`, KEY = AFRICA, ASIA, LATIN_AMERICA, US,
   TEMPLATE; never in the repo). A region with neither is skipped; half a pair, an id used twice,
-  no pair at all, or a source folder whose name is not `Attendance photos - <Region>` is refused
-  before anything moves. One run at a time (`LockService`); a run stops starting new moves after
-  4.5 minutes (Apps Script's limit is 6) and leaves the rest to the next. Every failure is logged
+  no pair at all, a source folder whose name is not `Attendance photos - <Region>`, or a target
+  folder whose name is not exactly `<Region>`, is refused before any subfolder is read. One run
+  at a time (`LockService`); a run stops reading new subfolders after half its 4.5-minute budget
+  and starting new moves after 4.5 minutes (Apps Script's limit is 6), and leaves the rest to the
+  next. Each source subfolder is read together with the target's subfolders of its name, so a
+  subfolder in the plan always has its target side read. Every failure is logged
   by code (`MOVE_FAILED`, `MERGE_FAILED`, `CONFIG refused`, `LOCKED`, `TIME_BUDGET`) and a run
   with a failure ends in an error, so the execution shows as failed.
 - **The log**: per region `move N, merge N (F file(s) in, K kept), waiting N, refused N`, then one
@@ -79,8 +83,9 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
 0. Prerequisite: #63, the Drive integration on the template writing into Ryan's My Drive
    (RUNBOOK "Photos", steps 1-2). The mover can be set up before; it has nothing to move until
    then.
-1. **Shared Drive** (Ryan): the drive and its region folders (Africa, Asia, Latin America,
-   Template); members the named list only; Ryan's company account a Content manager or more.
+1. **Shared Drive** (Ryan): the drive and its region folders, named exactly `Africa`, `Asia`,
+   `Latin America`, `Template`; members the named list only; Ryan's company account a Content
+   manager or more.
 2. **Project and push** (Ryan; `drive-sync/README.md`, steps 2-3): the standalone project as the
    company account; `cd drive-sync && npx clasp push -f` under Node 18, logged in as that
    account, or the files pasted into the editor.
@@ -120,6 +125,15 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
 - **Leftovers in My Drive.** A merge leaves the files it kept (same name and size already on
   the Shared Drive) in their subfolder, logged as kept every run. Ryan deletes such a subfolder
   by hand after a look; the mover never trashes.
+- **A backlog** (the first run after a pause, or a busy day): a run reads for at most about 2
+  minutes (half its budget, `TIME_BUDGET` in the log) and never moves a subfolder it did not
+  read; the rest waits for the next run, 15 minutes later. Same-name copies clear one per run
+  (the planner is tested to settle within 10 runs and never to make a second same-name folder on
+  the Shared Drive).
+- **A wrong folder id.** A Script Property pointing at the wrong folder would move photos to the
+  wrong place. Mitigation: the source must be named exactly `Attendance photos - <Region>` and
+  the target exactly `<Region>`, or the run is refused (`CONFIG refused`) before it reads a
+  subfolder; an id used twice is refused too.
 - **Authorisation lapses** (a password change, a revoked session): the trigger's runs fail and
   Google sends the owner its failure summary; re-run any entry point in the editor and accept.
 - **Ryan's account.** The integration and the mover run on it; the photos do not stay in it.
