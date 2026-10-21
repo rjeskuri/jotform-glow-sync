@@ -18,6 +18,13 @@ description: Salesforce for this project - what lives there (attendance batches 
 - **Accounts.** Every active club has a Club account (record type Club) named exactly as question
   5 sends it, parented to its partner's account (`glow/sf_partners.csv`). Never rename a club in
   Salesforce first: a rename starts in the sheet (RUNBOOK "Renaming a club").
+- **Duplicate and obsolete flags.** `Duplicate_Record__c` and `Obsolete_Record__c` ("Duplicate
+  Record", "Obsolete Record") on Account and Contact, set by hand by administrators alone and by
+  rule by the flagging batch (#85). The Account duplicate rule `Account.Name_Parent_Record_Type_Report`
+  (same name ignoring capitals and spacing, same parent, same record type) is Allow with Report
+  only, no Alert and no Block, because an alert refuses a record created by code (BACKLOG 54: the
+  processor's partner-less Club accounts, `tools/sf_new_clubs.py`). Flagged records are shown in
+  the reports, the flags a filter (RUNBOOK "Duplicate and obsolete records in Salesforce").
 - **Reports and dashboards**: the "Jotform Attendance" dashboard and its reports, the
   `Attendance_Totals` report type, the `Attendance_Report_Viewer` permission set (RUNBOOK
   "Attendance dashboard in Salesforce").
