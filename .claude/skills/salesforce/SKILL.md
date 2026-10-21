@@ -20,11 +20,13 @@ description: Salesforce for this project - what lives there (attendance batches 
   Salesforce first: a rename starts in the sheet (RUNBOOK "Renaming a club").
 - **Duplicate and obsolete flags.** `Duplicate_Record__c` and `Obsolete_Record__c` ("Duplicate
   Record", "Obsolete Record") on Account and Contact, set by hand by administrators alone and by
-  rule by the flagging batch (#85). The Account duplicate rule `Account.Name_Parent_Record_Type_Report`
-  (same name ignoring capitals and spacing, same parent, same record type) is Allow with Report
-  only, no Alert and no Block, because an alert refuses a record created by code (BACKLOG 54: the
-  processor's partner-less Club accounts, `tools/sf_new_clubs.py`). Flagged records are shown in
-  the reports, the flags a filter (RUNBOOK "Duplicate and obsolete records in Salesforce").
+  rule by the flagging batch (#85). The Matching Rule `Account.Name_Parent` (same name ignoring
+  capitals and spacing, same parent) and one Duplicate Rule per record type, Club and Household
+  (`Account.Name_Parent_Club_Report`, `Account.Name_Parent_Household_Report`, the condition Record
+  Type equals that type), are Allow with Report only, no Alert and no Block, because an alert
+  refuses a record created by code (BACKLOG 54: the processor's partner-less Club accounts,
+  `tools/sf_new_clubs.py`). Flagged records are shown in the reports, the flags a filter (RUNBOOK
+  "Duplicate and obsolete records in Salesforce").
 - **Reports and dashboards**: the "Jotform Attendance" dashboard and its reports, the
   `Attendance_Totals` report type, the `Attendance_Report_Viewer` permission set (RUNBOOK
   "Attendance dashboard in Salesforce").

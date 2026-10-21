@@ -13,7 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
-| 2026-10-21 | Duplicate and obsolete flags on Account and Contact, and an Account duplicate rule that reports only | in-progress |  | [2026-10-21-sf-duplicate-obsolete-flags.md](2026-10-21-sf-duplicate-obsolete-flags.md) |
+| 2026-10-21 | Duplicate and obsolete flags on Account and Contact, and Account duplicate rules that report only | in-progress |  | [2026-10-21-sf-duplicate-obsolete-flags.md](2026-10-21-sf-duplicate-obsolete-flags.md) |
 | 2026-10-20 | The dashboard's top row becomes two girls-who-attended tiles (Jotform + 3 partners); total attendance no longer tracked | done 2026-10-21 | 72 | [2026-10-20-girls-attended-tiles.md](2026-10-20-girls-attended-tiles.md) |
 | 2026-10-19 | The three Salesforce-reporting partners' Monthly Max copied into attendance, one Partner report batch per partner per month | done 2026-10-20 | 72 | [2026-10-19-partner-monthly-max.md](2026-10-19-partner-monthly-max.md) |
 | 2026-10-15 | The dashboard's total attendance counts Jotform plus the three Salesforce-reporting partners only, shown beside Jotform only | done 2026-10-15 | 72 | [2026-10-15-attendance-total-three-partners.md](2026-10-15-attendance-total-three-partners.md) |

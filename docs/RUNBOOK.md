@@ -2530,8 +2530,8 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - **Status:** planned 2026-10-21 (ticket #84), the deploy waits for Ryan's go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md)); the flagging batch is ticket #85.
 - **Dry run:** the check-only deploy (`sf project deploy start --dry-run`), step 3 of the plan's Rollout.
 - **Apply:** the same with its dry-run flag taken off, Ryan's go (VPN off); then the rolled-back `sf apex run` proof, also on his go.
-- **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (both Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rule's `DuplicateRecordSet`s, and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
-- **Rollback:** deactivate the Account Duplicate Rule (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)).
+- **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (the three Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rules' `DuplicateRecordSet`s, and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
+- **Rollback:** deactivate the two Account Duplicate Rules, each rule by the same step (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)).
 
 GLOW's annotated SOW (p.9) asks for "Duplicate Record" and "Obsolete Record" checkbox fields on
 Account and Contact, and for one Matching Rule and one Duplicate Rule on Account. The definitions
@@ -2556,7 +2556,11 @@ cleaned by this (SOW p.10); the batch that sets the flags by these criteria is t
 - **An obsolete Account:** a partner whose `Partner_Status__c` is Archived is obsolete; so is a
   Club account whose club is deactivated in the Roster ("Deactivating a club"), and a Club account
   with no attendance batch for 6 months that was created more than 6 months ago (so the clubs
-  created in September 2026 are not flagged before March 2027).
+  created in September 2026 are not flagged before March 2027). The clubs of a partner marked
+  `no` in the Partners tab's `jotform` column (the three Salesforce-reporting partners, "Clubs
+  that do not use Jotform") report as one `Partner report` batch on the partner account, so they
+  are judged by their partner account's `Partner report` batches, not their own (review,
+  2026-10-21).
 - **An obsolete Contact:** a Participant (a girl) with no attendance in 12 months. Staff, mentor
   and coordinator contacts are never flagged by rule (on 2026-10-21 every girl has attendance; the
   216 contacts without any are staff, mentors or coordinators).
@@ -2574,20 +2578,28 @@ Four checkbox fields, "Duplicate Record" and "Obsolete Record" (`Duplicate_Recor
 every Contact, the girls' records included. A flag is report data: it marks a record, and the
 record keeps everything it has (its attendance, its contacts, its place in the reports).
 
-**The Matching Rule on Account** (`Account.Name_Parent_Record_Type`, "Name, parent and record
-type") has three `MatchingRuleItems`, all required: Name with the Exact method (case-insensitive),
-ParentId (Exact, blanks matching blanks, so two partner-less strays match) and RecordTypeId (Exact).
+**The Matching Rule on Account** (`Account.Name_Parent`, "Name and parent") has two
+`MatchingRuleItems`, both required: Name with the Exact method (case-insensitive) and ParentId
+(Exact, blank matching blank, so two partner-less strays match). RecordTypeId is not a matching
+item: Salesforce does not allow Record Type as a matching-rule field (review, 2026-10-21).
 Salesforce's Exact method ignores case; whether it also ignores a difference in spacing (a double
-space, a tab, a no-break space) is not documented with certainty, so the read-back and the monthly
-check compare the rule's `DuplicateRecordSet`s with `glow.salesforce.duplicate_account_groups`,
-which ignores both, and a difference between the two lists is looked at by hand.
+space, a tab, a no-break space) is not documented with certainty, so the rolled-back proof probes
+it, and the read-back and the monthly check compare the rules' `DuplicateRecordSet`s with
+`glow.salesforce.duplicate_account_groups`, which ignores both, and a difference between the two
+lists is looked at by hand.
 
-**The Duplicate Rule on Account** (`Account.Name_Parent_Record_Type_Report`) uses that Matching
-Rule and runs on create and on edit. Its action is Allow with Report only, no Alert and no Block:
-in the metadata `actionOnInsert` and `actionOnUpdate` are `Allow`, each operation is Report, and
+**One report-only Duplicate Rule per record type**, Club (`Account.Name_Parent_Club_Report`)
+and Household (`Account.Name_Parent_Household_Report`, the partner accounts), uses that Matching
+Rule, runs on create and on edit, and carries the condition Record Type equals that type on the
+record saved and on the records matched, so a Club and a partner account of one name never
+match: together the two rules are "same name, same parent, same record type" for the two record
+types in use. Each Duplicate Rule's action is Allow with Report only, no Alert and no Block: in
+the metadata `actionOnInsert` and `actionOnUpdate` are `Allow`, each operation is Report, and
 there is no `alertText`. A possible duplicate is written to a `DuplicateRecordSet` (a Duplicate
-Record Set, with one `DuplicateRecordItem` per record) and the save goes through: the rule never
-stops a record created by code, and a user sees nothing at the save.
+Record Set, with one `DuplicateRecordItem` per record) and the save goes through: the rules never
+stop a record created by code, and a user sees nothing at the save. The rules never catch the
+partner-less twin of a parented club (their parents differ): that stays for the monthly check
+below and for the Signals of "Club accounts in Salesforce" (Club accounts without a parent).
 
 Why Report only: an alert refuses a record created by code, and code creates Accounts here. The
 Alert on the Contact rule failed live attendance batches mid-way until 2026-10-01 (BACKLOG 54: a
@@ -2604,18 +2616,19 @@ With the duplicate-girls check ("Duplicate girls in Salesforce"), read-only, VPN
 repository root:
 
 ```bash
-sf data query -o glow -q "SELECT Id, RecordCount FROM DuplicateRecordSet WHERE DuplicateRule.SobjectType = 'Account'"
+sf data query -o glow --json -q "SELECT Id, RecordCount, (SELECT RecordId FROM DuplicateRecordItems) FROM DuplicateRecordSet WHERE DuplicateRule.SobjectType = 'Account'"
 python3 - <<'EOF'
 from glow.salesforce import Org, duplicate_account_groups
 print(duplicate_account_groups(Org("glow").query("SELECT Id, Name, ParentId, RecordTypeId FROM Account")))
 EOF
 ```
 
-Expected: the same groups on both sides, and today none (0 sets, 0 groups on 2026-10-21). A
-group is a stray twin, as a rule a partner-less account the processor made for a name no account
-carried: re-parent it, never re-create it ("Club accounts in Salesforce"). A set without a group,
-or a group without a set, means the rule and the Python side disagree on spacing: look at the two
-names by id. Counts and ids only in what is said about it.
+Compare the two by Account id: each set's `RecordId`s are one group of `duplicate_account_groups`,
+and each group is one set. Expected: the same groups on both sides, and today none (0 sets, 0
+groups on 2026-10-21). A group is a stray twin, as a rule a partner-less account the processor
+made for a name no account carried: re-parent it, never re-create it ("Club accounts in
+Salesforce"). A set without a group, or a group without a set, means the rule and the Python side
+disagree on spacing: look at the two names by id. Counts and ids only in what is said about it.
 
 ## Attendance totals and partner-reported counts
 
