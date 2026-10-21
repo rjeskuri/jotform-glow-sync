@@ -16,10 +16,16 @@ administrators alone setting a flag by hand, flagged records shown in the kept r
 as a filter; a plan carries the rolled-back `sf apex run` proof before the deploy, the check-only,
 Ryan's go (his answer after the check-only's result), the read-back and the next day's batch check,
 in that order, the proof's script quoted in an ```apex block ending in `Database.rollback(sp);`, and
-its Rollback deactivates the rule in the org by a named action; the RUNBOOK states the rule's exact
-settings (`actionOnInsert`/`actionOnUpdate` Allow, no `alertText`, the MatchingRuleItems); a dated
-DECISIONS entry records the definitions as Ryan's provisional answers pending GLOW; the salesforce
-skill's "What lives there" points at the section. Every part a test reads is swept for what would
+its Rollback deactivates the rule in the org by a named action; the RUNBOOK states the rules' exact
+settings (`actionOnInsert`/`actionOnUpdate` Allow, no `alertText`; the MatchingRuleItems Name (Exact,
+case-insensitive) and ParentId (blank matches blank), never RecordTypeId; one report-only Duplicate
+Rule per record type, Club and Household, with the condition Record Type equals that type), the
+obsolete Club exception (the clubs of a partner marked `no` in the Partners tab's `jotform` column are
+judged by their partner account's `Partner report` batches), the monthly check's SOQL with the sets'
+member ids, and what the rule does not catch (the partner-less twin of a parented club); the proof's
+twin differs from the first account by case only, and a missing DuplicateRecordSet is a failure; a
+dated DECISIONS entry records the definitions as Ryan's provisional answers pending GLOW and the
+review's two design changes; the salesforce skill's "What lives there" points at the section. Every part a test reads is swept for what would
 contradict the rules (contradictions()): the rule set to Alert or Block (said any way, unless denied
 where it is said, without a time limit) or stopping a save in other words (a halt, pop-up, message,
 prompt, refusal), a flagged record deleted, merged, hidden or kept out of the reports (said any way),
@@ -76,6 +82,8 @@ class DuplicateRuleDocs(unittest.TestCase):
     BLOCK_DENIED = re.compile(r"(?i)\b(no|without|never|not|nor|or)\s+(an?\s+|the\s+)?block")   # "never Alert or Block"
     ACCOUNT = r"(?<!\w)Accounts?(?![A-Za-z])"         # also in `Account_Duplicate_Record__c` (norm() joins the dot)
     CONTACT = r"(?<!\w)Contacts?(?![A-Za-z])"
+    # "their partner's batches", "the partner account's `Partner report` batches"
+    PARTNER_BATCHES = r"(?i)\bpartner(['’]s| account['’]s)?\s+(account['’]s\s+)?(`?Partner report`?\s+)?batch"
     # the criteria say "the same parent" and "the same record type" ("under any parent" is another rule)
     SAME_PARENT = r"(?i)\b(same|one|identical)\s+(\w+\s+)?parent\b|\bparent\b\s+(is|are|being|stays?)\s+(the same|identical|equal)\b"
     SAME_TYPE = (r"(?i)\b(same|one|identical)\s+(\w+\s+)?record type\b|"
@@ -143,6 +151,11 @@ class DuplicateRuleDocs(unittest.TestCase):
     @staticmethod
     def local(s, m):
         return re.split(r"[,;:—–(]|\bbut\b|\bhowever\b|\bactually\b", s[max(0, m.start() - 40):m.start()])[-1]
+
+    def denied_near(self, s, m):
+        """locally_denied, or a negation right after the match ("RecordTypeId is not a matching item")."""
+        return self.locally_denied(s, m) or bool(re.match(r"(?i)\s*(is|are|was|were|remains?|stays?)?\s*(not|never|no)\b",
+                                                          s[m.end():]))
 
     def alert_or_block(self, s):
         out = []
@@ -298,6 +311,15 @@ class DuplicateRuleDocs(unittest.TestCase):
                         f"{where}: say a Club account with no attendance batch for 6 months AND created more than 6 "
                         "months ago is obsolete, in one sentence (the September 2026 clubs are not flagged before "
                         "March 2027)")
+        # the exception (review, 2026-10-21): the clubs of a partner marked `no` in the Partners tab's `jotform`
+        # column report as one `Partner report` batch on the partner account, so they are judged by their partner's
+        # batches, never by their own
+        self.assertTrue(self.said(part, r"`?jotform`?", r"(?<![\w-])`?no`?(?![\w-])", r"(?i)\bPartners tab\b",
+                                  r"`?Partner report`?", self.PARTNER_BATCHES,
+                                  negated=True),
+                        f"{where}: state the exception in one sentence: the clubs of a partner marked `no` in the Partners "
+                        "tab's `jotform` column are judged by their partner account's `Partner report` batches, not "
+                        "their own")
         # an obsolete Contact: a Participant (girl) with no attendance in 12 months; staff, mentors and
         # coordinators never by rule
         self.assertTrue(self.said(part, r"(?i)\b(participants?|girls?)\b", r"(?i)\b(12|twelve) months\b", r"(?i)\battendance\b"),
@@ -384,13 +406,52 @@ class DuplicateRuleDocs(unittest.TestCase):
                          f"{where}: say the rule has no `alertText` (nothing is shown to a user)")
         self.assertRegex(text, r"(?i)MatchingRuleItems?|matching rule items?",
                          f"{where}: name the Matching Rule's items (`MatchingRuleItems`)")
-        self.assertTrue(self.said(part, r"\bName\b", r"(?i)\bexact\w*\b", r"(?i)case-insensitive|ignoring (capitals|case)|"
-                                                                            r"(capitals|case) ignored",
-                                  r"ParentId", r"RecordTypeId"),
-                        f"{where}: give the Matching Rule's items in one sentence: Name (exact, case-insensitive), "
-                        "ParentId and RecordTypeId")
+        # the matching design (review, 2026-10-21): the Matching Rule matches Name (Exact, case-insensitive) and
+        # ParentId (blank matches blank), never RecordTypeId; "same record type" comes from one report-only
+        # Duplicate Rule per record type (Club, Household), each with the condition Record Type equals that type
+        items = self.said(part, r"(?i)MatchingRuleItems?|matching rule items?", r"\bName\b", r"(?i)\bexact\w*\b",
+                          r"(?i)case-insensitive|ignoring (capitals|case)|(capitals|case) ignored", r"ParentId",
+                          r"(?i)\bblank\b[^.;]{0,20}?\bblank\b|\bempty\b[^.;]{0,20}?\bempty\b|\bnull\b[^.;]{0,20}?\bnull\b")
+        self.assertTrue(items, f"{where}: give the Matching Rule's items in one sentence: Name (Exact, case-insensitive) "
+                               "and ParentId (blank matches blank)")
+        self.assertFalse([s for s in items if "RecordTypeId" in s],
+                         f"{where}: RecordTypeId is not a matching item (Salesforce refuses Record Type as a matching-rule "
+                         "field): the record type is the Duplicate Rule's condition")
+        for s in self.clauses(part):
+            if "RecordTypeId" in s and re.search(r"(?i)\bmatch\w*", s):
+                m = re.search(r"RecordTypeId", s)
+                self.assertTrue(self.denied_near(s, m), f"{where}: a clause names RecordTypeId as something matched; "
+                                                        f"say it is not a matching item: {s[:160]!r}")
+        self.assertTrue(self.said(part, r"(?i)\bduplicate rules?\b|DuplicateRule",
+                                  r"(?i)\b(per|each|every|one for each|two)\b[^.;]{0,25}?\brecord types?\b|\btwo duplicate rules\b",
+                                  r"(?<!\w)Club(?!\w)", r"(?<!\w)Household(?!\w)", r"(?i)\brecord type\b[^.;]{0,25}?\b(equals|=|is)\b"),
+                        f"{where}: say there is one report-only Duplicate Rule per record type (Club, Household), each "
+                        "with the condition Record Type equals that type, in one sentence")
         self.assertTrue(self.said(part, r"(?i)\brollback\b", r"(?i)\bdeactivat\w*|\binactive\b|isActive"),
-                        f"{where}: the Rollback deactivates the Duplicate Rule (`isActive` false), said in the section")
+                        f"{where}: the Rollback deactivates the Duplicate Rules (`isActive` false), said in the section")
+        self.assertNoContradiction(part, where)
+
+    def test_the_runbook_gives_the_monthly_check_and_what_the_rule_misses(self):
+        """The monthly check reads the rule's duplicate record sets with their members' ids (counts and ids only,
+        never a name) and compares them with `duplicate_account_groups`; the rule does not catch the partner-less
+        twin of a parented club (their parents differ): that stays for the monthly check."""
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        part = self.section()
+        text = flat(part)
+        self.assertRegex(text, r"(?i)\bmonthly check\b", f"{where}: give the monthly check")
+        self.assertRegex(text, r"FROM\s+DuplicateRecordSet\b", f"{where}: the monthly check's SOQL reads `DuplicateRecordSet`")
+        self.assertRegex(text, r"\(\s*SELECT\s+RecordId\s+FROM\s+DuplicateRecordItems\s*\)",
+                         f"{where}: the monthly check's SOQL selects the members' ids: `(SELECT RecordId FROM "
+                         "DuplicateRecordItems)`")
+        self.assertRegex(text, r"duplicate_account_groups", f"{where}: the monthly check compares the sets with "
+                                                            "`glow.salesforce.duplicate_account_groups`")
+        self.assertTrue(self.said(part, r"(?i)\b(does not|will not|never|cannot|can['’]t|doesn['’]t)\s+(catch|report|"
+                                        r"match|find|see)\w*|\bmisses\b|\bnot caught\b|\bnot reported\b|\bnot matched\b",
+                                  r"(?i)\bpartner-?less\b|\bparent-?less\b|\bwithout a parent\b|\bno parent\b",
+                                  r"(?i)\btwins?\b|\bstrays?\b|\bcop(y|ies)\b|\bduplicates?\b",
+                                  r"(?i)\bmonthly check\b", negated=True),
+                        f"{where}: say what the rule does not catch, in one sentence: the partner-less twin of a parented "
+                        "club (their parents differ), which stays for the monthly check")
         self.assertNoContradiction(part, where)
 
     def test_the_contact_rule_stays_report_only(self):
@@ -456,7 +517,17 @@ class DuplicateRuleDocs(unittest.TestCase):
                         f"{name}: the Rollout names the four fields (`Duplicate_Record__c`, `Obsolete_Record__c` on "
                         "Account and Contact) in one sentence")
         self.assertRegex(flat_rollout, r"MatchingRule|Matching Rule", f"{name}: the Rollout builds the Matching Rule on Account")
-        self.assertRegex(flat_rollout, r"DuplicateRule|Duplicate Rule", f"{name}: the Rollout builds the Duplicate Rule on Account")
+        self.assertRegex(flat_rollout, r"DuplicateRule|Duplicate Rule", f"{name}: the Rollout builds the Duplicate Rules on Account")
+        self.assertTrue(self.said(rollout, r"(?i)\bduplicate rules?\b|DuplicateRule", r"(?<!\w)Club(?!\w)", r"(?<!\w)Household(?!\w)",
+                                  r"(?i)\b(per|each|every|one for each|two)\b[^.;]{0,25}?\brecord types?\b|\btwo duplicate rules\b"),
+                        f"{name}: the Rollout builds one Duplicate Rule per record type (Club, Household), in one sentence")
+        self.assertTrue(self.said(rollout, r"(?i)MatchingRule|Matching Rule", r"\bName\b", r"ParentId"),
+                        f"{name}: the Rollout's Matching Rule matches Name and ParentId (one sentence)")
+        for s in self.clauses(rollout):
+            if "RecordTypeId" in s and re.search(r"(?i)\bmatch\w*", s):
+                self.assertTrue(self.denied_near(s, re.search(r"RecordTypeId", s)),
+                                f"{name}: RecordTypeId is not a matching item (the record type is each Duplicate Rule's "
+                                f"condition): {s[:160]!r}")
         self.assertTrue([s for s in self.clauses(rollout) if self.REPORT_ONLY.search(s) and self.ALERT_DENIED.search(s)
                          and self.BLOCK_DENIED.search(s)],
                         f"{name}: the Rollout states the rule's action in one sentence: Allow with Report only, no Alert "
@@ -529,6 +600,18 @@ class DuplicateRuleDocs(unittest.TestCase):
         self.assertTrue(sp, f"{name}: the ```apex block starts from a savepoint, `Savepoint sp = Database.setSavepoint();`")
         self.assertRegex(code, r"(?m)^\s*insert\b", f"{name}: the ```apex block inserts the fictional Accounts")
         self.assertIn("DuplicateRecordSet", code, f"{name}: the ```apex block queries the `DuplicateRecordSet` that appears")
+        # the first two Accounts of the script are the case-only pair (same spacing); a spacing probe, if any, is
+        # a separate account; a name that only shares a name with another partner's club is one more
+        names = re.findall(r"Name\s*=\s*'([^']*)'", code)
+        self.assertGreaterEqual(len(names), 2, f"{name}: the ```apex block names its Accounts (`Name = '…'`)")
+        self.assertTrue(names[0] != names[1] and names[0].casefold() == names[1].casefold(),
+                        f"{name}: the ```apex block's second Account differs from the first by case only (got "
+                        f"{names[0]!r} and {names[1]!r})")
+        for probe in names[2:]:
+            if " ".join(probe.split()).casefold() == " ".join(names[0].split()).casefold():
+                self.assertNotEqual(probe.casefold(), names[0].casefold(),
+                                    f"{name}: a third Account that equals the first ignoring case is one twin too many; "
+                                    "a spacing probe differs in spacing")
         statements = [ln.strip() for ln in code.splitlines() if ln.strip() and not ln.strip().startswith("//")]
         self.assertRegex(statements[-1], r"^Database\.rollback\(" + sp.group(1) + r"\);\s*(//.*)?$",
                          f"{name}: the ```apex block's last statement is `Database.rollback({sp.group(1)});` (not "
@@ -545,14 +628,29 @@ class DuplicateRuleDocs(unittest.TestCase):
         self.assertTrue(self.said(proof_text, r"<club> - <partner>", r"(?i)\b(never|not|no)\b[^.;]{0,30}?\bmatch", negated=True),
                         f"{name}: the proof shows an Account that only shares a name with another partner's club "
                         "(`<club> - <partner>`) is not matched")
-        self.assertTrue(self.said(proof_text, r"(?i)\b(both|two|2)\b", r"(?i)\binserts?\b|\bDML\b", r"(?i)\bsucceed\w*"),
-                        f"{name}: the proof shows both inserts succeed (the rule stops neither)")
+        self.assertTrue(self.said(proof_text, r"(?i)\b(both|two|2|all|every|each|three|four)\b", r"(?i)\binserts?\b|\bDML\b",
+                                  r"(?i)\bsucceed\w*"),
+                        f"{name}: the proof shows every insert succeeds (the rule stops none)")
+        # the twin differs from the first account by case only, so a missing DuplicateRecordSet is a real signal:
+        # a failure that stops the rollout and deactivates the rule, never "the proof still holds"
+        self.assertRegex(proof_text, r"(?i)\bcase[- ]only\b|\bonly (by|in) (its )?case\b|\bdiffers? (only )?(by|in) (its )?case\b|"
+                                     r"\bcapitals? only\b|\bby case alone\b",
+                         f"{name}: the proof step says the twin differs from the first account by case only")
+        self.assertTrue(self.said(proof_text, r"(?i)\b(no|missing|absent|without)\b[^.;]{0,30}?DuplicateRecordSet|"
+                                              r"DuplicateRecordSet[^.;]{0,40}?\b(missing|absent|does not appear|none)\b",
+                                  r"(?i)\bfail\w*|\bfailure\b", r"(?i)\bstop\w*|\bdeactivat\w*|\brollback\b", negated=True),
+                        f"{name}: the proof step says a missing DuplicateRecordSet for the case-only twin is a failure: "
+                        "stop and deactivate the rule (one sentence)")
+        self.assertNotRegex(proof_text, r"(?i)\bstill holds\b|\bstill (passes|counts|proves|stands)\b|\bnot a failure\b|"
+                                        r"\bno failure\b|\bholds anyway\b|\bgood enough\b",
+                            f"{name}: a missing DuplicateRecordSet is never \"the proof still holds\"")
         # the read-back: retrieve into after/ and compare; both rules active, four fields; the Contact rule the same
         self.assertTrue(re.search(r"(?i)\bcompar\w*|\bdiff\b", steps[after]),
                         f"{name}: the `after/` step compares the retrieve with the build")
-        self.assertRegex(flat_rollout, r"(?i)\b(both rules|the two rules|DuplicateRule and MatchingRule|MatchingRule and DuplicateRule)\b"
-                                       r"[^.;]{0,60}?\bactive\b|\bactive\b[^.;]{0,60}?\b(both rules|the two rules)\b|IsActive",
-                         f"{name}: the read-back's SOQL shows both rules active")
+        self.assertRegex(flat_rollout, r"(?i)\b(all|both|every|each|the three|three|the two|two|the)\s+(\w+\s+)?rules\b"
+                                       r"[^.;]{0,60}?\bactive\b|\bactive\b[^.;]{0,60}?\b(all|both|the three|three)\s+(\w+\s+)?rules\b|IsActive",
+                         f"{name}: the read-back's SOQL shows every rule active (the Matching Rule and the Duplicate Rule "
+                         "per record type)")
         self.assertTrue([s for s in self.clauses(rollout) if self.CONTACT_RULE in s
                          and re.search(r"(?i)\bunchanged\b|\bcompar\w*|\bdiff\b|\bequal\w*|\bthe same\b|\buntouched\b", s)],
                         f"{name}: the Rollout retrieves and compares the Contact rule {self.CONTACT_RULE!r}: unchanged")
@@ -614,6 +712,16 @@ class DuplicateRuleDocs(unittest.TestCase):
                         f"{where}: who sets a flag by hand: administrators only")
         self.assertTrue(self.said(e, r"(?i)\bshown\b|\bstays? in\b|\bremains? in\b", r"(?i)\bfilter\b"),
                         f"{where}: the kept reports show flagged records, the flags as a filter")
+        # the review's two design changes (2026-10-21), recorded as decisions Ryan can overrule
+        self.assertTrue(self.said(e, r"`?jotform`?", r"(?<![\w-])`?no`?(?![\w-])", r"`?Partner report`?",
+                                  self.PARTNER_BATCHES, negated=True),
+                        f"{where}: the obsolete Club exception: the clubs of a partner marked `no` in the Partners tab's "
+                        "`jotform` column are judged by their partner account's `Partner report` batches, not their own")
+        self.assertTrue(self.said(e, r"(?i)\bduplicate rules?\b|DuplicateRule",
+                                  r"(?i)\b(per|each|every|one for each|two)\b[^.;]{0,25}?\brecord types?\b|\btwo duplicate rules\b",
+                                  r"(?<!\w)Household(?!\w)", negated=True),
+                        f"{where}: the matching design: one report-only Duplicate Rule per record type (Club, Household) "
+                        "with the condition Record Type equals that type; the Matching Rule on Name and ParentId")
         rejected = self.norm(e.split("**Rejected", 1)[1].split("**Consequences", 1)[0])
         self.assertRegex(rejected, r"(?i)\balert\b|\bblock\w*", f"{where}: **Rejected** names Alert or Block")
         self.assertRegex(rejected, r"(?i)\bexclud\w*|\bleft out\b|\bhid\w*|\bfilter\w* out\b|\bdrop\w*",
