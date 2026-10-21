@@ -3073,14 +3073,21 @@ Two folders, both labelled "Decommissioned", hold what epic #68 retires and the 
 - The dashboard folder "Decommissioned" (`DashboardFolder` `Decommissioned_Dashboards`) is
   hidden, with no `folderShares`: only administrators see it.
 - The measure is the shares API (`GET /services/data/v67.0/folders/<id>/shares`), which must
-  show no share on either folder.
+  show no share on either folder beyond the deploying administrator's own Manage entry.
+- Salesforce may give the deploying administrator (an internal System Administrator) Manage
+  access to a new folder by itself: that one entry is accepted and recorded in the plan's Result.
+  An entry for anyone else (a group, a role, guest, portal, community or partner users, All
+  Internal Users) is a failure, removed before anything is moved in.
 
 The archive rule:
 - A retired report or dashboard is moved to Decommissioned and keeps its Id; nothing is deleted
   in this epic.
 - Before a report or dashboard changes, a copy of it as it was goes to Decommissioned, carrying
-  its source Id and the ticket in its label or description, in addition to the `before/`
-  retrieve.
+  its source Id and the ticket in its description, in addition to the `before/` retrieve.
+- The copy's label stays within 40 characters, Salesforce's limit on a report's name.
+- A dynamic dashboard's copy (the original runs as the logged-in user) runs as a specified user:
+  dynamic dashboards count against an org limit, and the `before/` retrieve keeps the original's
+  running-user setting.
 - The `before/` retrieve is what a metadata redeploy starts from; the copy is what a Salesforce
   user opens.
 - To revert from Salesforce, open the copy in Decommissioned, then Save As into the original

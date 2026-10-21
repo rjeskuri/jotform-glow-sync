@@ -46,7 +46,11 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
      with the build; SOQL on `Folder` (`Type` `Report` and `Dashboard`, DeveloperName
      `Decommissioned` and `Decommissioned_Dashboards`) shows both.
    - The shares API (`GET /services/data/v67.0/folders/<id>/shares`) shows no share on either
-     folder.
+     folder beyond one Manage share for the deploying administrator (an internal System
+     Administrator), which enhanced folder sharing may add to a new folder by itself: that one is
+     accepted and recorded in the Result. Any other share (a group, a role, guest, portal,
+     community or partner users, All Internal Users) is a failure, removed before anything is
+     moved in.
 3. The API proof, each non-GET call on Ryan's go: clone one DHIS2 report into Decommissioned,
    move the clone to "DHIS2 Reports" and back, and the same with one dashboard; SOQL shows the
    same Id after each move, with `FolderName` following; the two clones stay in Decommissioned,
@@ -157,22 +161,35 @@ Where the epic's interactive-dashboard tasks (#81-#83) start:
 ## API proof
 
 status: not yet run. Each non-GET call waits for Ryan's go; the request forms below are the ones
-to run, with each one's HTTP status to be recorded here (no record data). The source report and
-dashboard are one of the DHIS2 folders' own; the clones carry "proof #69" in their label.
+to run, with each one's HTTP status to be recorded here (no record data).
+
+The sources (from `evidence/inventory.csv`):
+- Report: `00ORP000005rVCT2A2` (`Freq_of_Glow_Club_Meet_by_Mon_and_Reg_Fq6`, matrix, in "DHIS2
+  Reports", used by no dashboard).
+- Dashboard: `01ZRP000006quAj2AI` (DeveloperName `fgMcyANlcTvERilgPVySaXCChURVlO`, in "DHIS2
+  Dashboards", 2 components), type `SpecifiedUser`. 4 of the 15 dashboards are dynamic
+  (`LoggedInUser`) and dynamic dashboards count against an org limit, so the proof clones a
+  `SpecifiedUser` one.
+
+The clones' labels: a report or dashboard name is at most 40 characters, so each label is
+`proof #69 <short>` within 40 characters (e.g. `proof #69 Club meet freq`); the source Id and
+the ticket go in `description`. Every label the proof sets keeps the `proof #69` marker.
 
 Report:
-1. Clone into Decommissioned: `POST /services/data/v67.0/analytics/reports?cloneId=<source report id>`, body `{"reportMetadata": {"name": "<label> (proof #69)", "folderId": "<Decommissioned report folder id>"}}`. Status: not yet run.
-2. Move to "DHIS2 Reports": `PATCH /services/data/v67.0/analytics/reports/<clone id>`, body `{"reportMetadata": {"folderId": "<DHIS2 Reports folder id>"}}`. Status: not yet run.
-3. Move back: `PATCH /services/data/v67.0/analytics/reports/<clone id>`, body `{"reportMetadata": {"folderId": "<Decommissioned report folder id>"}}`. Status: not yet run.
-4. Label and description: `PATCH /services/data/v67.0/analytics/reports/<clone id>`, body `{"reportMetadata": {"name": "<label>", "description": "copy of <source id>, #69"}}`. Status: not yet run.
-5. After each move: `SELECT Id, FolderName FROM Report WHERE Id = '<clone id>'` - the same Id, `FolderName` following.
+1. Clone into Decommissioned: `POST /services/data/v67.0/analytics/reports?cloneId=00ORP000005rVCT2A2`, body `{"reportMetadata": {"name": "proof #69 Club meet freq", "folderId": "<Decommissioned report folder id>"}}`. Status: not yet run.
+2. Where the clone landed: `SELECT Id, FolderName FROM Report WHERE Id = '<clone id>'`. If it is in the source folder ("DHIS2 Reports": the clone ignored `folderId`), the proof records that, and the first move is into Decommissioned (step 4 before step 3).
+3. Move to "DHIS2 Reports": `PATCH /services/data/v67.0/analytics/reports/<clone id>`, body `{"reportMetadata": {"folderId": "<DHIS2 Reports folder id>"}}`. Status: not yet run.
+4. Move back: `PATCH /services/data/v67.0/analytics/reports/<clone id>`, body `{"reportMetadata": {"folderId": "<Decommissioned report folder id>"}}`. Status: not yet run.
+5. Label and description: `PATCH /services/data/v67.0/analytics/reports/<clone id>`, body `{"reportMetadata": {"name": "proof #69 Club meet freq (moved)", "description": "copy of 00ORP000005rVCT2A2, #69"}}`. Status: not yet run.
+6. After each move: `SELECT Id, FolderName FROM Report WHERE Id = '<clone id>'` - the same Id, `FolderName` following.
 
 Dashboard:
-1. Clone into Decommissioned: `POST /services/data/v67.0/analytics/dashboards?cloneId=<source dashboard id>`, body `{"folderId": "<Decommissioned dashboard folder id>"}`. Status: not yet run.
-2. Move to "DHIS2 Dashboards": `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"folderId": "<DHIS2 Dashboards folder id>"}}`. Status: not yet run.
-3. Move back: `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"folderId": "<Decommissioned dashboard folder id>"}}`. Status: not yet run.
-4. Label and description: `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"name": "<label> (proof #69)", "description": "copy of <source id>, #69"}}`. Status: not yet run.
-5. After each move: `SELECT Id, FolderName FROM Dashboard WHERE Id = '<clone id>'` - the same Id, `FolderName` following.
+1. Clone into Decommissioned: `POST /services/data/v67.0/analytics/dashboards?cloneId=01ZRP000006quAj2AI`, body `{"folderId": "<Decommissioned dashboard folder id>"}`. Status: not yet run.
+2. Where the clone landed: `SELECT Id, FolderName FROM Dashboard WHERE Id = '<clone id>'`. If it is in the source folder ("DHIS2 Dashboards": the clone ignored `folderId`), the proof records that, and the first move is into Decommissioned (step 4 before step 3).
+3. Move to "DHIS2 Dashboards": `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"folderId": "<DHIS2 Dashboards folder id>"}}`. Status: not yet run.
+4. Move back: `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"folderId": "<Decommissioned dashboard folder id>"}}`. Status: not yet run.
+5. Label and description: `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"name": "proof #69 DHIS2 dashboard", "description": "copy of 01ZRP000006quAj2AI, #69"}}`. Status: not yet run.
+6. After each move: `SELECT Id, FolderName FROM Dashboard WHERE Id = '<clone id>'` - the same Id, `FolderName` following.
 
 If an API refuses a call, that is recorded here with its status, and the fallback is Lightning's
 Move, done by hand by Ryan (the report's or dashboard's Move action in Lightning), checked with
