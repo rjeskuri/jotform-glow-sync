@@ -9,6 +9,12 @@ intent: docs/intent/2026-10-06-photos-to-drive.md
 
 # Plan: the group photo goes to Google Drive, not Salesforce
 
+**2026-10-21 (Ryan):** the Drive integration runs on Ryan's company account, not a role account
+(open decision 1), because Jotform uses only that account; the photos end on the company
+**Shared Drive**, moved there from his My Drive by the photo mover, a standalone Apps Script
+(`drive-sync/`, ticket #89, [plan](2026-10-21-drive-photo-mover.md)). Where this plan says "the
+role account", read Ryan's company account; the folder and subfolder rules stand.
+
 ## Context
 
 **The decision.** On 2026-10-01 GLOW's CEO decided that the attendance photos (one required
@@ -440,6 +446,8 @@ before and diffed after), his test submission (step 5) and the deletion of the o
 
 1. **Which GLOW Workspace role account** owns the folders (suggested: the account that owns
    the enrollment sheet and the Apps Script).
+   - 2026-10-21 (Ryan): Ryan's company account; the photo mover moves the subfolders to the
+     company Shared Drive ([plan](2026-10-21-drive-photo-mover.md)).
 2. **Sharing**: the named list beside the owner.
 3. **Retention** in Drive: the CEO's; recorded in DECISIONS and the RUNBOOK when taken.
 4. **The test submission's leftovers**: delete the Failed `Duplicate:` batch (recommended) and
