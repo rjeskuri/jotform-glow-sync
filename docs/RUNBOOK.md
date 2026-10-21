@@ -1755,9 +1755,10 @@ unattended. The mentor e-mails of a marked partner say the attendance form
 does not change for them (Apps Script, once that change is pushed: the plan's
 step 11). Salesforce is untouched: the clubs' Accounts keep their names. On
 the dashboard they stay in "Clubs with no attendance last month" (that tile
-counts Jotform attendance rows, Ryan's decision of 2026-10-06) and, until
-their partner-reported totals arrive, in the batch-based "did not submit"
-lists planned beside it ("Attendance totals and partner-reported counts").
+counts Jotform attendance rows, Ryan's decision of 2026-10-06) and in the
+batch-based "did not submit" lists planned beside it: their partners' figure
+is one monthly batch on the partner account, never per club (2026-10-19,
+"Attendance totals and partner-reported counts").
 
 ## Deactivating a club
 
@@ -2525,31 +2526,30 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 
 ## Attendance totals and partner-reported counts
 
-- **When:** reading or typing an attendance total; the monthly `check`.
-- **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); open: how the partners' counts come in (BACKLOG 72; [Result](plans/2026-10-06-attendance-totals.md#result)).
+- **When:** reading an attendance total; the monthly `check`; the three partners' monthly copy, about the 12th of each month.
+- **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); decided 2026-10-19 (BACKLOG 72, ticket #60): the three partners' figure is their Monthly Report's Monthly Max, copied monthly by `tools/sf_partner_monthly.py`; September 2026 copied on Ryan's go 2026-10-20 07:33-07:38 UTC: three `Partner report` batches dated 2026-09-30, 110 + 320 + 315 = 745, read back equal to the three Monthly Reports ([Result](plans/2026-10-19-partner-monthly-max.md#result)).
 - **Verify:** the Signals, below.
-- **Rollback:** of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
+- **Rollback:** of a monthly copy, from `data/sf_partner_monthly/ledger.csv` (each batch's last row is its state): delete an inserted batch by its `batch_id`, set an updated one's `Girls_Present__c` back to the row's `old` count - one record per call, VPN off, Ryan's go ([plan](plans/2026-10-19-partner-monthly-max.md#rollback)). Of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
 
 Three partners' clubs report their attendance through Salesforce only (Ryan, 2026-10-06). Since
 2026-10-16 the three partners are marked `no` in the Partners tab's `jotform` column and their 38
 clubs are off the template's and the Africa form's Club picker
 ([plan](plans/2026-10-06-clubs-off-jotform.md), [Result](plans/2026-10-06-clubs-off-jotform.md#result)):
-their attendance reaches Salesforce only as typed counts (branch 3 of the filter, below).
-- **Double counting**: a typed monthly aggregate for one of those 38 clubs (branch 3) plus that
-  club's Jotform batches in the same month (branch 2) would both count; the processor's
-  club-and-day lock blocks only a batch for the same date, and the aggregate is dated the last day
-  of the month. The Jotform path for these clubs is closed (none sent a batch since 1 September),
-  so a count typed for them counts once. A count typed for a club of another partner is left out
-  by the filter. If one of the three partners is unmarked again (its clubs back on the picker), the
-  risk returns: stop typing its counts before its clubs submit on Jotform again.
+since 2026-10-19 (ticket #60) their figure reaches the attendance data as their Monthly Report's
+"Monthly Max", one batch per partner per month on the partner account (The monthly copy, below).
+- **Double counting**: a partner's monthly batch plus Jotform batches from its clubs in the same
+  month would both count. The Jotform path for these clubs is closed (none sent a batch since 1
+  September), so the partner's figure counts once. If one of the three partners is unmarked again
+  (its clubs back on the picker), the risk returns: stop copying its Monthly Max before its clubs
+  submit on Jotform again.
 
 Leadership wants one attendance total that includes them, shown beside the figure from the forms
 alone (Ryan, 2026-10-15).
 
 **The field.** `Attendance_Batch__c.Girls_Present__c` (Number, "Girls present") is the one
 attendance count. Since the deploy the attendance processor sets it when a Jotform batch
-succeeds (= the attendance rows it created) and clears it on every `Failed` path; a
-partner-reported total is typed into it. A batch with no names and no count is `Failed` "No
+succeeds (= the attendance rows it created) and clears it on every `Failed` path; the three
+partners' monthly copy writes their Monthly Max into it. A batch with no names and no count is `Failed` "No
 participants submitted" (no rows, blocks nothing); a batch with no names and a count above 0 is
 an aggregate and succeeds with no rows.
 
@@ -2562,6 +2562,12 @@ an aggregate and succeeds with no rows.
   `Success`, 2 `Creator__c` starts with `Jotform`, 3 the parent equals one of the three names, and
   4 and 5 are the Partner and Club filters. A Jotform batch from one of the three partners' clubs
   counts once.
+- **Filter 3 does not match the monthly copy yet**: it asks for a club whose parent is one of the
+  three partners, and the monthly batch sits on the partner account itself, whose parent is none
+  of them. Until #59 changes the dashboard (its measure becomes girls who attended: Jotform girls
+  plus the three partners' Monthly Max), the copied batches are in the data but not in the
+  dashboard's total. 2026-10-20: so it is for September 2026 - its three batches (745) are copied,
+  and the dashboard's total does not include them until #59.
 - Any other club's attendance entered in Salesforce (a `Success` batch whose `Creator__c` does
   not start with `Jotform`, from a club outside the three partners) is left out of the total.
 - **"Jotform only"** = the sum of `Girls_Present__c` over `Success` batches whose `Creator__c`
@@ -2572,29 +2578,58 @@ an aggregate and succeeds with no rows.
   date), never by when the batch was created: about 4,978 September-dated rows were created on
   2026-10-02 (the September back-fill's 4,712 plus live submissions), which a report by created
   date would put in October.
-- The Monthly Report's weekly counts are never added to attendance, in either measure.
+- The Monthly Report's weekly counts are never added to attendance, in either measure. Only the
+  three partners' Monthly Max is copied, as one batch a month (below); every other partner's
+  Monthly Report stays out (DECISIONS 2026-10-19).
+- The Monthly Max is roughly the month's unique girls, not girls × sessions: added to Jotform
+  attendances it would be a mixed sum, which is why #59 makes the dashboard's measure girls who
+  attended.
 - A girl counted twice in one month on two sources would be a double count: a club reports on one
   source only.
 
-**The intake contract** - whatever carries a partner's count into Salesforce (a small Jotform
-form, a Salesforce screen flow, a sheet import: BACKLOG 72, Ryan's decision) writes one
-`Attendance_Batch__c` per club per month with exactly these values:
+**The monthly copy** (`tools/sf_partner_monthly.py`, ticket #60,
+[plan](plans/2026-10-19-partner-monthly-max.md); replaces the per-club intake contract of
+2026-10-06). Each of the three partners files one Monthly Report a month (`DHIS2__c`,
+`Account__c` = the partner account), between the 5th and the 12th of the next month; its
+"Monthly Max" is `Monthly_Total__c`. After the three are filed (about the 12th) the tool writes
+one `Attendance_Batch__c` per partner for the month:
 
 | Field | Value |
 |---|---|
-| `Account_Name__c` | the club's Salesforce Account name **exactly** as the Club picker sends it (CLAUDE.md rule 5): the plain club name, or `<club> - <partner>` where another partner's club shares the name; the sync's `--summary-json` `sf_names` lists them. A mistyped name creates a partner-less account ("Club accounts in Salesforce") |
-| `Attendance_Date__c` | the **last day of the month** reported (a partner that gives per-session counts dates them the session day instead) |
-| `Girls_Present__c` | the count, above 0 (0 or empty with no names is `Failed` "No participants submitted") |
+| `Account_Name__c` | the partner's Salesforce Account name **exactly** (Education and English for You, Tumaini La Maisha, Ng'aa Maskani): the processor matches it against every Account, so the batch attaches to the partner account and creates none |
+| `Attendance_Date__c` | the **last day of the month** |
+| `Girls_Present__c` | the Monthly Max, a whole number above 0 |
 | `Contact_IDs__c` | **empty** - no names, ever |
-| `Creator__c` | `Partner report` (the label the reports use). The batch counts in the total only from a club of the three partners; it never counts in the Jotform-only view, which takes only `Creator__c` values starting with `Jotform` |
-| `Module__c`, `Module_Week__c`, `Module_Year__c` | optional; empty keeps the batch out of the by-module report only (it counts rows) |
+| `Creator__c` | `Partner report`; it never counts in the Jotform-only view, which takes only `Creator__c` values starting with `Jotform` |
 | `enable_fuzzy_matching__c` | false |
 
-The processor's club-and-day lock still applies: an aggregate `Success` for a club and date makes
-a Jotform batch for that date a `Failed` "Duplicate", and attendance rows on that date make an
-aggregate `Failed` "Attendance already exists" - which is why aggregates are dated the last day of
-the month, a day the three partners' clubs will not send a Jotform batch for once they are off the
-forms (applied 2026-10-16, above).
+```
+python3 tools/sf_partner_monthly.py --month 2026-09 --vpn-off                         # dry run (default month: last month)
+python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off --limit 1       # Ryan's go: one write, read back
+python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off                 # the rest
+```
+
+- The dry run reads Salesforce too, so it needs `--vpn-off`; it prints each partner's plan by name
+  and count (no record ids) and writes nothing. The current month or a later one is refused.
+- Per partner, in the order above: no batch yet → insert; a `Success` `Partner report` batch on
+  the partner account and day with the same count → skipped; with another count → an update of
+  `Girls_Present__c` alone (old → new; a PATCH runs none of the processor). A `Failed` one does not
+  count as existing.
+- Refused, and named, with no write for that partner: no Monthly Report for the month or more than
+  one, a Monthly Max blank, 0, negative or not whole, no single Account with the partner's exact
+  name, two `Success` `Partner report` batches on its day, or - when it needs an insert - another
+  `Success` batch (any other `Creator__c`) on the partner account and day. The other partners are still
+  planned and written; the run ends non-zero. Fix the report in Salesforce (or ask the partner)
+  and run again: what is in place is skipped.
+- `--apply`: one insert or update per request, each read back (`Success`, on the partner account,
+  the count); a write Salesforce refuses or that reads back otherwise stops the run. `--limit N`
+  counts writes only. The ledger `data/sf_partner_monthly/ledger.csv` (owner only, never committed)
+  keeps every write's batch id, partner, month, date, old and new count: the rollback (above).
+
+The processor's club-and-day lock is per Account and date: any `Success` batch on the partner
+account and the month's last day, whatever its `Creator__c`, would make the insert `Failed`
+"Duplicate". The partner account has no Jotform batches, so none is expected; if one is there and
+no `Partner report` batch is, the tool refuses that partner before sending (the others still go).
 
 **The one-off back-fill** (`tools/sf_girls_present.py`) - **done 2026-10-07**, on Ryan's go:
 every `Success` batch from before the deploy got its count (= its attendance rows; 573
@@ -2608,14 +2643,22 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
   `differ` is a Jotform `Success` batch whose count is not its rows; a `without a value` is a
   `Success` batch the processor or the back-fill did not count. Aggregate batches are not compared
   (no rows by design).
-- The dashboard's last-month tiles: until the first partner-reported count arrives, "Total
-  attendance (Jotform + 3 partners)" equals "Attendance (Jotform only)" and `SELECT COUNT(Id) FROM
-  Attendance__c WHERE Attendance_Date__c = LAST_MONTH` (September 2026: 7,227 each, read
-  2026-10-15). Afterwards the difference is the three partners' counts for the month.
+- The dashboard's last-month tiles: "Total attendance (Jotform + 3 partners)" equals "Attendance
+  (Jotform only)" and `SELECT COUNT(Id) FROM Attendance__c WHERE Attendance_Date__c = LAST_MONTH`
+  (September 2026: 7,227 each, read 2026-10-15) - also after a monthly copy, until #59 changes the
+  dashboard (filter 3 does not match the partner account, above).
+- The monthly copy, after its run: `SELECT Account__r.Name, Girls_Present__c, Processing_Status__c
+  FROM Attendance_Batch__c WHERE Creator__c = 'Partner report' AND Attendance_Date__c = <the
+  month's last day> AND Account__r.Name IN ('Education and English for You', 'Tumaini La Maisha',
+  'Ng\'aa Maskani')` (SOQL escapes the apostrophe with a backslash) → three `Success` rows, one
+  per partner, whose sum equals `SELECT
+  SUM(Monthly_Total__c) FROM DHIS2__c` over the three partners' reports for the month (September
+  2026: 110 + 320 + 315 = 745, read 2026-10-19); a second dry run says every partner unchanged,
+  skipped. A refused partner is a Monthly Report to fix or chase (most often: not filed yet).
 - Blank submissions: `SELECT COUNT(Id) FROM Attendance_Batch__c WHERE Status_Message__c = 'No
   participants submitted'` grows only with real blanks; each is a club to ask, not a day blocked.
 - Club accounts without a parent: still exactly the two pilot accounts ("Club accounts in
-  Salesforce"). One more after an aggregate run means a count was typed under a name no account
+  Salesforce"). One more after a monthly copy means a batch went out under a name no account
   carries.
 
 ## Attendance dashboard in Salesforce

@@ -468,16 +468,6 @@ Status: open
 - Ryan's default 2026-10-06: leave them; a later, tested step with his go if staff ask
 - 2026-10-16: the three partners' 38 rosters are retired on the template and the Africa form (ticket #56; [Result](plans/2026-10-06-clubs-off-jotform.md#result)); their option lists stay, as above. The U.S clubs are not deactivated (the template's dry run retired 38, none for "no active girl"), so the U.S part of this item is still to come.
 
-### 72. The intake for partner-reported attendance counts is not decided
-
-Status: blocked-on-ryan
-
-- **The intake for partner-reported attendance counts is not decided** (`docs/plans/2026-10-06-attendance-totals.md`, F; Ryan is gathering information). Three partners' clubs leave the Jotform forms and report a monthly total per club instead, as an `Attendance_Batch__c` with `Girls_Present__c` typed, `Creator__c` `Partner report`, no names and the last day of the month as its date (the contract: RUNBOOK "Attendance totals and partner-reported counts").
-- Options: a small Jotform "aggregate attendance" form with its own Salesforce mapping; a screen flow or the plain record form in Salesforce for the coordinator; a sheet tab the partners fill and a dry-run repo tool (`tools/sf_aggregate_send.py`, built like `sf_backfill.py`) sends monthly.
-- Whichever: the club name must be the account's exactly, or the processor creates a partner-less account.
-- Its own plan once Ryan decides; the first aggregates land only after the three partners' clubs are off the Africa picker (plan 3)
-- **Rule since 2026-10-15 (Ryan, deployed in #35; supersedes the contract above where it implies `Creator__c` `Partner report` alone counts)**: the total counts a Salesforce-entered batch only when its club's parent account is Education and English for You, Tumaini La Maisha or Ng'aa Maskani; the `Creator__c` value does not decide it, so a `Partner report` batch for any other club is left out of the total. Whatever intake is chosen must type the counts for those three partners' clubs ([plan](plans/2026-10-15-attendance-total-three-partners.md); RUNBOOK "Attendance totals and partner-reported counts")
-
 ### 73. The three legacy blank `Success` batches
 
 Status: open
@@ -740,6 +730,18 @@ Status: done 2026-10-07
 Status: done 2026-10-06
 
 - **`form_status` pins the module chain's shape** (single-select, required, form-level `clearFieldOnHide=disable`; `module shape:` line, `--rendered` reads the served `JotForm.clearFieldOnHide` and refuses a module select served `multiple`) - **built 2026-10-06** ([plan](plans/2026-10-06-module-selection.md), RUNBOOK "The names dictionary and the module values"): a builder change becomes NOT CLEAN, not a silent change of what Salesforce receives. The audit's premise is Jotform's runtime (build `fc726a121d4`; 64 lists the builds seen since, not yet re-read): when `--rendered` prints a new build, re-read the submit handler's `clearFieldOnHide` branch (64's pattern)
+
+### 72. The intake for partner-reported attendance counts is not decided
+
+Status: done 2026-10-19
+
+- **The intake for partner-reported attendance counts is not decided** (`docs/plans/2026-10-06-attendance-totals.md`, F; Ryan is gathering information). Three partners' clubs leave the Jotform forms and report a monthly total per club instead, as an `Attendance_Batch__c` with `Girls_Present__c` typed, `Creator__c` `Partner report`, no names and the last day of the month as its date (the contract: RUNBOOK "Attendance totals and partner-reported counts").
+- Options: a small Jotform "aggregate attendance" form with its own Salesforce mapping; a screen flow or the plain record form in Salesforce for the coordinator; a sheet tab the partners fill and a dry-run repo tool (`tools/sf_aggregate_send.py`, built like `sf_backfill.py`) sends monthly.
+- Whichever: the club name must be the account's exactly, or the processor creates a partner-less account.
+- Its own plan once Ryan decides; the first aggregates land only after the three partners' clubs are off the Africa picker (plan 3)
+- **Rule since 2026-10-15 (Ryan, deployed in #35; supersedes the contract above where it implies `Creator__c` `Partner report` alone counts)**: the total counts a Salesforce-entered batch only when its club's parent account is Education and English for You, Tumaini La Maisha or Ng'aa Maskani; the `Creator__c` value does not decide it, so a `Partner report` batch for any other club is left out of the total. Whatever intake is chosen must type the counts for those three partners' clubs ([plan](plans/2026-10-15-attendance-total-three-partners.md); RUNBOOK "Attendance totals and partner-reported counts")
+- 2026-10-19: decided (Ryan) - no separate intake and no per-club counts. The three partners' figure is their Monthly Report's "Monthly Max" (`DHIS2__c.Monthly_Total__c`), copied once a month by `tools/sf_partner_monthly.py` (ticket #60) as one `Partner report` batch per partner on the partner account, dated the month's last day; this replaces the per-club contract above (RUNBOOK "Attendance totals and partner-reported counts"; DECISIONS 2026-10-19; [plan](plans/2026-10-19-partner-monthly-max.md)). The first run (September 2026) is the plan's Rollout, on Ryan's go; the dashboard reads these batches after #59
+- 2026-10-20: September 2026 copied on Ryan's go - three `Partner report` batches dated 2026-09-30, 110 + 320 + 315 = 745, equal to the three Monthly Reports ([Result](plans/2026-10-19-partner-monthly-max.md#result)); not in the dashboard's total until #59
 
 ### 75. The attendance processor's name match
 
