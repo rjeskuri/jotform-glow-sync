@@ -2749,10 +2749,13 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   account itself, whose parent is blank. Any other partner, or All, shows the right number.
 - A renamed partner account drops out of filter 4 (it matches the names): rename the filter values
   with the account, on Ryan's go.
-- **Reports no longer used** since 2026-10-21 (#59): `Total_Attendance_Last_Month`,
-  `Jotform_Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month` and
-  `Jotform_Attendance_This_Month`. They are kept until Ryan decides which to delete (only this
-  dashboard was retrieved, so another dashboard's use of them is unchecked).
+- **Reports deleted** 2026-10-21 05:22:34 UTC on Ryan's go, the four the dashboard stopped using
+  with #59: `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`,
+  `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month` (destructive deploy
+  `0AfRP000002hhq90AA`, check-only `0AfRP000002hhmv0AA`, from
+  `data/sf_girls_tiles_2026-10-20/delete_old_reports/`). Before the delete, SOQL on
+  `DashboardComponent` showed no dashboard using them; after it, SOQL on `Report` finds only the
+  three `Girls_Attended_*` of the seven names. Their rollback: Rollback, below.
 - The signal for each tile (SOQL) and the blank key: "Attendance totals and partner-reported
   counts", Signals.
 
@@ -2832,15 +2835,15 @@ sharing stays as it is"):
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
 - **`gen.py` is behind what is live: never use it as it is.** It builds `totals1/` (2026-10-07)
   and was not updated for the 2026-10-09 Access change or the 2026-10-15 change (the total as
-  Jotform plus the three partners, the new report `Jotform_Total_Attendance_Last_Month`, the four
-  tiles #59 replaces), nor for #59; a deploy of its build would undo them on the dashboard and the
-  two Total reports. The 2026-10-15 change was made by editing a fresh retrieve
-  (`data/sf_totals2_2026-10-15/before/`), and the deployed state was retrieved back into
-  `data/sf_totals2_2026-10-15/after/` (0 differences from the build). #59 was built the same way,
-  from the fresh retrieve `data/sf_girls_tiles_2026-10-20/before/` (into `build/`), deployed
-  2026-10-21 and read back into `data/sf_girls_tiles_2026-10-20/after/`: that is what is live
-  today. A change starts from a fresh retrieve of what is live and edits that (The
-  steps, below).
+  Jotform plus the three partners, the new report `Jotform_Total_Attendance_Last_Month`
+  (deleted 2026-10-21), the four tiles #59 replaces), nor for #59; a deploy of its build would
+  undo them on the dashboard and the two Total reports. The 2026-10-15 change was made by
+  editing a fresh retrieve (`data/sf_totals2_2026-10-15/before/`), and the deployed state was
+  retrieved back into `data/sf_totals2_2026-10-15/after/` (0 differences from the build). #59
+  was built the same way, from the fresh retrieve `data/sf_girls_tiles_2026-10-20/before/` (into
+  `build/`), deployed 2026-10-21 and read back into `data/sf_girls_tiles_2026-10-20/after/`: that
+  is what is live today. A change starts from a fresh retrieve of what is live and edits that
+  (The steps, below).
 - What built `totals1/` and the copies before it is in `data/sf_dashboard_2026-10-02/`. `gen.py`
   builds every report, the batch report type `Attendance_Totals` and the dashboard into `build/`,
   from:
@@ -2875,27 +2878,29 @@ sharing stays as it is"):
     00ORP000009c8ic2AA, `Jotform_Attendance_by_Partner_by_Month` 00ORP000009c8ia2AA,
     `Total_Attendance_Last_Month` 00ORP000009c8ib2AA, `Clubs_Not_Submitting_Last_14_Days`
     00ORP000009c8iY2AQ, `Clubs_Not_Submitting_Since_1_Sept` 00ORP000009c8iZ2AQ,
-    `Blank_Submissions` 00ORP000009c8iX2AQ.
+    `Blank_Submissions` 00ORP000009c8iX2AQ. The two Total reports among them were deleted
+    2026-10-21 (#59; "The headline tiles", above).
   - `data/sf_totals2_2026-10-15/`: the 2026-10-15 change (the total as Jotform plus the three
     partners). `before/` is what was live just before it (the dashboard, the reports
     `Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month`,
     `Jotform_Attendance_by_Partner_by_Month` and the report type `Attendance_Totals`); the
     rollback deploys only the three of them the deploy changed (Rollback, below); `after/` is the
-    read-back of the deploy (0 differences from the build).
+    read-back of the deploy (0 differences from the build). Its two Total reports and
+    `Jotform_Total_Attendance_Last_Month` were deleted 2026-10-21.
 - After a deploy, Salesforce writes `expandOthers` true on every report chart and drops or adds a
   few default attributes on the dashboard (for `totals1/`: `useReportChart` dropped,
   `showPicturesOnCharts` and the owner added, apostrophes escaped). A retrieve differs from
   `gen.py` only in those.
 - **The steps:**
-  1. Back up what is live: `sf project retrieve start -o glow` the reports below (the six
-     `Jotform_*` of the first deploy; the six of `totals1/`, the two Total reports
-     `Total_Attendance_Last_Month` and `Total_Attendance_by_Partner_by_Month` among them;
-     `Jotform_Total_Attendance_Last_Month` of 2026-10-15; and the report type
-     `Attendance_Totals`), the test report and the dashboard
-     (`Dashboard:Attendance/Jotform_Attendance_test`), into a new dated folder (as
-     `data/sf_totals2_2026-10-15/before/`). It is the starting point and, for only the components
-     the change then makes, the rollback (Rollback, below); compare it
-     with `data/sf_totals2_2026-10-15/after/` (or the latest read-back) to see whether anything
+  1. Back up what is live: `sf project retrieve start -o glow` the reports below (the
+     `Jotform_*` of the first deploy; the six of `totals1/`; and the report type
+     `Attendance_Totals`; since 2026-10-21 without the four deleted reports,
+     `Jotform_Attendance_This_Month`, the two Total reports `Total_Attendance_Last_Month` and
+     `Total_Attendance_by_Partner_by_Month`, and `Jotform_Total_Attendance_Last_Month`), the
+     test report and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a new
+     dated folder (as `data/sf_totals2_2026-10-15/before/`). It is the starting point and, for
+     only the components the change then makes, the rollback (Rollback, below); compare it with
+     `data/sf_totals2_2026-10-15/after/` (or the latest read-back) to see whether anything
      changed in Salesforce since. Since #59 (2026-10-21) the backup also takes its 10 components
      (as in `data/sf_girls_tiles_2026-10-20/after/`), and that `after/` is the latest read-back.
   2. Copy that retrieve and edit the copy, only the files that change. A new partner's Partner
@@ -2929,11 +2934,12 @@ sharing stays as it is"):
 - The new components: delete them with a `destructiveChanges.xml`. Never delete
   `Jotform_Monthly_Attendance_test`; it predates this work. The new components are:
   - the reports `Jotform_Attendance_by_Week`, `Jotform_Attendance_by_Month`,
-    `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month`,
+    `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month` (deleted 2026-10-21),
     `Jotform_Sessions_by_Module_Last_Month` and `Jotform_Clubs_No_Attendance_Last_Month`;
   - the dashboard `Jotform_Attendance_test`;
-  - since `totals1/` (2026-10-07): the reports `Total_Attendance_by_Partner_by_Month`,
-    `Jotform_Attendance_by_Partner_by_Month`, `Total_Attendance_Last_Month`,
+  - since `totals1/` (2026-10-07): the reports `Total_Attendance_by_Partner_by_Month` (deleted
+    2026-10-21), `Jotform_Attendance_by_Partner_by_Month`, `Total_Attendance_Last_Month` (deleted
+    2026-10-21),
     `Clubs_Not_Submitting_Last_14_Days`, `Clubs_Not_Submitting_Since_1_Sept` and
     `Blank_Submissions`, then - **last**, after the six reports that use it - the report type
     `Attendance_Totals`; never `Attendance_Batches` (the vendor's report type). The dashboard
@@ -2959,7 +2965,10 @@ sharing stays as it is"):
   with it. The new report `Jotform_Total_Attendance_Last_Month` may stay (the dashboard no longer
   references it after the rollback), or goes with a `destructiveChanges.xml` after the dashboard.
   Since #59 is deployed (2026-10-21), the dashboard's fresh retrieve differs from `after/`, so
-  this rollback stops at its check: roll #59 back first (next).
+  this rollback stops at its check: roll #59 back first (next). Its three reports,
+  `Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month` and
+  `Jotform_Total_Attendance_Last_Month`, were deleted 2026-10-21 too: they come back with the
+  deleted reports' rollback (below).
 - The #59 change (the two girls-who-attended tiles, deployed 2026-10-21), [plan](plans/2026-10-20-girls-attended-tiles.md#rollback).
   `data/sf_girls_tiles_2026-10-20/before/` is the fresh retrieve of what was live on 2026-10-20
   right before it (its dashboard identical to what the 2026-10-15 deploy left). #59 changed two
@@ -2973,8 +2982,9 @@ sharing stays as it is"):
      `data/sf_girls_tiles_2026-10-20/after/`, the read-back; if either differs (beyond
      Salesforce's normalisation), someone changed it since - stop and build the rollback from
      that fresh retrieve instead.
-  2. Equal: Ryan's go. From `data/sf_girls_tiles_2026-10-20/before/`, redeploy only those two
-     files: copy `before/dashboards/Attendance/Jotform_Attendance_test.dashboard-meta.xml` to
+  2. Equal: Ryan's go. First bring back the four deleted reports (the deleted reports' rollback,
+     below), because `before/`'s dashboard reads them. From `data/sf_girls_tiles_2026-10-20/before/`,
+     redeploy only those two files: copy `before/dashboards/Attendance/Jotform_Attendance_test.dashboard-meta.xml` to
      `<new folder>/force-app/main/default/dashboards/Attendance/` and
      `before/permissionsets/Attendance_Report_Viewer.permissionset-meta.xml` to
      `<new folder>/force-app/main/default/permissionsets/`, beside an `sfdx-project.json` (as
@@ -3000,6 +3010,12 @@ sharing stays as it is"):
      command minus `--dry-run`. The next deploy starts after this one succeeded.
   4. Retrieve the dashboard and the permission set again and compare with `before/`. The four
      reports #59 stopped using are back on the dashboard; revert #59's RUNBOOK change with it.
+- The four reports deleted 2026-10-21 (`Total_Attendance_Last_Month`,
+  `Jotform_Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month`,
+  `Jotform_Attendance_This_Month`; destructive deploy `0AfRP000002hhq90AA`): redeploy any of them
+  from `data/sf_girls_tiles_2026-10-20/before/reports/Attendance/` - a new folder with an
+  `sfdx-project.json` and the report's file under `force-app/main/default/reports/Attendance/`,
+  check-only, Ryan's go, deploy.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
 

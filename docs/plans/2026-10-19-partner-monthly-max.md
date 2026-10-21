@@ -32,6 +32,9 @@ combined number: Jotform girls plus the three partners' Monthly Max.
   a batch on the partner account itself; #59 changes the dashboard to read these batches.
   2026-10-20: still so after the September 2026 copy - its three batches (745) are in the data,
   not in the dashboard's total, until #59.
+  2026-10-21: the partner batches count in the dashboard's tiles since 2026-10-21 (#59, Ryan's
+  go; last month 3,633 = 2,888 Jotform girls + 745,
+  [Result](2026-10-20-girls-attended-tiles.md#result)).
 
 ## Build
 

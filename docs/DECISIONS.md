@@ -644,6 +644,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Why:** Ryan, 2026-10-19: no separate intake; the number is the one their Monthly Report already carries. The partners file it anyway (between the 5th and the 12th of the next month), so nothing new is asked of them.
 - **Rejected:** the intake options of BACKLOG 72 (a small Jotform form, a Salesforce screen flow, a sheet import - all per club); summing the Monthly Report's weekly counts ([plan](plans/2026-10-06-attendance-totals.md), "Not chosen": a partner that ticks "submitted electronically" and still types counts would be counted twice).
 - **Consequences:** a monthly run after the reports are filed (about the 12th), dry run first and `--apply --vpn-off` on Ryan's go; the batches sit on the partner accounts, which the 2026-10-15 total's filter 3 (the club's parent is one of the three) does not match until #59; a Monthly Report corrected after the copy becomes an update on the next run (old → new, the ledger keeps the old count).
+- 2026-10-21: the partner batches count in the dashboard's tiles since 2026-10-21 (#59, deployed on Ryan's go; see the 2026-10-20 entry).
 
 ### 2026-10-20 — The dashboard's headline is girls who attended (Jotform + 3 partners); total attendance is no longer tracked
 

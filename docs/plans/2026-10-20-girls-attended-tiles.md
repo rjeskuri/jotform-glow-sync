@@ -59,7 +59,8 @@ judgement calls, the offline checks), `DIFF.md` (the dashboard and the permissio
 - No longer used by the dashboard once deployed, kept until Ryan decides which to delete: the
   reports `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`,
   `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month` (only this dashboard
-  was retrieved, so another dashboard's use of them is unchecked).
+  was retrieved, so another dashboard's use of them is unchecked). 2026-10-21: Ryan chose to
+  delete all four; deleted that day (Result).
 - Unverified until the check-only deploy (BUILD.md, judgement calls 1 and 2): the summary
   formula's token `Attendance__c.Contact__c:UNIQUE + Attendance_Batch__c.Partner_Girls__c:SUM`
   (about 75%) and the `FORMULA1` chartSummary with no aggregate (about 90%). If the check-only
@@ -119,7 +120,11 @@ the change; it is a rollback only for this change, while a retrieve still equals
 1. VPN off. Retrieve the dashboard and the permission set fresh and compare with `after/` (the
    read-back of 2026-10-21); if either differs beyond Salesforce's normalisation, stop and build
    the rollback from that fresh retrieve instead.
-2. Equal: Ryan's go. From `data/sf_girls_tiles_2026-10-20/before/`, redeploy only the dashboard
+2. Equal: Ryan's go. First bring back the four reports deleted 2026-10-21, because `before/`'s
+   dashboard reads them: each from `data/sf_girls_tiles_2026-10-20/before/reports/Attendance/`, in
+   a new folder with an `sfdx-project.json` and the file under
+   `force-app/main/default/reports/Attendance/`, check-only, Ryan's go, deploy (the same restores
+   any one of them alone). From `data/sf_girls_tiles_2026-10-20/before/`, redeploy only the dashboard
    and the permission set: copy `before/dashboards/Attendance/Jotform_Attendance_test.dashboard-meta.xml`
    to `<new folder>/force-app/main/default/dashboards/Attendance/` and
    `before/permissionsets/Attendance_Report_Viewer.permissionset-meta.xml` to
@@ -197,4 +202,10 @@ Deployed on Ryan's go at each prompt, 2026-10-21 (VPN off, CLI login `glow`); co
 - **Read-back**: all 10 components retrieved into `data/sf_girls_tiles_2026-10-20/after/`, equal
   to `build/` apart from Salesforce's normalisation (XML entities, the default `trackTrending`,
   `BlankAsBlank` omitted, the full Admin profile returned with the three read-only entries).
-- The four reports the dashboard no longer uses are kept until Ryan decides which to delete.
+- **The four reports the dashboard stopped using, deleted** on Ryan's go (he chose all four):
+  `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`,
+  `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month`, destructive deploy
+  `0AfRP000002hhq90AA` 2026-10-21 05:22:34 UTC (check-only `0AfRP000002hhmv0AA`), from
+  `data/sf_girls_tiles_2026-10-20/delete_old_reports/`. Before it, SOQL on `DashboardComponent`
+  showed no dashboard using them; after it, SOQL on `Report` finds only the three
+  `Girls_Attended_*` of the seven names. Their rollback: Rollback, step 2.
