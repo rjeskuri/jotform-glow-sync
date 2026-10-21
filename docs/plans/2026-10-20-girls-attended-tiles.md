@@ -1,7 +1,8 @@
 ---
 title: The dashboard's top row becomes two girls-who-attended tiles (Jotform + 3 partners); total attendance no longer tracked
 author: Claude (with Ryan's decisions of 2026-10-19)
-status: accepted         # ticket #59; built 2026-10-20 in data/sf_girls_tiles_2026-10-20/build/, not deployed (awaits Ryan's go)
+status: done             # ticket #59; deployed on Ryan's go 2026-10-21 04:59-05:10 UTC in two phases, read back (Result)
+done: 2026-10-21
 backlog: 72
 created: 2026-10-20
 intent: none - Ryan's request of 2026-10-19 (ticket #59)
@@ -29,8 +30,8 @@ de-duplication.
   attended (Jotform only)" tiles, and the chart "Total attendance per month (Jotform + 3
   partners)".
 - The partners' batches sit on the partner accounts themselves (#60), so the 2026-10-15 filter on
-  the club's parent misses them: September 2026's three batches (745) are in the data, outside
-  today's dashboard.
+  the club's parent misses them: September 2026's three batches (745) were in the data, outside
+  the 2026-10-15 dashboard.
 - Salesforce limits (2026-10-19): a dashboard Metric reads one report; a joined report reaches a
   dashboard only as a chart, so both parts share one report type; a summary formula may use
   unique counts (`FIELD:UNIQUE`), at most three per report.
@@ -53,7 +54,8 @@ judgement calls, the offline checks), `DIFF.md` (the dashboard and the permissio
   `Attendance__c.Contact__c` + the sum of `Partner_Girls__c`.
 - Changed: the dashboard (the two tiles, the chart "Girls who attended per month (Jotform + 3
   partners)", two bullets of "How to read this dashboard"); the permission set
-  `Attendance_Report_Viewer` and the Admin profile (Read on the new field, one entry each).
+  `Attendance_Report_Viewer` and the Admin profile (Read on the new field, one entry each; three
+  since the deploy's two added fields, below).
 - No longer used by the dashboard once deployed, kept until Ryan decides which to delete: the
   reports `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`,
   `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month` (only this dashboard
@@ -63,6 +65,13 @@ judgement calls, the offline checks), `DIFF.md` (the dashboard and the permissio
   (about 75%) and the `FORMULA1` chartSummary with no aggregate (about 90%). If the check-only
   refuses either, fix all three reports and the dashboard the same way, in the fallback order of
   `data/sf_girls_tiles_2026-10-20/build/BUILD.md`, and check-only again.
+  - 2026-10-21, at the deploy (Result): the chartSummary passed; the token did not - a summary
+    formula cannot unique-count a lookup. Two formula fields were added to the build:
+    `Attendance__c.Contact_Key__c` = `CASESAFEID(Contact__c)` (the girl's record id as text, never
+    a name), which the reports unique-count, and `Attendance__c.Has_Row__c` = 1. `FORMULA1` became
+    `Attendance__c.Contact_Key__c:UNIQUE - IF(RowCount > Attendance__c.Has_Row__c:SUM, 1, 0) +
+    Attendance_Batch__c.Partner_Girls__c:SUM`, labelled "Girls who attended (Jotform + partners)"
+    (40-character limit); the build holds 10 components.
 
 ## Rollout (live, two phases; each deploy on Ryan's go)
 
@@ -107,25 +116,24 @@ reports are deployed and checked against SOQL before the dashboard reads them.
 `data/sf_girls_tiles_2026-10-20/before/` is the fresh retrieve of what was live right before
 the change; it is a rollback only for this change, while a retrieve still equals `build/` (or
 `after/`) - DECISIONS 2026-10-16.
-1. VPN off. Retrieve the dashboard and the permission set fresh and compare with `after/` (or
-   `build/`; after phase 1 alone, the permission set and `before/`'s dashboard); if either
-   differs, stop and build the rollback from that fresh retrieve instead.
+1. VPN off. Retrieve the dashboard and the permission set fresh and compare with `after/` (the
+   read-back of 2026-10-21); if either differs beyond Salesforce's normalisation, stop and build
+   the rollback from that fresh retrieve instead.
 2. Equal: Ryan's go. From `data/sf_girls_tiles_2026-10-20/before/`, redeploy only the dashboard
    and the permission set: copy `before/dashboards/Attendance/Jotform_Attendance_test.dashboard-meta.xml`
    to `<new folder>/force-app/main/default/dashboards/Attendance/` and
    `before/permissionsets/Attendance_Report_Viewer.permissionset-meta.xml` to
    `<new folder>/force-app/main/default/permissionsets/`, beside an `sfdx-project.json` (as
    `build/`'s), then within `<new folder>` `sf project deploy start --dry-run -o glow -d force-app`
-   and the same command minus `--dry-run`. After phase 1 alone, the permission set only. The rest
-   of `before/` is never deployed from it.
-3. Delete the five new components in three destructive deploys, in this order, each a
+   and the same command minus `--dry-run`. The rest of `before/` is never deployed from it.
+3. Delete the seven new components in three destructive deploys, in this order, each a
    `destructiveChanges.xml` beside an empty `package.xml`, check-only first, on Ryan's go:
    - first the reports `Girls_Attended_Last_Month`, `Girls_Attended_This_Month` and
      `Girls_Attended_by_Month` (`Report` members `Attendance/Girls_Attended_Last_Month` and so on;
      they may also go as the `--pre-destructive-changes` file of the report type's deploy);
    - then the report type `Attendance_Batches_and_Girls` (`ReportType`);
-   - then the field `Attendance_Batch__c.Partner_Girls__c` (`CustomField`; its Admin profile
-     entry goes with it).
+   - then the three fields `Attendance_Batch__c.Partner_Girls__c`, `Attendance__c.Contact_Key__c`
+     and `Attendance__c.Has_Row__c` (`CustomField`; their Admin profile entries go with them).
 
    Each deploy is its own folder holding an empty `package.xml` (`<Package>` with only
    `<version>62.0</version>`) and a `destructiveChanges.xml` listing that deploy's components,
@@ -141,10 +149,13 @@ the change; it is a rollback only for this change, while a retrieve still equals
 - **The summary formula's token and the `FORMULA1` chartSummary** are unverified until the
   check-only deploy (BUILD.md: about 75% and 90%). Mitigation: if refused, the same fix in all
   three reports and the dashboard, in BUILD.md's fallback order, or build the formula once in
-  the report builder and retrieve it.
+  the report builder and retrieve it. 2026-10-21: the token was refused; fixed with
+  `Contact_Key__c` (Build).
 - **A blank `Contact__c` counted as one girl** would make each tile one too high; **filter 5
   dropping the partner batches** would make last month's 745 too low. Mitigation: the reports'
-  SOQL check of Rollout step 4, before the dashboard is deployed.
+  SOQL check of Rollout step 4, before the dashboard is deployed. 2026-10-21: the empty key did
+  count as one (2,889 against 2,888); `Has_Row__c` and the `IF(RowCount > …)` term take it off.
+  Filter 5 kept the partner batches (745 in last month's total).
 - **The Partner filter** set to one of the three partners shows only its Jotform girls (0 since
   2026-10-16): its batch sits on the partner account, whose parent is blank. Stated in the RUNBOOK.
 - **A renamed partner account** drops out of filter 4 (it matches the names). Mitigation: rename
@@ -159,5 +170,31 @@ the change; it is a rollback only for this change, while a retrieve still equals
 
 ## Result
 
-Not deployed yet: built 2026-10-20 in `data/sf_girls_tiles_2026-10-20/build/`, checked offline
-only (BUILD.md); both phases' check-only deploys and deploys wait for Ryan's go.
+Deployed on Ryan's go at each prompt, 2026-10-21 (VPN off, CLI login `glow`); counts only.
+
+- **Check-only probes**: `Attendance__c.Contact__c:UNIQUE` and `Attendance_Batch__c.Account__c:UNIQUE`
+  were refused ("does not exist"): a summary formula cannot unique-count a lookup. The token form
+  is the object API name and the field (`Attendance_Batch__c.X`, `Attendance__c.X`). The build
+  gained the text formula field `Attendance__c.Contact_Key__c` = `CASESAFEID(Contact__c)`.
+- **Phase 1** `0AfRP000002hhdF0AQ`, 04:59 UTC: the fields `Partner_Girls__c` and `Contact_Key__c`,
+  the report type, the three reports, the permission set and the Admin profile entries. Its
+  reports through the Analytics API: the unique count counted the empty key of a row-less batch
+  as one value (2,889 against SOQL's 2,888 last month, 2,945 against 2,944 this month).
+- **The `Has_Row__c` fix** `0AfRP000002hhi50AA`, 05:06 UTC (check-only `0AfRP000002hhgT0AQ`): the
+  number formula field `Attendance__c.Has_Row__c` = 1, Read on it in the permission set and the
+  Admin profile, and `FORMULA1` = `Attendance__c.Contact_Key__c:UNIQUE - IF(RowCount >
+  Attendance__c.Has_Row__c:SUM, 1, 0) + Attendance_Batch__c.Partner_Girls__c:SUM` (one off only
+  when a row-less batch is in the period), labelled "Girls who attended (Jotform + partners)"
+  (40-character limit); the by-month report's chart title is "Girls who attended per month".
+- **Reports against SOQL before phase 2** (Analytics API, `includeDetails=false`): last month
+  3,633 = 2,888 (`COUNT_DISTINCT(Contact__c)` over the Jotform rows by batch date) + 745; this
+  month 2,944 = 2,944 + 0; by month September 3,633, October 2,944.
+- **Phase 2** `0AfRP000002hhlJ0AQ`, 05:08 UTC (check-only `0AfRP000002hhjh0AA`): the dashboard;
+  its component headers stay "Girls who attended (Jotform + 3 partners)" and "Girls who attended
+  per month (Jotform + 3 partners)".
+- **Refreshed** 2026-10-21 05:10:44 UTC: the tiles read 3,633 (last month) and 2,944 (this month
+  so far).
+- **Read-back**: all 10 components retrieved into `data/sf_girls_tiles_2026-10-20/after/`, equal
+  to `build/` apart from Salesforce's normalisation (XML entities, the default `trackTrending`,
+  `BlankAsBlank` omitted, the full Admin profile returned with the three read-only entries).
+- The four reports the dashboard no longer uses are kept until Ryan decides which to delete.

@@ -2527,9 +2527,9 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 ## Attendance totals and partner-reported counts
 
 - **When:** reading an attendance total; the monthly `check`; the three partners' monthly copy, about the 12th of each month.
-- **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); decided 2026-10-19 (BACKLOG 72, ticket #60): the three partners' figure is their Monthly Report's Monthly Max, copied monthly by `tools/sf_partner_monthly.py`; September 2026 copied on Ryan's go 2026-10-20 07:33-07:38 UTC: three `Partner report` batches dated 2026-09-30, 110 + 320 + 315 = 745, read back equal to the three Monthly Reports ([Result](plans/2026-10-19-partner-monthly-max.md#result)); decided 2026-10-19 (ticket #59): the dashboard's measure becomes girls who attended, Jotform girls plus the three partners' Monthly Max - built 2026-10-20, not deployed (awaits Ryan's go, in two phases: the field and the reports, checked against SOQL, then the dashboard; [plan](plans/2026-10-20-girls-attended-tiles.md)).
+- **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); decided 2026-10-19 (BACKLOG 72, ticket #60): the three partners' figure is their Monthly Report's Monthly Max, copied monthly by `tools/sf_partner_monthly.py`; September 2026 copied on Ryan's go 2026-10-20 07:33-07:38 UTC: three `Partner report` batches dated 2026-09-30, 110 + 320 + 315 = 745, read back equal to the three Monthly Reports ([Result](plans/2026-10-19-partner-monthly-max.md#result)); decided 2026-10-19 (ticket #59): the dashboard's measure is girls who attended, Jotform girls plus the three partners' Monthly Max - deployed on Ryan's go 2026-10-21 04:59-05:10 UTC, the reports first (checked against SOQL), then the dashboard, read back; tiles 3,633 last month and 2,944 this month at the 05:10 UTC refresh ([Result](plans/2026-10-20-girls-attended-tiles.md#result)).
 - **Verify:** the Signals, below.
-- **Rollback:** of a monthly copy, from `data/sf_partner_monthly/ledger.csv` (each batch's last row is its state): delete an inserted batch by its `batch_id`, set an updated one's `Girls_Present__c` back to the row's `old` count - one record per call, VPN off, Ryan's go ([plan](plans/2026-10-19-partner-monthly-max.md#rollback)). Of #59's tiles, once deployed: "Attendance dashboard in Salesforce", Rollback. Of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
+- **Rollback:** of a monthly copy, from `data/sf_partner_monthly/ledger.csv` (each batch's last row is its state): delete an inserted batch by its `batch_id`, set an updated one's `Girls_Present__c` back to the row's `old` count - one record per call, VPN off, Ryan's go ([plan](plans/2026-10-19-partner-monthly-max.md#rollback)). Of #59's tiles: "Attendance dashboard in Salesforce", Rollback. Of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
 
 Three partners' clubs report their attendance through Salesforce only (Ryan, 2026-10-06). Since
 2026-10-16 the three partners are marked `no` in the Partners tab's `jotform` column and their 38
@@ -2577,13 +2577,12 @@ ticket #35):
 - Any other club's attendance entered in Salesforce (a `Success` batch whose `Creator__c` does
   not start with `Jotform`, other than the three partners' `Partner report` batches) is left out
   of the tiles. A Jotform batch from one of the three partners' clubs counts in the Jotform part.
-- The reports, the formula field and the filter that make the tiles: "Attendance dashboard in
+- The reports, the formula fields and the filter that make the tiles: "Attendance dashboard in
   Salesforce".
-- The deployed dashboard is the 2026-10-15 one until the #59 deploy: its filter 3 (a club whose
-  parent is one of the three partners) misses the monthly copy, whose batch sits on the partner
-  account itself, so September 2026's three copied batches (745) are in the data and outside its
-  figures. Once #59 is deployed, the tiles read them through the report type
-  `Attendance_Batches_and_Girls`.
+- The monthly copy's batch sits on the partner account itself, which the 2026-10-15 filter 3 (a
+  club whose parent is one of the three partners) missed; since 2026-10-21 the tiles read these
+  batches through the report type `Attendance_Batches_and_Girls` (September 2026: 745 of last
+  month's 3,633).
 - The Monthly Report's weekly counts are never added to attendance. Only the three partners'
   Monthly Max is copied, as one batch a month (below); every other partner's Monthly Report stays
   out (DECISIONS 2026-10-19).
@@ -2604,7 +2603,7 @@ one `Attendance_Batch__c` per partner for the month:
 | `Attendance_Date__c` | the **last day of the month** |
 | `Girls_Present__c` | the Monthly Max, a whole number above 0 |
 | `Contact_IDs__c` | **empty** - no names, ever |
-| `Creator__c` | `Partner report`: the tiles' partner part (`Partner_Girls__c`, once #59 is deployed); it never counts in a Jotform-only report, which takes only `Creator__c` values starting with `Jotform` |
+| `Creator__c` | `Partner report`: the tiles' partner part (`Partner_Girls__c`, since #59); it never counts in a Jotform-only report, which takes only `Creator__c` values starting with `Jotform` |
 | `enable_fuzzy_matching__c` | false |
 
 ```
@@ -2647,24 +2646,21 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
   `differ` is a Jotform `Success` batch whose count is not its rows; a `without a value` is a
   `Success` batch the processor or the back-fill did not count. Aggregate batches are not compared
   (no rows by design).
-- The dashboard's two tiles, once #59 is deployed (and its two reports between the deploy's two
-  phases): each tile = `COUNT_DISTINCT(Contact__c)` over the month's Jotform `Attendance__c` rows,
-  by the batch's date as the reports filter (`SELECT COUNT_DISTINCT(Contact__c) FROM
-  Attendance__c WHERE Attendance_Batch__r.Attendance_Date__c = LAST_MONTH AND
-  Attendance_Batch__r.Processing_Status__c = 'Success' AND Attendance_Batch__r.Creator__c LIKE
-  'Jotform%'`; `THIS_MONTH` for the other tile) + `SUM(Girls_Present__c)` over the three partners'
-  `Partner report` batches for the month (the monthly copy's query, next). Read 2026-10-20: last
-  month 2,888 + 745 = 3,633, this month 2,893 + 0.
-- **Open until the reports are deployed: the blank `Contact__c`.** The report type gives each
-  batch without rows (the three partners' batches among them) one report row with a blank
-  `Contact__c`, and whether the unique count ignores it is checked only then, in the reports'
-  check between the two phases ([plan](plans/2026-10-20-girls-attended-tiles.md), Rollout step
-  4): last month's report equal to the SOQL sum above means it is ignored; one more means the
-  blank counts as a girl; 745 less means the Partner filter's `Parent` contains "" drops the
-  partner batches. Either way stop and ask Ryan before the dashboard is deployed.
-- Before the #59 deploy, the 2026-10-15 last-month tiles that #59 replaces equal `SELECT COUNT(Id)
-  FROM Attendance__c WHERE Attendance_Date__c = LAST_MONTH` (September 2026: 7,227, read
-  2026-10-15); filter 3 misses the partner account (above), so the copied 745 are outside them.
+- The dashboard's two tiles (since 2026-10-21, #59): each tile, the reports' `FORMULA1`, =
+  `COUNT_DISTINCT(Contact__c)` over the month's Jotform `Attendance__c` rows, by the batch's date
+  as the reports filter (`SELECT COUNT_DISTINCT(Contact__c) FROM Attendance__c WHERE
+  Attendance_Batch__r.Attendance_Date__c = LAST_MONTH AND Attendance_Batch__r.Processing_Status__c
+  = 'Success' AND Attendance_Batch__r.Creator__c LIKE 'Jotform%'`; `THIS_MONTH` for the other
+  tile) + `SUM(Girls_Present__c)` over the three partners' `Partner report` batches for the month
+  (the monthly copy's query, next). Read 2026-10-21: last month 3,633 = 2,888 + 745, this month
+  2,944 = 2,944 + 0; the by-month chart September 3,633, October 2,944.
+- **The blank key, settled 2026-10-21.** The report type gives each batch without rows (the three
+  partners' batches among them) one report row with an empty `Contact_Key__c`, and the unique
+  count counts it as one value (read 2026-10-21: 2,889 against SOQL's 2,888 last month, 2,945
+  against 2,944 this month). `FORMULA1` takes it back off - one when the period has a row-less
+  batch (`RowCount` above the sum of `Has_Row__c`), else 0 - so the tiles equal the SOQL sum
+  above. A tile one above it means that correction broke; 745 less last month means the
+  partners' batches dropped out of the filter: stop and ask Ryan either way.
 - The monthly copy, after its run: `SELECT Account__r.Name, Girls_Present__c, Processing_Status__c
   FROM Attendance_Batch__c WHERE Creator__c = 'Partner report' AND Attendance_Date__c = <the
   month's last day> AND Account__r.Name IN ('Education and English for You', 'Tumaini La Maisha',
@@ -2682,7 +2678,7 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
 ## Attendance dashboard in Salesforce
 
 - **When:** a new partner (the Partner filter), a new staff user (the permission set), a report change.
-- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); #59, the two "Girls who attended (Jotform + 3 partners)" tiles: built 2026-10-20 in `data/sf_girls_tiles_2026-10-20/build/`, not deployed (awaits Ryan's go, in two phases: the field, the permission set, the report type and the three reports, checked against SOQL; then the dashboard; [plan](plans/2026-10-20-girls-attended-tiles.md#rollout-live-two-phases-each-deploy-on-ryans-go)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
+- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); #59, the two "Girls who attended (Jotform + 3 partners)" tiles: deployed on Ryan's go 2026-10-21 - phase 1 (the fields, the report type, the three reports, the permission set and the Admin profile entries) `0AfRP000002hhdF0AQ` 04:59 UTC, the `Has_Row__c` fix `0AfRP000002hhi50AA` 05:06 UTC (check-only `0AfRP000002hhgT0AQ`), phase 2 (the dashboard) `0AfRP000002hhlJ0AQ` 05:08 UTC (check-only `0AfRP000002hhjh0AA`); all 10 components read back into `data/sf_girls_tiles_2026-10-20/after/`, equal to `build/` apart from Salesforce's normalisation ([Result](plans/2026-10-20-girls-attended-tiles.md#result)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
 - **Dry run:** the check-only deploy (`--dry-run`), step 4 of "The steps".
 - **Apply:** the same without `--dry-run`, Ryan's go (VPN off).
 - **Verify:** retrieve again and compare with the build; one report's totals against SOQL.
@@ -2698,35 +2694,38 @@ by module, the clubs with no attendance or not submitting, the blank submissions
 read its numbers (a session, a blank and "did not submit" defined; late submissions, so "last
 month" settles around the 20th; a club without a partner; the refresh is a snapshot): [plan](plans/2026-10-02-attendance-dashboard.md#from-the-runbook-moved-2026-10-09).
 
-**The headline tiles** (ticket #59, [plan](plans/2026-10-20-girls-attended-tiles.md); built
-2026-10-20 in `data/sf_girls_tiles_2026-10-20/build/`, awaiting Ryan's go: this part says what the
-dashboard does once it is deployed; its `BUILD.md` describes every component. The deploy has two
-phases, each check-only first and on Ryan's go: the field, the permission set, the Admin profile
-entry, the report type and the three reports (`build/package-phase1.xml`), whose two Metric
-reports are checked against SOQL through the Analytics API before phase 2 deploys the dashboard
-(`build/package-phase2.xml`; [plan](plans/2026-10-20-girls-attended-tiles.md), Rollout. The
-summary formula's token and the `FORMULA1` chartSummary are unverified until the check-only: if
-refused, fix the three reports and the dashboard the same way, in `BUILD.md`'s fallback order):
-- Once #59 is deployed, the top row is two tiles headed "Girls who attended (Jotform + 3
+**The headline tiles** (ticket #59, [plan and Result](plans/2026-10-20-girls-attended-tiles.md);
+deployed 2026-10-21 in two phases, the reports first, checked against SOQL through the Analytics
+API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describes the build, and
+`after/` beside it is the read-back):
+- Since 2026-10-21 (#59) the top row is two tiles headed "Girls who attended (Jotform + 3
   partners)", one for last month and one for this month so far.
 - Each tile is the month's girls who attended, Jotform and the three partners together; how it is
   computed is in "Attendance totals and partner-reported counts".
 - The four tiles of 2026-10-15 are replaced by these two; total attendance (girls × sessions) is
-  no longer tracked (Ryan, 2026-10-19). Until the deploy, the 2026-10-15 top row is what is live
-  ([plan](plans/2026-10-15-attendance-total-three-partners.md)).
+  no longer tracked (Ryan, 2026-10-19). The 2026-10-15 change:
+  [plan](plans/2026-10-15-attendance-total-three-partners.md).
 - The monthly chart "Girls who attended per month (Jotform + 3 partners)" (the report
   `Girls_Attended_by_Month`, months since September 2026) replaces "Total attendance per month
   (Jotform + 3 partners)" in the same place; "Girls attending per month (Jotform only)" and every
-  other component are unchanged.
+  other component are unchanged. The component headers carry "(Jotform + 3 partners)"; the
+  report's own chart title is "Girls who attended per month".
 - The "How to read this dashboard" box defines girls who attended as the Jotform girls, each girl
   once however many sessions she came to, plus the three partners' Monthly Max, copied in about
   the 12th of the next month. Its next bullet says "Jotform only" means the Jotform girls alone,
   each once, that attendances (girls × sessions) are no longer a headline number, and that the
   Monthly Report of any other partner is never added.
-- **The new components:**
+- **The new components** (seven, and Read on the three fields in the permission set
+  `Attendance_Report_Viewer` and the Admin profile):
   - The formula field `Attendance_Batch__c.Partner_Girls__c` ("Girls (partner report)") =
-    `Girls_Present__c` when `Creator__c` is `Partner report`, else 0 (a blank counts as 0). The
-    permission set `Attendance_Report_Viewer` and the Admin profile each get Read on it.
+    `Girls_Present__c` when `Creator__c` is `Partner report`, else 0 (a blank counts as 0).
+  - The text formula field `Attendance__c.Contact_Key__c` = `CASESAFEID(Contact__c)`: the girl's
+    record id as text, never a name. The reports unique-count it, because a summary formula
+    cannot unique-count a lookup (the check-only refused `Attendance__c.Contact__c:UNIQUE`,
+    2026-10-21).
+  - The number formula field `Attendance__c.Has_Row__c` = 1 on every attendance row: its sum is
+    the count of real rows, which tells the summary formula whether a row-less batch is in the
+    period (the blank key, "Attendance totals and partner-reported counts", Signals).
   - The report type `Attendance_Batches_and_Girls` ("Attendance batches and girls") is
     `Attendance_Batch__c` with or without `Attendance__c` rows (an outer join on the lookup
     `Attendance__c.Attendance_Batch__c`), so a row-less batch (a partner's monthly batch) reaches
@@ -2737,9 +2736,11 @@ refused, fix the three reports and the dashboard the same way, in `BUILD.md`'s f
     `Processing_Status__c` = `Success`, 2 the batch's `Creator__c` starts with `Jotform`, 3 it is
     `Partner report`, 4 the batch's account is one of the three partner accounts (by name), 5 and
     6 the unlocked Partner and Club filters.
-  - Each report's summary formula `FORMULA1` ("Girls who attended (Jotform + 3 partners)") = the
-    unique `Attendance__c.Contact__c` + the sum of `Partner_Girls__c`, the number the tiles and the
-    chart show.
+  - Each report's summary formula `FORMULA1` ("Girls who attended (Jotform + partners)", within
+    the label's 40-character limit) = the unique `Contact__c` key + the sum of `Partner_Girls__c`,
+    less one for the empty key of a row-less batch, the number the tiles and the chart show:
+    `Attendance__c.Contact_Key__c:UNIQUE - IF(RowCount > Attendance__c.Has_Row__c:SUM, 1, 0) +
+    Attendance_Batch__c.Partner_Girls__c:SUM`.
   - The dashboard `Attendance/Jotform_Attendance_test` itself: the two tiles, the chart and the box
     above.
 - **Known limitation, the Partner filter**: the Partner filter set to one of the three partners
@@ -2748,12 +2749,12 @@ refused, fix the three reports and the dashboard the same way, in `BUILD.md`'s f
   account itself, whose parent is blank. Any other partner, or All, shows the right number.
 - A renamed partner account drops out of filter 4 (it matches the names): rename the filter values
   with the account, on Ryan's go.
-- **Reports no longer used** once #59 is deployed: `Total_Attendance_Last_Month`,
+- **Reports no longer used** since 2026-10-21 (#59): `Total_Attendance_Last_Month`,
   `Jotform_Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month` and
   `Jotform_Attendance_This_Month`. They are kept until Ryan decides which to delete (only this
   dashboard was retrieved, so another dashboard's use of them is unchecked).
-- The signal for each tile (SOQL) and the open blank-`Contact__c` check: "Attendance totals and
-  partner-reported counts", Signals.
+- The signal for each tile (SOQL) and the blank key: "Attendance totals and partner-reported
+  counts", Signals.
 
 **Filters:**
 - The dashboard's **Partner** filter covers every component. It holds the 49 partner names
@@ -2803,7 +2804,9 @@ sharing stays as it is"):
   - Read on `Attendance__c` and `Attendance_Batch__c`;
   - View All on Contact and on Account;
   - Read on the 21 fields that the reports in both folders show, filter or group, the pilot
-    reports included (22 once #59 is deployed: `Attendance_Batch__c.Partner_Girls__c`). The list is in the plan; the derivation is
+    reports included, and since 2026-10-21 (#59) the three new fields
+    `Attendance_Batch__c.Partner_Girls__c`, `Attendance__c.Contact_Key__c` and
+    `Attendance__c.Has_Row__c`. The list is in the plan; the derivation is
     `public_2026-10-09/evidence/`.
   A filter on a field the viewer cannot read is dropped silently, or the report fails "Invalid
   Report". Every per-girl report filters on `Creator__c`: without it, the totals would include
@@ -2833,9 +2836,10 @@ sharing stays as it is"):
   tiles #59 replaces), nor for #59; a deploy of its build would undo them on the dashboard and the
   two Total reports. The 2026-10-15 change was made by editing a fresh retrieve
   (`data/sf_totals2_2026-10-15/before/`), and the deployed state was retrieved back into
-  `data/sf_totals2_2026-10-15/after/` (0 differences from the build): that is what is live today.
-  #59 was built the same way, from the fresh retrieve `data/sf_girls_tiles_2026-10-20/before/`
-  (into `build/`). A change starts from a fresh retrieve of what is live and edits that (The
+  `data/sf_totals2_2026-10-15/after/` (0 differences from the build). #59 was built the same way,
+  from the fresh retrieve `data/sf_girls_tiles_2026-10-20/before/` (into `build/`), deployed
+  2026-10-21 and read back into `data/sf_girls_tiles_2026-10-20/after/`: that is what is live
+  today. A change starts from a fresh retrieve of what is live and edits that (The
   steps, below).
 - What built `totals1/` and the copies before it is in `data/sf_dashboard_2026-10-02/`. `gen.py`
   builds every report, the batch report type `Attendance_Totals` and the dashboard into `build/`,
@@ -2892,9 +2896,8 @@ sharing stays as it is"):
      `data/sf_totals2_2026-10-15/before/`). It is the starting point and, for only the components
      the change then makes, the rollback (Rollback, below); compare it
      with `data/sf_totals2_2026-10-15/after/` (or the latest read-back) to see whether anything
-     changed in Salesforce since. Once #59 is deployed, the backup also takes its eight components
-     (`data/sf_girls_tiles_2026-10-20/build/package.xml`), and the latest read-back is its
-     `after/`.
+     changed in Salesforce since. Since #59 (2026-10-21) the backup also takes its 10 components
+     (as in `data/sf_girls_tiles_2026-10-20/after/`), and that `after/` is the latest read-back.
   2. Copy that retrieve and edit the copy, only the files that change. A new partner's Partner
      filter value is in the dashboard's XML; add it to `partners.json` as well, so the lists stay
      one. Not `gen.py` (above).
@@ -2914,9 +2917,9 @@ sharing stays as it is"):
 - **The rule (Ryan, 2026-10-16: "I don't want to overwrite with an old package")**: every
   dashboard or report deploy, a rollback included, starts from a fresh retrieve of what is live.
   The only rollback for the 2026-10-15 change is the three components it changed, from
-  `data/sf_totals2_2026-10-15/before/` (below); for #59, once deployed, the two components it
-  changed, from `data/sf_girls_tiles_2026-10-20/before/`, and a `destructiveChanges.xml` for the
-  five it created (below).
+  `data/sf_totals2_2026-10-15/before/` (below); for #59 (deployed 2026-10-21), the two components it
+  changed, from `data/sf_girls_tiles_2026-10-20/before/`, and destructive deploys for the seven
+  it created (below).
   Never redeploy an older package: `data/sf_dashboard_2026-10-02/`'s `before/`, `build/`,
   `after/`, `after2/`, `fix1/`, `totals1/`, `live_2026-10-07/`, `public_2026-10-09/`,
   `before_public_2026-10-09/`, or a `gen.py` build - each would overwrite later changes.
@@ -2955,37 +2958,38 @@ sharing stays as it is"):
   `totals1/` filter (every `Success` batch, from any club); revert ticket #35's RUNBOOK change
   with it. The new report `Jotform_Total_Attendance_Last_Month` may stay (the dashboard no longer
   references it after the rollback), or goes with a `destructiveChanges.xml` after the dashboard.
-  Once #59 is deployed, the dashboard's fresh retrieve differs from `after/`, so this rollback
-  stops at its check: roll #59 back first (next).
-- The #59 change (the two girls-who-attended tiles), once deployed, [plan](plans/2026-10-20-girls-attended-tiles.md#rollback).
+  Since #59 is deployed (2026-10-21), the dashboard's fresh retrieve differs from `after/`, so
+  this rollback stops at its check: roll #59 back first (next).
+- The #59 change (the two girls-who-attended tiles, deployed 2026-10-21), [plan](plans/2026-10-20-girls-attended-tiles.md#rollback).
   `data/sf_girls_tiles_2026-10-20/before/` is the fresh retrieve of what was live on 2026-10-20
   right before it (its dashboard identical to what the 2026-10-15 deploy left). #59 changed two
   components, the dashboard `Attendance/Jotform_Attendance_test` and the permission set
-  `Attendance_Report_Viewer` (and one read-only entry in the Admin profile, which goes with the
-  field), and created five: the field `Attendance_Batch__c.Partner_Girls__c`, the report type
+  `Attendance_Report_Viewer` (and three read-only entries in the Admin profile, which go with the
+  fields), and created seven: the fields `Attendance_Batch__c.Partner_Girls__c`,
+  `Attendance__c.Contact_Key__c` and `Attendance__c.Has_Row__c`, the report type
   `Attendance_Batches_and_Girls` and the reports `Attendance/Girls_Attended_Last_Month`,
   `Attendance/Girls_Attended_This_Month` and `Attendance/Girls_Attended_by_Month`.
   1. VPN off. Retrieve the dashboard and the permission set fresh and compare them with
-     `data/sf_girls_tiles_2026-10-20/build/` (or with its read-back `after/`, once it exists;
-     after phase 1 alone, the dashboard with `before/`); if either differs, someone changed it
-     since - stop and build the rollback from that fresh retrieve instead.
+     `data/sf_girls_tiles_2026-10-20/after/`, the read-back; if either differs (beyond
+     Salesforce's normalisation), someone changed it since - stop and build the rollback from
+     that fresh retrieve instead.
   2. Equal: Ryan's go. From `data/sf_girls_tiles_2026-10-20/before/`, redeploy only those two
      files: copy `before/dashboards/Attendance/Jotform_Attendance_test.dashboard-meta.xml` to
      `<new folder>/force-app/main/default/dashboards/Attendance/` and
      `before/permissionsets/Attendance_Report_Viewer.permissionset-meta.xml` to
      `<new folder>/force-app/main/default/permissionsets/`, beside an `sfdx-project.json` (as
      `build/`'s), then within `<new folder>` run `sf project deploy start --dry-run -o glow -d
-     force-app` and the same command minus `--dry-run`. After phase 1 alone, the permission set
-     only. The rest of `before/` (the live reports, the report type `Attendance_Totals`, the
-     object, the Admin profile) is never deployed from it.
-  3. With the dashboard off the new reports, delete the five new components in three destructive
+     force-app` and the same command minus `--dry-run`. The rest of `before/` (the live reports,
+     the report type `Attendance_Totals`, the object, the Admin profile) is never deployed from it.
+  3. With the dashboard off the new reports, delete the seven new components in three destructive
      deploys, in this order, each a `destructiveChanges.xml` beside an empty `package.xml`,
      check-only first, on Ryan's go:
      - first the reports `Girls_Attended_Last_Month`, `Girls_Attended_This_Month` and
        `Girls_Attended_by_Month` (`Report` members `Attendance/Girls_Attended_Last_Month` and so
        on; they may also go as the `--pre-destructive-changes` file of the report type's deploy);
      - then the report type `Attendance_Batches_and_Girls` (`ReportType`);
-     - then the field `Attendance_Batch__c.Partner_Girls__c` (`CustomField`).
+     - then the three fields `Attendance_Batch__c.Partner_Girls__c`, `Attendance__c.Contact_Key__c`
+       and `Attendance__c.Has_Row__c` (`CustomField`; their Admin profile entries go with them).
 
      Each deploy is its own folder holding an empty `package.xml` (`<Package>` with only
      `<version>62.0</version>`) and a `destructiveChanges.xml` listing that deploy's components,
