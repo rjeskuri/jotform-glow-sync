@@ -2527,9 +2527,9 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 ## Attendance totals and partner-reported counts
 
 - **When:** reading an attendance total; the monthly `check`; the three partners' monthly copy, about the 12th of each month.
-- **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); decided 2026-10-19 (BACKLOG 72, ticket #60): the three partners' figure is their Monthly Report's Monthly Max, copied monthly by `tools/sf_partner_monthly.py`; September 2026 copied on Ryan's go 2026-10-20 07:33-07:38 UTC: three `Partner report` batches dated 2026-09-30, 110 + 320 + 315 = 745, read back equal to the three Monthly Reports ([Result](plans/2026-10-19-partner-monthly-max.md#result)).
+- **Status:** the field and the processor change deployed 2026-10-07 03:22 UTC (Ryan's quick deploy `0AfRP000002gKqn0AE` of validation `0AfRP000002gKnZ0AU`), the one-off back-fill and the dashboard's totals done the same day; since 2026-10-15 ~09:05 UTC (Ryan's go, deploy `0AfRP000002h9dB0AQ`) the total counts Jotform plus the three partners below and nothing else ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); decided 2026-10-19 (BACKLOG 72, ticket #60): the three partners' figure is their Monthly Report's Monthly Max, copied monthly by `tools/sf_partner_monthly.py`; September 2026 copied on Ryan's go 2026-10-20 07:33-07:38 UTC: three `Partner report` batches dated 2026-09-30, 110 + 320 + 315 = 745, read back equal to the three Monthly Reports ([Result](plans/2026-10-19-partner-monthly-max.md#result)); decided 2026-10-19 (ticket #59): the dashboard's measure is girls who attended, Jotform girls plus the three partners' Monthly Max - deployed on Ryan's go 2026-10-21 04:59-05:10 UTC, the reports first (checked against SOQL), then the dashboard, read back; tiles 3,633 last month and 2,944 this month at the 05:10 UTC refresh ([Result](plans/2026-10-20-girls-attended-tiles.md#result)).
 - **Verify:** the Signals, below.
-- **Rollback:** of a monthly copy, from `data/sf_partner_monthly/ledger.csv` (each batch's last row is its state): delete an inserted batch by its `batch_id`, set an updated one's `Girls_Present__c` back to the row's `old` count - one record per call, VPN off, Ryan's go ([plan](plans/2026-10-19-partner-monthly-max.md#rollback)). Of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
+- **Rollback:** of a monthly copy, from `data/sf_partner_monthly/ledger.csv` (each batch's last row is its state): delete an inserted batch by its `batch_id`, set an updated one's `Girls_Present__c` back to the row's `old` count - one record per call, VPN off, Ryan's go ([plan](plans/2026-10-19-partner-monthly-max.md#rollback)). Of #59's tiles: "Attendance dashboard in Salesforce", Rollback. Of the 2026-10-15 rule, redeploy only the three components it changed from `data/sf_totals2_2026-10-15/before/`, after a fresh retrieve of them equals `after/` ("Attendance dashboard in Salesforce", Rollback); of the field and the processor's 03:22 UTC change (2026-10-16): never redeploy `data/sf_totals_2026-10/before/` - it would also undo the processor's name cleaning (2026-10-07 04:38 UTC); retrieve what is live and undo only that change in the copy (DECISIONS 2026-10-16). The name cleaning's own rollback ([plan](plans/2026-10-07-processor-name-spacing.md), Result): a fresh retrieve of the two classes and the trigger must equal `data/sf_processor_2026-10-07/after`, ignoring a missing final newline (Salesforce stores the test class without it; any other difference: stop and build from the retrieve); then redeploy the two classes of `data/sf_totals_2026-10/deployed/`. The fields can stay.
 
 Three partners' clubs report their attendance through Salesforce only (Ryan, 2026-10-06). Since
 2026-10-16 the three partners are marked `no` in the Partners tab's `jotform` column and their 38
@@ -2543,8 +2543,8 @@ since 2026-10-19 (ticket #60) their figure reaches the attendance data as their 
   (its clubs back on the picker), the risk returns: stop copying its Monthly Max before its clubs
   submit on Jotform again.
 
-Leadership wants one attendance total that includes them, shown beside the figure from the forms
-alone (Ryan, 2026-10-15).
+Leadership wants one number that includes them (Ryan, 2026-10-15); since Ryan's decision of
+2026-10-19 (ticket #59) that number is girls who attended.
 
 **The field.** `Attendance_Batch__c.Girls_Present__c` (Number, "Girls present") is the one
 attendance count. Since the deploy the attendance processor sets it when a Jotform batch
@@ -2553,39 +2553,42 @@ partners' monthly copy writes their Monthly Max into it. A batch with no names a
 participants submitted" (no rows, blocks nothing); a batch with no names and a count above 0 is
 an aggregate and succeeds with no rows.
 
-**The two measures** (Ryan's decisions of 2026-10-15, ticket #35):
-- **Total attendance** = the Jotform attendance plus the Salesforce-entered counts of the three
-  partners Education and English for You, Tumaini La Maisha and Ng'aa Maskani.
-  In the reports it is the sum of `Girls_Present__c` over `Success` batches whose `Creator__c`
-  starts with `Jotform` or whose club's parent account (`Account__c.Parent`) is one of those three
-  partners: filter logic `1 AND (2 OR 3) AND 4 AND 5`, where 1 is `Processing_Status__c` =
-  `Success`, 2 `Creator__c` starts with `Jotform`, 3 the parent equals one of the three names, and
-  4 and 5 are the Partner and Club filters. A Jotform batch from one of the three partners' clubs
-  counts once.
-- **Filter 3 does not match the monthly copy yet**: it asks for a club whose parent is one of the
-  three partners, and the monthly batch sits on the partner account itself, whose parent is none
-  of them. Until #59 changes the dashboard (its measure becomes girls who attended: Jotform girls
-  plus the three partners' Monthly Max), the copied batches are in the data but not in the
-  dashboard's total. 2026-10-20: so it is for September 2026 - its three batches (745) are copied,
-  and the dashboard's total does not include them until #59.
+**The measure** (Ryan's decisions of 2026-10-19, ticket #59,
+[plan](plans/2026-10-20-girls-attended-tiles.md); it replaces the two measures of 2026-10-15,
+ticket #35):
+- Total attendance (girls × sessions) is no longer tracked (Ryan, 2026-10-19). The headline
+  measure is girls who attended in a month.
+- **Girls who attended (Jotform + 3 partners)** = the Jotform girls who attended in the month,
+  each girl once however many sessions she came to (unique `Attendance__c.Contact__c` over the
+  month's `Attendance__c` rows from Jotform batches), plus the `Girls_Present__c` of the month's
+  `Partner report` batches of the three partners Education and English for You, Tumaini La Maisha
+  and Ng'aa Maskani (their Monthly Report's Monthly Max, copied by `tools/sf_partner_monthly.py`:
+  The monthly copy, below).
+- The two parts are added with no de-duplication: the partners report a number without names, and
+  a club reports on one source only (the three partners' clubs are off the forms since
+  2026-10-16, #56).
+- This month's partner part is 0 until the three partners' Monthly Report is filed and copied,
+  about the 12th of the next month: October's lands about 12 November, when October has become
+  last month. So this month's tile shows the Jotform girls alone for most of the month.
+- Months separate by `Attendance_Date__c` (the session date; a partner batch is dated the month's
+  last day), never by when the batch was created: about 4,978 September-dated rows were created
+  on 2026-10-02 (the September back-fill's 4,712 plus live submissions), which a report by
+  created date would put in October.
 - Any other club's attendance entered in Salesforce (a `Success` batch whose `Creator__c` does
-  not start with `Jotform`, from a club outside the three partners) is left out of the total.
-- **"Jotform only"** = the sum of `Girls_Present__c` over `Success` batches whose `Creator__c`
-  starts with `Jotform`: the attendance rows made from the forms.
-- The dashboard shows the two side by side, labelled "Total attendance (Jotform + 3 partners)" and
-  "Attendance (Jotform only)".
-- Both count attendances (girls × sessions). Months separate by `Attendance_Date__c` (the session
-  date), never by when the batch was created: about 4,978 September-dated rows were created on
-  2026-10-02 (the September back-fill's 4,712 plus live submissions), which a report by created
-  date would put in October.
-- The Monthly Report's weekly counts are never added to attendance, in either measure. Only the
-  three partners' Monthly Max is copied, as one batch a month (below); every other partner's
-  Monthly Report stays out (DECISIONS 2026-10-19).
-- The Monthly Max is roughly the month's unique girls, not girls × sessions: added to Jotform
-  attendances it would be a mixed sum, which is why #59 makes the dashboard's measure girls who
-  attended.
-- A girl counted twice in one month on two sources would be a double count: a club reports on one
-  source only.
+  not start with `Jotform`, other than the three partners' `Partner report` batches) is left out
+  of the tiles. A Jotform batch from one of the three partners' clubs counts in the Jotform part.
+- The reports, the formula fields and the filter that make the tiles: "Attendance dashboard in
+  Salesforce".
+- The monthly copy's batch sits on the partner account itself, which the 2026-10-15 filter 3 (a
+  club whose parent is one of the three partners) missed; since 2026-10-21 the tiles read these
+  batches through the report type `Attendance_Batches_and_Girls` (September 2026: 745 of last
+  month's 3,633).
+- The Monthly Report's weekly counts are never added to attendance. Only the three partners'
+  Monthly Max is copied, as one batch a month (below); every other partner's Monthly Report stays
+  out (DECISIONS 2026-10-19).
+- The Monthly Max is roughly the month's unique girls, the same kind of number as the Jotform
+  girls, so the two parts add up to one figure; added to attendances (girls × sessions) it would
+  have been a mixed sum, which is why the measure is girls who attended.
 
 **The monthly copy** (`tools/sf_partner_monthly.py`, ticket #60,
 [plan](plans/2026-10-19-partner-monthly-max.md); replaces the per-club intake contract of
@@ -2600,7 +2603,7 @@ one `Attendance_Batch__c` per partner for the month:
 | `Attendance_Date__c` | the **last day of the month** |
 | `Girls_Present__c` | the Monthly Max, a whole number above 0 |
 | `Contact_IDs__c` | **empty** - no names, ever |
-| `Creator__c` | `Partner report`; it never counts in the Jotform-only view, which takes only `Creator__c` values starting with `Jotform` |
+| `Creator__c` | `Partner report`: the tiles' partner part (`Partner_Girls__c`, since #59); it never counts in a Jotform-only report, which takes only `Creator__c` values starting with `Jotform` |
 | `enable_fuzzy_matching__c` | false |
 
 ```
@@ -2643,10 +2646,21 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
   `differ` is a Jotform `Success` batch whose count is not its rows; a `without a value` is a
   `Success` batch the processor or the back-fill did not count. Aggregate batches are not compared
   (no rows by design).
-- The dashboard's last-month tiles: "Total attendance (Jotform + 3 partners)" equals "Attendance
-  (Jotform only)" and `SELECT COUNT(Id) FROM Attendance__c WHERE Attendance_Date__c = LAST_MONTH`
-  (September 2026: 7,227 each, read 2026-10-15) - also after a monthly copy, until #59 changes the
-  dashboard (filter 3 does not match the partner account, above).
+- The dashboard's two tiles (since 2026-10-21, #59): each tile, the reports' `FORMULA1`, =
+  `COUNT_DISTINCT(Contact__c)` over the month's Jotform `Attendance__c` rows, by the batch's date
+  as the reports filter (`SELECT COUNT_DISTINCT(Contact__c) FROM Attendance__c WHERE
+  Attendance_Batch__r.Attendance_Date__c = LAST_MONTH AND Attendance_Batch__r.Processing_Status__c
+  = 'Success' AND Attendance_Batch__r.Creator__c LIKE 'Jotform%'`; `THIS_MONTH` for the other
+  tile) + `SUM(Girls_Present__c)` over the three partners' `Partner report` batches for the month
+  (the monthly copy's query, next). Read 2026-10-21: last month 3,633 = 2,888 + 745, this month
+  2,944 = 2,944 + 0; the by-month chart September 3,633, October 2,944.
+- **The blank key, settled 2026-10-21.** The report type gives each batch without rows (the three
+  partners' batches among them) one report row with an empty `Contact_Key__c`, and the unique
+  count counts it as one value (read 2026-10-21: 2,889 against SOQL's 2,888 last month, 2,945
+  against 2,944 this month). `FORMULA1` takes it back off - one when the period has a row-less
+  batch (`RowCount` above the sum of `Has_Row__c`), else 0 - so the tiles equal the SOQL sum
+  above. A tile one above it means that correction broke; 745 less last month means the
+  partners' batches dropped out of the filter: stop and ask Ryan either way.
 - The monthly copy, after its run: `SELECT Account__r.Name, Girls_Present__c, Processing_Status__c
   FROM Attendance_Batch__c WHERE Creator__c = 'Partner report' AND Attendance_Date__c = <the
   month's last day> AND Account__r.Name IN ('Education and English for You', 'Tumaini La Maisha',
@@ -2664,7 +2678,7 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
 ## Attendance dashboard in Salesforce
 
 - **When:** a new partner (the Partner filter), a new staff user (the permission set), a report change.
-- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
+- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); #59, the two "Girls who attended (Jotform + 3 partners)" tiles: deployed on Ryan's go 2026-10-21 - phase 1 (the fields, the report type, the three reports, the permission set and the Admin profile entries) `0AfRP000002hhdF0AQ` 04:59 UTC, the `Has_Row__c` fix `0AfRP000002hhi50AA` 05:06 UTC (check-only `0AfRP000002hhgT0AQ`), phase 2 (the dashboard) `0AfRP000002hhlJ0AQ` 05:08 UTC (check-only `0AfRP000002hhjh0AA`); all 10 components read back into `data/sf_girls_tiles_2026-10-20/after/`, equal to `build/` apart from Salesforce's normalisation ([Result](plans/2026-10-20-girls-attended-tiles.md#result)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
 - **Dry run:** the check-only deploy (`--dry-run`), step 4 of "The steps".
 - **Apply:** the same without `--dry-run`, Ryan's go (VPN off).
 - **Verify:** retrieve again and compare with the build; one report's totals against SOQL.
@@ -2675,23 +2689,75 @@ DeveloperName `Jotform_Attendance_test`) shows the Jotform attendance as charts,
 from data Salesforce already has ([plan and result](plans/2026-10-02-attendance-dashboard.md)).
 Its label lost "(test)" with the 2026-10-09 Access deploy (below); the DeveloperName keeps it.
 
-What it shows - four headline numbers, weekly and monthly charts, last month by partner and
+What it shows - the headline tiles (below), weekly and monthly charts, last month by partner and
 by module, the clubs with no attendance or not submitting, the blank submissions - and how to
 read its numbers (a session, a blank and "did not submit" defined; late submissions, so "last
 month" settles around the 20th; a club without a partner; the refresh is a snapshot): [plan](plans/2026-10-02-attendance-dashboard.md#from-the-runbook-moved-2026-10-09).
 
-**The two attendance measures** (since 2026-10-15, ticket #35,
-[plan](plans/2026-10-15-attendance-total-three-partners.md)):
-- The top row is four tiles: "Total attendance (Jotform + 3 partners)" and "Attendance (Jotform
-  only)" for last month, then "Girls who attended (Jotform only)" last month and this month.
-- The monthly chart's header is "Total attendance per month (Jotform + 3 partners)"; the "How to
-  read this dashboard" box defines both measures and says the Monthly Report is never added.
-- How the total is computed (Jotform plus the three partners' Salesforce-entered counts, every
-  other Salesforce entry left out) is in "Attendance totals and partner-reported counts".
-- The reports behind them: `Total_Attendance_Last_Month` and
-  `Total_Attendance_by_Partner_by_Month` (the total's filter), and `Jotform_Total_Attendance_Last_Month`
-  ("Jotform Total Attendance Last Month", new: `Success` batches whose `Creator__c` starts with
-  `Jotform`, last month, the sum of `Girls_Present__c`).
+**The headline tiles** (ticket #59, [plan and Result](plans/2026-10-20-girls-attended-tiles.md);
+deployed 2026-10-21 in two phases, the reports first, checked against SOQL through the Analytics
+API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describes the build, and
+`after/` beside it is the read-back):
+- Since 2026-10-21 (#59) the top row is two tiles headed "Girls who attended (Jotform + 3
+  partners)", one for last month and one for this month so far.
+- Each tile is the month's girls who attended, Jotform and the three partners together; how it is
+  computed is in "Attendance totals and partner-reported counts".
+- The four tiles of 2026-10-15 are replaced by these two; total attendance (girls × sessions) is
+  no longer tracked (Ryan, 2026-10-19). The 2026-10-15 change:
+  [plan](plans/2026-10-15-attendance-total-three-partners.md).
+- The monthly chart "Girls who attended per month (Jotform + 3 partners)" (the report
+  `Girls_Attended_by_Month`, months since September 2026) replaces "Total attendance per month
+  (Jotform + 3 partners)" in the same place; "Girls attending per month (Jotform only)" and every
+  other component are unchanged. The component headers carry "(Jotform + 3 partners)"; the
+  report's own chart title is "Girls who attended per month".
+- The "How to read this dashboard" box defines girls who attended as the Jotform girls, each girl
+  once however many sessions she came to, plus the three partners' Monthly Max, copied in about
+  the 12th of the next month. Its next bullet says "Jotform only" means the Jotform girls alone,
+  each once, that attendances (girls × sessions) are no longer a headline number, and that the
+  Monthly Report of any other partner is never added.
+- **The new components** (seven, and Read on the three fields in the permission set
+  `Attendance_Report_Viewer` and the Admin profile):
+  - The formula field `Attendance_Batch__c.Partner_Girls__c` ("Girls (partner report)") =
+    `Girls_Present__c` when `Creator__c` is `Partner report`, else 0 (a blank counts as 0).
+  - The text formula field `Attendance__c.Contact_Key__c` = `CASESAFEID(Contact__c)`: the girl's
+    record id as text, never a name. The reports unique-count it, because a summary formula
+    cannot unique-count a lookup (the check-only refused `Attendance__c.Contact__c:UNIQUE`,
+    2026-10-21).
+  - The number formula field `Attendance__c.Has_Row__c` = 1 on every attendance row: its sum is
+    the count of real rows, which tells the summary formula whether a row-less batch is in the
+    period (the blank key, "Attendance totals and partner-reported counts", Signals).
+  - The report type `Attendance_Batches_and_Girls` ("Attendance batches and girls") is
+    `Attendance_Batch__c` with or without `Attendance__c` rows (an outer join on the lookup
+    `Attendance__c.Attendance_Batch__c`), so a row-less batch (a partner's monthly batch) reaches
+    the reports.
+  - The reports `Attendance/Girls_Attended_Last_Month` and `Attendance/Girls_Attended_This_Month`
+    (one tile each, grouped by partner) and `Attendance/Girls_Attended_by_Month` (the monthly
+    chart, grouped by month) share the filter logic `1 AND (2 OR (3 AND 4)) AND 5 AND 6`: 1
+    `Processing_Status__c` = `Success`, 2 the batch's `Creator__c` starts with `Jotform`, 3 it is
+    `Partner report`, 4 the batch's account is one of the three partner accounts (by name), 5 and
+    6 the unlocked Partner and Club filters.
+  - Each report's summary formula `FORMULA1` ("Girls who attended (Jotform + partners)", within
+    the label's 40-character limit) = the unique `Contact__c` key + the sum of `Partner_Girls__c`,
+    less one for the empty key of a row-less batch, the number the tiles and the chart show:
+    `Attendance__c.Contact_Key__c:UNIQUE - IF(RowCount > Attendance__c.Has_Row__c:SUM, 1, 0) +
+    Attendance_Batch__c.Partner_Girls__c:SUM`.
+  - The dashboard `Attendance/Jotform_Attendance_test` itself: the two tiles, the chart and the box
+    above.
+- **Known limitation, the Partner filter**: the Partner filter set to one of the three partners
+  shows only that partner's Jotform girls (0 since #56 took their clubs off the forms on
+  2026-10-16), and its Monthly Max drops out, because the partner's batch sits on the partner
+  account itself, whose parent is blank. Any other partner, or All, shows the right number.
+- A renamed partner account drops out of filter 4 (it matches the names): rename the filter values
+  with the account, on Ryan's go.
+- **Reports deleted** 2026-10-21 05:22:34 UTC on Ryan's go, the four the dashboard stopped using
+  with #59: `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`,
+  `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month` (destructive deploy
+  `0AfRP000002hhq90AA`, check-only `0AfRP000002hhmv0AA`, from
+  `data/sf_girls_tiles_2026-10-20/delete_old_reports/`). Before the delete, SOQL on
+  `DashboardComponent` showed no dashboard using them; after it, SOQL on `Report` finds only the
+  three `Girls_Attended_*` of the seven names. Their rollback: Rollback, below.
+- The signal for each tile (SOQL) and the blank key: "Attendance totals and partner-reported
+  counts", Signals.
 
 **Filters:**
 - The dashboard's **Partner** filter covers every component. It holds the 49 partner names
@@ -2741,7 +2807,9 @@ sharing stays as it is"):
   - Read on `Attendance__c` and `Attendance_Batch__c`;
   - View All on Contact and on Account;
   - Read on the 21 fields that the reports in both folders show, filter or group, the pilot
-    reports included. The list is in the plan; the derivation is
+    reports included, and since 2026-10-21 (#59) the three new fields
+    `Attendance_Batch__c.Partner_Girls__c`, `Attendance__c.Contact_Key__c` and
+    `Attendance__c.Has_Row__c`. The list is in the plan; the derivation is
     `public_2026-10-09/evidence/`.
   A filter on a field the viewer cannot read is dropped silently, or the report fails "Invalid
   Report". Every per-girl report filters on `Creator__c`: without it, the totals would include
@@ -2767,12 +2835,15 @@ sharing stays as it is"):
 **Changing it** (Ryan deploys; VPN off; nothing in this folder is committed):
 - **`gen.py` is behind what is live: never use it as it is.** It builds `totals1/` (2026-10-07)
   and was not updated for the 2026-10-09 Access change or the 2026-10-15 change (the total as
-  Jotform plus the three partners, the new report `Jotform_Total_Attendance_Last_Month`, the four
-  tiles); a deploy of its build would undo them on the dashboard and the two Total reports. The
-  2026-10-15 change was made by editing a fresh retrieve (`data/sf_totals2_2026-10-15/before/`),
-  and the deployed state was retrieved back into `data/sf_totals2_2026-10-15/after/` (0
-  differences from the build): that is what is live today. A change starts from a fresh retrieve
-  of what is live and edits that (The steps, below).
+  Jotform plus the three partners, the new report `Jotform_Total_Attendance_Last_Month`
+  (deleted 2026-10-21), the four tiles #59 replaces), nor for #59; a deploy of its build would
+  undo them on the dashboard and the two Total reports. The 2026-10-15 change was made by
+  editing a fresh retrieve (`data/sf_totals2_2026-10-15/before/`), and the deployed state was
+  retrieved back into `data/sf_totals2_2026-10-15/after/` (0 differences from the build). #59
+  was built the same way, from the fresh retrieve `data/sf_girls_tiles_2026-10-20/before/` (into
+  `build/`), deployed 2026-10-21 and read back into `data/sf_girls_tiles_2026-10-20/after/`: that
+  is what is live today. A change starts from a fresh retrieve of what is live and edits that
+  (The steps, below).
 - What built `totals1/` and the copies before it is in `data/sf_dashboard_2026-10-02/`. `gen.py`
   builds every report, the batch report type `Attendance_Totals` and the dashboard into `build/`,
   from:
@@ -2807,28 +2878,31 @@ sharing stays as it is"):
     00ORP000009c8ic2AA, `Jotform_Attendance_by_Partner_by_Month` 00ORP000009c8ia2AA,
     `Total_Attendance_Last_Month` 00ORP000009c8ib2AA, `Clubs_Not_Submitting_Last_14_Days`
     00ORP000009c8iY2AQ, `Clubs_Not_Submitting_Since_1_Sept` 00ORP000009c8iZ2AQ,
-    `Blank_Submissions` 00ORP000009c8iX2AQ.
+    `Blank_Submissions` 00ORP000009c8iX2AQ. The two Total reports among them were deleted
+    2026-10-21 (#59; "The headline tiles", above).
   - `data/sf_totals2_2026-10-15/`: the 2026-10-15 change (the total as Jotform plus the three
     partners). `before/` is what was live just before it (the dashboard, the reports
     `Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month`,
     `Jotform_Attendance_by_Partner_by_Month` and the report type `Attendance_Totals`); the
     rollback deploys only the three of them the deploy changed (Rollback, below); `after/` is the
-    read-back of the deploy (0 differences from the build).
+    read-back of the deploy (0 differences from the build). Its two Total reports and
+    `Jotform_Total_Attendance_Last_Month` were deleted 2026-10-21.
 - After a deploy, Salesforce writes `expandOthers` true on every report chart and drops or adds a
   few default attributes on the dashboard (for `totals1/`: `useReportChart` dropped,
   `showPicturesOnCharts` and the owner added, apostrophes escaped). A retrieve differs from
   `gen.py` only in those.
 - **The steps:**
-  1. Back up what is live: `sf project retrieve start -o glow` the reports below (the six
-     `Jotform_*` of the first deploy; the six of `totals1/`, the two Total reports
-     `Total_Attendance_Last_Month` and `Total_Attendance_by_Partner_by_Month` among them;
-     `Jotform_Total_Attendance_Last_Month` of 2026-10-15; and the report type
-     `Attendance_Totals`), the test report and the dashboard
-     (`Dashboard:Attendance/Jotform_Attendance_test`), into a new dated folder (as
-     `data/sf_totals2_2026-10-15/before/`). It is the starting point and, for only the components
-     the change then makes, the rollback (Rollback, below); compare it
-     with `data/sf_totals2_2026-10-15/after/` (or the latest read-back) to see whether anything
-     changed in Salesforce since.
+  1. Back up what is live: `sf project retrieve start -o glow` the reports below (the
+     `Jotform_*` of the first deploy; the six of `totals1/`; and the report type
+     `Attendance_Totals`; since 2026-10-21 without the four deleted reports,
+     `Jotform_Attendance_This_Month`, the two Total reports `Total_Attendance_Last_Month` and
+     `Total_Attendance_by_Partner_by_Month`, and `Jotform_Total_Attendance_Last_Month`), the
+     test report and the dashboard (`Dashboard:Attendance/Jotform_Attendance_test`), into a new
+     dated folder (as `data/sf_totals2_2026-10-15/before/`). It is the starting point and, for
+     only the components the change then makes, the rollback (Rollback, below); compare it with
+     `data/sf_totals2_2026-10-15/after/` (or the latest read-back) to see whether anything
+     changed in Salesforce since. Since #59 (2026-10-21) the backup also takes its 10 components
+     (as in `data/sf_girls_tiles_2026-10-20/after/`), and that `after/` is the latest read-back.
   2. Copy that retrieve and edit the copy, only the files that change. A new partner's Partner
      filter value is in the dashboard's XML; add it to `partners.json` as well, so the lists stay
      one. Not `gen.py` (above).
@@ -2848,7 +2922,9 @@ sharing stays as it is"):
 - **The rule (Ryan, 2026-10-16: "I don't want to overwrite with an old package")**: every
   dashboard or report deploy, a rollback included, starts from a fresh retrieve of what is live.
   The only rollback for the 2026-10-15 change is the three components it changed, from
-  `data/sf_totals2_2026-10-15/before/` (below).
+  `data/sf_totals2_2026-10-15/before/` (below); for #59 (deployed 2026-10-21), the two components it
+  changed, from `data/sf_girls_tiles_2026-10-20/before/`, and destructive deploys for the seven
+  it created (below).
   Never redeploy an older package: `data/sf_dashboard_2026-10-02/`'s `before/`, `build/`,
   `after/`, `after2/`, `fix1/`, `totals1/`, `live_2026-10-07/`, `public_2026-10-09/`,
   `before_public_2026-10-09/`, or a `gen.py` build - each would overwrite later changes.
@@ -2858,11 +2934,12 @@ sharing stays as it is"):
 - The new components: delete them with a `destructiveChanges.xml`. Never delete
   `Jotform_Monthly_Attendance_test`; it predates this work. The new components are:
   - the reports `Jotform_Attendance_by_Week`, `Jotform_Attendance_by_Month`,
-    `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month`,
+    `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month` (deleted 2026-10-21),
     `Jotform_Sessions_by_Module_Last_Month` and `Jotform_Clubs_No_Attendance_Last_Month`;
   - the dashboard `Jotform_Attendance_test`;
-  - since `totals1/` (2026-10-07): the reports `Total_Attendance_by_Partner_by_Month`,
-    `Jotform_Attendance_by_Partner_by_Month`, `Total_Attendance_Last_Month`,
+  - since `totals1/` (2026-10-07): the reports `Total_Attendance_by_Partner_by_Month` (deleted
+    2026-10-21), `Jotform_Attendance_by_Partner_by_Month`, `Total_Attendance_Last_Month` (deleted
+    2026-10-21),
     `Clubs_Not_Submitting_Last_14_Days`, `Clubs_Not_Submitting_Since_1_Sept` and
     `Blank_Submissions`, then - **last**, after the six reports that use it - the report type
     `Attendance_Totals`; never `Attendance_Batches` (the vendor's report type). The dashboard
@@ -2887,6 +2964,58 @@ sharing stays as it is"):
   `totals1/` filter (every `Success` batch, from any club); revert ticket #35's RUNBOOK change
   with it. The new report `Jotform_Total_Attendance_Last_Month` may stay (the dashboard no longer
   references it after the rollback), or goes with a `destructiveChanges.xml` after the dashboard.
+  Since #59 is deployed (2026-10-21), the dashboard's fresh retrieve differs from `after/`, so
+  this rollback stops at its check: roll #59 back first (next). Its three reports,
+  `Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month` and
+  `Jotform_Total_Attendance_Last_Month`, were deleted 2026-10-21 too: they come back with the
+  deleted reports' rollback (below).
+- The #59 change (the two girls-who-attended tiles, deployed 2026-10-21), [plan](plans/2026-10-20-girls-attended-tiles.md#rollback).
+  `data/sf_girls_tiles_2026-10-20/before/` is the fresh retrieve of what was live on 2026-10-20
+  right before it (its dashboard identical to what the 2026-10-15 deploy left). #59 changed two
+  components, the dashboard `Attendance/Jotform_Attendance_test` and the permission set
+  `Attendance_Report_Viewer` (and three read-only entries in the Admin profile, which go with the
+  fields), and created seven: the fields `Attendance_Batch__c.Partner_Girls__c`,
+  `Attendance__c.Contact_Key__c` and `Attendance__c.Has_Row__c`, the report type
+  `Attendance_Batches_and_Girls` and the reports `Attendance/Girls_Attended_Last_Month`,
+  `Attendance/Girls_Attended_This_Month` and `Attendance/Girls_Attended_by_Month`.
+  1. VPN off. Retrieve the dashboard and the permission set fresh and compare them with
+     `data/sf_girls_tiles_2026-10-20/after/`, the read-back; if either differs (beyond
+     Salesforce's normalisation), someone changed it since - stop and build the rollback from
+     that fresh retrieve instead.
+  2. Equal: Ryan's go. First bring back the four deleted reports (the deleted reports' rollback,
+     below), because `before/`'s dashboard reads them. From `data/sf_girls_tiles_2026-10-20/before/`,
+     redeploy only those two files: copy `before/dashboards/Attendance/Jotform_Attendance_test.dashboard-meta.xml` to
+     `<new folder>/force-app/main/default/dashboards/Attendance/` and
+     `before/permissionsets/Attendance_Report_Viewer.permissionset-meta.xml` to
+     `<new folder>/force-app/main/default/permissionsets/`, beside an `sfdx-project.json` (as
+     `build/`'s), then within `<new folder>` run `sf project deploy start --dry-run -o glow -d
+     force-app` and the same command minus `--dry-run`. The rest of `before/` (the live reports,
+     the report type `Attendance_Totals`, the object, the Admin profile) is never deployed from it.
+  3. With the dashboard off the new reports, delete the seven new components in three destructive
+     deploys, in this order, each a `destructiveChanges.xml` beside an empty `package.xml`,
+     check-only first, on Ryan's go:
+     - first the reports `Girls_Attended_Last_Month`, `Girls_Attended_This_Month` and
+       `Girls_Attended_by_Month` (`Report` members `Attendance/Girls_Attended_Last_Month` and so
+       on; they may also go as the `--pre-destructive-changes` file of the report type's deploy);
+     - then the report type `Attendance_Batches_and_Girls` (`ReportType`);
+     - then the three fields `Attendance_Batch__c.Partner_Girls__c`, `Attendance__c.Contact_Key__c`
+       and `Attendance__c.Has_Row__c` (`CustomField`; their Admin profile entries go with them).
+
+     Each deploy is its own folder holding an empty `package.xml` (`<Package>` with only
+     `<version>62.0</version>`) and a `destructiveChanges.xml` listing that deploy's components,
+     beside an `sfdx-project.json` (as in step 2) and the empty `force-app/` folder it names:
+     `--manifest` needs an SFDX project.
+     Within the folder, check-only: `sf project deploy start --dry-run -o glow --manifest
+     package.xml --post-destructive-changes destructiveChanges.xml`; then Ryan's go and the same
+     command minus `--dry-run`. The next deploy starts after this one succeeded.
+  4. Retrieve the dashboard and the permission set again and compare with `before/`. The four
+     reports #59 stopped using are back on the dashboard; revert #59's RUNBOOK change with it.
+- The four reports deleted 2026-10-21 (`Total_Attendance_Last_Month`,
+  `Jotform_Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month`,
+  `Jotform_Attendance_This_Month`; destructive deploy `0AfRP000002hhq90AA`): redeploy any of them
+  from `data/sf_girls_tiles_2026-10-20/before/reports/Attendance/` - a new folder with an
+  `sfdx-project.json` and the report's file under `force-app/main/default/reports/Attendance/`,
+  check-only, Ryan's go, deploy.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
 
