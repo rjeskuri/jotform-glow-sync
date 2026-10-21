@@ -3085,13 +3085,16 @@ The archive rule:
 - Before a report or dashboard changes, a copy of it as it was goes to Decommissioned, carrying
   its source Id and the ticket in its description, in addition to the `before/` retrieve.
 - The copy's label stays within 40 characters, Salesforce's limit on a report's name.
-- A dynamic dashboard's copy (the original runs as the logged-in user) runs as a specified user:
-  dynamic dashboards count against an org limit, and the `before/` retrieve keeps the original's
-  running-user setting.
+- A dynamic dashboard's copy (the original runs as the logged-in user) runs as a specified user,
+  the administrator who makes the copy: dynamic dashboards count against an org limit, and the
+  `before/` retrieve keeps the original's running-user setting.
 - The `before/` retrieve is what a metadata redeploy starts from; the copy is what a Salesforce
   user opens.
 - To revert from Salesforce, open the copy in Decommissioned, then Save As into the original
   folder or move it back there. Save As makes a new Id; a move keeps the copy's Id.
+- A dynamic dashboard put back from its copy has "View dashboard as" reset to the dashboard
+  viewer (`LoggedInUser`) before it returns to its original folder; the `before/` retrieve's
+  running-user setting is the check.
 - How a copy and a move are made (the Analytics API, or Lightning's Move by hand):
   [plan, API proof](plans/2026-10-21-sf-reporting-inventory.md#api-proof).
 

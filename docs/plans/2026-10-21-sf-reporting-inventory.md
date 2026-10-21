@@ -50,7 +50,8 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
      Administrator), which enhanced folder sharing may add to a new folder by itself: that one is
      accepted and recorded in the Result. Any other share (a group, a role, guest, portal,
      community or partner users, All Internal Users) is a failure, removed before anything is
-     moved in.
+     moved in. If the administrator's Manage entry appears, the definition of done's "no share"
+     is knowingly read as "no share beyond that entry", and the Result records it.
 3. The API proof, each non-GET call on Ryan's go: clone one DHIS2 report into Decommissioned,
    move the clone to "DHIS2 Reports" and back, and the same with one dashboard; SOQL shows the
    same Id after each move, with `FolderName` following; the two clones stay in Decommissioned,
@@ -76,7 +77,9 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
   1 static resource (`chartjs_v280`), 1 FlexiPage, 2 tabs, 1 app.
 - 2026-10-21: the two folders built in `data/sf_reporting_2026-10-21/folders/`; check-only passed
   (validation `0AfRP000002hisf0AA`). Pending: the deploy on Ryan's go, the read-back and the
-  shares API on both.
+  shares API on both. If the shares API shows the deploying administrator's Manage entry, it is
+  recorded here, and the definition of done's "no share" is knowingly read as "no share beyond
+  that entry".
 - Pending: the API proof (status: not yet run).
 
 ## Inventory
@@ -185,10 +188,10 @@ Report:
 
 Dashboard:
 1. Clone into Decommissioned: `POST /services/data/v67.0/analytics/dashboards?cloneId=01ZRP000006quAj2AI`, body `{"folderId": "<Decommissioned dashboard folder id>"}`. Status: not yet run.
-2. Where the clone landed: `SELECT Id, FolderName FROM Dashboard WHERE Id = '<clone id>'`. If it is in the source folder ("DHIS2 Dashboards": the clone ignored `folderId`), the proof records that, and the first move is into Decommissioned (step 4 before step 3).
-3. Move to "DHIS2 Dashboards": `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"folderId": "<DHIS2 Dashboards folder id>"}}`. Status: not yet run.
-4. Move back: `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"folderId": "<Decommissioned dashboard folder id>"}}`. Status: not yet run.
-5. Label and description: `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"name": "proof #69 DHIS2 dashboard", "description": "copy of 01ZRP000006quAj2AI, #69"}}`. Status: not yet run.
+2. Where the clone landed: `SELECT Id, FolderName FROM Dashboard WHERE Id = '<clone id>'`. If it is in the source folder ("DHIS2 Dashboards", a shared folder: the clone ignored `folderId`), the proof records that; step 3 renames it first, then step 5 moves it into Decommissioned, and steps 4 and 5 follow as written.
+3. Label and description, right after the clone and its folder check, before any move: `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"name": "proof #69 DHIS2 dashboard", "description": "copy of 01ZRP000006quAj2AI, #69"}}`. Status: not yet run.
+4. Move to "DHIS2 Dashboards": `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"folderId": "<DHIS2 Dashboards folder id>"}}`. Status: not yet run.
+5. Move back: `PATCH /services/data/v67.0/analytics/dashboards/<clone id>`, body `{"dashboardMetadata": {"folderId": "<Decommissioned dashboard folder id>"}}`. Status: not yet run.
 6. After each move: `SELECT Id, FolderName FROM Dashboard WHERE Id = '<clone id>'` - the same Id, `FolderName` following.
 
 If an API refuses a call, that is recorded here with its status, and the fallback is Lightning's
