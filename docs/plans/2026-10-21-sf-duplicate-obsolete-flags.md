@@ -68,9 +68,11 @@ committed; the build is written there by script or `cp`.
    Edit on the four fields for administrators, as entries in the partial Admin profile retrieved
    with the fields, and Read on them for the users who read the reports, in the
    `Attendance_Report_Viewer` permission set. RecordTypeId is not a matching item, since
-   Salesforce does not allow Record Type as a matching-rule field (review, 2026-10-21). All three
-   rules go in one deploy (a Duplicate Rule needs its Matching Rule in the same package or
-   already active).
+   Salesforce does not allow Record Type as a matching-rule field (review, 2026-10-21). Each
+   rule's condition is a `duplicateRuleFilter` whose `duplicateRuleFilterItems` test
+   `Account.RecordTypeId` equals the record type's Name - "Club" and "Household Account" (not
+   "Household") - for the record saved and for the candidates alike. All three rules go in one
+   deploy (a Duplicate Rule needs its Matching Rule in the same package or already active).
 3. Check-only: from within `build/`, `sf project deploy start --dry-run -o glow -x package.xml`;
    its result (the components, 0 errors, 0 tests run) is shown to Ryan as it is.
 4. Ryan's go: his answer in the main session, given after the check-only's result of step 3 is
@@ -83,16 +85,21 @@ committed; the build is written there by script or `cp`.
    conversation. It inserts two fictional Accounts that meet the criteria the way the processor
    inserts them (Apex DML, one `insert` per record, default options), the second differing from
    the first by case only (same spacing), then a spacing probe (the same name with a double
-   space, a separate account) and, after a fictional partner account, a fourth club under that
-   partner carrying the deliberate long name. All four inserts succeed, and one DuplicateRecordSet
-   holding the case-only pair appears (`DIAG|set` with its RecordCount and one `DIAG|item` line
-   per member); whether the spacing probe joins that set says how Salesforce's Exact method treats
-   spacing, recorded in Result either way. The fourth Account, which only shares a name with
-   another partner's club, as the `<club> - <partner>` clubs do, is not matched: its name and its
-   parent differ. A missing DuplicateRecordSet for the case-only twin is a failure: stop and
-   deactivate the rules (the Rollback). If either insert of the pair is refused
-   (`DUPLICATES_DETECTED` among its error codes), the Rollback below follows at once: deactivate
-   the rules. Nothing of the proof is kept: the script ends in `Database.rollback(sp);`, its last
+   space, a separate account), then a second name three times: a partner-less Club account, the
+   same name under a fictional partner account (inserted before it), and the same name as a
+   partner-less Household account. All seven inserts succeed, and one DuplicateRecordSet holding
+   the case-only pair appears (`DIAG|set` with its RecordCount and one `DIAG|item` line per
+   member); whether the spacing probe joins that set says how Salesforce's Exact method treats
+   spacing, recorded in Result either way. The second name's accounts are expected outside any
+   set: the Club under the fictional partner, which only shares a name with another partner's club
+   (the plain-name case the deliberate `<club> - <partner>` names never meet), is not matched
+   because ParentId keeps twins apart, and the Household account of that name is not matched
+   because the record-type condition keeps a Club and a partner apart. Either of those two
+   appearing in a set is a failure: stop and deactivate the rules (the Rollback). A missing
+   DuplicateRecordSet for the case-only twin is a failure too: stop and deactivate the rules (the
+   Rollback). If either insert of the pair is refused (`DUPLICATES_DETECTED` among its error
+   codes), the Rollback below follows at once: deactivate the rules. Nothing of the proof is
+   kept: the script ends in `Database.rollback(sp);`, its last
    statement, so every record it inserted and every set is rolled back and the org is as before
    (NPSP's triggers run on the inserts meanwhile, rolled back with them). Only `DIAG|` lines, ids
    and counts, are read from the log.
@@ -123,20 +130,28 @@ Id partnerType = '0126A000000cdYFQAY';      // 'Household Account': every partne
 Map<Id, DuplicateRule> rules = new Map<Id, DuplicateRule>([
     SELECT Id FROM DuplicateRule WHERE SobjectType = 'Account'
     AND DeveloperName IN ('Name_Parent_Club_Report', 'Name_Parent_Household_Report')]);
-// two partner-less Club accounts of one name, the second differing by case only, one insert each, as the processor inserts
+// (a) two partner-less Club accounts of one name, the second differing by case only, one insert each,
+//     as the processor inserts: expected, ONE set holding both
 Account first = new Account(Name = 'Zz Proof Club 84', RecordTypeId = clubType);
 insert first;
 Account second = new Account(Name = 'ZZ PROOF CLUB 84', RecordTypeId = clubType);
 insert second;
-// the spacing probe: the same name with a double space (does the Exact method ignore spacing?)
+// (b) the spacing probe: the same name with a double space (does the Exact method ignore spacing?)
 Account spaced = new Account(Name = 'Zz  Proof Club 84', RecordTypeId = clubType);
 insert spaced;
-// a fictional partner, and under it a club that only shares the name, named as such clubs are
+// (c) a second name three times: a partner-less Club; the same name under a fictional partner
+//     (ParentId keeps twins apart); the same name as a partner-less Household account (the record-type
+//     condition keeps a Club and a partner apart): expected, NO set for this name
 Account partner = new Account(Name = 'Zz Proof Partner 84', RecordTypeId = partnerType);
 insert partner;
-Account other = new Account(Name = 'Zz Proof Club 84 - Zz Proof Partner 84', RecordTypeId = clubType, ParentId = partner.Id);
-insert other;
-System.debug('DIAG|inserted|' + first.Id + '|' + second.Id + '|' + spaced.Id + '|' + partner.Id + '|' + other.Id);
+Account beta = new Account(Name = 'Zz Proof Beta 84', RecordTypeId = clubType);
+insert beta;
+Account parented = new Account(Name = 'Zz Proof Beta 84', RecordTypeId = clubType, ParentId = partner.Id);
+insert parented;
+Account household = new Account(Name = 'Zz Proof Beta 84', RecordTypeId = partnerType);
+insert household;
+System.debug('DIAG|inserted|' + first.Id + '|' + second.Id + '|' + spaced.Id + '|' + partner.Id + '|'
+             + beta.Id + '|' + parented.Id + '|' + household.Id);
 for (DuplicateRecordSet s : [SELECT Id, RecordCount, DuplicateRuleId, (SELECT RecordId FROM DuplicateRecordItems)
                              FROM DuplicateRecordSet WHERE DuplicateRuleId IN :rules.keySet()]) {
     System.debug('DIAG|set|' + s.Id + '|' + s.DuplicateRuleId + '|' + s.RecordCount);
