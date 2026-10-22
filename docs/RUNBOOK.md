@@ -1168,7 +1168,8 @@ plain `diff` of the snapshot before and the one after.*
    this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
    Settings → Integrations → Google Drive → Authorize → log in as Ryan's company account (the
-   one the photo mover runs on) → Folder Name `Attendance photos - Template` → Create Subfolders for Submissions ON,
+   one the photo mover runs on) → Folder Name `Attendance photos - Template` (the photo mover's
+   source folder, made at its setup before this step: "Photo mover") → Create Subfolders for Submissions ON,
    name = the "Club Name" field that is **question 5** (the hidden text field; the builder shows
    the Club picker under the same label - prefer the hidden one; if only the picker is offered,
    use it and say so in the plan's Result), a space, then "Attendance Date" → Send Uploaded Files
@@ -1267,10 +1268,10 @@ owner's to delete (the CEO's retention decision).
 
 ## Photo mover
 
-- **When:** setting it up (once), a region's form gets its Drive integration (its pair of Script Properties), a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
-- **Status:** built offline 2026-10-21 (ticket #89), not set up yet; waits for #63's integration ([plan](plans/2026-10-21-drive-photo-mover.md#result)).
+- **When:** setting it up (once, before #63 points the forms' Drive integrations at its source folders), the template's test upload after #63, a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
+- **Status:** built offline 2026-10-21 (ticket #89), not set up yet; it is set up first, then #63 (Ryan, 2026-10-22; [plan](plans/2026-10-21-drive-photo-mover.md#result)).
 - **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, by counts and folder names; nothing changes.
-- **Apply:** Ryan's go. `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 3 (Node 18, clasp 2.4.2).
+- **Apply:** Ryan's go, after #63 and a test upload on the template: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
 - **Verify:** the execution's log (`done: N folder(s) moved, N file(s) merged, 0 failure(s)`); the subfolder is in the region's folder on the Shared Drive and gone from `Attendance photos - <Region>`, which stays.
 - **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; move a subfolder back into `Attendance photos - <Region>` by hand to undo a move.
 
@@ -1280,6 +1281,20 @@ owned by Ryan's company account - not the sheet's script, whose scopes must not 
 (CLAUDE.md rule 11) - that every 15 minutes moves each submission subfolder that has not changed
 for 10 minutes from `Attendance photos - <Region>` into that region's folder on the Shared Drive.
 Setup, Script Properties and the push: `drive-sync/README.md`.
+
+The order, each live step on Ryan's go (Ryan, 2026-10-22):
+
+1. PR #91 lands: code only, nothing live.
+2. Setup (`drive-sync/README.md`, steps 1-6): the Shared Drive's folders, named exactly
+   `Africa`, `Asia`, `Latin America`, `Template` (`U.S` only if its form is re-enabled); one My
+   Drive source folder per region for Jotform's uploads, `Attendance photos - <Region>`; the
+   standalone project (`.clasp.json` from the example) and its push; the Script Properties
+   `SOURCE_FOLDER_<REGION>` / `TARGET_FOLDER_<REGION>`; `previewMoves` on the empty folders
+   (writes nothing).
+3. #63 (Ryan): each form's Google Drive integration pointed at its region's My Drive source
+   folder ("Photos", above, steps 1-2 and 5).
+4. A test upload on the template ("Photos", step 3), `previewMoves`, one `moveSettledPhotos`,
+   then `installTrigger`.
 
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N`,
 then the folders by name (club and date; never a file's name or contents).

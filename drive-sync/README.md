@@ -29,21 +29,29 @@ points), `appsscript.json` (time zone America/New_York, the sheet's; the two sco
 
 ## Setup (once, Ryan)
 
+The mover is set up first (Ryan, 2026-10-22): steps 1-6 need no form change and move nothing.
+Its My Drive source folders (step 2) are the folders each form's Google Drive integration is then
+pointed at (#63, RUNBOOK "Photos"); steps 7-8 follow a test upload on the template.
+
 1. **The Shared Drive.** A company Shared Drive with one folder per region in use, named exactly
    `Africa`, `Asia`, `Latin America`, `Template` (and `U.S` only if that form is re-enabled):
    the mover refuses a target folder with any other name. Members: the named list only
    (the CEO and Ryan); never "anyone with the link". Ryan's company account is at least a
    **Content manager** (moving items in needs it; see the plan's Risks on moving folders).
-2. **The project.** Signed in as the company account, script.google.com → New project, named
+2. **The source folders.** In the company account's My Drive, one folder per region in use for
+   Jotform's uploads, named exactly `Attendance photos - <Region>` (`Attendance photos -
+   Africa`, … `Attendance photos - Template`): the mover refuses a source folder with any other
+   name. Not shared with anyone.
+3. **The project.** Signed in as the company account, script.google.com → New project, named
    `GLOW photo mover`. Project Settings → copy the Script ID. In the repo:
    `cp drive-sync/.clasp.json.example drive-sync/.clasp.json` and paste the id there
    (`drive-sync/.clasp.json` is gitignored; ids never go in the repo).
-3. **Push** (a live write: Ryan's go). Node 18 and clasp 2.4.2 are pinned (CLAUDE.md rule 11):
+4. **Push** (a live write: Ryan's go). Node 18 and clasp 2.4.2 are pinned (CLAUDE.md rule 11):
    `nvm use 18`, then `cd drive-sync && npx clasp push -f`. clasp must be logged in as the
    company account (`npx clasp login`; the login is global, in `~/.clasprc.json`, so check it
    again before the next `appsscript/` push). Or paste `Plan.gs`, `Mover.gs` and the manifest
    into the editor by hand (Project Settings → show the manifest).
-4. **Script Properties** (Project Settings → Script Properties). One pair per region in use; the
+5. **Script Properties** (Project Settings → Script Properties). One pair per region in use; the
    id of a folder is the last part of its Drive URL, after `/folders/`:
 
    | Property | Folder |
@@ -59,12 +67,18 @@ points), `appsscript.json` (time zone America/New_York, the sheet's; the two sco
    source folder not named exactly `Attendance photos - <Region>`, or a target folder not named
    exactly the region (`Africa`, `Asia`, `Latin America`, `U.S`, `Template`): the run refuses
    (`CONFIG refused …`) before it reads a subfolder or moves anything.
-5. **Dry run.** In the editor, run `previewMoves`; accept Google's authorisation (Drive, and the
+6. **Dry run.** In the editor, run `previewMoves`; accept Google's authorisation (Drive, and the
    trigger scope). Executions → its log: one line per region, `would move N, would merge N (…),
-   waiting N, refused N`, then the folder names. Nothing changes.
-6. **First real run** (Ryan's go): run `moveSettledPhotos` once and check the log and both drives
-   (RUNBOOK "Photo mover", Verify).
-7. **The trigger** (Ryan's go): run `installTrigger`. It adds one time-driven trigger,
+   waiting N, refused N`, then the folder names; on the empty folders every count is 0 and no
+   `CONFIG refused`. Nothing changes.
+
+Then #63 (Ryan, in the builder): each form's Google Drive integration pointed at its region's
+source folder, template first, and a test upload on the template (RUNBOOK "Photos", steps 2-3).
+
+7. **First real run** (Ryan's go): after 10 minutes, `previewMoves` → `would move 1` naming the
+   test subfolder; then run `moveSettledPhotos` once and check the log and both drives (RUNBOOK
+   "Photo mover", Verify).
+8. **The trigger** (Ryan's go): run `installTrigger`. It adds one time-driven trigger,
    `moveSettledPhotos` every 15 minutes; running it again changes nothing.
 
 ## Stopping it

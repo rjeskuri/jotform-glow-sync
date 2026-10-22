@@ -1,7 +1,7 @@
 ---
 title: A standalone Apps Script moves Jotform's photo subfolders from Ryan's My Drive to the company Shared Drive
 author: Claude (ticket #89, with Ryan's decision of 2026-10-21)
-status: accepted         # built offline 2026-10-21 (drive-sync/); every live step below waits for Ryan's go and for #63's integration
+status: accepted         # built offline 2026-10-21 (drive-sync/); set up before #63 (Ryan, 2026-10-22); every live step below waits for Ryan's go
 created: 2026-10-21
 intent: Ryan, 2026-10-21 (ticket #89) - "Jotform will only use my local company gmail, but it needs to go to a company shared drive. So photos will be uploaded to me and then need to be transferred to the shared drive. Can we create a custom way to do this sync."
 ---
@@ -80,27 +80,33 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
 
 ## Rollout (live; each step on Ryan's go)
 
-0. Prerequisite: #63, the Drive integration on the template writing into Ryan's My Drive
-   (RUNBOOK "Photos", steps 1-2). The mover can be set up before; it has nothing to move until
-   then.
-1. **Shared Drive** (Ryan): the drive and its region folders, named exactly `Africa`, `Asia`,
-   `Latin America`, `Template`; members the named list only; Ryan's company account a Content
-   manager or more.
-2. **Project and push** (Ryan; `drive-sync/README.md`, steps 2-3): the standalone project as the
-   company account; `cd drive-sync && npx clasp push -f` under Node 18, logged in as that
-   account, or the files pasted into the editor.
-3. **Script Properties**: the Template pair first.
-4. **Dry run**: `previewMoves`, authorise when asked; the log lists the template folder's
-   subfolders by name, nothing changes in either drive.
-5. **Template test**: the photos plan's test submission (RUNBOOK "Photos", step 3: a neutral
-   image with nobody in it). After 10 minutes, `previewMoves` → `would move 1` naming
-   `<club> <date>`; then `moveSettledPhotos` by hand → `done: 1 folder(s) moved, 0 file(s)
-   merged, 0 failure(s)`; the subfolder is in the Template folder on the Shared Drive and gone
-   from `Attendance photos - Template`, which stays.
-6. **Trigger**: `installTrigger`; the next executions (every 15 minutes) log `move 0 … waiting 0`
-   or the folders they moved.
-7. **Regional forms**: as each form's integration is set up (RUNBOOK "Photos", step 5), add its
-   pair of Script Properties; the next run picks it up. Verify with the first real submission's
+The order (Ryan, 2026-10-22): the mover is set up first, with the My Drive source folders it
+reads; #63 then points each form's Google Drive integration at its region's source folder.
+
+1. **Land PR #91** (code only; nothing live).
+2. **Setup** (Ryan; `drive-sync/README.md`, Setup steps 1-6):
+   - the Shared Drive and its region folders, named exactly `Africa`, `Asia`, `Latin America`,
+     `Template` (`U.S` only if its form is re-enabled); members the named list only; Ryan's
+     company account a Content manager or more;
+   - one source folder per region in Ryan's company My Drive, for Jotform's uploads, named
+     exactly `Attendance photos - <Region>` (the mover refuses any other name);
+   - the standalone project as the company account, `.clasp.json` from `.clasp.json.example`,
+     `cd drive-sync && npx clasp push -f` under Node 18, logged in as that account (or the files
+     pasted into the editor);
+   - Script Properties `SOURCE_FOLDER_<REGION>` / `TARGET_FOLDER_<REGION>`, one pair per region;
+   - `previewMoves` on the empty folders, authorise when asked: one line per region, `would move
+     0, would merge 0 (0 file(s) in, 0 kept), waiting 0, refused 0`, no `CONFIG refused`;
+     nothing changes in either drive.
+3. **#63** (Ryan, in the builder; RUNBOOK "Photos", steps 1-2 and 5): each form's Google Drive
+   integration pointed at its region's source folder, `Attendance photos - <Region>` in Ryan's
+   My Drive, template first.
+4. **Template test, then the trigger**: the photos plan's test submission on the template
+   (RUNBOOK "Photos", step 3: a neutral image with nobody in it). After 10 minutes,
+   `previewMoves` → `would move 1` naming `<club> <date>`; then `moveSettledPhotos` by hand,
+   once → `done: 1 folder(s) moved, 0 file(s) merged, 0 failure(s)`; the subfolder is in the
+   Template folder on the Shared Drive and gone from `Attendance photos - Template`, which
+   stays. Then `installTrigger`; the next executions (every 15 minutes) log `move 0 … waiting 0`
+   or the folders they moved. Each regional form is verified by its first real submission's
    subfolder arriving on the Shared Drive within half an hour.
 
 ## Rollback
@@ -134,6 +140,11 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
   wrong place. Mitigation: the source must be named exactly `Attendance photos - <Region>` and
   the target exactly `<Region>`, or the run is refused (`CONFIG refused`) before it reads a
   subfolder; an id used twice is refused too.
+- **Jotform makes its own folder.** Whether the integration writes into the existing
+  `Attendance photos - <Region>` folder or creates a second one of that name is unverified. The
+  template test shows it (`previewMoves` → `would move 0` while the test subfolder sits in My
+  Drive); then `SOURCE_FOLDER_<REGION>` is pointed at the folder Jotform writes into, and the
+  empty one is deleted by hand.
 - **Authorisation lapses** (a password change, a revoked session): the trigger's runs fail and
   Google sends the owner its failure summary; re-run any entry point in the editor and accept.
 - **Ryan's account.** The integration and the mover run on it; the photos do not stay in it.
