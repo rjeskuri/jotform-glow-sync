@@ -31,7 +31,8 @@ points), `appsscript.json` (time zone America/New_York, the sheet's; the two sco
 
 The mover is set up first (Ryan, 2026-10-22): steps 1-6 need no form change and move nothing.
 Its My Drive source folders (step 2) are the folders each form's Google Drive integration is then
-pointed at (#63, RUNBOOK "Photos"); steps 7-8 follow a test upload on the template.
+pointed at (#63, RUNBOOK "Photos"); steps 7-8 follow the template's integration and a test
+upload on it, and step 9 (the regional forms) comes last.
 
 1. **The Shared Drive.** A company Shared Drive with one folder per region in use, named exactly
    `Africa`, `Asia`, `Latin America`, `Template` (and `U.S` only if that form is re-enabled):
@@ -72,14 +73,19 @@ pointed at (#63, RUNBOOK "Photos"); steps 7-8 follow a test upload on the templa
    waiting N, refused N`, then the folder names; on the empty folders every count is 0 and no
    `CONFIG refused`. Nothing changes.
 
-Then #63 (Ryan, in the builder): each form's Google Drive integration pointed at its region's
-source folder, template first, and a test upload on the template (RUNBOOK "Photos", steps 2-3).
+Then #63 for the template only (Ryan, in the builder): its Google Drive integration pointed at
+`Attendance photos - Template`, and a test upload on it with its read-back (RUNBOOK "Photos",
+steps 1-4). No regional form yet.
 
 7. **First real run** (Ryan's go): after 10 minutes, `previewMoves` → `would move 1` naming the
    test subfolder; then run `moveSettledPhotos` once and check the log and both drives (RUNBOOK
    "Photo mover", Verify).
 8. **The trigger** (Ryan's go): run `installTrigger`. It adds one time-driven trigger,
    `moveSettledPhotos` every 15 minutes; running it again changes nothing.
+9. **The regional forms** (#63, Ryan's go; RUNBOOK "Photos", step 5), only after steps 7-8:
+   one form at a time, its integration pointed at `Attendance photos - <Region>`, then the next
+   run's log for that region (no `CONFIG refused`, no `UNKNOWN`; its first subfolder moved)
+   before the next form.
 
 ## Stopping it
 

@@ -81,7 +81,8 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
 ## Rollout (live; each step on Ryan's go)
 
 The order (Ryan, 2026-10-22): the mover is set up first, with the My Drive source folders it
-reads; #63 then points each form's Google Drive integration at its region's source folder.
+reads; #63 then points the template's Google Drive integration at its source folder; the
+template test and the trigger come next, and only then the regional forms' integrations.
 
 1. **Land PR #91** (code only; nothing live).
 2. **Setup** (Ryan; `drive-sync/README.md`, Setup steps 1-6):
@@ -97,17 +98,21 @@ reads; #63 then points each form's Google Drive integration at its region's sour
    - `previewMoves` on the empty folders, authorise when asked: one line per region, `would move
      0, would merge 0 (0 file(s) in, 0 kept), waiting 0, refused 0`, no `CONFIG refused`;
      nothing changes in either drive.
-3. **#63** (Ryan, in the builder; RUNBOOK "Photos", steps 1-2 and 5): each form's Google Drive
-   integration pointed at its region's source folder, `Attendance photos - <Region>` in Ryan's
-   My Drive, template first.
+3. **#63, the template only** (Ryan, in the builder; RUNBOOK "Photos", steps 1-2): the
+   template's Google Drive integration pointed at `Attendance photos - Template` in Ryan's My
+   Drive. No regional form yet.
 4. **Template test, then the trigger**: the photos plan's test submission on the template
-   (RUNBOOK "Photos", step 3: a neutral image with nobody in it). After 10 minutes,
+   (RUNBOOK "Photos", steps 3-4: a neutral image with nobody in it; the read-back checks the
+   subfolder's name and which folder Jotform wrote into, see Risks). After 10 minutes,
    `previewMoves` → `would move 1` naming `<club> <date>`; then `moveSettledPhotos` by hand,
    once → `done: 1 folder(s) moved, 0 file(s) merged, 0 failure(s)`; the subfolder is in the
    Template folder on the Shared Drive and gone from `Attendance photos - Template`, which
    stays. Then `installTrigger`; the next executions (every 15 minutes) log `move 0 … waiting 0`
-   or the folders they moved. Each regional form is verified by its first real submission's
-   subfolder arriving on the Shared Drive within half an hour.
+   or the folders they moved.
+5. **#63, the regional forms** (Ryan, in the builder; RUNBOOK "Photos", step 5), only after
+   step 4 passed, one form at a time: its integration pointed at `Attendance photos - <Region>`;
+   then the next run's log for that region (no `CONFIG refused`, no `UNKNOWN`), and its first
+   real submission's subfolder on the Shared Drive within half an hour, before the next form.
 
 ## Rollback
 

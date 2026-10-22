@@ -1271,7 +1271,7 @@ owner's to delete (the CEO's retention decision).
 - **When:** setting it up (once, before #63 points the forms' Drive integrations at its source folders), the template's test upload after #63, a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
 - **Status:** built offline 2026-10-21 (ticket #89), not set up yet; it is set up first, then #63 (Ryan, 2026-10-22; [plan](plans/2026-10-21-drive-photo-mover.md#result)).
 - **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, by counts and folder names; nothing changes.
-- **Apply:** Ryan's go, after #63 and a test upload on the template: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
+- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
 - **Verify:** the execution's log (`done: N folder(s) moved, N file(s) merged, 0 failure(s)`); the subfolder is in the region's folder on the Shared Drive and gone from `Attendance photos - <Region>`, which stays.
 - **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; move a subfolder back into `Attendance photos - <Region>` by hand to undo a move.
 
@@ -1291,10 +1291,13 @@ The order, each live step on Ryan's go (Ryan, 2026-10-22):
    standalone project (`.clasp.json` from the example) and its push; the Script Properties
    `SOURCE_FOLDER_<REGION>` / `TARGET_FOLDER_<REGION>`; `previewMoves` on the empty folders
    (writes nothing).
-3. #63 (Ryan): each form's Google Drive integration pointed at its region's My Drive source
-   folder ("Photos", above, steps 1-2 and 5).
-4. A test upload on the template ("Photos", step 3), `previewMoves`, one `moveSettledPhotos`,
-   then `installTrigger`.
+3. #63, the template only (Ryan): the template's Google Drive integration pointed at
+   `Attendance photos - Template` ("Photos", above, steps 1-2). No regional form yet.
+4. A test upload on the template and its read-back ("Photos", steps 3-4), `previewMoves`, one
+   `moveSettledPhotos`, then `installTrigger`.
+5. #63, the regional forms (Ryan), only after step 4 passed: "Photos", step 5, one form at a
+   time, each followed by a check of the next run's log for that region (no `CONFIG refused`,
+   no `UNKNOWN`; its first subfolder moved) before the next form.
 
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N`,
 then the folders by name (club and date; never a file's name or contents).
