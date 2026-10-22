@@ -539,31 +539,59 @@ console.log('\n  which reports are roster changes');
     // changes (a 2026-10 report of girls who attended but were "not on the form" was missed);
     // a named girl who is not on the list is one too (this case said '' before #110)
     [LA, 'Grace Zibblewick is not on the list', {}, 'text'],
-    [AF, 'Three girls who attended are not on the form.', {}, 'text'],
-    [AF, 'Two of our members are not in the portal.', {}, 'text'],
-    [AF, 'Five students are missing from the list.', {}, 'text'],
-    [AF, 'The names of two girls are not on the form.', {}, 'text'],
-    [AF, 'Hana Marrowgate is missing from the list.', {}, 'text'],
-    [AF, 'Esther Ostrivane and Chiara Pellucidor are not on the form.', {}, 'text'],
-    [AF, 'The form worked.', { [PQ.FB_DOING]: 'Mark attendance, but two girls are not in the portal' }, 'text'],
-    [LA, 'Dos niñas no aparecen en el formulario.', {}, 'text'],
-    [LA, 'Hana Marrowgate no aparece en la lista.', {}, 'text'],
-    // …but the same phrases about a club, a session, a button or an organization are bug reports
-    [AF, 'My club is not on the form.', {}, ''],
-    [AF, 'The session is not in the portal.', {}, ''],
-    [AF, 'The Submit button is missing from the page.', {}, ''],
-    [AF, 'Our partner organization is not on the list.', {}, ''],
-    [AF, 'Today\'s module is missing from the list.', {}, ''],
     [AF, 'Nova Girls Club is not on the form.', { [PQ.FB_CLUB]: 'Nova Girls Club' }, ''],
-    [LA, 'Mi club no aparece en la lista.', {}, ''],
-    [LA, 'La sesión de hoy no aparece en el formulario.', {}, ''],
+    [AF, 'The Submit button is missing from the page.', {}, ''],
     [AF, '', {}, ''],
   ];
-  const wrong = cases.filter(([f, w, x, want]) => pr.looksLikeRosterChange_(report(f, w, x)) !== want)
-      .map(([f, w, x, want]) => w.slice(0, 40) + ' → ' + JSON.stringify(want));
-  check(cases.length + ' wordings classified as expected (Club Roster Form chosen, roster words + change words, ' +
-        'girls not on the form / in the portal / missing from the list, Spanish)',
-        !wrong.length, wrong.join(' | '));
+  // The #110 wordings, built from parts: every subject × every phrase, so no fragment of a
+  // sentence is worth matching on its own. Names come from the fixture pools, a different one
+  // per row (test/fixtures/make_fixture.py: FIRST, LAST).
+  const pools = (() => {
+    const src = fs.readFileSync(path.join(REPO, 'test', 'fixtures', 'make_fixture.py'), 'utf8');
+    const list = n => [...src.match(new RegExp('^' + n + ' = \\[([\\s\\S]*?)\\]', 'm'))[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
+    return { first: list('FIRST'), last: list('LAST') };
+  })();
+  check('the fixture name pools were read (' + pools.first.length + ' first names, ' + pools.last.length + ' surnames)',
+        pools.first.length >= 20 && pools.last.length >= 10 && pools.first.includes('Hope') && pools.last.includes('Fennwhistle'));
+  let nth = 0;
+  const girl = () => { nth++; return pools.first[(nth * 7) % pools.first.length] + ' ' + pools.last[(nth * 3) % pools.last.length]; };
+  const cap = s => s[0].toUpperCase() + s.slice(1);
+  // [subject, verb, isName]: people (roster changes) and things (bug reports)
+  const PEOPLE_EN = [['girls', 'are'], ['two girls', 'are'], ['our members', 'are'], ['three students', 'are'],
+                     ['the names', 'are'], ['the girls who came today', 'are'], [girl, 'is']];
+  const THINGS_EN = [['my club', 'is'], ['the session', 'is'], ['the Submit button', 'is'], ['our organization', 'is'],
+                     ['today\'s module', 'is'], ['the page', 'is'], ['the photo', 'is']];
+  const PHRASES_EN = ['not on the form', 'not on the list', 'not in the portal', 'missing from the list'];
+  const PEOPLE_ES = [['las niñas', 'no aparecen'], ['dos niñas', 'no aparecen'], ['tres integrantes', 'no aparecen'], [girl, 'no aparece']];
+  const THINGS_ES = [['mi club', 'no aparece'], ['la sesión', 'no aparece'], ['el botón', 'no aparece'], ['el módulo', 'no aparece']];
+  const PHRASES_ES = ['en la lista', 'en el formulario'];
+  // each sentence in a different frame: bare, after a greeting, before a plea, mid-report
+  const FRAMES = [s => cap(s) + '.', s => 'Hello. ' + cap(s) + '.', s => cap(s) + '. Please help.',
+                  s => 'We met on Tuesday and ' + s + '.', s => 'Hola. ' + cap(s) + '.', s => cap(s) + ', ¿pueden revisar?'];
+  let k = 0;
+  const sentence = ([subj, verb], phrase) => {
+    const s = (typeof subj === 'function' ? subj() : subj) + ' ' + verb + ' ' + phrase;
+    return FRAMES[k++ % FRAMES.length](s);
+  };
+  const cross = (subjects, phrases, form, want) => subjects.flatMap(sv => phrases.map(p => [form, sentence(sv, p), {}, want]));
+  const built = [].concat(cross(PEOPLE_EN, PHRASES_EN, AF, 'text'), cross(PEOPLE_ES, PHRASES_ES, LA, 'text'),
+                          cross(THINGS_EN, PHRASES_EN, AF, ''), cross(THINGS_ES, PHRASES_ES, LA, ''));
+  // the same wording given as "what were you trying to do", with a bland "what happened"
+  const BLAND = ['The form worked.', 'It saved.', 'Nothing happened.', 'Todo bien.'];
+  const asDoing = (c, i) => [c[0], BLAND[i % BLAND.length], { [PQ.FB_DOING]: c[1] }, c[3]];
+  const doingRows = built.filter((c, i) => i % 5 === 2).map(asDoing);
+  const all = cases.concat(built, doingRows);
+  const wrong = all.filter(([f, w, x, want]) => pr.looksLikeRosterChange_(report(f, w, x)) !== want)
+      .map(([f, w, x, want]) => (x[PQ.FB_DOING] ? 'doing: ' + x[PQ.FB_DOING] : w).slice(0, 48) + ' → ' + JSON.stringify(want));
+  check(all.length + ' wordings classified as expected (Club Roster Form chosen, roster words + change words, ' +
+        'people not on the form / in the portal / missing from the list and the same about things, ' +
+        built.filter(c => c[3]).length + ' built roster changes, ' + built.filter(c => !c[3]).length + ' built bug reports, ' +
+        doingRows.length + ' of them as "trying to do")',
+        !wrong.length, wrong.length + ' wrong: ' + wrong.slice(0, 12).join(' | ') + (wrong.length > 12 ? ' | …' : ''));
+  const names = built.map(c => c[1]).join(' ').match(/[A-Z][a-z]+ [A-Z][a-z]+(?= (?:is|no aparece) )/g) || [];
+  check('every built name row uses a different fixture name (' + names.length + ' names)',
+        names.length === PHRASES_EN.length + PHRASES_ES.length && new Set(names).size === names.length &&
+        names.every(n => pools.first.includes(n.split(' ')[0]) && pools.last.includes(n.split(' ')[1])), names.join(', '));
   const kept = [['The list of clubs is missing mine.', ''], ['The new orientation session is missing from the list.', ''],
                 ['When I choose our club, the girls\' names do not show.', '']]
       .filter(([w, want]) => cases.some(c => c[1] === w && c[3] === want));
@@ -653,11 +681,14 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
   const vm = require('vm');
   // Forms.gs: existingForm_ (the Club Roster Form the mentor is pointed to, #110)
   const gsFiles = ['Config.gs', 'Normalize.gs', 'RosterOps.gs', 'Roster.gs', 'Forms.gs', 'FormHandlers.gs'];
-  const formUrl = id => 'https://forms.example.org/' + id + '/viewform';
+  const crypto = require('crypto');
   // A spreadsheet of plain arrays: tabs[name] = rows (row 1 = header). opts.fail(mail) → the
-  // error a send throws ('' = sent); opts.formsDown: FormApp.openById throws.
+  // error a send throws ('' = sent); opts.formsDown: FormApp.openById throws. Each form's
+  // published URL is a random token minted by this world (url(id)): only getPublishedUrl()
+  // on the opened form can know it; `published` lists the ids it was called for.
   const world = (opts) => {
-    const tabs = {}, mails = [], audits = [];
+    const tabs = {}, mails = [], audits = [], urls = {}, published = [];
+    const url = id => (urls[id] = urls[id] || 'https://docs.google.com/forms/d/e/' + crypto.randomBytes(12).toString('hex') + '/viewform');
     const sheet = name => ({
       getName: () => name,
       getLastRow: () => tabs[name].length,
@@ -689,7 +720,7 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
       // a form per id, as Script Properties name them; its published URL is its own
       FormApp: { openById: id => {
         if (opts.formsDown) throw new Error('Forms service unavailable');
-        return { getId: () => id, getPublishedUrl: () => formUrl(id) };
+        return { getId: () => id, getPublishedUrl: () => { published.push(id); return url(id); } };
       } },
       Utilities: { formatDate: d => d.toISOString().slice(0, 10) },
     });
@@ -699,14 +730,16 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
     ctx.formLogAdd_ = () => {};
     tabs.ReviewQueue = [vm.runInContext('REVIEW_COLS', ctx).slice()];
     const toStaff = m => m.to === 'staff@example.org';
-    return { ctx, tabs, mails, audits, sheet,
+    return { ctx, tabs, mails, audits, sheet, url, published,
              staffMails: () => mails.filter(toStaff), mentorMails: () => mails.filter(m => !toStaff(m)) };
   };
   const STAFF = { STAFF_NOTIFY_EMAIL: 'staff@example.org', FORM_ROSTER_ID: 'rf-2026', FORM_FEEDBACK_ID: 'pf-2026' };
   const KEY = 'FEEDBACK|w:2026-09-20 08:15:38.000|GLOW – Club Roster Form|';
   const change = () => report('GLOW – Club Roster Form', 'Please remove ' + CANARY,
       { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: 'mentor@example.org' });
-  const clean = s => !/Fennwhistle|Bright Stars|mentor@example\.org/.test(s);
+  // no girl, no typed club, and not the address this run typed
+  const cleanFor = addr => s => !/Fennwhistle|Bright Stars/.test(s) && !s.includes(addr);
+  const clean = cleanFor('mentor@example.org');
 
   let w = world({ props: STAFF });
   const res = w.ctx.runResponse_('FEEDBACK', w.sheet('Feedback'), 7, change(), KEY);
@@ -743,7 +776,7 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         clean(w.audits.join('\n')));
   check('…and the sender is still pointed to the Club Roster Form (the queue is staff\'s problem, not hers)',
         w.mentorMails().length === 1 && w.mentorMails()[0].to === 'mentor@example.org' &&
-        w.mentorMails()[0].body.includes(formUrl('rf-2026')), w.mails.map(m => m.to).join(','));
+        w.mentorMails()[0].body.includes(w.url('rf-2026')), w.mails.map(m => m.to).join(','));
 
   w = world({ props: {} });
   threw = false;
@@ -795,13 +828,15 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
     check('each run: exactly one e-mail to the typed address (trimmed), none to anyone else',
           !bad(r => r.x.mentorMails().length === 1 && r.x.mentorMails()[0].to === r.typed && r.x.mails.length === 2),
           runs.map(r => r.source + ': ' + r.x.mails.map(m => m.to).join('+')).join(' | '));
-    check('…it names the Club Roster Form and gives ITS link (the form FORM_ROSTER_ID names, published URL), never the problem form\'s',
+    check('…it names the Club Roster Form and gives ITS link (the form FORM_ROSTER_ID names, as getPublishedUrl() gave it), never the problem form\'s',
           !bad(r => r.x.mentorMails().length === 1 && mentorText(r.x.mentorMails()[0]).includes('Club Roster Form') &&
-                    r.x.mentorMails()[0].body.includes(formUrl(r.rfId)) && !mentorText(r.x.mentorMails()[0]).includes(formUrl('pf-2026'))),
+                    r.x.published.includes(r.rfId) && r.x.mentorMails()[0].body.includes(r.x.url(r.rfId)) &&
+                    !mentorText(r.x.mentorMails()[0]).includes(r.x.url('pf-2026'))),
           runs.map(r => r.source + ': ' + (r.x.mentorMails()[0] ? mentorText(r.x.mentorMails()[0]).replace(/\s+/g, ' ').slice(0, 120) : 'no mentor e-mail')).join(' | '));
     check('…and never echoes the report (it can name girls): no canary, no "undefined"',
           !bad(r => r.x.mentorMails().length === 1 && !/Fennwhistle|undefined|null/.test(mentorText(r.x.mentorMails()[0]))));
-    check('Audit still names no girl, no typed club, no address', !bad(r => clean(r.x.audits.join('\n'))));
+    check('Audit still names no girl, no typed club, nor the address this run typed',
+          !bad(r => cleanFor(r.typed)(r.x.audits.join('\n'))));
 
     // no such e-mail for a plain bug report, nor without a usable address
     const addressed = what => report('Africa Attendance Form', what, { [PQ.FB_EMAIL]: 'mentor@example.org' });
@@ -818,14 +853,16 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
           w.tabs.ReviewQueue.length === 3 && w.mails.length === 2 && !w.mentorMails().length, w.mails.map(m => m.to).join(','));
 
     // the mentor e-mail is best-effort, like sendHoldNotice_'s: never fails the handler, never blocks staff
-    w = world({ props: STAFF, fail: m => (m.to === 'mentor@example.org' ? 'Invalid email: ' + m.to : '') });
+    const BOUNCING = 'bounces.here@example.org';
+    w = world({ props: STAFF, fail: m => (m.to === BOUNCING ? 'Invalid email: ' + m.to : '') });
     let failed = null;
-    try { failed = w.ctx.handleFeedback_(change(), 'Feedback!7', KEY); } catch (e) { failed = 'THREW ' + e.message; }
+    const bouncing = report('GLOW – Club Roster Form', 'Please remove ' + CANARY, { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: BOUNCING });
+    try { failed = w.ctx.handleFeedback_(bouncing, 'Feedback!41', KEY); } catch (e) { failed = 'THREW ' + e.message; }
     check('the mentor e-mail fails: the handler still returns queued, staff e-mailed, the row queued',
           failed.startsWith('emailed staff; roster change queued') && w.staffMails().length === 1 &&
-          w.tabs.ReviewQueue.length === 2, failed);
+          w.staffMails()[0].replyTo === BOUNCING && w.tabs.ReviewQueue.length === 2, failed);
     check('…its failure goes to Audit, about the source, without the address or the girl',
-          w.audits.some(a => a.includes('could not e-mail the mentor about Feedback!7')) && clean(w.audits.join('\n')),
+          w.audits.some(a => a.includes('could not e-mail the mentor about Feedback!41')) && cleanFor(BOUNCING)(w.audits.join('\n')),
           w.audits.join(' | '));
 
     // the staff e-mail is the step that throws and is retried: the mentor is e-mailed only
@@ -848,9 +885,9 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
     check('FORM_ROSTER_ID unset, or the form not opening: no ERROR, staff e-mailed, the row queued',
           outcomes.every(o => o.startsWith('emailed staff; roster change queued')) &&
           noForm.every(x => x.staffMails().length === 1 && x.tabs.ReviewQueue.length === 2), outcomes.join(' | '));
-    check('…a mentor e-mail sent without the link still names the Club Roster Form and never says "undefined"',
+    check('…a mentor e-mail sent without the link still names the Club Roster Form and never says "undefined" or links another form',
           noForm.every(x => x.mentorMails().every(m => mentorText(m).includes('Club Roster Form') &&
-                                                       !/undefined|null|forms\.example\.org/.test(mentorText(m)))),
+                                                       !/undefined|null|docs\.google\.com/.test(mentorText(m)))),
           noForm.map(x => x.mentorMails().map(m => mentorText(m).replace(/\s+/g, ' ').slice(0, 100)).join('+') || 'none').join(' | '));
   }
 
