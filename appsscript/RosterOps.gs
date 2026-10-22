@@ -161,17 +161,24 @@ function planClub_(entry, current, state, region, today) {
  * reactivated (same ID), unless removed after the response was sent
  * (keptRemoved: she stays removed, and a REMOVE of the same name is then
  * "already removed"); unknown → minted. Removes: matched case-
- * insensitively against the club's ACTIVE girls → deactivated; already
- * inactive → noted, nothing to do; anything that matches nobody is returned
- * with the closest candidates (for staff, via the ReviewQueue — never for the
- * mentor email). Nothing is ever deleted. plan.removedOn is the removed_date
- * the deactivated rows get (removedOnDay_).
+ * insensitively against the club's girls (key_) → active: deactivated;
+ * inactive: noted, nothing to do. A name spelled no such way is then matched
+ * with capitals, accents and punctuation ignored (foldLetters_) against the
+ * club's rows of any status: exactly one girl and she is active → deactivated
+ * (folded, counted in the summary); only inactive girls → already removed; an
+ * active girl plus any other, a near spelling (a typo, a middle name left out)
+ * or no letters at all → returned with the closest candidates (for staff, via
+ * the ReviewQueue — never for the mentor email). Nothing is ever deleted.
+ * plan.removedOn is the removed_date the deactivated rows get (removedOnDay_);
+ * plan.removedNames are the deactivated girls as the mentor typed them, one per
+ * deactivate row (the e-mail echoes those, never the Roster's spelling).
  *
  * entry: {partner, club, adds, removes, duplicates, source, submitted (optional)}
  */
 function planModification_(entry, current, state, region, today) {
   const plan = { toAppend: [], reactivate: [], deactivate: [], keptRemoved: [], issues: [],
-                 alreadyActive: [], alreadyInactive: [], keptBoth: [], unmatched: [] };
+                 alreadyActive: [], alreadyInactive: [], keptBoth: [], unmatched: [],
+                 removedNames: [], folded: [] };
   const sentDay = submittedDay_(entry);
   plan.removedOn = removedOnDay_(sentDay, today);
   if (entry.duplicates && entry.duplicates.length) plan.issues.push(duplicateNamesIssue_(entry));
@@ -199,11 +206,29 @@ function planModification_(entry, current, state, region, today) {
 
   const activeNames = current.filter(function (r) { return r.status === STATUS.ACTIVE; })
       .map(function (r) { return r.full_name; });
+  // The club's rows by their spelling with capitals, accents and punctuation ignored, any
+  // status. A girl this response also ADDs (her enrolled spelling) is left out: a REMOVE of
+  // her under another spelling takes today's path (an item), never deactivates her.
+  const byFold = {};
+  current.forEach(function (row) {
+    const fold = foldLetters_(row.full_name);
+    if (fold && !added[key_(row.full_name)]) (byFold[fold] = byFold[fold] || []).push(row);
+  });
   (entry.removes || []).forEach(function (name) {
     const found = byName[key_(name)];
     if (added[key_(name)]) { plan.keptBoth.push(name); return; }
-    if (found && found.status === STATUS.ACTIVE) { plan.deactivate.push(found); return; }
+    if (found && found.status === STATUS.ACTIVE) {
+      plan.deactivate.push(found); plan.removedNames.push(name); return;
+    }
     if (found) { plan.alreadyInactive.push(name); return; }   // already removed earlier
+    // not spelled so on file: the same letters and digits, within this club only
+    const twins = byFold[foldLetters_(name)] || [];
+    const active = twins.filter(function (r) { return r.status === STATUS.ACTIVE; });
+    if (twins.length === 1 && active.length === 1) {
+      plan.deactivate.push(active[0]); plan.removedNames.push(name); plan.folded.push(name);
+      return;
+    }
+    if (twins.length && !active.length) { plan.alreadyInactive.push(name); return; }
     plan.unmatched.push({ name: name, candidates: closestNames_(name, activeNames) });
   });
 
