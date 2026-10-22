@@ -366,7 +366,7 @@ consumer keys (`3MVG9…`) and 64-hex consumer secrets, in either case.
 
 **Next (Ryan):** remove Contents from the token and check `HTTP 204` again; then the Salesforce
 setup, the two secrets and `SF_SYNC=plan` (RUNBOOK "New clubs' accounts, automatically", setup
-steps 1-3 and 5-6).
+steps 1-3 and 5-6). *Done 2026-10-22: see Result.*
 
 ## Amendment 2026-10-21 (ticket #66): the sync runs as Ryan's own user
 
@@ -411,9 +411,15 @@ and run ids only.
   closed: a token is issued to Ryan's System Administrator user. RUNBOOK Setup step 2 and the
   ATTENTION table say so.
 - **Run 39780929667:** describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's
-  `glow` login); check 317 ok, 5 need a person. The five were fixed by hand on Ryan's go: 4
+  `glow` login on 2026-10-21: a VPN-off count of 455 Accounts, 372 Club, 83 Household); check 317 ok, 5 need a person. The five were fixed by hand on Ryan's go: 4
   partner-less club accounts parented, 1 club account created.
 - **Run 39784745392:** 456 Accounts, 373 Club; check 322 ok, 0 need a person.
 - **`SF_SYNC=apply` since 2026-10-22 12:52 UTC.**
+- **The plan-mode gate was waived.** Order of work step 5 asks for at least 7 days in plan mode,
+  closed by zero login failures and one "would create" body equal to a hand create. Ryan waived
+  it on 2026-10-22, in his words "set sf_sync to apply". `apply` was set at 12:52 UTC, before the
+  clean check: run 39784745392 then showed 0 need a person. No "would create" body has been
+  compared yet, because no new club has appeared. The first creates are checked by hand instead
+  (RUNBOOK ATTENTION table, `created … check it by hand (first creates)`).
 - **Still to do:** check the first automatic creates by hand (RUNBOOK ATTENTION table, `created …
   check it by hand (first creates)`); then set this plan's `status:` to `done`.
