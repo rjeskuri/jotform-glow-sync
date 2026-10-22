@@ -196,6 +196,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - The reports e-mailed before (Feedback rows 4-12) went through the same code once (`tools/backfill_feedback_review.py`)
 - **Why:** 7 of 11 problem reports were roster requests and none was applied; the queue grew from 22 to 30 open with nothing resolved 09-12 → 09-28, because nobody owned it and nothing announced it
 - **Consequences:** any text in `resolved` closes an item, rows are never deleted; the classifier is a keyword heuristic — a missed report still reaches staff by e-mail (add it by hand), a false alarm is resolved "not a roster change"; [plan](plans/2026-09-28-problem-report-followup.md)
+- 2026-10-22 (#110): the classifier also takes girls "not on the form / list", "not in the portal", "missing from the list" (and "no aparece(n) en la lista / el formulario") said of people, not of a club, session, button or page — a 2026-10 report of that shape was missed; and the sender of a roster-change report who gave a reply address is e-mailed the Club Roster Form's link after the staff e-mail (never the report text), the item staying staff's to enter or confirm ([plan](plans/2026-10-22-roster-change-reports-to-roster-form.md))
 
 ### 2026-09-28 — A partner list for shared club names (superseded)
 

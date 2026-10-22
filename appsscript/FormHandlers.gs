@@ -977,7 +977,9 @@ function attendanceFormLine_(partner, otherwise) {
 /**
  * E-mail staff a problem report. One that looks like a roster change also
  * becomes a ReviewQueue item ("Roster change sent as a problem report"),
- * because an e-mail alone was never followed up (2026-09-27 review).
+ * because an e-mail alone was never followed up (2026-09-27 review), and its
+ * sender is pointed to the Club Roster Form (#110) — after the staff e-mail,
+ * the one step that throws and is retried, so a retry never e-mails her twice.
  */
 function handleFeedback_(a, source, responseKey) {
   const staff = PropertiesService.getScriptProperties().getProperty(PROP.STAFF_EMAIL);
@@ -1014,8 +1016,54 @@ function handleFeedback_(a, source, responseKey) {
   audit_('feedbackForm', 'emailed ' + staff + ' about ' + tidy_(a[Q.FB_FORM]) +
          (!reason ? '' : queued ? '; ReviewQueue [#' + source + ']'
                                 : '; roster change, ReviewQueue write FAILED'));
+  const pointed = reason && replyTo ? sendRosterFormPointer_(replyTo, source) : null;
   return 'emailed staff' +
-      (!reason ? '' : queued ? '; roster change queued' : '; roster change NOT queued (see Audit)');
+      (!reason ? '' : queued ? '; roster change queued' : '; roster change NOT queued (see Audit)') +
+      (pointed === null ? '' : pointed ? '; sender pointed to the Club Roster Form'
+                                       : '; sender NOT e-mailed (see Audit)');
+}
+
+/**
+ * Tell the sender of a roster-change report where such changes go: the Club
+ * Roster Form, with its published link when the form opens (rosterFormUrl_),
+ * named without one otherwise. Echoes nothing she typed — reports name girls,
+ * and the address is whatever was typed into a public form. Never fails the
+ * handler; a failure goes to Audit without the address, as sendHoldNotice_'s
+ * does. True once sent.
+ */
+function sendRosterFormPointer_(to, source) {
+  try {
+    const url = rosterFormUrl_();
+    const body = [
+      'Thank you for your report. It reached the GLOW team.', '',
+      'It reads like a change to your club\'s roster: girls to add, or girls to remove. ' +
+          'Those go on the Club Roster Form' +
+          (url ? ':' : ' (your GLOW contact can send you its link).'),
+    ].concat(url ? [url] : []).concat([
+      '',
+      'Choose "' + Q.ACTION_MOD + '", then your organization and your club, and list the ' +
+          'girls to add or to remove, each spelled as she was enrolled. Your club\'s roster ' +
+          'and its attendance form are updated from it.', '',
+      'If you have already sent it there, or your report was about something else, there ' +
+          'is nothing more to do: the team reads every report.',
+    ]).join('\n');
+    MailApp.sendEmail({ to: to, subject: 'GLOW – roster changes go on the Club Roster Form', body: body });
+    return true;
+  } catch (err) {
+    audit_('sendRosterFormPointer_', 'could not e-mail the mentor about ' + source + ': ' +
+           previewError_(err.message));
+    return false;
+  }
+}
+
+/** The Club Roster Form's published link, or '' (no form saved, or not opening: existingForm_). */
+function rosterFormUrl_() {
+  try {
+    const form = existingForm_(PROP.ROSTER_FORM);
+    return form ? String(form.getPublishedUrl() || '') : '';
+  } catch (err) {
+    return '';
+  }
 }
 
 /**
@@ -1064,12 +1112,30 @@ const DIGEST = { MAX_PER_ISSUE: 10, NEW_DAYS: 7 };
 const RC_PEOPLE = /\b(?:girls?|members?|students?|names|roster|list|(?:to|from) (?:our|the|my|this) (?:club|group)|ninas?|chicas?|integrantes|participantes|nombres|lista)\b/;
 const RC_CHANGE = /\b(?:add(?:ed|ing)?|remov(?:e|ed|ing|al)|join(?:ed|ing|s)?|left|chang(?:e|ed|es|ing)|reduc(?:e|ed|es|ing|tion)|updated|up to date|agreg\w*|anadi\w*|quitar\w*|elimin\w*|se fue(?:ron)?|cambi\w*|actualizad[ao]s?)\b/;
 const RC_NEW = /\bnew (?:girls?|members?|students?|names)\b|\bnuev[ao]s? (?:ninas?|chicas?|integrantes|participantes)\b|\b(?:ninas?|chicas?|integrantes|participantes) nuev[ao]s?\b/;
+// #110: girls "not on the form / list", "not in the portal", "missing from the
+// list" (Spanish "no aparece(n) en la lista / el formulario") are a roster
+// change said without a change word (a 2026-10 report of girls who attended
+// but were "not on the form" was missed). The same phrases are how page
+// problems read ("my club is not on the list"), so WHAT is absent decides: the
+// clause before the phrase, back to the last stop or "and". It is people when
+// it holds a people word (RC_WHO), or when, its articles and copula dropped
+// (RC_FILLER), what is left is no thing word (RC_THING) — a girl's name, "her
+// name", "she", "three". Accepted misses: a pronoun alone ("they are not on
+// the form"), a name after a thing word in the same clause ("at the club
+// meeting Ada Lorrimane was not on the list"). Accepted false alarms: a thing
+// not listed ("the date is not on the form"), resolved "not a roster change".
+const RC_ABSENT = /\b(?:not (?:on the (?:form|list)|in the portal)|missing from the list|no aparecen? en (?:la lista|el formulario))\b/;
+const RC_WHO = /\b(?:girls?|members?|students?|names|ninas?|chicas?|integrantes|participantes|nombres)\b/;
+const RC_THING = /\b(?:clubs?|clubes|groups?|sessions?|buttons?|organi[sz]ations?|modules?|pages?|photos?|pictures?|forms?|links?|options?|questions?|dates?|languages?|rosters?|lists?|logos?|menus?|grupos?|sesion(?:es)?|boton(?:es)?|organizacion(?:es)?|modulos?|paginas?|fotos?|formularios?|enlaces?|opcion(?:es)?|preguntas?|fechas?|idiomas?|listas?)\b/;
+const RC_FILLER = /\b(?:is|are|was|were|am|the|an?|my|our|your|their|her|his|its|this|that|these|those|it|they|them|there|here|some|all|also|still|now|el|la|los|las|una?|unos|unas|mi|mis|nuestr[ao]s?|sus?|est[aeo]s?|es[aeo]s?|ell[ao]s?|tod[ao]s?|tambien|ya|ahora)\b/g;
+const RC_BREAK = /[.,;:!?¿¡()"]|\b(?:and|but|so|because|y|pero|porque)\b/;
 
 /**
  * Why a problem report looks like a roster change: 'form' (it names the Club
- * Roster Form), 'text' (its words ask to add or remove girls) or '' (it does
- * not). A miss still reaches staff by e-mail; a false alarm is resolved
- * "not a roster change" (docs/RUNBOOK.md, "Working the ReviewQueue").
+ * Roster Form), 'text' (its words ask to add or remove girls, or say girls are
+ * not on the form) or '' (it does not). A miss still reaches staff by e-mail;
+ * a false alarm is resolved "not a roster change" (docs/RUNBOOK.md, "Working
+ * the ReviewQueue").
  */
 function looksLikeRosterChange_(a) {
   if (key_(a[Q.FB_FORM]).indexOf('roster form') !== -1) return 'form';
@@ -1077,7 +1143,18 @@ function looksLikeRosterChange_(a) {
   let text = foldKey_(tidy_(a[Q.FB_DOING]) + ' ' + tidy_(a[Q.FB_WHAT]));
   const club = foldKey_(a[Q.FB_CLUB]);
   if (club.length >= 4) text = text.split(club).join(' ');   // "<X> Girls Club" is no roster word
-  return RC_NEW.test(text) || (RC_PEOPLE.test(text) && RC_CHANGE.test(text)) ? 'text' : '';
+  if (RC_NEW.test(text) || (RC_PEOPLE.test(text) && RC_CHANGE.test(text))) return 'text';
+  return absentPeople_(text) ? 'text' : '';
+}
+
+/** #110: whether any RC_ABSENT phrase in the folded text is said of people (the rule above RC_ABSENT). */
+function absentPeople_(text) {
+  const before = text.split(RC_ABSENT);
+  before.pop();   // what follows the last phrase
+  return before.some(function (part) {
+    const subject = part.split(RC_BREAK).pop().replace(RC_FILLER, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+    return RC_WHO.test(subject) || (!!subject && !RC_THING.test(subject));
+  });
 }
 
 /**
