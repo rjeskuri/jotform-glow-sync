@@ -90,6 +90,19 @@ class Workspace:
                                     "2026-10-01" if status != "active" else "", "test"])
         return path
 
+    def raw_roster(self, rows, name="raw_roster.csv"):
+        """rows: (partner, club, region cell, status), written in this order, one girl each."""
+        path = self.path(name)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(ROSTER_COLS)
+            for partner, club, region, status in rows:
+                girl = self.next_girl()
+                w.writerow([f"DEMOCLUB-SAMPLE-{self._n:03d}", partner, club, region, girl,
+                            girl.split()[-1], status, "2026-09-01",
+                            "2026-10-01" if status != "active" else "", "test"])
+        return path
+
     def partners(self, marked_no=(), name="partners.csv"):
         path = self.path(name)
         with open(path, "w", newline="", encoding="utf-8") as f:
@@ -365,7 +378,7 @@ class SimilarClubNames(unittest.TestCase):
             (DELTA, "Silver Light", "Africa", 2, 0),      # Delta is jotform=no
             (BETA, "Silver-Lights", "Asia", 0, 4),        # nobody active
             (GAMMA, "Silver Lights!", "", 2, 0),          # blank region
-            (ALPHA, "Silverlights", "Europe", 5, 0),      # not a region of a form
+            (ALPHA, "Silverlights", " Europe ", 5, 0),    # not a region of a form
             (DELTA, "Mountain Flames", "Africa", 2, 0),
         ])
         partners = self.ws.partners(marked_no=(DELTA,))
@@ -384,10 +397,133 @@ class SimilarClubNames(unittest.TestCase):
         by_club = {r["club"]: r for r in rows}
         self.assertEqual(by_club["Silver-Lights"]["region"], "Asia")
         self.assertEqual(by_club["Silver Lights!"]["region"], "")
+        self.assertEqual(by_club["Silverlights"]["region"], "Europe")    # as written, whitespace collapsed
         self.assertEqual(by_club["Silver Light"]["partner"], DELTA)
         self.assertEqual(len({r["group"] for r in rows}), 1)
         counts, _ = counts_line(self, out)
         self.assertEqual((counts[0], counts[4]), (1, 5), out)
+
+    def test_form_precedence_retired_then_no_active_girl_then_no_region(self):
+        # retired (jotform=no) > none (no active girl) > none (no region) > the form's title
+        roster = self.ws.roster([
+            (DELTA, "Ocean Wings", "Africa", 0, 3),       # jotform=no AND nobody active
+            (GAMMA, "Ocean Wing", "", 0, 2),             # blank region AND nobody active
+            (BETA, "Ocean-Wings", "", 2, 0),             # blank region, active
+            (ALPHA, "OCEAN WINGS", "Asia", 4, 0),        # on the Asia form
+            (DELTA, "Golden Roots", "", 2, 0),           # jotform=no AND blank region
+            (GAMMA, "Golden Root", "Africa", 3, 0),
+        ])
+        out_csv = self.ws.path("precedence.csv")
+        code, out = run_main(["similar", "--roster", roster, "--partners", self.ws.partners(marked_no=(DELTA,)),
+                              "--csv", out_csv])
+        self.assertIn(code, (0, None), out)
+        _, rows = read_csv(out_csv)
+        self.assertEqual({(r["club"], r["partner"]): (r["form"], r["status"]) for r in rows}, {
+            ("Ocean Wings", DELTA): ("retired (jotform=no)", "inactive"),
+            ("Ocean Wing", GAMMA): ("none (no active girl)", "inactive"),
+            ("Ocean-Wings", BETA): ("none (no region)", "active"),
+            ("OCEAN WINGS", ALPHA): ("Asia Attendance Form", "active"),
+            ("Golden Roots", DELTA): ("retired (jotform=no)", "active"),
+            ("Golden Root", GAMMA): ("Africa Attendance Form", "active"),
+        })
+
+    def test_region_is_the_first_active_rows_and_blank_partner_or_club_rows_are_skipped(self):
+        roster = self.ws.raw_roster([
+            (ALPHA, "Rising Voices", "Asia", "inactive"),        # first row, not active
+            (ALPHA, "Rising Voices", "Africa", "active"),        # first active row: its region wins
+            (ALPHA, "Rising Voices", "Latin America", "active"),
+            (BETA, "Rising Voice", "Latin America", "inactive"),  # nobody active: its first row
+            (BETA, "Rising Voice", "Asia", "inactive"),
+            ("", "Rising Voices", "Africa", "active"),           # no partner: skipped
+            (GAMMA, "", "Africa", "active"),                     # no club: skipped
+            (DELTA, " ", "Asia", "active"),
+            ("  ", "Rising  Voicez", "Asia", "active"),          # no partner: skipped
+        ])
+        out_csv = self.ws.path("regions.csv")
+        code, out = run_main(["similar", "--roster", roster, "--partners", self.ws.partners(), "--csv", out_csv])
+        self.assertIn(code, (0, None), out)
+        _, rows = read_csv(out_csv)
+        self.assertEqual({(r["club"], r["partner"]): (r["region"], r["form"], r["active_girls"]) for r in rows}, {
+            ("Rising Voices", ALPHA): ("Africa", "Africa Attendance Form", "2"),
+            ("Rising Voice", BETA): ("Latin America", "none (no active girl)", "0"),
+        })
+        self.assertEqual(counts_line(self, out)[0], (1, 0, 0, 1, 2), out)
+        self.assertNotIn("Rising Voicez", out)
+
+    def test_one_club_name_under_two_partners_is_two_clubs_in_one_group(self):
+        roster = self.ws.roster([
+            (ALPHA, "Golden Wings", "Africa", 2, 0),
+            (BETA, "Golden Wings", "Asia", 3, 0),
+            (ALPHA, "Sunrise Club", "Africa", 2, 0),
+            (BETA, "Sunrize Club", "Asia", 2, 0),
+            (GAMMA, "River Roots", "Latin America", 2, 0),
+        ])
+        summary = self.ws.summary("Africa", [
+            {"qid": "10", "club": "Golden Wings", "partner": ALPHA, "value": f"Golden Wings - {ALPHA}"},
+            {"qid": "11", "club": "Golden Wings", "partner": BETA, "value": f"Golden Wings - {BETA}"},
+            {"qid": "12", "club": "Sunrise Club", "partner": GAMMA, "value": f"Sunrise Club - {GAMMA}"},
+        ], "plan.json")
+        reverse = self.ws.summary("Asia", [
+            {"qid": "21", "club": "Sunrize Club", "partner": GAMMA, "value": "Sunrize Club"},
+        ], "plan_asia.json")
+        out_csv = self.ws.path("shared.csv")
+        code, out = run_main(["similar", "--roster", roster, "--partners", self.ws.partners(),
+                              "--sf-names", summary, "--sf-names", reverse, "--csv", out_csv])
+        self.assertIn(code, (0, None), out)
+        self.assertEqual(counts_line(self, out)[0], (2, 1, 0, 1, 4), out)
+        _, rows = read_csv(out_csv)
+        got = {(r["club"], r["partner"]): (r["match"], r["region"], r["form"], r["sf_name"], r["active_girls"])
+               for r in rows}
+        self.assertEqual(got, {
+            ("Golden Wings", ALPHA): ("same", "Africa", "Africa Attendance Form", f"Golden Wings - {ALPHA}", "2"),
+            ("Golden Wings", BETA): ("same", "Asia", "Asia Attendance Form", f"Golden Wings - {BETA}", "3"),
+            # an sf_names entry of the same club name under another partner is not this club's
+            ("Sunrise Club", ALPHA): ("close", "Africa", "Africa Attendance Form", "", "2"),
+            ("Sunrize Club", BETA): ("close", "Asia", "Asia Attendance Form", "", "2"),
+        })
+        golden = {r["group"] for r in rows if r["club"] == "Golden Wings"}
+        self.assertEqual(len(golden), 1)
+        self.assertNotIn(next(iter(golden)), {r["group"] for r in rows if r["club"] != "Golden Wings"})
+        lines = out.splitlines()
+        for partner, form in ((ALPHA, "Africa Attendance Form"), (BETA, "Asia Attendance Form")):
+            hits = [line for line in lines if "Golden Wings" in line and partner in line and form in line]
+            self.assertTrue(hits, f"no line for Golden Wings of {partner} with {form}:\n{out}")
+
+    def test_a_mixed_group_counts_under_its_weakest_match_and_same_partner_is_per_group(self):
+        roster = self.ws.roster([
+            (ALPHA, "Valley Stars", "Africa", 2, 0),
+            (ALPHA, "Valley Starz", "Africa", 2, 0),     # close to both others
+            (BETA, "VALLEY STARS", "Asia", 2, 0),        # same as Valley Stars
+            (BETA, "Ocean Roots", "Asia", 2, 0),         # Beta's own lookalikes: one partner
+            (BETA, "Ocean Root", "Asia", 2, 0),
+            (DELTA, "Northern Lights", "Africa", 2, 0),
+        ])
+        out_csv = self.ws.path("mixed.csv")
+        code, out = run_main(["similar", "--roster", roster, "--partners", self.ws.partners(), "--csv", out_csv])
+        self.assertIn(code, (0, None), out)
+        self.assertEqual(counts_line(self, out)[0], (2, 0, 0, 2, 5), out)
+        _, rows = read_csv(out_csv)
+        self.assertEqual({(r["club"], r["partner"]): (r["match"], r["same_partner"]) for r in rows}, {
+            ("Valley Stars", ALPHA): ("same", "no"),
+            ("Valley Starz", ALPHA): ("close", "no"),
+            ("VALLEY STARS", BETA): ("same", "no"),
+            ("Ocean Roots", BETA): ("close", "yes"),
+            ("Ocean Root", BETA): ("close", "yes"),
+        })
+
+    def test_no_lookalikes_prints_zero_groups_and_writes_the_header_only(self):
+        roster = self.ws.roster([
+            (ALPHA, "Harbor Club 1", "Africa", 2, 0),
+            (ALPHA, "Harbor Club 2", "Africa", 2, 0),
+            (BETA, "Morning Star", "Asia", 2, 0),
+            (GAMMA, "Evening Star", "Latin America", 2, 0),
+        ])
+        out_csv = self.ws.path("empty.csv")
+        code, out = run_main(["similar", "--roster", roster, "--partners", self.ws.partners(), "--csv", out_csv])
+        self.assertIn(code, (0, None), out)
+        self.assertEqual(counts_line(self, out)[0], (0, 0, 0, 0, 0), out)
+        header, rows = read_csv(out_csv)
+        self.assertEqual((header, rows), (CSV_COLUMNS, []))
 
     # ------------------------------------------------------------- privacy, files only
     def test_no_girls_name_is_printed(self):
