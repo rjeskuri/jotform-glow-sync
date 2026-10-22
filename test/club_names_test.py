@@ -450,6 +450,46 @@ class SimilarClubNames(unittest.TestCase):
         self.assertEqual(counts_line(self, out)[0], (1, 0, 0, 1, 2), out)
         self.assertNotIn("Rising Voicez", out)
 
+    def test_clubs_partners_marks_countries_and_sf_names_are_matched_by_key(self):
+        # one girl per row; a club is key(partner) + key(club), spelled as its first active row
+        roster = self.ws.raw_roster([
+            (ALPHA, "GOLDEN wings", "Asia", "inactive"),                  # first row, not active
+            (ALPHA, "Golden Wings", "AFRICA", "active"),                  # first active row
+            (ALPHA, "Golden Wings", "Africa", "active"),
+            ("fixture  PARTNER alpha", " golden  wings", "Asia", " ACTIVE "),   # the same club
+            (BETA, "Golden Wingz", " latin   AMERICA", "Active"),
+            (ALPHA, "Sunrise Club", "africa", "active"),
+            (DELTA, "Sunrise Club", "u.s", "active"),                     # Delta: jotform=no by key
+            (GAMMA, "Sunrise-Club", " europe ", "active"),                # not a region of a form
+        ])
+        partners = self.ws.path("partners_keyed.csv")
+        with open(partners, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerows([["partner", "region", "notes", "jotform"], [ALPHA, "Africa", "", ""],
+                                     [BETA, "Asia", "", "yes"], [GAMMA, "Latin America", "", ""],
+                                     [" fixture partner DELTA ", "U.S", "", " No "]])
+        countries = self.ws.countries([["Fixture  Partner   Alpha", "Kenya"], ["FIXTURE PARTNER BETA", "Nepal"]])
+        summary = self.ws.summary("Africa", [
+            {"qid": "10", "club": "sunrise  club", "partner": ALPHA.upper(), "value": f"Sunrise Club - {ALPHA}"},
+            {"qid": "11", "club": "Sunrise Club", "partner": GAMMA, "value": f"Sunrise Club - {GAMMA}"},
+            {"qid": "12", "club": "GOLDEN  WINGS", "partner": f" {ALPHA.lower()} ", "value": "Golden Wings"},
+        ], "plan_keyed.json")
+        out_csv = self.ws.path("keyed.csv")
+        code, out = run_main(["similar", "--roster", roster, "--partners", partners, "--countries", countries,
+                              "--sf-names", summary, "--csv", out_csv])
+        self.assertIn(code, (0, None), out)
+        self.assertEqual(counts_line(self, out)[0], (2, 0, 1, 1, 5), out)
+        _, rows = read_csv(out_csv)
+        cols = ["club", "partner", "region", "form", "country", "sf_name", "status", "active_girls"]
+        self.assertEqual(sorted(tuple(r[c] for c in cols) for r in rows), sorted([
+            ("Golden Wings", ALPHA, "Africa", "Africa Attendance Form", "Kenya", "Golden Wings", "active", "3"),
+            ("Golden Wingz", BETA, "Latin America", "Latin America Attendance Form", "Nepal", "", "active", "1"),
+            ("Sunrise Club", ALPHA, "Africa", "Africa Attendance Form", "Kenya", f"Sunrise Club - {ALPHA}",
+             "active", "1"),
+            ("Sunrise Club", DELTA, "U.S", "retired (jotform=no)", "", "", "active", "1"),
+            ("Sunrise-Club", GAMMA, "europe", "none (no region)", "", "", "active", "1"),
+        ]))
+        self.assertEqual({r["match"] for r in rows if r["club"].startswith("Golden")}, {"close"})
+
     def test_one_club_name_under_two_partners_is_two_clubs_in_one_group(self):
         roster = self.ws.roster([
             (ALPHA, "Golden Wings", "Africa", 2, 0),
