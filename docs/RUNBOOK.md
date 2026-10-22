@@ -2276,7 +2276,13 @@ when nothing matches it creates a new, partner-less Club account.
 ### New clubs' accounts, automatically (`SF_SYNC`)
 
 - **When:** switching `SF_SYNC` (`plan`, then `apply`); an `SF:` ATTENTION item; rotating the secret.
-- **Status:** built and in `main` since 2026-10-07. 2026-10-21: the External Client App "GLOW Sync" exists in Salesforce (client credentials, Run As **Ryan's own user**; Setup steps 1-2 below, done). Not yet recorded as done: the two GitHub secrets, the dispatch token's step 4.4, `SF_SYNC=plan` and its first run, then `apply` ([plan](plans/2026-10-06-sf-new-club-accounts.md), amendment 2026-10-21; DECISIONS 2026-10-21).
+- **Status:** built and in `main` since 2026-10-07; **live in `apply` since 2026-10-22 12:52 UTC** (Ryan's go). History ([plan](plans/2026-10-06-sf-new-club-accounts.md), amendment 2026-10-21 and Result; DECISIONS 2026-10-21):
+  - 2026-10-21: the External Client App "GLOW Sync" exists in Salesforce (client credentials, Run As **Ryan's own user**; Setup steps 1-2 below).
+  - 2026-10-22: Ryan set the secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (12:17 UTC). The dispatch token's step 4.4 is done (Contents: No access) and 4.5 checked (run 39778511710, `workflow_dispatch`, success). `SF_SYNC=plan` from 12:31 UTC.
+  - The first plan run, 39779117991, was refused: `HTTP 400 invalid_app_access` (the app's policies lacked the System Administrator profile, Setup step 2). Ryan added it.
+  - Run 39780929667: describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's `glow` login); check 317 ok, 5 need a person. Those five were fixed by hand on Ryan's go (4 partner-less club accounts parented, 1 club account created).
+  - Run 39784745392: 456 Accounts, 373 Club; check 322 ok, 0 need a person. `SF_SYNC=apply` since 12:52 UTC.
+  - **Still to do:** check the first automatic creates by hand (ATTENTION table, `created … check it by hand (first creates)`).
 - **Dry run:** `SF_SYNC=plan`: every account it would create is an ATTENTION item with the body.
 - **Apply:** `SF_SYNC=apply` (with `AUTO_SYNC_APPLY=1`), Ryan's go.
 - **Verify:** the run's `SF:` log lines; the local cross-check, below.
@@ -2310,7 +2316,7 @@ create for a club that is not being put on a form.
 Without the secrets the log says `SF: not configured`, with no ATTENTION.
 
 **Setup** (Ryan, once, in Salesforce Setup and on GitHub; nothing here goes through a Claude
-session). Steps 1-2 are done; the consumer key and secret are never written in a file, a message
+session). All steps are done (2026-10-22); the consumer key and secret are never written in a file, a message
 or a command line.
 1. **No integration user and no permission set** (decision 2026-10-21). The run is Ryan's user,
    so there is nothing to create for access.
@@ -2324,9 +2330,14 @@ or a command line.
      minutes; refresh token **Zero** (none);
    - the consumer key and secret: Settings → OAuth Settings → **Consumer Key and Secret**; copy
      them from that page only, straight into the GitHub secrets of step 5.
+   - **the policies must include the System Administrator profile** (Setup → External Client App
+     Manager → GLOW Sync → Policies → Edit → select profiles). With "Admin approved users are
+     pre-authorized" the Run As user has to be given the app; without the profile every login is
+     refused `HTTP 400 invalid_app_access - user is not admin approved to access this app` (run
+     39779117991, 2026-10-22). Ryan added it 2026-10-22; the deploy of 2026-10-21 did not carry it.
    - The Metadata reference says the Run As user "must have the API Only permission"; the deploy
-     accepted Ryan's System Administrator user. That a token is issued is proven only by the
-     first plan run (step 6). If it is refused, the log says `SF: not ready … Salesforce refused
+     accepted Ryan's System Administrator user, and with the profile above the 2026-10-22 login
+     was issued a token. If a login is refused, the log says `SF: not ready … Salesforce refused
      the GLOW Sync login (HTTP …)`: set `SF_SYNC=off` and read the app's policies before trying
      again.
 3. *(Was: the app's Run As GLOW Sync and its permission set; replaced by step 2.)*
@@ -2341,8 +2352,8 @@ or a command line.
    4. Edit the token again: Contents → **No access**. It can no longer change the code that holds
       the Salesforce secret.
    5. Request Jotform sync now once more: `HTTP 204` again.
-   - Done 2026-10-07: 4.1-4.3 (`HTTP 204`; the runs since start by `workflow_dispatch`). Whether
-     4.4 is done is not visible from the repository: Ryan confirms it, then 4.5.
+   - Done 2026-10-07: 4.1-4.3 (`HTTP 204`; the runs since start by `workflow_dispatch`). Done
+     2026-10-22: 4.4 (Contents: No access) and 4.5 (run 39778511710, `workflow_dispatch`, success).
    - Before step 2 the sheet still uses `repository_dispatch`; after it, a token without Actions
      gets `HTTP 403` in the Audit tab and only the daily run syncs.
    - The workflow runs only on `main` (a token with Actions: write can pick the branch of a run);
@@ -2352,8 +2363,9 @@ or a command line.
      Setup → External Client App Manager → GLOW Sync), set by Ryan on the repository's Settings →
      Secrets and variables → Actions page, never on a command line or in a conversation. They
      now hold **administrator access**: whoever can read them acts as Ryan ("The risks of running
-     as Ryan", below);
-   - repository variable `SF_SYNC` = `plan` (Ryan's go; CLAUDE.md rule 1).
+     as Ryan", below); set 2026-10-22 12:17 UTC;
+   - repository variable `SF_SYNC` = `plan` (Ryan's go; CLAUDE.md rule 1); set 2026-10-22 12:31
+     UTC, `apply` since 12:52 UTC.
 6. **First run**: Actions → auto-sync → Run workflow (apply unticked). The log must show:
    - `SF: plan, as GLOW Sync` (the code prints this literally: "GLOW Sync" now names the app,
      and the user behind it is Ryan; the wording stays until a code ticket changes it);
@@ -2364,6 +2376,12 @@ or a command line.
    - `SF: 448 Accounts read, 366 Club` (or today's counts);
    - `SF: check - 364 ok, 0 need a person`.
 
+   What the runs of 2026-10-22 showed: the first (39779117991) was refused (`invalid_app_access`,
+   step 2). The next (39780929667): describe ok; `SF: 455 Accounts read, 372 Club`; `SF: check -
+   317 ok, 5 need a person` (4 partner-less club accounts and 1 club without an account, fixed by
+   hand on Ryan's go). The one after (39784745392): `SF: 456 Accounts read, 373 Club`; `SF: check -
+   322 ok, 0 need a person`.
+
    The old design's `UserRecordAccess` cross-check for GLOW Sync is not needed: Ryan's user sees
    everything. Instead compare the run's Account counts with a count from Ryan's `glow` login
    (VPN off).
@@ -2372,7 +2390,7 @@ or a command line.
 
 | Item | Meaning | Fix |
 |---|---|---|
-| `not ready …` | Login refused, the user frozen, or the Account read not whole (a page missing, a mapped partner unseen; its hint may still name a "GLOW Club Sync" permission set: read it as Ryan's profile) | Read the detail. **Frozen**: it is Ryan's user, so also the Jotform connection: "The risks of running as Ryan", below. New clubs this run went on the forms without an account: create them by hand. |
+| `not ready …` | Login refused, the user frozen, or the Account read not whole (a page missing, a mapped partner unseen; its hint may still name a "GLOW Club Sync" permission set: read it as Ryan's profile) | Read the detail. **`HTTP 400 invalid_app_access`**: the app's policies lack the System Administrator profile (Setup step 2). **Frozen**: it is Ryan's user, so also the Jotform connection: "The risks of running as Ryan", below. New clubs this run went on the forms without an account: create them by hand. |
 | `would create …` (plan) | A new club needs its account | Create it by hand with the body shown, today |
 | `… - not created`: club code on another account | The club was renamed in the sheet, not in Salesforce | Rename that account to the question-5 name first ("Renaming a club"); no new account |
 | `… - not created`: the name is already an account | The processor made it first, or another record has the name | A partner-less Club: set its `ParentId` as the item says (write connector, Ryan's go). Anything else: look before acting. |
