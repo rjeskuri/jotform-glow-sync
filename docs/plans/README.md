@@ -24,7 +24,7 @@ names the BACKLOG items a plan is about. Newest first.
 | 2026-10-09 | Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped | in-progress | 60 | [2026-10-09-attendance-reports-public.md](2026-10-09-attendance-reports-public.md) |
 | 2026-10-07 | One Salesforce contact per girl - merge the duplicates the altered names made, then release Queens of Quest | done 2026-10-07 | 61, 76, 77, 78 | [2026-10-07-sf-duplicate-girls.md](2026-10-07-sf-duplicate-girls.md) |
 | 2026-10-07 | Attendance processor - a name with extra spaces or invisible characters finds its girl | done 2026-10-07 | 75 | [2026-10-07-processor-name-spacing.md](2026-10-07-processor-name-spacing.md) |
-| 2026-10-06 | Salesforce club accounts created automatically for new clubs (BACKLOG 27) | blocked | 27 | [2026-10-06-sf-new-club-accounts.md](2026-10-06-sf-new-club-accounts.md) |
+| 2026-10-06 | Salesforce club accounts created automatically for new clubs (BACKLOG 27) | in-progress | 27 | [2026-10-06-sf-new-club-accounts.md](2026-10-06-sf-new-club-accounts.md) |
 | 2026-10-06 | The group photo never reaches Salesforce; it is kept where staff can find it, under GLOW's control | in-progress | 68, 69, 70 | [2026-10-06-photos-to-drive.md](2026-10-06-photos-to-drive.md) |
 | 2026-10-06 | The module a submission sends is one required dropdown and exact text | done 2026-10-07 | 66, 67 | [2026-10-06-module-selection.md](2026-10-06-module-selection.md) |
 | 2026-10-06 | Clubs that do not report through Jotform leave the forms - a Partners-tab marker for the three partners, deactivation of the U.S clubs, the U.S form disabled | in-progress | 71, 74 | [2026-10-06-clubs-off-jotform.md](2026-10-06-clubs-off-jotform.md) |
