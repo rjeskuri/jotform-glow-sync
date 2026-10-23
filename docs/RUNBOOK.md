@@ -1719,7 +1719,7 @@ lines counted before the apply, the verify and the browser checks - and its roll
 ## Club names that look alike
 
 - **When:** before GLOW renames clubs into a country format, to see which names already collide or nearly do; as the input for the duplicate-club checks (ticket #84).
-- **Status:** built 2026-10 (ticket #94); it runs without `--countries` meanwhile, and the `country` column fills once the Account field is chosen. Which Salesforce Account field holds a partner's country (the ticket outline's step 4) is not settled: the candidates are `Country__c` (a picklist), `BillingCountry` and `ShippingCountry`, and their non-blank counts over the partner accounts are not taken yet.
+- **Status:** built 2026-10 (ticket #94; `plan-renames` ticket #95, waiting on GLOW's format, task #99); it runs without `--countries` meanwhile, and the `country` column fills once the Account field is chosen. Which Salesforce Account field holds a partner's country (the ticket outline's step 4) is not settled: the candidates are `Country__c` (a picklist), `BillingCountry` and `ShippingCountry`, and their non-blank counts over the partner accounts are not taken yet.
 - **Dry run:** the whole tool is one: it reads exports and writes only its own CSV.
 - **Apply:** none; a rename it points at goes through "Renaming a club".
 - **Verify:** the counts line, against the CSV's rows.
@@ -1783,6 +1783,39 @@ The CSV (`--csv`, its folder made when missing; only the header when there is no
 | `status` | `active` (at least one active girl) or `inactive` |
 | `active_girls` | the club's active rows |
 | `same_partner` | `yes` when every club of the group has one partner (one partner's own lookalikes), else `no` |
+
+`tools/club_names.py plan-renames` (ticket #95) plans the rename into the
+format GLOW picks, and renames nothing: from the same exports, a
+`partner,country` CSV (`--countries`), every region's `--summary-json`
+(`--sf-names`: each club's question 5 now) and `--format` (placeholders
+`{country}`, `{club}`, `{partner}`, `{region}`, e.g. `"{country} - {club}"`),
+each active club of a partner not marked `jotform=no` gets `new_club`, the
+format filled in (spacing collapsed), and `new_sf_name`, what its question 5
+(its Salesforce Account name) becomes. `--scope all` takes every such club,
+`--scope similar --similar-csv data/club_names/similar_<date>.csv` only those
+`similar --csv` listed; inactive and retired clubs keep their names. A club
+whose question 5 is `<club> - <partner>` keeps that suffix after the new name
+with `--keep-long yes` and drops it with `no`; a plain one never gains it. A
+club already in the format is `unchanged`, so a second run over the renamed
+Roster plans nothing. Any refusal stops the plan, lists every refused club
+with its reason and writes no `--out`: no country for its partner (or no
+region when the format has `{region}`); `|`, `{` or `}` in the new name; a
+`new_sf_name` equal (by key) to another club's, planned or keeping its name
+(one Salesforce Account); a `new_club` another partner's club has after the
+renames, in any status, unless its `new_sf_name` is the long form ("Club names
+two partners share"); a `new_sf_name` over 255 characters. The last line counts
+`to rename N, unchanged N, refused N`; the CSV has `partner, club, region,
+old_sf_name, new_club, new_sf_name, action` (`rename` or `unchanged`). The
+rename itself, Accounts first, is task #99's plan.
+
+```bash
+python3 tools/club_names.py plan-renames --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv \
+        --countries data/club_names/partner_countries.csv \
+        --sf-names data/club_names/plan_africa_<date>.json --sf-names ... \
+        --format "{country} - {club}" --scope all --keep-long yes \
+        --out data/club_names/renames_<date>.csv
+```
 
 ## Clubs that do not use Jotform
 
