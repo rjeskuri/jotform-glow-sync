@@ -3574,7 +3574,8 @@ user is active (another administrator). D1, D2 and D5 run as the viewer (`Logged
 live; D3 and D4 run as that specified user and show the snapshot of their last refresh,
 2026-07-10 (D3) and 2026-08-13 (D4), and no refresh of them is scheduled (`CronTrigger` has no
 dashboard-refresh job; the org's one report subscription, weekly since 2026-10-02, is tied to no
-dashboard here by the API).
+dashboard here by the API). The ticked count, the running user, the scheduled jobs and the
+dynamic dashboards: `evidence/soql_2026-10-23_review.txt`.
 
 Components more than one dashboard shares:
 - The period design (a fixed year, a month name with no year) is in every report of all five.
@@ -3585,6 +3586,10 @@ Components more than one dashboard shares:
   all 5 in use (D1, D2, D5, "Attendance According to Attendance Rosters" `01ZRP000006s43B2AQ`,
   which #72 moves to Decommissioned, and "Activities Dashboard", outside the epic). D3 and D4
   therefore stay on a specified user and are kept fresh by a scheduled refresh.
+- Item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`), a D4 report, is a
+  component of D3, not of D4. #77 takes that component off D3 and #78 puts item 16 on D4; until
+  #77 is done, #78's change to item 16 (its period and grouping) changes D3's component too.
+  No other kept report is on a dashboard other than its own.
 
 The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #76 D2, #77 D3,
 #78 D4, #79 D5 and item 19):
@@ -3596,8 +3601,9 @@ The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #7
    filter on `Assigned_Partner_Manager__c` stays. Item 19 stays tabular, with the filter only.
 3. Add the test-record rule (above).
 4. Put the kept reports on their dashboard: today D1 shows items 2 and 3 (and a copy of item 1's
-   report, not item 1), D2 items 6-8, D3 items 9-11, D4 none of items 13-16, D5 neither 17 nor
-   18; the dashboards' other components are on reports #72 moves to Decommissioned.
+   report, not item 1), D2 items 6-8, D3 items 9-11 and 16 (above), D4 none of items 13-16, D5
+   neither 17 nor 18; the dashboards' other components are on reports #72 moves to
+   Decommissioned.
 5. D3 and D4: a refresh after the fix (a PUT, Ryan's go), and a weekly refresh by a dashboard
    subscription in Lightning.
 
@@ -3625,10 +3631,27 @@ The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #7
 Item 19's label in the org is "GLOW of the Month Stories Report" since 2026-10-21 (changed by
 another administrator); `glow/sf_keep_list.csv` still reads the label with "_2025".
 
-The check that a fix worked: the report's cell for 2026 and September equals
-`SELECT COUNT(Id), SUM(<field>) FROM DHIS2__c WHERE Year__c = 2026 AND Month__c = 'September' AND <field> != null AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`
-(for item 4 also `AND Monthly_Total__c != 0`, for item 17 `AND Approved__c = true`), the numbers
-in the table as of 2026-10-23; a report filed or approved later moves both sides.
+The check that a fix worked: the report's cell for 2026 and September equals a query on
+`DHIS2__c` with
+`WHERE Year__c = 2026 AND Month__c = 'September' AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`
+and, per item:
+- A number: `SELECT COUNT(Id), SUM(<field>)` with `AND <field> != null`. Items 3 and 4
+  `Monthly_Total__c` (item 4 also `AND Monthly_Total__c != 0`), 10
+  `GC_sessions_did_you_observe_last_month__c`, 11 the same field with `> 0` in place of `!= null`
+  (the partners who observed), 13 `Mentors_attended_the_training_sessions__c`, 14
+  `how_many_training_sessions_did_you_lead__c`.
+- A picklist (SUM is not valid on one): `SELECT <field>, COUNT(Id)` with `AND <field> != null
+  GROUP BY <field>`. Items 1 `collect_last_month_s_attendance__c`, 2 `Submit__c`, 5
+  `Did_you_implement_GLOW_Club_last_month_f__c`, 7 `Adapted_to_the_local_culture_or_context__c`,
+  8 `Select_summits_completed_last_month__c`, 9 `did_you_submit_your_GC_observation_form__c`, 15
+  `Lead_any_training_sessions__c`, 16 `Did_you_meet_with_mentors_as_a_group__c`. Item 6's
+  `Select_all_GLOW_Club_modules_implemented__c` is a multi-select picklist, which SOQL does not
+  group: `SELECT COUNT(Id)` with `AND <field> != null`.
+- Items 17-19: `SELECT COUNT(Id)`, for item 17 with `AND Approved__c = true`.
+
+Each was run once for September 2026 and gives the table's cell
+(`evidence/soql_2026-10-23_check_per_item.txt`), the numbers as of 2026-10-23; a report filed or
+approved later moves both sides.
 
 Questions for GLOW:
 - The labels are answered: Ryan, 2026-10-23 on #74, "Labels stay (#70)": the Monthly Report
