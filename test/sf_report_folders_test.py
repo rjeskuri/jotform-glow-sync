@@ -826,8 +826,8 @@ class Undo(Harness):
         self.assertEqual(o.state()[0], now)
 
         # a later move is undone alone
-        x = o.rid["long"]
-        self.apply_moves([[("report", x, "GLOW Club Reports", "Implementation by month")]])
+        x = o.rid["observed"]
+        self.apply_moves([[("report", x, "GLOW Club Reports", "Observations by partner")]])
         sent = len(o.calls)
         self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
         self.assertEqual([w[1] for w in self.writes_since(sent)], [f"{API_ROOT}analytics/reports/{x}"])
@@ -859,7 +859,7 @@ class Undo(Harness):
     def test_undo_stops_on_a_failed_read_back(self):
         for mode in ("echo", "folder", "refuse"):
             o = self.fresh()
-            a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["long"]
+            a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["observed"]     # labels within 40: undo can put them back
             moves = self.apply_moves([[("report", a, "Decommissioned", ""), ("report", b, "GLOW Club Reports", "Stories")],
                                       [("report", c, "Shared Name", "Implementation by month")]])
             moved = o.state()[0]
@@ -882,7 +882,7 @@ class Undo(Harness):
     def test_undo_limit_undoes_the_last_n_and_the_rest_later(self):
         o = self.org
         original = o.state()[0]
-        a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["long"]
+        a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["observed"]     # labels within 40: undo can put them back
         self.apply_moves([[("report", a, "Decommissioned", ""), ("report", b, "GLOW Club Reports", "Stories"),
                            ("report", c, "Shared Name", "Implementation by month")]])
         moved = o.state()[0]
@@ -975,6 +975,15 @@ class Refusals(Harness):
         self.ok("move", "--plan", self.plan([("report", o.rid["mentors"], "GLOW Club Reports", L40)]),
                 "--vpn-off", "--apply")
         self.assertEqual(o.report(o.rid["mentors"])["Name"], L40)
+        # a report whose CURRENT label is over 40 is not relabelled: undo could not put that label back
+        for label in ("Implementation by month", L40):
+            o = self.fresh()
+            self.assert_move_refused(("report", o.rid["long"], "GLOW Club Reports", label), "40")
+        # the control: moved with its label kept
+        o = self.fresh()
+        self.ok("move", "--plan", self.plan([("report", o.rid["long"], "GLOW Club Reports", "")]),
+                "--vpn-off", "--apply")
+        self.assertEqual((o.report(o.rid["long"])["OwnerId"], o.report(o.rid["long"])["Name"]), (o.fid["r_cat"], LONG))
         # a dashboard is moved and renamed by hand in Lightning: the API refuses every dashboard PATCH
         for to, label in (("GLOW Club Dashboards", ""), ("Decommissioned", "Old training")):
             o = self.fresh()
@@ -1040,6 +1049,7 @@ class Docs(unittest.TestCase):
     ARCH = os.path.join(REPO, "docs", "ARCHITECTURE.md")
     RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
     SKILL = os.path.join(REPO, ".claude", "skills", "salesforce", "SKILL.md")
+    MONTHLY = "## Monthly Report dashboards in Salesforce"
     SUB = "### Copying and moving reports and dashboards"
 
     def row(self, text, where):
@@ -1052,8 +1062,8 @@ class Docs(unittest.TestCase):
         for word in ("--apply", "--vpn-off", "undo", "Decommissioned"):
             self.assertIn(word, arch, f"docs/ARCHITECTURE.md's row names {word}")
 
-        monthly = md_part(self.RUNBOOK, "## Monthly Report dashboards in Salesforce")
-        self.assertIn(self.SUB, monthly, "the subsection sits under `## Monthly Report dashboards in Salesforce`")
+        monthly = md_part(self.RUNBOOK, self.MONTHLY)
+        self.assertIn(self.SUB, monthly, f"the subsection sits under {self.MONTHLY}")
         part = md_part(self.RUNBOOK, self.SUB)
         for word in ("tools/sf_report_folders.py", "--apply", "--vpn-off", "--limit 1", "undo", "ledger"):
             self.assertIn(word, part, f"RUNBOOK {self.SUB} names {word}")
