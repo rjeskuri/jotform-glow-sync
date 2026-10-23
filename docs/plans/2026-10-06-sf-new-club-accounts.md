@@ -1,7 +1,7 @@
 ---
 title: Salesforce club accounts created automatically for new clubs (BACKLOG 27)
 author: Claude (with Ryan)
-status: blocked          # accepted by Ryan 2026-10-06; built 2026-10-07 and in main; the Salesforce and GitHub setup is Ryan's and not done as of 2026-10-09 (BACKLOG 27)
+status: in-progress      # accepted by Ryan 2026-10-06; built 2026-10-07 and in main; 2026-10-21: the sync runs as Ryan's own user; 2026-10-22: secrets set, SF_SYNC=plan 12:31 UTC then apply 12:52 UTC (Ryan's go); done when the first automatic creates are checked by hand (BACKLOG 27, ticket #66)
 backlog: 27
 created: 2026-10-06
 intent: none - Ryan's request of 2026-10-06 ("look at doing the salesforce clubs records automatically")
@@ -366,5 +366,60 @@ consumer keys (`3MVG9…`) and 64-hex consumer secrets, in either case.
 
 **Next (Ryan):** remove Contents from the token and check `HTTP 204` again; then the Salesforce
 setup, the two secrets and `SF_SYNC=plan` (RUNBOOK "New clubs' accounts, automatically", setup
-steps 1-3 and 5-6).
+steps 1-3 and 5-6). *Done 2026-10-22: see Result.*
 
+## Amendment 2026-10-21 (ticket #66): the sync runs as Ryan's own user
+
+Ryan's word, 2026-10-21: the sync runs as his own Salesforce user; no "GLOW Sync" integration user
+and no "GLOW Club Sync" permission set ([DECISIONS 2026-10-21](../DECISIONS.md)). This replaces,
+where it differs, the text above, which is kept as the design history.
+
+- **Setup steps 1-2 (user, permission set) are dropped.** Step 3 became: the External Client App
+  "GLOW Sync", client credentials flow, Run As **Ryan's user**, scope `Api`, created 2026-10-21
+  through the Metadata API (check-only, then deploy `0AfRP000002hjdR0AQ` for the app and OAuth
+  settings and `0AfRP000002hjiH0AQ` for the policies), on Ryan's go. Policies: admin approved
+  users pre-authorized, IP relaxation Bypass, session 15 minutes, no refresh token. Salesforce
+  generated the consumer key and secret; they are not in any file here and are copied by Ryan into
+  the GitHub secrets.
+- **"Owner GLOW Sync", `CreatedById = GLOW Sync`** (Order of work step 7, Rollback) no longer
+  hold: creator and owner are Ryan. The sync's accounts are told apart by the Description
+  `GLOW club code <code>; created by the automatic sync <date>`.
+- **Risks (Risks section)**: "GLOW Sync frozen" is now "Ryan's user frozen", which also revokes
+  the Jotform connection (as on 2026-09-30); the GitHub secret holds administrator access; the
+  first create runs NPSP's and Mailchimp's triggers as an administrator, not a minimum-access
+  user. RUNBOOK "New clubs' accounts, automatically" carries the steps.
+- **Open** (settled 2026-10-22, see Result): the Metadata reference says a Run As user "must
+  have the API Only permission"; the deploy accepted Ryan's System Administrator user. Whether a
+  token is issued is proven by the first plan run.
+- **The code still says "GLOW Sync"** (`SF: plan, as GLOW Sync`, the describe hint naming the
+  permission set, `glow/salesforce.py`'s "never Ryan" docstrings): wording only, now naming the
+  app; a code ticket may change it.
+
+## Result
+
+2026-10-22 (ticket #66; `Live:` SF_SYNC `plan` 12:31 UTC and `apply` 12:52 UTC, Ryan's go). Counts
+and run ids only.
+
+- **Secrets:** Ryan set `SF_CLIENT_ID` and `SF_CLIENT_SECRET` at 12:17 UTC.
+- **Dispatch token:** step 4.4 done (Contents: No access); 4.5 checked: run 39778511710 by
+  `workflow_dispatch`, success.
+- **First plan run, 39779117991 (`SF_SYNC=plan`, 12:31 UTC):** refused, `HTTP 400
+  invalid_app_access - user is not admin approved to access this app`. Cause: with "Admin approved
+  users are pre-authorized" the app's policies must name the profiles allowed to use it, and the
+  System Administrator profile was not among them. Ryan added it (Setup → External Client App
+  Manager → GLOW Sync → Policies → Edit). The open question of the 2026-10-21 amendment is
+  closed: a token is issued to Ryan's System Administrator user. RUNBOOK Setup step 2 and the
+  ATTENTION table say so.
+- **Run 39780929667:** describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's
+  `glow` login on 2026-10-21: a VPN-off count of 455 Accounts, 372 Club, 83 Household); check 317 ok, 5 need a person. The five were fixed by hand on Ryan's go: 4
+  partner-less club accounts parented, 1 club account created.
+- **Run 39784745392:** 456 Accounts, 373 Club; check 322 ok, 0 need a person.
+- **`SF_SYNC=apply` since 2026-10-22 12:52 UTC.**
+- **The plan-mode gate was waived.** Order of work step 5 asks for at least 7 days in plan mode,
+  closed by zero login failures and one "would create" body equal to a hand create. Ryan waived
+  it on 2026-10-22, in his words "set sf_sync to apply". `apply` was set at 12:52 UTC, before the
+  clean check: run 39784745392 then showed 0 need a person. No "would create" body has been
+  compared yet, because no new club has appeared. The first creates are checked by hand instead
+  (RUNBOOK ATTENTION table, `created … check it by hand (first creates)`).
+- **Still to do:** check the first automatic creates by hand (RUNBOOK ATTENTION table, `created …
+  check it by hand (first creates)`); then set this plan's `status:` to `done`.

@@ -661,3 +661,15 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - the reports `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month` are no longer used by the dashboard and kept until Ryan decides which to delete;
     - 2026-10-21: all four deleted on Ryan's go, 05:22 UTC (deploy `0AfRP000002hhq90AA`); restore one from `data/sf_girls_tiles_2026-10-20/before/` (#59; RUNBOOK "Attendance dashboard in Salesforce");
   - a fourth Salesforce-reporting partner needs its account added to filter 4 of the three reports and to `tools/sf_partner_monthly.py`, on Ryan's go.
+
+### 2026-10-21 — The automatic Salesforce club sync runs as Ryan's own user
+
+- The automatic sync (BACKLOG 27, `SF_SYNC`) logs in to Salesforce as **Ryan's own user**, through the External Client App "GLOW Sync" (OAuth client credentials, scope `api`, Run As Ryan), created 2026-10-21 through the Metadata API on his go (deploys `0AfRP000002hjdR0AQ` and `0AfRP000002hjiH0AQ`). There is no "GLOW Sync" user and no "GLOW Club Sync" permission set. This amends 2026-10-06 ("its own integration user"); the rest of that design (create only, at most 5 per region, all or nothing, the end-of-run check) is unchanged ([plan](plans/2026-10-06-sf-new-club-accounts.md), amendment 2026-10-21; RUNBOOK "New clubs' accounts, automatically").
+- **Why:** Ryan, 2026-10-21 (ticket #66): the sync runs as himself, and his administrator rights cover the access. He was told the risks and accepted them.
+- **Rejected:** the integration user "GLOW Sync" (Salesforce Integration licence, profile "Minimum Access - API Only Integrations") with a minimum permission set "GLOW Club Sync" (Account Read, Create, View All; no Edit); it keeps the secret's reach small and the creator visible, but needs the user, the licence and the permission set set up and kept.
+- **Consequences:**
+  - the GitHub secrets `SF_CLIENT_ID` / `SF_CLIENT_SECRET` hold administrator access (scope `api`): the workflow runs only on `main`, the dispatch token loses Contents, only Ryan edits secrets and workflow;
+  - a login from GitHub's data-centre addresses can freeze Ryan's user (Salesforce cannot allowlist them), which revokes all his tokens, the Jotform connection's included, as on 2026-09-30; the response (`SF_SYNC=off`, another administrator unfreezes, Jotform re-authorised) is in the RUNBOOK;
+  - `CreatedById` and owner no longer tell the sync's accounts from Ryan's own: the Description `created by the automatic sync <date>` does, for any rollback;
+  - the first create runs NPSP's and Mailchimp's triggers as an administrator;
+  - the code still says "GLOW Sync" (log line, hints, docstrings): the app's name, wording only.
