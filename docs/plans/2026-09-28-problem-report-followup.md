@@ -153,3 +153,7 @@ guard.
 - Still to observe: the Monday e-mail of 2026-10-05 (Audit `sendSfPendingDigest: emailed …:
   N open ReviewQueue item(s) …`), and the next roster-change report getting its line and the
   e-mail's staff note.
+- 2026-10-22: a 2026-10 report of girls who attended but were "not on the form" was missed by
+  the classifier (no change word). Ticket #110 widens it to girls "not on the form / list / in
+  the portal, missing from the list" said of people, and e-mails the sender the Club Roster
+  Form link ([plan](2026-10-22-roster-change-reports-to-roster-form.md)).

@@ -13,7 +13,8 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
-| 2026-10-21 | Inventory of the Monthly Report (DHIS2) reports, dashboards and interactive dashboard; the two hidden Decommissioned folders; the copy-and-move API proof | in-progress |  | [2026-10-21-sf-reporting-inventory.md](2026-10-21-sf-reporting-inventory.md) |
+| 2026-10-22 | Roster changes sent as problem reports point their sender to the Club Roster Form, and girls "not on the form" count as one | proposed |  | [2026-10-22-roster-change-reports-to-roster-form.md](2026-10-22-roster-change-reports-to-roster-form.md) |
+| 2026-10-21 | Inventory of the Monthly Report (DHIS2) reports, dashboards and interactive dashboard; the two hidden Decommissioned folders; the copy-and-move API proof | done 2026-10-23 |  | [2026-10-21-sf-reporting-inventory.md](2026-10-21-sf-reporting-inventory.md) |
 | 2026-10-21 | Duplicate and obsolete flags on Account and Contact, and Account duplicate rules that report only | in-progress |  | [2026-10-21-sf-duplicate-obsolete-flags.md](2026-10-21-sf-duplicate-obsolete-flags.md) |
 | 2026-10-21 | A standalone Apps Script moves Jotform's photo subfolders from Ryan's My Drive to the company Shared Drive | accepted |  | [2026-10-21-drive-photo-mover.md](2026-10-21-drive-photo-mover.md) |
 | 2026-10-20 | The dashboard's top row becomes two girls-who-attended tiles (Jotform + 3 partners); total attendance no longer tracked | done 2026-10-21 | 72 | [2026-10-20-girls-attended-tiles.md](2026-10-20-girls-attended-tiles.md) |
