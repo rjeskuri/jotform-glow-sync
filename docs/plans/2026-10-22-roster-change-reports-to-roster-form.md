@@ -11,8 +11,9 @@ intent: none - ticket #110 (a 2026-10 report of girls who attended but were "not
 Ticket #110. A problem report of 2026-10 said girls who attended were "not on the form": a
 roster change with no change word, so `looksLikeRosterChange_` (`appsscript/FormHandlers.gs`)
 missed it and nothing reached the ReviewQueue. And a report that is recognised still leaves the
-sender waiting on staff. Two changes, both in the deployed Apps Script, nothing on the forms or
-in the sheet's data:
+sender waiting on staff. And a report that the form itself is not working was e-mail only, so
+nobody counted or worked it (Ryan, 2026-10-22, from #67 Q3). Three changes, all in the deployed
+Apps Script, nothing on the forms or in the sheet's data:
 
 - The classifier also takes girls "not on the form / list / roster", "not in the portal",
   "missing from the form / list" (Spanish "no aparece(n) / no está(n) en la lista, el
@@ -38,9 +39,24 @@ in the sheet's data:
   happened" itself asks for the change ("please remove X from the roster"): a mentor whose
   Club Roster Form broke ("the partner dropdown is empty") is not told to use it (the PR #117
   review); her report is queued and e-mailed to staff as before.
+- A report that says the form is not working — it does not load or submit, a blank page, an
+  empty dropdown, an error message, in English or Spanish — becomes a ReviewQueue item of its
+  own, `Form not working report` (new in `REVIEW_ISSUES`, its own heading in the Monday e-mail),
+  through the roster-change item's path: queued before the staff e-mail under the `[#Feedback!N]`
+  tag (a retry adds no second row), detail naming the form she chose and never her words, the
+  staff e-mail with `Staff note: looks like the form is not working; on the ReviewQueue as
+  Feedback!N.`, FormLog `emailed staff; form problem queued` (`… NOT queued (see Audit)` with the
+  ReviewQueue down, the e-mail saying "add it by hand"). Nothing to the sender: the pointer is
+  for roster changes. The rule (`looksLikeFormProblem_`) is a form thing that fails — the form's
+  own doing negated ("does not load", "cannot be submitted", "no se puede enviar"), an error, or
+  a form thing in a failed state in the same clause ("the page is blank", "the dropdown is
+  empty", "no hay ningún club en la lista") — never a list of sentences; the form working, a
+  wish, a question or news of the session stay e-mail only. A roster change wins: one item per
+  report, the roster-change one, also when it says the form fails.
 
-Staff still own the item (RUNBOOK "Working the ReviewQueue"): enter the change or confirm the
-partner sent it, then resolve.
+Staff still own the items (RUNBOOK "Working the ReviewQueue"): for a roster change, enter it or
+confirm the partner sent it; for a form problem, try the form, fix or escalate, answer the
+sender; then resolve.
 
 ## Rollout (live; each step on Ryan's go)
 1. After the land: `/deploy-appsscript` from `main` at a quiet moment (`.claude/skills/deploy-appsscript/SKILL.md`:
@@ -71,12 +87,18 @@ Property. An e-mail already sent to a mentor is not recalled; the ReviewQueue ro
   Audit masks addresses (`previewError_`).
 - The Forms service slow or down at submit time: `rosterFormUrl_` catches it and the note goes
   without the link; the handler never fails for it.
+- A false alarm on the form-problem rule (a human "error", a box the mentor left blank) is an
+  item staff resolve "not a form problem"; a miss ("it is blank", a verb the lists do not name)
+  is e-mail only, as today. Nothing is sent to that sender either way.
 
 ## Proof
 Offline: `scripts/harness_tests.sh test/forms_logic_test.js` (the "which reports are roster
-changes" table, 178 wordings with the PR #117 review's 68, and the block "a roster-change report
-points its sender to the Club Roster Form (#110)") green; `make gs` (services unchanged); `scripts/verify.sh` ends
-`CHECK PASSED`. Live: step 2's read-back.
+changes" table, 178 wordings with the PR #117 review's 68; the block "a roster-change report
+points its sender to the Club Roster Form (#110)"; the block "a "form not working" report becomes
+a ReviewQueue item of its own (#110)", 277 reports through the handler — 217 form problems, 53
+neither, 7 roster changes that also say the form fails — plus the end-to-end row, the retry, the
+ReviewQueue down and the Monday e-mail) green; `make gs` (services unchanged); `scripts/verify.sh`
+ends `CHECK PASSED`. Live: step 2's read-back.
 
 ## Result
 Pending: the deploy waits for Ryan's go.

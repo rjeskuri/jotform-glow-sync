@@ -980,6 +980,9 @@ function attendanceFormLine_(partner, otherwise) {
  * because an e-mail alone was never followed up (2026-09-27 review), and its
  * sender is pointed to the Club Roster Form (#110) — after the staff e-mail,
  * the one step that throws and is retried, so a retry never e-mails her twice.
+ * One that says the form is not working (looksLikeFormProblem_) becomes a
+ * "Form not working report" item the same way (#110, Ryan 2026-10-22), with
+ * nothing to its sender. A roster change wins: one item per report.
  */
 function handleFeedback_(a, source, responseKey) {
   const staff = PropertiesService.getScriptProperties().getProperty(PROP.STAFF_EMAIL);
@@ -991,13 +994,16 @@ function handleFeedback_(a, source, responseKey) {
   // Queued BEFORE the e-mail: review_ skips an item already open under the
   // same tag, so a retry after a failed send adds no second row — the e-mail
   // is the one step that must not repeat.
-  const reason = looksLikeRosterChange_(a);
+  const reason = looksLikeRosterChange_(a) || (looksLikeFormProblem_(a) ? 'broken' : '');
   const replyTo = replyAddress_(a[Q.FB_EMAIL]);
   const queued = !!reason &&
       tryReview_([feedbackReviewItem_(a, source, sentDayOfKey_(responseKey), reason)], source);
+  // what the staff e-mail, Audit and FormLog call the item
+  const kind = reason === 'broken' ? 'form problem' : 'roster change';
+  const looks = reason === 'broken' ? 'the form is not working' : 'a roster change';
   const note = !reason ? '' : queued
-      ? 'Staff note: looks like a roster change; on the ReviewQueue as ' + source + '.'
-      : 'Staff note: looks like a roster change, but it could NOT be added to the ' +
+      ? 'Staff note: looks like ' + looks + '; on the ReviewQueue as ' + source + '.'
+      : 'Staff note: looks like ' + looks + ', but it could NOT be added to the ' +
         'ReviewQueue (see Audit) — add it by hand.';
   const body = [
     'A problem report arrived via "' + FORM_TITLES.FEEDBACK + '" (' + source + ').', '',
@@ -1015,17 +1021,18 @@ function handleFeedback_(a, source, responseKey) {
   MailApp.sendEmail(opts);   // a quota/send failure throws → ERROR → retried later
   audit_('feedbackForm', 'emailed ' + staff + ' about ' + tidy_(a[Q.FB_FORM]) +
          (!reason ? '' : queued ? '; ReviewQueue [#' + source + ']'
-                                : '; roster change, ReviewQueue write FAILED'));
+                                : '; ' + kind + ', ReviewQueue write FAILED'));
   // The pointer goes to the sender of a report whose words are the change
   // ('text'), or who chose the Club Roster Form and whose "what happened" is
   // one ("please remove X from the roster"). With that form chosen, "what were
   // you trying to do" describes her work on it ("marking the roster change"),
   // and a report that it is broken is not answered "use the Club Roster Form"
   // (#117 review): queued and e-mailed to staff as before, nothing to her.
+  // Nor is the sender of a form-not-working report ('broken') e-mailed.
   const point = reason === 'text' || (reason === 'form' && rosterChangeWords_(a, [Q.FB_WHAT]));
   const pointed = point && replyTo ? sendRosterFormPointer_(replyTo, source) : null;
   return 'emailed staff' +
-      (!reason ? '' : queued ? '; roster change queued' : '; roster change NOT queued (see Audit)') +
+      (!reason ? '' : '; ' + kind + (queued ? ' queued' : ' NOT queued (see Audit)')) +
       (pointed === null ? '' : pointed ? '; sender pointed to the Club Roster Form'
                                        : '; sender NOT e-mailed (see Audit)');
 }
@@ -1104,8 +1111,8 @@ function tryReview_(items, source) {
 
 /** Every issue the ReviewQueue can hold, in the order the weekly e-mail lists them. */
 const REVIEW_ISSUES = [
-  HOLD_ISSUE, SAME_NAME_ISSUE, 'Roster change sent as a problem report', 'Removal did not match anyone',
-  'Removed girls not put back by an older response',
+  HOLD_ISSUE, SAME_NAME_ISSUE, 'Roster change sent as a problem report', 'Form not working report',
+  'Removal did not match anyone', 'Removed girls not put back by an older response',
   'Same name listed twice', 'Partner says two girls share a name',
   'Girls missing from the latest enrollment', 'Roster change for a club not on file',
   'Partner has no region', 'Form response could not be processed',
@@ -1149,6 +1156,36 @@ const RC_WHERE = /\b(?:of|in|from|at|de|en) (?:our|my|the|this|nuestr[ao]|mi|el|
 const RC_FILLER = /\b(?:is|are|was|were|am|the|an?|my|our|your|their|her|his|its|this|that|these|those|i|you|we|she|he|it|they|them|there|here|some|all|also|still|now|el|la|los|las|una?|unos|unas|mi|mis|nuestr[ao]s?|sus?|est[aeo]s?|es[aeo]s?|yo|ell[ao]s?|tod[ao]s?|tambien|ya|ahora)\b/gi;
 const RC_BREAK = /[.,;:!?¿¡()"]|\b(?:and|but|so|because|y|pero|porque)\b/i;
 
+// #110 (Ryan, 2026-10-22): "is this report the form NOT WORKING?" — queued as
+// "Form not working report" so it is worked and counted (such reports were
+// e-mail only). The rule is a form thing that fails, in English or Spanish,
+// read on the folded, lower-cased text with apostrophes dropped; never a list
+// of sentences. A failure is one of:
+// - the form's own doing negated (FP_FAIL_*): a negation, up to two words,
+//   then load / open / submit / send / work / respond / show / save / upload
+//   ("does not load", "cannot be submitted", "stopped working", "no carga",
+//   "no se puede enviar", "dejó de funcionar", "no me deja enviar");
+// - an error (FP_ERROR): "error", "something went wrong";
+// - a form thing (FP_THING_*: the form, page, screen, link, button, Submit,
+//   dropdown, list, menu, box, field) in a failed state (FP_STATE_*) in the
+//   same clause (RC_BREAK): "the page is blank", "the dropdown is empty",
+//   "nothing happens when I press Submit", "pantalla en blanco", "no hay
+//   ningún club en la lista".
+// The form working ("loads fine", "it submits now"), a wish ("the form does
+// not ask for the venue"), a question or news of the session have no failure
+// sign. Accepted false alarms: a human "error" ("I made an error in a name"),
+// a box the mentor left blank ("I left the venue field blank"); staff resolve
+// them "not a form problem". Accepted misses: a failed state said of "it"
+// alone ("it is blank"), a verb the lists do not name ("the form would not
+// let me choose my club"); the staff e-mail goes regardless.
+const FP_FAIL_EN = /\b(?:not|never|no longer|cannot|cant|wont|dont|doesnt|didnt|isnt|arent|wasnt|couldnt|wouldnt|stopped|stops|refuses?|refused|fails?|failed|unable) (?:\w+ ){0,2}(?:loads?|loaded|loading|opens?|opened|opening|submits?|submitted|submitting|sends?|sending|sent|works?|worked|working|responds?|responded|responding|saves?|saved|saving|uploads?|uploaded|uploading|displays?|displayed|displaying|shows?|showed|showing|shown|accepts?|accepted|accepting|connects?|connected|connecting|go(?:es)? through|went through|gone through)\b/;
+const FP_FAIL_ES = /\b(?:no|nunca|tampoco|dej[oa](?:n|ron)? de|sin poder) (?:\w+ ){0,2}(?:carg(?:a|an|o|ar|aba|aron)|abr(?:e|en|io|ir|ia|ieron)|envi(?:a|an|o|ar|aba|aron|e)|funcion(?:a|an|o|ar|aba|aron)|respond(?:e|en|io|er|ia)|guard(?:a|an|o|ar|aba)|muestr(?:a|an)|mostr(?:o|ar|aba)|sub(?:e|en|io|ir|ia)|acept(?:a|an|o|ar))\b/;
+const FP_ERROR = /\berror(?:s|es)?\b|\bsomething went wrong\b|\balgo salio mal\b/;
+const FP_THING_EN = /\b(?:forms?|pages?|screens?|links?|sites?|website|portal|app|buttons?|submit|submission|dropdowns?|drop-downs?|lists?|menus?|box(?:es)?|fields?|uploads?)\b/;
+const FP_STATE_EN = /\bblank\b|\bempty\b|\bnothing (?:happens|happened|in it|shows|showed|appears|appeared|loads|loaded|opens|opened)\b|\bshows? nothing\b|\bshowed nothing\b|\bno (?:options?|choices?)\b|\bno (?:\w+ ){1,2}(?:in|on) (?:the|my|our|this) (?:dropdown|drop-down|list|menu)\b|\bfroze\b|\bfrozen\b|\bfreezes\b|\bstuck\b|\bcrash(?:es|ed)?\b|\bhangs\b|\bhung\b|\btimed out\b|\bfails?\b|\bfailed\b|\bspinning\b|\bkeeps? loading\b/;
+const FP_THING_ES = /\b(?:formularios?|paginas?|pantallas?|enlaces?|links?|sitio|portal|aplicacion|app|boton(?:es)?|enviar|envio|desplegables?|listas?|menus?|casillas?|campos?)\b/;
+const FP_STATE_ES = /\ben blanco\b|\bvaci[ao]s?\b|\bno (?:muestra|aparece|sale|carga|hay) nada\b|\bno pas[oa] nada\b|\bno (?:hace|hizo) nada\b|\bsin opciones\b|\bno tiene opciones\b|\bno hay (?:\w+ ){0,3}en (?:la|el|mi|nuestr[ao]) (?:lista|desplegable|menu)\b|\bse (?:congela|congelo|traba|trabo|cuelga|colgo|queda cargando)\b|\bcongelad[ao]\b|\btrabad[ao]\b|\bfall[oa]\b|\bfallando\b/;
+
 /**
  * Why a problem report looks like a roster change: 'form' (it names the Club
  * Roster Form), 'text' (its words ask to add or remove girls, or say girls are
@@ -1163,15 +1200,38 @@ function looksLikeRosterChange_(a) {
 
 /**
  * Whether the given boxes of a problem report ask to add or remove girls, or
- * say girls are not on the form (the RC_ patterns). The typed club is blanked
- * first ("<X> Girls Club" is no roster word).
+ * say girls are not on the form (the RC_ patterns).
  */
 function rosterChangeWords_(a, boxes) {
+  const text = reportText_(a, boxes);
+  const lower = text.toLowerCase();
+  return RC_NEW.test(lower) || (RC_PEOPLE.test(lower) && RC_CHANGE.test(lower)) || absentPeople_(text);
+}
+
+/**
+ * #110: whether a problem report says the form is not working — the rule
+ * above FP_FAIL_EN. handleFeedback_ asks looksLikeRosterChange_ first, so a
+ * roster change that also says the form fails is one roster-change item.
+ */
+function looksLikeFormProblem_(a) {
+  const text = reportText_(a, [Q.FB_DOING, Q.FB_WHAT]).toLowerCase().replace(/['’]/g, '');
+  if (FP_FAIL_EN.test(text) || FP_FAIL_ES.test(text) || FP_ERROR.test(text)) return true;
+  return text.split(RC_BREAK).some(function (clause) {
+    return (FP_THING_EN.test(clause) && FP_STATE_EN.test(clause)) ||
+           (FP_THING_ES.test(clause) && FP_STATE_ES.test(clause));
+  });
+}
+
+/**
+ * The given boxes of a problem report as the RC_ and FP_ patterns read them
+ * (foldText_), joined by a stop; the typed club blanked first ("<X> Girls
+ * Club" is no roster word, "<X> Form Club" no form thing).
+ */
+function reportText_(a, boxes) {
   let text = boxes.map(function (q) { return foldText_(a[q]); }).join('. ');
   const club = foldText_(a[Q.FB_CLUB]);
   if (club.length >= 4) text = text.replace(new RegExp(club.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
-  const lower = text.toLowerCase();
-  return RC_NEW.test(lower) || (RC_PEOPLE.test(lower) && RC_CHANGE.test(lower)) || absentPeople_(text);
+  return text;
 }
 
 /** Text as the RC_ patterns read it: tidied, accents folded (so \b sees "anadio"), case kept (a name is capitalised). */
@@ -1199,18 +1259,32 @@ function absentPeople_(text) {
 }
 
 /**
- * The ReviewQueue item for a roster change sent as a problem report. It points
- * at the report (source) and never copies its text or reply address: reports
- * name girls. Partner and club are what the mentor typed, capped, with any
- * leading run of = + - @ and spaces stripped (sheetText_) so the sheet never reads a formula.
+ * The ReviewQueue item for a problem report: a roster change (reason 'form'
+ * or 'text', looksLikeRosterChange_) or the form not working ('broken',
+ * looksLikeFormProblem_). It points at the report (source) and never copies
+ * its text or reply address: reports name girls. Partner and club are what the
+ * mentor typed, capped, with any leading run of = + - @ and spaces stripped
+ * (sheetText_) so the sheet never reads a formula; a 'broken' item also names
+ * the form she chose.
  */
 function feedbackReviewItem_(a, source, sentDay, reason) {
   const typed = function (v) { return sheetText_(v).slice(0, 80); };
+  const head = source + ' (sent ' + (sentDay || '?') + '; ';
+  if (reason === 'broken') {
+    return {
+      issue: 'Form not working report',
+      partner: typed(a[Q.FB_PARTNER]), club: typed(a[Q.FB_CLUB]),
+      detail: head + (typed(a[Q.FB_FORM]) || 'form not given') + '): the sender says it does ' +
+          'not load, submit or show its choices. Read the report (the staff e-mail, or that ' +
+          'Feedback row), try the form as she did, fix or escalate, and answer her if she gave ' +
+          'an address. Then mark resolved.',
+      dedupeKey: source,
+    };
+  }
   return {
     issue: 'Roster change sent as a problem report',
     partner: typed(a[Q.FB_PARTNER]), club: typed(a[Q.FB_CLUB]),
-    detail: source + ' (sent ' + (sentDay || '?') + '; ' +
-        (reason === 'form' ? 'Club Roster Form chosen' : 'report text') + '): enter it on ' +
+    detail: head + (reason === 'form' ? 'Club Roster Form chosen' : 'report text') + '): enter it on ' +
         'the Club Roster Form → "' + Q.ACTION_MOD + '", removals spelled exactly as on the ' +
         'Roster — or ask the partner to. Then mark resolved.',
     dedupeKey: source,
