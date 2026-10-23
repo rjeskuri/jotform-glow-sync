@@ -465,6 +465,11 @@ function levelTag_(words) {
  * "Lions (Testville Youth Centre)" — are compared without that bracket
  * (placeSuffix_), by the rules above: the place's words lifted similarity_ of
  * the whole names over SIMILAR and held new clubs (#111, the 2026-10-08 hold).
+ * The brackets must fold to the same words (matchWords_: case, accents,
+ * punctuation) — "Tigers (Testville Youth Centre)" / "Lions (Testville Youth
+ * Center)" is compared whole, and held; a bracket only similarity_-close is
+ * NOT stripped, since "(Site 1)" / "(Site 2)" (0.83) would then read as one
+ * place and two clubs that only their tags tell apart as one club.
  * The place bracketed on one side only, or a name that is only the place, is
  * compared whole, as before — so "Lion Testville Youth Centre" is still close
  * to "Lions (Testville Youth Centre)", and "(Testville Youth Centre)" to
