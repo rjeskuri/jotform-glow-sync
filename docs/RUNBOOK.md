@@ -39,6 +39,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Renaming a club](#renaming-a-club)
   - [Moving a club to another partner (a mistyped partner)](#moving-a-club-to-another-partner-a-mistyped-partner)
   - [Club names two partners share](#club-names-two-partners-share)
+  - [Club names that look alike](#club-names-that-look-alike)
   - [Clubs that do not use Jotform](#clubs-that-do-not-use-jotform)
   - [Deactivating a club](#deactivating-a-club)
   - [Roster rebuild and upload (offline path)](#roster-rebuild-and-upload-offline-path)
@@ -1714,6 +1715,74 @@ lines counted before the apply, the verify and the browser checks - and its roll
   difference: it raises ATTENTION ("roster rule(s) test a name the Club
   picker does not list") on every run until that apply, or until a roster
   change in that region makes it apply.
+
+## Club names that look alike
+
+- **When:** before GLOW renames clubs into a country format, to see which names already collide or nearly do; as the input for the duplicate-club checks (ticket #84).
+- **Status:** built 2026-10 (ticket #94); it runs without `--countries` meanwhile, and the `country` column fills once the Account field is chosen. Which Salesforce Account field holds a partner's country (the ticket outline's step 4) is not settled: the candidates are `Country__c` (a picklist), `BillingCountry` and `ShippingCountry`, and their non-blank counts over the partner accounts are not taken yet.
+- **Dry run:** the whole tool is one: it reads exports and writes only its own CSV.
+- **Apply:** none; a rename it points at goes through "Renaming a club".
+- **Verify:** the counts line, against the CSV's rows.
+- **Rollback:** none needed (nothing is written outside `data/`).
+
+`tools/club_names.py similar` compares every club of the Roster with every
+other and prints the lookalikes in groups. A club is one partner + club name
+(compared with case and spacing ignored, `glow.text.key`), whatever its
+status, so a retired club still counts. The tool reads files only: no
+Jotform, Sheets or Salesforce call, and it prints club and partner names,
+regions and counts, never a girl's name. Its exports and its CSV live in
+`data/`, which stays uncommitted (the Roster export holds the girls' names).
+
+```bash
+mkdir -p data/club_names                     # the sync's --summary-json does not make it
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+python3 tools/sheets_client.py export Partners data/partners_<date>.csv
+# optional, for the sf_name column: each region's sync dry run with its summary (Jotform GET only)
+python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --partners data/partners_<date>.csv \
+        --region Africa --form 262382821971058 \
+        --summary-json data/club_names/plan_africa_<date>.json            # and Asia, Latin America, U.S
+python3 tools/club_names.py similar --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv \
+        [--countries data/club_names/partner_countries.csv] \
+        [--sf-names data/club_names/plan_africa_<date>.json --sf-names ...] \
+        --csv data/club_names/similar_<date>.csv
+```
+
+Two names match as
+
+- `same`: equal apart from capitals and spacing ("Sunrise Club", "SUNRISE  CLUB");
+- `folded`: equal once accents, punctuation and spacing are folded away
+  ("Niñas Unidas", "Ninas-Unidas"; "G.L.O.W. Club", "Glow Club");
+- `close`: the folded names at least `--threshold` alike (difflib's ratio,
+  default 0.85: "Sunrise Club", "Sunrize Club") and carrying the same numbers
+  in the same order, so "Harbor Club 1" and "Harbor Club 2" never match.
+
+A group is every club joined by a chain of matches, so two clubs in one group
+need not match each other directly. The first line counts them:
+`groups: N (same A, folded B, close C); clubs in them: M`. A mixed group
+counts under the **weakest link it needs** to be one group: `same` when its
+`same` pairs alone connect it, else `folded` when its `same` and `folded`
+pairs do, else `close`. So two `same` pairs joined only by a `close` pair are
+one `close` group, although every club's own `match` is `same`. Each group follows, one line per club with its
+partner, region, form and active girls. The seven names two partners share
+("Club names two partners share") come out with match `same`, and with
+`--sf-names` each of those clubs' `sf_name` is its `<club> - <partner>`.
+
+The CSV (`--csv`, its folder made when missing; only the header when there is no group), one row per club in a group:
+
+| Column | What |
+|---|---|
+| `group` | the group's number in this run (groups ordered by folded name) |
+| `match` | the strongest kind joining this club to another of its group: `same`, `folded` or `close` |
+| `club`, `partner` | as the Roster spells them (whitespace collapsed), from the club's first active row, else its first row |
+| `region` | the region cell of that row, in the forms' spelling when it is one of theirs, else as written |
+| `form` | `retired (jotform=no)` (its partner is marked `no` in the Partners tab), else `none (no active girl)`, else `none (no region)` (a blank region or one no form has), else the form's title, such as `Africa Attendance Form` - checked in that order |
+| `country` | the partner's country from `--countries` (a `partner,country` CSV); blank without it |
+| `sf_name` | what the club sends to question 5 (its Salesforce Account name), from the `sf_names` of the `--sf-names` summaries; blank without them, or for a club none of them lists |
+| `status` | `active` (at least one active girl) or `inactive` |
+| `active_girls` | the club's active rows |
+| `same_partner` | `yes` when every club of the group has one partner (one partner's own lookalikes), else `no` |
 
 ## Clubs that do not use Jotform
 
