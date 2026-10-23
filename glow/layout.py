@@ -148,8 +148,11 @@ def notes_slot(questions, conditions=()):
     Refuses (never guesses): a hidden link or Submit between the first link
     and Submit, anything a mentor can see between the last roster and Submit
     but the links and Submit (visible, or hidden and shown by a rule), a
-    roster in the block, a move onto a taken order, and a simulation in which
-    the form's sequence changes or the freed order is still taken."""
+    roster in the block, two questions of the block sharing an order (both
+    named; tools/add_feedback_link.py --link roster leaves Submit tied with
+    the field below it, so the notes go on before that link), a move onto a
+    taken order, and a simulation in which the form's sequence changes or
+    the freed order is still taken."""
     last, first = notes_neighbours(questions)
     submit = links.submit_button(questions)
     shown = links.shown_by_rules(conditions)
@@ -184,6 +187,15 @@ def notes_slot(questions, conditions=()):
     if rosters:
         sys.exit(f"{label(rosters[0])} shares the run of orders from {label(first)} ({order}) down - "
                  f"the order freed would not be empty; {FIX}")
+    tied = next((at[k] for k in range(order, o) if len(at[k]) > 1), None)
+    if tied:    # both named: the operator sees what blocks it
+        pair = " and ".join(label(q) for q in sorted(tied, key=links.render_key))
+        sys.exit(f"{pair} share order {links.order_of(tied[0])} - making room writes only to empty "
+                 "orders, so it cannot move them apart. The notes go on before the Club Roster Form "
+                 "link (tools/add_feedback_link.py --link roster leaves Submit tied with the field "
+                 "below it): with that link on, take it out (--link roster --remove --apply), add "
+                 "the notes, then place the link again; any other tie: untie it in the builder "
+                 "first (RUNBOOK \"Session notes on the attendance forms\")")
     moves = [(str(q["qid"]), links.order_of(q) + 1)
              for q in sorted(block, key=links.render_key, reverse=True)]
     state = {k: dict(v) for k, v in questions.items()}

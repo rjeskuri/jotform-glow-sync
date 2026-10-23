@@ -1020,7 +1020,11 @@ by a test to the table in "The forms"):
 | `problem` | `somethingNotWorking` (q443) | Click here to report a problem | the problem-report form |
 
 The Club Roster Form link sits above the problem link, so a mentor with a
-roster change meets it first. Adding, re-checking or removing one:
+roster change meets it first. Place it only after the session-notes field
+(task #105; "Session notes on the attendance forms"): the notes go on first,
+because placing this link leaves Submit sharing an order with the hidden field
+below it, and `add_session_notes.py` then refuses on the tie. Adding,
+re-checking or removing one:
 
 ```bash
 python3 backup_forms.py                                           # optional: the tool snapshots each form it writes
@@ -1124,17 +1128,25 @@ there), so the tool first makes room the way `add_feedback_link.py` does
 (Ryan, 2026-10-23): the first link through Submit and the hidden fields at the
 orders right after move one down, bottom-up so each lands on an empty order
 (the path Jotform keeps exactly), then one create at the freed order - about
-ten writes per form, each printed as `move <name> (qN) a -> b`. Refuses rather
-than guesses: two fields of the name, the field below a link or Submit or a
-roster below it (move it in the builder, or `--remove --apply` and add it
-again), a hidden link or Submit, anything a mentor can see between the last
-roster and Submit besides the links and Submit, a move onto a taken order. A
-drifted flag or text (`required`, `hidden`, the label, the limit, a sub-label)
-is set back in place in one write (`UPDATE <property>: old -> new`); re-running
-is a no-op. With `--apply` each form is snapshotted first
-(`backups/<id>/questions-<stamp>.json`), then re-read: the field exactly once,
-its properties, every move landed, its place, no rule mentioning it - a
-mismatch stops the tool non-zero naming the snapshot.
+ten writes per form, each printed as `move <name> (qN) a -> b`. So the
+sequence matters: **the session notes go on before the Club Roster Form link**
+(`add_feedback_link.py --link roster`, BACKLOG 46; "Links above Submit"), whose
+placing leaves Submit sharing an order with the hidden field below it. After
+that link the tool refuses on the tie, naming both questions: take the link
+out (`--link roster --remove --apply`), add the notes, then place the link
+again - it goes directly above the problem link, below the notes
+(test-pinned). Refuses rather than guesses: two fields of the name, the field
+below a link or Submit or a roster below it (move it in the builder, or
+`--remove --apply` and add it again), a hidden link or Submit, anything a
+mentor can see between the last roster and Submit besides the links and
+Submit, two questions of the tail sharing an order. A drifted flag or text
+(`required`, `hidden`, the label, the limit, a sub-label) is set back in place
+in one write (`UPDATE <property>: old -> new`); re-running is a no-op. With
+`--apply` each form is snapshotted first (`backups/<id>/questions-<stamp>.json`),
+then re-read: the field exactly once, its properties, every move landed, its
+place, no rule mentioning it - a mismatch stops the tool there, non-zero,
+naming that form's snapshot; the forms after it are neither snapshotted nor
+written, the forms before it stay written and verified.
 
 ## Header logo
 

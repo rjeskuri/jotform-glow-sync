@@ -20,10 +20,14 @@ With --apply each form is snapshotted first (glow/backup.py -> backups/<id>/),
 written, then re-read and checked: the field exactly once, its properties as
 NOTES_PROPS, every move landed, the field after the rosters and above the links
 and Submit, and no rule mentioning it (the sync rewrites rules, never this
-field). Re-running is a no-op; --remove deletes the field: the rollback.
-Refuses rather than guesses: two fields of the name, the field misplaced, a
-roster below the fence, a hidden link or Submit, or anything a mentor can see
-between the last roster and Submit besides the links and Submit.
+field); a mismatch stops the run there, naming that form's snapshot - the
+forms after it are untouched. Re-running is a no-op; --remove deletes the
+field: the rollback. Refuses rather than guesses: two fields of the name, the
+field misplaced, a roster below the fence, a hidden link or Submit, anything a
+mentor can see between the last roster and Submit besides the links and
+Submit, or two tail questions sharing an order - what add_feedback_link.py
+--link roster leaves behind (Submit tied with the field below it), so the
+notes go on BEFORE the Club Roster Form link.
 
 Usage:
     export JOTFORM_API_KEY=...
@@ -169,7 +173,18 @@ def main(argv=None, client=None):
         for n, step in enumerate(steps, 1):
             print(f"   {n}. {step['label']}")
 
-    failed = 0
+    # the first form that is not as planned or does not verify stops the run
+    # (as fix_roster_order.py stops): the forms after it are neither
+    # snapshotted nor written, the forms before it stay written and verified
+    written = []
+
+    def stop(form_id, msg, wrote=False):
+        done = f"; written and verified before it: {', '.join(written)}" if written else ""
+        back = (f'; its "before" is backups/{form_id}/questions-{stamp}.json'
+                + ("" if args.remove else " (--remove --apply takes the field out)")) if wrote else ""
+        sys.exit(f"{chosen[form_id]} {form_id}: {msg} - stopped; the forms after it are "
+                 f"untouched{done}. Re-read (the dry run) before retrying{back}")
+
     for form_id, steps in planned.items():
         if not args.apply or not steps:
             continue
@@ -178,9 +193,7 @@ def main(argv=None, client=None):
         print(f"   snapshot: backups/{form_id}/questions-{stamp}.json")
         steps, _ = read_and_plan(form_id)      # the form may have changed since the preview
         if [s["label"] for s in steps] != [s["label"] for s in planned[form_id]]:
-            failed += 1
-            print("   ! the form changed since the preview - nothing written; re-run")
-            continue
+            stop(form_id, "the form changed since the preview - nothing written to it")
         for step in steps:
             created = write(client, form_id, step)
             if step["op"] == "add" and isinstance(created, dict):
@@ -189,17 +202,13 @@ def main(argv=None, client=None):
         conditions = client.get(f"/form/{form_id}/properties").get("conditions", [])
         problems = verify(after, conditions, steps, args.remove)
         if problems:
-            failed += 1
             print("   ! MISMATCH after write: " + "; ".join(problems))
-        else:
-            print("   re-read: verified")
+            stop(form_id, "MISMATCH after write (a gateway 504 can hide a completed write)", wrote=True)
+        print("   re-read: verified")
+        written.append(form_id)
 
     if not args.apply:
         print("\nDRY RUN - re-run with --apply to write")
-    if failed:
-        sys.exit(f"{failed} form(s) did not verify - re-read before retrying (a gateway 504 can "
-                 f"hide a completed write); the \"before\" of each form written is "
-                 f"backups/<id>/questions-{stamp}.json (--remove --apply takes the field out)")
 
 
 if __name__ == "__main__":

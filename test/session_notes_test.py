@@ -613,6 +613,162 @@ class NotesTool(unittest.TestCase):
                 self.tmp.cleanup()
                 self.tmp = tempfile.TemporaryDirectory()
 
+    def test_a_mismatch_on_one_form_stops_the_run_before_the_next_is_touched(self):
+        # a re-read MISMATCH on one form stops the run there (the outline: "otherwise stops
+        # non-zero naming the snapshot"; fix_roster_order.py, whose order moves these are, stops
+        # at the first form): the forms after it are neither snapshotted nor written, the forms
+        # before it stay written and verified, the exit is non-zero and names the snapshot of
+        # the form that did not verify (the review of PR #127)
+        class AppendingOn(FakeClient):
+            """A Jotform that, on the form `wrong`, ignores the order sent: the field lands at
+            the end, below Submit - the re-read finds it misplaced."""
+            def __init__(self, forms, wrong):
+                super().__init__(forms)
+                self.wrong = wrong
+
+            def post_form(self, path, data, label):
+                if path == f"/form/{self.wrong}/questions":
+                    end = max(links.order_of(q) for q in self.forms[self.wrong].values()) + 1
+                    data = dict(data, **{"question[order]": str(end)})
+                return super().post_form(path, data, label)
+
+        bases = {fid: base for fid, base, _, _ in self.cases()}
+        regionals = [fid for fid in glow_forms.LIVE if fid != TEMPLATE]
+        pick = sum((["--form", f] for f in regionals), [])
+        # (argv, the forms of the run in order, the form whose write lands wrong)
+        runs = [((), list(glow_forms.LIVE), TEMPLATE),          # every form: the first one fails
+                (pick, regionals, regionals[0]),                # the regionals: the first one fails
+                (pick, regionals, regionals[1])]                # the second: one written before it
+        for argv, order, wrong in runs:
+            with self.subTest(argv=argv, wrong=wrong):
+                forms = {fid: copy.deepcopy(bases[fid]) for fid in order}
+                fake = AppendingOn(copy.deepcopy(forms), wrong)
+                code, out = self.run_tool(fake, *argv, "--apply")
+                self.assertRefused(code)
+                self.assertIn("MISMATCH", out)
+                at = order.index(wrong)
+                before, after = order[:at], order[at + 1:]
+                for fid in before:                                       # written and verified
+                    self.assertEqual(len(links.named(fake.forms[fid], NOTES)), 1, fid)
+                    self.assertEqual(len(self.stamped(fid)), 1, fid)
+                self.assertEqual(out.count("re-read: verified"), len(before))
+                # the form that did not verify: one create, its snapshot taken and named
+                self.assertEqual([p for p, _ in fake.writes if wrong in p], [f"/form/{wrong}/questions"])
+                stamped = self.stamped(wrong)
+                self.assertEqual(len(stamped), 1)
+                self.assertEqual(self.saved(wrong, stamped[0]), forms[wrong])
+                self.assertIn(f"backups/{wrong}/{stamped[0]}", code + out)
+                # the forms after it: no snapshot, no write, as they were
+                for fid in after:
+                    self.assertEqual(self.snapshots(fid), [], fid)
+                    self.assertEqual([p for p, _ in fake.writes if fid in p], [], fid)
+                    self.assertEqual(fake.forms[fid], forms[fid], fid)
+                self.assertEqual(len(fake.writes), len(before) + 1)
+                self.tmp.cleanup()
+                self.tmp = tempfile.TemporaryDirectory()
+
+    @staticmethod
+    def with_roster_link(qs):
+        """`qs` after tools/add_feedback_link.py --link roster, as links.plan_insert places it:
+        the problem link (or Submit) and what is below it down to Submit move one down, the
+        element takes the freed order - so Submit comes to share an order with the hidden field
+        right after it."""
+        order, moves = links.plan_insert(qs, links.ROSTER)
+        out = move_all(qs, moves)
+        qid = str(max(int(k) for k in out) + 1)
+        out[qid] = {"qid": qid, "type": "control_text", "name": links.ROSTER.name, "order": str(order),
+                    "text": links.element_html(links.ROSTER.sentence, links.ROSTER_FORM_URL)}
+        return out
+
+    def test_a_tie_in_the_tail_is_refused_naming_both_questions(self):
+        # --link roster on a live form (BACKLOG 46, pending) leaves Submit sharing an order with
+        # the first hidden field after it; making room for the notes would then write onto a
+        # taken order. A refusal - and one that names the tied pair (both qids), so the operator
+        # knows what blocks it (the review of PR #127) - from notes_slot and from the tool, in
+        # the dry run and with --apply; nothing written, no snapshot.
+        linked = self.with_roster_link(notes_form(gap=0))                # the live layout, then --link roster
+        self.assertEqual(links.order_of(linked["2"]), links.order_of(linked["103"]))    # Submit ties with belowAre
+        bare = self.with_roster_link(notes_form(gap=0, problem=False))   # no problem link: the same tie
+        self.assertEqual(links.order_of(bare["2"]), links.order_of(bare["103"]))
+        hidden_pair = notes_form(gap=0)                                   # two hidden fields share an order
+        hidden_pair["18"]["order"] = hidden_pair["103"]["order"]
+        for name, qs, pair in (("after --link roster", linked, ("2", "103")),
+                               ("after --link roster, no problem link", bare, ("2", "103")),
+                               ("two hidden fields tied", hidden_pair, ("103", "18"))):
+            with self.subTest(case=name):
+                self.assertEqual(layout.audit_layout(qs), [])             # the form is healthy otherwise
+                with self.assertRaises(SystemExit) as cm:
+                    layout.notes_slot(qs)
+                for qid in pair:
+                    self.assertRegex(str(cm.exception.code), rf"\bq{qid}\b")
+                for argv in ((), ("--apply",)):
+                    fake = FakeClient({TEMPLATE: copy.deepcopy(qs)})
+                    code, out = self.run_tool(fake, "--form", TEMPLATE, *argv)
+                    self.assertRefused(code, argv)
+                    for qid in pair:
+                        self.assertRegex(code, rf"\bq{qid}\b", argv)
+                    self.assertEqual(fake.writes, [], argv)
+                    self.assertEqual(fake.forms[TEMPLATE], qs, argv)
+                    self.assertEqual(self.snapshots(TEMPLATE), [], argv)
+
+    def test_the_notes_go_on_before_the_roster_link_which_then_goes_between(self):
+        # the sequence that works: the notes first, the Club Roster Form link after -
+        # links.plan_insert puts it directly above the problem link, below the notes, and the
+        # layout audits clean: rosters -> sessionNotes -> roster link -> problem link -> Submit
+        for behaviour in ("insert", "tie"):
+            for gap in (0, 3):
+                with self.subTest(behaviour=behaviour, gap=gap):
+                    fake = FakeClient({TEMPLATE: notes_form(gap=gap)}, behaviour)
+                    code, out = self.run_tool(fake, "--form", TEMPLATE, "--apply")
+                    self.assertEqual(code, 0, out)
+                    noted = fake.forms[TEMPLATE]
+                    after = self.with_roster_link(noted)
+                    names = rendered(after)
+                    i = names.index("MoonriseClub")                       # the last roster
+                    self.assertEqual(names[i:i + 5],
+                                     ["MoonriseClub", NOTES, links.ROSTER.name, links.PROBLEM.name, "submit2"])
+                    self.assertEqual([n for n in names if n != links.ROSTER.name], rendered(noted))  # nothing else moved
+                    self.assertEqual(layout.audit_layout(after), [])
+                    self.assertEqual(layout.rosters_below(after), [])
+                    again = FakeClient({TEMPLATE: copy.deepcopy(after)})  # the tool finds its field as wanted
+                    code, out = self.run_tool(again, "--form", TEMPLATE, "--apply")
+                    self.assertEqual((code, again.writes), (0, []), out)
+                    self.assertIn("as wanted", out)
+                    self.tmp.cleanup()
+                    self.tmp = tempfile.TemporaryDirectory()
+
+    def test_an_existing_misplaced_field_is_refused_and_nothing_written(self):
+        # the field is on the form but not where it belongs: the tool sets a field's flags
+        # right, never its place - a refusal naming what is wrong, in the dry run and with
+        # --apply; nothing written, no snapshot. --remove --apply is the way out.
+        below_link = notes_form(gap=3, notes=("700", 19))                # after the problem link, above Submit
+        for qid in ("2", "103", "18"):
+            below_link[qid]["order"] = str(links.order_of(below_link[qid]) + 2)
+        below_submit = notes_form(gap=3, notes=("700", 30), roster=True)  # after everything
+        roster_below = notes_form(gap=3, notes=("700", 10))              # q400 (order 14) renders below it
+        two_below = notes_form(gap=2, notes=("812", 8), problem=False)   # another qid; q350 and q400 below it
+        for name, qs, words in (("below the problem link", below_link, ("q700", "below", "q443")),
+                                ("below Submit", below_submit, ("q700", "below")),
+                                ("a roster below it", roster_below, ("q700", "q400", "1 roster")),
+                                ("two rosters below it", two_below, ("q812", "q350", "2 roster"))):
+            for argv in ((), ("--apply",)):
+                fake = FakeClient({TEMPLATE: copy.deepcopy(qs)})
+                code, out = self.run_tool(fake, "--form", TEMPLATE, *argv)
+                self.assertRefused(code, (name, argv))
+                for word in words:
+                    self.assertIn(word, code, (name, argv))
+                self.assertNotIn("ADD", out, (name, argv))
+                self.assertEqual(fake.writes, [], (name, argv))
+                self.assertEqual(fake.forms[TEMPLATE], qs, (name, argv))
+                self.assertEqual(self.snapshots(TEMPLATE), [], (name, argv))
+            fake = FakeClient({TEMPLATE: copy.deepcopy(qs)})              # the way out still works
+            code, out = self.run_tool(fake, "--form", TEMPLATE, "--remove", "--apply")
+            self.assertEqual(code, 0, (name, out))
+            self.assertEqual(links.named(fake.forms[TEMPLATE], NOTES), [], name)
+            self.assertEqual(len(fake.writes), 1, name)
+            self.tmp.cleanup()                                           # the remove's snapshot
+            self.tmp = tempfile.TemporaryDirectory()
+
     def test_remove_takes_the_field_out(self):
         fid, qid = LATAM, "812"
         before = notes_form(gap=2, notes=(qid, 16), roster=True)
@@ -817,6 +973,135 @@ class FormStatusNotes(unittest.TestCase):
         problems = self.notes_problems(self.report(low))
         self.assertTrue(any("q700" in p and "q400" in p and "below" in p for p in problems), problems)
         self.assertIn("session notes: present (q700)", self.printed(low))
+
+    def test_form_status_flags_a_hidden_notes_field(self):
+        # hidden, no mentor can fill it: an audit line (audit_layout's), whatever the qid, that
+        # the runner's verify sees too; the `session notes:` line still says present
+        for kw, qid, order in (({}, "700", 15), ({"roster": True}, "812", 16)):
+            qs = notes_form(gap=3, notes=(qid, order), **kw)
+            self.assertEqual(self.notes_problems(self.report(qs)), [], qid)     # as wanted: no line
+            qs[qid]["hidden"] = "Yes"
+            rep = self.report(qs)
+            problems = self.notes_problems(rep)
+            self.assertTrue(any(f"q{qid}" in p and "hidden" in p for p in problems), problems)
+            self.assertEqual(problems, [p for p in layout.audit_layout(qs) if NOTES in p], qid)
+            self.assertIn(f"session notes: present (q{qid})", self.printed(qs))
+            clean = dict(rep, rule_problems=problems, languages=["a"] * 12,
+                         region_check={"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []})
+            verify_problems, _ = auto_sync.verify_report(clean)
+            self.assertTrue(any(NOTES in p and "hidden" in p for p in verify_problems), verify_problems)
+
+
+class TailRepairWithNotes(unittest.TestCase):
+    """tools/fix_roster_order.py (the one-time tail repair, glow.layout.plan_tail_moves /
+    plan_restore) on a form that carries the notes field above a stray roster - one the old
+    sync created after Submit: the notes move with the links (the notes first in the tail, then
+    the links, Submit, the hidden fields) to empty orders after the last roster, no roster is
+    written, the audit is clean after, and --undo puts every order back."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()      # backups/ of the run (glow.backup.REPO)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def unrepaired(**kw):
+        """link_form(**kw) - q400, the roster the old sync created after Submit, renders last -
+        with the notes field q700 at the first link's (or Submit's) order and everything from
+        there down moved one down: the notes above the links, the links above Submit, q400
+        below them all."""
+        qs = link_form(**kw)
+        first = min((q for q in qs.values() if q["name"] in TAIL[:3]), key=links.render_key)
+        at = links.order_of(first)
+        for q in qs.values():
+            if links.order_of(q) >= at:
+                q["order"] = str(links.order_of(q) + 1)
+        qs["700"] = field("700", at)
+        return qs
+
+    def run_fix(self, fake, *argv):
+        """(exit code or 0, stdout) of fix_roster_order.main() with `fake` as its Client, the
+        snapshots in a temporary backups/ (so --undo <stamp> reads what --apply wrote)."""
+        import fix_roster_order
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(glow_backup, "REPO", self.tmp.name))
+            stack.enter_context(mock.patch.object(fix_roster_order, "Client", lambda key, apply=False: fake))
+            stack.enter_context(mock.patch.dict(os.environ, {"JOTFORM_API_KEY": "test-only"}))
+            stack.enter_context(mock.patch.object(sys, "argv", ["fix_roster_order.py", *argv]))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            try:
+                fix_roster_order.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code or 0
+        return code, out.getvalue()
+
+    @staticmethod
+    def without_orders(qs):
+        return {k: {x: y for x, y in v.items() if x != "order"} for k, v in qs.items()}
+
+    def test_the_repair_moves_the_notes_with_the_links_and_undo_puts_every_order_back(self):
+        fid = TEMPLATE
+        for kw in ({"roster": True}, {}, {"problem": False}):             # two links, one, none
+            with self.subTest(**kw):
+                before = self.unrepaired(**kw)
+                present = {q["name"] for q in before.values()}
+                tail = [NOTES] + [n for n in TAIL if n in present]        # the tail in render order
+                names = rendered(before)
+                self.assertEqual(names[-1], "MoonriseClub")                # the stray roster renders last
+                self.assertEqual(names[names.index(NOTES):-1], tail)      # the notes lead the tail
+                self.assertTrue(any("render below" in p and "q400" in p for p in layout.audit_layout(before)))
+                top = max(links.order_of(q) for q in before.values())
+                tail_qids = {str(q["qid"]) for q in before.values() if q["name"] in tail}
+                fake = FakeClient({fid: copy.deepcopy(before)})
+                # the dry run: the notes are in the plan (first in the tail: the order right
+                # after the old top), nothing written
+                code, out = self.run_fix(fake, "--form", fid)
+                self.assertEqual(code, 0, out)
+                self.assertIn(f"move {NOTES} (q700) {links.order_of(before['700'])} -> {top + 1}", out)
+                self.assertEqual((fake.writes, fake.forms[fid]), ([], before))
+                self.assertNotIn("Girl", out)
+                # --apply: one order write per tail element, each to an empty order above the
+                # old top, Submit first and the notes (the fence) last; no roster written
+                code, out = self.run_fix(fake, "--form", fid, "--apply")
+                self.assertEqual(code, 0, out)
+                after = fake.forms[fid]
+                written = {p.rsplit("/", 1)[1]: int(f["order"]) for p, f in fake.writes}
+                self.assertEqual(len(fake.writes), len(tail))
+                self.assertEqual(set(written), tail_qids)
+                self.assertTrue(all(set(f) == {"order"} for _, f in fake.writes))
+                self.assertEqual(sorted(written.values()), list(range(top + 1, top + 1 + len(tail))))
+                self.assertEqual(fake.writes[0][0].rsplit("/", 1)[1], "2")
+                self.assertEqual(fake.writes[-1][0].rsplit("/", 1)[1], "700")
+                self.assertEqual(rendered(after), [n for n in names if n not in tail and n != "MoonriseClub"]
+                                 + ["MoonriseClub"] + tail)
+                self.assertEqual(self.without_orders(after), self.without_orders(before))   # orders only
+                for roster in ("350", "400"):
+                    self.assertEqual(after[roster]["order"], before[roster]["order"], roster)
+                self.assertEqual(layout.audit_layout(after), [])
+                self.assertEqual(layout.rosters_below(after), [])
+                self.assertEqual(layout.fence(after)["qid"], "700")
+                self.assertIn(f"re-read: verified - every roster above {NOTES} (q700)", out)
+                stamp = re.search(r"--undo (\S+)\)", out).group(1)
+                code, out = self.run_fix(fake, "--form", fid, "--apply")  # a re-run: nothing to do
+                self.assertEqual((code, len(fake.writes)), (0, len(tail)), out)
+                self.assertIn("nothing to do", out)
+                # --undo <stamp>: the dry run writes nothing; --apply puts every order back, the
+                # notes first on the way back and Submit last
+                code, out = self.run_fix(fake, "--form", fid, "--undo", stamp)
+                self.assertEqual((code, len(fake.writes)), (0, len(tail)), out)
+                self.assertIn(f"{len(tail)} element(s) go back to the snapshot's orders", out)
+                code, out = self.run_fix(fake, "--form", fid, "--undo", stamp, "--apply")
+                self.assertEqual(code, 0, out)
+                self.assertEqual(fake.forms[fid], before)
+                undo = [p.rsplit("/", 1)[1] for p, _ in fake.writes[len(tail):]]
+                self.assertEqual((len(undo), set(undo)), (len(tail), tail_qids))
+                self.assertEqual((undo[0], undo[-1]), ("700", "2"))
+                self.assertIn(f"the {stamp} orders are back", out)
+                self.tmp.cleanup()
+                self.tmp = tempfile.TemporaryDirectory()
 
 
 if __name__ == "__main__":
