@@ -32,12 +32,14 @@ headings, so a heading is never renamed (`make check` runs
   - [Rosters above Submit](#rosters-above-submit)
   - [Header logo](#header-logo)
   - [Photos](#photos)
+  - [Photo mover](#photo-mover)
   - [Disabling a regional form](#disabling-a-regional-form)
   - [Building a new regional form (not maintenance)](#building-a-new-regional-form-not-maintenance)
 - [Clubs](#clubs)
   - [Renaming a club](#renaming-a-club)
   - [Moving a club to another partner (a mistyped partner)](#moving-a-club-to-another-partner-a-mistyped-partner)
   - [Club names two partners share](#club-names-two-partners-share)
+  - [Club names that look alike](#club-names-that-look-alike)
   - [Clubs that do not use Jotform](#clubs-that-do-not-use-jotform)
   - [Deactivating a club](#deactivating-a-club)
   - [Roster rebuild and upload (offline path)](#roster-rebuild-and-upload-offline-path)
@@ -1135,9 +1137,11 @@ Jotform's Revision History. The image carries no translated text (q13 is in
 **Photos.** Since 2026-10-01 no attendance photo goes to Salesforce (the CEO's decision: the
 files there were deleted that day and the four regional forms' mapping lost its upload row; the
 template follows in step 1). Since <date> the photos are copied by Jotform's Google Drive
-integration into the My Drive of <role account>, folder `Attendance photos - <Region>`, one
-subfolder per submission named `<Club Name> <Attendance Date>`, uploaded files only, no PDF
-(the PDF renders every ticked girl's name). The photo stays required on the forms. The photos
+integration into the My Drive of Ryan's company account (Ryan, 2026-10-21: Jotform uses only
+that account), folder `Attendance photos - <Region>`, one subfolder per submission named
+`<Club Name> <Attendance Date>`, uploaded files only, no PDF (the PDF renders every ticked
+girl's name). The photo mover then moves each subfolder into that region's folder on the
+company Shared Drive ("Photo mover", below). The photo stays required on the forms. The photos
 before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
 <named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
 
@@ -1166,8 +1170,9 @@ plain `diff` of the snapshot before and the one after.*
    `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
    this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
-   Settings → Integrations → Google Drive → Authorize → log in as the role account (never your
-   own) → Folder Name `Attendance photos - Template` → Create Subfolders for Submissions ON,
+   Settings → Integrations → Google Drive → Authorize → log in as Ryan's company account (the
+   one the photo mover runs on) → Folder Name `Attendance photos - Template` (the photo mover's
+   source folder, made at its setup before this step: "Photo mover") → Create Subfolders for Submissions ON,
    name = the "Club Name" field that is **question 5** (the hidden text field; the builder shows
    the Club picker under the same label - prefer the hidden one; if only the picker is offered,
    use it and say so in the plan's Result), a space, then "Attendance Date" → Send Uploaded Files
@@ -1207,7 +1212,8 @@ plain `diff` of the snapshot before and the one after.*
    stays in the `emails` list is unverified; the diff of step 4 shows whatever changed and that
    it came back).
 4. **Read back, within a few minutes:**
-   - Drive (as the role account): folder `Attendance photos - Template` → one subfolder named
+   - Drive (as Ryan's company account; once the photo mover runs, on the Shared Drive's
+     Template folder instead): folder `Attendance photos - Template` → one subfolder named
      exactly `<that club> <that date>` → one image file, **no PDF**.
    - Salesforce (read-only SOQL): exactly one new batch for that club and date,
      `Processing_Status__c = 'Failed'`, `Status_Message__c LIKE 'Duplicate:%'`, 0 `Attendance__c`
@@ -1239,7 +1245,8 @@ plain `diff` of the snapshot before and the one after.*
    U.S `drive: not wanted (form DISABLED)`, `integration: ok`; `form_status.py` → every form
    CLEAN, `salesforce yes`.
 6. **When copies stop** (a subfolder dated more than a week ago is the newest while the form has
-   newer submissions; or Jotform e-mails a token error): the Google token has lapsed. In the
+   newer submissions - look in the region's folder on the Shared Drive once the photo mover runs;
+   or Jotform e-mails a token error): the Google token has lapsed. In the
    builder, on each affected form: Settings → Integrations → Google Drive → remove → add again
    with the same settings (step 2, backup and diff included); read back with the next real
    submission. Nothing in the repo raises an alarm for this (BACKLOG 70); look at the folders
@@ -1261,6 +1268,68 @@ the photos stay in Jotform and nothing else on the form changes (the before/afte
 save says so). The template's Salesforce upload row is re-added only on the CEO's word, with
 `UPLOADS = ["19"]` put back in `tools/integration_status.py`. What is already in Drive is the
 owner's to delete (the CEO's retention decision).
+
+## Photo mover
+
+- **When:** setting it up (once, before #63 points the forms' Drive integrations at its source folders), the template's test upload after #63, a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
+- **Status:** built offline 2026-10-21 (ticket #89), not set up yet; it is set up first, then #63 (Ryan, 2026-10-22; [plan](plans/2026-10-21-drive-photo-mover.md#result)).
+- **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, by counts and folder names; nothing changes.
+- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
+- **Verify:** the execution's log (`done: N folder(s) moved, N file(s) merged, 0 failure(s)`); the subfolder is in the region's folder on the Shared Drive and gone from `Attendance photos - <Region>`, which stays.
+- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; move a subfolder back into `Attendance photos - <Region>` by hand to undo a move.
+
+Jotform's Google Drive integration writes only into Ryan's My Drive ("Photos", above); the
+photos belong on the company Shared Drive. `drive-sync/` is a standalone Apps Script project
+owned by Ryan's company account - not the sheet's script, whose scopes must not change
+(CLAUDE.md rule 11) - that every 15 minutes moves each submission subfolder that has not changed
+for 10 minutes from `Attendance photos - <Region>` into that region's folder on the Shared Drive.
+Setup, Script Properties and the push: `drive-sync/README.md`.
+
+The order, each live step on Ryan's go (Ryan, 2026-10-22):
+
+1. PR #91 lands: code only, nothing live.
+2. Setup (`drive-sync/README.md`, steps 1-6): the Shared Drive's folders, named exactly
+   `Africa`, `Asia`, `Latin America`, `Template` (`U.S` only if its form is re-enabled); one My
+   Drive source folder per region for Jotform's uploads, `Attendance photos - <Region>`; the
+   standalone project (`.clasp.json` from the example) and its push; the Script Properties
+   `SOURCE_FOLDER_<REGION>` / `TARGET_FOLDER_<REGION>`; `previewMoves` on the empty folders
+   (writes nothing).
+3. #63, the template only (Ryan): the template's Google Drive integration pointed at
+   `Attendance photos - Template` ("Photos", above, steps 1-2). No regional form yet.
+4. A test upload on the template and its read-back ("Photos", steps 3-4), `previewMoves`, one
+   `moveSettledPhotos`, then `installTrigger`.
+5. #63, the regional forms (Ryan), only after step 4 passed: "Photos", step 5, one form at a
+   time, each followed by a check of the next run's log for that region (no `CONFIG refused`,
+   no `UNKNOWN`; its first subfolder moved) before the next form.
+
+What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N`,
+then the folders by name (club and date; never a file's name or contents).
+
+- **move**: the whole subfolder went to the Shared Drive.
+- **merge**: that name was already there once (a resubmission): its files went in one by one,
+  beside what is there; **kept** files (same name and size already there) stay in My Drive. A
+  subfolder of kept files only (`0 file(s) in`) changes nothing, never holds up a same-name copy
+  with new photos, and is logged again every run until Ryan deletes it by hand after a look; the
+  mover never trashes anything.
+- **waiting**: a file changed less than 10 minutes ago, or another subfolder of the same name
+  moved or merged files this run; the next run takes it (a backlog of same-name copies clears
+  one per run).
+- **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
+  moving at 4.5; what it did not read is not touched, and the next run carries on.
+- **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
+  hand (pick the right folder), or rename one of the two there.
+- **UNKNOWN**: a folder that is no region's; left alone.
+- **CONFIG refused**: a Script Property is missing or wrong (half a pair, an id used twice, a
+  source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
+  `Africa`, `Asia`, `Latin America`, `U.S` or `Template`); nothing read, nothing moved. Fix the
+  property in Project Settings → Script Properties, or the folder's name.
+- **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a move; the run ends in an error and Google
+  sends the owner its failure summary. On the first move, a permission error means Ryan's role on
+  the Shared Drive must be raised to Manager ([plan](plans/2026-10-21-drive-photo-mover.md),
+  Risks).
+
+Nothing is shared beyond the Shared Drive's members (the named list: the CEO and Ryan, never
+"anyone with the link"): the mover never shares, links, copies, trashes or e-mails a file.
 
 ## Disabling a regional form
 
@@ -1649,6 +1718,116 @@ lines counted before the apply, the verify and the browser checks - and its roll
   picker does not list") on every run until that apply, or until a roster
   change in that region makes it apply.
 
+## Club names that look alike
+
+- **When:** before GLOW renames clubs into a country format, to see which names already collide or nearly do; as the input for the duplicate-club checks (ticket #84).
+- **Status:** built 2026-10 (ticket #94; `plan-renames` ticket #95, waiting on GLOW's format, task #99); it runs without `--countries` meanwhile, and the `country` column fills once the Account field is chosen. Which Salesforce Account field holds a partner's country (the ticket outline's step 4) is not settled: the candidates are `Country__c` (a picklist), `BillingCountry` and `ShippingCountry`, and their non-blank counts over the partner accounts are not taken yet.
+- **Dry run:** the whole tool is one: it reads exports and writes only its own CSV.
+- **Apply:** none; a rename it points at goes through "Renaming a club".
+- **Verify:** the counts line, against the CSV's rows.
+- **Rollback:** none needed (nothing is written outside `data/`).
+
+`tools/club_names.py similar` compares every club of the Roster with every
+other and prints the lookalikes in groups. A club is one partner + club name
+(compared with case and spacing ignored, `glow.text.key`), whatever its
+status, so a retired club still counts. The tool reads files only: no
+Jotform, Sheets or Salesforce call, and it prints club and partner names,
+regions and counts, never a girl's name. Its exports and its CSV live in
+`data/`, which stays uncommitted (the Roster export holds the girls' names).
+
+```bash
+mkdir -p data/club_names                     # the sync's --summary-json does not make it
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+python3 tools/sheets_client.py export Partners data/partners_<date>.csv
+# optional, for the sf_name column: each region's sync dry run with its summary (Jotform GET only)
+python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --partners data/partners_<date>.csv \
+        --region Africa --form 262382821971058 \
+        --summary-json data/club_names/plan_africa_<date>.json            # and Asia, Latin America, U.S
+python3 tools/club_names.py similar --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv \
+        [--countries data/club_names/partner_countries.csv] \
+        [--sf-names data/club_names/plan_africa_<date>.json --sf-names ...] \
+        --csv data/club_names/similar_<date>.csv
+```
+
+Two names match as
+
+- `same`: equal apart from capitals and spacing ("Sunrise Club", "SUNRISE  CLUB");
+- `folded`: equal once accents, punctuation and spacing are folded away
+  ("Niñas Unidas", "Ninas-Unidas"; "G.L.O.W. Club", "Glow Club");
+- `close`: the folded names at least `--threshold` alike (difflib's ratio,
+  default 0.85: "Sunrise Club", "Sunrize Club") and carrying the same numbers
+  in the same order, so "Harbor Club 1" and "Harbor Club 2" never match.
+
+A group is every club joined by a chain of matches, so two clubs in one group
+need not match each other directly. The first line counts them:
+`groups: N (same A, folded B, close C); clubs in them: M`. A mixed group
+counts under the **weakest link it needs** to be one group: `same` when its
+`same` pairs alone connect it, else `folded` when its `same` and `folded`
+pairs do, else `close`. So two `same` pairs joined only by a `close` pair are
+one `close` group, although every club's own `match` is `same`. Each group follows, one line per club with its
+partner, region, form and active girls. The seven names two partners share
+("Club names two partners share") come out with match `same`, and with
+`--sf-names` each of those clubs' `sf_name` is its `<club> - <partner>`.
+
+The CSV (`--csv`, its folder made when missing; only the header when there is no group), one row per club in a group:
+
+| Column | What |
+|---|---|
+| `group` | the group's number in this run (groups ordered by folded name) |
+| `match` | the strongest kind joining this club to another of its group: `same`, `folded` or `close` |
+| `club`, `partner` | as the Roster spells them (whitespace collapsed), from the club's first active row, else its first row |
+| `region` | the region cell of that row, in the forms' spelling when it is one of theirs, else as written |
+| `form` | `retired (jotform=no)` (its partner is marked `no` in the Partners tab), else `none (no active girl)`, else `none (no region)` (a blank region or one no form has), else the form's title, such as `Africa Attendance Form` - checked in that order |
+| `country` | the partner's country from `--countries` (a `partner,country` CSV); blank without it |
+| `sf_name` | what the club sends to question 5 (its Salesforce Account name), from the `sf_names` of the `--sf-names` summaries; blank without them, or for a club none of them lists |
+| `status` | `active` (at least one active girl) or `inactive` |
+| `active_girls` | the club's active rows |
+| `same_partner` | `yes` when every club of the group has one partner (one partner's own lookalikes), else `no` |
+
+`tools/club_names.py plan-renames` (ticket #95) plans the rename into the
+format GLOW picks, and renames nothing: from the same exports, a
+`partner,country` CSV (`--countries`), every region's `--summary-json`
+(`--sf-names`: each club's question 5 now) and `--format` (placeholders
+`{country}`, `{club}`, `{partner}`, `{region}`, e.g. `"{country} - {club}"`),
+each active club of a partner not marked `jotform=no` gets `new_club`, the
+format filled in (spacing collapsed), and `new_sf_name`, what its question 5
+(its Salesforce Account name) becomes. `--scope all` takes every such club,
+`--scope similar --similar-csv data/club_names/similar_<date>.csv` only those
+`similar --csv` listed; inactive and retired clubs keep their names. A club
+whose question 5 is `<club> - <partner>` keeps that suffix after the new name
+with `--keep-long yes` and drops it with `no`; a plain one never gains it. A
+club already in the format is `unchanged`, so a second run over the renamed
+Roster plans nothing. Any refusal stops the plan, lists every refused club
+with its reason and writes no `--out`: no country for its partner (or no
+region when the format has `{region}`); `|`, `{` or `}` in the new name; a
+`new_sf_name` equal (by key) to another club's, planned or keeping its name
+(one Salesforce Account); a `new_club` another partner's club has after the
+renames, in any status, unless its `new_sf_name` is the long form ("Club names
+two partners share"); a `new_sf_name` over 255 characters; a cycle of planned
+clubs each taking another's current question 5 (two clubs swapping names, or a
+ring of three or more: no rename order works), every club of the cycle named.
+The last line counts `to rename N, unchanged N, refused N`; the CSV has
+`partner, club, region, old_sf_name, new_club, new_sf_name, action` (`rename`
+or `unchanged`) and `after`. `after` is blank unless the club's `new_sf_name`
+equals (by key) another planned club's current question 5: then it holds that
+`old_sf_name` as the other club's row has it, and the run prints an
+`order: rename <that club> ... first, then <this club> ...` line. In the
+rollout, **rename the Account named in `after` first** (and that club's
+question 5 with it), then this club's: renamed the other way round, two clubs
+would send one Account name for a while. The rename itself, Accounts first, is
+task #99's plan.
+
+```bash
+python3 tools/club_names.py plan-renames --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv \
+        --countries data/club_names/partner_countries.csv \
+        --sf-names data/club_names/plan_africa_<date>.json --sf-names ... \
+        --format "{country} - {club}" --scope all --keep-long yes \
+        --out data/club_names/renames_<date>.csv
+```
+
 ## Clubs that do not use Jotform
 
 - **When:** a partner's clubs stop (or start again) reporting through Jotform: the Partners tab's `jotform` cell.
@@ -1912,15 +2091,16 @@ trigger's hour, which follows the script project's zone
   a club that is already enrolled" → partner → club → ADD / REMOVE, one
   submission per club. For the mentor e-mail use your own address (the
   confirmation echoes what you typed). REMOVE matches the enrolled spelling
-  only (capitals and spacing are ignored; accents, punctuation and middle
-  names are not): copy each name from the club's Roster rows.
+  (capitals, spacing, accents and punctuation are ignored, when that leaves
+  one girl of the club; a middle name left out or a letter changed is not
+  matched): copy each name from the club's Roster rows.
 
 | Issue | What to do |
 |---|---|
 | **New club held as a possible duplicate** | "Enroll a NEW club" was sent for what may be a club already on file: nothing was imported, and the mentor was told it is being checked. Detail says why — names already active in one club, a club name close to one of the partner's, a typed organization close to a partner on file, or a re-enrollment whose list is mostly not the club's — and names the club(s) on file. Compare the response row (the tag) with those clubs' Roster rows. **Same club:** enter only its new girls on "Add or remove girls" for the club on file (REMOVE anyone who has left), then `resolved <date> by <name>: same club as <club>`. **A new club after all, or the new list is right:** `release <date> by <name>: <why>` (`release` must be the first word), then run **Process any missed form responses**: it asks about released rows separately and imports each as sent. **If the reason says "the organization was typed as …, close to … on file"**, fix that first, or the club is filed under a second spelling of the partner (no region, a second form section — the `ion bu` case): if it is that partner, set the response row's `Partner organization` cell to the partner exactly as the Partners tab spells it (the row stays matched to its item by its Timestamp, and the release preview shows the corrected partner); if it really is another organization, add it to the Partners tab with its region. Until then the release run refuses it (`ERROR: release refused: …`, offered again by the next run). **Sent again under another name and already imported** (a later "Enroll a NEW club" row of the partner's, its club now on file with most of these girls — 2026-10-16: Kawempe Youth Center's Burning Flames): compare the two lists first — a girl on the held list but not on the one sent again is entered on "Add or remove girls" for the imported club, or the partner is asked, since the held response never runs — then `resolved <date> by <name>: sent again as <club> (Roster Form Responses!N)`; never release it as well — a release imports the girls a second time, as a second club. **Sent by mistake:** `resolved …: not imported`. Never ask the partner to send it again, and never edit the `(sent …)` or the `[#…]` tag in detail: the menu matches both to the response row. |
 | **Club name already used by another partner — ask for a different name** | "Enroll a NEW club" was sent with a club name that another partner's club already has — any status, any region; capitals and spacing are ignored, a plural or a typo is a different name — or that reads as a club on file followed by its partner (`<club> - <partner>`). Nothing was imported, and the mentor got the same "it is being checked" note as any held club. A new club may not take a name in use: the attendance forms and Salesforce tell clubs apart by name, and the sync would refuse to add it ([plans/2026-09-30-same-name-clubs.md](plans/2026-09-30-same-name-clubs.md)). Detail names the club(s) that have the name. **First rule out a mix-up:** compare the response row (the tag) with that club's Roster rows — it may be that club, sent under the wrong partner — and, when detail gives more reasons (names on file, a close club name), with the other clubs it names. **Same club:** enter only its new girls on "Add or remove girls" for the club on file, then `resolved <date> by <name>: same club as <club> (<partner>)`. **That club, but the Roster has it under the wrong partner (or it has moved to this one):** move the club on file first ("Moving a club to another partner" — the tool refuses a club whose name two partners already share, and a partner in another region: Ryan's call), then write `release <date> by <name>: club moved to <partner>` with the `Club name` cell unchanged and run **Process any missed form responses**: the response now runs as that existing club (its new girls are added; no second club, no Salesforce line). **A new club:** ask the partner for a different name (the school or the place added is enough: `Stars (Testville Sec Sch)`). Then either **(a) release it under the new name:** set the response row's `Club name` cell to the new name (the row stays matched to its item by its Timestamp), write `release <date> by <name>: renamed to <new name>` (`release` must be the first word), and run **Process any missed form responses** — its preview shows the new name, and YES imports the club as sent otherwise; or **(b) have it sent again:** the partner (or you, from the response row's answers) sends "Enroll a NEW club" under the new name, and you close this item `resolved <date> by <name>: sent again as <new name>` — the held response is then never run. A release with the name unchanged, or changed to another name in use, is refused (`ERROR: release refused: …`, offered again by the next run) and adds a **Form response could not be processed** item: fix the cell, run it again, then close that item. **If detail also says "the organization was typed as …, close to … on file"**, fix that first, as in the row above. **If detail says "this club is on file with no active girl":** the partner sent "Enroll a NEW club" for a club of its own that has no active girl left, and another partner's club has its name. A club retired as a duplicate (the two of 2026-09-30) has no roster on the attendance forms any more, so bringing it back would add a new club under a name in use, which the sync refuses. Work it as above: the girls usually belong to the partner's up-to-date club (**Same club**); a club that really starts again needs a different name (**A new club**). The one false hold: a club that only lost every girl still has its roster on its attendance form, and keeps its name and its Salesforce account — none on 2026-09-30 (the only clubs with no active girl are the two retired ones). That one is Ryan's: he sets one of its girls back to `active` in the Roster (one who is on the list sent, if there is one; `removed_date` emptied — the only Roster cells typed by hand for an item), then releases with the `Club name` cell unchanged: the response runs as that existing club. Never edit the `(sent …)` or the `[#…]` tag in detail. The clubs that already share a name and have active girls are not affected: their own enrollments and roster changes run as always. |
 | **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added once by a one-off script, since retired: [Retired tools](ARCHITECTURE.md#retired-tools)). |
-| **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. Those are girls who were **active when the response ran** (one of them may since have been removed by another line of it), so first look for her among the club's `inactive` Roster rows: a close spelling removed on or after the day the response was sent (by another line of it, or by a repeat submission) means she is already off — `resolved <date> by <name>: already removed` (2026-10-21: 31 of the 62 open) — but only when no **active** girl of the club is also close to the typed name: two lines of one response are more often two girls (sisters, a shared first name) than one typed twice, so with an active close match go on to the next step. Otherwise REMOVE only an active match that is clearly her (the same names with accents or punctuation changed, or a middle name left out, and no other girl of the club close to it); otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). One response's unmatched names are separate items with the same response row in detail: work them together. |
+| **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. Since #112 the matcher settles the clear cases itself, and they raise no item: a typed name that is one of the club's girls once capitals, accents and punctuation are ignored (the same letters and digits, in that order: `Lucia Zorblewick` for `Lucía Zörblewick`, `Mary Jo` for `Mary-Jo`, `JR` for `J.R.`) is her removal when she is the only girl of the club spelled so and is active (Audit `rosterChangeForm`: `1 removed, 1 of them matched ignoring accents and punctuation`; the mentor's e-mail shows the name as typed), and "already removed" (nothing changes, `1 already removed` in Audit) when every girl of the club spelled so is inactive. What still reaches you: a spelling two or more of the club's girls share once folded with an active one among them (`Zoe` and `Zoë`: sisters, or one girl twice), a second line of one response that reaches a girl another line of it removes (she is removed once, by the line spelled as enrolled if there is one; the other line is this item), a REMOVE of a girl the same response also ADDs under her enrolled spelling (she stays), a middle name left out, a letter changed or dropped (`Pea` for `Peña`), a name that is only punctuation, a name nobody has — and every item raised before #112 was deployed. The "Closest names" are girls who were **active when the response ran** (one of them may since have been removed by another line of it), so first look for her among the club's `inactive` Roster rows: a close spelling removed on or after the day the response was sent (by another line of it, or by a repeat submission) means she is already off — `resolved <date> by <name>: already removed` (2026-10-21: 31 of the 62 open, before #112) — but only when no **active** girl of the club is also close to the typed name: two lines of one response are more often two girls (sisters, a shared first name) than one typed twice, so with an active close match go on to the next step. Otherwise REMOVE only an active match that is clearly her (a middle name left out, one letter off, and no other girl of the club close to it). An item whose typed name differs from one active girl only by capitals, accents or punctuation does not mean a second girl exists: it is raised when another line of the same response removed or ADDed her (read the response row — the tag — first: removed by another line is `already removed`; ADDed is nothing to do), when two or more girls of the club fold to it (never guess which), and for every item from before #112 — do not look for a second girl before you have ruled those out. Otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). One response's unmatched names are separate items with the same response row in detail: work them together. |
 | **Removed girls not put back by an older response** | A Club Roster Form response ran after some girls it lists had been removed — a retry, or an old response confirmed in "Missed form responses" — so they stayed removed instead of coming back (the 2026-09-13 replay cannot recur). Detail names the response row, the day it was sent and the Roster rows; the mentor's confirmation (roster changes) listed the names the mentor typed under "Not added back". Usually nothing to do: `resolved …: stayed removed`. If a girl really has rejoined since her removal (ask the partner), ADD her as above: the same ID comes back. |
 | **Same name listed twice** | Only one girl is on the Roster. Ask the partner: two girls → ADD the second with a mark, e.g. `Jane Doe (B)` (the first keeps her ID); one girl typed twice → `resolved …: one girl, no change`. Never resubmit through "Enroll a NEW club". |
 | **Partner says two girls share a name** | The partner answered Yes but no name repeats. Compare their note with the club's Roster rows: listed distinctly → resolved, no change; one missing → ADD her with a mark as above. |
@@ -2589,6 +2769,126 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - `--rehearse` and a failed run leave nothing to roll back. Should a rehearsal ever keep a change
   ("not as before the rehearsal - LOOK AT IT NOW"), the rollback file holds the club's contacts as
   they were just before it.
+
+## Duplicate and obsolete records in Salesforce
+
+- **When:** the monthly check (with "Duplicate girls in Salesforce"); a flag to set or clear; GLOW's own definitions arrive (DECISIONS 2026-10-21).
+- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day, 12:58 UTC, on his go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch is ticket #85.
+- **Dry run:** the check-only deploy (`sf project deploy start --dry-run`), step 3 of the plan's Rollout.
+- **Apply:** the same with its dry-run flag taken off, Ryan's go (VPN off); then the proof, also on his go: the no-DML `Datacloud.FindDuplicates` diagnostic (`sf apex run -f diag.apex`, the plan's step 6), which runs the active rules over three unsaved copies of existing accounts, inserts nothing and prints only `DIAG|` lines with each rule's name and its match count.
+- **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (the three Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rules' `DuplicateRecordSet`s (a cross-type pair, a Household account and a Club of one name and parent, is a set without a group: looked at by hand), and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
+- **Rollback:** deactivate the two Account Duplicate Rules, each rule by the same step (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)).
+
+GLOW's annotated SOW (p.9) asks for "Duplicate Record" and "Obsolete Record" checkbox fields on
+Account and Contact, and for one Matching Rule and one Duplicate Rule on Account. The definitions
+below are Ryan's working answers of 2026-10-21 ("move forward with this"), provisional until GLOW
+defines the terms (DECISIONS 2026-10-21). The fields and the rules are live since 2026-10-22
+(DECISIONS 2026-10-22: the proof and the cross-type pairs). The legacy records themselves are
+never merged or cleaned by this (SOW p.10); the batch that sets the flags by these criteria is
+ticket #85.
+
+### What is a duplicate, what is obsolete
+
+- **A duplicate Account:** two Accounts are duplicates when they have the same name ignoring
+  capitals and spacing (any run of whitespace is one space), the same parent and the same record
+  type. An accent counts: "Café Club" and "Cafe Club" are different names. The deliberate
+  `<club> - <partner>` names ("Club names two partners share") never match a plain name, and two
+  partners' clubs of one name never match each other: another parent keeps them apart. Matches
+  on 2026-10-21: 0 (455 Accounts: 372 clubs, 83 partners).
+- **A duplicate Contact:** the existing Contact rule "First & Last & Account" (same first name,
+  last name and account) stays unchanged, Report only since 2026-10-01 (BACKLOG 54). A Contact's
+  "Duplicate Record" flag is set by the flagging batch (#85) when the Contact sits in one of that
+  rule's duplicate record sets (`DuplicateRecordSet`). `tools/sf_dupes.py` still merges one girl's
+  duplicate contacts by its own key ("Duplicate girls in Salesforce") and never merges a record
+  for being flagged.
+- **An obsolete Account:** a partner whose `Partner_Status__c` is Archived is obsolete; so is a
+  Club account whose club is deactivated in the Roster ("Deactivating a club"), and a Club account
+  with no attendance batch for 6 months that was created more than 6 months ago (so the clubs
+  created in September 2026 are not flagged before March 2027). The clubs of a partner marked
+  `no` in the Partners tab's `jotform` column (the three Salesforce-reporting partners, "Clubs
+  that do not use Jotform") report as one `Partner report` batch on the partner account, so they
+  are judged by their partner account's `Partner report` batches, not their own (review,
+  2026-10-21).
+- **An obsolete Contact:** a Participant (a girl) with no attendance in 12 months. Staff, mentor
+  and coordinator contacts are never flagged by rule (on 2026-10-21 every girl has attendance; the
+  216 contacts without any are staff, mentors or coordinators).
+- **Who sets a flag by hand:** administrators only (the System Administrator profile has Edit on
+  the four fields). The users who read the reports read the flags too: the
+  `Attendance_Report_Viewer` permission set has Read on the four fields.
+- **The kept reports and dashboards:** flagged records are shown as before, with the two flags
+  available as a filter on any report that lists Accounts or Contacts; nothing is excluded by
+  default.
+
+### The fields and the rules
+
+Four checkbox fields, "Duplicate Record" and "Obsolete Record" (`Duplicate_Record__c` and
+`Obsolete_Record__c`, on Account and on Contact), default false (unchecked), on every Account and
+every Contact, the girls' records included. A flag is report data: it marks a record, and the
+record keeps everything it has (its attendance, its contacts, its place in the reports).
+
+**The Matching Rule on Account** (`Account.Name_Parent`, "Name and parent") has two
+`MatchingRuleItems`, both required: Name with the Exact method (case-insensitive) and ParentId
+(Exact, blank matching blank, so two partner-less strays match). RecordTypeId is not a matching
+item: Salesforce does not allow Record Type as a matching-rule field (review, 2026-10-21).
+Salesforce's Exact method ignores case (on 2026-10-22 the diagnostic's upper-cased copy of a Club
+matched its original); whether it also ignores a difference in spacing (a double space, a tab, a
+no-break space) is not documented with certainty and the diagnostic did not probe it, so the
+read-back and the monthly check compare the rules' `DuplicateRecordSet`s with
+`glow.salesforce.duplicate_account_groups`, which ignores both, and a difference between the two
+lists is looked at by hand.
+
+**One report-only Duplicate Rule per record type**, Club (`Account.Name_Parent_Club_Report`,
+`sortOrder` 1) and Household (`Account.Name_Parent_Household_Report`, the partner accounts,
+`sortOrder` 2), uses that Matching Rule, runs on create and on edit, and carries the condition
+Record Type equals that type. That condition picks only which rule runs for the record being
+saved: together the two rules are "same name, same parent, same record type" for the record
+saved, for the two record types in use. It does not limit the candidates (the records the
+Matching Rule finds, whatever their record type), so Salesforce may report a Household account
+and a Club of one name and parent as a pair: on 2026-10-22 the diagnostic's Household probe
+carrying a club's name and ParentId matched that Club under the Household rule. Ryan accepted
+that the same day, with no code or metadata change: `glow.salesforce.duplicate_account_groups`
+keeps its own definition (the same record type too), and the monthly check below reviews any such
+pair by hand (DECISIONS 2026-10-22). Each Duplicate Rule's action is Allow with Report only, no
+Alert and no Block: in
+the metadata `actionOnInsert` and `actionOnUpdate` are `Allow`, each operation is Report, and
+there is no `alertText`. A possible duplicate is written to a `DuplicateRecordSet` (a Duplicate
+Record Set, with one `DuplicateRecordItem` per record) and the save goes through: the rules never
+stop a record created by code, and a user sees nothing at the save. The rules never catch the
+partner-less twin of a parented club (their parents differ): that stays for the monthly check
+below and for the Signals of "Club accounts in Salesforce" (Club accounts without a parent).
+
+Why Report only: an alert refuses a record created by code, and code creates Accounts here. The
+Alert on the Contact rule failed live attendance batches mid-way until 2026-10-01 (BACKLOG 54: a
+Failed batch with part of the girls saved), and over REST an Alert would need the
+`Sforce-Duplicate-Rule-Header: allowSave=true` header on every insert. The attendance processor
+(`AttendanceBatchProcessor`) creates a partner-less Club account when a submitted club name
+matches no Account, `tools/sf_new_clubs.py` creates the accounts of new clubs from the automatic
+sync, and the Jotform integration creates every batch. Only Ryan can choose otherwise, on ticket
+#84, knowing that cost.
+
+### The monthly check
+
+With the duplicate-girls check ("Duplicate girls in Salesforce"), read-only, VPN off, from the
+repository root:
+
+```bash
+sf data query -o glow --json -q "SELECT Id, RecordCount, (SELECT RecordId FROM DuplicateRecordItems) FROM DuplicateRecordSet WHERE DuplicateRule.SobjectType = 'Account'"
+python3 - <<'EOF'
+from glow.salesforce import Org, duplicate_account_groups
+print(duplicate_account_groups(Org("glow").query("SELECT Id, Name, ParentId, RecordTypeId FROM Account")))
+EOF
+```
+
+Compare the two by Account id: each set's `RecordId`s are one group of `duplicate_account_groups`,
+and each group is one set. Expected: the same groups on both sides, and today none (0 sets, 0
+groups and 0 cross-type pairs on 2026-10-22). A group is a stray twin, as a rule a partner-less
+account the processor made for a name no account carried: re-parent it, never re-create it ("Club
+accounts in Salesforce"). A set without a group, or a group without a set, means the rule and the
+Python side disagree: on spacing, or on record type - a set holding a Household account and a
+Club of one name and parent (cross-type), which Salesforce may report and
+`duplicate_account_groups`, keeping its own definition, never groups. Look at the two records of
+such a pair by id and decide by hand whether one is a stray of the other (Ryan, 2026-10-22).
+Counts and ids only in what is said about it.
 
 ## Attendance totals and partner-reported counts
 

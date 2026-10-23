@@ -460,6 +460,7 @@ Status: open
 - **Watch: the Google Drive token can lapse silently.** Jotform raises no alarm when the Drive integration's Google token expires or is revoked (a password change, a session revocation): the copies stop and nothing says so. Nothing in the repo can see it either (`integration_status.py` can at most say the block exists, once its key is known).
 - The check is by eye once a month: the newest subfolder's date in each `Attendance photos - <Region>` folder against the form's newest submission; a week's gap with newer submissions means remove and re-add the integration on that form (RUNBOOK "Photos" step 6).
 - A repo check would need Drive access from the Mac or the runner (a role-account credential): not built
+- 2026-10-21: once the photo mover runs (ticket #89, RUNBOOK "Photo mover"), the subfolders leave `Attendance photos - <Region>` within half an hour; the monthly look is at the region's folder on the company Shared Drive instead
 
 ### 71. The retired rosters' option lists stay on the forms
 
