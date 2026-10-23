@@ -2527,17 +2527,19 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 ## Duplicate and obsolete records in Salesforce
 
 - **When:** the monthly check (with "Duplicate girls in Salesforce"); a flag to set or clear; GLOW's own definitions arrive (DECISIONS 2026-10-21).
-- **Status:** planned 2026-10-21 (ticket #84), the deploy waits for Ryan's go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md)); the flagging batch is ticket #85.
+- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch is ticket #85.
 - **Dry run:** the check-only deploy (`sf project deploy start --dry-run`), step 3 of the plan's Rollout.
-- **Apply:** the same with its dry-run flag taken off, Ryan's go (VPN off); then the rolled-back `sf apex run` proof, also on his go.
-- **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (the three Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rules' `DuplicateRecordSet`s, and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
+- **Apply:** the same with its dry-run flag taken off, Ryan's go (VPN off); then the proof, also on his go: the no-DML `Datacloud.FindDuplicates` diagnostic (`sf apex run -f diag.apex`, the plan's step 6), which runs the active rules over three unsaved copies of existing accounts, inserts nothing and prints only `DIAG|` lines with each rule's name and its match count.
+- **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (the three Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rules' `DuplicateRecordSet`s (a cross-type pair, a Household account and a Club of one name and parent, is a set without a group: looked at by hand), and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
 - **Rollback:** deactivate the two Account Duplicate Rules, each rule by the same step (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)).
 
 GLOW's annotated SOW (p.9) asks for "Duplicate Record" and "Obsolete Record" checkbox fields on
 Account and Contact, and for one Matching Rule and one Duplicate Rule on Account. The definitions
 below are Ryan's working answers of 2026-10-21 ("move forward with this"), provisional until GLOW
-defines the terms (DECISIONS 2026-10-21). The legacy records themselves are never merged or
-cleaned by this (SOW p.10); the batch that sets the flags by these criteria is ticket #85.
+defines the terms (DECISIONS 2026-10-21). The fields and the rules are live since 2026-10-22
+(DECISIONS 2026-10-22: the proof and the cross-type pairs). The legacy records themselves are
+never merged or cleaned by this (SOW p.10); the batch that sets the flags by these criteria is
+ticket #85.
 
 ### What is a duplicate, what is obsolete
 
@@ -2582,18 +2584,26 @@ record keeps everything it has (its attendance, its contacts, its place in the r
 `MatchingRuleItems`, both required: Name with the Exact method (case-insensitive) and ParentId
 (Exact, blank matching blank, so two partner-less strays match). RecordTypeId is not a matching
 item: Salesforce does not allow Record Type as a matching-rule field (review, 2026-10-21).
-Salesforce's Exact method ignores case; whether it also ignores a difference in spacing (a double
-space, a tab, a no-break space) is not documented with certainty, so the rolled-back proof probes
-it, and the read-back and the monthly check compare the rules' `DuplicateRecordSet`s with
+Salesforce's Exact method ignores case (on 2026-10-22 the diagnostic's upper-cased copy of a Club
+matched its original); whether it also ignores a difference in spacing (a double space, a tab, a
+no-break space) is not documented with certainty and the diagnostic did not probe it, so the
+read-back and the monthly check compare the rules' `DuplicateRecordSet`s with
 `glow.salesforce.duplicate_account_groups`, which ignores both, and a difference between the two
 lists is looked at by hand.
 
-**One report-only Duplicate Rule per record type**, Club (`Account.Name_Parent_Club_Report`)
-and Household (`Account.Name_Parent_Household_Report`, the partner accounts), uses that Matching
-Rule, runs on create and on edit, and carries the condition Record Type equals that type on the
-record saved and on the records matched, so a Club and a partner account of one name never
-match: together the two rules are "same name, same parent, same record type" for the two record
-types in use. Each Duplicate Rule's action is Allow with Report only, no Alert and no Block: in
+**One report-only Duplicate Rule per record type**, Club (`Account.Name_Parent_Club_Report`,
+`sortOrder` 1) and Household (`Account.Name_Parent_Household_Report`, the partner accounts,
+`sortOrder` 2), uses that Matching Rule, runs on create and on edit, and carries the condition
+Record Type equals that type. That condition picks only which rule runs for the record being
+saved: together the two rules are "same name, same parent, same record type" for the record
+saved, for the two record types in use. It does not limit the candidates (the records the
+Matching Rule finds, whatever their record type), so Salesforce may report a Household account
+and a Club of one name and parent as a pair: on 2026-10-22 the diagnostic's Household probe
+carrying a club's name and ParentId matched that Club under the Household rule. Ryan accepted
+that the same day, with no code or metadata change: `glow.salesforce.duplicate_account_groups`
+keeps its own definition (the same record type too), and the monthly check below reviews any such
+pair by hand (DECISIONS 2026-10-22). Each Duplicate Rule's action is Allow with Report only, no
+Alert and no Block: in
 the metadata `actionOnInsert` and `actionOnUpdate` are `Allow`, each operation is Report, and
 there is no `alertText`. A possible duplicate is written to a `DuplicateRecordSet` (a Duplicate
 Record Set, with one `DuplicateRecordItem` per record) and the save goes through: the rules never
@@ -2625,10 +2635,14 @@ EOF
 
 Compare the two by Account id: each set's `RecordId`s are one group of `duplicate_account_groups`,
 and each group is one set. Expected: the same groups on both sides, and today none (0 sets, 0
-groups on 2026-10-21). A group is a stray twin, as a rule a partner-less account the processor
-made for a name no account carried: re-parent it, never re-create it ("Club accounts in
-Salesforce"). A set without a group, or a group without a set, means the rule and the Python side
-disagree on spacing: look at the two names by id. Counts and ids only in what is said about it.
+groups and 0 cross-type pairs on 2026-10-22). A group is a stray twin, as a rule a partner-less
+account the processor made for a name no account carried: re-parent it, never re-create it ("Club
+accounts in Salesforce"). A set without a group, or a group without a set, means the rule and the
+Python side disagree: on spacing, or on record type - a set holding a Household account and a
+Club of one name and parent (cross-type), which Salesforce may report and
+`duplicate_account_groups`, keeping its own definition, never groups. Look at the two records of
+such a pair by id and decide by hand whether one is a stray of the other (Ryan, 2026-10-22).
+Counts and ids only in what is said about it.
 
 ## Attendance totals and partner-reported counts
 

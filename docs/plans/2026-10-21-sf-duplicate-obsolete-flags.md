@@ -1,7 +1,7 @@
 ---
 title: Duplicate and obsolete flags on Account and Contact, and Account duplicate rules that report only
 author: Claude (with Ryan's working answers of 2026-10-21)
-status: in-progress      # ticket #84; planned 2026-10-21, nothing deployed: the deploy waits for Ryan's go
+status: in-progress      # ticket #84; deployed 2026-10-22 on Ryan's go; step 8, the next day's batch check, pending
 created: 2026-10-21
 intent: none - the SOW item (p.9) and GLOW's questions on it, ticket #84
 ---
@@ -11,11 +11,15 @@ intent: none - the SOW item (p.9) and GLOW's questions on it, ticket #84
 Ticket #84 (epic #68). The SOW (p.9) asks for Duplicate Record and Obsolete Record checkbox
 fields on Account and Contact and for one Matching Rule and one Duplicate Rule on Account.
 Ryan, 2026-10-21: "move forward with this" - his working answers (on the ticket) hold until GLOW
-defines the terms, and GLOW can change any of them before the deploy, which waits for his go.
-The definitions are in the RUNBOOK ("Duplicate and obsolete records in Salesforce") and in
-DECISIONS 2026-10-21, with the review's two design changes of 2026-10-21 (the obsolete Club
+defines the terms, and GLOW can still change any of them (a change to the duplicate criteria
+means a new deploy of the rules; the obsolete criteria live in the docs and the batch only).
+Deployed 2026-10-22 12:33 UTC on Ryan's go (Result); step 8, the next day's batch check, is
+pending. The definitions are in the RUNBOOK ("Duplicate and obsolete records in Salesforce") and
+in DECISIONS 2026-10-21, with the review's two design changes of 2026-10-21 (the obsolete Club
 exception for the three Salesforce-reporting partners; one Duplicate Rule per record type in
-place of a RecordTypeId matching item); the batch that sets the flags by them is ticket #85.
+place of a RecordTypeId matching item) and Ryan's two decisions of 2026-10-22 (the proof is a
+no-DML diagnostic; cross-type pairs are accepted, DECISIONS 2026-10-22); the batch that sets the
+flags by them is ticket #85.
 
 ## Context
 
@@ -28,27 +32,34 @@ place of a RecordTypeId matching item); the batch that sets the flags by them is
   (the accounts of new clubs, from the automatic sync as GLOW Sync) and the Jotform integration
   (every batch). An alert refuses such a record, and over REST would need the
   `Sforce-Duplicate-Rule-Header: allowSave=true` header on every insert.
-- Read on 2026-10-21 (counts only): 455 Accounts (372 clubs, 83 partners), 0 groups of Accounts
-  with one name under one parent and record type; 7 clubs of different partners share 3 names and
-  are named `<club> - <partner>` on purpose (RUNBOOK "Club names two partners share"); 14
-  possible-duplicate sets on the Contact rule; the Account object has no duplicate rule.
+- Read on 2026-10-21, before the deploy (counts only): 455 Accounts (372 clubs, 83 partners),
+  0 groups of Accounts with one name under one parent and record type; 7 clubs of different
+  partners share 3 names and are named `<club> - <partner>` on purpose (RUNBOOK "Club names two
+  partners share"); 14 possible-duplicate sets on the Contact rule; and the Account object had
+  no duplicate rule then (it has the two below since the deploy of 2026-10-22).
 - The matching design (review, 2026-10-21): Salesforce does not allow Record Type as a
   matching-rule field, so the Matching Rule matches Name (Exact, case-insensitive) and ParentId
-  (blank matches blank), and "same record type" comes from one report-only Duplicate Rule per
-  record type, Club and Household, each with the condition Record Type equals that type.
+  (blank matches blank), and "same record type" comes, for the record saved, from one report-only
+  Duplicate Rule per record type, Club and Household, each with the condition Record Type equals
+  that type. That condition picks only which rule runs for the record being saved and does not
+  limit the candidates (the records the Matching Rule finds, whatever their record type), so
+  Salesforce may report a Household account and a Club of one name and parent as a pair: the
+  diagnostic showed it on 2026-10-22, and Ryan accepted it the same day, documented here and in
+  the RUNBOOK, with no code or metadata change (DECISIONS 2026-10-22).
 - The Python side of the rules is `glow.salesforce.duplicate_account_groups` (the same name
   ignoring capitals and spacing, the same parent, the same record type; an accent is a different
   name): what the read-back and the monthly check compare with the rules' `DuplicateRecordSet`s,
   since Salesforce's Exact method ignores case and its handling of spacing is not documented with
-  certainty (the proof probes it).
+  certainty (the diagnostic did not probe spacing, so the two lists are compared instead).
 - Duplicates of girls are handled by `tools/sf_dupes.py` by its own key (RUNBOOK "Duplicate
   girls in Salesforce"); that path is unchanged.
 
 ## Rollout
 
-All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesforce`); every
-write waits for Ryan's go in the main session, never a subagent (epic #68). `data/` is never
-committed; the build is written there by script or `cp`.
+All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesforce`). Every
+write of this rollout (the deploy of step 5, the proof of step 6) waited for Ryan's go in the main
+session, never a subagent (epic #68), and the Rollback waits for it the same way. `data/` is
+never committed; the build is written there by script or `cp`.
 1. Retrieve fresh into `data/sf_dupflags_2026-10-21/before/`: the `Account` and `Contact`
    objects (their fields; none of the four exists yet), every `DuplicateRule` and `MatchingRule`
    (the Contact rule "First & Last & Account" among them), the `Attendance_Report_Viewer`
@@ -62,7 +73,7 @@ committed; the build is written there by script or `cp`.
    ParentId (Exact, blank matching blank, so two partner-less strays match); two report-only
    Duplicate Rules on that Matching Rule, one per record type, Club (`Account.Name_Parent_Club_Report`)
    and Household (`Account.Name_Parent_Household_Report`), each with the condition Record Type
-   equals that type on the record saved and on the records matched, on create and on edit, Allow
+   equals that type for the record saved, on create and on edit, Allow
    with Report only, no Alert and no Block (`actionOnInsert` and `actionOnUpdate` `Allow`,
    `operationsOnInsert` and `operationsOnUpdate` `Report`, no `alertText`, `isActive` true);
    Edit on the four fields for administrators, as entries in the partial Admin profile retrieved
@@ -71,8 +82,11 @@ committed; the build is written there by script or `cp`.
    Salesforce does not allow Record Type as a matching-rule field (review, 2026-10-21). Each
    rule's condition is a `duplicateRuleFilter` whose `duplicateRuleFilterItems` test
    `Account.RecordTypeId` equals the record type's Name - "Club" and "Household Account" (not
-   "Household") - for the record saved and for the candidates alike. All three rules go in one
-   deploy (a Duplicate Rule needs its Matching Rule in the same package or already active).
+   "Household") - for the record saved only; the candidates are whatever the Matching Rule finds.
+   Each Duplicate Rule has its own `sortOrder` (Club 1, Household 2): the first check-only failed
+   with "SortOrder must be in sequential order from 1" when both carried 1 (Result). Each rule's
+   `securityOption` is `BypassSharingRules`. All three rules go in one deploy (a Duplicate Rule
+   needs its Matching Rule in the same package or already active).
 3. Check-only: from within `build/`, `sf project deploy start --dry-run -o glow -x package.xml`;
    its result (the components, 0 errors, 0 tests run) is shown to Ryan as it is.
 4. Ryan's go: his answer in the main session, given after the check-only's result of step 3 is
@@ -80,29 +94,19 @@ committed; the build is written there by script or `cp`.
    subagent cannot ask it.
 5. Deploy: from within `build/`, `sf project deploy start -o glow -x package.xml`, the check-only
    command of step 3 with its dry-run flag taken off; record the deploy id and time (UTC).
-6. The rolled-back proof, at once, with the rules live, `sf apex run -o glow -f proof.apex` on
-   Ryan's go: the script (below, "The proof's script") is pasted in full first in the
-   conversation. It inserts two fictional Accounts that meet the criteria the way the processor
-   inserts them (Apex DML, one `insert` per record, default options), the second differing from
-   the first by case only (same spacing), then a spacing probe (the same name with a double
-   space, a separate account), then a second name three times: a partner-less Club account, the
-   same name under a fictional partner account (inserted before it), and the same name as a
-   partner-less Household account. All seven inserts succeed, and one DuplicateRecordSet holding
-   the case-only pair appears (`DIAG|set` with its RecordCount and one `DIAG|item` line per
-   member); whether the spacing probe joins that set says how Salesforce's Exact method treats
-   spacing, recorded in Result either way. The second name's accounts are expected outside any
-   set: the Club under the fictional partner, which only shares a name with another partner's club
-   (the plain-name case the deliberate `<club> - <partner>` names never meet), is not matched
-   because ParentId keeps twins apart, and the Household account of that name is not matched
-   because the record-type condition keeps a Club and a partner apart. Either of those two
-   appearing in a set is a failure: stop and deactivate the rules (the Rollback). A missing
-   DuplicateRecordSet for the case-only twin is a failure too: stop and deactivate the rules (the
-   Rollback). If either insert of the pair is refused (`DUPLICATES_DETECTED` among its error
-   codes), the Rollback below follows at once: deactivate the rules. Nothing of the proof is
-   kept: the script ends in `Database.rollback(sp);`, its last
-   statement, so every record it inserted and every set is rolled back and the org is as before
-   (NPSP's triggers run on the inserts meanwhile, rolled back with them). Only `DIAG|` lines, ids
-   and counts, are read from the log.
+6. The proof, at once, with the rules live, `sf apex run -o glow -f diag.apex` on Ryan's go: the
+   script (below, "The diagnostic's script") is pasted in full first in the conversation. It is
+   a no-DML diagnostic: `Datacloud.FindDuplicates.findDuplicates` runs the active rules over
+   three unsaved copies of existing accounts, read by SOQL, inserts nothing and prints only
+   `DIAG|` lines with each rule's name and its match count (never a record's name or id). Probe
+   A is an upper-cased copy of a Club that has a parent: expected, the Club rule runs and reports
+   1 match, the original. Probe B is a copy of a Household account: expected, the Household rule,
+   1 match. Probe C is a Household account with a club's name and ParentId: the Household rule
+   runs (the record saved is a Household account) and reports 1 match, the Club, since the
+   record-type condition does not limit the candidates (cross-type, see Context). A probe with 0
+   matches would mean a rule does not match what it should: the Rollback. The rolled-back insert
+   proof of this plan's first version was dropped on 2026-10-22: Salesforce's duplicate matching
+   does not see records inserted earlier in the same uncommitted transaction (Result).
 7. Read-back: retrieve the same components into `data/sf_dupflags_2026-10-21/after/` and compare
    with `build/` (expected: Salesforce's normalisation only) and with `before/`. SOQL: `SELECT
    DeveloperName, IsActive, SobjectType FROM DuplicateRule` and the same on `MatchingRule` show
@@ -110,56 +114,41 @@ committed; the build is written there by script or `cp`.
    metadata file equal to `before/`); the four fields are in `describe` of each object;
    `glow.salesforce.duplicate_account_groups` over `SELECT Id, Name, ParentId, RecordTypeId FROM
    Account` is compared by Account id with the rules' `DuplicateRecordSet`s and their
-   `DuplicateRecordItems` (expected today: 0 groups and 0 sets, the two lists equal). Then the
-   docs: this plan's Result, the RUNBOOK's Status line.
-8. The next day: SOQL on `Attendance_Batch__c` created since the deploy, none `Failed` with
-   `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`,
-   codes only); `python3 tools/auto_sync.py` as a dry run, its Salesforce plan unchanged (every
-   region `in-sync`, 0 `SF:` ATTENTION items); `python3 tools/sf_new_clubs.py check --vpn-off …`
-   exits 0. Record the counts in Result.
+   `DuplicateRecordItems` (expected today: 0 groups and 0 sets, the two lists equal; a set
+   without a group may be a cross-type pair, looked at by hand). Then the docs: this plan's
+   Result, the RUNBOOK's Status line.
+8. The next day (on or after 2026-10-23, UTC): SOQL on `Attendance_Batch__c` created since the
+   deploy, none `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes
+   (`glow.salesforce.error_codes`, codes only); `python3 tools/auto_sync.py` as a dry run, its
+   Salesforce plan unchanged (every region `in-sync`, 0 `SF:` ATTENTION items);
+   `python3 tools/sf_new_clubs.py check --vpn-off …` exits 0. Record the counts in Result.
 
-## The proof's script (step 6)
+## The diagnostic's script (step 6)
 
-Fictional names only; ids and counts in the debug lines; the last statement is the rollback.
+`data/sf_dupflags_2026-10-21/proof/diag.apex`, quoted in full as it ran on 2026-10-22 (`data/` is
+never committed). No DML: it reads one Club with a parent and one Household account by SOQL,
+builds three unsaved probes from them and runs `Datacloud.FindDuplicates.findDuplicates` on each,
+printing only `DIAG|` lines with the rule names and the match counts. The record type ids are the
+org's (`glow.salesforce`).
 
 ```apex
-// Ticket #84: every insert goes through with the Account duplicate rules live, and everything is rolled back.
-Savepoint sp = Database.setSavepoint();
-Id clubType = '012RP000002uklNYAQ';         // RecordType 'Club' on Account (glow.salesforce.CLUB_RECORD_TYPE)
-Id partnerType = '0126A000000cdYFQAY';      // 'Household Account': every partner account has it
-Map<Id, DuplicateRule> rules = new Map<Id, DuplicateRule>([
-    SELECT Id FROM DuplicateRule WHERE SobjectType = 'Account'
-    AND DeveloperName IN ('Name_Parent_Club_Report', 'Name_Parent_Household_Report')]);
-// (a) two partner-less Club accounts of one name, the second differing by case only, one insert each,
-//     as the processor inserts: expected, ONE set holding both
-Account first = new Account(Name = 'Zz Proof Club 84', RecordTypeId = clubType);
-insert first;
-Account second = new Account(Name = 'ZZ PROOF CLUB 84', RecordTypeId = clubType);
-insert second;
-// (b) the spacing probe: the same name with a double space (does the Exact method ignore spacing?)
-Account spaced = new Account(Name = 'Zz  Proof Club 84', RecordTypeId = clubType);
-insert spaced;
-// (c) a second name three times: a partner-less Club; the same name under a fictional partner
-//     (ParentId keeps twins apart); the same name as a partner-less Household account (the record-type
-//     condition keeps a Club and a partner apart): expected, NO set for this name
-Account partner = new Account(Name = 'Zz Proof Partner 84', RecordTypeId = partnerType);
-insert partner;
-Account beta = new Account(Name = 'Zz Proof Beta 84', RecordTypeId = clubType);
-insert beta;
-Account parented = new Account(Name = 'Zz Proof Beta 84', RecordTypeId = clubType, ParentId = partner.Id);
-insert parented;
-Account household = new Account(Name = 'Zz Proof Beta 84', RecordTypeId = partnerType);
-insert household;
-System.debug('DIAG|inserted|' + first.Id + '|' + second.Id + '|' + spaced.Id + '|' + partner.Id + '|'
-             + beta.Id + '|' + parented.Id + '|' + household.Id);
-for (DuplicateRecordSet s : [SELECT Id, RecordCount, DuplicateRuleId, (SELECT RecordId FROM DuplicateRecordItems)
-                             FROM DuplicateRecordSet WHERE DuplicateRuleId IN :rules.keySet()]) {
-    System.debug('DIAG|set|' + s.Id + '|' + s.DuplicateRuleId + '|' + s.RecordCount);
-    for (DuplicateRecordItem i : s.DuplicateRecordItems) {
-        System.debug('DIAG|item|' + s.Id + '|' + i.RecordId);
+// Ticket #84 diagnostic: no DML. Unsaved copies of existing accounts; rule names and match counts only.
+Account club = [SELECT Name, ParentId FROM Account WHERE RecordType.DeveloperName = 'Club' AND ParentId != null LIMIT 1];
+Account hh = [SELECT Name, ParentId FROM Account WHERE RecordType.DeveloperName = 'HH_Account' LIMIT 1];
+Id clubType = '012RP000002uklNYAQ', hhType = '0126A000000cdYFQAY';
+Map<String, Account> probes = new Map<String, Account>{
+    'A_club_copy' => new Account(Name = club.Name.toUpperCase(), ParentId = club.ParentId, RecordTypeId = clubType),
+    'B_household_copy' => new Account(Name = hh.Name, ParentId = hh.ParentId, RecordTypeId = hhType),
+    'C_household_named_like_club' => new Account(Name = club.Name, ParentId = club.ParentId, RecordTypeId = hhType)};
+for (String k : probes.keySet()) {
+    List<Datacloud.FindDuplicatesResult> res = Datacloud.FindDuplicates.findDuplicates(new List<Account>{ probes.get(k) });
+    System.debug('DIAG|' + k + '|rules_run|' + res[0].getDuplicateResults().size());
+    for (Datacloud.DuplicateResult d : res[0].getDuplicateResults()) {
+        Integer n = 0;
+        for (Datacloud.MatchResult m : d.getMatchResults()) { n += m.getSize(); }
+        System.debug('DIAG|' + k + '|' + d.getDuplicateRule() + '|matches|' + n);
     }
 }
-Database.rollback(sp);
 ```
 
 ## Rollback
@@ -184,28 +173,75 @@ Deactivate the two Account Duplicate Rules in the org, each rule by the same ste
 ## Risks
 
 - **The rules in the path of live account creation.** Mitigation: Report only (no save is
-  touched), the rolled-back proof with the rules live right after the deploy, and the next day's
-  batch check. If an insert is refused all the same, the Rollback.
+  touched), the no-DML diagnostic with the rules live right after the deploy, and the next day's
+  batch check, which is the live check of the rules' action: a batch `Failed` with
+  `DUPLICATES_DETECTED` means the Rollback.
 - **Record Type as a Duplicate Rule condition.** A record whose type is neither Club nor
   Household meets no rule; the org uses only these two on Account (read 2026-10-21). A third type
   would need a third rule.
+- **Cross-type pairs.** Salesforce may report a Household account and a Club of one name and
+  parent as a pair, since a Duplicate Rule's record-type condition picks only the rule that runs
+  for the record saved; `duplicate_account_groups` never groups them, so the monthly check sees
+  a set without a group: looked at by hand, by id (Ryan, 2026-10-22).
 - **Salesforce's Exact method and spacing.** The rules may report fewer twins than the Python
-  side (a double space). Mitigation: the proof's spacing probe says which it is; the read-back and
-  the monthly check compare the two lists, and a difference is looked at by hand, by id.
-- **GLOW changes a definition.** Only the docs and the batch (#85) carry the criteria; the rules
-  themselves carry the duplicate criteria only, so a change of the obsolete criteria costs no
-  deploy.
+  side (a double space). Mitigation: the read-back and the monthly check compare the two lists,
+  and a difference is looked at by hand, by id; the diagnostic did not probe spacing.
+- **GLOW changes a definition.** Only the docs and the batch (#85) carry the obsolete criteria,
+  so a change of them costs no deploy; the rules carry the duplicate criteria, so a change of
+  those is a new deploy by this plan's steps.
 
 ## Proof
 
 - `scripts/harness_tests.sh test/sf_data_quality_test.py` (classes `DuplicateRuleDocs` and
   `DuplicateAccountGroups`) and `make check` → `CHECK PASSED`.
-- Live: the rolled-back `sf apex run` (step 6), the read-back (step 7) and the next day's batches
-  (step 8).
+- Live: the no-DML `Datacloud.FindDuplicates` diagnostic (step 6), the read-back (step 7) and
+  the next day's batches (step 8).
 
 ## Result
 
-Pending (nothing deployed as of 2026-10-21): the fresh retrieve into `before/`, the check-only,
-Ryan's go, the deploy, the rolled-back `sf apex run` proof (with what the spacing probe showed),
-the read-back into `after/` and its compare, and the next day's batch check. Written here with
-deploy ids, times (UTC) and counts when done.
+Deployed 2026-10-22 on Ryan's go; step 8 pending. In order, counts and ids only:
+
+- 2026-10-21, from 13:46 UTC: the fresh retrieve into `data/sf_dupflags_2026-10-21/before/`
+  (step 1) and the build (step 2). The first check-only, `0AfRP000002hlP70AI`, failed:
+  "SortOrder must be in sequential order from 1", because both Duplicate Rules carried
+  `sortOrder` 1; the Household rule was set to `sortOrder` 2, so each Duplicate Rule has its own
+  (Club 1, Household 2), and the check-only `0AfRP000002hlVZ0AY` succeeded, 9/9 components,
+  0 errors. Its result was shown to Ryan; his go came on 2026-10-22.
+- 2026-10-22 12:33 UTC: deploy `0AfRP000002htOH0AY`, 9/9 components, on Ryan's go. SOQL:
+  `Name_Parent_Club_Report` and `Name_Parent_Household_Report` active, the Matching Rule
+  `Name_Parent` Active, and the Contact rule "First & Last & Account" unchanged, its metadata
+  equal to `before/`. Each Duplicate Rule's `securityOption` is `BypassSharingRules`.
+- The read-back into `data/sf_dupflags_2026-10-21/after/` equals `build/` but for Salesforce's
+  normalisation (`externalId` omitted, `trackFeedHistory` added, the permission set re-sorted);
+  the 4 field permissions are present (Read in `Attendance_Report_Viewer`, Edit on the Admin
+  profile).
+- 12:35 UTC: the rolled-back insert proof of this plan's first version ran and could not work:
+  all 7 inserts were saved and the rollback left 0 records, but 0 DuplicateRecordSets appeared,
+  because Salesforce's duplicate matching does not see records inserted earlier in the same
+  uncommitted transaction. Ryan, 2026-10-22: the no-DML `Datacloud.FindDuplicates` diagnostic
+  replaces it as the proof (DECISIONS 2026-10-22).
+- The diagnostic, the same day, over three unsaved copies of existing accounts (`DIAG|` lines,
+  rule names and match counts only): probe A, an upper-cased copy of a Club that has a parent,
+  ran the Club rule, 1 match; probe B, a copy of a Household account, ran the Household rule,
+  1 match; probe C, a Household account with a club's name and ParentId, ran the Household rule,
+  1 match, the Club. The log's lines, as printed (Salesforce writes `&#124;` for `|`):
+
+  ```text
+  DIAG&#124;A_club_copy&#124;rules_run&#124;1
+  DIAG&#124;A_club_copy&#124;Name_Parent_Club_Report&#124;matches&#124;1
+  DIAG&#124;B_household_copy&#124;rules_run&#124;1
+  DIAG&#124;B_household_copy&#124;Name_Parent_Household_Report&#124;matches&#124;1
+  DIAG&#124;C_household_named_like_club&#124;rules_run&#124;1
+  DIAG&#124;C_household_named_like_club&#124;Name_Parent_Household_Report&#124;matches&#124;1
+  ```
+
+- Probe C is the cross-type pair: a Duplicate Rule's record-type condition picks only which rule
+  runs for the record being saved and does not limit the candidates, so Salesforce may report a
+  Household account and a Club of one name and parent as a pair. Ryan, 2026-10-22: accepted and
+  documented, no code or metadata change; `duplicate_account_groups` keeps its own definition,
+  and the monthly check reviews any such pair by hand.
+- Counts on 2026-10-22: 0 same-name-and-parent groups (`duplicate_account_groups`), 0 cross-type
+  pairs, 0 Account DuplicateRecordSets - the same after a Club account was created by hand that
+  day (ticket #66).
+- Step 8, the next day's batch check, is pending: due on or after 2026-10-23 (UTC), not yet run;
+  its counts are written here when it has.

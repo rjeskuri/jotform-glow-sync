@@ -13,19 +13,38 @@ coordinators never), the four fields, the two rules and their action - Allow wit
 Alert and no Block, because an alert refuses a record created by code (BACKLOG 54: the attendance
 processor, tools/sf_new_clubs.py) - the Contact rule "First & Last & Account" unchanged,
 administrators alone setting a flag by hand, flagged records shown in the kept reports with the flags
-as a filter; a plan carries the rolled-back `sf apex run` proof before the deploy, the check-only,
-Ryan's go (his answer after the check-only's result), the read-back and the next day's batch check,
-in that order, the proof's script quoted in an ```apex block ending in `Database.rollback(sp);`, and
-its Rollback deactivates the rule in the org by a named action; the RUNBOOK states the rules' exact
-settings (`actionOnInsert`/`actionOnUpdate` Allow, no `alertText`; the MatchingRuleItems Name (Exact,
-case-insensitive) and ParentId (blank matches blank), never RecordTypeId; one report-only Duplicate
-Rule per record type, Club and Household, with the condition Record Type equals that type), the
-obsolete Club exception (the clubs of a partner marked `no` in the Partners tab's `jotform` column are
-judged by their partner account's `Partner report` batches), the monthly check's SOQL with the sets'
-member ids, and what the rule does not catch (the partner-less twin of a parented club); the proof's
-twin differs from the first account by case only, and a missing DuplicateRecordSet is a failure; a
-dated DECISIONS entry records the definitions as Ryan's provisional answers pending GLOW and the
-review's two design changes; the salesforce skill's "What lives there" points at the section. Every part a test reads is swept for what would
+as a filter; a plan carries the fresh retrieve, the check-only, Ryan's go (his answer after the
+check-only's result), the deploy, the proof after it, the read-back and the next day's batch check,
+in that order, and its Rollback deactivates the rule in the org by a named action; the RUNBOOK states
+the rules' exact settings (`actionOnInsert`/`actionOnUpdate` Allow, no `alertText`; the
+MatchingRuleItems Name (Exact, case-insensitive) and ParentId (blank matches blank), never
+RecordTypeId; one report-only Duplicate Rule per record type, Club and Household, with the condition
+Record Type equals that type), the obsolete Club exception (the clubs of a partner marked `no` in the
+Partners tab's `jotform` column are judged by their partner account's `Partner report` batches), the
+monthly check's SOQL with the sets' member ids, and what the rule does not catch (the partner-less
+twin of a parented club); a dated DECISIONS entry records the definitions as Ryan's provisional
+answers pending GLOW and the review's two design changes; the salesforce skill's "What lives there"
+points at the section.
+
+Deployed 2026-10-22 (Ryan's go): deploy 0AfRP000002htOH0AY 12:33 UTC, 9/9 (check-only
+0AfRP000002hlVZ0AY), each Duplicate Rule with its own sortOrder (Club 1, Household 2: two rules with
+sortOrder 1 are refused, "SortOrder must be in sequential order from 1"). Two decisions of Ryan's the
+same day, which the plan and the RUNBOOK section must carry: (1) the proof is a no-DML diagnostic -
+`Datacloud.FindDuplicates.findDuplicates` on unsaved copies of existing accounts, printing only rule
+names and match counts as `DIAG|` lines; three probes: an upper-cased copy of a parented Club (the Club
+rule, 1 match), a copy of a Household account (the Household rule, 1 match), a Household account with
+a club's name and ParentId (the Household rule, 1 match: the Club) - because the rolled-back insert
+proof could not work (Salesforce's duplicate matching does not see records inserted earlier in the
+same uncommitted transaction: 7/7 inserts, 0 sets), so no doc names the rolled-back insert as the
+proof except as history, and none says the proof probes spacing; (2) cross-type pairs are accepted: a
+Duplicate Rule's record-type condition picks the rule for the record saved and does not limit the
+candidates, so Salesforce may report a Household account and a Club of one name and parent as a pair,
+`duplicate_account_groups` keeps its own definition, and the monthly check reviews such a pair by
+hand - so no doc says the condition applies to the candidates, or that a Club and a Household account
+never match. The plan records the deploy id, time and count, the read-back (after/ = build/ but for
+Salesforce's normalisation, the four field permissions present), the three rules active, the Contact
+rule unchanged, the counts (0 groups, 0 cross-type, 0 sets), and is not `done` while the next day's
+batch check (step 8) is pending. Every part a test reads is swept for what would
 contradict the rules (contradictions()): the rule set to Alert or Block (said any way, unless denied
 where it is said, without a time limit) or stopping a save in other words (a halt, pop-up, message,
 prompt, refusal), a flagged record deleted, merged, hidden or kept out of the reports (said any way),
@@ -40,6 +59,7 @@ space, casefold (Straße = STRASSE), ParentId "" = null = missing, RecordTypeId 
 the `<club> - <partner>` names get no special case (only another parent keeps twins apart).
 """
 import copy
+import datetime
 import glob
 import os
 import re
@@ -139,6 +159,177 @@ class DuplicateRuleDocs(unittest.TestCase):
     # says flagged records are not merged by it
     GIRL_WORDS = re.compile(r"(?i)\b(contacts?|girls?)\b")
     NOT_FOR_FLAG = re.compile(r"(?i)\b(never|not|no|nor)\b[^.;]{0,40}?\bflag")
+
+    # --- the deploy of 2026-10-22 and Ryan's two decisions of that day ------------------------------------
+    DEPLOY_ID, CHECK_ONLY_ID = "0AfRP000002htOH0AY", "0AfRP000002hlVZ0AY"
+    DEPLOY_DAY, DEPLOY_TIME, NEXT_DAY = "2026-10-22", "12:33", "2026-10-23"
+    FIND_DUPLICATES = r"FindDuplicates"
+    DIAGNOSTIC = r"FindDuplicates|(?i:\bdiagnostic\b)"
+    # the diagnostic inserts, writes and saves nothing: its probes are unsaved copies
+    NO_DML = (r"(?i)\bno[- ]DML\b|\bwithout (any )?DML\b|\bDML-free\b|\bno (inserts?|writes?|saves?)\b|"
+              r"\b(inserts?|writes?|saves?|creates?|stores?|commits?)\s+(nothing|no records?|no accounts?|none)\b|"
+              r"\bnothing (is |gets )?(inserted|written|saved|created|stored|committed)\b|\bunsaved\b|\bnever saved\b|"
+              r"\bnot saved\b|\bin memory\b|\bno (record|account) is (inserted|saved|written|created)\b|\bread-only\b")
+    COPIES = r"(?i)\b(cop(y|ies)|clones?|twins?)\b"
+    EXISTING = r"(?i)\b(existing|real|live|current|on file)\b"
+    RULE_NAMES = r"(?i)\brule['’]?s? names?\b|\bnames? of (the|each|a) rule\b|\brules?\b"
+    COUNTS = r"(?i)\bcounts?\b|\bmatches\b|\bnumber of matches\b"
+    ONLY = r"(?i)\bonly\b|\bnothing else\b|\balone\b|\bno names?\b|\bnever a name\b|\bnothing more\b"
+    ONE_MATCH = r"(?<![\w/.-])(1|one)\s+match(es)?\b"
+    CLUB_RULE = r"(?i)\bClub rule\b|Name_Parent_Club_Report|\bClub['’]s rule\b|\brule for Clubs?\b"
+    HOUSEHOLD_RULE = r"(?i)\bHousehold rule\b|Name_Parent_Household_Report|\bHousehold['’]s rule\b|\brule for Households?\b"
+    UPPER = r"(?i)\bupper-?cased?\b|\bupper case\b|\buppercase\b|\bcapitals\b|\bcapitalis\w*|toUpperCase|\bin capitals\b"
+    CLUBS_NAME = (r"(?i)\bclub['’]s name\b|\bname (and (parent|ParentId) )?of a club\b|\bclub name\b|"
+                  r"\bnamed (like|as|after) a club\b|\ba club['’]s\b|\blike a club\b|\bas a club\b")
+    THE_CLUB = r"(?i:\bcross-?type\b|\bthe original\b)|(?<![\w'’-])(the|that|its|one|a|The) Club(?![\w'’-])"
+    PAIR = r"(?i)\bpairs?\b|\bcross-?type\b|\b(same|one) (set|DuplicateRecordSet)\b|\btogether\b|\bas twins\b"
+    HOUSEHOLD = r"(?i)\bHousehold\b"
+    ANY_CLUB = r"(?i)\bclub\b"
+    # the rolled-back insert proof may be named as history only (dropped, could not work, a flaw): never as the
+    # proof; what a clause says of it is read from the last comma, dash or bracket before the words to the
+    # next `, so|and|but|then|which|...` or `;` after them
+    ROLLED_BACK = re.compile(r"(?i)\brolled[- ]back\b|Database_rollback|\broll(ed|s|ing)? back\b")
+    PROOF_WORDS = re.compile(r"(?i)\bproof\b|\binsert\w*|\bDML\b|\bapex\b")
+    DROPPED = re.compile(r"(?i)\b(dropped|drops|replaced|superseded|abandoned|withdrawn|retired|scrapped|flaws?|flawed|"
+                         r"could not|cannot|can['’]t|did not|didn['’]t|does not|doesn['’]t|was not|were not|old|former|"
+                         r"(first|earlier|previous|original) (version|form|design|proof|plan|step)|no longer|instead|"
+                         r"history|redesign\w*|rewritten|rethought|failed|fails|failure|dead end|not the proof)\b")
+    SEGMENT_END = re.compile(r",\s+(so|and|but|then|which|while|whereas|because|since)\s+|;")
+    # the proof (the diagnostic, a probe, the script) answering the spacing question - the three probes do not
+    PROOF_SUBJECT = re.compile(r"(?i)\b(proof|diagnostic|probe|script)['’]?s?\b[^.;,]{0,20}?"
+                               r"\b(probes?|tests?|answers?|settles?|decides?|says|shows|tells|records?)\b")
+    SPACING = re.compile(r"(?i)\bspacing\b|\bdouble space\b|\bwhitespace\b")
+    # a Duplicate Rule's record-type condition said to apply to the candidates (the records matched), not only
+    # to the record saved
+    CONDITION = re.compile(r"(?i)\bcondition\b|\bduplicateRuleFilter\w*|\bfilter\b")
+    CANDIDATES = re.compile(r"(?i)\bcandidates?\b|\brecords? (it |that are |that were |being )?matched\b|\bmatched records?\b|"
+                            r"\bthe match(es)?\b|\bboth (records|sides)\b|\bthe twin\b|\bthe other record\b|"
+                            r"\bthe records? (found|compared)\b")
+    UNFILTERED = re.compile(r"(?i)\b(whatever|whichever|regardless|irrespective|any|all|every|either|both|unfiltered|"
+                            r"unrestricted|not|never|no|cannot|can['’]t|only|decides|picks|chooses|selects)\b")
+    AFTER_UNFILTERED = re.compile(r"(?i)\s*(is|are|was|were|come|comes|remains?|stays?|of)?\s*(not|never|no|cannot|can['’]t|"
+                                  r"whatever|whichever|any|all|either|both|unfiltered|unrestricted)\b")
+    # a Club and a Household (partner) account of one name said never to match or to be kept apart - true of
+    # the Python side only
+    CROSS_PAIR = re.compile(r"(?i)\bHousehold( account)?\b|\bpartner account\b|\b(a|the|one) club and (a|the) partner\b|"
+                            r"\b(a|the) partner and (a|the) club\b")
+    NEVER_MATCH = re.compile(r"(?i)\b(never|not|cannot|can['’]t|no)\s+(be )?(match\w*|report\w*|pair\w*|meet|twins?|"
+                             r"duplicates?)\b|\bkept apart\b|\bkeeps? [^.;]{0,30}?\bapart\b")
+    PYTHON_SIDE = re.compile(r"(?i)duplicate_account_groups|\bPython\b|\bthe batch\b|(?<![\w#])#85\b")
+    NEXT_DAY_WORDS = re.compile(r"(?i)\bnext day\b|\bday after\b|\bfollowing day\b|\bstep 8\b|2026-10-23|\bbatch check\b")
+    PENDING = re.compile(r"(?i)\bpending\b|\bto come\b|\bstill to\b|\bawait\w*|\bnot yet\b|\btomorrow\b|\bto do\b|\bopen\b|"
+                         r"\boutstanding\b|\bdue\b|\bwhen done\b|\bonce done\b|\bstill\b")
+    # the deploy said to be pending or waiting (for Ryan's go, or "his go"), in any tense but the past
+    NOTHING_DEPLOYED = re.compile(r"(?i)\bnothing (is |has been |was )?deployed\b|\bthe deploy(ment)?,? (which |that |still )?"
+                                  r"waits\b|\bnot yet deployed\b|\bawaits? (the |its )?deploy|\bbefore the deploy\b[^.;]{0,40}?"
+                                  r"\bwaits? for (Ryan['’]s|his) go\b|\bdeploy\w*\b[^.;]{0,40}?\bwaits? for (Ryan['’]s|his) go\b|"
+                                  r"\bdeploy\w* waits?\b")
+    DML = re.compile(r"(?m)^\s*(insert|update|delete|undelete|upsert|merge)\s|Database\.(insert|update|delete|undelete|"
+                     r"upsert|merge|emptyRecycleBin)\(")
+    ROLLBACK_CODE = re.compile(r"\bSavepoint\b|Database\.setSavepoint\s*\(|Database\.rollback\s*\(")
+    # a save refused "all the same": the rule's action hedged into a refusal
+    HEDGED_REFUSAL = re.compile(r"(?i)\b(inserts?|saves?|records?|batch(es)?|accounts?)\b[^.;]{0,40}?\b(refus|reject|block|"
+                                r"stop)\w*[^.;]{0,25}?\b(all the same|anyway|nevertheless|regardless|after all|despite|"
+                                r"even so|still|nonetheless)\b")
+    # "same record type" claimed of the rules (not of the Python side's definition)
+    SAME_TYPE_CLAIM = re.compile(r"(?i)same record type")
+    RULES_ANSWER = re.compile(r"(?i)\brules?\b|\banswer\b|\bcomes? from\b")
+    SAVED_ONLY = re.compile(r"(?i)\bsav(ed|ing)\b|\bpicks?\b|\bwhich rule\b|\bnot\b|\bcannot\b|\bnever\b|\bno longer\b|\bexcept\b")
+
+    def rules_give_same_type(self, text):
+        """The clauses (split at `.;:` too) that say the rules, or the answer, are "same record type" without
+        saying it holds for the record saved only - the Python side's own definition excepted."""
+        return [s[:160] for s in self.clauses(text, ".;:") if self.SAME_TYPE_CLAIM.search(s) and self.RULES_ANSWER.search(s)
+                and not self.PYTHON_SIDE.search(s) and not re.search(r"(?i)\bduplicates when\b|\bdefinition\b|\bcriteri", s)
+                and not self.SAVED_ONLY.search(s)]
+
+    @staticmethod
+    def fences(text):
+        """Every fenced code block of `text`, whatever its language."""
+        return re.findall(r"(?ms)^```[^\n]*\n(.*?)^```", text)
+
+    @staticmethod
+    def prose(text):
+        """`text` without its fenced code blocks (a quoted script is checked on its own)."""
+        return re.sub(r"(?ms)^```.*?^```[^\n]*$", " ", text)
+
+    def old_proof_claims(self, text):
+        """The clauses of `text` that name the rolled-back insert proof as the proof: `rolled back`, `rolled-back`
+        or `Database.rollback` with a proof, insert, DML or Apex word in reach, and neither a denial nor a
+        history word (dropped, could not work, a flaw, the first version) in reach."""
+        out = []
+        for s in self.clauses(text):
+            for m in self.ROLLED_BACK.finditer(s):
+                window = self.local(s, m) + " " + self.SEGMENT_END.split(s[m.end():])[0]
+                if self.PROOF_WORDS.search(window) and not (self.NEGATION.search(window) or self.DROPPED.search(window)):
+                    out.append(s[:160])
+                    break
+        return out
+
+    def proof_probes_spacing(self, text):
+        """The clauses saying the proof (the diagnostic, a probe, the script) probes, tests or answers the spacing
+        question, unless denied in the words themselves or right after ("the probes do not test spacing")."""
+        return [s[:160] for s in self.clauses(text) if self.SPACING.search(s)
+                and any(not self.NEGATION.search(s[m.start():m.end() + 25]) for m in self.PROOF_SUBJECT.finditer(s))]
+
+    def condition_filters_candidates(self, text):
+        """The clauses where a rule's condition (or filter) is said to apply to the candidates, the records
+        matched: the words before the candidates (back to the last comma, dash or bracket) or right after them
+        neither deny it nor say whatever/any/all/only."""
+        out = []
+        for s in self.clauses(text):
+            if not self.CONDITION.search(s):
+                continue
+            for m in self.CANDIDATES.finditer(s):
+                if self.UNFILTERED.search(self.local(s, m)) or self.AFTER_UNFILTERED.match(s[m.end():]):
+                    continue
+                out.append(f"{m.group(0)!r}: {s[:160]!r}")
+                break
+        return out
+
+    def club_and_household_never_match(self, text):
+        """The clauses saying a Club and a Household (partner) account never match or are kept apart - about the
+        rules or Salesforce, not the Python side - unless denied where it is said."""
+        out = []
+        for s in self.clauses(text):
+            if not (re.search(self.ANY_CLUB, s) and self.CROSS_PAIR.search(s)) or self.PYTHON_SIDE.search(s):
+                continue
+            for m in self.NEVER_MATCH.finditer(s):
+                if not self.locally_denied(s, m):
+                    out.append(f"{m.group(0)!r}: {s[:160]!r}")
+                    break
+        return out
+
+    def says_cross_type_pair(self, text):
+        """The clauses saying Salesforce may report a Household account and a Club of one name and parent as a
+        pair (one set), not denied where the pair is said."""
+        return [s for s in self.clauses(text) if re.search(self.HOUSEHOLD, s) and re.search(self.ANY_CLUB, s)
+                and any(not self.locally_denied(s, m) for m in re.finditer(self.PAIR, s))]
+
+    def probe_clauses(self, text):
+        """(a, b, c): the clauses of `text` that state each probe of the diagnostic with its result - an
+        upper-cased copy of a parented Club (the Club rule, 1 match); a copy of a Household account (the
+        Household rule, 1 match); a Household account with a club's name and ParentId (the Household rule, 1
+        match, the Club: cross-type)."""
+        a = self.said(text, self.UPPER, self.ANY_CLUB, r"(?i)\bparent(ed|Id)?\b", self.CLUB_RULE, self.ONE_MATCH, negated=True)
+        b = self.said(text, self.HOUSEHOLD, self.COPIES, self.HOUSEHOLD_RULE, self.ONE_MATCH, negated=True)
+        c = self.said(text, self.HOUSEHOLD, self.CLUBS_NAME, r"(?i)\bParentId\b|\bparent\b", self.HOUSEHOLD_RULE,
+                      self.ONE_MATCH, self.THE_CLUB, negated=True)
+        return a, b, c
+
+    def header_line(self, part, label):
+        """The `- **<label>:** …` line of a RUNBOOK section's header."""
+        m = re.search(r"\*\*" + label + r":?\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", part, re.S)
+        self.assertTrue(m, f"RUNBOOK section {self.SECTION[3:]!r}: no `- **{label}:**` header line")
+        return flat(m.group(1))
+
+    def subpart(self, part, heading):
+        """The `### …` subsection of the RUNBOOK section `part` headed `heading`, to the next heading."""
+        m = re.search(r"^" + re.escape(heading) + r"(?!\w).*$", part, re.M)
+        self.assertTrue(m, f"RUNBOOK section {self.SECTION[3:]!r}: no `{heading}` subsection")
+        rest = part[m.start():]
+        nxt = re.search(r"\n#{1,3} ", rest)
+        return rest[:nxt.start()] if nxt else rest
 
     def denies(self, text):
         return bool(self.NEGATION.search(self.RULE_IDIOM.sub(" ", text)))
@@ -472,9 +663,272 @@ class DuplicateRuleDocs(unittest.TestCase):
                         "never merges a record for being flagged, in one sentence")
         self.assertNoContradiction(part, where)
 
+    # --- the proof and the cross-type pairs: the docs as deployed (Ryan, 2026-10-22) ------------------------
+
+    def test_the_docs_describe_the_find_duplicates_diagnostic_as_the_proof(self):
+        """Ryan, 2026-10-22 (decision 1): the proof is a no-DML diagnostic, `Datacloud.FindDuplicates` on
+        unsaved copies of existing accounts, printing only rule names and match counts as `DIAG|` lines; the
+        RUNBOOK's Apply line and the plan's proof step say so."""
+        part = self.section()
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        rollout = md_part(path, "## Rollout")
+        steps = self.steps(self.prose(rollout))
+        proof = next((i for i, s in enumerate(steps) if re.search(r"sf apex run", s)), None)
+        self.assertIsNotNone(proof, f"{name}: a Rollout step runs the proof with `sf apex run`")
+        step = steps[proof]
+        # the RUNBOOK says it where the procedure is: the `- **Apply:**` header line, not a paragraph anywhere
+        apply = self.header_line(part, "Apply")
+        for text, place in ((apply, f"{where}: the `- **Apply:**` line"),
+                            (step, f"{name}: the Rollout's proof step (step {proof + 1})")):
+            self.assertRegex(self.norm(text), self.FIND_DUPLICATES,
+                             f"{place}: name the proof that follows the deploy: the `Datacloud.FindDuplicates` diagnostic")
+            self.assertTrue(self.said(text, self.DIAGNOSTIC, self.NO_DML, negated=True),
+                            f"{place}: say in one sentence that the diagnostic (`Datacloud.FindDuplicates`) runs no DML: "
+                            "it inserts, writes and saves nothing (unsaved copies)")
+            self.assertTrue(self.said(text, self.DIAGNOSTIC + r"|(?i:\bprobes?\b)", self.COPIES, self.EXISTING,
+                                      self.ACCOUNT + r"|(?i:\baccounts?\b)", negated=True),
+                            f"{place}: say the diagnostic runs on unsaved copies of existing accounts (one sentence)")
+            self.assertTrue(self.said(text, r"DIAG", self.RULE_NAMES, self.COUNTS, self.ONLY, negated=True),
+                            f"{place}: say the diagnostic prints only `DIAG|` lines with the rule's name and the match "
+                            "count (one sentence: rule names and match counts only, never a record's name)")
+        self.assertRegex(step, r"(?i)\b(three|3)\b[^.;]{0,30}?\b(probes?|copies|accounts?)\b",
+                         f"{name}: the proof step says the diagnostic runs three probes (unsaved copies)")
+        self.assertRegex(step, r"(?i)pasted? in full|in full first",
+                         f"{name}: the proof's script is pasted in full first (the gate on `sf apex run`)")
+        # the probes and what each showed: three distinct clauses of the plan
+        plan = self.prose(read(path))
+        a, b, c = self.probe_clauses(plan)
+        self.assertTrue(a, f"{name}: state probe A with its result in one sentence: an upper-cased copy of a Club that "
+                           "has a parent - the Club rule ran, 1 match")
+        self.assertTrue(b, f"{name}: state probe B with its result in one sentence: a copy of a Household account - "
+                           "the Household rule, 1 match")
+        self.assertTrue(c, f"{name}: state probe C with its result in one sentence: a Household account with a club's "
+                           "name and ParentId - the Household rule, 1 match, and the match is the Club (cross-type)")
+        self.assertTrue(any(x != y and y != z and x != z for x in a for y in b for z in c),
+                        f"{name}: the three probes are three sentences (or clauses split by `;`), one each")
+        self.assertTrue(self.said(plan, r"(?i)\btransaction\b",
+                                  r"(?i)\b(not|never|cannot|can['’]t|don['’]t|doesn['’]t)\s+(be )?(seen|see|sees|visible|"
+                                  r"match\w*|find\w*|report\w*)\b|\binvisible\b|\bunseen\b|\bblind\b", negated=True),
+                        f"{name}: say why the insert proof could not work, in one sentence: Salesforce's duplicate "
+                        "matching does not see records inserted earlier in the same uncommitted transaction")
+        self.assertTrue(self.said(plan, self.DEPLOY_DAY, r"\bRyan\b|(?i:\bdecid\w*|\bdecision\b)",
+                                  self.DIAGNOSTIC + r"|(?i:\bproof\b|\bcross-?type\b|\bpairs?\b)", negated=True),
+                        f"{name}: attribute the proof's redesign (and the cross-type decision) to Ryan, {self.DEPLOY_DAY}, "
+                        "in one sentence")
+        self.assertNoContradiction(self.prose(rollout), f"{name}: `## Rollout`")
+
+    def test_the_docs_no_longer_describe_the_rolled_back_insert_as_the_proof(self):
+        """The rolled-back insert proof is history: no clause of the RUNBOOK section or the plan names it as the
+        proof (only as dropped, could not work, a flaw), none says the proof probes spacing (the three probes do
+        not), the Rollout no longer makes a missing DuplicateRecordSet the signal to stop, and no quoted Apex
+        inserts."""
+        part = self.section()
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        raw = read(path)            # fences included: a ```text fence is no hiding place for the old proof
+        for text, place in ((part, where), (raw, name)):
+            found = self.old_proof_claims(text)
+            self.assertEqual(found, [], f"{place}: names the rolled-back insert proof as the proof (fenced text included); "
+                                        "the proof is the no-DML `Datacloud.FindDuplicates` diagnostic (Ryan, 2026-10-22), "
+                                        "and the rolled-back insert is named only as history, in a clause that says it "
+                                        "was dropped or could not work: " + " | ".join(repr(s) for s in found))
+            found = self.proof_probes_spacing(text)
+            self.assertEqual(found, [], f"{place}: says the proof (a probe, the script) answers the spacing question; "
+                                        "the diagnostic's three probes do not probe spacing - the read-back and the "
+                                        "monthly check compare the sets with `duplicate_account_groups`: "
+                                        + " | ".join(repr(s) for s in found))
+            found = [s[:160] for s in self.clauses(text) if self.HEDGED_REFUSAL.search(s)]
+            self.assertEqual(found, [], f"{place}: hedges the rule's action into a refusal (\"if an insert is refused all "
+                                        "the same\"): Report only never refuses a save; the next day's `DUPLICATES_DETECTED` "
+                                        "check is the guard, said as that check: " + " | ".join(repr(s) for s in found))
+        self.assertNotRegex(self.norm(raw), r"(?i)\b(missing|absent|no|without)\b[^.;]{0,30}?DuplicateRecordSet[^.;]{0,80}?"
+                                            r"\b(failure|fail\w*|stop\w*|deactivat\w*)|DuplicateRecordSet[^.;]{0,40}?"
+                                            r"\b(missing|absent|does not appear|none)\b[^.;]{0,60}?\b(failure|fail\w*|stop\w*|"
+                                            r"deactivat\w*)",
+                            f"{name}: the plan still makes a missing DuplicateRecordSet the signal to stop and deactivate "
+                            "(fenced text included): that was the insert proof's condition, dropped with it")
+        rollout = self.norm(self.prose(md_part(path, "## Rollout")))
+        steps = self.steps(rollout)
+        proof = next((i for i, s in enumerate(steps) if re.search(r"sf apex run", s)), None)
+        self.assertIsNotNone(proof, f"{name}: a Rollout step runs the proof with `sf apex run`")
+        step = steps[proof]
+        for s in self.clauses(step):
+            if self.DROPPED.search(s):
+                continue            # the dropped insert proof, as history
+            for m in re.finditer(r"(?i)\binsert(s|ed|ing)?\b", s):
+                local, post = self.local(s, m), s[m.end():m.end() + 80]
+                self.assertTrue(any(rx.search(where) for where in (local, post)
+                                    for rx in (self.NEGATION, self.DROPPED, self.CONDITIONAL)),
+                                f"{name}: the proof step (step {proof + 1}) inserts: the diagnostic inserts nothing "
+                                f"(name an insert only to deny it, or as the dropped proof in a clause that says so): "
+                                f"{s[max(0, m.start() - 60):m.end() + 80]!r}")
+        self.assertNotRegex(step, r"Database_rollback|\bsavepoint\b|\bSavepoint\b",
+                            f"{name}: the proof step names a savepoint or `Database.rollback`: with no DML there is "
+                            "nothing to roll back")
+        for code in self.fences(raw):
+            self.assertNotRegex(code, self.DML, f"{name}: a fenced block (any language) runs DML (insert, update, delete, "
+                                                "upsert, merge): the proof is the no-DML diagnostic, and the dropped "
+                                                "insert script is not quoted, in no fence")
+            self.assertNotRegex(code, self.ROLLBACK_CODE, f"{name}: a fenced block sets a savepoint or rolls back: with no "
+                                                          "DML there is nothing to roll back, and the dropped script is not "
+                                                          "quoted")
+
+    def test_a_plan_quotes_the_diagnostic_script(self):
+        """The script lives in data/ (never committed), so the plan quotes it in full in an ```apex block that does
+        what the docs say: reads existing accounts with SOQL, builds three unsaved copies (`new Account(` with
+        RecordTypeId and ParentId, or `.clone(`; no name literal), upper-cases one name, keeps the result of
+        `Datacloud.FindDuplicates.findDuplicates`, and prints `DIAG|` lines built from `getDuplicateRule()` and the
+        match results' size - never a literal, never a record's Name or Id - with no DML and no savepoint."""
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        blocks = [b for b in re.findall(r"(?ms)^```apex[^\n]*\n(.*?)^```", read(path)) if "FindDuplicates" in b]
+        self.assertTrue(blocks, f"{name}: quote the diagnostic's script in full in a ```apex block that calls "
+                               "`Datacloud.FindDuplicates.findDuplicates`")
+        code = blocks[0]
+        self.assertRegex(code, r"(List\s*<\s*Datacloud\.FindDuplicatesResult\s*>|Datacloud\.FindDuplicatesResult\s*\[\s*\])"
+                               r"\s+\w+\s*=\s*Datacloud\.FindDuplicates\.findDuplicates\s*\(",
+                         f"{name}: the ```apex block keeps the result: `List<Datacloud.FindDuplicatesResult> results = "
+                         "Datacloud.FindDuplicates.findDuplicates(…)` (the lines are read from it, not thrown away)")
+        self.assertRegex(code, r"\[\s*SELECT\b[^\]]*?\bFROM\s+Account\b",
+                         f"{name}: the ```apex block reads the existing accounts it copies with SOQL (`[SELECT … FROM Account …]`)")
+        # the probes: each `new Account(` to its matching `)`, wherever it sits (a statement, a list or a map literal)
+        probes = []
+        for m in re.finditer(r"new Account\s*\(", code):
+            depth, i = 1, m.end()
+            while i < len(code) and depth:
+                depth += {"(": 1, ")": -1}.get(code[i], 0)
+                i += 1
+            probes.append(code[m.end():i - 1])
+        clones = re.findall(r"\.clone\s*\(", code)
+        self.assertGreaterEqual(len(probes) + len(clones), 3,
+                                f"{name}: the ```apex block builds three unsaved probes (`new Account(` or `.clone(`)")
+        for fields in probes:
+            for field in ("RecordTypeId", "ParentId"):
+                self.assertIn(field, fields, f"{name}: every `new Account(` probe carries {field} (the rules match on "
+                                             f"ParentId and run per record type): `new Account({fields.strip()[:80]}…)`")
+        self.assertNotRegex(code, r"\bName\s*=\s*'", f"{name}: a probe's Name is a literal; the probes copy existing accounts' "
+                                                     "names (`Name = club.Name…`)")
+        # the three probes as the plan describes them: A copies a queried account's Name upper-cased, with its ParentId
+        # and record type; C takes the same account's Name and ParentId with the other record type; B copies another
+        # queried account with that other record type
+        def parts(fields):
+            src = re.search(r"\bName\s*=\s*(\w+)\.Name\b", fields)
+            parent = re.search(r"\bParentId\s*=\s*(\w+)\.ParentId\b", fields)
+            rtype = re.search(r"\bRecordTypeId\s*=\s*(\w+)", fields)
+            return (src and src.group(1), parent and parent.group(1), rtype and rtype.group(1),
+                    bool(re.search(r"\bName\s*=\s*\w+\.Name\.toUpperCase\(\)", fields)))
+        parsed = [parts(f) for f in probes]
+        uppers = [p for p in parsed if p[3]]
+        self.assertTrue(uppers, f"{name}: probe A's Name is a queried account's Name upper-cased "
+                                "(`Name = club.Name.toUpperCase()`)")
+        a = uppers[0]
+        self.assertTrue(a[0] and a[0] == a[1] and a[2],
+                        f"{name}: probe A copies one queried account's Name and ParentId (`Name = x.Name.toUpperCase(), "
+                        f"ParentId = x.ParentId`) with a record type variable; got {a!r}")
+        c = [p for p in parsed if p is not a and p[0] == a[0] and p[1] == a[1] and p[2] and p[2] != a[2]]
+        self.assertTrue(c, f"{name}: probe C takes the same account's Name and ParentId as probe A (`{a[0]}.Name`, "
+                           f"`{a[1]}.ParentId`) with the other record type (a Household account named and parented like "
+                           "the club)")
+        self.assertTrue([p for p in parsed if p is not a and p[0] and p[0] != a[0] and p[2] == c[0][2]],
+                        f"{name}: probe B copies another queried account (`Name = hh.Name`) with the Household record type, "
+                        f"the one probe C uses ({c[0][2]})")
+        self.assertNotRegex(code, self.DML, f"{name}: the ```apex block runs DML: the diagnostic inserts nothing")
+        self.assertNotRegex(code, self.ROLLBACK_CODE, f"{name}: the ```apex block sets a savepoint or rolls back: no DML, "
+                                                      "nothing to roll back")
+        self.assertIn("getDuplicateRule()", code, f"{name}: the ```apex block reads each rule's name from the result "
+                                                  "(`getDuplicateRule()`)")
+        self.assertIn("getMatchResults()", code, f"{name}: the ```apex block reads the match results (`getMatchResults()`)")
+        self.assertRegex(code, r"getMatchRecords\(\)\s*\.size\(\)|\bgetSize\(\)",
+                         f"{name}: the ```apex block counts the matches (`getMatchRecords().size()` or `getSize()`)")
+        debugs = re.findall(r"(?m)^.*System\.debug\s*\(.*$", code)
+        self.assertTrue(debugs, f"{name}: the ```apex block prints `DIAG|` lines with `System.debug`")
+        for line in debugs:
+            self.assertIn("DIAG|", line, f"{name}: every `System.debug` of the ```apex block prints a `DIAG|` line: {line.strip()!r}")
+            self.assertNotRegex(line, r"System\.debug\s*\(\s*'[^']*'\s*\)",
+                                f"{name}: a `DIAG|` line is a string literal (a hard-coded result): build it from the result, "
+                                f"`getDuplicateRule()` and the match count: {line.strip()!r}")
+            self.assertNotRegex(line, r"\.Name\b|getRecord\(\)|\.Id\b",
+                                f"{name}: a `DIAG|` line prints a record's Name or Id; rule names and match counts only: "
+                                f"{line.strip()!r}")
+        self.assertTrue(any("getDuplicateRule()" in line for line in debugs),
+                        f"{name}: a `DIAG|` line carries the rule's name from the result (`getDuplicateRule()`)")
+        loop = re.search(r"for\s*\(\s*Datacloud\.DuplicateResult\b", code)
+        self.assertTrue(loop and re.search(r"System\.debug\s*\([^\n]*getDuplicateRule\(\)", code[loop.end():]),
+                        f"{name}: the `DIAG|` line with `getDuplicateRule()` is printed inside the loop over the results "
+                        "(`for (Datacloud.DuplicateResult d : …getDuplicateResults())`), one line per rule that ran")
+
+    def test_the_docs_state_the_cross_type_pairs_and_the_by_hand_review(self):
+        """Ryan, 2026-10-22 (decision 2): a Duplicate Rule's record-type condition only picks the rule for the
+        record saved and does not limit the candidates, so Salesforce may report a Household account and a Club
+        of one name and parent as a pair; `duplicate_account_groups` keeps its own definition and the monthly
+        check reviews such a pair by hand. No clause says the condition applies to the candidates, or that a Club
+        and a Household account never match."""
+        part = self.section()
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        rules = self.subpart(part, "### The fields and the rules")
+        monthly = self.subpart(part, "### The monthly check")
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        raw = read(path)
+        plan = self.prose(raw)
+        # where it is said: the rules subsection says what the condition does; the monthly check says what to do
+        # with a cross-type pair (a paragraph of keywords anywhere else is not the procedure)
+        for text, place in ((rules, f"{where}, `### The fields and the rules`"), (plan, name)):
+            self.assertTrue(self.says_cross_type_pair(text),
+                            f"{place}: say in one sentence that Salesforce may report a Household account and a Club of "
+                            "one name and parent as a pair (one DuplicateRecordSet): the record-type condition picks the "
+                            "rule for the record saved and does not limit the candidates")
+            self.assertTrue(self.said(text, r"(?i)\bcondition\b", r"(?i)\b(record )?(being )?saved\b|\bthe record saved\b|"
+                                                                   r"\bsaving\b|\bon save\b|\bthe saved record\b",
+                                      r"(?i)\bonly\b|\bpicks\b|\bdecides\b|\bchooses\b|\bselects\b|\bwhich rule\b", negated=True),
+                            f"{place}: say what the record-type condition does: it picks (decides only) which rule runs "
+                            "for the record being saved, in one sentence")
+        for text, place in ((part, where), (raw, name)):
+            found = self.condition_filters_candidates(text)
+            self.assertEqual(found, [], f"{place}: says a rule's record-type condition applies to the candidates (the "
+                                        "records matched); it decides only which rule runs for the record saved: "
+                                        + " | ".join(found))
+            found = self.club_and_household_never_match(text)
+            self.assertEqual(found, [], f"{place}: says a Club and a Household (partner) account never match or are "
+                                        "kept apart; Salesforce may report them as a pair (only the Python side, "
+                                        "`duplicate_account_groups`, keeps record types apart): " + " | ".join(found))
+            found = self.rules_give_same_type(text)
+            self.assertEqual(found, [], f"{place}: says the rules (or the answer) are \"same record type\" without saying "
+                                        "that holds for the record saved only (the candidates are of any record type): "
+                                        + " | ".join(repr(s) for s in found))
+        self.assertTrue(self.says_cross_type_pair(monthly),
+                        f"{where}, `### The monthly check`: say a Household account and a Club of one name and parent may "
+                        "be reported as a pair (a set `duplicate_account_groups` has no group for), in one sentence")
+        self.assertTrue(self.said(monthly, r"(?i)\bpairs?\b|\bcross-?type\b|\bHousehold\b",
+                                  r"(?i)\bby hand\b|\bmanual\w*|\blooked at\b|\breview\w*|\bjudge\w*|\bdecide\w*", negated=True),
+                        f"{where}, `### The monthly check`: say such a (cross-type) pair is reviewed by hand, in one sentence")
+        self.assertTrue(self.said(monthly, r"duplicate_account_groups", r"(?i)\bits own\b|\bown (definition|rule|criteria)\b|"
+                                                                        r"\bsame record type\b|\bunchanged\b|\bkeeps?\b|\bstays?\b|"
+                                                                        r"\bas before\b|\bnot changed\b|\bno change\b|\bstill\b|"
+                                                                        r"\bdoes not\b|\bnever\b",
+                                  negated=True),
+                        f"{where}, `### The monthly check`: say `duplicate_account_groups` keeps its own definition (the "
+                        "same record type: it never groups a Club with a Household account), in one sentence")
+        # the Verify line and the monthly paragraph agree with it: a cross-type set is a set without a group, looked at
+        # by hand, not a spacing disagreement
+        verify = self.header_line(part, "Verify")
+        self.assertRegex(verify, r"(?i)\bcross-?type\b|\bpairs?\b",
+                         f"{where}: the `- **Verify:**` line names the cross-type pair the comparison with "
+                         "`duplicate_account_groups` may show")
+        self.assertRegex(verify, r"(?i)\bby hand\b|\blooked at\b|\breview\w*|\bjudge\w*",
+                         f"{where}: the `- **Verify:**` line says a cross-type pair is looked at by hand")
+        self.assertTrue(self.said(monthly, r"(?i)\bdisagree\w*|\bdiffer\w*|\bwithout a group\b|\bset without\b|\bgroup without\b",
+                                  r"(?i)\bcross-?type\b|\bHousehold\b|\brecord type\b", negated=True),
+                        f"{where}, `### The monthly check`: the paragraph on a set without a group names the cross-type "
+                        "case beside spacing, in one sentence")
+        self.assertNoContradiction(part, where)
+
     # --- the plan ---------------------------------------------------------------------------------------
 
-    def test_a_plan_carries_the_rule_deploy_and_the_rolled_back_proof(self):
+    def test_a_plan_carries_the_rule_deploy_and_the_read_back(self):
         sys.path.insert(0, os.path.join(REPO, "scripts"))
         import docs_index
         path = self.plan_path()
@@ -493,15 +947,10 @@ class DuplicateRuleDocs(unittest.TestCase):
         self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
         result = self.norm(md_part(path, "## Result").split("\n", 1)[1] if "\n" in md_part(path, "## Result") else "")
         self.assertTrue(re.search(r"[A-Za-z]{3,}", result), f"{name}: `## Result` is empty")
-        if re.search(r"(?i)\bpending\b", result) or not re.search(r"\d{4}-\d\d-\d\d", result):
-            for what, rx in (("the deploy", r"(?i)\bdeploy\w*"), ("the proof", r"(?i)\bproof\b"),
-                             ("the read-back", r"(?i)\bread-?back\b|\bread back\b|after/|\bretriev\w*"),
-                             ("the next day's check", r"(?i)\bnext day\b|\bday after\b|\bfollowing day\b")):
-                self.assertRegex(result, rx, f"{name}: a pending `## Result` lists what is pending: {what}")
         raw, bodies = {}, {}
         for heading, least in (("## Rollout", 60), ("## Rollback", 15)):
             part = md_part(path, heading)
-            raw[heading] = part.split("\n", 1)[1] if "\n" in part else ""
+            raw[heading] = self.prose(part.split("\n", 1)[1] if "\n" in part else "")
             body = self.norm(raw[heading])
             self.assertNotRegex(body, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: `{heading}` is a placeholder")
             distinct = {w.lower() for w in re.findall(r"[A-Za-z]\w*", body)}
@@ -538,9 +987,8 @@ class DuplicateRuleDocs(unittest.TestCase):
         self.assertTrue(self.said(rollout, r"(?<!\w)Read(?!\w)", r"(?i)\breport\w*|\bviewer\w*|Attendance_Report_Viewer|"
                                                                    r"permission set|profile"),
                         f"{name}: the Rollout gives Read on the fields to the users who read the reports (one sentence)")
-        # the steps, numbered: check-only, Ryan's go, deploy, then the rolled-back proof at once (a
-        # DuplicateRecordSet appears only while the rule is active: the proof runs with the rule live, and a
-        # refused insert means the Rollback), the read-back, the next day's check
+        # the steps, numbered: the retrieve, the check-only, Ryan's go, the deploy, then the proof (the rules
+        # must be active for the diagnostic to run them), the read-back, the next day's check
         steps = self.steps(rollout)
         self.assertGreaterEqual(len(steps), 6, f"{name}: number the Rollout's steps (`1. …`, at least six: the retrieve, "
                                                "the check-only, Ryan's go, the deploy, the proof, the read-back, the "
@@ -574,76 +1022,9 @@ class DuplicateRuleDocs(unittest.TestCase):
                                           r"prior) go\b|\bwithout (asking|a prompt|his answer)\b|move forward[^.;]{0,60}?"
                                           r"\b(is|as|was) (the|his|a) go\b",
                             f"{name}: nothing said earlier is the go: the go is Ryan's answer to this deploy's prompt")
-        self.assertTrue(deploy < proof and (proof == deploy + 1 or proof < after),
-                        f"{name}: the `sf apex run` proof is the step right after the deploy (before the read-back): the "
-                        "rule must be active for a DuplicateRecordSet to appear and for the proof to show the rule "
-                        "stops neither insert")
+        self.assertTrue(deploy < proof, f"{name}: the `sf apex run` proof comes after the deploy (the rules must be active "
+                                        "for `Datacloud.FindDuplicates` to run them)")
         self.assertGreaterEqual(after, deploy, f"{name}: after the deploy, retrieve into `after/` and compare")
-        proof_text = " ".join(steps[proof:proof + 2])
-        self.assertRegex(proof_text, r"(?i)\bif\b[^.;]{0,40}?\b(refus|fail|reject)\w*[^.;]{0,80}?\b(deactivat\w*|rollback)\b|"
-                                     r"\b(should|were)\b[^.;]{0,40}?\b(refus|fail|reject)\w*[^.;]{0,80}?\b(deactivat\w*|"
-                                     r"rollback)\b",
-                         f"{name}: the proof step says that if an insert is refused, the Rollback (deactivate the rule) "
-                         "follows at once")
-        self.assertNotRegex(proof_text, r"(?i)\bcommented\b|\bleft in\b|\bremain\w*|\bstay\w*|\blive test data\b|"
-                                        r"\bkept in the org\b|\bcommit\w*",
-                            f"{name}: nothing of the proof stays in the org: no commented-out rollback, no records left "
-                            "in, no live test data")
-        self.assertRegex(proof_text, r"(?i)\brolled back\b|\bnothing is kept\b",
-                         f"{name}: the proof step says everything is rolled back (nothing is kept)")
-        # the script itself, quoted in the plan: a savepoint, the inserts, the DuplicateRecordSet query, and the
-        # rollback as its last statement
-        blocks = re.findall(r"(?ms)^```apex[^\n]*\n(.*?)^```", text)
-        self.assertTrue(blocks, f"{name}: quote the proof's script in full in a ```apex block")
-        code = blocks[0]
-        sp = re.search(r"Savepoint\s+(\w+)\s*=\s*Database\.setSavepoint\(\)", code)
-        self.assertTrue(sp, f"{name}: the ```apex block starts from a savepoint, `Savepoint sp = Database.setSavepoint();`")
-        self.assertRegex(code, r"(?m)^\s*insert\b", f"{name}: the ```apex block inserts the fictional Accounts")
-        self.assertIn("DuplicateRecordSet", code, f"{name}: the ```apex block queries the `DuplicateRecordSet` that appears")
-        # the first two Accounts of the script are the case-only pair (same spacing); a spacing probe, if any, is
-        # a separate account; a name that only shares a name with another partner's club is one more
-        names = re.findall(r"Name\s*=\s*'([^']*)'", code)
-        self.assertGreaterEqual(len(names), 2, f"{name}: the ```apex block names its Accounts (`Name = '…'`)")
-        self.assertTrue(names[0] != names[1] and names[0].casefold() == names[1].casefold(),
-                        f"{name}: the ```apex block's second Account differs from the first by case only (got "
-                        f"{names[0]!r} and {names[1]!r})")
-        for probe in names[2:]:
-            if " ".join(probe.split()).casefold() == " ".join(names[0].split()).casefold():
-                self.assertNotEqual(probe.casefold(), names[0].casefold(),
-                                    f"{name}: a third Account that equals the first ignoring case is one twin too many; "
-                                    "a spacing probe differs in spacing")
-        statements = [ln.strip() for ln in code.splitlines() if ln.strip() and not ln.strip().startswith("//")]
-        self.assertRegex(statements[-1], r"^Database\.rollback\(" + sp.group(1) + r"\);\s*(//.*)?$",
-                         f"{name}: the ```apex block's last statement is `Database.rollback({sp.group(1)});` (not "
-                         f"commented out; got {statements[-1]!r})")
-        self.assertNotRegex(code, r"//[^\n]*Database\.rollback", f"{name}: the rollback is not commented out")
-        self.assertTrue([s for s in self.clauses(proof_text, ".;") if "Database_rollback" in s
-                         and re.search(r"(?i)\b(ends?|ending|last|final|closes?)\b", s)],
-                        f"{name}: say the proof's script ends in `Database.rollback` (one sentence of the proof step)")
-        self.assertRegex(proof_text, r"(?i)pasted? in full|in full first",
-                         f"{name}: the proof's script is pasted in full first (the gate)")
-        self.assertTrue(self.said(proof_text, r"(?i)\b(two|2|both)\b", r"(?i)\bfictional\b", self.ACCOUNT),
-                        f"{name}: the proof inserts two fictional Accounts that meet the criteria (one sentence)")
-        self.assertRegex(proof_text, r"DuplicateRecordSet", f"{name}: the proof shows a `DuplicateRecordSet` holding both")
-        self.assertTrue(self.said(proof_text, r"<club> - <partner>", r"(?i)\b(never|not|no)\b[^.;]{0,30}?\bmatch", negated=True),
-                        f"{name}: the proof shows an Account that only shares a name with another partner's club "
-                        "(`<club> - <partner>`) is not matched")
-        self.assertTrue(self.said(proof_text, r"(?i)\b(both|two|2|all|every|each|three|four)\b", r"(?i)\binserts?\b|\bDML\b",
-                                  r"(?i)\bsucceed\w*"),
-                        f"{name}: the proof shows every insert succeeds (the rule stops none)")
-        # the twin differs from the first account by case only, so a missing DuplicateRecordSet is a real signal:
-        # a failure that stops the rollout and deactivates the rule, never "the proof still holds"
-        self.assertRegex(proof_text, r"(?i)\bcase[- ]only\b|\bonly (by|in) (its )?case\b|\bdiffers? (only )?(by|in) (its )?case\b|"
-                                     r"\bcapitals? only\b|\bby case alone\b",
-                         f"{name}: the proof step says the twin differs from the first account by case only")
-        self.assertTrue(self.said(proof_text, r"(?i)\b(no|missing|absent|without)\b[^.;]{0,30}?DuplicateRecordSet|"
-                                              r"DuplicateRecordSet[^.;]{0,40}?\b(missing|absent|does not appear|none)\b",
-                                  r"(?i)\bfail\w*|\bfailure\b", r"(?i)\bstop\w*|\bdeactivat\w*|\brollback\b", negated=True),
-                        f"{name}: the proof step says a missing DuplicateRecordSet for the case-only twin is a failure: "
-                        "stop and deactivate the rule (one sentence)")
-        self.assertNotRegex(proof_text, r"(?i)\bstill holds\b|\bstill (passes|counts|proves|stands)\b|\bnot a failure\b|"
-                                        r"\bno failure\b|\bholds anyway\b|\bgood enough\b",
-                            f"{name}: a missing DuplicateRecordSet is never \"the proof still holds\"")
         # the read-back: retrieve into after/ and compare; both rules active, four fields; the Contact rule the same
         self.assertTrue(re.search(r"(?i)\bcompar\w*|\bdiff\b", steps[after]),
                         f"{name}: the `after/` step compares the retrieve with the build")
@@ -680,6 +1061,131 @@ class DuplicateRuleDocs(unittest.TestCase):
                                                    r"\bon disk only\b|\bnot (be )?deployed\b",
                             f"{name}: the Rollback acts on the org, not on a file in the repository or a later ticket")
         self.assertNoContradiction(rollback, f"{name}: `## Rollback`", rollback=True)
+
+    def test_a_plan_records_the_deploy_the_read_back_and_the_sort_order(self):
+        """The Result of 2026-10-22: the deploy id with its time and count, the check-only id, each Duplicate
+        Rule's own sortOrder and why, the read-back (after/ = build/ but for Salesforce's normalisation, the four
+        field permissions present), the three rules active and the Contact rule unchanged, the diagnostic that
+        day, and the counts (0 groups, 0 cross-type, 0 sets). Counts and ids only."""
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        plan = self.prose(read(path))
+        result = self.norm(self.prose(md_part(path, "## Result")))
+        deploy = [s for s in self.clauses(plan) if self.DEPLOY_ID in s]
+        self.assertTrue(deploy, f"{name}: record the deploy id `{self.DEPLOY_ID}`")
+        self.assertTrue([s for s in deploy if self.DEPLOY_TIME in s and "UTC" in s],
+                        f"{name}: the deploy id's sentence gives its time, `{self.DEPLOY_DAY} {self.DEPLOY_TIME} UTC`")
+        at = self.norm(plan).find(self.DEPLOY_ID)
+        self.assertIn(self.DEPLOY_DAY, self.norm(plan)[max(0, at - 400):at + 200],
+                      f"{name}: the deploy id is dated {self.DEPLOY_DAY} (the date near the id)")
+        self.assertTrue([s for s in deploy if re.search(r"(?<![\w.])9\s*(/|of)\s*9\b|\bnine of nine\b|\ball nine\b", s)],
+                        f"{name}: the deploy id's sentence gives its count, 9/9 components")
+        self.assertIn(self.CHECK_ONLY_ID, self.norm(plan), f"{name}: record the check-only id `{self.CHECK_ONLY_ID}`")
+        # each Duplicate Rule has its own sortOrder (Club 1, Household 2): two rules with sortOrder 1 are refused
+        self.assertTrue(self.said(plan, r"sortOrder",
+                                  r"(?<![\w.])1(?![\w.:])[^.;]{0,30}?\bClub\b|\bClub\b[^.;]{0,30}?(?<![\w.])1(?![\w.:])",
+                                  r"(?<![\w.])2(?![\w.:])[^.;]{0,30}?\bHousehold\b|\bHousehold\b[^.;]{0,30}?(?<![\w.])2(?![\w.:])",
+                                  negated=True),
+                        f"{name}: say each Duplicate Rule has its own `sortOrder` - Club 1, Household 2 - in one sentence")
+        self.assertTrue(self.said(plan, r"sortOrder", r"(?i)\bsequential\b|\brefus\w*|\breject\w*", negated=True),
+                        f"{name}: say why: two rules with `sortOrder` 1 were refused (\"SortOrder must be in sequential "
+                        "order from 1\"), in one sentence")
+        self.assertIn("SortOrder must be in sequential order from 1", result,
+                      f"{name}: the Result quotes Salesforce's refusal as it was: \"SortOrder must be in sequential order from 1\"")
+        # the read-back
+        self.assertIn("data/sf_dupflags_2026-10-21/after/", result,
+                      f"{name}: the Result names the read-back folder, `data/sf_dupflags_2026-10-21/after/`")
+        self.assertTrue(self.said(result, r"after/", r"build/", r"(?i)\bnormali[sz]\w*", negated=True),
+                        f"{name}: the Result says `after/` equals `build/` but for Salesforce's normalisation (one sentence)")
+        self.assertTrue(self.said(result, r"(?i)\b(four|4)\b", r"(?i)\bfield ?permissions?\b",
+                                  r"(?i)\bpresent\b|\bthere\b|\bin place\b|\bfound\b|\ball\b|\bread back\b", negated=True),
+                        f"{name}: the Result says the four field permissions are present in `after/` (one sentence)")
+        self.assertTrue(self.said(result, r"Name_Parent_Club_Report", r"Name_Parent_Household_Report", r"(?i)\bactive\b", negated=True),
+                        f"{name}: the Result says both Duplicate Rules are active, by name (one sentence)")
+        self.assertTrue(self.said(result, r"(?i)\bMatching ?Rule\b|\bName_Parent\b(?!_)", r"(?i)\bactive\b", negated=True),
+                        f"{name}: the Result says the Matching Rule `Name_Parent` is active")
+        self.assertTrue(self.said(result, r"First & Last & Account|First_Last|(?i:\bContact rule\b)",
+                                  r"(?i)\bunchanged\b|\bequal\w*|\bthe same\b|\buntouched\b|\bidentical\b", negated=True),
+                        f"{name}: the Result says the Contact rule {self.CONTACT_RULE!r} is unchanged (its metadata equal "
+                        "to `before/`)")
+        # the diagnostic that day, and the counts
+        self.assertIn(self.DEPLOY_DAY, result, f"{name}: the Result is dated {self.DEPLOY_DAY}")
+        self.assertRegex(result, self.DIAGNOSTIC, f"{name}: the Result records the `Datacloud.FindDuplicates` diagnostic")
+        self.assertRegex(result, r"(?<![\w.])0\s+(\w+[\s+-]*){0,4}?groups?\b",
+                         f"{name}: the Result gives the count of same-name-and-parent groups that day (0 groups)")
+        self.assertRegex(result, r"(?<![\w.])0\s+cross-?type", f"{name}: the Result gives the count of cross-type pairs (0)")
+        self.assertRegex(result, r"(?<![\w.])0\s+(\w+\s+){0,3}?(sets|DuplicateRecordSets?)\b",
+                         f"{name}: the Result gives the count of Account DuplicateRecordSets that day (0 sets)")
+        self.assertNoContradiction(result, f"{name}: `## Result`")
+
+    def test_the_plan_is_not_done_before_the_next_day_check(self):
+        """Deployed 2026-10-22, so the plan is in-progress or done, says nowhere that nothing is deployed, and is
+        `done` only once the Result records the next day's batch check (step 8) with its date; while that check
+        is pending the Result says so."""
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        word, _ = docs_index.status_of(keys.get("status", ""))
+        self.assertIn(word, ("in-progress", "done"), f"{name}: deployed {self.DEPLOY_DAY}: the status is in-progress "
+                                                      f"(step 8 pending) or done (not {word!r})")
+        self.assertNotRegex(self.norm(text), self.NOTHING_DEPLOYED,
+                            f"{name}: says the deploy waits (for Ryan's go, for his go) or nothing is deployed - the "
+                            f"frontmatter's comment, the opening, the Result, a fence: deployed {self.DEPLOY_DAY} "
+                            f"{self.DEPLOY_TIME} UTC (say it in the past: \"waited for his go, given {self.DEPLOY_DAY}\")")
+        today = datetime.date.today().isoformat()
+        result = self.norm(self.prose(md_part(path, "## Result")))
+        clauses = self.clauses(result)
+        pending = [s for s in clauses if self.NEXT_DAY_WORDS.search(s) and self.PENDING.search(s)]
+        recorded = [s for s in clauses if self.NEXT_DAY_WORDS.search(s) and not self.PENDING.search(s)
+                    and re.search(r"2026-10-2[3-9]|2026-1[12]-\d\d|202[7-9]-\d\d-\d\d", s)
+                    and re.search(r"DUPLICATES_DETECTED|\bFailed\b|auto_sync|\bbatches\b", s)]
+        for s in recorded:
+            for d in re.findall(r"\d{4}-\d\d-\d\d", s):
+                self.assertLessEqual(d, today, f"{name}: the next day's check is recorded on {d}, after today ({today}): "
+                                               "a result is written when it exists, never ahead")
+        if word == "done":
+            self.assertTrue(recorded, f"{name}: a done plan's Result records the next day's batch check (step 8) with its "
+                                      f"date ({self.NEXT_DAY} or later) and its counts (no batch `Failed` with "
+                                      "`DUPLICATES_DETECTED`, `auto_sync` unchanged)")
+            self.assertEqual(pending, [], f"{name}: done, but the Result still says the next day's check is pending: "
+                                          + " | ".join(repr(s[:120]) for s in pending))
+            self.assertGreaterEqual(keys.get("done", "")[:10], self.NEXT_DAY,
+                                    f"{name}: `done:` is the day of the next day's check, {self.NEXT_DAY} or later")
+            self.assertLessEqual(keys.get("done", "")[:10], today, f"{name}: `done:` is after today ({today})")
+        else:
+            self.assertTrue(pending or recorded,
+                            f"{name}: the Result says where the next day's batch check (step 8, {self.NEXT_DAY}) stands: "
+                            "pending, or recorded with its date and counts")
+        # the RUNBOOK's Status line and the plan agree on step 8: both pending, or both recorded
+        status = self.header_line(self.section(), "Status")
+        step8 = [s for s in self.clauses(status) if self.NEXT_DAY_WORDS.search(s)]
+        self.assertTrue(step8, f"RUNBOOK section {self.SECTION[3:]!r}: the `- **Status:**` line says where the next day's "
+                               "batch check (step 8) stands")
+        runbook_pending = any(self.PENDING.search(s) for s in step8)
+        plan_pending = not recorded
+        self.assertEqual(plan_pending, runbook_pending,
+                         f"{name} and the RUNBOOK's `- **Status:**` line disagree on step 8: the plan says it is "
+                         f"{'pending' if plan_pending else 'recorded'}, the RUNBOOK says it is "
+                         f"{'pending' if runbook_pending else 'done'}")
+
+    def test_the_runbook_status_carries_the_deploy_and_the_next_day_check(self):
+        """The section's Status line says the rules are live: the deploy id and its date, and where the next day's
+        batch check stands."""
+        part = self.section()
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        status = self.header_line(part, "Status")
+        self.assertIn(self.DEPLOY_ID, status, f"{where}: the `- **Status:**` line carries the deploy id `{self.DEPLOY_ID}`")
+        self.assertIn(self.DEPLOY_DAY, status, f"{where}: the `- **Status:**` line dates the deploy {self.DEPLOY_DAY}")
+        self.assertRegex(status, r"(?i)\bdeployed\b|\blive\b", f"{where}: the `- **Status:**` line says deployed (live)")
+        self.assertNotRegex(self.norm(part), self.NOTHING_DEPLOYED,
+                            f"{where}: says the deploy waits or nothing is deployed: deployed {self.DEPLOY_DAY}")
+        self.assertTrue(self.NEXT_DAY_WORDS.search(status),
+                        f"{where}: the `- **Status:**` line says where the next day's batch check (step 8, {self.NEXT_DAY}) "
+                        "stands: pending, or done with its date")
+        self.assertNoContradiction(part, where)
 
     # --- DECISIONS and the skill ------------------------------------------------------------------------
 
@@ -733,6 +1239,113 @@ class DuplicateRuleDocs(unittest.TestCase):
         # the Rejected bullet names what was rejected (Alert, Block); the rest of the entry must not contradict the rule
         rest = re.sub(r"(?ms)^- \*\*Rejected.*?(?=^- \*\*|\Z)", "", e)
         self.assertNoContradiction(rest, where)
+
+    def test_a_decision_records_the_proof_and_the_cross_type_pairs(self):
+        """Ryan's two decisions of 2026-10-22 are a dated section at the end of DECISIONS (the file's header): the
+        proof is the no-DML `Datacloud.FindDuplicates` diagnostic because the rolled-back insert could not work
+        (the same uncommitted transaction), and cross-type pairs are accepted and documented, the record-type
+        condition picking the rule for the record being saved only; the entry says it amends the 2026-10-21
+        one, and that entry gets a dated `- 2026-10-22:` bullet pointing at it, so its sentences on the
+        rolled-back proof waiting for the go and on "same record type" as the rules' answer are dated history,
+        never current without the pointer."""
+        entries = re.split(r"(?m)^(?=### )", read(self.DECISIONS))[1:]
+
+        def day(entry):
+            m = re.match(r"### (\d{4}-\d\d-\d\d) ", entry)
+            return m.group(1) if m else ""
+
+        old = [x for x in entries if day(x) == "2026-10-21" and self.TICKET.search(x) and re.search(r"(?i)\bobsolete\b", x)]
+        self.assertTrue(old, "docs/DECISIONS.md: the 2026-10-21 entry on ticket #84 (the definitions) is missing")
+        new = [x for x in entries if day(x) >= self.DEPLOY_DAY and self.TICKET.search(x)
+               and re.search(self.DIAGNOSTIC, self.norm(x)) and re.search(r"(?i)\bcross-?type\b|\bpairs?\b", x)]
+        self.assertTrue(new, f"docs/DECISIONS.md: no dated entry `### {self.DEPLOY_DAY} — …` (or later) naming ticket #84, "
+                             "the `Datacloud.FindDuplicates` diagnostic and the cross-type pairs (one section for Ryan's "
+                             "two decisions of 2026-10-22)")
+        e = new[0]
+        where = f"docs/DECISIONS.md {day(e)}"
+        self.assertGreater(entries.index(e), entries.index(old[0]),
+                           f"{where}: the new entry comes after the 2026-10-21 one (the file is in date order, new "
+                           "entries at the end)")
+        for part in ("**Why", "**Rejected", "**Consequences"):
+            self.assertIn(part, e, f"{where}: no {part}** bullet (the file's header)")
+        self.assertTrue(self.said(e, r"\bRyan\b", self.DEPLOY_DAY, negated=True),
+                        f"{where}: attribute the decisions to Ryan, {self.DEPLOY_DAY}, in one sentence")
+        # decision 1: the proof is the no-DML diagnostic, because the rolled-back insert could not work
+        self.assertTrue(self.said(e, self.DIAGNOSTIC, self.NO_DML, negated=True),
+                        f"{where}: say the proof is the no-DML `Datacloud.FindDuplicates` diagnostic (inserts, writes, saves "
+                        "nothing; unsaved copies), in one sentence")
+        self.assertTrue(self.said(e, r"(?i)\btransaction\b",
+                                  r"(?i)\b(not|never|cannot|can['’]t|don['’]t|doesn['’]t)\s+(be )?(seen|see|sees|visible|"
+                                  r"match\w*|find\w*|report\w*)\b|\binvisible\b|\bunseen\b|\bblind\b", negated=True),
+                        f"{where}: say why, in one sentence: the rolled-back insert proof could not work because Salesforce's "
+                        "duplicate matching does not see records inserted earlier in the same uncommitted transaction")
+        found = self.old_proof_claims(e)
+        self.assertEqual(found, [], f"{where}: names the rolled-back insert proof as the proof (name it only as dropped, "
+                                    "could not work): " + " | ".join(repr(s) for s in found))
+        self.assertEqual(self.proof_probes_spacing(e), [], f"{where}: says the proof probes spacing; the three probes do not")
+        # decision 2: cross-type pairs accepted and documented; the condition picks the rule for the record saved only
+        self.assertTrue(self.says_cross_type_pair(e),
+                        f"{where}: say Salesforce may report a Household account and a Club of one name and parent as a "
+                        "pair, in one sentence")
+        self.assertTrue(self.said(e, r"(?i)\bcross-?type\b|\bpairs?\b", r"(?i)\baccept\w*|\bdocumented\b", negated=True),
+                        f"{where}: say the cross-type pairs are accepted and documented (one sentence)")
+        self.assertTrue(self.said(e, r"(?i)\bcondition\b", r"(?i)\b(record )?(being )?saved\b|\bthe record saved\b|\bsaving\b|"
+                                                           r"\bon save\b|\bthe saved record\b",
+                                  r"(?i)\bonly\b|\bpicks\b|\bdecides\b|\bchooses\b|\bselects\b|\bwhich rule\b", negated=True),
+                        f"{where}: say the record-type condition picks (decides only) which rule runs for the record being "
+                        "saved, in one sentence")
+        found = self.condition_filters_candidates(e)
+        self.assertEqual(found, [], f"{where}: says the condition applies to the candidates: " + " | ".join(found))
+        found = self.club_and_household_never_match(e)
+        self.assertEqual(found, [], f"{where}: says a Club and a Household account never match (Salesforce may report them "
+                                    "as a pair; only the Python side keeps record types apart): " + " | ".join(found))
+        self.assertTrue(self.said(e, r"(?i)\b(no|without|not a)\b[^.;]{0,25}?\b(code|metadata)\b[^.;]{0,25}?\bchange",
+                                  negated=True),
+                        f"{where}: say the cross-type decision changes no code and no metadata (one sentence)")
+        self.assertTrue(self.said(e, r"2026-10-21", r"(?i)\bamend\w*|\bsupersed\w*|\brevers\w*|\bchang\w*|\breplac\w*|"
+                                                     r"\bupdat\w*|\bearlier\b|\bprevious\b|\bthat entry\b", negated=True),
+                        f"{where}: say the entry amends the 2026-10-21 decision (the file's header: a decision that amends "
+                        "an earlier one says so), in one sentence")
+        rejected = self.norm(e.split("**Rejected", 1)[1].split("**Consequences", 1)[0])
+        self.assertRegex(rejected, r"(?i)\binsert\w*|\brolled[- ]back\b|\bmetadata\b|\bcandidates?\b|\bcross-?type\b|"
+                                   r"\bthird rule\b|\bapart\b",
+                         f"{where}: **Rejected** names what was not done: keeping the rolled-back insert proof, or a "
+                         "metadata change to keep a Club and a Household account apart")
+        rest = re.sub(r"(?ms)^- \*\*Rejected.*?(?=^- \*\*|\Z)", "", e)
+        self.assertNoContradiction(rest, where)
+        found = self.rules_give_same_type(e)
+        self.assertEqual(found, [], f"{where}: says the rules are \"same record type\" without \"for the record saved\": "
+                                    + " | ".join(repr(s) for s in found))
+        # the 2026-10-21 entry: a dated bullet pointing at the new entry (the file's convention), naming the proof and
+        # the cross-type pairs, so what it says of the rolled-back proof and of "same record type" as the rules' answer
+        # is dated history; the bullet itself states neither as current, and nothing in the entry still has the deploy
+        # waiting for Ryan's go (the go was given 2026-10-22: say it in the past)
+        o = old[0]
+        pointer_rx = r"(?m)^\s*- " + self.DEPLOY_DAY + r"[:,].*(?:\n(?!\s*- |\n|#).*)*"
+        pointers = re.findall(pointer_rx, o)
+        self.assertNotRegex(self.norm(re.sub(pointer_rx, " ", o)), self.NOTHING_DEPLOYED,
+                            f"docs/DECISIONS.md 2026-10-21: still says the deploy (or the proof) waits for Ryan's go; the go was "
+                            f"given {self.DEPLOY_DAY}: say it in the past (\"waited for Ryan's go, given {self.DEPLOY_DAY}\") "
+                            "or point at the new entry in that sentence")
+        self.assertTrue(pointers, f"docs/DECISIONS.md 2026-10-21: the entry gets a dated bullet `- {self.DEPLOY_DAY}: …` "
+                                  f"pointing at the {day(e)} entry (the file's header: the earlier decision gets a dated "
+                                  "bullet pointing at the one that amends it)")
+        joined = " ".join(flat(b) for b in pointers)
+        self.assertRegex(joined, r"(?i)\bsee\b|\bentry\b|\bamend\w*|\bsupersed\w*|\bdecision\b|\bbelow\b",
+                         f"docs/DECISIONS.md 2026-10-21: the `- {self.DEPLOY_DAY}:` bullet points at the new entry (\"see the "
+                         f"{day(e)} entry\", \"amended\")")
+        self.assertRegex(self.norm(joined), self.DIAGNOSTIC + r"|(?i:\bproof\b)",
+                         f"docs/DECISIONS.md 2026-10-21: the `- {self.DEPLOY_DAY}:` bullet names the proof's change (the "
+                         "diagnostic)")
+        self.assertRegex(joined, r"(?i)\bcross-?type\b|\bpairs?\b|\brecord type\b",
+                         f"docs/DECISIONS.md 2026-10-21: the `- {self.DEPLOY_DAY}:` bullet names the cross-type pairs")
+        self.assertEqual(self.old_proof_claims(joined), [], f"docs/DECISIONS.md 2026-10-21: the `- {self.DEPLOY_DAY}:` bullet "
+                                                             "names the rolled-back proof as current")
+        self.assertEqual(self.condition_filters_candidates(joined), [],
+                         f"docs/DECISIONS.md 2026-10-21: the `- {self.DEPLOY_DAY}:` bullet says the condition applies to "
+                         "the candidates")
+        self.assertNotRegex(self.norm(joined), self.NOTHING_DEPLOYED,
+                            f"docs/DECISIONS.md 2026-10-21: the `- {self.DEPLOY_DAY}:` bullet says the deploy waits")
 
     def test_the_salesforce_skill_points_at_the_section(self):
         item = self.skill_item()
