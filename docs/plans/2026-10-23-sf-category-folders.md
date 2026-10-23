@@ -80,9 +80,14 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
 
 ## Rollback
 
-- The reports go back by `tools/sf_report_folders.py undo --vpn-off` from the ledger
-  `data/sf_report_folders/ledger.csv` (dry run, then with `--apply` on Ryan's go): each to its old
-  folder and label, last first.
+- The reports go back by `undo` from the ledger `data/sf_report_folders/ledger.csv`, bounded to
+  #73's 18 moves:
+  `python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv --limit 18`.
+  Its dry run lists exactly the 18 ids of `data/sf_folders_2026-10-23/move_plan.csv`; then, on
+  Ryan's go, the same with `--apply`: each to its old folder and label, last first.
+- The ledger is shared: `undo` reverses the pending moves in it last first, whatever their tag. A
+  dry run that lists any other id (a move of #72 or another ticket made after #73's) stops the
+  rollback there: those moves are not this ticket's to undo, and Ryan decides.
 - The five dashboards go back by hand in Lightning (Ryan), each to the DHIS2 folder it came from,
   checked with SOQL on `Dashboard`.
 - The copies stay in Decommissioned.
