@@ -10,7 +10,8 @@
 list (read-only): CSV on stdout, kind,id,developer_name,label,folder,last_run,used_by (used_by: the
 ids of the dashboards with a component on the report, ;-separated); the counts on stderr.
 copy: clones a report or a dashboard into the one folder named "Decommissioned" of its kind. A
-report's copy keeps its label (cut to 40 characters) and gets the description "copy of <id>, <tag>";
+report's copy keeps its label (cut to 40 characters) and gets the description "copy of <id>, <tag>"
+by a PATCH of the copy after the clone (#69's API proof, Report steps 1 and 5);
 a dashboard's clone takes no name or description (the API refuses them, #69's API proof).
 move: the plan CSV has the columns kind,id,to_folder,new_label; to_folder is a folder name that
 must be exactly one folder of the kind; a blank new_label keeps the label. A report is moved (and
@@ -25,7 +26,8 @@ characters (a new one, or the current one of a report the plan relabels: undo co
 it), retiring a report that a dashboard outside Decommissioned still uses, an unknown id.
 Each write is one request, read back by SOQL (the same Id, its folder and label); a write that does
 not read back stops the run. One ledger row per write (data/sf_report_folders/ledger.csv, owner
-only, never committed), on disk before the next write. The tool reads Folder, Report, Dashboard and
+only, never committed): on disk as "sending" before its request, rewritten in place as ok or failed
+before the next write (a copy's row gets the copy's id first). The tool reads Folder, Report, Dashboard and
 DashboardComponent only, and prints ids, labels, folder names, counts and HTTP codes, never an
 answer. Salesforce access is glow/salesforce.py's (the CLI's login).
 """
@@ -150,15 +152,30 @@ def open_ledger(folder):
     return ledger
 
 
+def sending(ledger, row):
+    """The write's row, status "sending", on disk before its request goes out (a crash leaves it so:
+    the outcome is unknown); finish() rewrites it in place."""
+    row = dict(row, when=stamp(), status="sending", http="")
+    ledger.append(row)
+    return row
+
+
+def finish(ledger, row, **fields):
+    new = dict(row, when=stamp(), **fields)
+    ledger.replace_last(row, new)
+    return new
+
+
 def patch_report(org, ledger, row, folder_id, name, label):
     """One PATCH of a report's folder (and name), read back, its ledger row; Refused when it is not
     as sent. `label` is the label the read-back expects (None: any)."""
     meta = {"folderId": folder_id}
     if name:
         meta["name"] = name
+    row = sending(ledger, row)
     status, answer = org.call("PATCH", f"{ANALYTICS}/reports/{row['id']}", {"reportMetadata": meta})
     wrong = read_back(org, "report", row["id"], folder_id, label) if status == 200 else [http_said(status, answer)]
-    ledger.append(dict(row, when=stamp(), status="failed" if wrong else "ok", http=status))
+    finish(ledger, row, status="failed" if wrong else "ok", http=status)
     if wrong:
         raise Refused(f"{row['action']} of report {row['id']}: " + "; ".join(wrong) + " - STOPPED, nothing more "
                       f"written; its row is in {rel(ledger.path)} (undo puts back every move Salesforce took)")
@@ -194,12 +211,12 @@ def do_copy(org, args, folder):
     item = by_id(org, args.kind, [args.id])[args.id]
     not_protected(item)
     decom = one_folder(org, DECOM, args.kind)
+    description = f"copy of {item['id']}, {args.tag}"
     if args.kind == "report":
-        label = item["label"][:NAME_LIMIT]
+        label = item["label"][:NAME_LIMIT].rstrip()    # Salesforce stores a name trimmed
         path = f"{ANALYTICS}/reports?cloneId={item['id']}"
-        body = {"reportMetadata": {"name": label, "folderId": decom["Id"],
-                                   "description": f"copy of {item['id']}, {args.tag}"}}
-        said = f'as "{label}", description "copy of {item["id"]}, {args.tag}"'
+        body = {"reportMetadata": {"name": label, "folderId": decom["Id"]}}     # #69 proof, Report step 1
+        said = f'as "{label}", then the description "{description}" by a PATCH of the copy'
     else:
         label, path, body = None, f"{ANALYTICS}/dashboards?cloneId={item['id']}", {"folderId": decom["Id"]}
         said = "with its title (rename and describe the copy by hand in Lightning)"
@@ -209,18 +226,25 @@ def do_copy(org, args, folder):
         print("dry run: nothing was written (--apply --vpn-off writes, with Ryan's go)")
         return
     ledger = open_ledger(folder)
+    row = sending(ledger, {"action": "copy", "kind": args.kind, "id": item["id"], "from_folder_id": item["folder_id"],
+                           "to_folder_id": decom["Id"], "old_label": item["label"], "new_label": label or "",
+                           "copy_id": "", "tag": args.tag})
     status, answer = org.call("POST", path, body)
     meta = (answer.get("reportMetadata") if args.kind == "report" else answer) if isinstance(answer, dict) else None
     copy_id = meta.get("id") if status == 200 and isinstance(meta, dict) else None
     copy_id = copy_id if isinstance(copy_id, str) and ID18.fullmatch(copy_id) else ""
-    if copy_id:
-        wrong = read_back(org, args.kind, copy_id, decom["Id"], label)
-    else:
+    if not copy_id:
         wrong = [http_said(status, answer) + ("" if status != 200 else ", without the copy's id")]
-    ledger.append({"when": stamp(), "action": "copy", "kind": args.kind, "id": item["id"],
-                   "from_folder_id": item["folder_id"], "to_folder_id": decom["Id"], "old_label": item["label"],
-                   "new_label": label or "", "copy_id": copy_id, "tag": args.tag,
-                   "status": "failed" if wrong else "ok", "http": status})
+    else:
+        wrong = read_back(org, args.kind, copy_id, decom["Id"], label)
+    if not wrong and args.kind == "report":
+        row = finish(ledger, row, status="sending", copy_id=copy_id, http=status)   # the copy's id on disk first
+        # #69 proof, Report step 5: the label and the description by a PATCH of the copy
+        status, answer = org.call("PATCH", f"{ANALYTICS}/reports/{copy_id}",
+                                  {"reportMetadata": {"name": label, "description": description}})
+        wrong = read_back(org, "report", copy_id, decom["Id"], label) if status == 200 else \
+            [http_said(status, answer) + " to the copy's description PATCH"]
+    finish(ledger, row, status="failed" if wrong else "ok", copy_id=copy_id, http=status)
     if wrong:
         raise Refused(f"copy of {args.kind} {item['id']}" + (f" (the copy is {copy_id})" if copy_id else "") + ": "
                       + "; ".join(wrong) + f" - look at it in Salesforce; its row is in {rel(ledger.path)}")
@@ -317,7 +341,8 @@ def do_move(org, args, folder):
 
 def pending_moves(rows):
     """The ledger's moves not undone yet, in order. A move Salesforce refused (HTTP 4xx) never moved;
-    one it took (or whose outcome is unknown) is undone whether its read-back passed or not. An undo
+    one it took (or whose outcome is unknown: a row a crash left "sending") is undone whether its
+    read-back passed or not. An undo
     row with status ok cancels the latest move of its id before it."""
     pending = []
     for r in rows:

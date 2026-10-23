@@ -20,7 +20,8 @@ The fake org (ReportOrg) is Salesforce as far as this tool may see it, after the
 - call(method, path, body) -> (status, answer), paths under /services/data/v67.0:
   * POST analytics/reports?cloneId=<id>, body {"reportMetadata": {"name", "folderId",
     ["description"]}} -> 200, {"reportMetadata": {"id": <new id>, "name", "folderId"}, ...};
-    the clone lands in folderId with that name (or the source's) and description.
+    the clone lands in folderId with that name (or the source's) and description. A name is
+    stored with its surrounding whitespace stripped (clone and PATCH), as Salesforce stores it.
   * POST analytics/dashboards?cloneId=<id>, body {"folderId": ...} -> 200, {"id": <new id>,
     "dashboardMetadata": {"id": <new id>, ...}, ...}; any other key in the body is refused
     400 JSON_PARSER_ERROR, as the API refused a dashboard's name and description.
@@ -415,7 +416,7 @@ class ReportOrg:
                 return 404, [{"errorCode": "NOT_FOUND", "message": "no such report"}]
             if not isinstance(meta, dict):
                 return 400, [{"errorCode": "JSON_PARSER_ERROR", "message": f"no reportMetadata ({CANARY})"}]
-            name = meta.get("name", src["Name"])
+            name = meta.get("name", src["Name"]).strip()      # Salesforce keeps a name trimmed
             if len(name) > 40:
                 return 400, [{"errorCode": "FIELD_INTEGRITY_EXCEPTION", "message": "name too long"}]
             asked = meta.get("folderId", src["OwnerId"])
@@ -459,11 +460,42 @@ class ReportOrg:
         if "folderId" in meta and drift != "folder":
             r["OwnerId"] = meta["folderId"]
         if "name" in meta and drift != "name":
-            r["Name"] = meta["name"]
+            r["Name"] = meta["name"].strip()
         if "description" in meta:
             r["Description"] = meta["description"]
         return 200, {"reportMetadata": {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"]},
                      "runningUser": {"name": CANARY}}
+
+
+def rows_on_disk(path):
+    """The ledger's rows as they are on disk now ([] when there is no file yet)."""
+    if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+        return []
+    with open(path, encoding="utf-8", newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+class Crash(BaseException):
+    """The process dies (power, kill, lost laptop) after Salesforce took a write, before the tool
+    hears back: nothing in the tool runs after it."""
+
+
+class WatchedOrg(ReportOrg):
+    """ReportOrg that, when each write (POST or PATCH) arrives, records what ledger.csv on disk holds
+    at that moment (on_disk: [(method, path, rows)]); crash_at = N makes the Nth write land in
+    Salesforce and then raise Crash."""
+
+    def __init__(self, ledger_path, **kw):
+        super().__init__(**kw)
+        self.ledger_path, self.on_disk, self.crash_at = ledger_path, [], None
+
+    def call(self, method, path, body=None):
+        if method != "GET":
+            self.on_disk.append((method, path, rows_on_disk(self.ledger_path)))
+        answer = super().call(method, path, body)
+        if method != "GET" and self.crash_at == len(self.writes()):
+            raise Crash(f"died after {method} {path}")
+        return answer
 
 
 # ---- the harness ----------------------------------------------------------------------------------
@@ -772,6 +804,96 @@ class Copy(Harness):
             self.assertEqual((ledger[0]["action"], ledger[0]["id"], ledger[0]["copy_id"], ledger[0]["status"]),
                              ("copy", source, new_id, "failed"))
 
+    def add_report(self, label, folder="r_dhis2"):
+        """A new report in the fake org (fictional label); its id."""
+        o = self.org
+        rid = fresh_id("00O")
+        o.reports.append({"Id": rid, "DeveloperName": dev_name(label), "Name": label, "OwnerId": o.fid[folder],
+                          "LastRunDate": None, "Description": ""})
+        return rid
+
+    def test_report_clone_body_is_the_proofs_and_the_description_follows_by_patch(self):
+        """#69's API proof, Report steps 1 and 5: the clone POST carries reportMetadata name and
+        folderId and nothing else; the source id and tag go on by a PATCH of the copy."""
+        for key, tag in (("meet", "#72"), ("long", "keep-list 2026-10-23"), ("girls", "before #75")):
+            o = self.fresh()
+            source = o.rid[key]
+            was = copy.deepcopy(o.report(source))
+            label = was["Name"][:40]
+            decom = o.fid["r_decom"]
+            sent = len(o.calls)
+            self.ok("copy", "--kind", "report", "--id", source, "--tag", tag, "--vpn-off", "--apply")
+            writes = self.writes_since(sent)
+            method, path, body = writes[0]
+            self.assertEqual((method, path), ("POST", f"{API_ROOT}analytics/reports?cloneId={source}"))
+            self.assertEqual(body, {"reportMetadata": {"name": label, "folderId": decom}},
+                             f"{key}: the clone body is the proof's, name and folderId only")
+            self.assertEqual([w[0] for w in writes], ["POST", "PATCH"], f"{key}: the clone, then its description")
+            ledger = self.ledger()
+            self.assertEqual(len(ledger), 1, "one ledger row per copy")
+            row = ledger[0]
+            copy_id = row["copy_id"]
+            self.assertEqual((row["action"], row["kind"], row["id"], row["tag"], row["status"]),
+                             ("copy", "report", source, tag, "ok"))
+            self.assertIsNotNone(o.report(copy_id), "the ledger's copy_id is the clone's id")
+            self.assertNotEqual(copy_id, source)
+            _, path, body = writes[1]
+            self.assertEqual(path, f"{API_ROOT}analytics/reports/{copy_id}", "the description PATCH is on the copy")
+            self.assertEqual(set(body), {"reportMetadata"})
+            meta = body["reportMetadata"]
+            self.assertLessEqual(set(meta), {"name", "description"}, f"the proof's step 5 keys only: {meta}")
+            self.assertEqual(meta.get("description"), f"copy of {source}, {tag}")
+            if "name" in meta:
+                self.assertEqual(meta["name"], label, "a name in the PATCH is the copy's own label")
+            new = o.report(copy_id)
+            self.assertEqual((new["OwnerId"], new["Name"], new["Description"]),
+                             (decom, label, f"copy of {source}, {tag}"))
+            self.assertEqual(o.report(source), was, "the source is untouched")
+
+    def test_a_refused_description_patch_keeps_the_copy_id_and_stops(self):
+        class NoDescribe(ReportOrg):
+            def patch_report(self, rid, body):
+                if rid not in self.rid.values():         # the clone's description PATCH is refused
+                    return 400, [{"errorCode": "INVALID_FIELD", "message": f"refused ({CANARY})"}]
+                return super().patch_report(rid, body)
+        self.org = o = NoDescribe()
+        source = o.rid["mentors"]
+        said = self.refused("copy", "--kind", "report", "--id", source, "--tag", "#72", "--vpn-off", "--apply")
+        self.assertEqual([w[0] for w in o.writes()], ["POST", "PATCH"])
+        new_id = o.reports[-1]["Id"]
+        self.assertNotEqual(new_id, source)
+        ledger = self.ledger()
+        self.assertEqual(len(ledger), 1)
+        self.assertEqual((ledger[0]["action"], ledger[0]["id"], ledger[0]["copy_id"], ledger[0]["status"]),
+                         ("copy", source, new_id, "failed"))
+        self.assertIn(new_id, said, "the refusal names the copy that has no description")
+        self.assertIn("400", said)
+
+    def test_a_cut_label_drops_the_space_it_ends_on(self):
+        """The 40-character cut can end on a space; Salesforce stores the name trimmed, so the tool
+        sends it trimmed and its read-back passes."""
+        ends_on_space = "Mentor sessions recorded by partner and month, all"
+        cut_before_space = L40 + " of the year"
+        cases = ((ends_on_space, "Mentor sessions recorded by partner and"), (cut_before_space, L40))
+        self.assertEqual((len(ends_on_space), ends_on_space[39], cut_before_space[40]), (50, " ", " "))
+        self.assertEqual([len(want) for _, want in cases], [39, 40])
+        for label, want in cases:
+            o = self.fresh()
+            source = self.add_report(label)
+            sent = len(o.calls)
+            self.ok("copy", "--kind", "report", "--id", source, "--tag", "#72", "--vpn-off", "--apply")
+            writes = self.writes_since(sent)
+            self.assertEqual(writes[0][0], "POST")
+            self.assertEqual(writes[0][2]["reportMetadata"]["name"], want, f"the clone's name for {label!r}")
+            for _, _, body in writes[1:]:
+                if "name" in body.get("reportMetadata", {}):
+                    self.assertEqual(body["reportMetadata"]["name"], want)
+            row = self.ledger()[-1]
+            self.assertEqual((row["action"], row["status"]), ("copy", "ok"), f"read back for {label!r}")
+            self.assertEqual(row["new_label"], want)
+            self.assertEqual((o.report(row["copy_id"])["Name"], o.report(row["copy_id"])["OwnerId"]),
+                             (want, o.fid["r_decom"]))
+
 
 class Undo(Harness):
     def test_undo_puts_every_ledger_row_back_last_first(self):
@@ -895,6 +1017,157 @@ class Undo(Harness):
         self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
         self.assertEqual([w[1] for w in self.writes_since(sent)],
                          [f"{API_ROOT}analytics/reports/{rid}" for rid in (b, a)])
+        self.assertEqual(o.state()[0], original)
+
+
+class LedgerDurability(Harness):
+    """A write's ledger row is on disk (status "sending", as tools/sf_backfill.py's) BEFORE its
+    request goes out, and finished (ok or failed, in place: the finished ledger keeps one row per
+    write) before the next write. A row a crash leaves "sending" has an unknown outcome: undo puts
+    that move back, as it does any move Salesforce may have taken."""
+
+    def watched(self, **kw):
+        self.org = WatchedOrg(self.ledger_path, **kw)
+        return self.org
+
+    def die(self, *argv):
+        """Run the tool until the fake's Crash (or an exit); what it printed is discarded."""
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                srf.main(list(argv) + ["--dir", self.dir], org=self.org)
+            except (Crash, SystemExit):
+                pass
+            else:
+                self.fail("the fake's Crash should have stopped the run")
+
+    def assert_in_flight(self, seen, rid, where, **fields):
+        rows = [x for x in seen if x["id"] == rid and x["status"] == "sending"]
+        self.assertEqual(len(rows), 1, f"{where}: a 'sending' row for {rid} on disk before its request:\n{seen}")
+        for k, v in fields.items():
+            self.assertEqual(rows[0][k], v, f"{where}: the in-flight row's {k}")
+        return rows[0]
+
+    def test_move_rows_are_on_disk_before_each_patch_and_finished_before_the_next(self):
+        o = self.watched()
+        rows = self.move_plan()
+        old = {rid: (o.report(rid)["OwnerId"], o.report(rid)["Name"]) for _, rid, _, _ in rows}
+        self.ok("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        self.assertEqual([(m, p) for m, p, _ in o.on_disk],
+                         [("PATCH", f"{API_ROOT}analytics/reports/{rid}") for _, rid, _, _ in rows])
+        for k, (_, _, seen) in enumerate(o.on_disk):
+            _, rid, to, label = rows[k]
+            self.assert_in_flight(seen, rid, f"PATCH {k + 1}", action="move", kind="report",
+                                  from_folder_id=old[rid][0], to_folder_id=o.fid[self.target(to)],
+                                  old_label=old[rid][1], new_label=label)
+            for _, earlier, _, _ in rows[:k]:
+                done = [x for x in seen if x["id"] == earlier and x["status"] == "ok"]
+                self.assertEqual(len(done), 1, f"PATCH {k + 1}: {earlier}'s finished row is on disk first:\n{seen}")
+        final = self.ledger()
+        self.assertEqual([(x["action"], x["id"], x["status"], x["http"]) for x in final],
+                         [("move", rid, "ok", "200") for _, rid, _, _ in rows], "one finished row per write")
+
+        # a failed read-back: its row is on disk before the PATCH, finished as failed after it
+        o = self.fresh()
+        o = self.watched()
+        rows = self.move_plan()
+        o.drift[rows[1][1]] = "folder"
+        self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        self.assertEqual(len(o.on_disk), 2)
+        self.assert_in_flight(o.on_disk[1][2], rows[1][1], "the failing PATCH", action="move")
+        self.assertEqual([(x["id"], x["status"]) for x in self.ledger()], [(rows[0][1], "ok"), (rows[1][1], "failed")])
+
+    def test_copy_row_is_on_disk_before_the_clone_and_holds_the_copy_id_before_the_next_write(self):
+        o = self.watched()
+        source = o.rid["mentors"]
+        self.ok("copy", "--kind", "report", "--id", source, "--tag", "#72", "--vpn-off", "--apply")
+        self.assertEqual(o.on_disk[0][0], "POST")
+        self.assert_in_flight(o.on_disk[0][2], source, "the clone POST", action="copy", kind="report", tag="#72")
+        self.assertEqual([m for m, _, _ in o.on_disk], ["POST", "PATCH"])
+        final = self.ledger()
+        self.assertEqual(len(final), 1)
+        copy_id = final[0]["copy_id"]
+        self.assertIsNotNone(o.report(copy_id))
+        held = [x for x in o.on_disk[1][2] if x["action"] == "copy" and x["id"] == source]
+        self.assertEqual([x["copy_id"] for x in held], [copy_id],
+                         "the clone's id is on disk before the description PATCH is sent")
+        self.assertEqual(final[0]["status"], "ok")
+
+        o = self.fresh()
+        o = self.watched()
+        source = o.did["reporting"]
+        self.ok("copy", "--kind", "dashboard", "--id", source, "--tag", "before #75", "--vpn-off", "--apply")
+        self.assertEqual([m for m, _, _ in o.on_disk], ["POST"])
+        self.assert_in_flight(o.on_disk[0][2], source, "the dashboard clone POST", action="copy", kind="dashboard",
+                              tag="before #75")
+        self.assertEqual([(x["action"], x["id"], x["status"]) for x in self.ledger()], [("copy", source, "ok")])
+
+    def test_undo_rows_are_on_disk_before_each_patch(self):
+        o = self.watched()
+        a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["observed"]
+        moves = self.apply_moves([[("report", a, "Decommissioned", ""), ("report", b, "GLOW Club Reports", "Stories"),
+                                   ("report", c, "Shared Name", "Implementation by month")]])
+        rows_before = len(self.ledger())
+        o.on_disk = []
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        order = [m["id"] for m in reversed(moves)]
+        self.assertEqual([p for _, p, _ in o.on_disk], [f"{API_ROOT}analytics/reports/{rid}" for rid in order])
+        for k, (_, _, seen) in enumerate(o.on_disk):
+            row = self.assert_in_flight(seen, order[k], f"undo PATCH {k + 1}")
+            self.assertNotIn(row["action"], ("move", "copy"))
+            for earlier in order[:k]:
+                done = [x for x in seen[rows_before:] if x["id"] == earlier and x["status"] == "ok"]
+                self.assertEqual(len(done), 1, f"undo PATCH {k + 1}: {earlier}'s finished row is on disk first")
+        added = self.ledger()[rows_before:]
+        self.assertEqual([(x["id"], x["status"]) for x in added], [(rid, "ok") for rid in order])
+
+    def test_a_crash_mid_write_leaves_a_row_that_undo_puts_back(self):
+        for crash_at in (1, 2):
+            o = self.fresh()
+            o = self.watched()
+            original = o.state()[0]
+            mentors, stories = o.rid["mentors"], o.rid["stories"]
+            rows = [("report", mentors, "Decommissioned", ""), ("report", stories, "GLOW Club Reports", "Monthly stories")]
+            o.crash_at = crash_at
+            self.die("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+            crashed = rows[crash_at - 1][1]
+            self.assertNotEqual(o.state()[0][crashed], original[crashed], "the crashed PATCH landed")
+            left = rows_on_disk(self.ledger_path)
+            mine = [x for x in left if x["id"] == crashed and x["action"] == "move"]
+            self.assertEqual(len(mine), 1, f"crash at write {crash_at}: the ledger knows the write was sent:\n{left}")
+            self.assertNotEqual(mine[0]["status"], "ok", "it was never read back")
+            o.crash_at = None
+            sent = len(o.calls)
+            self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+            self.assertEqual([w[1] for w in self.writes_since(sent)],
+                             [f"{API_ROOT}analytics/reports/{r[1]}" for r in reversed(rows[:crash_at])], "last first")
+            self.assertEqual(o.state()[0], original, f"crash at write {crash_at}: undo puts everything back")
+
+        # a crash during the clone: the copy row is on disk; undo leaves copies alone
+        o = self.fresh()
+        o = self.watched()
+        o.crash_at = 1
+        source = o.rid["girls"]
+        self.die("copy", "--kind", "report", "--id", source, "--tag", "#72", "--vpn-off", "--apply")
+        self.assertEqual([x["id"] for x in rows_on_disk(self.ledger_path) if x["action"] == "copy"], [source])
+        o.crash_at = None
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual(self.writes_since(sent), [], "a copy is never undone")
+
+        # a ledger a crash left: two 'sending' moves, one that landed and one that never did; both
+        # outcomes are unknown to the tool, so undo puts both back
+        o = self.fresh()
+        original = o.state()[0]
+        meet, observed = o.rid["meet"], o.rid["observed"]
+        o.report(meet).update(OwnerId=o.fid["r_cat"], Name="Club meeting frequency")
+        common = {"action": "move", "kind": "report", "from_folder_id": o.fid["r_dhis2"], "to_folder_id": o.fid["r_cat"],
+                  "status": "sending", "http": ""}
+        self.write_ledger([dict(common, id=observed, old_label=original[observed][1], new_label="Observations"),
+                           dict(common, id=meet, old_label=original[meet][1], new_label="Club meeting frequency")])
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual([w[1] for w in self.writes_since(sent)],
+                         [f"{API_ROOT}analytics/reports/{rid}" for rid in (meet, observed)])
         self.assertEqual(o.state()[0], original)
 
 

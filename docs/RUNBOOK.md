@@ -3486,7 +3486,9 @@ the live gate asks him). The folders named "Attendance" are never a source or a 
 - Copy one report or dashboard into Decommissioned before it changes:
   `python3 tools/sf_report_folders.py copy --vpn-off --kind report --id <id> --tag "#72"`, read
   the line it prints, then the same with `--apply`. A report's copy keeps its label (cut to 40
-  characters) and gets the description `copy of <id>, <tag>`. A dashboard's copy keeps its title
+  characters) and gets the description `copy of <id>, <tag>` by a PATCH of the copy once the
+  clone reads back in Decommissioned (the API proof's steps); a refused PATCH stops with the copy's
+  id in its `failed` ledger row. A dashboard's copy keeps its title
   and has no description (the API refuses both): set them by hand in Lightning if wanted.
 - Move (and relabel) reports by a plan, a CSV with the columns `kind,id,to_folder,new_label`
   (`to_folder` a folder name, exactly one report folder of that name; a blank `new_label` keeps
@@ -3502,8 +3504,9 @@ the live gate asks him). The folders named "Attendance" are never a source or a 
   dashboard `PATCH`, 400 `JSON_PARSER_ERROR`); a plan row of kind `dashboard` is refused. Check
   the hand move with SOQL on `Dashboard` (the same Id, `FolderName` following).
 - The ledger `data/sf_report_folders/ledger.csv` (owner only, never committed) holds one row per
-  write: the item, its folder and label before and after, a copy's id and tag, `ok` or `failed`
-  and the HTTP code.
+  write: the item, its folder and label before and after, a copy's id and tag, the status and the
+  HTTP code. The row is on disk as `sending` before the request and rewritten in place as `ok` or
+  `failed`; a row left `sending` (the run died) has an unknown outcome, and undo puts that move back.
 - Undo: `python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv`
   (the dry run), then with `--apply` (`--limit N` undoes the last N only). It puts each move back
   to its old folder and label, last first, and adds an `undo` row for each; a move Salesforce
