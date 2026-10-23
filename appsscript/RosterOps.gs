@@ -164,11 +164,12 @@ function planClub_(entry, current, state, region, today) {
  * insensitively against the club's girls (key_) → active: deactivated;
  * inactive: noted, nothing to do. A name spelled no such way is then matched
  * with capitals, accents and punctuation ignored (foldLetters_) against the
- * club's rows of any status: exactly one girl and she is active → deactivated
- * (folded, counted in the summary); only inactive girls → already removed; an
- * active girl plus any other, a near spelling (a typo, a middle name left out)
- * or no letters at all → returned with the closest candidates (for staff, via
- * the ReviewQueue — never for the mentor email). Nothing is ever deleted.
+ * club's rows of any status: exactly one girl, active and not removed by
+ * another line of the response → deactivated (folded, counted in the summary);
+ * only inactive girls → already removed; an active girl plus any other, one
+ * another line already removes, a near spelling (a typo, a middle name left
+ * out) or no letters at all → returned with the closest candidates (for staff,
+ * via the ReviewQueue — never for the mentor email). Nothing is ever deleted.
  * plan.removedOn is the removed_date the deactivated rows get (removedOnDay_);
  * plan.removedNames are the deactivated girls as the mentor typed them, one per
  * deactivate row (the e-mail echoes those, never the Roster's spelling).
@@ -214,7 +215,20 @@ function planModification_(entry, current, state, region, today) {
     const fold = foldLetters_(row.full_name);
     if (fold && !added[key_(row.full_name)]) (byFold[fold] = byFold[fold] || []).push(row);
   });
-  (entry.removes || []).forEach(function (name) {
+  // A row is deactivated once per response. A line spelled as enrolled removes her whatever
+  // its place in the list (exactRows), so a line reaching her only by fold never takes her
+  // from it; a later fold line reaching a row an earlier line removed is an item, as before
+  // #112 (two lines of one response are more often two girls than one typed twice), never
+  // "already removed".
+  const removes = entry.removes || [];
+  const exactRows = removes.map(function (name) {
+    const found = byName[key_(name)];
+    return found && found.status === STATUS.ACTIVE && !added[key_(name)] ? found : null;
+  });
+  const taken = function (row) {
+    return exactRows.indexOf(row) !== -1 || plan.deactivate.indexOf(row) !== -1;
+  };
+  removes.forEach(function (name) {
     const found = byName[key_(name)];
     if (added[key_(name)]) { plan.keptBoth.push(name); return; }
     if (found && found.status === STATUS.ACTIVE) {
@@ -224,7 +238,7 @@ function planModification_(entry, current, state, region, today) {
     // not spelled so on file: the same letters and digits, within this club only
     const twins = byFold[foldLetters_(name)] || [];
     const active = twins.filter(function (r) { return r.status === STATUS.ACTIVE; });
-    if (twins.length === 1 && active.length === 1) {
+    if (twins.length === 1 && active.length === 1 && !taken(active[0])) {
       plan.deactivate.push(active[0]); plan.removedNames.push(name); plan.folded.push(name);
       return;
     }

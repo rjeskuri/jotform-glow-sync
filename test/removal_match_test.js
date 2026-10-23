@@ -275,6 +275,78 @@ console.log('\nplanModification_ — ADD and REMOVE in the same response');
   }
 }
 
+console.log('\nplanModification_ — two REMOVE lines of one response that reach the same girl');
+{
+  // One rule (RUNBOOK: two lines of one response are more often two girls than one typed twice):
+  // the row is deactivated ONCE; a later line that reaches her only by fold raises the item, as
+  // before #112 — never "already removed". An exact line always removes her and the fold line is
+  // the item, whatever their order. (Lines that differ only by case/spacing never get here:
+  // parseRoster_ dedupes them.)
+  const MJ = 'Mary-Jo Thornquibble';   // row 3, the only Thornquibble on file
+  const pairs = [
+    // [removes, the line that removes her, the lines that are items, why]
+    [['Mary Jo Thornquibble', 'MaryJo Thornquibble'], 'Mary Jo Thornquibble', ['MaryJo Thornquibble'], 'fold + fold: the first line removes her'],
+    [['MaryJo Thornquibble', 'Mary Jo Thornquibble'], 'MaryJo Thornquibble', ['Mary Jo Thornquibble'], 'fold + fold, the other way round'],
+    [[MJ, 'MaryJo Thornquibble'], MJ, ['MaryJo Thornquibble'], 'exact + fold'],
+    [['MaryJo Thornquibble', MJ], MJ, ['MaryJo Thornquibble'], 'fold + exact: the exact line still removes her'],
+    [['Mary Jo Thornquibble', 'MaryJo Thornquibble', 'Mary_Jo Thornquibble'], 'Mary Jo Thornquibble',
+     ['MaryJo Thornquibble', 'Mary_Jo Thornquibble'], 'three fold lines: two items'],
+    [['Mary–Jo Thornquibble', MJ, 'Mary_Jo Thornquibble'], MJ, ['Mary–Jo Thornquibble', 'Mary_Jo Thornquibble'], 'fold + exact + fold'],
+  ];
+  pairs.forEach(([removes, remover, items, why]) => {
+    const plan = modify(removes);
+    check(why + ': row 3 deactivated once, by "' + remover + '"; ' + items.length + ' item(s) for the other line(s); nobody "already removed"',
+          plan.deactivate.map(r => r._sheetRow).join() === '3' && plan.removedNames.join('|') === remover &&
+          plan.unmatched.map(u => u.name).join('|') === items.join('|') && !plan.alreadyInactive.length && !plan.keptBoth.length &&
+          plan.issues.length === items.length && plan.issues.every(i => i.issue === ITEM) &&
+          plan.issues.map(i => i.dedupeKey).join('|') === items.map(gs.key_).join('|'),
+          outcome(plan) + ' / removedNames ' + plan.removedNames.join('|') + ' / items ' + plan.unmatched.map(u => u.name).join('|'));
+  });
+  check('exact + fold, either order: hers is not a folded removal (plan.folded empty, so the Audit names no rule)',
+        !modify([MJ, 'MaryJo Thornquibble']).folded.length && !modify(['MaryJo Thornquibble', MJ]).folded.length,
+        modify(['MaryJo Thornquibble', MJ]).folded.join('|'));
+  check('fold + fold: exactly one folded removal, the line that removed her',
+        modify(['Mary Jo Thornquibble', 'MaryJo Thornquibble']).folded.join('|') === 'Mary Jo Thornquibble',
+        modify(['Mary Jo Thornquibble', 'MaryJo Thornquibble']).folded.join('|'));
+  let plan = modify(['Mary Jo Thornquibble', 'MaryJo Thornquibble', 'Lucia Zorblewick', 'Grace Zibblewick']);
+  check('…alongside other lines: rows 3 and 2 deactivated once each, Grace already removed, one item',
+        plan.deactivate.map(r => r._sheetRow).sort((a, b) => a - b).join() === '2,3' &&
+        plan.removedNames.join('|') === 'Mary Jo Thornquibble|Lucia Zorblewick' && plan.alreadyInactive.join() === 'Grace Zibblewick' &&
+        plan.unmatched.map(u => u.name).join() === 'MaryJo Thornquibble' && plan.issues.length === 1, outcome(plan));
+
+  // the sisters case: only "Zoë" on file, "Zoe" and "Zoé" typed — before #112 both lines raised items
+  const zoe = [rowObj(['SUNRISEC-HALVERQUIST-001', P, CLUB, REGION, 'Zoë Halverquist', 'Halverquist', 'active', '2026-08-26', '', 'T!2'], 2),
+               rowObj(['SUNRISEC-IXWORTHING-001', P, CLUB, REGION, 'Dalia Ixworthing', 'Ixworthing', 'active', '2026-08-26', '', 'T!2'], 3)];
+  for (const [first, second] of [['Zoe Halverquist', 'Zoé Halverquist'], ['Zoé Halverquist', 'Zoe Halverquist']]) {
+    plan = modify([first, second], [], zoe);
+    check('sisters: REMOVE "' + first + '" then "' + second + '", only "Zoë Halverquist" on file: removed once by the first line, the second raises the item',
+          plan.deactivate.map(r => r._sheetRow).join() === '2' && plan.removedNames.join() === first && plan.folded.join() === first &&
+          plan.unmatched.map(u => u.name).join() === second && plan.issues.length === 1 && plan.issues[0].issue === ITEM &&
+          plan.issues[0].dedupeKey === gs.key_(second) && !plan.alreadyInactive.length, outcome(plan) + ' / removedNames ' + plan.removedNames.join('|'));
+  }
+  const sisterIssue = (modify(['Zoe Halverquist', 'Zoé Halverquist'], [], zoe).issues[0] || { detail: '' }).detail;
+  check('…and the second line\'s item reads as before #112 (source, the name as typed, "not on this club\'s active roster")',
+        sisterIssue.startsWith(SRC + ': "Zoé Halverquist" is not on this club\'s active roster'), sisterIssue.slice(0, 100));
+}
+
+console.log('\nplanModification_ — a girl this response also ADDs is never removed under another spelling');
+{
+  // The ADD names her enrolled spelling, so the REMOVE under another spelling is not her:
+  // today's path (an item), nobody deactivated, not "kept both" (the two keys differ).
+  for (const add of ['Lucía Zörblewick', 'LUCÍA ZÖRBLEWICK']) {
+    const plan = modify(['Lucia Zorblewick'], [add]);
+    check('ADD "' + add + '" + REMOVE "Lucia Zorblewick" (row 2 active): already on the roster; the REMOVE is an item; nobody removed; not "kept both"',
+          !plan.deactivate.length && !plan.removedNames.length && plan.alreadyActive.join() === add &&
+          plan.unmatched.map(u => u.name).join() === 'Lucia Zorblewick' && plan.issues.length === 1 && plan.issues[0].issue === ITEM &&
+          !plan.keptBoth.length && !plan.alreadyInactive.length && !plan.toAppend.length && !plan.reactivate.length, outcome(plan));
+  }
+  const plan = modify(['Lucia Zorblewick', 'Dalia Ixworthing'], ['Lucía Zörblewick']);
+  check('…while another REMOVE in the same response still works: Dalia removed, Lucía kept, one item',
+        plan.deactivate.map(r => r._sheetRow).join() === '6' && plan.removedNames.join() === 'Dalia Ixworthing' &&
+        plan.unmatched.map(u => u.name).join() === 'Lucia Zorblewick' && plan.alreadyActive.join() === 'Lucía Zörblewick' &&
+        plan.issues.length === 1, outcome(plan));
+}
+
 console.log('\nplanModification_ — an empty club, and nothing to remove');
 {
   const plan = modify(['Lucia Zorblewick'], [], []);
@@ -501,6 +573,44 @@ check('REMOVE "Dalio Ixworthing": "Dalia Ixworthing" stays active; the item; Aud
       w.status('T3') === 'active|' && w.tabs.ReviewQueue.length === 2 && (w.tabs.ReviewQueue[1] || [])[1] === ITEM &&
       /\b0 removed\b/.test(dalio) && /1 removal\(s\) did not match/.test(dalio) && !RULE.test(dalio) &&
       /could NOT find/.test(body) && body.includes('  - Dalio Ixworthing'), dalio);
+
+console.log('\n  two REMOVE lines of one response that reach the same girl');
+w = world();
+const twice = w.ctx.handleRosterChange_(change(CLUB, 'Mary Jo Thornquibble\nMaryJo Thornquibble'), RQ + '!77', TODAY);
+check('fold + fold for the one "Mary-Jo Thornquibble": removed once; Audit "1 removed" (never "2 removed"), the rule clause with count 1, ' +
+      '"1 removal(s) did not match"; no name',
+      w.status('T11') === 'inactive|' + TODAY && /\b1 removed\b/.test(twice) && !/\b2 removed\b/.test(twice) && ruleClause(twice, 1) &&
+      !ruleClause(twice, 2) && /1 removal\(s\) did not match/.test(twice) && !/already removed/.test(twice) && noGirls(twice), twice);
+check('…one ReviewQueue row, for the second line, as before #112',
+      w.tabs.ReviewQueue.length === 2 && (w.tabs.ReviewQueue[1] || [])[1] === ITEM &&
+      String((w.tabs.ReviewQueue[1] || [])[4]).startsWith(RQ + '!77: "MaryJo Thornquibble" is not on this club\'s active roster'),
+      w.tabs.ReviewQueue.length - 1 + ' row(s): ' + String((w.tabs.ReviewQueue[1] || [])[4]).slice(0, 90));
+body = (w.mails[0] || { body: '' }).body;
+check('…the e-mail: "Removed:" has the first line only; the second under "could NOT find"; no "Already removed earlier"; "Mary-Jo" never appears',
+      (section(body, 'Removed:') || []).join('|') === 'Mary Jo Thornquibble' && /could NOT find/.test(body) &&
+      body.includes('  - MaryJo Thornquibble') && !/Mary-Jo/.test(body) && !/Already removed earlier/.test(body),
+      JSON.stringify(section(body, 'Removed:')));
+w = world();
+const exactLater = w.ctx.handleRosterChange_(change(CLUB, 'MaryJo Thornquibble\nMary-Jo Thornquibble'), RQ + '!78', TODAY);
+check('fold + exact (the exact line second): removed once, by the exact line — Audit "1 removed" with NO rule clause, "1 removal(s) did not match", one item',
+      w.status('T11') === 'inactive|' + TODAY && /\b1 removed\b/.test(exactLater) && !/\b2 removed\b/.test(exactLater) && !RULE.test(exactLater) &&
+      /1 removal\(s\) did not match/.test(exactLater) && w.tabs.ReviewQueue.length === 2 && (w.tabs.ReviewQueue[1] || [])[1] === ITEM, exactLater);
+body = (w.mails[0] || { body: '' }).body;
+check('…the e-mail\'s "Removed:" is "Mary-Jo Thornquibble" (the exact line); "MaryJo Thornquibble" under "could NOT find"',
+      (section(body, 'Removed:') || []).join('|') === 'Mary-Jo Thornquibble' && body.includes('  - MaryJo Thornquibble') && /could NOT find/.test(body),
+      JSON.stringify(section(body, 'Removed:')));
+
+console.log('\n  a girl this response also ADDs is never removed under another spelling');
+w = world();
+const addToo = w.ctx.handleRosterChange_(Object.assign(change(CLUB, 'Lucia Zorblewick'), { [HQ.ADD]: 'Lucía Zörblewick' }), RQ + '!79', TODAY);
+check('ADD "Lucía Zörblewick" + REMOVE "Lucia Zorblewick": she stays active; Audit "0 removed", "1 already on the roster", "1 removal(s) did not match"; one item',
+      w.status('T1') === 'active|' && /\b0 removed\b/.test(addToo) && /1 already on the roster/.test(addToo) &&
+      /1 removal\(s\) did not match/.test(addToo) && !RULE.test(addToo) && w.tabs.ReviewQueue.length === 2 &&
+      (w.tabs.ReviewQueue[1] || [])[1] === ITEM && noGirls(addToo), addToo);
+body = (w.mails[0] || { body: '' }).body;
+check('…the e-mail: "Already on the roster (no change):" lists the ADD as typed; the REMOVE under "could NOT find"; no "Removed:" section',
+      (section(body, 'Already on the roster (no change):') || []).join('|') === 'Lucía Zörblewick' && body.includes('  - Lucia Zorblewick') &&
+      /could NOT find/.test(body) && section(body, 'Removed:') === null, JSON.stringify(section(body, 'Removed:')));
 
 console.log('\n  no mentor e-mail address: the same Roster outcome, no mail');
 w = world();
