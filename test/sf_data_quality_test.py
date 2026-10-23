@@ -227,6 +227,8 @@ class DuplicateRuleDocs(unittest.TestCase):
     DML = re.compile(r"(?m)^\s*(insert|update|delete|undelete|upsert|merge)\s|Database\.(insert|update|delete|undelete|"
                      r"upsert|merge|emptyRecycleBin)\(")
     ROLLBACK_CODE = re.compile(r"\bSavepoint\b|Database\.setSavepoint\s*\(|Database\.rollback\s*\(")
+    # an unsaved copy made in Apex: a new Account or a clone of a queried one
+    PROBE_MAKER = r"new Account\s*\(|\.\s*clone\s*\("
     # a save refused "all the same": the rule's action hedged into a refusal
     HEDGED_REFUSAL = re.compile(r"(?i)\b(inserts?|saves?|records?|batch(es)?|accounts?)\b[^.;]{0,40}?\b(refus|reject|block|"
                                 r"stop)\w*[^.;]{0,25}?\b(all the same|anyway|nevertheless|regardless|after all|despite|"
@@ -252,6 +254,56 @@ class DuplicateRuleDocs(unittest.TestCase):
     def prose(text):
         """`text` without its fenced code blocks (a quoted script is checked on its own)."""
         return re.sub(r"(?ms)^```.*?^```[^\n]*$", " ", text)
+
+    @staticmethod
+    def balanced(code, start):
+        """`code` from `start` (just past an opening bracket) to the bracket that closes it, exclusive."""
+        depth, i = 1, start
+        while i < len(code) and depth:
+            depth += {"(": 1, "[": 1, "{": 1, ")": -1, "]": -1, "}": -1}.get(code[i], 0)
+            i += 1
+        return code[start:i - 1]
+
+    def apex_bindings(self, code):
+        """(sources, probes) of an Apex script without comments: the names bound to queried accounts
+        (`x = [SELECT …]`, `Database.query(`, a cast of either, the variable of a loop over them) and the
+        names bound to unsaved copies - a variable set to `new Account(` or `x.clone(`, a List/Map/Set
+        literal or an `.add(`/`.put(`/`.addAll(` that holds one of those or a probe name already found,
+        and the variable of a loop over such a collection."""
+        sources = set(re.findall(r"(\w+)\s*[=:]\s*(?:\(\s*(?:List\s*<\s*Account\s*>|Account)\s*\)\s*|"
+                                 r"new\s+(?:List|Map)\s*<[^;({]*?>\s*\(\s*)?(?:\[\s*SELECT\b|Database\s*\.\s*query\s*\()",
+                                 code))
+        probes = set(re.findall(rf"(\w+)\s*=\s*(?:\w+\s*)?(?:{self.PROBE_MAKER})", code))
+        grew = True
+        while grew:
+            grew = False
+            for m in re.finditer(r"(\w+)\s*(?:=\s*new\s+(?:List|Map|Set)\s*<[^;{]*?>\s*\{|\.\s*(?:add|put|addAll)\s*\()",
+                                 code):
+                body = self.balanced(code, m.end())
+                if m.group(1) not in probes and (re.search(self.PROBE_MAKER, body)
+                                                 or any(re.search(rf"\b{re.escape(p)}\b", body) for p in probes)):
+                    probes.add(m.group(1))
+                    grew = True
+            for m in re.finditer(r"for\s*\(\s*Account\s+(\w+)\s*:\s*(\w+)", code):
+                var, over = m.groups()
+                if over in probes and var not in probes:
+                    probes.add(var)
+                    grew = True
+                if over in sources and var not in sources:
+                    sources.add(var)
+                    grew = True
+        return sources, probes
+
+    @staticmethod
+    def passes_record(arg, name):
+        """Whether a call's argument text `arg` hands over the record `name` itself - bare, or an element of
+        it (`name[0]`, `name.get(0)`) - rather than reading a field of it (`name.Name`) or cloning it."""
+        for m in re.finditer(rf"\b{re.escape(name)}\b", arg):
+            tail = arg[m.end():]
+            if re.match(r"\s*\.\s*clone\s*\(", tail) or re.match(r"\s*\.\s*\w+\b(?!\s*\()", tail):
+                continue
+            return True
+        return False
 
     def old_proof_claims(self, text):
         """The clauses of `text` that name the rolled-back insert proof as the proof: `rolled back`, `rolled-back`
@@ -779,15 +831,16 @@ class DuplicateRuleDocs(unittest.TestCase):
     def test_a_plan_quotes_the_diagnostic_script(self):
         """The script lives in data/ (never committed), so the plan quotes it in full in an ```apex block that does
         what the docs say: reads existing accounts with SOQL, builds three unsaved copies (`new Account(` with
-        RecordTypeId and ParentId, or `.clone(`; no name literal), upper-cases one name, keeps the result of
-        `Datacloud.FindDuplicates.findDuplicates`, and prints `DIAG|` lines built from `getDuplicateRule()` and the
-        match results' size - never a literal, never a record's Name or Id - with no DML and no savepoint."""
+        RecordTypeId and ParentId, or `.clone(`; no name literal), upper-cases one name, hands those probes (and
+        never a queried account or an empty list) to `Datacloud.FindDuplicates.findDuplicates`, keeps the result,
+        and prints `DIAG|` lines built from `getDuplicateRule()` and the match results' size - never a literal,
+        never a record's Name or Id - with no DML and no savepoint."""
         path = self.plan_path()
         name = os.path.relpath(path, REPO)
         blocks = [b for b in re.findall(r"(?ms)^```apex[^\n]*\n(.*?)^```", read(path)) if "FindDuplicates" in b]
         self.assertTrue(blocks, f"{name}: quote the diagnostic's script in full in a ```apex block that calls "
                                "`Datacloud.FindDuplicates.findDuplicates`")
-        code = blocks[0]
+        code = re.sub(r"//[^\n]*|/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m.group()), blocks[0], flags=re.S)
         self.assertRegex(code, r"(List\s*<\s*Datacloud\.FindDuplicatesResult\s*>|Datacloud\.FindDuplicatesResult\s*\[\s*\])"
                                r"\s+\w+\s*=\s*Datacloud\.FindDuplicates\.findDuplicates\s*\(",
                          f"{name}: the ```apex block keeps the result: `List<Datacloud.FindDuplicatesResult> results = "
@@ -795,13 +848,7 @@ class DuplicateRuleDocs(unittest.TestCase):
         self.assertRegex(code, r"\[\s*SELECT\b[^\]]*?\bFROM\s+Account\b",
                          f"{name}: the ```apex block reads the existing accounts it copies with SOQL (`[SELECT … FROM Account …]`)")
         # the probes: each `new Account(` to its matching `)`, wherever it sits (a statement, a list or a map literal)
-        probes = []
-        for m in re.finditer(r"new Account\s*\(", code):
-            depth, i = 1, m.end()
-            while i < len(code) and depth:
-                depth += {"(": 1, ")": -1}.get(code[i], 0)
-                i += 1
-            probes.append(code[m.end():i - 1])
+        probes = [self.balanced(code, m.end()) for m in re.finditer(r"new Account\s*\(", code)]
         clones = re.findall(r"\.clone\s*\(", code)
         self.assertGreaterEqual(len(probes) + len(clones), 3,
                                 f"{name}: the ```apex block builds three unsaved probes (`new Account(` or `.clone(`)")
@@ -835,6 +882,25 @@ class DuplicateRuleDocs(unittest.TestCase):
         self.assertTrue([p for p in parsed if p is not a and p[0] and p[0] != a[0] and p[2] == c[0][2]],
                         f"{name}: probe B copies another queried account (`Name = hh.Name`) with the Household record type, "
                         f"the one probe C uses ({c[0][2]})")
+        # the probes are what findDuplicates gets: every call's argument names a probe - a variable bound to
+        # `new Account(` or `.clone(`, the collection holding them (bare, `.get(k)`, `[i]`, `.values()`), the
+        # variable of a loop over that collection, or a copy built in the call - and never a queried account
+        # itself (`new List<Account>{ club }`, the saved original) nor nothing (`new List<Account>()`)
+        sources, probe_names = self.apex_bindings(code)
+        calls = list(re.finditer(r"FindDuplicates\s*\.\s*findDuplicates\s*\(", code))
+        self.assertTrue(calls, f"{name}: the ```apex block calls `Datacloud.FindDuplicates.findDuplicates(`")
+        for m in calls:
+            arg = re.sub(r"'(?:[^'\\]|\\.)*'", "''", self.balanced(code, m.end()))
+            shown = " ".join(arg.split())
+            passed = [s for s in sorted(sources) if self.passes_record(arg, s)]
+            self.assertFalse(passed, f"{name}: `findDuplicates({shown})` is given the queried account "
+                                     f"`{', '.join(passed)}` itself (the saved original) - the diagnostic probes unsaved "
+                                     "copies, so the argument is a probe, never a record read from the org")
+            self.assertTrue(re.search(self.PROBE_MAKER, arg)
+                            or any(re.search(rf"\b{re.escape(p)}\b", arg) for p in probe_names),
+                            f"{name}: `findDuplicates({shown})` is given none of the probes {sorted(probe_names)}: "
+                            "pass a probe variable, the probe collection or one of its elements (`probes.get(k)`), "
+                            "never an empty list")
         self.assertNotRegex(code, self.DML, f"{name}: the ```apex block runs DML: the diagnostic inserts nothing")
         self.assertNotRegex(code, self.ROLLBACK_CODE, f"{name}: the ```apex block sets a savepoint or rolls back: no DML, "
                                                       "nothing to roll back")

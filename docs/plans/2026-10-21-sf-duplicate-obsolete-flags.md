@@ -80,9 +80,11 @@ never committed; the build is written there by script or `cp`.
    with the fields, and Read on them for the users who read the reports, in the
    `Attendance_Report_Viewer` permission set. RecordTypeId is not a matching item, since
    Salesforce does not allow Record Type as a matching-rule field (review, 2026-10-21). Each
-   rule's condition is a `duplicateRuleFilter` whose `duplicateRuleFilterItems` test
-   `Account.RecordTypeId` equals the record type's Name - "Club" and "Household Account" (not
-   "Household") - for the record saved only; the candidates are whatever the Matching Rule finds.
+   rule's condition is a `duplicateRuleFilter` with one `duplicateRuleFilterItems` entry, as
+   deployed: `<table>Account</table>`, `<field>RecordType</field>`, `<operation>equals</operation>`
+   and, as its `<value>`, the record type's label - "Club" and "Household Account" (not
+   "Household", nor the DeveloperName `HH_Account`) - for the record saved only; the candidates
+   are whatever the Matching Rule finds.
    Each Duplicate Rule has its own `sortOrder` (Club 1, Household 2): the first check-only failed
    with "SortOrder must be in sequential order from 1" when both carried 1 (Result). Each rule's
    `securityOption` is `BypassSharingRules`. All three rules go in one deploy (a Duplicate Rule
@@ -107,11 +109,14 @@ never committed; the build is written there by script or `cp`.
    matches would mean a rule does not match what it should: the Rollback. The rolled-back insert
    proof of this plan's first version was dropped on 2026-10-22: Salesforce's duplicate matching
    does not see records inserted earlier in the same uncommitted transaction (Result).
-7. Read-back: retrieve the same components into `data/sf_dupflags_2026-10-21/after/` and compare
-   with `build/` (expected: Salesforce's normalisation only) and with `before/`. SOQL: `SELECT
-   DeveloperName, IsActive, SobjectType FROM DuplicateRule` and the same on `MatchingRule` show
-   all three rules active and the Contact rule "First & Last & Account" unchanged (its row and its
-   metadata file equal to `before/`); the four fields are in `describe` of each object;
+7. Read-back: retrieve the deployed components (the build's `package.xml`) into
+   `data/sf_dupflags_2026-10-21/after/` and compare with `build/` (expected: Salesforce's
+   normalisation only) and with `before/`. SOQL: `SELECT DeveloperName, IsActive, SobjectType
+   FROM DuplicateRule` and the same on `MatchingRule` show all three rules active and the Contact
+   rule "First & Last & Account" unchanged: its row as before, and its metadata file, retrieved
+   on its own into `data/sf_dupflags_2026-10-21/evidence/contact_rule_after/` (it is not a
+   deployed component, so it is not in `after/`), equal to `before/`; the four fields are in
+   `describe` of each object;
    `glow.salesforce.duplicate_account_groups` over `SELECT Id, Name, ParentId, RecordTypeId FROM
    Account` is compared by Account id with the rules' `DuplicateRecordSet`s and their
    `DuplicateRecordItems` (expected today: 0 groups and 0 sets, the two lists equal; a set
@@ -209,19 +214,24 @@ Deployed 2026-10-22 on Ryan's go; step 8 pending. In order, counts and ids only:
   0 errors. Its result was shown to Ryan; his go came on 2026-10-22.
 - 2026-10-22 12:33 UTC: deploy `0AfRP000002htOH0AY`, 9/9 components, on Ryan's go. SOQL:
   `Name_Parent_Club_Report` and `Name_Parent_Household_Report` active, the Matching Rule
-  `Name_Parent` Active, and the Contact rule "First & Last & Account" unchanged, its metadata
-  equal to `before/`. Each Duplicate Rule's `securityOption` is `BypassSharingRules`.
-- The read-back into `data/sf_dupflags_2026-10-21/after/` equals `build/` but for Salesforce's
-  normalisation (`externalId` omitted, `trackFeedHistory` added, the permission set re-sorted);
+  `Name_Parent` Active, and the Contact rule "First & Last & Account" unchanged: its metadata
+  file, retrieved on its own into `data/sf_dupflags_2026-10-21/evidence/contact_rule_after/`, is
+  byte-identical to `before/`. Each Duplicate Rule's `securityOption` is `BypassSharingRules`.
+- The read-back of the deployed components into `data/sf_dupflags_2026-10-21/after/` equals
+  `build/` but for Salesforce's normalisation (`externalId` omitted, `trackFeedHistory` added,
+  the permission set re-sorted);
   the 4 field permissions are present (Read in `Attendance_Report_Viewer`, Edit on the Admin
   profile).
-- 12:35 UTC: the rolled-back insert proof of this plan's first version ran and could not work:
-  all 7 inserts were saved and the rollback left 0 records, but 0 DuplicateRecordSets appeared,
-  because Salesforce's duplicate matching does not see records inserted earlier in the same
-  uncommitted transaction. Ryan, 2026-10-22: the no-DML `Datacloud.FindDuplicates` diagnostic
-  replaces it as the proof (DECISIONS 2026-10-22).
-- The diagnostic, the same day, over three unsaved copies of existing accounts (`DIAG|` lines,
-  rule names and match counts only): probe A, an upper-cased copy of a Club that has a parent,
+- 12:35 UTC: the rolled-back insert proof of this plan's first version ran on Ryan's go
+  (`sf apex run`, behind the live gate) and could not work: all 7 inserts were saved and the
+  rollback left 0 records, but 0 DuplicateRecordSets appeared, because Salesforce's duplicate
+  matching does not see records inserted earlier in the same uncommitted transaction. Ryan,
+  2026-10-22: the no-DML `Datacloud.FindDuplicates` diagnostic replaces it as the proof
+  (DECISIONS 2026-10-22).
+- 12:58 UTC: the diagnostic ran on Ryan's go, his decision of 2026-10-22 (`sf apex run -f
+  diag.apex`, behind the live gate; its log is `data/sf_dupflags_2026-10-21/proof/diag.log`),
+  over three unsaved copies of existing accounts (`DIAG|` lines, rule names and match counts
+  only): probe A, an upper-cased copy of a Club that has a parent,
   ran the Club rule, 1 match; probe B, a copy of a Household account, ran the Household rule,
   1 match; probe C, a Household account with a club's name and ParentId, ran the Household rule,
   1 match, the Club. The log's lines, as printed (Salesforce writes `&#124;` for `|`):
