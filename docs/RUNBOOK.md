@@ -3187,14 +3187,17 @@ dashboard that becomes it:
 
 Item 19, "GLOW of the Month Stories" (group "Report/Data Table Format"), is the report "GLOW of the
 Month Stories Report_2025" (`00ORP000005p2L32AI`). It is the table: a tabular report on no
-dashboard, kept as it is. Item 12, "New mentors recruited", has no report today: task #80 builds
+dashboard, and it stays tabular, not grouped (below). Item 12, "New mentors recruited", has no report today: task #80 builds
 it, and the file reads `new` for its Id. Item 18, "Report submitted on time", maps to "Reports
 completed on time" (`00ORP0000054DyH2AU`), which lists submission and modified dates; no report
 computes "on time" today, and that computation is a later task, on hold (#120).
 
 Every kept report and dashboard is by Partner and Month (Ryan, 2026-10-21: "This data should be
-displayed by the Partner and Month."): grouped by the partner (`DHIS2__c.Account__c`) and the
-month. Tasks #75 to #79 bring each dashboard and its reports to that, with current data.
+displayed by the Partner and Month."): the 18 reports of the five dashboards are grouped by the
+partner (`DHIS2__c.Account__c`) and the month. Item 19, the table, is the one exception to the
+grouping: it stays a tabular report, not grouped, with Partner and Month as its columns and
+filters. Tasks #75 to #79 bring each dashboard and its reports to that, with current data; #79
+("Fix GLOW Club Reporting and the GLOW of the Month table") does item 19 too.
 
 Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
 `label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
@@ -3202,9 +3205,14 @@ keep the dashboard names listed above. Item 12 has no label today; its `label_ta
 measure, "New mentors recruited", which #80 confirms when it builds the report.
 
 Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
-a pick changes later (Ryan, 2026-10-23). That is every report in "DHIS2 Reports" and every
-dashboard in "DHIS2 Dashboards" and "Dhis2 Dashbords" whose Id is not in the file; task #72 moves
-them, and the archive rule above holds for each move.
+a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's: every report in
+"DHIS2 Reports" and every dashboard in "DHIS2 Dashboards" and "Dhis2 Dashbords" whose Id is not
+in the file, and every report outside those folders that one of the 15 dashboards uses today and
+whose Id is not in the file. Today those are two of the three "Public Reports" reports on a
+dashboard: "Pending Approvals monthly report" (`00ORP000006XSy92AG`) and "New Monthly Reports by
+account" (`00ORP000006V09x2AC`); the third is item 17, kept. Task #72 moves them, and the archive
+rule above holds for each move. The two Attendance folders and the "Jotform Attendance" dashboard
+are outside the scope: epic #68 leaves them untouched.
 
 Test records are Monthly Reports filed on a test account or on no account. The test-record rule
 is one report filter on existing fields, applied to every kept report:
@@ -3212,7 +3220,11 @@ is one report filter on existing fields, applied to every kept report:
 the count of 2026-10-23 it excludes the five Monthly Reports of the two test accounts and the six
 with a blank Account, and no real partner's. `Partner_Status__c` is not the rule: it is blank on
 four real partners with 23 Monthly Reports, the same as on the test accounts. Tasks #75 to #79
-add the filter as they fix each dashboard.
+add the filter as they fix each dashboard, and #79 adds it to item 19, the table, too. The filter
+matches a substring: a partner whose account name contains "test" (a "Contest" or "Protestant"
+partner, say) would drop out of every kept report, so a new partner's account name (its line in
+`glow/sf_partners.csv`, RUNBOOK "Club accounts in Salesforce") is checked against the filter
+when the partner is added.
 
 ## Interactive dashboard in Salesforce
 
