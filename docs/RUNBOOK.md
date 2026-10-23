@@ -1651,7 +1651,7 @@ lines counted before the apply, the verify and the browser checks - and its roll
 ## Club names that look alike
 
 - **When:** before GLOW renames clubs into a country format, to see which names already collide or nearly do; as the input for the duplicate-club checks (ticket #84).
-- **Status:** built 2026-10 (ticket #94); the live run awaits the country source. Which Salesforce Account field holds a partner's country (the ticket outline's step 4) is not settled: the candidates are `Country__c` (a picklist), `BillingCountry` and `ShippingCountry`, and their non-blank counts over the partner accounts are not taken yet. Until then, run without `--countries`.
+- **Status:** built 2026-10 (ticket #94); it runs without `--countries` meanwhile, and the `country` column fills once the Account field is chosen. Which Salesforce Account field holds a partner's country (the ticket outline's step 4) is not settled: the candidates are `Country__c` (a picklist), `BillingCountry` and `ShippingCountry`, and their non-blank counts over the partner accounts are not taken yet.
 - **Dry run:** the whole tool is one: it reads exports and writes only its own CSV.
 - **Apply:** none; a rename it points at goes through "Renaming a club".
 - **Verify:** the counts line, against the CSV's rows.
@@ -1666,6 +1666,7 @@ regions and counts, never a girl's name. Its exports and its CSV live in
 `data/`, which stays uncommitted (the Roster export holds the girls' names).
 
 ```bash
+mkdir -p data/club_names                     # the sync's --summary-json does not make it
 python3 tools/sheets_client.py export Roster data/roster_<date>.csv
 python3 tools/sheets_client.py export Partners data/partners_<date>.csv
 # optional, for the sf_name column: each region's sync dry run with its summary (Jotform GET only)
@@ -1691,14 +1692,16 @@ Two names match as
 
 A group is every club joined by a chain of matches, so two clubs in one group
 need not match each other directly. The first line counts them:
-`groups: N (same A, folded B, close C); clubs in them: M`. A group counts
-under its **weakest** match: a group of a `same` pair plus a club only `close`
-to them is one `close` group. Each group follows, one line per club with its
+`groups: N (same A, folded B, close C); clubs in them: M`. A mixed group
+counts under the **weakest link it needs** to be one group: `same` when its
+`same` pairs alone connect it, else `folded` when its `same` and `folded`
+pairs do, else `close`. So two `same` pairs joined only by a `close` pair are
+one `close` group, although every club's own `match` is `same`. Each group follows, one line per club with its
 partner, region, form and active girls. The seven names two partners share
 ("Club names two partners share") come out with match `same`, and with
 `--sf-names` each of those clubs' `sf_name` is its `<club> - <partner>`.
 
-The CSV (`--csv`; only the header when there is no group), one row per club in a group:
+The CSV (`--csv`, its folder made when missing; only the header when there is no group), one row per club in a group:
 
 | Column | What |
 |---|---|

@@ -551,6 +551,95 @@ class SimilarClubNames(unittest.TestCase):
             ("Ocean Root", BETA): ("close", "yes"),
         })
 
+    def group_kind_run(self, clubs, name):
+        roster = self.ws.roster(clubs, name=f"{name}.csv")
+        out_csv = self.ws.path(f"{name}_out.csv")
+        code, out = run_main(["similar", "--roster", roster, "--partners", self.ws.partners(), "--csv", out_csv])
+        self.assertIn(code, (0, None), out)
+        return counts_line(self, out)[0], read_csv(out_csv)[1], out
+
+    def test_a_group_counts_under_the_weakest_link_needed_to_connect_it(self):
+        # two same-pairs joined only by close links: every club's strongest match is same,
+        # but the group needs a close link to be one group, so it counts as close
+        self.assertEqual(club_names.match_kind("Valley Stars", "Valley Starz"), "close")
+        counts, rows, out = self.group_kind_run([
+            (ALPHA, "Valley Stars", "Africa", 2, 0),
+            (BETA, "VALLEY STARS", "Asia", 2, 0),
+            (GAMMA, "Valley Starz", "Latin America", 2, 0),
+            (DELTA, "valley starz", "Africa", 2, 0),
+            (DELTA, "Northern Lights", "Africa", 2, 0),
+        ], "close_link")
+        self.assertEqual(counts, (1, 0, 0, 1, 4), out)
+        self.assertEqual({(r["club"], r["partner"]): r["match"] for r in rows}, {
+            ("Valley Stars", ALPHA): "same", ("VALLEY STARS", BETA): "same",
+            ("Valley Starz", GAMMA): "same", ("valley starz", DELTA): "same"})
+        self.assertEqual(len({r["group"] for r in rows}), 1)
+
+    def test_two_same_pairs_joined_only_by_a_folded_link_count_as_folded(self):
+        self.assertEqual(club_names.match_kind("Niñas Unidas", "Ninas-Unidas"), "folded")
+        counts, rows, out = self.group_kind_run([
+            (ALPHA, "Niñas Unidas", "Latin America", 2, 0),
+            (BETA, "NIÑAS  UNIDAS", "Latin America", 2, 0),
+            (GAMMA, "Ninas-Unidas", "U.S", 2, 0),
+            (DELTA, "ninas-unidas", "Asia", 2, 0),
+            (DELTA, "River Roots", "Asia", 2, 0),
+        ], "folded_link")
+        self.assertEqual(counts, (1, 0, 1, 0, 4), out)
+        self.assertEqual({r["match"] for r in rows}, {"same"})
+        self.assertEqual(len(rows), 4)
+        # and a group its same-links alone connect counts as same, whatever else links it
+        counts, rows, out = self.group_kind_run([
+            (ALPHA, "Golden Wings", "Africa", 2, 0),
+            (BETA, "GOLDEN WINGS", "Asia", 2, 0),
+            (GAMMA, "golden  wings", "Asia", 2, 0),
+        ], "same_link")
+        self.assertEqual(counts, (1, 1, 0, 0, 3), out)
+
+    def test_digit_runs_split_by_a_space_are_not_the_same_digits(self):
+        self.assertIsNone(club_names.match_kind("Club 1 2", "Club 12"))
+        self.assertIsNone(club_names.match_kind("Club 12", "Club 1 2"))
+
+    def test_an_active_row_without_a_name_is_not_an_active_girl(self):
+        roster = self.ws.path("blank_name.csv")
+        with open(roster, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(ROSTER_COLS)
+            w.writerow(["DEMOCLUB-SAMPLE-001", BETA, "Silver Light", "Asia", "  ", "", "active",
+                        "2026-09-01", "", "test"])                    # the club's only row
+            girl = self.ws.next_girl()
+            w.writerow(["DEMOCLUB-SAMPLE-002", ALPHA, "Silver Lights", "Africa", girl, girl.split()[-1],
+                        "active", "2026-09-01", "", "test"])
+        out_csv = self.ws.path("blank_name_out.csv")
+        code, out = run_main(["similar", "--roster", roster, "--partners", self.ws.partners(), "--csv", out_csv])
+        self.assertIn(code, (0, None), out)
+        _, rows = read_csv(out_csv)
+        self.assertEqual({r["club"]: (r["status"], r["active_girls"], r["form"]) for r in rows}, {
+            "Silver Light": ("inactive", "0", "none (no active girl)"),
+            "Silver Lights": ("active", "1", "Africa Attendance Form"),
+        })
+
+    def test_a_chain_of_four_where_only_neighbours_match_is_one_group(self):
+        chain = ["Sunrise Club", "Sunrize Club", "Sunrize Klub", "Sunrize Klab"]
+        for i, a in enumerate(chain):                 # neighbours close (0.917), the rest below 0.85
+            for b in chain[i + 1:]:
+                ratio = difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+                self.assertEqual(ratio >= 0.85, chain.index(b) == i + 1, (a, b, ratio))
+        counts, rows, out = self.group_kind_run(
+            [(PARTNERS[i], club, ("Africa", "Asia", "Latin America", "U.S")[i], 2, 0)
+             for i, club in enumerate(chain)] + [(ALPHA, "Ocean Voices", "Africa", 2, 0)], "chain4")
+        self.assertEqual(counts, (1, 0, 0, 1, 4), out)
+        self.assertEqual(sorted(r["club"] for r in rows), sorted(chain))
+        self.assertEqual(len({r["group"] for r in rows}), 1)
+
+    def test_fold_applies_compatibility_folding(self):
+        for name, want in (("ＳＵＮＲＩＳＥ Club", "sunrise club"),     # full-width letters
+                           ("Ｇｌｏｗ  Ｃｌｕｂ １", "glow club 1"),        # full-width digit too
+                           ("ﬁre Girls", "fire girls"),                 # the fi ligature
+                           ("Oﬄine Stars", "offline stars")):          # the ffl ligature
+            with self.subTest(name=name):
+                self.assertEqual(club_names.fold(name), want)
+        self.assertEqual(club_names.match_kind("ＳＵＮＲＩＳＥ Club", "Sunrise Club"), "folded")
+
     def test_no_lookalikes_prints_zero_groups_and_writes_the_header_only(self):
         roster = self.ws.roster([
             (ALPHA, "Harbor Club 1", "Africa", 2, 0),

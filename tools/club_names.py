@@ -11,7 +11,9 @@ Club names that look alike across partners and regions (ticket #94): read-only, 
              close   folded names at least --threshold alike (difflib ratio) that carry the
                      same numbers in the same order ("Club 1" and "Club 2" never match)
            A club's `match` is the strongest kind joining it to its group; a group counts under
-           its weakest. --csv writes one row per grouped club; --countries (partner,country)
+           the weakest kind of link it needs to be one group (same when its same pairs alone
+           connect it, else folded when same and folded pairs do, else close). --csv (its
+           folder made when missing) writes one row per grouped club; --countries (partner,country)
            and --sf-names (the sync's --summary-json files: what each club sends to question 5)
            fill the country and sf_name columns.
 
@@ -146,12 +148,9 @@ def form_of(club, marks):
     return TITLES[club["region"]]
 
 
-def groups_of(clubs, threshold):
-    """[[club, ...]]: the connected components (union-find) of the lookalike pairs, each club
-    carrying its strongest `match`; groups and clubs sorted by folded name, then partner."""
-    keys = [key(c["club"]) for c in clubs]
-    folds = [fold(c["club"]) for c in clubs]
-    parent = list(range(len(clubs)))
+def _components(nodes, links):
+    """The connected components of `nodes` over `links` [(i, j)] (union-find)."""
+    parent = {n: n for n in nodes}
 
     def root(i):
         while parent[i] != i:
@@ -159,25 +158,42 @@ def groups_of(clubs, threshold):
             i = parent[i]
         return i
 
-    best = {}                                           # club index -> rank of its strongest kind
+    for i, j in links:
+        parent[root(i)] = root(j)
+    out = {}
+    for n in nodes:
+        out.setdefault(root(n), []).append(n)
+    return list(out.values())
+
+
+def groups_of(clubs, threshold):
+    """[(kind, [club, ...])]: the connected components of the lookalike pairs, each club carrying
+    its strongest `match`, each group the weakest kind of link it needs to be one group (`same`
+    when its same pairs alone connect it, else `folded` when same and folded pairs do, else
+    `close`); groups and clubs sorted by folded name, then partner."""
+    keys = [key(c["club"]) for c in clubs]
+    folds = [fold(c["club"]) for c in clubs]
+    links = []                                          # (i, j, rank of the pair's kind)
     for i in range(len(clubs)):
         for j in range(i + 1, len(clubs)):
             kind = _kind(keys[i], keys[j], folds[i], folds[j], threshold)
-            if kind is None:
-                continue
-            rank = KINDS.index(kind)
-            for n in (i, j):
-                best[n] = min(best.get(n, rank), rank)
-            parent[root(i)] = root(j)
-    members = {}
-    for i in best:
-        members.setdefault(root(i), []).append(i)
+            if kind is not None:
+                links.append((i, j, KINDS.index(kind)))
+    best = {}                                           # club index -> rank of its strongest kind
+    for i, j, rank in links:
+        for n in (i, j):
+            best[n] = min(best.get(n, rank), rank)
     order = lambda i: (folds[i], keys[i], key(clubs[i]["partner"]))
     out = []
-    for idx in members.values():
+    for idx in _components(sorted(best), [(i, j) for i, j, _ in links]):
         idx.sort(key=order)
-        out.append([dict(clubs[i], match=KINDS[best[i]]) for i in idx])
-    out.sort(key=lambda g: (fold(g[0]["club"]), key(g[0]["club"]), key(g[0]["partner"])))
+        mine = set(idx)
+        inside = [(i, j, rank) for i, j, rank in links if i in mine]
+        kind = next((KINDS[r] for r in range(len(KINDS) - 1)
+                     if len(_components(idx, [(i, j) for i, j, rank in inside if rank <= r])) == 1),
+                    KINDS[-1])
+        out.append((kind, [dict(clubs[i], match=KINDS[best[i]]) for i in idx]))
+    out.sort(key=lambda g: (fold(g[1][0]["club"]), key(g[1][0]["club"]), key(g[1][0]["partner"])))
     return out
 
 
@@ -192,9 +208,9 @@ def similar(args):
 
     rows = []
     weakest = {kind: 0 for kind in KINDS}
-    for n, group in enumerate(groups, 1):
+    for n, (kind, group) in enumerate(groups, 1):
         same_partner = "yes" if len({key(c["partner"]) for c in group}) == 1 else "no"
-        weakest[max((c["match"] for c in group), key=KINDS.index)] += 1
+        weakest[kind] += 1
         for c in group:
             rows.append({
                 "group": n, "match": c["match"], "club": c["club"], "partner": c["partner"],
@@ -206,9 +222,9 @@ def similar(args):
 
     print(f"groups: {len(groups)} (same {weakest['same']}, folded {weakest['folded']}, "
           f"close {weakest['close']}); clubs in them: {len(rows)}")
-    for n in range(1, len(groups) + 1):
+    for n, (kind, _) in enumerate(groups, 1):
         mine = [r for r in rows if r["group"] == n]
-        print(f"\ngroup {n}: {max((r['match'] for r in mine), key=KINDS.index)}"   # its weakest, as counted
+        print(f"\ngroup {n}: {kind}"                    # the weakest link it needs, as counted
               + (", one partner" if mine[0]["same_partner"] == "yes" else ""))
         for r in mine:
             extra = "".join(f", {label} {r[col]}" for label, col in (("country", "country"),
@@ -217,6 +233,7 @@ def similar(args):
                   f"{r['region'] or '(blank)'}, form {r['form']}, {r['active_girls']} active{extra}")
 
     if args.csv:
+        os.makedirs(os.path.dirname(os.path.abspath(args.csv)), exist_ok=True)   # as sheets_client's export
         with open(args.csv, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
             w.writeheader()
