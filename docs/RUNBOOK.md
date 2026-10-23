@@ -3538,6 +3538,49 @@ partner, say) would drop out of every kept report, so a new partner's account na
 `glow/sf_partners.csv`, RUNBOOK "Club accounts in Salesforce") is checked against the filter
 when the partner is added.
 
+### Copying and moving reports and dashboards
+
+`tools/sf_report_folders.py` (ticket #71) makes the copies and the moves of the archive rule
+above through the Analytics API, exactly as the API proof sent them. It never deletes, and it
+reads `Folder`, `Report`, `Dashboard` and `DashboardComponent` only, never a record. Every
+subcommand needs `--vpn-off`; `copy`, `move` and `undo` are dry runs until `--apply` (Ryan's go,
+the live gate asks him). The folders named "Attendance" are never a source or a target.
+
+- List what a folder holds (read-only; CSV on stdout, the counts on stderr, which must equal SOQL's
+  `SELECT OwnerId, COUNT(Id) FROM Report GROUP BY OwnerId` for that folder):
+  `python3 tools/sf_report_folders.py list --vpn-off --folder "DHIS2 Reports" [--folder "Dhis2 Dashbords"] [--kind report|dashboard]`.
+  The `used_by` column lists the dashboards with a component on each report.
+- Copy one report or dashboard into Decommissioned before it changes:
+  `python3 tools/sf_report_folders.py copy --vpn-off --kind report --id <id> --tag "#72"`, read
+  the line it prints, then the same with `--apply`. A report's copy keeps its label (cut to 40
+  characters) and gets the description `copy of <id>, <tag>` by a PATCH of the copy once the
+  clone reads back in Decommissioned (the API proof's steps); a refused PATCH stops with the copy's
+  id in its `failed` ledger row. A dashboard's copy keeps its title
+  and has no description (the API refuses both): set them by hand in Lightning if wanted.
+- Move (and relabel) reports by a plan, a CSV with the columns `kind,id,to_folder,new_label`
+  (`to_folder` a folder name, exactly one report folder of that name; a blank `new_label` keeps
+  the label; a label is at most 40 characters, and a report whose current label is longer moves
+  only with its label kept, since undo could not put that label back):
+  `python3 tools/sf_report_folders.py move --vpn-off --plan <plan.csv>` (the dry run: one line per
+  row with the current label and folder and the change), then `--apply --limit 1` first, check
+  that report in Salesforce, then `--apply` for the rest. The whole plan is checked before the
+  first write: a report that a dashboard outside Decommissioned still uses is refused a move to
+  Decommissioned. Each move keeps the report's Id and is read back by SOQL; a read-back that
+  differs stops the run.
+- Dashboards are moved and renamed by hand in Lightning (the API proof: Salesforce refuses every
+  dashboard `PATCH`, 400 `JSON_PARSER_ERROR`); a plan row of kind `dashboard` is refused. Check
+  the hand move with SOQL on `Dashboard` (the same Id, `FolderName` following).
+- The ledger `data/sf_report_folders/ledger.csv` (owner only, never committed) holds one row per
+  write: the item, its folder and label before and after, a copy's id and tag, the status and the
+  HTTP code. The row is on disk as `sending` before the request and rewritten in place as `ok` or
+  `failed`; a row left `sending` (the run died) has an unknown outcome, and undo puts that move back.
+- Undo: `python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv`
+  (the dry run), then with `--apply` (`--limit N` undoes the last N only). It puts each move back
+  to its old folder and label, last first, and adds an `undo` row for each; a move Salesforce
+  refused (HTTP 4xx) never moved and is left as it is, and a move already undone is not undone
+  again. Copies stay in
+  Decommissioned.
+
 ## Interactive dashboard in Salesforce
 
 - **When:** before a change to the interactive dashboard (#81, #82, #83), or to read how it counts.
