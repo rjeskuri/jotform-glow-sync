@@ -161,17 +161,25 @@ function planClub_(entry, current, state, region, today) {
  * reactivated (same ID), unless removed after the response was sent
  * (keptRemoved: she stays removed, and a REMOVE of the same name is then
  * "already removed"); unknown → minted. Removes: matched case-
- * insensitively against the club's ACTIVE girls → deactivated; already
- * inactive → noted, nothing to do; anything that matches nobody is returned
- * with the closest candidates (for staff, via the ReviewQueue — never for the
- * mentor email). Nothing is ever deleted. plan.removedOn is the removed_date
- * the deactivated rows get (removedOnDay_).
+ * insensitively against the club's girls (key_) → active: deactivated;
+ * inactive: noted, nothing to do. A name spelled no such way is then matched
+ * with capitals, accents and punctuation ignored (foldLetters_) against the
+ * club's rows of any status: exactly one girl, active and not removed by
+ * another line of the response → deactivated (folded, counted in the summary);
+ * only inactive girls → already removed; an active girl plus any other, one
+ * another line already removes, a near spelling (a typo, a middle name left
+ * out) or no letters at all → returned with the closest candidates (for staff,
+ * via the ReviewQueue — never for the mentor email). Nothing is ever deleted.
+ * plan.removedOn is the removed_date the deactivated rows get (removedOnDay_);
+ * plan.removedNames are the deactivated girls as the mentor typed them, one per
+ * deactivate row (the e-mail echoes those, never the Roster's spelling).
  *
  * entry: {partner, club, adds, removes, duplicates, source, submitted (optional)}
  */
 function planModification_(entry, current, state, region, today) {
   const plan = { toAppend: [], reactivate: [], deactivate: [], keptRemoved: [], issues: [],
-                 alreadyActive: [], alreadyInactive: [], keptBoth: [], unmatched: [] };
+                 alreadyActive: [], alreadyInactive: [], keptBoth: [], unmatched: [],
+                 removedNames: [], folded: [] };
   const sentDay = submittedDay_(entry);
   plan.removedOn = removedOnDay_(sentDay, today);
   if (entry.duplicates && entry.duplicates.length) plan.issues.push(duplicateNamesIssue_(entry));
@@ -199,11 +207,42 @@ function planModification_(entry, current, state, region, today) {
 
   const activeNames = current.filter(function (r) { return r.status === STATUS.ACTIVE; })
       .map(function (r) { return r.full_name; });
-  (entry.removes || []).forEach(function (name) {
+  // The club's rows by their spelling with capitals, accents and punctuation ignored, any
+  // status. A girl this response also ADDs (her enrolled spelling) is left out: a REMOVE of
+  // her under another spelling takes today's path (an item), never deactivates her.
+  const byFold = {};
+  current.forEach(function (row) {
+    const fold = foldLetters_(row.full_name);
+    if (fold && !added[key_(row.full_name)]) (byFold[fold] = byFold[fold] || []).push(row);
+  });
+  // A row is deactivated once per response. A line spelled as enrolled removes her whatever
+  // its place in the list (exactRows), so a line reaching her only by fold never takes her
+  // from it; a later fold line reaching a row an earlier line removed is an item, as before
+  // #112 (two lines of one response are more often two girls than one typed twice), never
+  // "already removed".
+  const removes = entry.removes || [];
+  const exactRows = removes.map(function (name) {
+    const found = byName[key_(name)];
+    return found && found.status === STATUS.ACTIVE && !added[key_(name)] ? found : null;
+  });
+  const taken = function (row) {
+    return exactRows.indexOf(row) !== -1 || plan.deactivate.indexOf(row) !== -1;
+  };
+  removes.forEach(function (name) {
     const found = byName[key_(name)];
     if (added[key_(name)]) { plan.keptBoth.push(name); return; }
-    if (found && found.status === STATUS.ACTIVE) { plan.deactivate.push(found); return; }
+    if (found && found.status === STATUS.ACTIVE) {
+      plan.deactivate.push(found); plan.removedNames.push(name); return;
+    }
     if (found) { plan.alreadyInactive.push(name); return; }   // already removed earlier
+    // not spelled so on file: the same letters and digits, within this club only
+    const twins = byFold[foldLetters_(name)] || [];
+    const active = twins.filter(function (r) { return r.status === STATUS.ACTIVE; });
+    if (twins.length === 1 && active.length === 1 && !taken(active[0])) {
+      plan.deactivate.push(active[0]); plan.removedNames.push(name); plan.folded.push(name);
+      return;
+    }
+    if (twins.length && !active.length) { plan.alreadyInactive.push(name); return; }
     plan.unmatched.push({ name: name, candidates: closestNames_(name, activeNames) });
   });
 
@@ -459,8 +498,25 @@ function levelTag_(words) {
  * section letters or school levels differ ("Harbor Club 1" / "Harbor Club
  * (2)", "Orbit (A)" / "Orbit (B)", "Las Lomitas primaria" / "Las Lomitas
  * secundaria") never are.
+ *
+ * Two names that end in the SAME bracket, each with words of its own before
+ * it — a partner's clubs at one place, "Tigers (Testville Youth Centre)" /
+ * "Lions (Testville Youth Centre)" — are compared without that bracket
+ * (placeSuffix_), by the rules above: the place's words lifted similarity_ of
+ * the whole names over SIMILAR and held new clubs (#111, the 2026-10-08 hold).
+ * The brackets must fold to the same words (matchWords_: case, accents,
+ * punctuation) — "Tigers (Testville Youth Centre)" / "Lions (Testville Youth
+ * Center)" is compared whole, and held; a bracket only similarity_-close is
+ * NOT stripped, since "(Site 1)" / "(Site 2)" (0.83) would then read as one
+ * place and two clubs that only their tags tell apart as one club.
+ * The place bracketed on one side only, or a name that is only the place, is
+ * compared whole, as before — so "Lion Testville Youth Centre" is still close
+ * to "Lions (Testville Youth Centre)", and "(Testville Youth Centre)" to
+ * "Tigers (Testville Youth Centre)".
  */
 function clubNamesClose_(a, b) {
+  const pa = placeSuffix_(a), pb = placeSuffix_(b);
+  if (pa && pb && pa.place === pb.place) { a = pa.own; b = pb.own; }
   const wa = matchWords_(a), wb = matchWords_(b);
   const differ = function (tag) { const x = tag(wa), y = tag(wb); return x && y && x !== y; };
   if (differ(numberTag_) || differ(letterTag_) || differ(levelTag_)) return false;
@@ -468,6 +524,19 @@ function clubNamesClose_(a, b) {
   const bare = function (s) { return matchWords_(String(s == null ? '' : s).replace(/\([^)]*\)/g, ' ')); };
   const ba = bare(a), bb = bare(b);
   return (ba.length < wa.length || bb.length < wb.length) && wordsClose_(ba, bb, CLUB_FILLER);
+}
+
+/**
+ * A club name split at its trailing bracket — {own: what is before it, place:
+ * the bracket's words as matchWords_ joins them} — when it has one AND a word
+ * that is not filler (CLUB_FILLER) before it: "Tigers (Testville Youth
+ * Centre)". null for "Tigers", "(Testville Youth Centre)" or "Club (Testville
+ * Youth Centre)", which clubNamesClose_ compares whole.
+ */
+function placeSuffix_(s) {
+  const m = /^(.*\S)\s*\(([^()]*)\)\s*$/.exec(String(s == null ? '' : s));
+  if (!m || !matchWords_(m[1]).some(function (w) { return !CLUB_FILLER.test(w); })) return null;
+  return { own: m[1], place: matchWords_(m[2]).join(' ') };
 }
 
 /**

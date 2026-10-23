@@ -48,7 +48,11 @@ letter, mark or digit, letters split from digits).
     so a typo plus an added school is caught. Generic words (`glow global club girls sec
     sch primaria …`) are not distinctive; names whose numbers, section letters or school
     levels differ (`Harbor Club 1` / `Harbor Club 2`, `Orbit (A)` / `Orbit (B)`,
-    `… primaria` / `… secundaria`) are never close.
+    `… primaria` / `… secundaria`) are never close. 2026-10-23 (#111): two names that end
+    in the same bracket (folded words), each with a distinctive word before it — a partner's
+    clubs at one place — are compared without that bracket (`placeSuffix_`); a bracket on
+    one side only, or a name that is only the place, is compared whole as above (DECISIONS
+    2026-09-28, the 2026-10-23 bullet).
   - `partner`: "My organization is not in this list" was chosen and the typed name is not a
     partner on file but is close to one: equal words (accents, punctuation), acronym
     (`TARN` / `Test Aid Relief Network`, either way round), distinctive words contained, or

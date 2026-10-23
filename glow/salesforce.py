@@ -14,9 +14,10 @@ short description, never a response body.
 
 Beside the client, what every Salesforce tool relies on: the org's record types, ids and the pilot
 accounts on hold; how the attendance processor compares a submitted club name with an Account's
-(sf_match); the characters no name may hide (has_invisible); the error codes of an answer, never
-its words (error_codes); the partner map (glow/sf_partners.csv, read_partners); and the tools'
---vpn-off (add_vpn_flag, require_vpn_off). Their owner-only files: glow/private_files.py.
+(sf_match); the groups of Accounts the Account duplicate rule reports (duplicate_account_groups);
+the characters no name may hide (has_invisible); the error codes of an answer, never its words
+(error_codes); the partner map (glow/sf_partners.csv, read_partners); and the tools' --vpn-off
+(add_vpn_flag, require_vpn_off). Their owner-only files: glow/private_files.py.
 """
 import argparse
 import csv
@@ -284,6 +285,23 @@ def sf_match(submitted, name):
         if x != y and ux != uy and _lower(ux) != _lower(uy):
             return False
     return True
+
+
+# ---- the Account duplicate rule's Python side ------------------------------------------------------
+def duplicate_account_groups(accounts):
+    """The groups of two or more Accounts the Account matching rule reports (RUNBOOK "Duplicate and
+    obsolete records in Salesforce"), for the read-back and the monthly check: the same Name ignoring
+    capitals and spacing (casefold, so 'Straße' is 'STRASSE' - not text.key's lower(); any run of
+    whitespace, a tab or a no-break space included, is one space; an accent is a different name), the
+    same ParentId ("" and a missing key are null: partner-less) and the same RecordTypeId (missing is
+    null). `accounts` as `SELECT Id, Name, ParentId, RecordTypeId FROM Account` gives them; each group
+    is the Accounts' Ids, sorted, the groups sorted too; the input is left as it is."""
+    groups = {}
+    for account in accounts:
+        name = " ".join(str(account.get("Name") or "").split()).casefold()
+        parent, record_type = account.get("ParentId") or None, account.get("RecordTypeId") or None
+        groups.setdefault((name, parent, record_type), []).append(account["Id"])
+    return sorted(sorted(ids) for ids in groups.values() if len(ids) > 1)
 
 
 # ---- names ----------------------------------------------------------------------------------------
