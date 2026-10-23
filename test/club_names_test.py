@@ -1067,6 +1067,140 @@ class PlanRenames(unittest.TestCase):
         self.assert_refused(code, out, out_csv, [wide[:20]])
         self.assertEqual(plan_counts(self, out)[2], 1, out)
 
+    def test_bad_characters_from_the_format_or_the_countries_file_are_refused(self):
+        # the format brings the "|": every club in scope is refused and named
+        code, out, _, _, out_csv = self.plan(PLAN_ROSTER, "badfmt", fmt="{country} | {club}", expect_ok=False)
+        self.assert_refused(code, out, out_csv, sorted({c for _, c, _, _ in PLANNED}))
+        self.assertEqual(plan_counts(self, out)[2], len(PLANNED), out)
+        for club in ("Harbor Club 1", "Ocean Voices"):                    # inactive, retired: not refused
+            self.assertNotIn(club, out)
+        for n, fmt in enumerate(("{country} {{ {club}", "{club} }} {country}")):  # a brace, escaped or not
+            with self.subTest(format=fmt):
+                code, out, _, _, out_csv = self.plan(PLAN_ROSTER, f"badbrace{n}", fmt=fmt, expect_ok=False)
+                self.assertNotIn(code, (0, None), out)
+                self.assertFalse(os.path.exists(out_csv))
+        # the countries file brings them: only those partners' clubs are refused
+        clubs = [
+            (ALPHA, "Sunrise Club", "Africa", 2, 0, "Sunrise Club"),        # Kenya|East
+            (ALPHA, "Shining Stars", "Africa", 2, 0, "Shining Stars"),      # Kenya|East
+            (BETA, "Morning Star", "Asia", 2, 0, "Morning Star"),           # Kenya: fine
+            (GAMMA, "Niñas Unidas", "Latin America", 2, 0, "Niñas Unidas"),  # Peru {Sur}
+            (DELTA, "River Roots", "Asia", 2, 0, "River Roots"),            # Nepal: fine
+            (DELTA, "Harbor Club 1", "Asia", 0, 2, None),                   # inactive: not planned
+        ]
+        countries = [[ALPHA, "Kenya|East"], [BETA, "Kenya"], [GAMMA, "Peru {Sur}"], [DELTA, "Nepal"]]
+        code, out, _, _, out_csv = self.plan(clubs, "badcountry", countries=countries, expect_ok=False)
+        self.assert_refused(code, out, out_csv, ["Sunrise Club", "Shining Stars", "Niñas Unidas"])
+        self.assertEqual(plan_counts(self, out)[2], 3, out)
+        # the control: the same clubs with clean countries are planned
+        clean = [[ALPHA, "Kenya"], [BETA, "Kenya"], [GAMMA, "Peru"], [DELTA, "Nepal"]]
+        code, out, _, rows, _ = self.plan(clubs, "badcountry_control", countries=clean)
+        self.assertEqual(plan_counts(self, out), (5, 0, 0))
+
+    def write_similar_csv(self, name, clubs):
+        """A task #94 CSV listing `clubs` ((partner, club, region)) as one group."""
+        path = self.ws.path(name)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+            w.writeheader()
+            for partner, club, region in clubs:
+                w.writerow({"group": 1, "match": "close", "club": club, "partner": partner, "region": region,
+                            "form": f"{region} Attendance Form", "country": "", "sf_name": "",
+                            "status": "active", "active_girls": 2, "same_partner": "no"})
+        return path
+
+    def test_a_new_club_another_partners_club_has_is_refused_in_any_spelling_or_status(self):
+        # Alpha's plain "Moon Girls" becomes "Kenya - Moon Girls" (Alpha is in Kenya)
+        moon = (ALPHA, "Moon Girls", "Africa", 2, 0, "Moon Girls")
+        fine = (DELTA, "River Roots", "Asia", 2, 0, "River Roots")
+        cases = {
+            # the other club's name equals the new one by key only (case, spacing), inactive
+            "key-equal inactive": [moon, (GAMMA, "kenya -  moon GIRLS", "Latin America", 0, 2, None)],
+            # the new name itself spelled differently from the other club's
+            "key-equal new name": [(ALPHA, "moon  GIRLS", "Africa", 2, 0, "moon GIRLS"),
+                                   (GAMMA, "Kenya - Moon Girls", "Latin America", 0, 2, None)],
+            # a retired partner's club (active girls, but never planned: it keeps its name)
+            "retired partner's": [moon, (EPSILON, "Kenya - Moon Girls", "Africa", 3, 0, "Kenya - Moon Girls")],
+        }
+        for reason, clubs in cases.items():
+            with self.subTest(reason=reason):
+                tag = "inuse_" + re.sub(r"\W+", "_", reason)
+                code, out, _, _, out_csv = self.plan([fine, *clubs], tag, expect_ok=False)
+                self.assert_refused(code, out, out_csv, ["Moon Girls" if reason != "key-equal new name"
+                                                         else "moon GIRLS"])
+                self.assertEqual(plan_counts(self, out)[2], 1, out)
+        # an ACTIVE club of another partner that keeps its name: out of scope ...
+        clubs = [fine, moon, (BETA, "Kenya - Moon Girls", "Asia", 2, 0, "Kenya - Moon Girls")]
+        listed = self.write_similar_csv("inuse_similar.csv", [(ALPHA, "Moon Girls", "Africa"),
+                                                              (DELTA, "River Roots", "Asia")])
+        code, out, _, _, out_csv = self.plan(clubs, "inuse_active_scope", expect_ok=False,
+                                             scope=("--scope", "similar", "--similar-csv", listed))
+        self.assert_refused(code, out, out_csv, ["Moon Girls"])
+        self.assertEqual(plan_counts(self, out)[2], 1, out)
+        # ... or in scope and already in the format (unchanged): still refused
+        code, out, _, _, out_csv = self.plan(clubs, "inuse_active_all", expect_ok=False)
+        self.assert_refused(code, out, out_csv, ["Moon Girls"])
+        self.assertIn(plan_counts(self, out)[2], (1, 2), out)
+        # the control: without Alpha's Moon Girls the same files are planned
+        self.plan([c for c in clubs if c is not moon], "inuse_active_control")
+
+    def test_the_shared_name_check_runs_on_the_names_after_the_renames(self):
+        # Gamma's active "Kenya - Moon Girls" is itself renamed (to "Peru - Kenya - Moon Girls"),
+        # so Alpha's Moon Girls may take "Kenya - Moon Girls"
+        clubs = [(ALPHA, "Moon Girls", "Africa", 2, 0, "Moon Girls"),
+                 (GAMMA, "Kenya - Moon Girls", "Latin America", 2, 0, "Kenya - Moon Girls")]
+        code, out, _, rows, _ = self.plan(clubs, "after", keep_long="no")
+        self.assertEqual(self.by_club(rows), {
+            (ALPHA, "Moon Girls"): ("Africa", "Moon Girls", "Kenya - Moon Girls", "Kenya - Moon Girls", "rename"),
+            (GAMMA, "Kenya - Moon Girls"): ("Latin America", "Kenya - Moon Girls", "Peru - Kenya - Moon Girls",
+                                            "Peru - Kenya - Moon Girls", "rename"),
+        })
+        self.assertEqual(plan_counts(self, out), (2, 0, 0))
+        # a name another partner's club keeps is allowed only in the long form "<club> - <partner>"
+        clubs = [(ALPHA, "Moon Girls", "Africa", 2, 0, f"Moon Girls - {ALPHA}"),
+                 (GAMMA, "Kenya - Moon Girls", "Latin America", 0, 2, None)]           # inactive: keeps it
+        code, out, _, rows, _ = self.plan(clubs, "after_long", keep_long="yes")
+        self.assertEqual(self.by_club(rows), {
+            (ALPHA, "Moon Girls"): ("Africa", f"Moon Girls - {ALPHA}", "Kenya - Moon Girls",
+                                    f"Kenya - Moon Girls - {ALPHA}", "rename")})
+        code, out, _, _, out_csv = self.plan(clubs, "after_plain", keep_long="no", expect_ok=False)
+        self.assert_refused(code, out, out_csv, ["Moon Girls"])
+        self.assertEqual(plan_counts(self, out)[2], 1, out)
+
+    def test_two_partners_clubs_given_one_new_name_need_the_long_form(self):
+        # Alpha and Beta are both in Kenya: their "Ruby" clubs both become "Kenya - Ruby"
+        fine = (GAMMA, "River Roots", "Latin America", 2, 0, "River Roots")
+        plain = {ALPHA: "Ruby", BETA: "Ruby"}
+        long = {ALPHA: f"Ruby - {ALPHA}", BETA: f"Ruby - {BETA}"}
+        cases = [
+            # (Alpha's question 5, Beta's, --keep-long, the refused partners or None when planned)
+            (plain, "no", [ALPHA, BETA]),
+            (plain, "yes", [ALPHA, BETA]),           # a plain club never gains the suffix
+            (long, "no", [ALPHA, BETA]),
+            (long, "yes", None),
+            ({ALPHA: long[ALPHA], BETA: plain[BETA]}, "yes", [BETA]),
+            ({ALPHA: long[ALPHA], BETA: plain[BETA]}, "no", [ALPHA, BETA]),
+        ]
+        for n, (sf, keep, refused) in enumerate(cases):
+            with self.subTest(alpha=sf[ALPHA], beta=sf[BETA], keep_long=keep):
+                clubs = [fine, (ALPHA, "Ruby", "Africa", 2, 0, sf[ALPHA]), (BETA, "Ruby", "Asia", 3, 0, sf[BETA])]
+                code, out, _, rows, out_csv = self.plan(clubs, f"ruby{n}", keep_long=keep,
+                                                        expect_ok=refused is None)
+                if refused is None:
+                    got = self.by_club(rows)
+                    self.assertEqual(got[(ALPHA, "Ruby")][2:], ("Kenya - Ruby", f"Kenya - Ruby - {ALPHA}", "rename"))
+                    self.assertEqual(got[(BETA, "Ruby")][2:], ("Kenya - Ruby", f"Kenya - Ruby - {BETA}", "rename"))
+                    self.assertEqual(plan_counts(self, out), (3, 0, 0))
+                else:
+                    self.assert_refused(code, out, out_csv, ["Ruby", *refused])
+                    self.assertEqual(plan_counts(self, out)[2], len(refused), out)
+        # the control: in two countries the plain pair is planned
+        clubs = [fine, (ALPHA, "Ruby", "Africa", 2, 0, "Ruby"), (BETA, "Ruby", "Asia", 3, 0, "Ruby")]
+        countries = [[p, c] for p, c in COUNTRY.items() if p != BETA] + [[BETA, "Uganda"]]
+        code, out, _, rows, _ = self.plan(clubs, "ruby_two_countries", keep_long="no", countries=countries)
+        got = self.by_club(rows)
+        self.assertEqual((got[(ALPHA, "Ruby")][3], got[(BETA, "Ruby")][3]), ("Kenya - Ruby", "Uganda - Ruby"))
+
     # ------------------------------------------------------------- a second run
     def test_plan_renames_is_idempotent(self):
         formats = ["{country} - {club}", "{club} ({country})", "{region}: {country} / {club}",
