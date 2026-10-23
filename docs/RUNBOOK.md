@@ -3024,7 +3024,7 @@ sharing stays as it is"):
 ## Monthly Report dashboards in Salesforce
 
 - **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
-- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) are built and passed the check-only 2026-10-21 (validation `0AfRP000002hisf0AA`); their deploy waits for Ryan's go ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)).
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)).
 - **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
 - **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
 - **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
@@ -3066,18 +3066,20 @@ check-only, Ryan's go, deploy, retrieve `after/` and compare; never an older bui
 ### Decommissioned
 
 Two folders, both labelled "Decommissioned", hold what epic #68 retires and the copies it keeps
-(DECISIONS 2026-10-21). Built in `data/sf_reporting_2026-10-21/folders/`; check-only passed
-2026-10-21 (`0AfRP000002hisf0AA`); the deploy waits for Ryan's go.
-- The report folder "Decommissioned" (`ReportFolder` `Decommissioned`) is hidden, with no
-  `folderShares`: only administrators see it.
-- The dashboard folder "Decommissioned" (`DashboardFolder` `Decommissioned_Dashboards`) is
+(DECISIONS 2026-10-21). Built in `data/sf_reporting_2026-10-21/folders/`; deployed on Ryan's go
+2026-10-21 (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`); read back into
+`after/`, identical to the build.
+- The report folder "Decommissioned" (`ReportFolder` `Decommissioned`, `00lRP000007iOiXYAU`) is
   hidden, with no `folderShares`: only administrators see it.
-- The measure is the shares API (`GET /services/data/v67.0/folders/<id>/shares`), which must
-  show no share on either folder beyond the deploying administrator's own Manage entry.
-- Salesforce may give the deploying administrator (an internal System Administrator) Manage
-  access to a new folder by itself: that one entry is accepted and recorded in the plan's Result.
-  An entry for anyone else (a group, a role, guest, portal, community or partner users, All
-  Internal Users) is a failure, removed before anything is moved in.
+- The dashboard folder "Decommissioned" (`DashboardFolder` `Decommissioned_Dashboards`,
+  `00lRP000007iOiYYAU`) is hidden, with no `folderShares`: only administrators see it.
+- The measure is the shares API (`GET /services/data/v67.0/folders/<id>/shares`): on 2026-10-21
+  it showed no share on either folder, not even a Manage entry for the deploying administrator.
+- An entry for anyone (a group, a role, guest, portal, community or partner users, All Internal
+  Users) is a failure, removed before anything more is moved in.
+- The two proof copies of #69 stay there (Ryan, 2026-10-23): the report `00ORP000009igCr2AI`
+  "proof #69 Club meet freq (moved)" and the dashboard `01ZRP00000BNDJB2A5` "proof #69 DHIS2
+  dashboard".
 
 The archive rule:
 - A retired report or dashboard is moved to Decommissioned and keeps its Id; nothing is deleted
@@ -3095,8 +3097,13 @@ The archive rule:
 - A dynamic dashboard put back from its copy has "View dashboard as" reset to the dashboard
   viewer (`LoggedInUser`) before it returns to its original folder; the `before/` retrieve's
   running-user setting is the check.
-- How a copy and a move are made (the Analytics API, or Lightning's Move by hand):
-  [plan, API proof](plans/2026-10-21-sf-reporting-inventory.md#api-proof).
+- How a copy and a move are made ([plan, API proof](plans/2026-10-21-sf-reporting-inventory.md#api-proof)):
+  a report is copied and moved by the Analytics API (`POST …/analytics/reports?cloneId=<id>`,
+  then `PATCH …/analytics/reports/<id>` with `reportMetadata.folderId`), and keeps its Id.
+- A dashboard is copied by the Analytics API (`POST …/analytics/dashboards?cloneId=<id>` with
+  `folderId`). The API refuses to rename or move a dashboard (`PATCH` returns 400
+  `JSON_PARSER_ERROR`), so Ryan renames and moves it by hand in Lightning (its Move action); the
+  Id stays the same, checked with SOQL.
 
 ## Interactive dashboard in Salesforce
 
