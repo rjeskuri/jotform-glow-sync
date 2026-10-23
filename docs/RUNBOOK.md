@@ -2578,12 +2578,12 @@ or a command line.
 | `… - not created`: club code on another account | The club was renamed in the sheet, not in Salesforce | Rename that account to the question-5 name first ("Renaming a club"); no new account |
 | `… - not created`: the name is already an account | The processor made it first, or another record has the name | A partner-less Club: set its `ParentId` as the item says (write connector, Ryan's go). Anything else: look before acting. |
 | `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
-| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds |
+| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds. Check its account name against the Monthly Reports' "test" filter ("The keep list") |
 | `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
 | `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
 | `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
 | `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
-| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv` |
+| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv`; check the new name against the Monthly Reports' "test" filter ("The keep list") |
 
 **SF Pending**: when it creates an account, the run marks that club's SF Pending row
 `done (auto <date>)`: one cell, found by its header, read again before the write and after.
@@ -3133,7 +3133,8 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
     (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
     map the automatic club accounts read, partner → its account; "New clubs' accounts,
     automatically"). Two lists of the same 49 partners, kept separate on purpose: one is filter
-    text, the other account ids.
+    text, the other account ids. Check its account name against the Monthly Reports' "test"
+    filter ("The keep list").
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -3471,6 +3472,71 @@ The archive rule:
   `JSON_PARSER_ERROR`), so Ryan does it by hand in Lightning: in the dashboard's Properties
   (Name, Description, Folder) he sets the name and the description `copy of <source id>,
   #<ticket>`, and moves it with its Move action; the Id stays the same, checked with SOQL.
+
+### The keep list
+
+`glow/sf_keep_list.csv` is GLOW's keep list (the GLOW team via Ryan, 2026-10-21) mapped to what
+is in the org today, as Ryan agreed it on ticket #70 (2026-10-23; DECISIONS 2026-10-23). The
+list has 19 items: 18 reports in five groups, and one table. The file has a row for each item and
+for each of the five dashboards, with the header `item,group,measure,kind,id,label_today,label_target`:
+GLOW's measure verbatim, the kind (`report`, `table` or `dashboard`), the 18-character Id of the
+report or dashboard the item is today, and its label. It holds report and dashboard Ids and names
+only, never record data. Tasks #71 to #73 build their move plans from it.
+
+The five groups are the five Monthly Report dashboards (D1 to D5 in the file), each mapped to the
+dashboard that becomes it:
+- D1, the GLOW Club Attendance dashboard: "Glow Club Attendance" (`01ZRP000006iWqL2AU`), items 1-4.
+- D2, the GLOW Club Implementation dashboard: "Implementation Dashboard" (`01ZRP000006jU9o2AE`),
+  items 5-8.
+- D3, the GLOW Club Observations dashboard: the dashboard named "GLOW Club Training" today
+  (`01ZRP000006k2D32AI`), items 9-11. Five of its nine components are observations, and no
+  dashboard today is about observations alone.
+- D4, the GLOW Club Training dashboard: "Mentors" (`01ZRP000006quAj2AI`), items 12-16. The group
+  "GLOW Club Training" is this dashboard, D4, and the dashboard named "GLOW Club Training" is D3:
+  the file's Ids tell them apart.
+- D5, the GLOW Club Reporting dashboard: "Reporting" (`01ZRP000006oxSr2AI`), items 17 and 18.
+
+Item 19, "GLOW of the Month Stories" (group "Report/Data Table Format"), is the report "GLOW of the
+Month Stories Report_2025" (`00ORP000005p2L32AI`). It is the table: a tabular report on no
+dashboard, and it stays tabular, not grouped (below). Item 12, "New mentors recruited", has no report today: task #80 builds
+it, and the file reads `new` for its Id. Item 18, "Report submitted on time", maps to "Reports
+completed on time" (`00ORP0000054DyH2AU`), which lists submission and modified dates; no report
+computes "on time" today, and that computation is a later task, on hold (#119).
+
+Every kept report and dashboard is by Partner and Month (Ryan, 2026-10-21: "This data should be
+displayed by the Partner and Month."): the 18 reports of the five dashboards are grouped by the
+partner (`DHIS2__c.Account__c`) and the month. Item 19, the table, is the one exception to the
+grouping: it stays a tabular report, not grouped, with Partner and Month as its columns and
+filters. Tasks #75 to #79 bring each dashboard and its reports to that, with current data; #79
+("Fix GLOW Club Reporting and the GLOW of the Month table") does item 19 too.
+
+Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
+`label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
+keep the dashboard names listed above. Item 12 has no label today; its `label_target` is GLOW's
+measure, "New mentors recruited", which #80 confirms when it builds the report.
+
+Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
+a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's three folders, which
+task #72 moves: every report in "DHIS2 Reports" and every dashboard in "DHIS2 Dashboards" and
+"Dhis2 Dashbords" whose Id is not in the file; the archive rule above holds for each move. Two
+reports outside those folders are on one of their 15 dashboards today and not in the file, both in
+"Public Reports": "Pending Approvals monthly report" (`00ORP000006XSy92AG`) and "New Monthly
+Reports by account" (`00ORP000006V09x2AC`); the third "Public Reports" report on a dashboard is
+item 17, kept. Those two sit outside #72's folders, and Ryan decides on #72 whether they move. The
+two Attendance folders and the "Jotform Attendance" dashboard
+are outside the scope: epic #68 leaves them untouched.
+
+Test records are Monthly Reports filed on a test account or on no account. The test-record rule
+is one report filter on existing fields, applied to every kept report:
+`Account is not blank AND Account: Account Name does not contain "test"` (Ryan, 2026-10-23). On
+the count of 2026-10-23 it excludes the five Monthly Reports of the two test accounts and the six
+with a blank Account, and no real partner's. `Partner_Status__c` is not the rule: it is blank on
+four real partners with 23 Monthly Reports, the same as on the test accounts. Tasks #75 to #79
+add the filter as they fix each dashboard, and #79 adds it to item 19, the table, too. The filter
+matches a substring: a partner whose account name contains "test" (a "Contest" or "Protestant"
+partner, say) would drop out of every kept report, so a new partner's account name (its line in
+`glow/sf_partners.csv`, RUNBOOK "Club accounts in Salesforce") is checked against the filter
+when the partner is added.
 
 ## Interactive dashboard in Salesforce
 
