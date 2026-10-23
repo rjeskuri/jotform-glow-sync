@@ -1803,10 +1803,19 @@ region when the format has `{region}`); `|`, `{` or `}` in the new name; a
 `new_sf_name` equal (by key) to another club's, planned or keeping its name
 (one Salesforce Account); a `new_club` another partner's club has after the
 renames, in any status, unless its `new_sf_name` is the long form ("Club names
-two partners share"); a `new_sf_name` over 255 characters. The last line counts
-`to rename N, unchanged N, refused N`; the CSV has `partner, club, region,
-old_sf_name, new_club, new_sf_name, action` (`rename` or `unchanged`). The
-rename itself, Accounts first, is task #99's plan.
+two partners share"); a `new_sf_name` over 255 characters; a cycle of planned
+clubs each taking another's current question 5 (two clubs swapping names, or a
+ring of three or more: no rename order works), every club of the cycle named.
+The last line counts `to rename N, unchanged N, refused N`; the CSV has
+`partner, club, region, old_sf_name, new_club, new_sf_name, action` (`rename`
+or `unchanged`) and `after`. `after` is blank unless the club's `new_sf_name`
+equals (by key) another planned club's current question 5: then it holds that
+`old_sf_name` as the other club's row has it, and the run prints an
+`order: rename <that club> ... first, then <this club> ...` line. In the
+rollout, **rename the Account named in `after` first** (and that club's
+question 5 with it), then this club's: renamed the other way round, two clubs
+would send one Account name for a while. The rename itself, Accounts first, is
+task #99's plan.
 
 ```bash
 python3 tools/club_names.py plan-renames --roster data/roster_<date>.csv \

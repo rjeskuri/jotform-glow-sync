@@ -704,10 +704,13 @@ class SimilarClubNames(unittest.TestCase):
 #   --similar-csv   the CSV `similar --csv` writes (task #94's columns)
 #   --partners      a Partners export: a partner marked jotform=no is retired, its clubs not planned
 # Output: --out CSV with exactly PLAN_COLUMNS, one row per active club in scope, any order.
+# Order (review of PR #121): `after` is empty on most rows; on a row whose new_sf_name equals (by
+# key) another planned row's old_sf_name it holds that row's old_sf_name - the Account renamed first -
+# and the run prints a line with the word "first" naming both clubs. A cycle (no order works) is refused.
 # Counts: one printed line holding "rename N", "unchanged N" and "refused N" (a ":" or "=" between
 # the word and its number is fine), e.g. "to rename 7, unchanged 1, refused 0".
 EPSILON = "Fixture Partner Epsilon"        # a fifth fictional partner, marked jotform=no (retired)
-PLAN_COLUMNS = ["partner", "club", "region", "old_sf_name", "new_club", "new_sf_name", "action"]
+PLAN_COLUMNS = ["partner", "club", "region", "old_sf_name", "new_club", "new_sf_name", "action", "after"]
 COUNTRY = {ALPHA: "Kenya", BETA: "Kenya", GAMMA: "Peru", DELTA: "Nepal", EPSILON: "Ghana"}
 
 # the plan fixture: (partner, club cell, region cell, active girls, inactive girls, question-5 value
@@ -802,13 +805,22 @@ class PlanRenames(unittest.TestCase):
         header, rows = read_csv(out_csv)
         return code, out, header, rows, out_csv
 
-    def by_club(self, rows):
+    def by_club(self, rows, afters=None):
+        """{(partner, club): (region, old_sf_name, new_club, new_sf_name, action)}; checks `after`
+        too: the value `afters` gives for that club, empty on every other row."""
+        afters = afters or {}
         got = {}
         for r in rows:
             k = (r["partner"], r["club"])
             self.assertNotIn(k, got, f"two rows for {k}")
+            self.assertEqual(r.get("after"), afters.get(k, ""), f"the after column of {k}")
             got[k] = (r["region"], r["old_sf_name"], r["new_club"], r["new_sf_name"], r["action"])
         return got
+
+    @staticmethod
+    def first_lines(out):
+        """The printed lines that say which club is renamed first."""
+        return [line for line in out.splitlines() if re.search(r"\bfirst\b", line, re.I)]
 
     def assert_refused(self, code, out, out_csv, names):
         self.assertNotIn(code, (0, None), f"the plan should be refused:\n{out}")
@@ -839,6 +851,7 @@ class PlanRenames(unittest.TestCase):
                                      "rename"),
         })
         self.assertEqual(plan_counts(self, out), (7, 1, 0))
+        self.assertEqual(self.first_lines(out), [], "no club takes another's current name: no order line")
         # girls' names never printed or written
         with open(self.ws.path("main_plan.csv"), encoding="utf-8") as f:
             written = f.read()
@@ -1149,13 +1162,19 @@ class PlanRenames(unittest.TestCase):
         # so Alpha's Moon Girls may take "Kenya - Moon Girls"
         clubs = [(ALPHA, "Moon Girls", "Africa", 2, 0, "Moon Girls"),
                  (GAMMA, "Kenya - Moon Girls", "Latin America", 2, 0, "Kenya - Moon Girls")]
-        code, out, _, rows, _ = self.plan(clubs, "after", keep_long="no")
-        self.assertEqual(self.by_club(rows), {
+        code, out, header, rows, _ = self.plan(clubs, "after", keep_long="no")
+        self.assertEqual(header, PLAN_COLUMNS)
+        # ... once Gamma's Account is renamed: Alpha's row says so in `after`
+        self.assertEqual(self.by_club(rows, afters={(ALPHA, "Moon Girls"): "Kenya - Moon Girls"}), {
             (ALPHA, "Moon Girls"): ("Africa", "Moon Girls", "Kenya - Moon Girls", "Kenya - Moon Girls", "rename"),
             (GAMMA, "Kenya - Moon Girls"): ("Latin America", "Kenya - Moon Girls", "Peru - Kenya - Moon Girls",
                                             "Peru - Kenya - Moon Girls", "rename"),
         })
         self.assertEqual(plan_counts(self, out), (2, 0, 0))
+        # and a printed line names both clubs: Gamma's (every "... Kenya - Moon Girls") and Alpha's bare one
+        both = [line for line in self.first_lines(out) if "Kenya - Moon Girls" in line
+                and "Moon Girls" in re.sub(r"(?:\w+ - )*Kenya - Moon Girls", "", line)]
+        self.assertTrue(both, f"no line says which club is renamed first, naming both:\n{out}")
         # a name another partner's club keeps is allowed only in the long form "<club> - <partner>"
         clubs = [(ALPHA, "Moon Girls", "Africa", 2, 0, f"Moon Girls - {ALPHA}"),
                  (GAMMA, "Kenya - Moon Girls", "Latin America", 0, 2, None)]           # inactive: keeps it
@@ -1200,6 +1219,110 @@ class PlanRenames(unittest.TestCase):
         code, out, _, rows, _ = self.plan(clubs, "ruby_two_countries", keep_long="no", countries=countries)
         got = self.by_club(rows)
         self.assertEqual((got[(ALPHA, "Ruby")][3], got[(BETA, "Ruby")][3]), ("Kenya - Ruby", "Uganda - Ruby"))
+
+    def test_a_new_sf_name_an_unplanned_club_sends_is_refused(self):
+        # Alpha's plain club "Moon - <partner>" becomes "Kenya - Moon - <partner>". No club is named
+        # that, so the shared-name check passes it; but an unplanned club "Kenya - Moon" of that
+        # partner sends it as its long question 5: one Salesforce Account, refused
+        fine = (DELTA, "River Roots", "Asia", 2, 0, "River Roots")
+
+        def pair(owner, active, q5):
+            return [(ALPHA, f"Moon - {owner}", "Africa", 2, 0, f"Moon - {owner}"),
+                    (owner, "Kenya - Moon", "Latin America", active, 0 if active else 2, q5)]
+        cases = {
+            # reason: (clubs, the clubs a --scope similar CSV lists, or None for --scope all)
+            "inactive": (pair(GAMMA, 0, f"Kenya - Moon - {GAMMA}"), None),
+            "inactive, equal by key": (pair(GAMMA, 0, f"KENYA -  moon - {GAMMA.lower()}"), None),
+            "retired partner's": (pair(EPSILON, 3, f"Kenya - Moon - {EPSILON}"), None),
+            "active, out of scope": (pair(GAMMA, 2, f"Kenya - Moon - {GAMMA}"),
+                                     [(ALPHA, f"Moon - {GAMMA}", "Africa"), (DELTA, "River Roots", "Asia")]),
+        }
+        for reason, (clubs, listed) in cases.items():
+            owner = clubs[1][0]
+            for keep in ("yes", "no"):                    # Alpha's club is plain: the same either way
+                with self.subTest(reason=reason, keep_long=keep):
+                    tag = "unplanned_" + re.sub(r"\W+", "_", reason) + keep
+                    scope = ("--scope", "all") if listed is None else (
+                        "--scope", "similar", "--similar-csv", self.write_similar_csv(f"{tag}_similar.csv", listed))
+                    code, out, _, _, out_csv = self.plan([fine, *clubs], tag, keep_long=keep, scope=scope,
+                                                         expect_ok=False)
+                    self.assert_refused(code, out, out_csv, [f"Moon - {owner}"])
+                    self.assertEqual(plan_counts(self, out)[2], 1, out)
+                    # the control: the unplanned club sending nothing, the same clubs are planned
+                    quiet = [fine, clubs[0], (*clubs[1][:5], None)]
+                    code, out, _, rows, _ = self.plan(quiet, tag + "_control", keep_long=keep, scope=scope)
+                    new = {(r["partner"], r["club"]): r["new_sf_name"] for r in rows}
+                    self.assertEqual(new[(ALPHA, f"Moon - {owner}")], f"Kenya - Moon - {owner}")
+
+    # ------------------------------------------------------------- rename order
+    def test_a_club_taking_another_clubs_current_name_is_renamed_after_it(self):
+        fine = (BETA, "Morning Star", "Asia", 2, 0, "Morning Star")
+        # a chain: Alpha's takes Gamma's current name, Gamma's takes Delta's (Delta's question 5 is
+        # spelled differently: equal by key, and `after` holds it as Delta's row has it)
+        clubs = [fine,
+                 (ALPHA, "Moon Girls", "Africa", 2, 0, "Moon Girls"),
+                 (GAMMA, "Kenya - Moon Girls", "Latin America", 2, 0, "Kenya - Moon Girls"),
+                 (DELTA, "Peru - Kenya - Moon Girls", "Asia", 2, 0, "peru -  kenya - MOON girls")]
+        code, out, header, rows, _ = self.plan(clubs, "chain", keep_long="no")
+        self.assertEqual(header, PLAN_COLUMNS)
+        got = self.by_club(rows, afters={(ALPHA, "Moon Girls"): "Kenya - Moon Girls",
+                                         (GAMMA, "Kenya - Moon Girls"): "peru - kenya - MOON girls"})
+        self.assertEqual({k: v[1:] for k, v in got.items()}, {
+            (BETA, "Morning Star"): ("Morning Star", "Kenya - Morning Star", "Kenya - Morning Star", "rename"),
+            (ALPHA, "Moon Girls"): ("Moon Girls", "Kenya - Moon Girls", "Kenya - Moon Girls", "rename"),
+            (GAMMA, "Kenya - Moon Girls"): ("Kenya - Moon Girls", "Peru - Kenya - Moon Girls",
+                                            "Peru - Kenya - Moon Girls", "rename"),
+            (DELTA, "Peru - Kenya - Moon Girls"): ("peru - kenya - MOON girls", "Nepal - Peru - Kenya - Moon Girls",
+                                                   "Nepal - Peru - Kenya - Moon Girls", "rename"),
+        })
+        self.assertEqual(plan_counts(self, out), (4, 0, 0))
+        lines = self.first_lines(out)
+        self.assertTrue([line for line in lines if "Kenya - Moon Girls" in line
+                         and "Moon Girls" in re.sub(r"(?:\w+ - )*Kenya - Moon Girls", "", line)],
+                        f"no line naming Alpha's and Gamma's clubs says which goes first:\n{out}")
+        self.assertTrue([line for line in lines if "Peru - Kenya - Moon Girls" in line
+                         and re.search(r"(?<!Peru - )Kenya - Moon Girls", line)],
+                        f"no line naming Gamma's and Delta's clubs says which goes first:\n{out}")
+        # two clubs whose names share nothing: Gamma's question 5 still sends Alpha's new name
+        clubs = [fine, (ALPHA, "Sunrise Club", "Africa", 2, 0, "Sunrise Club"),
+                 (GAMMA, "Dawn Club", "Latin America", 2, 0, "Kenya - Sunrise Club")]
+        code, out, header, rows, _ = self.plan(clubs, "pair", keep_long="yes")
+        got = self.by_club(rows, afters={(ALPHA, "Sunrise Club"): "Kenya - Sunrise Club"})
+        self.assertEqual(got[(GAMMA, "Dawn Club")][3], "Peru - Dawn Club")
+        self.assertTrue([line for line in self.first_lines(out) if "Sunrise Club" in line and "Dawn Club" in line],
+                        f"no line naming Sunrise Club and Dawn Club says which goes first:\n{out}")
+
+    def test_a_cycle_of_renames_is_refused_with_every_club_in_it_named(self):
+        fine = (DELTA, "River Roots", "Asia", 2, 0, "River Roots")
+        sunrise, evening, harbor = "Sunrise Club", "Evening Star", "Harbor Club"
+        two = [(ALPHA, sunrise, "Africa", 2, 0, f"Kenya - {evening}"),      # question 5 values swapped:
+               (BETA, evening, "Asia", 2, 0, f"Kenya - {sunrise}")]        # each takes the other's
+        cases = {
+            # reason: (clubs, the clubs in the cycle)
+            "two swap": (two, [(ALPHA, sunrise), (BETA, evening)]),
+            # Alpha's takes Gamma's current name (by key), Gamma's takes Beta's, Beta's takes Alpha's
+            "three": ([(ALPHA, sunrise, "Africa", 2, 0, f"Kenya - {evening}"),
+                       (BETA, evening, "Asia", 2, 0, f"Peru - {harbor}"),
+                       (GAMMA, harbor, "Latin America", 2, 0, f"kenya - {sunrise.upper()}")],
+                      [(ALPHA, sunrise), (BETA, evening), (GAMMA, harbor)]),
+            # beside a chain that has an order: only the cycle is refused
+            "two beside a chain": (two + [(ALPHA, "Moon Girls", "Africa", 2, 0, "Moon Girls"),
+                                          (GAMMA, "Kenya - Moon Girls", "Latin America", 2, 0, "Kenya - Moon Girls")],
+                                   [(ALPHA, sunrise), (BETA, evening)]),
+        }
+        for reason, (clubs, cycle) in cases.items():
+            for keep in ("yes", "no"):
+                with self.subTest(reason=reason, keep_long=keep):
+                    tag = "cycle_" + re.sub(r"\W+", "_", reason) + keep
+                    code, out, _, _, out_csv = self.plan([fine, *clubs], tag, keep_long=keep, expect_ok=False)
+                    self.assert_refused(code, out, out_csv, [c for _, c in cycle] + sorted({p for p, _ in cycle}))
+                    self.assertEqual(plan_counts(self, out)[2], len(cycle), out)
+        # the control: Beta's question 5 its own name, the cycle is broken and Beta's goes after Alpha's
+        clubs = [fine, two[0], (BETA, evening, "Asia", 2, 0, evening)]
+        code, out, header, rows, _ = self.plan(clubs, "cycle_broken", keep_long="no")
+        got = self.by_club(rows, afters={(BETA, evening): f"Kenya - {evening}"})
+        self.assertEqual(got[(BETA, evening)][3], f"Kenya - {evening}")
+        self.assertEqual(plan_counts(self, out), (3, 0, 0))
 
     # ------------------------------------------------------------- a second run
     def test_plan_renames_is_idempotent(self):

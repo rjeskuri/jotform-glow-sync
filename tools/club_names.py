@@ -28,7 +28,10 @@ into a format that shows their country (ticket #95): read-only, files only.
            no region the format needs); "|", "{" or "}" in the name; two new_sf_names equal by
            key, or one equal to the question 5 of a club not planned (one Salesforce Account); a
            new_club another partner's club has after the renames (any status) unless its
-           new_sf_name is the long form; a new_sf_name over 255 characters. Renames nothing.
+           new_sf_name is the long form; a new_sf_name over 255 characters; a cycle of clubs each
+           taking another's current question 5 (no rename order works). A club whose new_sf_name
+           is (by key) another planned club's current question 5 has that value in `after` and
+           an "order: ... first" line: that club's Account is renamed first. Renames nothing.
 
 Prints club and partner names, regions and counts, never a girl's name. No network: the Roster
 and Partners exports come from tools/sheets_client.py.
@@ -66,7 +69,7 @@ KINDS = ("same", "folded", "close")                     # strongest first
 CSV_COLUMNS = ["group", "match", "club", "partner", "region", "form", "country", "sf_name",
                "status", "active_girls", "same_partner"]
 DROPPED = str.maketrans("", "", ".'’`")            # removed outright: "G.L.O.W." -> "glow"
-PLAN_COLUMNS = ["partner", "club", "region", "old_sf_name", "new_club", "new_sf_name", "action"]
+PLAN_COLUMNS = ["partner", "club", "region", "old_sf_name", "new_club", "new_sf_name", "action", "after"]
 PLACEHOLDERS = ("country", "club", "partner", "region")
 PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 BAD_CHARS = "|{}"                                       # the sync refuses them in a club name
@@ -360,6 +363,32 @@ def plan_renames(args):
             refused.setdefault(k, []).append(
                 f"another partner's club is named '{p['new_club']}' (by key): it needs the long name "
                 f"'{p['new_club']}{SF_NAME_SEP}{p['partner']}' (RUNBOOK \"Club names two partners share\")")
+    # rename order: a club taking (by key) another planned club's current question 5 goes after it;
+    # a cycle of such links has no order and is refused
+    holders = {}                                        # key(old_sf_name) -> the planned clubs sending it
+    for k, p in plans.items():
+        if p["old_sf_name"]:
+            holders.setdefault(key(p["old_sf_name"]), []).append(k)
+    links = {k: sorted(w for w in holders.get(key(p["new_sf_name"]), []) if w != k) for k, p in plans.items()}
+    for k, p in plans.items():
+        p["after"] = "; ".join(plans[w]["old_sf_name"] for w in links[k])
+    reach = {}
+    for k in plans:
+        seen, todo = set(), list(links[k])
+        while todo:
+            w = todo.pop()
+            if w not in seen:
+                seen.add(w)
+                todo.extend(links[w])
+        reach[k] = seen
+    for k in plans:
+        if k in reach[k]:
+            cycle = sorted((w for w in reach[k] if k in reach[w] and w != k),
+                           key=lambda w: (key(plans[w]["partner"]), key(plans[w]["club"])))
+            refused.setdefault(k, []).append(
+                f"its new_sf_name '{plans[k]['new_sf_name']}' is the current question 5 of a club that "
+                "in turn needs this club's, directly or through others: no rename order works ("
+                + ", ".join(f"{plans[w]['club']} ({plans[w]['partner']})" for w in cycle) + ")")
 
     rows = sorted((p for k, p in plans.items() if k not in refused),
                   key=lambda p: (key(p["partner"]), key(p["club"])))
@@ -367,6 +396,12 @@ def plan_renames(args):
     if missing:
         print(f"note: {len(missing)} clubs have no question 5 in --sf-names (planned as plain names): "
               + "; ".join(f"{p['club']} ({p['partner']})" for p in missing))
+    for p in rows:
+        for w in links[(key(p["partner"]), key(p["club"]))]:
+            if w not in refused:
+                h = plans[w]
+                print(f"order: rename {h['club']} ({h['partner']}) from '{h['old_sf_name']}' first, then "
+                      f"{p['club']} ({p['partner']}) takes that name as '{p['new_sf_name']}'")
     if refused:
         print(f"REFUSED: {len(refused)} clubs")
         for c in sorted(planned, key=lambda c: (key(c["partner"]), key(c["club"]))):
