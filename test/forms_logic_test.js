@@ -580,7 +580,73 @@ console.log('\n  which reports are roster changes');
   const BLAND = ['The form worked.', 'It saved.', 'Nothing happened.', 'Todo bien.'];
   const asDoing = (c, i) => [c[0], BLAND[i % BLAND.length], { [PQ.FB_DOING]: c[1] }, c[3]];
   const doingRows = built.filter((c, i) => i % 5 === 2).map(asDoing);
-  const all = cases.concat(built, doingRows);
+
+  // PR #117 review: a subject the code cannot name as a thing is not thereby people. What is
+  // absent must be girls — a people word, or a girl's name (two capitalised words, no digit, no
+  // thing word) — also when they were named earlier and a pronoun (or nothing) sits before
+  // the phrase. Names here are minted from syllables as well as drawn from the pools, so no
+  // surname list can stand in for the rule. Trade-off, decided here: a lone capitalised word
+  // ("Sunrise is not on the list") is read as a club, not a girl's first name — an accepted
+  // miss (the staff e-mail still goes; the Club Roster Form needs her full name anyway) — and
+  // a two-word club named only in the text ("Bright Stars is not on the form", club box
+  // blank) is an accepted false alarm: nothing in the text tells it from a girl's name, staff
+  // resolve it "not a roster change", and the pointer e-mail says a report about something
+  // else needs nothing more.
+  const minted = [];
+  const STEM = ['Quen', 'Tilb', 'Oska', 'Marn', 'Zelb', 'Dovi', 'Yarr', 'Pemb'];
+  const TAIL = ['varrow', 'rookney', 'velle', 'quist', 'rightly', 'castelle', 'wyndle', 'ostrick'];
+  const GIVEN = ['Adaeze', 'Bettina', 'Celestine', 'Dorcas', 'Eunice', 'Fidelia', 'Gugu', 'Halima'];
+  const mint = () => {
+    const i = minted.length, round = Math.floor(i / STEM.length);   // a new stem/tail pairing each round
+    const n = GIVEN[i % GIVEN.length] + ' ' + STEM[(i + round) % STEM.length] + TAIL[(i * 3 + 1 + round) % TAIL.length];
+    minted.push(n);
+    return n;
+  };
+  const more = [
+    // things the thing list does not name, a count, a week, "my name", a club named only in the text
+    [AF, 'Today\'s attendance is not on the form.', {}, ''],
+    [AF, 'Our mentor is not in the portal.', {}, ''],
+    [AF, 'Week 3 is missing from the list.', {}, ''],
+    [AF, 'My name is not on the list.', {}, ''],                   // singular "name": left out on purpose since 2026-09
+    [AF, 'Our school is not on the list.', {}, ''],
+    [AF, 'Attendance for October 14 is not in the portal.', {}, ''],
+    [AF, 'The number of girls is not on the form.', {}, ''],       // a count: the Club Roster Form cannot fix it
+    [AF, 'Sunrise is not on the list.', {}, ''],                    // club box blank
+    [AF, 'Golden Wings Girls Club is not on the list.', {}, ''],    // club box blank: "Club" says what it is
+    [AF, 'Tuesday Session is missing from the list.', {}, ''],      // two capitals, but a thing
+    [AF, 'The Partner Organization is not in the portal.', {}, ''],
+    [AF, 'We chose our club but it is not on the list.', {}, ''],  // a pronoun for a thing
+    [AF, 'I pressed Submit but it is not on the form.', {}, ''],
+    [AF, 'The girls had fun but the photo is not on the form.', {}, ''],   // girls earlier, a thing absent
+    [AF, 'Hello. Our meeting place is not on the form, please add it.', {}, ''],
+    [LA, 'La asistencia de hoy no aparece en el formulario.', {}, ''],
+    [LA, 'Nuestra mentora no aparece en la lista.', {}, ''],
+    [LA, 'La semana 3 no aparece en la lista.', {}, ''],
+    [LA, 'Mi nombre no aparece en la lista.', {}, ''],
+    [LA, 'Nuestra escuela no aparece en el formulario.', {}, ''],
+    [LA, 'El número de niñas no aparece en el formulario.', {}, ''],
+    [LA, 'Club Alas Doradas no aparece en la lista.', {}, ''],
+    [LA, 'Elegimos el club pero no aparece en la lista.', {}, ''],
+    // girls named, then a pronoun (or nothing) before the phrase: the motivating report's shapes
+    [AF, 'Two girls attended but they are not on the form.', {}, 'text'],
+    [AF, 'Three girls came today. They are not on the form.', {}, 'text'],
+    [AF, 'Two of our students came, but they are not in the portal.', {}, 'text'],
+    [AF, mint() + ' came on Tuesday but she is missing from the list.', {}, 'text'],
+    [AF, 'The session went well.', { [PQ.FB_DOING]: 'Four girls were there and they are not on the form' }, 'text'],
+    [LA, 'Vinieron dos niñas pero no aparecen en la lista.', {}, 'text'],
+    [LA, 'Hoy vino ' + mint() + ' pero no aparece en el formulario.', {}, 'text'],
+  ];
+  // "not on the attendance form", "not on the roster", "missing from the form", of people and of things
+  const PEOPLE2 = [['two girls', 'are'], ['our members', 'are'], [mint, 'is'], [girl, 'is'], [() => mint() + ' and ' + mint(), 'are']];
+  const THINGS2 = [['the logo', 'is'], ['our club', 'is'], ['the date', 'is'], ['the photo', 'is'], ['the Spanish version', 'is']];
+  const PHRASES2 = ['not on the attendance form', 'not on the roster', 'missing from the form'];
+  const built2 = [].concat(cross(PEOPLE2, PHRASES2, AF, 'text'), cross(THINGS2, PHRASES2, AF, ''));
+  const doingRows2 = built2.filter((c, i) => i % 4 === 1).map(asDoing);
+  check('minted names: ' + minted.length + ', all different, none with a pool surname',
+        minted.length >= 8 && new Set(minted).size === minted.length &&
+        minted.every(n => /^[A-Z][a-z]+ [A-Z][a-z]+$/.test(n) && !pools.last.includes(n.split(' ')[1])), minted.join(', '));
+
+  const all = cases.concat(built, doingRows, more, built2, doingRows2);
   const wrong = all.filter(([f, w, x, want]) => pr.looksLikeRosterChange_(report(f, w, x)) !== want)
       .map(([f, w, x, want]) => (x[PQ.FB_DOING] ? 'doing: ' + x[PQ.FB_DOING] : w).slice(0, 48) + ' → ' + JSON.stringify(want));
   check(all.length + ' wordings classified as expected (Club Roster Form chosen, roster words + change words, ' +
@@ -588,6 +654,15 @@ console.log('\n  which reports are roster changes');
         built.filter(c => c[3]).length + ' built roster changes, ' + built.filter(c => !c[3]).length + ' built bug reports, ' +
         doingRows.length + ' of them as "trying to do")',
         !wrong.length, wrong.length + ' wrong: ' + wrong.slice(0, 12).join(' | ') + (wrong.length > 12 ? ' | …' : ''));
+  const wrong3 = more.concat(built2, doingRows2).filter(([f, w, x, want]) => pr.looksLikeRosterChange_(report(f, w, x)) !== want)
+      .map(([f, w, x, want]) => (x[PQ.FB_DOING] ? 'doing: ' + x[PQ.FB_DOING] : w).slice(0, 60) + ' → ' + JSON.stringify(want));
+  check('…of which the #117 review set (' + more.concat(built2, doingRows2).length + '): things outside the thing list, counts, ' +
+        'a club named only in the text and pronouns for things are bug reports; girls named then "they", and ' +
+        '"not on the attendance form / the roster", "missing from the form" of girls are roster changes',
+        !wrong3.length, wrong3.length + ' wrong: ' + wrong3.join(' | '));
+  check('accepted false alarm, documented: a two-word club named only in the text reads as a girl\'s name',
+        pr.looksLikeRosterChange_(report(AF, 'Bright Stars is not on the form.')) === 'text' &&
+        pr.looksLikeRosterChange_(report(AF, 'Bright Stars is not on the form.', { [PQ.FB_CLUB]: 'Bright Stars' })) === '');
   const names = built.map(c => c[1]).join(' ').match(/[A-Z][a-z]+ [A-Z][a-z]+(?= (?:is|no aparece) )/g) || [];
   check('every built name row uses a different fixture name (' + names.length + ' names)',
         names.length === PHRASES_EN.length + PHRASES_ES.length && new Set(names).size === names.length &&
@@ -735,7 +810,10 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
   };
   const STAFF = { STAFF_NOTIFY_EMAIL: 'staff@example.org', FORM_ROSTER_ID: 'rf-2026', FORM_FEEDBACK_ID: 'pf-2026' };
   const KEY = 'FEEDBACK|w:2026-09-20 08:15:38.000|GLOW – Club Roster Form|';
-  const change = () => report('GLOW – Club Roster Form', 'Please remove ' + CANARY,
+  // the Club Roster Form chosen AND roster words in the text (#117 review: the pointer e-mail
+  // needs the words — a report that the Club Roster Form is broken must not be answered with
+  // "use the Club Roster Form")
+  const change = () => report('GLOW – Club Roster Form', 'Please remove ' + CANARY + ' from our club.',
       { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: 'mentor@example.org' });
   // no girl, no typed club, and not the address this run typed
   const cleanFor = addr => s => !/Fennwhistle|Bright Stars/.test(s) && !s.includes(addr);
@@ -846,17 +924,46 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
     check('a plain bug report with a reply address: the staff e-mail only (no Club Roster Form e-mail)',
           w.mails.length === 2 && !w.mentorMails().length && w.tabs.ReviewQueue.length === 1, w.mails.map(m => m.to).join(','));
     w = world({ props: STAFF });
-    w.ctx.handleFeedback_(report('GLOW – Club Roster Form', 'Please remove ' + CANARY, { [PQ.FB_CLUB]: 'Bright Stars' }), 'Feedback!32', KEY);
-    w.ctx.handleFeedback_(report('GLOW – Club Roster Form', 'Please remove ' + CANARY,
+    w.ctx.handleFeedback_(report('GLOW – Club Roster Form', 'Please remove ' + CANARY + ' from our club.', { [PQ.FB_CLUB]: 'Bright Stars' }), 'Feedback!32', KEY);
+    w.ctx.handleFeedback_(report('GLOW – Club Roster Form', 'Please remove ' + CANARY + ' from our club.',
                                  { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: 'call me on whatsapp' }), 'Feedback!33', KEY);
     check('a roster-change report with no address, or a non-address: queued and e-mailed to staff, nobody else',
           w.tabs.ReviewQueue.length === 3 && w.mails.length === 2 && !w.mentorMails().length, w.mails.map(m => m.to).join(','));
+
+    // #117 review: the Club Roster Form chosen under "Which form were you using?" with no roster
+    // words in the text is a report that THAT form is broken — queued for staff as today, but
+    // its sender is not told to use it
+    const broken = [['GLOW – Club Roster Form', 'The form would not let me choose my club.', 'Marking the roster change'],
+                    ['Club Roster Form (add or remove girls)', 'The partner dropdown is empty.', ''],
+                    ['GLOW – Club Roster Form', 'La página se quedó en blanco al enviar.', 'Enviar el formulario']];
+    const brokenRuns = broken.map(([form, what, doing], i) => {
+      const x = world({ props: STAFF });
+      const result = x.ctx.handleFeedback_(report(form, what, { [PQ.FB_DOING]: doing, [PQ.FB_CLUB]: 'Bright Stars',
+                                                                  [PQ.FB_EMAIL]: 'mentor@example.org' }), 'Feedback!' + (50 + i), KEY);
+      return { x, result, source: 'Feedback!' + (50 + i) };
+    });
+    check('the Club Roster Form chosen, no roster words: queued ("Club Roster Form chosen"), staff e-mailed with the note, as today',
+          brokenRuns.every(r => r.result.startsWith('emailed staff; roster change queued') && r.x.tabs.ReviewQueue.length === 2 &&
+                                r.x.tabs.ReviewQueue[1][4].includes('Club Roster Form chosen') && r.x.staffMails().length === 1 &&
+                                r.x.staffMails()[0].replyTo === 'mentor@example.org' &&
+                                r.x.staffMails()[0].body.includes('Staff note: looks like a roster change; on the ReviewQueue as ' + r.source + '.')),
+          brokenRuns.map(r => r.source + ': ' + r.result).join(' | '));
+    check('…but NO pointer e-mail to its sender, and FormLog does not claim one',
+          brokenRuns.every(r => r.x.mails.length === 1 && !r.x.mentorMails().length && !/pointed/i.test(r.result)),
+          brokenRuns.map(r => r.source + ': ' + r.x.mails.map(m => m.to).join('+') + ' / ' + r.result).join(' | '));
+    w = world({ props: STAFF });
+    const both = w.ctx.handleFeedback_(change(), 'Feedback!53', KEY);
+    check('the Club Roster Form chosen AND roster words ("remove … from our club"): queued as "Club Roster Form chosen", pointer sent',
+          both.startsWith('emailed staff; roster change queued') && w.tabs.ReviewQueue[1][4].includes('Club Roster Form chosen') &&
+          w.staffMails().length === 1 && w.mentorMails().length === 1 && w.mentorMails()[0].to === 'mentor@example.org' &&
+          w.mentorMails()[0].body.includes(w.url('rf-2026')), both + ' / ' + w.mails.map(m => m.to).join('+'));
 
     // the mentor e-mail is best-effort, like sendHoldNotice_'s: never fails the handler, never blocks staff
     const BOUNCING = 'bounces.here@example.org';
     w = world({ props: STAFF, fail: m => (m.to === BOUNCING ? 'Invalid email: ' + m.to : '') });
     let failed = null;
-    const bouncing = report('GLOW – Club Roster Form', 'Please remove ' + CANARY, { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: BOUNCING });
+    const bouncing = report('GLOW – Club Roster Form', 'Please remove ' + CANARY + ' from our club.',
+                            { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: BOUNCING });
     try { failed = w.ctx.handleFeedback_(bouncing, 'Feedback!41', KEY); } catch (e) { failed = 'THREW ' + e.message; }
     check('the mentor e-mail fails: the handler still returns queued, staff e-mailed, the row queued',
           failed.startsWith('emailed staff; roster change queued') && w.staffMails().length === 1 &&
