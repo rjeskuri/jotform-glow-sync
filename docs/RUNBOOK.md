@@ -3496,8 +3496,12 @@ dashboard that becomes it:
   the file's Ids tell them apart.
 - D5, the GLOW Club Reporting dashboard: "Reporting" (`01ZRP000006oxSr2AI`), items 17 and 18.
 
+Item 2 is retired (Ryan, 2026-10-23 on #74): it has no source, and #75 moves its report to
+Decommissioned, kept there; #73 leaves item 2's report in its folder, for #75 to move.
+
 Item 19, "GLOW of the Month Stories" (group "Report/Data Table Format"), is the report "GLOW of the
-Month Stories Report_2025" (`00ORP000005p2L32AI`). It is the table: a tabular report on no
+Month Stories Report" (`00ORP000005p2L32AI`), the org's label since 2026-10-21, which the file
+follows (Ryan, 2026-10-23). It is the table: a tabular report on no
 dashboard, and it stays tabular, not grouped (below). Item 12, "New mentors recruited", has no report today: task #80 builds
 it, and the file reads `new` for its Id. Item 18, "Report submitted on time", maps to "Reports
 completed on time" (`00ORP0000054DyH2AU`), which lists submission and modified dates; no report
@@ -3592,7 +3596,7 @@ Components more than one dashboard shares:
   No other kept report is on a dashboard other than its own.
 
 The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #76 D2, #77 D3,
-#78 D4, #79 D5 and item 19):
+#78 D4, #79 D5 and item 19; item 6 takes its own steps 1-3, below):
 1. Replace `Year__c equals <year>` with GLOW's period: the last 12 months (`LAST_N_MONTHS:12`)
    on #128's date field, which leaves out the current, incomplete month.
 2. Group by the partner (`DHIS2__c.Account__c`), then by #128's date field by calendar month.
@@ -3606,6 +3610,27 @@ The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #7
 5. D3 and D4: a refresh after the fix (a PUT, Ryan's go), and a weekly refresh by a dashboard
    subscription in Lightning.
 
+Item 6 is the exception to steps 1-3 (Ryan, 2026-10-23 on #74: it counts the Jotform batches'
+`Module__c`). Its source is `Attendance_Batch__c`, not `DHIS2__c`, so #76 builds it on the batch
+report type `Attendance_Totals` (base `Attendance_Batch__c`, with `Module__c`,
+`Attendance_Date__c`, `Creator__c`, `Processing_Status__c` and the club's parent; "Attendance
+dashboard in Salesforce", [plan](plans/2026-10-06-attendance-totals.md) D.1):
+1. Filters: `Processing_Status__c` equals `Success` and `Creator__c` starts with `Jotform`, as
+   the girls tiles' filters 1 and 2, so a `Failed` "Duplicate" batch and a `Partner report`
+   batch never count.
+2. Period: `Attendance_Date__c` `LAST_N_MONTHS:12`, the session date (#128's field is on
+   `DHIS2__c` only).
+3. Grouping: the partner, which is the club's parent account
+   (`Attendance_Batch__c$Account__c.Parent`, the column the Partner filter uses), then
+   `Attendance_Date__c` by calendar month, then `Module__c`; the measure is the record count,
+   one batch per club and session date.
+- Test records: the RUNBOOK has no batch-side rule; the `Creator__c` filter is what keeps the
+  March pilot out of the attendance reports ("Access"). Whether item 6 also takes the
+  test-record rule on the parent account, #76 decides.
+- Whether item 6's report is rebuilt or a new report takes its place (the Id in
+  `glow/sf_keep_list.csv`), and how D2's `Assigned_Partner_Manager__c` filter reaches it, #76
+  decides; the copy to Decommissioned comes first either way.
+
 | Item | Report | Year filter | The report's "September" | SOQL, September 2026 | Cause and fix |
 |---|---|---|---|---|---|
 | 1 | Collection of Attendance Roster by Month | 2025 | 52 records (September 2025) | 42 records, 0 with the field | Year; field blank since 2025-10: counts `Attendance_submitted_electronically__c` instead (21 of 42; #75) |
@@ -3613,7 +3638,7 @@ The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #7
 | 3 | Participation by Month and Partner | 2025 | sum 5,225 (SOQL, September 2025: 5,225) | sum 4,779 over 42 | Year: steps 1-4 |
 | 4 | GLOW Club Each Week | 2026 | sum 4,779 over 36 | 4,779 over 36 (total not 0) | Current; fixed year: steps 1-4, onto D1 |
 | 5 | Copy of GLOW Club Implementation by M&P | 2025 | 50 | 41 answered (39 Yes, 2 No) | Year: steps 1-4, onto D2 |
-| 6 | Glow Club Modules Implemented by M&P | 2025 | 95 module ticks on 52; 0 in October-December 2025 | 0 of 42 | Year; field blank since 2025-10: counts the Jotform batches' `Module__c` on `Attendance_Batch__c` instead, a report type over the batches (#76) |
+| 6 | Glow Club Modules Implemented by M&P | 2025 | 95 module ticks on 52; 0 in October-December 2025 | 0 of 42 | Year; field blank since 2025-10: counts the Jotform batches' `Module__c` instead, on `Attendance_Totals`, by partner, month and module (#76; item 6's steps 1-3, above) |
 | 7 | GLOW Club Modules Adapted By Month | 2025 | 51 | 42 (29 Yes, 13 No) | Year: steps 1-4 |
 | 8 | Local and Regional Summits By Month 2 | 2025 | 47 | 38 (5 summits, 33 none) | Year: steps 1-4 |
 | 9 | Submission of GC observation forms M & P | 2025 | 52 | 26 (23 Yes, 3 No) | Year: steps 1-4 |
@@ -3648,9 +3673,11 @@ and, per item:
 - Items 1 and 17-19: `SELECT COUNT(Id)`, for item 1 with
   `AND Attendance_submitted_electronically__c = true` (a checkbox; 21 for September 2026), for
   item 17 with `AND Approved__c = true`.
-- Item 6 is not on `DHIS2__c`: `SELECT Module__c, COUNT(Id) FROM Attendance_Batch__c` for the same
-  partners (the club's parent Account) and a September 2026 `Attendance_Date__c`,
-  `GROUP BY Module__c`. Not run yet, so no number here.
+- Item 6 is not on `DHIS2__c`: the report's September 2026 total per module equals
+  `SELECT Module__c, COUNT(Id) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success'
+  AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c >= 2026-09-01 AND Attendance_Date__c <=
+  2026-09-30 GROUP BY Module__c`; one partner's cells, the same with `AND Account__r.Parent.Name
+  = '<partner>'`; with the test-record rule too if #76 adds it. Not run yet, so no number here.
 - Item 2 has no check: it is retired (#75).
 
 Each but item 6 was run once for September 2026 and gives the table's cell
