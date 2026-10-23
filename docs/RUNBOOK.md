@@ -32,6 +32,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Rosters above Submit](#rosters-above-submit)
   - [Header logo](#header-logo)
   - [Photos](#photos)
+  - [Photo mover](#photo-mover)
   - [Disabling a regional form](#disabling-a-regional-form)
   - [Building a new regional form (not maintenance)](#building-a-new-regional-form-not-maintenance)
 - [Clubs](#clubs)
@@ -1133,9 +1134,11 @@ Jotform's Revision History. The image carries no translated text (q13 is in
 **Photos.** Since 2026-10-01 no attendance photo goes to Salesforce (the CEO's decision: the
 files there were deleted that day and the four regional forms' mapping lost its upload row; the
 template follows in step 1). Since <date> the photos are copied by Jotform's Google Drive
-integration into the My Drive of <role account>, folder `Attendance photos - <Region>`, one
-subfolder per submission named `<Club Name> <Attendance Date>`, uploaded files only, no PDF
-(the PDF renders every ticked girl's name). The photo stays required on the forms. The photos
+integration into the My Drive of Ryan's company account (Ryan, 2026-10-21: Jotform uses only
+that account), folder `Attendance photos - <Region>`, one subfolder per submission named
+`<Club Name> <Attendance Date>`, uploaded files only, no PDF (the PDF renders every ticked
+girl's name). The photo mover then moves each subfolder into that region's folder on the
+company Shared Drive ("Photo mover", below). The photo stays required on the forms. The photos
 before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
 <named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
 
@@ -1164,8 +1167,9 @@ plain `diff` of the snapshot before and the one after.*
    `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
    this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
-   Settings → Integrations → Google Drive → Authorize → log in as the role account (never your
-   own) → Folder Name `Attendance photos - Template` → Create Subfolders for Submissions ON,
+   Settings → Integrations → Google Drive → Authorize → log in as Ryan's company account (the
+   one the photo mover runs on) → Folder Name `Attendance photos - Template` (the photo mover's
+   source folder, made at its setup before this step: "Photo mover") → Create Subfolders for Submissions ON,
    name = the "Club Name" field that is **question 5** (the hidden text field; the builder shows
    the Club picker under the same label - prefer the hidden one; if only the picker is offered,
    use it and say so in the plan's Result), a space, then "Attendance Date" → Send Uploaded Files
@@ -1205,7 +1209,8 @@ plain `diff` of the snapshot before and the one after.*
    stays in the `emails` list is unverified; the diff of step 4 shows whatever changed and that
    it came back).
 4. **Read back, within a few minutes:**
-   - Drive (as the role account): folder `Attendance photos - Template` → one subfolder named
+   - Drive (as Ryan's company account; once the photo mover runs, on the Shared Drive's
+     Template folder instead): folder `Attendance photos - Template` → one subfolder named
      exactly `<that club> <that date>` → one image file, **no PDF**.
    - Salesforce (read-only SOQL): exactly one new batch for that club and date,
      `Processing_Status__c = 'Failed'`, `Status_Message__c LIKE 'Duplicate:%'`, 0 `Attendance__c`
@@ -1237,7 +1242,8 @@ plain `diff` of the snapshot before and the one after.*
    U.S `drive: not wanted (form DISABLED)`, `integration: ok`; `form_status.py` → every form
    CLEAN, `salesforce yes`.
 6. **When copies stop** (a subfolder dated more than a week ago is the newest while the form has
-   newer submissions; or Jotform e-mails a token error): the Google token has lapsed. In the
+   newer submissions - look in the region's folder on the Shared Drive once the photo mover runs;
+   or Jotform e-mails a token error): the Google token has lapsed. In the
    builder, on each affected form: Settings → Integrations → Google Drive → remove → add again
    with the same settings (step 2, backup and diff included); read back with the next real
    submission. Nothing in the repo raises an alarm for this (BACKLOG 70); look at the folders
@@ -1259,6 +1265,68 @@ the photos stay in Jotform and nothing else on the form changes (the before/afte
 save says so). The template's Salesforce upload row is re-added only on the CEO's word, with
 `UPLOADS = ["19"]` put back in `tools/integration_status.py`. What is already in Drive is the
 owner's to delete (the CEO's retention decision).
+
+## Photo mover
+
+- **When:** setting it up (once, before #63 points the forms' Drive integrations at its source folders), the template's test upload after #63, a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
+- **Status:** built offline 2026-10-21 (ticket #89), not set up yet; it is set up first, then #63 (Ryan, 2026-10-22; [plan](plans/2026-10-21-drive-photo-mover.md#result)).
+- **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, by counts and folder names; nothing changes.
+- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
+- **Verify:** the execution's log (`done: N folder(s) moved, N file(s) merged, 0 failure(s)`); the subfolder is in the region's folder on the Shared Drive and gone from `Attendance photos - <Region>`, which stays.
+- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; move a subfolder back into `Attendance photos - <Region>` by hand to undo a move.
+
+Jotform's Google Drive integration writes only into Ryan's My Drive ("Photos", above); the
+photos belong on the company Shared Drive. `drive-sync/` is a standalone Apps Script project
+owned by Ryan's company account - not the sheet's script, whose scopes must not change
+(CLAUDE.md rule 11) - that every 15 minutes moves each submission subfolder that has not changed
+for 10 minutes from `Attendance photos - <Region>` into that region's folder on the Shared Drive.
+Setup, Script Properties and the push: `drive-sync/README.md`.
+
+The order, each live step on Ryan's go (Ryan, 2026-10-22):
+
+1. PR #91 lands: code only, nothing live.
+2. Setup (`drive-sync/README.md`, steps 1-6): the Shared Drive's folders, named exactly
+   `Africa`, `Asia`, `Latin America`, `Template` (`U.S` only if its form is re-enabled); one My
+   Drive source folder per region for Jotform's uploads, `Attendance photos - <Region>`; the
+   standalone project (`.clasp.json` from the example) and its push; the Script Properties
+   `SOURCE_FOLDER_<REGION>` / `TARGET_FOLDER_<REGION>`; `previewMoves` on the empty folders
+   (writes nothing).
+3. #63, the template only (Ryan): the template's Google Drive integration pointed at
+   `Attendance photos - Template` ("Photos", above, steps 1-2). No regional form yet.
+4. A test upload on the template and its read-back ("Photos", steps 3-4), `previewMoves`, one
+   `moveSettledPhotos`, then `installTrigger`.
+5. #63, the regional forms (Ryan), only after step 4 passed: "Photos", step 5, one form at a
+   time, each followed by a check of the next run's log for that region (no `CONFIG refused`,
+   no `UNKNOWN`; its first subfolder moved) before the next form.
+
+What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N`,
+then the folders by name (club and date; never a file's name or contents).
+
+- **move**: the whole subfolder went to the Shared Drive.
+- **merge**: that name was already there once (a resubmission): its files went in one by one,
+  beside what is there; **kept** files (same name and size already there) stay in My Drive. A
+  subfolder of kept files only (`0 file(s) in`) changes nothing, never holds up a same-name copy
+  with new photos, and is logged again every run until Ryan deletes it by hand after a look; the
+  mover never trashes anything.
+- **waiting**: a file changed less than 10 minutes ago, or another subfolder of the same name
+  moved or merged files this run; the next run takes it (a backlog of same-name copies clears
+  one per run).
+- **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
+  moving at 4.5; what it did not read is not touched, and the next run carries on.
+- **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
+  hand (pick the right folder), or rename one of the two there.
+- **UNKNOWN**: a folder that is no region's; left alone.
+- **CONFIG refused**: a Script Property is missing or wrong (half a pair, an id used twice, a
+  source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
+  `Africa`, `Asia`, `Latin America`, `U.S` or `Template`); nothing read, nothing moved. Fix the
+  property in Project Settings → Script Properties, or the folder's name.
+- **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a move; the run ends in an error and Google
+  sends the owner its failure summary. On the first move, a permission error means Ryan's role on
+  the Shared Drive must be raised to Manager ([plan](plans/2026-10-21-drive-photo-mover.md),
+  Risks).
+
+Nothing is shared beyond the Shared Drive's members (the named list: the CEO and Ryan, never
+"anyone with the link"): the mover never shares, links, copies, trashes or e-mails a file.
 
 ## Disabling a regional form
 
