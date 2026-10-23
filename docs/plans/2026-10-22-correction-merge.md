@@ -101,7 +101,11 @@ recipe in "Photos", "Special events"; the salesforce skill; DECISIONS 2026-10-22
    Expected: every test passes (the 33 of 2026-10-07 plus the 11 new ones), the processor's
    coverage at least 75%; note the validation id. A failing test: fix the processor (never the
    test), validate again.
-3. Ryan's go, in the conversation, on the validation's result.
+3. Ryan's go, in the conversation, on the validation's result AND his confirmation of the three
+   defaults of "The change" 4 as built: (1) a merged row carries the original batch's session
+   fields, (2) the original's `Girls_Present__c` is the count of its own rows, (3) nothing is
+   merged into a row-less or `Partner report` batch. A different answer on any of them changes
+   the build: rebuild `after/` to it and validate again (step 2) before any deploy.
 4. Quick deploy of that validation: `sf project deploy quick -o glow -i <validation id>`; note
    the deploy id and the time (UTC).
 5. Retrieve the four components again (`sf project retrieve start -o glow -m

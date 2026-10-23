@@ -1202,10 +1202,10 @@ plain `diff` of the snapshot before and the one after.*
    submission, `SELECT COUNT() FROM Account WHERE RecordType.DeveloperName = 'Club' AND
    ParentId = null` (2 on 2026-10-06: the two pilots). On the template pick that club, that date
    and that batch's module; open the batch in Salesforce to see which girls its attendance rows
-   hold (their names stay in Salesforce, never in the conversation, a log or the repo) and tick
-   only girls already on that date's batch - one is enough (the roster is required); type your
-   own address as the Partner Coordinator Email, and upload a **neutral image with nobody in
-   it**. Open the mentor link
+   hold (their names stay in Salesforce, never in the conversation, a log or the repo), note its
+   `Girls_Present__c` and row count, and tick only girls already on that date's batch - one is
+   enough (the roster is required); type your own address as the Partner Coordinator Email, and
+   upload a **neutral image with nobody in it**. Open the mentor link
    (`https://form.jotform.com/262352490535154`), not the builder's preview (whether a preview
    submission runs the integrations is unverified). **Two e-mails go out with it**: the
    template's staff notification ("Notification 1", to one fixed address set in the form's
@@ -1225,8 +1225,16 @@ plain `diff` of the snapshot before and the one after.*
      `Girls_Present__c` and row count unchanged (`SELECT Girls_Present__c FROM
      Attendance_Batch__c WHERE Id = '<original id>'`; `SELECT COUNT() FROM Attendance__c WHERE
      Attendance_Batch__c = '<original id>'`), and the partner-less Club account count unchanged
-     (the query of step 3; 2 today). Then delete that one batch - Ryan's go, one write (the
-     write connector or Ryan in the Salesforce UI) - and read it back as gone.
+     (the query of step 3; 2 today). If the original's row count or `Girls_Present__c` changed,
+     the submission merged after all (its batch then reads `Success`, `merged into <original
+     id>`, and the row it added sits on the original): put the original back first, two writes,
+     each one record on Ryan's go (one record per call, never from a subagent:
+     `.claude/skills/salesforce`) - delete the row the test added on the original, by its id
+     (`SELECT Id, CreatedDate FROM Attendance__c WHERE Attendance_Batch__c = '<original id>'
+     ORDER BY CreatedDate DESC`: the one created at the test's time, the others at the original
+     submission's), then set the original's `Girls_Present__c` back to the value noted in step 3
+     - and read both back with the two queries above. Then delete that one batch - Ryan's go,
+     one write (the write connector or Ryan in the Salesforce UI) - and read it back as gone.
    - Jotform: `python3 tools/form_status.py --form 262352490535154 --roster <csv>` →
      `submissions 2`, CLEAN, `salesforce yes`; `backup_forms.py --form 262352490535154` and the
      diff against step 2's "after" snapshot → nothing but `count` (the submission) and, if you
