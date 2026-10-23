@@ -14,11 +14,15 @@ missed it and nothing reached the ReviewQueue. And a report that is recognised s
 sender waiting on staff. Two changes, both in the deployed Apps Script, nothing on the forms or
 in the sheet's data:
 
-- The classifier also takes girls "not on the form / list", "not in the portal", "missing from
-  the list" (Spanish "no aparece(n) en la lista / el formulario") when they are said of people:
-  a people word, or a subject that is no thing word (a girl's name, "she", "three"); "my club is
-  not on the list" and the like stay bug reports. The accepted misses and false alarms are in
-  the comment above `RC_ABSENT`.
+- The classifier also takes girls "not on the form / list / roster", "not in the portal",
+  "missing from the form / list" (Spanish "no aparece(n) / no está(n) en la lista, el
+  formulario, el portal") when they are said of people — a people word, or a girl's name (two
+  capitalised words), in the clause before the phrase, or in the clause before that when it is
+  only a pronoun ("two girls came but they are not on the form"); a thing word in that clause
+  ("Golden Wings Girls Club", "the number of girls") and any subject with neither sign ("today's
+  attendance", "our mentor", "my name") stay bug reports (the PR #117 review: the first cut took
+  anything not on its thing list as people). The accepted misses and false alarms are in the
+  comment above `RC_ABSENT` and in `docs/DECISIONS.md` (2026-10-23).
 - `handleFeedback_` e-mails the sender of a roster-change report, when the reply box holds an
   address, a short note naming the Club Roster Form with its published link
   (`existingForm_(PROP.ROSTER_FORM).getPublishedUrl()`; FormApp is already a pinned service, so
@@ -26,9 +30,14 @@ in the sheet's data:
   so a retry never sends it twice; it never echoes the report, the typed club or partner; a
   failure is one Audit row `sendRosterFormPointer_: could not e-mail the mentor about Feedback!N`
   (addresses masked) and the handler still returns `emailed staff; roster change queued`. No
-  roster form saved, or one that does not open: the note goes without a link. The ReviewQueue
-  item, the staff e-mail and its Audit row are as before; the FormLog result gains `; sender
-  pointed to the Club Roster Form` or `; sender NOT e-mailed (see Audit)`.
+  roster form saved, or one that does not open: the note goes without a link. The note also
+  says a misspelled name is fixed there by removing the wrong spelling and adding the right one
+  (Ryan, 2026-10-22). The ReviewQueue item, the staff e-mail and its Audit row are as before;
+  the FormLog result gains `; sender pointed to the Club Roster Form` or `; sender NOT e-mailed
+  (see Audit)`. A report that chose the Club Roster Form gets the note only when its "what
+  happened" itself asks for the change ("please remove X from the roster"): a mentor whose
+  Club Roster Form broke ("the partner dropdown is empty") is not told to use it (the PR #117
+  review); her report is queued and e-mailed to staff as before.
 
 Staff still own the item (RUNBOOK "Working the ReviewQueue"): enter the change or confirm the
 partner sent it, then resolve.
@@ -65,8 +74,8 @@ Property. An e-mail already sent to a mentor is not recalled; the ReviewQueue ro
 
 ## Proof
 Offline: `scripts/harness_tests.sh test/forms_logic_test.js` (the "which reports are roster
-changes" table, 110 wordings, and the block "a roster-change report points its sender to the
-Club Roster Form (#110)") green; `make gs` (services unchanged); `scripts/verify.sh` ends
+changes" table, 178 wordings with the PR #117 review's 68, and the block "a roster-change report
+points its sender to the Club Roster Form (#110)") green; `make gs` (services unchanged); `scripts/verify.sh` ends
 `CHECK PASSED`. Live: step 2's read-back.
 
 ## Result

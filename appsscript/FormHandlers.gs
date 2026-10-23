@@ -1016,7 +1016,14 @@ function handleFeedback_(a, source, responseKey) {
   audit_('feedbackForm', 'emailed ' + staff + ' about ' + tidy_(a[Q.FB_FORM]) +
          (!reason ? '' : queued ? '; ReviewQueue [#' + source + ']'
                                 : '; roster change, ReviewQueue write FAILED'));
-  const pointed = reason && replyTo ? sendRosterFormPointer_(replyTo, source) : null;
+  // The pointer goes to the sender of a report whose words are the change
+  // ('text'), or who chose the Club Roster Form and whose "what happened" is
+  // one ("please remove X from the roster"). With that form chosen, "what were
+  // you trying to do" describes her work on it ("marking the roster change"),
+  // and a report that it is broken is not answered "use the Club Roster Form"
+  // (#117 review): queued and e-mailed to staff as before, nothing to her.
+  const point = reason === 'text' || (reason === 'form' && rosterChangeWords_(a, [Q.FB_WHAT]));
+  const pointed = point && replyTo ? sendRosterFormPointer_(replyTo, source) : null;
   return 'emailed staff' +
       (!reason ? '' : queued ? '; roster change queued' : '; roster change NOT queued (see Audit)') +
       (pointed === null ? '' : pointed ? '; sender pointed to the Club Roster Form'
@@ -1042,8 +1049,9 @@ function sendRosterFormPointer_(to, source) {
     ].concat(url ? [url] : []).concat([
       '',
       'Choose "' + Q.ACTION_MOD + '", then your organization and your club, and list the ' +
-          'girls to add or to remove, each spelled as she was enrolled. Your club\'s roster ' +
-          'and its attendance form are updated from it.', '',
+          'girls to add or to remove, each spelled as she was enrolled. A misspelled name is ' +
+          'fixed the same way: remove the wrong spelling and add the right one. Your club\'s ' +
+          'roster and its attendance form are updated from it.', '',
       'If you have already sent it there, or your report was about something else, there ' +
           'is nothing more to do: the team reads every report.',
     ]).join('\n');
@@ -1112,23 +1120,34 @@ const DIGEST = { MAX_PER_ISSUE: 10, NEW_DAYS: 7 };
 const RC_PEOPLE = /\b(?:girls?|members?|students?|names|roster|list|(?:to|from) (?:our|the|my|this) (?:club|group)|ninas?|chicas?|integrantes|participantes|nombres|lista)\b/;
 const RC_CHANGE = /\b(?:add(?:ed|ing)?|remov(?:e|ed|ing|al)|join(?:ed|ing|s)?|left|chang(?:e|ed|es|ing)|reduc(?:e|ed|es|ing|tion)|updated|up to date|agreg\w*|anadi\w*|quitar\w*|elimin\w*|se fue(?:ron)?|cambi\w*|actualizad[ao]s?)\b/;
 const RC_NEW = /\bnew (?:girls?|members?|students?|names)\b|\bnuev[ao]s? (?:ninas?|chicas?|integrantes|participantes)\b|\b(?:ninas?|chicas?|integrantes|participantes) nuev[ao]s?\b/;
-// #110: girls "not on the form / list", "not in the portal", "missing from the
-// list" (Spanish "no aparece(n) en la lista / el formulario") are a roster
-// change said without a change word (a 2026-10 report of girls who attended
-// but were "not on the form" was missed). The same phrases are how page
-// problems read ("my club is not on the list"), so WHAT is absent decides: the
-// clause before the phrase, back to the last stop or "and". It is people when
-// it holds a people word (RC_WHO), or when, its articles and copula dropped
-// (RC_FILLER), what is left is no thing word (RC_THING) — a girl's name, "her
-// name", "she", "three". Accepted misses: a pronoun alone ("they are not on
-// the form"), a name after a thing word in the same clause ("at the club
-// meeting Ada Lorrimane was not on the list"). Accepted false alarms: a thing
-// not listed ("the date is not on the form"), resolved "not a roster change".
-const RC_ABSENT = /\b(?:not (?:on the (?:form|list)|in the portal)|missing from the list|no aparecen? en (?:la lista|el formulario))\b/;
-const RC_WHO = /\b(?:girls?|members?|students?|names|ninas?|chicas?|integrantes|participantes|nombres)\b/;
-const RC_THING = /\b(?:clubs?|clubes|groups?|sessions?|buttons?|organi[sz]ations?|modules?|pages?|photos?|pictures?|forms?|links?|options?|questions?|dates?|languages?|rosters?|lists?|logos?|menus?|grupos?|sesion(?:es)?|boton(?:es)?|organizacion(?:es)?|modulos?|paginas?|fotos?|formularios?|enlaces?|opcion(?:es)?|preguntas?|fechas?|idiomas?|listas?)\b/;
-const RC_FILLER = /\b(?:is|are|was|were|am|the|an?|my|our|your|their|her|his|its|this|that|these|those|it|they|them|there|here|some|all|also|still|now|el|la|los|las|una?|unos|unas|mi|mis|nuestr[ao]s?|sus?|est[aeo]s?|es[aeo]s?|ell[ao]s?|tod[ao]s?|tambien|ya|ahora)\b/g;
-const RC_BREAK = /[.,;:!?¿¡()"]|\b(?:and|but|so|because|y|pero|porque)\b/;
+// #110: girls "not on the form / list / roster", "not in the portal", "missing
+// from the form / list" (Spanish "no aparece(n) / no está(n) en la lista, el
+// formulario, el portal") are a roster change said without a change word (a
+// 2026-10 report of girls who attended but were "not on the form" was missed).
+// The same phrases are how page problems read ("my club is not on the list"),
+// so WHAT is absent decides: the clause before the phrase, back to the last
+// stop or "and" — or the clause before that, when it is only a pronoun and
+// its verb ("two girls came but THEY are not on the form"). It is people on a
+// positive sign only (#117 review): a people word (RC_WHO), or a girl's name
+// (RC_NAME: two capitalised words, no digit in the clause), and in neither
+// case a thing word in the clause (RC_THING: "Golden Wings Girls Club", "the
+// number of girls"; a club named as where the girls are, "the girls in our
+// club", is not what is absent: RC_WHERE). Anything else is a thing, listed or
+// not ("today's attendance", "our mentor", "my name"). Accepted misses: a lone
+// capitalised word ("Sunrise is not on the list": a club, or a first name — the
+// Club Roster Form needs her full name anyway), a pronoun or a number alone
+// ("they are not on the form"), a name after a thing word in its clause ("at
+// the club meeting Ada Lorrimane was not on the list"). Accepted false alarm:
+// a two-word club named only in the text, the club box blank ("Bright Stars
+// is not on the form"), reads as a girl's name; staff resolve it "not a roster
+// change" (docs/DECISIONS.md, 2026-10-23).
+const RC_ABSENT = /\b(?:not (?:on|in) the (?:(?:attendance |roster )?form|list|roster|portal)|missing from the (?:(?:attendance )?form|list|roster)|no (?:aparecen?|estan?) en (?:la lista|el formulario|el portal))\b/i;
+const RC_WHO = /\b(?:girls?|members?|students?|names|ninas?|chicas?|integrantes|participantes|nombres)\b/i;
+const RC_THING = /\b(?:clubs?|clubes|groups?|sessions?|buttons?|organi[sz]ations?|modules?|pages?|photos?|pictures?|forms?|links?|options?|questions?|dates?|languages?|rosters?|lists?|logos?|menus?|numbers?|counts?|grupos?|sesion(?:es)?|boton(?:es)?|organizacion(?:es)?|modulos?|paginas?|fotos?|formularios?|enlaces?|opcion(?:es)?|preguntas?|fechas?|idiomas?|listas?|numeros?|cantidad(?:es)?)\b/i;
+const RC_NAME = /\b[A-Z][A-Za-z]+(?: (?:de|del|da|dos|van|von))* [A-Z][A-Za-z]+\b/;
+const RC_WHERE = /\b(?:of|in|from|at|de|en) (?:our|my|the|this|nuestr[ao]|mi|el|la|est[ae]) (?:club|group|grupo)\b/gi;
+const RC_FILLER = /\b(?:is|are|was|were|am|the|an?|my|our|your|their|her|his|its|this|that|these|those|i|you|we|she|he|it|they|them|there|here|some|all|also|still|now|el|la|los|las|una?|unos|unas|mi|mis|nuestr[ao]s?|sus?|est[aeo]s?|es[aeo]s?|yo|ell[ao]s?|tod[ao]s?|tambien|ya|ahora)\b/gi;
+const RC_BREAK = /[.,;:!?¿¡()"]|\b(?:and|but|so|because|y|pero|porque)\b/i;
 
 /**
  * Why a problem report looks like a roster change: 'form' (it names the Club
@@ -1139,21 +1158,43 @@ const RC_BREAK = /[.,;:!?¿¡()"]|\b(?:and|but|so|because|y|pero|porque)\b/;
  */
 function looksLikeRosterChange_(a) {
   if (key_(a[Q.FB_FORM]).indexOf('roster form') !== -1) return 'form';
-  // the text as the patterns read it: lower case, accents folded (so \b sees "anadio")
-  let text = foldKey_(tidy_(a[Q.FB_DOING]) + ' ' + tidy_(a[Q.FB_WHAT]));
-  const club = foldKey_(a[Q.FB_CLUB]);
-  if (club.length >= 4) text = text.split(club).join(' ');   // "<X> Girls Club" is no roster word
-  if (RC_NEW.test(text) || (RC_PEOPLE.test(text) && RC_CHANGE.test(text))) return 'text';
-  return absentPeople_(text) ? 'text' : '';
+  return rosterChangeWords_(a, [Q.FB_DOING, Q.FB_WHAT]) ? 'text' : '';
 }
 
-/** #110: whether any RC_ABSENT phrase in the folded text is said of people (the rule above RC_ABSENT). */
+/**
+ * Whether the given boxes of a problem report ask to add or remove girls, or
+ * say girls are not on the form (the RC_ patterns). The typed club is blanked
+ * first ("<X> Girls Club" is no roster word).
+ */
+function rosterChangeWords_(a, boxes) {
+  let text = boxes.map(function (q) { return foldText_(a[q]); }).join('. ');
+  const club = foldText_(a[Q.FB_CLUB]);
+  if (club.length >= 4) text = text.replace(new RegExp(club.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
+  const lower = text.toLowerCase();
+  return RC_NEW.test(lower) || (RC_PEOPLE.test(lower) && RC_CHANGE.test(lower)) || absentPeople_(text);
+}
+
+/** Text as the RC_ patterns read it: tidied, accents folded (so \b sees "anadio"), case kept (a name is capitalised). */
+function foldText_(s) {
+  return tidy_(s).normalize('NFKD').replace(/[̀-ͯ]/g, '');
+}
+
+/** #110: whether any RC_ABSENT phrase in the text (foldText_) is said of people — the rule above RC_ABSENT. */
 function absentPeople_(text) {
   const before = text.split(RC_ABSENT);
   before.pop();   // what follows the last phrase
   return before.some(function (part) {
-    const subject = part.split(RC_BREAK).pop().replace(RC_FILLER, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
-    return RC_WHO.test(subject) || (!!subject && !RC_THING.test(subject));
+    const clauses = part.split(RC_BREAK);
+    while (clauses.length) {
+      // the club as where the girls are, then articles, pronouns and the copula, dropped:
+      // a clause with nothing left ("they are", "it is") defers to the one before it
+      const clause = clauses.pop().replace(/['’]/g, '').replace(RC_WHERE, ' ').replace(RC_FILLER, ' ')
+          .replace(/[^a-z0-9]+/gi, ' ').trim();
+      if (!clause) continue;
+      if (RC_THING.test(clause)) return false;
+      return RC_WHO.test(clause) || (RC_NAME.test(clause) && !/\d/.test(clause));
+    }
+    return false;
   });
 }
 
