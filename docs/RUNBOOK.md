@@ -3594,6 +3594,13 @@ Components more than one dashboard shares:
   component of D3, not of D4. #77 takes that component off D3 and #78 puts item 16 on D4; until
   #77 is done, #78's change to item 16 (its period and grouping) changes D3's component too.
   No other kept report is on a dashboard other than its own.
+- Item 6 on D2 and the report type `Attendance_Totals`, which the Attendance-folder reports share
+  (they stay as they are). The type carries the club's parent's name, not the partner's
+  `Assigned_Partner_Manager__c` ([plan](plans/2026-10-06-attendance-totals.md) D.1), so D2's
+  filter on it does not apply to item 6 until that field is reachable from the type (e.g. a
+  lookup through the club's parent added to `Attendance_Totals`, deployed only from a fresh
+  retrieve, the Attendance reports unchanged). #76 settles it before building item 6; named on
+  #74.
 
 The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #76 D2, #77 D3,
 #78 D4, #79 D5 and item 19; item 6 takes its own steps 1-3, below):
@@ -3624,12 +3631,17 @@ dashboard in Salesforce", [plan](plans/2026-10-06-attendance-totals.md) D.1):
    (`Attendance_Batch__c$Account__c.Parent`, the column the Partner filter uses), then
    `Attendance_Date__c` by calendar month, then `Module__c`; the measure is the record count,
    one batch per club and session date.
-- Test records: the RUNBOOK has no batch-side rule; the `Creator__c` filter is what keeps the
-  March pilot out of the attendance reports ("Access"). Whether item 6 also takes the
-  test-record rule on the parent account, #76 decides.
+- Test records: the RUNBOOK has no batch-side rule. The 11 February 2026 pilot batches are
+  `Creator__c` "Jotform" and `Success` (plan, Context), so they pass filters 1 and 2, fall inside
+  `LAST_N_MONTHS:12` until February 2027 and would show as a February 2026 bar. The Jotform
+  Attendance reports leave them out only by their window, `Attendance_Date__c` since 2026-09-01
+  (the `Creator__c` filter keeps the March pilot's per-girl rows out, "Access", not these
+  batches). Whether item 6 leaves them out (e.g. the same `Attendance_Date__c` floor of
+  2026-09-01) and takes the test-record rule on the parent account, #76 decides.
 - Whether item 6's report is rebuilt or a new report takes its place (the Id in
-  `glow/sf_keep_list.csv`), and how D2's `Assigned_Partner_Manager__c` filter reaches it, #76
-  decides; the copy to Decommissioned comes first either way.
+  `glow/sf_keep_list.csv`), #76 decides; D2's `Assigned_Partner_Manager__c` filter does not
+  reach it yet (Components more than one dashboard shares, above). The copy to Decommissioned
+  comes first either way.
 
 | Item | Report | Year filter | The report's "September" | SOQL, September 2026 | Cause and fix |
 |---|---|---|---|---|---|
