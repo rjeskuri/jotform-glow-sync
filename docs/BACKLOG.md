@@ -474,6 +474,7 @@ Status: open
 
 - **The three legacy blank `Success` batches** (one club each, dated 2026-09-30, 2026-09-30 and 2026-10-01; plus one February pilot batch): stored before the processor's backstop, no rows, no names. After `tools/sf_girls_present.py set` they carry `Girls_Present__c` 0, which is how the blank-submissions report finds them; each still blocks its club's day for a late re-submission (`Duplicate`).
 - Ryan's default 2026-10-06: leave them; if he wants those days open, three record deletes with his go (no rows to remove; nothing to roll back)
+- 2026-10-22: still true after #108 (a correction is merged only into a batch with rows of its own, and a blank `Success` has none): a late re-submission for those days stays `Duplicate`
 
 ### 74. Club accounts for clubs on no form
 
