@@ -26,7 +26,10 @@ The fake org (ReportOrg) is Salesforce as far as this tool may see it, after the
     400 JSON_PARSER_ERROR, as the API refused a dashboard's name and description.
   * PATCH analytics/reports/<id>, body {"reportMetadata": {...}}: folderId, name, description
     change; 200 with the report's metadata. drift[id] = "folder" | "name" makes the PATCH answer
-    200 while that field stays as it was (a failed read-back); refuse_patch makes it 400.
+    200 while that field stays as it was (a failed read-back); drift[id] = "echo" answers 200 with
+    the values asked for while nothing is stored (only a SOQL read-back sees it); refuse_patch
+    makes it 400. misplace = True: a clone answers 200 with the folder asked for, but lands in its
+    source's folder (only a SOQL read-back sees it).
   * PATCH analytics/dashboards/<id>: always 400 JSON_PARSER_ERROR (the proof, steps 3-5).
   * GET .../describe answers a small describe; any other GET (a report run returns its rows) and
     any other method is an AssertionError (recorded first).
@@ -250,7 +253,7 @@ FOLDERS = [   # key, name, type
     ("r_dhis2", "DHIS2 Reports", "Report"), ("r_public", "Public Reports", "Report"),
     ("r_cat", "GLOW Club Reports", "Report"), ("r_shared", "Shared Name", "Report"),
     ("r_old1", "Old Exports", "Report"), ("r_old2", "Old Exports", "Report"),
-    ("r_att", "Attendance", "Report"),
+    ("r_att", "Attendance", "Report"), ("r_attarch", "Attendance Archive", "Report"),
     ("d_dhis2", "DHIS2 Dashboards", "Dashboard"), ("d_dhis2b", "Dhis2 Dashbords", "Dashboard"),
     ("d_cat", "GLOW Club Dashboards", "Dashboard"), ("d_shared", "Shared Name", "Dashboard"),
     ("d_att", "Attendance", "Dashboard"),
@@ -265,6 +268,7 @@ REPORTS = [   # key, label, folder key, last run
     ("mixed", "Training sessions led", "r_dhis2", "2026-10-05T16:45:00.000+0000"),
     ("public", "Public club totals", "r_public", "2026-10-01T12:00:00.000+0000"),
     ("att", "Jotform attendance by club", "r_att", "2026-10-20T06:00:00.000+0000"),
+    ("archived", "Old attendance export", "r_attarch", "2026-05-02T09:30:00.000+0000"),
 ]
 DASHBOARDS = [   # key, title, folder key, report keys of its components (None: a text component)
     ("attendance", "GLOW Club Attendance", "d_dhis2", ["meet", "girls", None]),
@@ -285,7 +289,7 @@ class ReportOrg:
 
     def __init__(self, decom_reports=1, decom_dashboards=1):
         self.calls, self.seen = [], []
-        self.drift, self.refuse_patch = {}, set()
+        self.drift, self.refuse_patch, self.misplace = {}, set(), False
         self.folders, self.fid = [], {}
         for key, name, kind in FOLDERS:
             self.add_folder(key, name, kind)
@@ -414,24 +418,26 @@ class ReportOrg:
             name = meta.get("name", src["Name"])
             if len(name) > 40:
                 return 400, [{"errorCode": "FIELD_INTEGRITY_EXCEPTION", "message": "name too long"}]
-            new = dict(src, Id=fresh_id("00O"), Name=name, OwnerId=meta.get("folderId", src["OwnerId"]),
+            asked = meta.get("folderId", src["OwnerId"])
+            new = dict(src, Id=fresh_id("00O"), Name=name, OwnerId=src["OwnerId"] if self.misplace else asked,
                        DeveloperName=src["DeveloperName"] + "_copy", Description=meta.get("description", ""),
                        LastRunDate=None)
             self.reports.append(new)
-            return 200, {"reportMetadata": {"id": new["Id"], "name": new["Name"], "folderId": new["OwnerId"]},
+            return 200, {"reportMetadata": {"id": new["Id"], "name": new["Name"], "folderId": asked},
                          "runningUser": {"name": CANARY}}
         src = self.dashboard(source)
         if src is None:
             return 404, [{"errorCode": "NOT_FOUND", "message": "no such dashboard"}]
         if not isinstance(body, dict) or set(body) - {"folderId"}:
             return 400, [{"errorCode": "JSON_PARSER_ERROR", "message": f"Cannot deserialize ({CANARY})"}]
-        new = dict(src, Id=fresh_id("01Z"), FolderId=body.get("folderId", src["FolderId"]),
+        asked = body.get("folderId", src["FolderId"])
+        new = dict(src, Id=fresh_id("01Z"), FolderId=src["FolderId"] if self.misplace else asked,
                    DeveloperName=src["DeveloperName"] + "_copy")
         self.dashboards.append(new)
         for c in [c for c in self.components if c["DashboardId"] == source]:
             self.components.append(dict(c, Id=fresh_id("01a"), DashboardId=new["Id"]))
-        return 200, {"id": new["Id"], "name": new["Title"], "folderId": new["FolderId"],
-                     "dashboardMetadata": {"id": new["Id"], "name": new["Title"], "folderId": new["FolderId"]},
+        return 200, {"id": new["Id"], "name": new["Title"], "folderId": asked,
+                     "dashboardMetadata": {"id": new["Id"], "name": new["Title"], "folderId": asked},
                      "runningUser": {"name": CANARY}}
 
     def patch_report(self, rid, body):
@@ -446,6 +452,10 @@ class ReportOrg:
         if "name" in meta and len(meta["name"]) > 40:
             return 400, [{"errorCode": "FIELD_INTEGRITY_EXCEPTION", "message": "name too long"}]
         drift = self.drift.get(rid)
+        if drift == "echo":        # the answer says what was asked; Salesforce kept nothing
+            echoed = {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"]}
+            echoed.update({k: v for k, v in meta.items() if k in ("name", "folderId")})
+            return 200, {"reportMetadata": echoed, "runningUser": {"name": CANARY}}
         if "folderId" in meta and drift != "folder":
             r["OwnerId"] = meta["folderId"]
         if "name" in meta and drift != "name":
@@ -534,7 +544,26 @@ class Harness(unittest.TestCase):
 
     def target(self, name):
         return {"GLOW Club Reports": "r_cat", "Decommissioned": "r_decom", "Shared Name": "r_shared",
-                "Public Reports": "r_public", "DHIS2 Reports": "r_dhis2"}[name]
+                "Public Reports": "r_public", "DHIS2 Reports": "r_dhis2", "Attendance Archive": "r_attarch"}[name]
+
+    def write_ledger(self, rows):
+        """A ledger written by hand (an earlier run's), at the --dir ledger; its path."""
+        with open(self.ledger_path, "w", encoding="utf-8", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=LEDGER_COLS, lineterminator="\n")
+            w.writeheader()
+            for n, row in enumerate(rows):
+                w.writerow(dict({"when": f"2026-10-23T10:0{n}:00Z"}, **row))
+        os.chmod(self.ledger_path, 0o600)
+        return self.ledger_path
+
+    def apply_moves(self, plans):
+        """Each plan (a list of rows) moved with --apply, in order; the ledger's move rows."""
+        for rows in plans:
+            self.ok("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        return [x for x in self.ledger() if x["action"] == "move"]
+
+    def writes_since(self, n):
+        return [x for x in self.org.calls[n:] if x[0] != "GET"]
 
 
 # ---- the broad behaviour --------------------------------------------------------------------------
@@ -606,6 +635,9 @@ class Move(Harness):
                 self.assertIn(to, lines[0])
                 if label:
                     self.assertIn(label, lines[0])
+                # what only the read of the item gives: its current label and folder
+                self.assertIn(o.report(rid)["Name"], lines[0], f"the current label, read from Salesforce:\n{said}")
+                self.assertIn(o.folder_name(o.report(rid)["OwnerId"]), lines[0], "the current folder")
             others = [r["Id"] for r in o.reports if r["Id"] not in {x[1] for x in rows}]
             for rid in others:
                 self.assertNotIn(rid, said)
@@ -658,7 +690,8 @@ class Move(Harness):
                 self.assertEqual(o.report(rid)["OwnerId"], want, f"row {i} with --limit {n}")
 
     def test_a_failed_read_back_stops_the_run(self):
-        for bad, drift in ((0, "folder"), (1, "folder"), (2, "name")):
+        # "echo": the PATCH answer says it worked; only a SOQL read-back shows nothing changed
+        for bad, drift in ((0, "folder"), (1, "folder"), (2, "name"), (0, "echo"), (1, "echo")):
             o = self.fresh()
             rows = self.move_plan()
             o.drift[rows[bad][1]] = drift
@@ -726,6 +759,19 @@ class Copy(Harness):
                 self.assertEqual(o.dashboard(source), was, "the source is untouched")
         self.assertFalse([p for p in o.patches() if "/dashboards/" in p[1]], "a dashboard PATCH is refused by the API")
 
+    def test_a_copy_is_read_back_and_a_misplaced_clone_stops_the_run(self):
+        for kind in ("report", "dashboard"):
+            o = self.fresh()
+            o.misplace = True        # the clone answers 200 with the folder asked for, but lands in its source's
+            source = o.rid["meet"] if kind == "report" else o.did["attendance"]
+            said = self.refused("copy", "--kind", kind, "--id", source, "--tag", "#72", "--vpn-off", "--apply")
+            self.assertEqual(len(o.writes()), 1, f"no write after the failed read-back:\n{said}")
+            new_id = (o.reports if kind == "report" else o.dashboards)[-1]["Id"]
+            ledger = self.ledger()
+            self.assertEqual(len(ledger), 1)
+            self.assertEqual((ledger[0]["action"], ledger[0]["id"], ledger[0]["copy_id"], ledger[0]["status"]),
+                             ("copy", source, new_id, "failed"))
+
 
 class Undo(Harness):
     def test_undo_puts_every_ledger_row_back_last_first(self):
@@ -773,22 +819,114 @@ class Undo(Harness):
         self.assertTrue(all(x["action"] not in ("move", "copy") for x in added), added)
         self.assertEqual([x["id"] for x in added], [x["id"] for x in reversed(moves)])
 
+        # a second undo finds nothing left to undo
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual(self.writes_since(sent), [], "every move was undone already")
+        self.assertEqual(o.state()[0], now)
+
+        # a later move is undone alone
+        x = o.rid["long"]
+        self.apply_moves([[("report", x, "GLOW Club Reports", "Implementation by month")]])
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual([w[1] for w in self.writes_since(sent)], [f"{API_ROOT}analytics/reports/{x}"])
+        self.assertEqual(o.state()[0], now)
+
+    def test_undo_acts_on_every_sent_move_and_skips_a_refused_one(self):
+        """A move row whose PATCH answered 200 is undone, ok or failed; one answered 400 never moved."""
+        o = self.org
+        original = o.state()[0]
+        meet, mentors, stories = o.rid["meet"], o.rid["mentors"], o.rid["stories"]
+        o.report(meet).update(OwnerId=o.fid["r_cat"], Name="Club meeting frequency")
+        o.report(mentors).update(OwnerId=o.fid["r_cat"])        # its read-back failed, the move landed later
+        common = {"action": "move", "kind": "report", "from_folder_id": o.fid["r_dhis2"], "to_folder_id": o.fid["r_cat"]}
+        ledger = self.write_ledger([
+            dict(common, id=meet, old_label=original[meet][1], new_label="Club meeting frequency",
+                 status="ok", http="200"),
+            dict(common, id=mentors, old_label=original[mentors][1], new_label="", status="failed", http="200"),
+            dict(common, id=stories, old_label=original[stories][1], new_label="Stories", status="failed",
+                 http="400"),
+            {"action": "copy", "kind": "report", "id": stories, "to_folder_id": o.fid["r_decom"],
+             "copy_id": fresh_id("00O"), "tag": "#72", "status": "ok", "http": "200"},
+        ])
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", ledger, "--vpn-off", "--apply")
+        self.assertEqual([w[1] for w in self.writes_since(sent)],
+                         [f"{API_ROOT}analytics/reports/{rid}" for rid in (mentors, meet)], "last first; no 400 row")
+        self.assertEqual(o.state()[0], original)
+
+    def test_undo_stops_on_a_failed_read_back(self):
+        for mode in ("echo", "folder", "refuse"):
+            o = self.fresh()
+            a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["long"]
+            moves = self.apply_moves([[("report", a, "Decommissioned", ""), ("report", b, "GLOW Club Reports", "Stories")],
+                                      [("report", c, "Shared Name", "Implementation by month")]])
+            moved = o.state()[0]
+            rows_before = len(self.ledger())
+            if mode == "refuse":
+                o.refuse_patch.add(c)
+            else:
+                o.drift[c] = mode
+            sent = len(o.calls)
+            said = self.refused("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+            self.assertEqual([w[1] for w in self.writes_since(sent)], [f"{API_ROOT}analytics/reports/{c}"],
+                             f"{mode}: no write after the failed undo:\n{said}")
+            added = self.ledger()[rows_before:]
+            self.assertEqual([(x["id"], x["status"]) for x in added], [(c, "failed")], mode)
+            self.assertNotIn(added[0]["action"], ("move", "copy"))
+            for rid in (a, b):
+                self.assertEqual(o.state()[0][rid], moved[rid], f"{mode}: {rid} stays moved")
+            self.assertEqual(len(moves), 3)
+
+    def test_undo_limit_undoes_the_last_n_and_the_rest_later(self):
+        o = self.org
+        original = o.state()[0]
+        a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["long"]
+        self.apply_moves([[("report", a, "Decommissioned", ""), ("report", b, "GLOW Club Reports", "Stories"),
+                           ("report", c, "Shared Name", "Implementation by month")]])
+        moved = o.state()[0]
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply", "--limit", "1")
+        self.assertEqual([w[1] for w in self.writes_since(sent)], [f"{API_ROOT}analytics/reports/{c}"])
+        self.assertEqual(o.state()[0][c], original[c])
+        self.assertEqual((o.state()[0][a], o.state()[0][b]), (moved[a], moved[b]))
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual([w[1] for w in self.writes_since(sent)],
+                         [f"{API_ROOT}analytics/reports/{rid}" for rid in (b, a)])
+        self.assertEqual(o.state()[0], original)
+
 
 # ---- the refusals ---------------------------------------------------------------------------------
 class Refusals(Harness):
     def assert_move_refused(self, bad_row, *words):
-        """A plan of a valid row, then `bad_row`: refused whole, before any write."""
+        """A plan of a valid row, then `bad_row`: refused whole, before any write, in the dry run
+        and with --apply alike."""
         o = self.org
         before = o.state()
         rows = [("report", o.rid["public"], "GLOW Club Reports", "Public club totals, all"), bad_row]
-        said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
-        self.assert_nothing_written(before)
-        for w in words:
-            self.assertIn(w, said)
+        plan = self.plan(rows)
+        for extra in ([], ["--apply"]):
+            said = self.refused("move", "--plan", plan, "--vpn-off", *extra)
+            self.assert_nothing_written(before)
+            for w in words:
+                self.assertIn(w, said, f"move {extra}")
+        return said
+
+    def assert_copy_refused(self, kind, item, *words):
+        before = self.org.state()
+        for extra in ([], ["--apply"]):
+            said = self.refused("copy", "--kind", kind, "--id", item, "--tag", "#72", "--vpn-off", *extra)
+            self.assert_nothing_written(before)
+            for w in words:
+                self.assertIn(w, said, f"copy {extra}")
         return said
 
     def test_refuses_a_folder_name_that_is_not_exactly_one_folder_of_the_kind(self):
-        for name in ("Nowhere Folder", "Old Exports", "GLOW Club Dashboards"):
+        # none; two; only a dashboard folder; a folder's name in another case (SOQL's = ignores case:
+        # the name is compared exactly, in Python)
+        for name in ("Nowhere Folder", "Old Exports", "GLOW Club Dashboards", "glow club reports", "DECOMMISSIONED"):
             o = self.fresh()
             self.assert_move_refused(("report", o.rid["mentors"], name, ""), name)
         # the control: a name one report folder and one dashboard folder share is one of the kind
@@ -803,11 +941,16 @@ class Refusals(Harness):
         self.assert_move_refused(("report", o.rid["mentors"], "Attendance", ""), "Attendance")
         for kind, key in (("report", "att"), ("dashboard", "jotform")):
             o = self.fresh()
-            item = o.rid[key] if kind == "report" else o.did[key]
-            before = o.state()
-            said = self.refused("copy", "--kind", kind, "--id", item, "--tag", "#72", "--vpn-off", "--apply")
-            self.assert_nothing_written(before)
-            self.assertIn("Attendance", said)
+            self.assert_copy_refused(kind, o.rid[key] if kind == "report" else o.did[key], "Attendance")
+        # the control: only a folder named exactly "Attendance" is protected, not "Attendance Archive"
+        o = self.fresh()
+        self.ok("move", "--plan", self.plan([("report", o.rid["mentors"], "Attendance Archive", ""),
+                                             ("report", o.rid["archived"], "GLOW Club Reports", "")]),
+                "--vpn-off", "--apply")
+        self.assertEqual(o.report(o.rid["mentors"])["OwnerId"], o.fid["r_attarch"])
+        self.assertEqual(o.report(o.rid["archived"])["OwnerId"], o.fid["r_cat"])
+        self.ok("copy", "--kind", "report", "--id", o.rid["archived"], "--tag", "#72", "--vpn-off", "--apply")
+        self.assertEqual(len(o.posts()), 1)
 
     def test_refuses_to_retire_a_report_a_remaining_dashboard_uses(self):
         # used by one dashboard outside Decommissioned; by two outside; by one inside and one outside
@@ -841,11 +984,8 @@ class Refusals(Harness):
         for kind, counts in (("report", dict(decom_reports=0)), ("report", dict(decom_reports=2)),
                              ("dashboard", dict(decom_dashboards=0)), ("dashboard", dict(decom_dashboards=2))):
             o = self.fresh(**counts)
-            item = o.rid["meet"] if kind == "report" else o.did["attendance"]
-            before = o.state()
-            said = self.refused("copy", "--kind", kind, "--id", item, "--tag", "#72", "--vpn-off", "--apply")
-            self.assert_nothing_written(before)
-            self.assertIn("Decommissioned", said)
+            self.assert_copy_refused(kind, o.rid["meet"] if kind == "report" else o.did["attendance"],
+                                     "Decommissioned")
         # the other kind's Decommissioned folder does not count
         o = self.fresh(decom_reports=0)
         self.ok("copy", "--kind", "dashboard", "--id", o.did["attendance"], "--tag", "#72", "--vpn-off", "--apply")
