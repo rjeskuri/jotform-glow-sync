@@ -54,6 +54,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Duplicate girls in Salesforce](#duplicate-girls-in-salesforce)
   - [Attendance totals and partner-reported counts](#attendance-totals-and-partner-reported-counts)
   - [Attendance dashboard in Salesforce](#attendance-dashboard-in-salesforce)
+  - [Submission timing in Salesforce](#submission-timing-in-salesforce)
   - [Monthly Report dashboards in Salesforce](#monthly-report-dashboards-in-salesforce)
   - [Interactive dashboard in Salesforce](#interactive-dashboard-in-salesforce)
   - [September back-fill: the resolver](#september-back-fill-the-resolver)
@@ -3385,6 +3386,82 @@ sharing stays as it is"):
   check-only, Ryan's go, deploy.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
+
+## Submission timing in Salesforce
+
+- **When:** a report or dashboard on when clubs submit (tasks #102 and #103); the monthly
+  Salesforce checks; a question about a batch's session week or its delay.
+- **Status:** the four formula fields are deployed on Ryan's go per the
+  [plan](plans/2026-10-23-submission-timing.md) (its `status:` and Result say whether that has
+  happened yet; the read-only proofs are done, 2026-10-23).
+- **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
+  is read-only.
+- **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
+- **Verify:** retrieve again and compare with the build and with `before/`; then
+  `python3 tools/sf_session_timing.py check --vpn-off` -> `-> OK`.
+- **Rollback:** below.
+- **History:** [plan](plans/2026-10-23-submission-timing.md) (the proofs, the deploy, tasks
+  #102 and #103).
+
+Since task #100 (DECISIONS 2026-10-23) a batch's session month and week, and for a live Jotform
+batch its submission time and the delay from the session to it, are four formula fields on
+`Attendance_Batch__c`, computed by Salesforce from `Creator__c`, `CreatedDate` and
+`Attendance_Date__c`; the formula texts are `glow/session_timing.py SF_FORMULAS`, and task #101
+deploys them. A formula field changes no record and runs nothing: the processor's trigger and
+the Jotform integration are untouched.
+
+**The fields** (API name, label, type):
+- `Submitted_At__c` ("Submitted at", Date/Time): the batch's `CreatedDate` when `Creator__c` is
+  `Jotform`, else blank.
+- `Submission_Delay_Days__c` ("Days from session to submission", Number): whole days from
+  `Attendance_Date__c`, the session date, to the UTC day of the submission, blank without a
+  submission time, negative when the form was submitted before the session date (a date typo,
+  BACKLOG 79).
+- `Session_Month__c` ("Session month", Text): the session's month as `2026-10`, from
+  `Attendance_Date__c`.
+- `Session_Week__c` ("Session week", Text): the week of the month the session date falls in, as
+  `2026-10 week 2`.
+
+**The week rule:** the week is the week of the month by day of the session date: days 1-7 are
+week 1, 8-14 week 2, 15-21 week 3, 22-28 week 4 and 29-31 week 5, shown as `2026-10 week 2`.
+It is the calendar week of the session date, not the curriculum "Session N" in `Module_Week__c`
+and not Salesforce's Sunday-start report weeks (DECISIONS 2026-10-23).
+
+**The time zone:** the submission day, the day the delay counts to, is the UTC day of
+`CreatedDate` (what a formula's `DATEVALUE` gives). That is the clock's day in UTC rather than
+the mentor's local day: a late-evening submission in the Americas counts as the next day and an
+early-morning one in Asia as the same day, so a delay of 1 can be a form sent the same evening.
+
+**Which batches have one:** only a batch whose `Creator__c` is exactly `Jotform` has a
+submission time, because the native Jotform Salesforce V2 integration creates the batch the
+moment the form is submitted, so its `CreatedDate` is the submission time. The September
+back-fill batches (`Creator__c` starting `Jotform back-fill`) and the three partners' monthly
+batches (`Partner report`, `tools/sf_partner_monthly.py`) were created later by tools, so they
+have no submission time and no delay, but they do have a session month and week. A batch that
+`tools/sf_backfill.py` sends later carries the same back-fill creator and gets none either.
+
+**The check** (read only, VPN off): `python3 tools/sf_session_timing.py check --vpn-off`
+compares every batch since 2026-09-01 with `glow/session_timing.py` in one explicit-field SOQL
+query (never `Contact_IDs__c`) and prints `checked N batches` with the count of differing values
+per field, then `-> OK`, or `-> DIFFER` with up to 10 lines of batch Name, field, Salesforce's
+value and the expected one, exit 1; `--since 2026-10-01` narrows the window. Batch Names and
+counts only, nothing written. An HTTP 400 means the fields are not deployed yet (task #101), or
+the login cannot read them. Run it after the deploy, after any change to `SF_FORMULAS`, and
+with the monthly Salesforce checks.
+
+**Access:** the permission set `Attendance_Report_Viewer` and the Admin profile read the four
+fields (one Read entry per field in each, deployed with the fields), so a report that shows,
+groups or filters on them works for every viewer; a filter on a field the viewer cannot read is
+dropped silently ("Attendance dashboard in Salesforce", Access). A new report on another field
+needs that field's Read added to the set.
+
+**Rollback** ([plan](plans/2026-10-23-submission-timing.md#rollback)): the reports that use or
+filter on the fields go first (edited or deleted, each copied to Decommissioned before, the
+archive rule of DECISIONS 2026-10-21), then the four fields `Submitted_At__c`,
+`Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` are deleted by a
+`destructiveChanges.xml` deploy, check-only first and on Ryan's go, their permission-set and
+Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
+components and changed none, so nothing is redeployed from its `before/`.
 
 ## Monthly Report dashboards in Salesforce
 
