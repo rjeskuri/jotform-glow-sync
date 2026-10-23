@@ -12,6 +12,12 @@ a dated DECISIONS entry records archive-not-delete; the salesforce skill points 
 Every part a test reads is also swept for what would contradict the rule (contradictions()): a
 deletion, a share, or a softener that makes the copy, the check-only or the revert optional.
 Counts and names of reports only: no figure from the org is pinned.
+
+KeepListDocs (ticket #70): the RUNBOOK's `### The keep list` names `glow/sf_keep_list.csv`, the five
+groups, Partner and Month, the unchanged labels, Decommissioned for what is off the list and the
+test-record filter; a dated DECISIONS entry records the keep list, Ryan's words, the rule and what was
+rejected (`Partner_Status__c` with its reason). Each rule is checked as stated, not negated, rejected,
+renamed, put off or softened, with #69's `locally_denied` and `contradictions`.
 """
 import glob
 import os
@@ -388,6 +394,241 @@ class DecommissionedFoldersDocs(unittest.TestCase):
                         f"{where}: the archive rule says a copy goes to Decommissioned before each change (one "
                         "sentence, not negated)")
         self.assertNoContradiction(item, where, share=True)
+
+
+class KeepListDocs(unittest.TestCase):
+    """Ticket #70: GLOW's keep list (`glow/sf_keep_list.csv`, test/sf_keep_list_test.py) in the RUNBOOK and
+    DECISIONS, as Ryan answered on the ticket, 2026-10-23: the 19 items in five dashboards and one table, every
+    kept report by Partner and Month (Ryan, 2026-10-21); the labels unchanged ("Kept reports and dashboards keep
+    their current names"); everything off the list goes to Decommissioned and is kept there; the test-record
+    rule is the report filter `Account is not blank AND Account: Account Name does not contain "test"`, not
+    `Partner_Status__c`. Each rule must be stated as the rule: not negated, rejected, renamed or put off (#69's
+    `locally_denied` and `contradictions`)."""
+
+    longMessage = False         # the messages say what to fix
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
+    MONTHLY = "## Monthly Report dashboards in Salesforce"
+    KEEP = "### The keep list"
+    TICKET = re.compile(r"(?<![\w#])#70\b")
+    GROUPS = ("GLOW Club Attendance", "GLOW Club Implementation", "GLOW Club Observations", "GLOW Club Training",
+              "GLOW Club Reporting")
+    NEGATION = DecommissionedFoldersDocs.NEGATION
+    RYAN = "This data should be displayed by the Partner and Month"     # Ryan, 2026-10-21, verbatim
+
+    # the rule, in either order of its two conditions, quotes straight or curly
+    NOT_BLANK = re.compile(r"(?i)`?Account`?\s+(is\s+)?not\s+blank\b|`?Account`?\s+(is\s+)?not\s+(empty|null)\b|"
+                           r"`?Account`?\s*(!=|≠|<>)\s*(blank|null|['\"]{2})")
+    NO_TEST = re.compile(r"(?i)\bAccount Name`?\s+does\s+not\s+contain\s+[`\"“']+test[`\"”']+")
+    # words that make the rule a rejected one, before it ("A rejected filter: …", "we dropped …") ...
+    REJECT = re.compile(r"(?i)\b(reject\w*|dropped|dropping|discard\w*|abandon\w*|withdr[ae]w\w*|superseded|"
+                        r"instead|cannot|wrong|replac\w*|retired)\b")
+    # ... or after it ("… does not contain "test" was rejected")
+    REJECTED_AFTER = re.compile(r"(?i)\b(is|are|was|were|been|be)\s+(\w+\s+)?(rejected|dropped|discarded|abandoned|"
+                                r"replaced|superseded|wrong|withdrawn|not used|unused)\b|\brejected\b")
+    # Partner_Status__c used as the rule ("use Partner_Status__c", "filter on Partner_Status__c")
+    USES_STATUS = re.compile(r"(?i)\b(use|uses|using|used|filters?\s+(on|by)|filtered\s+(on|by)|rel(y|ies)\s+on|"
+                             r"keyed\s+on|by|with)\s+`?Partner_Status__c")
+    # why Partner_Status__c is rejected: blank on real partners too (it would drop real partners)
+    STATUS_REASON = re.compile(r"(?i)\bblank\b[^.;]{0,80}?\breal partners?\b|"
+                               r"\b(drops?|dropping|excludes?|excluding|loses?|hides?|removes?)\b[^.;]{0,30}?"
+                               r"\breal partners?\b")
+    # "keep their current names", "labels stay unchanged", "the labels are not changed", "do not change the labels"
+    SAME_LABELS = re.compile(r"(?i)\bkeep(s|ing)?\b[^.;]{0,30}?\b(current|today['’]s|existing|own|present)\s+"
+                             r"(labels?|names?)\b|\b(labels?|names?)\b[^.;]{0,40}?\b(unchanged|stay the same|"
+                             r"(are|is|stay|stays)\s+as\s+(they|it)\s+(are|is)|(are|is)\s+(not|never)\s+(changed|renamed)|"
+                             r"(do|does)\s+not\s+change|not\s+renamed|never\s+renamed)\b|"
+                             r"\b(do|does|did|will)\s+not\s+change\s+(the|their|its|any)\s+(\w+\s+)?(labels?|names?)\b")
+    # a label change stated as the plan ("rename all of them", "change the labels", "the names are changed")
+    RENAME = re.compile(r"(?i)\b(renam\w*|re-?label\w*|chang(e|es|ed|ing)\s+(the\s+|their\s+|its\s+|a\s+|each\s+|"
+                        r"every\s+|all\s+)?(\w+\s+)?(labels?|names?)|new\s+(labels?|names?))\b|"
+                        r"\b(labels?|names?)\s+(will\s+be\s+|are\s+|is\s+|get\s+)?(chang(e|es|ed)|renamed|relabel\w*)\b")
+    OFF_LIST = re.compile(r"(?i)\b(not on|off)\s+the\s+(keep\s+)?list\b")
+    MOVED = re.compile(r"(?i)\b(goes|go|going|moved?|moves|moving|retired?)\s+(\w+\s+){0,3}?(to|into)\s+(the\s+)?"
+                       r"[`\"“]?Decommissioned")
+    KEPT_THERE = re.compile(r"(?i)\b(kept|stays?|remains?)\s+(\w+\s+)?there\b|"
+                            r"\bkept\s+in\s+(the\s+)?[`\"“]?Decommissioned")
+    # what puts the move off or makes it conditional ("only once Ryan asks", "until then it stays in place")
+    DELAY = re.compile(r"(?i)\bonly\s+(once|if|when|after|on)\b|\buntil\b|\bunless\b|"
+                       r"\b(stays?|remains?|left|leave|kept)\s+in\s+place\b|\bstays?\s+where\b|\beventually\b|"
+                       r"\bwhen(ever)?\s+(Ryan|someone|asked|needed)\b|\bif\s+(Ryan|asked|needed|requested)\b|"
+                       r"\bon request\b|\boptional\w*|\bmay\b|\bmight\b|\bcould\b|\bsomeday\b|\bone day\b|"
+                       r"\bat some point\b|\bfor now\b|\bnot yet\b")
+    STAY_PUT = re.compile(r"(?i)\b(stays?|remains?|left|leave|kept)\s+(\w+\s+)?in\s+place\b|"
+                          r"\bstays?\s+where\s+(it|they)\s+(is|are)\b")
+    EVERY_REPORT = re.compile(r"(?i)\b(every|each|all)\b[^.;]{0,60}?\breports?\b")
+    NINETEEN = re.compile(r"(?i)\b19\s+(\w+\s+)?items\b")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = DecommissionedFoldersDocs()     # #69's helpers: locally_denied, contradictions
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def said(self, s, m):
+        """Match `m` of clause `s` stated, not denied: no negation in the words before it (#69's
+        `locally_denied`) and no "nothing", "none" or "no" right after it ("rename nothing")."""
+        return not self.d.locally_denied(s, m) and not re.match(r"\s+(nothing|none|no)\b", s[m.end():])
+
+    def stated(self, text, rx):
+        """The clauses of `text` where `rx` is said, not denied."""
+        return [s for s in sentences(text, ".;") if any(self.said(s, m) for m in rx.finditer(s))]
+
+    def keep_part(self):
+        """The `### The keep list` part of the Monthly Report section, to the next `###` or `##`."""
+        section = md_part(self.RUNBOOK, self.MONTHLY)
+        m = re.search(r"^" + re.escape(self.KEEP) + r"(?!\w).*$", section, re.M)
+        self.assertTrue(m, f"RUNBOOK section {self.MONTHLY[3:]!r}: no `{self.KEEP}` part under it")
+        rest = section[m.start():]
+        nxt = re.search(r"\n#{1,3} ", rest)
+        return rest[:nxt.start()] if nxt else rest
+
+    def decision(self):
+        entries = re.split(r"(?m)^(?=### )", read(self.DECISIONS))[1:]
+        new = [e for e in entries if re.match(r"### (\d{4}-\d\d-\d\d) ", e)
+               and re.match(r"### (\d{4}-\d\d-\d\d) ", e).group(1) >= "2026-10-21"
+               and re.search(r"(?i)\bkeep list\b", e.split("\n", 1)[0])]
+        self.assertTrue(new, "docs/DECISIONS.md: no dated entry (`### 2026-10-2x — GLOW's keep list: 19 items in five "
+                             "dashboards and one table; every kept report by Partner and Month`) whose heading names "
+                             "the keep list")
+        self.assertEqual(len(new), 1, "docs/DECISIONS.md: one dated entry on the keep list, not "
+                                      f"{len(new)}")
+        return new[0]
+
+    # --- the rules, shared by the RUNBOOK and the DECISIONS checks ------------------------------------------
+
+    def assertTestRecordRule(self, text, where):
+        """The rule stated in one clause, as a report filter, not rejected or dropped and without
+        `Partner_Status__c`; `Partner_Status__c` named only where it is denied, never used."""
+        rules = [s for s in sentences(text, ".;") if self.NOT_BLANK.search(s) and self.NO_TEST.search(s)]
+        self.assertTrue(rules, f"{where}: state the test-record rule in one sentence: `Account is not blank AND "
+                               "Account: Account Name does not contain \"test\"`")
+        for s in rules:             # every statement of it, so a rejected one cannot sit beside a stated one
+            a, b = self.NOT_BLANK.search(s), self.NO_TEST.search(s)
+            pre, post = s[:min(a.start(), b.start())], s[max(a.end(), b.end()):]
+            self.assertFalse(self.NEGATION.search(pre) or self.REJECT.search(pre) or self.REJECTED_AFTER.search(post)
+                             or "Partner_Status__c" in s,
+                             f"{where}: the test-record rule is stated as the rule (Ryan, 2026-10-23), not negated, "
+                             f"rejected or dropped, and `Partner_Status__c` is not in its sentence: {s[:200]!r}")
+        self.assertTrue([s for s in rules if re.search(r"(?i)\bfilters?\b", s)],
+                        f"{where}: the test-record rule is a report filter (say so in its sentence)")
+        for s in sentences(text, ".;"):
+            if "Partner_Status__c" not in s:
+                continue
+            used = [m for m in self.USES_STATUS.finditer(s) if self.said(s, m)]
+            self.assertFalse(used or not (self.NEGATION.search(s) or self.REJECT.search(s)),
+                             f"{where}: `Partner_Status__c` is not the test-record rule (Ryan, 2026-10-23); name it "
+                             f"only to say it is not used: {s[:200]!r}")
+
+    def assertSameLabels(self, text, where):
+        self.assertTrue(self.stated(text, self.SAME_LABELS),
+                        f"{where}: say kept reports and dashboards keep their current names (labels unchanged, Ryan "
+                        "2026-10-23), not negated")
+        for s in sentences(text, ".;"):
+            for m in self.SAME_LABELS.finditer(s):      # "never keep their current names"
+                self.assertFalse(m.group(0).lower().startswith("keep") and not self.said(s, m),
+                                 f"{where}: kept reports and dashboards keep their current names (Ryan, 2026-10-23), "
+                                 f"not negated: {s[:200]!r}")
+            for m in self.RENAME.finditer(s):
+                self.assertFalse(self.said(s, m), f"{where}: the labels are not changed (Ryan, 2026-10-23); a rename "
+                                                  "or relabel is only ever denied (`not renamed`, `nothing is "
+                                                  f"relabelled`): {s[:200]!r}")
+
+    def assertOffListDecommissioned(self, text, where):
+        """Everything off the list goes to Decommissioned and is kept there: said in one clause, and no
+        clause about the off-list or Decommissioned puts it off, makes it conditional or softens it."""
+        for s in sentences(text, ".;"):                 # "until then it stays in place", wherever it is said
+            for m in self.STAY_PUT.finditer(s):
+                self.assertFalse(self.said(s, m), f"{where}: what is off the keep list goes to Decommissioned, it "
+                                                  f"does not stay in place: {s[:200]!r}")
+        good = []
+        for s in sentences(text, "."):                  # whole sentences: a "; until …" tail belongs to the rule
+            if not (self.OFF_LIST.search(s) or "Decommissioned" in s):
+                continue
+            plain = self.OFF_LIST.sub(" ", s)       # "not on the list" is the subject, not a denial
+            delay = [m.group(0) for m in self.DELAY.finditer(plain) if self.said(plain, m)]
+            self.assertEqual(delay, [], f"{where}: what is off the keep list goes to Decommissioned now and stays "
+                                        f"there, with no condition or delay ({delay[:1]}): {s[:200]!r}")
+            found = self.d.contradictions(plain)
+            self.assertEqual(found, [], f"{where}: contradicts the rules (moved to Decommissioned, never deleted, "
+                                        "never optional): " + "; ".join(found))
+            if (self.OFF_LIST.search(s) and any(self.said(plain, m) for m in self.MOVED.finditer(plain))
+                    and any(self.said(plain, m) for m in self.KEPT_THERE.finditer(plain))):
+                good.append(s)
+        self.assertTrue(good, f"{where}: say, in one sentence, every report and dashboard not on the keep list goes to "
+                              "Decommissioned and is kept there (Ryan, 2026-10-23)")
+
+    def assertPartnerAndMonth(self, text, where):
+        said = [s for s in self.stated(text, re.compile(r"\bPartner and Month\b")) if self.EVERY_REPORT.search(s)]
+        self.assertTrue(said, f"{where}: say every kept report is by Partner and Month, in one sentence, not negated")
+
+    @staticmethod
+    def in_dashboard_context(part, name):
+        """`name` on a line that says dashboard, or in a list or table under a line (or header row) that does."""
+        lead = block = ""
+        for line in part.splitlines():
+            st = line.strip()
+            if not st:
+                continue
+            if not re.match(r"([-*+]|\d+\.)\s|\|", st):
+                lead, block = st, ""
+            elif not block:
+                block = st
+            if name in line and re.search(r"(?i)\bdashboards?\b", " ".join((line, block, lead))):
+                return True
+        return False
+
+    # --- the tests -------------------------------------------------------------------------------------------
+
+    def test_the_runbook_states_the_keep_list_and_the_test_record_rule(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.KEEP[4:]!r}"
+        part = self.keep_part()
+        text = self.norm(part)
+        self.assertIn("glow/sf_keep_list.csv", part, f"{where}: name the file `glow/sf_keep_list.csv`")
+        for group in self.GROUPS:
+            self.assertTrue(self.in_dashboard_context(part, group),
+                            f"{where}: name the group {group!r} as a dashboard (on a line that says dashboard, or in a "
+                            "list or table under one)")
+        self.assertRegex(text, r"(?i)\bGLOW of the Month Stories\b", f"{where}: name the table, item 19 \"GLOW of "
+                                                                      "the Month Stories\"")
+        self.assertTrue(self.stated(text, self.NINETEEN), f"{where}: say the list has 19 items (`19 items`)")
+        self.assertPartnerAndMonth(text, where)
+        self.assertRegex(text, r"(?i)\btest records?\b", f"{where}: call what the rule excludes test records")
+        self.assertTestRecordRule(text, where)
+        self.assertSameLabels(text, where)
+        self.assertOffListDecommissioned(text, where)
+
+    def test_a_decision_records_the_keep_list(self):
+        e = self.decision()
+        where = f"docs/DECISIONS.md {e.split(chr(10), 1)[0][4:14]}"
+        for part in ("**Why", "**Rejected", "**Consequences"):
+            self.assertIn(part, e, f"{where}: no {part}** bullet (the file's header)")
+        self.assertRegex(e, self.TICKET, f"{where}: name ticket #70")
+        flat_e = self.norm(e)
+        self.assertRegex(flat_e, r"\b19 items\b", f"{where}: say the list is 19 items")
+        self.assertRegex(flat_e, r"(?i)\bfive dashboards\b", f"{where}: say the 19 items are in five dashboards")
+        self.assertIn("glow/sf_keep_list.csv", e, f"{where}: name the file `glow/sf_keep_list.csv`")
+        why = self.norm(e.split("**Why", 1)[1].split("**Rejected", 1)[0])
+        self.assertTrue([m for m in re.finditer(re.escape(self.RYAN), why) if self.said(why, m)],
+                        f"{where}: **Why** quotes Ryan verbatim, not negated: \"{self.RYAN}.\"")
+        # everything outside **Rejected** states the agreed rules as rules
+        rest = self.norm(re.sub(r"(?ms)^- \*\*Rejected.*?(?=^- \*\*|\Z)", "", e))
+        self.assertPartnerAndMonth(rest, where)
+        self.assertTestRecordRule(rest, where)
+        self.assertSameLabels(rest, where)
+        self.assertOffListDecommissioned(rest, where)
+        rejected = self.norm(e.split("**Rejected", 1)[1].split("**Consequences", 1)[0])
+        self.assertTrue([s for s in sentences(rejected, ".;") if "Partner_Status__c" in s
+                         and self.STATUS_REASON.search(s)],
+                        f"{where}: **Rejected** names `Partner_Status__c` with its reason, in one sentence: blank on "
+                        "real partners too (it would drop real partners)")
+        self.assertRegex(rejected, r"(?i)\b(new\s+(\w+\s+)?(field|checkbox)|Obsolete_Record__c)\b",
+                         f"{where}: **Rejected** names a new test-record field or reusing `Obsolete_Record__c` (a "
+                         "field or record writes)")
+        self.assertFalse([s for s in sentences(rejected, ".;") if self.NOT_BLANK.search(s) and self.NO_TEST.search(s)],
+                         f"{where}: the agreed test-record rule is not under **Rejected**")
 
 
 if __name__ == "__main__":
