@@ -3079,7 +3079,8 @@ Two folders, both labelled "Decommissioned", hold what epic #68 retires and the 
   Users) is a failure, removed before anything more is moved in.
 - The two proof copies of #69 stay there (Ryan, 2026-10-23): the report `00ORP000009igCr2AI`
   "proof #69 Club meet freq (moved)" and the dashboard `01ZRP00000BNDJB2A5` "proof #69 DHIS2
-  dashboard".
+  dashboard". The dashboard copy has no description: the API refused it and it was not set by
+  hand; Ryan said 2026-10-23 to leave the copies as they are.
 
 The archive rule:
 - A retired report or dashboard is moved to Decommissioned and keeps its Id; nothing is deleted
@@ -3101,9 +3102,10 @@ The archive rule:
   a report is copied and moved by the Analytics API (`POST …/analytics/reports?cloneId=<id>`,
   then `PATCH …/analytics/reports/<id>` with `reportMetadata.folderId`), and keeps its Id.
 - A dashboard is copied by the Analytics API (`POST …/analytics/dashboards?cloneId=<id>` with
-  `folderId`). The API refuses to rename or move a dashboard (`PATCH` returns 400
-  `JSON_PARSER_ERROR`), so Ryan renames and moves it by hand in Lightning (its Move action); the
-  Id stays the same, checked with SOQL.
+  `folderId`). The API refuses to rename, describe or move a dashboard (`PATCH` returns 400
+  `JSON_PARSER_ERROR`), so Ryan does it by hand in Lightning: in the dashboard's Properties
+  (Name, Description, Folder) he sets the name and the description `copy of <source id>,
+  #<ticket>`, and moves it with its Move action; the Id stays the same, checked with SOQL.
 
 ## Interactive dashboard in Salesforce
 

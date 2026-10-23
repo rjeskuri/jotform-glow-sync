@@ -102,14 +102,15 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
 - 2026-10-23: the fallback. Ryan, by hand in Lightning, renamed the dashboard clone `proof #69
   DHIS2 dashboard`, moved it to "DHIS2 Dashboards" and moved it back. Read-back (read-only SOQL):
   `01ZRP00000BNDJB2A5`, Title "proof #69 DHIS2 dashboard", `FolderName` Decommissioned,
-  `LastModifiedDate` 2026-10-23T03:41:02Z: the Id is unchanged. Its description was not set (the
-  API refused it). The report clone `00ORP000009igCr2AI` is still in Decommissioned with its
+  `LastModifiedDate` 2026-10-23T03:41:02Z: the Id is unchanged. It has no description: the API
+  refused it and it was not set by hand. The report clone `00ORP000009igCr2AI` is still in Decommissioned with its
   "(moved)" label.
 - 2026-10-23, Ryan: both proof copies stay in the hidden Decommissioned folders; they are kept,
-  not removed.
+  not removed, and left as they are (the dashboard copy without a description).
 - For the later tasks (#72 on): the Analytics API copies and moves a report and keeps its Id. It
-  clones a dashboard, but it refuses to rename or move one, so a dashboard is renamed and moved
-  by hand in Lightning (Ryan), checked with SOQL.
+  clones a dashboard, but it refuses to rename, describe or move one, so a dashboard is renamed,
+  given its description (`copy of <source id>, #<ticket>`, in its Properties) and moved by hand
+  in Lightning (Ryan), checked with SOQL.
 
 ## Inventory
 
@@ -196,7 +197,8 @@ Run 2026-10-21 09:37-09:38 UTC, each non-GET call on Ryan's go; the dashboard's 
 2026-10-23. Each request with its HTTP status (no record data; the responses are in
 `data/sf_reporting_2026-10-21/evidence/proof/`). The folder ids: Decommissioned (reports)
 `00lRP000007iOiXYAU`, Decommissioned (dashboards) `00lRP000007iOiYYAU`, "DHIS2 Reports"
-`00lRP000002vHpNYAU`, "DHIS2 Dashboards" `00lRP000002vHpOYAU`.
+`00lRP000002vHpNYAU`, "DHIS2 Dashboards" `00lRP000004D4oHYAS` (the source dashboard's folder),
+"Dhis2 Dashbords" (sic) `00lRP000002vHpOYAU` (all from `evidence/inventory.csv`).
 
 The sources (from `evidence/inventory.csv`):
 - Report: `00ORP000005rVCT2A2` (`Freq_of_Glow_Club_Meet_by_Mon_and_Reg_Fq6`, matrix, in "DHIS2
@@ -222,10 +224,11 @@ Dashboard (the clone worked; every PATCH was refused; the moves were made by han
 1. Clone into Decommissioned: `POST /services/data/v67.0/analytics/dashboards?cloneId=01ZRP000006quAj2AI`, body `{"folderId": "00lRP000007iOiYYAU"}`. Status: 200; the clone is `01ZRP00000BNDJB2A5`, type `SpecifiedUser` (`proof/d1_clone.txt`).
 2. Where the clone landed: `SELECT Id, FolderName FROM Dashboard WHERE Id = '01ZRP00000BNDJB2A5'`: Decommissioned (the clone honoured `folderId`).
 3. Label and description: `PATCH /services/data/v67.0/analytics/dashboards/01ZRP00000BNDJB2A5`, body `{"dashboardMetadata": {"name": "proof #69 DHIS2 dashboard", "description": "copy of 01ZRP000006quAj2AI, #69"}}`. Status: 400 `JSON_PARSER_ERROR` (`proof/d3_label.txt`); again with the full body from the clone's describe (`proof/d_describe.json`), 400 `JSON_PARSER_ERROR` (`proof/d3_label_full.txt`).
-4. Move to "DHIS2 Dashboards": `PATCH /services/data/v67.0/analytics/dashboards/01ZRP00000BNDJB2A5`, body `{"dashboardMetadata": {"folderId": "00lRP000002vHpOYAU"}}`. Status: 400 `JSON_PARSER_ERROR` (`proof/d4_move_dhis2.txt`); with the full body, 400 `JSON_PARSER_ERROR` (`proof/d4_move_dhis2_full.txt`).
+4. Move to "DHIS2 Dashboards": `PATCH /services/data/v67.0/analytics/dashboards/01ZRP00000BNDJB2A5`, body `{"dashboardMetadata": {"folderId": "00lRP000004D4oHYAS"}}` (the intended target). Status: 400 `JSON_PARSER_ERROR` (`proof/d4_move_dhis2.txt`); with the full body, 400 `JSON_PARSER_ERROR` (`proof/d4_move_dhis2_full.txt`). The proof files of steps 3-5 hold only the response, not the body sent, so the folder id sent here is not on record; every `PATCH` was refused (400) whatever its body, and the dashboard never moved by API.
 5. Move back: `PATCH /services/data/v67.0/analytics/dashboards/01ZRP00000BNDJB2A5`, body `{"dashboardMetadata": {"folderId": "00lRP000007iOiYYAU"}}`. Status: 400 `JSON_PARSER_ERROR` (`proof/d5_move_back.txt`); with the full body, 400 `JSON_PARSER_ERROR` (`proof/d5_move_back_full.txt`).
-6. The fallback, Lightning's Move by hand: Ryan, 2026-10-23, in Lightning (Dashboards, Decommissioned, the clone), renamed it `proof #69 DHIS2 dashboard`, moved it to "DHIS2 Dashboards" and moved it back. Read-back, read-only SOQL on `Dashboard` (Id, Title, FolderName, LastModifiedDate) by the clone's Id: the same Id, Title "proof #69 DHIS2 dashboard", `FolderName` Decommissioned, `LastModifiedDate` 2026-10-23T03:41:02Z. No description was set on the dashboard clone.
+6. The fallback, Lightning's Move by hand: Ryan, 2026-10-23, in Lightning (Dashboards, Decommissioned, the clone), renamed it `proof #69 DHIS2 dashboard`, moved it to "DHIS2 Dashboards" and moved it back. Read-back, read-only SOQL on `Dashboard` (Id, Title, FolderName, LastModifiedDate) by the clone's Id: the same Id, Title "proof #69 DHIS2 dashboard", `FolderName` Decommissioned, `LastModifiedDate` 2026-10-23T03:41:02Z. The dashboard clone has no description: the API refused it and it was not set by hand; Ryan said 2026-10-23 to leave the copies as they are.
 
 So a report is copied and moved by the Analytics API. A dashboard is cloned by the API, then
-renamed and moved by Lightning's Move by hand (Ryan), checked with the same SOQL. Both clones
+renamed, given its description (Properties) and moved by Lightning's Move by hand (Ryan), checked
+with the same SOQL. Both clones
 stay in Decommissioned (Ryan, 2026-10-23).
