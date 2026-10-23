@@ -7,9 +7,14 @@ there is no "big delay" threshold or flag. Everything here is fictional: batch i
 (`AB-0001`), account ids and dates are invented. A stub org answers the check's one SOQL query with
 Salesforce's REST shapes (CreatedDate `2026-10-06T01:30:00.000+0000`, a Date `2026-10-05`, a Number
 as a float) and the formula values Salesforce would compute, written out by hand below.
+
+Ticket #101 deploys the four fields; its repo side is documentation, checked by SubmissionTimingDocs:
+the RUNBOOK section "Submission timing in Salesforce" and the plan in docs/plans/ that carries the
+live change (found by its ticket reference, never by a date).
 """
 import contextlib
 import copy
+import glob
 import importlib
 import io
 import os
@@ -23,6 +28,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.salesforce import Refused  # noqa: E402
+from helpers.common import flat, md_part, read, sentences  # noqa: E402
 
 UTC = timezone.utc
 FIELDS = ["Submitted_At__c", "Submission_Delay_Days__c", "Session_Month__c", "Session_Week__c"]
@@ -443,6 +449,313 @@ class Definitions(unittest.TestCase):
         st = timing()
         self.assertFalse(hasattr(st, "LATE_DAYS"))
         self.assertFalse(hasattr(st, "is_late"))
+
+
+def prose(body):
+    """`body` (flattened) with the dots inside code spans turned into middle dots, so a `[^.]{0,N}`
+    window and a sentence split read across a quoted path or command (`sf_session_timing.py`,
+    `destructiveChanges.xml`) and stop at a sentence end only."""
+    return re.sub(r"`[^`]*`", lambda m: m.group(0).replace(".", "·"), body)
+
+
+def near(first, second, window=250):
+    """A regex: `first` then `second`, or `second` then `first`, within `window` characters of one
+    sentence (no sentence end between)."""
+    return re.compile(rf"(?i)(?:{first})[^.]{{0,{window}}}?(?:{second})|(?:{second})[^.]{{0,{window}}}?(?:{first})")
+
+
+# A statement is affirmed only when the clause that carries it has no negation: "days 1-7 are not week
+# 1", "the submission day is never the UTC day", "no --dry-run is needed", "Ryan's go is not required",
+# "do not compare", "skip the check", "unrelated to" say the opposite of what the ticket asks. A clause
+# ends at a sentence end, a comma, a semicolon, a colon, a parenthesis or a spaced dash, so "the same
+# command without `--dry-run`" and "compare (no difference expected)" still count. The week rule and
+# the time-zone rule are scanned over their whole sentence: a contrast ("not the mentor's local day")
+# goes in a sentence of its own.
+NEGATION = re.compile(r"(?i)\b(?:not|never|no|none|nor|isn't|aren't|wasn't|don't|doesn't|cannot|can't|won't|"
+                      r"skip\w*|omit\w*|optional|unnecessary|needless|rather than|instead of|"
+                      r"wrong\w*|false\w*|incorrect\w*|opposite|unrelated|irrelevant)\b")
+CLAUSE_END = re.compile(r"[.,;:()]|\s[-–—]\s")
+LIST_ITEM = re.compile(r"(?:\d+[.)]|[-*•])\s+")
+
+
+def clause_of(text, at):
+    """The clause of `text` around offset `at`: from the clause end before it to the one after."""
+    start = max((m.end() for m in CLAUSE_END.finditer(text, 0, at)), default=0)
+    end = CLAUSE_END.search(text, at)
+    return text[start:end.start() if end else len(text)]
+
+
+def clauses(sentence):
+    """The non-empty clauses of a sentence, in order."""
+    return [c for c in CLAUSE_END.split(sentence) if c and c.strip()]
+
+
+def negated(text, m):
+    """A match whose clause at its start or at its end carries a negation (a window that spans clauses
+    is judged by its two anchors: "(no difference expected)" between them is not a negation of either)."""
+    return bool(NEGATION.search(clause_of(text, m.start())) or NEGATION.search(clause_of(text, max(m.end() - 1, m.start()))))
+
+
+def affirmed(text, pattern, start=0):
+    """The first match of `pattern` in `text` at or after `start` that is not negated; None when every
+    match is."""
+    for m in pattern.finditer(text, start):
+        if not negated(text, m):
+            return m
+    return None
+
+
+def denied(text, pattern):
+    """The first negated match of `pattern` in `text`, else None: a step the text argues against."""
+    for m in pattern.finditer(text):
+        if negated(text, m):
+            return m
+    return None
+
+
+def sentence_at(text, at):
+    """The sentence of `text` (flattened, prose()) around offset `at`."""
+    start = max((m.end() for m in re.finditer(r"[.;]\s", text[:at])), default=0)
+    end = re.search(r"[.;](?:\s|$)", text[at:])
+    return text[start:at + end.start() if end else len(text)]
+
+
+def list_items(part):
+    """The numbered or bulleted items of a Markdown part, in order, each flattened: an item starts at an
+    unindented marker line and runs over its indented lines and lazy continuations; a blank line, a
+    paragraph after one or a heading ends it. Text outside the items (an intro, a trailing line) is
+    not an item."""
+    items, current, open_ = [], [], False
+    for line in part.splitlines():
+        if LIST_ITEM.match(line):
+            current = [line[LIST_ITEM.match(line).end():]]
+            items.append(current)
+            open_ = True
+        elif not line.strip() or line.startswith("#"):
+            open_ = False
+        elif open_ and (line[:1].isspace() or line.lstrip()[:1] not in "-*•"):
+            current.append(line)
+        else:
+            open_ = False
+    return [flat(" ".join(item)) for item in items]
+
+
+class SubmissionTimingDocs(unittest.TestCase):
+    """Ticket #101: the four formula fields are deployed on Ryan's go; what the repo keeps is the
+    documentation. docs/RUNBOOK.md "Submission timing in Salesforce" (that section alone, to the
+    next `## `) names the four formula fields of `Attendance_Batch__c` by API name, each in its own
+    sentence that says what it is, the week rule (days 1-7 week 1, 8-14 week 2, 15-21 week 3, 22-28
+    week 4, 29-31 week 5, shown as `2026-10 week 2`), the time zone (the submission day is the UTC
+    day), which batches have no submission time (only `Creator__c` exactly `Jotform` has one - the
+    September back-fill and the `Partner report` batches have none), the check command and the
+    rollback (a destructive deploy of the fields, or the plan's path). A plan in docs/plans/ naming
+    #101 in its head (frontmatter, title or the paragraphs before the first section) carries the
+    live change, for tasks #101-#103: its Rollout's numbered steps have, in this order, the retrieve
+    into `before/`, the `CreatedDate` proof, the check-only deploy (`--dry-run`), Ryan's go, the
+    deploy, the read-back (retrieve into `after/`, compared with the build) and the check, and no
+    step is argued against anywhere in the Rollout; its Rollback deletes the four fields by a
+    destructive deploy (`destructiveChanges`) after the reports that use them, the reports' step
+    first. Meaning, not sentences: tolerant matching on the names and the key commands, but a
+    negated statement does not count, and the steps are found in sequence."""
+
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    HEADING = "## Submission timing in Salesforce"
+    CHECK = re.compile(r"\bsf_session_timing[.·]py check\b")
+    LADDER = ((1, 7, 1), (8, 14, 2), (15, 21, 3), (22, 28, 4), (29, 31, 5))
+    NONE = r"\b(?:no|none|not|never|blank|empty|null|without)\b"
+    ONLY = r"\b(?:only|exactly|alone|just|nothing else)\b"
+    SUBMISSION = re.compile(r"(?i)submission time|submitted at|Submitted_At__c|CreatedDate")
+    A_FIELD = r"\bfields?\b|" + "|".join(FIELDS)
+    # what each field is, said within ~60 characters of its name, in a sentence that names it alone
+    MEANINGS = {
+        "Submitted_At__c": (r"CreatedDate", "the batch's `CreatedDate`"),
+        "Submission_Delay_Days__c": (r"\bdays?\b", "days, from the session date"),
+        "Session_Month__c": (r"\b\d{4}-(?:0[1-9]|1[0-2])\b", "a `YYYY-MM` month"),
+        "Session_Week__c": (r"\bweek\b", "the week of the month"),
+    }
+    READS = r"\bread\w*|\baccess\w*|\bvisib\w*|\bFLS\b|field-?level"
+    ROLLOUT_STEPS = (
+        ("retrieve what is live into `before/`, first", near(r"\bretriev\w*", r"before/")),
+        ("the proof that `CreatedDate` is the submission time (the Jotform submission created within 10 minutes of "
+         "it), after the retrieve", near(r"CreatedDate", r"\bproo?f\w*|\bprove[sdn]?\b|within \d+ minutes")),
+        ("the check-only deploy (`sf project deploy start --dry-run`), after the proof",
+         near(r"--dry-run", r"check-only|\bvalidat\w*|sf project deploy start", 120)),
+        ("Ryan's go, after the check-only deploy", near(r"\bRyan'?s?\b", r"\bgo\b", 40)),
+        ("the deploy, after the go", re.compile(r"(?i)\bdeploy\w*")),
+        ("the read-back after the deploy: retrieve into `after/`", near(r"\bretriev\w*", r"after/")),
+        ("the read-back compares `after/` with the build", near(r"after/", r"\bcompar\w*")),
+        ("the check `sf_session_timing.py check`, after the read-back", CHECK),
+    )
+
+    def section(self):
+        """The section's text, flattened; a missing heading fails here (md_part)."""
+        return flat(md_part(self.RUNBOOK, self.HEADING))
+
+    def test_the_runbook_defines_the_four_fields_and_the_check(self):
+        raw = self.section()
+        text = prose(raw)
+        where = f"RUNBOOK section {self.HEADING[3:]!r}"
+        said = sentences(text, ".;")
+        self.assertIn("Attendance_Batch__c", raw, f"{where}: the fields are on `Attendance_Batch__c`")
+        self.assertRegex(raw, r"(?i)\bformula", f"{where}: say they are formula fields (they change no record)")
+        # the four fields, by API name, each in its own sentence that says what it is
+        for field, (meaning, hint) in self.MEANINGS.items():
+            with self.subTest(field=field):
+                self.assertIn(field, raw, f"{where}: name the field `{field}`")
+                own = [s for s in said if field in s and sum(f in s for f in FIELDS) == 1]
+                self.assertTrue([s for s in own if affirmed(s, near(field, meaning, 60))],
+                                f"{where}: say what `{field}` is ({hint}) within about 60 characters of its name, in a "
+                                "sentence that names no other field; a negation in that clause does not count")
+        self.assertTrue([s for s in said if "Submission_Delay_Days__c" in s and sum(f in s for f in FIELDS) == 1
+                         and affirmed(s, near("Submission_Delay_Days__c", r"Attendance_Date__c|\bsession\b", 60))],
+                        f"{where}: the delay counts from the session date (`Attendance_Date__c`), said of "
+                        "`Submission_Delay_Days__c`")
+        # the week rule: the week of the month by day, the whole ladder in a sentence that argues against
+        # nothing, shown as `2026-10 week 2`
+        for lo, hi, week in self.LADDER:
+            with self.subTest(days=f"{lo}-{hi}"):
+                rung = near(rf"\b{lo}\s*(?:-|–|to)\s*{hi}\b", rf"\bweek {week}\b", 60)
+                self.assertTrue([s for s in said if rung.search(s) and not NEGATION.search(s)],
+                                f"{where}: say days {lo}-{hi} are week {week} (the rule by day of the month) in a "
+                                "sentence with no negation at all")
+        self.assertRegex(raw, r"\b\d{4}-(?:0[1-9]|1[0-2]) week [1-5]\b",
+                         f"{where}: show the shape of a session week, `2026-10 week 2`")
+        # the time zone: the day a batch was submitted (what the delay counts to) is the UTC day, in a
+        # sentence that argues against nothing
+        utc = near(r"\bUTC\b", r"\bday\b", 60)
+        self.assertTrue([s for s in said if re.search(r"(?i)submi|delay", s) and utc.search(s) and not NEGATION.search(s)],
+                        f"{where}: say the submission day (the delay's end) is the UTC day, in a sentence with no "
+                        "negation at all (a contrast goes in its own sentence)")
+        # which batches have a submission time: only `Creator__c` exactly `Jotform`, said of the submission
+        # time in the same or the next clause; the back-fill and the partners' `Partner report` batches have none
+        self.assertIn("Creator__c", raw, f"{where}: name `Creator__c`, which decides whether a batch has a submission time")
+        self.assertTrue([s for s in said if re.search(f"(?i){self.ONLY}", s) and self.creator_jotform_has_submission_time(s)],
+                        f"{where}: say only a batch whose `Creator__c` is exactly `Jotform` has a submission time "
+                        "(`Submitted_At__c`), the submission time in the same or an adjacent clause, neither negated")
+        for kind, pattern in (("back-fill", r"(?i)back-?fill"), ("Partner report", r"Partner report")):
+            with self.subTest(batches=kind):
+                self.assertTrue([s for s in said if re.search(pattern, s) and re.search(f"(?i){self.NONE}", s)
+                                 and re.search(r"(?i)submi|Submitted_At__c|delay", s)],
+                                f"{where}: say the {kind} batches have no submission time (and so no delay)")
+        # the check, with the VPN off like every sf call, and the rollback: the destructive deploy of the
+        # fields, or the plan's path
+        self.assertRegex(raw, r"\bsf_session_timing\.py check\b",
+                         f"{where}: quote the check `python3 tools/sf_session_timing.py check --vpn-off`")
+        self.assertIn("--vpn-off", raw, f"{where}: the check runs with `--vpn-off` (VPN off before any sf call)")
+        self.assertTrue([s for s in said if re.search(r"(?i)\broll ?back", s)
+                         and (("destructiveChanges" in s and re.search(f"(?i){self.A_FIELD}", s))
+                              or re.search(r"plans/[\w-]+[.·]md", s))],
+                        f"{where}: say how the fields are rolled back - a destructive deploy (`destructiveChanges`) of "
+                        "the fields, or the plan's path for its Rollback - in one sentence")
+
+    @classmethod
+    def creator_jotform_has_submission_time(cls, sentence):
+        """`Creator__c` and `Jotform` in one clause, the submission time in that clause or the one before or
+        after, none of them negated."""
+        parts = clauses(sentence)
+        for i, clause in enumerate(parts):
+            if "Creator__c" in clause and re.search(r"\bJotform\b", clause) and not NEGATION.search(clause):
+                for j in (i - 1, i, i + 1):
+                    if 0 <= j < len(parts) and cls.SUBMISSION.search(parts[j]) and not NEGATION.search(parts[j]):
+                        return True
+        return False
+
+    def plans_naming(self, ticket):
+        """The plans whose head (frontmatter, title or the paragraphs before the first section) names the ticket."""
+        return [p for p in sorted(glob.glob(os.path.join(REPO, "docs", "plans", "*.md")))
+                if os.path.basename(p) != "README.md"
+                and re.search(rf"(?<![\w#])#{ticket}\b", read(p).split("\n## ", 1)[0])]
+
+    def test_a_plan_carries_the_check_only_go_deploy_and_read_back(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        plans = self.plans_naming(101)
+        self.assertTrue(plans, "docs/plans/: no plan names ticket #101 in its frontmatter, title or opening paragraph "
+                               "(the four formula fields are a live Salesforce change: CLAUDE.md conventions)")
+        for path in plans:
+            name = os.path.relpath(path, REPO)
+            text = read(path)
+            keys, _ = docs_index.frontmatter(text)
+            self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+            _, problem = docs_index.status_of(keys["status"])
+            self.assertIsNone(problem, f"{name}: {problem}")
+            whole = prose(flat(text))
+            for ticket in ("#102", "#103"):
+                self.assertRegex(whole, rf"(?<![\w#]){ticket}\b", f"{name}: the plan covers tasks #101-#103 ({ticket})")
+            # the viewers' permission set and the Admin profile read the fields (a field a viewer cannot
+            # read silently drops a report filter)
+            for who, pattern in (("the permission set `Attendance_Report_Viewer`", r"Attendance_Report_Viewer"),
+                                 ("the Admin profile", r"\bAdmin\b[^.]{0,40}?\bprofile\b|\bprofile\b[^.]{0,40}?\bAdmin\b")):
+                self.assertTrue(affirmed(whole, near(pattern, self.READS, 200)),
+                                f"{name}: {who} reads the fields (say so, not just that it exists)")
+                self.assertTrue(affirmed(whole, near(pattern, self.A_FIELD, 200)),
+                                f"{name}: {who} reads the fields: name the fields (or `fields`) near it")
+            bodies, parts = {}, {}
+            for heading, least in (("## Rollout", 60), ("## Rollback", 30), ("## Risks", 15), ("## Result", 0)):
+                part = md_part(path, heading)
+                parts[heading] = part.split("\n", 1)[1] if "\n" in part else ""
+                body = flat(parts[heading])
+                self.assertNotRegex(body, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: `{heading}` is a placeholder")
+                self.assertGreaterEqual(len(re.findall(r"\w+", body)), least,
+                                        f"{name}: `{heading}` says too little (at least {least} words): the steps")
+                bodies[heading] = body
+            self.rollout_is_retrieve_proof_check_only_go_deploy_read_back_check(name, parts["## Rollout"])
+            self.rollback_deletes_the_fields_after_the_reports(name, bodies["## Rollback"])
+            self.risks_name_a_real_risk(name, bodies["## Risks"])
+
+    def rollout_is_retrieve_proof_check_only_go_deploy_read_back_check(self, name, part):
+        """The steps in this order over the Rollout's list items (an intro or a trailing line is not a
+        step), each found at or after the one before it and affirmed; and no step argued against anywhere
+        in the Rollout."""
+        where, text = f"{name}: Rollout", prose(flat(part))
+        self.assertIn("sf project deploy start", text, f"{where}: the deploy command `sf project deploy start`")
+        for what, pattern in self.ROLLOUT_STEPS:
+            if pattern.pattern != r"(?i)\bdeploy\w*":        # "never deploy an older package" is a rule, not a step
+                m = denied(text, pattern)
+                self.assertIsNone(m, f"{where}: argues against a step - {what}: {clause_of(text, m.start()).strip()!r}"
+                                     if m else None)
+        items = list_items(part)
+        self.assertGreaterEqual(len(items), 3, f"{where}: the steps as a numbered (or bulleted) list, in order")
+        walk = " . ".join(prose(item) for item in items)
+        at = 0
+        for what, pattern in self.ROLLOUT_STEPS:
+            m = affirmed(walk, pattern, at)
+            self.assertTrue(m, f"{where}: {what} (the steps in that order, in the list's items; a negated statement "
+                               "does not count)")
+            at = m.start()
+        self.assertTrue(affirmed(walk, near(r"after/", r"\bbuild\b")),
+                        f"{where}: the read-back is compared with the build (`build/`), in a step")
+
+    def rollback_deletes_the_fields_after_the_reports(self, name, rollback):
+        where, text = f"{name}: Rollback", prose(rollback)
+        self.assertIn("destructiveChanges", rollback,
+                      f"{where}: the four fields go by a destructive deploy (`destructiveChanges.xml`)")
+        for field in FIELDS:
+            self.assertIn(field, rollback, f"{where}: name the field `{field}` it deletes")
+        deletion = near(r"\breports?\b", r"\b(?:delet\w*|remov\w*|drop\w*|destructive|edit\w*|first)\b")
+        # the reports' step: the reports that use (filter on) the fields are deleted or edited
+        uses = re.compile(r"(?i)\b(?:use[sd]?|using|filter\w*|read\w*|depend\w*|built on|based on|need\w*)\b")
+        steps = [m for m in deletion.finditer(text) if not negated(text, m)
+                 and uses.search(sentence_at(text, m.start())) and re.search(f"(?i){self.A_FIELD}", sentence_at(text, m.start()))]
+        self.assertTrue(steps, f"{where}: delete (or edit) the reports that use the fields, said in one sentence - a field "
+                               "a report filters on cannot be deleted")
+        # the fields' destructive deploy: the first `destructiveChanges` whose sentence names a field, else the first
+        mentions = [m.start() for m in re.finditer(r"destructiveChanges", text)]
+        fields_deploy = next((p for p in mentions if re.search(f"(?i){self.A_FIELD}", sentence_at(text, p))), mentions[0])
+        self.assertLess(steps[0].start(), fields_deploy,
+                        f"{where}: the reports' step comes before the fields' destructive deploy (order matters: a field "
+                        "a report uses cannot be deleted)")
+        late = affirmed(text, deletion, fields_deploy)
+        self.assertIsNone(late, f"{where}: a report deletion after the fields' destructive deploy: "
+                                f"{sentence_at(text, late.start()).strip()!r} - the reports go first" if late else None)
+
+    def risks_name_a_real_risk(self, name, risks):
+        where = f"{name}: Risks"
+        self.assertNotRegex(risks, r"(?i)^\W*(?:none|no risks?|n/?a|nothing|hardly|few|little|minimal|negligible|harmless)\b",
+                            f"{where}: name at least one real risk (no dismissive opening)")
+        self.assertRegex(risks, r"(?i)CreatedDate|permission|filter|formula|deploy|\bfields?\b|\breports?\b",
+                         f"{where}: a risk of this change (the `CreatedDate` assumption, a viewer who cannot read a "
+                         "field, the deploy)")
 
 
 if __name__ == "__main__":
