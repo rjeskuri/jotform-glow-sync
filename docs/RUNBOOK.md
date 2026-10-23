@@ -3162,6 +3162,58 @@ The archive rule:
 - How a copy and a move are made (the Analytics API, or Lightning's Move by hand):
   [plan, API proof](plans/2026-10-21-sf-reporting-inventory.md#api-proof).
 
+### The keep list
+
+`glow/sf_keep_list.csv` is GLOW's keep list (the GLOW team via Ryan, 2026-10-21) mapped to what
+is in the org today, as Ryan agreed it on ticket #70 (2026-10-23; DECISIONS 2026-10-23). The
+list has 19 items: 18 reports in five groups, and one table. The file has a row for each item and
+for each of the five dashboards, with the header `item,group,measure,kind,id,label_today,label_target`:
+GLOW's measure verbatim, the kind (`report`, `table` or `dashboard`), the 18-character Id of the
+report or dashboard the item is today, and its label. It holds report and dashboard Ids and names
+only, never record data. Tasks #71 to #73 build their move plans from it.
+
+The five groups are the five Monthly Report dashboards (D1 to D5 in the file), each mapped to the
+dashboard that becomes it:
+- D1, the GLOW Club Attendance dashboard: "Glow Club Attendance" (`01ZRP000006iWqL2AU`), items 1-4.
+- D2, the GLOW Club Implementation dashboard: "Implementation Dashboard" (`01ZRP000006jU9o2AE`),
+  items 5-8.
+- D3, the GLOW Club Observations dashboard: the dashboard named "GLOW Club Training" today
+  (`01ZRP000006k2D32AI`), items 9-11. Five of its nine components are observations, and no
+  dashboard today is about observations alone.
+- D4, the GLOW Club Training dashboard: "Mentors" (`01ZRP000006quAj2AI`), items 12-16. The group
+  "GLOW Club Training" is this dashboard, D4, and the dashboard named "GLOW Club Training" is D3:
+  the file's Ids tell them apart.
+- D5, the GLOW Club Reporting dashboard: "Reporting" (`01ZRP000006oxSr2AI`), items 17 and 18.
+
+Item 19, "GLOW of the Month Stories" (group "Report/Data Table Format"), is the report "GLOW of the
+Month Stories Report_2025" (`00ORP000005p2L32AI`). It is the table: a tabular report on no
+dashboard, kept as it is. Item 12, "New mentors recruited", has no report today: task #80 builds
+it, and the file reads `new` for its Id. Item 18, "Report submitted on time", maps to "Reports
+completed on time" (`00ORP0000054DyH2AU`), which lists submission and modified dates; no report
+computes "on time" today, and that computation is a later task, on hold (#120).
+
+Every kept report and dashboard is by Partner and Month (Ryan, 2026-10-21: "This data should be
+displayed by the Partner and Month."): grouped by the partner (`DHIS2__c.Account__c`) and the
+month. Tasks #75 to #79 bring each dashboard and its reports to that, with current data.
+
+Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
+`label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
+keep the dashboard names listed above. Item 12 has no label today; its `label_target` is GLOW's
+measure, "New mentors recruited", which #80 confirms when it builds the report.
+
+Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
+a pick changes later (Ryan, 2026-10-23). That is every report in "DHIS2 Reports" and every
+dashboard in "DHIS2 Dashboards" and "Dhis2 Dashbords" whose Id is not in the file; task #72 moves
+them, and the archive rule above holds for each move.
+
+Test records are Monthly Reports filed on a test account or on no account. The test-record rule
+is one report filter on existing fields, applied to every kept report:
+`Account is not blank AND Account: Account Name does not contain "test"` (Ryan, 2026-10-23). On
+the count of 2026-10-23 it excludes the five Monthly Reports of the two test accounts and the six
+with a blank Account, and no real partner's. `Partner_Status__c` is not the rule: it is blank on
+four real partners with 23 Monthly Reports, the same as on the test accounts. Tasks #75 to #79
+add the filter as they fix each dashboard.
+
 ## Interactive dashboard in Salesforce
 
 - **When:** before a change to the interactive dashboard (#81, #82, #83), or to read how it counts.
