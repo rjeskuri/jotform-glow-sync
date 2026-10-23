@@ -126,7 +126,7 @@ only). Only counts and batch Names reach the ticket, the conversation or this pl
    terminal when auto mode refuses a production deploy (2026-10-02). The deploy id and time
    (UTC) go into Result.
 7. Read back: retrieve the same three components into `after/` and compare with `build/` (the
-   four fields and the six entries equal, apart from Salesforce's own normalisation) and with
+   four fields and the eight entries equal, apart from Salesforce's own normalisation) and with
    `before/` (the object differs by the four fields alone, the permission set and the profile by
    the four entries alone, so nothing else in them changed).
 8. `python3 tools/sf_session_timing.py check --vpn-off` -> `checked N batches` with every
@@ -158,9 +158,10 @@ the four together, the two that the others reference go last: `Submission_Delay_
 `Session_Week__c` in one deploy, then `Submitted_At__c` and `Session_Month__c`. Retrieve the
 object, the permission set and the profile again and compare with `before/`: equal means the
 rollback is complete. Never an older build (DECISIONS 2026-10-16): `before/` is the comparison
-only, and nothing is redeployed from it, because this deploy created components and changed
-none. Revert this ticket's RUNBOOK section with it; `sf_session_timing.py check` then stops
-with its HTTP 400 hint again, as before the deploy.
+only, and nothing is redeployed from it, because this deploy created the four fields and only
+added their entries to `Attendance_Report_Viewer` and the Admin profile, which go with the
+fields when they are deleted. Revert this ticket's RUNBOOK section with it;
+`sf_session_timing.py check` then stops with its HTTP 400 hint again, as before the deploy.
 
 ## Risks
 

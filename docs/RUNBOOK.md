@@ -3461,7 +3461,8 @@ archive rule of DECISIONS 2026-10-21), then the four fields `Submitted_At__c`,
 `Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` are deleted by a
 `destructiveChanges.xml` deploy, check-only first and on Ryan's go, their permission-set and
 Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
-components and changed none, so nothing is redeployed from its `before/`.
+the four fields and only added their entries to the permission set and the Admin profile, which
+go with the fields when they are deleted, so nothing is redeployed from its `before/`.
 
 ## Monthly Report dashboards in Salesforce
 
