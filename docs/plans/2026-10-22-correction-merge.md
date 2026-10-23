@@ -42,14 +42,23 @@ intent: none - Ryan's request of 2026-10-22 (staff meeting, "names not being add
    the original's `Girls_Present__c` is set to its own rows after the merge, and the correction's
    status update is `Success`, `merged into <original id>`, `Girls_Present__c` null.
 3. `saveRecords` updates the batches' own statuses and the originals' counts in one DML (a map,
-   one update per original: two corrections of one day in one run share it).
-4. Three choices the ticket leaves open, taken here - **Ryan to confirm**:
+   one update per original: two corrections of one day in one run share it). Two corrections of
+   one day in ONE trigger run (a bulk insert) read each other through the run's own state, not
+   the database, where the first one's rows arrive only in `saveRecords`: per original, the girls
+   this run has queued for it (`girlsQueuedByOriginal`) and its one status update with the
+   running count (the original's rows in the database plus every girl queued). The second
+   correction gets no second row for a girl the first one added, counts her once, and stays
+   `Failed` "Duplicate" when it brings nothing new (2026-10-23, the review of PR #126; no method
+   of the fixed test class inserts two corrections in one DML - the proof of Rollout step 6 does).
+4. Three choices Ryan's answers leave open, built as the defaults below - **Ryan to confirm
+   before the deploy** (Rollout step 3; DECISIONS 2026-10-22 lists the same three):
    - (1) a merged row carries the ORIGINAL batch's `Module_Week__c`, `Module_Year__c`, module and
      date (it belongs to that session), not the correction's;
    - (2) the original's `Girls_Present__c` = the count of the original batch's own `Attendance__c`
      rows after the merge - the field's definition since 2026-10-07 and what
-     `tools/sf_girls_present.py check` compares; a hand-made row (on no batch) for a girl on that
-     date blocks a second row for her but is not counted on the batch;
+     `tools/sf_girls_present.py check` compares; Ryan's answer 2, "the count of that date's rows
+     after the merge", is read as the batch's own rows, so a hand-made row (on no batch) for a
+     girl on that date blocks a second row for her but is not counted on the batch;
    - (3) nothing is merged into a batch with no rows of its own (a typed aggregate, one of the
      three legacy blanks of BACKLOG 73, a merged correction) or whose `Creator__c` is
      `Partner report`: such a correction stays `Failed` "Duplicate" as today.
@@ -106,7 +115,11 @@ recipe in "Photos", "Special events"; the salesforce skill; DECISIONS 2026-10-22
    club, date and module with both girls -> the correction `Success` with `Status_Message__c`
    `merged into <the first batch's id>`, no count, no rows of its own; the first batch 2
    `Attendance__c` rows, `Girls_Present__c` 2; a third batch naming the same two girls ->
-   `Failed` "Duplicate", nothing changed; a fourth with another module -> `Failed` "Duplicate".
+   `Failed` "Duplicate", nothing changed; a fourth with another module -> `Failed` "Duplicate";
+   then two corrections inserted in ONE DML (one trigger run: the bulk case of "The change" 3),
+   the first naming a third made-up girl and the second naming only her -> the first `Success`
+   merged, the second `Failed` "Duplicate" (she was queued by the first, not yet in the
+   database), the first batch 3 rows, `Girls_Present__c` 3, one row for her.
    Everything rolled back: the club, the contacts, the batches and the rows gone (a count of
    each = 0 after the run). Counts only in the conversation, never a name.
 7. Read-back of the live flow, the next day: `SELECT COUNT() FROM Attendance_Batch__c WHERE
@@ -152,5 +165,6 @@ read as its own kind.
   the rolled-back proof of step 6 (counts as expected, nothing left), the read-back of step 7.
 
 ## Result
-Pending: nothing deployed. Built 2026-10-23 on the ticket branch; the check-only validate, the
-deploy, the proof and the read-back wait for Ryan's go.
+Pending: nothing deployed. Built 2026-10-23 on the ticket branch (the bulk-run fix of "The
+change" 3 the same day, in `after/`); the check-only validate, the deploy, the proof and the
+read-back wait for Ryan's go.
