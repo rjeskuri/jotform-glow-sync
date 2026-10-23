@@ -1,0 +1,936 @@
+#!/usr/bin/env python3
+"""
+Offline tests for tools/sf_report_folders.py (ticket #71, epic #68; found by `make py`'s unittest
+discovery).
+
+The tool copies a report or a dashboard into the "Decommissioned" folder of its kind, moves (and,
+for free, relabels) reports keeping their Ids, lists what a folder holds, and undoes its own moves
+from its ledger. It never deletes. Everything here is fictional: the ids are new random ones per
+fake org, so a tool that hard-codes one cannot pass.
+
+The fake org (ReportOrg) is Salesforce as far as this tool may see it, after the API proof of #69
+(docs/plans/2026-10-21-sf-reporting-inventory.md, "API proof"):
+
+- query(soql) / query_all(soql): plain SOQL (SELECT fields FROM object [WHERE ...] with
+  AND/OR/NOT/parentheses, =, !=, <, >, IN, NOT IN, LIKE; ORDER BY and LIMIT accepted and ignored)
+  over Folder (Id, Name, DeveloperName, Type), Report (Id, DeveloperName, Name, OwnerId - its
+  folder's id - FolderName, LastRunDate), Dashboard (Id, DeveloperName, Title, FolderId,
+  FolderName, Type) and DashboardComponent (Id, DashboardId, CustomReportId, and the relationship
+  Dashboard.*). Any other object is an AssertionError (recorded first).
+- call(method, path, body) -> (status, answer), paths under /services/data/v67.0:
+  * POST analytics/reports?cloneId=<id>, body {"reportMetadata": {"name", "folderId",
+    ["description"]}} -> 200, {"reportMetadata": {"id": <new id>, "name", "folderId"}, ...};
+    the clone lands in folderId with that name (or the source's) and description.
+  * POST analytics/dashboards?cloneId=<id>, body {"folderId": ...} -> 200, {"id": <new id>,
+    "dashboardMetadata": {"id": <new id>, ...}, ...}; any other key in the body is refused
+    400 JSON_PARSER_ERROR, as the API refused a dashboard's name and description.
+  * PATCH analytics/reports/<id>, body {"reportMetadata": {...}}: folderId, name, description
+    change; 200 with the report's metadata. drift[id] = "folder" | "name" makes the PATCH answer
+    200 while that field stays as it was (a failed read-back); refuse_patch makes it 400.
+  * PATCH analytics/dashboards/<id>: always 400 JSON_PARSER_ERROR (the proof, steps 3-5).
+  * GET .../describe answers a small describe; any other GET (a report run returns its rows) and
+    any other method is an AssertionError (recorded first).
+  Every answer carries a fictional staff name (CANARY): the tool must never print an answer.
+
+The plan CSV has columns kind,id,to_folder,new_label; the ledger CSV has the columns LEDGER_COLS.
+Options go after the subcommand: `move --plan FILE --vpn-off [--apply] [--limit N] --dir DIR`.
+A run succeeds when main() returns 0/None; a refusal is SystemExit with a non-zero code (or a
+non-zero return) and sends no write.
+"""
+import contextlib
+import copy
+import csv
+import io
+import os
+import random
+import re
+import stat
+import string
+import subprocess
+import sys
+import tempfile
+import unittest
+
+# first: importing helpers.common puts the repository root and tools/ on sys.path
+from helpers.common import REPO, md_part, read
+sys.path.insert(0, os.path.join(REPO, "test", "fixtures"))
+import make_fixture                                        # the invented name pools
+import sf_report_folders as srf
+
+API_ROOT = "/services/data/v67.0/"
+TOOL = os.path.join(REPO, "tools", "sf_report_folders.py")
+LEDGER_COLS = ["when", "action", "kind", "id", "from_folder_id", "to_folder_id", "old_label", "new_label",
+               "copy_id", "tag", "status", "http"]
+LIST_COLS = ["kind", "id", "developer_name", "label", "folder", "last_run", "used_by"]
+ALLOWED_OBJECTS = {"folder", "report", "dashboard", "dashboardcomponent"}
+# a fictional staff member's name, in every API answer: the tool prints no response body
+CANARY = f"{make_fixture.FIRST[3]} {make_fixture.LAST[4]}"
+ALNUM = string.ascii_letters + string.digits
+
+L40 = "Mentor trainings by partner and by month"
+L41 = L40 + "s"
+L60 = "Mentor trainings recorded by every partner, by region, month"
+LONG = "Implementation by country and partner month"       # 43: a clone's name is cut to 40
+assert (len(L40), len(L41), len(L60), len(LONG)) == (40, 41, 60, 43)
+
+
+def fresh_id(prefix):
+    """A new 18-character id each time."""
+    return prefix + "".join(random.choice(ALNUM) for _ in range(18 - len(prefix)))
+
+
+# ---- a minimal SOQL evaluator ---------------------------------------------------------------------
+TOKEN = re.compile(r"\s*(?:('(?:[^'\\]|\\.)*')|(!=|<=|>=|=|<|>)|(\()|(\))|(,)|([^\s(),=<>!']+))")
+
+
+def tokens(text):
+    out, pos, text = [], 0, text.strip()
+    while pos < len(text):
+        m = TOKEN.match(text, pos)
+        if not m or m.end() == pos:
+            raise AssertionError(f"the fake cannot read this WHERE clause: {text!r}")
+        pos = m.end()
+        s, op, lp, rp, comma, word = m.groups()
+        if s is not None:
+            out.append(("str", re.sub(r"\\(.)", r"\1", s[1:-1])))
+        elif op:
+            out.append(("op", op))
+        elif lp:
+            out.append(("(", "("))
+        elif rp:
+            out.append((")", ")"))
+        elif comma:
+            out.append((",", ","))
+        else:
+            out.append(("word", word))
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+    return out
+
+
+def literal(tok):
+    kind, value = tok
+    if kind == "str":
+        return value
+    low = value.lower()
+    if low == "null":
+        return None
+    if low in ("true", "false"):
+        return low == "true"
+    return value
+
+
+def field_of(record, path):
+    value = record
+    for part in path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = next((v for k, v in value.items() if k.lower() == part.lower()), None)
+    return value
+
+
+def compare(a, op, b):
+    if op in ("=", "!="):
+        same = (None if a is None else str(a).casefold()) == (None if b is None else str(b).casefold())
+        return same if op == "=" else not same
+    if a is None or b is None:
+        return False
+    return {"<": a < b, ">": a > b, "<=": a <= b, ">=": a >= b}[op]
+
+
+class Where:
+    def __init__(self, text):
+        self.toks, self.i = tokens(text), 0
+
+    def peek(self, word=None):
+        if self.i >= len(self.toks):
+            return None
+        tok = self.toks[self.i]
+        if word is None:
+            return tok
+        return tok if tok[0] == "word" and tok[1].upper() == word else None
+
+    def take(self):
+        tok = self.toks[self.i]
+        self.i += 1
+        return tok
+
+    def parse(self):
+        tree = self.expr()
+        if self.i != len(self.toks):
+            raise AssertionError(f"the fake cannot read the rest of a WHERE clause: {self.toks[self.i:]}")
+        return tree
+
+    def expr(self):
+        node = self.term()
+        while self.peek("OR"):
+            self.take()
+            node = ("or", node, self.term())
+        return node
+
+    def term(self):
+        node = self.factor()
+        while self.peek("AND"):
+            self.take()
+            node = ("and", node, self.factor())
+        return node
+
+    def factor(self):
+        if self.peek("NOT"):
+            self.take()
+            return ("not", self.factor())
+        if self.peek() and self.peek()[0] == "(":
+            self.take()
+            node = self.expr()
+            assert self.take()[0] == ")"
+            return node
+        field = self.take()[1]
+        negate = False
+        if self.peek("NOT"):
+            self.take()
+            negate = True
+        if self.peek("IN"):
+            self.take()
+            assert self.take()[0] == "("
+            values = []
+            while True:
+                values.append(literal(self.take()))
+                nxt = self.take()
+                if nxt[0] == ")":
+                    break
+                assert nxt[0] == ",", nxt
+            return ("in", field, values, negate)
+        if self.peek("LIKE"):
+            self.take()
+            return ("like", field, literal(self.take()), negate)
+        op = self.take()
+        assert op[0] == "op", op
+        return ("cmp", field, op[1], literal(self.take()))
+
+
+def holds(node, record):
+    kind = node[0]
+    if kind == "and":
+        return holds(node[1], record) and holds(node[2], record)
+    if kind == "or":
+        return holds(node[1], record) or holds(node[2], record)
+    if kind == "not":
+        return not holds(node[1], record)
+    if kind == "in":
+        return any(compare(field_of(record, node[1]), "=", v) for v in node[2]) != node[3]
+    if kind == "like":
+        pattern = "".join(".*" if c == "%" else "." if c == "_" else re.escape(c) for c in node[2])
+        value = field_of(record, node[1])
+        found = value is not None and re.fullmatch(pattern, str(value), re.IGNORECASE | re.DOTALL) is not None
+        return found != node[3]
+    return compare(field_of(record, node[1]), node[2], node[3])
+
+
+SOQL = re.compile(r"^\s*SELECT\s+(.+?)\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+?))?(?:\s+ORDER\s+BY\s+.+?)?"
+                  r"(?:\s+LIMIT\s+\d+)?\s*$", re.IGNORECASE | re.DOTALL)
+
+
+def project(record, fields):
+    out = {}
+    for f in fields:
+        parts, spot = f.split("."), out
+        for part in parts[:-1]:
+            spot = spot.setdefault(part, {})
+        spot[parts[-1]] = copy.deepcopy(field_of(record, f))
+    return out
+
+
+def soql_objects(soql):
+    """Every object a SOQL names after FROM (subqueries too), lower case."""
+    return {m.lower() for m in re.findall(r"\bFROM\s+(\w+)", soql, re.IGNORECASE)}
+
+
+# ---- the fake org ---------------------------------------------------------------------------------
+FOLDERS = [   # key, name, type
+    ("r_dhis2", "DHIS2 Reports", "Report"), ("r_public", "Public Reports", "Report"),
+    ("r_cat", "GLOW Club Reports", "Report"), ("r_shared", "Shared Name", "Report"),
+    ("r_old1", "Old Exports", "Report"), ("r_old2", "Old Exports", "Report"),
+    ("r_att", "Attendance", "Report"),
+    ("d_dhis2", "DHIS2 Dashboards", "Dashboard"), ("d_dhis2b", "Dhis2 Dashbords", "Dashboard"),
+    ("d_cat", "GLOW Club Dashboards", "Dashboard"), ("d_shared", "Shared Name", "Dashboard"),
+    ("d_att", "Attendance", "Dashboard"),
+]
+REPORTS = [   # key, label, folder key, last run
+    ("meet", "Club meet freq by month and region", "r_dhis2", "2026-09-14T08:00:00.000+0000"),
+    ("girls", "Girls attended by partner", "r_dhis2", "2026-10-02T11:30:00.000+0000"),
+    ("mentors", "Mentors trained per month", "r_dhis2", "2026-08-30T07:15:00.000+0000"),
+    ("observed", "Sessions observed by partner", "r_dhis2", "2026-07-01T09:00:00.000+0000"),
+    ("stories", "GLOW of the Month Stories", "r_dhis2", None),
+    ("long", LONG, "r_dhis2", "2026-06-11T10:00:00.000+0000"),
+    ("mixed", "Training sessions led", "r_dhis2", "2026-10-05T16:45:00.000+0000"),
+    ("public", "Public club totals", "r_public", "2026-10-01T12:00:00.000+0000"),
+    ("att", "Jotform attendance by club", "r_att", "2026-10-20T06:00:00.000+0000"),
+]
+DASHBOARDS = [   # key, title, folder key, report keys of its components (None: a text component)
+    ("attendance", "GLOW Club Attendance", "d_dhis2", ["meet", "girls", None]),
+    ("training_old", "Old training view", "d_dhis2b", ["girls", "mixed"]),
+    ("reporting", "GLOW Club Reporting", "d_dhis2b", ["public"]),
+    ("retired", "Retired observations", "d_decom", ["observed", "mixed"]),
+    ("jotform", "Jotform Attendance", "d_att", ["att"]),
+]
+
+
+def dev_name(text):
+    return re.sub(r"\W+", "_", text).strip("_")
+
+
+class ReportOrg:
+    """Salesforce as far as tools/sf_report_folders.py may see it (see the module docstring)."""
+    alias = "fake"
+
+    def __init__(self, decom_reports=1, decom_dashboards=1):
+        self.calls, self.seen = [], []
+        self.drift, self.refuse_patch = {}, set()
+        self.folders, self.fid = [], {}
+        for key, name, kind in FOLDERS:
+            self.add_folder(key, name, kind)
+        for n in range(decom_reports):
+            self.add_folder("r_decom" if n == 0 else f"r_decom{n}", "Decommissioned", "Report")
+        for n in range(decom_dashboards):
+            self.add_folder("d_decom" if n == 0 else f"d_decom{n}", "Decommissioned", "Dashboard")
+        self.reports, self.rid = [], {}
+        for key, label, folder, last_run in REPORTS:
+            rid = fresh_id("00O")
+            self.rid[key] = rid
+            self.reports.append({"Id": rid, "DeveloperName": dev_name(label), "Name": label,
+                                 "OwnerId": self.fid[folder], "LastRunDate": last_run, "Description": ""})
+        self.dashboards, self.did, self.components = [], {}, []
+        for key, title, folder, uses in DASHBOARDS:
+            did = fresh_id("01Z")
+            self.did[key] = did
+            folder = folder if folder in self.fid else "d_dhis2b"     # no Decommissioned: it stays outside
+            self.dashboards.append({"Id": did, "DeveloperName": dev_name(title), "Title": title,
+                                    "FolderId": self.fid[folder], "Type": "SpecifiedUser", "Description": ""})
+            for rkey in uses:
+                self.components.append({"Id": fresh_id("01a"), "DashboardId": did,
+                                        "CustomReportId": self.rid[rkey] if rkey else None})
+
+    def add_folder(self, key, name, kind):
+        fid = fresh_id("00l")
+        self.fid[key] = fid
+        self.folders.append({"Id": fid, "Name": name, "DeveloperName": dev_name(name) + "_" + key, "Type": kind})
+
+    # -- what the tests read
+    def folder_name(self, fid):
+        return next((f["Name"] for f in self.folders if f["Id"] == fid), None)
+
+    def report(self, rid):
+        found = [r for r in self.reports if r["Id"] == rid]
+        assert len(found) <= 1
+        return found[0] if found else None
+
+    def dashboard(self, did):
+        return next((d for d in self.dashboards if d["Id"] == did), None)
+
+    def state(self):
+        """{report id: (folder id, label)} and {dashboard id: (folder id, title)}."""
+        return ({r["Id"]: (r["OwnerId"], r["Name"]) for r in self.reports},
+                {d["Id"]: (d["FolderId"], d["Title"]) for d in self.dashboards})
+
+    def writes(self):
+        return [c for c in self.calls if c[0] != "GET"]
+
+    def patches(self):
+        return [c for c in self.calls if c[0] == "PATCH"]
+
+    def posts(self):
+        return [c for c in self.calls if c[0] == "POST"]
+
+    # -- SOQL
+    def table(self, sobject):
+        name = sobject.lower()
+        if name == "folder":
+            return [dict(f) for f in self.folders]
+        if name == "report":
+            return [dict(r, FolderName=self.folder_name(r["OwnerId"])) for r in self.reports]
+        if name == "dashboard":
+            return [dict(d, FolderName=self.folder_name(d["FolderId"])) for d in self.dashboards]
+        if name == "dashboardcomponent":
+            dashes = {d["Id"]: d for d in self.table("Dashboard")}
+            return [dict(c, Dashboard=dashes.get(c["DashboardId"])) for c in self.components]
+        raise AssertionError(f"the tool read an object it has no reason to read: {sobject}")
+
+    def query(self, soql):
+        self.seen.append(soql)
+        m = SOQL.match(soql)
+        if not m:
+            raise AssertionError(f"the fake cannot read this SOQL: {soql}")
+        fields, sobject, where = m.groups()
+        names = [f.strip() for f in fields.split(",")]
+        if any("(" in f for f in names):
+            raise AssertionError(f"the fake answers plain field lists only: {soql}")
+        records = self.table(sobject)
+        if where:
+            tree = Where(where).parse()
+            records = [r for r in records if holds(tree, r)]
+        return [project(r, names) for r in records]
+
+    query_all = query
+
+    def count(self, soql):
+        raise AssertionError("the fake answers no COUNT(): count the records a query returns")
+
+    # -- REST
+    def call(self, method, path, body=None):
+        self.calls.append((method, path, copy.deepcopy(body)))
+        if method not in ("GET", "POST", "PATCH"):
+            raise AssertionError(f"the tool sent {method} {path}")
+        assert path.startswith(API_ROOT), f"not under {API_ROOT}: {path}"
+        rest = path[len(API_ROOT):]
+        m = re.fullmatch(r"analytics/(reports|dashboards)\?cloneId=(\w+)", rest)
+        if method == "POST" and m:
+            return self.clone(m.group(1), m.group(2), body)
+        m = re.fullmatch(r"analytics/(reports|dashboards)/(\w+)", rest)
+        if method == "PATCH" and m:
+            if m.group(1) == "dashboards":
+                return 400, [{"errorCode": "JSON_PARSER_ERROR", "message": f"Cannot deserialize ({CANARY})"}]
+            return self.patch_report(m.group(2), body)
+        m = re.fullmatch(r"analytics/(reports|dashboards)/(\w+)/describe", rest)
+        if method == "GET" and m:
+            if m.group(1) == "reports" and self.report(m.group(2)):
+                r = self.report(m.group(2))
+                return 200, {"reportMetadata": {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"]},
+                             "runningUser": {"name": CANARY}}
+            if m.group(1) == "dashboards" and self.dashboard(m.group(2)):
+                d = self.dashboard(m.group(2))
+                return 200, {"id": d["Id"], "name": d["Title"], "folderId": d["FolderId"],
+                             "runningUser": {"name": CANARY}}
+            return 404, [{"errorCode": "NOT_FOUND", "message": "no such item"}]
+        raise AssertionError(f"the fake does not answer {method} {path} (a GET on a report runs it: record data)")
+
+    def clone(self, kind, source, body):
+        if kind == "reports":
+            src = self.report(source)
+            meta = (body or {}).get("reportMetadata") if isinstance(body, dict) else None
+            if src is None:
+                return 404, [{"errorCode": "NOT_FOUND", "message": "no such report"}]
+            if not isinstance(meta, dict):
+                return 400, [{"errorCode": "JSON_PARSER_ERROR", "message": f"no reportMetadata ({CANARY})"}]
+            name = meta.get("name", src["Name"])
+            if len(name) > 40:
+                return 400, [{"errorCode": "FIELD_INTEGRITY_EXCEPTION", "message": "name too long"}]
+            new = dict(src, Id=fresh_id("00O"), Name=name, OwnerId=meta.get("folderId", src["OwnerId"]),
+                       DeveloperName=src["DeveloperName"] + "_copy", Description=meta.get("description", ""),
+                       LastRunDate=None)
+            self.reports.append(new)
+            return 200, {"reportMetadata": {"id": new["Id"], "name": new["Name"], "folderId": new["OwnerId"]},
+                         "runningUser": {"name": CANARY}}
+        src = self.dashboard(source)
+        if src is None:
+            return 404, [{"errorCode": "NOT_FOUND", "message": "no such dashboard"}]
+        if not isinstance(body, dict) or set(body) - {"folderId"}:
+            return 400, [{"errorCode": "JSON_PARSER_ERROR", "message": f"Cannot deserialize ({CANARY})"}]
+        new = dict(src, Id=fresh_id("01Z"), FolderId=body.get("folderId", src["FolderId"]),
+                   DeveloperName=src["DeveloperName"] + "_copy")
+        self.dashboards.append(new)
+        for c in [c for c in self.components if c["DashboardId"] == source]:
+            self.components.append(dict(c, Id=fresh_id("01a"), DashboardId=new["Id"]))
+        return 200, {"id": new["Id"], "name": new["Title"], "folderId": new["FolderId"],
+                     "dashboardMetadata": {"id": new["Id"], "name": new["Title"], "folderId": new["FolderId"]},
+                     "runningUser": {"name": CANARY}}
+
+    def patch_report(self, rid, body):
+        r = self.report(rid)
+        if r is None:
+            return 404, [{"errorCode": "NOT_FOUND", "message": "no such report"}]
+        if rid in self.refuse_patch:
+            return 400, [{"errorCode": "INVALID_FIELD", "message": f"refused ({CANARY})"}]
+        meta = body.get("reportMetadata") if isinstance(body, dict) else None
+        if not isinstance(meta, dict):
+            return 400, [{"errorCode": "JSON_PARSER_ERROR", "message": f"no reportMetadata ({CANARY})"}]
+        if "name" in meta and len(meta["name"]) > 40:
+            return 400, [{"errorCode": "FIELD_INTEGRITY_EXCEPTION", "message": "name too long"}]
+        drift = self.drift.get(rid)
+        if "folderId" in meta and drift != "folder":
+            r["OwnerId"] = meta["folderId"]
+        if "name" in meta and drift != "name":
+            r["Name"] = meta["name"]
+        if "description" in meta:
+            r["Description"] = meta["description"]
+        return 200, {"reportMetadata": {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"]},
+                     "runningUser": {"name": CANARY}}
+
+
+# ---- the harness ----------------------------------------------------------------------------------
+class Harness(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.fresh()
+
+    def fresh(self, **kw):
+        self.org = ReportOrg(**kw)
+        self.dir = tempfile.mkdtemp(dir=self.tmp.name)
+        self.ledger_path = os.path.join(self.dir, "ledger.csv")
+        return self.org
+
+    def run_tool(self, *argv, dir_=True):
+        """(stdout + stderr + the exit message, the exit code: None or 0 when it ended normally).
+        self.out keeps stdout alone. Checks that no API answer reached the output."""
+        out, err = io.StringIO(), io.StringIO()
+        code = None
+        args = list(argv) + (["--dir", self.dir] if dir_ else [])
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = srf.main(args, org=self.org)
+        except SystemExit as stop:
+            code = stop.code
+        self.out = out.getvalue()
+        said = out.getvalue() + err.getvalue() + ("" if code in (None, 0) else str(code))
+        self.assertNotIn(CANARY, said, "the tool printed an API answer")
+        return said, code
+
+    def ok(self, *argv):
+        said, code = self.run_tool(*argv)
+        self.assertIn(code, (None, 0), f"the run should succeed; it said:\n{said}")
+        return said
+
+    def refused(self, *argv):
+        said, code = self.run_tool(*argv)
+        self.assertNotIn(code, (None, 0), f"the run should be refused; it said:\n{said}")
+        return said
+
+    def plan(self, rows):
+        """A plan CSV of (kind, id, to_folder, new_label) rows; its path."""
+        fd, path = tempfile.mkstemp(suffix=".csv", dir=self.tmp.name)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            w = csv.writer(fh, lineterminator="\n")
+            w.writerow(["kind", "id", "to_folder", "new_label"])
+            w.writerows(rows)
+        return path
+
+    def ledger(self):
+        self.assertTrue(os.path.exists(self.ledger_path), "no ledger.csv after a write")
+        self.assertEqual(stat.S_IMODE(os.stat(self.ledger_path).st_mode), 0o600)
+        with open(self.ledger_path, encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            self.assertEqual(reader.fieldnames, LEDGER_COLS)
+            return list(reader)
+
+    def assert_nothing_written(self, before=None):
+        self.assertEqual(self.org.writes(), [], "a write was sent")
+        self.assertFalse(os.path.exists(self.ledger_path) and os.path.getsize(self.ledger_path) > 0,
+                         "a ledger row was written")
+        if before is not None:
+            self.assertEqual(self.org.state(), before)
+
+    def lines_with(self, said, text):
+        return [line for line in said.splitlines() if text in line]
+
+    def move_plan(self):
+        """Three report rows: a relabel into a category folder, a retirement with the label kept, a
+        relabel into the report folder that shares its name with a dashboard folder."""
+        o = self.org
+        return [
+            ("report", o.rid["meet"], "GLOW Club Reports", "Club meeting frequency"),
+            ("report", o.rid["mentors"], "Decommissioned", ""),
+            ("report", o.rid["stories"], "Shared Name", "GLOW of the Month table"),
+        ]
+
+    def target(self, name):
+        return {"GLOW Club Reports": "r_cat", "Decommissioned": "r_decom", "Shared Name": "r_shared",
+                "Public Reports": "r_public", "DHIS2 Reports": "r_dhis2"}[name]
+
+
+# ---- the broad behaviour --------------------------------------------------------------------------
+class List(Harness):
+    def parse_csv(self):
+        lines = [line for line in self.out.splitlines() if line.strip()]
+        self.assertTrue(lines, "list printed nothing to stdout")
+        rows = list(csv.reader(lines))
+        self.assertEqual(rows[0], LIST_COLS, "stdout must be the CSV alone, header first")
+        return [dict(zip(LIST_COLS, r)) for r in rows[1:]]
+
+    def expected_used_by(self, rid):
+        return {c["DashboardId"] for c in self.org.components if c["CustomReportId"] == rid}
+
+    def test_list_prints_csv_of_the_folders_items_with_the_dashboards_that_use_them(self):
+        o = self.org
+        before = o.state()
+        self.ok("list", "--vpn-off", "--folder", "DHIS2 Reports")
+        rows = self.parse_csv()
+        want = [r for r in o.reports if r["OwnerId"] == o.fid["r_dhis2"]]
+        self.assertEqual(sorted(r["id"] for r in rows), sorted(r["Id"] for r in want))
+        for r in want:
+            row = next(x for x in rows if x["id"] == r["Id"])
+            self.assertEqual(row["kind"], "report")
+            self.assertEqual(row["developer_name"], r["DeveloperName"])
+            self.assertEqual(row["label"], r["Name"])
+            self.assertEqual(row["folder"], "DHIS2 Reports")
+            if r["LastRunDate"]:
+                self.assertEqual(row["last_run"][:10], r["LastRunDate"][:10])
+            else:
+                self.assertEqual(row["last_run"], "")
+            used = {u for u in row["used_by"].split(";") if u}
+            self.assertEqual(used, self.expected_used_by(r["Id"]), f"used_by of {r['Name']}")
+        # the spread: two dashboards, one, none
+        by_id = {x["id"]: x for x in rows}
+        self.assertEqual(len(by_id[o.rid["girls"]]["used_by"].split(";")), 2)
+        self.assertEqual(by_id[o.rid["mentors"]]["used_by"], "")
+        self.assert_nothing_written(before)
+
+        # two folders of both kinds, and --kind
+        self.ok("list", "--vpn-off", "--folder", "Dhis2 Dashbords", "--folder", "Public Reports")
+        rows = self.parse_csv()
+        self.assertEqual(sorted((x["kind"], x["id"]) for x in rows),
+                         sorted([("dashboard", o.did["training_old"]), ("dashboard", o.did["reporting"]),
+                                 ("report", o.rid["public"])]))
+        dash = next(x for x in rows if x["id"] == o.did["reporting"])
+        self.assertEqual((dash["label"], dash["folder"]), ("GLOW Club Reporting", "Dhis2 Dashbords"))
+        self.assertEqual(next(x for x in rows if x["id"] == o.rid["public"])["used_by"], o.did["reporting"])
+
+        self.ok("list", "--vpn-off", "--folder", "Decommissioned", "--kind", "dashboard")
+        rows = self.parse_csv()
+        self.assertEqual([(x["kind"], x["id"]) for x in rows], [("dashboard", o.did["retired"])])
+        self.ok("list", "--vpn-off", "--folder", "Decommissioned", "--kind", "report")
+        self.assertEqual(self.parse_csv(), [])
+        self.assert_nothing_written(before)
+
+
+class Move(Harness):
+    def test_move_dry_run_writes_nothing_and_prints_each_change(self):
+        for n in (1, 3):
+            o = self.fresh()
+            rows = self.move_plan()[:n]
+            before = o.state()
+            said = self.ok("move", "--plan", self.plan(rows), "--vpn-off")
+            self.assert_nothing_written(before)
+            for _kind, rid, to, label in rows:
+                lines = self.lines_with(said, rid)
+                self.assertEqual(len(lines), 1, f"one line per plan row for {rid}:\n{said}")
+                self.assertIn(to, lines[0])
+                if label:
+                    self.assertIn(label, lines[0])
+            others = [r["Id"] for r in o.reports if r["Id"] not in {x[1] for x in rows}]
+            for rid in others:
+                self.assertNotIn(rid, said)
+
+    def test_move_apply_moves_and_relabels_and_reads_back_the_same_id(self):
+        o = self.org
+        rows = self.move_plan()
+        old = {rid: (o.report(rid)["OwnerId"], o.report(rid)["Name"]) for _, rid, _, _ in rows}
+        count = len(o.reports)
+        said = self.ok("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        self.assertEqual(o.posts(), [], "a move is a PATCH, never a clone")
+        patches = o.patches()
+        self.assertEqual(len(patches), len(rows))
+        for (_, rid, to, label) in rows:
+            folder_id = o.fid[self.target(to)]
+            sent = [p for p in patches if p[1] == f"{API_ROOT}analytics/reports/{rid}"]
+            self.assertEqual(len(sent), 1, f"one PATCH for {rid}")
+            want = {"folderId": folder_id}
+            if label:
+                want["name"] = label
+            self.assertEqual(sent[0][2], {"reportMetadata": want})
+            r = o.report(rid)
+            self.assertIsNotNone(r, "the same Id after the move")
+            self.assertEqual(r["OwnerId"], folder_id)
+            self.assertEqual(r["Name"], label or old[rid][1])
+            self.assertIn(rid, said)
+        self.assertEqual(len(o.reports), count, "no new report: the Ids are kept")
+
+        ledger = self.ledger()
+        self.assertEqual([x["id"] for x in ledger], [rid for _, rid, _, _ in rows])
+        for x, (_, rid, to, label) in zip(ledger, rows):
+            self.assertEqual((x["action"], x["kind"], x["status"], x["http"]), ("move", "report", "ok", "200"))
+            self.assertEqual(x["from_folder_id"], old[rid][0])
+            self.assertEqual(x["to_folder_id"], o.fid[self.target(to)])
+            self.assertEqual(x["old_label"], old[rid][1])
+            if label:
+                self.assertEqual(x["new_label"], label)
+            self.assertTrue(x["when"])
+
+    def test_limit_stops_after_n_writes(self):
+        for n in (1, 2, 3):
+            o = self.fresh()
+            rows = self.move_plan() + [("report", o.rid["long"], "Decommissioned", "")]
+            before = {rid: o.report(rid)["OwnerId"] for _, rid, _, _ in rows}
+            said = self.ok("move", "--plan", self.plan(rows), "--vpn-off", "--apply", "--limit", str(n))
+            self.assertEqual(len(o.writes()), n, said)
+            self.assertEqual([x["id"] for x in self.ledger()], [rid for _, rid, _, _ in rows[:n]])
+            for i, (_, rid, to, _) in enumerate(rows):
+                want = o.fid[self.target(to)] if i < n else before[rid]
+                self.assertEqual(o.report(rid)["OwnerId"], want, f"row {i} with --limit {n}")
+
+    def test_a_failed_read_back_stops_the_run(self):
+        for bad, drift in ((0, "folder"), (1, "folder"), (2, "name")):
+            o = self.fresh()
+            rows = self.move_plan()
+            o.drift[rows[bad][1]] = drift
+            untouched = {rid: (o.report(rid)["OwnerId"], o.report(rid)["Name"]) for _, rid, _, _ in rows[bad + 1:]}
+            said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+            self.assertEqual(len(o.writes()), bad + 1, f"no write after the failed read-back:\n{said}")
+            ledger = self.ledger()
+            self.assertEqual([x["id"] for x in ledger], [rid for _, rid, _, _ in rows[:bad + 1]])
+            self.assertEqual([x["status"] for x in ledger], ["ok"] * bad + ["failed"])
+            for rid, was in untouched.items():
+                self.assertEqual((o.report(rid)["OwnerId"], o.report(rid)["Name"]), was)
+            self.assertIn(rows[bad][1], said)
+
+        # a refused PATCH stops the run too, and says its HTTP code
+        o = self.fresh()
+        rows = self.move_plan()
+        o.refuse_patch.add(rows[0][1])
+        said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        self.assertEqual(len(o.writes()), 1)
+        self.assertIn("400", said)
+
+
+class Copy(Harness):
+    def test_copy_clones_into_decommissioned_with_its_source_and_tag(self):
+        o = self.org
+        # the dry run sends nothing
+        before = o.state()
+        said = self.ok("copy", "--kind", "report", "--id", o.rid["meet"], "--tag", "#72", "--vpn-off")
+        self.assert_nothing_written(before)
+        self.assertIn(o.rid["meet"], said)
+
+        cases = [("report", o.rid["meet"], "#72"), ("report", o.rid["long"], "keep-list 2026-10-23"),
+                 ("dashboard", o.did["attendance"], "#72"), ("dashboard", o.did["reporting"], "before #75")]
+        for n, (kind, source, tag) in enumerate(cases, 1):
+            was = copy.deepcopy(o.report(source) if kind == "report" else o.dashboard(source))
+            sent_before = len(o.posts())
+            self.ok("copy", "--kind", kind, "--id", source, "--tag", tag, "--vpn-off", "--apply")
+            posts = o.posts()[sent_before:]
+            self.assertEqual(len(posts), 1, f"one clone for {kind} {source}")
+            method, path, body = posts[0]
+            row = self.ledger()[-1]
+            self.assertEqual(len(self.ledger()), n, "one ledger row per copy")
+            self.assertEqual((row["action"], row["kind"], row["id"], row["tag"], row["status"]),
+                             ("copy", kind, source, tag, "ok"))
+            new_id = row["copy_id"]
+            self.assertNotEqual(new_id, source)
+            if kind == "report":
+                decom = o.fid["r_decom"]
+                self.assertEqual(path, f"{API_ROOT}analytics/reports?cloneId={source}")
+                self.assertEqual(body["reportMetadata"]["folderId"], decom)
+                self.assertEqual(body["reportMetadata"]["name"], was["Name"][:40])
+                new = o.report(new_id)
+                self.assertIsNotNone(new, "the ledger's copy_id is the clone's id")
+                self.assertEqual((new["OwnerId"], new["Name"]), (decom, was["Name"][:40]))
+                self.assertIn(source, new["Description"])
+                self.assertIn(tag, new["Description"])
+                self.assertEqual(o.report(source), was, "the source is untouched")
+            else:
+                decom = o.fid["d_decom"]
+                self.assertEqual(path, f"{API_ROOT}analytics/dashboards?cloneId={source}")
+                self.assertEqual(body, {"folderId": decom}, "the API takes no name or description for a dashboard")
+                new = o.dashboard(new_id)
+                self.assertIsNotNone(new, "the ledger's copy_id is the clone's id")
+                self.assertEqual(new["FolderId"], decom)
+                self.assertEqual(o.dashboard(source), was, "the source is untouched")
+        self.assertFalse([p for p in o.patches() if "/dashboards/" in p[1]], "a dashboard PATCH is refused by the API")
+
+
+class Undo(Harness):
+    def test_undo_puts_every_ledger_row_back_last_first(self):
+        o = self.org
+        original = o.state()[0]
+        b, c = o.rid["mentors"], o.rid["stories"]
+        self.ok("copy", "--kind", "report", "--id", c, "--tag", "#72", "--vpn-off", "--apply")
+        copy_id = self.ledger()[-1]["copy_id"]
+        self.ok("move", "--plan", self.plan([("report", b, "Decommissioned", ""),
+                                             ("report", c, "GLOW Club Reports", "Monthly stories")]),
+                "--vpn-off", "--apply")
+        self.ok("move", "--plan", self.plan([("report", c, "Decommissioned", "Stories, retired")]),
+                "--vpn-off", "--apply")
+        moves = [x for x in self.ledger() if x["action"] == "move"]
+        self.assertEqual([x["id"] for x in moves], [b, c, c])
+        rows_before = len(self.ledger())
+
+        # the dry run
+        state = o.state()
+        sent = len(o.calls)
+        said = self.ok("undo", "--ledger", self.ledger_path, "--vpn-off")
+        self.assertEqual([x for x in o.calls[sent:] if x[0] != "GET"], [])
+        self.assertEqual(o.state(), state)
+        self.assertEqual(len(self.ledger()), rows_before, "a dry run writes no ledger row")
+        self.assertTrue(self.lines_with(said, b) and self.lines_with(said, c), said)
+
+        # the undo
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        undo_patches = [x for x in o.calls[sent:] if x[0] != "GET"]
+        self.assertTrue(all(x[0] == "PATCH" for x in undo_patches), undo_patches)
+        self.assertEqual([x[1] for x in undo_patches],
+                         [f"{API_ROOT}analytics/reports/{x['id']}" for x in reversed(moves)], "last first")
+        for (_, _, body), row in zip(undo_patches, reversed(moves)):
+            self.assertEqual(body["reportMetadata"]["folderId"], row["from_folder_id"])
+            if row["new_label"] and row["new_label"] != row["old_label"]:
+                self.assertEqual(body["reportMetadata"]["name"], row["old_label"])
+        now = o.state()[0]
+        for rid, was in original.items():
+            self.assertEqual(now[rid], was, f"{rid} is back where and as it was")
+        self.assertEqual(now[copy_id], (o.fid["r_decom"], original[c][1]), "the copy stays")
+        self.assertNotIn("DELETE", {x[0] for x in o.calls})
+        added = self.ledger()[rows_before:]
+        self.assertEqual(len(added), len(moves), "one ledger row per undone move")
+        self.assertTrue(all(x["action"] not in ("move", "copy") for x in added), added)
+        self.assertEqual([x["id"] for x in added], [x["id"] for x in reversed(moves)])
+
+
+# ---- the refusals ---------------------------------------------------------------------------------
+class Refusals(Harness):
+    def assert_move_refused(self, bad_row, *words):
+        """A plan of a valid row, then `bad_row`: refused whole, before any write."""
+        o = self.org
+        before = o.state()
+        rows = [("report", o.rid["public"], "GLOW Club Reports", "Public club totals, all"), bad_row]
+        said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        self.assert_nothing_written(before)
+        for w in words:
+            self.assertIn(w, said)
+        return said
+
+    def test_refuses_a_folder_name_that_is_not_exactly_one_folder_of_the_kind(self):
+        for name in ("Nowhere Folder", "Old Exports", "GLOW Club Dashboards"):
+            o = self.fresh()
+            self.assert_move_refused(("report", o.rid["mentors"], name, ""), name)
+        # the control: a name one report folder and one dashboard folder share is one of the kind
+        o = self.fresh()
+        self.ok("move", "--plan", self.plan([("report", o.rid["mentors"], "Shared Name", "")]), "--vpn-off", "--apply")
+        self.assertEqual(o.report(o.rid["mentors"])["OwnerId"], o.fid["r_shared"])
+
+    def test_refuses_to_touch_the_attendance_folders(self):
+        o = self.fresh()
+        self.assert_move_refused(("report", o.rid["att"], "GLOW Club Reports", ""), "Attendance")
+        o = self.fresh()
+        self.assert_move_refused(("report", o.rid["mentors"], "Attendance", ""), "Attendance")
+        for kind, key in (("report", "att"), ("dashboard", "jotform")):
+            o = self.fresh()
+            item = o.rid[key] if kind == "report" else o.did[key]
+            before = o.state()
+            said = self.refused("copy", "--kind", kind, "--id", item, "--tag", "#72", "--vpn-off", "--apply")
+            self.assert_nothing_written(before)
+            self.assertIn("Attendance", said)
+
+    def test_refuses_to_retire_a_report_a_remaining_dashboard_uses(self):
+        # used by one dashboard outside Decommissioned; by two outside; by one inside and one outside
+        for key, dash in (("meet", "attendance"), ("girls", "training_old"), ("mixed", "training_old")):
+            o = self.fresh()
+            said = self.assert_move_refused(("report", o.rid[key], "Decommissioned", ""))
+            self.assertTrue(o.did[dash] in said or dict((k, t) for k, t, _, _ in DASHBOARDS)[dash] in said,
+                            f"the refusal names the dashboard that uses it:\n{said}")
+        # the controls: used only by a dashboard already in Decommissioned; a used report moved elsewhere
+        o = self.fresh()
+        self.ok("move", "--plan", self.plan([("report", o.rid["observed"], "Decommissioned", ""),
+                                             ("report", o.rid["girls"], "GLOW Club Reports", "")]),
+                "--vpn-off", "--apply")
+        self.assertEqual(o.report(o.rid["observed"])["OwnerId"], o.fid["r_decom"])
+        self.assertEqual(o.report(o.rid["girls"])["OwnerId"], o.fid["r_cat"])
+
+    def test_refuses_a_label_over_the_limit(self):
+        for label in (L41, L60):
+            o = self.fresh()
+            self.assert_move_refused(("report", o.rid["mentors"], "GLOW Club Reports", label), "40")
+        o = self.fresh()
+        self.ok("move", "--plan", self.plan([("report", o.rid["mentors"], "GLOW Club Reports", L40)]),
+                "--vpn-off", "--apply")
+        self.assertEqual(o.report(o.rid["mentors"])["Name"], L40)
+        # a dashboard is moved and renamed by hand in Lightning: the API refuses every dashboard PATCH
+        for to, label in (("GLOW Club Dashboards", ""), ("Decommissioned", "Old training")):
+            o = self.fresh()
+            self.assert_move_refused(("dashboard", o.did["training_old"], to, label), "Lightning")
+
+    def test_copy_refuses_without_exactly_one_decommissioned_folder(self):
+        for kind, counts in (("report", dict(decom_reports=0)), ("report", dict(decom_reports=2)),
+                             ("dashboard", dict(decom_dashboards=0)), ("dashboard", dict(decom_dashboards=2))):
+            o = self.fresh(**counts)
+            item = o.rid["meet"] if kind == "report" else o.did["attendance"]
+            before = o.state()
+            said = self.refused("copy", "--kind", kind, "--id", item, "--tag", "#72", "--vpn-off", "--apply")
+            self.assert_nothing_written(before)
+            self.assertIn("Decommissioned", said)
+        # the other kind's Decommissioned folder does not count
+        o = self.fresh(decom_reports=0)
+        self.ok("copy", "--kind", "dashboard", "--id", o.did["attendance"], "--tag", "#72", "--vpn-off", "--apply")
+        self.assertEqual(len(o.posts()), 1)
+
+    def test_never_sends_delete_and_never_reads_records(self):
+        o = self.org
+        self.ok("list", "--vpn-off", "--folder", "DHIS2 Reports", "--folder", "DHIS2 Dashboards")
+        self.ok("copy", "--kind", "report", "--id", o.rid["mentors"], "--tag", "#72", "--vpn-off", "--apply")
+        self.ok("copy", "--kind", "dashboard", "--id", o.did["reporting"], "--tag", "#72", "--vpn-off", "--apply")
+        self.ok("move", "--plan", self.plan(self.move_plan()), "--vpn-off", "--apply")
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertTrue(o.calls and o.seen)
+        self.assertLessEqual({c[0] for c in o.calls}, {"GET", "POST", "PATCH"})
+        for soql in o.seen:
+            self.assertLessEqual(soql_objects(soql), ALLOWED_OBJECTS, soql)
+            self.assertNotIn("fields(", soql.lower(), soql)
+        for _method, path, _ in o.calls:
+            self.assertRegex(path, r"^/services/data/v67\.0/analytics/(reports|dashboards)\b", path)
+        source = read(TOOL)
+        self.assertNotRegex(source, r"""['"]DELETE['"]""", "a DELETE in the tool")
+        self.assertNotRegex(source, r"\.delete\(", "a delete call in the tool")
+
+    def test_every_subcommand_refuses_without_vpn_off(self):
+        o = self.org
+        plan = self.plan(self.move_plan())
+        ledger = os.path.join(self.tmp.name, "old_ledger.csv")
+        with open(ledger, "w", encoding="utf-8", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=LEDGER_COLS, lineterminator="\n")
+            w.writeheader()
+            w.writerow({"when": "2026-10-23T10:00:00Z", "action": "move", "kind": "report", "id": o.rid["meet"],
+                        "from_folder_id": o.fid["r_dhis2"], "to_folder_id": o.fid["r_cat"],
+                        "old_label": "Club meet freq by month and region", "new_label": "Club meeting frequency",
+                        "status": "ok", "http": "200"})
+        commands = [
+            ["list", "--folder", "DHIS2 Reports"],
+            ["copy", "--kind", "report", "--id", o.rid["meet"], "--tag", "#72"],
+            ["copy", "--kind", "dashboard", "--id", o.did["attendance"], "--tag", "#72", "--apply"],
+            ["move", "--plan", plan],
+            ["move", "--plan", plan, "--apply"],
+            ["undo", "--ledger", ledger],
+            ["undo", "--ledger", ledger, "--apply"],
+        ]
+        for argv in commands:
+            said = self.refused(*argv)
+            self.assertIn("--vpn-off", said, argv)
+            self.assertEqual((o.calls, o.seen), ([], []), f"Salesforce was asked: {argv}")
+            self.assertFalse(os.path.exists(self.ledger_path), argv)
+
+
+class Docs(unittest.TestCase):
+    ARCH = os.path.join(REPO, "docs", "ARCHITECTURE.md")
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    SKILL = os.path.join(REPO, ".claude", "skills", "salesforce", "SKILL.md")
+    SUB = "### Copying and moving reports and dashboards"
+
+    def row(self, text, where):
+        rows = [line for line in text.splitlines() if line.startswith("| `tools/sf_report_folders.py")]
+        self.assertEqual(len(rows), 1, f"{where}: one table row for tools/sf_report_folders.py")
+        return rows[0]
+
+    def test_the_docs_name_the_tool_its_gate_and_its_undo(self):
+        arch = self.row(read(self.ARCH), "docs/ARCHITECTURE.md")
+        for word in ("--apply", "--vpn-off", "undo", "Decommissioned"):
+            self.assertIn(word, arch, f"docs/ARCHITECTURE.md's row names {word}")
+
+        monthly = md_part(self.RUNBOOK, "## Monthly Report dashboards in Salesforce")
+        self.assertIn(self.SUB, monthly, "the subsection sits under `## Monthly Report dashboards in Salesforce`")
+        part = md_part(self.RUNBOOK, self.SUB)
+        for word in ("tools/sf_report_folders.py", "--apply", "--vpn-off", "--limit 1", "undo", "ledger"):
+            self.assertIn(word, part, f"RUNBOOK {self.SUB} names {word}")
+        for sub in ("list", "copy", "move", "undo"):
+            self.assertRegex(part, rf"sf_report_folders\.py\s+{sub}\b", f"RUNBOOK gives the {sub} command")
+
+        writer = self.row(md_part(self.SKILL, "## Writers"), ".claude/skills/salesforce/SKILL.md Writers")
+        for word in ("--apply", "--vpn-off", "undo"):
+            self.assertIn(word, writer, f"the skill's Writers row names {word}")
+
+    def test_help_answers(self):
+        for argv in (["--help"], ["move", "--help"], ["undo", "--help"]):
+            done = subprocess.run([sys.executable, TOOL] + argv, capture_output=True, text=True, cwd=REPO,
+                                  timeout=60)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("usage", done.stdout.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()
