@@ -674,6 +674,107 @@ console.log('\n  which reports are roster changes');
   // Accepted misses (no roster word, other form chosen): "Please remove Grace Zibblewick,
   // who moved away." / "Please add Chiara Pellucidor and Dalia Thornquibble." Every real
   // request of this kind chose the Club Roster Form; the staff e-mail goes out regardless.
+
+  // PR #117 re-review: "it" after the girls. A clause that is only a pronoun deferred to the
+  // clause before it for ANY pronoun, so "I marked all 14 girls present but it is not on the
+  // form" (attendance lost: a bug report) read as a roster change — a ReviewQueue item AND a
+  // pointer e-mail to the mentor. Pinned here: only a PERSON pronoun defers — they / she /
+  // he, ellas / ellos / ella / él, or the elided Spanish subject after girls ("vinieron dos
+  // niñas pero no aparecen") — never "it", "that", "this", "eso", "esto", nor the elided
+  // subject after a thing. And attendance / la asistencia / the register is a thing even
+  // with the girls named in it ("the attendance of the girls is not on the form"). Built
+  // from parts — the clause before × the pronoun × the phrase, EN and ES, with and without
+  // accents, joined and framed differently each time — so no keyword stands in for the rule.
+  console.log('\n  #117 re-review: "it" after girls, and the attendance of the girls, are things');
+  {
+    let j = 0, f = 0;
+    const JOIN_EN = [' but ', ', ', ' and ', '. '], JOIN_ES = [' pero ', ', ', ' y ', '. '];
+    const join = (a, b, joins) => { const jn = joins[j++ % joins.length]; return a + jn + (jn === '. ' ? cap(b) : b); };
+    const FR_EN = [s => cap(s) + '.', s => 'Hello. ' + cap(s) + '.', s => cap(s) + '. Please help.',
+                   s => 'We met on Tuesday and ' + s + '.', s => cap(s) + ', please check.'];
+    const FR_ES = [s => cap(s) + '.', s => 'Hola. ' + cap(s) + '.', s => cap(s) + '. ¿Pueden revisar?',
+                   s => 'Nos reunimos el martes y ' + s + '.', s => 'Buenas tardes, ' + s + '.'];
+    const frame = (s, frames) => frames[f++ % frames.length](s);
+    const build = (befores, pronouns, phrases, joins, frames, form, want) =>
+        befores.flatMap(b => pronouns.flatMap(p => phrases.map(ph =>
+            [form, frame(join(typeof b === 'function' ? b() : b, p + ' ' + ph, joins), frames), {}, want])));
+    const PH_EN = ['not on the form', 'not on the list', 'not in the portal', 'missing from the list',
+                   'not on the attendance form', 'not on the roster', 'missing from the form'];
+    const PH_ES = ['en la lista', 'en el formulario', 'en el portal'];
+
+    // things: girls named on a positive sign, then "it" / "that" / "this" / "eso" / "esto"
+    const GIRLS_EN = ['I marked all 14 girls present', 'marked attendance for the girls', 'the girls attended', 'we marked the girls',
+                      'I entered the girls who came', 'two girls came today', 'our members were all there', 'three students came on Friday'];
+    const IT_EN = ['it is', 'that is', 'this is'];
+    const GIRLS_ES = ['marqué a las niñas presentes', 'marque a las ninas presentes', 'vinieron dos niñas', 'las niñas vinieron',
+                      'registré a las tres integrantes', 'anoté a las chicas que vinieron'];
+    const ESO = ['eso no aparece', 'esto no aparece', 'eso no está', 'esto no esta'];
+    // things: the attendance / the register, with the girls named in it
+    const ATT_EN = ['the attendance of the girls', 'the attendance for the girls', 'today\'s attendance of the girls',
+                    'the attendance register of the girls', 'the register of the girls', 'the attendance of all 12 girls',
+                    'the girls\' attendance', 'attendance for the three students', 'the attendance of our members'];
+    const ATT_ES = ['la asistencia de las niñas', 'la asistencia de las ninas', 'la asistencia de hoy de las niñas',
+                    'la asistencia de las tres integrantes', 'el registro de asistencia de las niñas', 'la asistencia de todas las chicas'];
+    // things: the elided Spanish subject after a thing (the attendance), not after girls
+    const THING_THEN_ELIDED = ['marqué la asistencia de las niñas', 'registré la asistencia de las ninas',
+                               'pasé la asistencia de las chicas', 'anoté la asistencia de las tres integrantes'];
+    const things = [].concat(
+      build(GIRLS_EN, IT_EN, PH_EN, JOIN_EN, FR_EN, AF, ''),
+      build(GIRLS_ES, ESO, PH_ES, JOIN_ES, FR_ES, LA, ''),
+      ATT_EN.flatMap(s => PH_EN.map(ph => [AF, frame(s + ' is ' + ph, FR_EN), {}, ''])),
+      ATT_ES.flatMap(s => ['no aparece', 'no está', 'no esta'].flatMap(v => PH_ES.map(ph => [LA, frame(s + ' ' + v + ' ' + ph, FR_ES), {}, '']))),
+      build(THING_THEN_ELIDED, ['no aparece', 'no está'], PH_ES, JOIN_ES, FR_ES, LA, ''));
+
+    // people, nearby: the same shapes with a person pronoun, or the elided subject after girls
+    const PLURAL_EN = ['two girls attended', 'three girls came today', 'two of our students came', 'our members came', 'five girls were there'];
+    const PLURAL_ES = ['dos niñas vinieron el martes', 'las chicas vinieron hoy', 'las ninas vinieron'];
+    const ELIDED_ES = ['vinieron dos niñas', 'hoy vinieron tres niñas', 'las niñas vinieron', 'vinieron todas las chicas'];
+    const people = [].concat(
+      build(PLURAL_EN, ['they are'], PH_EN, JOIN_EN, FR_EN, AF, 'text'),
+      build([mint], ['she is', 'he is'], PH_EN, JOIN_EN, FR_EN, AF, 'text'),
+      build(PLURAL_ES, ['ellas no aparecen', 'ellas no están', 'ellas no estan'], PH_ES, JOIN_ES, FR_ES, LA, 'text'),
+      build(['vinieron tres integrantes', 'vinieron dos participantes'], ['ellos no aparecen'], PH_ES, JOIN_ES, FR_ES, LA, 'text'),
+      build([mint], ['ella no aparece', 'él no aparece', 'el no aparece'], PH_ES, JOIN_ES, FR_ES, LA, 'text'),
+      build(ELIDED_ES, ['no aparecen', 'no están', 'no estan'], PH_ES, JOIN_ES, FR_ES, LA, 'text'),
+      build([() => 'hoy vino ' + mint()], ['no aparece', 'no está'], PH_ES, JOIN_ES, FR_ES, LA, 'text'));
+
+    // the review's own probes, the club box typed on the first, and the same in "trying to do"
+    const probes = [
+      [AF, 'I marked all 14 girls present but it is not on the form.', { [PQ.FB_CLUB]: 'Bright Stars' }, ''],
+      [AF, 'Marked attendance for the girls, it is not on the form.', {}, ''],
+      [AF, 'The attendance of the girls is not on the form.', {}, ''],
+      [LA, 'La asistencia de las niñas no aparece en el formulario.', {}, ''],
+      [LA, 'La asistencia de las ninas no aparece en el formulario.', {}, ''],
+      [AF, 'The register is not on the form.', {}, ''],
+      [AF, 'The attendance is not on the form.', {}, ''],
+      [AF, 'The girls attended and ' + girl() + ' was there too, but it is not on the form.', {}, ''],
+      [LA, 'Marqué a las niñas presentes pero eso no aparece en el formulario.', {}, ''],
+      [AF, 'The session went well.', { [PQ.FB_DOING]: 'I marked all 14 girls present but it is not on the form' }, ''],
+      [AF, 'Two girls attended but they are not on the form.', {}, 'text'],
+      [LA, 'Vinieron dos niñas pero no aparecen en la lista.', {}, 'text'],
+      [AF, mint() + ' came on Tuesday but she is missing from the list.', {}, 'text'],
+      [AF, 'The session went well.', { [PQ.FB_DOING]: 'Four girls were there and they are not on the form' }, 'text'],
+    ];
+    const doingRows3 = things.concat(people).filter((c, i) => i % 9 === 4).map(asDoing);
+    const miss = rows => rows.filter(([fm, w, x, want]) => pr.looksLikeRosterChange_(report(fm, w, x)) !== want)
+        .map(([fm, w, x, want]) => (x[PQ.FB_DOING] ? 'doing: ' + x[PQ.FB_DOING] : w).slice(0, 64) + ' → ' + JSON.stringify(want));
+    const say = bad => bad.length + ' wrong: ' + bad.slice(0, 10).join(' | ') + (bad.length > 10 ? ' | …' : '');
+    check('the review\'s probes (' + probes.length + '): attendance lost ("…but it is not on the form", "the attendance of the girls") ' +
+          'is no roster change; girls then "they" / "she", and the elided Spanish subject after girls, still are',
+          !miss(probes).length, say(miss(probes)));
+    // the tables must hold what the labels say (a build that made no rows would pass vacuously)
+    const built3 = (rows, atLeast) => rows.length >= atLeast && rows.some(c => c[0] === LA) && rows.some(c => c[0] === AF);
+    check(things.length + ' built things: girls named, then "it" / "that" / "this" / "eso" / "esto" (' +
+          (GIRLS_EN.length * IT_EN.length * PH_EN.length + GIRLS_ES.length * ESO.length * PH_ES.length) + '); the attendance / the register ' +
+          'of the girls (' + (ATT_EN.length * PH_EN.length + ATT_ES.length * 3 * PH_ES.length) + '); the elided Spanish subject after ' +
+          'the attendance (' + THING_THEN_ELIDED.length * 2 * PH_ES.length + ') — none a roster change',
+          built3(things, 300) && !miss(things).length, say(miss(things)));
+    check(people.length + ' built people nearby: girls then they / she / he, ellas / ellos / ella / él (with and without the accent), ' +
+          'and the elided Spanish subject after girls or a named girl — every one a roster change',
+          built3(people, 120) && !miss(people).length, say(miss(people)));
+    check(doingRows3.length + ' of them as "what were you trying to do", a bland "what happened": the same',
+          doingRows3.length >= 40 && !miss(doingRows3).length, say(miss(doingRows3)));
+  }
 }
 
 console.log('\n  the ReviewQueue item never carries the report');
@@ -1357,6 +1458,159 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
           digest.body.includes('(no partner or club) · Feedback!81') && digest.body.includes(ROSTER + ': 1 open') &&
           !digest.body.includes(pr.OTHER_ISSUE) && !/fennwhistle/i.test(digest.body),
           (digest.subject || 'no e-mail') + ' / ' + String(digest.body || '').replace(/\n/g, ' ⏎ ').slice(0, 400));
+  }
+
+  // PR #117 re-review, through the handler: attendance lost — "I marked all 14 girls present
+  // but it is not on the form", "the attendance of the girls is not on the form" — is NOT a
+  // roster change: no "Roster change sent as a problem report" row, no pointer e-mail to the
+  // mentor, and FormLog never says so; the staff e-mail goes as for any report. Whether such
+  // a report is queued as a "Form not working report" is left open here (attendance lost is
+  // arguably one); what is pinned is that it costs no roster item and no e-mail to her.
+  console.log('\n  attendance lost is no roster change: no pointer e-mail, no roster item (#117 re-review)');
+  {
+    const ROSTER = 'Roster change sent as a problem report';
+    const AF = 'Africa Attendance Form', LA = 'Latin America Attendance Form';
+    const lost = [
+      [AF, 'I marked all 14 girls present but it is not on the form.', 'Marking attendance'],
+      [AF, 'Marked attendance for the girls, it is not on the form.', ''],
+      [AF, 'The attendance of the girls is not on the form.', 'Marking the girls present'],
+      [LA, 'La asistencia de las niñas no aparece en el formulario.', ''],
+      [AF, 'The girls attended and ' + CANARY + ' was there too, but it is not on the form.', 'Attendance for today'],
+      [LA, 'Marqué a las niñas presentes pero eso no aparece en el formulario.', 'Pasar lista'],
+      [AF, 'Hello. We entered the girls who came on Friday and that is not on the list. Please help.', ''],
+    ];
+    const runs = lost.map(([form, what, doing], i) => {
+      const x = world({ props: STAFF });
+      const a = report(form, what, { [PQ.FB_DOING]: doing, [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: 'mentor@example.org' });
+      const source = 'Feedback!' + (90 + i);
+      return { x, source, what, result: x.ctx.handleFeedback_(a, source, KEY) };
+    });
+    const bad = f => runs.filter(r => !f(r))
+        .map(r => r.source + ' "' + r.what.slice(0, 40) + '" → ' + r.result + ' / mails to ' + r.x.mails.map(m => m.to).join('+')).join(' | ');
+    const noRosterRow = r => !r.x.tabs.ReviewQueue.slice(1).some(row => row[1] === ROSTER) && !/roster change|pointed/i.test(r.result);
+    const privateStill = r => cleanFor('mentor@example.org')(r.x.audits.join('\n') + '\n' + r.x.tabs.ReviewQueue.slice(1).map(row => row[4]).join('\n'));
+    check('each of the ' + runs.length + ': no roster-change row on the ReviewQueue, FormLog says neither "roster change" nor "pointed", ' +
+          'and Audit and the queue carry no girl, no typed club, no address',
+          !bad(r => noRosterRow(r) && privateStill(r)), bad(r => noRosterRow(r) && privateStill(r)));
+    check('…one staff e-mail with the Reply-To, and NO e-mail to the sender',
+          !bad(r => r.x.mails.length === 1 && r.x.staffMails().length === 1 && r.x.staffMails()[0].replyTo === 'mentor@example.org' &&
+                    !r.x.mentorMails().length),
+          bad(r => r.x.mails.length === 1 && !r.x.mentorMails().length));
+    // the positives nearby keep their pointer: girls who came, then "they" / "she" / nothing (ES)
+    const came = [[AF, 'Two girls attended but they are not on the form.'], [LA, 'Vinieron dos niñas pero no aparecen en la lista.'],
+                  [AF, CANARY + ' came on Tuesday but she is missing from the list.']];
+    const cameRuns = came.map(([form, what], i) => {
+      const x = world({ props: STAFF });
+      const source = 'Feedback!' + (95 + i);
+      const result = x.ctx.handleFeedback_(report(form, what, { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: 'mentor@example.org' }), source, KEY);
+      return { x, source, what, result };
+    });
+    check('girls who came, then "they" / "she" / the elided Spanish subject: still queued as a roster change and the sender pointed to the Club Roster Form',
+          cameRuns.every(r => r.result === 'emailed staff; roster change queued; sender pointed to the Club Roster Form' &&
+                              r.x.tabs.ReviewQueue.length === 2 && r.x.tabs.ReviewQueue[1][1] === ROSTER &&
+                              r.x.mentorMails().length === 1 && r.x.mentorMails()[0].body.includes(r.x.url('rf-2026')) &&
+                              !/Fennwhistle/.test(r.x.mentorMails()[0].body)),
+          cameRuns.map(r => r.source + ': ' + r.result + ' / ' + r.x.mails.map(m => m.to).join('+')).join(' | '));
+  }
+
+  // PR #117 re-review: a negation + a verb with a PERSON subject — I / we / they / the girls /
+  // our club; nosotros, the elided Spanish first person — about the session, or about not
+  // having sent something, is news, not the form failing: "Half the girls did not show up
+  // today because of the rain", "We did not submit last week because there was no session",
+  // "I have not sent the photo yet", "No pudimos enviar la asistencia porque no hubo sesión",
+  // "No envié la asistencia la semana pasada". A form thing or an impersonal subject with the
+  // failure is one ("The form did not submit", "It would not submit", "The page does not
+  // load", "No se pudo enviar el formulario", "El formulario no carga").
+  // Decided here: the reporter's own inability with nothing else said — "I could not submit",
+  // "I could not submit the form", "No pude enviar", "I could not send the attendance" — IS a
+  // form problem (she tried and failed; "I cannot submit" / "No puedo enviar" already are),
+  // and stays one when an error or a blank page is shown or the because-clause is itself a
+  // form failure ("because the page does not load"). It is NOT one when a because-clause
+  // gives a reason that is not the form ("could not submit last week because there was no
+  // session", "porque no hubo sesión"), and "did not / have not" (not done, a person subject)
+  // never is. Built from parts, each sentence in a frame shared by both sides, EN and ES, with
+  // and without accents; the outcome is the ReviewQueue row the handler writes.
+  console.log('\n  session news and "we did not send" are not the form failing (#117 re-review)');
+  {
+    const BROKEN = 'Form not working report';
+    const ROSTER = 'Roster change sent as a problem report';
+    const AF = 'Africa Attendance Form', AS = 'Asia Attendance Form', LA = 'Latin America Attendance Form';
+    const cap = s => s[0].toUpperCase() + s.slice(1);
+    const FR_EN = [s => cap(s) + '.', s => 'Hello. ' + cap(s) + '.', s => cap(s) + '. Please note.', s => 'Just to let you know, ' + s + '.',
+                   s => cap(s) + '. Thank you.', s => cap(s) + ', what should I do?'];
+    const FR_ES = [s => cap(s) + '.', s => 'Hola. ' + cap(s) + '.', s => cap(s) + '. Gracias.', s => 'Les aviso que ' + s + '.',
+                   s => 'Buenas tardes, ' + s + '.', s => cap(s) + ', ¿qué hago?'];
+    let k = 0;
+    const cross = (subjects, preds, frames, form, want) =>
+        subjects.flatMap(s => preds.map(p => [form, frames[k++ % frames.length](s + ' ' + p), {}, want]));
+    const each = (sentences, frames, form, want) => sentences.flatMap(s => frames.map(fr => [form, fr(s), {}, want]));
+
+    const NEWS = [].concat(
+      cross(['the girls', 'half the girls', 'two of the girls', 'most of the girls', 'they', 'our members'],
+            ['did not show up today because of the rain', 'did not show up this week', 'did not come on Friday',
+             'did not show up, so we had no session'], FR_EN, AF, ''),
+      cross(['I', 'we', 'our club', 'the mentors'],
+            ['did not submit last week because there was no session', 'did not submit this week', 'did not send the attendance on Friday',
+             'could not submit last week because there was no session', 'did not send the photo yet'], FR_EN, AS, ''),
+      each(['I have not sent the photo yet', 'we have not sent the attendance yet', 'our club has not submitted for two weeks because of the holidays',
+            'I have not submitted this week\'s attendance yet', 'we did not meet, so there was nothing to submit'], FR_EN, AF, ''),
+      cross(['las niñas', 'las ninas', 'muchas niñas', 'ellas', 'las chicas'],
+            ['no vinieron hoy por la lluvia', 'no vinieron esta semana', 'no asistieron el viernes'], FR_ES, LA, ''),
+      each(['no pudimos enviar la asistencia porque no hubo sesión', 'no pudimos enviar la asistencia porque no hubo sesion',
+            'no envié la asistencia la semana pasada', 'no envie la asistencia la semana pasada',
+            'no enviamos la asistencia esta semana porque no hubo sesión', 'nosotros no enviamos nada la semana pasada',
+            'todavía no he enviado la foto', 'todavia no hemos enviado la asistencia de esta semana',
+            'no pude enviar la asistencia la semana pasada porque no tuvimos sesión', 'nuestro club no envió la asistencia el viernes',
+            'las mentoras no enviaron la asistencia esta semana'], FR_ES, LA, ''));
+    const FAILS = [].concat(
+      cross(['the form', 'the attendance form', 'the page', 'it', 'my report'],
+            ['did not submit', 'would not submit', 'did not go through', 'will not send'], FR_EN, AF, BROKEN),
+      cross(['the form', 'the page', 'the link', 'it'], ['does not load', 'would not open', 'did not work', 'is not working'], FR_EN, AS, BROKEN),
+      each(['I could not submit', 'I could not submit the form', 'I could not submit the form, it shows an error', 'we could not submit the form',
+            'I cannot submit', 'I could not send the attendance', 'I could not send the attendance, it shows an error',
+            'I could not submit today, the page is blank', 'we were unable to submit the form', 'I could not submit because the page does not load',
+            'half the girls did not show up today. Also the form did not submit',
+            'we did not submit last week because there was no session. This week the form will not submit',
+            'I have not sent the photo yet because the upload does not work'], FR_EN, AF, BROKEN),
+      each(['no se pudo enviar el formulario', 'el formulario no carga', 'el formulario no se envía', 'el formulario no se envia',
+            'la página no abre', 'la pagina no abre', 'no se envía', 'no se envia', 'no puedo enviar', 'no pude enviar el formulario',
+            'no me deja enviar', 'no pude enviar', 'no pude enviar la asistencia', 'no pudimos enviar el formulario, sale un error',
+            'el enlace no abre', 'no carga', 'no pude enviar porque la página no carga',
+            'las niñas no vinieron hoy, y además el formulario no carga', 'no pudimos enviar la asistencia porque el formulario no funciona'],
+           FR_ES, LA, BROKEN));
+    const BLAND = ['Nothing.', 'See above.', 'Nada.', 'Ver arriba.'];
+    const doingNews = NEWS.filter((c, i) => i % 7 === 2).map((c, i) => [c[0], BLAND[i % BLAND.length], { [PQ.FB_DOING]: c[1] }, '']);
+    const all = [].concat(NEWS, FAILS, doingNews);
+    const n = want => all.filter(c => c[3] === want).length;
+    const w2 = world({ props: STAFF });
+    const runs = all.map(([form, what, extra, want], i) => {
+      const source = 'Feedback!' + (1000 + i);
+      const result = w2.ctx.handleFeedback_(report(form, what, extra), source, KEY);
+      const rows = w2.tabs.ReviewQueue.slice(1).filter(r => String(r[4]).endsWith(' [#' + source + ']'));
+      return { form, what, extra, want, source, result, rows };
+    });
+    const got = r => (r.rows.length === 0 ? '' : r.rows.length === 1 ? r.rows[0][1] : r.rows.length + ' items');
+    const label = r => (r.extra[PQ.FB_DOING] ? 'doing: ' + r.extra[PQ.FB_DOING] : r.what).slice(0, 64);
+    const say = bad => bad.length + ' wrong: ' + bad.slice(0, 10).join(' | ') + (bad.length > 10 ? ' | …' : '');
+    const wrongNews = runs.filter(r => r.want === '' && got(r) !== '').map(r => label(r) + ' → ' + JSON.stringify(got(r)));
+    check(n('') + ' reports of session news or something not sent (a person subject: I / we / they / the girls / our club; nosotros, ' +
+          'the elided first person; "did not show up", "did not / have not sent", "no pudimos … porque no hubo sesión"; ' +
+          doingNews.length + ' as "trying to do") → NO ReviewQueue item',
+          NEWS.length >= 150 && !wrongNews.length, say(wrongNews));
+    const wrongFails = runs.filter(r => r.want === BROKEN && got(r) !== BROKEN).map(r => label(r) + ' → ' + JSON.stringify(got(r)));
+    check(n(BROKEN) + ' nearby reports of the form or "it" failing, the reporter unable to submit, or news followed by a failure → ONE "' +
+          BROKEN + '" each (decided: "I could not submit" / "No pude enviar" with nothing else said is one)',
+          FAILS.length >= 100 && !wrongFails.length, say(wrongFails));
+    check('looksLikeFormProblem_ says the same of every one (the classifier, not only the handler)',
+          runs.every(r => pr.looksLikeFormProblem_(report(r.form, r.what, r.extra)) === (r.want === BROKEN)),
+          say(runs.filter(r => pr.looksLikeFormProblem_(report(r.form, r.what, r.extra)) !== (r.want === BROKEN)).map(label)));
+    const badResult = runs.filter(r => r.result !== (r.want === BROKEN ? 'emailed staff; form problem queued' : 'emailed staff'))
+        .map(r => label(r) + ' → ' + JSON.stringify(r.result));
+    check('FormLog: "emailed staff" for the news, "emailed staff; form problem queued" for the failures; never a roster change, never a pointer',
+          !badResult.length && !w2.tabs.ReviewQueue.slice(1).some(r => r[1] === ROSTER), say(badResult));
+    check('every report e-mailed staff and nobody else; the queue holds one row per failure and none for the news',
+          w2.staffMails().length === all.length && !w2.mentorMails().length && w2.tabs.ReviewQueue.length === 1 + n(BROKEN),
+          w2.staffMails().length + ' staff e-mails, ' + w2.mentorMails().length + ' other, ' + (w2.tabs.ReviewQueue.length - 1) + ' rows');
   }
 }
 
