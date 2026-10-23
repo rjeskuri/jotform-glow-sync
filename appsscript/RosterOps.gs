@@ -459,8 +459,25 @@ function levelTag_(words) {
  * section letters or school levels differ ("Harbor Club 1" / "Harbor Club
  * (2)", "Orbit (A)" / "Orbit (B)", "Las Lomitas primaria" / "Las Lomitas
  * secundaria") never are.
+ *
+ * Two names that end in the SAME bracket, each with words of its own before
+ * it — a partner's clubs at one place, "Tigers (Testville Youth Centre)" /
+ * "Lions (Testville Youth Centre)" — are compared without that bracket
+ * (placeSuffix_), by the rules above: the place's words lifted similarity_ of
+ * the whole names over SIMILAR and held new clubs (#111, the 2026-10-08 hold).
+ * The brackets must fold to the same words (matchWords_: case, accents,
+ * punctuation) — "Tigers (Testville Youth Centre)" / "Lions (Testville Youth
+ * Center)" is compared whole, and held; a bracket only similarity_-close is
+ * NOT stripped, since "(Site 1)" / "(Site 2)" (0.83) would then read as one
+ * place and two clubs that only their tags tell apart as one club.
+ * The place bracketed on one side only, or a name that is only the place, is
+ * compared whole, as before — so "Lion Testville Youth Centre" is still close
+ * to "Lions (Testville Youth Centre)", and "(Testville Youth Centre)" to
+ * "Tigers (Testville Youth Centre)".
  */
 function clubNamesClose_(a, b) {
+  const pa = placeSuffix_(a), pb = placeSuffix_(b);
+  if (pa && pb && pa.place === pb.place) { a = pa.own; b = pb.own; }
   const wa = matchWords_(a), wb = matchWords_(b);
   const differ = function (tag) { const x = tag(wa), y = tag(wb); return x && y && x !== y; };
   if (differ(numberTag_) || differ(letterTag_) || differ(levelTag_)) return false;
@@ -468,6 +485,19 @@ function clubNamesClose_(a, b) {
   const bare = function (s) { return matchWords_(String(s == null ? '' : s).replace(/\([^)]*\)/g, ' ')); };
   const ba = bare(a), bb = bare(b);
   return (ba.length < wa.length || bb.length < wb.length) && wordsClose_(ba, bb, CLUB_FILLER);
+}
+
+/**
+ * A club name split at its trailing bracket — {own: what is before it, place:
+ * the bracket's words as matchWords_ joins them} — when it has one AND a word
+ * that is not filler (CLUB_FILLER) before it: "Tigers (Testville Youth
+ * Centre)". null for "Tigers", "(Testville Youth Centre)" or "Club (Testville
+ * Youth Centre)", which clubNamesClose_ compares whole.
+ */
+function placeSuffix_(s) {
+  const m = /^(.*\S)\s*\(([^()]*)\)\s*$/.exec(String(s == null ? '' : s));
+  if (!m || !matchWords_(m[1]).some(function (w) { return !CLUB_FILLER.test(w); })) return null;
+  return { own: m[1], place: matchWords_(m[2]).join(' ') };
 }
 
 /**

@@ -32,12 +32,14 @@ headings, so a heading is never renamed (`make check` runs
   - [Rosters above Submit](#rosters-above-submit)
   - [Header logo](#header-logo)
   - [Photos](#photos)
+  - [Photo mover](#photo-mover)
   - [Disabling a regional form](#disabling-a-regional-form)
   - [Building a new regional form (not maintenance)](#building-a-new-regional-form-not-maintenance)
 - [Clubs](#clubs)
   - [Renaming a club](#renaming-a-club)
   - [Moving a club to another partner (a mistyped partner)](#moving-a-club-to-another-partner-a-mistyped-partner)
   - [Club names two partners share](#club-names-two-partners-share)
+  - [Club names that look alike](#club-names-that-look-alike)
   - [Clubs that do not use Jotform](#clubs-that-do-not-use-jotform)
   - [Deactivating a club](#deactivating-a-club)
   - [Roster rebuild and upload (offline path)](#roster-rebuild-and-upload-offline-path)
@@ -1133,9 +1135,11 @@ Jotform's Revision History. The image carries no translated text (q13 is in
 **Photos.** Since 2026-10-01 no attendance photo goes to Salesforce (the CEO's decision: the
 files there were deleted that day and the four regional forms' mapping lost its upload row; the
 template follows in step 1). Since <date> the photos are copied by Jotform's Google Drive
-integration into the My Drive of <role account>, folder `Attendance photos - <Region>`, one
-subfolder per submission named `<Club Name> <Attendance Date>`, uploaded files only, no PDF
-(the PDF renders every ticked girl's name). The photo stays required on the forms. The photos
+integration into the My Drive of Ryan's company account (Ryan, 2026-10-21: Jotform uses only
+that account), folder `Attendance photos - <Region>`, one subfolder per submission named
+`<Club Name> <Attendance Date>`, uploaded files only, no PDF (the PDF renders every ticked
+girl's name). The photo mover then moves each subfolder into that region's folder on the
+company Shared Drive ("Photo mover", below). The photo stays required on the forms. The photos
 before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
 <named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
 
@@ -1164,8 +1168,9 @@ plain `diff` of the snapshot before and the one after.*
    `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
    this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
-   Settings → Integrations → Google Drive → Authorize → log in as the role account (never your
-   own) → Folder Name `Attendance photos - Template` → Create Subfolders for Submissions ON,
+   Settings → Integrations → Google Drive → Authorize → log in as Ryan's company account (the
+   one the photo mover runs on) → Folder Name `Attendance photos - Template` (the photo mover's
+   source folder, made at its setup before this step: "Photo mover") → Create Subfolders for Submissions ON,
    name = the "Club Name" field that is **question 5** (the hidden text field; the builder shows
    the Club picker under the same label - prefer the hidden one; if only the picker is offered,
    use it and say so in the plan's Result), a space, then "Attendance Date" → Send Uploaded Files
@@ -1205,7 +1210,8 @@ plain `diff` of the snapshot before and the one after.*
    stays in the `emails` list is unverified; the diff of step 4 shows whatever changed and that
    it came back).
 4. **Read back, within a few minutes:**
-   - Drive (as the role account): folder `Attendance photos - Template` → one subfolder named
+   - Drive (as Ryan's company account; once the photo mover runs, on the Shared Drive's
+     Template folder instead): folder `Attendance photos - Template` → one subfolder named
      exactly `<that club> <that date>` → one image file, **no PDF**.
    - Salesforce (read-only SOQL): exactly one new batch for that club and date,
      `Processing_Status__c = 'Failed'`, `Status_Message__c LIKE 'Duplicate:%'`, 0 `Attendance__c`
@@ -1237,7 +1243,8 @@ plain `diff` of the snapshot before and the one after.*
    U.S `drive: not wanted (form DISABLED)`, `integration: ok`; `form_status.py` → every form
    CLEAN, `salesforce yes`.
 6. **When copies stop** (a subfolder dated more than a week ago is the newest while the form has
-   newer submissions; or Jotform e-mails a token error): the Google token has lapsed. In the
+   newer submissions - look in the region's folder on the Shared Drive once the photo mover runs;
+   or Jotform e-mails a token error): the Google token has lapsed. In the
    builder, on each affected form: Settings → Integrations → Google Drive → remove → add again
    with the same settings (step 2, backup and diff included); read back with the next real
    submission. Nothing in the repo raises an alarm for this (BACKLOG 70); look at the folders
@@ -1259,6 +1266,68 @@ the photos stay in Jotform and nothing else on the form changes (the before/afte
 save says so). The template's Salesforce upload row is re-added only on the CEO's word, with
 `UPLOADS = ["19"]` put back in `tools/integration_status.py`. What is already in Drive is the
 owner's to delete (the CEO's retention decision).
+
+## Photo mover
+
+- **When:** setting it up (once, before #63 points the forms' Drive integrations at its source folders), the template's test upload after #63, a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
+- **Status:** built offline 2026-10-21 (ticket #89), not set up yet; it is set up first, then #63 (Ryan, 2026-10-22; [plan](plans/2026-10-21-drive-photo-mover.md#result)).
+- **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, by counts and folder names; nothing changes.
+- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
+- **Verify:** the execution's log (`done: N folder(s) moved, N file(s) merged, 0 failure(s)`); the subfolder is in the region's folder on the Shared Drive and gone from `Attendance photos - <Region>`, which stays.
+- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; move a subfolder back into `Attendance photos - <Region>` by hand to undo a move.
+
+Jotform's Google Drive integration writes only into Ryan's My Drive ("Photos", above); the
+photos belong on the company Shared Drive. `drive-sync/` is a standalone Apps Script project
+owned by Ryan's company account - not the sheet's script, whose scopes must not change
+(CLAUDE.md rule 11) - that every 15 minutes moves each submission subfolder that has not changed
+for 10 minutes from `Attendance photos - <Region>` into that region's folder on the Shared Drive.
+Setup, Script Properties and the push: `drive-sync/README.md`.
+
+The order, each live step on Ryan's go (Ryan, 2026-10-22):
+
+1. PR #91 lands: code only, nothing live.
+2. Setup (`drive-sync/README.md`, steps 1-6): the Shared Drive's folders, named exactly
+   `Africa`, `Asia`, `Latin America`, `Template` (`U.S` only if its form is re-enabled); one My
+   Drive source folder per region for Jotform's uploads, `Attendance photos - <Region>`; the
+   standalone project (`.clasp.json` from the example) and its push; the Script Properties
+   `SOURCE_FOLDER_<REGION>` / `TARGET_FOLDER_<REGION>`; `previewMoves` on the empty folders
+   (writes nothing).
+3. #63, the template only (Ryan): the template's Google Drive integration pointed at
+   `Attendance photos - Template` ("Photos", above, steps 1-2). No regional form yet.
+4. A test upload on the template and its read-back ("Photos", steps 3-4), `previewMoves`, one
+   `moveSettledPhotos`, then `installTrigger`.
+5. #63, the regional forms (Ryan), only after step 4 passed: "Photos", step 5, one form at a
+   time, each followed by a check of the next run's log for that region (no `CONFIG refused`,
+   no `UNKNOWN`; its first subfolder moved) before the next form.
+
+What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N`,
+then the folders by name (club and date; never a file's name or contents).
+
+- **move**: the whole subfolder went to the Shared Drive.
+- **merge**: that name was already there once (a resubmission): its files went in one by one,
+  beside what is there; **kept** files (same name and size already there) stay in My Drive. A
+  subfolder of kept files only (`0 file(s) in`) changes nothing, never holds up a same-name copy
+  with new photos, and is logged again every run until Ryan deletes it by hand after a look; the
+  mover never trashes anything.
+- **waiting**: a file changed less than 10 minutes ago, or another subfolder of the same name
+  moved or merged files this run; the next run takes it (a backlog of same-name copies clears
+  one per run).
+- **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
+  moving at 4.5; what it did not read is not touched, and the next run carries on.
+- **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
+  hand (pick the right folder), or rename one of the two there.
+- **UNKNOWN**: a folder that is no region's; left alone.
+- **CONFIG refused**: a Script Property is missing or wrong (half a pair, an id used twice, a
+  source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
+  `Africa`, `Asia`, `Latin America`, `U.S` or `Template`); nothing read, nothing moved. Fix the
+  property in Project Settings → Script Properties, or the folder's name.
+- **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a move; the run ends in an error and Google
+  sends the owner its failure summary. On the first move, a permission error means Ryan's role on
+  the Shared Drive must be raised to Manager ([plan](plans/2026-10-21-drive-photo-mover.md),
+  Risks).
+
+Nothing is shared beyond the Shared Drive's members (the named list: the CEO and Ryan, never
+"anyone with the link"): the mover never shares, links, copies, trashes or e-mails a file.
 
 ## Disabling a regional form
 
@@ -1646,6 +1715,74 @@ lines counted before the apply, the verify and the browser checks - and its roll
   difference: it raises ATTENTION ("roster rule(s) test a name the Club
   picker does not list") on every run until that apply, or until a roster
   change in that region makes it apply.
+
+## Club names that look alike
+
+- **When:** before GLOW renames clubs into a country format, to see which names already collide or nearly do; as the input for the duplicate-club checks (ticket #84).
+- **Status:** built 2026-10 (ticket #94); it runs without `--countries` meanwhile, and the `country` column fills once the Account field is chosen. Which Salesforce Account field holds a partner's country (the ticket outline's step 4) is not settled: the candidates are `Country__c` (a picklist), `BillingCountry` and `ShippingCountry`, and their non-blank counts over the partner accounts are not taken yet.
+- **Dry run:** the whole tool is one: it reads exports and writes only its own CSV.
+- **Apply:** none; a rename it points at goes through "Renaming a club".
+- **Verify:** the counts line, against the CSV's rows.
+- **Rollback:** none needed (nothing is written outside `data/`).
+
+`tools/club_names.py similar` compares every club of the Roster with every
+other and prints the lookalikes in groups. A club is one partner + club name
+(compared with case and spacing ignored, `glow.text.key`), whatever its
+status, so a retired club still counts. The tool reads files only: no
+Jotform, Sheets or Salesforce call, and it prints club and partner names,
+regions and counts, never a girl's name. Its exports and its CSV live in
+`data/`, which stays uncommitted (the Roster export holds the girls' names).
+
+```bash
+mkdir -p data/club_names                     # the sync's --summary-json does not make it
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+python3 tools/sheets_client.py export Partners data/partners_<date>.csv
+# optional, for the sf_name column: each region's sync dry run with its summary (Jotform GET only)
+python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --partners data/partners_<date>.csv \
+        --region Africa --form 262382821971058 \
+        --summary-json data/club_names/plan_africa_<date>.json            # and Asia, Latin America, U.S
+python3 tools/club_names.py similar --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv \
+        [--countries data/club_names/partner_countries.csv] \
+        [--sf-names data/club_names/plan_africa_<date>.json --sf-names ...] \
+        --csv data/club_names/similar_<date>.csv
+```
+
+Two names match as
+
+- `same`: equal apart from capitals and spacing ("Sunrise Club", "SUNRISE  CLUB");
+- `folded`: equal once accents, punctuation and spacing are folded away
+  ("Niñas Unidas", "Ninas-Unidas"; "G.L.O.W. Club", "Glow Club");
+- `close`: the folded names at least `--threshold` alike (difflib's ratio,
+  default 0.85: "Sunrise Club", "Sunrize Club") and carrying the same numbers
+  in the same order, so "Harbor Club 1" and "Harbor Club 2" never match.
+
+A group is every club joined by a chain of matches, so two clubs in one group
+need not match each other directly. The first line counts them:
+`groups: N (same A, folded B, close C); clubs in them: M`. A mixed group
+counts under the **weakest link it needs** to be one group: `same` when its
+`same` pairs alone connect it, else `folded` when its `same` and `folded`
+pairs do, else `close`. So two `same` pairs joined only by a `close` pair are
+one `close` group, although every club's own `match` is `same`. Each group follows, one line per club with its
+partner, region, form and active girls. The seven names two partners share
+("Club names two partners share") come out with match `same`, and with
+`--sf-names` each of those clubs' `sf_name` is its `<club> - <partner>`.
+
+The CSV (`--csv`, its folder made when missing; only the header when there is no group), one row per club in a group:
+
+| Column | What |
+|---|---|
+| `group` | the group's number in this run (groups ordered by folded name) |
+| `match` | the strongest kind joining this club to another of its group: `same`, `folded` or `close` |
+| `club`, `partner` | as the Roster spells them (whitespace collapsed), from the club's first active row, else its first row |
+| `region` | the region cell of that row, in the forms' spelling when it is one of theirs, else as written |
+| `form` | `retired (jotform=no)` (its partner is marked `no` in the Partners tab), else `none (no active girl)`, else `none (no region)` (a blank region or one no form has), else the form's title, such as `Africa Attendance Form` - checked in that order |
+| `country` | the partner's country from `--countries` (a `partner,country` CSV); blank without it |
+| `sf_name` | what the club sends to question 5 (its Salesforce Account name), from the `sf_names` of the `--sf-names` summaries; blank without them, or for a club none of them lists |
+| `status` | `active` (at least one active girl) or `inactive` |
+| `active_girls` | the club's active rows |
+| `same_partner` | `yes` when every club of the group has one partner (one partner's own lookalikes), else `no` |
 
 ## Clubs that do not use Jotform
 
@@ -2276,7 +2413,13 @@ when nothing matches it creates a new, partner-less Club account.
 ### New clubs' accounts, automatically (`SF_SYNC`)
 
 - **When:** switching `SF_SYNC` (`plan`, then `apply`); an `SF:` ATTENTION item; rotating the secret.
-- **Status:** built and in `main` since 2026-10-07; the Setup below (Salesforce and GitHub) is Ryan's and not recorded as done ([plan](plans/2026-10-06-sf-new-club-accounts.md)).
+- **Status:** built and in `main` since 2026-10-07; **live in `apply` since 2026-10-22 12:52 UTC** (Ryan's go). History ([plan](plans/2026-10-06-sf-new-club-accounts.md), amendment 2026-10-21 and Result; DECISIONS 2026-10-21):
+  - 2026-10-21: the External Client App "GLOW Sync" exists in Salesforce (client credentials, Run As **Ryan's own user**; Setup steps 1-2 below).
+  - 2026-10-22: Ryan set the secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (12:17 UTC). The dispatch token's step 4.4 is done (Contents: No access) and 4.5 checked (run 39778511710, `workflow_dispatch`, success). `SF_SYNC=plan` from 12:31 UTC.
+  - The first plan run, 39779117991, was refused: `HTTP 400 invalid_app_access` (the app's policies lacked the System Administrator profile, Setup step 2). Ryan added it.
+  - Run 39780929667: describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's `glow` login on 2026-10-21); check 317 ok, 5 need a person. Those five were fixed by hand on Ryan's go (4 partner-less club accounts parented, 1 club account created).
+  - Run 39784745392: 456 Accounts, 373 Club; check 322 ok, 0 need a person. `SF_SYNC=apply` since 12:52 UTC.
+  - **Still to do:** check the first automatic creates by hand (ATTENTION table, `created … check it by hand (first creates)`).
 - **Dry run:** `SF_SYNC=plan`: every account it would create is an ATTENTION item with the body.
 - **Apply:** `SF_SYNC=apply` (with `AUTO_SYNC_APPLY=1`), Ryan's go.
 - **Verify:** the run's `SF:` log lines; the local cross-check, below.
@@ -2285,7 +2428,9 @@ when nothing matches it creates a new, partner-less Club account.
 `tools/sf_new_clubs.py`, called by `tools/auto_sync.py`.
 
 **What each run does:**
-- Log in as **GLOW Sync**, an integration user, never Ryan's.
+- Log in as **Ryan's own Salesforce user**, through the External Client App **GLOW Sync** (OAuth
+  client credentials flow, scope `api`, Run As = Ryan). There is no GLOW Sync user and no GLOW
+  Club Sync permission set (DECISIONS 2026-10-21): the access is Ryan's administrator rights.
 - Read every Account, and stop all Salesforce work for the run if the read is not the whole org.
 - Before a region's form puts a new club on its Club picker, create the club's account:
   - Name = exactly what question 5 will send;
@@ -2308,20 +2453,31 @@ create for a club that is not being put on a form.
 Without the secrets the log says `SF: not configured`, with no ATTENTION.
 
 **Setup** (Ryan, once, in Salesforce Setup and on GitHub; nothing here goes through a Claude
-session):
-1. **User** "GLOW Sync":
-   - user licence Salesforce Integration, profile "Minimum Access - API Only Integrations";
-   - assign it the permission set licence "Salesforce API Integration".
-2. **Permission set** "GLOW Club Sync", licence "Salesforce API Integration":
-   - Account Read, Create and **View All**; field access `ParentId`, `Description`; record type
-     Club;
-   - nothing else: no Edit, no Contact, no attendance;
-   - assign it to GLOW Sync.
-3. **External Client App** "GLOW Sync":
-   - OAuth on; scope **api** only; **client credentials** flow on, Run As = GLOW Sync;
-   - App Policies: Permitted Users "Admin approved users are pre-authorized", permission set GLOW
-     Club Sync;
-   - a short session timeout; no refresh token; no login IP ranges (GitHub's addresses change).
+session). All steps are done (2026-10-22); the consumer key and secret are never written in a file, a message
+or a command line.
+1. **No integration user and no permission set** (decision 2026-10-21). The run is Ryan's user,
+   so there is nothing to create for access.
+2. **External Client App "GLOW Sync"**: created 2026-10-21 through the Metadata API (check-only
+   first, then deploy `0AfRP000002hjdR0AQ` for the app and its OAuth settings, and
+   `0AfRP000002hjiH0AQ` for the policies), on Ryan's go:
+   - Setup → External Client App Manager → **GLOW Sync**;
+   - OAuth settings: scope **Api** only; the client credentials flow on;
+   - policies: client credentials Run As = **Ryan's user**; Permitted Users "Admin approved users
+     are pre-authorized"; IP relaxation **Bypass** (GitHub's addresses change); session timeout 15
+     minutes; refresh token **Zero** (none);
+   - the consumer key and secret: Settings → OAuth Settings → **Consumer Key and Secret**; copy
+     them from that page only, straight into the GitHub secrets of step 5.
+   - **the policies must include the System Administrator profile** (Setup → External Client App
+     Manager → GLOW Sync → Policies → Edit → select profiles). With "Admin approved users are
+     pre-authorized" the Run As user has to be given the app; without the profile every login is
+     refused `HTTP 400 invalid_app_access - user is not admin approved to access this app` (run
+     39779117991, 2026-10-22). Ryan added it 2026-10-22; the deploy of 2026-10-21 did not carry it.
+   - The Metadata reference says the Run As user "must have the API Only permission"; the deploy
+     accepted Ryan's System Administrator user, and with the profile above the 2026-10-22 login
+     was issued a token. If a login is refused, the log says `SF: not ready … Salesforce refused
+     the GLOW Sync login (HTTP …)`: set `SF_SYNC=off` and read the app's policies before trying
+     again.
+3. *(Was: the app's Run As GLOW Sync and its permission set; replaced by step 2.)*
 4. **The dispatch token**, in this order (the old `Dispatch.gs` needs Contents: write, the new one
    Actions: write, so the token holds both for a few minutes):
    1. On GitHub, Settings → Developer settings → Fine-grained tokens → the sheet's token → Edit:
@@ -2333,37 +2489,52 @@ session):
    4. Edit the token again: Contents → **No access**. It can no longer change the code that holds
       the Salesforce secret.
    5. Request Jotform sync now once more: `HTTP 204` again.
+   - Done 2026-10-07: 4.1-4.3 (`HTTP 204`; the runs since start by `workflow_dispatch`). Done
+     2026-10-22: 4.4 (Contents: No access) and 4.5 (run 39778511710, `workflow_dispatch`, success).
    - Before step 2 the sheet still uses `repository_dispatch`; after it, a token without Actions
      gets `HTTP 403` in the Audit tab and only the daily run syncs.
    - The workflow runs only on `main` (a token with Actions: write can pick the branch of a run);
      delete stale branches on GitHub, whose older workflow file has no such guard.
 5. **GitHub**:
-   - secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (the app's consumer key and secret), on the
-     web page or `gh secret set` reading stdin;
-   - repository variable `SF_SYNC` = `plan`.
+   - secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (the app's consumer key and secret, from
+     Setup → External Client App Manager → GLOW Sync), set by Ryan on the repository's Settings →
+     Secrets and variables → Actions page, never on a command line or in a conversation. They
+     now hold **administrator access**: whoever can read them acts as Ryan ("The risks of running
+     as Ryan", below); set 2026-10-22 12:17 UTC;
+   - repository variable `SF_SYNC` = `plan` (Ryan's go; CLAUDE.md rule 1); set 2026-10-22 12:31
+     UTC, `apply` since 12:52 UTC.
 6. **First run**: Actions → auto-sync → Run workflow (apply unticked). The log must show:
-   - `SF: plan, as GLOW Sync`;
+   - `SF: plan, as GLOW Sync` (the code prints this literally: "GLOW Sync" now names the app,
+     and the user behind it is Ryan; the wording stays until a code ticket changes it);
    - `SF: describe ok - Account, Name, ParentId, Description, RecordTypeId createable; Club record
-     type available` (otherwise `SF: GLOW Sync cannot create Club accounts: …` names what the
-     permission set lacks, and an `apply` run only shows bodies);
+     type available` (otherwise `SF: GLOW Sync cannot create Club accounts: …` names what Ryan's
+     user lacks, and an `apply` run only shows bodies; its hint still names the "GLOW Club Sync
+     permission set", which does not exist: read it as Ryan's profile);
    - `SF: 448 Accounts read, 366 Club` (or today's counts);
    - `SF: check - 364 ok, 0 need a person`.
 
-   Then from Ryan's `glow` login: `UserRecordAccess` for GLOW Sync is read access on a club and on
-   a partner account.
+   What the runs of 2026-10-22 showed: the first (39779117991) was refused (`invalid_app_access`,
+   step 2). The next (39780929667): describe ok; `SF: 455 Accounts read, 372 Club`; `SF: check -
+   317 ok, 5 need a person` (4 partner-less club accounts and 1 club without an account, fixed by
+   hand on Ryan's go). The one after (39784745392): `SF: 456 Accounts read, 373 Club`; `SF: check -
+   322 ok, 0 need a person`.
+
+   The old design's `UserRecordAccess` cross-check for GLOW Sync is not needed: Ryan's user sees
+   everything. Instead compare the run's Account counts with a count from Ryan's `glow` login
+   (VPN off).
 
 **ATTENTION items (`SF: …`) and what to do:**
 
 | Item | Meaning | Fix |
 |---|---|---|
-| `not ready …` | Login refused, the user frozen, or the Account read not whole (View All lost, a page missing, a mapped partner unseen) | Read the detail. **Frozen**: an administrator unfreezes GLOW Sync (Salesforce also e-mails the admins); if it repeats, set `SF_SYNC=off` and ask Salesforce Support. New clubs this run went on the forms without an account: create them by hand. |
+| `not ready …` | Login refused, the user frozen, or the Account read not whole (a page missing, a mapped partner unseen; its hint may still name a "GLOW Club Sync" permission set: read it as Ryan's profile) | Read the detail. **`HTTP 400 invalid_app_access`**: the app's policies lack the System Administrator profile (Setup step 2). **Frozen**: it is Ryan's user, so also the Jotform connection: "The risks of running as Ryan", below. New clubs this run went on the forms without an account: create them by hand. |
 | `would create …` (plan) | A new club needs its account | Create it by hand with the body shown, today |
 | `… - not created`: club code on another account | The club was renamed in the sheet, not in Salesforce | Rename that account to the question-5 name first ("Renaming a club"); no new account |
 | `… - not created`: the name is already an account | The processor made it first, or another record has the name | A partner-less Club: set its `ParentId` as the item says (write connector, Ryan's go). Anything else: look before acting. |
 | `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
 | `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds |
 | `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
-| `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description, owner GLOW Sync |
+| `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
 | `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
 | `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
 | `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv` |
@@ -2371,17 +2542,47 @@ session):
 **SF Pending**: when it creates an account, the run marks that club's SF Pending row
 `done (auto <date>)`: one cell, found by its header, read again before the write and after.
 
-**Rotating the secret**: regenerate the consumer secret in the External Client App, update the
-GitHub secret, then start a manual run (apply unticked): the log must show `SF: plan` or
-`SF: apply` and the counts.
+**The risks of running as Ryan** (accepted by Ryan 2026-10-21, DECISIONS):
+- **A freeze of Ryan's user.** Salesforce freezes a user whose connection comes from anonymising
+  or high-risk addresses, and cannot be told to allow GitHub's data-centre addresses (plan, "The
+  freeze rule"). A frozen user is locked out and **all his tokens are revoked, the Jotform
+  connection's included, as on 2026-09-30 12:16 UTC**: no submission then reaches Salesforce
+  until it is repaired. What to do, in this order:
+  1. Set `SF_SYNC=off` (Ryan's go) so no further run logs in, and cancel a run under way.
+  2. Another Salesforce administrator unfreezes Ryan's user (Salesforce e-mails the admins);
+     Ryan cannot do it himself.
+  3. Re-authorise Jotform on the five forms and run `tools/integration_status.py`, then a live
+     test submission (as after 2026-09-30: "Back-fill of attendance into Salesforce").
+  4. Switch `SF_SYNC` back on only on Ryan's word; repeated tries mean repeated containment. The
+     forms and the sheet keep syncing meanwhile.
+- **Admin rights in a GitHub secret.** `SF_CLIENT_ID` and `SF_CLIENT_SECRET` log in as Ryan with
+  his administrator rights (scope `api`: records and metadata over the API). Hence the workflow
+  runs only on `main`, the dispatch token loses Contents (Setup step 4.4), only Ryan edits the
+  secrets and the workflow, and the app has no refresh token and a 15-minute session.
+- **The creator no longer shows who made an account** ("Rollback of creates", below).
 
-**Off-boarding / stop**:
-- `SF_SYNC=off` stops future runs; cancel a run already started in Actions.
-- Turning the External Client App off, or deactivating GLOW Sync, removes the access entirely.
+**Rotating the secret** (also if it may have been seen): in the External Client App GLOW Sync,
+Settings → OAuth Settings → Consumer Key and Secret, regenerate the secret; update the GitHub
+secret `SF_CLIENT_SECRET` (and `SF_CLIENT_ID` if the key changed) on the web page; then start a
+manual run (apply unticked): the log must show `SF: plan` or `SF: apply` and the counts. Until
+the secret is updated every run logs `SF: not ready`.
+
+**Off-boarding / stop**, lightest first:
+- `SF_SYNC=off` stops future runs (no login); cancel a run already started in Actions.
+- Disable the app's policies (External Client App Manager → GLOW Sync → Policies: the client
+  credentials flow off, or the Run As user cleared): the next login is refused, the app and its
+  key stay.
+- Delete the app (External Client App Manager, or a destructive change of the `GLOW_Sync`
+  components): its key and secret stop working at once. Then delete the two GitHub secrets.
+- Rotate the secret (above) if it may have been exposed.
+- There is no user to deactivate, and Ryan's must not be.
 
 **Rollback of creates**:
-- The accounts the sync made: `SELECT Id, Name FROM Account WHERE CreatedById = '<GLOW Sync's
-  user id>'`.
+- The sync's accounts are **not** listed by `CreatedById`: Ryan's user creates them, as it does
+  his hand-made ones. Separate them by the Description the sync always writes,
+  `GLOW club code <code>; created by the automatic sync <date>`: `SELECT Id, Name, CreatedDate
+  FROM Account WHERE Description LIKE '%created by the automatic sync%'`. The run's log and the
+  SF Pending row (`done (auto <date>)`) name the same clubs.
 - One is deleted only while it has no Contacts and no attendance, on Ryan's go.
 - Dispatch: revert `Dispatch.gs` and restore a Contents token (not recommended).
 
@@ -3218,7 +3419,7 @@ The live commands of the procedure refuse without `--vpn-off`: the word that you
   variable `AUTO_SYNC_APPLY` (`0` = dry runs only, `1` = writes). For the new
   clubs' Salesforce accounts also the secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET`
   (the consumer key and secret of the External Client App "GLOW Sync", whose client
-  credentials log in as the integration user GLOW Sync) and the variable `SF_SYNC`
+  credentials log in as Ryan's own Salesforce user) and the variable `SF_SYNC`
   (`off` / `plan` / `apply`; changing it is Ryan's go): "New clubs' accounts,
   automatically".
 - **Salesforce from the Mac** — the Salesforce CLI's login, alias `glow`
