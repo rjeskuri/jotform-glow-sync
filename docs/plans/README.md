@@ -14,6 +14,9 @@ names the BACKLOG items a plan is about. Newest first.
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
 | 2026-10-22 | Roster changes sent as problem reports point their sender to the Club Roster Form, and girls "not on the form" count as one | proposed |  | [2026-10-22-roster-change-reports-to-roster-form.md](2026-10-22-roster-change-reports-to-roster-form.md) |
+| 2026-10-21 | Inventory of the Monthly Report (DHIS2) reports, dashboards and interactive dashboard; the two hidden Decommissioned folders; the copy-and-move API proof | done 2026-10-23 |  | [2026-10-21-sf-reporting-inventory.md](2026-10-21-sf-reporting-inventory.md) |
+| 2026-10-21 | Duplicate and obsolete flags on Account and Contact, and Account duplicate rules that report only | in-progress |  | [2026-10-21-sf-duplicate-obsolete-flags.md](2026-10-21-sf-duplicate-obsolete-flags.md) |
+| 2026-10-21 | A standalone Apps Script moves Jotform's photo subfolders from Ryan's My Drive to the company Shared Drive | accepted |  | [2026-10-21-drive-photo-mover.md](2026-10-21-drive-photo-mover.md) |
 | 2026-10-20 | The dashboard's top row becomes two girls-who-attended tiles (Jotform + 3 partners); total attendance no longer tracked | done 2026-10-21 | 72 | [2026-10-20-girls-attended-tiles.md](2026-10-20-girls-attended-tiles.md) |
 | 2026-10-19 | The three Salesforce-reporting partners' Monthly Max copied into attendance, one Partner report batch per partner per month | done 2026-10-20 | 72 | [2026-10-19-partner-monthly-max.md](2026-10-19-partner-monthly-max.md) |
 | 2026-10-15 | The dashboard's total attendance counts Jotform plus the three Salesforce-reporting partners only, shown beside Jotform only | done 2026-10-15 | 72 | [2026-10-15-attendance-total-three-partners.md](2026-10-15-attendance-total-three-partners.md) |
@@ -24,7 +27,7 @@ names the BACKLOG items a plan is about. Newest first.
 | 2026-10-09 | Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped | in-progress | 60 | [2026-10-09-attendance-reports-public.md](2026-10-09-attendance-reports-public.md) |
 | 2026-10-07 | One Salesforce contact per girl - merge the duplicates the altered names made, then release Queens of Quest | done 2026-10-07 | 61, 76, 77, 78 | [2026-10-07-sf-duplicate-girls.md](2026-10-07-sf-duplicate-girls.md) |
 | 2026-10-07 | Attendance processor - a name with extra spaces or invisible characters finds its girl | done 2026-10-07 | 75 | [2026-10-07-processor-name-spacing.md](2026-10-07-processor-name-spacing.md) |
-| 2026-10-06 | Salesforce club accounts created automatically for new clubs (BACKLOG 27) | blocked | 27 | [2026-10-06-sf-new-club-accounts.md](2026-10-06-sf-new-club-accounts.md) |
+| 2026-10-06 | Salesforce club accounts created automatically for new clubs (BACKLOG 27) | in-progress | 27 | [2026-10-06-sf-new-club-accounts.md](2026-10-06-sf-new-club-accounts.md) |
 | 2026-10-06 | The group photo never reaches Salesforce; it is kept where staff can find it, under GLOW's control | in-progress | 68, 69, 70 | [2026-10-06-photos-to-drive.md](2026-10-06-photos-to-drive.md) |
 | 2026-10-06 | The module a submission sends is one required dropdown and exact text | done 2026-10-07 | 66, 67 | [2026-10-06-module-selection.md](2026-10-06-module-selection.md) |
 | 2026-10-06 | Clubs that do not report through Jotform leave the forms - a Partners-tab marker for the three partners, deactivation of the U.S clubs, the U.S form disabled | in-progress | 71, 74 | [2026-10-06-clubs-off-jotform.md](2026-10-06-clubs-off-jotform.md) |

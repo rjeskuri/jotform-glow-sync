@@ -905,6 +905,7 @@ function handleRosterChange_(a, source, submitted) {
 
   const summary = club + ' (' + partner + '): ' + plan.toAppend.length + ' added, ' +
       plan.reactivate.length + ' reactivated, ' + plan.deactivate.length + ' removed' +
+      (plan.folded.length ? ', ' + plan.folded.length + ' of them matched ignoring accents and punctuation' : '') +
       keptRemovedNote_(plan) +
       (plan.alreadyActive.length ? ', ' + plan.alreadyActive.length + ' already on the roster' : '') +
       (plan.alreadyInactive.length ? ', ' + plan.alreadyInactive.length + ' already removed' : '') +
@@ -923,11 +924,11 @@ function handleRosterChange_(a, source, submitted) {
  * Tell the mentor what happened. Only names THEY typed are echoed back —
  * never other girls from the roster (the address is whatever was typed into
  * a public form, so "did you mean" suggestions stay in the staff-only
- * ReviewQueue). Never fails the handler; a failure goes to Audit without the
- * address, as sendHoldNotice_'s does.
+ * ReviewQueue), and a removal matched with accents and punctuation ignored
+ * shows the typed spelling, not the Roster's. Never fails the handler; a
+ * failure goes to Audit without the address, as sendHoldNotice_'s does.
  */
 function sendChangeConfirmation_(to, club, partner, plan, source) {
-  const names = function (rows) { return rows.map(function (r) { return r.full_name; }); };
   const section = function (title, list) {
     if (!list.length) return;
     lines.push(title);
@@ -935,8 +936,8 @@ function sendChangeConfirmation_(to, club, partner, plan, source) {
   };
   const lines = ['Thank you. Here is what changed for ' + club + ' (' + partner + '):', ''];
   section('Added:', plan.toAppend.map(function (r) { return r[ROSTER_COLS.indexOf('full_name')]; }));
-  section('Back on the roster:', names(plan.reactivate));
-  section('Removed:', names(plan.deactivate));
+  section('Back on the roster:', plan.reactivate.map(function (r) { return r.full_name; }));
+  section('Removed:', plan.removedNames);
   section('Already on the roster (no change):', plan.alreadyActive);
   section('Already removed earlier (no change):', plan.alreadyInactive);
   section('Listed under both ADD and REMOVE — kept on the roster:', plan.keptBoth);

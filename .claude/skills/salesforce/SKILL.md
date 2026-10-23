@@ -18,9 +18,23 @@ description: Salesforce for this project - what lives there (attendance batches 
 - **Accounts.** Every active club has a Club account (record type Club) named exactly as question
   5 sends it, parented to its partner's account (`glow/sf_partners.csv`). Never rename a club in
   Salesforce first: a rename starts in the sheet (RUNBOOK "Renaming a club").
+- **Duplicate and obsolete flags.** `Duplicate_Record__c` and `Obsolete_Record__c` ("Duplicate
+  Record", "Obsolete Record") on Account and Contact, set by hand by administrators alone and by
+  rule by the flagging batch (#85). The Matching Rule `Account.Name_Parent` (same name ignoring
+  capitals and spacing, same parent) and one Duplicate Rule per record type, Club and Household
+  (`Account.Name_Parent_Club_Report`, `Account.Name_Parent_Household_Report`, the condition Record
+  Type equals that type), are Allow with Report only, no Alert and no Block, because an alert
+  refuses a record created by code (BACKLOG 54: the processor's partner-less Club accounts,
+  `tools/sf_new_clubs.py`). Flagged records are shown in the reports, the flags a filter (RUNBOOK
+  "Duplicate and obsolete records in Salesforce").
 - **Reports and dashboards**: the "Jotform Attendance" dashboard and its reports, the
   `Attendance_Totals` report type, the `Attendance_Report_Viewer` permission set (RUNBOOK
-  "Attendance dashboard in Salesforce").
+  "Attendance dashboard in Salesforce"); the Monthly Report (`DHIS2__c`) reports and dashboards
+  and the two hidden Decommissioned folders (RUNBOOK "Monthly Report dashboards in Salesforce");
+  the interactive dashboard, LWC `glowDashboardShell` (RUNBOOK
+  "Interactive dashboard in Salesforce"). The archive rule (DECISIONS 2026-10-21): a retired report or dashboard is moved
+  to Decommissioned and keeps its Id, never deleted; before a report or dashboard changes, a copy
+  of it as it was goes to Decommissioned, carrying its source Id and the ticket.
 - **The SF Pending tab** in the sheet lists new clubs still without an account; the Monday e-mail
   sends it to staff; the automatic sync marks a row `done (auto <date>)` when it creates one.
 - `glow/salesforce.py` holds the org's record-type ids, `sf_match` (the processor's name
@@ -68,7 +82,7 @@ description: Salesforce for this project - what lives there (attendance batches 
 | `tools/sf_dupes.py merge --apply` | Duplicate contacts of one girl merged (anonymous Apex, one all-or-nothing run per club) | Hook, `--vpn-off`; after the dry run and `--rehearse` | `merge_rollback.json`: undelete within 15 days, rows inserted again |
 | `tools/sf_dupes.py rename --apply` | A stored name's whitespace | Hook, `--vpn-off` | The `renames` old values |
 | `tools/sf_dupes.py cleanup --apply` | Extra affiliations and duplicate-rule sets deleted | Hook, `--vpn-off` | Each deleted record is saved in the rollback file first |
-| `tools/auto_sync.py --apply-salesforce` (GitHub Actions, as GLOW Sync, through `tools/sf_new_clubs.py`) | Creates new clubs' Club accounts (at most 5 per region per run) and marks their SF Pending rows | `SF_SYNC=apply` and `AUTO_SYNC_APPLY=1`, repository variables that only Ryan changes | `SF_SYNC=off`; a created account is deleted only while it has no Contacts and no attendance |
+| `tools/auto_sync.py --apply-salesforce` (GitHub Actions, as Ryan's own user through the External Client App GLOW Sync (client credentials), through `tools/sf_new_clubs.py`) | Creates new clubs' Club accounts (at most 5 per region per run) and marks their SF Pending rows | `SF_SYNC=apply` and `AUTO_SYNC_APPLY=1`, repository variables that only Ryan changes | `SF_SYNC=off`; a created account (Description `created by the automatic sync <date>`; `CreatedById` is Ryan's, not the sync's) is deleted only while it has no Contacts and no attendance. A freeze of Ryan's user also revokes the Jotform connection (RUNBOOK "New clubs' accounts, automatically", The risks of running as Ryan) |
 | `sf project deploy validate`, `start`, `quick` | Metadata | Hook (check-only too) | Redeploy only the components that change made, from its `before/`, after a fresh retrieve of them equals its `after/`, never an older build (2026-10-15: RUNBOOK "Attendance dashboard in Salesforce", Rollback); a `destructiveChanges.xml` for new components |
 | `sf apex run` (the rolled-back proof of a processor change) | Inserts inside a transaction that ends in `Database.rollback` | Hook; the script pasted in full first | Nothing left, unless the script misses its rollback call |
 | `sf data create`, `update`, `delete`, `upsert`, `import` | Records | Hook | Prefer the write connector (one record) or a tool with a ledger |
@@ -91,7 +105,7 @@ rollback files there too (`data/backfill_2026-09/`, `data/sf_dupes_<date>/`,
 
 ## The procedures (RUNBOOK)
 RUNBOOK "Club accounts in Salesforce" (by hand, the Signals), "New clubs' accounts,
-automatically" (`SF_SYNC`, the GLOW Sync setup, the ATTENTION table), "Duplicate girls in
+automatically" (`SF_SYNC`, the GLOW Sync app, its risks and rollback, the ATTENTION table), "Duplicate girls in
 Salesforce" (the monthly check, the merge, the rollback per part), "Attendance totals and
 partner-reported counts" (the intake contract), "Attendance dashboard in Salesforce" (the steps,
 Access, rollback), "Back-fill of attendance into Salesforce", "Credentials" (the CLI login) and

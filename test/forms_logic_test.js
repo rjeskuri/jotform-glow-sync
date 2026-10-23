@@ -2043,6 +2043,233 @@ const dg = loadGs(null, null, { strict: true });
   check('a same-name reason names clubs and partners, never a girl',
         !/ling\b|Newperson/.test([same(P3, 'Stars'), same(P3, 'Stars', G(P1, 'Stars', 4).map(x => x.full_name)),
                                    same(P3, 'Alpha Club - Partner One')].map(texts).join(' ')));
+
+  console.log('\n  clubs of one partner that share a bracketed place suffix (#111: the 2026-10-08 hold)');
+  // Several clubs of one partner meet at one place, so every name ends in "(<the place>)". The
+  // place's words made similarity_ of two WHOLE names ≥ SIMILAR although the clubs' own words are
+  // nothing alike, and a genuinely new club was held — then sent again under another name.
+  const YC = '(Testville Community Youth Centre)', NF = '(Northfield Youth Centre)', CJ = '(Centro Juvenil Villa Prueba)';
+  const atPlace = [].concat(
+      R(A, 'Ember Sparks ' + YC, girls('Emberling', 4)), R(A, 'Red Club ' + YC, girls('Scarletton', 3)),
+      R(A, 'Lions ' + YC, girls('Prideling', 2)), R(A, 'Hope Girls ' + NF, girls('Hopewell', 3)), R(A, 'Sunrise Club', sunrise),
+      R('Fundación Demo', 'Luceros ' + CJ, girls('Lucerito', 3)));
+  const place = (partner, club, typed) =>
+      dg.newClubHoldReasons_({ partner, club, names: fresh, typedPartner: !!typed }, atPlace, partners);
+  const newAtPlace = [[A, 'Rising Stars ' + YC], [A, 'Blue Club ' + YC], [A, 'Tigers ' + YC], [A, 'Doves ' + YC],
+                      [A, 'Peace Girls ' + NF], ['Fundación Demo', 'Estrellas ' + CJ]];
+  const heldWrongly = newAtPlace.filter(([p, c]) => place(p, c).length)
+      .map(([p, c]) => c + ' → ' + kinds(place(p, c)) + ': ' + texts(place(p, c)));
+  check('a new club at a place where the partner already has clubs, its own words unlike theirs: imported, no reason at all',
+        !heldWrongly.length, heldWrongly.join(' | '));
+  r = place('Fundacion Demo', 'Estrellas ' + CJ, true);
+  check('…also against the clubs of a partner the typed organization is close to: the partner reason alone',
+        kinds(r) === 'partner', kinds(r) + ': ' + texts(r));
+  // the true near-duplicates at the place are still held, and the hold names THAT club only — not every club at the place
+  const stillHeld = [[A, 'Ember Sparks', 'Ember Sparks ' + YC, 'the suffix left off'],
+                     [A, 'Sunrise Club ' + YC, 'Sunrise Club', 'the suffix added to a club on file'],
+                     [A, 'Ember Sprks ' + YC, 'Ember Sparks ' + YC, 'a typo, the same suffix'],
+                     // (the same words in another case and spacing alone IS the club, key_ folds those: a reenroll upstream)
+                     [A, 'ember sparks(testville community youth centre)', 'Ember Sparks ' + YC, 'case and spacing'],
+                     [A, 'RED CLUB, (Testville Community Youth Centre)', 'Red Club ' + YC, 'punctuation'],
+                     [A, 'Sparks ' + YC, 'Ember Sparks ' + YC, 'one of its words, the same suffix'],
+                     [A, 'Lion ' + YC, 'Lions ' + YC, 'a plural, the same suffix'],
+                     [A, 'Hope Girls', 'Hope Girls ' + NF, 'the suffix left off (one club at that place)'],
+                     // the place written WITHOUT brackets on one side: no shared bracket to strip, so the WHOLE names are
+                     // compared as today, and the typo is caught (the fix must keep that pass, not just compare own words)
+                     [A, 'Hoope Girls Northfield Youth Centre', 'Hope Girls ' + NF, 'the place unbracketed, a typo (one club at that place)'],
+                     ['Fundación Demo', 'Luceros', 'Luceros ' + CJ, 'the suffix left off, another partner']];
+  const wrongHold = stillHeld.filter(([p, c, onFile]) => {
+    const got = place(p, c);
+    return kinds(got) !== 'club' || texts(got) !== 'the club name is close to ' + onFile + ' (' + p + '), already enrolled';
+  }).map(([p, c, , why]) => c + ' (' + why + ') → ' + kinds(place(p, c)) + ': ' + texts(place(p, c)));
+  check('the suffix left off or added, a typo, case, spacing, punctuation, one of its words, a plural — with the same suffix — ' +
+        'or the place unbracketed on one side: held (club), naming that one club', !wrongHold.length, wrongHold.join(' | '));
+  // The same at a place with THREE clubs: the plural with the place unbracketed is held, naming the club it is a plural of.
+  // Whether the other two clubs at the place are named too is not pinned: today the whole-name pass names all three
+  // (each ≥ SIMILAR alike to "lion testville community youth centre"), and an unbracketed place is out of this ticket's scope.
+  r = place(A, 'Lion Testville Community Youth Centre');
+  check('…and at a place with three clubs, a plural with the place unbracketed: held (club), naming the club it is a plural of',
+        kinds(r) === 'club' && texts(r).includes('Lions ' + YC + ' (' + A + ')'), kinds(r) + ': ' + texts(r));
+  // the pairs, both ways round
+  const suffixApart = [['Rising Stars ' + YC, 'Ember Sparks ' + YC], ['Blue Club ' + YC, 'Red Club ' + YC], ['Tigers ' + YC, 'Lions ' + YC],
+                       ['Doves ' + YC, 'Lions ' + YC], ['Peace Girls ' + NF, 'Hope Girls ' + NF], ['Peace ' + NF, 'Hope ' + NF],
+                       ['Estrellas ' + CJ, 'Luceros ' + CJ],
+                       ['Blue (Testville Girls Secondary School)', 'Red (Testville Girls Secondary School)']];
+  const suffixClose = [['Ember Sparks', 'Ember Sparks ' + YC], ['Ember Sprks ' + YC, 'Ember Sparks ' + YC],
+                       ['ember  sparks (testville community youth centre)', 'Ember Sparks ' + YC],
+                       ['RED CLUB, (Testville Community Youth Centre)', 'Red Club ' + YC], ['Sparks ' + YC, 'Ember Sparks ' + YC],
+                       ['Lion ' + YC, 'Lions ' + YC], ['Bravehaert (Hilltop)', 'Braveheart (Hilltop)'],
+                       // the place unbracketed on ONE side (+ a plural or a typo): there is no bracket both names share, so
+                       // the whole names are compared as today and stay close. "Ignore every bracket" would part them.
+                       ['Lion Testville Community Youth Centre', 'Lions ' + YC],
+                       ['Ember Sprks Testville Community Youth Centre', 'Ember Sparks ' + YC], ['Reed Northfield Youth Centre', 'Red ' + NF]];
+  const wrongSuffixApart = suffixApart.filter(([a, b]) => dg.clubNamesClose_(a, b) || dg.clubNamesClose_(b, a));
+  const wrongSuffixClose = suffixClose.filter(([a, b]) => !dg.clubNamesClose_(a, b) || !dg.clubNamesClose_(b, a));
+  check('clubNamesClose_: different words, the same bracketed place — apart either way round',
+        !wrongSuffixApart.length, wrongSuffixApart.map(p => p.join(' / ')).join(' | '));
+  check('clubNamesClose_: the same words with and without the place, a typo, case, punctuation, containment, a plural at the same place, ' +
+        'the place unbracketed on one side — close', !wrongSuffixClose.length, wrongSuffixClose.map(p => p.join(' / ')).join(' | '));
+  // Decided here, the ticket being silent: a name that is ONLY the place — "(Testville Community Youth Centre)", bracketed or
+  // not — against a club with its own words at that place has nothing but the place to tell them apart, so containment keeps
+  // it close, as today (the strip applies when BOTH names keep words of their own). Staff decide whether that club is now
+  // called Tigers. Two bare places are compared as before (the pre-existing apart pairs above).
+  const barePlace = [['(Testville Community Youth Centre)', 'Tigers ' + YC], ['Testville Community Youth Centre', 'Tigers ' + YC],
+                     [NF, 'Hope Girls ' + NF]];
+  const wrongBarePlace = barePlace.filter(([a, b]) => !dg.clubNamesClose_(a, b) || !dg.clubNamesClose_(b, a));
+  check('clubNamesClose_: a name that is only the place, bracketed or not, vs a club with its own words there — close by containment, as today',
+        !wrongBarePlace.length, wrongBarePlace.map(p => p.join(' / ')).join(' | '));
+  // The premise, so the "apart" pairs stay the ticket's case if anyone renames them: with the filler words out, the WHOLE
+  // names are at least SIMILAR alike and the clubs' own words are not (Python difflib ratios, pinned).
+  const lifted = [['rising stars testville community youth centre', 'ember sparks testville community youth centre', 0.8666666666666667,
+                   'rising stars', 'ember sparks', 0.5],
+                  ['blue testville community youth centre', 'red testville community youth centre', 0.9315068493150684, 'blue', 'red', 0.2857142857142857],
+                  ['tigers testville community youth centre', 'lions testville community youth centre', 0.9090909090909091, 'tigers', 'lions', 0.36363636363636365],
+                  ['doves testville community youth centre', 'lions testville community youth centre', 0.9210526315789473, 'doves', 'lions', 0.4],
+                  ['peace northfield youth centre', 'hope northfield youth centre', 0.9122807017543859, 'peace', 'hope', 0.4444444444444444],
+                  ['estrellas centro juvenil villa prueba', 'luceros centro juvenil villa prueba', 0.8611111111111112, 'estrellas', 'luceros', 0.25],
+                  ['blue testville', 'red testville', 0.8148148148148148, 'blue', 'red', 0.2857142857142857]];
+  const notLifted = lifted.filter(([a, b, whole, da, db, own]) =>
+      Math.abs(dg.similarity_(a, b) - whole) > 1e-12 || Math.abs(dg.similarity_(da, db) - own) > 1e-12 ||
+      whole < dg.DUP_GUARD.SIMILAR || own >= dg.DUP_GUARD.SIMILAR);
+  check('(premise) each apart pair: the whole names ≥ SIMILAR alike, the clubs\' own words under it — the place lifts them',
+        !notLifted.length, notLifted.map(x => x[0] + ' / ' + x[1] + '=' + dg.similarity_(x[0], x[1])).join(' | '));
+
+  // The same at places GENERATED from word lists, so the guard must handle ANY identical bracketed suffix, not a list of
+  // phrases: TOWNS × KINDS (coprime lengths: 24 distinct places of 3 to 5 words), an English kind after the town ("Testville
+  // Youth Centre"), a Spanish one before it ("Centro Juvenil Eastmarch"), accents, and a filler word the guard already
+  // ignores ("Girls", "School", "Escuela", "Colegio") inside some brackets. The clubs' own words: short pairs nothing alike.
+  // What the fix is: strip the ONE identical shared bracket, not "both names are bracketed, so ignore the brackets" — the
+  // same own words at two different places stay close (today's bare pass) and a level, number or letter inside the
+  // brackets still tells two clubs apart. Out of scope (no test): a place written BEFORE the club's own words ("Testville
+  // Youth Centre Tigers"); the ticket and the 2026-10-08 hold are about a suffix.
+  console.log('\n  …at 24 generated places (TOWNS × KINDS), at clubNamesClose_ and through the hold');
+  const TOWNS = ['Testville', 'Northfield', 'Villa Prueba', 'Eastmarch', 'Río Ficticio', 'Westbrook', 'San Ejemplo', 'Mocktown'];
+  const KINDS = [['Community Youth Centre'], ['Youth Centre'], ['Memorial Girls School'], ['Centro Juvenil', 'es'], ['Escuela Técnica', 'es'],
+                 ['Community Hall'], ['Centro Comunitario', 'es'], ['Parish Hall'], ['Colegio Técnico', 'es']];
+  const places = Array.from({ length: 24 }, (_, i) => {
+    const t = TOWNS[i % TOWNS.length], [k, es] = KINDS[i % KINDS.length];
+    return '(' + (es ? k + ' ' + t : t + ' ' + k) + ')';
+  });
+  const OWN = [['Blue', 'Red'], ['Tigers', 'Lions'], ['Doves', 'Falcons'], ['Peace Girls', 'Hope Girls'], ['Oak', 'Elm'], ['Coral', 'Jade'],
+               ['Águilas', 'Leones']];                                   // [a new club's words, a club on file's words]; 7: no (pair, town) twice
+  const own = i => OWN[i % OWN.length];
+  const at = (words, i) => words + ' ' + places[i];
+  const distinct = s => dg.matchWords_(s).filter(w => !dg.CLUB_FILLER.test(w)).join(' ');   // the string wordsClose_ compares
+  const typo = s => s.replace(/^(\S)(\S)/, '$1$2$2');                                      // "Red" → "Reed", "Lions" → "Liions"
+  const plural = s => /s$/.test(s) ? s.slice(0, -1) : s + 's';                             // "Lions" → "Lion", "Red" → "Reds"
+  const unbracketed = p => p.slice(1, -1);                                                 // "(Testville Youth Centre)" → "Testville Youth Centre"
+  const wordCount = p => unbracketed(p).split(' ').length;
+  check('the pool: 24 distinct places of 3 to 5 words; Spanish word order, an accent and a filler word inside some brackets',
+        new Set(places.map(p => dg.foldKey_(p))).size === 24 &&
+        places.every(p => /^\([^()]+\)$/.test(p) && wordCount(p) >= 3 && wordCount(p) <= 5) &&
+        places.filter(p => wordCount(p) === 3).length >= 6 && places.filter(p => wordCount(p) === 5).length >= 3 &&
+        places.filter(p => /^\((Centro|Escuela|Colegio) /.test(p)).length >= 8 && places.filter(p => /[áéíóú]/.test(p)).length >= 6 &&
+        places.filter(p => dg.matchWords_(p).some(w => dg.CLUB_FILLER.test(w))).length >= 6,
+        places.join(' '));
+  const genApart = places.map((p, i) => own(i).map(w => at(w, i)));                       // [new, on file] at each place
+  const wrongGenApart = genApart.filter(([a, b]) => dg.clubNamesClose_(a, b) || dg.clubNamesClose_(b, a));
+  check('clubNamesClose_: different own words at the same generated place — apart either way round, at all 24 places',
+        !wrongGenApart.length, wrongGenApart.length + ' close: ' + wrongGenApart.map(p => p.join(' / ')).join(' | '));
+  const genClose = places.flatMap((p, i) => {
+    const w = own(i)[1], b = at(w, i);
+    return [[at(typo(w), i), b, 'a typo'], [at(plural(w), i), b, 'a plural'], [w, b, 'the suffix left off'],
+            [at(w.toUpperCase(), i).replace(' (', '('), b, 'case and spacing'],
+            // the place unbracketed on one side: no bracket both names share, the whole names compared as today — the fix
+            // strips a SHARED bracket, it does not ignore every bracket (that would part these at all 24 places)
+            [typo(w) + ' ' + unbracketed(p), b, 'the place unbracketed, a typo'],
+            [plural(w) + ' ' + unbracketed(p), b, 'the place unbracketed, a plural']];
+  });
+  const wrongGenClose = genClose.filter(([a, b]) => !dg.clubNamesClose_(a, b) || !dg.clubNamesClose_(b, a));
+  check('clubNamesClose_: at each generated place a typo, a plural, the suffix left off, case and spacing, the place unbracketed ' +
+        'on one side with a typo or a plural — close either way round',
+        !wrongGenClose.length, wrongGenClose.map(([a, b, why]) => a + ' / ' + b + ' (' + why + ')').join(' | '));
+  const elsewhere = places.map((p, i) => [own(i)[1], i, (i + 1) % places.length]);      // a club's words at this place and the next
+  const wrongSameElsewhere = elsewhere.filter(([w, i, j]) => !dg.clubNamesClose_(at(w, i), at(w, j)) || !dg.clubNamesClose_(at(w, j), at(w, i)));
+  const wrongDiffElsewhere = elsewhere.filter(([w, i, j]) =>
+      dg.clubNamesClose_(at(own(i)[0], i), at(w, j)) || dg.clubNamesClose_(at(w, j), at(own(i)[0], i)));
+  check('the same own words at two different places: close, as today (the bare pass); different own words at different places: apart',
+        !wrongSameElsewhere.length && !wrongDiffElsewhere.length &&
+        dg.clubNamesClose_('Bright Girls (Testville)', 'Bright Girls (Northfield)') && !dg.clubNamesClose_('Blue (Testville)', 'Red (Northfield)'),
+        'not close: ' + wrongSameElsewhere.map(([w, i, j]) => at(w, i) + ' / ' + at(w, j)).join(' | ') +
+        '; not apart: ' + wrongDiffElsewhere.map(([w, i, j]) => at(own(i)[0], i) + ' / ' + at(w, j)).join(' | '));
+  const tagged = [['Bright Girls (Escuela Primaria Villa Prueba)', 'Bright Girls (Escuela Secundaria Villa Prueba)'],
+                  ['Harbor Club (Site 1)', 'Harbor Club (Site 2)'], ['Orbit (Hall A)', 'Orbit (Hall B)'],
+                  [at('Harbor 1', 0), at('Harbor 2', 0)], [at('Orbit A', 5), at('Orbit B', 5)],
+                  [at('Las Lomitas primaria', 3), at('Las Lomitas secundaria', 3)]];
+  const wrongTagged = tagged.filter(([a, b]) => dg.clubNamesClose_(a, b) || dg.clubNamesClose_(b, a));
+  check('a level, a number or a section letter inside the brackets, or in the own words at one place: still apart',
+        !wrongTagged.length, wrongTagged.map(p => p.join(' / ')).join(' | '));
+  // the premise at every generated place (similarity_ is pinned to difflib above), and a sample pinned to Python difflib
+  // itself — strings written out, and checked to be what the generator makes
+  const genNotLifted = genApart.filter(([a, b], i) => dg.similarity_(distinct(a), distinct(b)) < dg.DUP_GUARD.SIMILAR ||
+                                                      dg.similarity_(distinct(own(i)[0]), distinct(own(i)[1])) >= dg.DUP_GUARD.SIMILAR);
+  const genLifted = [[1, 'tigers northfield youth centre', 'lions northfield youth centre', 0.8813559322033898, 'tigers', 'lions', 0.36363636363636365],
+                     [2, 'doves villa prueba memorial', 'falcons villa prueba memorial', 0.8571428571428571, 'doves', 'falcons', 0.3333333333333333],
+                     [3, 'peace centro juvenil eastmarch', 'hope centro juvenil eastmarch', 0.9152542372881356, 'peace', 'hope', 0.4444444444444444],
+                     [4, 'oak tecnica rio ficticio', 'elm tecnica rio ficticio', 0.875, 'oak', 'elm', 0],
+                     [5, 'coral westbrook community hall', 'jade westbrook community hall', 0.8813559322033898, 'coral', 'jade', 0.2222222222222222],
+                     [6, 'aguilas centro comunitario san ejemplo', 'leones centro comunitario san ejemplo', 0.88, 'aguilas', 'leones', 0.3076923076923077],
+                     [7, 'blue mocktown parish hall', 'red mocktown parish hall', 0.8979591836734694, 'blue', 'red', 0.2857142857142857],
+                     [8, 'tigers tecnico testville', 'lions tecnico testville', 0.851063829787234, 'tigers', 'lions', 0.36363636363636365]];
+  const genOffPin = genLifted.filter(([i, a, b, whole, da, db, ownRatio]) =>
+      distinct(genApart[i][0]) !== a || distinct(genApart[i][1]) !== b || Math.abs(dg.similarity_(a, b) - whole) > 1e-12 ||
+      Math.abs(dg.similarity_(da, db) - ownRatio) > 1e-12 || whole < dg.DUP_GUARD.SIMILAR || ownRatio >= dg.DUP_GUARD.SIMILAR);
+  check('(premise) at all 24 generated places the whole names are ≥ SIMILAR alike and the own words under it; 8 pinned to difflib',
+        !genNotLifted.length && !genOffPin.length,
+        genNotLifted.map(([a, b]) => a + ' / ' + b + '=' + dg.similarity_(distinct(a), distinct(b))).concat(
+            genOffPin.map(x => 'pin ' + x[0] + ': ' + distinct(genApart[x[0]][0]) + ' / ' + distinct(genApart[x[0]][1]))).join(' | '));
+  // through the hold: a partner with two clubs at each of the first 7 generated places (7 towns, 7 kinds, every own-word
+  // pair once), ONE club alone at each of the next 7 places (SOLO: words unlike any other club's), and one club with no
+  // suffix; another partner's club at one of the places
+  const EXTRA = ['Comet', 'Harbor', 'Willow', 'Pearl', 'Cedar', 'Marigold', 'Amber'];       // the other club at each place
+  const SURNAMES = [['Brindlecote', 'Lorrimane'], ['Cobblewynd', 'Nimbleford'], ['Grimboltz', 'Quillstrand'], ['Halverquist', 'Vexmoorish'],
+                    ['Ixworthing', 'Zaffrewick'], ['Jubbleton', 'Umberlash'], ['Kestrelby', 'Wrenfoldy']];
+  const SOLO = ['Maple', 'Quartz', 'Heron', 'Ivory', 'Lantern', 'Meadow', 'Nutmeg'];
+  const SOLO_SURNAMES = ['Abbotsgrave', 'Bellwhistle', 'Crumbleton', 'Dapplewood', 'Everfrost', 'Fiddlemoor', 'Gildenhall'];
+  const HELD = 7;
+  const atPlaces = [].concat(...Array.from({ length: HELD }, (_, i) =>
+      R(A, at(own(i)[1], i), girls(SURNAMES[i][0], 3)).concat(R(A, at(EXTRA[i], i), girls(SURNAMES[i][1], 2)))),
+      ...SOLO.map((w, j) => R(A, at(w, HELD + j), girls(SOLO_SURNAMES[j], 2))),
+      R(A, 'Sunrise Club', sunrise), R('Fundación Demo', at('Luceros', 3), girls('Lucerito', 3)));
+  const placed = (partner, club, typed) =>
+      dg.newClubHoldReasons_({ partner, club, names: fresh, typedPartner: !!typed }, atPlaces, partners);
+  const closeTo = onFile => 'the club name is close to ' + onFile + ' (' + A + '), already enrolled';
+  const genHeldWrongly = places.slice(0, HELD).map((p, i) => at(own(i)[0], i)).filter(c => placed(A, c).length)
+      .map(c => c + ' → ' + kinds(placed(A, c)) + ': ' + texts(placed(A, c)));
+  check('through the hold: a new club at each generated place, its own words unlike the two clubs there: imported, no reason at all',
+        !genHeldWrongly.length, genHeldWrongly.join(' | '));
+  const genStillHeld = places.slice(0, HELD).flatMap((p, i) => {
+    const w = own(i)[1], onFile = at(w, i);
+    return [[at(typo(w), i), onFile, 'a typo'], [at(plural(w), i), onFile, 'a plural'], [w, onFile, 'the suffix left off'],
+            [at('Sunrise Club', i), 'Sunrise Club', 'the suffix added to a club on file']];
+  });
+  const genWrongHold = genStillHeld.filter(([c, onFile]) => kinds(placed(A, c)) !== 'club' || texts(placed(A, c)) !== closeTo(onFile))
+      .map(([c, , why]) => c + ' (' + why + ') → ' + kinds(placed(A, c)) + ': ' + texts(placed(A, c)));
+  check('…a typo, a plural, the suffix left off, the suffix added to a club on file: held (club), naming that one club — ' +
+        'not the other club at the place', !genWrongHold.length, genWrongHold.join(' | '));
+  // the place unbracketed on one side, with a typo or a plural: no shared bracket, the whole names compared as today — held.
+  // Exact at the SOLO places (one club there, so the text names it alone); at the crowded places the hold must name the
+  // club it is a typo of — whether it names the other club there too is not pinned (an unbracketed place is out of scope).
+  const soloHeld = SOLO.flatMap((w, j) => {
+    const p = places[HELD + j], onFile = at(w, HELD + j);
+    return [[typo(w) + ' ' + unbracketed(p), onFile, 'a typo'], [plural(w) + ' ' + unbracketed(p), onFile, 'a plural']];
+  });
+  const soloWrongHold = soloHeld.filter(([c, onFile]) => kinds(placed(A, c)) !== 'club' || texts(placed(A, c)) !== closeTo(onFile))
+      .map(([c, , why]) => c + ' (' + why + ') → ' + kinds(placed(A, c)) + ': ' + texts(placed(A, c)));
+  check('…the place unbracketed on one side, a typo or a plural, one club at that place: held (club), naming that one club',
+        !soloWrongHold.length, soloWrongHold.join(' | '));
+  const crowdedHeld = places.slice(0, HELD).flatMap((p, i) => {
+    const w = own(i)[1], onFile = at(w, i);
+    return [[typo(w) + ' ' + unbracketed(p), onFile, 'a typo'], [plural(w) + ' ' + unbracketed(p), onFile, 'a plural']];
+  });
+  const crowdedWrongHold = crowdedHeld.filter(([c, onFile]) =>
+      kinds(placed(A, c)) !== 'club' || !texts(placed(A, c)).includes(onFile + ' (' + A + ')'))
+      .map(([c, , why]) => c + ' (' + why + ') → ' + kinds(placed(A, c)) + ': ' + texts(placed(A, c)));
+  check('…the same at the places with two clubs: held (club), naming the club it is a typo or a plural of',
+        !crowdedWrongHold.length, crowdedWrongHold.join(' | '));
+  r = placed('Fundacion Demo', at('Estrellas', 3), true);
+  check('…a typed organization close to a partner with a club at the place: the partner reason alone',
+        kinds(r) === 'partner', kinds(r) + ': ' + texts(r));
 }
 
 console.log('\nClub names two partners share (RosterOps.gs sharedClubNames_ / sfClubName_, Config.gs SF_NAME_SEP)');
