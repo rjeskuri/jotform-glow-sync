@@ -478,11 +478,18 @@ CLAUSE_END = re.compile(r"[.,;:()]|\s[-–—]\s")
 LIST_ITEM = re.compile(r"(?:\d+[.)]|[-*•])\s+")
 
 
-def clause_of(text, at):
-    """The clause of `text` around offset `at`: from the clause end before it to the one after."""
+def clause_span(text, at):
+    """The [start, end) of the clause of `text` around offset `at`: from the clause end before it to the
+    one after."""
     start = max((m.end() for m in CLAUSE_END.finditer(text, 0, at)), default=0)
     end = CLAUSE_END.search(text, at)
-    return text[start:end.start() if end else len(text)]
+    return start, (end.start() if end else len(text))
+
+
+def clause_of(text, at):
+    """The clause of `text` around offset `at`."""
+    start, end = clause_span(text, at)
+    return text[start:end]
 
 
 def clauses(sentence):
@@ -490,16 +497,48 @@ def clauses(sentence):
     return [c for c in CLAUSE_END.split(sentence) if c and c.strip()]
 
 
+# "is not", "is never", "not required", "optional": a denial wherever it stands in the clause
+PREDICATE_NEGATION = re.compile(r"(?i)\b(?:is|are|was|were|be)\s+(?:not|never|no)\b|\bnot\s+(?:required|needed|necessary)\b|"
+                                r"\b(?:optional|unnecessary|needless|skipped|omitted)\b")
+
+
 def negated(text, m):
-    """A match whose clause at its start or at its end carries a negation (a window that spans clauses
-    is judged by its two anchors: "(no difference expected)" between them is not a negation of either)."""
-    return bool(NEGATION.search(clause_of(text, m.start())) or NEGATION.search(clause_of(text, max(m.end() - 1, m.start()))))
+    """A match denied by the clause at its start or the clause at its end: a negation word in that clause
+    before the match's end ("do not retrieve into `before/`", "`CreatedDate` needs no proof", "`after/`
+    and do not compare"), or a predicate negation anywhere in it ("Ryan's go is not required"). A
+    negation after the match in its clause ("`sf project deploy start -o glow` (no `--dry-run`)" is
+    read from the deploy command on) and one between the anchors of a window that spans clauses ("(no
+    difference expected)") deny nothing."""
+    for at in (m.start(), max(m.end() - 1, m.start())):
+        start, end = clause_span(text, at)
+        if NEGATION.search(text, start, min(end, m.end())) or PREDICATE_NEGATION.search(text, start, end):
+            return True
+    return False
+
+
+def matches(text, pattern, start=0):
+    """The non-overlapping matches of `pattern` in `text` from `start`, each tightened to the latest start
+    that keeps its end: "a fresh retrieve: retrieve what is live into `before/`" is judged from the
+    second retrieve, in its own clause."""
+    pos = start
+    while True:
+        m = pattern.search(text, pos)
+        if not m:
+            return
+        while True:
+            tighter = pattern.search(text, m.start() + 1)
+            if tighter and tighter.end() == m.end():
+                m = tighter
+            else:
+                break
+        yield m
+        pos = max(m.end(), m.start() + 1)
 
 
 def affirmed(text, pattern, start=0):
     """The first match of `pattern` in `text` at or after `start` that is not negated; None when every
     match is."""
-    for m in pattern.finditer(text, start):
+    for m in matches(text, pattern, start):
         if not negated(text, m):
             return m
     return None
@@ -507,7 +546,7 @@ def affirmed(text, pattern, start=0):
 
 def denied(text, pattern):
     """The first negated match of `pattern` in `text`, else None: a step the text argues against."""
-    for m in pattern.finditer(text):
+    for m in matches(text, pattern):
         if negated(text, m):
             return m
     return None
@@ -578,8 +617,11 @@ class SubmissionTimingDocs(unittest.TestCase):
         ("retrieve what is live into `before/`, first", near(r"\bretriev\w*", r"before/")),
         ("the proof that `CreatedDate` is the submission time (the Jotform submission created within 10 minutes of "
          "it), after the retrieve", near(r"CreatedDate", r"\bproo?f\w*|\bprove[sdn]?\b|within \d+ minutes")),
+        # `--dry-run` said of a check-only or validation, or inside the deploy command itself: "`sf project
+        # deploy start -o glow` (no `--dry-run`)" is the real deploy, not this step
         ("the check-only deploy (`sf project deploy start --dry-run`), after the proof",
-         near(r"--dry-run", r"check-only|\bvalidat\w*|sf project deploy start", 120)),
+         re.compile(r"(?i)(?:check-only|\bvalidat\w*)[^.]{0,120}?--dry-run|--dry-run[^.]{0,120}?(?:check-only|\bvalidat\w*)|"
+                    r"sf project deploy start[^.(]{0,80}?--dry-run")),
         ("Ryan's go, after the check-only deploy", near(r"\bRyan'?s?\b", r"\bgo\b", 40)),
         ("the deploy, after the go", re.compile(r"(?i)\bdeploy\w*")),
         ("the read-back after the deploy: retrieve into `after/`", near(r"\bretriev\w*", r"after/")),
@@ -735,7 +777,7 @@ class SubmissionTimingDocs(unittest.TestCase):
         deletion = near(r"\breports?\b", r"\b(?:delet\w*|remov\w*|drop\w*|destructive|edit\w*|first)\b")
         # the reports' step: the reports that use (filter on) the fields are deleted or edited
         uses = re.compile(r"(?i)\b(?:use[sd]?|using|filter\w*|read\w*|depend\w*|built on|based on|need\w*)\b")
-        steps = [m for m in deletion.finditer(text) if not negated(text, m)
+        steps = [m for m in matches(text, deletion) if not negated(text, m)
                  and uses.search(sentence_at(text, m.start())) and re.search(f"(?i){self.A_FIELD}", sentence_at(text, m.start()))]
         self.assertTrue(steps, f"{where}: delete (or edit) the reports that use the fields, said in one sentence - a field "
                                "a report filters on cannot be deleted")
@@ -745,7 +787,11 @@ class SubmissionTimingDocs(unittest.TestCase):
         self.assertLess(steps[0].start(), fields_deploy,
                         f"{where}: the reports' step comes before the fields' destructive deploy (order matters: a field "
                         "a report uses cannot be deleted)")
-        late = affirmed(text, deletion, fields_deploy)
+        # a reports' step after the fields' deploy: a deletion verb and a uses-verb in its sentence ("leaves every
+        # other report untouched" is not one)
+        late_deletion = near(r"\breports?\b", r"\b(?:delet\w*|remov\w*|drop\w*|edit\w*)\b")
+        late = next((m for m in matches(text, late_deletion, fields_deploy)
+                     if not negated(text, m) and uses.search(sentence_at(text, m.start()))), None)
         self.assertIsNone(late, f"{where}: a report deletion after the fields' destructive deploy: "
                                 f"{sentence_at(text, late.start()).strip()!r} - the reports go first" if late else None)
 
