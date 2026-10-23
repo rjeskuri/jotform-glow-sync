@@ -220,6 +220,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Why:** 7 of 39 new-club responses so far would have been held — exactly the 08-31 exact re-enrollment with another club's list and the six 09-22 re-enrollments with a school added — and no other; importing them created second ids for the same girls. A leading `=` from a public form became a formula in the sheet
 - **Consequences:** a false hold waits up to a week for the Monday e-mail; thresholds are one constant (`DUP_GUARD`); "same club" is never automated (staff enter the new girls on the club on file); the form-side "Is your club one of these?" question is not built; [plan](plans/2026-09-28-duplicate-club-guard.md)
 - 2026-10-09: merged 2026-09-29 and deployed 2026-09-30 with the same-name push (BACKLOG 11b).
+- 2026-10-23: two club names that end in the same bracket (its words as `matchWords_` folds them), each with a word that is not filler before it, are compared without that bracket (`RosterOps.gs placeSuffix_`, then the rules above): a partner's clubs at one place all end in "(<place>)", and the place's words lifted similarity_ of the whole names over `SIMILAR`, so on 2026-10-08 a genuinely new club at a place where the partner had clubs was held, then sent again under another name (#111). The place bracketed on one side only, and a name that is only the place, are compared whole as before (the place-only choice was the tests' call: such a name has nothing but the place to tell it from the clubs there, so staff decide); a shared place misspelt on one side (Centre / Center) is not the same bracket, so those names are still compared whole and still held. Live after Ryan's next `clasp push` (`.claude/skills/deploy-appsscript/SKILL.md`; rollback = the previous deployment, per that skill).
 
 ### 2026-09-28 — The Google Forms' wording comes from `Forms.gs`
 
@@ -661,6 +662,35 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - the reports `Total_Attendance_Last_Month`, `Jotform_Total_Attendance_Last_Month`, `Total_Attendance_by_Partner_by_Month` and `Jotform_Attendance_This_Month` are no longer used by the dashboard and kept until Ryan decides which to delete;
     - 2026-10-21: all four deleted on Ryan's go, 05:22 UTC (deploy `0AfRP000002hhq90AA`); restore one from `data/sf_girls_tiles_2026-10-20/before/` (#59; RUNBOOK "Attendance dashboard in Salesforce");
   - a fourth Salesforce-reporting partner needs its account added to filter 4 of the three reports and to `tools/sf_partner_monthly.py`, on Ryan's go.
+
+### 2026-10-21 — The automatic Salesforce club sync runs as Ryan's own user
+
+- The automatic sync (BACKLOG 27, `SF_SYNC`) logs in to Salesforce as **Ryan's own user**, through the External Client App "GLOW Sync" (OAuth client credentials, scope `api`, Run As Ryan), created 2026-10-21 through the Metadata API on his go (deploys `0AfRP000002hjdR0AQ` and `0AfRP000002hjiH0AQ`). There is no "GLOW Sync" user and no "GLOW Club Sync" permission set. This amends 2026-10-06 ("its own integration user"); the rest of that design (create only, at most 5 per region, all or nothing, the end-of-run check) is unchanged ([plan](plans/2026-10-06-sf-new-club-accounts.md), amendment 2026-10-21; RUNBOOK "New clubs' accounts, automatically").
+- **Why:** Ryan, 2026-10-21 (ticket #66): the sync runs as himself, and his administrator rights cover the access. He was told the risks and accepted them.
+- **Rejected:** the integration user "GLOW Sync" (Salesforce Integration licence, profile "Minimum Access - API Only Integrations") with a minimum permission set "GLOW Club Sync" (Account Read, Create, View All; no Edit); it keeps the secret's reach small and the creator visible, but needs the user, the licence and the permission set set up and kept.
+- **Consequences:**
+  - the GitHub secrets `SF_CLIENT_ID` / `SF_CLIENT_SECRET` hold administrator access (scope `api`): the workflow runs only on `main`, the dispatch token loses Contents, only Ryan edits secrets and workflow;
+  - a login from GitHub's data-centre addresses can freeze Ryan's user (Salesforce cannot allowlist them), which revokes all his tokens, the Jotform connection's included, as on 2026-09-30; the response (`SF_SYNC=off`, another administrator unfreezes, Jotform re-authorised) is in the RUNBOOK;
+  - `CreatedById` and owner no longer tell the sync's accounts from Ryan's own: the Description `created by the automatic sync <date>` does, for any rollback;
+  - the first create runs NPSP's and Mailchimp's triggers as an administrator;
+  - the code still says "GLOW Sync" (log line, hints, docstrings): the app's name, wording only.
+
+### 2026-10-21 — The photos land in Ryan's My Drive and a standalone Apps Script moves them to the company Shared Drive
+
+- Jotform's Google Drive integration runs on Ryan's company account, not a GLOW role account (the photos plan's open decision 1). It writes only into that account's My Drive, so `drive-sync/`, a standalone Apps Script project owned by the same account, moves each submission subfolder from `Attendance photos - <Region>` into that region's folder on the company Shared Drive every 15 minutes, once it has not changed for 10 minutes (ticket #89; [plan](plans/2026-10-21-drive-photo-mover.md); RUNBOOK "Photo mover").
+- A resubmission (the name already there once) is merged file by file and nothing is ever replaced; a name there twice is refused; the mover never shares, links, copies, trashes or e-mails a file; the folder ids live in its Script Properties; its log holds counts and folder names only.
+- **Why:** Ryan, 2026-10-21: "Jotform will only use my local company gmail, but it needs to go to a company shared drive." The integration cannot write into a Shared Drive, and photos of minors must not stay in one person's My Drive.
+- **Rejected:** a GitHub Actions job with a service account (Ryan's My Drive shared to a robot, its key as a secret, the photos readable from the runner); putting the mover in `appsscript/` (a Drive scope there stops the form-submit trigger until re-authorised, CLAUDE.md rule 11); copy-then-trash (a second copy of the photos in Ryan's trash for 30 days).
+- **Consequences:** Ryan's account is at least a Content manager on the Shared Drive (Manager if Drive refuses the folder move); its members are the named list only; the mover goes live on Ryan's go (push, authorise, dry run, the template test, then the trigger); the monthly token check (BACKLOG 70) looks at the Shared Drive's folders.
+- 2026-10-22: the order is reversed: the mover is set up before #63, not after it (see the 2026-10-22 entry).
+
+### 2026-10-22 — The photo mover is set up before the forms' Drive integrations (#63 depends on #89)
+
+- The photo mover (#89) is set up first and its My Drive source folders, `Attendance photos - <Region>`, exist before any form's Google Drive integration; #63 then points each form's integration at its region's source folder, the template before any regional form. Each live step on Ryan's go: (1) land PR #91, code only; (2) setup: the Shared Drive's folders named exactly `Africa`, `Asia`, `Latin America`, `Template` (`U.S` only if its form is re-enabled), one My Drive source folder per region, the standalone project (`.clasp.json` from the example) and its push, the Script Properties `SOURCE_FOLDER_<REGION>` / `TARGET_FOLDER_<REGION>`, `previewMoves` on the empty folders (writes nothing); (3) #63 for the template only, Ryan in the builder (RUNBOOK "Photos", steps 1-2); (4) a test upload on the template and its read-back, `previewMoves`, one `moveSettledPhotos`, then `installTrigger`; (5) only then #63 for the regional forms ("Photos", step 5), one at a time, each followed by a check of the next run's log ([plan](plans/2026-10-21-drive-photo-mover.md), Rollout; RUNBOOK "Photo mover").
+- This replaces the 2026-10-21 plan's order, in which the mover went live after #63's integration on the template.
+- **Why:** Ryan, 2026-10-22: the mover is set up first and makes the My Drive source folders that each form's integration is then pointed at; the folders carry the names the mover requires before any photo lands in them.
+- **Rejected:** #63 first, then the mover (the 2026-10-21 order).
+- **Consequences:** #63 depends on #89 on the board; the setup's dry run runs on empty folders and shows only the configuration (`CONFIG refused` or every count 0); the template test after #63 is the first real move. Whether Jotform writes into the existing folder or creates a second one of that name is unverified until that test ([plan](plans/2026-10-21-drive-photo-mover.md), Risks).
 
 ### 2026-10-23 — Session week by day of the month, the submission's UTC day, no "big delay" flag
 

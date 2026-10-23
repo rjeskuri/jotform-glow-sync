@@ -68,7 +68,7 @@ description: Salesforce for this project - what lives there (attendance batches 
 | `tools/sf_dupes.py merge --apply` | Duplicate contacts of one girl merged (anonymous Apex, one all-or-nothing run per club) | Hook, `--vpn-off`; after the dry run and `--rehearse` | `merge_rollback.json`: undelete within 15 days, rows inserted again |
 | `tools/sf_dupes.py rename --apply` | A stored name's whitespace | Hook, `--vpn-off` | The `renames` old values |
 | `tools/sf_dupes.py cleanup --apply` | Extra affiliations and duplicate-rule sets deleted | Hook, `--vpn-off` | Each deleted record is saved in the rollback file first |
-| `tools/auto_sync.py --apply-salesforce` (GitHub Actions, as GLOW Sync, through `tools/sf_new_clubs.py`) | Creates new clubs' Club accounts (at most 5 per region per run) and marks their SF Pending rows | `SF_SYNC=apply` and `AUTO_SYNC_APPLY=1`, repository variables that only Ryan changes | `SF_SYNC=off`; a created account is deleted only while it has no Contacts and no attendance |
+| `tools/auto_sync.py --apply-salesforce` (GitHub Actions, as Ryan's own user through the External Client App GLOW Sync (client credentials), through `tools/sf_new_clubs.py`) | Creates new clubs' Club accounts (at most 5 per region per run) and marks their SF Pending rows | `SF_SYNC=apply` and `AUTO_SYNC_APPLY=1`, repository variables that only Ryan changes | `SF_SYNC=off`; a created account (Description `created by the automatic sync <date>`; `CreatedById` is Ryan's, not the sync's) is deleted only while it has no Contacts and no attendance. A freeze of Ryan's user also revokes the Jotform connection (RUNBOOK "New clubs' accounts, automatically", The risks of running as Ryan) |
 | `sf project deploy validate`, `start`, `quick` | Metadata | Hook (check-only too) | Redeploy only the components that change made, from its `before/`, after a fresh retrieve of them equals its `after/`, never an older build (2026-10-15: RUNBOOK "Attendance dashboard in Salesforce", Rollback); a `destructiveChanges.xml` for new components |
 | `sf apex run` (the rolled-back proof of a processor change) | Inserts inside a transaction that ends in `Database.rollback` | Hook; the script pasted in full first | Nothing left, unless the script misses its rollback call |
 | `sf data create`, `update`, `delete`, `upsert`, `import` | Records | Hook | Prefer the write connector (one record) or a tool with a ledger |
@@ -91,7 +91,7 @@ rollback files there too (`data/backfill_2026-09/`, `data/sf_dupes_<date>/`,
 
 ## The procedures (RUNBOOK)
 RUNBOOK "Club accounts in Salesforce" (by hand, the Signals), "New clubs' accounts,
-automatically" (`SF_SYNC`, the GLOW Sync setup, the ATTENTION table), "Duplicate girls in
+automatically" (`SF_SYNC`, the GLOW Sync app, its risks and rollback, the ATTENTION table), "Duplicate girls in
 Salesforce" (the monthly check, the merge, the rollback per part), "Attendance totals and
 partner-reported counts" (the intake contract), "Attendance dashboard in Salesforce" (the steps,
 Access, rollback), "Back-fill of attendance into Salesforce", "Credentials" (the CLI login) and
