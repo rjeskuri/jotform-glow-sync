@@ -227,7 +227,7 @@ class CorrectionMergeRunbook(unittest.TestCase):
         # reader takes the 2026-10-13 rule for the whole rule. The Special events section (two statements of it
         # on 2026-10-22) and the template-test recipe are where the RUNBOOK states it.
         for heading, where in (("## Special events", "docs/RUNBOOK.md \"Special events\""),
-                               (None, "docs/RUNBOOK.md, the \"Jotform template test\" recipe")):
+                               (None, "the template-test recipe in docs/RUNBOOK.md \"Photos\"")):
             text = md_part(RUNBOOK, heading) if heading else self.recipe()
             self.assertEqual(unqualified(text), [], f"{where}: a statement of the Duplicate refusal does not say which "
                                                     f"case it is (a different module or event, nobody new): "
@@ -247,7 +247,7 @@ class CorrectionMergeRunbook(unittest.TestCase):
     def test_the_template_test_ticks_only_girls_already_on_that_dates_batch(self):
         recipe = self.recipe()
         sents = [s for s in sentences(recipe, ".;:") if not PAST.search(s)]
-        where = "docs/RUNBOOK.md, the \"Jotform template test\" recipe"
+        where = "the template-test recipe in docs/RUNBOOK.md \"Photos\""
         tick = [s for s in sents if re.search(r"\btick", s, re.I)
                 and re.search(r"\b(only|just|nobody new|no new|no girl who)\b", s, re.I)
                 and re.search(r"\balready\b|\b(on|of) that (date|day)['’]s batch\b|\bthat (date|day) already has\b", s, re.I)]
