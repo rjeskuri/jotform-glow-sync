@@ -20,7 +20,12 @@ description: Salesforce for this project - what lives there (attendance batches 
   Salesforce first: a rename starts in the sheet (RUNBOOK "Renaming a club").
 - **Reports and dashboards**: the "Jotform Attendance" dashboard and its reports, the
   `Attendance_Totals` report type, the `Attendance_Report_Viewer` permission set (RUNBOOK
-  "Attendance dashboard in Salesforce").
+  "Attendance dashboard in Salesforce"); the Monthly Report (`DHIS2__c`) reports and dashboards
+  and the two hidden Decommissioned folders (RUNBOOK "Monthly Report dashboards in Salesforce");
+  the interactive dashboard, LWC `glowDashboardShell` (RUNBOOK
+  "Interactive dashboard in Salesforce"). The archive rule (DECISIONS 2026-10-21): a retired report or dashboard is moved
+  to Decommissioned and keeps its Id, never deleted; before a report or dashboard changes, a copy
+  of it as it was goes to Decommissioned, carrying its source Id and the ticket.
 - **The SF Pending tab** in the sheet lists new clubs still without an account; the Monday e-mail
   sends it to staff; the automatic sync marks a row `done (auto <date>)` when it creates one.
 - `glow/salesforce.py` holds the org's record-type ids, `sf_match` (the processor's name

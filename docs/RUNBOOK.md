@@ -52,6 +52,8 @@ headings, so a heading is never renamed (`make check` runs
   - [Duplicate girls in Salesforce](#duplicate-girls-in-salesforce)
   - [Attendance totals and partner-reported counts](#attendance-totals-and-partner-reported-counts)
   - [Attendance dashboard in Salesforce](#attendance-dashboard-in-salesforce)
+  - [Monthly Report dashboards in Salesforce](#monthly-report-dashboards-in-salesforce)
+  - [Interactive dashboard in Salesforce](#interactive-dashboard-in-salesforce)
   - [September back-fill: the resolver](#september-back-fill-the-resolver)
   - [Back-fill of attendance into Salesforce](#back-fill-of-attendance-into-salesforce)
 - [Admin and work log](#admin-and-work-log)
@@ -3082,6 +3084,122 @@ sharing stays as it is"):
   check-only, Ryan's go, deploy.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
+
+## Monthly Report dashboards in Salesforce
+
+- **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) are built and passed the check-only 2026-10-21 (validation `0AfRP000002hisf0AA`); their deploy waits for Ryan's go ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)).
+- **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
+- **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
+- **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
+- **Rollback:** the copy in Decommissioned and the `before/` retrieve (Decommissioned, below).
+
+The Monthly Report is the object `DHIS2__c`: one record per partner per month (`Account__c` the
+partner account, `YearMonth__c` like `202609`). The vendor built its reports and dashboards; the
+inventory of 2026-10-21 (#69, [plan](plans/2026-10-21-sf-reporting-inventory.md#inventory)):
+- The report folder "DHIS2 Reports" (`DHIS2Reports`) holds 63 reports.
+- The dashboard folders "DHIS2 Dashboards" (`DHIS2Dashboards`) and "Dhis2 Dashbords" (sic,
+  `Dhis2Dashbords`) hold 9 and 6 dashboards, 15 in all.
+- The 15 dashboards have 64 components on 55 reports: 52 in "DHIS2 Reports" and 3 in "Public
+  Reports". 11 of the 63 reports in "DHIS2 Reports" are used by no dashboard.
+- Report types: `Dhis2` (65 reports) and `Monthly_Reports` (1), both on `DHIS2__c`.
+- 11 of the 15 dashboards filter on `DHIS2__c$Account__c.Assigned_Partner_Manager__c`.
+- 10 of the 15 dashboards are embedded in the Lightning page (FlexiPage)
+  `Monthly_Report_Dashboards`, the tab `Monthly_Report_Dashbords` (sic) of the app "Monthly
+  Report Dashboards".
+- The three folders' shares (the shares API, 2026-10-21): "DHIS2 Reports" 6, "DHIS2 Dashboards"
+  6, "Dhis2 Dashbords" 2, all to internal users or one Regular group; no guest, portal, community
+  or partner share.
+- Counted with `SELECT OwnerId, COUNT(Id) FROM Report GROUP BY OwnerId` (a report's `OwnerId` is
+  its folder) and `SELECT FolderId, COUNT(Id) FROM Dashboard GROUP BY FolderId`; Salesforce
+  refuses `GROUP BY FolderName`.
+
+`data/sf_reporting_2026-10-21/` (owner only, never committed) holds the read-only retrieve
+`before/` (66 reports, 15 dashboards, the 3 folders, 2 report types, the FlexiPage, 2 tabs, 1 app
+and the interactive dashboard's code) and `evidence/inventory.csv`, one row per report and
+dashboard: its folder, report type, format, created, last modified, last run, last viewed, and
+the dashboards and components that use it. The retrieved XML carries staff names (shares,
+running users, filter values): never quote it.
+
+The "Jotform Attendance" dashboard and the two Attendance folders are another set ("Attendance
+dashboard in Salesforce"); epic #68 leaves them untouched. A change here follows the epic's
+ritual: VPN off, retrieve live into `data/sf_<topic>_<date>/before/`, build in a copy,
+check-only, Ryan's go, deploy, retrieve `after/` and compare; never an older build (DECISIONS
+2026-10-16).
+
+### Decommissioned
+
+Two folders, both labelled "Decommissioned", hold what epic #68 retires and the copies it keeps
+(DECISIONS 2026-10-21). Built in `data/sf_reporting_2026-10-21/folders/`; check-only passed
+2026-10-21 (`0AfRP000002hisf0AA`); the deploy waits for Ryan's go.
+- The report folder "Decommissioned" (`ReportFolder` `Decommissioned`) is hidden, with no
+  `folderShares`: only administrators see it.
+- The dashboard folder "Decommissioned" (`DashboardFolder` `Decommissioned_Dashboards`) is
+  hidden, with no `folderShares`: only administrators see it.
+- The measure is the shares API (`GET /services/data/v67.0/folders/<id>/shares`), which must
+  show no share on either folder beyond the deploying administrator's own Manage entry.
+- Salesforce may give the deploying administrator (an internal System Administrator) Manage
+  access to a new folder by itself: that one entry is accepted and recorded in the plan's Result.
+  An entry for anyone else (a group, a role, guest, portal, community or partner users, All
+  Internal Users) is a failure, removed before anything is moved in.
+
+The archive rule:
+- A retired report or dashboard is moved to Decommissioned and keeps its Id; nothing is deleted
+  in this epic.
+- Before a report or dashboard changes, a copy of it as it was goes to Decommissioned, carrying
+  its source Id and the ticket in its description, in addition to the `before/` retrieve.
+- The copy's label stays within 40 characters, Salesforce's limit on a report's name.
+- A dynamic dashboard's copy (the original runs as the logged-in user) runs as a specified user,
+  the administrator who makes the copy: dynamic dashboards count against an org limit, and the
+  `before/` retrieve keeps the original's running-user setting.
+- The `before/` retrieve is what a metadata redeploy starts from; the copy is what a Salesforce
+  user opens.
+- To revert from Salesforce, open the copy in Decommissioned, then Save As into the original
+  folder or move it back there. Save As makes a new Id; a move keeps the copy's Id.
+- A dynamic dashboard put back from its copy has "View dashboard as" reset to the dashboard
+  viewer (`LoggedInUser`) before it returns to its original folder; the `before/` retrieve's
+  running-user setting is the check.
+- How a copy and a move are made (the Analytics API, or Lightning's Move by hand):
+  [plan, API proof](plans/2026-10-21-sf-reporting-inventory.md#api-proof).
+
+## Interactive dashboard in Salesforce
+
+- **When:** before a change to the interactive dashboard (#81, #82, #83), or to read how it counts.
+- **Status:** unchanged by this repo; last modified in the org: the Apex classes 2026-01-04, the LWC bundles 2026-01-13 (`glowTileWeeklyAttendance` 2026-01-22). Retrieved read-only 2026-10-21 (#69).
+- **Dry run:** the check-only deploy (`--dry-run`) with the Apex tests.
+- **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off).
+- **Verify:** retrieve again and compare with the build.
+- **Rollback:** a fresh retrieve first, then the `before/` of that change (DECISIONS 2026-10-16).
+
+The LWC `glowDashboardShell` is the vendor's interactive dashboard on `DHIS2__c`. Its code is not
+in git: it lives only in the org, and the read-only retrieve of 2026-10-21 is in
+`data/sf_reporting_2026-10-21/before/` (`lwc/`, `classes/`, `staticresources/`, `tabs/`). Each
+Apex method, its signature and what it reads: [plan, Inventory](plans/2026-10-21-sf-reporting-inventory.md#inventory).
+- **Where it is hosted:** the Lightning tab `Glow_Interactive_Dashboard`, a CustomTab whose
+  `lwcComponent` is `glowDashboardShell`; no app lists the tab, and no Lightning page (FlexiPage)
+  embeds the LWC (its `isExposed` is `false`).
+- **The LWC:** `glowDashboardShell` holds `glowFilterBar`, seven tiles (`glowTileActivity`,
+  `glowTileSummits`, `glowTileWeeklyAttendance`, `glowTileMentorOrientation`,
+  `glowTileMentorGroup`, `glowTileSessionsObserved`, `glowTileMentorTraining`) and
+  `glowRangeBadge`, with shared chart modules on the static resource `chartjs_v280`.
+- **The controllers:** `GlowDemoController` gives the filter options (`getFilterOptions`,
+  `getDependentOptions`; `getMetrics` is unused) and `GlowTilesController` the tiles (8 methods
+  called, 2 unused, 1 commented out). Every method is `public static` and
+  `@AuraEnabled(cacheable=true)` in a `with sharing` class, reads `DHIS2__c` and has no DML.
+  The tests `GlowDemoControllerTest` and `GlowTilesControllerTest` cover 92.4% and 93.4% and
+  assert nothing.
+- **Where it counts:**
+  - the Partner-Month count is `COUNT()` of `DHIS2__c` rows (`GlowTilesController.cls:156-163`),
+    rows rather than distinct partners;
+  - there is no majority-across-months logic: the badge is one ratio over the whole range
+    (`pct >= 50`, `glowTileActivity.js:26`);
+  - the Partner Manager and Partner options are distinct values over every `DHIS2__c` row of any
+    date (`GlowDemoController.cls:149-219`);
+  - the Partner -> Partner Manager mapping is the account's current
+    `Account__r.Assigned_Partner_Manager__c`, applied to every month.
+- **A change** (#81, #82, #83) follows the epic's ritual: retrieve live, build in a copy,
+  check-only with the Apex tests, Ryan's go, deploy, retrieve `after/` and compare; never an edit
+  directly in the org.
 
 ## September back-fill: the resolver
 

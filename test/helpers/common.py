@@ -2,7 +2,8 @@
 What more than one test file (test/*_test.py) uses. Importing it puts the repository root and
 tools/ on sys.path, so a test file imports it before any tool.
 
-  - REPO and read();
+  - REPO and read(); the Markdown helpers flat(), md_part() and sentences() (the docs tests:
+    runbook_test, sf_monthly_dashboards_test);
   - FakeForm, an in-memory Jotform form for sync_attendance_form.main();
   - the fixtures other TestCases borrow: SameNameFixture (the fake Africa form with two clubs
     named "Stars") and ClubGuardFixture (that form with the club guard), AutoSyncFixture
@@ -15,6 +16,7 @@ tools/ on sys.path, so a test file imports it before any tool.
 import copy
 import json
 import os
+import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,6 +33,29 @@ from glow.text import md5  # noqa: E402
 def read(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+def flat(text):
+    return " ".join(text.split())
+
+
+def md_part(path, heading):
+    """A Markdown file's part under the first heading line that starts with `heading` (`## The
+    ritual`, `## 3.`), that line included, to the next heading of its level or higher. A missing
+    heading fails: a test never passes on an empty part."""
+    doc = read(path)
+    m = re.search(r"^" + re.escape(heading) + r"(?!\w).*$", doc, re.M)
+    if not m:
+        raise AssertionError(f"{os.path.relpath(path, REPO)}: no heading starting `{heading}`")
+    level = len(heading) - len(heading.lstrip("#"))
+    rest = doc[m.start():]
+    nxt = re.search(r"\n#{1,%d} " % level, rest)
+    return rest[:nxt.start()] if nxt else rest
+
+
+def sentences(text, ends=".;:"):
+    """`text` (flattened) cut after each of `ends`."""
+    return [s for s in re.split(r"(?<=[%s])\s+" % re.escape(ends), flat(text)) if s.strip()]
 
 
 def module_lists(modules, events=True):
