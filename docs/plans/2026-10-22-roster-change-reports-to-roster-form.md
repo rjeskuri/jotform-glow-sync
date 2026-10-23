@@ -19,11 +19,15 @@ Apps Script, nothing on the forms or in the sheet's data:
   "missing from the form / list" (Spanish "no aparece(n) / no está(n) en la lista, el
   formulario, el portal") when they are said of people — a people word, or a girl's name (two
   capitalised words), in the clause before the phrase, or in the clause before that when it is
-  only a pronoun ("two girls came but they are not on the form"); a thing word in that clause
-  ("Golden Wings Girls Club", "the number of girls") and any subject with neither sign ("today's
+  only a person pronoun ("two girls came but they are not on the form") or has no subject at
+  all ("vinieron dos niñas pero no aparecen"); a thing word in that clause ("Golden Wings Girls
+  Club", "the number of girls", "the attendance of the girls" — the attendance and the register
+  are things with the girls named in them), a thing pronoun ("I marked all 14 girls present but
+  it is not on the form": the attendance lost) and any subject with neither sign ("today's
   attendance", "our mentor", "my name") stay bug reports (the PR #117 review: the first cut took
-  anything not on its thing list as people). The accepted misses and false alarms are in the
-  comment above `RC_ABSENT` and in `docs/DECISIONS.md` (2026-10-23).
+  anything not on its thing list as people; the re-review: the second let "it" stand for the
+  girls before it). The accepted misses and false alarms are in the comment above `RC_ABSENT`
+  and in `docs/DECISIONS.md` (2026-10-23).
 - `handleFeedback_` e-mails the sender of a roster-change report, when the reply box holds an
   address, a short note naming the Club Roster Form with its published link
   (`existingForm_(PROP.ROSTER_FORM).getPublishedUrl()`; FormApp is already a pinned service, so
@@ -51,8 +55,15 @@ Apps Script, nothing on the forms or in the sheet's data:
   own doing negated ("does not load", "cannot be submitted", "no se puede enviar"), an error, or
   a form thing in a failed state in the same clause ("the page is blank", "the dropdown is
   empty", "no hay ningún club en la lista") — never a list of sentences; the form working, a
-  wish, a question or news of the session stay e-mail only. A roster change wins: one item per
-  report, the roster-change one, also when it says the form fails.
+  wish, a question or news of the session stay e-mail only. The negated doing is the form's
+  when its subject is a form thing, "it", the impersonal Spanish "se" or nothing at all; with
+  a person as its subject (I, we, they, the girls, our club; the elided Spanish first person)
+  it is news or something not sent, not a failure ("half the girls did not show up", "we did
+  not submit last week because there was no session", "no envié la asistencia") — except the
+  reporter's own inability ("I could not submit", "no pude enviar": she tried), which counts
+  unless a "because / porque" clause gives the reason, when that clause decides on its own
+  (the PR #117 re-review: the second cut queued every negated form verb). A roster change
+  wins: one item per report, the roster-change one, also when it says the form fails.
 
 Staff still own the items (RUNBOOK "Working the ReviewQueue"): for a roster change, enter it or
 confirm the partner sent it; for a form problem, try the form, fix or escalate, answer the
@@ -87,18 +98,24 @@ Property. An e-mail already sent to a mentor is not recalled; the ReviewQueue ro
   Audit masks addresses (`previewError_`).
 - The Forms service slow or down at submit time: `rosterFormUrl_` catches it and the note goes
   without the link; the handler never fails for it.
-- A false alarm on the form-problem rule (a human "error", a box the mentor left blank) is an
-  item staff resolve "not a form problem"; a miss ("it is blank", a verb the lists do not name)
-  is e-mail only, as today. Nothing is sent to that sender either way.
+- A false alarm on the form-problem rule (a human "error", a box the mentor left blank, a
+  Spanish done-form with its subject left out, "no envió la asistencia"; a reason given without
+  "because") is an item staff resolve "not a form problem"; a miss ("it is blank", a verb the
+  lists do not name, "the photo of the girls did not upload") is e-mail only, as today. Nothing
+  is sent to that sender either way.
 
 ## Proof
 Offline: `scripts/harness_tests.sh test/forms_logic_test.js` (the "which reports are roster
-changes" table, 178 wordings with the PR #117 review's 68; the block "a roster-change report
-points its sender to the Club Roster Form (#110)"; the block "a "form not working" report becomes
-a ReviewQueue item of its own (#110)", 277 reports through the handler — 217 form problems, 53
+changes" table, 178 wordings with the PR #117 review's 68, and the re-review's 14 probes, 381
+built things — girls then "it" / "eso", the attendance of the girls, the elided subject after
+the attendance — against 133 built people nearby; the block "a roster-change report points its
+sender to the Club Roster Form (#110)"; the block "a "form not working" report becomes a
+ReviewQueue item of its own (#110)", 277 reports through the handler — 217 form problems, 53
 neither, 7 roster changes that also say the form fails — plus the end-to-end row, the retry, the
-ReviewQueue down and the Monday e-mail) green; `make gs` (services unchanged); `scripts/verify.sh`
-ends `CHECK PASSED`. Live: step 2's read-back.
+ReviewQueue down and the Monday e-mail; the re-review's blocks: 7 attendance-lost reports through
+the handler with no roster item and no pointer, and 177 reports of session news or something not
+sent against 228 failures nearby, each a "Form not working report") green; `make gs` (services
+unchanged); `scripts/verify.sh` ends `CHECK PASSED`. Live: step 2's read-back.
 
 ## Result
 Pending: the deploy waits for Ryan's go.

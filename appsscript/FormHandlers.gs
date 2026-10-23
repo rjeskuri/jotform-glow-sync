@@ -1134,56 +1134,88 @@ const RC_NEW = /\bnew (?:girls?|members?|students?|names)\b|\bnuev[ao]s? (?:nina
 // The same phrases are how page problems read ("my club is not on the list"),
 // so WHAT is absent decides: the clause before the phrase, back to the last
 // stop or "and" — or the clause before that, when it is only a pronoun and
-// its verb ("two girls came but THEY are not on the form"). It is people on a
-// positive sign only (#117 review): a people word (RC_WHO), or a girl's name
-// (RC_NAME: two capitalised words, no digit in the clause), and in neither
-// case a thing word in the clause (RC_THING: "Golden Wings Girls Club", "the
-// number of girls"; a club named as where the girls are, "the girls in our
-// club", is not what is absent: RC_WHERE). Anything else is a thing, listed or
-// not ("today's attendance", "our mentor", "my name"). Accepted misses: a lone
-// capitalised word ("Sunrise is not on the list": a club, or a first name — the
-// Club Roster Form needs her full name anyway), a pronoun or a number alone
-// ("they are not on the form"), a name after a thing word in its clause ("at
-// the club meeting Ada Lorrimane was not on the list"). Accepted false alarm:
-// a two-word club named only in the text, the club box blank ("Bright Stars
-// is not on the form"), reads as a girl's name; staff resolve it "not a roster
-// change" (docs/DECISIONS.md, 2026-10-23).
+// its verb, or nothing at all (the elided Spanish subject: "vinieron dos niñas
+// pero no aparecen"). It is people on a positive sign only (#117 review): a
+// people word (RC_WHO), or a girl's name (RC_NAME: two capitalised words, no
+// digit in the clause), and in neither case a thing word in the clause
+// (RC_THING: "Golden Wings Girls Club", "the number of girls", "the attendance
+// of the girls" — the attendance and the register are things with the girls
+// named in them; a club named as where the girls are, "the girls in our club",
+// is not what is absent: RC_WHERE). A pronoun-only clause defers to the one
+// before it on a person pronoun ("two girls came but THEY are not on the
+// form") or none, never on a thing pronoun (RC_IT: "I marked all 14 girls
+// present but IT is not on the form" is the attendance lost, a bug report;
+// #117 re-review). Anything else is a thing, listed or not ("today's
+// attendance", "our mentor", "my name"). Accepted misses: a lone capitalised
+// word ("Sunrise is not on the list": a club, or a first name — the Club Roster
+// Form needs her full name anyway), a pronoun or a number alone ("they are not
+// on the form"), a name or a people word after a thing word in its clause ("at
+// the club meeting Ada Lorrimane was not on the list", "I marked attendance for
+// the girls but they are not on the form"). Accepted false alarm: a two-word
+// club named only in the text, the club box blank ("Bright Stars is not on the
+// form"), reads as a girl's name; staff resolve it "not a roster change"
+// (docs/DECISIONS.md, 2026-10-23).
 const RC_ABSENT = /\b(?:not (?:on|in) the (?:(?:attendance |roster )?form|list|roster|portal)|missing from the (?:(?:attendance )?form|list|roster)|no (?:aparecen?|estan?) en (?:la lista|el formulario|el portal))\b/i;
 const RC_WHO = /\b(?:girls?|members?|students?|names|ninas?|chicas?|integrantes|participantes|nombres)\b/i;
-const RC_THING = /\b(?:clubs?|clubes|groups?|sessions?|buttons?|organi[sz]ations?|modules?|pages?|photos?|pictures?|forms?|links?|options?|questions?|dates?|languages?|rosters?|lists?|logos?|menus?|numbers?|counts?|grupos?|sesion(?:es)?|boton(?:es)?|organizacion(?:es)?|modulos?|paginas?|fotos?|formularios?|enlaces?|opcion(?:es)?|preguntas?|fechas?|idiomas?|listas?|numeros?|cantidad(?:es)?)\b/i;
+const RC_THING = /\b(?:clubs?|clubes|groups?|sessions?|buttons?|organi[sz]ations?|modules?|pages?|photos?|pictures?|forms?|links?|options?|questions?|dates?|languages?|rosters?|lists?|logos?|menus?|numbers?|counts?|attendance|registers?|grupos?|sesion(?:es)?|boton(?:es)?|organizacion(?:es)?|modulos?|paginas?|fotos?|formularios?|enlaces?|opcion(?:es)?|preguntas?|fechas?|idiomas?|listas?|numeros?|cantidad(?:es)?|asistencia|registros?)\b/i;
+const RC_IT = /\b(?:it|that|this|eso|esto)\b/i;
 const RC_NAME = /\b[A-Z][A-Za-z]+(?: (?:de|del|da|dos|van|von))* [A-Z][A-Za-z]+\b/;
 const RC_WHERE = /\b(?:of|in|from|at|de|en) (?:our|my|the|this|nuestr[ao]|mi|el|la|est[ae]) (?:club|group|grupo)\b/gi;
 const RC_FILLER = /\b(?:is|are|was|were|am|the|an?|my|our|your|their|her|his|its|this|that|these|those|i|you|we|she|he|it|they|them|there|here|some|all|also|still|now|el|la|los|las|una?|unos|unas|mi|mis|nuestr[ao]s?|sus?|est[aeo]s?|es[aeo]s?|yo|ell[ao]s?|tod[ao]s?|tambien|ya|ahora)\b/gi;
 const RC_BREAK = /[.,;:!?¿¡()"]|\b(?:and|but|so|because|y|pero|porque)\b/i;
+const RC_BREAK_KEPT = new RegExp('(' + RC_BREAK.source + ')', 'i');   // split keeping the breaks
 
 // #110 (Ryan, 2026-10-22): "is this report the form NOT WORKING?" — queued as
 // "Form not working report" so it is worked and counted (such reports were
 // e-mail only). The rule is a form thing that fails, in English or Spanish,
-// read on the folded, lower-cased text with apostrophes dropped; never a list
-// of sentences. A failure is one of:
+// read clause by clause (RC_BREAK) on the folded, lower-cased text with
+// apostrophes dropped; never a list of sentences. A failure is one of:
 // - the form's own doing negated (FP_FAIL_*): a negation, up to two words,
 //   then load / open / submit / send / work / respond / show / save / upload
 //   ("does not load", "cannot be submitted", "stopped working", "no carga",
-//   "no se puede enviar", "dejó de funcionar", "no me deja enviar");
+//   "no se puede enviar", "dejó de funcionar", "no me deja enviar") — said of
+//   a form thing or "it", impersonally ("no se envía"), or with no subject at
+//   all ("No carga."). Said of a PERSON (FP_PERSON before the negation in the
+//   clause: I, we, they, the girls, our club, the mentors; the elided Spanish
+//   first person, whose forms "no envié", "no enviamos", "no he enviado" the
+//   list does not name) it is news or something not sent, not the form
+//   failing ("the girls did not show up", "we did not submit last week", "I
+//   have not sent the photo yet", "nuestro club no envió la asistencia"; #117
+//   re-review) — except her own inability (FP_TRIED: cannot, could not,
+//   unable; no puedo, no pude, sin poder): "I could not submit" / "No pude
+//   enviar" is a failure, she tried, unless "because / porque" follows, when
+//   the reason decides on its own ("because there was no session": none;
+//   "because the page does not load": one). A thing word before the negation
+//   wins over a people word ("the club dropdown does not load"); "show up" is
+//   never the form's doing.
 // - an error (FP_ERROR): "error", "something went wrong";
 // - a form thing (FP_THING_*: the form, page, screen, link, button, Submit,
-//   dropdown, list, menu, box, field) in a failed state (FP_STATE_*) in the
-//   same clause (RC_BREAK): "the page is blank", "the dropdown is empty",
+//   dropdown, list, menu, box, field, the names) in a failed state (FP_STATE_*)
+//   in the same clause: "the page is blank", "the dropdown is empty",
 //   "nothing happens when I press Submit", "pantalla en blanco", "no hay
 //   ningún club en la lista".
 // The form working ("loads fine", "it submits now"), a wish ("the form does
 // not ask for the venue"), a question or news of the session have no failure
 // sign. Accepted false alarms: a human "error" ("I made an error in a name"),
-// a box the mentor left blank ("I left the venue field blank"); staff resolve
+// a box the mentor left blank ("I left the venue field blank"), a Spanish
+// done-form with its subject left out or folded ("no envió la asistencia":
+// she, or the form; "no envío" reads as "no envió"), a reason given without
+// "because" ("I could not submit since there was no session"); staff resolve
 // them "not a form problem". Accepted misses: a failed state said of "it"
 // alone ("it is blank"), a verb the lists do not name ("the form would not
-// let me choose my club"); the staff e-mail goes regardless.
-const FP_FAIL_EN = /\b(?:not|never|no longer|cannot|cant|wont|dont|doesnt|didnt|isnt|arent|wasnt|couldnt|wouldnt|stopped|stops|refuses?|refused|fails?|failed|unable) (?:\w+ ){0,2}(?:loads?|loaded|loading|opens?|opened|opening|submits?|submitted|submitting|sends?|sending|sent|works?|worked|working|responds?|responded|responding|saves?|saved|saving|uploads?|uploaded|uploading|displays?|displayed|displaying|shows?|showed|showing|shown|accepts?|accepted|accepting|connects?|connected|connecting|go(?:es)? through|went through|gone through)\b/;
-const FP_FAIL_ES = /\b(?:no|nunca|tampoco|dej[oa](?:n|ron)? de|sin poder) (?:\w+ ){0,2}(?:carg(?:a|an|o|ar|aba|aron)|abr(?:e|en|io|ir|ia|ieron)|envi(?:a|an|o|ar|aba|aron|e)|funcion(?:a|an|o|ar|aba|aron)|respond(?:e|en|io|er|ia)|guard(?:a|an|o|ar|aba)|muestr(?:a|an)|mostr(?:o|ar|aba)|sub(?:e|en|io|ir|ia)|acept(?:a|an|o|ar))\b/;
+// let me choose my club"), a thing the lists do not name with a people word
+// before the negation ("the photo of the girls did not upload"); the staff
+// e-mail goes regardless.
+const FP_FAIL_EN = /\b(?:cannot|cant|can not|could not|couldnt|unable|not able|not|never|no longer|wont|dont|doesnt|didnt|isnt|arent|wasnt|wouldnt|stopped|stops|refuses?|refused|fails?|failed) (?:\w+ ){0,2}(?:loads?|loaded|loading|opens?|opened|opening|submits?|submitted|submitting|sends?|sending|sent|works?|worked|working|responds?|responded|responding|saves?|saved|saving|uploads?|uploaded|uploading|displays?|displayed|displaying|show(?:s|ed|ing|n)?(?! up\b)|accepts?|accepted|accepting|connects?|connected|connecting|go(?:es)? through|went through|gone through)\b/;
+const FP_FAIL_ES = /\b(?:no|nunca|tampoco|dej[oa](?:n|ron)? de|sin poder) (?:\w+ ){0,2}(?:carg(?:a|an|o|ar|aba|aron)|abr(?:e|en|io|ir|ia|ieron)|envi(?:a|an|o|ar|aba|aron)|funcion(?:a|an|o|ar|aba|aron)|respond(?:e|en|io|er|ia)|guard(?:a|an|o|ar|aba)|muestr(?:a|an)|mostr(?:o|ar|aba)|sub(?:e|en|io|ir|ia)|acept(?:a|an|o|ar))\b/;
+// her own inability, in the failure matched: she tried (FP_FAIL_* starts at the modal, so "could not" is the match, not "not")
+const FP_TRIED = /\b(?:cannot|cant|can not|could not|couldnt|unable|not able|fails?|failed|pued\w*|pud\w*|pod\w*|poder|logr\w*|consig\w*|consegu\w*)\b/;
+// a person as the subject of the failure: pronouns, girls, mentors, the club (a group of people), the partner
+const FP_PERSON = /\b(?:i|we|you|they|she|he|girls?|members?|students?|mentors?|co-?mentors?|clubs?|partners?|teams?|parents?|volunteers?|staff|children|kids|participants?|everyone|everybody|nobody|people|women|woman|ladies|facilitators?|teachers?|yo|nosotr[ao]s|ell[ao]s?|ninas?|chicas?|integrantes|participantes|mentor(?:as?|es)|clubes|socias?|madres?|padres?|voluntari[ao]s?|equipo|tod[ao]s|nadie|alguien|gente|personas?|alumn[ao]s?|estudiantes|maestr[ao]s?|profesor[ae]s?)\b/;
 const FP_ERROR = /\berror(?:s|es)?\b|\bsomething went wrong\b|\balgo salio mal\b/;
-const FP_THING_EN = /\b(?:forms?|pages?|screens?|links?|sites?|website|portal|app|buttons?|submit|submission|dropdowns?|drop-downs?|lists?|menus?|box(?:es)?|fields?|uploads?)\b/;
+const FP_THING_EN = /\b(?:forms?|pages?|screens?|links?|sites?|website|portal|app|buttons?|submit|submission|dropdowns?|drop-downs?|lists?|menus?|box(?:es)?|fields?|uploads?|names?)\b/;
 const FP_STATE_EN = /\bblank\b|\bempty\b|\bnothing (?:happens|happened|in it|shows|showed|appears|appeared|loads|loaded|opens|opened)\b|\bshows? nothing\b|\bshowed nothing\b|\bno (?:options?|choices?)\b|\bno (?:\w+ ){1,2}(?:in|on) (?:the|my|our|this) (?:dropdown|drop-down|list|menu)\b|\bfroze\b|\bfrozen\b|\bfreezes\b|\bstuck\b|\bcrash(?:es|ed)?\b|\bhangs\b|\bhung\b|\btimed out\b|\bfails?\b|\bfailed\b|\bspinning\b|\bkeeps? loading\b/;
-const FP_THING_ES = /\b(?:formularios?|paginas?|pantallas?|enlaces?|links?|sitio|portal|aplicacion|app|boton(?:es)?|enviar|envio|desplegables?|listas?|menus?|casillas?|campos?)\b/;
+const FP_THING_ES = /\b(?:formularios?|paginas?|pantallas?|enlaces?|links?|sitio|portal|aplicacion|app|boton(?:es)?|enviar|envio|desplegables?|listas?|menus?|casillas?|campos?|nombres?)\b/;
 const FP_STATE_ES = /\ben blanco\b|\bvaci[ao]s?\b|\bno (?:muestra|aparece|sale|carga|hay) nada\b|\bno pas[oa] nada\b|\bno (?:hace|hizo) nada\b|\bsin opciones\b|\bno tiene opciones\b|\bno hay (?:\w+ ){0,3}en (?:la|el|mi|nuestr[ao]) (?:lista|desplegable|menu)\b|\bse (?:congela|congelo|traba|trabo|cuelga|colgo|queda cargando)\b|\bcongelad[ao]\b|\btrabad[ao]\b|\bfall[oa]\b|\bfallando\b/;
 
 /**
@@ -1215,11 +1247,31 @@ function rosterChangeWords_(a, boxes) {
  */
 function looksLikeFormProblem_(a) {
   const text = reportText_(a, [Q.FB_DOING, Q.FB_WHAT]).toLowerCase().replace(/['’]/g, '');
-  if (FP_FAIL_EN.test(text) || FP_FAIL_ES.test(text) || FP_ERROR.test(text)) return true;
-  return text.split(RC_BREAK).some(function (clause) {
-    return (FP_THING_EN.test(clause) && FP_STATE_EN.test(clause)) ||
-           (FP_THING_ES.test(clause) && FP_STATE_ES.test(clause));
-  });
+  if (FP_ERROR.test(text)) return true;
+  // clause, break, clause, break, …: a clause followed by "because / porque" has its reason next
+  const parts = text.split(RC_BREAK_KEPT);
+  for (let i = 0; i < parts.length; i += 2) {
+    if (failedClause_(parts[i], /^(?:because|porque)$/.test((parts[i + 1] || '').trim()))) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether one clause of a problem report says a form thing fails — the rule
+ * above FP_FAIL_EN; `explained` when a "because / porque" clause follows it.
+ */
+function failedClause_(clause, explained) {
+  if ((FP_THING_EN.test(clause) && FP_STATE_EN.test(clause)) ||
+      (FP_THING_ES.test(clause) && FP_STATE_ES.test(clause))) return true;
+  const m = FP_FAIL_EN.exec(clause) || FP_FAIL_ES.exec(clause);
+  if (!m) return false;
+  const subject = clause.slice(0, m.index);
+  // the form's own doing: a form thing or "it" before the negation, or the impersonal "se"
+  if (FP_THING_EN.test(subject) || FP_THING_ES.test(subject) || /\bit\b/.test(subject) || /\bse\b/.test(m[0])) return true;
+  // she tried and could not: a failure unless the reason is given ("because there was no session")
+  if (FP_TRIED.test(m[0])) return !explained;
+  // a person who did not: news, not the form ("the girls did not show up", "we have not sent it")
+  return !FP_PERSON.test(subject);
 }
 
 /**
@@ -1246,11 +1298,15 @@ function absentPeople_(text) {
   return before.some(function (part) {
     const clauses = part.split(RC_BREAK);
     while (clauses.length) {
-      // the club as where the girls are, then articles, pronouns and the copula, dropped:
-      // a clause with nothing left ("they are", "it is") defers to the one before it
-      const clause = clauses.pop().replace(/['’]/g, '').replace(RC_WHERE, ' ').replace(RC_FILLER, ' ')
-          .replace(/[^a-z0-9]+/gi, ' ').trim();
-      if (!clause) continue;
+      // the club as where the girls are, then articles, pronouns and the copula, dropped
+      const raw = clauses.pop().replace(/['’]/g, '');
+      const clause = raw.replace(RC_WHERE, ' ').replace(RC_FILLER, ' ').replace(/[^a-z0-9]+/gi, ' ').trim();
+      if (!clause) {
+        // nothing left: a thing pronoun ("it is", "eso") is a thing; a person
+        // pronoun ("they are") or no subject at all defers to the clause before
+        if (RC_IT.test(raw)) return false;
+        continue;
+      }
       if (RC_THING.test(clause)) return false;
       return RC_WHO.test(clause) || (RC_NAME.test(clause) && !/\d/.test(clause));
     }
