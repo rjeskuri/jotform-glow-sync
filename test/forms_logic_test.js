@@ -864,7 +864,7 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
   // the reply box's e-mail validation may be missing (a wording run that stopped part-way):
   // a typed non-address never becomes the Reply-To, so it can never fail the staff e-mail
   w = world({ props: STAFF });
-  const notAddress = report('Africa Attendance Form', 'The page left me on a blank screen.', { [PQ.FB_EMAIL]: 'call me on whatsapp' });
+  const notAddress = report('Africa Attendance Form', 'I have a question about the session dates.', { [PQ.FB_EMAIL]: 'call me on whatsapp' });
   const na = w.ctx.handleFeedback_(notAddress, 'Feedback!9', KEY);
   check('a reply "address" that is not one: e-mailed without Reply-To, the body says why',
         na === 'emailed staff' && w.mails.length === 1 && !('replyTo' in w.mails[0]) &&
@@ -875,9 +875,9 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
         !w.mails[0].body.includes('not set as Reply-To'));
 
   w = world({ props: STAFF });
-  const plain = w.ctx.handleFeedback_(report('Africa Attendance Form', 'The page left me on a blank screen.'), 'Feedback!8', KEY);
-  check('any other report: e-mail only, as before', plain === 'emailed staff' && w.tabs.ReviewQueue.length === 1 &&
-        w.mails.length === 1 && !w.mails[0].body.includes('Staff note'));
+  const plain = w.ctx.handleFeedback_(report('Africa Attendance Form', 'The form works well, thank you.'), 'Feedback!8', KEY);
+  check('feedback that is neither a roster change nor the form failing: e-mail only, as before', plain === 'emailed staff' &&
+        w.tabs.ReviewQueue.length === 1 && w.mails.length === 1 && !w.mails[0].body.includes('Staff note'));
 
   // #110: the sender of a roster-change report is pointed to the Club Roster Form
   console.log('\n  a roster-change report points its sender to the Club Roster Form (#110)');
@@ -921,8 +921,9 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
     w = world({ props: STAFF });
     w.ctx.handleFeedback_(addressed('The page left me on a blank screen after I pressed Submit.'), 'Feedback!30', KEY);
     w.ctx.handleFeedback_(addressed('The list of clubs is missing mine.'), 'Feedback!31', KEY);
-    check('a plain bug report with a reply address: the staff e-mail only (no Club Roster Form e-mail)',
-          w.mails.length === 2 && !w.mentorMails().length && w.tabs.ReviewQueue.length === 1, w.mails.map(m => m.to).join(','));
+    check('a plain bug report with a reply address: the staff e-mail only (no Club Roster Form e-mail, no roster-change item)',
+          w.mails.length === 2 && !w.mentorMails().length &&
+          !w.tabs.ReviewQueue.slice(1).some(r => r[1] === 'Roster change sent as a problem report'), w.mails.map(m => m.to).join(','));
     w = world({ props: STAFF });
     w.ctx.handleFeedback_(report('GLOW – Club Roster Form', 'Please remove ' + CANARY + ' from our club.', { [PQ.FB_CLUB]: 'Bright Stars' }), 'Feedback!32', KEY);
     w.ctx.handleFeedback_(report('GLOW – Club Roster Form', 'Please remove ' + CANARY + ' from our club.',
@@ -996,6 +997,16 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
           noForm.every(x => x.mentorMails().every(m => mentorText(m).includes('Club Roster Form') &&
                                                        !/undefined|null|docs\.google\.com/.test(mentorText(m)))),
           noForm.map(x => x.mentorMails().map(m => mentorText(m).replace(/\s+/g, ' ').slice(0, 100)).join('+') || 'none').join(' | '));
+
+    // Ryan, 2026-10-22 (#67 Q1): on the Club Roster Form a misspelled name is fixed by REMOVE of
+    // the wrong spelling and ADD of the right one — every pointer e-mail says so, with the link
+    // and without it, in one sentence a mentor can act on
+    const MISSPELLED = /misspel\w* name[^.]*remov\w* the wrong spelling and add\w* the right (?:one|spelling)/i;
+    const pointed = runs.map(r => r.x.mentorMails()[0]).concat(noForm.flatMap(x => x.mentorMails()));
+    check('every pointer e-mail (' + pointed.length + ': the 4 with the link, the 2 without) says a misspelled name is fixed there by ' +
+          'removing the wrong spelling and adding the right one',
+          pointed.length === runs.length + noForm.length && pointed.every(m => m && MISSPELLED.test(m.body)),
+          pointed.map(m => (m ? (m.body.match(/[^.\n]*misspel[^.]*\./i) || ['no such sentence'])[0].trim() : 'no e-mail')).join(' | '));
   }
 
   // the weekly e-mail
@@ -1078,6 +1089,275 @@ console.log('\n  the handler and the weekly e-mail, run with Google services stu
   check('…and that check can fail: with a club pending, the same unreadable Roster stops the e-mail',
         unread === 'sheet unavailable', unread);
   check('no girl and no Roster row reaches the e-mail', !/Testling|W\d+ /.test(weekly([], [pend('Partner One', 'Stars', 'Africa')], STAFF, twoStars).mails[0].body));
+
+  // #110, Ryan 2026-10-22 (#67 Q3): a report that the form is NOT WORKING — it does not load or
+  // submit, a blank page, an empty dropdown, an error message, in English or Spanish — becomes a
+  // ReviewQueue item of its own ("Form not working report"), so it is worked and counted under
+  // its own heading in the Monday e-mail, not just e-mailed to staff as plain bug reports were.
+  // Precedence, decided here: a report that is a roster change stays a roster-change item (one
+  // item per report, never two — also when it chose the Club Roster Form and reports it broken,
+  // as the #117 review settled); feedback that is neither (the form working, thanks, a question,
+  // a suggestion) stays e-mail only. The staff e-mail goes as before; the sender is not e-mailed
+  // (the Club Roster Form pointer is for roster changes only).
+  console.log('\n  a "form not working" report becomes a ReviewQueue item of its own (#110)');
+  {
+    const BROKEN = 'Form not working report';
+    const ROSTER = 'Roster change sent as a problem report';
+    const AF = 'Africa Attendance Form', AS = 'Asia Attendance Form', LA = 'Latin America Attendance Form';
+    const cap = s => s[0].toUpperCase() + s.slice(1);
+    check('the issue has a heading of its own in the weekly e-mail: in REVIEW_ISSUES, distinct from "Other (added by hand)"',
+          pr.REVIEW_ISSUES.includes(BROKEN) && BROKEN !== pr.OTHER_ISSUE && pr.REVIEW_ISSUES.includes(ROSTER),
+          pr.REVIEW_ISSUES.join(' | '));
+
+    // Built from parts, as the roster-change table is: a form thing × what it does (or shows),
+    // each sentence in a different frame, so no fragment is worth matching on its own; the same
+    // things with the same frames and a working verb are the negatives.
+    const FRAMES_EN = [s => cap(s) + '.', s => 'Hello. ' + cap(s) + '.', s => cap(s) + '. Please help.',
+                       s => 'I tried twice today and ' + s + '.', s => 'Since Monday ' + s + '.', s => cap(s) + ', what can I do?'];
+    const FRAMES_ES = [s => cap(s) + '.', s => 'Hola. ' + cap(s) + '.', s => cap(s) + '. ¿Me pueden ayudar?',
+                       s => 'Lo intenté dos veces y ' + s + '.', s => 'Desde el lunes ' + s + '.', s => 'Buenas tardes, ' + s + '.'];
+    let k = 0;
+    const cross = (subjects, verbs, frames, form, want) =>
+        subjects.flatMap(subj => verbs.map(v => [form, frames[k++ % frames.length](subj + ' ' + v), {}, want]));
+    const BROKEN_EN = [].concat(
+      cross(['the form', 'the attendance form', 'the page', 'the link'],
+            ['does not load', 'will not open', 'is not loading', 'never loads'], FRAMES_EN, AF, BROKEN),
+      cross(['the form', 'the attendance form', 'my report', 'the page'],
+            ['will not submit', 'does not submit', 'cannot be submitted', 'is not submitting'], FRAMES_EN, AS, BROKEN),
+      cross(['the form', 'the Submit button', 'the link', 'the club dropdown'],
+            ['is not working', 'does not work', 'stopped working', 'no longer works'], FRAMES_EN, AF, BROKEN),
+      cross(['the page', 'the form', 'the screen'], ['is blank', 'stays blank', 'went blank'], FRAMES_EN, AS, BROKEN),
+      cross(['the dropdown', 'the club dropdown', 'the list of clubs', 'the partner menu'],
+            ['is empty', 'shows nothing', 'has nothing in it', 'has no options'], FRAMES_EN, AF, BROKEN),
+      cross(['the form', 'the page', 'the attendance form'],
+            ['shows an error message', 'gives an error', 'says there was an error', 'shows "something went wrong"'], FRAMES_EN, AS, BROKEN));
+    const BROKEN_ES = [].concat(   // with and without accents: mentors type both
+      cross(['el formulario', 'la página', 'la pagina', 'el enlace'], ['no carga', 'no abre', 'no se abre', 'nunca carga'], FRAMES_ES, LA, BROKEN),
+      cross(['el formulario', 'mi reporte', 'la asistencia'],
+            ['no se envía', 'no se envia', 'no se puede enviar', 'no se deja enviar'], FRAMES_ES, LA, BROKEN),
+      cross(['el formulario', 'el botón de enviar', 'el boton de enviar', 'el enlace'],
+            ['no funciona', 'dejó de funcionar', 'dejo de funcionar', 'ya no funciona'], FRAMES_ES, LA, BROKEN),
+      cross(['la página', 'la pagina', 'la pantalla'],
+            ['está en blanco', 'esta en blanco', 'se queda en blanco', 'se pone en blanco'], FRAMES_ES, LA, BROKEN),
+      cross(['la lista desplegable', 'la lista de clubes', 'la lista de organizaciones'],
+            ['está vacía', 'esta vacia', 'no muestra nada', 'no tiene opciones'], FRAMES_ES, LA, BROKEN),
+      cross(['el formulario', 'la página', 'la pagina'],
+            ['muestra un mensaje de error', 'me da un error', 'dice que hubo un error', 'sale con error'], FRAMES_ES, LA, BROKEN));
+    const FINE = [].concat(
+      cross(['the form', 'the page', 'the link'], ['loads fine', 'opened quickly', 'works well now'], FRAMES_EN, AF, ''),
+      cross(['el formulario', 'la página', 'el enlace'], ['carga bien', 'abrió rápido', 'funciona bien ahora'], FRAMES_ES, LA, ''));
+    // the wording given as "what were you trying to do", with a bland "what happened" — and the
+    // other way round: a task in that box ("submit the form") with a happy ending is no failure
+    const BLAND = ['See above.', 'Nothing.', 'Nada.', 'Ver arriba.'];
+    const doingRows = BROKEN_EN.concat(BROKEN_ES).filter((c, i) => i % 7 === 3)
+        .map((c, i) => [c[0], BLAND[i % BLAND.length], { [PQ.FB_DOING]: c[1] }, c[3]]);
+    const MORE = [
+      // short, pronoun or subjectless, the way reports are typed on a phone
+      [AF, 'It does not load.', {}, BROKEN],
+      [AF, 'It will not submit.', {}, BROKEN],
+      [AF, 'It shows an error message.', {}, BROKEN],
+      [AF, 'Nothing happens when I press Submit.', {}, BROKEN],
+      [AF, 'Blank page after I press Submit.', {}, BROKEN],
+      [AF, 'Error message when I submit.', {}, BROKEN],
+      [AF, 'I cannot submit.', {}, BROKEN],
+      [AF, 'I cannot open the form.', {}, BROKEN],
+      [AF, 'I can\'t open the link.', {}, BROKEN],
+      [AF, 'The form won\'t load.', {}, BROKEN],
+      [AF, 'The page left me on a blank screen after I pressed Submit.', {}, BROKEN],   // '' in the roster-change table: the two agree
+      [AF, 'Nova Girls Club: the form left me on a blank page.', { [PQ.FB_CLUB]: 'Nova Girls Club' }, BROKEN],
+      [AF, 'The club dropdown is empty, so I cannot choose our club.', {}, BROKEN],
+      [AF, 'When I press Submit I get an error.', {}, BROKEN],
+      [AF, 'There is no club in the dropdown.', {}, BROKEN],
+      [AS, 'The form is not working on my phone.', {}, BROKEN],
+      ['Something else', 'The form does not load on my phone.', {}, BROKEN],   // the words decide, not the form chosen
+      [LA, 'No carga.', {}, BROKEN],
+      [LA, 'No se envía.', {}, BROKEN],
+      [LA, 'No puedo enviar.', {}, BROKEN],
+      [LA, 'No puedo abrir el formulario.', {}, BROKEN],
+      [LA, 'Me sale un error al enviar.', {}, BROKEN],
+      [LA, 'Pantalla en blanco.', {}, BROKEN],
+      [LA, 'Sale un mensaje de error.', {}, BROKEN],
+      [LA, 'Tuve que actualizar la página y la lista no carga.', {}, BROKEN],   // '' in the roster-change table
+      [LA, 'Cuando doy enviar no pasa nada.', {}, BROKEN],
+      [LA, 'No hay ningún club en la lista.', {}, BROKEN],
+      [LA, 'El formulario no me deja enviar.', {}, BROKEN],
+      // neither: the form working, thanks, questions, suggestions, news — e-mail only, as today
+      [AF, 'The form works well, thank you.', {}, ''],
+      [AF, 'Thank you for the new form, it is much easier now.', {}, ''],
+      [AF, 'The form loaded fine today.', {}, ''],
+      [AF, 'It worked, thank you.', {}, ''],
+      [AF, 'It went through this time.', {}, ''],
+      [AF, 'Thank you for fixing the form, it submits now.', {}, ''],
+      [AF, 'The photo uploaded fine, thanks.', {}, ''],
+      [AF, 'The dropdown has our club now, thank you.', {}, ''],
+      [AF, 'How do I change the session date after I submit?', {}, ''],
+      [AF, 'Can we add a question about the venue?', {}, ''],
+      [AF, 'Could the form be in Swahili too?', {}, ''],
+      [AF, 'It would help if the form remembered my club.', {}, ''],
+      [AF, 'The form does not ask for the venue; could it?', {}, ''],   // "the form does not": a wish, not a failure
+      [AF, 'The form does not have Swahili yet.', {}, ''],
+      [AF, 'The session went well and the girls were happy.', {}, ''],
+      [AF, 'The girls did not come today because of the rain.', {}, ''],
+      [AF, 'We did not meet this week.', {}, ''],
+      [AF, 'Our club does not meet on Fridays any more.', {}, ''],
+      [AF, 'I do not know which module we are on.', {}, ''],
+      [AF, 'We will meet on Saturday instead of Friday this week.', {}, ''],
+      [AF, 'It worked.', { [PQ.FB_DOING]: 'Submit the attendance form' }, ''],
+      [LA, 'Todo bien.', { [PQ.FB_DOING]: 'Abrir el formulario y enviar la asistencia' }, ''],
+      [LA, 'El formulario funciona muy bien, gracias.', {}, ''],
+      [LA, 'Gracias por el nuevo formulario, es mucho más fácil.', {}, ''],
+      [LA, 'Hoy el formulario cargó bien.', {}, ''],
+      [LA, 'Ya se envió, gracias.', {}, ''],
+      [LA, '¿Cómo cambio la fecha de la sesión después de enviar?', {}, ''],
+      [LA, 'Sería útil que el formulario recordara mi club.', {}, ''],
+      [LA, '¿Podría estar el formulario en portugués también?', {}, ''],
+      [LA, 'El formulario no pregunta por el lugar, ¿podría?', {}, ''],
+      [LA, 'La sesión de hoy fue sobre autoestima y las niñas participaron mucho.', {}, ''],
+      [LA, 'No nos reunimos esta semana por la lluvia.', {}, ''],
+      [LA, 'Las niñas no vinieron hoy por la lluvia.', {}, ''],
+      [LA, 'No sé en qué módulo vamos.', {}, ''],
+      [AF, '', {}, ''],
+      // a roster change that also says the form fails: ONE item, the roster-change one
+      [AF, 'Two girls who came are not on the form and the form will not submit.', {}, ROSTER],
+      [AF, 'Please add ' + CANARY + ' to the roster. Also the page does not load.', {}, ROSTER],
+      [AF, 'The form is not working: ' + CANARY + ' is missing from the list.', {}, ROSTER],
+      [LA, 'Dos niñas nuevas: ' + CANARY + ' y su prima. Además el formulario no carga.', {}, ROSTER],
+      [AF, 'The page went blank.', { [PQ.FB_DOING]: 'Removing two girls from our list' }, ROSTER],
+      ['GLOW – Club Roster Form', 'The partner dropdown is empty.', {}, ROSTER],          // that form chosen and reported broken:
+      ['GLOW – Club Roster Form', 'La página se quedó en blanco al enviar.', {}, ROSTER],  // "Club Roster Form chosen", as today
+    ];
+    const all = [].concat(BROKEN_EN, BROKEN_ES, FINE, doingRows, MORE);
+    const n = want => all.filter(c => c[3] === want).length;
+    const w1 = world({ props: STAFF });
+    const runs = all.map(([form, what, extra, want], i) => {
+      const source = 'Feedback!' + (100 + i);
+      const result = w1.ctx.handleFeedback_(report(form, what, extra), source, KEY);
+      const rows = w1.tabs.ReviewQueue.slice(1).filter(r => String(r[4]).endsWith(' [#' + source + ']'));
+      return { what, extra, want, source, result, rows };
+    });
+    const got = r => (r.rows.length === 0 ? '' : r.rows.length === 1 ? r.rows[0][1] : r.rows.length + ' items');
+    const label = r => (r.extra[PQ.FB_DOING] ? 'doing: ' + r.extra[PQ.FB_DOING] : r.what).slice(0, 48);
+    const wrong = runs.filter(r => got(r) !== r.want).map(r => label(r) + ' → ' + JSON.stringify(got(r)) + ' (want ' + JSON.stringify(r.want) + ')');
+    check(all.length + ' reports through handleFeedback_: ' + n(BROKEN) + ' say the form is not working (does not load or submit, blank, ' +
+          'empty dropdown, error; English and Spanish; ' + doingRows.length + ' as "trying to do") → ONE item "' + BROKEN + '" each; ' +
+          n('') + ' are neither → no item; ' + n(ROSTER) + ' are roster changes that also say the form fails → ONE roster-change item',
+          !wrong.length, wrong.length + ' wrong: ' + wrong.slice(0, 12).join(' | ') + (wrong.length > 12 ? ' | …' : ''));
+    const EXPECT = { [BROKEN]: 'emailed staff; form problem queued', [ROSTER]: 'emailed staff; roster change queued', '': 'emailed staff' };
+    const badResult = runs.filter(r => r.result !== EXPECT[r.want]).map(r => label(r) + ' → ' + JSON.stringify(r.result));
+    check('…and FormLog says which: "emailed staff; form problem queued" / "emailed staff; roster change queued" / "emailed staff"',
+          !badResult.length, badResult.length + ' wrong: ' + badResult.slice(0, 8).join(' | '));
+    check('every report e-mailed staff and nobody else (no address typed); the queue holds exactly one row per queued report',
+          w1.staffMails().length === all.length && !w1.mentorMails().length &&
+          w1.tabs.ReviewQueue.length === 1 + n(BROKEN) + n(ROSTER),
+          w1.staffMails().length + ' staff e-mails, ' + w1.mentorMails().length + ' other, ' + (w1.tabs.ReviewQueue.length - 1) + ' rows');
+    check('no ReviewQueue detail and no Audit row carries a report\'s text (the canary) or a typed club',
+          !/Fennwhistle|Nova Girls Club/.test(w1.tabs.ReviewQueue.slice(1).map(r => r[4]).join('\n')) &&
+          !/Fennwhistle|Nova Girls Club/.test(w1.audits.join('\n')));
+
+    // one such report end to end: the row, the staff e-mail, Audit, FormLog — and nothing to the sender
+    const brokenReport = () => report(AF, 'When I press Submit the page went blank. ' + CANARY + ' was there today.',
+        { [PQ.FB_DOING]: 'Marking attendance for ' + CANARY, [PQ.FB_PARTNER]: '=HYPERLINK("x")', [PQ.FB_CLUB]: 'Bright Stars',
+          [PQ.FB_DEVICE]: 'phone', [PQ.FB_EMAIL]: 'mentor@example.org' });
+    w = world({ props: STAFF });
+    const res2 = w.ctx.runResponse_('FEEDBACK', w.sheet('Feedback'), 70, brokenReport(), KEY);
+    const row = w.tabs.ReviewQueue[1] || [];
+    check('one ReviewQueue row: the issue; partner/club as typed (sheet-safe); detail = the source, the sent day, the form chosen, ' +
+          'the tag — never the report text or the address',
+          w.tabs.ReviewQueue.length === 2 && row[1] === BROKEN && row[2] === 'HYPERLINK("x")' && row[3] === 'Bright Stars' &&
+          String(row[4]).startsWith('Feedback!70 (sent 2026-09-20') && String(row[4]).includes(AF) &&
+          String(row[4]).endsWith(' [#Feedback!70]') && !/Fennwhistle|example\.org/.test(String(row[4])), JSON.stringify(row));
+    check('FormLog: "emailed staff; form problem queued" — no pointer to the Club Roster Form', res2 === 'emailed staff; form problem queued', res2);
+    check('the staff e-mail as before (the report, the Reply-To) plus the staff note naming the row; no e-mail to the sender',
+          w.mails.length === 1 && w.staffMails().length === 1 && w.staffMails()[0].replyTo === 'mentor@example.org' &&
+          w.staffMails()[0].body.includes('What happened:\nWhen I press Submit the page went blank.') &&
+          w.staffMails()[0].body.includes('Staff note: looks like the form is not working; on the ReviewQueue as Feedback!70.') &&
+          !/roster change/i.test(w.staffMails()[0].body), (w.staffMails()[0] || {}).body);
+    check('Audit: the source and the queue tag only (no girl, no typed club, no address)',
+          w.audits.some(a => a.startsWith('feedbackForm: emailed staff@example.org about ' + AF) && a.includes('; ReviewQueue [#Feedback!70]')) &&
+          cleanFor('mentor@example.org')(w.audits.join('\n')), w.audits.join(' | '));
+    w = world({ props: STAFF });
+    w.ctx.handleFeedback_(report(LA, 'El formulario no carga.', { [PQ.FB_EMAIL]: 'mentora@example.org' }), 'Feedback!76', KEY);
+    check('in Spanish, with an address: queued, the staff e-mail with that Reply-To, and still nothing to the sender',
+          w.tabs.ReviewQueue.length === 2 && w.tabs.ReviewQueue[1][1] === BROKEN && w.mails.length === 1 &&
+          w.mails[0].replyTo === 'mentora@example.org', w.mails.map(m => m.to).join(','));
+
+    // queued before the staff e-mail, which is the step that throws and is retried
+    w = world({ props: STAFF, mailFails: 1 });
+    threw = false;
+    try { w.ctx.handleFeedback_(brokenReport(), 'Feedback!71', KEY); } catch (e) { threw = /quota/.test(e.message); }
+    const again = w.ctx.handleFeedback_(brokenReport(), 'Feedback!71', KEY);
+    check('the staff send fails once (the handler throws, retried later), then the retry: one staff e-mail, ONE row, nothing to the sender',
+          threw && again === 'emailed staff; form problem queued' && w.mails.length === 1 && w.staffMails().length === 1 &&
+          w.tabs.ReviewQueue.length === 2, again + ' / ' + w.mails.map(m => m.to).join(','));
+    w = world({ props: STAFF, down: 'ReviewQueue' });
+    const down2 = w.ctx.handleFeedback_(brokenReport(), 'Feedback!72', KEY);
+    check('the ReviewQueue unavailable: still e-mailed, "add it by hand", FormLog "NOT queued (see Audit)", the Audit row names the issue',
+          down2 === 'emailed staff; form problem NOT queued (see Audit)' && w.staffMails().length === 1 &&
+          w.staffMails()[0].body.includes('could NOT be added to the ReviewQueue') &&
+          w.audits.some(x => x.startsWith('tryReview_: could not add 1 item(s) (' + BROKEN + ') for Feedback!72')) &&
+          cleanFor('mentor@example.org')(w.audits.join('\n')), down2 + ' / ' + w.audits.join(' | '));
+    w = world({ props: STAFF });
+    w.ctx.handleFeedback_(report(AF, 'The form will not submit.', { [PQ.FB_CLUB]: 'x'.repeat(200), [PQ.FB_PARTNER]: ' - = Partner' }), 'Feedback!73', KEY);
+    check('typed partner/club: a leading run of = + - @ stripped, capped at 80 — as the roster-change item\'s',
+          w.tabs.ReviewQueue.length === 2 && w.tabs.ReviewQueue[1][3].length === 80 && w.tabs.ReviewQueue[1][2] === 'Partner',
+          JSON.stringify((w.tabs.ReviewQueue[1] || []).slice(1, 4)));
+
+    // precedence, with an address: the roster change wins and keeps its pointer; the Club Roster
+    // Form chosen and reported broken stays "Club Roster Form chosen" with no pointer (#117 review)
+    w = world({ props: STAFF });
+    const bothText = w.ctx.handleFeedback_(report(AF, 'Two girls who came are not on the form and the form will not submit.',
+        { [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: 'mentor@example.org' }), 'Feedback!74', KEY);
+    check('a roster change that also says the form fails: ONE item (the roster change), the sender pointed to the Club Roster Form, FormLog says only that',
+          bothText === 'emailed staff; roster change queued; sender pointed to the Club Roster Form' && w.tabs.ReviewQueue.length === 2 &&
+          w.tabs.ReviewQueue[1][1] === ROSTER && w.mentorMails().length === 1 && w.mails.length === 2, bothText);
+    w = world({ props: STAFF });
+    const bothForm = w.ctx.handleFeedback_(report('GLOW – Club Roster Form', 'The partner dropdown is empty.',
+        { [PQ.FB_DOING]: 'Marking the roster change', [PQ.FB_CLUB]: 'Bright Stars', [PQ.FB_EMAIL]: 'mentor@example.org' }), 'Feedback!75', KEY);
+    check('the Club Roster Form chosen and reported broken: ONE item, the roster-change one ("Club Roster Form chosen"), no pointer, as today',
+          bothForm === 'emailed staff; roster change queued' && w.tabs.ReviewQueue.length === 2 && w.tabs.ReviewQueue[1][1] === ROSTER &&
+          String(w.tabs.ReviewQueue[1][4]).includes('Club Roster Form chosen') && w.mails.length === 1, bothForm);
+
+    // the Monday e-mail counts them under their own heading
+    const known = { partners: { 'fixture partner alpha': 'Fixture Partner Alpha' }, clubs: { 'bright stars': 'Bright Stars' } };
+    const rq = (row, raised, issue, partner, club, detail, resolved) => ({ row, raised, issue, partner, club, detail, resolved: resolved || '' });
+    const d1 = pr.reviewDigest_([
+      rq(2, '2026-09-27', BROKEN, 'Fixture Partner Alpha', 'Bright Stars', 'Feedback!12 (sent 2026-09-26; Africa Attendance Form): … [#Feedback!12]'),
+      rq(3, '2026-09-10', BROKEN, '', '', 'Feedback!5 (sent 2026-09-09; Asia Attendance Form): … [#Feedback!5]'),
+      rq(4, '2026-09-27', ROSTER, '', '', 'Feedback!13 (sent 2026-09-26; report text): … [#Feedback!13]'),
+      rq(5, '2026-09-20', 'Typed by hand about ' + CANARY, '', '', ''),
+      rq(6, '2026-09-01', BROKEN, '', '', 'x [#Feedback!2]', 'resolved 2026-09-02 by Ryan: fixed'),
+    ], '2026-09-28', known);
+    const t1 = d1.lines.join('\n');
+    check('reviewDigest_: "' + BROKEN + ': 2 open, 1 new, oldest 18 day(s)", each with row, date, who and its Feedback tag; the resolved one left out',
+          d1.open === 4 && d1.fresh === 2 && t1.includes(BROKEN + ': 2 open, 1 new, oldest 18 day(s)') &&
+          t1.includes('  - row 2 · raised 2026-09-27 · Fixture Partner Alpha / Bright Stars · Feedback!12') &&
+          t1.includes('  - row 3 · raised 2026-09-10 · (no partner or club) · Feedback!5') && !t1.includes('Feedback!2'), t1);
+    check('…not under "Other (added by hand)" (the hand-typed item alone is there), the roster-change heading as before, no girl',
+          t1.includes(pr.OTHER_ISSUE + ': 1 open') && t1.includes(ROSTER + ': 1 open, 1 new') && !/fennwhistle/i.test(t1), t1);
+    const d2 = pr.reviewDigest_(Array.from({ length: 3 }, (_, i) => rq(i + 2, '2026-09-0' + (i + 1), BROKEN, '', '', 'x [#Feedback!' + (i + 7) + ']')),
+                                '2026-09-28', known);
+    check('three older ones: "3 open, oldest 27 day(s)"', d2.open === 3 && d2.lines.join('\n').includes(BROKEN + ': 3 open, oldest 27 day(s)'),
+          d2.lines.join(' / '));
+    // handled today, then the weekly trigger: the rows the handler wrote are what the e-mail counts
+    w = world({ props: STAFF });
+    w.ctx.handleFeedback_(report(AF, 'The form will not submit.', { [PQ.FB_PARTNER]: 'Fixture Partner Alpha', [PQ.FB_CLUB]: 'Bright Stars' }), 'Feedback!80', KEY);
+    w.ctx.handleFeedback_(report(LA, 'El formulario no carga.'), 'Feedback!81', KEY);
+    w.ctx.handleFeedback_(report(AF, 'Please add ' + CANARY + ' to the roster.'), 'Feedback!82', KEY);
+    w.ctx.handleFeedback_(report(AF, 'The form works well, thank you.'), 'Feedback!83', KEY);
+    w.tabs.ClubRegistry = [['club_code', 'partner', 'club', 'created'], ['BRIGHTST', 'Fixture Partner Alpha', 'Bright Stars', '2026-08-26']];
+    w.tabs['SF Pending'] = [vm.runInContext('SF_PENDING_COLS', w.ctx).slice()];
+    w.tabs.Roster = [vm.runInContext('ROSTER_COLS', w.ctx).slice()];
+    const sent = w.mails.length;
+    w.ctx.sendSfPendingDigest();
+    const digest = w.mails[w.mails.length - 1] || {};
+    check('four reports handled, then the Monday e-mail: "3 open", the two broken-form rows under their heading with their Feedback tags, ' +
+          'the roster change under its own, no "Other", no girl',
+          w.mails.length === sent + 1 && digest.subject === 'GLOW weekly: 3 open ReviewQueue item(s)' &&
+          digest.body.includes(BROKEN + ': 2 open') && digest.body.includes('Fixture Partner Alpha / Bright Stars · Feedback!80') &&
+          digest.body.includes('(no partner or club) · Feedback!81') && digest.body.includes(ROSTER + ': 1 open') &&
+          !digest.body.includes(pr.OTHER_ISSUE) && !/fennwhistle/i.test(digest.body),
+          (digest.subject || 'no e-mail') + ' / ' + String(digest.body || '').replace(/\n/g, ' ⏎ ').slice(0, 400));
+  }
 }
 
 console.log('\n  the replay guard in the Club Roster Form handlers (Google services stubbed)');
@@ -2553,6 +2833,8 @@ console.log('\n  guards');
   const section = (rb.split('## Working the ReviewQueue')[1] || '').split('\n## ')[0];
   const missing = pr.REVIEW_ISSUES.filter(i => !section.includes('**' + i + '**'));
   check('docs/RUNBOOK.md "Working the ReviewQueue" has a staff action for each', !missing.length, missing.join(' | '));
+  check('…including "Form not working report" (#110): a row of its own in that table',
+        /^\| \*\*Form not working report\*\* \| \S/m.test(section));
   const SAME = loadGs(['SAME_NAME_ISSUE'], ['Config.gs', 'Normalize.gs', 'FormHandlers.gs']).SAME_NAME_ISSUE;
   const sameRow = (section.split('\n').find(l => l.startsWith('| **' + SAME + '**')) || '').replace(/\s+/g, ' ');
   check('…the same-name row covers a club on file under the wrong partner (move, then release unchanged) and a club on ' +
