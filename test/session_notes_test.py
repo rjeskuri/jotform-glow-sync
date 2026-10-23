@@ -10,8 +10,12 @@ Ryan's answers (ticket #104, 2026-10-22): label "Additional information about th
 (optional)", NO sub-label, 1,000 characters. Jotform's textarea keeps the limit as `entryLimit`
 "<Type>-<N>" and its runtime counts `Letters` as characters: "Letters-1000". The field has no
 rule, is never required or hidden, and sits after the last roster and above the links and
-Submit, at an EMPTY order (so nothing moves whether Jotform inserts or ties). Fictional clubs and
-girls only (helpers.common.link_form).
+Submit, at an EMPTY order (so nothing moves whether Jotform inserts or ties). When none is free -
+the live forms today: the tail sits right after the last roster - the tool first moves the first
+link through Submit, and the hidden fields at the orders right after, down by one, bottom-up so
+each lands on an empty order (the path Jotform keeps exactly), and refuses on a hidden or stray
+element in that run (Ryan, 2026-10-23, option A). Fictional clubs and girls only
+(helpers.common.link_form).
 """
 import contextlib
 import copy
@@ -25,7 +29,7 @@ import unittest
 from unittest import mock
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
-from helpers.common import FakeForm, SameNameFixture, create_at, link_form, rendered
+from helpers.common import FakeForm, SameNameFixture, create_at, link_form, move_all, rendered
 import auto_sync
 import form_status
 from glow import backup as glow_backup
@@ -81,6 +85,19 @@ def notes_form(gap=3, notes=None, **link_kw):
 def first_of_tail(qs):
     """The qid of the first link / Submit in render order (what the notes must sit above)."""
     return str(min((q for q in qs.values() if q["name"] in TAIL[:3]), key=links.render_key)["qid"])
+
+
+def shifted_block(qs, first):
+    """What moves down by one when no order is free before the links: `first` (the first link /
+    Submit) and everything at the consecutive orders below it, down to the first empty order -
+    the block Jotform's own insert would shift - bottom-up: written in that sequence every
+    target is empty, so Jotform keeps each order exactly. Orders unique, as notes_form's are."""
+    at = {links.order_of(q): str(q["qid"]) for q in qs.values()}
+    order, block = links.order_of(qs[first]), []
+    while order in at:
+        block.append(at[order])
+        order += 1
+    return block[::-1]
 
 
 class FakeClient:
@@ -144,23 +161,43 @@ class NotesDefinition(unittest.TestCase):
         self.assertEqual(int(m.group(1)), 1000)
 
     def test_notes_slot_is_the_lowest_empty_order_after_the_last_roster(self):
+        # notes_slot(questions) -> (order, moves): the order the field takes and, as
+        # links.plan_insert gives them, the [(qid, new order)] that free it - [] when it is free
         for kw in ({}, {"roster": True}, {"problem": False}):
             for gap in (1, 2, 5):
                 qs = notes_form(gap=gap, **kw)
-                # the first free order after q400 - not 10, the gap the tail left between the rosters
-                self.assertEqual(layout.notes_slot(qs), links.order_of(qs["400"]) + 1, (kw, gap))
-            with self.assertRaises(SystemExit, msg=kw):
-                layout.notes_slot(notes_form(gap=0, **kw))   # the repair's own result: no room
+                # the first free order after q400 - not 10, the gap the tail left between the
+                # rosters - and nothing to move
+                self.assertEqual(layout.notes_slot(qs), (links.order_of(qs["400"]) + 1, []), (kw, gap))
+            # the repair's own result, and the live forms today: no free order, so the first link
+            # through Submit and the hidden fields at the orders right after move down by one -
+            # bottom-up, each to an empty order - and the field takes the order that frees up
+            full = notes_form(gap=0, **kw)
+            first = first_of_tail(full)
+            block = shifted_block(full, first)
+            self.assertEqual(set(block), {q for q in full if links.order_of(full[q]) > links.order_of(full["400"])})
+            order, moves = layout.notes_slot(full)
+            self.assertEqual(order, links.order_of(full[first]), kw)
+            self.assertEqual(moves, [(qid, links.order_of(full[qid]) + 1) for qid in block], kw)
+            after = move_all(full, moves)
+            self.assertEqual(rendered(after), rendered(full), kw)                    # nothing re-ordered
+            self.assertNotIn(order, {links.order_of(q) for q in after.values()}, kw)  # the slot is free now
+            self.assertEqual(layout.notes_slot(after), (order, []), kw)              # and a re-plan finds it
         moved = notes_form(gap=3)
         moved["400"]["order"] = "11"                         # the last roster higher up: 12..17 free
-        self.assertEqual(layout.notes_slot(moved), 12)
+        self.assertEqual(layout.notes_slot(moved), (12, []))
         gone = notes_form(gap=3)
         del gone["400"]                                      # q350 (order 9) is the last roster
-        self.assertEqual(layout.notes_slot(gone), 10)
-        full = notes_form(gap=0)
-        full["350"]["order"] = "15"                          # q350 shares the link's order: still no room
-        with self.assertRaises(SystemExit):
-            layout.notes_slot(full)
+        self.assertEqual(layout.notes_slot(gone), (10, []))
+        spaced = notes_form(gap=0)                           # a gap below Submit: what is past it stays
+        for qid in ("103", "18"):
+            spaced[qid]["order"] = str(links.order_of(spaced[qid]) + 2)
+        at = links.order_of(spaced["443"])
+        self.assertEqual(layout.notes_slot(spaced), (at, [("2", at + 2), ("443", at + 1)]))
+        tied = notes_form(gap=0)
+        tied["350"]["order"] = "15"                          # a roster shares the link's order: the order
+        with self.assertRaises(SystemExit):                  # freed would not be empty - a refusal still
+            layout.notes_slot(tied)
 
     def test_a_roster_the_sync_creates_later_renders_above_the_notes(self):
         for kw in ({}, {"roster": True}, {"problem": False}):
@@ -200,7 +237,8 @@ class NotesDefinition(unittest.TestCase):
 
 class NotesTool(unittest.TestCase):
     """tools/add_session_notes.py main(argv, client=fake): placement under both create
-    behaviours, the dry run, idempotence, the snapshot, the refusal, the re-read, --remove."""
+    behaviours, the dry run, idempotence, the snapshot, the moves when no order is free, the
+    refusals, the re-read, --remove."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()      # backups/ of the run (glow.backup.REPO)
@@ -399,21 +437,134 @@ class NotesTool(unittest.TestCase):
         self.assertIn("properties-latest.json", self.snapshots(fid))     # a full snapshot (glow.backup.snapshot)
         self.assertIn(f"backups/{fid}/{stamped[0]}", out)                # the tool names the rollback path
 
-    def test_no_empty_order_before_the_links_is_refused(self):
-        for kw in ({}, {"roster": True}, {"problem": False}):
-            full = notes_form(gap=0, **kw)                               # the repair's result: no free order
-            self.assertEqual(layout.audit_layout(full), [], kw)          # a healthy layout, just no room
+    def watch_first_write(self, fake, fid):
+        """fake.post_form wrapped: the dict returned gets, at the first write, the stamped
+        snapshots of the form then on disk (the rollback has to be there before any write)."""
+        seen, post = {}, fake.post_form
+
+        def post_form(path, data, label):
+            if "at first write" not in seen:
+                seen["at first write"] = [self.saved(fid, n) for n in self.stamped(fid)]
+            return post(path, data, label)
+        fake.post_form = post_form
+        return seen
+
+    def test_no_empty_order_before_the_links_makes_room_then_adds_the_field(self):
+        # Ryan, 2026-10-23 (option A): the live forms have no free order between the last roster
+        # and the first link, so the tool makes room - the first link through Submit and the
+        # hidden fields at the orders right after move down by one, bottom-up so each lands on an
+        # empty order (the path Jotform keeps exactly), Submit before the links - then creates the
+        # field at the order that frees up. Four layouts: one link, two links, no link, a gap
+        # below Submit (the hidden fields past it stay put).
+        spaced = notes_form(gap=0)
+        for qid in ("103", "18"):
+            spaced[qid]["order"] = str(links.order_of(spaced[qid]) + 2)
+        cases = [(TEMPLATE, notes_form(gap=0), "400", "443"),
+                 (AFRICA, notes_form(gap=0, roster=True), "400", "460"),
+                 (ASIA, notes_form(gap=0, problem=False), "400", "2"),
+                 (US, spaced, "400", "443")]
+        for behaviour in ("insert", "tie"):
+            for fid, base, last, first in cases:
+                with self.subTest(behaviour=behaviour, form=fid):
+                    self.assertEqual(layout.audit_layout(base), [])          # healthy, just no room
+                    slot = links.order_of(base[first])                       # the first link's order, freed
+                    block = shifted_block(base, first)
+                    self.assertGreater(len(block), 1)
+                    moves = [(f"/form/{fid}/question/{qid}", {"order": str(links.order_of(base[qid]) + 1)})
+                             for qid in block]
+                    lines = [f"move {base[qid]['name']} (q{qid}) {links.order_of(base[qid])} -> "
+                             f"{links.order_of(base[qid]) + 1}" for qid in block]
+                    lines.append(f"ADD {NOTES} at order {slot} (after q{last}, above q{first})")
+                    # the dry run prints the moves and the create, and writes nothing
+                    fake = FakeClient({fid: copy.deepcopy(base)}, behaviour)
+                    code, out = self.run_tool(fake, "--form", fid)
+                    self.assertEqual(code, 0, out)
+                    self.assertIn("DRY RUN", out)
+                    for line in lines:
+                        self.assertIn(line, out)
+                    self.assertEqual(len(re.findall(r"\bmove \S+ \(q\d+\) \d+ -> \d+", out)), len(block))
+                    self.assertEqual((fake.writes, fake.forms[fid], self.snapshots(fid)), ([], base, []))
+                    # --apply: the snapshot, the moves bottom-up (each target empty when it is
+                    # written), then one create at the freed order
+                    seen = self.watch_first_write(fake, fid)
+                    code, out = self.run_tool(fake, "--form", fid, "--apply")
+                    self.assertEqual(code, 0, out)
+                    self.assertEqual(fake.writes[:-1], moves)
+                    path, sent = fake.writes[-1]
+                    self.assertEqual(path, f"/form/{fid}/questions")
+                    self.assertEqual((sent["name"], sent["order"]), (NOTES, str(slot)))
+                    for k, v in WANT.items():
+                        self.assertEqual(sent.get(k), v, k)
+                    self.assertLessEqual(set(sent), set(WANT) | {"name", "order", "subLabel", "hidden"})
+                    after = fake.forms[fid]
+                    ours = links.named(after, NOTES)
+                    self.assertEqual(len(ours), 1)
+                    q = ours[0]
+                    self.assertEqual(q["order"], str(slot))
+                    for k, v in WANT.items():
+                        self.assertEqual(q.get(k), v, k)
+                    self.assertNotEqual(q.get("hidden"), "Yes")
+                    names = rendered(after)
+                    i = names.index(NOTES)
+                    self.assertEqual((names[i - 1], names[i + 1]), (base[last]["name"], base[first]["name"]))
+                    self.assertEqual(names[:i] + names[i + 1:], rendered(base))   # nothing else re-ordered
+                    want = {qid: dict(x, order=str(links.order_of(x) + 1)) if qid in block else x
+                            for qid, x in base.items()}
+                    self.assertEqual({k: v for k, v in after.items() if k != q["qid"]}, want)  # orders only
+                    self.assertEqual(layout.audit_layout(after), [])
+                    for line in lines:
+                        self.assertIn(line, out)
+                    stamped = self.stamped(fid)
+                    self.assertEqual(seen["at first write"], [base])     # the "before", on disk before the first move
+                    self.assertEqual((len(stamped), self.saved(fid, stamped[0])), (1, base))
+                    self.assertIn(f"backups/{fid}/{stamped[0]}", out)
+                    # a second run finds it as wanted: nothing moves again
+                    code, out = self.run_tool(fake, "--form", fid, "--apply")
+                    self.assertEqual(code, 0, out)
+                    self.assertEqual(len(fake.writes), len(block) + 1)
+                    self.assertIn(f"present (q{q['qid']}) - as wanted", out)
+                    self.tmp.cleanup()
+                    self.tmp = tempfile.TemporaryDirectory()
+
+    def test_a_hidden_or_stray_element_in_the_run_is_refused(self):
+        # the run the tool would move - the first link through Submit - holds a hidden link or
+        # Submit, or something a mentor can see besides the links and Submit: a refusal naming
+        # the element, in the dry run and with --apply; nothing written, no snapshot
+        def between(q, conditions=None):
+            """notes_form(gap=0) with `q` between the problem link and Submit (Submit and the
+            hidden fields one further down), and the rules the form's properties answer."""
+            qs = notes_form(gap=0)
+            for qid in ("2", "103", "18"):
+                qs[qid]["order"] = str(links.order_of(qs[qid]) + 1)
+            qs[q["qid"]] = dict(q, order=str(links.order_of(qs["443"]) + 1))
+            return qs, conditions
+        hidden_first = notes_form(gap=0, roster=True)
+        hidden_first["460"]["hidden"] = "Yes"
+        hidden_second = notes_form(gap=0, roster=True)
+        hidden_second["443"]["hidden"] = "Yes"
+        hidden_submit = notes_form(gap=0, problem=False)
+        hidden_submit["2"]["hidden"] = "Yes"
+        stray = {"qid": "470", "type": "control_textbox", "name": "somethingElse"}
+        shown = [{"id": "7", "terms": [], "action": [{"visibility": "Show", "field": "470"}]}]
+        cases = (("hidden first link", hidden_first, None, "q460", "hidden"),
+                 ("hidden second link", hidden_second, None, "q443", "hidden"),
+                 ("hidden Submit", hidden_submit, None, "q2", "hidden"),
+                 ("visible stray", *between(stray), "q470", "somethingElse"),
+                 ("hidden stray a rule shows", *between(dict(stray, hidden="Yes"), shown), "q470", "somethingElse"))
+        for name, qs, conditions, who, word in cases:
+            self.assertEqual(layout.audit_layout(qs), [], name)          # nothing else wrong with the layout
             for argv in ((), ("--apply",)):
-                fake = FakeClient({TEMPLATE: copy.deepcopy(full)})
+                fake = FakeClient({TEMPLATE: copy.deepcopy(qs)}, conditions={TEMPLATE: conditions or []})
                 code, out = self.run_tool(fake, "--form", TEMPLATE, *argv)
-                self.assertRefused(code, (kw, argv))
-                self.assertIn("order", code)                             # the reason, not a traceback
-                self.assertEqual(fake.writes, [], (kw, argv))
-                self.assertEqual(fake.forms[TEMPLATE], full, (kw, argv))
-                self.assertEqual(self.snapshots(TEMPLATE), [], (kw, argv))
+                self.assertRefused(code, (name, argv))
+                self.assertIn(who, code, (name, argv))                   # the reason names the element
+                self.assertIn(word, code, (name, argv))
+                self.assertEqual(fake.writes, [], (name, argv))
+                self.assertEqual(fake.forms[TEMPLATE], qs, (name, argv))
+                self.assertEqual(self.snapshots(TEMPLATE), [], (name, argv))
         # every form is planned before anything is written: a refusal on the second form leaves
         # the first one unchanged too
-        forms = {TEMPLATE: notes_form(gap=3), AFRICA: notes_form(gap=0)}
+        forms = {TEMPLATE: notes_form(gap=3), AFRICA: hidden_first}
         fake = FakeClient(copy.deepcopy(forms))
         code, out = self.run_tool(fake, "--form", TEMPLATE, "--form", AFRICA, "--apply")
         self.assertRefused(code)
