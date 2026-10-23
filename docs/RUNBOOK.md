@@ -2397,12 +2397,12 @@ or a command line.
 | `… - not created`: club code on another account | The club was renamed in the sheet, not in Salesforce | Rename that account to the question-5 name first ("Renaming a club"); no new account |
 | `… - not created`: the name is already an account | The processor made it first, or another record has the name | A partner-less Club: set its `ParentId` as the item says (write connector, Ryan's go). Anything else: look before acting. |
 | `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
-| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds |
+| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds. Check its account name against the Monthly Reports' "test" filter ("The keep list") |
 | `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
 | `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
 | `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
 | `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
-| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv` |
+| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv`; check the new name against the Monthly Reports' "test" filter ("The keep list") |
 
 **SF Pending**: when it creates an account, the run marks that club's SF Pending row
 `done (auto <date>)`: one cell, found by its header, read again before the write and after.
@@ -2832,7 +2832,8 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
     (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
     map the automatic club accounts read, partner → its account; "New clubs' accounts,
     automatically"). Two lists of the same 49 partners, kept separate on purpose: one is filter
-    text, the other account ids.
+    text, the other account ids. Check its account name against the Monthly Reports' "test"
+    filter ("The keep list").
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -3205,13 +3206,14 @@ keep the dashboard names listed above. Item 12 has no label today; its `label_ta
 measure, "New mentors recruited", which #80 confirms when it builds the report.
 
 Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
-a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's: every report in
-"DHIS2 Reports" and every dashboard in "DHIS2 Dashboards" and "Dhis2 Dashbords" whose Id is not
-in the file, and every report outside those folders that one of the 15 dashboards uses today and
-whose Id is not in the file. Today those are two of the three "Public Reports" reports on a
-dashboard: "Pending Approvals monthly report" (`00ORP000006XSy92AG`) and "New Monthly Reports by
-account" (`00ORP000006V09x2AC`); the third is item 17, kept. Task #72 moves them, and the archive
-rule above holds for each move. The two Attendance folders and the "Jotform Attendance" dashboard
+a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's three folders, which
+task #72 moves: every report in "DHIS2 Reports" and every dashboard in "DHIS2 Dashboards" and
+"Dhis2 Dashbords" whose Id is not in the file; the archive rule above holds for each move. Two
+reports outside those folders are on one of their 15 dashboards today and not in the file, both in
+"Public Reports": "Pending Approvals monthly report" (`00ORP000006XSy92AG`) and "New Monthly
+Reports by account" (`00ORP000006V09x2AC`); the third "Public Reports" report on a dashboard is
+item 17, kept. Those two sit outside #72's folders, and Ryan decides on #72 whether they move. The
+two Attendance folders and the "Jotform Attendance" dashboard
 are outside the scope: epic #68 leaves them untouched.
 
 Test records are Monthly Reports filed on a test account or on no account. The test-record rule
