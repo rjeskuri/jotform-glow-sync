@@ -30,14 +30,17 @@ headings, so a heading is never renamed (`make check` runs
   - [Translations](#translations)
   - [Links above Submit (problem report, Club Roster Form)](#links-above-submit-problem-report-club-roster-form)
   - [Rosters above Submit](#rosters-above-submit)
+  - [Session notes on the attendance forms](#session-notes-on-the-attendance-forms)
   - [Header logo](#header-logo)
   - [Photos](#photos)
+  - [Photo mover](#photo-mover)
   - [Disabling a regional form](#disabling-a-regional-form)
   - [Building a new regional form (not maintenance)](#building-a-new-regional-form-not-maintenance)
 - [Clubs](#clubs)
   - [Renaming a club](#renaming-a-club)
   - [Moving a club to another partner (a mistyped partner)](#moving-a-club-to-another-partner-a-mistyped-partner)
   - [Club names two partners share](#club-names-two-partners-share)
+  - [Club names that look alike](#club-names-that-look-alike)
   - [Clubs that do not use Jotform](#clubs-that-do-not-use-jotform)
   - [Deactivating a club](#deactivating-a-club)
   - [Roster rebuild and upload (offline path)](#roster-rebuild-and-upload-offline-path)
@@ -52,6 +55,9 @@ headings, so a heading is never renamed (`make check` runs
   - [Duplicate girls in Salesforce](#duplicate-girls-in-salesforce)
   - [Attendance totals and partner-reported counts](#attendance-totals-and-partner-reported-counts)
   - [Attendance dashboard in Salesforce](#attendance-dashboard-in-salesforce)
+  - [Submission timing in Salesforce](#submission-timing-in-salesforce)
+  - [Monthly Report dashboards in Salesforce](#monthly-report-dashboards-in-salesforce)
+  - [Interactive dashboard in Salesforce](#interactive-dashboard-in-salesforce)
   - [September back-fill: the resolver](#september-back-fill-the-resolver)
   - [Back-fill of attendance into Salesforce](#back-fill-of-attendance-into-salesforce)
 - [Admin and work log](#admin-and-work-log)
@@ -1024,7 +1030,11 @@ by a test to the table in "The forms"):
 | `problem` | `somethingNotWorking` (q443) | Click here to report a problem | the problem-report form |
 
 The Club Roster Form link sits above the problem link, so a mentor with a
-roster change meets it first. Adding, re-checking or removing one:
+roster change meets it first. Place it only after the session-notes field
+(task #105; "Session notes on the attendance forms"): the notes go on first,
+because placing this link leaves Submit sharing an order with the hidden field
+below it, and `add_session_notes.py` then refuses on the tie. Adding,
+re-checking or removing one:
 
 ```bash
 python3 backup_forms.py                                           # optional: the tool snapshots each form it writes
@@ -1092,6 +1102,62 @@ python3 tools/fix_roster_order.py --form <id> --undo <stamp>             # the r
 The full procedure - the runner paused, what the tool refuses, how it stops and
 what `--undo` can still restore: [plan](plans/2026-09-29-rosters-above-submit.md#from-the-runbook-moved-2026-10-09).
 
+## Session notes on the attendance forms
+
+- **When:** placing, re-checking or removing the optional session-notes field; `form_status` says `session notes: absent` once the field is expected, or flags one (`!!` lines naming `sessionNotes`).
+- **Status:** built, not live (ticket #104, 2026-10-23). Task #105 places it on the template and the four regional forms on Ryan's go, after a read-only `GET /form/{id}/questions` of a live textarea confirms the limit property (`entryLimit`, `Letters-1000`: the name from Jotform's own example, the value from the runtime; not yet read from this account), and flips `glow/layout.py` `NOTES_EXPECTED` to `True`.
+- **Dry run:** `python3 tools/add_session_notes.py`.
+- **Apply:** its `--apply`, the template first; the label's translations are a second step (task #105): until then every language shows it in English.
+- **Verify:** the tool's re-read after the write; `form_status` (`session notes:`, `layout:`).
+- **Rollback:** `--remove --apply`, the questions snapshot, or Revision History.
+
+One textarea named `sessionNotes` on every attendance form, found by its name
+(the qid differs per form): the label "Additional information about this
+session (optional)", no sub-label, 1,000 characters, not required, not hidden,
+no rule (Ryan's answers, 2026-10-22; `glow/layout.py` `NOTES_PROPS`). It sits
+after the last roster and above the links and Submit, so a mentor meets it
+once her girls are ticked. The sync leaves it alone: no generated rule names
+it, `--prune` deletes rosters only, and a roster the sync creates afterwards
+goes above it (the field is the first element of the fence `glow/layout.py`
+guards, like the links and Submit; test-pinned). Mentors' notes are free text
+that can name girls: no tool prints a submission's notes, counts only.
+
+```bash
+python3 tools/add_session_notes.py                                # dry run, template + 4 regionals
+python3 tools/add_session_notes.py --form 262352490535154 --apply # the template first; open its page
+python3 tools/add_session_notes.py --apply                        # the four regional forms
+python3 tools/add_session_notes.py --remove --apply               # take it out again (the rollback)
+```
+
+The tool plans all five forms before it writes any. The field goes at an
+empty order between the last roster and the first link, where nothing moves
+whether Jotform inserts or ties. The live forms have none today (the
+2026-09-30 repair put the links, Submit and the hidden bridge fields at the
+orders right after the last roster, and every roster inserted since kept them
+there), so the tool first makes room the way `add_feedback_link.py` does
+(Ryan, 2026-10-23): the first link through Submit and the hidden fields at the
+orders right after move one down, bottom-up so each lands on an empty order
+(the path Jotform keeps exactly), then one create at the freed order - about
+ten writes per form, each printed as `move <name> (qN) a -> b`. So the
+sequence matters: **the session notes go on before the Club Roster Form link**
+(`add_feedback_link.py --link roster`, BACKLOG 46; "Links above Submit"), whose
+placing leaves Submit sharing an order with the hidden field below it. After
+that link the tool refuses on the tie, naming both questions: take the link
+out (`--link roster --remove --apply`), add the notes, then place the link
+again - it goes directly above the problem link, below the notes
+(test-pinned). Refuses rather than guesses: two fields of the name, the field
+below a link or Submit or a roster below it (move it in the builder, or
+`--remove --apply` and add it again), a hidden link or Submit, anything a
+mentor can see between the last roster and Submit besides the links and
+Submit, two questions of the tail sharing an order. A drifted flag or text
+(`required`, `hidden`, the label, the limit, a sub-label) is set back in place
+in one write (`UPDATE <property>: old -> new`); re-running is a no-op. With
+`--apply` each form is snapshotted first (`backups/<id>/questions-<stamp>.json`),
+then re-read: the field exactly once, its properties, every move landed, its
+place, no rule mentioning it - a mismatch stops the tool there, non-zero,
+naming that form's snapshot; the forms after it are neither snapshotted nor
+written, the forms before it stay written and verified.
+
 ## Header logo
 
 - **When:** the logo's first upload, or a new logo file.
@@ -1138,9 +1204,11 @@ Jotform's Revision History. The image carries no translated text (q13 is in
 **Photos.** Since 2026-10-01 no attendance photo goes to Salesforce (the CEO's decision: the
 files there were deleted that day and the four regional forms' mapping lost its upload row; the
 template follows in step 1). Since <date> the photos are copied by Jotform's Google Drive
-integration into the My Drive of <role account>, folder `Attendance photos - <Region>`, one
-subfolder per submission named `<Club Name> <Attendance Date>`, uploaded files only, no PDF
-(the PDF renders every ticked girl's name). The photo stays required on the forms. The photos
+integration into the My Drive of Ryan's company account (Ryan, 2026-10-21: Jotform uses only
+that account), folder `Attendance photos - <Region>`, one subfolder per submission named
+`<Club Name> <Attendance Date>`, uploaded files only, no PDF (the PDF renders every ticked
+girl's name). The photo mover then moves each subfolder into that region's folder on the
+company Shared Drive ("Photo mover", below). The photo stays required on the forms. The photos
 before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
 <named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
 
@@ -1169,8 +1237,9 @@ plain `diff` of the snapshot before and the one after.*
    `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
    this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
-   Settings → Integrations → Google Drive → Authorize → log in as the role account (never your
-   own) → Folder Name `Attendance photos - Template` → Create Subfolders for Submissions ON,
+   Settings → Integrations → Google Drive → Authorize → log in as Ryan's company account (the
+   one the photo mover runs on) → Folder Name `Attendance photos - Template` (the photo mover's
+   source folder, made at its setup before this step: "Photo mover") → Create Subfolders for Submissions ON,
    name = the "Club Name" field that is **question 5** (the hidden text field; the builder shows
    the Club picker under the same label - prefer the hidden one; if only the picker is offered,
    use it and say so in the plan's Result), a space, then "Attendance Date" → Send Uploaded Files
@@ -1215,7 +1284,8 @@ plain `diff` of the snapshot before and the one after.*
    stays in the `emails` list is unverified; the diff of step 4 shows whatever changed and that
    it came back).
 4. **Read back, within a few minutes:**
-   - Drive (as the role account): folder `Attendance photos - Template` → one subfolder named
+   - Drive (as Ryan's company account; once the photo mover runs, on the Shared Drive's
+     Template folder instead): folder `Attendance photos - Template` → one subfolder named
      exactly `<that club> <that date>` → one image file, **no PDF**.
    - Salesforce (read-only SOQL): exactly one new batch for that club and date,
      `Processing_Status__c = 'Failed'`, `Status_Message__c LIKE 'Duplicate:%'` (it added nobody),
@@ -1258,7 +1328,8 @@ plain `diff` of the snapshot before and the one after.*
    U.S `drive: not wanted (form DISABLED)`, `integration: ok`; `form_status.py` → every form
    CLEAN, `salesforce yes`.
 6. **When copies stop** (a subfolder dated more than a week ago is the newest while the form has
-   newer submissions; or Jotform e-mails a token error): the Google token has lapsed. In the
+   newer submissions - look in the region's folder on the Shared Drive once the photo mover runs;
+   or Jotform e-mails a token error): the Google token has lapsed. In the
    builder, on each affected form: Settings → Integrations → Google Drive → remove → add again
    with the same settings (step 2, backup and diff included); read back with the next real
    submission. Nothing in the repo raises an alarm for this (BACKLOG 70); look at the folders
@@ -1280,6 +1351,68 @@ the photos stay in Jotform and nothing else on the form changes (the before/afte
 save says so). The template's Salesforce upload row is re-added only on the CEO's word, with
 `UPLOADS = ["19"]` put back in `tools/integration_status.py`. What is already in Drive is the
 owner's to delete (the CEO's retention decision).
+
+## Photo mover
+
+- **When:** setting it up (once, before #63 points the forms' Drive integrations at its source folders), the template's test upload after #63, a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
+- **Status:** built offline 2026-10-21 (ticket #89), not set up yet; it is set up first, then #63 (Ryan, 2026-10-22; [plan](plans/2026-10-21-drive-photo-mover.md#result)).
+- **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, by counts and folder names; nothing changes.
+- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
+- **Verify:** the execution's log (`done: N folder(s) moved, N file(s) merged, 0 failure(s)`); the subfolder is in the region's folder on the Shared Drive and gone from `Attendance photos - <Region>`, which stays.
+- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; move a subfolder back into `Attendance photos - <Region>` by hand to undo a move.
+
+Jotform's Google Drive integration writes only into Ryan's My Drive ("Photos", above); the
+photos belong on the company Shared Drive. `drive-sync/` is a standalone Apps Script project
+owned by Ryan's company account - not the sheet's script, whose scopes must not change
+(CLAUDE.md rule 11) - that every 15 minutes moves each submission subfolder that has not changed
+for 10 minutes from `Attendance photos - <Region>` into that region's folder on the Shared Drive.
+Setup, Script Properties and the push: `drive-sync/README.md`.
+
+The order, each live step on Ryan's go (Ryan, 2026-10-22):
+
+1. PR #91 lands: code only, nothing live.
+2. Setup (`drive-sync/README.md`, steps 1-6): the Shared Drive's folders, named exactly
+   `Africa`, `Asia`, `Latin America`, `Template` (`U.S` only if its form is re-enabled); one My
+   Drive source folder per region for Jotform's uploads, `Attendance photos - <Region>`; the
+   standalone project (`.clasp.json` from the example) and its push; the Script Properties
+   `SOURCE_FOLDER_<REGION>` / `TARGET_FOLDER_<REGION>`; `previewMoves` on the empty folders
+   (writes nothing).
+3. #63, the template only (Ryan): the template's Google Drive integration pointed at
+   `Attendance photos - Template` ("Photos", above, steps 1-2). No regional form yet.
+4. A test upload on the template and its read-back ("Photos", steps 3-4), `previewMoves`, one
+   `moveSettledPhotos`, then `installTrigger`.
+5. #63, the regional forms (Ryan), only after step 4 passed: "Photos", step 5, one form at a
+   time, each followed by a check of the next run's log for that region (no `CONFIG refused`,
+   no `UNKNOWN`; its first subfolder moved) before the next form.
+
+What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N`,
+then the folders by name (club and date; never a file's name or contents).
+
+- **move**: the whole subfolder went to the Shared Drive.
+- **merge**: that name was already there once (a resubmission): its files went in one by one,
+  beside what is there; **kept** files (same name and size already there) stay in My Drive. A
+  subfolder of kept files only (`0 file(s) in`) changes nothing, never holds up a same-name copy
+  with new photos, and is logged again every run until Ryan deletes it by hand after a look; the
+  mover never trashes anything.
+- **waiting**: a file changed less than 10 minutes ago, or another subfolder of the same name
+  moved or merged files this run; the next run takes it (a backlog of same-name copies clears
+  one per run).
+- **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
+  moving at 4.5; what it did not read is not touched, and the next run carries on.
+- **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
+  hand (pick the right folder), or rename one of the two there.
+- **UNKNOWN**: a folder that is no region's; left alone.
+- **CONFIG refused**: a Script Property is missing or wrong (half a pair, an id used twice, a
+  source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
+  `Africa`, `Asia`, `Latin America`, `U.S` or `Template`); nothing read, nothing moved. Fix the
+  property in Project Settings → Script Properties, or the folder's name.
+- **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a move; the run ends in an error and Google
+  sends the owner its failure summary. On the first move, a permission error means Ryan's role on
+  the Shared Drive must be raised to Manager ([plan](plans/2026-10-21-drive-photo-mover.md),
+  Risks).
+
+Nothing is shared beyond the Shared Drive's members (the named list: the CEO and Ryan, never
+"anyone with the link"): the mover never shares, links, copies, trashes or e-mails a file.
 
 ## Disabling a regional form
 
@@ -1668,6 +1801,116 @@ lines counted before the apply, the verify and the browser checks - and its roll
   picker does not list") on every run until that apply, or until a roster
   change in that region makes it apply.
 
+## Club names that look alike
+
+- **When:** before GLOW renames clubs into a country format, to see which names already collide or nearly do; as the input for the duplicate-club checks (ticket #84).
+- **Status:** built 2026-10 (ticket #94; `plan-renames` ticket #95, waiting on GLOW's format, task #99); it runs without `--countries` meanwhile, and the `country` column fills once the Account field is chosen. Which Salesforce Account field holds a partner's country (the ticket outline's step 4) is not settled: the candidates are `Country__c` (a picklist), `BillingCountry` and `ShippingCountry`, and their non-blank counts over the partner accounts are not taken yet.
+- **Dry run:** the whole tool is one: it reads exports and writes only its own CSV.
+- **Apply:** none; a rename it points at goes through "Renaming a club".
+- **Verify:** the counts line, against the CSV's rows.
+- **Rollback:** none needed (nothing is written outside `data/`).
+
+`tools/club_names.py similar` compares every club of the Roster with every
+other and prints the lookalikes in groups. A club is one partner + club name
+(compared with case and spacing ignored, `glow.text.key`), whatever its
+status, so a retired club still counts. The tool reads files only: no
+Jotform, Sheets or Salesforce call, and it prints club and partner names,
+regions and counts, never a girl's name. Its exports and its CSV live in
+`data/`, which stays uncommitted (the Roster export holds the girls' names).
+
+```bash
+mkdir -p data/club_names                     # the sync's --summary-json does not make it
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+python3 tools/sheets_client.py export Partners data/partners_<date>.csv
+# optional, for the sf_name column: each region's sync dry run with its summary (Jotform GET only)
+python3 sync_attendance_form.py data/roster_<date>.csv --roster \
+        --partners data/partners_<date>.csv \
+        --region Africa --form 262382821971058 \
+        --summary-json data/club_names/plan_africa_<date>.json            # and Asia, Latin America, U.S
+python3 tools/club_names.py similar --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv \
+        [--countries data/club_names/partner_countries.csv] \
+        [--sf-names data/club_names/plan_africa_<date>.json --sf-names ...] \
+        --csv data/club_names/similar_<date>.csv
+```
+
+Two names match as
+
+- `same`: equal apart from capitals and spacing ("Sunrise Club", "SUNRISE  CLUB");
+- `folded`: equal once accents, punctuation and spacing are folded away
+  ("Niñas Unidas", "Ninas-Unidas"; "G.L.O.W. Club", "Glow Club");
+- `close`: the folded names at least `--threshold` alike (difflib's ratio,
+  default 0.85: "Sunrise Club", "Sunrize Club") and carrying the same numbers
+  in the same order, so "Harbor Club 1" and "Harbor Club 2" never match.
+
+A group is every club joined by a chain of matches, so two clubs in one group
+need not match each other directly. The first line counts them:
+`groups: N (same A, folded B, close C); clubs in them: M`. A mixed group
+counts under the **weakest link it needs** to be one group: `same` when its
+`same` pairs alone connect it, else `folded` when its `same` and `folded`
+pairs do, else `close`. So two `same` pairs joined only by a `close` pair are
+one `close` group, although every club's own `match` is `same`. Each group follows, one line per club with its
+partner, region, form and active girls. The seven names two partners share
+("Club names two partners share") come out with match `same`, and with
+`--sf-names` each of those clubs' `sf_name` is its `<club> - <partner>`.
+
+The CSV (`--csv`, its folder made when missing; only the header when there is no group), one row per club in a group:
+
+| Column | What |
+|---|---|
+| `group` | the group's number in this run (groups ordered by folded name) |
+| `match` | the strongest kind joining this club to another of its group: `same`, `folded` or `close` |
+| `club`, `partner` | as the Roster spells them (whitespace collapsed), from the club's first active row, else its first row |
+| `region` | the region cell of that row, in the forms' spelling when it is one of theirs, else as written |
+| `form` | `retired (jotform=no)` (its partner is marked `no` in the Partners tab), else `none (no active girl)`, else `none (no region)` (a blank region or one no form has), else the form's title, such as `Africa Attendance Form` - checked in that order |
+| `country` | the partner's country from `--countries` (a `partner,country` CSV); blank without it |
+| `sf_name` | what the club sends to question 5 (its Salesforce Account name), from the `sf_names` of the `--sf-names` summaries; blank without them, or for a club none of them lists |
+| `status` | `active` (at least one active girl) or `inactive` |
+| `active_girls` | the club's active rows |
+| `same_partner` | `yes` when every club of the group has one partner (one partner's own lookalikes), else `no` |
+
+`tools/club_names.py plan-renames` (ticket #95) plans the rename into the
+format GLOW picks, and renames nothing: from the same exports, a
+`partner,country` CSV (`--countries`), every region's `--summary-json`
+(`--sf-names`: each club's question 5 now) and `--format` (placeholders
+`{country}`, `{club}`, `{partner}`, `{region}`, e.g. `"{country} - {club}"`),
+each active club of a partner not marked `jotform=no` gets `new_club`, the
+format filled in (spacing collapsed), and `new_sf_name`, what its question 5
+(its Salesforce Account name) becomes. `--scope all` takes every such club,
+`--scope similar --similar-csv data/club_names/similar_<date>.csv` only those
+`similar --csv` listed; inactive and retired clubs keep their names. A club
+whose question 5 is `<club> - <partner>` keeps that suffix after the new name
+with `--keep-long yes` and drops it with `no`; a plain one never gains it. A
+club already in the format is `unchanged`, so a second run over the renamed
+Roster plans nothing. Any refusal stops the plan, lists every refused club
+with its reason and writes no `--out`: no country for its partner (or no
+region when the format has `{region}`); `|`, `{` or `}` in the new name; a
+`new_sf_name` equal (by key) to another club's, planned or keeping its name
+(one Salesforce Account); a `new_club` another partner's club has after the
+renames, in any status, unless its `new_sf_name` is the long form ("Club names
+two partners share"); a `new_sf_name` over 255 characters; a cycle of planned
+clubs each taking another's current question 5 (two clubs swapping names, or a
+ring of three or more: no rename order works), every club of the cycle named.
+The last line counts `to rename N, unchanged N, refused N`; the CSV has
+`partner, club, region, old_sf_name, new_club, new_sf_name, action` (`rename`
+or `unchanged`) and `after`. `after` is blank unless the club's `new_sf_name`
+equals (by key) another planned club's current question 5: then it holds that
+`old_sf_name` as the other club's row has it, and the run prints an
+`order: rename <that club> ... first, then <this club> ...` line. In the
+rollout, **rename the Account named in `after` first** (and that club's
+question 5 with it), then this club's: renamed the other way round, two clubs
+would send one Account name for a while. The rename itself, Accounts first, is
+task #99's plan.
+
+```bash
+python3 tools/club_names.py plan-renames --roster data/roster_<date>.csv \
+        --partners data/partners_<date>.csv \
+        --countries data/club_names/partner_countries.csv \
+        --sf-names data/club_names/plan_africa_<date>.json --sf-names ... \
+        --format "{country} - {club}" --scope all --keep-long yes \
+        --out data/club_names/renames_<date>.csv
+```
+
 ## Clubs that do not use Jotform
 
 - **When:** a partner's clubs stop (or start again) reporting through Jotform: the Partners tab's `jotform` cell.
@@ -1931,15 +2174,17 @@ trigger's hour, which follows the script project's zone
   a club that is already enrolled" → partner → club → ADD / REMOVE, one
   submission per club. For the mentor e-mail use your own address (the
   confirmation echoes what you typed). REMOVE matches the enrolled spelling
-  only (capitals and spacing are ignored; accents, punctuation and middle
-  names are not): copy each name from the club's Roster rows.
+  (capitals, spacing, accents and punctuation are ignored, when that leaves
+  one girl of the club; a middle name left out or a letter changed is not
+  matched): copy each name from the club's Roster rows.
 
 | Issue | What to do |
 |---|---|
 | **New club held as a possible duplicate** | "Enroll a NEW club" was sent for what may be a club already on file: nothing was imported, and the mentor was told it is being checked. Detail says why — names already active in one club, a club name close to one of the partner's, a typed organization close to a partner on file, or a re-enrollment whose list is mostly not the club's — and names the club(s) on file. Compare the response row (the tag) with those clubs' Roster rows. **Same club:** enter only its new girls on "Add or remove girls" for the club on file (REMOVE anyone who has left), then `resolved <date> by <name>: same club as <club>`. **A new club after all, or the new list is right:** `release <date> by <name>: <why>` (`release` must be the first word), then run **Process any missed form responses**: it asks about released rows separately and imports each as sent. **If the reason says "the organization was typed as …, close to … on file"**, fix that first, or the club is filed under a second spelling of the partner (no region, a second form section — the `ion bu` case): if it is that partner, set the response row's `Partner organization` cell to the partner exactly as the Partners tab spells it (the row stays matched to its item by its Timestamp, and the release preview shows the corrected partner); if it really is another organization, add it to the Partners tab with its region. Until then the release run refuses it (`ERROR: release refused: …`, offered again by the next run). **Sent again under another name and already imported** (a later "Enroll a NEW club" row of the partner's, its club now on file with most of these girls — 2026-10-16: Kawempe Youth Center's Burning Flames): compare the two lists first — a girl on the held list but not on the one sent again is entered on "Add or remove girls" for the imported club, or the partner is asked, since the held response never runs — then `resolved <date> by <name>: sent again as <club> (Roster Form Responses!N)`; never release it as well — a release imports the girls a second time, as a second club. **Sent by mistake:** `resolved …: not imported`. Never ask the partner to send it again, and never edit the `(sent …)` or the `[#…]` tag in detail: the menu matches both to the response row. |
 | **Club name already used by another partner — ask for a different name** | "Enroll a NEW club" was sent with a club name that another partner's club already has — any status, any region; capitals and spacing are ignored, a plural or a typo is a different name — or that reads as a club on file followed by its partner (`<club> - <partner>`). Nothing was imported, and the mentor got the same "it is being checked" note as any held club. A new club may not take a name in use: the attendance forms and Salesforce tell clubs apart by name, and the sync would refuse to add it ([plans/2026-09-30-same-name-clubs.md](plans/2026-09-30-same-name-clubs.md)). Detail names the club(s) that have the name. **First rule out a mix-up:** compare the response row (the tag) with that club's Roster rows — it may be that club, sent under the wrong partner — and, when detail gives more reasons (names on file, a close club name), with the other clubs it names. **Same club:** enter only its new girls on "Add or remove girls" for the club on file, then `resolved <date> by <name>: same club as <club> (<partner>)`. **That club, but the Roster has it under the wrong partner (or it has moved to this one):** move the club on file first ("Moving a club to another partner" — the tool refuses a club whose name two partners already share, and a partner in another region: Ryan's call), then write `release <date> by <name>: club moved to <partner>` with the `Club name` cell unchanged and run **Process any missed form responses**: the response now runs as that existing club (its new girls are added; no second club, no Salesforce line). **A new club:** ask the partner for a different name (the school or the place added is enough: `Stars (Testville Sec Sch)`). Then either **(a) release it under the new name:** set the response row's `Club name` cell to the new name (the row stays matched to its item by its Timestamp), write `release <date> by <name>: renamed to <new name>` (`release` must be the first word), and run **Process any missed form responses** — its preview shows the new name, and YES imports the club as sent otherwise; or **(b) have it sent again:** the partner (or you, from the response row's answers) sends "Enroll a NEW club" under the new name, and you close this item `resolved <date> by <name>: sent again as <new name>` — the held response is then never run. A release with the name unchanged, or changed to another name in use, is refused (`ERROR: release refused: …`, offered again by the next run) and adds a **Form response could not be processed** item: fix the cell, run it again, then close that item. **If detail also says "the organization was typed as …, close to … on file"**, fix that first, as in the row above. **If detail says "this club is on file with no active girl":** the partner sent "Enroll a NEW club" for a club of its own that has no active girl left, and another partner's club has its name. A club retired as a duplicate (the two of 2026-09-30) has no roster on the attendance forms any more, so bringing it back would add a new club under a name in use, which the sync refuses. Work it as above: the girls usually belong to the partner's up-to-date club (**Same club**); a club that really starts again needs a different name (**A new club**). The one false hold: a club that only lost every girl still has its roster on its attendance form, and keeps its name and its Salesforce account — none on 2026-09-30 (the only clubs with no active girl are the two retired ones). That one is Ryan's: he sets one of its girls back to `active` in the Roster (one who is on the list sent, if there is one; `removed_date` emptied — the only Roster cells typed by hand for an item), then releases with the `Club name` cell unchanged: the response runs as that existing club. Never edit the `(sent …)` or the `[#…]` tag in detail. The clubs that already share a name and have active girls are not affected: their own enrollments and roster changes run as always. |
-| **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added once by a one-off script, since retired: [Retired tools](ARCHITECTURE.md#retired-tools)). |
-| **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. Those are girls who were **active when the response ran** (one of them may since have been removed by another line of it), so first look for her among the club's `inactive` Roster rows: a close spelling removed on or after the day the response was sent (by another line of it, or by a repeat submission) means she is already off — `resolved <date> by <name>: already removed` (2026-10-21: 31 of the 62 open) — but only when no **active** girl of the club is also close to the typed name: two lines of one response are more often two girls (sisters, a shared first name) than one typed twice, so with an active close match go on to the next step. Otherwise REMOVE only an active match that is clearly her (the same names with accents or punctuation changed, or a middle name left out, and no other girl of the club close to it); otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). One response's unmatched names are separate items with the same response row in detail: work them together. |
+| **Roster change sent as a problem report** | Read `Feedback!N` (the tag). Check the Roster and Audit `rosterChangeForm`: the partner may have sent it since. Enter it as above, or ask the partner to. Not a roster change after all: `resolved …: not a roster change`. Since #110 the sender is e-mailed the Club Roster Form link when the report gave a reply address and its words ask for the change (not when she chose the Club Roster Form and only describes it broken; FormLog `sender pointed to the Club Roster Form`; the Audit row `sendRosterFormPointer_` when that e-mail failed): the item is still yours — enter the change or confirm the partner sent it, then resolve. A roster-change report whose staff e-mail lacks the "Staff note" line was missed by the keyword check: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail (reports from before 2026-09-28 were added once by a one-off script, since retired: [Retired tools](ARCHITECTURE.md#retired-tools)). |
+| **Form not working report** | A problem report says the form is not working — it does not load or submit, a blank page, an empty dropdown, an error message, in English or Spanish (the rule above `FP_FAIL_EN` in `appsscript/FormHandlers.gs`). Read `Feedback!N` (the tag) and the staff e-mail (its "Staff note" line names this row); detail names the form she chose, never her words. Try that form as she did: an attendance form (Jotform) — is it enabled, is her club in its picker, does a test submission on a test club go through (`python3 tools/auto_sync.py` shows a disabled form and a region out of sync); the Club Roster Form or the problem form (Google Forms) — open its link, check its dropdowns. Fix or escalate (Jotform support for an outage; "Automatic sync" for a roster or picker problem), answer the sender when the report gave a reply address (the staff e-mail's Reply-To), then `resolved <date> by <name>: <what was wrong>`. The form was fine (a one-off, her phone or network, an "error" that was not the form's): `resolved …: not a form problem`. A report that is also a roster change is queued as **Roster change sent as a problem report** instead — one item per report — and the sender of this item is never e-mailed automatically. A report whose staff e-mail lacks the "Staff note" line was missed by the rule: add a row by hand with this issue and `[#Feedback!N]` as the last text of detail. |
+| **Removal did not match anyone** | Detail shows the typed name and up to 3 "Closest names on file" — other girls, so never send them to the mentor. Since #112 the matcher settles the clear cases itself, and they raise no item: a typed name that is one of the club's girls once capitals, accents and punctuation are ignored (the same letters and digits, in that order: `Lucia Zorblewick` for `Lucía Zörblewick`, `Mary Jo` for `Mary-Jo`, `JR` for `J.R.`) is her removal when she is the only girl of the club spelled so and is active (Audit `rosterChangeForm`: `1 removed, 1 of them matched ignoring accents and punctuation`; the mentor's e-mail shows the name as typed), and "already removed" (nothing changes, `1 already removed` in Audit) when every girl of the club spelled so is inactive. What still reaches you: a spelling two or more of the club's girls share once folded with an active one among them (`Zoe` and `Zoë`: sisters, or one girl twice), a second line of one response that reaches a girl another line of it removes (she is removed once, by the line spelled as enrolled if there is one; the other line is this item), a REMOVE of a girl the same response also ADDs under her enrolled spelling (she stays), a middle name left out, a letter changed or dropped (`Pea` for `Peña`), a name that is only punctuation, a name nobody has — and every item raised before #112 was deployed. The "Closest names" are girls who were **active when the response ran** (one of them may since have been removed by another line of it), so first look for her among the club's `inactive` Roster rows: a close spelling removed on or after the day the response was sent (by another line of it, or by a repeat submission) means she is already off — `resolved <date> by <name>: already removed` (2026-10-21: 31 of the 62 open, before #112) — but only when no **active** girl of the club is also close to the typed name: two lines of one response are more often two girls (sisters, a shared first name) than one typed twice, so with an active close match go on to the next step. Otherwise REMOVE only an active match that is clearly her (a middle name left out, one letter off, and no other girl of the club close to it). An item whose typed name differs from one active girl only by capitals, accents or punctuation does not mean a second girl exists: it is raised when another line of the same response removed or ADDed her (read the response row — the tag — first: removed by another line is `already removed`; ADDed is nothing to do), when two or more girls of the club fold to it (never guess which), and for every item from before #112 — do not look for a second girl before you have ruled those out. Otherwise ask the mentor for the enrolled spelling (her confirmation said "our team will check"). One response's unmatched names are separate items with the same response row in detail: work them together. |
 | **Removed girls not put back by an older response** | A Club Roster Form response ran after some girls it lists had been removed — a retry, or an old response confirmed in "Missed form responses" — so they stayed removed instead of coming back (the 2026-09-13 replay cannot recur). Detail names the response row, the day it was sent and the Roster rows; the mentor's confirmation (roster changes) listed the names the mentor typed under "Not added back". Usually nothing to do: `resolved …: stayed removed`. If a girl really has rejoined since her removal (ask the partner), ADD her as above: the same ID comes back. |
 | **Same name listed twice** | Only one girl is on the Roster. Ask the partner: two girls → ADD the second with a mark, e.g. `Jane Doe (B)` (the first keeps her ID); one girl typed twice → `resolved …: one girl, no change`. Never resubmit through "Enroll a NEW club". |
 | **Partner says two girls share a name** | The partner answered Yes but no name repeats. Compare their note with the club's Roster rows: listed distinctly → resolved, no change; one missing → ADD her with a mark as above. |
@@ -2297,7 +2542,13 @@ when nothing matches it creates a new, partner-less Club account.
 ### New clubs' accounts, automatically (`SF_SYNC`)
 
 - **When:** switching `SF_SYNC` (`plan`, then `apply`); an `SF:` ATTENTION item; rotating the secret.
-- **Status:** built and in `main` since 2026-10-07; the Setup below (Salesforce and GitHub) is Ryan's and not recorded as done ([plan](plans/2026-10-06-sf-new-club-accounts.md)).
+- **Status:** built and in `main` since 2026-10-07; **live in `apply` since 2026-10-22 12:52 UTC** (Ryan's go). History ([plan](plans/2026-10-06-sf-new-club-accounts.md), amendment 2026-10-21 and Result; DECISIONS 2026-10-21):
+  - 2026-10-21: the External Client App "GLOW Sync" exists in Salesforce (client credentials, Run As **Ryan's own user**; Setup steps 1-2 below).
+  - 2026-10-22: Ryan set the secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (12:17 UTC). The dispatch token's step 4.4 is done (Contents: No access) and 4.5 checked (run 39778511710, `workflow_dispatch`, success). `SF_SYNC=plan` from 12:31 UTC.
+  - The first plan run, 39779117991, was refused: `HTTP 400 invalid_app_access` (the app's policies lacked the System Administrator profile, Setup step 2). Ryan added it.
+  - Run 39780929667: describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's `glow` login on 2026-10-21); check 317 ok, 5 need a person. Those five were fixed by hand on Ryan's go (4 partner-less club accounts parented, 1 club account created).
+  - Run 39784745392: 456 Accounts, 373 Club; check 322 ok, 0 need a person. `SF_SYNC=apply` since 12:52 UTC.
+  - **Still to do:** check the first automatic creates by hand (ATTENTION table, `created … check it by hand (first creates)`).
 - **Dry run:** `SF_SYNC=plan`: every account it would create is an ATTENTION item with the body.
 - **Apply:** `SF_SYNC=apply` (with `AUTO_SYNC_APPLY=1`), Ryan's go.
 - **Verify:** the run's `SF:` log lines; the local cross-check, below.
@@ -2306,7 +2557,9 @@ when nothing matches it creates a new, partner-less Club account.
 `tools/sf_new_clubs.py`, called by `tools/auto_sync.py`.
 
 **What each run does:**
-- Log in as **GLOW Sync**, an integration user, never Ryan's.
+- Log in as **Ryan's own Salesforce user**, through the External Client App **GLOW Sync** (OAuth
+  client credentials flow, scope `api`, Run As = Ryan). There is no GLOW Sync user and no GLOW
+  Club Sync permission set (DECISIONS 2026-10-21): the access is Ryan's administrator rights.
 - Read every Account, and stop all Salesforce work for the run if the read is not the whole org.
 - Before a region's form puts a new club on its Club picker, create the club's account:
   - Name = exactly what question 5 will send;
@@ -2329,20 +2582,31 @@ create for a club that is not being put on a form.
 Without the secrets the log says `SF: not configured`, with no ATTENTION.
 
 **Setup** (Ryan, once, in Salesforce Setup and on GitHub; nothing here goes through a Claude
-session):
-1. **User** "GLOW Sync":
-   - user licence Salesforce Integration, profile "Minimum Access - API Only Integrations";
-   - assign it the permission set licence "Salesforce API Integration".
-2. **Permission set** "GLOW Club Sync", licence "Salesforce API Integration":
-   - Account Read, Create and **View All**; field access `ParentId`, `Description`; record type
-     Club;
-   - nothing else: no Edit, no Contact, no attendance;
-   - assign it to GLOW Sync.
-3. **External Client App** "GLOW Sync":
-   - OAuth on; scope **api** only; **client credentials** flow on, Run As = GLOW Sync;
-   - App Policies: Permitted Users "Admin approved users are pre-authorized", permission set GLOW
-     Club Sync;
-   - a short session timeout; no refresh token; no login IP ranges (GitHub's addresses change).
+session). All steps are done (2026-10-22); the consumer key and secret are never written in a file, a message
+or a command line.
+1. **No integration user and no permission set** (decision 2026-10-21). The run is Ryan's user,
+   so there is nothing to create for access.
+2. **External Client App "GLOW Sync"**: created 2026-10-21 through the Metadata API (check-only
+   first, then deploy `0AfRP000002hjdR0AQ` for the app and its OAuth settings, and
+   `0AfRP000002hjiH0AQ` for the policies), on Ryan's go:
+   - Setup → External Client App Manager → **GLOW Sync**;
+   - OAuth settings: scope **Api** only; the client credentials flow on;
+   - policies: client credentials Run As = **Ryan's user**; Permitted Users "Admin approved users
+     are pre-authorized"; IP relaxation **Bypass** (GitHub's addresses change); session timeout 15
+     minutes; refresh token **Zero** (none);
+   - the consumer key and secret: Settings → OAuth Settings → **Consumer Key and Secret**; copy
+     them from that page only, straight into the GitHub secrets of step 5.
+   - **the policies must include the System Administrator profile** (Setup → External Client App
+     Manager → GLOW Sync → Policies → Edit → select profiles). With "Admin approved users are
+     pre-authorized" the Run As user has to be given the app; without the profile every login is
+     refused `HTTP 400 invalid_app_access - user is not admin approved to access this app` (run
+     39779117991, 2026-10-22). Ryan added it 2026-10-22; the deploy of 2026-10-21 did not carry it.
+   - The Metadata reference says the Run As user "must have the API Only permission"; the deploy
+     accepted Ryan's System Administrator user, and with the profile above the 2026-10-22 login
+     was issued a token. If a login is refused, the log says `SF: not ready … Salesforce refused
+     the GLOW Sync login (HTTP …)`: set `SF_SYNC=off` and read the app's policies before trying
+     again.
+3. *(Was: the app's Run As GLOW Sync and its permission set; replaced by step 2.)*
 4. **The dispatch token**, in this order (the old `Dispatch.gs` needs Contents: write, the new one
    Actions: write, so the token holds both for a few minutes):
    1. On GitHub, Settings → Developer settings → Fine-grained tokens → the sheet's token → Edit:
@@ -2354,55 +2618,100 @@ session):
    4. Edit the token again: Contents → **No access**. It can no longer change the code that holds
       the Salesforce secret.
    5. Request Jotform sync now once more: `HTTP 204` again.
+   - Done 2026-10-07: 4.1-4.3 (`HTTP 204`; the runs since start by `workflow_dispatch`). Done
+     2026-10-22: 4.4 (Contents: No access) and 4.5 (run 39778511710, `workflow_dispatch`, success).
    - Before step 2 the sheet still uses `repository_dispatch`; after it, a token without Actions
      gets `HTTP 403` in the Audit tab and only the daily run syncs.
    - The workflow runs only on `main` (a token with Actions: write can pick the branch of a run);
      delete stale branches on GitHub, whose older workflow file has no such guard.
 5. **GitHub**:
-   - secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (the app's consumer key and secret), on the
-     web page or `gh secret set` reading stdin;
-   - repository variable `SF_SYNC` = `plan`.
+   - secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET` (the app's consumer key and secret, from
+     Setup → External Client App Manager → GLOW Sync), set by Ryan on the repository's Settings →
+     Secrets and variables → Actions page, never on a command line or in a conversation. They
+     now hold **administrator access**: whoever can read them acts as Ryan ("The risks of running
+     as Ryan", below); set 2026-10-22 12:17 UTC;
+   - repository variable `SF_SYNC` = `plan` (Ryan's go; CLAUDE.md rule 1); set 2026-10-22 12:31
+     UTC, `apply` since 12:52 UTC.
 6. **First run**: Actions → auto-sync → Run workflow (apply unticked). The log must show:
-   - `SF: plan, as GLOW Sync`;
+   - `SF: plan, as GLOW Sync` (the code prints this literally: "GLOW Sync" now names the app,
+     and the user behind it is Ryan; the wording stays until a code ticket changes it);
    - `SF: describe ok - Account, Name, ParentId, Description, RecordTypeId createable; Club record
-     type available` (otherwise `SF: GLOW Sync cannot create Club accounts: …` names what the
-     permission set lacks, and an `apply` run only shows bodies);
+     type available` (otherwise `SF: GLOW Sync cannot create Club accounts: …` names what Ryan's
+     user lacks, and an `apply` run only shows bodies; its hint still names the "GLOW Club Sync
+     permission set", which does not exist: read it as Ryan's profile);
    - `SF: 448 Accounts read, 366 Club` (or today's counts);
    - `SF: check - 364 ok, 0 need a person`.
 
-   Then from Ryan's `glow` login: `UserRecordAccess` for GLOW Sync is read access on a club and on
-   a partner account.
+   What the runs of 2026-10-22 showed: the first (39779117991) was refused (`invalid_app_access`,
+   step 2). The next (39780929667): describe ok; `SF: 455 Accounts read, 372 Club`; `SF: check -
+   317 ok, 5 need a person` (4 partner-less club accounts and 1 club without an account, fixed by
+   hand on Ryan's go). The one after (39784745392): `SF: 456 Accounts read, 373 Club`; `SF: check -
+   322 ok, 0 need a person`.
+
+   The old design's `UserRecordAccess` cross-check for GLOW Sync is not needed: Ryan's user sees
+   everything. Instead compare the run's Account counts with a count from Ryan's `glow` login
+   (VPN off).
 
 **ATTENTION items (`SF: …`) and what to do:**
 
 | Item | Meaning | Fix |
 |---|---|---|
-| `not ready …` | Login refused, the user frozen, or the Account read not whole (View All lost, a page missing, a mapped partner unseen) | Read the detail. **Frozen**: an administrator unfreezes GLOW Sync (Salesforce also e-mails the admins); if it repeats, set `SF_SYNC=off` and ask Salesforce Support. New clubs this run went on the forms without an account: create them by hand. |
+| `not ready …` | Login refused, the user frozen, or the Account read not whole (a page missing, a mapped partner unseen; its hint may still name a "GLOW Club Sync" permission set: read it as Ryan's profile) | Read the detail. **`HTTP 400 invalid_app_access`**: the app's policies lack the System Administrator profile (Setup step 2). **Frozen**: it is Ryan's user, so also the Jotform connection: "The risks of running as Ryan", below. New clubs this run went on the forms without an account: create them by hand. |
 | `would create …` (plan) | A new club needs its account | Create it by hand with the body shown, today |
 | `… - not created`: club code on another account | The club was renamed in the sheet, not in Salesforce | Rename that account to the question-5 name first ("Renaming a club"); no new account |
 | `… - not created`: the name is already an account | The processor made it first, or another record has the name | A partner-less Club: set its `ParentId` as the item says (write connector, Ryan's go). Anything else: look before acting. |
 | `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
-| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds |
+| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds. Check its account name against the Monthly Reports' "test" filter ("The keep list") |
 | `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
-| `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description, owner GLOW Sync |
+| `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
 | `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
 | `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
-| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv` |
+| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv`; check the new name against the Monthly Reports' "test" filter ("The keep list") |
 
 **SF Pending**: when it creates an account, the run marks that club's SF Pending row
 `done (auto <date>)`: one cell, found by its header, read again before the write and after.
 
-**Rotating the secret**: regenerate the consumer secret in the External Client App, update the
-GitHub secret, then start a manual run (apply unticked): the log must show `SF: plan` or
-`SF: apply` and the counts.
+**The risks of running as Ryan** (accepted by Ryan 2026-10-21, DECISIONS):
+- **A freeze of Ryan's user.** Salesforce freezes a user whose connection comes from anonymising
+  or high-risk addresses, and cannot be told to allow GitHub's data-centre addresses (plan, "The
+  freeze rule"). A frozen user is locked out and **all his tokens are revoked, the Jotform
+  connection's included, as on 2026-09-30 12:16 UTC**: no submission then reaches Salesforce
+  until it is repaired. What to do, in this order:
+  1. Set `SF_SYNC=off` (Ryan's go) so no further run logs in, and cancel a run under way.
+  2. Another Salesforce administrator unfreezes Ryan's user (Salesforce e-mails the admins);
+     Ryan cannot do it himself.
+  3. Re-authorise Jotform on the five forms and run `tools/integration_status.py`, then a live
+     test submission (as after 2026-09-30: "Back-fill of attendance into Salesforce").
+  4. Switch `SF_SYNC` back on only on Ryan's word; repeated tries mean repeated containment. The
+     forms and the sheet keep syncing meanwhile.
+- **Admin rights in a GitHub secret.** `SF_CLIENT_ID` and `SF_CLIENT_SECRET` log in as Ryan with
+  his administrator rights (scope `api`: records and metadata over the API). Hence the workflow
+  runs only on `main`, the dispatch token loses Contents (Setup step 4.4), only Ryan edits the
+  secrets and the workflow, and the app has no refresh token and a 15-minute session.
+- **The creator no longer shows who made an account** ("Rollback of creates", below).
 
-**Off-boarding / stop**:
-- `SF_SYNC=off` stops future runs; cancel a run already started in Actions.
-- Turning the External Client App off, or deactivating GLOW Sync, removes the access entirely.
+**Rotating the secret** (also if it may have been seen): in the External Client App GLOW Sync,
+Settings → OAuth Settings → Consumer Key and Secret, regenerate the secret; update the GitHub
+secret `SF_CLIENT_SECRET` (and `SF_CLIENT_ID` if the key changed) on the web page; then start a
+manual run (apply unticked): the log must show `SF: plan` or `SF: apply` and the counts. Until
+the secret is updated every run logs `SF: not ready`.
+
+**Off-boarding / stop**, lightest first:
+- `SF_SYNC=off` stops future runs (no login); cancel a run already started in Actions.
+- Disable the app's policies (External Client App Manager → GLOW Sync → Policies: the client
+  credentials flow off, or the Run As user cleared): the next login is refused, the app and its
+  key stay.
+- Delete the app (External Client App Manager, or a destructive change of the `GLOW_Sync`
+  components): its key and secret stop working at once. Then delete the two GitHub secrets.
+- Rotate the secret (above) if it may have been exposed.
+- There is no user to deactivate, and Ryan's must not be.
 
 **Rollback of creates**:
-- The accounts the sync made: `SELECT Id, Name FROM Account WHERE CreatedById = '<GLOW Sync's
-  user id>'`.
+- The sync's accounts are **not** listed by `CreatedById`: Ryan's user creates them, as it does
+  his hand-made ones. Separate them by the Description the sync always writes,
+  `GLOW club code <code>; created by the automatic sync <date>`: `SELECT Id, Name, CreatedDate
+  FROM Account WHERE Description LIKE '%created by the automatic sync%'`. The run's log and the
+  SF Pending row (`done (auto <date>)`) name the same clubs.
 - One is deleted only while it has no Contacts and no attendance, on Ryan's go.
 - Dispatch: revert `Dispatch.gs` and restore a Contents token (not recommended).
 
@@ -2544,6 +2853,126 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 - `--rehearse` and a failed run leave nothing to roll back. Should a rehearsal ever keep a change
   ("not as before the rehearsal - LOOK AT IT NOW"), the rollback file holds the club's contacts as
   they were just before it.
+
+## Duplicate and obsolete records in Salesforce
+
+- **When:** the monthly check (with "Duplicate girls in Salesforce"); a flag to set or clear; GLOW's own definitions arrive (DECISIONS 2026-10-21).
+- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day, 12:58 UTC, on his go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch is ticket #85.
+- **Dry run:** the check-only deploy (`sf project deploy start --dry-run`), step 3 of the plan's Rollout.
+- **Apply:** the same with its dry-run flag taken off, Ryan's go (VPN off); then the proof, also on his go: the no-DML `Datacloud.FindDuplicates` diagnostic (`sf apex run -f diag.apex`, the plan's step 6), which runs the active rules over three unsaved copies of existing accounts, inserts nothing and prints only `DIAG|` lines with each rule's name and its match count.
+- **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (the three Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rules' `DuplicateRecordSet`s (a cross-type pair, a Household account and a Club of one name and parent, is a set without a group: looked at by hand), and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
+- **Rollback:** deactivate the two Account Duplicate Rules, each rule by the same step (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)).
+
+GLOW's annotated SOW (p.9) asks for "Duplicate Record" and "Obsolete Record" checkbox fields on
+Account and Contact, and for one Matching Rule and one Duplicate Rule on Account. The definitions
+below are Ryan's working answers of 2026-10-21 ("move forward with this"), provisional until GLOW
+defines the terms (DECISIONS 2026-10-21). The fields and the rules are live since 2026-10-22
+(DECISIONS 2026-10-22: the proof and the cross-type pairs). The legacy records themselves are
+never merged or cleaned by this (SOW p.10); the batch that sets the flags by these criteria is
+ticket #85.
+
+### What is a duplicate, what is obsolete
+
+- **A duplicate Account:** two Accounts are duplicates when they have the same name ignoring
+  capitals and spacing (any run of whitespace is one space), the same parent and the same record
+  type. An accent counts: "Café Club" and "Cafe Club" are different names. The deliberate
+  `<club> - <partner>` names ("Club names two partners share") never match a plain name, and two
+  partners' clubs of one name never match each other: another parent keeps them apart. Matches
+  on 2026-10-21: 0 (455 Accounts: 372 clubs, 83 partners).
+- **A duplicate Contact:** the existing Contact rule "First & Last & Account" (same first name,
+  last name and account) stays unchanged, Report only since 2026-10-01 (BACKLOG 54). A Contact's
+  "Duplicate Record" flag is set by the flagging batch (#85) when the Contact sits in one of that
+  rule's duplicate record sets (`DuplicateRecordSet`). `tools/sf_dupes.py` still merges one girl's
+  duplicate contacts by its own key ("Duplicate girls in Salesforce") and never merges a record
+  for being flagged.
+- **An obsolete Account:** a partner whose `Partner_Status__c` is Archived is obsolete; so is a
+  Club account whose club is deactivated in the Roster ("Deactivating a club"), and a Club account
+  with no attendance batch for 6 months that was created more than 6 months ago (so the clubs
+  created in September 2026 are not flagged before March 2027). The clubs of a partner marked
+  `no` in the Partners tab's `jotform` column (the three Salesforce-reporting partners, "Clubs
+  that do not use Jotform") report as one `Partner report` batch on the partner account, so they
+  are judged by their partner account's `Partner report` batches, not their own (review,
+  2026-10-21).
+- **An obsolete Contact:** a Participant (a girl) with no attendance in 12 months. Staff, mentor
+  and coordinator contacts are never flagged by rule (on 2026-10-21 every girl has attendance; the
+  216 contacts without any are staff, mentors or coordinators).
+- **Who sets a flag by hand:** administrators only (the System Administrator profile has Edit on
+  the four fields). The users who read the reports read the flags too: the
+  `Attendance_Report_Viewer` permission set has Read on the four fields.
+- **The kept reports and dashboards:** flagged records are shown as before, with the two flags
+  available as a filter on any report that lists Accounts or Contacts; nothing is excluded by
+  default.
+
+### The fields and the rules
+
+Four checkbox fields, "Duplicate Record" and "Obsolete Record" (`Duplicate_Record__c` and
+`Obsolete_Record__c`, on Account and on Contact), default false (unchecked), on every Account and
+every Contact, the girls' records included. A flag is report data: it marks a record, and the
+record keeps everything it has (its attendance, its contacts, its place in the reports).
+
+**The Matching Rule on Account** (`Account.Name_Parent`, "Name and parent") has two
+`MatchingRuleItems`, both required: Name with the Exact method (case-insensitive) and ParentId
+(Exact, blank matching blank, so two partner-less strays match). RecordTypeId is not a matching
+item: Salesforce does not allow Record Type as a matching-rule field (review, 2026-10-21).
+Salesforce's Exact method ignores case (on 2026-10-22 the diagnostic's upper-cased copy of a Club
+matched its original); whether it also ignores a difference in spacing (a double space, a tab, a
+no-break space) is not documented with certainty and the diagnostic did not probe it, so the
+read-back and the monthly check compare the rules' `DuplicateRecordSet`s with
+`glow.salesforce.duplicate_account_groups`, which ignores both, and a difference between the two
+lists is looked at by hand.
+
+**One report-only Duplicate Rule per record type**, Club (`Account.Name_Parent_Club_Report`,
+`sortOrder` 1) and Household (`Account.Name_Parent_Household_Report`, the partner accounts,
+`sortOrder` 2), uses that Matching Rule, runs on create and on edit, and carries the condition
+Record Type equals that type. That condition picks only which rule runs for the record being
+saved: together the two rules are "same name, same parent, same record type" for the record
+saved, for the two record types in use. It does not limit the candidates (the records the
+Matching Rule finds, whatever their record type), so Salesforce may report a Household account
+and a Club of one name and parent as a pair: on 2026-10-22 the diagnostic's Household probe
+carrying a club's name and ParentId matched that Club under the Household rule. Ryan accepted
+that the same day, with no code or metadata change: `glow.salesforce.duplicate_account_groups`
+keeps its own definition (the same record type too), and the monthly check below reviews any such
+pair by hand (DECISIONS 2026-10-22). Each Duplicate Rule's action is Allow with Report only, no
+Alert and no Block: in
+the metadata `actionOnInsert` and `actionOnUpdate` are `Allow`, each operation is Report, and
+there is no `alertText`. A possible duplicate is written to a `DuplicateRecordSet` (a Duplicate
+Record Set, with one `DuplicateRecordItem` per record) and the save goes through: the rules never
+stop a record created by code, and a user sees nothing at the save. The rules never catch the
+partner-less twin of a parented club (their parents differ): that stays for the monthly check
+below and for the Signals of "Club accounts in Salesforce" (Club accounts without a parent).
+
+Why Report only: an alert refuses a record created by code, and code creates Accounts here. The
+Alert on the Contact rule failed live attendance batches mid-way until 2026-10-01 (BACKLOG 54: a
+Failed batch with part of the girls saved), and over REST an Alert would need the
+`Sforce-Duplicate-Rule-Header: allowSave=true` header on every insert. The attendance processor
+(`AttendanceBatchProcessor`) creates a partner-less Club account when a submitted club name
+matches no Account, `tools/sf_new_clubs.py` creates the accounts of new clubs from the automatic
+sync, and the Jotform integration creates every batch. Only Ryan can choose otherwise, on ticket
+#84, knowing that cost.
+
+### The monthly check
+
+With the duplicate-girls check ("Duplicate girls in Salesforce"), read-only, VPN off, from the
+repository root:
+
+```bash
+sf data query -o glow --json -q "SELECT Id, RecordCount, (SELECT RecordId FROM DuplicateRecordItems) FROM DuplicateRecordSet WHERE DuplicateRule.SobjectType = 'Account'"
+python3 - <<'EOF'
+from glow.salesforce import Org, duplicate_account_groups
+print(duplicate_account_groups(Org("glow").query("SELECT Id, Name, ParentId, RecordTypeId FROM Account")))
+EOF
+```
+
+Compare the two by Account id: each set's `RecordId`s are one group of `duplicate_account_groups`,
+and each group is one set. Expected: the same groups on both sides, and today none (0 sets, 0
+groups and 0 cross-type pairs on 2026-10-22). A group is a stray twin, as a rule a partner-less
+account the processor made for a name no account carried: re-parent it, never re-create it ("Club
+accounts in Salesforce"). A set without a group, or a group without a set, means the rule and the
+Python side disagree: on spacing, or on record type - a set holding a Household account and a
+Club of one name and parent (cross-type), which Salesforce may report and
+`duplicate_account_groups`, keeping its own definition, never groups. Look at the two records of
+such a pair by id and decide by hand whether one is a stray of the other (Ryan, 2026-10-22).
+Counts and ids only in what is said about it.
 
 ## Attendance totals and partner-reported counts
 
@@ -2810,7 +3239,8 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
     (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
     map the automatic club accounts read, partner → its account; "New clubs' accounts,
     automatically"). Two lists of the same 49 partners, kept separate on purpose: one is filter
-    text, the other account ids.
+    text, the other account ids. Check its account name against the Monthly Reports' "test"
+    filter ("The keep list").
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -3063,6 +3493,493 @@ sharing stays as it is"):
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
 
+## Submission timing in Salesforce
+
+- **When:** a report or dashboard on when clubs submit (tasks #102 and #103); the monthly
+  Salesforce checks; a question about a batch's session week or its delay.
+- **Status:** the four formula fields are live since 2026-10-24 (deploy `0AfRP000002i4Er0AI`,
+  06:41 UTC, Ryan's go). The first delay formula was a day short for submissions before about
+  07:00 UTC (the check: 153 of 1,123 batches); `Submission_Delay_Days__c` was redeployed alone
+  with the corrected text the same day (deploy `0AfRP000002i4LJ0AY`, 06:59 UTC), and the check
+  reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result).
+- **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
+  is read-only.
+- **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
+- **Verify:** retrieve again and compare with the build and with `before/`; then
+  `python3 tools/sf_session_timing.py check --vpn-off` -> `-> OK`.
+- **Rollback:** below.
+- **History:** [plan](plans/2026-10-23-submission-timing.md) (the proofs, the deploy, tasks
+  #102 and #103).
+
+Since task #100 (DECISIONS 2026-10-23) a batch's session month and week, and for a live Jotform
+batch its submission time and the delay from the session to it, are four formula fields on
+`Attendance_Batch__c`, computed by Salesforce from `Creator__c`, `CreatedDate` and
+`Attendance_Date__c`; the formula texts are `glow/session_timing.py SF_FORMULAS`, and task #101
+deploys them. A formula field changes no record and runs nothing: the processor's trigger and
+the Jotform integration are untouched.
+
+**The fields** (API name, label, type):
+- `Submitted_At__c` ("Submitted at", Date/Time): the batch's `CreatedDate` when `Creator__c` is
+  `Jotform`, else blank.
+- `Submission_Delay_Days__c` ("Days from session to submission", Number): whole days from
+  `Attendance_Date__c`, the session date, to the UTC day of the submission, blank without a
+  submission time, negative when the form was submitted before the session date (a date typo,
+  BACKLOG 79).
+- `Session_Month__c` ("Session month", Text): the session's month as `2026-10`, from
+  `Attendance_Date__c`.
+- `Session_Week__c` ("Session week", Text): the week of the month the session date falls in, as
+  `2026-10 week 2`.
+
+**The week rule:** the week is the week of the month by day of the session date: days 1-7 are
+week 1, 8-14 week 2, 15-21 week 3, 22-28 week 4 and 29-31 week 5, shown as `2026-10 week 2`.
+It is the calendar week of the session date, not the curriculum "Session N" in `Module_Week__c`
+and not Salesforce's Sunday-start report weeks (DECISIONS 2026-10-23).
+
+**The time zone:** the submission day, the day the delay counts to, is the UTC day of
+`CreatedDate`, which the formula takes as `DATEVALUE(TEXT(Submitted_At__c))`: `TEXT()` of a
+date/time is the UTC timestamp `YYYY-MM-DD HH:MM:SSZ` and `DATEVALUE` of that text is its UTC
+date. `DATEVALUE` on the date/time itself converts in the running user's time zone (here the org's default,
+America/Los_Angeles): the
+first deploy's formula did, and the check found it a day short for every submission between
+00:00 and about 07:00 UTC (2026-10-24, 153 of 1,123 batches), so the field is redeployed with
+the `TEXT()` form (DECISIONS 2026-10-24; the plan's Result says when). That is the clock's day
+in UTC rather than the mentor's local day: a late-evening submission in the Americas counts as
+the next day and an early-morning one in Asia as the same day, so a delay of 1 can be a form sent
+the same evening.
+
+**Which batches have one:** only a batch whose `Creator__c` is exactly `Jotform` has a
+submission time, because the native Jotform Salesforce V2 integration creates the batch the
+moment the form is submitted, so its `CreatedDate` is the submission time. The September
+back-fill batches (`Creator__c` starting `Jotform back-fill`) and the three partners' monthly
+batches (`Partner report`, `tools/sf_partner_monthly.py`) were created later by tools, so they
+have no submission time and no delay, but they do have a session month and week. A batch that
+`tools/sf_backfill.py` sends later carries the same back-fill creator and gets none either.
+
+**The check** (read only, VPN off): `python3 tools/sf_session_timing.py check --vpn-off`
+compares every batch since 2026-09-01 with `glow/session_timing.py` in one explicit-field SOQL
+query (never `Contact_IDs__c`) and prints `checked N batches` with the count of differing values
+per field, then `-> OK`, or `-> DIFFER` with up to 10 lines of batch Name, field, Salesforce's
+value and the expected one, exit 1; `--since 2026-10-01` narrows the window. Batch Names and
+counts only, nothing written. An HTTP 400 means the fields are not deployed yet (task #101), or
+the login cannot read them. Run it after the deploy, after any change to `SF_FORMULAS`, and
+with the monthly Salesforce checks.
+
+**Access:** the permission set `Attendance_Report_Viewer` and the Admin profile read the four
+fields (one Read entry per field in each, deployed with the fields), so a report that shows,
+groups or filters on them works for every viewer; a filter on a field the viewer cannot read is
+dropped silently ("Attendance dashboard in Salesforce", Access). A new report on another field
+needs that field's Read added to the set.
+
+**Rollback** ([plan](plans/2026-10-23-submission-timing.md#rollback)): the reports that use or
+filter on the fields go first (edited or deleted, each copied to Decommissioned before, the
+archive rule of DECISIONS 2026-10-21), then the four fields `Submitted_At__c`,
+`Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` are deleted by a
+`destructiveChanges.xml` deploy, check-only first and on Ryan's go, their permission-set and
+Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
+the four fields and only added their entries to the permission set and the Admin profile, which
+go with the fields when they are deleted, so nothing is redeployed from its `before/`.
+
+## Monthly Report dashboards in Salesforce
+
+- **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)).
+- **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
+- **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
+- **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
+- **Rollback:** the copy in Decommissioned and the `before/` retrieve (Decommissioned, below).
+
+The Monthly Report is the object `DHIS2__c`: one record per partner per month (`Account__c` the
+partner account, `YearMonth__c` like `202609`). The vendor built its reports and dashboards; the
+inventory of 2026-10-21 (#69, [plan](plans/2026-10-21-sf-reporting-inventory.md#inventory)):
+- The report folder "DHIS2 Reports" (`DHIS2Reports`) holds 63 reports.
+- The dashboard folders "DHIS2 Dashboards" (`DHIS2Dashboards`) and "Dhis2 Dashbords" (sic,
+  `Dhis2Dashbords`) hold 9 and 6 dashboards, 15 in all.
+- The 15 dashboards have 64 components on 55 reports: 52 in "DHIS2 Reports" and 3 in "Public
+  Reports". 11 of the 63 reports in "DHIS2 Reports" are used by no dashboard.
+- Report types: `Dhis2` (65 reports) and `Monthly_Reports` (1), both on `DHIS2__c`.
+- 11 of the 15 dashboards filter on `DHIS2__c$Account__c.Assigned_Partner_Manager__c`.
+- 10 of the 15 dashboards are embedded in the Lightning page (FlexiPage)
+  `Monthly_Report_Dashboards`, the tab `Monthly_Report_Dashbords` (sic) of the app "Monthly
+  Report Dashboards".
+- The three folders' shares (the shares API, 2026-10-21): "DHIS2 Reports" 6, "DHIS2 Dashboards"
+  6, "Dhis2 Dashbords" 2, all to internal users or one Regular group; no guest, portal, community
+  or partner share.
+- Counted with `SELECT OwnerId, COUNT(Id) FROM Report GROUP BY OwnerId` (a report's `OwnerId` is
+  its folder) and `SELECT FolderId, COUNT(Id) FROM Dashboard GROUP BY FolderId`; Salesforce
+  refuses `GROUP BY FolderName`.
+
+`data/sf_reporting_2026-10-21/` (owner only, never committed) holds the read-only retrieve
+`before/` (66 reports, 15 dashboards, the 3 folders, 2 report types, the FlexiPage, 2 tabs, 1 app
+and the interactive dashboard's code) and `evidence/inventory.csv`, one row per report and
+dashboard: its folder, report type, format, created, last modified, last run, last viewed, and
+the dashboards and components that use it. The retrieved XML carries staff names (shares,
+running users, filter values): never quote it.
+
+The "Jotform Attendance" dashboard and the two Attendance folders are another set ("Attendance
+dashboard in Salesforce"); epic #68 leaves them untouched. A change here follows the epic's
+ritual: VPN off, retrieve live into `data/sf_<topic>_<date>/before/`, build in a copy,
+check-only, Ryan's go, deploy, retrieve `after/` and compare; never an older build (DECISIONS
+2026-10-16).
+
+### Decommissioned
+
+Two folders, both labelled "Decommissioned", hold what epic #68 retires and the copies it keeps
+(DECISIONS 2026-10-21). Built in `data/sf_reporting_2026-10-21/folders/`; deployed on Ryan's go
+2026-10-21 (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`); read back into
+`after/`, identical to the build.
+- The report folder "Decommissioned" (`ReportFolder` `Decommissioned`, `00lRP000007iOiXYAU`) is
+  hidden, with no `folderShares`: only administrators see it.
+- The dashboard folder "Decommissioned" (`DashboardFolder` `Decommissioned_Dashboards`,
+  `00lRP000007iOiYYAU`) is hidden, with no `folderShares`: only administrators see it.
+- The measure is the shares API (`GET /services/data/v67.0/folders/<id>/shares`): on 2026-10-21
+  it showed no share on either folder, not even a Manage entry for the deploying administrator.
+- An entry for anyone (a group, a role, guest, portal, community or partner users, All Internal
+  Users) is a failure, removed before anything more is moved in.
+- The two proof copies of #69 stay there (Ryan, 2026-10-23): the report `00ORP000009igCr2AI`
+  "proof #69 Club meet freq (moved)" and the dashboard `01ZRP00000BNDJB2A5` "proof #69 DHIS2
+  dashboard". The dashboard copy has no description: the API refused it and it was not set by
+  hand; Ryan said 2026-10-23 to leave the copies as they are.
+
+The archive rule:
+- A retired report or dashboard is moved to Decommissioned and keeps its Id; nothing is deleted
+  in this epic.
+- Before a report or dashboard changes, a copy of it as it was goes to Decommissioned, carrying
+  its source Id and the ticket in its description, in addition to the `before/` retrieve.
+- The copy's label stays within 40 characters, Salesforce's limit on a report's name.
+- A dynamic dashboard's copy (the original runs as the logged-in user) runs as a specified user,
+  the administrator who makes the copy: dynamic dashboards count against an org limit, and the
+  `before/` retrieve keeps the original's running-user setting.
+- The `before/` retrieve is what a metadata redeploy starts from; the copy is what a Salesforce
+  user opens.
+- To revert from Salesforce, open the copy in Decommissioned, then Save As into the original
+  folder or move it back there. Save As makes a new Id; a move keeps the copy's Id.
+- A dynamic dashboard put back from its copy has "View dashboard as" reset to the dashboard
+  viewer (`LoggedInUser`) before it returns to its original folder; the `before/` retrieve's
+  running-user setting is the check.
+- How a copy and a move are made ([plan, API proof](plans/2026-10-21-sf-reporting-inventory.md#api-proof)):
+  a report is copied and moved by the Analytics API (`POST …/analytics/reports?cloneId=<id>`,
+  then `PATCH …/analytics/reports/<id>` with `reportMetadata.folderId`), and keeps its Id.
+- A dashboard is copied by the Analytics API (`POST …/analytics/dashboards?cloneId=<id>` with
+  `folderId`). The API refuses to rename, describe or move a dashboard (`PATCH` returns 400
+  `JSON_PARSER_ERROR`), so Ryan does it by hand in Lightning: in the dashboard's Properties
+  (Name, Description, Folder) he sets the name and the description `copy of <source id>,
+  #<ticket>`, and moves it with its Move action; the Id stays the same, checked with SOQL.
+
+### The keep list
+
+`glow/sf_keep_list.csv` is GLOW's keep list (the GLOW team via Ryan, 2026-10-21) mapped to what
+is in the org today, as Ryan agreed it on ticket #70 (2026-10-23; DECISIONS 2026-10-23). The
+list has 19 items: 18 reports in five groups, and one table. The file has a row for each item and
+for each of the five dashboards, with the header `item,group,measure,kind,id,label_today,label_target`:
+GLOW's measure verbatim, the kind (`report`, `table` or `dashboard`), the 18-character Id of the
+report or dashboard the item is today, and its label. It holds report and dashboard Ids and names
+only, never record data. Tasks #71 to #73 build their move plans from it.
+
+The five groups are the five Monthly Report dashboards (D1 to D5 in the file), each mapped to the
+dashboard that becomes it:
+- D1, the GLOW Club Attendance dashboard: "Glow Club Attendance" (`01ZRP000006iWqL2AU`), items 1-4.
+- D2, the GLOW Club Implementation dashboard: "Implementation Dashboard" (`01ZRP000006jU9o2AE`),
+  items 5-8.
+- D3, the GLOW Club Observations dashboard: the dashboard named "GLOW Club Training" today
+  (`01ZRP000006k2D32AI`), items 9-11. Five of its nine components are observations, and no
+  dashboard today is about observations alone.
+- D4, the GLOW Club Training dashboard: "Mentors" (`01ZRP000006quAj2AI`), items 12-16. The group
+  "GLOW Club Training" is this dashboard, D4, and the dashboard named "GLOW Club Training" is D3:
+  the file's Ids tell them apart.
+- D5, the GLOW Club Reporting dashboard: "Reporting" (`01ZRP000006oxSr2AI`), items 17 and 18.
+
+Item 2 is retired (Ryan, 2026-10-23 on #74): it has no source, and #75 moves its report to
+Decommissioned, kept there; #73 leaves item 2's report in its folder, for #75 to move.
+
+Item 19, "GLOW of the Month Stories" (group "Report/Data Table Format"), is the report "GLOW of the
+Month Stories Report" (`00ORP000005p2L32AI`), the org's label since 2026-10-21, which the file
+follows (Ryan, 2026-10-23). It is the table: a tabular report on no
+dashboard, and it stays tabular, not grouped (below). Item 12, "New mentors recruited", has no report today: task #80 builds
+it, and the file reads `new` for its Id. Item 18, "Report submitted on time", maps to "Reports
+completed on time" (`00ORP0000054DyH2AU`), which lists submission and modified dates; no report
+computes "on time" today, and that computation is a later task, on hold (#119).
+
+Every kept report and dashboard is by Partner and Month (Ryan, 2026-10-21: "This data should be
+displayed by the Partner and Month."): the 18 reports of the five dashboards are grouped by the
+partner (`DHIS2__c.Account__c`) and the month. Item 19, the table, is the one exception to the
+grouping: it stays a tabular report, not grouped, with Partner and Month as its columns and
+filters. Tasks #75 to #79 bring each dashboard and its reports to that, with current data; #79
+("Fix GLOW Club Reporting and the GLOW of the Month table") does item 19 too.
+
+Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
+`label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
+keep the dashboard names listed above. Item 12 has no label today; its `label_target` is GLOW's
+measure, "New mentors recruited", which #80 confirms when it builds the report.
+
+Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
+a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's three folders, which
+task #72 moves: every report in "DHIS2 Reports" and every dashboard in "DHIS2 Dashboards" and
+"Dhis2 Dashbords" whose Id is not in the file; the archive rule above holds for each move. Two
+reports outside those folders are on one of their 15 dashboards today and not in the file, both in
+"Public Reports": "Pending Approvals monthly report" (`00ORP000006XSy92AG`) and "New Monthly
+Reports by account" (`00ORP000006V09x2AC`); the third "Public Reports" report on a dashboard is
+item 17, kept. Those two sit outside #72's folders, and Ryan decides on #72 whether they move. The
+two Attendance folders and the "Jotform Attendance" dashboard
+are outside the scope: epic #68 leaves them untouched.
+
+Test records are Monthly Reports filed on a test account or on no account. The test-record rule
+is one report filter on existing fields, applied to every kept report:
+`Account is not blank AND Account: Account Name does not contain "test"` (Ryan, 2026-10-23). On
+the count of 2026-10-23 it excludes the five Monthly Reports of the two test accounts and the six
+with a blank Account, and no real partner's. `Partner_Status__c` is not the rule: it is blank on
+four real partners with 23 Monthly Reports, the same as on the test accounts. Tasks #75 to #79
+add the filter as they fix each dashboard, and #79 adds it to item 19, the table, too. The filter
+matches a substring: a partner whose account name contains "test" (a "Contest" or "Protestant"
+partner, say) would drop out of every kept report, so a new partner's account name (its line in
+`glow/sf_partners.csv`, RUNBOOK "Club accounts in Salesforce") is checked against the filter
+when the partner is added.
+
+### Copying and moving reports and dashboards
+
+`tools/sf_report_folders.py` (ticket #71) makes the copies and the moves of the archive rule
+above through the Analytics API, exactly as the API proof sent them. It never deletes, and it
+reads `Folder`, `Report`, `Dashboard` and `DashboardComponent` only, never a record. Every
+subcommand needs `--vpn-off`; `copy`, `move` and `undo` are dry runs until `--apply` (Ryan's go,
+the live gate asks him). The folders named "Attendance" are never a source or a target.
+
+- List what a folder holds (read-only; CSV on stdout, the counts on stderr, which must equal SOQL's
+  `SELECT OwnerId, COUNT(Id) FROM Report GROUP BY OwnerId` for that folder):
+  `python3 tools/sf_report_folders.py list --vpn-off --folder "DHIS2 Reports" [--folder "Dhis2 Dashbords"] [--kind report|dashboard]`.
+  The `used_by` column lists the dashboards with a component on each report.
+- Copy one report or dashboard into Decommissioned before it changes:
+  `python3 tools/sf_report_folders.py copy --vpn-off --kind report --id <id> --tag "#72"`, read
+  the line it prints, then the same with `--apply`. A report's copy keeps its label (cut to 40
+  characters) and gets the description `copy of <id>, <tag>` by a PATCH of the copy once the
+  clone reads back in Decommissioned (the API proof's steps); a refused PATCH stops with the copy's
+  id in its `failed` ledger row. A dashboard's copy keeps its title
+  and has no description (the API refuses both): set them by hand in Lightning if wanted.
+- Move (and relabel) reports by a plan, a CSV with the columns `kind,id,to_folder,new_label`
+  (`to_folder` a folder name, exactly one report folder of that name; a blank `new_label` keeps
+  the label; a label is at most 40 characters, and a report whose current label is longer moves
+  only with its label kept, since undo could not put that label back):
+  `python3 tools/sf_report_folders.py move --vpn-off --plan <plan.csv>` (the dry run: one line per
+  row with the current label and folder and the change), then `--apply --limit 1` first, check
+  that report in Salesforce, then `--apply` for the rest. The whole plan is checked before the
+  first write: a report that a dashboard outside Decommissioned still uses is refused a move to
+  Decommissioned. Each move keeps the report's Id and is read back by SOQL; a read-back that
+  differs stops the run.
+- Dashboards are moved and renamed by hand in Lightning (the API proof: Salesforce refuses every
+  dashboard `PATCH`, 400 `JSON_PARSER_ERROR`); a plan row of kind `dashboard` is refused. Check
+  the hand move with SOQL on `Dashboard` (the same Id, `FolderName` following).
+- The ledger `data/sf_report_folders/ledger.csv` (owner only, never committed) holds one row per
+  write: the item, its folder and label before and after, a copy's id and tag, the status and the
+  HTTP code. The row is on disk as `sending` before the request and rewritten in place as `ok` or
+  `failed`; a row left `sending` (the run died) has an unknown outcome, and undo puts that move back.
+- Undo: `python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv`
+  (the dry run), then with `--apply` (`--limit N` undoes the last N only). It puts each move back
+  to its old folder and label, last first, and adds an `undo` row for each; a move Salesforce
+  refused (HTTP 4xx) never moved and is left as it is, and a move already undone is not undone
+  again. Copies stay in
+  Decommissioned.
+
+### Why the dashboards showed old data
+
+Read-only diagnosis, 2026-10-23 (#74). A fresh retrieve of D1-D5, the 18 kept reports that exist
+(items 1-19 but 12), the report types `Dhis2` and `Monthly_Reports`, `DHIS2__c` and the form
+(LWC `dHIS2Forms`, Apex `dHIS2Controller`) is in `data/sf_stale_2026-10-23/before/`; each report
+was run by the Analytics API (a GET) and the runs, the SOQL counts and their summaries are in
+`data/sf_stale_2026-10-23/evidence/`. The month compared is September 2026, the last complete
+month: 42 Monthly Reports from 42 partners, none on a test account or a blank Account.
+
+The cause: every kept report filters on a fixed year, and groups by the month's name alone.
+- 14 of the 18 filter `Year__c equals 2025`; items 4 and 19 filter `Year__c equals 2026` (current
+  today, old again in January 2027); items 17 and 18 have no year filter and add September 2025
+  and September 2026 into one "September". Every other report on the five dashboards filters
+  `Year__c equals 2025` too, except "Participation by month" (2026).
+- The month is `Month__c`, a picklist of month names; `Year__c` is a number. `YearMonth__c` (a
+  number formula, `202609`) is not in the `Dhis2` report type's layout, so no report offers it.
+- The standard date filter of every report is `CreatedDate`, all time: it narrows nothing.
+
+Three of the form's fields have been blank since October 2025, when the form moved to the record
+type `Monthly_reports_new` (every record from `202510` on has it; 470 older ones have none):
+`collect_last_month_s_attendance__c` (item 1), `Submit__c` (item 2) and
+`Select_all_GLOW_Club_modules_implemented__c` (item 6, through its 18 module formula fields such
+as `GLOW_Create_Year_1_Relationships_101__c`). All three are blank on the 425 records of 2026; the
+form no longer asks those questions. The form's change of 2026-09-23 (`dHIS2Controller` and
+`dHIS2Forms` last modified in the org 2026-09-30) added the checkbox
+`Attendance_submitted_electronically__c`, first set on the September 2026 reports (21 of 42
+ticked), and stopped no field a kept report reads: the others are filled on 26 to 42 of the 42.
+
+Not causes: no kept report filters on a record type (`DHIS2__c` has one, `Monthly_reports_new`);
+the `Dhis2` report type's inner join to Duplicate Record Items drops no record (item 18 returns
+all 1,051 Monthly Reports, item 1 all 619 of 2025; `DHIS2__c` has 0 duplicate record items); the
+formula `Monthly_Total__c` (the largest week total) is current (item 4). The dashboards' running
+user is active (another administrator). D1, D2 and D5 run as the viewer (`LoggedInUser`) and are
+live; D3 and D4 run as that specified user and show the snapshot of their last refresh,
+2026-07-10 (D3) and 2026-08-13 (D4), and no refresh of them is scheduled (`CronTrigger` has no
+dashboard-refresh job; the org's one report subscription, weekly since 2026-10-02, is tied to no
+dashboard here by the API). The ticked count, the running user, the scheduled jobs and the
+dynamic dashboards: `evidence/soql_2026-10-23_review.txt`.
+
+Components more than one dashboard shares:
+- The period design (a fixed year, a month name with no year) is in every report of all five.
+  Each dashboard ticket fixes its own reports the same way (below). GLOW's period is the last 12
+  months (Ryan, 2026-10-23), which needs one shared change first: #128 adds a date field for the
+  report's month to `DHIS2__c` and the `Dhis2` report type, before #75-#79.
+- The org's limit on dynamic dashboards: Enterprise Edition, 5 dashboards that run as the viewer,
+  all 5 in use (D1, D2, D5, "Attendance According to Attendance Rosters" `01ZRP000006s43B2AQ`,
+  which #72 moves to Decommissioned, and "Activities Dashboard", outside the epic). D3 and D4
+  therefore stay on a specified user and are kept fresh by a scheduled refresh.
+- Item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`), a D4 report, is a
+  component of D3, not of D4. #77 takes that component off D3 and #78 puts item 16 on D4; until
+  #77 is done, #78's change to item 16 (its period and grouping) changes D3's component too.
+  No other kept report is on a dashboard other than its own.
+- Item 6 on D2 and the report type `Attendance_Totals`, which the Attendance-folder reports share
+  (they stay as they are). The type carries the club's parent's name, not the partner's
+  `Assigned_Partner_Manager__c` ([plan](plans/2026-10-06-attendance-totals.md) D.1), so D2's
+  filter on it does not apply to item 6 until that field is reachable from the type (e.g. a
+  lookup through the club's parent added to `Attendance_Totals`, deployed only from a fresh
+  retrieve, the Attendance reports unchanged). #76 settles it before building item 6; named on
+  #74.
+
+The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #76 D2, #77 D3,
+#78 D4, #79 D5 and item 19; item 6 takes its own steps 1-3, below):
+1. Replace `Year__c equals <year>` with GLOW's period: the last 12 months (`LAST_N_MONTHS:12`)
+   on #128's date field, which leaves out the current, incomplete month.
+2. Group by the partner (`DHIS2__c.Account__c`), then by #128's date field by calendar month.
+   The `Account__c.Owner` or `Account_Owner_Check__c` grouping goes; the dashboards'
+   filter on `Assigned_Partner_Manager__c` stays. Item 19 stays tabular, with the filter only.
+3. Add the test-record rule (above).
+4. Put the kept reports on their dashboard: today D1 shows items 2 and 3 (and a copy of item 1's
+   report, not item 1), D2 items 6-8, D3 items 9-11 and 16 (above), D4 none of items 13-16, D5
+   neither 17 nor 18; the dashboards' other components are on reports #72 moves to
+   Decommissioned.
+5. D3 and D4: a refresh after the fix (a PUT, Ryan's go), and a weekly refresh by a dashboard
+   subscription in Lightning.
+
+Item 6 is the exception to steps 1-3 (Ryan, 2026-10-23 on #74: it counts the Jotform batches'
+`Module__c`). Its source is `Attendance_Batch__c`, not `DHIS2__c`, so #76 builds it on the batch
+report type `Attendance_Totals` (base `Attendance_Batch__c`, with `Module__c`,
+`Attendance_Date__c`, `Creator__c`, `Processing_Status__c` and the club's parent; "Attendance
+dashboard in Salesforce", [plan](plans/2026-10-06-attendance-totals.md) D.1):
+1. Filters: `Processing_Status__c` equals `Success` and `Creator__c` starts with `Jotform`, as
+   the girls tiles' filters 1 and 2, so a `Failed` "Duplicate" batch and a `Partner report`
+   batch never count.
+2. Period: `Attendance_Date__c` `LAST_N_MONTHS:12`, the session date (#128's field is on
+   `DHIS2__c` only).
+3. Grouping: the partner, which is the club's parent account
+   (`Attendance_Batch__c$Account__c.Parent`, the column the Partner filter uses), then
+   `Attendance_Date__c` by calendar month, then `Module__c`; the measure is the record count,
+   one batch per club and session date.
+- Test records: the RUNBOOK has no batch-side rule. The 11 February 2026 pilot batches are
+  `Creator__c` "Jotform" and `Success` (plan, Context), so they pass filters 1 and 2, fall inside
+  `LAST_N_MONTHS:12` until February 2027 and would show as a February 2026 bar. The Jotform
+  Attendance reports leave them out only by their window, `Attendance_Date__c` since 2026-09-01
+  (the `Creator__c` filter keeps the March pilot's per-girl rows out, "Access", not these
+  batches). Whether item 6 leaves them out (e.g. the same `Attendance_Date__c` floor of
+  2026-09-01) and takes the test-record rule on the parent account, #76 decides.
+- Whether item 6's report is rebuilt or a new report takes its place (the Id in
+  `glow/sf_keep_list.csv`), #76 decides; D2's `Assigned_Partner_Manager__c` filter does not
+  reach it yet (Components more than one dashboard shares, above). The copy to Decommissioned
+  comes first either way.
+
+| Item | Report | Year filter | The report's "September" | SOQL, September 2026 | Cause and fix |
+|---|---|---|---|---|---|
+| 1 | Collection of Attendance Roster by Month | 2025 | 52 records (September 2025) | 42 records, 0 with the field | Year; field blank since 2025-10: counts `Attendance_submitted_electronically__c` instead (21 of 42; #75) |
+| 2 | Attendance Roster Uploaded on DR by M&P | 2025, `Submit__c` set | 46 (2025); no month after September 2025 | 0 of 42 | Field blank since 2025-10, no source: retired from D1, its report to Decommissioned, kept (#75) |
+| 3 | Participation by Month and Partner | 2025 | sum 5,225 (SOQL, September 2025: 5,225) | sum 4,779 over 42 | Year: steps 1-4 |
+| 4 | GLOW Club Each Week | 2026 | sum 4,779 over 36 | 4,779 over 36 (total not 0) | Current; fixed year: steps 1-4, onto D1 |
+| 5 | Copy of GLOW Club Implementation by M&P | 2025 | 50 | 41 answered (39 Yes, 2 No) | Year: steps 1-4, onto D2 |
+| 6 | Glow Club Modules Implemented by M&P | 2025 | 95 module ticks on 52; 0 in October-December 2025 | 0 of 42 | Year; field blank since 2025-10: counts the Jotform batches' `Module__c` instead, on `Attendance_Totals`, by partner, month and module (#76; item 6's steps 1-3, above) |
+| 7 | GLOW Club Modules Adapted By Month | 2025 | 51 | 42 (29 Yes, 13 No) | Year: steps 1-4 |
+| 8 | Local and Regional Summits By Month 2 | 2025 | 47 | 38 (5 summits, 33 none) | Year: steps 1-4 |
+| 9 | Submission of GC observation forms M & P | 2025 | 52 | 26 (23 Yes, 3 No) | Year: steps 1-4 |
+| 10 | Total Number of Club Observations M&P | 2025 | sum 93 over 50 | sum 93 over 42 (the same sum by chance) | Year: steps 1-4 |
+| 11 | Completed Observing Clubs Alteast Once P | 2025 | sum 93; total 1,215 = all of 2025 | 27 partners observed (sum 93); January-September 796 | Year: steps 1-4 |
+| 13 | Number of mentors trained about module | 2025, month a column | total 1,676 = all of 2025 | 152 (September 2025: 107) | Year; month a column: steps 1-4 |
+| 14 | Number of training sessions led | 2025, month a column | total 791 = all of 2025 | 27 | Year; month a column: steps 1-4 |
+| 15 | Leading training sessions with mentors | 2025, month a column | 619 records = all of 2025 | 41 answered (19 Yes, 22 No) | Year; month a column: steps 1-4 |
+| 16 | Meeting with mentors to discuss program | 2025 | 52 | 41 (37 Yes, 4 No) | Year: steps 1-4 |
+| 17 | Approved Approvals monthly report | none | 58 = 44 (2025) + 14 (2026) | 14 of 42 approved | Two years in one month, by owner: steps 1-4 |
+| 18 | Reports completed on time | none | 94 = 52 (2025) + 42 (2026) | 42 | Two years in one month: steps 1-4 |
+| 19 | GLOW of the Month Stories Report | 2026 | 42 | 42 | Current; fixed year: steps 1 and 3 (#79) |
+
+Item 19's label in the org is "GLOW of the Month Stories Report" since 2026-10-21 (changed by
+another administrator); `glow/sf_keep_list.csv` follows the org's label (Ryan, 2026-10-23), with
+no rename in Salesforce.
+
+The check that a fix worked: the report's cell for 2026 and September equals a query on
+`DHIS2__c` with
+`WHERE Year__c = 2026 AND Month__c = 'September' AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`
+and, per item:
+- A number: `SELECT COUNT(Id), SUM(<field>)` with `AND <field> != null`. Items 3 and 4
+  `Monthly_Total__c` (item 4 also `AND Monthly_Total__c != 0`), 10
+  `GC_sessions_did_you_observe_last_month__c`, 11 the same field with `> 0` in place of `!= null`
+  (the partners who observed), 13 `Mentors_attended_the_training_sessions__c`, 14
+  `how_many_training_sessions_did_you_lead__c`.
+- A picklist (SUM is not valid on one): `SELECT <field>, COUNT(Id)` with `AND <field> != null
+  GROUP BY <field>`. Items 5 `Did_you_implement_GLOW_Club_last_month_f__c`, 7
+  `Adapted_to_the_local_culture_or_context__c`, 8 `Select_summits_completed_last_month__c`, 9
+  `did_you_submit_your_GC_observation_form__c`, 15 `Lead_any_training_sessions__c`, 16
+  `Did_you_meet_with_mentors_as_a_group__c`.
+- Items 1 and 17-19: `SELECT COUNT(Id)`, for item 1 with
+  `AND Attendance_submitted_electronically__c = true` (a checkbox; 21 for September 2026), for
+  item 17 with `AND Approved__c = true`.
+- Item 6 is not on `DHIS2__c`: the report's September 2026 total per module equals
+  `SELECT Module__c, COUNT(Id) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success'
+  AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c >= 2026-09-01 AND Attendance_Date__c <=
+  2026-09-30 GROUP BY Module__c`; one partner's cells, the same with `AND Account__r.Parent.Name
+  = '<partner>'`; with the test-record rule too if #76 adds it. Not run yet, so no number here.
+- Item 2 has no check: it is retired (#75).
+
+Each but item 6 was run once for September 2026 and gives the table's cell
+(`evidence/soql_2026-10-23_check_per_item.txt`; item 1's ticked count:
+`evidence/soql_2026-10-23_review.txt`), the numbers as of 2026-10-23; a report filed or
+approved later moves both sides.
+
+Questions for GLOW:
+- The labels are answered: Ryan, 2026-10-23 on #74, "Labels stay (#70)": the Monthly Report
+  attendance totals (items 3 and 4) keep their labels, with no "(Monthly Report)".
+- The period is answered: Ryan, 2026-10-23 on #74, the last 12 months is the default period of
+  every Monthly Report dashboard; its date field is #128, kept minimal, before #75-#79.
+- The sources are answered: Ryan, 2026-10-23 on #74, "use the candidates": item 1 counts
+  `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
+  and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
+
+## Interactive dashboard in Salesforce
+
+- **When:** before a change to the interactive dashboard (#81, #82, #83), or to read how it counts.
+- **Status:** unchanged by this repo; last modified in the org: the Apex classes 2026-01-04, the LWC bundles 2026-01-13 (`glowTileWeeklyAttendance` 2026-01-22). Retrieved read-only 2026-10-21 (#69).
+- **Dry run:** the check-only deploy (`--dry-run`) with the Apex tests.
+- **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off).
+- **Verify:** retrieve again and compare with the build.
+- **Rollback:** a fresh retrieve first, then the `before/` of that change (DECISIONS 2026-10-16).
+
+The LWC `glowDashboardShell` is the vendor's interactive dashboard on `DHIS2__c`. Its code is not
+in git: it lives only in the org, and the read-only retrieve of 2026-10-21 is in
+`data/sf_reporting_2026-10-21/before/` (`lwc/`, `classes/`, `staticresources/`, `tabs/`). Each
+Apex method, its signature and what it reads: [plan, Inventory](plans/2026-10-21-sf-reporting-inventory.md#inventory).
+- **Where it is hosted:** the Lightning tab `Glow_Interactive_Dashboard`, a CustomTab whose
+  `lwcComponent` is `glowDashboardShell`; no app lists the tab, and no Lightning page (FlexiPage)
+  embeds the LWC (its `isExposed` is `false`).
+- **The LWC:** `glowDashboardShell` holds `glowFilterBar`, seven tiles (`glowTileActivity`,
+  `glowTileSummits`, `glowTileWeeklyAttendance`, `glowTileMentorOrientation`,
+  `glowTileMentorGroup`, `glowTileSessionsObserved`, `glowTileMentorTraining`) and
+  `glowRangeBadge`, with shared chart modules on the static resource `chartjs_v280`.
+- **The controllers:** `GlowDemoController` gives the filter options (`getFilterOptions`,
+  `getDependentOptions`; `getMetrics` is unused) and `GlowTilesController` the tiles (8 methods
+  called, 2 unused, 1 commented out). Every method is `public static` and
+  `@AuraEnabled(cacheable=true)` in a `with sharing` class, reads `DHIS2__c` and has no DML.
+  The tests `GlowDemoControllerTest` and `GlowTilesControllerTest` cover 92.4% and 93.4% and
+  assert nothing.
+- **Where it counts:**
+  - the Partner-Month count is `COUNT()` of `DHIS2__c` rows (`GlowTilesController.cls:156-163`),
+    rows rather than distinct partners;
+  - there is no majority-across-months logic: the badge is one ratio over the whole range
+    (`pct >= 50`, `glowTileActivity.js:26`);
+  - the Partner Manager and Partner options are distinct values over every `DHIS2__c` row of any
+    date (`GlowDemoController.cls:149-219`);
+  - the Partner -> Partner Manager mapping is the account's current
+    `Account__r.Assigned_Partner_Manager__c`, applied to every month.
+- **A change** (#81, #82, #83) follows the epic's ritual: retrieve live, build in a copy,
+  check-only with the Apex tests, Ryan's go, deploy, retrieve `after/` and compare; never an edit
+  directly in the org.
+
 ## September back-fill: the resolver
 
 - **When:** the first, read-only step of a back-fill ("Back-fill of attendance into Salesforce").
@@ -3142,7 +4059,7 @@ The live commands of the procedure refuse without `--vpn-off`: the word that you
   variable `AUTO_SYNC_APPLY` (`0` = dry runs only, `1` = writes). For the new
   clubs' Salesforce accounts also the secrets `SF_CLIENT_ID` and `SF_CLIENT_SECRET`
   (the consumer key and secret of the External Client App "GLOW Sync", whose client
-  credentials log in as the integration user GLOW Sync) and the variable `SF_SYNC`
+  credentials log in as Ryan's own Salesforce user) and the variable `SF_SYNC`
   (`off` / `plan` / `apply`; changing it is Ryan's go): "New clubs' accounts,
   automatically".
 - **Salesforce from the Mac** — the Salesforce CLI's login, alias `glow`

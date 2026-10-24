@@ -5,7 +5,8 @@ this checkout, only under data/ (git-ignored).
   private_folder(folder, ...)  the --dir guard: under data/ inside the checkout; made, owner-only
   keep_private(folder)         the folder and the files in it owner-only again
   open_private / save_private  a file opened owner-only; a whole file replaced all at once
-  Ledger(path, cols)           an append-only CSV ledger (each tool's ledger.csv), last_rows()
+  Ledger(path, cols)           an append-only CSV ledger (each tool's ledger.csv), last_rows();
+                               replace_last() finishes the row a write left in flight
   stamp, rel, sha256, load_json  the UTC stamp, a path as printed, a file's hash, a JSON input
 
 A refusal is glow.salesforce.Refused: the tools that use this module stop on it.
@@ -13,6 +14,7 @@ A refusal is glow.salesforce.Refused: the tools that use this module stop on it.
 import csv
 import datetime
 import hashlib
+import io
 import json
 import os
 
@@ -146,6 +148,20 @@ class Ledger:
             os.fsync(fh.fileno())
         if rows is not None:
             rows.append({col: str(row.get(col, "")) for col in self.cols})
+
+    def replace_last(self, was, row):
+        """The last row, which must still be `was` (what append() wrote), becomes `row`: the whole file
+        written beside itself, fsync'd and moved onto it (save_private), so a crash leaves old or new."""
+        rows = self.read()
+        if not rows or rows[-1] != {col: str(was.get(col, "")) for col in self.cols}:
+            raise Refused(f"{rel(self.path)}: its last row is not the one this run wrote - look at it before "
+                          "anything else")
+        rows[-1] = {col: row.get(col, "") for col in self.cols}
+        text = io.StringIO()
+        writer = csv.DictWriter(text, fieldnames=self.cols, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+        save_private(self.path, text.getvalue())
 
 
 def last_rows(rows, key):

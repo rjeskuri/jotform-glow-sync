@@ -1252,6 +1252,13 @@ def layout_line(lo):
     return f"every roster above {lo['fence']}"
 
 
+def notes_line(qids):
+    """The printed report's `session notes:` line, from form_report's `session_notes` field
+    (the qids of the fields named glow.layout.NOTES_NAME; the audit flags two, a misplaced,
+    hidden or required one, and - once NOTES_EXPECTED - none)."""
+    return f"present ({', '.join('q' + str(q) for q in qids)})" if qids else "absent"
+
+
 def form_report(form_id, client, roster_by_region, partners_of=None, facts=None):
     """One form's report. partners_of: roster_facts' holders (the Roster's holders of each club
     name); facts: roster_facts, with which the retired rosters are told from broken ones
@@ -1360,6 +1367,7 @@ def form_report(form_id, client, roster_by_region, partners_of=None, facts=None)
                          "shown_by_rules": len(rules_showing(conditions, PARTNER))}
                         if box else None),
         "layout": layout.summary(questions),
+        "session_notes": [q["qid"] for q in layout.notes_fields(questions)],
         "languages": languages, "club_picker": picker,
         "club_guard": ({"qid": guards[0], "clubs": len(picker_options(questions, picker)) if picker else 0}
                        if guards else None),
@@ -1514,6 +1522,7 @@ def main():
             print(f"   same-name clubs: {r['same_name_rosters']} rosters send '<club> - <partner>'")
         print(f"   partner box: {partner_box_line(r.get('partner_box'), r['club_picker'])}")
         print(f"   layout: {layout_line(r['layout'])}")
+        print(f"   session notes: {notes_line(r.get('session_notes'))}")
         if r["club_picker"]:
             g = r.get("club_guard")
             print(f"   club guard: q{g['qid']} ({g['clubs']} clubs)" if g

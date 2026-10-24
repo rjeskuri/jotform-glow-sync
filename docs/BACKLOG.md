@@ -220,7 +220,7 @@ Status: open
 
 ### 27. Salesforce accounts for new clubs, automatically
 
-Status: blocked-on-ryan
+Status: in-progress
 
 - Salesforce REST auto-creation of Accounts for new clubs (replaces the SF Pending section of the Monday e-mail; keep `sendSfPendingDigest`, its trigger and its ReviewQueue section).
 - **Since 2026-09-30 every active club has its account** ([plan](plans/2026-09-30-salesforce-clubs.md), RUNBOOK "Club accounts in Salesforce"): this item is now only about clubs added or renamed afterwards - the account must be named as the picker sends it and linked to the partner; name each Account with the club's question-5 text (the sync's `--summary-json` `sf_names`), and never create one for a club the sync refused for its name.
@@ -229,6 +229,8 @@ Status: blocked-on-ryan
 - Until `SF_SYNC` is `apply`, check after every new club: "Club accounts without a parent" in RUNBOOK "Club accounts in Salesforce" must be exactly the two pilots.
 - **Cadence until then** (2026-10-06, [plan](plans/2026-10-06-attendance-totals.md) E, DECISIONS): the Monday e-mail's SF Pending list is worked each Monday, Ryan with Claude, as a round of the 2026-09-30 procedure, so a new club's account exists before its first attendance; a partner-less account the processor created meanwhile is re-parented, never re-created. Clubs the sync never puts on a form (a partner marked `jotform=no`) stay a hand create either way: BACKLOG 74.
 - **Setup not done as of 2026-10-09**: none of the GLOW Sync user, the GLOW Club Sync permission set, the External Client App and the GitHub secrets `SF_CLIENT_ID` / `SF_CLIENT_SECRET` exists, so `SF_SYNC` cannot be switched on yet (read 2026-10-09; [plan 2026-10-09](plans/2026-10-09-attendance-reports-public.md), Context).
+- **2026-10-21** (ticket #66): Ryan decided the sync runs as his own Salesforce user: no GLOW Sync user and no GLOW Club Sync permission set (DECISIONS 2026-10-21). The External Client App "GLOW Sync" (client credentials, Run As Ryan, scope api) was created through the Metadata API on his go; the GitHub secrets `SF_CLIENT_ID` / `SF_CLIENT_SECRET`, the dispatch token's Contents removal and `SF_SYNC=plan` follow (RUNBOOK "New clubs' accounts, automatically", Status). Still `blocked-on-ryan` until the first plan run is read.
+- **2026-10-22** (ticket #66): live. Ryan set the secrets `SF_CLIENT_ID` / `SF_CLIENT_SECRET` (12:17 UTC) and removed Contents from the dispatch token (step 4.4; 4.5 checked, run 39778511710). `SF_SYNC=plan` from 12:31 UTC; the first run (39779117991) was refused `invalid_app_access` until the app's policies included the System Administrator profile. Run 39780929667: 455 Accounts, 372 Club, check 317 ok, 5 need a person; the five were fixed by hand on Ryan's go (4 partner-less club accounts parented, 1 club account created); run 39784745392: 456 / 373, check 322 ok, 0 need a person. `SF_SYNC=apply` since 12:52 UTC, before the plan's 7-day plan-mode gate (Ryan waived it, see the plan's Result). Status now `in-progress`: what is left is checking the first automatic creates by hand (RUNBOOK ATTENTION table, "first creates").
 - Meanwhile two more partner-less club accounts came from the processor (Kawempe Youth Center's two new clubs, on the roster since 10-08); their parent was set on Ryan's go on 2026-10-09, 04:59 UTC
 
 ### 28. Close the Python ↔ Apps Script parity gaps
@@ -458,6 +460,7 @@ Status: open
 - **Watch: the Google Drive token can lapse silently.** Jotform raises no alarm when the Drive integration's Google token expires or is revoked (a password change, a session revocation): the copies stop and nothing says so. Nothing in the repo can see it either (`integration_status.py` can at most say the block exists, once its key is known).
 - The check is by eye once a month: the newest subfolder's date in each `Attendance photos - <Region>` folder against the form's newest submission; a week's gap with newer submissions means remove and re-add the integration on that form (RUNBOOK "Photos" step 6).
 - A repo check would need Drive access from the Mac or the runner (a role-account credential): not built
+- 2026-10-21: once the photo mover runs (ticket #89, RUNBOOK "Photo mover"), the subfolders leave `Attendance photos - <Region>` within half an hour; the monthly look is at the region's folder on the company Shared Drive instead
 
 ### 71. The retired rosters' option lists stay on the forms
 

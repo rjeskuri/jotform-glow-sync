@@ -151,3 +151,14 @@ function parseFormRoster_(cell) {
 function foldKey_(s) {
   return key_(s).normalize('NFKD').replace(/[\u0300-\u036F]/g, '');
 }
+
+/**
+ * foldKey_ keeping only letters and digits, of any script ("Mary-Jo O'Brix" →
+ * "maryjoobrix"): two names are the same spelling once capitals, accents and
+ * punctuation are ignored. Every letter counts ("Pea" is not "Peña"), and ''
+ * (nothing but punctuation) matches nobody. The Club Roster Form's REMOVE
+ * matcher (RosterOps.gs planModification_); never for identity.
+ */
+function foldLetters_(s) {
+  return foldKey_(s).replace(/[^\p{L}\p{N}]/gu, '');
+}
