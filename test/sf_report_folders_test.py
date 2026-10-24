@@ -1046,7 +1046,8 @@ class PublicReportsOrg(ReportOrg):
 class UndoFromPublicReports(Harness):
     """Ticket #72, live 2026-10-24: two reports moved out of "Public Reports", whose ledger rows'
     from_folder_id is the organization's id (no Folder has it), and two reports have a repeated
-    Decommissioned-to-Decommissioned row (a second `--limit 1` run, a no-op). The undo's dry run must
+    Decommissioned-to-Decommissioned row, a no-op: the full `--apply` run's first PATCH moved its plan's
+    first row, already moved by `--limit 1`, again. The undo's dry run must
     list every row and name "Public Reports" as the destination of the org-id ones, not refuse; the
     undo puts each report back, last first, a Public Reports one with folderId the org id."""
 

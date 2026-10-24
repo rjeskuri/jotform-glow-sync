@@ -3482,8 +3482,10 @@ The retirement (#72, [plan and Result](plans/2026-10-23-sf-retire-reports.md#res
 - 19 retiring reports stay in "DHIS2 Reports", held for #75-#79 because the 5 kept dashboards
   use them; each moves when its dashboard is reworked.
 - The ledger `data/sf_retire_2026-10-23/ledger.csv` has 31 move rows for the 29 reports: two
-  reports have a second row, Decommissioned to Decommissioned, from a repeated `--limit 1` run,
-  which changed nothing. The ledger is owner only and never committed.
+  reports have a second row, Decommissioned to Decommissioned, which changed nothing. Each is the
+  first PATCH of a plan's full `--apply` run, which moved that plan's first report again after
+  `--limit 1` had moved it; the undo, newest first, still ends with the report back in its old
+  folder. The ledger is owner only and never committed.
 - The 10 dashboards moved by hand in Lightning, so they are in no ledger;
   `data/sf_retire_2026-10-23/dashboards_by_hand.csv` lists each with its old folder.
 - To bring a report back: the undo's dry run lists every move of the ledger, newest first, with
@@ -3491,6 +3493,11 @@ The retirement (#72, [plan and Result](plans/2026-10-23-sf-retire-reports.md#res
   `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_retire_2026-10-23`.
   On Ryan's go, `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_retire_2026-10-23 --apply`
   puts each back and reads it back (`--limit N` undoes the last N moves only).
+- The undo puts the two "Public Reports" reports back first (their rows are the newest) by a PATCH
+  with `folderId` the organization's id, not yet proven in the org. If Salesforce refuses it, the
+  run stops there: Ryan moves the two back by hand in Lightning, an undo row with status `ok` is
+  added to the ledger for each, and the undo then goes on with the other 27 reports
+  ([plan, Rollback](plans/2026-10-23-sf-retire-reports.md#rollback)).
 - To bring a dashboard back: Ryan moves it back by hand in Lightning (its Move action) to its old
   folder, "DHIS2 Dashboards" or "Dhis2 Dashbords", and SOQL shows the same Id. One that the
   FlexiPage `Monthly_Report_Dashboards` embedded gets its component back from

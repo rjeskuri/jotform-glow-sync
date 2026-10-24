@@ -682,7 +682,8 @@ class RetiredReportsDocs(unittest.TestCase):
     LEFT_COUNTS = {"report": {19, 17, 36}, "dashboard": {5, 0}}
     ROWS = re.compile(r"(?i)\b31\s+(\w+\s+){0,2}?rows\b")
     ROW_COUNTS = {31, 2}
-    NOOP_ROWS = ("00ORP000005rT932AE", "00ORP000005gxSD2AY")   # a second row, Decommissioned to Decommissioned
+    # a second row, Decommissioned to Decommissioned: the full --apply run re-moved the row --limit 1 had moved
+    NOOP_ROWS = ("00ORP000005rT932AE", "00ORP000005gxSD2AY")
     MOVE_CMD = re.compile(r"\bpython3\s+(\S*/)?sf_report_folders\.py\s+(move|undo)\b")
 
     @classmethod
@@ -965,7 +966,8 @@ class RetiredReportsDocs(unittest.TestCase):
                         f"{where}: say the ledger holds 31 move rows for the 29 reports, in one sentence")
         for rid in self.NOOP_ROWS:
             self.assertIn(rid, result_raw, f"{where}: name report {rid}, one of the two with a second, no-op row from "
-                                           "Decommissioned to Decommissioned (a repeated `--limit 1` run)")
+                                           "Decommissioned to Decommissioned (the full `--apply` run's first PATCH "
+                                           "moved its plan's first row, already moved by `--limit 1`, again)")
         soql = [s for s in sentences(result, ".;:") if self.SOQL.search(s)]
         self.assertTrue([s for s in sentences(result, ".;") if self.stated(s, self.SOQL) and "Decommissioned" in s],
                         f"{where} gives the SOQL read-back of Decommissioned, in one sentence")
