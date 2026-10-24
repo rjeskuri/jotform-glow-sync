@@ -11,10 +11,16 @@ description: Salesforce for this project - what lives there (attendance batches 
   `Attendance_Batch__c`. The Apex attendance processor (after-insert trigger only, so a batch
   `PATCH` runs none of it) matches the club Account by name (capitals ignored; no match creates a
   partner-less Club account), finds or creates one Contact per ticked girl and writes the
-  `Attendance__c` rows (master-detail on the Contact). A batch for a club and date that already
-  has a `Success` one is `Failed` "Duplicate". `Girls_Present__c` on the batch is the one attendance count: set by the
-  processor on `Success`, typed in for partner-reported aggregates (RUNBOOK "Attendance totals and
-  partner-reported counts").
+  `Attendance__c` rows (master-detail on the Contact). A second batch for a club and date that
+  already has a `Success` one (a mentor's corrected re-submission; since 2026-10-22, #108) is
+  merged into the oldest `Success` batch of that club and date when its `Module__c` is the same:
+  only the girls not yet on that date get an `Attendance__c` row, as rows of that original batch,
+  whose `Girls_Present__c` moves to its row count; the correction is `Success` with
+  `Status_Message__c` `merged into <original batch id>`, no count and no rows of its own. A
+  different module, or a correction that adds nobody, is `Failed` "Duplicate" as before (never a
+  row removed, never a girl twice). `Girls_Present__c` on the batch is the one attendance count:
+  set by the processor on `Success`, moved on a merge, typed in for partner-reported aggregates
+  (RUNBOOK "Attendance totals and partner-reported counts").
 - **Accounts.** Every active club has a Club account (record type Club) named exactly as question
   5 sends it, parented to its partner's account (`glow/sf_partners.csv`). Never rename a club in
   Salesforce first: a rename starts in the sheet (RUNBOOK "Renaming a club").

@@ -24,6 +24,11 @@ CategoryFoldersDocs (ticket #73): one report folder "GLOW Monthly Reports" and o
 dashboards and their folders` table (read against `glow/sf_keep_list.csv`), the folders' shares
 copied from the DHIS2 folders (internal only), the plan (deploy, copies before moves, SOQL check,
 undo) and a dated bullet on the keep-list DECISIONS entry. Labels do not change (Ryan, 2026-10-23).
+RetiredReportsDocs (ticket #72): the RUNBOOK's `### Decommissioned` records the retirement (its date, 29
+reports and 10 dashboards moved, the 19 held for #75-#79, the ledger `data/sf_retire_2026-10-23/ledger.csv`)
+and how to bring an item back; the plan `docs/plans/<date>-sf-retire-reports.md` names #72, its Rollout has
+the dry run, `--limit 1`, Ryan's go, the dashboards by hand and the SOQL check by Id, its Rollback is the
+tool's undo from that ledger and deletes nothing, and its Result gives the counts.
 """
 import glob
 import os
@@ -635,6 +640,348 @@ class KeepListDocs(unittest.TestCase):
                          "field or record writes)")
         self.assertFalse([s for s in sentences(rejected, ".;") if self.NOT_BLANK.search(s) and self.NO_TEST.search(s)],
                          f"{where}: the agreed test-record rule is not under **Rejected**")
+
+
+class RetiredReportsDocs(unittest.TestCase):
+    """Ticket #72: the reports and dashboards off the keep list moved to Decommissioned, live 2026-10-23..24 on
+    Ryan's go (the ticket's comments): 29 reports by `tools/sf_report_folders.py` (27 of the 46 retiring in
+    "DHIS2 Reports", the other 19 held there for #75-#79 because kept dashboards use them, and 2 from "Public
+    Reports"), the ledger `data/sf_retire_2026-10-23/ledger.csv`; 10 dashboards moved by hand in Lightning (not in
+    the ledger). The RUNBOOK's `### Decommissioned` records it and how to bring an item back; the plan
+    `docs/plans/<date>-sf-retire-reports.md` carries the Rollout, a Rollback that is the tool's undo (nothing is
+    deleted) and the Result. The tool's undo reads only `ledger.csv` in its `--dir`, so a command that brings the
+    retirement back names `--dir data/sf_retire_2026-10-23`."""
+
+    longMessage = False         # the messages say what to fix
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    PLANS = os.path.join(REPO, "docs", "plans", "*-sf-retire-reports.md")
+    TICKET = re.compile(r"(?<![\w#])#72\b")
+    RETIRE_DIR = "data/sf_retire_2026-10-23"
+    LEDGER = RETIRE_DIR + "/ledger.csv"
+    DATE = re.compile(r"\b2026-10-2[34]\b")                 # the moves ran 2026-10-23 and 2026-10-24
+    MOVED = re.compile(r"(?i)\b(mov(e|ed|es|ing)|retired)\b")
+    REPORTS_29 = re.compile(r"(?i)\b29\s+(\w+\s+){0,3}?reports?\b")
+    DASHBOARDS_10 = re.compile(r"(?i)\b(10|ten)\s+(\w+\s+){0,3}?dashboards?\b")
+    HELD_19 = re.compile(r"(?i)\b19\s+(\w+\s+){0,3}?reports?\b")
+    SOQL = re.compile(r"(?i)\bSOQL\b|\bSELECT\b[^.;]{0,80}?\bFROM\s+(Report|Dashboard)\b")
+    IN_DECOM = re.compile(r"\bFolderName\s*=\s*['‘’]Decommissioned['‘’]")
+    BY_HAND = re.compile(r"(?i)\bby hand\b|\bLightning\b")
+    MOVE_VERB = re.compile(r"(?i)\bmov(e|ed|es|ing)\b")
+    # a folder a dashboard goes to or comes back to
+    FOLDER = re.compile(r"(?i)\bfolders?\b|\bDecommissioned\b|\bDHIS2 Dashboards\b|\bDhis2 Dashbords\b")
+    # the retired dashboards left where they were ("the dashboards stay where they are")
+    DASHBOARDS_STAY = re.compile(r"(?i)\b(the|retired|retiring|10|ten|these|those|each|all|every)\s+(\w+\s+)?"
+                                 r"dashboards?\s+(\w+\s+){0,2}?(stay|stays|stayed|remain|remains|remained|are left|"
+                                 r"were left)\b|\bdashboards?\b[^.;]{0,40}?\bwhere (they|it) (are|is|were|was)\b")
+    # what makes a factual statement a guess
+    HEDGE = re.compile(r"(?i)\b(rumou?r\w*|maybe|perhaps|possibly|probably|presumably|supposedly|allegedly|"
+                       r"reportedly|apparently|may or may not|might or might not|some ?day|assum\w*|in some sense|"
+                       r"somewhere|of something|(is|are)\s+(just\s+)?(a\s+)?words?|nice idea|ignored|in theory|"
+                       r"unverified|hopefully|guess\w*|in truth)\b")
+    # the moves' counts (the ticket's comments, 2026-10-23..24): reports moved 29 = 27 + 2 (plan_1 10, plan_2
+    # 17, --limit 1 one); dashboards moved 10; reports left 19 held + 17 kept = 36; dashboards left the 5 kept
+    COUNT = re.compile(r"(?i)(?<![\w#.\-/])(\d+)\s+((?:[\w\"“”'’-]+\s+){0,3}?)(reports?|dashboards?|rows?)\b")
+    MOVED_WORD = re.compile(r"(?i)\bmov(e|ed|es|ing)\b|\bretired\b|\bto\s+[\"“]?Decommissioned\b")
+    LEFT_WORD = re.compile(r"(?i)\b(remain\w*|stay\w*|held|left|kept)\b")
+    MOVED_COUNTS = {"report": {29, 27, 2, 10, 17, 1}, "dashboard": {10, 1}}
+    LEFT_COUNTS = {"report": {19, 17, 36}, "dashboard": {5, 0}}
+    ROWS = re.compile(r"(?i)\b31\s+(\w+\s+){0,2}?rows\b")
+    ROW_COUNTS = {31, 2}
+    # a second row, Decommissioned to Decommissioned: the full --apply run re-moved the row --limit 1 had moved
+    NOOP_ROWS = ("00ORP000005rT932AE", "00ORP000005gxSD2AY")
+    MOVE_CMD = re.compile(r"\bpython3\s+(\S*/)?sf_report_folders\.py\s+(move|undo)\b")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = DecommissionedFoldersDocs()     # #69's helpers: decommissioned(), contradictions, locally_denied
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def stated(self, s, rx):
+        """`rx` said in clause `s`, not denied in the words before it."""
+        return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
+
+    def commands(self, raw, verb=None):
+        """Each runnable `python3 …sf_report_folders.py move|undo …` command in `raw` (inline code, a fenced
+        line), flattened, in order; with `verb`, only that subcommand. An inline span wrapped over a line break
+        stays one command."""
+        segments = re.split(r"`+|\n\s*\n|\n(?=\s*(?:\$\s*)?python3\s)|(?=\bpython3\s)", raw)
+        out = []
+        for seg in segments:
+            m = self.MOVE_CMD.search(flat(seg))
+            if m and (verb is None or m.group(2) == verb):
+                out.append(flat(seg)[m.start():])
+        return out
+
+    @staticmethod
+    def flag(cmd, name):
+        """The values of `--name` in `cmd`, quotes and a trailing `/` stripped."""
+        return [v.strip("`'\"").rstrip("/") for v in re.findall(r"--" + name + r"(?:=|\s+)(\S+)", cmd)]
+
+    def assertCommandsUseTheDir(self, raw, where):
+        """Every move and undo command runs with `--vpn-off` and `--dir` the retirement's folder and no other `--dir`
+        (the tool writes and reads `ledger.csv` there, and undo refuses any other ledger); a `--ledger` is that
+        folder's `ledger.csv`; a `--plan` is a CSV in that folder."""
+        for c in self.commands(raw):
+            self.assertIn("--vpn-off", c, f"{where}: the tool refuses to run without `--vpn-off`: {c[:160]!r}")
+            dirs = self.flag(c, "dir")
+            self.assertTrue(dirs and set(dirs) == {self.RETIRE_DIR},
+                            f"{where}: every move and undo of this retirement runs with `--dir {self.RETIRE_DIR}` and no "
+                            f"other `--dir` (its ledger is `{self.LEDGER}`): {c[:160]!r}")
+            for v in self.flag(c, "ledger"):
+                self.assertEqual(v, self.LEDGER, f"{where}: undo reads only `ledger.csv` in its `--dir`; the ledger "
+                                                 f"is `{self.LEDGER}`: {c[:160]!r}")
+            for v in self.flag(c, "plan"):
+                self.assertRegex(v, r"^" + re.escape(self.RETIRE_DIR) + r"/[\w.-]+\.csv$",
+                                 f"{where}: a move's `--plan` is a CSV in `{self.RETIRE_DIR}/`: {c[:160]!r}")
+
+    def assertUndoFromTheLedger(self, raw, where):
+        """A dry run of the tool's undo for this retirement: `--vpn-off`, `--dir` the retirement's folder, no
+        `--apply`; and every move and undo command uses that folder."""
+        cmds = self.commands(raw, "undo")
+        self.assertTrue(cmds, f"{where}: give the command `python3 tools/sf_report_folders.py undo --vpn-off --dir "
+                              f"{self.RETIRE_DIR}`")
+        self.assertCommandsUseTheDir(raw, where)
+        self.assertTrue([c for c in cmds if "--apply" not in c],
+                        f"{where}: the undo's dry run, on one line: `python3 tools/sf_report_folders.py undo --vpn-off "
+                        f"--dir {self.RETIRE_DIR}` (no `--apply`)")
+
+    def assertNoHedge(self, text, where):
+        found = [f"{m.group(0)!r} in {s[:160]!r}" for s in sentences(self.norm(text), ".;:")
+                 for m in [self.HEDGE.search(s)] if m]
+        self.assertEqual(found, [], f"{where}: a record of what was done states it, it does not guess: " + "; ".join(found))
+
+    def assertNoDashboardsStay(self, text, where):
+        for s in sentences(self.norm(text), ".;:"):
+            for m in self.DASHBOARDS_STAY.finditer(s):
+                self.assertFalse("kept" not in m.group(0).lower() and not self.d.locally_denied(s, m),
+                                 f"{where}: the 10 retired dashboards moved to Decommissioned (by hand in Lightning); "
+                                 f"they did not stay where they were: {s[:160]!r}")
+
+    def assertCountsTrue(self, text, where):
+        """Every "N reports|dashboards" said moved or left, and every "N rows", is one of the moves' counts."""
+        bad = []
+        for s in sentences(self.norm(text), ".;"):
+            for m in self.COUNT.finditer(s):
+                n, noun = int(m.group(1)), m.group(3).lower().rstrip("s")
+                if noun == "row":
+                    if n not in self.ROW_COUNTS:
+                        bad.append(f"{n} rows: {s[:160]!r}")
+                    continue
+                around = s[max(0, m.start() - 25):m.start()] + " " + m.group(2) + " " + s[m.end():m.end() + 40]
+                moved, left = self.MOVED_WORD.search(around), self.LEFT_WORD.search(around)
+                ok = set()
+                if moved:
+                    ok |= self.MOVED_COUNTS[noun]
+                if left:
+                    ok |= self.LEFT_COUNTS[noun]
+                if (moved or left) and n not in ok:
+                    bad.append(f"{n} {noun}s: {s[:160]!r}")
+        self.assertEqual(bad, [], f"{where}: a count that is not the moves' (29 reports and 10 dashboards moved, 19 "
+                                  "held and 17 kept reports and 5 kept dashboards left, 31 ledger rows): "
+                                  + "; ".join(bad))
+
+    def retirement(self, text):
+        """The sentences of `text` that say, not negated and not hedged, 29 reports and 10 dashboards moved
+        to Decommissioned."""
+        return [s for s in sentences(self.norm(text), ".;") if self.stated(s, self.MOVED)
+                and self.REPORTS_29.search(s) and self.DASHBOARDS_10.search(s) and "Decommissioned" in s
+                and not self.HEDGE.search(s)]
+
+    def ledger_rows(self, text):
+        """The sentences of `text` that give the ledger's 31 move rows with the 29 reports, not negated."""
+        return [s for s in sentences(self.norm(text), ".;") if self.stated(s, self.ROWS) and self.REPORTS_29.search(s)
+                and not self.HEDGE.search(s)]
+
+    def back_by_hand(self, text):
+        """The sentences of `text` that name a dashboard and, in one of their parts (cut at a colon: "the
+        dashboards are not in the ledger: Ryan moves each back by hand to its old folder"), move it back by hand in
+        Lightning to a folder, the "back" and the move not denied, nothing hedged."""
+        back = re.compile(r"(?i)\bback\b")
+        return [s for s in sentences(text, ".;") if re.search(r"(?i)\bdashboards?\b", s) and not self.HEDGE.search(s)
+                and [p for p in re.split(r":\s", s) if self.BY_HAND.search(p) and self.stated(p, back)
+                     and self.stated(p, self.MOVE_VERB) and self.FOLDER.search(p)]]
+
+    def plan_path(self):
+        found = sorted(glob.glob(self.PLANS))
+        self.assertEqual(len(found), 1, "docs/plans/: one plan `YYYY-MM-DD-sf-retire-reports.md` for ticket #72 "
+                                        f"(found {[os.path.basename(p) for p in found]})")
+        self.assertRegex(os.path.basename(found[0]), r"^\d{4}-\d\d-\d\d-sf-retire-reports\.md$",
+                         "docs/plans/: the plan is named `YYYY-MM-DD-sf-retire-reports.md`")
+        return found[0]
+
+    def plan_part(self, path, heading, least):
+        """The body of `heading` in the plan, raw, after checking it says something."""
+        name = os.path.relpath(path, REPO)
+        part = md_part(path, heading)
+        raw = part.split("\n", 1)[1] if "\n" in part else ""
+        body = self.norm(raw)
+        self.assertNotRegex(body, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: `{heading}` is a placeholder")
+        distinct = {w.lower() for w in re.findall(r"[A-Za-z]\w*", body)}
+        self.assertGreaterEqual(len(distinct), least, f"{name}: `{heading}` says too little (at least {least} "
+                                                      "distinct words)")
+        return raw
+
+    # --- the RUNBOOK ----------------------------------------------------------------------------------------
+
+    def test_the_runbook_records_the_retirement_counts_and_ledger(self):
+        where = f"RUNBOOK section {self.d.MONTHLY[3:]!r}, {self.d.DECOM[4:]!r}"
+        part = self.d.decommissioned()          # the counts belong here, not anywhere in the RUNBOOK
+        text = self.norm(part)
+        clauses = sentences(text, ".;")
+        # one sentence: when, what moved, how many of each
+        said = [s for s in self.retirement(text) if self.DATE.search(s)]
+        self.assertTrue(said, f"{where}: say, in one sentence (not negated, not hedged), the retirement's date "
+                              "(2026-10-23..24), that it moved 29 reports and 10 dashboards to Decommissioned (\"On "
+                              "2026-10-23 and 24, #72 moved 29 reports … and 10 dashboards to Decommissioned\")")
+        self.assertTrue([s for s in clauses if "Public Reports" in s
+                         and re.search(r"(?i)\b(2|two)\s+(\w+\s+){0,3}?reports?\b", s)
+                         and re.search(r"(?i)\bfrom\b|\bmov\w*\b", s)],
+                        f"{where}: say 2 of the 29 reports came from \"Public Reports\" (in one sentence)")
+        self.assertTrue([s for s in clauses if self.HELD_19.search(s) and "DHIS2 Reports" in s
+                         and re.search(r"#7[5-9]\b", s) and self.stated(s, self.LEFT_WORD)],
+                        f"{where}: say the 19 retiring reports that kept dashboards still use stay in \"DHIS2 Reports\" "
+                        "for #75-#79 (in one sentence)")
+        self.assertIn(self.LEDGER, part, f"{where}: name the retirement's ledger `{self.LEDGER}`")
+        self.assertTrue(self.ledger_rows(text),
+                        f"{where}: say the ledger holds 31 move rows for the 29 reports (two reports have a second, "
+                        "no-op row from Decommissioned to Decommissioned), in one sentence")
+        # how to bring an item back: the reports by the tool's undo from that ledger, the dashboards by hand
+        self.assertUndoFromTheLedger(part, where)
+        self.assertTrue(self.back_by_hand(text),
+                        f"{where}: say a retired dashboard is moved back by hand in Lightning to its old folder (Move), "
+                        "in one sentence: the ledger holds only the reports")
+        self.assertNoDashboardsStay(part, where)
+        self.assertCountsTrue(part, where)
+        self.assertNoHedge(part, where)
+        self.d.assertNoContradiction(part, where, share=True)
+
+    # --- the plan ---------------------------------------------------------------------------------------------
+
+    def test_the_retirement_rollback_is_the_tools_undo(self):
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        where = f"{name}: `## Rollback`"
+        raw = self.plan_part(path, "## Rollback", 15)
+        body = self.norm(raw)
+        self.assertUndoFromTheLedger(raw, where)
+        self.assertTrue([c for c in self.commands(raw, "undo") if "--apply" in c],
+                        f"{where}: after the dry run, the undo's own command with `--apply`: `python3 "
+                        f"tools/sf_report_folders.py undo --vpn-off --dir {self.RETIRE_DIR} --apply`")
+        self.assertTrue([s for s in sentences(body, ".;") if re.search(r"Ryan['’]s go\b", s)
+                         and "--apply" in s and not self.HEDGE.search(s)],
+                        f"{where}: the undo's `--apply` waits for Ryan's go (in one sentence)")
+        self.assertTrue(self.back_by_hand(body),
+                        f"{where}: the 10 dashboards are not in the ledger; say they are moved back by hand in "
+                        "Lightning to their old folder")
+        self.assertNoDashboardsStay(raw, where)
+        self.assertNoHedge(raw, where)
+        # it deletes nothing: said, and no step contradicts it
+        self.assertTrue([s for s in sentences(body, ".;")
+                         if re.search(r"(?i)\b(nothing|never|no\s+\w+)\b[^.;]{0,40}?\bdelet\w*", s)],
+                        f"{where}: say nothing is deleted (\"nothing is deleted: the undo moves the reports back\")")
+        for rx, what in ((r"destructiveChanges", "a `destructiveChanges` deploy"),
+                         (r"\bsf project delete\b", "`sf project delete`"),
+                         (r"(-X\s*|--method\s+)DELETE\b|\bDELETE\s+/services/", "an HTTP DELETE")):
+            self.assertNotRegex(raw, rx, f"{where}: {what} deletes; the rollback is the tool's undo and deletes nothing")
+        found = self.d.contradictions(raw)
+        found += [f"says there is no rollback: {s[:160]!r}" for s in sentences(body, ".;:")
+                  if self.d.NO_ROLLBACK.search(s)]
+        self.assertEqual(found, [], f"{where}: contradicts the rule (the undo moves back, nothing is deleted, never "
+                                    "optional): " + "; ".join(found))
+
+    def test_a_plan_carries_the_moves(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        word, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertEqual(word, "done", f"{name}: the moves have run (2026-10-23..24): `status: done`")
+        self.assertRegex(keys.get("done", ""), r"^2026-10-(2[3-9]|3[01])\b",
+                         f"{name}: a done plan carries `done:` with the date the moves finished (2026-10-24 or later)")
+        opening = text.split("\n## ", 1)[0]
+        self.assertRegex(opening, self.TICKET,
+                         f"{name}: name ticket #72 in the frontmatter, the title or the opening paragraph")
+        self.assertNoHedge(opening.split("\n---\n", 1)[-1], f"{name}: the opening")
+        flat_text = self.norm(text)
+        self.assertTrue([s for s in sentences(flat_text, ".;") if re.search(r"(?i)\b46\s+(\w+\s+){0,3}?reports?\b", s)
+                         and re.search(r"(?i)\bretir\w*", s) and not self.HEDGE.search(s)],
+                        f"{name}: give the count of retiring reports in \"DHIS2 Reports\" (46 reports retiring), in one "
+                        "sentence")
+        self.assertTrue([s for s in sentences(flat_text, ".;") if re.search(r"(?i)\b17\s+(\w+\s+){0,3}?reports?\b", s)
+                         and re.search(r"(?i)\bkept\b", s) and not self.HEDGE.search(s)],
+                        f"{name}: give the count of kept reports staying (17 kept reports), in one sentence")
+
+        # the Rollout: the dry run, then --limit 1 of the same plan on Ryan's go, the dashboards by hand, the SOQL check
+        raw = self.plan_part(path, "## Rollout", 40)
+        rollout = self.norm(raw)
+        rclauses = sentences(rollout, ".;")
+        where = f"{name}: `## Rollout`"
+        self.assertRegex(rollout, r"(?i)\bdry[- ]run\b", f"{where} has the dry run (`move --vpn-off --plan …` without "
+                                                         "`--apply`)")
+        self.assertCommandsUseTheDir(raw, where)
+        moves = self.commands(raw, "move")
+        dry = [(i, self.flag(c, "plan")) for i, c in enumerate(moves) if self.flag(c, "plan") and "--apply" not in c]
+        self.assertTrue(dry, f"{where} gives the dry run's command, `python3 tools/sf_report_folders.py move --vpn-off "
+                             f"--plan {self.RETIRE_DIR}/<plan>.csv --dir {self.RETIRE_DIR}` without `--apply`")
+        first = [(i, self.flag(c, "plan")) for i, c in enumerate(moves)
+                 if "--apply" in c and self.flag(c, "limit") == ["1"] and self.flag(c, "plan")]
+        self.assertTrue(first, f"{where} moves one report first: `… move … --apply --limit 1`, then reads it back")
+        self.assertTrue([1 for i, p in first for j, q in dry if j < i and p == q],
+                        f"{where}: the `--apply --limit 1` move runs the same `--plan` as a dry run before it")
+        self.assertTrue([s for s in rclauses if re.search(r"Ryan['’]s go\b", s)
+                         and re.search(r"--apply|--limit[ =]1\b", s) and not self.d.denies(s)
+                         and not self.HEDGE.search(s)],
+                        f"{where}: the `--apply` moves wait for Ryan's go (one sentence with Ryan's go and `--apply`)")
+        self.assertTrue([s for s in rclauses if re.search(r"(?i)\bdashboards?\b", s) and self.BY_HAND.search(s)
+                         and self.stated(s, self.MOVE_VERB) and self.FOLDER.search(s) and not self.HEDGE.search(s)],
+                        f"{where}: the 10 dashboards are moved by hand in Lightning to Decommissioned (the API refuses "
+                        "it), in one sentence")
+        self.assertNoDashboardsStay(raw, where)
+        self.assertIn("Monthly_Report_Dashboards", rollout,
+                      f"{where}: the FlexiPage `Monthly_Report_Dashboards` loses the retiring dashboards' components "
+                      "before they move")
+        self.assertTrue([s for s in rclauses if self.SOQL.search(s) and self.IN_DECOM.search(s)
+                         and re.search(r"\bId\b", s) and self.stated(s, self.SOQL)],
+                        f"{where} checks by SOQL by Id that each item is in Decommissioned (`SELECT COUNT() FROM Report "
+                        "WHERE Id IN (…) AND FolderName = 'Decommissioned'`), in one sentence")
+        self.assertNoHedge(raw, where)
+        self.d.assertNoContradiction(raw, where)
+
+        # the Result: what moved, when, how many, the ledger's rows, checked by SOQL
+        self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        result_raw = self.plan_part(path, "## Result", 15)
+        result = self.norm(result_raw)
+        where = f"{name}: `## Result`"
+        self.assertRegex(result, self.DATE, f"{where} gives the dates of the moves (2026-10-23..24)")
+        self.assertTrue(self.retirement(result),
+                        f"{where}: say, in one sentence (not negated, not hedged), 29 reports and 10 dashboards moved to "
+                        "Decommissioned")
+        self.assertTrue([s for s in sentences(result, ".;") if self.HELD_19.search(s)
+                         and self.stated(s, self.LEFT_WORD) and not self.HEDGE.search(s)],
+                        f"{where} gives the 19 reports held in \"DHIS2 Reports\" (\"19 … reports stay …\")")
+        self.assertIn(self.LEDGER, result_raw, f"{where} names the ledger `{self.LEDGER}`")
+        self.assertTrue(self.ledger_rows(result),
+                        f"{where}: say the ledger holds 31 move rows for the 29 reports, in one sentence")
+        for rid in self.NOOP_ROWS:
+            self.assertIn(rid, result_raw, f"{where}: name report {rid}, one of the two with a second, no-op row from "
+                                           "Decommissioned to Decommissioned (the full `--apply` run's first PATCH "
+                                           "moved its plan's first row, already moved by `--limit 1`, again)")
+        soql = [s for s in sentences(result, ".;:") if self.SOQL.search(s)]
+        self.assertTrue([s for s in sentences(result, ".;") if self.stated(s, self.SOQL) and "Decommissioned" in s],
+                        f"{where} gives the SOQL read-back of Decommissioned, in one sentence")
+        self.assertEqual([s for s in soql if not self.stated(s, self.SOQL)], [],
+                         f"{where}: the SOQL read-back was run; no sentence denies it")
+        self.assertNoDashboardsStay(result_raw, where)
+        self.assertCountsTrue(result_raw, where)
+        self.assertNoHedge(result_raw, where)
+        self.d.assertNoContradiction(result_raw, where)
 
 
 class CategoryFoldersDocs(unittest.TestCase):

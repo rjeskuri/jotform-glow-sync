@@ -73,7 +73,7 @@ AGREED = {
     "16": ("report", "00ORP000004RJZ72AO", "Meeting with mentors to discuss program"),
     "17": ("report", "00ORP000006XXEf2AO", "Approved Approvals monthly report"),
     "18": ("report", "00ORP0000054DyH2AU", "Reports completed on time"),
-    "19": ("table", "00ORP000005p2L32AI", "GLOW of the Month Stories Report"),   # the org's label (SOQL, 2026-10-23)
+    "19": ("table", "00ORP000005p2L32AI", "GLOW of the Month Stories Report"),  # Ryan, 2026-10-23: the org's 10-21 rename
     "D1": ("dashboard", "01ZRP000006iWqL2AU", "Glow Club Attendance"),
     "D2": ("dashboard", "01ZRP000006jU9o2AE", "Implementation Dashboard"),
     "D3": ("dashboard", "01ZRP000006k2D32AI", "GLOW Club Training"),
