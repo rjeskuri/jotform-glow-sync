@@ -608,24 +608,30 @@ const WRITES = c => /\.(moveTo|createFolder|addFile|removeFile|addFolder|removeF
 
 // Script Properties: SOURCE_FOLDER_<KEY> and TARGET_FOLDER_<KEY> per region (drive-sync/README.md)
 const PROP_KEYS = { Africa: 'AFRICA', Asia: 'ASIA', 'Latin America': 'LATIN_AMERICA', 'U.S': 'US', Template: 'TEMPLATE' };
-// the fake My Drive: Africa has a settled, a still-uploading and a resubmitted subfolder; Asia one settled one
+// the fake My Drive: Africa has a settled, a still-uploading and a resubmitted subfolder; Asia a settled
+// one and, either side of the 10-minute settle time, a 9-minute-old (waits) and an 11-minute-old (moves)
 const FAKE_SOURCES = {
   Africa: [['Bright Stars 2026-10-14', [['IMG_4471.jpg', 2048, OLD], ['IMG_4472.jpg', 4096, OLD]]],
            ['Rising Lights 2026-10-15', [['IMG_4480.jpg', 1500, 1]]],
            ['Golden Flames 2026-10-13', [['IMG_5501.jpg', 3000, OLD], ['IMG_5502.jpg', 3100, OLD]]]],
-  Asia: [['Morning Wings 2026-10-13', [['IMG_6001.jpg', 5000, OLD]]]],
+  Asia: [['Morning Wings 2026-10-13', [['IMG_6001.jpg', 5000, OLD]]],
+         ['Evening Lights 2026-10-15', [['IMG_6101.jpg', 2600, 9]]],
+         ['Silver Voices 2026-10-15', [['IMG_6201.jpg', 2700, 11]]]],
   'Latin America': [], 'U.S': [], Template: [],
 };
 // the fake Shared Drive: Africa already holds the resubmission's name, with one of its two photos
 const FAKE_TARGETS = { Africa: [['Golden Flames 2026-10-13', [['IMG_5501.jpg', 3000]]]], Asia: [], 'Latin America': [], 'U.S': [], Template: [] };
 const SOURCE_SUBS = Object.values(FAKE_SOURCES).reduce((a, s) => a + s.length, 0);
-const FILE_STEMS = ['IMG_4471', 'IMG_4472', 'IMG_4480', 'IMG_5501', 'IMG_5502', 'IMG_6001', 'IMG_9000', 'receipt'];
+const LATE_UPLOAD = 'IMG_7777.jpg';   // a photo Jotform adds to a subfolder after the planner has read it (opt.lateUploadTo)
+const FILE_STEMS = ['IMG_4471', 'IMG_4472', 'IMG_4480', 'IMG_5501', 'IMG_5502', 'IMG_6001', 'IMG_6101', 'IMG_6201', 'IMG_7777',
+                    'IMG_9000', 'receipt'];
 // the real run (#132): a folder of each moved subfolder's name made ONCE in its region folder, each of its
 // files moved into it; the merge's new photo into the folder already there (no folder made for a merge)
-const EXPECTED_CREATED = ['T:Africa/Bright Stars 2026-10-14', 'T:Asia/Morning Wings 2026-10-13'].sort();
+const EXPECTED_CREATED = ['T:Africa/Bright Stars 2026-10-14', 'T:Asia/Morning Wings 2026-10-13', 'T:Asia/Silver Voices 2026-10-15'].sort();
 const EXPECTED_MOVES = ['S:Africa/Bright Stars 2026-10-14/IMG_4471.jpg -> T:Africa/Bright Stars 2026-10-14',
                         'S:Africa/Bright Stars 2026-10-14/IMG_4472.jpg -> T:Africa/Bright Stars 2026-10-14',
                         'S:Asia/Morning Wings 2026-10-13/IMG_6001.jpg -> T:Asia/Morning Wings 2026-10-13',
+                        'S:Asia/Silver Voices 2026-10-15/IMG_6201.jpg -> T:Asia/Silver Voices 2026-10-15',
                         'S:Africa/Golden Flames 2026-10-13/IMG_5502.jpg -> T:Africa/Golden Flames 2026-10-13'].sort();
 const inSub = (m, region, name) => m.startsWith('S:' + region + '/' + name + '/');
 
@@ -642,11 +648,14 @@ const inSub = (m, region, name) => m.startsWith('S:' + region + '/' + name + '/'
  * and any other property a fictional id) | 'empty' (no Script Properties). opt: failMoveOf (a
  * subfolder name whose files' moves throw), failCreateOf (a folder name whose Files.create
  * throws), moveAdvanceMin / readAdvanceMin (the clock jumps on each file moved / on each source
- * subfolder's files read), targetName / sourceName ({region: folder name}).
+ * subfolder's files read), lateUploadTo (a source subfolder name: every listing of its files
+ * after the first finds one more, fresh photo, LATE_UPLOAD - as Jotform may add one between the
+ * planner's read and the move), targetName / sourceName ({region: folder name}). readCount
+ * holds how often each source subfolder's files were listed.
  */
 function fakeEnv(mode, opt) {
   opt = opt || {};
-  const calls = [], moved = [], attempted = [], created = [], ops = [], logs = [], read = new Set();
+  const calls = [], moved = [], attempted = [], created = [], ops = [], logs = [], read = new Set(), readCount = {};
   const clock = { t: Date.now() };
   const t0 = clock.t;
   let D = Date, n = 0;
@@ -685,7 +694,16 @@ function fakeEnv(mode, opt) {
     const self = wrap('Folder', {
       getId: () => id, getName: () => name, getFolders: () => iter(kids),
       getFiles: () => {
-        if (isSourceSub) { read.add(lbl); if (opt.readAdvanceMin) clock.t += opt.readAdvanceMin * MIN; }
+        if (isSourceSub) {
+          read.add(lbl);
+          readCount[lbl] = (readCount[lbl] || 0) + 1;
+          if (opt.readAdvanceMin) clock.t += opt.readAdvanceMin * MIN;
+          if (opt.lateUploadTo === name && readCount[lbl] > 1) {   // one more photo arrived since the first listing
+            const late = mkFile(lbl, LATE_UPLOAD, 777, 0);
+            meta.get(late).parent = id;
+            files.push(late);
+          }
+        }
         return iter(files);
       },
       getFoldersByName: x => iter(kids.filter(k => meta.get(k).name === x)),
@@ -738,8 +756,8 @@ function fakeEnv(mode, opt) {
     attempted.push(m.label);
     const r = resource || {};
     if ('trashed' in r) calls.push('Drive.Files.update{trashed}');   // a trash by another door: a violation
-    if ('parents' in r || 'trashed' in r) {
-      throw new Error('Files.update: the parents field is not directly writable; nothing is trashed here (fake)');
+    if (Object.keys(r).length) {   // a parent move sends an empty resource: parents is not directly writable, nothing is trashed or renamed
+      throw new Error('Files.update: the resource of a parent move is {}, not {' + Object.keys(r).join(', ') + '} (fake)');
     }
     if (m.isFolder) throw new Error('Files.update: teamDrivesFolderMoveInNotSupported: Moving folders into shared drives is not supported (fake)');
     const dest = args.addParents ? byId[args.addParents] : null;
@@ -821,7 +839,7 @@ function fakeEnv(mode, opt) {
                     ' static now() { return now(); } } Date = FakeDate; })(); delete globalThis.__fakeClock;', c);
     D = vm.runInContext('Date', c);
   };
-  return { calls, moved, attempted, created, ops, logs, read, t0, globals, install };
+  return { calls, moved, attempted, created, ops, logs, read, readCount, t0, globals, install };
 }
 
 const violations = calls => calls.filter(c => {
@@ -848,13 +866,14 @@ function runEntry(name, mode, opt) {
     } catch (e) { threw = String(e && e.message || e); }
     return { name, threw, text: env.logs.join('\n'), calls: env.calls.slice(), moved: env.moved.slice(),
              attempted: env.attempted.slice(), created: env.created.slice(), ops: env.ops.slice(),
-             read: new Set(env.read), t0: env.t0, rerun };
+             read: new Set(env.read), readCount: Object.assign({}, env.readCount), t0: env.t0, rerun };
   };
   const rerun = next => {
     for (const k of Object.keys(opt)) delete opt[k];
     Object.assign(opt, next || {});
     for (const a of [env.calls, env.moved, env.attempted, env.created, env.ops, env.logs]) a.length = 0;
     env.read.clear();
+    for (const k of Object.keys(env.readCount)) delete env.readCount[k];
     return once();
   };
   return once();
@@ -895,9 +914,21 @@ const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
         applier ? applier.ops.length + ' call(s); without it: ' +
                   applier.ops.filter(o => o.args.supportsAllDrives !== true).map(o => o.op + ' ' + JSON.stringify(o.args)).join('; ') : 'no applier');
   check('…its log has the counts and the folder names, and no file name',
-        !!applier && /\d/.test(applier.text) && ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13', 'Golden Flames 2026-10-13']
+        !!applier && /\d/.test(applier.text) && ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13', 'Golden Flames 2026-10-13',
+                                                 'Silver Voices 2026-10-15', 'Evening Lights 2026-10-15']
           .every(x => applier.text.includes(x)) && !fileNamesIn(applier.text).length,
         applier ? 'file names logged: ' + fileNamesIn(applier.text).join(', ') : 'no applier');
+  const mentions = (r, name) => r.moved.concat(r.created).filter(x => x.includes(name));
+  check('…SETTLE_MINUTES is 10 at the entry point: the 9-minute-old subfolder waits (logged by name, nothing of it moved or made), ' +
+        'the 11-minute-old one moves',
+        !!applier && /waiting[^\n]*Evening Lights 2026-10-15/.test(applier.text) && !mentions(applier, 'Evening Lights 2026-10-15').length &&
+        applier.created.includes('T:Asia/Silver Voices 2026-10-15') && applier.moved.some(m => inSub(m, 'Asia', 'Silver Voices 2026-10-15')),
+        applier ? 'Evening Lights: ' + JSON.stringify(mentions(applier, 'Evening Lights 2026-10-15')) + '; Silver Voices: ' +
+                  JSON.stringify(mentions(applier, 'Silver Voices 2026-10-15')) + '; log: ' + applier.text.slice(-400) : 'no applier');
+  const relisted = applier ? Object.entries(applier.readCount).filter(([, c]) => c > 1).map(([l, c]) => l + ' x' + c) : ['no applier'];
+  check('…each source subfolder\'s files are listed once per run: the plan is carried out from what the planner read, never a re-listing',
+        !!applier && !relisted.length && Object.keys(applier.readCount).length === SOURCE_SUBS,
+        relisted.join(', ') || (applier ? Object.keys(applier.readCount).length + ' of ' + SOURCE_SUBS + ' read' : ''));
   const dry = full.find(r => r.read.size > 0 && !r.attempted.length && !r.created.length && !r.ops.length && !r.calls.some(WRITES) &&
                          !r.threw && ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13'].every(x => r.text.includes(x)));
   check('one entry point is the dry run: reads both drives, logs what it would move by folder name, writes nothing (no Files.create ' +
@@ -931,8 +962,19 @@ const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
         'the run ends with an error',
         !!failedCreate && !!failedCreate.threw && same(failedCreate.moved.slice().sort(), notMorning) &&
         !failedCreate.attempted.some(a => a.startsWith('S:Asia/Morning Wings 2026-10-13/')) &&
-        /MOVE_FAILED[^\n]*Morning Wings 2026-10-13/.test(failedCreate.text) && same(failedCreate.created, ['T:Africa/Bright Stars 2026-10-14']),
+        /MOVE_FAILED[^\n]*Morning Wings 2026-10-13/.test(failedCreate.text) &&
+        same(failedCreate.created.slice().sort(), EXPECTED_CREATED.filter(c => c !== 'T:Asia/Morning Wings 2026-10-13')),
         tell(failedCreate));
+  // a photo arriving between the planner's read and the move (the same run, minutes later): unsettled, it stays
+  for (const [sub, kind] of [['Bright Stars 2026-10-14', 'a move'], ['Golden Flames 2026-10-13', 'a merge']]) {
+    const r = A ? runEntry(A, 'ids', { lateUploadTo: sub }) : null;
+    const planned = EXPECTED_MOVES.filter(m => inSub(m, 'Africa', sub));
+    check('a photo uploaded into "' + sub + '" (' + kind + ') after the planner read it: the planned files move, the new one stays in ' +
+          'My Drive (it has not settled), nothing else changes, no error',
+          !!r && !r.threw && !r.moved.some(m => m.includes(LATE_UPLOAD)) && planned.every(m => r.moved.includes(m)) &&
+          same(r.moved.slice().sort(), EXPECTED_MOVES) && !fileNamesIn(r.text).length,
+          tell(r));
+  }
   const failedMerge = A ? runEntry(A, 'ids', { failMoveOf: 'Golden Flames 2026-10-13' }) : null;
   const notGolden = EXPECTED_MOVES.filter(m => !inSub(m, 'Africa', 'Golden Flames 2026-10-13'));
   check('a merge whose file move fails: both moves still happen, MERGE_FAILED names the folder (no file name), the run ends with an error',
@@ -947,6 +989,13 @@ const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
         !!late && late.attempted.length === 1 && !lateOps.length && /TIME_BUDGET/.test(late.text),
         late ? 'files tried ' + late.attempted.length + '; Drive calls after the budget ' + lateOps.length + '; ' + (late.threw || '') +
                ' log: ' + late.text.slice(-300) : 'no applier');
+  // Apps Script stops a run at 6 minutes: the budget must end well before, with time for the last file move
+  const late5 = A ? runEntry(A, 'ids', { moveAdvanceMin: 5 }) : null;
+  const late5Ops = late5 ? late5.ops.filter(o => o.t - late5.t0 >= 5 * MIN) : [];
+  check('…and the budget ends under 5 minutes (Apps Script stops at 6): a 5-minute jump per file also stops the run after the first file',
+        !!late5 && late5.attempted.length === 1 && !late5Ops.length && /TIME_BUDGET/.test(late5.text),
+        late5 ? 'files tried ' + late5.attempted.length + '; Drive calls from 5 min on ' + late5Ops.length + '; ' + (late5.threw || '') +
+                ' log: ' + late5.text.slice(-300) : 'no applier');
   const slow = A ? runEntry(A, 'ids', { readAdvanceMin: 3 }) : null;
   const unreadMoved = slow ? slow.moved.filter(m => ![...slow.read].some(r => m.startsWith(r + '/')))
                                  .concat(slow.created.filter(c => ![...slow.read].some(r => r.slice(2) === c.slice(2)))) : ['no applier'];
