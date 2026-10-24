@@ -13,7 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
-| 2026-10-23 | The kept Monthly Report reports and dashboards into one report folder and one dashboard folder | in-progress |  | [2026-10-23-sf-category-folders.md](2026-10-23-sf-category-folders.md) |
+| 2026-10-23 | The kept Monthly Report reports and dashboards into one report folder and one dashboard folder | done |  | [2026-10-23-sf-category-folders.md](2026-10-23-sf-category-folders.md) |
 | 2026-10-22 | Roster changes sent as problem reports point their sender to the Club Roster Form, and girls "not on the form" count as one | proposed |  | [2026-10-22-roster-change-reports-to-roster-form.md](2026-10-22-roster-change-reports-to-roster-form.md) |
 | 2026-10-21 | Inventory of the Monthly Report (DHIS2) reports, dashboards and interactive dashboard; the two hidden Decommissioned folders; the copy-and-move API proof | done 2026-10-23 |  | [2026-10-21-sf-reporting-inventory.md](2026-10-21-sf-reporting-inventory.md) |
 | 2026-10-21 | Duplicate and obsolete flags on Account and Contact, and Account duplicate rules that report only | in-progress |  | [2026-10-21-sf-duplicate-obsolete-flags.md](2026-10-21-sf-duplicate-obsolete-flags.md) |

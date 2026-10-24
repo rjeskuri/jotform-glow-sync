@@ -3582,7 +3582,10 @@ The moves:
 - The five dashboards are moved by hand in Lightning by Ryan into "GLOW Monthly Dashboards" (the
   API refuses a dashboard `PATCH`). Each keeps its Id, checked with SOQL on `Dashboard`.
 - Before each move, a copy of the report or dashboard as it was goes to Decommissioned (the
-  archive rule above, `copy --tag "#73"`).
+  archive rule above, `copy --tag "#73"`). The 3 dynamic dashboards (Glow Club Attendance,
+  Implementation Dashboard, Reporting) have no copy: the clone was refused at the org's limit of
+  5 dynamic dashboards (2026-10-24), so their rollback is the metadata retrieve in the plan's
+  `before/`.
 - The three DHIS2 folders stay; #72 moves what is left in them to Decommissioned.
 
 ### Copying and moving reports and dashboards
