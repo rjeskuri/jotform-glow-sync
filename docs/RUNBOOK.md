@@ -2897,13 +2897,22 @@ Counts and ids only in what is said about it.
 run) sets the two flags by the criteria above, one batch job per object in scopes of 200
 (`Database.Batchable` with `Database.Stateful`); the class and its test class live in
 `data/sf_record_flags_2026-10-23/build/`, never in git. Three modes: `dryRun` counts and writes
-nothing; `flag` sets each flag to what the criteria say; `clear` sets both flags false on every
-record that has one, a flag set by hand included. A run writes only the two flag fields, and only
-on a record whose flag changes, so a second `flag` run writes nothing; `finish` logs counts alone,
-never a name or a field's value. Account duplicates are judged in code, as
+nothing; `flag` only sets a flag and never unsets one - it sets a flag where the criteria ask for
+one, and a flag set by hand on a record outside the criteria stays (Ryan, 2026-10-24, option a,
+after the review of PR #133); `clear` alone takes a flag off: it sets both flags false on every
+record that has one, a flag set by hand included. A stale flag - an obsolete flag on a club that
+reports again - stays until a `clear` run and a `flag` run, each on Ryan's go. A run writes only
+the two flag fields, and only on a record whose flag changes, so a second `flag` run writes
+nothing, and so does a `flag` run over a hand-set flag the criteria do not ask for; `finish` logs
+counts alone, never a name or a field's value. Account duplicates are judged in code, as
 `glow.salesforce.duplicate_account_groups` judges them (the same name ignoring capitals and
-spacing, the same parent and the same record type), computed once per job over every Account;
-every member of a group is flagged, with no keeper (Ryan, decision 2a). `Datacloud.FindDuplicates`
+spacing - every run of whitespace, a tab or a no-break space included, is one space - the same
+parent and the same record type), computed once per job over every Account; every member of a
+group is flagged, with no keeper (Ryan, decision 2a). One divergence between the two sides: the
+batch lower-cases a name (`toLowerCase`) where `glow.salesforce.duplicate_account_groups` uses
+Python's `casefold`, so `Straße` and `STRASSE` are two names to the batch and one to the monthly
+check, and a group the check shows with no flag on its members is looked at by hand before
+anything else. `Datacloud.FindDuplicates`
 is not used by the batch: it does not see records inserted in the same transaction, so the tests
 could not prove it. A Contact is a duplicate when it sits in a `DuplicateRecordSet` of the Contact
 rule "First & Last & Account" holding two or more records (a set left with one item is no group:
@@ -2918,9 +2927,10 @@ writes the anonymous Apex, ids only: for Account it needs the day's Roster and P
 (the deactivated clubs' Club accounts and the `jotform=no` partners' accounts, which Apex cannot
 read: Ryan, decision 1a); for Contact it first counts the three things the NPSP and Volunteers
 workflow rules act on and writes no script while any count is not 0 (the guard, below). Each
-script is pasted in full in the session, then `sf apex run` runs it; the batch job's finish line
-in the debug log, `RecordFlagBatch|<object>|<mode>|duplicate=N|obsolete=N|written=N|failed=N`,
-gives the counts.
+script is pasted in full in the session, then `sf apex run` runs it and prints no job id (a
+one-statement script prints nothing): the read-only `AsyncApexJob` query below, newest first,
+gives the job's id and status, and the batch job's finish line in the debug log,
+`RecordFlagBatch|<object>|<mode>|duplicate=N|obsolete=N|written=N|failed=N`, gives the counts.
 
 ```bash
 python3 tools/sheets_client.py export Roster data/roster_<date>.csv
@@ -2929,6 +2939,7 @@ python3 tools/sf_record_flags.py --sobject Account --mode dryRun --roster data/r
 sf apex run -o glow -f data/sf_record_flags_<date>/scripts/account_dryRun.apex      # Ryan's go
 python3 tools/sf_record_flags.py --sobject Contact --mode dryRun --out data/sf_record_flags_<date>/scripts/contact_dryRun.apex --vpn-off
 sf apex run -o glow -f data/sf_record_flags_<date>/scripts/contact_dryRun.apex      # Ryan's go
+sf data query -o glow -q "SELECT Id, Status, JobItemsProcessed, TotalJobItems, NumberOfErrors, CreatedDate FROM AsyncApexJob WHERE ApexClass.Name = 'RecordFlagBatch' ORDER BY CreatedDate DESC LIMIT 1"   # after each run: the job's id and status, read only
 ```
 
 The same with `--mode flag` is the run (Account first, then the guard and Contact, at a quiet
@@ -2947,9 +2958,9 @@ flag-only update (Ryan, 2026-10-23).
 
 **The way back:** a `clear` run of the same batch, `new RecordFlagBatch('Account', 'clear')` and
 `new RecordFlagBatch('Contact', 'clear')` through `tools/sf_record_flags.py --mode clear` and
-`sf apex run`, sets both flags false on every record that has one; every flag was false before the
-fields were created on 2026-10-22, and the flags set by hand come off with it, so the plan's
-Rollout counts those first. The ids a run flagged are saved in
+`sf apex run`, sets both flags false on every record that has one - the only way a flag comes off,
+since a `flag` run never unsets one; every flag was false before the fields were created on
+2026-10-22, and the flags set by hand come off with it, so the plan's Rollout counts those first. The ids a run flagged are saved in
 `data/sf_record_flags_<date>/flagged.csv` (ids only) for a rollback of that run alone, record by
 record through the write connector.
 

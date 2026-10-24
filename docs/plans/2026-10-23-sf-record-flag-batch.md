@@ -1,6 +1,6 @@
 ---
 title: Historical duplicate and obsolete Accounts and Contacts flagged by Batch Apex (RecordFlagBatch), the sheet's criteria carried by a read-only script writer
-author: Claude (Ryan's decisions of 2026-10-23: 1a, 2a and the Contact workflow guard)
+author: Claude (Ryan's decisions of 2026-10-23: 1a, 2a and the Contact workflow guard; 2026-10-24: a flag run only sets)
 status: accepted      # ticket #85; nothing has run: the check-only, the deploy, the dry run and the run each still wait for Ryan's go
 created: 2026-10-23
 intent: none - SOW p.9 (Batch Apex over the historical records), ticket #85
@@ -15,9 +15,11 @@ records in Salesforce"; DECISIONS 2026-10-21 and 2026-10-22). Merging or cleanin
 out of scope (SOW p.10): a flag marks a record and the record keeps everything it has. Ryan's
 decisions of 2026-10-23 (DECISIONS 2026-10-23, the flagging entry): 1a, a read-only Python step
 carries the two criteria only the Google Sheet holds; 2a, every member of a duplicate group is
-flagged; (a), the two NPSP Contact workflow rules are accepted as harmless under a guard. Nothing
-has run yet: the check-only validate, the deploy, the dry run and the run each still wait for
-Ryan's go (Result).
+flagged; (a), the two NPSP Contact workflow rules are accepted as harmless under a guard. After the
+review of PR #133, Ryan's decision of 2026-10-24, option (a): a `flag` run only sets a flag and
+never unsets one, so a flag set by hand on a record outside the criteria stays; a flag comes off
+only through `clear`, after the hand-set flags are counted (step 4). Nothing has run yet: the
+check-only validate, the deploy, the dry run and the run each still wait for Ryan's go (Result).
 
 ## Context
 
@@ -31,16 +33,21 @@ Ryan's go (Result).
   `data/sf_record_flags_2026-10-23/build/force-app/main/default/classes/` (an SFDX project,
   `sfdx-project.json` at `build/`; never in git). Constructors `RecordFlagBatch(sobjectType, mode)`
   and `RecordFlagBatch(sobjectType, mode, deactivatedClubIds, partnerReportPartnerIds)`;
-  `sobjectType` is `Account` or `Contact`, `mode` is `dryRun` (counts, writes nothing), `flag` or
-  `clear` (both flags false on every record that has one, a flag set by hand included). It writes
+  `sobjectType` is `Account` or `Contact`, `mode` is `dryRun` (counts, writes nothing), `flag`
+  (sets a flag where the criteria ask for one and never unsets one: a flag set by hand outside the
+  criteria, or a flag the criteria no longer ask for, stays) or `clear` (both flags false on every
+  record that has one, a flag set by hand included: `clear` alone takes a flag off). It writes
   only the two flag fields, through a fresh SObject carrying the Id and the two fields, and only
   records whose flag changes (a second run writes nothing); `Database.update` with `allOrNone`
   false, so one locked row costs one record, not the scope; `finish` fills
   `RecordFlagBatch.lastCounts` (`duplicate`, `obsolete`, `written`, `failed`) and logs those counts
   only, never a name, an id or a field's value.
-- Duplicates (2a: every member, no keeper). Account: the same Name ignoring capitals and spacing,
-  the same ParentId (blank matches blank) and the same RecordTypeId, judged in code over every
-  Account once per run, as `glow.salesforce.duplicate_account_groups` judges them.
+- Duplicates (2a: every member, no keeper). Account: the same Name ignoring capitals and spacing
+  (every run of whitespace, the no-break space included, folded to one space and trimmed, then
+  `toLowerCase`), the same ParentId (blank matches blank) and the same RecordTypeId, judged in
+  code over every Account once per run, as `glow.salesforce.duplicate_account_groups` judges them
+  - but for the sharp s: that side casefolds, so `Straße` and `STRASSE` are one name there and
+  two to the batch (RUNBOOK "Duplicate and obsolete records in Salesforce", The flagging batch).
   `Datacloud.FindDuplicates` is not used: it does not see records inserted in the same uncommitted
   transaction (DECISIONS 2026-10-22), so the Apex tests could not prove it, and it takes 50
   records a call. Contact: a member of a `DuplicateRecordSet` of the Contact rule `First_Last`
@@ -163,13 +170,17 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
    python3 tools/sheets_client.py export Partners data/partners_<date>.csv
    python3 tools/sf_record_flags.py --sobject Account --mode dryRun --roster data/roster_<date>.csv --partners data/partners_<date>.csv --out data/sf_record_flags_2026-10-23/scripts/account_dryRun.apex --vpn-off
    sf apex run -o glow -f data/sf_record_flags_2026-10-23/scripts/account_dryRun.apex
+   sf data query -o glow -q "SELECT Id, Status, JobItemsProcessed, TotalJobItems, NumberOfErrors, CreatedDate FROM AsyncApexJob WHERE ApexClass.Name = 'RecordFlagBatch' ORDER BY CreatedDate DESC LIMIT 1"
    python3 tools/sf_record_flags.py --sobject Contact --mode dryRun --out data/sf_record_flags_2026-10-23/scripts/contact_dryRun.apex --vpn-off
    sf apex run -o glow -f data/sf_record_flags_2026-10-23/scripts/contact_dryRun.apex
+   sf data query -o glow -q "SELECT Id, Status, JobItemsProcessed, TotalJobItems, NumberOfErrors, CreatedDate FROM AsyncApexJob WHERE ApexClass.Name = 'RecordFlagBatch' ORDER BY CreatedDate DESC LIMIT 1"
    ```
 
-   Each `sf apex run` starts a batch job; its AsyncApexJob id (`707…`, 18 characters, as the
-   command prints it) is recorded. When the job is finished (`SELECT Status, NumberOfErrors FROM
-   AsyncApexJob WHERE Id = '<job id>'`), its finish line in the debug log,
+   Each `sf apex run` starts a batch job and prints no job id (a one-statement script prints
+   nothing): the read-only `AsyncApexJob` query right after it, newest first, gives the job's id
+   (`707…`, 18 characters), its `Status` and, once `Completed`, `JobItemsProcessed`,
+   `TotalJobItems` and `NumberOfErrors`; the id is recorded. When the job is finished, its finish
+   line in the debug log,
    `RecordFlagBatch|<object>|dryRun|duplicate=N|obsolete=N|written=0|failed=0`, gives the counts
    (a trace flag on Ryan's user for the hour; `sf apex get log -o glow -i <log id>`, or Setup,
    Debug Logs). The counts per object and flag go on the ticket and in Result. A `written` other
@@ -189,10 +200,12 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
    ```bash
    python3 tools/sf_record_flags.py --sobject Account --mode flag --roster data/roster_<date>.csv --partners data/partners_<date>.csv --out data/sf_record_flags_2026-10-23/scripts/account_flag.apex --vpn-off
    sf apex run -o glow -f data/sf_record_flags_2026-10-23/scripts/account_flag.apex
+   sf data query -o glow -q "SELECT Id, Status, JobItemsProcessed, TotalJobItems, NumberOfErrors, CreatedDate FROM AsyncApexJob WHERE ApexClass.Name = 'RecordFlagBatch' ORDER BY CreatedDate DESC LIMIT 1"
    ```
 
-   The script is pasted in full first (ids only). Record the AsyncApexJob id, the date and the
-   time (UTC); when the job is finished, its finish line gives duplicate, obsolete, written and
+   The script is pasted in full first (ids only). Record the AsyncApexJob id (the read-only
+   `AsyncApexJob` query, newest first: `sf apex run` prints none), the date and the time (UTC);
+   when the job is finished, its finish line gives duplicate, obsolete, written and
    failed (expected: failed 0; duplicate and obsolete equal to the dry run's; written the records
    whose flag changed, at most duplicate plus obsolete).
 8. The guard again, then the run for Contact, `--mode flag` (flag mode), on Ryan's go, right
@@ -205,10 +218,11 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
    ```bash
    python3 tools/sf_record_flags.py --sobject Contact --mode flag --out data/sf_record_flags_2026-10-23/scripts/contact_flag.apex --vpn-off
    sf apex run -o glow -f data/sf_record_flags_2026-10-23/scripts/contact_flag.apex
+   sf data query -o glow -q "SELECT Id, Status, JobItemsProcessed, TotalJobItems, NumberOfErrors, CreatedDate FROM AsyncApexJob WHERE ApexClass.Name = 'RecordFlagBatch' ORDER BY CreatedDate DESC LIMIT 1"
    ```
 
-   The script is pasted in full first. Record the AsyncApexJob id, the date and the time (UTC),
-   and the finish line's counts, as for Account.
+   The script is pasted in full first. Record the AsyncApexJob id (the read-only `AsyncApexJob`
+   query, newest first), the date and the time (UTC), and the finish line's counts, as for Account.
 9. The read-back: the SOQL count of each flag on each object equals the dry run's count (step 5)
    and the run's (steps 7 and 8), and the flagged ids are saved, ids only:
 
@@ -239,8 +253,11 @@ The rollback is a `clear` run of `RecordFlagBatch` through the same script write
 `sf apex run`, Account then Contact, on Ryan's go: it sets both flags false on every record that
 has one (every flag was false when the fields were created on 2026-10-22). `clear` takes the flags
 set by hand by administrators off too, so the count of step 4 says how many to set again by hand,
-from `hand_set_before.csv`. The Contact `clear` script is written only while the guard's three
-counts are 0, like any Contact script.
+from `hand_set_before.csv`. `clear` is the only mode that takes a flag off: a `flag` run only sets
+a flag and never unsets one (Ryan, 2026-10-24, option a), so a stale flag - an obsolete flag on a
+club that reports again - stays until a `clear` run and a `flag` run, each on Ryan's go. The
+Contact `clear` script is written only while the guard's three counts are 0, like any Contact
+script.
 
 ```bash
 python3 tools/sf_record_flags.py --sobject Account --mode clear --roster data/roster_<date>.csv --partners data/partners_<date>.csv --out data/sf_record_flags_2026-10-23/scripts/account_clear.apex --vpn-off
@@ -276,7 +293,17 @@ destructive deploy of its own (`destructiveChanges.xml` naming `RecordFlagBatch`
   not flagged: the batch counts a set's items and flags only the members of a set of two or more.
 - **The sheet's criteria go stale.** The Account script carries the day's Roster and Partners
   exports; a club deactivated after the run, or a partner marked later, is picked up by the next
-  run (a `flag` run is idempotent).
+  run (a `flag` run is idempotent, and it only adds). The other way round, a flag the criteria no
+  longer ask for - a club that reports again, a partner no longer Archived - is not taken off by a
+  `flag` run (Ryan, 2026-10-24, option a): it stays until a `clear` run and a `flag` run, each on
+  Ryan's go, with the hand-set flags counted first (step 4).
+- **`DuplicateRule` in a test without `SeeAllData`.** The Contact fixtures build their
+  `DuplicateRecordSet`s under the rule `First_Last`, read by SOQL on `DuplicateRule`, which
+  Salesforce's documented list of setup objects visible to a test without `SeeAllData` does not
+  name; the test's `contactRuleId()` asserts the read and names the rule when it fails. If the
+  check-only fails there, the fix is never `SeeAllData=true` (it would open the live girls'
+  records to the tests): the batch is given the rule id instead - a constructor argument the
+  script writer reads, read only, and the tests read the same way - and step 1 runs again.
 - **GLOW changes a definition.** The obsolete criteria live in the class and the docs: a change
   is a new check-only and deploy by this plan's steps 1 and 2; the duplicate criteria for
   Accounts are the rules' (#84) and the class's alike.
@@ -287,6 +314,17 @@ destructive deploy of its own (`destructiveChanges.xml` naming `RecordFlagBatch`
   tool's tests and the docs tests (`RecordFlagBatchDocs`), `make check` → `CHECK PASSED` - but for
   `test_the_runbook_records_the_flagging_run`, which stays red by design until the RUNBOOK records
   a run that happened and this plan's Result agrees with it.
+- Read only, 2026-10-24, through the read-only connector after the review of PR #133 (schema and
+  aggregate counts, no record's fields; the notes in
+  `data/sf_record_flags_2026-10-23/evidence/review_reads_2026-10-24.txt`): the Contact rule's
+  `DeveloperName` is `First_Last` ("First & Last & Account"), active - the class's `CONTACT_RULE`
+  and the test's; the org's two other Contact rules, `NPSP_Contact_Personal_Email_Match` and
+  `Standard_Rule_for_Contacts_with_Duplicate_Leads`, are inactive. The fixtures' fields and
+  values exist and are in use: `Attendance__c.Present__c` (a checkbox); `Account.Partner_Status__c`
+  `Active, In good standing` (51 Accounts) and `Archived` (21); `Contact.Contact_Role__c`
+  `Participant` (4,172), `Partnership Coordinator` (79), `Lead Mentor` (14) and `staff` (3, and 2
+  more with a trailing space); `Attendance_Batch__c.Creator__c` is free text (`Jotform` 773,
+  `Partner report` 3, one `Jotform back-fill …` value per back-filled batch).
 - Live: the check-only validate with `RecordFlagBatchTest` (step 1), the dry run (step 5), the
   read-back (step 9).
 

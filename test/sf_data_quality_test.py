@@ -1579,7 +1579,16 @@ class RecordFlagBatchDocs(unittest.TestCase):
     `Obsolete_Record__c`, `COUNT()`); its Rollback is `clear` mode, says `clear` wipes the hand-set flags too
     and names the saved ids (`flagged.csv`). Structure and consistency, never particular numbers: the run
     itself waits for Ryan's go, so the RUNBOOK test stays red until the section records a run that happened
-    and the plan's Result agrees with it."""
+    and the plan's Result agrees with it.
+
+    After the review of PR #133 (Ryan, 2026-10-24, option a): the RUNBOOK section and the plan say that a
+    `flag` run only sets a flag and never unsets one, that a flag comes off only through `clear`, and (the
+    section) that a stale flag stays until a `clear` and a `flag` run, with the old "sets each flag to what the
+    criteria say" gone or qualified; each Rollout step that runs `sf apex run` carries the read-only
+    AsyncApexJob query that finds the run's job id (`ApexClass.Name = 'RecordFlagBatch'`, newest first),
+    since a one-statement script prints none; and the section states the sharp-s divergence (the batch keys
+    a name with toLowerCase, `duplicate_account_groups` with casefold: Straße and STRASSE are two names to one
+    side and one to the other)."""
 
     longMessage = False
     RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
@@ -1624,6 +1633,38 @@ class RecordFlagBatchDocs(unittest.TestCase):
     NOT_COUNTS = re.compile(r"\d{4}-\d\d-\d\d|#\d+|\b\d\d:\d\d\b|\b\d+\s*(?:months?|days?|years?|weeks?)\b|"
                             r"\b(?:scope|batch(?:es)? of|per batch)\s*\d+|\b\d+\s*%|\bv?\d+\.\d+\b|\b\d+/\d+\b|"
                             r"(?<![A-Za-z0-9])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?(?![A-Za-z0-9])")
+    # --- the fix round after the review of PR #133 (Ryan, 2026-10-24, option a; findings 1, 4 and 5) ---------
+    # a `flag` run named: `flag` in backticks or quotes, "flag mode", "--mode flag", "a flag run"
+    FLAG_RUN = (r"(?<![\w'`])[`']flag[`'](?!\w)|(?i:\bflag mode\b|--mode flag\b|\bflag runs?\b|\bin flag\b|"
+                r"\bmode\b[^.;]{0,20}?\bflag\b)")
+    # the run only sets a flag: "only sets", "sets … only", "never unsets / clears / removes / takes … off /
+    # sets … false", "adds, never removes"
+    ONLY_SETS = (r"(?i)\bonly (ever )?sets\b|\bsets\b[^.;]{0,15}?\bonly\b|\bnever\b[^.;]{0,25}?\b(unsets?|clears?|"
+                 r"removes?|drops?|resets?|lowers?|takes?\b[^.;]{0,20}?\boff|turns?\b[^.;]{0,20}?\b(off|false)|"
+                 r"sets?\b[^.;]{0,25}?\bfalse)\b|\b(no|not|without) unsett?ing\b|\b(is|are) (never|not) unset\b|"
+                 r"\bunsets? (none|nothing|no flag)\b")
+    # the old statement, which option (a) retires unless the clause also says the run never unsets
+    SET_TO_CRITERIA = r"(?i)\bto (exactly )?what the criteria say\b|\bexactly what the criteria say\b"
+    # only `clear` takes a flag off: `clear` with an only-word within 50 characters of it (step 4's "administrators
+    # alone set a flag by hand" is another statement) and an off-word in the clause
+    ONLY_WORD = r"(?i:\bonly\b|\balone\b|\bnothing else\b|\bno other\b|\bthe (?:one|only|sole) (?:way|mode|run)\b)"
+    CLEAR_NEAR_ONLY = rf"{ONLY_WORD}[^.;]{{0,50}}?{CLEAR}|{CLEAR}[^.;]{{0,50}}?{ONLY_WORD}"
+    OFF_WORD = r"(?i)\boff\b|\bunsets?\b|\bunset\b|\bremov\w*|\bfalse\b|\bdrops?\b|\bresets?\b|\blowers?\b"
+    # a flag the criteria no longer ask for stays until a clear and a flag run
+    STALE = (r"(?i)\bstale\b|\bno longer\b|\bout of date\b|\boutdated\b|\breports? again\b|\bcomes? back\b|"
+             r"\bactive again\b|\bno more\b")
+    STAYS = r"(?i)\bstays?\b|\bkeeps?\b|\bkept\b|\bremains?\b|\bleft\b|\buntil\b"
+    # the read-only query that finds a run's job id (`sf apex run` prints none): Id selected, the class named,
+    # newest first - in one command line (a code block's line or a backticked span)
+    JOB_QUERY = (r"\bSELECT\b[^`]*?\bId\b[^`]*?\bFROM\s+AsyncApexJob\b", r"ApexClass\.Name\s*=\s*'RecordFlagBatch'",
+                 r"\bORDER\s+BY\s+(CreatedDate|CompletedDate|SystemModstamp)\s+DESC\b")
+    PRINTS_IT = r"(?i)\bas (the command|`?sf apex run`?|it) prints\b"
+    # the sharp s: the Apex side (toLowerCase) keeps Straße and STRASSE apart where Python's casefold joins them
+    SHARP_S = r"ß|(?i:\bStra(?:ß|ss)e\b|\beszett\b|\bsharp s\b)"
+    APEX_SIDE = r"RecordFlagBatch|(?i:\bApex\b|\btoLowerCase\b|\bthe batch\b|\bflagging batch\b)"
+    PYTHON_SIDE = r"duplicate_account_groups|(?i:\bcasefold\w*|\bPython\b)"
+    PARTS = (r"(?i)\bapart\b|\bdiffer\w*|\bdiverg\w*|\bunlike\b|\bwhere(as)?\b|\bbut\b|\bwhile\b|\bnot\b|"
+             r"\btwo names\b|\bone name\b|\bdistinct\b")
 
     # --- reading the docs ---------------------------------------------------------------------------------
     @staticmethod
@@ -2044,6 +2085,74 @@ class RecordFlagBatchDocs(unittest.TestCase):
             self.assertLessEqual(max(dates), today, f"{name}: the Result is dated after today ({today})")
             self.assertRegex(result, self.TIME, f"{name}: a done plan's Result gives the run's time, `HH:MM UTC`")
             self.assertRegex(keys.get("done", ""), r"^\d{4}-\d\d-\d\d", f"{name}: a done plan carries `done:`")
+
+    # --- the fix round after the review of PR #133 (Ryan, 2026-10-24, option a) -------------------------
+    def test_the_docs_say_a_flag_run_only_sets_flags_and_clear_alone_unsets_one(self):
+        """Ryan, 2026-10-24, option (a): a `flag` run only SETS a flag and never unsets one - a flag set by hand
+        on a record the criteria do not match stays - and a flag comes off only through `clear` (after the
+        hand-set flags are counted); a stale flag (a club that reports again) stays until a `clear` and a `flag`
+        run. The RUNBOOK section and the plan say so in substance, each in its own clauses, and neither keeps the
+        old "sets each flag to what the criteria say" unqualified."""
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        for label, text in ((where, self.section()), (name, self.prose(read(path)))):
+            clauses = self.clauses(text, ".;")
+            only_sets = [s for s in clauses if re.search(self.FLAG_RUN, s) and re.search(self.ONLY_SETS, s)]
+            self.assertTrue(only_sets, f"{label}: say that a `flag` run only sets a flag and never unsets one (one "
+                                       "clause naming the `flag` run with `only sets`, `never unsets`, `never takes a "
+                                       "flag off` or the like: Ryan, 2026-10-24, option a)")
+            only_clear = [s for s in clauses if re.search(self.CLEAR_NEAR_ONLY, s) and re.search(self.OFF_WORD, s)]
+            self.assertTrue(only_clear, f"{label}: say that a flag comes off only through `clear` (one clause with "
+                                        "`only`, `alone` or `the only way` beside `clear`, and `off`, `unset` or `false`)")
+            for s in clauses:
+                if re.search(self.SET_TO_CRITERIA, s):
+                    self.assertRegex(s, self.ONLY_SETS, f"{label}: a `flag` run no longer sets each flag to what the "
+                                                        f"criteria say - it only sets, never unsets; drop or qualify: "
+                                                        f"{s[:160]!r}")
+        stale = [s for s in self.clauses(self.section(), ".;")
+                 if re.search(self.STALE, s) and re.search(self.CLEAR, s) and re.search(self.STAYS, s)]
+        self.assertTrue(stale, f"{where}: say that a flag the criteria no longer ask for (a stale obsolete flag: a club "
+                               "that reports again) stays until a `clear` run and a `flag` run (one clause with `stale`, "
+                               "`no longer` or `reports again`, `clear`, and `stays`, `kept` or `until`)")
+
+    def test_each_run_step_of_the_plan_finds_its_job_id_by_an_asyncapexjob_query(self):
+        """`sf apex run` of a one-statement script prints no job id (review of PR #133, finding 5), so each
+        Rollout step that runs one - the dry run, the Account run, the Contact run - carries the read-only query
+        that finds it, `SELECT Id … FROM AsyncApexJob WHERE ApexClass.Name = 'RecordFlagBatch' … ORDER BY
+        CreatedDate DESC` (newest first), as a command line (a code block's line or a backticked span), and none
+        says the id is recorded "as the command prints it"."""
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        raw_steps = self.raw_steps(self.body(path, "## Rollout"))
+        job_steps = [i for i, s in enumerate(raw_steps) if self.apex_command(self.commands(s))]
+        self.assertGreaterEqual(len(job_steps), 3, f"{name}: the Rollout runs `sf apex run -o glow -f <script>` in at "
+                                                   "least three steps: the dry run, the Account run, the Contact run "
+                                                   f"(found in steps {[i + 1 for i in job_steps]})")
+        for i in job_steps:
+            commands = self.commands(raw_steps[i])
+            self.assertTrue(any(all(re.search(p, c) for p in self.JOB_QUERY) for c in commands),
+                            f"{name}: step {i + 1} runs `sf apex run` and so carries, as a command line, the read-only "
+                            "query that finds the run's job id: `SELECT Id, Status, NumberOfErrors FROM AsyncApexJob "
+                            "WHERE ApexClass.Name = 'RecordFlagBatch' ORDER BY CreatedDate DESC LIMIT 1` (`sf apex run` "
+                            "prints no id)")
+            self.assertNotRegex(flat(raw_steps[i]), self.PRINTS_IT,
+                                f"{name}: step {i + 1} says the job id is recorded as the command prints it: `sf apex "
+                                "run` prints no id for a one-statement script; the AsyncApexJob query finds it")
+
+    def test_the_runbook_states_the_sharp_s_divergence(self):
+        """The batch keys an Account's name with toLowerCase and `duplicate_account_groups` with casefold, so
+        'Straße' and 'STRASSE' are two names to the batch and one to the monthly check (review of PR #133,
+        finding 4): the RUNBOOK section says so in one sentence naming both sides and that they part."""
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        hits = [s for s in self.clauses(self.section()) if re.search(self.SHARP_S, s)
+                and re.search(self.APEX_SIDE, s) and re.search(self.PYTHON_SIDE, s)]
+        self.assertTrue(hits, f"{where}: state the sharp-s divergence in one sentence naming both sides: the batch "
+                              "(Apex, `toLowerCase`) keeps `Straße` and `STRASSE` apart, `duplicate_account_groups` "
+                              "(casefold) joins them")
+        self.assertTrue(any(re.search(self.PARTS, s) for s in hits),
+                        f"{where}: the sharp-s sentence says the two sides part (`apart`, `differ`, `where`, `but`): "
+                        f"{hits[0][:160]!r}")
 
 
 if __name__ == "__main__":
