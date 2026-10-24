@@ -30,6 +30,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Translations](#translations)
   - [Links above Submit (problem report, Club Roster Form)](#links-above-submit-problem-report-club-roster-form)
   - [Rosters above Submit](#rosters-above-submit)
+  - [Session notes on the attendance forms](#session-notes-on-the-attendance-forms)
   - [Header logo](#header-logo)
   - [Photos](#photos)
   - [Photo mover](#photo-mover)
@@ -1023,7 +1024,11 @@ by a test to the table in "The forms"):
 | `problem` | `somethingNotWorking` (q443) | Click here to report a problem | the problem-report form |
 
 The Club Roster Form link sits above the problem link, so a mentor with a
-roster change meets it first. Adding, re-checking or removing one:
+roster change meets it first. Place it only after the session-notes field
+(task #105; "Session notes on the attendance forms"): the notes go on first,
+because placing this link leaves Submit sharing an order with the hidden field
+below it, and `add_session_notes.py` then refuses on the tie. Adding,
+re-checking or removing one:
 
 ```bash
 python3 backup_forms.py                                           # optional: the tool snapshots each form it writes
@@ -1090,6 +1095,62 @@ python3 tools/fix_roster_order.py --form <id> --undo <stamp>             # the r
 
 The full procedure - the runner paused, what the tool refuses, how it stops and
 what `--undo` can still restore: [plan](plans/2026-09-29-rosters-above-submit.md#from-the-runbook-moved-2026-10-09).
+
+## Session notes on the attendance forms
+
+- **When:** placing, re-checking or removing the optional session-notes field; `form_status` says `session notes: absent` once the field is expected, or flags one (`!!` lines naming `sessionNotes`).
+- **Status:** built, not live (ticket #104, 2026-10-23). Task #105 places it on the template and the four regional forms on Ryan's go, after a read-only `GET /form/{id}/questions` of a live textarea confirms the limit property (`entryLimit`, `Letters-1000`: the name from Jotform's own example, the value from the runtime; not yet read from this account), and flips `glow/layout.py` `NOTES_EXPECTED` to `True`.
+- **Dry run:** `python3 tools/add_session_notes.py`.
+- **Apply:** its `--apply`, the template first; the label's translations are a second step (task #105): until then every language shows it in English.
+- **Verify:** the tool's re-read after the write; `form_status` (`session notes:`, `layout:`).
+- **Rollback:** `--remove --apply`, the questions snapshot, or Revision History.
+
+One textarea named `sessionNotes` on every attendance form, found by its name
+(the qid differs per form): the label "Additional information about this
+session (optional)", no sub-label, 1,000 characters, not required, not hidden,
+no rule (Ryan's answers, 2026-10-22; `glow/layout.py` `NOTES_PROPS`). It sits
+after the last roster and above the links and Submit, so a mentor meets it
+once her girls are ticked. The sync leaves it alone: no generated rule names
+it, `--prune` deletes rosters only, and a roster the sync creates afterwards
+goes above it (the field is the first element of the fence `glow/layout.py`
+guards, like the links and Submit; test-pinned). Mentors' notes are free text
+that can name girls: no tool prints a submission's notes, counts only.
+
+```bash
+python3 tools/add_session_notes.py                                # dry run, template + 4 regionals
+python3 tools/add_session_notes.py --form 262352490535154 --apply # the template first; open its page
+python3 tools/add_session_notes.py --apply                        # the four regional forms
+python3 tools/add_session_notes.py --remove --apply               # take it out again (the rollback)
+```
+
+The tool plans all five forms before it writes any. The field goes at an
+empty order between the last roster and the first link, where nothing moves
+whether Jotform inserts or ties. The live forms have none today (the
+2026-09-30 repair put the links, Submit and the hidden bridge fields at the
+orders right after the last roster, and every roster inserted since kept them
+there), so the tool first makes room the way `add_feedback_link.py` does
+(Ryan, 2026-10-23): the first link through Submit and the hidden fields at the
+orders right after move one down, bottom-up so each lands on an empty order
+(the path Jotform keeps exactly), then one create at the freed order - about
+ten writes per form, each printed as `move <name> (qN) a -> b`. So the
+sequence matters: **the session notes go on before the Club Roster Form link**
+(`add_feedback_link.py --link roster`, BACKLOG 46; "Links above Submit"), whose
+placing leaves Submit sharing an order with the hidden field below it. After
+that link the tool refuses on the tie, naming both questions: take the link
+out (`--link roster --remove --apply`), add the notes, then place the link
+again - it goes directly above the problem link, below the notes
+(test-pinned). Refuses rather than guesses: two fields of the name, the field
+below a link or Submit or a roster below it (move it in the builder, or
+`--remove --apply` and add it again), a hidden link or Submit, anything a
+mentor can see between the last roster and Submit besides the links and
+Submit, two questions of the tail sharing an order. A drifted flag or text
+(`required`, `hidden`, the label, the limit, a sub-label) is set back in place
+in one write (`UPDATE <property>: old -> new`); re-running is a no-op. With
+`--apply` each form is snapshotted first (`backups/<id>/questions-<stamp>.json`),
+then re-read: the field exactly once, its properties, every move landed, its
+place, no rule mentioning it - a mismatch stops the tool there, non-zero,
+naming that form's snapshot; the forms after it are neither snapshotted nor
+written, the forms before it stay written and verified.
 
 ## Header logo
 
