@@ -3644,8 +3644,12 @@ dashboard that becomes it:
   the file's Ids tell them apart.
 - D5, the GLOW Club Reporting dashboard: "Reporting" (`01ZRP000006oxSr2AI`), items 17 and 18.
 
+Item 2 is retired (Ryan, 2026-10-23 on #74): it has no source, and #75 moves its report to
+Decommissioned, kept there; #73 leaves item 2's report in its folder, for #75 to move.
+
 Item 19, "GLOW of the Month Stories" (group "Report/Data Table Format"), is the report "GLOW of the
-Month Stories Report_2025" (`00ORP000005p2L32AI`). It is the table: a tabular report on no
+Month Stories Report" (`00ORP000005p2L32AI`), the org's label since 2026-10-21, which the file
+follows (Ryan, 2026-10-23). It is the table: a tabular report on no
 dashboard, and it stays tabular, not grouped (below). Item 12, "New mentors recruited", has no report today: task #80 builds
 it, and the file reads `new` for its Id. Item 18, "Report submitted on time", maps to "Reports
 completed on time" (`00ORP0000054DyH2AU`), which lists submission and modified dates; no report
@@ -3728,6 +3732,170 @@ the live gate asks him). The folders named "Attendance" are never a source or a 
   refused (HTTP 4xx) never moved and is left as it is, and a move already undone is not undone
   again. Copies stay in
   Decommissioned.
+
+### Why the dashboards showed old data
+
+Read-only diagnosis, 2026-10-23 (#74). A fresh retrieve of D1-D5, the 18 kept reports that exist
+(items 1-19 but 12), the report types `Dhis2` and `Monthly_Reports`, `DHIS2__c` and the form
+(LWC `dHIS2Forms`, Apex `dHIS2Controller`) is in `data/sf_stale_2026-10-23/before/`; each report
+was run by the Analytics API (a GET) and the runs, the SOQL counts and their summaries are in
+`data/sf_stale_2026-10-23/evidence/`. The month compared is September 2026, the last complete
+month: 42 Monthly Reports from 42 partners, none on a test account or a blank Account.
+
+The cause: every kept report filters on a fixed year, and groups by the month's name alone.
+- 14 of the 18 filter `Year__c equals 2025`; items 4 and 19 filter `Year__c equals 2026` (current
+  today, old again in January 2027); items 17 and 18 have no year filter and add September 2025
+  and September 2026 into one "September". Every other report on the five dashboards filters
+  `Year__c equals 2025` too, except "Participation by month" (2026).
+- The month is `Month__c`, a picklist of month names; `Year__c` is a number. `YearMonth__c` (a
+  number formula, `202609`) is not in the `Dhis2` report type's layout, so no report offers it.
+- The standard date filter of every report is `CreatedDate`, all time: it narrows nothing.
+
+Three of the form's fields have been blank since October 2025, when the form moved to the record
+type `Monthly_reports_new` (every record from `202510` on has it; 470 older ones have none):
+`collect_last_month_s_attendance__c` (item 1), `Submit__c` (item 2) and
+`Select_all_GLOW_Club_modules_implemented__c` (item 6, through its 18 module formula fields such
+as `GLOW_Create_Year_1_Relationships_101__c`). All three are blank on the 425 records of 2026; the
+form no longer asks those questions. The form's change of 2026-09-23 (`dHIS2Controller` and
+`dHIS2Forms` last modified in the org 2026-09-30) added the checkbox
+`Attendance_submitted_electronically__c`, first set on the September 2026 reports (21 of 42
+ticked), and stopped no field a kept report reads: the others are filled on 26 to 42 of the 42.
+
+Not causes: no kept report filters on a record type (`DHIS2__c` has one, `Monthly_reports_new`);
+the `Dhis2` report type's inner join to Duplicate Record Items drops no record (item 18 returns
+all 1,051 Monthly Reports, item 1 all 619 of 2025; `DHIS2__c` has 0 duplicate record items); the
+formula `Monthly_Total__c` (the largest week total) is current (item 4). The dashboards' running
+user is active (another administrator). D1, D2 and D5 run as the viewer (`LoggedInUser`) and are
+live; D3 and D4 run as that specified user and show the snapshot of their last refresh,
+2026-07-10 (D3) and 2026-08-13 (D4), and no refresh of them is scheduled (`CronTrigger` has no
+dashboard-refresh job; the org's one report subscription, weekly since 2026-10-02, is tied to no
+dashboard here by the API). The ticked count, the running user, the scheduled jobs and the
+dynamic dashboards: `evidence/soql_2026-10-23_review.txt`.
+
+Components more than one dashboard shares:
+- The period design (a fixed year, a month name with no year) is in every report of all five.
+  Each dashboard ticket fixes its own reports the same way (below). GLOW's period is the last 12
+  months (Ryan, 2026-10-23), which needs one shared change first: #128 adds a date field for the
+  report's month to `DHIS2__c` and the `Dhis2` report type, before #75-#79.
+- The org's limit on dynamic dashboards: Enterprise Edition, 5 dashboards that run as the viewer,
+  all 5 in use (D1, D2, D5, "Attendance According to Attendance Rosters" `01ZRP000006s43B2AQ`,
+  which #72 moves to Decommissioned, and "Activities Dashboard", outside the epic). D3 and D4
+  therefore stay on a specified user and are kept fresh by a scheduled refresh.
+- Item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`), a D4 report, is a
+  component of D3, not of D4. #77 takes that component off D3 and #78 puts item 16 on D4; until
+  #77 is done, #78's change to item 16 (its period and grouping) changes D3's component too.
+  No other kept report is on a dashboard other than its own.
+- Item 6 on D2 and the report type `Attendance_Totals`, which the Attendance-folder reports share
+  (they stay as they are). The type carries the club's parent's name, not the partner's
+  `Assigned_Partner_Manager__c` ([plan](plans/2026-10-06-attendance-totals.md) D.1), so D2's
+  filter on it does not apply to item 6 until that field is reachable from the type (e.g. a
+  lookup through the club's parent added to `Attendance_Totals`, deployed only from a fresh
+  retrieve, the Attendance reports unchanged). #76 settles it before building item 6; named on
+  #74.
+
+The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #76 D2, #77 D3,
+#78 D4, #79 D5 and item 19; item 6 takes its own steps 1-3, below):
+1. Replace `Year__c equals <year>` with GLOW's period: the last 12 months (`LAST_N_MONTHS:12`)
+   on #128's date field, which leaves out the current, incomplete month.
+2. Group by the partner (`DHIS2__c.Account__c`), then by #128's date field by calendar month.
+   The `Account__c.Owner` or `Account_Owner_Check__c` grouping goes; the dashboards'
+   filter on `Assigned_Partner_Manager__c` stays. Item 19 stays tabular, with the filter only.
+3. Add the test-record rule (above).
+4. Put the kept reports on their dashboard: today D1 shows items 2 and 3 (and a copy of item 1's
+   report, not item 1), D2 items 6-8, D3 items 9-11 and 16 (above), D4 none of items 13-16, D5
+   neither 17 nor 18; the dashboards' other components are on reports #72 moves to
+   Decommissioned.
+5. D3 and D4: a refresh after the fix (a PUT, Ryan's go), and a weekly refresh by a dashboard
+   subscription in Lightning.
+
+Item 6 is the exception to steps 1-3 (Ryan, 2026-10-23 on #74: it counts the Jotform batches'
+`Module__c`). Its source is `Attendance_Batch__c`, not `DHIS2__c`, so #76 builds it on the batch
+report type `Attendance_Totals` (base `Attendance_Batch__c`, with `Module__c`,
+`Attendance_Date__c`, `Creator__c`, `Processing_Status__c` and the club's parent; "Attendance
+dashboard in Salesforce", [plan](plans/2026-10-06-attendance-totals.md) D.1):
+1. Filters: `Processing_Status__c` equals `Success` and `Creator__c` starts with `Jotform`, as
+   the girls tiles' filters 1 and 2, so a `Failed` "Duplicate" batch and a `Partner report`
+   batch never count.
+2. Period: `Attendance_Date__c` `LAST_N_MONTHS:12`, the session date (#128's field is on
+   `DHIS2__c` only).
+3. Grouping: the partner, which is the club's parent account
+   (`Attendance_Batch__c$Account__c.Parent`, the column the Partner filter uses), then
+   `Attendance_Date__c` by calendar month, then `Module__c`; the measure is the record count,
+   one batch per club and session date.
+- Test records: the RUNBOOK has no batch-side rule. The 11 February 2026 pilot batches are
+  `Creator__c` "Jotform" and `Success` (plan, Context), so they pass filters 1 and 2, fall inside
+  `LAST_N_MONTHS:12` until February 2027 and would show as a February 2026 bar. The Jotform
+  Attendance reports leave them out only by their window, `Attendance_Date__c` since 2026-09-01
+  (the `Creator__c` filter keeps the March pilot's per-girl rows out, "Access", not these
+  batches). Whether item 6 leaves them out (e.g. the same `Attendance_Date__c` floor of
+  2026-09-01) and takes the test-record rule on the parent account, #76 decides.
+- Whether item 6's report is rebuilt or a new report takes its place (the Id in
+  `glow/sf_keep_list.csv`), #76 decides; D2's `Assigned_Partner_Manager__c` filter does not
+  reach it yet (Components more than one dashboard shares, above). The copy to Decommissioned
+  comes first either way.
+
+| Item | Report | Year filter | The report's "September" | SOQL, September 2026 | Cause and fix |
+|---|---|---|---|---|---|
+| 1 | Collection of Attendance Roster by Month | 2025 | 52 records (September 2025) | 42 records, 0 with the field | Year; field blank since 2025-10: counts `Attendance_submitted_electronically__c` instead (21 of 42; #75) |
+| 2 | Attendance Roster Uploaded on DR by M&P | 2025, `Submit__c` set | 46 (2025); no month after September 2025 | 0 of 42 | Field blank since 2025-10, no source: retired from D1, its report to Decommissioned, kept (#75) |
+| 3 | Participation by Month and Partner | 2025 | sum 5,225 (SOQL, September 2025: 5,225) | sum 4,779 over 42 | Year: steps 1-4 |
+| 4 | GLOW Club Each Week | 2026 | sum 4,779 over 36 | 4,779 over 36 (total not 0) | Current; fixed year: steps 1-4, onto D1 |
+| 5 | Copy of GLOW Club Implementation by M&P | 2025 | 50 | 41 answered (39 Yes, 2 No) | Year: steps 1-4, onto D2 |
+| 6 | Glow Club Modules Implemented by M&P | 2025 | 95 module ticks on 52; 0 in October-December 2025 | 0 of 42 | Year; field blank since 2025-10: counts the Jotform batches' `Module__c` instead, on `Attendance_Totals`, by partner, month and module (#76; item 6's steps 1-3, above) |
+| 7 | GLOW Club Modules Adapted By Month | 2025 | 51 | 42 (29 Yes, 13 No) | Year: steps 1-4 |
+| 8 | Local and Regional Summits By Month 2 | 2025 | 47 | 38 (5 summits, 33 none) | Year: steps 1-4 |
+| 9 | Submission of GC observation forms M & P | 2025 | 52 | 26 (23 Yes, 3 No) | Year: steps 1-4 |
+| 10 | Total Number of Club Observations M&P | 2025 | sum 93 over 50 | sum 93 over 42 (the same sum by chance) | Year: steps 1-4 |
+| 11 | Completed Observing Clubs Alteast Once P | 2025 | sum 93; total 1,215 = all of 2025 | 27 partners observed (sum 93); January-September 796 | Year: steps 1-4 |
+| 13 | Number of mentors trained about module | 2025, month a column | total 1,676 = all of 2025 | 152 (September 2025: 107) | Year; month a column: steps 1-4 |
+| 14 | Number of training sessions led | 2025, month a column | total 791 = all of 2025 | 27 | Year; month a column: steps 1-4 |
+| 15 | Leading training sessions with mentors | 2025, month a column | 619 records = all of 2025 | 41 answered (19 Yes, 22 No) | Year; month a column: steps 1-4 |
+| 16 | Meeting with mentors to discuss program | 2025 | 52 | 41 (37 Yes, 4 No) | Year: steps 1-4 |
+| 17 | Approved Approvals monthly report | none | 58 = 44 (2025) + 14 (2026) | 14 of 42 approved | Two years in one month, by owner: steps 1-4 |
+| 18 | Reports completed on time | none | 94 = 52 (2025) + 42 (2026) | 42 | Two years in one month: steps 1-4 |
+| 19 | GLOW of the Month Stories Report | 2026 | 42 | 42 | Current; fixed year: steps 1 and 3 (#79) |
+
+Item 19's label in the org is "GLOW of the Month Stories Report" since 2026-10-21 (changed by
+another administrator); `glow/sf_keep_list.csv` follows the org's label (Ryan, 2026-10-23), with
+no rename in Salesforce.
+
+The check that a fix worked: the report's cell for 2026 and September equals a query on
+`DHIS2__c` with
+`WHERE Year__c = 2026 AND Month__c = 'September' AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`
+and, per item:
+- A number: `SELECT COUNT(Id), SUM(<field>)` with `AND <field> != null`. Items 3 and 4
+  `Monthly_Total__c` (item 4 also `AND Monthly_Total__c != 0`), 10
+  `GC_sessions_did_you_observe_last_month__c`, 11 the same field with `> 0` in place of `!= null`
+  (the partners who observed), 13 `Mentors_attended_the_training_sessions__c`, 14
+  `how_many_training_sessions_did_you_lead__c`.
+- A picklist (SUM is not valid on one): `SELECT <field>, COUNT(Id)` with `AND <field> != null
+  GROUP BY <field>`. Items 5 `Did_you_implement_GLOW_Club_last_month_f__c`, 7
+  `Adapted_to_the_local_culture_or_context__c`, 8 `Select_summits_completed_last_month__c`, 9
+  `did_you_submit_your_GC_observation_form__c`, 15 `Lead_any_training_sessions__c`, 16
+  `Did_you_meet_with_mentors_as_a_group__c`.
+- Items 1 and 17-19: `SELECT COUNT(Id)`, for item 1 with
+  `AND Attendance_submitted_electronically__c = true` (a checkbox; 21 for September 2026), for
+  item 17 with `AND Approved__c = true`.
+- Item 6 is not on `DHIS2__c`: the report's September 2026 total per module equals
+  `SELECT Module__c, COUNT(Id) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success'
+  AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c >= 2026-09-01 AND Attendance_Date__c <=
+  2026-09-30 GROUP BY Module__c`; one partner's cells, the same with `AND Account__r.Parent.Name
+  = '<partner>'`; with the test-record rule too if #76 adds it. Not run yet, so no number here.
+- Item 2 has no check: it is retired (#75).
+
+Each but item 6 was run once for September 2026 and gives the table's cell
+(`evidence/soql_2026-10-23_check_per_item.txt`; item 1's ticked count:
+`evidence/soql_2026-10-23_review.txt`), the numbers as of 2026-10-23; a report filed or
+approved later moves both sides.
+
+Questions for GLOW:
+- The labels are answered: Ryan, 2026-10-23 on #74, "Labels stay (#70)": the Monthly Report
+  attendance totals (items 3 and 4) keep their labels, with no "(Monthly Report)".
+- The period is answered: Ryan, 2026-10-23 on #74, the last 12 months is the default period of
+  every Monthly Report dashboard; its date field is #128, kept minimal, before #75-#79.
+- The sources are answered: Ryan, 2026-10-23 on #74, "use the candidates": item 1 counts
+  `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
+  and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
 
 ## Interactive dashboard in Salesforce
 
