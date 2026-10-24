@@ -1375,7 +1375,9 @@ class TrainingDashboardDocs(unittest.TestCase):
     its aggregate, the test-record rule and a period on `Period__c`; a rollback never deploys a `build/` or another
     ticket's build; the equality checks need "equals"/"matches"/"identical"/"no differences", not "compare" or
     "roughly"; one copy command per item id and for the dashboard; the deploy's go and check-only are read per
-    numbered step."""
+    numbered step. Round 3: each copy runs `--apply`; the check-only and deploy steps name `build/` (never `before/`);
+    the read-back says `after/` equals `build/` with nothing between; every `before/` deploy carries its guard, and
+    nothing ("anyway", "at any time") voids it; the one-partner query is an item's full query."""
 
     longMessage = False         # the messages say what to fix
     RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
@@ -1536,6 +1538,40 @@ class TrainingDashboardDocs(unittest.TestCase):
             for m in self.SOFT.finditer(s):
                 self.assertTrue(self.d.locally_denied(s, m),
                                 f"{where}: a check is exact, not {m.group(0)!r}: {s[:200]!r}")
+
+    # the guard on a `before/` deploy, and what voids it
+    BEFORE_DEPLOY = re.compile(r"(?i)\b(deploy\w*|restor\w*|roll\w*\s+(it\s+|them\s+)?back|revert\w*|put\w*\s+(\w+\s+)?back|"
+                               r"bring\w*\s+(\w+\s+)?back|rollback)\b")
+    ANYWAY = re.compile(r"(?i)\b(anyway|regardless|in any case|at any time|any time|either way|whenever|no matter|"
+                        r"if (Ryan|he|you|someone) (prefers?|wants?|likes?|chooses?|decides?)|if preferred|as needed|"
+                        r"if needed)\b")
+    # after/ <equal word> build/, or build/ <equal word> after/, nothing else between; or "after/ and build/ are
+    # identical", "compare after/ with build/: no differences"
+    EQ_WORD = (r"(equals?|matches|match|is identical to|are identical to|is the same as|shows? no differences? "
+               r"(from|with|to|against))")
+    READBACK = re.compile(
+        r"(?i)after/`?\s+(?:[\w'’]+\s+){0,4}?" + EQ_WORD + r"\s+(the\s+)?`?(\S*/)?build/|"
+        r"build/`?\s+(?:[\w'’]+\s+){0,4}?" + EQ_WORD + r"\s+(the\s+)?`?(\S*/)?after/|"
+        r"after/`?\s+(and|with|to|against)\s+`?(\S*/)?build/`?[:,]?\s+(?:[\w'’]+\s+){0,3}?"
+        r"(no differences|identical|equal|the same|match)\b")
+
+    def assertBeforeGuarded(self, text, where):
+        """Every clause that deploys or restores `before/` carries the guard (a fresh retrieve equals `after/`) or
+        denies the `before/`; nothing beside `before/` voids the guard ("anyway", "at any time", "if Ryan prefers")."""
+        for s in self.clauses(text, ".;"):
+            hits = list(re.finditer(r"before/", s))
+            if not hits or not self.stated(s, self.BEFORE_DEPLOY):
+                continue
+            if all(self.d.locally_denied(s, m) for m in hits):
+                continue
+            guard = ("after/" in s and self.FRESH.search(s) and self.stated(s, self.EQUAL_STRICT)
+                     and self.stated(s, self.CONDITION))
+            self.assertTrue(guard, f"{where}: a `before/` deploy carries its guard in the same sentence: only while a "
+                                   f"fresh retrieve equals `after/`: {s[:200]!r}")
+            for m in self.ANYWAY.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: `before/` goes back only while a fresh retrieve equals `after/`, never "
+                                f"{m.group(0)!r}: {s[:200]!r}")
 
     def step_clauses(self, raw, where):
         """The Rollout's numbered steps as [(step number, step text, [its clauses])], in order."""
@@ -1703,10 +1739,12 @@ class TrainingDashboardDocs(unittest.TestCase):
                             f"{where}: give item {n}'s SOQL signal as a query, in one table row, list item or sentence: "
                             f"`SELECT {shape} FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null "
                             "AND (NOT Account__r.Name LIKE '%test%')` (or the last complete month on `Period__c`)")
-        self.assertTrue([q for q in self.queries(part) if re.search(r"(?i)\bAccount__r\.Name\s*=\s*'|\bAccount__c\s*=\s*'",
-                                                                    q[1])],
-                        f"{where}: give the query for one partner's number (`SELECT … FROM DHIS2__c WHERE … AND "
-                        "Account__r.Name = '<partner>'`), the check of the Partner filter")
+        partner_q = re.compile(r"(?i)\bAccount__r\.Name\s*=\s*'|\bAccount__c\s*=\s*'")
+        self.assertTrue([q for q in self.queries(part) if partner_q.search(q[1])
+                         and any(self.item_query(n, q) for n in self.FIELDS)],
+                        f"{where}: give the query for one partner's number, an item's query (its SUM or GROUP BY, the "
+                        "period on `Period__c`, `Account__c != null`, `NOT Account__r.Name LIKE '%test%'`) with `AND "
+                        "Account__r.Name = '<partner>'`: the check of the Partner filter")
         # the rollback: the copies in Decommissioned and this change's before/ retrieve
         self.assertTrue([s for s in cl if self.stated(s, self.RESTORE) and "Decommissioned" in s
                          and self.COPY.search(s)],
@@ -1714,6 +1752,7 @@ class TrainingDashboardDocs(unittest.TestCase):
         self.assertRegex(part, self.BEFORE, f"{where}: name this change's retrieve `data/sf_dash_training_<date>/before/`")
         self.assertNoOlderBuild(part, where)
         self.assertNoOtherChange(part, where)
+        self.assertBeforeGuarded(part, where)
         self.assertNotSoft(part, where)
         self.d.assertNoContradiction(part, where)
 
@@ -1755,6 +1794,7 @@ class TrainingDashboardDocs(unittest.TestCase):
                          (r"(-X\s*|--method\s+)DELETE\b|\bDELETE\s+/services/", "an HTTP DELETE")):
             self.assertNotRegex(raw, rx, f"{where}: {what} deletes; the rollback restores and deletes nothing")
         self.assertNoOtherChange(raw, where)
+        self.assertBeforeGuarded(raw, where)
         self.assertNotSoft(raw, where)
         self.d.assertNoContradiction(raw, where, rollback=True)
 
@@ -1787,7 +1827,9 @@ class TrainingDashboardDocs(unittest.TestCase):
                               "report|dashboard --id <id> --tag \"#78\" --apply`")
         for c in cmds:
             self.assertIn("--vpn-off", c, f"{where}: the tool refuses to run without `--vpn-off`: {c[:160]!r}")
-            tags = [v.strip("`'\"") for v in re.findall(r"--tag(?:=|\s+)(\S+)", c)]
+            self.assertRegex(c, r"--apply\b", f"{where}: each copy runs with `--apply` (on Ryan's go); without it the "
+                                              f"tool makes no copy: {c[:160]!r}")
+            tags =[v.strip("`'\"") for v in re.findall(r"--tag(?:=|\s+)(\S+)", c)]
             self.assertTrue(tags and all(t == "#78" for t in tags), f"{where}: each copy is tagged `--tag \"#78\"`: "
                                                                     f"{c[:160]!r}")
         def flag(c, f):
@@ -1811,10 +1853,11 @@ class TrainingDashboardDocs(unittest.TestCase):
         self.assertTrue([s for s in cl if re.search(r"Ryan['’]s go\b", s) and re.search(r"(?i)\bdeploy|--apply", s)
                          and not self.d.denies(s)],
                         f"{where}: the deploy and each `--apply` wait for Ryan's go (one sentence)")
-        readback = [s for s in cl if "after/" in s and "build/" in s and self.stated(s, self.EQUAL_STRICT)
+        readback = [s for s in cl if [m for m in self.READBACK.finditer(s) if not self.d.locally_denied(s, m)]
                     and re.search(r"(?i)\bretriev\w*|\bread\w*\s+(it\s+)?back\b", s)]
-        self.assertTrue(readback, f"{where}: read back: retrieve into `after/` and check it equals `build/` (no "
-                                  "differences beyond Salesforce's normalisation), in one sentence")
+        self.assertTrue(readback, f"{where}: read back: retrieve into `after/` and check `after/` equals `build/` (\"…"
+                                  "`after/` and check it equals `build/`\", \"`after/` matches `build/`\", \"compare "
+                                  "`after/` with `build/`: no differences beyond normalisation\"), in one sentence")
         soql = [s for s in cl if (re.search(r"\bSOQL\b", s) and "DHIS2__c" in s or self.SOQL_ON_DHIS2.search(s))
                 and self.stated(s, self.EQUAL_STRICT) and re.search(r"(?i)\bcomponents?\b", s)]
         self.assertTrue(soql, f"{where}: check that each component equals SOQL on `DHIS2__c` (one sentence naming the "
@@ -1844,6 +1887,14 @@ class TrainingDashboardDocs(unittest.TestCase):
         deploy_step = steps[at_deploy[0]]
         self.assertRegex(deploy_step[1], r"Ryan['’]s go\b",
                          f"{where}: step {deploy_step[0]}, the deploy, waits for Ryan's go (say so in that step)")
+        check_step = steps[at_check[0]]
+        for st, what in ((check_step, "the check-only"), (deploy_step, "the deploy")):
+            self.assertRegex(st[1], r"\bbuild/", f"{where}: step {st[0]}, {what}, names what it deploys: `build/`")
+            nst = self.norm(st[1])
+            for m in re.finditer(r"before/", nst):
+                self.assertTrue(self.d.locally_denied(nst, m),
+                                f"{where}: step {st[0]}, {what}, deploys `build/`, never `before/` (that is the "
+                                f"rollback's): {nst[:200]!r}")
         for n, st, _cs in steps:
             if "--apply" in st:
                 self.assertRegex(st, r"Ryan['’]s go\b", f"{where}: step {n} runs `--apply`; say in that step it waits "
