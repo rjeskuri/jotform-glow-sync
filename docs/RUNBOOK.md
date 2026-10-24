@@ -4038,6 +4038,46 @@ The live commands of the procedure refuse without `--vpn-off`: the word that you
     whose batch is not in `ledger.csv`; if there is any, do not delete that contact (remove only
     the back-fill's own rows and batches). A guard in `sf_backfill.py` for this is BACKLOG 78.
 
+### Re-send of the corrections failed as "Duplicate" (`resend`)
+
+- **When:** corrected re-submissions the processor failed whole as `Duplicate` before 2026-10-24
+  (it merges a correction since: ticket #108); their girls are missing from that club and day.
+- **Status:** built 2026-10-24 (ticket #109, [plan](plans/2026-10-24-resend-duplicate-batches.md)); the live run waits for Ryan's go.
+- **Dry run:** `python3 tools/sf_backfill.py resend --vpn-off` (it reads Salesforce, so `--vpn-off` too).
+- **Apply:** `resend --apply --vpn-off --limit 1`, read back, then the rest, Ryan's go.
+- **Verify:** every copy is read back as it is sent; `sf_backfill.py status`.
+- **Rollback:** by id from `resend_ledger.csv` and `resend_added.csv` (below).
+
+`resend` reads every `Failed` batch whose message starts `Duplicate:` created since `--since`
+(default 2026-09-07), in `CreatedDate` order, and predicts in memory, by the processor's merge rule,
+what a copy of it would add to the day's original batch (the oldest `Success`): the girls it ticked
+without a row on that club and day, and how many of them get a new contact. Each candidate prints
+one line - the failed batch, the original, the club, the date, names ticked / girls to add / new
+contacts - then the totals, a line per club and `skipped, <reason>: N`: `no_success_original`,
+`original_not_mergeable` (a `Partner report` or no rows of its own), `module_differs`, `no_names`,
+`adds_nobody`, `own_batch` (a copy of this tool), `already_resent` (in the ledger, whatever the
+outcome). Corrections of one club and day are predicted in order, each after the earlier ones.
+Girls' names are compared inside the script; it prints counts, club names, dates and ids only.
+
+`--apply` sends one copy per request, in that order: the failed batch's fields as they are, with
+`Creator__c` `Jotform back-fill re-send <failed id>` (its marker; the copy gets no `Submitted_At__c`).
+Before each copy it reads the club and day again and refuses when the prediction changed (a live
+correction got there first); after it, it reads back that the copy is `Success` `merged into
+<original id>` with no rows or count of its own, that the original gained exactly the predicted
+rows and the club exactly the predicted contacts, and that the original's `Girls_Present__c` is
+its rows - else the copy is `CHECK` and nothing more is sent until it is closed (`close <failed
+id> --removed` or `--accepted`). A lost answer is `unknown` and settled by the marker before the
+next `--apply` sends anything. `--only <failed id>` sends one (refused while an earlier correction
+of its club and day is not re-sent), `--limit N` the first N. The original Failed batches stay as
+they are (history); a failed batch is never copied twice.
+
+- **Rollback** (only with Ryan's go): `resend_added.csv` lists, per copy, every attendance row it
+  added to the original and every contact it created. Delete those rows, then each listed contact
+  only while it carries no other attendance row (master-detail: deleting a contact deletes its
+  rows), then the copies (`batch_id` in `resend_ledger.csv`); set each original's
+  `Girls_Present__c` back to the count of its own rows (`tools/sf_girls_present.py check`), and
+  `close <failed id> --removed` for each.
+
 # Admin and work log
 
 ## Credentials

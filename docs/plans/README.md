@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-10-24 | The corrections failed as "Duplicate" before 2026-10-24 re-sent, so the processor merges their missing girls | proposed |  | [2026-10-24-resend-duplicate-batches.md](2026-10-24-resend-duplicate-batches.md) |
 | 2026-10-23 | Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them | done 2026-10-24 |  | [2026-10-23-submission-timing.md](2026-10-23-submission-timing.md) |
 | 2026-10-22 | Roster changes sent as problem reports point their sender to the Club Roster Form, and girls "not on the form" count as one | proposed |  | [2026-10-22-roster-change-reports-to-roster-form.md](2026-10-22-roster-change-reports-to-roster-form.md) |
 | 2026-10-22 | Attendance processor - a corrected re-submission adds its missing girls to the day's original batch | in-progress |  | [2026-10-22-correction-merge.md](2026-10-22-correction-merge.md) |
