@@ -1,7 +1,7 @@
 ---
 title: Attendance processor - a corrected re-submission adds its missing girls to the day's original batch
 author: Claude (with Ryan's decisions of 2026-10-22)
-status: accepted         # ticket #108; built 2026-10-23, nothing deployed yet (Result)
+status: in-progress      # ticket #108; deployed 2026-10-24 06:48 UTC, step 7 (the read-back) pending (Result)
 created: 2026-10-22
 intent: none - Ryan's request of 2026-10-22 (staff meeting, "names not being added"; ticket #108)
 ---
@@ -112,7 +112,7 @@ recipe in "Photos", "Special events"; the salesforce skill; DECISIONS 2026-10-22
    ApexClass:AttendanceBatchProcessor -m ApexClass:AttendanceBatchTriggerTest -m
    ApexClass:TestContactTriggerHandler -m ApexTrigger:AttendanceBatchTrigger`, into a new folder
    under `data/sf_processor_2026-10-22/`) and compare with `after/`: equal, apart from a missing
-   final newline on the test class (Salesforce stores it without one).
+   final newline on a class (Salesforce stores it without one).
 6. Proof in production, rolled back, with fictional names (`sf apex run` of a script pasted in
    full in the conversation first, ending in `Database.rollback`): a test club with two made-up
    girls, a submission of one of them (`Success`, 1 row, `Girls_Present__c` 1), then the same
@@ -138,7 +138,7 @@ recipe in "Photos", "Special events"; the salesforce skill; DECISIONS 2026-10-22
 Redeploy only the two classes this change deploys, `AttendanceBatchProcessor` and
 `AttendanceBatchTriggerTest`, from `data/sf_processor_2026-10-22/before/`, and only after a fresh
 retrieve of the two classes and the trigger equals this change's `after/` (ignoring a missing
-final newline on the test class); any other difference means something was deployed since -
+final newline on a class); any other difference means something was deployed since -
 stop and build the rollback from that retrieve, never from an older build or copy (DECISIONS
 2026-10-16). The trigger `AttendanceBatchTrigger` and `TestContactTriggerHandler` are not
 redeployed: they stay as retrieved. Rows a correction added before the rollback stay (they are
@@ -168,7 +168,37 @@ read as its own kind.
 - In the org: the validate of Rollout step 2 (every test passes), the compare of step 5 (equal),
   the rolled-back proof of step 6 (counts as expected, nothing left), the read-back of step 7.
 
-## Result
-Pending: nothing deployed. Built 2026-10-23 on the ticket branch (the bulk-run fix of "The
-change" 3 the same day, in `after/`); the check-only validate, the deploy, the proof and the
-read-back wait for Ryan's go.
+## Result (2026-10-24)
+Deployed 2026-10-24 06:48 UTC, each step on Ryan's go in the conversation (counts only, never a
+name); the read-back of Rollout step 7 is the remaining step, due the next day (2026-10-25).
+- Step 1: a fresh retrieve of the four components (`data/sf_processor_2026-10-22/check_2026-10-24/`)
+  equalled `before/`: nothing had changed in the org since 2026-10-22.
+- Step 2: check-only validate 0AfRP000002i4GT0AY: 44 of 44 tests passed
+  (`AttendanceBatchTriggerTest` and `TestContactTriggerHandler`: the 33 of 2026-10-07 plus the 11
+  new ones), 0 failing; the validate run's coverage 94.05% of lines (269/286); the processor and
+  its test class Changed, the trigger and `TestContactTriggerHandler` Unchanged.
+- Step 3: Ryan confirmed the three defaults of "The change" 4 as built - (1) a merged row carries
+  the original batch's session fields, (2) the original's `Girls_Present__c` is the count of its
+  own rows, (3) nothing is merged into a row-less or `Partner report` batch - and gave the go.
+  The last low finding of the review (the template-test remedy keyed by `CreatedDate`) stays as
+  it is, his choice.
+- Step 4: quick deploy 0AfRP000002i4I50AI of that validation, done 06:48:43 UTC.
+- Step 5: the retrieve after the deploy (`data/sf_processor_2026-10-22/deployed_2026-10-24/`)
+  equals `after/`, apart from the missing final newline on `AttendanceBatchProcessor.cls`
+  (Salesforce stores it without one; on 2026-10-07 it was the test class, hence "a class" in the
+  steps above).
+- Step 6: the rolled-back proof (`data/sf_processor_2026-10-22/proof_2026-10-24.apex`, fictional
+  names, session day 2026-01-15) gave exactly the expected outcome: the original `Success`, 1 row,
+  `Girls_Present__c` 1; the correction `Success` with `Status_Message__c` exactly
+  `merged into <the original's id>`, no count, no rows of its own, the original 2 rows and
+  `Girls_Present__c` 2; the same girls again `Failed` "Duplicate", the original unchanged; another
+  module `Failed` "Duplicate", no rows, no contact made; two corrections in one insert: the first
+  merged, the second `Failed` "Duplicate", the original 3 rows and `Girls_Present__c` 3, one row
+  for the third girl. After the rollback 0 accounts, 0 batches, 0 contacts, confirmed by separate
+  read-only counts afterwards (0 / 0 / 0).
+- Step 7, the read-back of the live flow, is due 2026-10-25: the day's merged corrections counted,
+  one original's rows and `Girls_Present__c` equal, `sf_girls_present.py check` OK, the dashboard's
+  tiles unchanged for sessions with one batch; then the plan `done`, `make docs-index`.
+- Rollback, if needed: as in Rollback above - the two classes from `before/`, after a fresh
+  retrieve equals `after/` (the read-back of step 5 did, ignoring the processor's missing final
+  newline).
