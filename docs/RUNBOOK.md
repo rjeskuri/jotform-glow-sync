@@ -3582,7 +3582,7 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 ## Monthly Report dashboards in Salesforce
 
 - **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
-- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)).
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)).
 - **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
 - **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
 - **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
@@ -3872,7 +3872,8 @@ The cause: every kept report filters on a fixed year, and groups by the month's 
   and September 2026 into one "September". Every other report on the five dashboards filters
   `Year__c equals 2025` too, except "Participation by month" (2026).
 - The month is `Month__c`, a picklist of month names; `Year__c` is a number. `YearMonth__c` (a
-  number formula, `202609`) is not in the `Dhis2` report type's layout, so no report offers it.
+  number formula, `202609`) is not in the `Dhis2` report type's layout, so no report offers it;
+  since #128 the type offers `Period__c` (below).
 - The standard date filter of every report is `CreatedDate`, all time: it narrows nothing.
 
 Three of the form's fields have been blank since October 2025, when the form moved to the record
@@ -3899,8 +3900,9 @@ dynamic dashboards: `evidence/soql_2026-10-23_review.txt`.
 Components more than one dashboard shares:
 - The period design (a fixed year, a month name with no year) is in every report of all five.
   Each dashboard ticket fixes its own reports the same way (below). GLOW's period is the last 12
-  months (Ryan, 2026-10-23), which needs one shared change first: #128 adds a date field for the
-  report's month to `DHIS2__c` and the `Dhis2` report type, before #75-#79.
+  months (Ryan, 2026-10-23), which needed one shared change first: #128 added the date field
+  `DHIS2__c.Period__c` for the report's month, and the `Dhis2` report type's column for it
+  (2026-10-24, below), before #75-#79.
 - The org's limit on dynamic dashboards: Enterprise Edition, 5 dashboards that run as the viewer,
   all 5 in use (D1, D2, D5, "Attendance According to Attendance Rosters" `01ZRP000006s43B2AQ`,
   which #72 moves to Decommissioned, and "Activities Dashboard", outside the epic). D3 and D4
@@ -3917,11 +3919,34 @@ Components more than one dashboard shares:
   retrieve, the Attendance reports unchanged). #76 settles it before building item 6; named on
   #74.
 
+`DHIS2__c.Period__c` (#128), deployed 2026-10-24 on Ryan's go: label "Period", a Date formula,
+the first day of the report's month, built from `Year__c` and `Month__c` the same way
+`YearMonth__c` is (a formula on `YearMonth__c` itself compiled to 18,865 characters, over the
+15,000 limit, because `YearMonth__c` is a large formula). Blank when `Year__c` is blank or the
+month is not a month name. Read-only for the two profiles that read `YearMonth__c` (System
+Administrator, GLOW Standard User), and a column of the `Dhis2` report type (section "DHIS2S",
+beside `Year__c`). The before/after retrieve compare shows only those additions (the field, two
+read permissions, one report-type column): `data/sf_period_2026-10-24/`. The check, 2026-10-24
+(window 2025-10-01 to 2026-09-30): `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c =
+LAST_N_MONTHS:12` = 569, and `... WHERE YearMonth__c >= 202510 AND YearMonth__c <= 202609` =
+569; an unsaved report (Analytics API `reports/query`, saves nothing) on `Dhis2` with
+`Period__c` as its date column and that filter returned 569 rows. Of 1,051 Monthly Reports, 6
+have no `Year__c`: `Period__c` is blank on them and `YearMonth__c` (blanks as zero) gives the
+bare month number (1 to 11), so neither count includes them. Two of the six (October and
+November, created 2025-11-28 and 2025-12-17) probably belong to the window and show only once an
+administrator fills in their year (not #128). Rollback: only once no report filters on
+`Period__c` (the dashboard tickets will), a destructive change of the field and the report
+type's column, each from a fresh retrieve (DECISIONS 2026-10-16). Plan, rollout and Result: [plan](plans/2026-10-24-dhis2-period-date.md).
+
 The fix, for each kept report, after its copy goes to Decommissioned (#75 D1, #76 D2, #77 D3,
 #78 D4, #79 D5 and item 19; item 6 takes its own steps 1-3, below):
-1. Replace `Year__c equals <year>` with GLOW's period: the last 12 months (`LAST_N_MONTHS:12`)
-   on #128's date field, which leaves out the current, incomplete month.
-2. Group by the partner (`DHIS2__c.Account__c`), then by #128's date field by calendar month.
+1. Replace `Year__c equals <year>` with GLOW's period: the last 12 months, which leaves out the
+   current, incomplete month. Lightning's standard date filter has no "last 12 months" (its
+   month options are last, this and next month), so the report gets the field filter
+   `Period__c equals LAST_N_MONTHS:12` (shown as "LAST 12 MONTHS"), and its standard date
+   filter's column is set to `Period__c`, range All Time (Custom, no dates), in place of
+   `CreatedDate`.
+2. Group by the partner (`DHIS2__c.Account__c`), then by `Period__c` by calendar month.
    The `Account__c.Owner` or `Account_Owner_Check__c` grouping goes; the dashboards'
    filter on `Assigned_Partner_Manager__c` stays. Item 19 stays tabular, with the filter only.
 3. Add the test-record rule (above).
@@ -3940,7 +3965,7 @@ dashboard in Salesforce", [plan](plans/2026-10-06-attendance-totals.md) D.1):
 1. Filters: `Processing_Status__c` equals `Success` and `Creator__c` starts with `Jotform`, as
    the girls tiles' filters 1 and 2, so a `Failed` "Duplicate" batch and a `Partner report`
    batch never count.
-2. Period: `Attendance_Date__c` `LAST_N_MONTHS:12`, the session date (#128's field is on
+2. Period: `Attendance_Date__c` `LAST_N_MONTHS:12`, the session date (`Period__c` is on
    `DHIS2__c` only).
 3. Grouping: the partner, which is the club's parent account
    (`Attendance_Batch__c$Account__c.Parent`, the column the Partner filter uses), then
@@ -4016,7 +4041,8 @@ Questions for GLOW:
 - The labels are answered: Ryan, 2026-10-23 on #74, "Labels stay (#70)": the Monthly Report
   attendance totals (items 3 and 4) keep their labels, with no "(Monthly Report)".
 - The period is answered: Ryan, 2026-10-23 on #74, the last 12 months is the default period of
-  every Monthly Report dashboard; its date field is #128, kept minimal, before #75-#79.
+  every Monthly Report dashboard; its date field is `Period__c` (#128, kept minimal, added
+  2026-10-24), before #75-#79.
 - The sources are answered: Ryan, 2026-10-23 on #74, "use the candidates": item 1 counts
   `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
   and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
