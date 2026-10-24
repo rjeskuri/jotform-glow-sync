@@ -1355,11 +1355,11 @@ owner's to delete (the CEO's retention decision).
 ## Photo mover
 
 - **When:** setting it up (once, before #63 points the forms' Drive integrations at its source folders), the template's test upload after #63, a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
-- **Status:** built offline 2026-10-21 (ticket #89), not set up yet; it is set up first, then #63 (Ryan, 2026-10-22; [plan](plans/2026-10-21-drive-photo-mover.md#result)).
+- **Status:** built offline 2026-10-21 (ticket #89); set up and its trigger installed 2026-10-23 ([plan](plans/2026-10-21-drive-photo-mover.md#result)); every real move then failed (Drive does not move a folder from My Drive into a Shared Drive), fixed in the repo 2026-10-24 (#132: the files move one by one into a folder made there); the live project's update is Ryan's, "Updating the live project" below.
 - **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, by counts and folder names; nothing changes.
-- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
-- **Verify:** the execution's log (`done: N folder(s) moved, N file(s) merged, 0 failure(s)`); the subfolder is in the region's folder on the Shared Drive and gone from `Attendance photos - <Region>`, which stays.
-- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; move a subfolder back into `Attendance photos - <Region>` by hand to undo a move.
+- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2; or paste by hand, below).
+- **Verify:** the execution's log (`done: N folder(s) moved (N file(s)), N file(s) merged, 0 failure(s)`); a folder of the subfolder's name is in the region's folder on the Shared Drive with its photos; the emptied subfolder is still in `Attendance photos - <Region>` (expected; delete it by hand), and that folder itself stays.
+- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; to undo a move, move the files back into the emptied subfolder in `Attendance photos - <Region>` (or a new folder of its name, once it was cleared) by hand. That move out of the Shared Drive needs **Manager** on it: Google's "How file access works in shared drives" (https://support.google.com/a/users/answer/12380484) lets a Contributor or Content manager move files from My Drive into a shared drive and a Content manager move them within it, but for out of it says only "If you have Manager access to a shared drive, you can move files and folders out of shared drive to My Drive". So a Manager does it, or Ryan's role is raised for it.
 
 Jotform's Google Drive integration writes only into Ryan's My Drive ("Photos", above); the
 photos belong on the company Shared Drive. `drive-sync/` is a standalone Apps Script project
@@ -1385,10 +1385,36 @@ The order, each live step on Ryan's go (Ryan, 2026-10-22):
    time, each followed by a check of the next run's log for that region (no `CONFIG refused`,
    no `UNKNOWN`; its first subfolder moved) before the next form.
 
+**Updating the live project** (#132; Ryan, once). Every run since 2026-10-23 ended in
+`MOVE_FAILED … cannot use this operation on a shared drive item`: Google's API does not move a
+folder from My Drive into a shared drive at any role (`teamDrivesFolderMoveInNotSupported`), so
+the mover now makes the folder on the Shared Drive and moves the files into it one by one through
+the advanced Drive service. The code is in the repo; the live project is updated by hand (clasp
+is logged in as another account):
+
+1. As the company account, open the `GLOW photo mover` project at script.google.com.
+2. Replace the editor's `Plan.gs` and `Mover.gs` with the repo's `drive-sync/Plan.gs` and
+   `drive-sync/Mover.gs` (the whole file each).
+3. Project Settings → "Show appsscript.json manifest file in editor"; replace the editor's
+   `appsscript.json` with the repo's `drive-sync/appsscript.json` (it enables the advanced Drive
+   service; the scopes are unchanged). Or: Editor → Services `+` → Drive API, version v3,
+   identifier `Drive` → Add. Save.
+4. Run `previewMoves`; re-authorise if asked. Its log is the plan as before (`would move N …`);
+   nothing changes.
+5. Run `moveSettledPhotos` once. Executions → its log: `done: N folder(s) moved (N file(s)), N
+   file(s) merged, 0 failure(s)`; a `MOVE_FAILED` line names the region and the folder (never a
+   file). The photos are in a folder of each subfolder's name in the region's folder.
+6. The emptied subfolders stay in `Attendance photos - <Region>` in My Drive: expected; delete
+   them by hand, now and regularly from then on (each leftover costs every run one listing; the
+   mover never trashes). The trigger needs no change (it keeps calling `moveSettledPhotos`).
+
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N`,
 then the folders by name (club and date; never a file's name or contents).
 
-- **move**: the whole subfolder went to the Shared Drive.
+- **move**: a folder of that name was made in the region's folder and the subfolder's files
+  moved into it (Drive cannot move the folder itself, #132); the emptied subfolder stays in My
+  Drive (the mover never trashes). Each leftover slows every run by one listing, so clear them
+  regularly by hand.
 - **merge**: that name was already there once (a resubmission): its files went in one by one,
   beside what is there; **kept** files (same name and size already there) stay in My Drive. A
   subfolder of kept files only (`0 file(s) in`) changes nothing, never holds up a same-name copy
@@ -1398,7 +1424,8 @@ then the folders by name (club and date; never a file's name or contents).
   moved or merged files this run; the next run takes it (a backlog of same-name copies clears
   one per run).
 - **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
-  moving at 4.5; what it did not read is not touched, and the next run carries on.
+  moving at 4.5; what it did not read is not touched, and the next run carries on (a move cut
+  short, its folder made and some files moved, is finished by the next run as a merge).
 - **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
   hand (pick the right folder), or rename one of the two there.
 - **UNKNOWN**: a folder that is no region's; left alone.
@@ -1406,10 +1433,15 @@ then the folders by name (club and date; never a file's name or contents).
   source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
   `Africa`, `Asia`, `Latin America`, `U.S` or `Template`); nothing read, nothing moved. Fix the
   property in Project Settings → Script Properties, or the folder's name.
-- **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a move; the run ends in an error and Google
-  sends the owner its failure summary. On the first move, a permission error means Ryan's role on
-  the Shared Drive must be raised to Manager ([plan](plans/2026-10-21-drive-photo-mover.md),
-  Risks).
+- **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a file's move, or did not confirm the new
+  folder (`folder not confirmed, its files stay in My Drive`: the next run merges into it if it
+  exists, or moves again); the line names the region and the folder, the rest of the run goes
+  on, the run ends in an error and Google sends the owner its failure summary. A move whose
+  folder exists but whose files did not all move is finished by the next run as a merge.
+  A permission error means Ryan's role on the Shared Drive is below Content manager, or the
+  advanced Drive service is not enabled (above). Before 2026-10-24 every move failed with
+  `cannot use this operation on a shared drive item`: the folder move Drive does not support
+  (#132; [plan](plans/2026-10-21-drive-photo-mover.md), Risks).
 
 Nothing is shared beyond the Shared Drive's members (the named list: the CEO and Ryan, never
 "anyone with the link"): the mover never shares, links, copies, trashes or e-mails a file.

@@ -20,9 +20,17 @@
  * A run reads for at most half its time budget, then moves for the rest (TIME_BUDGET either way:
  * what was not read or not moved waits for the next run).
  *
+ * Drive cannot move a folder from My Drive into a Shared Drive (#132: 403
+ * teamDrivesFolderMoveInNotSupported, and DriveApp's moveTo fails the same way), so a move makes
+ * a folder of the subfolder's name in the region folder and moves the plan's files into it, one
+ * by one, through the advanced Drive service (Drive.Files.create / Drive.Files.update with
+ * supportsAllDrives); a merge moves them the same way into the folder already there. The
+ * emptied subfolder stays in My Drive (nothing is ever trashed); a move cut short by a failure
+ * or the time budget is finished by a later run as a merge.
+ *
  * The log holds counts and folder names (`<Club Name> <Attendance Date>`), never a file's name
  * or contents. Nothing here shares, links, copies, trashes or e-mails anything: a file only
- * ever moves (Folder.moveTo / File.moveTo), and a move never replaces a file.
+ * ever moves (its parent changes), and a move never replaces a file.
  */
 
 const SETTLE_MINUTES = 10;
@@ -31,6 +39,7 @@ const TRIGGER_HANDLER = 'moveSettledPhotos';
 const RUN_BUDGET_MS = 4.5 * 60 * 1000;   // Apps Script stops a run at 6 minutes; the rest waits for the next
 const REGION_KEYS = { 'Africa': 'AFRICA', 'Asia': 'ASIA', 'Latin America': 'LATIN_AMERICA', 'U.S': 'US',
                       'Template': 'TEMPLATE' };
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 function previewMoves() {
   runMover_(false);
@@ -105,7 +114,7 @@ function runMover_(apply) {
     const read = readDrives_(opened, started + RUN_BUDGET_MS / 2);
     const plan = planMoves_(read.sources, read.targets, new Date(), SETTLE_MINUTES);
     logPlan_(plan, config, apply);
-    if (apply) carryOut_(plan, read.folders, started + RUN_BUDGET_MS);
+    if (apply) carryOut_(plan, started + RUN_BUDGET_MS);
   } finally {
     lock.releaseLock();
   }
@@ -136,17 +145,17 @@ function openRegionFolders_(config) {
 /**
  * The planner's inputs: per region the source subfolders with their files, and beside each one
  * the target's subfolders of the same name (all the planner compares with), so a subfolder read
- * always has its target side read too. Past `readBy` no further subfolder is read
- * (TIME_BUDGET): what was not read is not in the plan, and waits for the next run.
+ * always has its target side read too. An emptied subfolder (no files: what a move left behind)
+ * costs its one listing and nothing more, since the planner leaves it alone. Past `readBy` no
+ * further subfolder is read (TIME_BUDGET): what was not read is not in the plan, and waits for
+ * the next run.
  */
 function readDrives_(opened, readBy) {
-  const folders = {};   // id -> Folder, every folder the plan can name
   const sources = [], targets = {};
   let stopped = false, count = 0;
   for (const o of opened) {
     const source = { id: o.source.getId(), name: o.source.getName(), subfolders: [] };
     const target = { id: o.target.getId(), subfolders: [] };
-    folders[target.id] = o.target;
     sources.push(source);
     targets[o.region] = target;
     const looked = {};
@@ -159,22 +168,22 @@ function readDrives_(opened, readBy) {
       const sub = it.next();
       if (sub.isTrashed()) continue;
       const name = sub.getName();
-      folders[sub.getId()] = sub;
-      source.subfolders.push({ id: sub.getId(), name: name, files: describeFiles_(sub, true) });
+      const files = describeFiles_(sub, true);
+      source.subfolders.push({ id: sub.getId(), name: name, files: files });
       count++;
+      if (!files.length) continue;
       if (Object.prototype.hasOwnProperty.call(looked, name)) continue;
       looked[name] = true;
       const same = o.target.getFoldersByName(name);
       while (same.hasNext()) {
         const t = same.next();
         if (t.isTrashed()) continue;
-        folders[t.getId()] = t;
         target.subfolders.push({ id: t.getId(), name: t.getName(), files: describeFiles_(t, false) });
       }
     }
   }
   if (stopped) console.log('TIME_BUDGET: reading stopped after ' + count + ' subfolder(s); the rest waits for the next run');
-  return { sources: sources, targets: targets, folders: folders };
+  return { sources: sources, targets: targets };
 }
 
 function describeFiles_(folder, withDates) {
@@ -215,35 +224,65 @@ function logPlan_(plan, config, apply) {
   for (const u of plan.unknown) console.log('UNKNOWN "' + u.name + '": no such region or no target; left alone');
 }
 
-/** Moves first, then merges, until the time budget; every failure logged by code, then one error. */
-function carryOut_(plan, folders, deadline) {
+/**
+ * Moves first, then merges, until the time budget (checked before the folder is made and before
+ * each file). A move: a folder of the subfolder's name made in the region folder, then the plan's
+ * files into it (only those: the subfolder is never listed again); when Drive does not confirm
+ * the folder, none of its files moves this run. Every failure is logged by code, region and
+ * folder name, the rest of the run goes on, then one error. A move whose folder exists but
+ * whose files did not all move is a merge on the next run.
+ */
+function carryOut_(plan, deadline) {
   const failed = [];
-  let deferred = 0, moved = 0, filesMoved = 0;
+  let deferred = 0, moved = 0, filesMoved = 0, filesMerged = 0;
   const late = () => Date.now() > deadline;
   for (const m of plan.moves) {
     if (late()) { deferred++; continue; }
+    let made;
     try {
-      folders[m.id].moveTo(folders[m.to]);
-      moved++;
+      made = Drive.Files.create({ name: m.name, mimeType: FOLDER_MIME, parents: [m.to] }, null, { supportsAllDrives: true });
     } catch (e) {
-      failed.push('MOVE_FAILED ' + m.region + ' "' + m.name + '": ' + errorText_(e));
+      failed.push('MOVE_FAILED ' + m.region + ' "' + m.name + '": folder not confirmed, its files stay in My Drive ' +
+                  '(the next run merges if it exists): ' + errorText_(e));
+      continue;
     }
+    const r = moveFiles_(m, made.id, 'MOVE_FAILED', late, failed);
+    filesMoved += r.moved;
+    if (r.deferred) deferred++;
+    else if (!r.failed) moved++;
   }
   for (const m of plan.merges) {
-    for (const fileId of m.files) {
-      if (late()) { deferred++; continue; }
-      try {
-        DriveApp.getFileById(fileId).moveTo(folders[m.into]);
-        filesMoved++;
-      } catch (e) {
-        failed.push('MERGE_FAILED ' + m.region + ' "' + m.name + '": ' + errorText_(e));
-      }
-    }
+    if (!m.files.length) continue;
+    if (late()) { deferred++; continue; }
+    const r = moveFiles_(m, m.into, 'MERGE_FAILED', late, failed);
+    filesMerged += r.moved;
+    if (r.deferred) deferred++;
   }
-  console.log('done: ' + moved + ' folder(s) moved, ' + filesMoved + ' file(s) merged, ' + failed.length +
-              ' failure(s)' + (deferred ? ', ' + deferred + ' left for the next run (TIME_BUDGET)' : ''));
+  console.log('done: ' + moved + ' folder(s) moved (' + filesMoved + ' file(s)), ' + filesMerged + ' file(s) merged, ' +
+              failed.length + ' failure(s)' +
+              (deferred ? ', ' + deferred + ' folder(s) left for the next run (TIME_BUDGET)' : ''));
   for (const f of failed) console.log(f);
   if (failed.length) throw new Error(failed.length + ' move(s) failed: ' + failed[0]);
+}
+
+/**
+ * The plan entry's files (ids), each into the folder `into` by one Drive.Files.update, until
+ * `late()`: {moved, failed, deferred}; a failure is pushed to `failed` as `<code> <region>
+ * "<folder name>": <error>` (never a file's name) and the next file is still tried.
+ */
+function moveFiles_(entry, into, code, late, failed) {
+  const r = { moved: 0, failed: 0, deferred: false };
+  for (const fileId of entry.files) {
+    if (late()) { r.deferred = true; break; }
+    try {
+      Drive.Files.update({}, fileId, null, { addParents: into, removeParents: entry.id, supportsAllDrives: true });
+      r.moved++;
+    } catch (e) {
+      failed.push(code + ' ' + entry.region + ' "' + entry.name + '": ' + errorText_(e));
+      r.failed++;
+    }
+  }
+  return r;
 }
 
 function errorText_(e) {

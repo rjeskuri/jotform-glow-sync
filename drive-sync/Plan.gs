@@ -12,7 +12,10 @@
  *                the Shared Drive's region folders; their subfolders need only be the ones whose
  *                name a source subfolder has (Mover.gs looks those up by name)
  *
- * moves    [{region, id, name, to}]                 the whole subfolder into the region folder
+ * moves    [{region, id, name, to, files}]  the name is not yet in the region folder (to): Mover.gs
+ *          makes a folder of that name there and moves `files` (ALL the subfolder's file ids)
+ *          into it, since Drive cannot move a My Drive folder into a Shared Drive (#132); the
+ *          emptied subfolder stays in My Drive
  * merges   [{region, id, name, into, files, kept}]  the name is already there once: `files` (ids)
  *          move into that folder, `kept` (ids) stay because a file of the same name and size is
  *          already there; nothing on the Shared Drive is ever replaced
@@ -63,7 +66,7 @@ function planMoves_(sourceFolders, targetFolders, now, settleMinutes) {
           continue;
         }
         acted[sub.name] = true;
-        plan.moves.push({ region: region, id: sub.id, name: sub.name, to: target.id });
+        plan.moves.push({ region: region, id: sub.id, name: sub.name, to: target.id, files: sub.files.map(f => f.id) });
         continue;
       }
       const isDuplicate = f => there[0].files.some(t => t.name === f.name && t.size === f.size);
