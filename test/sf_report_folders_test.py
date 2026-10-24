@@ -1020,6 +1020,112 @@ class Undo(Harness):
         self.assertEqual(o.state()[0], original)
 
 
+class PublicReportsOrg(ReportOrg):
+    """ReportOrg as the real org has "Public Reports": no Folder record; a report there has the
+    organization's id (an `00D…` id) as its OwnerId and "Public Reports" as its FolderName. A second
+    report stays there (in the org, the keep list's item 17 did)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.org_id = fresh_id("00D")
+        public = self.fid["r_public"]
+        self.folders = [f for f in self.folders if f["Id"] != public]
+        for r in self.reports:
+            if r["OwnerId"] == public:
+                r["OwnerId"] = self.org_id
+        self.fid["r_public"] = self.org_id
+        rid = fresh_id("00O")
+        self.rid["public_kept"] = rid
+        self.reports.append({"Id": rid, "DeveloperName": "Public_partner_count", "Name": "Public partner count",
+                             "OwnerId": self.org_id, "LastRunDate": None, "Description": ""})
+
+    def folder_name(self, fid):
+        return "Public Reports" if fid == self.org_id else super().folder_name(fid)
+
+
+class UndoFromPublicReports(Harness):
+    """Ticket #72, live 2026-10-24: two reports moved out of "Public Reports", whose ledger rows'
+    from_folder_id is the organization's id (no Folder has it), and two reports have a repeated
+    Decommissioned-to-Decommissioned row, a no-op: the full `--apply` run's first PATCH moved its plan's
+    first row, already moved by `--limit 1`, again. The undo's dry run must
+    list every row and name "Public Reports" as the destination of the org-id ones, not refuse; the
+    undo puts each report back, last first, a Public Reports one with folderId the org id."""
+
+    def fresh(self, **kw):
+        super().fresh(**kw)
+        self.org = PublicReportsOrg(**kw)
+        return self.org
+
+    def retired_ledger(self, public_from=None):
+        """The org after the retirement and its ledger: meet moved DHIS2 Reports -> Decommissioned, the
+        public report moved Public Reports (the org id, or `public_from`) -> Decommissioned, then meet's
+        repeated row Decommissioned -> Decommissioned. (original state, [meet, public])."""
+        o = self.org
+        original = o.state()[0]
+        meet, pub = o.rid["meet"], o.rid["public"]
+        o.report(meet).update(OwnerId=o.fid["r_decom"])
+        o.report(pub).update(OwnerId=o.fid["r_decom"])
+        common = {"action": "move", "kind": "report", "new_label": "", "status": "ok", "http": "200"}
+        self.write_ledger([
+            dict(common, id=meet, from_folder_id=o.fid["r_dhis2"], to_folder_id=o.fid["r_decom"],
+                 old_label=original[meet][1]),
+            dict(common, id=pub, from_folder_id=public_from or o.org_id, to_folder_id=o.fid["r_decom"],
+                 old_label=original[pub][1]),
+            dict(common, id=meet, from_folder_id=o.fid["r_decom"], to_folder_id=o.fid["r_decom"],
+                 old_label=original[meet][1]),
+        ])
+        return original, [meet, pub]
+
+    def test_undo_dry_run_lists_every_row_and_names_public_reports(self):
+        o = self.org
+        _, (meet, pub) = self.retired_ledger()
+        state, on_disk = o.state(), read(self.ledger_path)
+        sent = len(o.calls)
+        said = self.ok("undo", "--ledger", self.ledger_path, "--vpn-off")
+        self.assertEqual(self.writes_since(sent), [], "a dry run sends no write")
+        self.assertEqual(o.state(), state)
+        self.assertEqual(read(self.ledger_path), on_disk, "a dry run writes no ledger row")
+        rows = [line for line in said.splitlines() if meet in line or pub in line]
+        self.assertEqual([pub if pub in line else meet for line in rows], [meet, pub, meet],
+                         f"one line per ledger move, newest first (the no-op row included):\n{said}")
+        self.assertIn("Public Reports", rows[1], f"the org-id row goes back to \"Public Reports\":\n{said}")
+        self.assertIn("DHIS2 Reports", rows[2], f"the first row goes back to \"DHIS2 Reports\":\n{said}")
+        self.assertNotIn("DHIS2 Reports", rows[0], f"the repeated row goes back to Decommissioned only:\n{said}")
+        self.assertNotIn("Public Reports", rows[0] + rows[2], said)
+
+        # a folder id that is neither a Folder nor the org's id is still refused, with nothing written
+        self.fresh()
+        self.retired_ledger(public_from=fresh_id("00l"))
+        state = self.org.state()
+        said = self.refused("undo", "--ledger", self.ledger_path, "--vpn-off")
+        self.assertEqual(self.org.writes(), [], said)
+        self.assertEqual(self.org.state(), state)
+
+    def test_undo_apply_puts_a_public_report_back_with_the_org_id(self):
+        o = self.org
+        original, (meet, pub) = self.retired_ledger()
+        rows_before = len(self.ledger())
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        patches = self.writes_since(sent)
+        self.assertTrue(all(p[0] == "PATCH" for p in patches), patches)
+        self.assertEqual([p[1] for p in patches], [f"{API_ROOT}analytics/reports/{rid}" for rid in (meet, pub, meet)],
+                         "last first, every row")
+        self.assertEqual([p[2]["reportMetadata"]["folderId"] for p in patches],
+                         [o.fid["r_decom"], o.org_id, o.fid["r_dhis2"]])
+        now = o.state()[0]
+        self.assertEqual(now[meet], original[meet], "meet is back in DHIS2 Reports as it was")
+        self.assertEqual(now[pub], (o.org_id, original[pub][1]), "the public report is back in Public Reports")
+        self.assertEqual(now[o.rid["public_kept"]], original[o.rid["public_kept"]], "the kept one is untouched")
+        added = self.ledger()[rows_before:]
+        self.assertEqual([(x["action"], x["id"], x["to_folder_id"], x["status"]) for x in added],
+                         [("undo", meet, o.fid["r_decom"], "ok"), ("undo", pub, o.org_id, "ok"),
+                          ("undo", meet, o.fid["r_dhis2"], "ok")])
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual(self.writes_since(sent), [], "every move was undone already")
+
+
 class LedgerDurability(Harness):
     """A write's ledger row is on disk (status "sending", as tools/sf_backfill.py's) BEFORE its
     request goes out, and finished (ok or failed, in place: the finished ledger keeps one row per
