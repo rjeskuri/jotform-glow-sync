@@ -68,9 +68,12 @@ report move by the tool, one PATCH per report, each read back by SOQL, one ledge
    (each one's Move action), because the API refuses a dashboard move. They are listed with
    their old folders in `data/sf_retire_2026-10-23/dashboards_by_hand.csv`; the ledger holds
    reports only.
-7. `plan_2_after_dashboards.csv`, 2026-10-23 (07:30-07:41 UTC), once the 10 dashboards were in
-   Decommissioned. Its
-   dry run:
+7. `plan_2_after_dashboards.csv`, 2026-10-23 (07:30-07:41 UTC), once the dashboards that used
+   its reports were in Decommissioned: its 17 reports are used only by the 4 retiring dashboards
+   `01ZRP000005STH92AO`, `01ZRP000005STH72AO`, `01ZRP000005STH82AO` and `01ZRP000006jMYn2AM`,
+   and the tool refuses a report only while a dashboard outside Decommissioned uses it. Ryan
+   moved the rest of the 10 by hand afterwards, the last ("Approval Status Monthly Reports",
+   `01ZRP000007ivUn2AI`) by 2026-10-24 07:09 UTC (step 8). Its dry run:
    `python3 tools/sf_report_folders.py move --vpn-off --plan data/sf_retire_2026-10-23/plan_2_after_dashboards.csv --dir data/sf_retire_2026-10-23`.
    On Ryan's go, `python3 tools/sf_report_folders.py move --vpn-off --plan data/sf_retire_2026-10-23/plan_2_after_dashboards.csv --dir data/sf_retire_2026-10-23 --apply --limit 1`,
    read back, then the whole plan with `--apply`: 17 reports moved, and again a no-op row for
