@@ -230,7 +230,7 @@ fields when they are deleted. Revert this ticket's RUNBOOK section with it;
   `CreateSalesforcePages`, `DeploySalesforcePages` and `ViewSalesforcePages` enabled (+32/-0
   lines), which were not in the build. The build's partial profile carries only the four
   fieldPermissions, which cannot enable a userPermission, and both retrieves ran from the same
-  project at the same API version, so the deploy did not set them; most likely Salesforce wrote the
+  project at the same API version, so the build's payload could not have set them; most likely Salesforce wrote the
   System Administrator profile's default permissions when the profile was saved (inferred, not
   confirmed). They are admin-only and
   left as they are; nothing else in the three components changed. The check: `checked 1123 batches; differ: Submitted_At__c 0,
