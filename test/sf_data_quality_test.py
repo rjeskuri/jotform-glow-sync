@@ -1566,8 +1566,9 @@ class RecordFlagBatchDocs(unittest.TestCase):
     batch `RecordFlagBatch` and its script writer `tools/sf_record_flags.py`. The RUNBOOK section records the
     run - its date and time (`HH:MM UTC`), each object's run with its own 18-character AsyncApexJob id (`707…`,
     Salesforce's case-safe suffix checked), a count for each flag on each object equal to the plan's `## Result`
-    (which carries, per object and flag, the dry run's count, the run's count and the read-back's count in
-    three clauses that agree; the plan then `status: done`), the rollback by `clear` mode on the
+    (which carries, per object and flag, the dry run's count and the run's count, which agree, step 4's count
+    of the flags set by hand outside the criteria (0 included), and the read-back's count, which is exactly
+    the dry run's plus that hand-set count: a `flag` run never unsets a flag; the plan then `status: done`), the rollback by `clear` mode on the
     `- **Rollback:**` line (anywhere on it, after #84's rollback of the rules) and how to run it again - and a
     plan `docs/plans/<date>-sf-record-flag-batch.md` carries the Rollout in order, each step with its command
     line: the check-only (naming the test class), the deploy (by the check-only's id or with the test class),
@@ -1625,12 +1626,17 @@ class RecordFlagBatchDocs(unittest.TestCase):
     # a flag set by hand (administrators alone can: RUNBOOK "Duplicate and obsolete records in Salesforce", its
     # bullet on who sets a flag by hand)
     HAND = r"(?i)\bby hand\b|\bhand-set\b|\bmanual\w*|\badministrators?\b"
+    # the Result's clause giving step 4's count of the flags set by hand on records outside the criteria (a
+    # `flag` run never unsets them, so the read-back counts them on top of the dry run's): `set by hand` or
+    # `hand-set`, and `outside the criteria`, in the clause
+    HAND_SET = r"(?i)\bby hand\b|\bhand-set\b"
+    OUTSIDE = r"(?i)\boutside\b[^.;]{0,30}?\bcriteria\b"
     GO = r"Ryan['’]s (go|answer|yes)\b"
     FLAG_MODE = r"(?<![\w'])'flag'|(?i:\bflag mode\b|--mode flag\b|\bmode\b[^.;]{0,20}?\bflag\b|\bin flag\b)"
     ORG = r"(?:^|\s)(?:-o|--target-org)\s+glow\b"
-    # what a count is not: a date, a ticket, a time, a span of months or days, a batch size, a percentage,
-    # a version, a Salesforce id (15 or 18 characters with a digit in them)
-    NOT_COUNTS = re.compile(r"\d{4}-\d\d-\d\d|#\d+|\b\d\d:\d\d\b|\b\d+\s*(?:months?|days?|years?|weeks?)\b|"
+    # what a count is not: a date, a ticket, a step number, a time, a span of months or days, a batch size, a
+    # percentage, a version, a Salesforce id (15 or 18 characters with a digit in them)
+    NOT_COUNTS = re.compile(r"\d{4}-\d\d-\d\d|#\d+|\bsteps?\s+\d+\b|\b\d\d:\d\d\b|\b\d+\s*(?:months?|days?|years?|weeks?)\b|"
                             r"\b(?:scope|batch(?:es)? of|per batch)\s*\d+|\b\d+\s*%|\bv?\d+\.\d+\b|\b\d+/\d+\b|"
                             r"(?<![A-Za-z0-9])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?(?![A-Za-z0-9])")
     # --- the fix round after the review of PR #133 (Ryan, 2026-10-24, option a; findings 1, 4 and 5) ---------
@@ -1771,8 +1777,12 @@ class RecordFlagBatchDocs(unittest.TestCase):
         return "Account" if account and not contact else "Contact" if contact and not account else None
 
     def kind(self, s):
-        """What clause `s` records: the dry run (`dry run`, `dryRun`), the read-back (`read-back`, `SOQL`,
-        `COUNT()`), or the run (`ran`, `run`, `flag` mode, or a job id)."""
+        """What clause `s` records: step 4's count of the flags set by hand outside the criteria (`set by hand`
+        or `hand-set` with `outside the criteria`; first, so its `COUNT()` or `run` is not read as another
+        kind's), the dry run (`dry run`, `dryRun`), the read-back (`read-back`, `SOQL`, `COUNT()`), or the run
+        (`ran`, `run`, `flag` mode, or a job id)."""
+        if re.search(self.HAND_SET, s) and re.search(self.OUTSIDE, s):
+            return "hand-set"
         if re.search(self.DRY, s):
             return "dry run"
         if re.search(self.READ_BACK, s):
@@ -1818,8 +1828,10 @@ class RecordFlagBatchDocs(unittest.TestCase):
         request having seen the run. What this test pins: the section says the batch ran, on what day and at
         what time (`HH:MM UTC` beside the date), each object's run with its own 18-character AsyncApexJob id
         (`707…`, Salesforce's case-safe suffix checked) in a sentence with the date and the time, and a count
-        for each flag on each object equal to the plan's `## Result` - which carries per object and flag the
-        dry run's count, the run's count and the read-back's count in three clauses that agree, and the same
+        for each flag on each object equal to the plan's `## Result` read-back's - which carries per object and
+        flag the dry run's count and the run's count, which agree, step 4's count of the flags set by hand
+        outside the criteria (a clause of its own, 0 included), and the read-back's count, exactly the dry
+        run's plus that hand-set count (a `flag` run never unsets a flag: Ryan, 2026-10-24), and the same
         job ids (the plan `status: done`, with its `done:` date); that the rollback is a run in `clear` mode
         (on the `- **Rollback:**` header line, anywhere on it: #84's rollback of the rules comes first); and
         how to run it again (the script writer and `sf apex run`)."""
@@ -1886,35 +1898,53 @@ class RecordFlagBatchDocs(unittest.TestCase):
         agreed = {}
         for obj_name in ("Account", "Contact"):
             for flag_name in ("duplicate", "obsolete"):
-                found = {k: set() for k in ("dry run", "run", "read-back")}
+                found = {k: set() for k in ("dry run", "run", "hand-set", "read-back")}
                 for s in result:
                     if self.one_object(s) == obj_name and self.kind(s) in found:
                         found[self.kind(s)] |= self.flag_counts(s, flag_name)
+                said = ", ".join(f"{k} {sorted(v)}" for k, v in found.items())
                 for k, counts in found.items():
                     self.assertTrue(counts, f"{name}: `## Result` gives no {k} count of {obj_name}s flagged {flag_name}: "
                                             f"a clause of the {k} (" + {"dry run": "`dry run`", "run": "`ran`, `run` or the job id, "
                                                                         "not naming the dry run or the read-back",
+                                                                        "hand-set": "step 4's count of the flags set by hand "
+                                                                        "on records outside the criteria, 0 included: "
+                                                                        "`set by hand` or `hand-set` with `outside the "
+                                                                        "criteria`, in a clause of its own, e.g. `Account set "
+                                                                        "by hand outside the criteria (step 4): duplicate 0, "
+                                                                        "obsolete 2`",
                                                                         "read-back": "`read-back` or `SOQL`, not naming "
-                                                                        "the dry run"}[k] + f") with {self.HOW}")
-                counts = found["dry run"] | found["run"] | found["read-back"]
-                self.assertEqual(len(counts), 1, f"{name}: `## Result`: the dry run's, the run's and the read-back's "
-                                                 f"count of {obj_name}s flagged {flag_name} are "
-                                                 f"{', '.join(f'{k} {sorted(v)}' for k, v in found.items())}: the three "
-                                                 "agree, and each clause gives one number per flag")
-                agreed[obj_name, flag_name] = counts
-        # the section's counts: every count in its run record equals the plan's
+                                                                        "the dry run or the flags set by hand outside the "
+                                                                        "criteria"}[k] + f") with {self.HOW}")
+                ran = found["dry run"] | found["run"]
+                self.assertEqual(len(ran), 1, f"{name}: `## Result`: the dry run's and the run's count of {obj_name}s "
+                                              f"flagged {flag_name} are {said}: the two agree, and each clause gives "
+                                              "one number per flag")
+                self.assertEqual(len(found["hand-set"]), 1,
+                                 f"{name}: `## Result`: step 4's count of {obj_name}s flagged {flag_name} set by hand "
+                                 f"outside the criteria is {sorted(found['hand-set'])}: one number per flag, 0 included")
+                expected = next(iter(ran)) + next(iter(found["hand-set"]))
+                self.assertEqual(found["read-back"], {expected},
+                                 f"{name}: `## Result`: the read-back's count of {obj_name}s flagged {flag_name} "
+                                 f"({sorted(found['read-back'])}) is exactly the dry run's ({sorted(ran)}) plus the "
+                                 f"flags step 4 counted set by hand outside the criteria ({sorted(found['hand-set'])}) "
+                                 f"= {expected}: a `flag` run never unsets a flag (Ryan, 2026-10-24) [{said}]")
+                agreed[obj_name, flag_name] = found["read-back"]
+        # the section's counts: every count in its run record (a clause of the flags set by hand outside the
+        # criteria aside) equals the plan's read-back's
         for obj_name in ("Account", "Contact"):
             record = self.run_record(clauses_, obj_name)
             for flag_name in ("duplicate", "obsolete"):
                 here = set()
                 for s in record:
-                    here |= self.flag_counts(s, flag_name)
-                self.assertTrue(here, f"{where}: give the run's count of {obj_name}s flagged {flag_name}: {self.HOW}, "
-                                      f"carrying the run's job id or dated {self.FIRST_RUN_DAY} or later")
+                    if self.kind(s) != "hand-set":
+                        here |= self.flag_counts(s, flag_name)
+                self.assertTrue(here, f"{where}: give the run's count of {obj_name}s flagged {flag_name} (the read-back's): "
+                                      f"{self.HOW}, carrying the run's job id or dated {self.FIRST_RUN_DAY} or later")
                 self.assertEqual(here, agreed[obj_name, flag_name],
                                  f"{where}: the count of {obj_name}s flagged {flag_name} ({sorted(here)}) is not the "
-                                 f"plan's Result's ({sorted(agreed[obj_name, flag_name])}): the two agree, each from "
-                                 "the read-back")
+                                 f"plan's Result's read-back ({sorted(agreed[obj_name, flag_name])}): the two agree, each "
+                                 "from the read-back (the dry run's plus the flags set by hand outside the criteria)")
         rollback_line = self.header_line(part, "Rollback")
         self.assertRegex(rollback_line, self.CLEAR, f"{where}: the `- **Rollback:**` header line names `clear` mode "
                                                     "(anywhere on the line: #84's rollback of the rules comes first)")

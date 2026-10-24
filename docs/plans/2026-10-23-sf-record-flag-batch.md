@@ -29,7 +29,7 @@ check-only validate, the deploy, the dry run and the run each still wait for Rya
   `tools/sf_dupes.py` stays the merge path (RUNBOOK "Duplicate girls in Salesforce"). How the
   reports treat flagged records is #84's answer (shown, with the flags as a filter).
 - The class `RecordFlagBatch` (`Database.Batchable<SObject>`, `Database.Stateful`) and its test
-  class `RecordFlagBatchTest` (nine methods, fictional records) live in
+  class `RecordFlagBatchTest` (eleven methods, fictional records) live in
   `data/sf_record_flags_2026-10-23/build/force-app/main/default/classes/` (an SFDX project,
   `sfdx-project.json` at `build/`; never in git). Constructors `RecordFlagBatch(sobjectType, mode)`
   and `RecordFlagBatch(sobjectType, mode, deactivatedClubIds, partnerReportPartnerIds)`;
@@ -226,8 +226,8 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
 9. The read-back: the SOQL count of each flag on each object equals the dry run's count (step 5),
    which the run's finish line repeats (steps 7 and 8), plus the flags step 4 counted on records
    outside the criteria: a `flag` run never unsets a flag set by hand, so those stay through the
-   run, and the read-back equals the dry run's count alone only while step 4 counted 0 (as it did
-   on 2026-10-24). The flagged ids are saved, ids only:
+   run, and the read-back equals the dry run's count alone only while step 4 counts 0 outside
+   the criteria. The flagged ids are saved, ids only:
 
    ```sql
    SELECT COUNT() FROM Account WHERE Duplicate_Record__c = true
@@ -239,14 +239,16 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
    ```
 
    The ids go to `data/sf_record_flags_2026-10-23/flagged.csv` (object, id, which flag; never a
-   name). A count that differs from the dry run's plus step 4's is looked at by id before anything
-   else. A `failed` above 0 in a finish line is a locked row (`UNABLE_TO_LOCK_ROW`, codes only):
+   name). A count that differs from the dry run's plus step 4's count outside the criteria is
+   looked at by id before anything else. A `failed` above 0 in a finish line is a locked row (`UNABLE_TO_LOCK_ROW`, codes only):
    the same `flag` run again writes only what is still missing, since a record whose flag is in
    place is not written. Then: `python3 tools/auto_sync.py` as a dry run still `in-sync` for every
    region, and no `Attendance_Batch__c` created since the run is `Failed` with
    `DUPLICATES_DETECTED` (the flags are not in the processor's path, so none is expected).
-10. Docs: this plan's Result (per object and flag the dry run's count, the run's count and the
-    read-back's count, each run's AsyncApexJob id with its date and time in UTC; then
+10. Docs: this plan's Result (per object and flag the dry run's count and the run's count, which
+    agree, step 4's count of the flags set by hand outside the criteria, 0 included, and the
+    read-back's count, exactly the dry run's plus that hand-set count; each run's AsyncApexJob id
+    with its date and time in UTC; then
     `status: done` with `done:`), the RUNBOOK section's run record and Status line, `make
     docs-index`; a DECISIONS bullet if a choice was made along the way.
 
@@ -337,8 +339,8 @@ Nothing has run yet (2026-10-24): the class and its tests are written and desk-c
 compiled; the check-only validate, the deploy, the dry run and the run each still wait for Ryan's
 go. When they have happened, this section carries, in order and with counts and ids only: the
 check-only's id and result; the deploy id and time (UTC); the guard's three counts; the hand-set
-flags' counts; per object and flag the dry run's count, the run's count and the read-back's count
-in three clauses that agree (the read-back's is the dry run's plus step 4's hand-set flags outside
-the criteria, which a `flag` run never unsets: the three agree while step 4 counts none, as on
-2026-10-24); each run's AsyncApexJob id with its date and time (UTC); and the plan goes
-`status: done` with its `done:` date.
+flags' counts; per object and flag the dry run's count and the run's count, which agree, a clause
+per object of step 4's count of each flag set by hand outside the criteria (0 included), and the
+read-back's count, exactly the dry run's plus that hand-set count (a `flag` run never unsets a
+flag); each run's AsyncApexJob id with its date and time (UTC); and the plan goes `status: done`
+with its `done:` date.
