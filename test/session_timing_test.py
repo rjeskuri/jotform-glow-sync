@@ -11,6 +11,14 @@ as a float) and the formula values Salesforce would compute, written out by hand
 Ticket #101 deploys the four fields; its repo side is documentation, checked by SubmissionTimingDocs:
 the RUNBOOK section "Submission timing in Salesforce" and the plan in docs/plans/ that carries the
 live change (found by its ticket reference, never by a date).
+
+Live finding (2026-10-24, after the first deploy): Salesforce's DATEVALUE(<date/time>) converts in the
+org's time zone (America/Los_Angeles), not UTC, so `DATEVALUE(Submitted_At__c)` gave a delay one day
+short for every submission between 00:00 and about 07:00 UTC (153 of 1,123 batches). Ryan kept the UTC
+day (DECISIONS 2026-10-23) and the delay formula takes it through `DATEVALUE(TEXT(Submitted_At__c))`:
+TEXT() of a date/time is the UTC timestamp 'YYYY-MM-DD HH:MM:SSZ', and DATEVALUE of that text is its
+UTC date. FORMULAS below is the deployed text; Definitions.test_delay_formula_takes_the_utc_date_through_text
+records why.
 """
 import contextlib
 import copy
@@ -35,7 +43,7 @@ FIELDS = ["Submitted_At__c", "Submission_Delay_Days__c", "Session_Month__c", "Se
 SELECTED = {"Id", "Name", "Creator__c", "CreatedDate", "Attendance_Date__c", *FIELDS}
 FORMULAS = {
     "Submitted_At__c": 'IF(Creator__c = "Jotform", CreatedDate, NULL)',
-    "Submission_Delay_Days__c": "IF(ISBLANK(Submitted_At__c), NULL, DATEVALUE(Submitted_At__c) - Attendance_Date__c)",
+    "Submission_Delay_Days__c": "IF(ISBLANK(Submitted_At__c), NULL, DATEVALUE(TEXT(Submitted_At__c)) - Attendance_Date__c)",
     "Session_Month__c": 'TEXT(YEAR(Attendance_Date__c)) & "-" & LPAD(TEXT(MONTH(Attendance_Date__c)), 2, "0")',
     "Session_Week__c": 'Session_Month__c & " week " & TEXT(CEILING(DAY(Attendance_Date__c) / 7))',
 }
@@ -444,6 +452,23 @@ class Definitions(unittest.TestCase):
         st = timing()
         self.assertEqual(st.SF_FORMULAS, FORMULAS)
 
+    def test_delay_formula_takes_the_utc_date_through_text(self):
+        """Why the delay formula is `DATEVALUE(TEXT(Submitted_At__c))` and never `DATEVALUE(Submitted_At__c)`:
+        Salesforce's DATEVALUE on a date/time converts in the org's zone (America/Los_Angeles), so a form
+        submitted 2026-10-02T04:52Z for a session on 2026-09-17 came out as 14 days (its Los Angeles day is
+        10-01), one short of the UTC rule's 15 (live, 2026-10-24: 153 of 1,123 batches). TEXT() of a date/time
+        is the UTC timestamp 'YYYY-MM-DD HH:MM:SSZ' and DATEVALUE of that text is its UTC date, which is what
+        glow/session_timing.py counts and what the check expects."""
+        st = timing()
+        self.assertEqual(st.delay_days(datetime(2026, 10, 2, 4, 52, tzinfo=UTC), date(2026, 9, 17)), 15)
+        delay = st.SF_FORMULAS["Submission_Delay_Days__c"]
+        self.assertIn("DATEVALUE(TEXT(Submitted_At__c))", delay)
+        for name, formula in st.SF_FORMULAS.items():
+            with self.subTest(field=name):
+                self.assertNotRegex(formula, r"DATEVALUE\(\s*(?:Submitted_At__c|CreatedDate)\s*\)",
+                                    f"{name}: DATEVALUE on a date/time field uses the org's zone, not UTC; "
+                                    "take the UTC date with DATEVALUE(TEXT(<date/time>))")
+
     def test_no_late_threshold_or_flag(self):
         """Ryan 2026-10-22: no "big delay" threshold and no flag; staff read the delay themselves."""
         st = timing()
@@ -744,6 +769,22 @@ class SubmissionTimingDocs(unittest.TestCase):
             self.rollout_is_retrieve_proof_check_only_go_deploy_read_back_check(name, parts["## Rollout"])
             self.rollback_deletes_the_fields_after_the_reports(name, bodies["## Rollback"])
             self.risks_name_a_real_risk(name, bodies["## Risks"])
+
+    def test_the_plan_quotes_the_four_formulas_verbatim(self):
+        """The plan's Build table is what goes into `build/` and is read back from Salesforce: each of the
+        four formula texts stands in the plan exactly as FORMULAS has it (the delay one through
+        `DATEVALUE(TEXT(...))`, the 2026-10-24 finding), and no plan still carries the first deploy's
+        `DATEVALUE(Submitted_At__c)` as a formula to build."""
+        plans = self.plans_naming(101)
+        self.assertTrue(plans, "docs/plans/: no plan names ticket #101 in its head")
+        for path in plans:
+            name, text = os.path.relpath(path, REPO), read(path)
+            for field, formula in FORMULAS.items():
+                with self.subTest(plan=name, field=field):
+                    self.assertTrue(formula in text, f"{name}: quote `{field}`'s formula verbatim: {formula}")
+            self.assertFalse("`IF(ISBLANK(Submitted_At__c), NULL, DATEVALUE(Submitted_At__c) - Attendance_Date__c)`" in text,
+                             f"{name}: the first deploy's formula (DATEVALUE on the date/time: the org's zone, a day "
+                             "short before ~07:00 UTC) is still quoted as a formula to build")
 
     def rollout_is_retrieve_proof_check_only_go_deploy_read_back_check(self, name, part):
         """The steps in this order over the Rollout's list items (an intro or a trailing line is not a

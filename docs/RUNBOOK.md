@@ -3391,9 +3391,11 @@ sharing stays as it is"):
 
 - **When:** a report or dashboard on when clubs submit (tasks #102 and #103); the monthly
   Salesforce checks; a question about a batch's session week or its delay.
-- **Status:** the four formula fields are deployed on Ryan's go per the
-  [plan](plans/2026-10-23-submission-timing.md) (its `status:` and Result say whether that has
-  happened yet; the read-only proofs are done, 2026-10-23).
+- **Status:** the four formula fields are live since 2026-10-24 (deploy `0AfRP000002i4Er0AI`,
+  06:41 UTC, Ryan's go). The first delay formula was a day short for submissions before about
+  07:00 UTC (the check: 153 of 1,123 batches), so `Submission_Delay_Days__c` is redeployed alone
+  with the corrected text on Ryan's go; the [plan](plans/2026-10-23-submission-timing.md)'s
+  `status:` and Result say where that stands.
 - **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
   is read-only.
 - **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
@@ -3428,9 +3430,15 @@ It is the calendar week of the session date, not the curriculum "Session N" in `
 and not Salesforce's Sunday-start report weeks (DECISIONS 2026-10-23).
 
 **The time zone:** the submission day, the day the delay counts to, is the UTC day of
-`CreatedDate` (what a formula's `DATEVALUE` gives). That is the clock's day in UTC rather than
-the mentor's local day: a late-evening submission in the Americas counts as the next day and an
-early-morning one in Asia as the same day, so a delay of 1 can be a form sent the same evening.
+`CreatedDate`, which the formula takes as `DATEVALUE(TEXT(Submitted_At__c))`: `TEXT()` of a
+date/time is the UTC timestamp `YYYY-MM-DD HH:MM:SSZ` and `DATEVALUE` of that text is its UTC
+date. `DATEVALUE` on the date/time itself converts in the org's zone (America/Los_Angeles): the
+first deploy's formula did, and the check found it a day short for every submission between
+00:00 and about 07:00 UTC (2026-10-24, 153 of 1,123 batches), so the field is redeployed with
+the `TEXT()` form (DECISIONS 2026-10-24; the plan's Result says when). That is the clock's day
+in UTC rather than the mentor's local day: a late-evening submission in the Americas counts as
+the next day and an early-morning one in Asia as the same day, so a delay of 1 can be a form sent
+the same evening.
 
 **Which batches have one:** only a batch whose `Creator__c` is exactly `Jotform` has a
 submission time, because the native Jotform Salesforce V2 integration creates the batch the

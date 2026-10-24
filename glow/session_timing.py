@@ -4,7 +4,10 @@ docs/DECISIONS.md, 2026-10-23). Ryan's answers of 2026-10-22:
 - the session week is the week of the month by day: 1-7 week 1, 8-14 week 2, 15-21 week 3, 22-28 week 4,
   29-31 week 5, shown as `2026-10 week 2` (the calendar week of the session date, not the curriculum
   "Session N" in `Module_Week__c`);
-- the day a batch was submitted is its UTC day (what a Salesforce formula's DATEVALUE gives);
+- the day a batch was submitted is its UTC day; a Salesforce formula takes it as DATEVALUE(TEXT(<date/time>)),
+  because TEXT() of a date/time is the UTC timestamp and DATEVALUE on the date/time itself converts in the
+  org's zone (America/Los_Angeles): the first deploy's DATEVALUE(Submitted_At__c) was a day short for every
+  submission between 00:00 and about 07:00 UTC, 153 of 1,123 batches (2026-10-24; DECISIONS 2026-10-24);
 - there is no "big delay" threshold and no flag: the delay in days is shown and staff read it.
 
 Only a live Jotform batch (`Creator__c` exactly `Jotform`) has a submission time: the native Jotform
@@ -22,8 +25,8 @@ JOTFORM_CREATOR = "Jotform"
 SF_FORMULAS = {
     # Date/Time
     "Submitted_At__c": 'IF(Creator__c = "Jotform", CreatedDate, NULL)',
-    # Number, 0 decimals
-    "Submission_Delay_Days__c": "IF(ISBLANK(Submitted_At__c), NULL, DATEVALUE(Submitted_At__c) - Attendance_Date__c)",
+    # Number, 0 decimals; DATEVALUE(TEXT(...)) is the UTC date (DATEVALUE on the date/time: the org's zone)
+    "Submission_Delay_Days__c": "IF(ISBLANK(Submitted_At__c), NULL, DATEVALUE(TEXT(Submitted_At__c)) - Attendance_Date__c)",
     # Text
     "Session_Month__c": 'TEXT(YEAR(Attendance_Date__c)) & "-" & LPAD(TEXT(MONTH(Attendance_Date__c)), 2, "0")',
     # Text
