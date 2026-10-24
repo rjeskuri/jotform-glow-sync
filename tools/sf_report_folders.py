@@ -18,6 +18,7 @@ must be exactly one folder of the kind; a blank new_label keeps the label. A rep
 relabelled) by PATCH and keeps its Id. A dashboard row is refused: Salesforce refuses every
 dashboard PATCH, so a dashboard is moved or renamed by hand in Lightning.
 undo: puts each move of the ledger back to its from_folder_id and old_label, last first; copies stay.
+A from_folder_id that is the organization's id (00D...) is "Public Reports", which has no Folder.
 
 Every subcommand needs --vpn-off; copy, move and undo are dry runs unless --apply (Ryan's go).
 Refused before any write: the folders named "Attendance" (this repo's own dashboard) as a source or
@@ -51,6 +52,7 @@ LIST_COLS = ["kind", "id", "developer_name", "label", "folder", "last_run", "use
 PLAN_COLS = ["kind", "id", "to_folder", "new_label"]
 FOLDER_TYPE = {"report": "Report", "dashboard": "Dashboard"}
 DECOM, PROTECTED, NAME_LIMIT = "Decommissioned", "Attendance", 40
+PUBLIC, ORG_ID_PREFIX = "Public Reports", "00D"     # "Public Reports" has no Folder: its id is the org's
 ID18 = re.compile(r"[A-Za-z0-9]{18}")
 BY_HAND = ("Salesforce refuses every dashboard PATCH (#69 API proof): move or rename a dashboard by hand "
            "in Lightning (RUNBOOK \"Copying and moving reports and dashboards\")")
@@ -78,10 +80,15 @@ def one_folder(org, name, kind):
 
 
 def folder_names(org, ids):
+    """{id: folder name}; an organization id (00D...) is "Public Reports", which has no Folder record (a
+    report there has the org's id as its OwnerId, #72)."""
     ids = sorted(set(ids))
-    if not ids:
-        return {}
-    return {f["Id"]: f["Name"] for f in plain(org.query(f"SELECT Id, Name FROM Folder WHERE Id IN {in_list(ids)}"))}
+    names = {i: PUBLIC for i in ids if i.startswith(ORG_ID_PREFIX)}
+    rest = [i for i in ids if i not in names]
+    if rest:
+        names.update((f["Id"], f["Name"]) for f in
+                     plain(org.query(f"SELECT Id, Name FROM Folder WHERE Id IN {in_list(rest)}")))
+    return names
 
 
 def items(org, kind, where):

@@ -3582,7 +3582,7 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 ## Monthly Report dashboards in Salesforce
 
 - **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
-- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)).
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below).
 - **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
 - **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
 - **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
@@ -3664,6 +3664,36 @@ The archive rule:
   `JSON_PARSER_ERROR`), so Ryan does it by hand in Lightning: in the dashboard's Properties
   (Name, Description, Folder) he sets the name and the description `copy of <source id>,
   #<ticket>`, and moves it with its Move action; the Id stays the same, checked with SOQL.
+
+The retirement (#72, [plan and Result](plans/2026-10-23-sf-retire-reports.md#result)):
+- On 2026-10-23 and 2026-10-24, on Ryan's go, #72 moved 29 reports and 10 dashboards to
+  Decommissioned, each with its Id unchanged.
+- 27 of the 29 came from "DHIS2 Reports"; 2 reports moved from "Public Reports"
+  (`00ORP000006XSy92AG`, `00ORP000006V09x2AC`, Ryan's decision of 2026-10-23), because only
+  retiring dashboards used them.
+- 19 retiring reports stay in "DHIS2 Reports", held for #75-#79 because the 5 kept dashboards
+  use them; each moves when its dashboard is reworked.
+- The ledger `data/sf_retire_2026-10-23/ledger.csv` has 31 move rows for the 29 reports: two
+  reports have a second row, Decommissioned to Decommissioned, which changed nothing. Each is the
+  first PATCH of a plan's full `--apply` run, which moved that plan's first report again after
+  `--limit 1` had moved it; the undo, newest first, still ends with the report back in its old
+  folder. The ledger is owner only and never committed.
+- The 10 dashboards moved by hand in Lightning, so they are in no ledger;
+  `data/sf_retire_2026-10-23/dashboards_by_hand.csv` lists each with its old folder.
+- To bring a report back: the undo's dry run lists every move of the ledger, newest first, with
+  the folder each report goes back to:
+  `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_retire_2026-10-23`.
+  On Ryan's go, `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_retire_2026-10-23 --apply`
+  puts each back and reads it back (`--limit N` undoes the last N moves only).
+- The undo puts the two "Public Reports" reports back first (their rows are the newest) by a PATCH
+  with `folderId` the organization's id, not yet proven in the org. If Salesforce refuses it, the
+  run stops there: Ryan moves the two back by hand in Lightning, an undo row with status `ok` is
+  added to the ledger for each, and the undo then goes on with the other 27 reports
+  ([plan, Rollback](plans/2026-10-23-sf-retire-reports.md#rollback)).
+- To bring a dashboard back: Ryan moves it back by hand in Lightning (its Move action) to its old
+  folder, "DHIS2 Dashboards" or "Dhis2 Dashbords", and SOQL shows the same Id. One that the
+  FlexiPage `Monthly_Report_Dashboards` embedded gets its component back from
+  `data/sf_flexipage_2026-10-23/before/` by the ritual above (check-only, Ryan's go, deploy).
 
 ### The keep list
 
