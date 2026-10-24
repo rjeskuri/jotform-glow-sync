@@ -15,6 +15,7 @@ names the BACKLOG items a plan is about. Newest first.
 |---|---|---|---|---|
 | 2026-10-23 | Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them | done 2026-10-24 |  | [2026-10-23-submission-timing.md](2026-10-23-submission-timing.md) |
 | 2026-10-23 | Move the Monthly Report (DHIS2) reports and dashboards off the keep list to Decommissioned | done 2026-10-24 |  | [2026-10-23-sf-retire-reports.md](2026-10-23-sf-retire-reports.md) |
+| 2026-10-23 | The kept Monthly Report reports and dashboards into one report folder and one dashboard folder | done |  | [2026-10-23-sf-category-folders.md](2026-10-23-sf-category-folders.md) |
 | 2026-10-22 | Roster changes sent as problem reports point their sender to the Club Roster Form, and girls "not on the form" count as one | proposed |  | [2026-10-22-roster-change-reports-to-roster-form.md](2026-10-22-roster-change-reports-to-roster-form.md) |
 | 2026-10-22 | Attendance processor - a corrected re-submission adds its missing girls to the day's original batch | in-progress |  | [2026-10-22-correction-merge.md](2026-10-22-correction-merge.md) |
 | 2026-10-21 | Inventory of the Monthly Report (DHIS2) reports, dashboards and interactive dashboard; the two hidden Decommissioned folders; the copy-and-move API proof | done 2026-10-23 |  | [2026-10-21-sf-reporting-inventory.md](2026-10-21-sf-reporting-inventory.md) |
