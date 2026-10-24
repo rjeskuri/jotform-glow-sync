@@ -1370,8 +1370,14 @@ class TrainingDashboardDocs(unittest.TestCase):
     "Mentors" in the org; the org's "GLOW Club Training" label is on `D3`, the Observations dashboard); its id and the
     reports' ids come from `glow/sf_keep_list.csv`. Counts only in the docs: no figure from the org is pinned.
 
-    Round 2 (the test-breaker): a unit naming an item never carries another item's field; each filter names its field
-    (`Account__c`, `Period__c`) and no other date field is the month; each item's SOQL signal is a real query with
+    The dashboard's filters (Ryan, 2026-10-24, the ticket's comment, for all five dashboards #75-#79): NO Partner
+    filter and NO Month filter; the one dashboard filter is Partner Manager, on
+    `DHIS2__c$Account__c.Assigned_Partner_Manager__c` (the column D4 already filters on). This supersedes the
+    definition of done's "Partner filter and a Month filter": one partner's month is read from the reports' Partner
+    and Month grouping and checked by a one-partner query.
+
+    Round 2 (the test-breaker): a unit naming an item never carries another item's field; no other date field is
+    the month; each item's SOQL signal is a real query with
     its aggregate, the test-record rule and a period on `Period__c`; a rollback never deploys a `build/` or another
     ticket's build; the equality checks need "equals"/"matches"/"identical"/"no differences", not "compare" or
     "roughly"; one copy command per item id and for the dashboard; the deploy's go and check-only are read per
@@ -1405,10 +1411,27 @@ class TrainingDashboardDocs(unittest.TestCase):
     # other date fields that are not the Monthly Report's month
     OTHER_DATE = re.compile(r"\b(CreatedDate|LastModifiedDate|SystemModstamp|LastActivityDate|LastViewedDate|"
                             r"LastReferencedDate)\b")
-    # a filter name (not "Partner Manager", not "Partner and Month" as a phrase about grouping)
-    FILTER_NAME = {"Partner": re.compile(r"\bPartner\b(?!\s+Manager)"), "Month": re.compile(r"\bMonth\b")}
-    FILTER_FIELD = {"Partner": re.compile(r"(?<![A-Za-z0-9])Account__c\b"),
-                    "Month": re.compile(r"(?<![A-Za-z0-9])Period__c\b")}
+    # the dashboard's one filter (Ryan, 2026-10-24): Partner Manager, on Account__c.Assigned_Partner_Manager__c
+    PARTNER_MANAGER = re.compile(r"(?i)\bPartner\s+Manager\b")
+    PM_FIELD = re.compile(r"Assigned_Partner_Manager__c\b")        # after norm(): `…Account__c_Assigned_…`
+    ONE = re.compile(r"(?i)\b(one|only|single|sole)\b")
+    # a Partner or a Month filter, which the dashboard does not have: "Partner filter", "Partner and Month filters",
+    # "“Partner (A-K)” filter", "Month is also a filter", "filter by month", "filters: Partner", "a dashboard filter on
+    # `Account__c`" (the field itself, not `Account__c.Assigned_Partner_Manager__c`); "Partner Manager" is never one
+    _NAME = r"[\"“”`']?(?:Partner(?!\s+Manager)(?:\s*\([^)]{0,12}\))?|Month)(?![\w-])[\"“”`']?"
+    PARTNER_OR_MONTH_FILTER = re.compile(
+        r"(?i)(?<![\w-])" + _NAME + r"(?:\s*(?:,|and|or|&|/)\s*" + _NAME + r")*"
+        r"(?:\s+(?:is|are|as|becomes?)(?:\s+(?!(?:not|no|never)\b)[\w'’]+){0,3}?)?\s+filters?\b|"
+        r"\bfilter(?:s|ed|ing)?\s+(?:(?!group|sort)[\w'’]+\s+){0,2}?"
+        r"(?:on|by|for|of|named|called|labell?ed|picks?|selects?|chooses?|sets?)\s+"
+        r"(?:the\s+|a\s+|one\s+|each\s+)?" + _NAME + r"|"
+        r"\bfilters?(?:\s*[:(]|\s+(?:is|are|include\w*|list\w*|cover\w*)\b)\s*(?:[\w,'’]+\s+){0,2}?" + _NAME + r"|"
+        r"\bdashboard(?:['’]s)?\s+(?:\w+\s+){0,2}?filters?\s+(?:on|by|for)\s+(?:the\s+)?`?(?:DHIS2__c[_$])?"
+        r"(?:Account__c|Period__c)\b")
+    # a second filter on the dashboard ("two filters", "another filter", "a second dashboard filter")
+    FILTER_NAME = re.compile(r"(?i)\bPartner\b(?!\s+Manager)|\bMonth\b")
+    MORE_FILTERS = re.compile(r"(?i)\b(two|three|2|3|second|third|another|more|other|extra|further|additional)\s+"
+                              r"(dashboard\s+)?filters?\b")
     # a figure that is not checked, only eyeballed
     SOFT = re.compile(r"(?i)\b(roughly|approximately|approx|about right|close enough|whichever|looks? right|"
                       r"seems? right|more or less|ballpark|eyeball\w*|near(ly)? enough|or so)\b")
@@ -1659,21 +1682,46 @@ class TrainingDashboardDocs(unittest.TestCase):
                                 f"{where}: never from an older build or retrieve (DECISIONS 2026-10-16); an older "
                                 f"build is only ever denied: {s[:200]!r}")
 
-    def filter_on(self, s, name):
-        """Clause `s` says the dashboard has a `name` filter on its field: the part of the clause from `name` to the
-        next filter name names the field (`Account__c` for Partner, `Period__c` for Month) and not the other's."""
-        other = "Month" if name == "Partner" else "Partner"
-        if not (self.FILTER.search(s) and self.DASHBOARD.search(s)):
+    def one_pm_filter(self, s):
+        """Clause `s` says the dashboard's one filter is Partner Manager on `Assigned_Partner_Manager__c`: it names
+        the dashboard, a filter, "one"/"only", Partner Manager and, after it, the field, none of them negated."""
+        if not (self.stated(s, self.DASHBOARD) and self.stated(s, self.FILTER) and self.stated(s, self.ONE)):
             return False
-        names = sorted([m.start() for rx in self.FILTER_NAME.values() for m in rx.finditer(s)])
-        for m in self.FILTER_NAME[name].finditer(s):
-            if self.d.locally_denied(s, m):
+        for pm in self.PARTNER_MANAGER.finditer(s):
+            if self.d.locally_denied(s, pm):
                 continue
-            end = min([p for p in names if p > m.start()] or [len(s)])
-            seg = s[m.start():end]
-            if self.FILTER_FIELD[name].search(seg) and not self.FILTER_FIELD[other].search(seg):
+            if [f for f in self.PM_FIELD.finditer(s, pm.end()) if not self.d.locally_denied(s, f)]:
                 return True
         return False
+
+    def denied_before(self, s, at, floor=0):
+        """#69's `locally_denied` at position `at` of clause `s`, looking back no further than `floor`."""
+        pre = re.split(r"[,—–(]|\bbut\b|\bhowever\b|\bactually\b", s[max(floor, at - 40):at])[-1]
+        return bool(DecommissionedFoldersDocs.NEGATION.search(pre))
+
+    def assertNoPartnerOrMonthFilter(self, text, where):
+        """No clause states a Partner filter, a Month filter or a second dashboard filter; each is only ever denied
+        ("no Partner or Month filter (Ryan, 2026-10-24)")."""
+        for s in self.clauses(text, ".;"):
+            prev = 0
+            for m in self.PARTNER_OR_MONTH_FILTER.finditer(s):
+                # the match's first Partner or Month (a list shares it: "no Partner or Month filter") is denied in
+                # the words before it, back to the last comma, dash or "but" and never past the previous match ("no
+                # Partner filter and a Month filter" states one)
+                first = self.FILTER_NAME.search(s, m.start(), m.end())
+                denied = self.denied_before(s, first.start() if first else m.start(), prev)
+                prev = m.end()
+                self.assertTrue(denied,
+                                f"{where}: the dashboard has no Partner filter and no Month filter (Ryan, 2026-10-24: "
+                                f"its one filter is Partner Manager); name one only to deny it: {m.group(0)!r} in "
+                                f"{s[:200]!r}")
+            if self.DASHBOARD.search(s):
+                for m in self.MORE_FILTERS.finditer(s):
+                    # a list keeps its negation across commas ("no Partner, Month or other filter")
+                    pre = re.split(r"\bbut\b|\bhowever\b|\bactually\b", s[max(0, m.start() - 40):m.start()])[-1]
+                    self.assertTrue(DecommissionedFoldersDocs.NEGATION.search(pre),
+                                    f"{where}: the dashboard has one filter, Partner Manager (Ryan, 2026-10-24), not "
+                                    f"{m.group(0)!r}: {s[:200]!r}")
 
     # --- the RUNBOOK ----------------------------------------------------------------------------------------
 
@@ -1726,11 +1774,12 @@ class TrainingDashboardDocs(unittest.TestCase):
                                  "(`Period__c`), in that order, in one sentence, not negated")
         self.assertNoOtherDate(part, where)
         self.k.assertTestRecordRule(text, where)
-        # the dashboard's two filters, each on its field
-        for name, field in (("Partner", "`DHIS2__c.Account__c`"), ("Month", "`DHIS2__c.Period__c`")):
-            self.assertTrue([s for s in cl if self.filter_on(s, name)],
-                            f"{where}: the dashboard has a {name} filter on {field} (a sentence naming the dashboard, "
-                            f"\"{name} filter\" and its field, not negated)")
+        # the dashboard's one filter, Partner Manager; no Partner filter, no Month filter (Ryan, 2026-10-24)
+        self.assertTrue([s for s in cl if self.one_pm_filter(s)],
+                        f"{where}: the dashboard's one filter is Partner Manager, on "
+                        "`DHIS2__c$Account__c.Assigned_Partner_Manager__c` (Ryan, 2026-10-24), in one sentence naming "
+                        "the dashboard, its one (or only) filter, Partner Manager and the field, not negated")
+        self.assertNoPartnerOrMonthFilter(part, where)
         # the SOQL signal: per component, a real query on DHIS2__c aggregating its field (#74: SUM for 13 and 14,
         # GROUP BY the field for 15 and 16), with the test-record rule and a period on Period__c, in a unit naming it
         for n, field in sorted(self.FIELDS.items()):
@@ -1744,7 +1793,8 @@ class TrainingDashboardDocs(unittest.TestCase):
                          and any(self.item_query(n, q) for n in self.FIELDS)],
                         f"{where}: give the query for one partner's number, an item's query (its SUM or GROUP BY, the "
                         "period on `Period__c`, `Account__c != null`, `NOT Account__r.Name LIKE '%test%'`) with `AND "
-                        "Account__r.Name = '<partner>'`: the check of the Partner filter")
+                        "Account__r.Name = '<partner>'`: the check of one partner's number in the reports' Partner and Month "
+                        "grouping (the dashboard has no Partner filter)")
         # the rollback: the copies in Decommissioned and this change's before/ retrieve
         self.assertTrue([s for s in cl if self.stated(s, self.RESTORE) and "Decommissioned" in s
                          and self.COPY.search(s)],
