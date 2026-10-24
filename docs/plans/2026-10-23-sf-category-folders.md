@@ -70,8 +70,11 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
    - On Ryan's go, the same with `--apply --limit 1`; check that report by SOQL (same Id, folder
      "GLOW Monthly Reports", label as before).
    - On Ryan's go, the rest:
-     `python3 tools/sf_report_folders.py move --vpn-off --plan data/sf_folders_2026-10-23/move_plan.csv --apply`,
-     each move to "GLOW Monthly Reports".
+     `python3 tools/sf_report_folders.py move --vpn-off --plan data/sf_folders_2026-10-23/move_plan_rest.csv --apply`,
+     each move to "GLOW Monthly Reports". `move_plan_rest.csv` is `move_plan.csv` without its first row
+     (00ORP000004RJYv2AO, moved by the `--limit 1` run): 17 rows. `move` moves a report again even when it
+     is in its target already, so the full plan here would write a second ledger row for that report;
+     #73 makes 18 move rows in all.
 7. Dashboards: Ryan moves the five by hand in Lightning into "GLOW Monthly Dashboards" (the API refuses a dashboard `PATCH`), Ids unchanged, as listed in `data/sf_folders_2026-10-23/dashboards_by_hand.csv`.
 8. Verify by SOQL after the moves: each kept Id is in its folder with its label unchanged ("GLOW
    Monthly Reports" for the 18 reports, "GLOW Monthly Dashboards" for the five dashboards). The
@@ -81,13 +84,18 @@ All with the VPN off, through the `sf` CLI login `glow` (`.claude/skills/salesfo
 ## Rollback
 
 - The reports go back by `undo` from the ledger `data/sf_report_folders/ledger.csv`, bounded to
-  #73's 18 moves:
-  `python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv --limit 18`.
-  Its dry run lists exactly the 18 ids of `data/sf_folders_2026-10-23/move_plan.csv`; then, on
-  Ryan's go, the same with `--apply`: each to its old folder and label, last first.
-- The ledger is shared: `undo` reverses the pending moves in it last first, whatever their tag. A
-  dry run that lists any other id (a move of #72 or another ticket made after #73's) stops the
-  rollback there: those moves are not this ticket's to undo, and Ryan decides.
+  #73's own moves:
+  `python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv --limit N`.
+  N is the number of #73's move rows in the ledger: the move rows after the last row written before
+  #73's rollout (status `ok` or `sending`, or `failed` with a 2xx `http`: the rows `undo` counts as
+  pending; a row Salesforce refused with a 4xx moved nothing and is not counted). N is
+  18 when every move is done, and 1 to 17 after a failed `--limit 1` check or a partial apply.
+- Its dry run shows exactly N lines, each an id of `data/sf_folders_2026-10-23/move_plan.csv` going
+  back to "DHIS2 Reports" ("Public Reports" for item 17, 00ORP000006XXEf2AO); then, on Ryan's go,
+  the same with `--apply`: each to its old folder and label, last first.
+- Any other line in that dry run (another id, another folder, or a count other than N) stops the
+  rollback for Ryan: the ledger is shared, `undo` reverses its pending moves last first whatever
+  their tag, and those moves are not this ticket's to undo.
 - The five dashboards go back by hand in Lightning (Ryan), each to the DHIS2 folder it came from,
   checked with SOQL on `Dashboard`.
 - The copies stay in Decommissioned.
