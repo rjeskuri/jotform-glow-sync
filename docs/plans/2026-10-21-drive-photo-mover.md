@@ -129,6 +129,12 @@ template test and the trigger come next, and only then the regional forms' integ
   content managers move files; folders may need the Manager role or a domain setting:
   unverified). The dry run cannot show it; the template test's first real move does
   (`MOVE_FAILED`). Mitigation: Ryan's role on the drive raised to Manager, then the test again.
+  - 2026-10-24 (#132): it failed live, and no role fixes it: Google's API does not move a folder
+    from My Drive into a shared drive (`403 teamDrivesFolderMoveInNotSupported`; only the Drive
+    UI, as a Manager). The mover now makes the folder on the Shared Drive and moves the files
+    into it one by one through the advanced Drive service (`Drive.Files.update`,
+    `supportsAllDrives`); Ryan owns the files, for which Content manager (Contributor at least)
+    suffices. The emptied subfolder stays in My Drive.
 - **A late file.** A file Jotform adds after the subfolder moved: the settle time (10 minutes
   since the newest file) makes it unlikely; if Jotform makes a new subfolder of the same name, it
   is merged on a later run; if it writes into the moved folder, it is already on the Shared
