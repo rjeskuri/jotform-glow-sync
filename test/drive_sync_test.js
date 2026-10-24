@@ -19,7 +19,10 @@
  *                  the Shared Drive's region folders (ids from Script Properties), by region
  *   now            a Date;  settleMinutes  a number
  *
- *   moves    [{region, id, name, to}]      a whole subfolder (id) into the region folder (to)
+ *   moves    [{region, id, name, to, files}]  a subfolder (id) whose name is not yet in the region
+ *            folder (to): `files` are ALL its files (each entry a file id, or the file object with
+ *            its id). The mover makes a folder of that name in `to` and moves them into it (#132:
+ *            Drive cannot move a My Drive folder into a Shared Drive; the emptied subfolder stays)
  *   merges   [{region, id, name, into, files, kept}]
  *            a subfolder whose name already exists ONCE in the region folder (into = that
  *            folder's id): `files` are the source files to move into it, `kept` the source
@@ -39,9 +42,11 @@
  *
  * The entry points (top-level functions whose names do not end in `_`) are run with fake
  * DriveApp / Drive / ScriptApp / PropertiesService / LockService objects: with fictional ids
- * in Script Properties they may call only the methods in ALLOW below (reading, moveTo,
- * createFolder, the trigger builder - never sharing, links, copies, trash or mail); with no
- * Script Properties at all they make no *ById call and change nothing.
+ * in Script Properties they may call only the methods in ALLOW below (reading, the trigger
+ * builder, and on the apply path the advanced Drive service's Files.create / Files.update with
+ * supportsAllDrives: true - never DriveApp's moveTo, which Drive refuses into a Shared Drive
+ * (#132); never sharing, links, copies, trash or mail); with no Script Properties at all they
+ * make no *ById call and change nothing.
  *
  * Every club name is fictional (test/fixtures/make_fixture.py's word lists).
  */
@@ -106,7 +111,7 @@ const list = (p, k) => (p && Array.isArray(p[k]) ? p[k] : []);
 /** The plan as sorted strings, so order does not matter. */
 function norm(p) {
   return {
-    moves: list(p, 'moves').map(m => [m.region, m.id, m.name, m.to].join('|')).sort(),
+    moves: list(p, 'moves').map(m => [m.region, m.id, m.name, m.to, (m.files || []).map(fid).sort().join(',')].join('|')).sort(),
     merges: list(p, 'merges').map(m => [m.region, m.id, m.name, m.into,
                                         (m.files || []).map(fid).sort().join(','),
                                         (m.kept || []).map(fid).sort().join(',')].join('|')).sort(),
@@ -214,7 +219,7 @@ function oracle(sources, targets, nowMs, settle) {
       if (nowMs - newest < settle * MIN) { out.waiting.push(key.join('|')); continue; }
       const there = tgt.subfolders.filter(t => t.name === sf.name);
       if (there.length > 1) { out.refused.push(key.join('|')); continue; }
-      if (!there.length) { out.moves.push(key.concat(tgt.id).join('|')); continue; }
+      if (!there.length) { out.moves.push(key.concat(tgt.id, sf.files.map(f => f.id).sort().join(',')).join('|')); continue; }
       const dup = f => there[0].files.some(t => t.name === f.name && t.size === f.size);
       out.merges.push(key.concat(there[0].id, sf.files.filter(f => !dup(f)).map(f => f.id).sort().join(','),
                                  sf.files.filter(dup).map(f => f.id).sort().join(',')).join('|'));
@@ -226,7 +231,7 @@ function oracle(sources, targets, nowMs, settle) {
 
 const NOWS = [Date.UTC(2027, 2, 5, 8, 0, 0), Date.UTC(2025, 11, 31, 23, 30, 0), Date.UTC(2026, 9, 21, 14, 7, 30)];
 const SETTLES = [10, 15, 3];
-const seen = { moves: 0, merges: 0, waiting: 0, refused: 0, unknown: 0, kept: 0, sameSizeMoved: 0, empty: 0 };
+const seen = { moves: 0, merges: 0, waiting: 0, refused: 0, unknown: 0, kept: 0, sameSizeMoved: 0, empty: 0, multiFileMoves: 0 };
 let runs = 0;
 for (let seed = 1; seed <= 8; seed++) {
   for (let k = 0; k < NOWS.length; k++) {
@@ -235,6 +240,7 @@ for (let seed = 1; seed <= 8; seed++) {
     const { want, empty, ignored } = oracle(sources, targets, nowMs, settle);
     for (const key of KEYS) seen[key] += want[key].length;
     seen.kept += want.merges.filter(m => m.split('|')[5]).length;
+    seen.multiFileMoves += want.moves.filter(m => m.split('|')[4].includes(',')).length;   // a move of 2+ files
     seen.empty += empty.length;
     // a moved file that has a same-size, other-name file in the target folder
     for (const s of sources) for (const sf of s.subfolders) {
@@ -250,7 +256,7 @@ for (let seed = 1; seed <= 8; seed++) {
     const got = norm(p);
     got.waiting = got.waiting.filter(w => !empty.includes(w.split('|')[1]));   // an empty one may wait
     const label = 'seed ' + seed + ', now ' + new Date(nowMs).toISOString() + ', settle ' + settle + 'm';
-    check(label + ': moves, merges, waiting, refused and unknown are the rules\' answer',
+    check(label + ': moves (each with all its files), merges, waiting, refused and unknown are the rules\' answer',
           !error && same(got, want), error || (same(got, want) ? '' : show(got, want)));
     const all = ids(p);
     const wrong = empty.filter(x => acted(p).some(e => e.id === x)).concat(ignored.filter(x => all.has(x)));
@@ -280,7 +286,7 @@ console.log('\nplanMoves_ — the settle time');
   const n10 = norm(r10.plan);
   check('settle 10: 9m59s waits, exactly 10m moves, 25m moves (with their names)',
         same(n10.waiting, ['Africa|a|' + nm.a, 'Africa|d|' + nm.d]) &&
-        same(n10.moves, ['Africa|b|' + nm.b + '|tgt-africa', 'Africa|c|' + nm.c + '|tgt-africa']),
+        same(n10.moves, ['Africa|b|' + nm.b + '|tgt-africa|b1', 'Africa|c|' + nm.c + '|tgt-africa|c1']),
         r10.error || JSON.stringify(n10));
   check('the NEWEST file decides: a 5-hour-old photo beside a 2-minute-old one waits',
         n10.waiting.includes('Africa|d|' + nm.d) && !acted(r10.plan).some(m => m.id === 'd'), r10.error || JSON.stringify(n10));
@@ -299,14 +305,14 @@ console.log('\nplanMoves_ — region from the folder name');
   ] }));
   const targets = Object.assign({}, ...REGIONS.map(reg => target(reg)));
   const r = plan(sources, targets, NOW, 10);
-  const want = REGIONS.map((reg, i) => [reg, 'sub-' + i, sources[i].subfolders[0].name, targets[reg].id].join('|')).sort();
+  const want = REGIONS.map((reg, i) => [reg, 'sub-' + i, sources[i].subfolders[0].name, targets[reg].id, 'f-' + i].join('|')).sort();
   check('Africa, Asia, Latin America, U.S, Template: each subfolder to its own region\'s folder',
         same(norm(r.plan).moves, want), r.error || show(norm(r.plan).moves, want));
   // the regions swapped round: the answer follows the names, not the order
   const reg2 = i => REGIONS[(i + 2) % REGIONS.length];
   const swapped = sources.map((s, i) => Object.assign({}, s, { name: PREFIX + reg2(i) }));
   const r2 = plan(swapped, targets, NOW, 10);
-  const want2 = REGIONS.map((_, i) => [reg2(i), 'sub-' + i, sources[i].subfolders[0].name, targets[reg2(i)].id].join('|')).sort();
+  const want2 = REGIONS.map((_, i) => [reg2(i), 'sub-' + i, sources[i].subfolders[0].name, targets[reg2(i)].id, 'f-' + i].join('|')).sort();
   check('folders renamed to other regions: the targets follow the names', same(norm(r2.plan).moves, want2),
         r2.error || show(norm(r2.plan).moves, want2));
   // targets keyed by things that are not regions, and region names that are object built-ins
@@ -348,7 +354,7 @@ console.log('\nplanMoves_ — a resubmission is merged file by file, never overw
   check('the Shared Drive\'s own files appear nowhere in the plan (nothing there is replaced)',
         !!r.plan && !/t-same|t-smaller|t-samesize|t-alsosize/.test(planned), planned);
   check('a name that exists only in ANOTHER region\'s folder is a plain move',
-        same(norm(r.plan).moves, ['Asia|fresh|Evening Roots 2026-10-15|tgt-asia']), r.error || JSON.stringify(norm(r.plan)));
+        same(norm(r.plan).moves, ['Asia|fresh|Evening Roots 2026-10-15|tgt-asia|s-fr']), r.error || JSON.stringify(norm(r.plan)));
   const early = plan(sources, targets, NOW - 35 * MIN, 10);
   check('a resubmission still uploading waits (named); it is not merged half-way',
         norm(early.plan).waiting.includes('Asia|resub|' + name) && !list(early.plan, 'merges').length,
@@ -383,7 +389,7 @@ console.log('\nplanMoves_ — the same name twice');
   const r = plan(sources, tg, NOW, 10);
   check('two same-name subfolders already on the Shared Drive: refused and reported, neither picked',
         same(norm(r.plan).refused, ['Asia|tw|Golden Flames 2026-10-13']) && !acted(r.plan).some(e => e.id === 'tw') &&
-        !list(r.plan, 'waiting').some(e => e.id === 'tw') && same(norm(r.plan).moves, ['Asia|ok|Silver Roots 2026-10-13|tgt-asia']),
+        !list(r.plan, 'waiting').some(e => e.id === 'tw') && same(norm(r.plan).moves, ['Asia|ok|Silver Roots 2026-10-13|tgt-asia|ok-f']),
         r.error || JSON.stringify(norm(r.plan)));
 }
 
@@ -413,14 +419,50 @@ console.log('\nplanMoves_ — unknown regions, empty subfolders, other folders')
         r.error || JSON.stringify(n));
   check('an empty subfolder is neither moved nor merged; its settled neighbour moves',
         !acted(r.plan).some(e => e.id === 'af-empty') &&
-        same(n.moves, ['Africa|af-1|Golden Stars 2026-10-09|tgt-africa']), r.error || JSON.stringify(n));
+        same(n.moves, ['Africa|af-1|Golden Stars 2026-10-09|tgt-africa|af-1-f']), r.error || JSON.stringify(n));
   const outside = ['src-x1', 'x1-1', 'src-x2', 'x2-1', 'src-x3', 'x3-1', 'src-x4', 'src-x5', 'x5-1', 'src-x6', 'x6-1',
                    'src-x7', 'x7-1', 'src-x8', 'x8-1', 'src-x9', 'x9-1'].filter(x => ids(r.plan).has(x));
   check('folders not named exactly `Attendance photos - …` (other case, doubled or missing space) are in no list',
         !!r.plan && !outside.length, r.error || outside.join(', '));
   const withUs = plan(sources, Object.assign({}, targets, target('U.S')), NOW, 10);
-  check('…and once U.S has a target, its subfolder moves there', norm(withUs.plan).moves.includes('U.S|us-1|Golden Stars 2026-10-09|tgt-us') &&
+  check('…and once U.S has a target, its subfolder moves there', norm(withUs.plan).moves.includes('U.S|us-1|Golden Stars 2026-10-09|tgt-us|us-1-f') &&
         same(norm(withUs.plan).unknown, ['src-eu']), withUs.error || JSON.stringify(norm(withUs.plan)));
+}
+
+console.log('\nplanMoves_ — a move carries every file of its subfolder (#132: the mover moves them one by one)');
+{
+  const name = 'Golden Voices 2026-10-16';
+  const sources = [
+    { id: 'src-la', name: 'Attendance photos - Latin America', subfolders: [
+      { id: 'three', name, files: [file('v1', 'IMG_100.jpg', 7001, 400), file('v2', 'IMG_101.jpg', 7002, 30), file('v3', 'IMG_102.jpg', 7001, 11)] },
+      { id: 'one', name: 'Silver Flames 2026-10-16', files: [file('w1', 'IMG_100.jpg', 7001, 60)] },
+      { id: 'young', name: 'Rising Wings 2026-10-16', files: [file('y1', 'IMG_100.jpg', 8000, 400), file('y2', 'IMG_101.jpg', 8001, 4)] },
+    ] },
+    { id: 'src-as', name: 'Attendance photos - Asia', subfolders: [
+      { id: 'elsewhere', name, files: [file('e1', 'IMG_100.jpg', 7001, 60), file('e2', 'IMG_101.jpg', 7002, 60)] } ] },
+  ];
+  // Asia's Shared Drive folder already holds this name with files identical to Latin America's `three`:
+  // another region, so `three` is still a plain move of everything (a move keeps nothing)
+  const targets = Object.assign(target('Latin America'), target('Asia', [
+    { id: 'as-there', name, files: [{ id: 't-e1', name: 'IMG_100.jpg', size: 7001 }, { id: 't-e2', name: 'IMG_101.jpg', size: 7002 },
+                                    { id: 't-x', name: 'IMG_102.jpg', size: 7001 }] }]));
+  const r = plan(sources, targets, NOW, 10);
+  const byId = Object.fromEntries(list(r.plan, 'moves').map(m => [m.id, m]));
+  const filesOf = m => (m && m.files ? m.files.map(fid).sort() : null);
+  check('a three-file subfolder moves with all three ids (whatever their ages); a one-file one with its one',
+        same(filesOf(byId.three), ['v1', 'v2', 'v3']) && same(filesOf(byId.one), ['w1']) && same(Object.keys(byId).sort(), ['one', 'three']),
+        r.error || JSON.stringify(list(r.plan, 'moves')));
+  check('…identical files under the same name in ANOTHER region\'s folder change nothing: nothing kept, every file in the move',
+        !!byId.three && !(byId.three.kept || []).length && same(filesOf(byId.three), ['v1', 'v2', 'v3']) &&
+        !!list(r.plan, 'merges').find(m => m.id === 'elsewhere' && !(m.files || []).length),
+        r.error || JSON.stringify(norm(r.plan)));
+  const all = [].concat(...list(r.plan, 'moves').map(m => (m.files || []).map(fid)));
+  check('…no file of another subfolder or of the Shared Drive is in any move\'s files',
+        !!r.plan && !all.some(x => ['y1', 'y2', 'e1', 'e2', 't-e1', 't-e2', 't-x'].includes(x)), all.join(','));
+  const r3 = plan(sources, targets, NOW, 3);
+  const young = list(r3.plan, 'moves').find(m => m.id === 'young');
+  check('settle 3: the two-file subfolder that waited now moves, with both its files',
+        same(filesOf(young), ['y1', 'y2']) && list(r3.plan, 'moves').length === 3, r3.error || JSON.stringify(norm(r3.plan)));
 }
 
 console.log('\nplanMoves_ — a merge that moves nothing does not claim the name');
@@ -444,13 +486,20 @@ console.log('\nplanMoves_ — a merge that moves nothing does not claim the name
 
 console.log('\nplanMoves_ — run after run, the plan carried out each time, everything settles');
 {
-  // the plan applied to the model, as the mover would apply it to Drive
+  // the plan applied to the model, as the mover applies it to Drive (#132): a move makes a folder of
+  // that name on the Shared Drive and moves the plan's files into it; the emptied subfolder stays
   const apply = (sources, targets, p) => {
     for (const s of sources) {
       const region = s.name.slice(PREFIX.length);
       for (const m of list(p, 'moves').filter(x => x.region === region)) {
-        const i = s.subfolders.findIndex(x => x.id === m.id);
-        if (i >= 0) targets[region].subfolders.push(s.subfolders.splice(i, 1)[0]);
+        const from = s.subfolders.find(x => x.id === m.id);
+        if (!from) continue;
+        const made = { id: 'made-' + m.id, name: m.name, files: [] };
+        for (const f of (m.files || []).map(fid)) {
+          const i = from.files.findIndex(x => x.id === f);
+          if (i >= 0) made.files.push(from.files.splice(i, 1)[0]);
+        }
+        targets[region].subfolders.push(made);
       }
       for (const m of list(p, 'merges').filter(x => x.region === region)) {
         const from = s.subfolders.find(x => x.id === m.id), into = targets[region].subfolders.find(x => x.id === m.into);
@@ -538,7 +587,7 @@ const ALLOW = {
   File: ['getId', 'getName', 'getSize', 'getLastUpdated', 'getDateCreated', 'getMimeType', 'moveTo', 'getParents', 'isTrashed'],
   Iterator: ['hasNext', 'next', 'getContinuationToken'],
   Drive: ['Files', 'Drives'],
-  'Drive.Files': ['list', 'get', 'update'],
+  'Drive.Files': ['list', 'get', 'update', 'create'],
   'Drive.Drives': ['get', 'list'],
   ScriptApp: ['newTrigger', 'getProjectTriggers', 'deleteTrigger'],
   TriggerBuilder: ['timeBased', 'everyMinutes', 'everyHours', 'create', 'after', 'at', 'inTimezone', 'nearMinute', 'atHour'],
@@ -554,7 +603,8 @@ const ALLOW = {
 };
 const INTROSPECTION = new Set(['toString', 'valueOf', 'toJSON', 'constructor', 'then', 'inspect']);
 const BY_ID = c => /ById$/.test(c) || ['Drive.Files.get', 'Drive.Files.update', 'Drive.Drives.get'].includes(c);
-const WRITES = c => /\.(moveTo|createFolder|addFile|removeFile|addFolder|removeFolder)$/.test(c) || c === 'Drive.Files.update';
+const WRITES = c => /\.(moveTo|createFolder|addFile|removeFile|addFolder|removeFolder)$/.test(c) ||
+                    c === 'Drive.Files.update' || c === 'Drive.Files.create';
 
 // Script Properties: SOURCE_FOLDER_<KEY> and TARGET_FOLDER_<KEY> per region (drive-sync/README.md)
 const PROP_KEYS = { Africa: 'AFRICA', Asia: 'ASIA', 'Latin America': 'LATIN_AMERICA', 'U.S': 'US', Template: 'TEMPLATE' };
@@ -570,19 +620,33 @@ const FAKE_SOURCES = {
 const FAKE_TARGETS = { Africa: [['Golden Flames 2026-10-13', [['IMG_5501.jpg', 3000]]]], Asia: [], 'Latin America': [], 'U.S': [], Template: [] };
 const SOURCE_SUBS = Object.values(FAKE_SOURCES).reduce((a, s) => a + s.length, 0);
 const FILE_STEMS = ['IMG_4471', 'IMG_4472', 'IMG_4480', 'IMG_5501', 'IMG_5502', 'IMG_6001', 'IMG_9000', 'receipt'];
-const EXPECTED_MOVES = ['S:Africa/Bright Stars 2026-10-14 -> T:Africa', 'S:Asia/Morning Wings 2026-10-13 -> T:Asia',
+// the real run (#132): a folder of each moved subfolder's name made ONCE in its region folder, each of its
+// files moved into it; the merge's new photo into the folder already there (no folder made for a merge)
+const EXPECTED_CREATED = ['T:Africa/Bright Stars 2026-10-14', 'T:Asia/Morning Wings 2026-10-13'].sort();
+const EXPECTED_MOVES = ['S:Africa/Bright Stars 2026-10-14/IMG_4471.jpg -> T:Africa/Bright Stars 2026-10-14',
+                        'S:Africa/Bright Stars 2026-10-14/IMG_4472.jpg -> T:Africa/Bright Stars 2026-10-14',
+                        'S:Asia/Morning Wings 2026-10-13/IMG_6001.jpg -> T:Asia/Morning Wings 2026-10-13',
                         'S:Africa/Golden Flames 2026-10-13/IMG_5502.jpg -> T:Africa/Golden Flames 2026-10-13'].sort();
+const inSub = (m, region, name) => m.startsWith('S:' + region + '/' + name + '/');
 
 /**
- * Fake Google services recording every member asked for ('Type.member'), the moves made, the log
- * and the source subfolders read. mode: 'ids' (every SOURCE_/TARGET_FOLDER_<KEY> set, and any
- * other property a fictional id) | 'empty' (no Script Properties). opt: failMoveOf (a subfolder
- * name whose moveTo throws), moveAdvanceMin / readAdvanceMin (the clock jumps on each move / on
- * each source subfolder's files read), targetName / sourceName ({region: folder name}).
+ * Fake Google services recording every member asked for ('Type.member'), the file moves made
+ * ('<file label> -> <folder label>'), the folders created ('<parent label>/<name>'), every
+ * advanced Drive call (ops: op, the clock when it came, its optional args), the log and the
+ * source subfolders read. The fake Drive behaves as the live one did on 2026-10-23 (#132):
+ * DriveApp's Folder.moveTo / File.moveTo INTO a Shared Drive (T:*) folder throws; the advanced
+ * service's Files.update moves a file only with supportsAllDrives true, addParents an existing
+ * folder and removeParents the file's current parent, and never moves a folder
+ * (teamDrivesFolderMoveInNotSupported); Files.create makes a real folder under its one parent,
+ * found by name afterwards like any other. mode: 'ids' (every SOURCE_/TARGET_FOLDER_<KEY> set,
+ * and any other property a fictional id) | 'empty' (no Script Properties). opt: failMoveOf (a
+ * subfolder name whose files' moves throw), failCreateOf (a folder name whose Files.create
+ * throws), moveAdvanceMin / readAdvanceMin (the clock jumps on each file moved / on each source
+ * subfolder's files read), targetName / sourceName ({region: folder name}).
  */
 function fakeEnv(mode, opt) {
   opt = opt || {};
-  const calls = [], moved = [], attempted = [], logs = [], read = new Set();
+  const calls = [], moved = [], attempted = [], created = [], ops = [], logs = [], read = new Set();
   const clock = { t: Date.now() };
   const t0 = clock.t;
   let D = Date, n = 0;
@@ -597,11 +661,12 @@ function fakeEnv(mode, opt) {
   const iter = items => { let i = 0; return wrap('Iterator', { hasNext: () => i < items.length, next: () => items[i++],
                                                               getContinuationToken: () => null }); };
   const label = x => (meta.get(x) || { label: '?' }).label;
-  const move = (self, dest) => {
+  const onSharedDrive = x => label(x).startsWith('T:');
+  // DriveApp's moveTo: into a Shared Drive folder it fails as the live one did (#132)
+  const moveTo = (self, dest) => {
     attempted.push(label(self));
-    if (opt.failMoveOf && meta.get(self).name === opt.failMoveOf) throw new Error('Drive said no (fake)');
+    if (onSharedDrive(dest)) throw new Error('cannot use this operation on a shared drive item (fake)');
     moved.push(label(self) + ' -> ' + label(dest));
-    if (opt.moveAdvanceMin) clock.t += opt.moveAdvanceMin * MIN;
     return self;
   };
   const mkFile = (where, name, size, ageMin) => {
@@ -609,9 +674,9 @@ function fakeEnv(mode, opt) {
     const self = wrap('File', {
       getId: () => id, getName: () => name, getSize: () => size, getMimeType: () => 'image/jpeg',
       getLastUpdated: () => new D(t0 - ageMin * MIN), getDateCreated: () => new D(t0 - ageMin * MIN),
-      moveTo: dest => move(self, dest), getParents: () => iter([]), isTrashed: () => false,
+      moveTo: dest => moveTo(self, dest), getParents: () => iter([]), isTrashed: () => false,
     });
-    meta.set(self, { name, label: where + '/' + name });
+    meta.set(self, { id, name, label: where + '/' + name, parent: null, isFolder: false });
     byId[id] = self;
     return self;
   };
@@ -625,14 +690,69 @@ function fakeEnv(mode, opt) {
       },
       getFoldersByName: x => iter(kids.filter(k => meta.get(k).name === x)),
       getFilesByName: x => iter(files.filter(f => meta.get(f).name === x)),
-      createFolder: x => mkFolder(lbl + '/' + x, x, [], [], false), moveTo: dest => move(self, dest),
+      createFolder: x => {
+        const made = mkFolder(lbl + '/' + x, x, [], [], false);
+        kids.push(made);
+        meta.get(made).parent = id;
+        created.push(lbl + '/' + x);
+        return made;
+      },
+      moveTo: dest => moveTo(self, dest),
       addFile: () => self, removeFile: () => self, addFolder: () => self, removeFolder: () => self,
       getLastUpdated: () => new D(t0 - OLD * MIN), getDateCreated: () => new D(t0 - OLD * MIN),
       getParents: () => iter([]), isTrashed: () => false, searchFolders: () => iter(kids), searchFiles: () => iter(files),
     });
-    meta.set(self, { name, label: lbl });
+    meta.set(self, { id, name, label: lbl, kids, files, parent: null, isFolder: true });
+    for (const k of kids) meta.get(k).parent = id;
+    for (const f of files) meta.get(f).parent = id;
     byId[id] = self;
     return self;
+  };
+  // the advanced Drive service, v3: Drive.Files.create(resource, mediaData, optionalArgs) and
+  // Drive.Files.update(resource, fileId, mediaData, optionalArgs), as strict as Drive is
+  const FOLDER_MIME = 'application/vnd.google-apps.folder';
+  const allDrives = (op, args) => {
+    if (!args || args.supportsAllDrives !== true) throw new Error(op + ': File not found (fake: supportsAllDrives is not true)');
+  };
+  const filesCreate = (resource, media, args) => {
+    ops.push({ op: 'create', t: clock.t, args: Object.assign({}, args) });
+    allDrives('Files.create', args);
+    const r = resource || {};
+    const parent = Array.isArray(r.parents) && r.parents.length === 1 ? byId[r.parents[0]] : null;
+    if (!parent || !meta.get(parent).isFolder) throw new Error('Files.create: parents must be one existing folder id (fake)');
+    if (r.mimeType !== FOLDER_MIME) throw new Error('Files.create: only a folder is created here, not ' + r.mimeType + ' (fake)');
+    if (typeof r.name !== 'string' || !r.name) throw new Error('Files.create: a name is required (fake)');
+    if (opt.failCreateOf && r.name === opt.failCreateOf) throw new Error('Drive said no (fake)');
+    const made = mkFolder(label(parent) + '/' + r.name, r.name, [], [], false);
+    meta.get(parent).kids.push(made);
+    meta.get(made).parent = meta.get(parent).id;
+    created.push(label(parent) + '/' + r.name);
+    return { id: meta.get(made).id, name: r.name, mimeType: FOLDER_MIME, parents: [meta.get(parent).id] };
+  };
+  const filesUpdate = (resource, fileId, media, args) => {
+    ops.push({ op: 'update', t: clock.t, args: Object.assign({}, args) });
+    allDrives('Files.update', args);
+    const item = byId[fileId];
+    if (!item) throw new Error('Files.update: File not found: ' + String(fileId) + ' (fake)');
+    const m = meta.get(item);
+    attempted.push(m.label);
+    const r = resource || {};
+    if ('trashed' in r) calls.push('Drive.Files.update{trashed}');   // a trash by another door: a violation
+    if ('parents' in r || 'trashed' in r) {
+      throw new Error('Files.update: the parents field is not directly writable; nothing is trashed here (fake)');
+    }
+    if (m.isFolder) throw new Error('Files.update: teamDrivesFolderMoveInNotSupported: Moving folders into shared drives is not supported (fake)');
+    const dest = args.addParents ? byId[args.addParents] : null;
+    if (!dest || !meta.get(dest).isFolder) throw new Error('Files.update: addParents is not one existing folder id (fake)');
+    if (args.removeParents !== m.parent) throw new Error('Files.update: removeParents is not the file\'s parent (fake)');
+    const from = meta.get(byId[m.parent]);
+    if (opt.failMoveOf && from.name === opt.failMoveOf) throw new Error('Drive said no (fake)');
+    from.files.splice(from.files.indexOf(item), 1);
+    meta.get(dest).files.push(item);
+    m.parent = meta.get(dest).id;
+    moved.push(m.label + ' -> ' + label(dest));
+    if (opt.moveAdvanceMin) clock.t += opt.moveAdvanceMin * MIN;
+    return { id: fileId, parents: [m.parent] };
   };
   const propId = k => 'fake-id-' + String(k).replace(/[^A-Za-z0-9]+/g, '-');
   const sourceFolders = [], propFolders = {};
@@ -678,7 +798,8 @@ function fakeEnv(mode, opt) {
       getFiles: () => iter([]), getFilesByName: () => iter([]),
     }),
     Drive: wrap('Drive', {
-      Files: wrap('Drive.Files', { list: () => ({ files: [], items: [] }), get: x => ({ id: x, name: 'x', parents: [] }), update: () => ({}) }),
+      Files: wrap('Drive.Files', { list: () => ({ files: [], items: [] }), get: x => ({ id: x, name: 'x', parents: [] }),
+                                   create: filesCreate, update: filesUpdate }),
       Drives: wrap('Drive.Drives', { get: x => ({ id: x, name: 'x' }), list: () => ({ drives: [] }) }),
     }),
     ScriptApp: wrap('ScriptApp', { newTrigger: () => builder, getProjectTriggers: () => [trigger], deleteTrigger: () => undefined }),
@@ -700,7 +821,7 @@ function fakeEnv(mode, opt) {
                     ' static now() { return now(); } } Date = FakeDate; })(); delete globalThis.__fakeClock;', c);
     D = vm.runInContext('Date', c);
   };
-  return { calls, moved, attempted, logs, read, globals, install };
+  return { calls, moved, attempted, created, ops, logs, read, t0, globals, install };
 }
 
 const violations = calls => calls.filter(c => {
@@ -710,15 +831,33 @@ const violations = calls => calls.filter(c => {
 });
 
 const ENTRIES = GS.length ? loadGs.declarations(GS_SRC).filter(nm => !nm.endsWith('_') && ctx && typeof ctx[nm] === 'function') : [];
+/**
+ * One entry point on a fresh fake Drive; the result's records are copies. Its `rerun(opt)` runs
+ * the same entry point again on the SAME fake Drive (the trigger's next run), with other
+ * options and the records starting afresh.
+ */
 function runEntry(name, mode, opt) {
+  opt = opt || {};
   const env = fakeEnv(mode, opt);
-  let threw = '';
-  try {
-    const c = loadGs.sandbox(GS, env.globals);
-    env.install(c);
-    vm.runInContext(name + '();', c, { timeout: 5000 });
-  } catch (e) { threw = String(e && e.message || e); }
-  return Object.assign({ name, threw, text: env.logs.join('\n') }, env);
+  let c = null;
+  const once = () => {
+    let threw = '';
+    try {
+      if (!c) { c = loadGs.sandbox(GS, env.globals); env.install(c); }
+      vm.runInContext(name + '();', c, { timeout: 5000 });
+    } catch (e) { threw = String(e && e.message || e); }
+    return { name, threw, text: env.logs.join('\n'), calls: env.calls.slice(), moved: env.moved.slice(),
+             attempted: env.attempted.slice(), created: env.created.slice(), ops: env.ops.slice(),
+             read: new Set(env.read), t0: env.t0, rerun };
+  };
+  const rerun = next => {
+    for (const k of Object.keys(opt)) delete opt[k];
+    Object.assign(opt, next || {});
+    for (const a of [env.calls, env.moved, env.attempted, env.created, env.ops, env.logs]) a.length = 0;
+    env.read.clear();
+    return once();
+  };
+  return once();
 }
 const runEntries = (mode, opt) => ENTRIES.map(name => runEntry(name, mode, opt));
 const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
@@ -729,21 +868,40 @@ const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
   check('with every region set up in Script Properties, every call (the full apply path included) is in the allow-list ' +
         '(no sharing, links, copies, trash, mail)',
         ENTRIES.length > 0 && !bad.length, ENTRIES.length ? [...new Set(bad)].join(', ') : 'no entry points');
-  const summary = rs => rs.map(r => r.name + ': ' + (r.threw || 'ok') + ' [' + r.calls.length + ' calls, ' + r.moved.length + ' moves]').join('; ');
+  const summary = rs => rs.map(r => r.name + ': ' + (r.threw || 'ok') + ' [' + r.calls.length + ' calls, ' + r.created.length +
+                                    ' created, ' + r.moved.length + ' moves]').join('; ');
   check('…and at least one entry point reads the fake Drive (the run is not vacuous)',
         full.some(r => r.read.size > 0), summary(full));
-  const applier = full.filter(r => r.moved.length)[0];
-  check('one entry point is the real run: settled subfolders moved whole, the resubmission\'s new photo merged, ' +
-        'nothing else (not the uploading one, not the kept photo, not Receipts)',
-        !!applier && !applier.threw && same(applier.moved.slice().sort(), EXPECTED_MOVES),
-        applier ? applier.name + ': ' + (applier.threw || '') + ' ' + show(applier.moved.slice().sort(), EXPECTED_MOVES) : summary(full));
+  // the entry point that writes (tries a move, or makes a folder): the real run
+  const applier = full.find(r => r.attempted.length || r.created.length);
+  const outcome = r => ({ created: r.created.slice().sort(), moved: r.moved.slice().sort() });
+  const WANT = { created: EXPECTED_CREATED, moved: EXPECTED_MOVES };
+  check('one entry point is the real run (#132): each settled subfolder\'s files moved into a folder of its name made in the ' +
+        'region folder, the resubmission\'s new photo merged into the folder already there, nothing else (not the uploading ' +
+        'one, not the kept photo, not Receipts)',
+        !!applier && !applier.threw && same(outcome(applier), WANT),
+        applier ? applier.name + ': ' + (applier.threw || '') + ' ' + show(outcome(applier), WANT) : summary(full));
+  check('…exactly one folder made per moved subfolder, through Drive.Files.create (none for the merge, none any other way)',
+        !!applier && applier.ops.filter(o => o.op === 'create').length === EXPECTED_CREATED.length &&
+        applier.created.length === EXPECTED_CREATED.length,
+        applier ? applier.ops.filter(o => o.op === 'create').length + ' Files.create call(s); made ' + JSON.stringify(applier.created) : 'no applier');
+  const banned = r => r.calls.filter(c => /\.(moveTo|setTrashed)$/.test(c) || c === 'Drive.Files.update{trashed}' ||
+                                          /^Drive\.Files\.(remove|delete|emptyTrash|trash)$/.test(c));
+  check('…no DriveApp moveTo at all on the apply path (Drive refuses a folder moved into a Shared Drive), nothing trashed or deleted: ' +
+        'the emptied My Drive subfolder stays',
+        !!applier && !banned(applier).length, applier ? [...new Set(banned(applier))].join(', ') : 'no applier');
+  check('…every advanced Drive call (Files.create and Files.update) carries supportsAllDrives: true',
+        !!applier && applier.ops.length > 0 && applier.ops.every(o => o.args.supportsAllDrives === true),
+        applier ? applier.ops.length + ' call(s); without it: ' +
+                  applier.ops.filter(o => o.args.supportsAllDrives !== true).map(o => o.op + ' ' + JSON.stringify(o.args)).join('; ') : 'no applier');
   check('…its log has the counts and the folder names, and no file name',
         !!applier && /\d/.test(applier.text) && ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13', 'Golden Flames 2026-10-13']
           .every(x => applier.text.includes(x)) && !fileNamesIn(applier.text).length,
         applier ? 'file names logged: ' + fileNamesIn(applier.text).join(', ') : 'no applier');
-  const dry = full.find(r => r.read.size > 0 && !r.attempted.length && !r.threw &&
-                         ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13'].every(x => r.text.includes(x)));
-  check('one entry point is the dry run: reads both drives, logs what it would move by folder name, moves nothing, no file name',
+  const dry = full.find(r => r.read.size > 0 && !r.attempted.length && !r.created.length && !r.ops.length && !r.calls.some(WRITES) &&
+                         !r.threw && ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13'].every(x => r.text.includes(x)));
+  check('one entry point is the dry run: reads both drives, logs what it would move by folder name, writes nothing (no Files.create ' +
+        'or Files.update, no moveTo), no file name',
         !!dry && !fileNamesIn(dry.text).length, dry ? dry.name + ': ' + fileNamesIn(dry.text).join(', ') : summary(full));
   const empty = runEntries('empty');
   const byId = empty.flatMap(r => r.calls.filter(c => BY_ID(c) || WRITES(c)).map(c => r.name + ': ' + c));
@@ -751,30 +909,60 @@ const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
         ENTRIES.length > 0 && !byId.length, ENTRIES.length ? [...new Set(byId)].join(', ') : 'no entry points');
 
   const A = applier ? applier.name : null;
-  const failed = A ? runEntry(A, 'ids', { failMoveOf: 'Bright Stars 2026-10-14' }) : null;
-  const others = EXPECTED_MOVES.filter(m => !m.startsWith('S:Africa/Bright Stars'));
-  check('a move that fails: the other moves still happen, MOVE_FAILED is logged, and the run ends with an error',
-        !!failed && !!failed.threw && others.every(m => failed.moved.includes(m)) && /MOVE_FAILED/.test(failed.text + failed.threw) &&
-        !fileNamesIn(failed.text).length,
-        failed ? 'threw: ' + (failed.threw || 'no') + '; moved ' + JSON.stringify(failed.moved) : 'no applier');
+  const tell = r => (r ? 'threw: ' + (r.threw || 'no') + '; made ' + JSON.stringify(r.created) + '; moved ' + JSON.stringify(r.moved) +
+                         '; log: ' + r.text.slice(-400) : 'no applier');
+  // a failure: logged by folder name, the rest of the run goes on, the run ends with an error
+  const failedMove = A ? runEntry(A, 'ids', { failMoveOf: 'Bright Stars 2026-10-14' }) : null;
+  const notBright = EXPECTED_MOVES.filter(m => !inSub(m, 'Africa', 'Bright Stars 2026-10-14'));
+  check('a move whose file moves fail: the other move and the merge still happen, MOVE_FAILED names the folder (no file name), ' +
+        'and the run ends with an error',
+        !!failedMove && !!failedMove.threw && same(failedMove.moved.slice().sort(), notBright) &&
+        /MOVE_FAILED[^\n]*Bright Stars 2026-10-14/.test(failedMove.text) && !fileNamesIn(failedMove.text + failedMove.threw).length,
+        tell(failedMove));
+  // the folder was made, its files were not moved: the next run sees the name on the Shared Drive once and merges
+  const again = failedMove ? failedMove.rerun({}) : null;
+  const bright = EXPECTED_MOVES.filter(m => inSub(m, 'Africa', 'Bright Stars 2026-10-14'));
+  check('…the next run finishes it as a merge: both photos move into the folder made last time, no second folder of that name, ' +
+        'nothing else moved, no error',
+        !!again && !again.threw && same(again.moved.slice().sort(), bright) && !again.created.length, tell(again));
+  const failedCreate = A ? runEntry(A, 'ids', { failCreateOf: 'Morning Wings 2026-10-13' }) : null;
+  const notMorning = EXPECTED_MOVES.filter(m => !inSub(m, 'Asia', 'Morning Wings 2026-10-13'));
+  check('a move whose folder cannot be made: none of its files is moved, the rest of the run goes on, MOVE_FAILED names it, ' +
+        'the run ends with an error',
+        !!failedCreate && !!failedCreate.threw && same(failedCreate.moved.slice().sort(), notMorning) &&
+        !failedCreate.attempted.some(a => a.startsWith('S:Asia/Morning Wings 2026-10-13/')) &&
+        /MOVE_FAILED[^\n]*Morning Wings 2026-10-13/.test(failedCreate.text) && same(failedCreate.created, ['T:Africa/Bright Stars 2026-10-14']),
+        tell(failedCreate));
+  const failedMerge = A ? runEntry(A, 'ids', { failMoveOf: 'Golden Flames 2026-10-13' }) : null;
+  const notGolden = EXPECTED_MOVES.filter(m => !inSub(m, 'Africa', 'Golden Flames 2026-10-13'));
+  check('a merge whose file move fails: both moves still happen, MERGE_FAILED names the folder (no file name), the run ends with an error',
+        !!failedMerge && !!failedMerge.threw && same(failedMerge.moved.slice().sort(), notGolden) &&
+        /MERGE_FAILED[^\n]*Golden Flames 2026-10-13/.test(failedMerge.text) && !fileNamesIn(failedMerge.text + failedMerge.threw).length,
+        tell(failedMerge));
+  // the clock jumps 7 minutes on each file moved: past the budget (and Apps Script's 6-minute limit) after the first
   const late = A ? runEntry(A, 'ids', { moveAdvanceMin: 7 }) : null;
-  check('the clock past the run\'s time budget after the first move: no further move, TIME_BUDGET logged',
-        !!late && late.attempted.length === 1 && /TIME_BUDGET/.test(late.text),
-        late ? 'moves tried ' + late.attempted.length + '; ' + (late.threw || '') + ' log: ' + late.text.slice(-300) : 'no applier');
+  const lateOps = late ? late.ops.filter(o => o.t - late.t0 >= 6 * MIN) : [];
+  check('the clock past the run\'s time budget after the FIRST file moved: no further Drive write (no file moved, no folder made), ' +
+        'TIME_BUDGET logged',
+        !!late && late.attempted.length === 1 && !lateOps.length && /TIME_BUDGET/.test(late.text),
+        late ? 'files tried ' + late.attempted.length + '; Drive calls after the budget ' + lateOps.length + '; ' + (late.threw || '') +
+               ' log: ' + late.text.slice(-300) : 'no applier');
   const slow = A ? runEntry(A, 'ids', { readAdvanceMin: 3 }) : null;
-  const unreadMoved = slow ? slow.moved.filter(m => ![...slow.read].some(r => m.startsWith(r))) : ['no applier'];
+  const unreadMoved = slow ? slow.moved.filter(m => ![...slow.read].some(r => m.startsWith(r + '/')))
+                                 .concat(slow.created.filter(c => ![...slow.read].some(r => r.slice(2) === c.slice(2)))) : ['no applier'];
   check('reading slow (3 minutes a subfolder): it stops reading new subfolders well before the budget and logs TIME_BUDGET',
         !!slow && slow.read.size < SOURCE_SUBS && /TIME_BUDGET/.test(slow.text),
         slow ? 'read ' + slow.read.size + ' of ' + SOURCE_SUBS + '; ' + (slow.threw || '') + ' log: ' + slow.text.slice(-300) : 'no applier');
-  check('…and nothing it did not read is moved', !!slow && !unreadMoved.length, unreadMoved.join(', '));
+  check('…and nothing it did not read is moved, nor a folder made for it', !!slow && !unreadMoved.length, unreadMoved.join(', '));
   for (const [what, opt] of [['TARGET_FOLDER_AFRICA is a folder named "Africa photos"', { targetName: { Africa: 'Africa photos' } }],
                              ['TARGET_FOLDER_ASIA is a folder named "asia"', { targetName: { Asia: 'asia' } }],
                              ['SOURCE_FOLDER_AFRICA is a folder named "Attendance photos - Africa (old)"',
                               { sourceName: { Africa: 'Attendance photos - Africa (old)' } }]]) {
     const r = A ? runEntry(A, 'ids', opt) : null;
-    check(what + ': CONFIG refused, and no move at all (not even the other regions\')',
-          !!r && /CONFIG refused/.test(r.threw + '\n' + r.text) && !r.attempted.length,
-          r ? 'threw: ' + (r.threw || 'no') + '; moves tried ' + JSON.stringify(r.attempted) : 'no applier');
+    check(what + ': CONFIG refused, and no Drive write at all (not even the other regions\')',
+          !!r && /CONFIG refused/.test(r.threw + '\n' + r.text) && !r.attempted.length && !r.created.length && !r.ops.length,
+          r ? 'threw: ' + (r.threw || 'no') + '; moves tried ' + JSON.stringify(r.attempted) + '; made ' + JSON.stringify(r.created) +
+              '; Drive calls ' + r.ops.length : 'no applier');
   }
 }
 
@@ -799,8 +987,11 @@ const readJson = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } c
   check('oauthScopes are exactly what the code uses: Drive, plus script.scriptapp iff it uses ScriptApp',
         !!scopes && need.includes(DRIVE_SCOPE) && same(scopes, need), 'declared ' + JSON.stringify(scopes) + ', needed ' + JSON.stringify(need));
   const adv = ((manifest && manifest.dependencies && manifest.dependencies.enabledAdvancedServices) || []);
-  check('advanced services: the Drive service exactly when the code calls Drive.*, nothing else',
-        !!manifest && adv.every(a => a.serviceId === 'drive') && (adv.length > 0) === usesDrive, JSON.stringify(adv));
+  const a0 = adv[0] || {};
+  check('the advanced Drive service is enabled for the code\'s Drive.* calls (#132): exactly one entry, userSymbol Drive, ' +
+        'serviceId drive, version v3',
+        !!manifest && usesDrive && adv.length === 1 && a0.userSymbol === 'Drive' && a0.serviceId === 'drive' && a0.version === 'v3',
+        'code calls Drive.*: ' + usesDrive + '; enabledAdvancedServices ' + JSON.stringify(adv));
   check('no web app or API executable (nothing reachable by a link)',
         !!manifest && !('webapp' in manifest) && !('executionApi' in manifest), manifest ? Object.keys(manifest).join(',') : '');
   const known = new Set(['DriveApp', 'ScriptApp', 'PropertiesService', 'LockService']);
