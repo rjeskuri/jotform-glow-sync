@@ -1,7 +1,7 @@
 ---
 title: Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them
 author: Claude (with Ryan's answers of 2026-10-22)
-status: in-progress      # ticket #101; the four fields deployed 2026-10-24 (Result); the check found the delay formula a day short before ~07:00 UTC, so Submission_Delay_Days__c is redeployed alone with the corrected text on Ryan's go; tasks #102 and #103 add their steps here
+status: done           # ticket #101; the four fields live since 2026-10-24, the delay field's UTC fix redeployed the same day; the check reads OK (Result)
 created: 2026-10-23
 intent: Ryan, 2026-10-22 (GLOW staff meeting, epic #93) - bring into Salesforce "the time the Jotform form was submitted AND which month/week the session belongs to (e.g. week 2, week 3), displayable in reports, so upper-level staff can see which clubs haven't submitted for a week, or have a big delay between session and submission"
 ---
@@ -239,3 +239,8 @@ fields when they are deleted. Revert this ticket's RUNBOOK section with it;
   `Submission_Delay_Days__c` is redeployed alone - its field file in a build of its own,
   check-only, Ryan's go, deploy, read-back, and the check to every differ count 0; that result
   follows here. Nothing reads the field yet (tasks #102 and #103).
+- 2026-10-24: the delay field redeployed alone, on Ryan's go: check-only `0AfRP000002i4Jh0AI`,
+  deploy `0AfRP000002i4LJ0AY` (06:59 UTC, 1 component, 0 errors), built from a fresh retrieve of
+  what was live (`build2/`, one line changed: the formula). Read-back `after2/` equals `build2/`.
+  `tools/sf_session_timing.py check --vpn-off`: `checked 1123 batches; differ: Submitted_At__c 0,
+  Submission_Delay_Days__c 0, Session_Month__c 0, Session_Week__c 0 -> OK`.

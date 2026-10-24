@@ -3393,9 +3393,9 @@ sharing stays as it is"):
   Salesforce checks; a question about a batch's session week or its delay.
 - **Status:** the four formula fields are live since 2026-10-24 (deploy `0AfRP000002i4Er0AI`,
   06:41 UTC, Ryan's go). The first delay formula was a day short for submissions before about
-  07:00 UTC (the check: 153 of 1,123 batches), so `Submission_Delay_Days__c` is redeployed alone
-  with the corrected text on Ryan's go; the [plan](plans/2026-10-23-submission-timing.md)'s
-  `status:` and Result say where that stands.
+  07:00 UTC (the check: 153 of 1,123 batches); `Submission_Delay_Days__c` was redeployed alone
+  with the corrected text the same day (deploy `0AfRP000002i4LJ0AY`, 06:59 UTC), and the check
+  reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result).
 - **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
   is read-only.
 - **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
