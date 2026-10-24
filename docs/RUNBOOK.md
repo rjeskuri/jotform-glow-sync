@@ -30,6 +30,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Translations](#translations)
   - [Links above Submit (problem report, Club Roster Form)](#links-above-submit-problem-report-club-roster-form)
   - [Rosters above Submit](#rosters-above-submit)
+  - [Session notes on the attendance forms](#session-notes-on-the-attendance-forms)
   - [Header logo](#header-logo)
   - [Photos](#photos)
   - [Photo mover](#photo-mover)
@@ -1024,7 +1025,11 @@ by a test to the table in "The forms"):
 | `problem` | `somethingNotWorking` (q443) | Click here to report a problem | the problem-report form |
 
 The Club Roster Form link sits above the problem link, so a mentor with a
-roster change meets it first. Adding, re-checking or removing one:
+roster change meets it first. Place it only after the session-notes field
+(task #105; "Session notes on the attendance forms"): the notes go on first,
+because placing this link leaves Submit sharing an order with the hidden field
+below it, and `add_session_notes.py` then refuses on the tie. Adding,
+re-checking or removing one:
 
 ```bash
 python3 backup_forms.py                                           # optional: the tool snapshots each form it writes
@@ -1091,6 +1096,62 @@ python3 tools/fix_roster_order.py --form <id> --undo <stamp>             # the r
 
 The full procedure - the runner paused, what the tool refuses, how it stops and
 what `--undo` can still restore: [plan](plans/2026-09-29-rosters-above-submit.md#from-the-runbook-moved-2026-10-09).
+
+## Session notes on the attendance forms
+
+- **When:** placing, re-checking or removing the optional session-notes field; `form_status` says `session notes: absent` once the field is expected, or flags one (`!!` lines naming `sessionNotes`).
+- **Status:** built, not live (ticket #104, 2026-10-23). Task #105 places it on the template and the four regional forms on Ryan's go, after a read-only `GET /form/{id}/questions` of a live textarea confirms the limit property (`entryLimit`, `Letters-1000`: the name from Jotform's own example, the value from the runtime; not yet read from this account), and flips `glow/layout.py` `NOTES_EXPECTED` to `True`.
+- **Dry run:** `python3 tools/add_session_notes.py`.
+- **Apply:** its `--apply`, the template first; the label's translations are a second step (task #105): until then every language shows it in English.
+- **Verify:** the tool's re-read after the write; `form_status` (`session notes:`, `layout:`).
+- **Rollback:** `--remove --apply`, the questions snapshot, or Revision History.
+
+One textarea named `sessionNotes` on every attendance form, found by its name
+(the qid differs per form): the label "Additional information about this
+session (optional)", no sub-label, 1,000 characters, not required, not hidden,
+no rule (Ryan's answers, 2026-10-22; `glow/layout.py` `NOTES_PROPS`). It sits
+after the last roster and above the links and Submit, so a mentor meets it
+once her girls are ticked. The sync leaves it alone: no generated rule names
+it, `--prune` deletes rosters only, and a roster the sync creates afterwards
+goes above it (the field is the first element of the fence `glow/layout.py`
+guards, like the links and Submit; test-pinned). Mentors' notes are free text
+that can name girls: no tool prints a submission's notes, counts only.
+
+```bash
+python3 tools/add_session_notes.py                                # dry run, template + 4 regionals
+python3 tools/add_session_notes.py --form 262352490535154 --apply # the template first; open its page
+python3 tools/add_session_notes.py --apply                        # the four regional forms
+python3 tools/add_session_notes.py --remove --apply               # take it out again (the rollback)
+```
+
+The tool plans all five forms before it writes any. The field goes at an
+empty order between the last roster and the first link, where nothing moves
+whether Jotform inserts or ties. The live forms have none today (the
+2026-09-30 repair put the links, Submit and the hidden bridge fields at the
+orders right after the last roster, and every roster inserted since kept them
+there), so the tool first makes room the way `add_feedback_link.py` does
+(Ryan, 2026-10-23): the first link through Submit and the hidden fields at the
+orders right after move one down, bottom-up so each lands on an empty order
+(the path Jotform keeps exactly), then one create at the freed order - about
+ten writes per form, each printed as `move <name> (qN) a -> b`. So the
+sequence matters: **the session notes go on before the Club Roster Form link**
+(`add_feedback_link.py --link roster`, BACKLOG 46; "Links above Submit"), whose
+placing leaves Submit sharing an order with the hidden field below it. After
+that link the tool refuses on the tie, naming both questions: take the link
+out (`--link roster --remove --apply`), add the notes, then place the link
+again - it goes directly above the problem link, below the notes
+(test-pinned). Refuses rather than guesses: two fields of the name, the field
+below a link or Submit or a roster below it (move it in the builder, or
+`--remove --apply` and add it again), a hidden link or Submit, anything a
+mentor can see between the last roster and Submit besides the links and
+Submit, two questions of the tail sharing an order. A drifted flag or text
+(`required`, `hidden`, the label, the limit, a sub-label) is set back in place
+in one write (`UPDATE <property>: old -> new`); re-running is a no-op. With
+`--apply` each form is snapshotted first (`backups/<id>/questions-<stamp>.json`),
+then re-read: the field exactly once, its properties, every move landed, its
+place, no rule mentioning it - a mismatch stops the tool there, non-zero,
+naming that form's snapshot; the forms after it are neither snapshotted nor
+written, the forms before it stay written and verified.
 
 ## Header logo
 
@@ -2579,12 +2640,12 @@ or a command line.
 | `… - not created`: club code on another account | The club was renamed in the sheet, not in Salesforce | Rename that account to the question-5 name first ("Renaming a club"); no new account |
 | `… - not created`: the name is already an account | The processor made it first, or another record has the name | A partner-less Club: set its `ParentId` as the item says (write connector, Ryan's go). Anything else: look before acting. |
 | `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
-| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds |
+| `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds. Check its account name against the Monthly Reports' "test" filter ("The keep list") |
 | `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
 | `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
 | `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
 | `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
-| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv` |
+| `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv`; check the new name against the Monthly Reports' "test" filter ("The keep list") |
 
 **SF Pending**: when it creates an account, the run marks that club's SF Pending row
 `done (auto <date>)`: one cell, found by its header, read again before the write and after.
@@ -3134,7 +3195,8 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
     (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
     map the automatic club accounts read, partner → its account; "New clubs' accounts,
     automatically"). Two lists of the same 49 partners, kept separate on purpose: one is filter
-    text, the other account ids.
+    text, the other account ids. Check its account name against the Monthly Reports' "test"
+    filter ("The keep list").
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -3557,6 +3619,114 @@ The archive rule:
   `JSON_PARSER_ERROR`), so Ryan does it by hand in Lightning: in the dashboard's Properties
   (Name, Description, Folder) he sets the name and the description `copy of <source id>,
   #<ticket>`, and moves it with its Move action; the Id stays the same, checked with SOQL.
+
+### The keep list
+
+`glow/sf_keep_list.csv` is GLOW's keep list (the GLOW team via Ryan, 2026-10-21) mapped to what
+is in the org today, as Ryan agreed it on ticket #70 (2026-10-23; DECISIONS 2026-10-23). The
+list has 19 items: 18 reports in five groups, and one table. The file has a row for each item and
+for each of the five dashboards, with the header `item,group,measure,kind,id,label_today,label_target`:
+GLOW's measure verbatim, the kind (`report`, `table` or `dashboard`), the 18-character Id of the
+report or dashboard the item is today, and its label. It holds report and dashboard Ids and names
+only, never record data. Tasks #71 to #73 build their move plans from it.
+
+The five groups are the five Monthly Report dashboards (D1 to D5 in the file), each mapped to the
+dashboard that becomes it:
+- D1, the GLOW Club Attendance dashboard: "Glow Club Attendance" (`01ZRP000006iWqL2AU`), items 1-4.
+- D2, the GLOW Club Implementation dashboard: "Implementation Dashboard" (`01ZRP000006jU9o2AE`),
+  items 5-8.
+- D3, the GLOW Club Observations dashboard: the dashboard named "GLOW Club Training" today
+  (`01ZRP000006k2D32AI`), items 9-11. Five of its nine components are observations, and no
+  dashboard today is about observations alone.
+- D4, the GLOW Club Training dashboard: "Mentors" (`01ZRP000006quAj2AI`), items 12-16. The group
+  "GLOW Club Training" is this dashboard, D4, and the dashboard named "GLOW Club Training" is D3:
+  the file's Ids tell them apart.
+- D5, the GLOW Club Reporting dashboard: "Reporting" (`01ZRP000006oxSr2AI`), items 17 and 18.
+
+Item 19, "GLOW of the Month Stories" (group "Report/Data Table Format"), is the report "GLOW of the
+Month Stories Report_2025" (`00ORP000005p2L32AI`). It is the table: a tabular report on no
+dashboard, and it stays tabular, not grouped (below). Item 12, "New mentors recruited", has no report today: task #80 builds
+it, and the file reads `new` for its Id. Item 18, "Report submitted on time", maps to "Reports
+completed on time" (`00ORP0000054DyH2AU`), which lists submission and modified dates; no report
+computes "on time" today, and that computation is a later task, on hold (#119).
+
+Every kept report and dashboard is by Partner and Month (Ryan, 2026-10-21: "This data should be
+displayed by the Partner and Month."): the 18 reports of the five dashboards are grouped by the
+partner (`DHIS2__c.Account__c`) and the month. Item 19, the table, is the one exception to the
+grouping: it stays a tabular report, not grouped, with Partner and Month as its columns and
+filters. Tasks #75 to #79 bring each dashboard and its reports to that, with current data; #79
+("Fix GLOW Club Reporting and the GLOW of the Month table") does item 19 too.
+
+Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
+`label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
+keep the dashboard names listed above. Item 12 has no label today; its `label_target` is GLOW's
+measure, "New mentors recruited", which #80 confirms when it builds the report.
+
+Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
+a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's three folders, which
+task #72 moves: every report in "DHIS2 Reports" and every dashboard in "DHIS2 Dashboards" and
+"Dhis2 Dashbords" whose Id is not in the file; the archive rule above holds for each move. Two
+reports outside those folders are on one of their 15 dashboards today and not in the file, both in
+"Public Reports": "Pending Approvals monthly report" (`00ORP000006XSy92AG`) and "New Monthly
+Reports by account" (`00ORP000006V09x2AC`); the third "Public Reports" report on a dashboard is
+item 17, kept. Those two sit outside #72's folders, and Ryan decides on #72 whether they move. The
+two Attendance folders and the "Jotform Attendance" dashboard
+are outside the scope: epic #68 leaves them untouched.
+
+Test records are Monthly Reports filed on a test account or on no account. The test-record rule
+is one report filter on existing fields, applied to every kept report:
+`Account is not blank AND Account: Account Name does not contain "test"` (Ryan, 2026-10-23). On
+the count of 2026-10-23 it excludes the five Monthly Reports of the two test accounts and the six
+with a blank Account, and no real partner's. `Partner_Status__c` is not the rule: it is blank on
+four real partners with 23 Monthly Reports, the same as on the test accounts. Tasks #75 to #79
+add the filter as they fix each dashboard, and #79 adds it to item 19, the table, too. The filter
+matches a substring: a partner whose account name contains "test" (a "Contest" or "Protestant"
+partner, say) would drop out of every kept report, so a new partner's account name (its line in
+`glow/sf_partners.csv`, RUNBOOK "Club accounts in Salesforce") is checked against the filter
+when the partner is added.
+
+### Copying and moving reports and dashboards
+
+`tools/sf_report_folders.py` (ticket #71) makes the copies and the moves of the archive rule
+above through the Analytics API, exactly as the API proof sent them. It never deletes, and it
+reads `Folder`, `Report`, `Dashboard` and `DashboardComponent` only, never a record. Every
+subcommand needs `--vpn-off`; `copy`, `move` and `undo` are dry runs until `--apply` (Ryan's go,
+the live gate asks him). The folders named "Attendance" are never a source or a target.
+
+- List what a folder holds (read-only; CSV on stdout, the counts on stderr, which must equal SOQL's
+  `SELECT OwnerId, COUNT(Id) FROM Report GROUP BY OwnerId` for that folder):
+  `python3 tools/sf_report_folders.py list --vpn-off --folder "DHIS2 Reports" [--folder "Dhis2 Dashbords"] [--kind report|dashboard]`.
+  The `used_by` column lists the dashboards with a component on each report.
+- Copy one report or dashboard into Decommissioned before it changes:
+  `python3 tools/sf_report_folders.py copy --vpn-off --kind report --id <id> --tag "#72"`, read
+  the line it prints, then the same with `--apply`. A report's copy keeps its label (cut to 40
+  characters) and gets the description `copy of <id>, <tag>` by a PATCH of the copy once the
+  clone reads back in Decommissioned (the API proof's steps); a refused PATCH stops with the copy's
+  id in its `failed` ledger row. A dashboard's copy keeps its title
+  and has no description (the API refuses both): set them by hand in Lightning if wanted.
+- Move (and relabel) reports by a plan, a CSV with the columns `kind,id,to_folder,new_label`
+  (`to_folder` a folder name, exactly one report folder of that name; a blank `new_label` keeps
+  the label; a label is at most 40 characters, and a report whose current label is longer moves
+  only with its label kept, since undo could not put that label back):
+  `python3 tools/sf_report_folders.py move --vpn-off --plan <plan.csv>` (the dry run: one line per
+  row with the current label and folder and the change), then `--apply --limit 1` first, check
+  that report in Salesforce, then `--apply` for the rest. The whole plan is checked before the
+  first write: a report that a dashboard outside Decommissioned still uses is refused a move to
+  Decommissioned. Each move keeps the report's Id and is read back by SOQL; a read-back that
+  differs stops the run.
+- Dashboards are moved and renamed by hand in Lightning (the API proof: Salesforce refuses every
+  dashboard `PATCH`, 400 `JSON_PARSER_ERROR`); a plan row of kind `dashboard` is refused. Check
+  the hand move with SOQL on `Dashboard` (the same Id, `FolderName` following).
+- The ledger `data/sf_report_folders/ledger.csv` (owner only, never committed) holds one row per
+  write: the item, its folder and label before and after, a copy's id and tag, the status and the
+  HTTP code. The row is on disk as `sending` before the request and rewritten in place as `ok` or
+  `failed`; a row left `sending` (the run died) has an unknown outcome, and undo puts that move back.
+- Undo: `python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv`
+  (the dry run), then with `--apply` (`--limit N` undoes the last N only). It puts each move back
+  to its old folder and label, last first, and adds an `undo` row for each; a move Salesforce
+  refused (HTTP 4xx) never moved and is left as it is, and a move already undone is not undone
+  again. Copies stay in
+  Decommissioned.
 
 ## Interactive dashboard in Salesforce
 
