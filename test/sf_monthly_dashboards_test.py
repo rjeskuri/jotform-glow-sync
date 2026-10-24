@@ -19,6 +19,11 @@ test-record filter; a dated DECISIONS entry records the keep list, Ryan's words,
 rejected (`Partner_Status__c` with its reason). Each rule is checked as stated, not negated, rejected,
 renamed, put off or softened, with #69's `locally_denied` and `contradictions`.
 
+CategoryFoldersDocs (ticket #73): one report folder "GLOW Monthly Reports" and one dashboard folder
+"GLOW Monthly Dashboards" (Ryan, 2026-10-21) for the kept items; the RUNBOOK's `### The five
+dashboards and their folders` table (read against `glow/sf_keep_list.csv`), the folders' shares
+copied from the DHIS2 folders (internal only), the plan (deploy, copies before moves, SOQL check,
+undo) and a dated bullet on the keep-list DECISIONS entry. Labels do not change (Ryan, 2026-10-23).
 RetiredReportsDocs (ticket #72): the RUNBOOK's `### Decommissioned` records the retirement (its date, 29
 reports and 10 dashboards moved, the 19 held for #75-#79, the ledger `data/sf_retire_2026-10-23/ledger.csv`)
 and how to bring an item back; the plan `docs/plans/<date>-sf-retire-reports.md` names #72, its Rollout has
@@ -977,6 +982,373 @@ class RetiredReportsDocs(unittest.TestCase):
         self.assertCountsTrue(result_raw, where)
         self.assertNoHedge(result_raw, where)
         self.d.assertNoContradiction(result_raw, where)
+
+
+class CategoryFoldersDocs(unittest.TestCase):
+    """Ticket #73: the kept reports and dashboards (`glow/sf_keep_list.csv`) go into their folders. Ryan,
+    2026-10-21: ONE report folder and ONE dashboard folder, not eleven per-category folders; the five groups
+    stay as categories (the RUNBOOK table's rows), and item 19 ("Report/Data Table Format") goes in the same
+    report folder. The names proposed on the ticket: report folder "GLOW Monthly Reports" (`ReportFolder`
+    `GLOW_Monthly_Reports`), dashboard folder "GLOW Monthly Dashboards" (`DashboardFolder`
+    `GLOW_Monthly_Dashboards`). Ryan, 2026-10-23: labels do NOT change - no relabel step.
+
+    The table's groups, dashboard labels and report counts are read from `glow/sf_keep_list.csv`, not pinned:
+    a group's report count is its rows on GLOW's keep list that are not a dashboard, item 12 ("New mentors
+    recruited", id `new`, built into the folder by #80) included - the table describes GLOW's list (18
+    reports in five dashboards, and the table), not what the org holds on one day."""
+
+    longMessage = False         # the messages say what to fix
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
+    KEEP_LIST = os.path.join(REPO, "glow", "sf_keep_list.csv")
+    PLANS = os.path.join(REPO, "docs", "plans", "*-sf-category-folders.md")
+    MONTHLY = "## Monthly Report dashboards in Salesforce"
+    PART = "### The five dashboards and their folders"
+    TICKET = re.compile(r"(?<![\w#])#73\b")
+    GROUPS = KeepListDocs.GROUPS
+    TABLE_GROUP = "Report/Data Table Format"
+    REPORT_FOLDER, REPORT_DEV = "GLOW Monthly Reports", "GLOW_Monthly_Reports"
+    DASH_FOLDER, DASH_DEV = "GLOW Monthly Dashboards", "GLOW_Monthly_Dashboards"
+    DHIS2_FOLDERS = DecommissionedFoldersDocs.DHIS2_FOLDERS
+    SHARES_API = DecommissionedFoldersDocs.SHARES_API
+    NEGATION = DecommissionedFoldersDocs.NEGATION
+    SF_ID = re.compile(r"\b0[0-9A-Z]{2}[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?\b")
+    # a share outside the org: only ever denied ("Partner and Month" is a grouping, not a share)
+    OUTSIDE = re.compile(r"(?i)\b(guest|portal|community|external|sharing\s+sets?|partners?(?!\s+(and|&)\s+month))\b")
+    # what puts a rule off or makes it temporary or optional, beyond #69's SOFTENER
+    SOFT_TIME = re.compile(r"(?i)\b(at first|for now|initially|to begin with|temporar\w*|for the time being|may|might|"
+                           r"could|now and then|from time to time|occasionally|eventually|later|someday|at some point|"
+                           r"until|not yet)\b")
+    # what makes a check an assumption
+    ASSUMED = re.compile(r"(?i)\b(assum\w*|presum\w*|suppos\w*|believ\w*|probably|likely)\b")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = DecommissionedFoldersDocs()     # #69's helpers: locally_denied, contradictions, denies
+        KeepListDocs.setUpClass()
+        cls.k = KeepListDocs()                  # #70's helpers: assertSameLabels, stated
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def clauses(self, text, ends=".;"):
+        return sentences(self.norm(text), ends)
+
+    def keep_rows(self):
+        import csv
+        with open(self.KEEP_LIST, encoding="utf-8", newline="") as f:
+            return list(csv.DictReader(f))
+
+    def part(self):
+        """The `### The five dashboards and their folders` part of the Monthly Report section."""
+        section = md_part(self.RUNBOOK, self.MONTHLY)
+        m = re.search(r"^" + re.escape(self.PART) + r"(?!\w).*$", section, re.M)
+        self.assertTrue(m, f"RUNBOOK section {self.MONTHLY[3:]!r}: no `{self.PART}` part under it (ticket #73)")
+        rest = section[m.start():]
+        nxt = re.search(r"\n#{1,3} ", rest)
+        return rest[:nxt.start()] if nxt else rest
+
+    @classmethod
+    def cell(cls, text):
+        """A table cell's text: backticks, quotes, bold and Salesforce ids stripped."""
+        text = re.sub(r"\(\s*\)", "", cls.SF_ID.sub("", re.sub(r"[`\"“”*]", "", text)))
+        return flat(text).strip().rstrip(".,;").strip()
+
+    def assertOnlyDenied(self, text, where):
+        """A guest, portal, community, partner or external share, or a sharing set, only ever denied: a negation
+        before it in its clause, and no "but" (or "however", "except", "yet") between."""
+        for s in self.clauses(text, ".;:?!"):
+            for m in self.OUTSIDE.finditer(s):
+                pre = re.split(r"(?i)\bbut\b|\bhowever\b|\bthough\b|\byet\b|\bexcept\b|\bapart from\b", s[:m.start()])[-1]
+                self.assertTrue(self.NEGATION.search(pre),
+                                f"{where}: a {m.group(0)!r} share is only ever denied (never a guest, portal, community "
+                                f"or partner share): {s[:200]!r}")
+
+    def assertNotSoftened(self, text, where):
+        """#69's contradiction sweep (a deletion, a softener), and nothing put off, made temporary or optional."""
+        self.d.assertNoContradiction(text, where)
+        for s in self.clauses(text, ".;:?!"):
+            for m in self.SOFT_TIME.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: the rule holds now and always, not {m.group(0)!r}: {s[:200]!r}")
+
+    def steps(self, raw, where):
+        """The Rollout's numbered steps (`1. …` and their indented lines), without any text before or after."""
+        out, inside = [], False
+        for line in raw.splitlines():
+            if re.match(r"\d+[.)]\s", line):
+                inside = True
+            elif inside and line.strip() and not line[:1].isspace():
+                break
+            if inside:
+                out.append(line)
+        self.assertGreaterEqual(len([x for x in out if re.match(r"\d+[.)]\s", x)]), 3,
+                                f"{where}: the Rollout is a numbered list of steps (`1. …`)")
+        return flat("\n".join(out))
+
+    def table(self, part, where):
+        """(columns, rows) of the first Markdown table in `part`: columns maps group, label, dashboard_folder,
+        report_folder and count to their index; rows are lists of raw cells."""
+        lines = [x.strip() for x in part.splitlines() if x.strip().startswith("|")]
+        self.assertGreaterEqual(len(lines), 3, f"{where}: no Markdown table (header, separator, rows)")
+        split = [[c.strip() for c in x.strip("|").split("|")] for x in lines]
+        header = [self.cell(h).lower() for h in split[0]]
+        self.assertTrue(all(re.fullmatch(r":?-{3,}:?", c) for c in split[1]), f"{where}: the table's second line is "
+                                                                                "its separator (`|---|---|`)")
+        want = {
+            "dashboard_folder": lambda h: "dashboard folder" in h,
+            "report_folder": lambda h: "report folder" in h,
+            "group": lambda h: re.search(r"\bgroup\b", h) and "folder" not in h,
+            "label": lambda h: "dashboard" in h and "folder" not in h and "group" not in h,
+            "count": lambda h: re.search(r"\b(count|number|reports)\b|#", h) and "folder" not in h
+                               and "dashboard" not in h and "group" not in h,
+        }
+        cols = {}
+        for key, ok in want.items():
+            found = [i for i, h in enumerate(header) if ok(h)]
+            self.assertEqual(len(found), 1, f"{where}: the table has one {key.replace('_', ' ')} column (columns: group, "
+                                            f"dashboard label, dashboard folder, report folder, report count); found "
+                                            f"{[split[0][i] for i in found]} in {split[0]}")
+            cols[key] = found[0]
+        rows = split[2:]
+        for r in rows:
+            self.assertEqual(len(r), len(header), f"{where}: row {r!r} has {len(r)} cells, not {len(header)}")
+        return cols, rows
+
+    def row_of(self, rows, cols, group, where):
+        found = [r for r in rows if group in self.cell(r[cols["group"]])]
+        self.assertEqual(len(found), 1, f"{where}: one table row whose group is {group!r} (found {len(found)})")
+        return found[0]
+
+    def plan_path(self):
+        found = sorted(glob.glob(self.PLANS))
+        self.assertEqual(len(found), 1, "docs/plans/: one plan `YYYY-MM-DD-sf-category-folders.md` for ticket #73 "
+                                        f"(found {[os.path.basename(p) for p in found]})")
+        self.assertRegex(os.path.basename(found[0]), r"^\d{4}-\d\d-\d\d-sf-category-folders\.md$",
+                         "docs/plans/: the plan is named `YYYY-MM-DD-sf-category-folders.md`")
+        return found[0]
+
+    def first(self, rx, text, where, what):
+        m = re.search(rx, text)
+        self.assertTrue(m, f"{where}: {what}")
+        return m.start()
+
+    # --- the RUNBOOK ---------------------------------------------------------------------------------------
+
+    def test_the_runbook_lists_the_five_dashboards_and_their_folders(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        part = self.part()
+        cols, rows = self.table(part, where)
+        keep = self.keep_rows()
+        self.assertEqual(len(rows), len(self.GROUPS) + 1, f"{where}: the table has six rows, the five groups and "
+                                                          f"{self.TABLE_GROUP!r} (found {len(rows)})")
+        for group in self.GROUPS + (self.TABLE_GROUP,):
+            r = self.row_of(rows, cols, group, where)
+            at = f"{where}, row {group!r}"
+            count = sum(1 for k in keep if k["group"] == group and k["kind"] != "dashboard")
+            self.assertRegex(self.cell(r[cols["count"]]), r"^\d+$",
+                             f"{at}: the report count cell is a number alone, not {r[cols['count']]!r}")
+            self.assertEqual(int(self.cell(r[cols["count"]])), count,
+                             f"{at}: the report count is {count}, its rows on `glow/sf_keep_list.csv` (item 12 "
+                             f"included), not {r[cols['count']]!r}")
+            self.assertEqual(self.cell(r[cols["report_folder"]]), self.REPORT_FOLDER,
+                             f"{at}: the report folder is {self.REPORT_FOLDER!r} exactly (one report folder for every "
+                             f"kept report, Ryan 2026-10-21), not {r[cols['report_folder']]!r}")
+            if group == self.TABLE_GROUP:
+                self.assertIn("GLOW of the Month Stories", self.cell(" ".join(r)),
+                              f"{at}: name item 19, \"GLOW of the Month Stories\"")
+                self.assertRegex(self.cell(r[cols["dashboard_folder"]]), r"^[-—–]?$",
+                                 f"{at}: the table is in no dashboard; its dashboard folder cell is blank or a dash, "
+                                 f"not {r[cols['dashboard_folder']]!r}")
+                continue
+            dash = [k for k in keep if k["group"] == group and k["kind"] == "dashboard"]
+            self.assertEqual(len(dash), 1, f"glow/sf_keep_list.csv: one dashboard row for {group!r}")
+            label = self.cell(r[cols["label"]])
+            self.assertEqual(label, dash[0]["label_today"],
+                             f"{at}: the dashboard label is its current label {dash[0]['label_today']!r} "
+                             f"({dash[0]['item']} in `glow/sf_keep_list.csv`; labels do not change, Ryan 2026-10-23), "
+                             f"not {label!r}")
+            self.assertEqual(self.cell(r[cols["dashboard_folder"]]), self.DASH_FOLDER,
+                             f"{at}: the dashboard folder is {self.DASH_FOLDER!r} exactly (one dashboard folder for the "
+                             f"five dashboards, Ryan 2026-10-21), not {r[cols['dashboard_folder']]!r}")
+        text = self.norm(part)
+        for kind, dev in (("ReportFolder", self.REPORT_DEV), ("DashboardFolder", self.DASH_DEV)):
+            self.assertTrue([s for s in self.clauses(part) if kind in s and re.search(r"\b%s\b" % dev, s)],
+                            f"{where}: give the {kind} DeveloperName `{dev}` (a sentence naming `{kind}` and `{dev}`)")
+        others = set(re.findall(r"\bGLOW_Monthly_\w+", flat(part))) - {self.REPORT_DEV, self.DASH_DEV}
+        self.assertFalse(others, f"{where}: the DeveloperNames are `{self.REPORT_DEV}` and `{self.DASH_DEV}`, not "
+                                 f"{sorted(others)}")
+        self.assertNotRegex(text, r"\bGLOW_Club_(Attendance|Implementation|Observations|Training|Reporting)\b",
+                            f"{where}: no per-category folder (Ryan, 2026-10-21: one report folder and one dashboard "
+                            "folder)")
+        self.k.assertSameLabels(text, where)
+
+    def test_the_new_folders_are_shared_with_internal_users_only(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        part = self.part()
+        text = self.norm(part)
+        cl = self.clauses(part)
+        for folder in self.DHIS2_FOLDERS + (self.REPORT_FOLDER, self.DASH_FOLDER):
+            self.assertIn(folder, text, f"{where}: name the folder {folder!r}")
+        share = re.compile(r"(?i)\bshar(e|es|ed|ing)\b")
+        copies = [s for s in cl if re.search(r"(?i)\bdhis2\b", s)
+                  and (all(f in s for f in self.DHIS2_FOLDERS) or re.search(r"(?i)\bunion\b|\ball three\b", s))
+                  and not re.search(r"(?i)\balone\b|\bignor\w*|\bonly one\b|\bjust one\b|\bexcept\b|\bexclud\w*|"
+                                    r"\bbut not\b", s)
+                  and re.search(r"(?i)\bcop(y|ies|ied)\b|\bsame\b", s)
+                  and any(not self.d.locally_denied(s, m) for m in share.finditer(s))]
+        self.assertTrue(copies, f"{where}: say, in one sentence, the new folders copy the shares of all three DHIS2 "
+                                "folders (the union of \"DHIS2 Reports\", \"DHIS2 Dashboards\" and \"Dhis2 Dashbords\"), "
+                                "not negated and not one of them alone")
+        same = [s for s in cl if share.search(s) and re.search(r"(?i)\bsame\b|\bidentical\b", s)
+                and re.search(r"(?i)\bboth\b|\btwo\b", s) and "Decommissioned" not in s]
+        self.assertTrue(same, f"{where}: say both new folders get the same shares as each other (a dashboard's viewers "
+                              "need its reports' folder), not the Decommissioned folders' (they have none)")
+        internal = re.compile(r"(?i)\binternal\s+users\b[^.;]{0,30}?\bgroups\b")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bonly\b", s)
+                         and any(not self.d.locally_denied(s, m) for m in internal.finditer(s))],
+                        f"{where}: say the new folders are shared with internal users and groups only")
+        self.assertTrue([s for s in cl if all(re.search(r"(?i)\b%s\b" % w, s) for w in ("guest", "portal", "community",
+                                                                                         "partner"))],
+                        f"{where}: say never a guest, portal, community or partner share, in one sentence")
+        self.assertOnlyDenied(part, where)
+        self.assertTrue([s for s in cl if self.SHARES_API.search(s)
+                         and re.search(r"(?i)\b(check\w*|read\w*|confirm\w*|verif\w*)\b", s)],
+                        f"{where}: say the shares are checked through the shares API, in one sentence")
+        self.assertNotSoftened(part, where)
+
+    def test_the_runbook_quotes_item_19_as_the_org_labels_it(self):
+        # the org's label for 00ORP000005p2L32AI (SOQL, 2026-10-23): "GLOW of the Month Stories Report"
+        row = [k for k in self.keep_rows() if k["item"] == "19"][0]
+        text = self.norm(md_part(self.RUNBOOK, self.MONTHLY))
+        self.assertNotIn("Report_2025", text, f"RUNBOOK section {self.MONTHLY[3:]!r}: item 19's label is \"GLOW of "
+                                              "the Month Stories Report\" in the org, not \"…Report_2025\"")
+        self.assertIn(row["label_today"], text, f"RUNBOOK section {self.MONTHLY[3:]!r}: quote item 19's label as "
+                                                f"`glow/sf_keep_list.csv` gives it, {row['label_today']!r}")
+
+    # --- the plan ---------------------------------------------------------------------------------------------
+
+    def test_a_plan_carries_the_folder_deploy_copies_and_moves(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        word, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertNotEqual(word, "superseded", f"{name}: the plan is the change in force")
+        self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
+                         f"{name}: name ticket #73 in the frontmatter, the title or the opening paragraph")
+        self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        raw = {}
+        for heading, least in (("## Rollout", 40), ("## Rollback", 15)):
+            part = md_part(path, heading)
+            raw[heading] = part.split("\n", 1)[1] if "\n" in part else ""
+            body = self.norm(raw[heading])
+            self.assertNotRegex(body, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: `{heading}` is a placeholder")
+            distinct = {w.lower() for w in re.findall(r"[A-Za-z]\w*", body)}
+            self.assertGreaterEqual(len(distinct), least,
+                                    f"{name}: `{heading}` says too little (at least {least} distinct words)")
+        where = f"{name}: `## Rollout`"
+        flat_out = flat(raw["## Rollout"])          # dots kept: `tools/sf_report_folders.py move`
+        cl = self.clauses(raw["## Rollout"])
+        for folder in (self.REPORT_FOLDER, self.DASH_FOLDER):
+            self.assertIn(folder, flat_out, f"{where}: name the new folder {folder!r}")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bretriev\w*", s) and re.search(r"(?i)\bdhis2\b", s)
+                         and not self.d.denies(s)],
+                        f"{where}: the folder build starts from a retrieve of the DHIS2 folders (one sentence)")
+        self.assertTrue([s for s in cl if re.search(r"(?i)check-only[^.;]*?\bdeploy", s) and not self.d.denies(s)],
+                        f"{where}: validate check-only before the deploy (one sentence, in that order)")
+        self.assertRegex(flat_out, r"Ryan['’]s go\b", f"{where}: the deploy and each `--apply` wait for Ryan's go")
+        self.assertRegex(flat_out, r"\bafter/", f"{where}: the read-back retrieves into `after/` and compares")
+        self.assertRegex(flat_out, self.SHARES_API, f"{where}: the read-back reads each new folder's shares through "
+                                                    "the shares API")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s
+                         and DecommissionedFoldersDocs.REPORT_AND_DASHBOARD.search(s) and not self.d.denies(s)],
+                        f"{where}: each kept report and dashboard is copied into Decommissioned (one sentence)")
+        # the order, read in the numbered steps only (a preface listing the steps proves nothing)
+        steps = self.steps(raw["## Rollout"], where)
+        check_only = self.first(r"(?i)check-only", steps, where, "no check-only in the numbered steps")
+        deploys = [s for s in sentences(steps, ".;,") if re.search(r"(?i)\bdeploy", s)
+                   and not re.search(r"(?i)check-only|--dry-run|\bvalidat", s)]
+        self.assertTrue(deploys, f"{where}: no deploy step (after the check-only, on Ryan's go)")
+        self.assertLess(check_only, steps.index(deploys[0]), f"{where}: the check-only comes before the deploy")
+        copies = [m.start() for m in re.finditer(r"sf_report_folders\.py\s+copy\b", steps)]
+        moves = [m.start() for m in re.finditer(r"sf_report_folders\.py\s+move\b", steps)]
+        self.assertTrue(copies, f"{where}: the copies into Decommissioned by `tools/sf_report_folders.py copy` (a step)")
+        self.assertTrue(moves, f"{where}: the report moves by `tools/sf_report_folders.py move` (a step)")
+        self.assertLess(check_only, copies[0], f"{where}: the folders are deployed (check-only, go, deploy) before the "
+                                               "copies")
+        self.assertLess(copies[-1], moves[0], f"{where}: every copy into Decommissioned comes BEFORE the first move "
+                                              "(copy, then move)")
+        dry = [m.start() for m in re.finditer(r"(?i)\bdry[- ]run\b", steps) if m.start() > copies[-1]]
+        limit = [m.start() for m in re.finditer(r"--limit 1\b", steps)]
+        self.assertTrue(dry and limit and dry[0] < limit[0] < moves[-1],
+                        f"{where}: after the copies, the moves go dry run, then `--limit 1`, then the rest (the last "
+                        "`move` step), in that order in the numbered steps")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bdashboards?\b", s) and re.search(r"(?i)\bmov\w*", s)
+                         and re.search(r"(?i)\bby hand\b|\bLightning\b", s) and not self.d.denies(s)
+                         and self.DASH_FOLDER in s
+                         and not re.search(r"(?i)dhis2", re.sub(r"(?i)\bfrom\s+(the\s+)?[`\"“]?(DHIS2|Dhis2)", "", s))],
+                        f"{where}: the dashboards are moved by hand in Lightning (the API refuses a dashboard PATCH) "
+                        f"to {self.DASH_FOLDER!r}, not to a DHIS2 folder (one sentence)")
+        soql = [s for s in cl if "SOQL" in s and re.search(r"\bId\b|\bIds\b", s) and re.search(r"(?i)\bfolder\b", s)
+                and re.search(r"(?i)\blabels?\b[^.;]{0,40}?\b(unchanged|the same)\b", s)]
+        self.assertTrue(soql, f"{where}: check by SOQL that each kept Id is in its folder with its label unchanged "
+                              "(one sentence)")
+        self.assertTrue([m for m in re.finditer(r"SOQL", steps) if m.start() > moves[-1]],
+                        f"{where}: the SOQL check comes after the moves (a later step)")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bdhis2\b", s) and re.search(r"(?i)\bkept\b", s)
+                         and re.search(r"(?i)\b(no|none|nothing|empty)\b", s)
+                         and re.search(r"(?i)\b(SOQL|quer\w*|confirm\w*|check\w*|verif\w*)\b", s)
+                         and not self.ASSUMED.search(s)],
+                        f"{where}: check (SOQL) that the three DHIS2 folders hold no kept item, not assume it (one "
+                        "sentence)")
+        self.k.assertSameLabels(self.norm(raw["## Rollout"]), where)
+        self.d.assertNoContradiction(raw["## Rollout"], where)
+        where = f"{name}: `## Rollback`"
+        cl = self.clauses(raw["## Rollback"])
+        self.assertTrue([s for s in cl if re.search(r"\bundo\b", s) and "ledger" in s and not self.d.denies(s)],
+                        f"{where}: the reports go back by `undo` from the ledger (`data/sf_report_folders/ledger.csv`)")
+        self.assertRegex(flat(raw["## Rollback"]), r"(?<![\w/.-])data/sf_report_folders/ledger\.csv(?![\w/-]|\.\w)",
+                         f"{where}: name the ledger `data/sf_report_folders/ledger.csv` exactly")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bdashboards?\b", s) and re.search(r"(?i)\bback\b", s)
+                         and re.search(r"(?i)\bby hand\b|\bLightning\b", s) and not self.d.denies(s)],
+                        f"{where}: the dashboards are moved back by hand in Lightning")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bfolders?\b", s)
+                         and re.search(r"(?i)\b(left|leave|stays?|remains?|kept)\b[^.;]{0,30}?\bin place\b", s)],
+                        f"{where}: the new folders are left in place, not deleted")
+        self.assertNotSoftened(raw["## Rollback"], where)
+        self.assertOnlyDenied(raw["## Rollback"], where)
+
+    # --- DECISIONS --------------------------------------------------------------------------------------------
+
+    def test_a_decision_records_one_report_folder_and_one_dashboard_folder(self):
+        e = self.k.decision()
+        where = f"docs/DECISIONS.md {e.split(chr(10), 1)[0][4:14]} (the keep list)"
+        bullets = re.findall(r"(?m)^[ \t]*- .*(?:\n(?![ \t]*- |\n|#).*)*", e)
+        dated = [flat(b) for b in bullets if re.match(r"-\s+\W{0,3}(\w+,?\s+){0,2}?2026-10-2[3-9]\b", flat(b))]
+        self.assertTrue(dated, f"{where}: no dated bullet (`- 2026-10-23: …`) on the entry")
+        good = []
+        for b in dated:
+            one = [re.search(r"(?i)\b(one|a single|single)\s+%s folder\b" % k, b) for k in ("report", "dashboard")]
+            if (all(one) and not any(self.d.locally_denied(b, m) for m in one)
+                    and self.REPORT_FOLDER in b and self.DASH_FOLDER in b
+                    and re.search(r"\bRyan\b", b) and "2026-10-21" in b
+                    and re.search(r"(?i)\b(instead of|rather than|not|in place of|replac\w*)\b[^.;]{0,40}?"
+                                  r"\b(per-category|categor(y|ies)|per group|each group|eleven)\b", b)
+                    and not re.search(r"(?i)\b(was|were|is|are|been)\s+(only\s+)?proposed\b|\bturned down\b|"
+                                      r"\bin favou?r of\b|\bdeclin\w*|\bvetoed\b|\boverruled\b", b)
+                    and not KeepListDocs.REJECTED_AFTER.search(b)
+                    and not re.search(r"(?i)\b(reject\w*|dropped|discard\w*|abandon\w*|withdr[ae]w\w*|superseded)\b", b)):
+                good.append(b)
+        self.assertTrue(good, f"{where}: a dated bullet records one report folder, {self.REPORT_FOLDER!r}, and one "
+                              f"dashboard folder, {self.DASH_FOLDER!r} (Ryan, 2026-10-21), as the decision, instead of "
+                              "per-category folders (\"instead of\", \"not\", \"rather than\", \"replaces\" before them); "
+                              "not proposed, turned down or rejected")
 
 
 if __name__ == "__main__":

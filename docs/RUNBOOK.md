@@ -3582,7 +3582,7 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 ## Monthly Report dashboards in Salesforce
 
 - **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
-- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)).
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)).
 - **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
 - **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
 - **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
@@ -3763,6 +3763,56 @@ matches a substring: a partner whose account name contains "test" (a "Contest" o
 partner, say) would drop out of every kept report, so a new partner's account name (its line in
 `glow/sf_partners.csv`, RUNBOOK "Club accounts in Salesforce") is checked against the filter
 when the partner is added.
+
+### The five dashboards and their folders
+
+The kept reports and dashboards (`glow/sf_keep_list.csv`) go into two new folders, one for
+reports and one for dashboards (Ryan, 2026-10-21; ticket #73,
+[plan](plans/2026-10-23-sf-category-folders.md)): the report folder "GLOW Monthly Reports" holds
+every kept report, the table included, and the dashboard folder "GLOW Monthly Dashboards" holds
+the five dashboards. The five groups are categories, the rows of this table:
+
+| Group | Dashboard label | Dashboard folder | Report folder | Report count |
+|---|---|---|---|---|
+| GLOW Club Attendance | "Glow Club Attendance" (`01ZRP000006iWqL2AU`) | GLOW Monthly Dashboards | GLOW Monthly Reports | 4 |
+| GLOW Club Implementation | "Implementation Dashboard" (`01ZRP000006jU9o2AE`) | GLOW Monthly Dashboards | GLOW Monthly Reports | 4 |
+| GLOW Club Observations | "GLOW Club Training" (`01ZRP000006k2D32AI`) | GLOW Monthly Dashboards | GLOW Monthly Reports | 3 |
+| GLOW Club Training | "Mentors" (`01ZRP000006quAj2AI`) | GLOW Monthly Dashboards | GLOW Monthly Reports | 5 |
+| GLOW Club Reporting | "Reporting" (`01ZRP000006oxSr2AI`) | GLOW Monthly Dashboards | GLOW Monthly Reports | 2 |
+| Report/Data Table Format | — (item 19, the table "GLOW of the Month Stories Report", on no dashboard) | — | GLOW Monthly Reports | 1 |
+
+- The counts are GLOW's list: 18 reports in five dashboards and the table. Item 12 ("New mentors
+  recruited", GLOW Club Training) has no report in the org today; #80 builds it in "GLOW Monthly
+  Reports". The report folder holds the other 18 kept reports: 17 of the five dashboards and item 19.
+- The report folder is the `ReportFolder` `GLOW_Monthly_Reports` and the dashboard folder the
+  `DashboardFolder` `GLOW_Monthly_Dashboards`, both new, built in
+  `data/sf_folders_2026-10-23/build/` from a retrieve of the three DHIS2 folders.
+- The kept reports and dashboards keep their current labels (Ryan, 2026-10-23): the labels in this
+  table and in `glow/sf_keep_list.csv` are the ones in the org.
+
+Shares:
+- Both new folders get the same shares, since a dashboard's viewers need its reports' folder: the
+  union of the shares of "DHIS2 Reports", "DHIS2 Dashboards" and "Dhis2 Dashbords", copied into
+  the build.
+- That union is 7 entries: 4 internal users with View, 2 internal users with Manage and 1 group
+  with Manage.
+- The new folders are shared with internal users and groups only. Never a guest, portal,
+  community or partner share.
+- The shares are checked through the shares API (`GET /services/data/v67.0/folders/<id>/shares`)
+  on both new folders after the deploy; an entry of any other kind is removed before anything
+  moves in.
+
+The moves:
+- The reports move by `tools/sf_report_folders.py move` (above) to "GLOW Monthly Reports": from
+  "DHIS2 Reports", and item 17 from "Public Reports". Each keeps its Id.
+- The five dashboards are moved by hand in Lightning by Ryan into "GLOW Monthly Dashboards" (the
+  API refuses a dashboard `PATCH`). Each keeps its Id, checked with SOQL on `Dashboard`.
+- Before each move, a copy of the report or dashboard as it was goes to Decommissioned (the
+  archive rule above, `copy --tag "#73"`). The 3 dynamic dashboards (Glow Club Attendance,
+  Implementation Dashboard, Reporting) have no copy: the clone was refused at the org's limit of
+  5 dynamic dashboards (2026-10-24), so their rollback is the metadata retrieve in the plan's
+  `before/`.
+- The three DHIS2 folders stay; #72 moves what is left in them to Decommissioned.
 
 ### Copying and moving reports and dashboards
 
