@@ -3494,7 +3494,8 @@ and not Salesforce's Sunday-start report weeks (DECISIONS 2026-10-23).
 **The time zone:** the submission day, the day the delay counts to, is the UTC day of
 `CreatedDate`, which the formula takes as `DATEVALUE(TEXT(Submitted_At__c))`: `TEXT()` of a
 date/time is the UTC timestamp `YYYY-MM-DD HH:MM:SSZ` and `DATEVALUE` of that text is its UTC
-date. `DATEVALUE` on the date/time itself converts in the org's zone (America/Los_Angeles): the
+date. `DATEVALUE` on the date/time itself converts in the running user's time zone (here the org's default,
+America/Los_Angeles): the
 first deploy's formula did, and the check found it a day short for every submission between
 00:00 and about 07:00 UTC (2026-10-24, 153 of 1,123 batches), so the field is redeployed with
 the `TEXT()` form (DECISIONS 2026-10-24; the plan's Result says when). That is the clock's day

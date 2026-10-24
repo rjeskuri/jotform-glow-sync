@@ -2,6 +2,7 @@
 title: Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them
 author: Claude (with Ryan's answers of 2026-10-22)
 status: done           # ticket #101; the four fields live since 2026-10-24, the delay field's UTC fix redeployed the same day; the check reads OK (Result)
+done: 2026-10-24
 created: 2026-10-23
 intent: Ryan, 2026-10-22 (GLOW staff meeting, epic #93) - bring into Salesforce "the time the Jotform form was submitted AND which month/week the session belongs to (e.g. week 2, week 3), displayable in reports, so upper-level staff can see which clubs haven't submitted for a week, or have a big delay between session and submission"
 ---
@@ -65,8 +66,8 @@ with the same definitions, so the two texts stay one):
 
 The delay takes the UTC date of the submission through `DATEVALUE(TEXT(Submitted_At__c))`:
 `TEXT()` of a date/time is the UTC timestamp `YYYY-MM-DD HH:MM:SSZ` and `DATEVALUE` of that text
-is its UTC date, whereas `DATEVALUE` on the date/time itself converts in the org's zone
-(America/Los_Angeles) - the first deploy's `DATEVALUE(Submitted_At__c)` was a day short for every
+is its UTC date, whereas `DATEVALUE` on the date/time itself converts in
+the running user's time zone (here the org's default, America/Los_Angeles) - the first deploy's `DATEVALUE(Submitted_At__c)` was a day short for every
 submission between 00:00 and about 07:00 UTC (Result, 2026-10-24; DECISIONS 2026-10-24).
 
 Each file follows the shape of `Partner_Girls__c`'s in `before/` (the #59 formula field):
@@ -227,12 +228,16 @@ fields when they are deleted. Revert this ticket's RUNBOOK section with it;
   object is `before/` plus the four fields, no existing field or object file changed; the
   permission set +4 Read entries (+20/-0 lines); the Admin profile +4 field entries plus
   `CreateSalesforcePages`, `DeploySalesforcePages` and `ViewSalesforcePages` enabled (+32/-0
-  lines), which were not in the build - likely Salesforce writing the profile's default
-  permissions on save, unverified. The check: `checked 1123 batches; differ: Submitted_At__c 0,
+  lines), which were not in the build. The build's partial profile carries only the four
+  fieldPermissions, which cannot enable a userPermission, and both retrieves ran from the same
+  project at the same API version, so the deploy did not set them; most likely Salesforce wrote the
+  System Administrator profile's default permissions when the profile was saved (inferred, not
+  confirmed). They are admin-only and
+  left as they are; nothing else in the three components changed. The check: `checked 1123 batches; differ: Submitted_At__c 0,
   Submission_Delay_Days__c 153, Session_Month__c 0, Session_Week__c 0 -> DIFFER`. Cause,
   confirmed on BATCH-000405..409 (`CreatedDate` 04:52-05:06 UTC on 2026-10-02, Salesforce one
-  day short): Salesforce's `DATEVALUE(<date/time>)` converts in the org's zone
-  (America/Los_Angeles), not UTC, so the first deploy's `DATEVALUE(Submitted_At__c)` gave the Los
+  day short): Salesforce's `DATEVALUE(<date/time>)` converts in the running user's time zone (here the org's default,
+  America/Los_Angeles), not UTC, so the first deploy's `DATEVALUE(Submitted_At__c)` gave the Los
   Angeles day, one short for every submission between 00:00 and about 07:00 UTC. Ryan,
   2026-10-24: keep the UTC day (DECISIONS 2026-10-24); the delay formula takes it through
   `DATEVALUE(TEXT(Submitted_At__c))` (the Build table and `SF_FORMULAS`, one text), and
