@@ -145,8 +145,10 @@ function openRegionFolders_(config) {
 /**
  * The planner's inputs: per region the source subfolders with their files, and beside each one
  * the target's subfolders of the same name (all the planner compares with), so a subfolder read
- * always has its target side read too. Past `readBy` no further subfolder is read
- * (TIME_BUDGET): what was not read is not in the plan, and waits for the next run.
+ * always has its target side read too. An emptied subfolder (no files: what a move left behind)
+ * costs its one listing and nothing more, since the planner leaves it alone. Past `readBy` no
+ * further subfolder is read (TIME_BUDGET): what was not read is not in the plan, and waits for
+ * the next run.
  */
 function readDrives_(opened, readBy) {
   const sources = [], targets = {};
@@ -166,8 +168,10 @@ function readDrives_(opened, readBy) {
       const sub = it.next();
       if (sub.isTrashed()) continue;
       const name = sub.getName();
-      source.subfolders.push({ id: sub.getId(), name: name, files: describeFiles_(sub, true) });
+      const files = describeFiles_(sub, true);
+      source.subfolders.push({ id: sub.getId(), name: name, files: files });
       count++;
+      if (!files.length) continue;
       if (Object.prototype.hasOwnProperty.call(looked, name)) continue;
       looked[name] = true;
       const same = o.target.getFoldersByName(name);
@@ -223,10 +227,10 @@ function logPlan_(plan, config, apply) {
 /**
  * Moves first, then merges, until the time budget (checked before the folder is made and before
  * each file). A move: a folder of the subfolder's name made in the region folder, then the plan's
- * files into it (only those: the subfolder is never listed again); when the folder cannot be
- * made, none of its files moves. Every failure is logged by code, region and folder name, the
- * rest of the run goes on, then one error. A move whose folder was made but whose files did not
- * all move is a merge on the next run.
+ * files into it (only those: the subfolder is never listed again); when Drive does not confirm
+ * the folder, none of its files moves this run. Every failure is logged by code, region and
+ * folder name, the rest of the run goes on, then one error. A move whose folder exists but
+ * whose files did not all move is a merge on the next run.
  */
 function carryOut_(plan, deadline) {
   const failed = [];
@@ -238,7 +242,8 @@ function carryOut_(plan, deadline) {
     try {
       made = Drive.Files.create({ name: m.name, mimeType: FOLDER_MIME, parents: [m.to] }, null, { supportsAllDrives: true });
     } catch (e) {
-      failed.push('MOVE_FAILED ' + m.region + ' "' + m.name + '": no folder made, its files stay: ' + errorText_(e));
+      failed.push('MOVE_FAILED ' + m.region + ' "' + m.name + '": folder not confirmed, its files stay in My Drive ' +
+                  '(the next run merges if it exists): ' + errorText_(e));
       continue;
     }
     const r = moveFiles_(m, made.id, 'MOVE_FAILED', late, failed);

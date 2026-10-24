@@ -19,7 +19,8 @@ What it does and never does:
   Drive (#132, 2026-10-24: `teamDrivesFolderMoveInNotSupported`, whatever the role), so the mover
   makes a folder of the subfolder's name in the region folder and moves the files into it one by
   one (`Drive.Files.update` with `addParents`/`removeParents`, `supportsAllDrives`); the emptied
-  subfolder stays in My Drive (expected; delete it by hand). When that name is already in the
+  subfolder stays in My Drive (expected; each leftover costs every run one listing, so Ryan
+  clears them regularly by hand). When that name is already in the
   region folder once (a resubmission) its files move in the same way beside what is there, and a
   file whose name and size are both already there stays in My Drive (logged as kept). Nothing is
   ever replaced;
@@ -103,4 +104,8 @@ steps 1-4). No regional form yet.
 
 Run `removeTrigger`, or delete the trigger in the editor (Triggers, the clock icon). Nothing else
 runs the mover. Undo a move by moving its files back into the emptied subfolder in
-`Attendance photos - <Region>` by hand (RUNBOOK "Photo mover", Rollback).
+`Attendance photos - <Region>` (or a new folder of its name, once it was cleared) by hand. That
+move out of the Shared Drive needs **Manager** on it (Google, "How file access works in shared
+drives", https://support.google.com/a/users/answer/12380484: "If you have Manager access to a
+shared drive, you can move files and folders out of shared drive to My Drive"; no lower role is
+named), so a Manager does it, or Ryan's role is raised for it (RUNBOOK "Photo mover", Rollback).
