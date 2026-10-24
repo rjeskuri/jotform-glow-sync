@@ -30,6 +30,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Translations](#translations)
   - [Links above Submit (problem report, Club Roster Form)](#links-above-submit-problem-report-club-roster-form)
   - [Rosters above Submit](#rosters-above-submit)
+  - [Session notes on the attendance forms](#session-notes-on-the-attendance-forms)
   - [Header logo](#header-logo)
   - [Photos](#photos)
   - [Photo mover](#photo-mover)
@@ -54,6 +55,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Duplicate girls in Salesforce](#duplicate-girls-in-salesforce)
   - [Attendance totals and partner-reported counts](#attendance-totals-and-partner-reported-counts)
   - [Attendance dashboard in Salesforce](#attendance-dashboard-in-salesforce)
+  - [Submission timing in Salesforce](#submission-timing-in-salesforce)
   - [Monthly Report dashboards in Salesforce](#monthly-report-dashboards-in-salesforce)
   - [Interactive dashboard in Salesforce](#interactive-dashboard-in-salesforce)
   - [September back-fill: the resolver](#september-back-fill-the-resolver)
@@ -1023,7 +1025,11 @@ by a test to the table in "The forms"):
 | `problem` | `somethingNotWorking` (q443) | Click here to report a problem | the problem-report form |
 
 The Club Roster Form link sits above the problem link, so a mentor with a
-roster change meets it first. Adding, re-checking or removing one:
+roster change meets it first. Place it only after the session-notes field
+(task #105; "Session notes on the attendance forms"): the notes go on first,
+because placing this link leaves Submit sharing an order with the hidden field
+below it, and `add_session_notes.py` then refuses on the tie. Adding,
+re-checking or removing one:
 
 ```bash
 python3 backup_forms.py                                           # optional: the tool snapshots each form it writes
@@ -1090,6 +1096,62 @@ python3 tools/fix_roster_order.py --form <id> --undo <stamp>             # the r
 
 The full procedure - the runner paused, what the tool refuses, how it stops and
 what `--undo` can still restore: [plan](plans/2026-09-29-rosters-above-submit.md#from-the-runbook-moved-2026-10-09).
+
+## Session notes on the attendance forms
+
+- **When:** placing, re-checking or removing the optional session-notes field; `form_status` says `session notes: absent` once the field is expected, or flags one (`!!` lines naming `sessionNotes`).
+- **Status:** built, not live (ticket #104, 2026-10-23). Task #105 places it on the template and the four regional forms on Ryan's go, after a read-only `GET /form/{id}/questions` of a live textarea confirms the limit property (`entryLimit`, `Letters-1000`: the name from Jotform's own example, the value from the runtime; not yet read from this account), and flips `glow/layout.py` `NOTES_EXPECTED` to `True`.
+- **Dry run:** `python3 tools/add_session_notes.py`.
+- **Apply:** its `--apply`, the template first; the label's translations are a second step (task #105): until then every language shows it in English.
+- **Verify:** the tool's re-read after the write; `form_status` (`session notes:`, `layout:`).
+- **Rollback:** `--remove --apply`, the questions snapshot, or Revision History.
+
+One textarea named `sessionNotes` on every attendance form, found by its name
+(the qid differs per form): the label "Additional information about this
+session (optional)", no sub-label, 1,000 characters, not required, not hidden,
+no rule (Ryan's answers, 2026-10-22; `glow/layout.py` `NOTES_PROPS`). It sits
+after the last roster and above the links and Submit, so a mentor meets it
+once her girls are ticked. The sync leaves it alone: no generated rule names
+it, `--prune` deletes rosters only, and a roster the sync creates afterwards
+goes above it (the field is the first element of the fence `glow/layout.py`
+guards, like the links and Submit; test-pinned). Mentors' notes are free text
+that can name girls: no tool prints a submission's notes, counts only.
+
+```bash
+python3 tools/add_session_notes.py                                # dry run, template + 4 regionals
+python3 tools/add_session_notes.py --form 262352490535154 --apply # the template first; open its page
+python3 tools/add_session_notes.py --apply                        # the four regional forms
+python3 tools/add_session_notes.py --remove --apply               # take it out again (the rollback)
+```
+
+The tool plans all five forms before it writes any. The field goes at an
+empty order between the last roster and the first link, where nothing moves
+whether Jotform inserts or ties. The live forms have none today (the
+2026-09-30 repair put the links, Submit and the hidden bridge fields at the
+orders right after the last roster, and every roster inserted since kept them
+there), so the tool first makes room the way `add_feedback_link.py` does
+(Ryan, 2026-10-23): the first link through Submit and the hidden fields at the
+orders right after move one down, bottom-up so each lands on an empty order
+(the path Jotform keeps exactly), then one create at the freed order - about
+ten writes per form, each printed as `move <name> (qN) a -> b`. So the
+sequence matters: **the session notes go on before the Club Roster Form link**
+(`add_feedback_link.py --link roster`, BACKLOG 46; "Links above Submit"), whose
+placing leaves Submit sharing an order with the hidden field below it. After
+that link the tool refuses on the tie, naming both questions: take the link
+out (`--link roster --remove --apply`), add the notes, then place the link
+again - it goes directly above the problem link, below the notes
+(test-pinned). Refuses rather than guesses: two fields of the name, the field
+below a link or Submit or a roster below it (move it in the builder, or
+`--remove --apply` and add it again), a hidden link or Submit, anything a
+mentor can see between the last roster and Submit besides the links and
+Submit, two questions of the tail sharing an order. A drifted flag or text
+(`required`, `hidden`, the label, the limit, a sub-label) is set back in place
+in one write (`UPDATE <property>: old -> new`); re-running is a no-op. With
+`--apply` each form is snapshotted first (`backups/<id>/questions-<stamp>.json`),
+then re-read: the field exactly once, its properties, every move landed, its
+place, no rule mentioning it - a mismatch stops the tool there, non-zero,
+naming that form's snapshot; the forms after it are neither snapshotted nor
+written, the forms before it stay written and verified.
 
 ## Header logo
 
@@ -3387,6 +3449,92 @@ sharing stays as it is"):
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
 
+## Submission timing in Salesforce
+
+- **When:** a report or dashboard on when clubs submit (tasks #102 and #103); the monthly
+  Salesforce checks; a question about a batch's session week or its delay.
+- **Status:** the four formula fields are live since 2026-10-24 (deploy `0AfRP000002i4Er0AI`,
+  06:41 UTC, Ryan's go). The first delay formula was a day short for submissions before about
+  07:00 UTC (the check: 153 of 1,123 batches); `Submission_Delay_Days__c` was redeployed alone
+  with the corrected text the same day (deploy `0AfRP000002i4LJ0AY`, 06:59 UTC), and the check
+  reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result).
+- **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
+  is read-only.
+- **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
+- **Verify:** retrieve again and compare with the build and with `before/`; then
+  `python3 tools/sf_session_timing.py check --vpn-off` -> `-> OK`.
+- **Rollback:** below.
+- **History:** [plan](plans/2026-10-23-submission-timing.md) (the proofs, the deploy, tasks
+  #102 and #103).
+
+Since task #100 (DECISIONS 2026-10-23) a batch's session month and week, and for a live Jotform
+batch its submission time and the delay from the session to it, are four formula fields on
+`Attendance_Batch__c`, computed by Salesforce from `Creator__c`, `CreatedDate` and
+`Attendance_Date__c`; the formula texts are `glow/session_timing.py SF_FORMULAS`, and task #101
+deploys them. A formula field changes no record and runs nothing: the processor's trigger and
+the Jotform integration are untouched.
+
+**The fields** (API name, label, type):
+- `Submitted_At__c` ("Submitted at", Date/Time): the batch's `CreatedDate` when `Creator__c` is
+  `Jotform`, else blank.
+- `Submission_Delay_Days__c` ("Days from session to submission", Number): whole days from
+  `Attendance_Date__c`, the session date, to the UTC day of the submission, blank without a
+  submission time, negative when the form was submitted before the session date (a date typo,
+  BACKLOG 79).
+- `Session_Month__c` ("Session month", Text): the session's month as `2026-10`, from
+  `Attendance_Date__c`.
+- `Session_Week__c` ("Session week", Text): the week of the month the session date falls in, as
+  `2026-10 week 2`.
+
+**The week rule:** the week is the week of the month by day of the session date: days 1-7 are
+week 1, 8-14 week 2, 15-21 week 3, 22-28 week 4 and 29-31 week 5, shown as `2026-10 week 2`.
+It is the calendar week of the session date, not the curriculum "Session N" in `Module_Week__c`
+and not Salesforce's Sunday-start report weeks (DECISIONS 2026-10-23).
+
+**The time zone:** the submission day, the day the delay counts to, is the UTC day of
+`CreatedDate`, which the formula takes as `DATEVALUE(TEXT(Submitted_At__c))`: `TEXT()` of a
+date/time is the UTC timestamp `YYYY-MM-DD HH:MM:SSZ` and `DATEVALUE` of that text is its UTC
+date. `DATEVALUE` on the date/time itself converts in the running user's time zone (here the org's default,
+America/Los_Angeles): the
+first deploy's formula did, and the check found it a day short for every submission between
+00:00 and about 07:00 UTC (2026-10-24, 153 of 1,123 batches), so the field is redeployed with
+the `TEXT()` form (DECISIONS 2026-10-24; the plan's Result says when). That is the clock's day
+in UTC rather than the mentor's local day: a late-evening submission in the Americas counts as
+the next day and an early-morning one in Asia as the same day, so a delay of 1 can be a form sent
+the same evening.
+
+**Which batches have one:** only a batch whose `Creator__c` is exactly `Jotform` has a
+submission time, because the native Jotform Salesforce V2 integration creates the batch the
+moment the form is submitted, so its `CreatedDate` is the submission time. The September
+back-fill batches (`Creator__c` starting `Jotform back-fill`) and the three partners' monthly
+batches (`Partner report`, `tools/sf_partner_monthly.py`) were created later by tools, so they
+have no submission time and no delay, but they do have a session month and week. A batch that
+`tools/sf_backfill.py` sends later carries the same back-fill creator and gets none either.
+
+**The check** (read only, VPN off): `python3 tools/sf_session_timing.py check --vpn-off`
+compares every batch since 2026-09-01 with `glow/session_timing.py` in one explicit-field SOQL
+query (never `Contact_IDs__c`) and prints `checked N batches` with the count of differing values
+per field, then `-> OK`, or `-> DIFFER` with up to 10 lines of batch Name, field, Salesforce's
+value and the expected one, exit 1; `--since 2026-10-01` narrows the window. Batch Names and
+counts only, nothing written. An HTTP 400 means the fields are not deployed yet (task #101), or
+the login cannot read them. Run it after the deploy, after any change to `SF_FORMULAS`, and
+with the monthly Salesforce checks.
+
+**Access:** the permission set `Attendance_Report_Viewer` and the Admin profile read the four
+fields (one Read entry per field in each, deployed with the fields), so a report that shows,
+groups or filters on them works for every viewer; a filter on a field the viewer cannot read is
+dropped silently ("Attendance dashboard in Salesforce", Access). A new report on another field
+needs that field's Read added to the set.
+
+**Rollback** ([plan](plans/2026-10-23-submission-timing.md#rollback)): the reports that use or
+filter on the fields go first (edited or deleted, each copied to Decommissioned before, the
+archive rule of DECISIONS 2026-10-21), then the four fields `Submitted_At__c`,
+`Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` are deleted by a
+`destructiveChanges.xml` deploy, check-only first and on Ryan's go, their permission-set and
+Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
+the four fields and only added their entries to the permission set and the Admin profile, which
+go with the fields when they are deleted, so nothing is redeployed from its `before/`.
+
 ## Monthly Report dashboards in Salesforce
 
 - **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
@@ -3541,6 +3689,49 @@ matches a substring: a partner whose account name contains "test" (a "Contest" o
 partner, say) would drop out of every kept report, so a new partner's account name (its line in
 `glow/sf_partners.csv`, RUNBOOK "Club accounts in Salesforce") is checked against the filter
 when the partner is added.
+
+### Copying and moving reports and dashboards
+
+`tools/sf_report_folders.py` (ticket #71) makes the copies and the moves of the archive rule
+above through the Analytics API, exactly as the API proof sent them. It never deletes, and it
+reads `Folder`, `Report`, `Dashboard` and `DashboardComponent` only, never a record. Every
+subcommand needs `--vpn-off`; `copy`, `move` and `undo` are dry runs until `--apply` (Ryan's go,
+the live gate asks him). The folders named "Attendance" are never a source or a target.
+
+- List what a folder holds (read-only; CSV on stdout, the counts on stderr, which must equal SOQL's
+  `SELECT OwnerId, COUNT(Id) FROM Report GROUP BY OwnerId` for that folder):
+  `python3 tools/sf_report_folders.py list --vpn-off --folder "DHIS2 Reports" [--folder "Dhis2 Dashbords"] [--kind report|dashboard]`.
+  The `used_by` column lists the dashboards with a component on each report.
+- Copy one report or dashboard into Decommissioned before it changes:
+  `python3 tools/sf_report_folders.py copy --vpn-off --kind report --id <id> --tag "#72"`, read
+  the line it prints, then the same with `--apply`. A report's copy keeps its label (cut to 40
+  characters) and gets the description `copy of <id>, <tag>` by a PATCH of the copy once the
+  clone reads back in Decommissioned (the API proof's steps); a refused PATCH stops with the copy's
+  id in its `failed` ledger row. A dashboard's copy keeps its title
+  and has no description (the API refuses both): set them by hand in Lightning if wanted.
+- Move (and relabel) reports by a plan, a CSV with the columns `kind,id,to_folder,new_label`
+  (`to_folder` a folder name, exactly one report folder of that name; a blank `new_label` keeps
+  the label; a label is at most 40 characters, and a report whose current label is longer moves
+  only with its label kept, since undo could not put that label back):
+  `python3 tools/sf_report_folders.py move --vpn-off --plan <plan.csv>` (the dry run: one line per
+  row with the current label and folder and the change), then `--apply --limit 1` first, check
+  that report in Salesforce, then `--apply` for the rest. The whole plan is checked before the
+  first write: a report that a dashboard outside Decommissioned still uses is refused a move to
+  Decommissioned. Each move keeps the report's Id and is read back by SOQL; a read-back that
+  differs stops the run.
+- Dashboards are moved and renamed by hand in Lightning (the API proof: Salesforce refuses every
+  dashboard `PATCH`, 400 `JSON_PARSER_ERROR`); a plan row of kind `dashboard` is refused. Check
+  the hand move with SOQL on `Dashboard` (the same Id, `FolderName` following).
+- The ledger `data/sf_report_folders/ledger.csv` (owner only, never committed) holds one row per
+  write: the item, its folder and label before and after, a copy's id and tag, the status and the
+  HTTP code. The row is on disk as `sending` before the request and rewritten in place as `ok` or
+  `failed`; a row left `sending` (the run died) has an unknown outcome, and undo puts that move back.
+- Undo: `python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv`
+  (the dry run), then with `--apply` (`--limit N` undoes the last N only). It puts each move back
+  to its old folder and label, last first, and adds an `undo` row for each; a move Salesforce
+  refused (HTTP 4xx) never moved and is left as it is, and a move already undone is not undone
+  again. Copies stay in
+  Decommissioned.
 
 ### Why the dashboards showed old data
 
