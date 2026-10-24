@@ -861,7 +861,10 @@ dropdown (q14, q92, q93), `Special Event - <type>`, as the electives are `Electi
 receives `Module__c` = the option's text, `Module_Week__c` blank and `Module_Year__c` the year;
 nothing changes in Salesforce. One batch per club and date still holds: a Welcome Session on a
 day the club also holds a curriculum session is refused as a duplicate, whichever arrives
-second, so mentors submit one per day (DECISIONS 2026-10-13).
+second, so mentors submit one per day (DECISIONS 2026-10-13). Since 2026-10-22 (#108) a
+re-submission of that same session - the same module - is merged into the day's batch instead,
+adding only the girls not yet on it ("Attendance totals and partner-reported counts", A mentor's
+correction); a different module stays "Duplicate".
 
 The sync owns the event options. It appends a missing one after the curriculum options, in
 `SPECIAL_EVENTS` order, in the same write as the dropdown's `calcValues`:
@@ -949,7 +952,9 @@ working:
 - Change the year after picking a session: question 100 is blank until a session of the new
   year's module shows.
 - One test submission by the plan's recipe (Rollout, step 2): a club and date that already have
-  a `Success` batch. It arrives `Failed` "Duplicate" with `Module__c` = the event's text and
+  a `Success` batch, with the event as the module. It arrives `Failed` "Duplicate" - the event's
+  module is not that day's session's, one session per club per day (since 2026-10-22 only a
+  re-submission with the same module merges) - with `Module__c` = the event's text and
   `Module_Week__c` blank (read back by SOQL, counts and fields only); then delete the submission.
 
 **Rollback**: revert the type's merge first (a revert on a ticket branch, landed like any
@@ -1247,23 +1252,28 @@ plain `diff` of the snapshot before and the one after.*
 3. **One test submission on the template, arranged to change nothing in Salesforce.** A
    template submission goes through the Salesforce integration like any other and is a real
    batch for a real club ([contact-ids plan](plans/2026-09-30-contact-ids.md), build notes: "a
-   delivered one is a real batch for a real club"). The processor refuses a second batch for a
-   club and date that already has a Success batch, *before* it reads any name
-   (`processBatch` → `resolveClubAccount` → `isDuplicateBatch` → return, the deployed
-   `AttendanceBatchProcessor.cls` under `data/sf_processor_2026-10-02/after/`): such a batch is
-   Failed `Duplicate: …` with no attendance row and no Contact created. `resolveClubAccount`
-   runs first, though, and **creates a partner-less Club account when question 5 matches no
-   Account name** (the BACKLOG 27 path, seen twice on 2026-10-03) - so the club must be one
-   whose Account name is plain, never one of the seven `<club> - <partner>` names. Mentors
-   submit late (19 of the 27 duplicates since 10-01 were September dates re-sent in October) and
-   a Success batch dated today is the exception, so the query is a window, not a day - read-only
-   SOQL: `SELECT Account_Name__c, Attendance_Date__c FROM Attendance_Batch__c WHERE
-   Processing_Status__c = 'Success' AND Attendance_Date__c = LAST_N_DAYS:3 ORDER BY
-   Attendance_Date__c DESC LIMIT 5`; take the newest club + date pair whose name has no
-   ` - <partner>` suffix; **never a free date**. Also read, before the submission,
-   `SELECT COUNT() FROM Account WHERE RecordType.DeveloperName = 'Club' AND ParentId = null`
-   (2 on 2026-10-06: the two pilots). On the template pick that club and that date, tick one
-   girl (the roster is required), type your own address as the Partner Coordinator Email, and
+   delivered one is a real batch for a real club"). Since 2026-10-22 (#108) the processor
+   merges a second batch for a club and date that already has a `Success` batch when it ticks a
+   girl not yet on that date - she would get a row on the original batch ("Attendance totals and
+   partner-reported counts", A mentor's correction) - so the test ticks only girls already on
+   that date's batch, with its module: it then adds nobody and is refused as `Failed`
+   "Duplicate", with no attendance row and no Contact created (the deployed
+   `AttendanceBatchProcessor.cls` under `data/sf_processor_2026-10-22/after/`).
+   `resolveClubAccount` runs first, though, and **creates a partner-less Club account when
+   question 5 matches no Account name** (the BACKLOG 27 path, seen twice on 2026-10-03) - so
+   the club must be one whose Account name is plain, never one of the seven `<club> - <partner>`
+   names. Mentors submit late (19 of the 27 duplicates since 10-01 were September dates re-sent
+   in October) and a Success batch dated today is the exception, so the query is a window, not a
+   day - read-only SOQL: `SELECT Id, Account_Name__c, Attendance_Date__c, Module__c FROM
+   Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Attendance_Date__c =
+   LAST_N_DAYS:3 ORDER BY Attendance_Date__c DESC LIMIT 5`; take the newest club + date pair
+   whose name has no ` - <partner>` suffix; **never a free date**. Also read, before the
+   submission, `SELECT COUNT() FROM Account WHERE RecordType.DeveloperName = 'Club' AND
+   ParentId = null` (2 on 2026-10-06: the two pilots). On the template pick that club, that date
+   and that batch's module; open the batch in Salesforce to see which girls its attendance rows
+   hold (their names stay in Salesforce, never in the conversation, a log or the repo), note its
+   `Girls_Present__c` and row count, and tick only girls already on that date's batch - one is
+   enough (the roster is required); type your own address as the Partner Coordinator Email, and
    upload a **neutral image with nobody in it**. Open the mentor link
    (`https://form.jotform.com/262352490535154`), not the builder's preview (whether a preview
    submission runs the integrations is unverified). **Two e-mails go out with it**: the
@@ -1278,12 +1288,23 @@ plain `diff` of the snapshot before and the one after.*
      Template folder instead): folder `Attendance photos - Template` → one subfolder named
      exactly `<that club> <that date>` → one image file, **no PDF**.
    - Salesforce (read-only SOQL): exactly one new batch for that club and date,
-     `Processing_Status__c = 'Failed'`, `Status_Message__c LIKE 'Duplicate:%'`, 0 `Attendance__c`
-     rows (`SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = '<id>'`), no new
-     Contact (`SELECT COUNT() FROM Contact WHERE CreatedDate = TODAY AND AccountId = '<club
-     id>'` unchanged from before the test), and the partner-less Club account count unchanged
-     (the query of step 3; 2 today). Then delete that one batch - Ryan's go, one write (the
-     write connector or Ryan in the Salesforce UI) - and read it back as gone.
+     `Processing_Status__c = 'Failed'`, `Status_Message__c LIKE 'Duplicate:%'` (it added nobody),
+     0 `Attendance__c` rows (`SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c =
+     '<id>'`), no new Contact (`SELECT COUNT() FROM Contact WHERE CreatedDate = TODAY AND
+     AccountId = '<club id>'` unchanged from before the test), the original batch's
+     `Girls_Present__c` and row count unchanged (`SELECT Girls_Present__c FROM
+     Attendance_Batch__c WHERE Id = '<original id>'`; `SELECT COUNT() FROM Attendance__c WHERE
+     Attendance_Batch__c = '<original id>'`), and the partner-less Club account count unchanged
+     (the query of step 3; 2 today). If the original's row count or `Girls_Present__c` changed,
+     the submission merged after all (its batch then reads `Success`, `merged into <original
+     id>`, and the row it added sits on the original): put the original back first, two writes,
+     each one record on Ryan's go (one record per call, never from a subagent:
+     `.claude/skills/salesforce`) - delete the row the test added on the original, by its id
+     (`SELECT Id, CreatedDate FROM Attendance__c WHERE Attendance_Batch__c = '<original id>'
+     ORDER BY CreatedDate DESC`: the one created at the test's time, the others at the original
+     submission's), then set the original's `Girls_Present__c` back to the value noted in step 3
+     - and read both back with the two queries above. Then delete that one batch - Ryan's go,
+     one write (the write connector or Ryan in the Salesforce UI) - and read it back as gone.
    - Jotform: `python3 tools/form_status.py --form 262352490535154 --roster <csv>` →
      `submissions 2`, CLEAN, `salesforce yes`; `backup_forms.py --form 262352490535154` and the
      diff against step 2's "after" snapshot → nothing but `count` (the submission) and, if you
@@ -2982,6 +3003,25 @@ partners' monthly copy writes their Monthly Max into it. A batch with no names a
 participants submitted" (no rows, blocks nothing); a batch with no names and a count above 0 is
 an aggregate and succeeds with no rows.
 
+**A mentor's correction** (since 2026-10-22, ticket #108;
+[plan](plans/2026-10-22-correction-merge.md)). A re-submission for a club and date that already
+has a `Success` batch, with the same module, adds only the girls missing from that date's rows -
+ticked now and without a row for that club and date, whoever made the rows - as `Attendance__c`
+rows of the original batch (the oldest `Success` batch of that club and date; the rows carry its
+module, week and year); never a row removed, never a girl counted twice. The original's
+`Girls_Present__c` moves to the new total, the count of its own rows after the merge. The
+correction's own batch is `Success` with `Status_Message__c` `merged into <original batch id>`,
+no count and no rows of its own. A re-submission with a different module (a special event on a
+curriculum day, or the other way round) is still `Failed` "Duplicate": one session per club per
+day (DECISIONS 2026-10-13). A re-submission that adds nobody (every girl ticked is already on
+that date) stays `Failed` "Duplicate" exactly as before, as does one for a day whose `Success`
+batch has no rows of its own (a typed aggregate, a `Partner report` batch, one of the three
+legacy blanks of BACKLOG 73). On the dashboard a merged correction is not a second session and
+not a blank: its girls count through the original batch's rows (the tiles read `Attendance__c`),
+and its empty `Girls_Present__c` is not a 0, so the blank-submissions report does not list it;
+`sf_girls_present.py check` leaves merged corrections out (Signals, below). The message is
+filtered on, never selected or printed (on other batches it can quote a name).
+
 **The measure** (Ryan's decisions of 2026-10-19, ticket #59,
 [plan](plans/2026-10-20-girls-attended-tiles.md); it replaces the two measures of 2026-10-15,
 ticket #35):
@@ -3060,7 +3100,8 @@ python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off           
 
 The processor's club-and-day lock is per Account and date: any `Success` batch on the partner
 account and the month's last day, whatever its `Creator__c`, would make the insert `Failed`
-"Duplicate". The partner account has no Jotform batches, so none is expected; if one is there and
+"Duplicate" (the copy names nobody, so it adds nobody: since 2026-10-22 only a re-submission that
+adds a girl merges). The partner account has no Jotform batches, so none is expected; if one is there and
 no `Partner report` batch is, the tool refuses that partner before sending (the others still go).
 
 **The one-off back-fill** (`tools/sf_girls_present.py`) - **done 2026-10-07**, on Ryan's go:
@@ -3074,7 +3115,10 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
   (true since the one-off back-fill, 2026-10-07: 575 Jotform Success batches then). A
   `differ` is a Jotform `Success` batch whose count is not its rows; a `without a value` is a
   `Success` batch the processor or the back-fill did not count. Aggregate batches are not compared
-  (no rows by design).
+  (no rows by design), and a merged correction (`Success`, `merged into <id>`, no count and no
+  rows by design since 2026-10-22) is left out of both counts: the tool tells it apart by a
+  condition on `Status_Message__c` in the WHERE, never by selecting it. An original whose count
+  did not move with the rows a correction added is a `differ`.
 - The dashboard's two tiles (since 2026-10-21, #59): each tile, the reports' `FORMULA1`, =
   `COUNT_DISTINCT(Contact__c)` over the month's Jotform `Attendance__c` rows, by the batch's date
   as the reports filter (`SELECT COUNT_DISTINCT(Contact__c) FROM Attendance__c WHERE

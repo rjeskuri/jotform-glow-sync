@@ -53,6 +53,9 @@ MAX_NEW = 22                                 # new girls in one batch proven so 
 MAX_AGE_HOURS = 3                            # how old the fetched submissions may be when sending
 CREATOR = "Jotform back-fill"                # the processor never reads the batch's Creator__c
 OK_STATUS, OK_MESSAGE = "Success", "Processed successfully."
+# the processor's message on a mentor's correction merged into the day's original batch (2026-10-22, ticket
+# #108): its exact text, then the original batch's id - a Success with no count and no rows of its own
+MERGED_RX = re.compile(r"merged into [A-Za-z0-9]+")
 CREATED_AT = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 SETTLE_AFTER_MINUTES = 10                    # a request Salesforce is still working on can commit this late
 LEDGER_COLS = ["when_utc", "done_utc", "key", "region", "account_id", "account_name", "attendance_date",
@@ -655,6 +658,8 @@ def outcome_of(status, message):
         return "attendance_already_exists"
     if message.startswith("No participants"):     # a batch without names and without a count (since 2026-10-07)
         return "no_participants"
+    if status == OK_STATUS and MERGED_RX.match(message):   # a correction merged into the day's original batch (2026-10-22)
+        return "merged"
     status = status if status in ("Success", "Failed", "Pending") else "no status"
     return f"{status.lower()}_{known_code(message)}"
 
