@@ -609,21 +609,26 @@ const WRITES = c => /\.(moveTo|createFolder|addFile|removeFile|addFolder|removeF
 // Script Properties: SOURCE_FOLDER_<KEY> and TARGET_FOLDER_<KEY> per region (drive-sync/README.md)
 const PROP_KEYS = { Africa: 'AFRICA', Asia: 'ASIA', 'Latin America': 'LATIN_AMERICA', 'U.S': 'US', Template: 'TEMPLATE' };
 // the fake My Drive: Africa has a settled, a still-uploading and a resubmitted subfolder; Asia a settled
-// one and, either side of the 10-minute settle time, a 9-minute-old (waits) and an 11-minute-old (moves)
+// one, either side of the 10-minute settle time a 9-minute-old (waits) and an 11-minute-old (moves), and an
+// emptied one (no files; its name is on the Shared Drive already)
+const EMPTIED = 'Golden Roots 2026-10-12';
 const FAKE_SOURCES = {
   Africa: [['Bright Stars 2026-10-14', [['IMG_4471.jpg', 2048, OLD], ['IMG_4472.jpg', 4096, OLD]]],
            ['Rising Lights 2026-10-15', [['IMG_4480.jpg', 1500, 1]]],
            ['Golden Flames 2026-10-13', [['IMG_5501.jpg', 3000, OLD], ['IMG_5502.jpg', 3100, OLD]]]],
   Asia: [['Morning Wings 2026-10-13', [['IMG_6001.jpg', 5000, OLD]]],
          ['Evening Lights 2026-10-15', [['IMG_6101.jpg', 2600, 9]]],
-         ['Silver Voices 2026-10-15', [['IMG_6201.jpg', 2700, 11]]]],
+         ['Silver Voices 2026-10-15', [['IMG_6201.jpg', 2700, 11]]],
+         [EMPTIED, []]],   // what an earlier run's move left behind: its photos are on the Shared Drive already
   'Latin America': [], 'U.S': [], Template: [],
 };
-// the fake Shared Drive: Africa already holds the resubmission's name, with one of its two photos
-const FAKE_TARGETS = { Africa: [['Golden Flames 2026-10-13', [['IMG_5501.jpg', 3000]]]], Asia: [], 'Latin America': [], 'U.S': [], Template: [] };
+// the fake Shared Drive: Africa already holds the resubmission's name, with one of its two photos; Asia the
+// emptied subfolder's name, with its photo
+const FAKE_TARGETS = { Africa: [['Golden Flames 2026-10-13', [['IMG_5501.jpg', 3000]]]], Asia: [[EMPTIED, [['IMG_6301.jpg', 2900]]]],
+                       'Latin America': [], 'U.S': [], Template: [] };
 const SOURCE_SUBS = Object.values(FAKE_SOURCES).reduce((a, s) => a + s.length, 0);
 const LATE_UPLOAD = 'IMG_7777.jpg';   // a photo Jotform adds to a subfolder after the planner has read it (opt.lateUploadTo)
-const FILE_STEMS = ['IMG_4471', 'IMG_4472', 'IMG_4480', 'IMG_5501', 'IMG_5502', 'IMG_6001', 'IMG_6101', 'IMG_6201', 'IMG_7777',
+const FILE_STEMS = ['IMG_4471', 'IMG_4472', 'IMG_4480', 'IMG_5501', 'IMG_5502', 'IMG_6001', 'IMG_6101', 'IMG_6201', 'IMG_6301', 'IMG_7777',
                     'IMG_9000', 'receipt'];
 // the real run (#132): a folder of each moved subfolder's name made ONCE in its region folder, each of its
 // files moved into it; the merge's new photo into the folder already there (no folder made for a merge)
@@ -657,12 +662,13 @@ const inSub = (m, region, name) => m.startsWith('S:' + region + '/' + name + '/'
  * DriveApp.getFiles / searchFiles (`'<id>' in parents` finds that folder, anything else every
  * folder) / getFilesByName / getFilesByType. readCount holds how often each source subfolder's
  * files were listed, firstListing the ids its first listing returned, idOf each file's id by
- * label, and each Files.update op its fileId and `ok` when the move happened.
+ * label, and each Files.update op its fileId and `ok` when the move happened; listedAll how often
+ * ANY folder's files were listed (by label), lookups every `<folder label> getFoldersByName <name>`.
  */
 function fakeEnv(mode, opt) {
   opt = opt || {};
-  const calls = [], moved = [], attempted = [], created = [], ops = [], logs = [], read = new Set();
-  const readCount = {}, firstListing = {}, idOf = {}, gone = {}, allFolders = [];
+  const calls = [], moved = [], attempted = [], created = [], ops = [], logs = [], read = new Set(), lookups = [];
+  const readCount = {}, firstListing = {}, idOf = {}, gone = {}, allFolders = [], listedAll = {};
   const clock = { t: Date.now() };
   const t0 = clock.t;
   let D = Date, n = 0;
@@ -728,12 +734,15 @@ function fakeEnv(mode, opt) {
   };
   const mkFolder = (lbl, name, kids, files, isSourceSub) => {
     const id = 'fake-folder-' + (++n);
-    const listing = () => (isSourceSub ? listed(lbl, name, id, files) : files.slice());
+    const listing = () => {
+      listedAll[lbl] = (listedAll[lbl] || 0) + 1;
+      return isSourceSub ? listed(lbl, name, id, files) : files.slice();
+    };
     const self = wrap('Folder', {
       getId: () => id, getName: () => name, getFolders: () => iter(kids),
       getFiles: () => iter(listing()),
       searchFiles: () => iter(listing()),
-      getFoldersByName: x => iter(kids.filter(k => meta.get(k).name === x)),
+      getFoldersByName: x => { lookups.push(lbl + ' getFoldersByName ' + x); return iter(kids.filter(k => meta.get(k).name === x)); },
       getFilesByName: x => iter(listing().filter(f => meta.get(f).name === x)),
       getFilesByType: x => iter(listing().filter(f => meta.get(f).mime === x)),
       createFolder: x => {
@@ -880,7 +889,7 @@ function fakeEnv(mode, opt) {
                     ' static now() { return now(); } } Date = FakeDate; })(); delete globalThis.__fakeClock;', c);
     D = vm.runInContext('Date', c);
   };
-  return { calls, moved, attempted, created, ops, logs, read, readCount, firstListing, idOf, t0, globals, install };
+  return { calls, moved, attempted, created, ops, logs, read, readCount, firstListing, idOf, listedAll, lookups, t0, globals, install };
 }
 
 const violations = calls => calls.filter(c => {
@@ -908,14 +917,14 @@ function runEntry(name, mode, opt) {
     return { name, threw, text: env.logs.join('\n'), calls: env.calls.slice(), moved: env.moved.slice(),
              attempted: env.attempted.slice(), created: env.created.slice(), ops: env.ops.slice(),
              read: new Set(env.read), readCount: Object.assign({}, env.readCount), firstListing: Object.assign({}, env.firstListing),
-             idOf: env.idOf, t0: env.t0, rerun };
+             listedAll: Object.assign({}, env.listedAll), lookups: env.lookups.slice(), idOf: env.idOf, t0: env.t0, rerun };
   };
   const rerun = next => {
     for (const k of Object.keys(opt)) delete opt[k];
     Object.assign(opt, next || {});
-    for (const a of [env.calls, env.moved, env.attempted, env.created, env.ops, env.logs]) a.length = 0;
+    for (const a of [env.calls, env.moved, env.attempted, env.created, env.ops, env.logs, env.lookups]) a.length = 0;
     env.read.clear();
-    for (const o of [env.readCount, env.firstListing]) for (const k of Object.keys(o)) delete o[k];
+    for (const o of [env.readCount, env.firstListing, env.listedAll]) for (const k of Object.keys(o)) delete o[k];
     return once();
   };
   return once();
@@ -990,14 +999,27 @@ const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
   check('one entry point is the dry run: reads both drives, logs what it would move by folder name, writes nothing (no Files.create ' +
         'or Files.update, no moveTo), no file name',
         !!dry && !fileNamesIn(dry.text).length, dry ? dry.name + ': ' + fileNamesIn(dry.text).join(', ') : summary(full));
+  const tell = r => (r ? 'threw: ' + (r.threw || 'no') + '; made ' + JSON.stringify(r.created) + '; moved ' + JSON.stringify(r.moved) +
+                         '; log: ' + r.text.slice(-400) : 'no applier');
+  // an emptied source subfolder (what a move leaves behind) costs one listing only: no target lookup by its name, no read
+  // of the same-name target folder - leftovers accumulate, and each would otherwise eat the read budget every run
+  for (const [what, r] of [['the real run', applier], ['the dry run', dry]]) {
+    const lookedUp = r ? r.lookups.filter(l => l === 'T:Asia getFoldersByName ' + EMPTIED) : [];
+    const targetRead = r ? (r.listedAll['T:Asia/' + EMPTIED] || 0) : 0;
+    const listedTimes = r ? (r.readCount['S:Asia/' + EMPTIED] || 0) : 0;
+    check(what + ': an emptied source subfolder ("' + EMPTIED + '") costs one listing only: no target lookup by its name, the ' +
+          'same-name target folder\'s files not read, and nothing of it moved, merged or logged as a move, merge, waiting or refused',
+          !!r && listedTimes === 1 && !lookedUp.length && !targetRead && !mentions(r, EMPTIED).length &&
+          !new RegExp('(move|merge|waiting|REFUSED)[^\\n]*' + EMPTIED).test(r.text),
+          r ? 'listed ' + listedTimes + 'x; target lookups by its name ' + lookedUp.length + '; target folder\'s files read ' + targetRead +
+              'x; ' + tell(r) : 'no ' + what);
+  }
   const empty = runEntries('empty');
   const byId = empty.flatMap(r => r.calls.filter(c => BY_ID(c) || WRITES(c)).map(c => r.name + ': ' + c));
   check('with NO Script Properties, no entry point opens anything by id or changes anything (no id is hard-coded)',
         ENTRIES.length > 0 && !byId.length, ENTRIES.length ? [...new Set(byId)].join(', ') : 'no entry points');
 
   const A = applier ? applier.name : null;
-  const tell = r => (r ? 'threw: ' + (r.threw || 'no') + '; made ' + JSON.stringify(r.created) + '; moved ' + JSON.stringify(r.moved) +
-                         '; log: ' + r.text.slice(-400) : 'no applier');
   // a failure: logged by folder name, the rest of the run goes on, the run ends with an error
   const failedMove = A ? runEntry(A, 'ids', { failMoveOf: 'Bright Stars 2026-10-14' }) : null;
   const notBright = EXPECTED_MOVES.filter(m => !inSub(m, 'Africa', 'Bright Stars 2026-10-14'));
