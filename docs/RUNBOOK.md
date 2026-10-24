@@ -2774,11 +2774,11 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 ## Duplicate and obsolete records in Salesforce
 
 - **When:** the monthly check (with "Duplicate girls in Salesforce"); a flag to set or clear; GLOW's own definitions arrive (DECISIONS 2026-10-21).
-- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day, 12:58 UTC, on his go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch is ticket #85.
+- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day, 12:58 UTC, on his go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch `RecordFlagBatch` (ticket #85) is built and not yet run ("The flagging batch", below).
 - **Dry run:** the check-only deploy (`sf project deploy start --dry-run`), step 3 of the plan's Rollout.
 - **Apply:** the same with its dry-run flag taken off, Ryan's go (VPN off); then the proof, also on his go: the no-DML `Datacloud.FindDuplicates` diagnostic (`sf apex run -f diag.apex`, the plan's step 6), which runs the active rules over three unsaved copies of existing accounts, inserts nothing and prints only `DIAG|` lines with each rule's name and its match count.
 - **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (the three Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rules' `DuplicateRecordSet`s (a cross-type pair, a Household account and a Club of one name and parent, is a set without a group: looked at by hand), and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
-- **Rollback:** deactivate the two Account Duplicate Rules, each rule by the same step (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)).
+- **Rollback:** deactivate the two Account Duplicate Rules, each rule by the same step (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)). The flags the batch (#85) set: a `clear` run of the same batch, `new RecordFlagBatch('Account', 'clear')` then `new RecordFlagBatch('Contact', 'clear')`, through `tools/sf_record_flags.py --mode clear` and `sf apex run`, Ryan's go, the hand-set flags counted first since `clear` takes them off too (the plan's Rollback, "The flagging batch" below).
 
 GLOW's annotated SOW (p.9) asks for "Duplicate Record" and "Obsolete Record" checkbox fields on
 Account and Contact, and for one Matching Rule and one Duplicate Rule on Account. The definitions
@@ -2890,6 +2890,68 @@ Club of one name and parent (cross-type), which Salesforce may report and
 `duplicate_account_groups`, keeping its own definition, never groups. Look at the two records of
 such a pair by id and decide by hand whether one is a stray of the other (Ryan, 2026-10-22).
 Counts and ids only in what is said about it.
+
+### The flagging batch
+
+`RecordFlagBatch` (ticket #85; [plan](plans/2026-10-23-sf-record-flag-batch.md); built, not yet
+run) sets the two flags by the criteria above, one batch job per object in scopes of 200
+(`Database.Batchable` with `Database.Stateful`); the class and its test class live in
+`data/sf_record_flags_2026-10-23/build/`, never in git. Three modes: `dryRun` counts and writes
+nothing; `flag` sets each flag to what the criteria say; `clear` sets both flags false on every
+record that has one, a flag set by hand included. A run writes only the two flag fields, and only
+on a record whose flag changes, so a second `flag` run writes nothing; `finish` logs counts alone,
+never a name or a field's value. Account duplicates are judged in code, as
+`glow.salesforce.duplicate_account_groups` judges them (the same name ignoring capitals and
+spacing, the same parent and the same record type), computed once per job over every Account;
+every member of a group is flagged, with no keeper (Ryan, decision 2a). `Datacloud.FindDuplicates`
+is not used by the batch: it does not see records inserted in the same transaction, so the tests
+could not prove it. A Contact is a duplicate when it sits in a `DuplicateRecordSet` of the Contact
+rule "First & Last & Account" holding two or more records (a set left with one item is no group:
+`tools/sf_dupes.py cleanup`). Obsolete is as defined above: a Club's six months are read on
+`Attendance_Batch__c.Attendance_Date__c` of its own batches, any status, or, for a club of a
+`jotform=no` partner, of the partner account's `Partner report` batches; a Participant's twelve
+months on `Attendance__c.Attendance_Date__c`.
+
+**Running it** (the plan's Rollout; each live step on Ryan's go, VPN off, from the repository
+root). The script writer `tools/sf_record_flags.py` reads the sheet's exports and Salesforce and
+writes the anonymous Apex, ids only: for Account it needs the day's Roster and Partners exports
+(the deactivated clubs' Club accounts and the `jotform=no` partners' accounts, which Apex cannot
+read: Ryan, decision 1a); for Contact it first counts the three things the NPSP and Volunteers
+workflow rules act on and writes no script while any count is not 0 (the guard, below). Each
+script is pasted in full in the session, then `sf apex run` runs it; the batch job's finish line
+in the debug log, `RecordFlagBatch|<object>|<mode>|duplicate=N|obsolete=N|written=N|failed=N`,
+gives the counts.
+
+```bash
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+python3 tools/sheets_client.py export Partners data/partners_<date>.csv
+python3 tools/sf_record_flags.py --sobject Account --mode dryRun --roster data/roster_<date>.csv --partners data/partners_<date>.csv --out data/sf_record_flags_<date>/scripts/account_dryRun.apex --vpn-off
+sf apex run -o glow -f data/sf_record_flags_<date>/scripts/account_dryRun.apex      # Ryan's go
+python3 tools/sf_record_flags.py --sobject Contact --mode dryRun --out data/sf_record_flags_<date>/scripts/contact_dryRun.apex --vpn-off
+sf apex run -o glow -f data/sf_record_flags_<date>/scripts/contact_dryRun.apex      # Ryan's go
+```
+
+The same with `--mode flag` is the run (Account first, then the guard and Contact, at a quiet
+hour), after Ryan confirmed the dry run's counts on the ticket; `--mode clear` is the way back.
+
+**The guard** (Ryan, 2026-10-23, option a): two NPSP workflow rules, `Preferred_Email__c` and
+`Preferred_Phone__c`, fire on any edit of a Contact whose Email or Phone is blank and fill it from
+the Work, Home and Alternate e-mail fields (or the Work, Home, Mobile and Other phone fields), and
+the Volunteers signup rule sends mail for a web signup of the day; the other Contact rules need a
+changed Email or Phone or a new record, and Account has only a Flow that acts when the owner
+changes. On 2026-10-23 the three counts were 0, 0 and 0, so a flag-only update changes nothing
+else. The tool counts them right before each Contact script (three `SELECT COUNT() FROM Contact
+WHERE …`, counts only) and refuses the script while any count is not 0; the plan's Rollout counts
+them again before the Contact run. The NPSP handlers and MC4SF are accepted as harmless for a
+flag-only update (Ryan, 2026-10-23).
+
+**The way back:** a `clear` run of the same batch, `new RecordFlagBatch('Account', 'clear')` and
+`new RecordFlagBatch('Contact', 'clear')` through `tools/sf_record_flags.py --mode clear` and
+`sf apex run`, sets both flags false on every record that has one; every flag was false before the
+fields were created on 2026-10-22, and the flags set by hand come off with it, so the plan's
+Rollout counts those first. The ids a run flagged are saved in
+`data/sf_record_flags_<date>/flagged.csv` (ids only) for a rollback of that run alone, record by
+record through the write connector.
 
 ## Attendance totals and partner-reported counts
 
