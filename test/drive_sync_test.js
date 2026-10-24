@@ -580,9 +580,9 @@ console.log('\ndrive-sync/ — the entry points, run against fake Drive services
 // what each fake may be asked for; anything else is recorded as a violation
 const ALLOW = {
   DriveApp: ['getFolders', 'getFoldersByName', 'getFolderById', 'getFileById', 'getRootFolder', 'searchFolders',
-             'searchFiles', 'getFiles', 'getFilesByName'],
-  Folder: ['getId', 'getName', 'getFolders', 'getFiles', 'getFoldersByName', 'getFilesByName', 'createFolder', 'moveTo',
-           'addFile', 'removeFile', 'addFolder', 'removeFolder', 'getLastUpdated', 'getDateCreated', 'getParents',
+             'searchFiles', 'getFiles', 'getFilesByName', 'getFilesByType'],
+  Folder: ['getId', 'getName', 'getFolders', 'getFiles', 'getFoldersByName', 'getFilesByName', 'getFilesByType', 'createFolder',
+           'moveTo', 'addFile', 'removeFile', 'addFolder', 'removeFolder', 'getLastUpdated', 'getDateCreated', 'getParents',
            'isTrashed', 'searchFolders', 'searchFiles'],
   File: ['getId', 'getName', 'getSize', 'getLastUpdated', 'getDateCreated', 'getMimeType', 'moveTo', 'getParents', 'isTrashed'],
   Iterator: ['hasNext', 'next', 'getContinuationToken'],
@@ -648,14 +648,21 @@ const inSub = (m, region, name) => m.startsWith('S:' + region + '/' + name + '/'
  * and any other property a fictional id) | 'empty' (no Script Properties). opt: failMoveOf (a
  * subfolder name whose files' moves throw), failCreateOf (a folder name whose Files.create
  * throws), moveAdvanceMin / readAdvanceMin (the clock jumps on each file moved / on each source
- * subfolder's files read), lateUploadTo (a source subfolder name: every listing of its files
- * after the first finds one more, fresh photo, LATE_UPLOAD - as Jotform may add one between the
- * planner's read and the move), targetName / sourceName ({region: folder name}). readCount
- * holds how often each source subfolder's files were listed.
+ * subfolder's files read), lateUploadTo (a source subfolder name: right after the FIRST listing
+ * of its files returns, one more fresh photo, LATE_UPLOAD, is in it - as Jotform may add one
+ * between the planner's read and the move; every later listing through any door sees it),
+ * lateRemoveFrom ('<source subfolder name>/<file name>': right after the first listing that
+ * photo is gone from Drive), targetName / sourceName ({region: folder name}). A listing is any door onto a
+ * folder's files: Folder.getFiles / searchFiles / getFilesByName / getFilesByType, and
+ * DriveApp.getFiles / searchFiles (`'<id>' in parents` finds that folder, anything else every
+ * folder) / getFilesByName / getFilesByType. readCount holds how often each source subfolder's
+ * files were listed, firstListing the ids its first listing returned, idOf each file's id by
+ * label, and each Files.update op its fileId and `ok` when the move happened.
  */
 function fakeEnv(mode, opt) {
   opt = opt || {};
-  const calls = [], moved = [], attempted = [], created = [], ops = [], logs = [], read = new Set(), readCount = {};
+  const calls = [], moved = [], attempted = [], created = [], ops = [], logs = [], read = new Set();
+  const readCount = {}, firstListing = {}, idOf = {}, gone = {}, allFolders = [];
   const clock = { t: Date.now() };
   const t0 = clock.t;
   let D = Date, n = 0;
@@ -680,34 +687,55 @@ function fakeEnv(mode, opt) {
   };
   const mkFile = (where, name, size, ageMin) => {
     const id = 'fake-file-' + (++n);
+    const mime = /\.pdf$/.test(name) ? 'application/pdf' : 'image/jpeg';
     const self = wrap('File', {
-      getId: () => id, getName: () => name, getSize: () => size, getMimeType: () => 'image/jpeg',
+      getId: () => id, getName: () => name, getSize: () => size, getMimeType: () => mime,
       getLastUpdated: () => new D(t0 - ageMin * MIN), getDateCreated: () => new D(t0 - ageMin * MIN),
-      moveTo: dest => moveTo(self, dest), getParents: () => iter([]), isTrashed: () => false,
+      moveTo: dest => moveTo(self, dest), isTrashed: () => false,
+      getParents: () => iter(meta.get(self).parent && byId[meta.get(self).parent] ? [byId[meta.get(self).parent]] : []),
     });
-    meta.set(self, { id, name, label: where + '/' + name, parent: null, isFolder: false });
+    meta.set(self, { id, name, mime, label: where + '/' + name, parent: null, isFolder: false });
     byId[id] = self;
+    idOf[where + '/' + name] = id;
     return self;
+  };
+  /**
+   * A source subfolder's files, listed through any door: counted, and right after the FIRST
+   * listing the subfolder changes under the mover's feet when an option says so (the listing
+   * returned is what was there before). Any later listing sees the change.
+   */
+  const listed = (lbl, name, id, files) => {
+    read.add(lbl);
+    readCount[lbl] = (readCount[lbl] || 0) + 1;
+    if (opt.readAdvanceMin) clock.t += opt.readAdvanceMin * MIN;
+    const snapshot = files.slice();
+    if (readCount[lbl] === 1) {
+      firstListing[lbl] = snapshot.map(f => meta.get(f).id);
+      if (opt.lateUploadTo === name) {   // one more photo arrives
+        const late = mkFile(lbl, LATE_UPLOAD, 777, 0);
+        meta.get(late).parent = id;
+        files.push(late);
+      }
+      const at = opt.lateRemoveFrom && opt.lateRemoveFrom.indexOf(name + '/') === 0 ?
+        files.findIndex(f => meta.get(f).name === opt.lateRemoveFrom.slice(name.length + 1)) : -1;
+      if (at >= 0) {   // that photo is gone from Drive
+        const g = meta.get(files.splice(at, 1)[0]);
+        gone[g.id] = g.label;
+        delete byId[g.id];
+      }
+    }
+    return snapshot;
   };
   const mkFolder = (lbl, name, kids, files, isSourceSub) => {
     const id = 'fake-folder-' + (++n);
+    const listing = () => (isSourceSub ? listed(lbl, name, id, files) : files.slice());
     const self = wrap('Folder', {
       getId: () => id, getName: () => name, getFolders: () => iter(kids),
-      getFiles: () => {
-        if (isSourceSub) {
-          read.add(lbl);
-          readCount[lbl] = (readCount[lbl] || 0) + 1;
-          if (opt.readAdvanceMin) clock.t += opt.readAdvanceMin * MIN;
-          if (opt.lateUploadTo === name && readCount[lbl] > 1) {   // one more photo arrived since the first listing
-            const late = mkFile(lbl, LATE_UPLOAD, 777, 0);
-            meta.get(late).parent = id;
-            files.push(late);
-          }
-        }
-        return iter(files);
-      },
+      getFiles: () => iter(listing()),
+      searchFiles: () => iter(listing()),
       getFoldersByName: x => iter(kids.filter(k => meta.get(k).name === x)),
-      getFilesByName: x => iter(files.filter(f => meta.get(f).name === x)),
+      getFilesByName: x => iter(listing().filter(f => meta.get(f).name === x)),
+      getFilesByType: x => iter(listing().filter(f => meta.get(f).mime === x)),
       createFolder: x => {
         const made = mkFolder(lbl + '/' + x, x, [], [], false);
         kids.push(made);
@@ -718,13 +746,20 @@ function fakeEnv(mode, opt) {
       moveTo: dest => moveTo(self, dest),
       addFile: () => self, removeFile: () => self, addFolder: () => self, removeFolder: () => self,
       getLastUpdated: () => new D(t0 - OLD * MIN), getDateCreated: () => new D(t0 - OLD * MIN),
-      getParents: () => iter([]), isTrashed: () => false, searchFolders: () => iter(kids), searchFiles: () => iter(files),
+      getParents: () => iter([]), isTrashed: () => false, searchFolders: () => iter(kids),
     });
-    meta.set(self, { id, name, label: lbl, kids, files, parent: null, isFolder: true });
+    meta.set(self, { id, name, label: lbl, kids, files, listing, parent: null, isFolder: true });
     for (const k of kids) meta.get(k).parent = id;
     for (const f of files) meta.get(f).parent = id;
     byId[id] = self;
+    allFolders.push(self);
     return self;
+  };
+  // DriveApp's own file doors: every folder's files (each source subfolder counted), or one folder's for `'<id>' in parents`
+  const everyFile = () => [].concat(...allFolders.map(f => meta.get(f).listing()));
+  const searched = q => {
+    const m = /'([^']+)'\s+in\s+parents/.exec(String(q));
+    return m && byId[m[1]] && meta.get(byId[m[1]]).isFolder ? meta.get(byId[m[1]]).listing() : everyFile();
   };
   // the advanced Drive service, v3: Drive.Files.create(resource, mediaData, optionalArgs) and
   // Drive.Files.update(resource, fileId, mediaData, optionalArgs), as strict as Drive is
@@ -748,10 +783,14 @@ function fakeEnv(mode, opt) {
     return { id: meta.get(made).id, name: r.name, mimeType: FOLDER_MIME, parents: [meta.get(parent).id] };
   };
   const filesUpdate = (resource, fileId, media, args) => {
-    ops.push({ op: 'update', t: clock.t, args: Object.assign({}, args) });
+    const op = { op: 'update', t: clock.t, args: Object.assign({}, args), fileId: fileId, ok: false };
+    ops.push(op);
     allDrives('Files.update', args);
     const item = byId[fileId];
-    if (!item) throw new Error('Files.update: File not found: ' + String(fileId) + ' (fake)');
+    if (!item) {
+      if (gone[fileId]) attempted.push(gone[fileId]);
+      throw new Error('Files.update: File not found: ' + String(fileId) + ' (fake)');
+    }
     const m = meta.get(item);
     attempted.push(m.label);
     const r = resource || {};
@@ -769,6 +808,7 @@ function fakeEnv(mode, opt) {
     meta.get(dest).files.push(item);
     m.parent = meta.get(dest).id;
     moved.push(m.label + ' -> ' + label(dest));
+    op.ok = true;
     if (opt.moveAdvanceMin) clock.t += opt.moveAdvanceMin * MIN;
     return { id: fileId, parents: [m.parent] };
   };
@@ -812,8 +852,9 @@ function fakeEnv(mode, opt) {
       // an id handed out by getId(); a SOURCE_/TARGET_FOLDER_<KEY> property's folder; else (another property's id) the root
       getFolderById: x => byId[x] || propFolders[x] || root,
       getFileById: x => { if (byId[x]) return byId[x]; throw new Error('No item with the given ID (fake)'); },
-      getRootFolder: () => root, searchFolders: () => iter(top), searchFiles: () => iter([]),
-      getFiles: () => iter([]), getFilesByName: () => iter([]),
+      getRootFolder: () => root, searchFolders: () => iter(top), searchFiles: q => iter(searched(q)),
+      getFiles: () => iter(everyFile()), getFilesByName: x => iter(everyFile().filter(f => meta.get(f).name === x)),
+      getFilesByType: x => iter(everyFile().filter(f => meta.get(f).mime === x)),
     }),
     Drive: wrap('Drive', {
       Files: wrap('Drive.Files', { list: () => ({ files: [], items: [] }), get: x => ({ id: x, name: 'x', parents: [] }),
@@ -839,7 +880,7 @@ function fakeEnv(mode, opt) {
                     ' static now() { return now(); } } Date = FakeDate; })(); delete globalThis.__fakeClock;', c);
     D = vm.runInContext('Date', c);
   };
-  return { calls, moved, attempted, created, ops, logs, read, readCount, t0, globals, install };
+  return { calls, moved, attempted, created, ops, logs, read, readCount, firstListing, idOf, t0, globals, install };
 }
 
 const violations = calls => calls.filter(c => {
@@ -866,14 +907,15 @@ function runEntry(name, mode, opt) {
     } catch (e) { threw = String(e && e.message || e); }
     return { name, threw, text: env.logs.join('\n'), calls: env.calls.slice(), moved: env.moved.slice(),
              attempted: env.attempted.slice(), created: env.created.slice(), ops: env.ops.slice(),
-             read: new Set(env.read), readCount: Object.assign({}, env.readCount), t0: env.t0, rerun };
+             read: new Set(env.read), readCount: Object.assign({}, env.readCount), firstListing: Object.assign({}, env.firstListing),
+             idOf: env.idOf, t0: env.t0, rerun };
   };
   const rerun = next => {
     for (const k of Object.keys(opt)) delete opt[k];
     Object.assign(opt, next || {});
     for (const a of [env.calls, env.moved, env.attempted, env.created, env.ops, env.logs]) a.length = 0;
     env.read.clear();
-    for (const k of Object.keys(env.readCount)) delete env.readCount[k];
+    for (const o of [env.readCount, env.firstListing]) for (const k of Object.keys(o)) delete o[k];
     return once();
   };
   return once();
@@ -926,9 +968,23 @@ const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
         applier ? 'Evening Lights: ' + JSON.stringify(mentions(applier, 'Evening Lights 2026-10-15')) + '; Silver Voices: ' +
                   JSON.stringify(mentions(applier, 'Silver Voices 2026-10-15')) + '; log: ' + applier.text.slice(-400) : 'no applier');
   const relisted = applier ? Object.entries(applier.readCount).filter(([, c]) => c > 1).map(([l, c]) => l + ' x' + c) : ['no applier'];
-  check('…each source subfolder\'s files are listed once per run: the plan is carried out from what the planner read, never a re-listing',
+  check('…each source subfolder\'s files are listed once per run (through any door): the plan is carried out from what the planner ' +
+        'read, never a re-listing',
         !!applier && !relisted.length && Object.keys(applier.readCount).length === SOURCE_SUBS,
         relisted.join(', ') || (applier ? Object.keys(applier.readCount).length + ' of ' + SOURCE_SUBS + ' read' : ''));
+  // the ids: what the planner's first listing of each settled subfolder returned, minus the one kept (same name and
+  // size already in T:Africa/Golden Flames 2026-10-13), is exactly what Files.update moved - and all it was ever sent
+  const SETTLED = ['S:Africa/Bright Stars 2026-10-14', 'S:Asia/Morning Wings 2026-10-13', 'S:Asia/Silver Voices 2026-10-15',
+                   'S:Africa/Golden Flames 2026-10-13'];
+  const KEPT = ['S:Africa/Golden Flames 2026-10-13/IMG_5501.jpg'];
+  const plannedIds = r => [].concat(...SETTLED.map(l => r.firstListing[l] || [])).filter(id => !KEPT.some(k => r.idOf[k] === id)).sort();
+  const sentIds = r => r.ops.filter(o => o.op === 'update').map(o => o.fileId);
+  const movedIds = r => r.ops.filter(o => o.op === 'update' && o.ok).map(o => o.fileId).sort();
+  check('…the file ids moved are exactly the ids the planner\'s first listing of the settled subfolders returned, minus the kept one, ' +
+        'and no other id is ever sent to Files.update',
+        !!applier && plannedIds(applier).length === EXPECTED_MOVES.length && same(movedIds(applier), plannedIds(applier)) &&
+        sentIds(applier).every(id => plannedIds(applier).includes(id)),
+        applier ? show(movedIds(applier), plannedIds(applier)) + '; sent ' + JSON.stringify(sentIds(applier)) : 'no applier');
   const dry = full.find(r => r.read.size > 0 && !r.attempted.length && !r.created.length && !r.ops.length && !r.calls.some(WRITES) &&
                          !r.threw && ['Bright Stars 2026-10-14', 'Morning Wings 2026-10-13'].every(x => r.text.includes(x)));
   check('one entry point is the dry run: reads both drives, logs what it would move by folder name, writes nothing (no Files.create ' +
@@ -969,11 +1025,27 @@ const fileNamesIn = text => FILE_STEMS.filter(s => text.includes(s));
   for (const [sub, kind] of [['Bright Stars 2026-10-14', 'a move'], ['Golden Flames 2026-10-13', 'a merge']]) {
     const r = A ? runEntry(A, 'ids', { lateUploadTo: sub }) : null;
     const planned = EXPECTED_MOVES.filter(m => inSub(m, 'Africa', sub));
+    const lateId = r ? r.idOf['S:Africa/' + sub + '/' + LATE_UPLOAD] : null;
     check('a photo uploaded into "' + sub + '" (' + kind + ') after the planner read it: the planned files move, the new one stays in ' +
-          'My Drive (it has not settled), nothing else changes, no error',
+          'My Drive (it has not settled; its id is never sent to Files.update), nothing else changes, no error',
           !!r && !r.threw && !r.moved.some(m => m.includes(LATE_UPLOAD)) && planned.every(m => r.moved.includes(m)) &&
-          same(r.moved.slice().sort(), EXPECTED_MOVES) && !fileNamesIn(r.text).length,
+          same(r.moved.slice().sort(), EXPECTED_MOVES) && !fileNamesIn(r.text).length &&
+          !(lateId && r.ops.some(o => o.fileId === lateId)),
           tell(r));
+  }
+  // the opposite disagreement: a planned photo gone from Drive after the planner's read: the mover goes by the plan, tries
+  // it, logs the failure by folder name, and still moves the rest - the gone photo's sibling that comes AFTER it included
+  for (const [sub, gone, code] of [['Bright Stars 2026-10-14', 'IMG_4471.jpg', 'MOVE_FAILED'],
+                                   ['Golden Flames 2026-10-13', 'IMG_5502.jpg', 'MERGE_FAILED']]) {
+    const r = A ? runEntry(A, 'ids', { lateRemoveFrom: sub + '/' + gone }) : null;
+    const goneLabel = 'S:Africa/' + sub + '/' + gone;
+    const rest = EXPECTED_MOVES.filter(m => !m.startsWith(goneLabel + ' '));
+    check('a planned photo gone from "' + sub + '" after the planner read it: the mover tries it (the plan, not a re-listing), ' + code +
+          ' names the folder (no file name), every other planned file still moves (the next one in that subfolder too), the run ' +
+          'ends with an error',
+          !!r && !!r.threw && r.attempted.includes(goneLabel) && same(r.moved.slice().sort(), rest) &&
+          new RegExp(code + '[^\\n]*' + sub).test(r.text) && !fileNamesIn(r.text + r.threw).length,
+          r ? 'tried gone: ' + r.attempted.includes(goneLabel) + '; ' + tell(r) : 'no applier');
   }
   const failedMerge = A ? runEntry(A, 'ids', { failMoveOf: 'Golden Flames 2026-10-13' }) : null;
   const notGolden = EXPECTED_MOVES.filter(m => !inSub(m, 'Africa', 'Golden Flames 2026-10-13'));
