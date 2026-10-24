@@ -223,8 +223,11 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
 
    The script is pasted in full first. Record the AsyncApexJob id (the read-only `AsyncApexJob`
    query, newest first), the date and the time (UTC), and the finish line's counts, as for Account.
-9. The read-back: the SOQL count of each flag on each object equals the dry run's count (step 5)
-   and the run's (steps 7 and 8), and the flagged ids are saved, ids only:
+9. The read-back: the SOQL count of each flag on each object equals the dry run's count (step 5),
+   which the run's finish line repeats (steps 7 and 8), plus the flags step 4 counted on records
+   outside the criteria: a `flag` run never unsets a flag set by hand, so those stay through the
+   run, and the read-back equals the dry run's count alone only while step 4 counted 0 (as it did
+   on 2026-10-24). The flagged ids are saved, ids only:
 
    ```sql
    SELECT COUNT() FROM Account WHERE Duplicate_Record__c = true
@@ -236,10 +239,10 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
    ```
 
    The ids go to `data/sf_record_flags_2026-10-23/flagged.csv` (object, id, which flag; never a
-   name). A count that differs from the dry run's is looked at by id before anything else. A
-   `failed` above 0 in a finish line is a locked row (`UNABLE_TO_LOCK_ROW`, codes only): the same
-   `flag` run again writes only what is still missing, since a record whose flag is in place is
-   not written. Then: `python3 tools/auto_sync.py` as a dry run still `in-sync` for every
+   name). A count that differs from the dry run's plus step 4's is looked at by id before anything
+   else. A `failed` above 0 in a finish line is a locked row (`UNABLE_TO_LOCK_ROW`, codes only):
+   the same `flag` run again writes only what is still missing, since a record whose flag is in
+   place is not written. Then: `python3 tools/auto_sync.py` as a dry run still `in-sync` for every
    region, and no `Attendance_Batch__c` created since the run is `Failed` with
    `DUPLICATES_DETECTED` (the flags are not in the processor's path, so none is expected).
 10. Docs: this plan's Result (per object and flag the dry run's count, the run's count and the
@@ -335,5 +338,7 @@ compiled; the check-only validate, the deploy, the dry run and the run each stil
 go. When they have happened, this section carries, in order and with counts and ids only: the
 check-only's id and result; the deploy id and time (UTC); the guard's three counts; the hand-set
 flags' counts; per object and flag the dry run's count, the run's count and the read-back's count
-in three clauses that agree; each run's AsyncApexJob id with its date and time (UTC); and the
-plan goes `status: done` with its `done:` date.
+in three clauses that agree (the read-back's is the dry run's plus step 4's hand-set flags outside
+the criteria, which a `flag` run never unsets: the three agree while step 4 counts none, as on
+2026-10-24); each run's AsyncApexJob id with its date and time (UTC); and the plan goes
+`status: done` with its `done:` date.
