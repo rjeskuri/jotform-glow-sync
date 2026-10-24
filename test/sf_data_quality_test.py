@@ -1613,7 +1613,8 @@ class RecordFlagBatchDocs(unittest.TestCase):
     ROLLBACK_WORDS = r"(?i)\brollback\b|\broll(?:ed|s|ing)?\s+back\b|\bundo\b|\bway back\b|\bback to false\b"
     # the guard: the three counts, named, and the stop unless each is 0
     GUARD = (r"(?i)\be-?mail\b", r"(?i)\bphone\b", r"(?i)\bvolunteer|\bsign-?ups?\b", r"(?<![\w.,:/-])0\b|\bzero\b")
-    # a flag set by hand (administrators alone can, RUNBOOK "Who sets a flag by hand")
+    # a flag set by hand (administrators alone can: RUNBOOK "Duplicate and obsolete records in Salesforce", its
+    # bullet on who sets a flag by hand)
     HAND = r"(?i)\bby hand\b|\bhand-set\b|\bmanual\w*|\badministrators?\b"
     GO = r"Ryan['’]s (go|answer|yes)\b"
     FLAG_MODE = r"(?<![\w'])'flag'|(?i:\bflag mode\b|--mode flag\b|\bmode\b[^.;]{0,20}?\bflag\b|\bin flag\b)"
