@@ -158,7 +158,15 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
    SELECT Id FROM Contact WHERE Duplicate_Record__c = true OR Obsolete_Record__c = true
    ```
 
-   The ids, if any, go to `data/sf_record_flags_2026-10-23/hand_set_before.csv` (ids only).
+   The ids, if any, go to `data/sf_record_flags_2026-10-23/hand_set_before.csv` (ids only). The
+   count of those flags set by hand outside the criteria, per object and flag, is found from these
+   ids alone: after the dry run (step 5) and before any run, each saved id is checked against the
+   criteria by read-only SOQL (the dry run's criteria re-read by SOQL, as in step 6, the sheet's
+   two by the ids step 5's Account script carries), the ids behind it into `data/`, ids and counts
+   only. It is never worked out from the read-back (step 9), the read-back's count less the dry
+   run's, and it is at most this step's total for that object and flag; a count found any other
+   way, or one above this step's total, stops the rollout here, as a guard count above 0 does in
+   step 3.
 5. The dry run, on Ryan's go: today's exports of the Roster and the Partners tab, then
    `tools/sf_record_flags.py` in `dryRun` mode writes each script - ids and counts only; the
    Account script carries the deactivated clubs' Club account ids and the `jotform=no` partners'
@@ -224,8 +232,9 @@ script; `data/` is never committed, and the scripts, the logs and the saved ids 
    The script is pasted in full first. Record the AsyncApexJob id (the read-only `AsyncApexJob`
    query, newest first), the date and the time (UTC), and the finish line's counts, as for Account.
 9. The read-back: the SOQL count of each flag on each object equals the dry run's count (step 5),
-   which the run's finish line repeats (steps 7 and 8), plus the flags step 4 counted on records
-   outside the criteria: a `flag` run never unsets a flag set by hand, so those stay through the
+   which the run's finish line repeats (steps 7 and 8), plus step 4's count of the flags set by
+   hand outside the criteria (found from step 4's ids by SOQL, never from this read-back): a
+   `flag` run never unsets a flag set by hand, so those stay through the
    run, and the read-back equals the dry run's count alone only while step 4 counts 0 outside
    the criteria. The flagged ids are saved, ids only:
 
