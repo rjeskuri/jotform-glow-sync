@@ -970,7 +970,7 @@ agree.
 - **Dry run:** each command without `--apply`.
 - **Apply:** with `--apply`, Ryan's go.
 - **Verify:** `--audit` again; `switcher_flags.py --check-page`.
-- **Rollback:** each write saves the form's whole store before its POST, to `backups/translations/<form>-<stamp>-before.json` (mode 600, never over an earlier file); without that file `glow/translations.py` sends nothing. Since 2026-10-09 that includes `add_language.py` and `restore_translations.py`, which used to POST without it.
+- **Rollback:** each write saves the form's whole store before its POST, to `backups/translations/<form>-<stamp>-before.json` (mode 600, never over an earlier file); without that file `glow/translations.py` sends nothing. Since 2026-10-09 that includes `add_language.py` and `restore_translations.py`, which used to POST without it. To put a saved store back: `python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json` (a dry run: per language how many keys differ, are added, are removed), then the same command with `--apply` on Ryan's go (the current store saved first, each differing language posted whole, re-read: RESTORED or MISMATCH).
 
 ```bash
 python3 tools/add_translations.py --audit                 # which labels lack translations
@@ -979,6 +979,8 @@ python3 tools/add_translations.py --apply
 python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json          # preview
 python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json --apply
 python3 tools/restore_translations.py --form <clone id> --check   # after a clone: is the switcher intact?
+python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json   # put a saved store back: dry run
+python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json --apply   # on Ryan's go
 python3 tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict tools/translations_hi.json     # Asia only (2026-09-20)
 python3 tools/add_language.py --form 262383129464057 --code fa --name Persian --dict tools/translations_fa.json   # Asia only (2026-09-20)
 python3 tools/switcher_flags.py --check-page             # which switcher languages have no built-in flag (public page, no key)

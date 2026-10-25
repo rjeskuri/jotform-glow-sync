@@ -40,13 +40,15 @@ class Fake:
     """A Jotform holding a translation store and a language property per form. A POST
     /translations replaces each language it carries, as Jotform's does, and records which
     files were in backups/translations at that moment. drop: {language: key} removed from the
-    store right after a POST that carried that language (the re-read then differs)."""
+    store right after a POST that carried that language (the re-read then differs). gets: every
+    GET path, in order."""
 
     def __init__(self, folder, stores, drop=None):
         self.folder, self.stores, self.drop = folder, stores, drop or {}
-        self.posts, self.puts = [], []
+        self.posts, self.puts, self.gets = [], [], []
 
     def get(self, path, **params):
+        self.gets.append(path)
         fid, what = path.split("/")[2], path.rstrip("/").rsplit("/", 1)[1]
         if what == "translations":
             return copy.deepcopy(self.stores.get(fid, {}))
@@ -309,6 +311,64 @@ class RestoreFromFile(unittest.TestCase):
         self.assertEqual(len(others), 1, self.files())
         with open(os.path.join(self.folder, others[0]), encoding="utf-8") as f:
             self.assertEqual(json.load(f), sc["live"])
+
+    # -- safety paths ------------------------------------------------------------------------
+
+    def test_a_language_empty_in_the_file_is_skipped_never_posted(self):
+        # es is {} in the file (posting it would wipe the live es); the other language differs
+        cases = [(glow_forms.REGIONALS["Africa"], "fr",
+                  {k("Date"): "Date (fr)", k("Club Name"): "Nom du club"},
+                  {k("Date"): "Date cassee"}),
+                 (glow_forms.REGIONALS["Asia"], "hi",
+                  {k("A"): "a-hi", k("B"): "b-hi", k("C"): "c-hi"},
+                  {k("A"): "a-hi wrong", k("D"): "d-hi"})]
+        for form, other, saved_other, live_other in cases:
+            saved = {**english(), "es": {}, other: saved_other}
+            live = {**english(), "es": {k("Date"): "Fecha", k("Week"): "Semana"},
+                    other: live_other}
+            for extra in ([], ["--apply"]):
+                with self.subTest(form=form, apply=bool(extra)):
+                    path = self.write_saved(f"{form}-2026-10-25T101500-before.json", saved)
+                    fake = Fake(self.folder, {form: copy.deepcopy(live)})
+                    code, out = self.run_tool(["--form", form, "--from-file", path, *extra], fake)
+                    self.assertIn(code, (0, None), out)
+                    es_lines = [ln for ln in out.splitlines()
+                                if re.search(r"(?<![\w-])es(?![\w-])", ln)]
+                    self.assertTrue(any("skipped" in ln for ln in es_lines), out)
+                    self.assertEqual(fake.stores[form]["es"], live["es"])     # live es unchanged
+                    for _, payload, _ in fake.posts:
+                        self.assertNotIn("es", payload)
+                    if extra:
+                        self.assertIn("RESTORED", out)
+                        self.assertNotIn("MISMATCH", out)
+                        self.assertEqual(fake.posted(form), {other: saved_other})
+                        self.assertEqual(fake.stores[form][other], saved_other)
+                    else:
+                        self.assertEqual((fake.posts, fake.puts), ([], []))
+                        self.assertEqual(fake.stores[form], live)
+                    for name in self.files():
+                        os.remove(os.path.join(self.folder, name))
+
+    def test_a_file_without_a_translated_language_is_nothing_to_restore(self):
+        # base/en only, or {}: exit 0, the live store not even read, nothing posted or saved
+        form = glow_forms.REGIONALS["Africa"]
+        files = {"base/en only": english(["Session notes"]), "empty": {},
+                 "base only": {"base": {k("Date"): "Date"}}}
+        live = {**english(), "es": {k("Date"): "Fecha"}}
+        for what, saved in files.items():
+            for extra in ([], ["--apply"]):
+                with self.subTest(file=what, apply=bool(extra)):
+                    path = self.write_saved(f"{form}-2026-10-25T111500-before.json", saved)
+                    before_files = self.files()
+                    fake = Fake(self.folder, {form: copy.deepcopy(live)})
+                    code, out = self.run_tool(["--form", form, "--from-file", path, *extra], fake)
+                    self.assertIn(code, (0, None), out)
+                    self.assertIn("nothing to restore", out)
+                    self.assertEqual((fake.posts, fake.puts), ([], []))
+                    self.assertEqual(self.files(), before_files)               # no new saved file
+                    self.assertEqual([g for g in fake.gets if "translations" in g], [], fake.gets)
+                    self.assertEqual(fake.stores[form], live)
+                    os.remove(path)
 
     # -- refusals ----------------------------------------------------------------------------
 

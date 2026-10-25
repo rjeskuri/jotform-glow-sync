@@ -35,10 +35,11 @@ four regional forms.
 - The limit's property was never read from this account (#104: `entryLimit` from Jotform's
   example, `Letters` from the runtime). So the template's block reads it first, read-only:
   every form already has a textarea, the hidden `contact_ids`, and the questions snapshot
-  `backup_forms.py` just took holds its limit property; the rollout stops before the template
-  write unless that property is named `entryLimit` with a `<Type>-<N>` value. Then the tool's
-  re-read after the write compares every property, and the browser check types past 1,000
-  characters.
+  `backup_forms.py` just took may hold its `entryLimit`. A `<Type>-<N>` value there confirms the
+  name; nothing there says only that this field never stored one, not that the name is wrong.
+  Either way the real check is the tool's re-read after the template write, which compares
+  every `NOTES_PROPS` property (a mismatch stops the rollout), and the browser check that typing
+  stops at 1,000 characters.
 - The e-mails (#105, 2026-10-23: mentors' notes can name girls; Ryan decides per e-mail, during
   the rollout). Jotform regenerates a default e-mail body when questions change, so a default
   body lists the new field; the staff notification "Notification 1" was custom HTML on
@@ -77,7 +78,7 @@ read back), the report CLEAN, the public page, the e-mails.
 
 ```bash
 python3 backup_forms.py --form 262352490535154
-jq -r '.[] | select(.name == "contact_ids") | to_entries[] | select(.key | test("(?i)limit")) | "\(.key) \(.value)"' backups/262352490535154/questions-latest.json
+jq -r '.[] | select(.name == "contact_ids") | to_entries[] | select(.key == "entryLimit") | "\(.key) \(.value)"' backups/262352490535154/questions-latest.json
 python3 tools/add_session_notes.py --form 262352490535154
 python3 tools/add_session_notes.py --form 262352490535154 --apply
 python3 tools/add_translations.py --form 262352490535154
@@ -85,12 +86,16 @@ python3 tools/add_translations.py --form 262352490535154 --apply
 python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.csv --partners data/partners_<date>.csv --rendered
 ```
 
-- The `jq` line is read-only and prints only the property's name and value from the snapshot
-  the backup just wrote (no question text, no data): the hidden `contact_ids` textarea's limit
-  property. It must print one line, `entryLimit <Type>-<N>` (`None-0` when that field has no
-  limit, `Letters-<N>` when it counts characters). Another name, another shape or nothing
-  stops the rollout here, before any write: `NOTES_PROPS` would then name a property Jotform
-  does not keep, and `glow/layout.py` is corrected first (a ticket).
+- The `jq` line is read-only and prints only the `entryLimit` key and its value from the
+  snapshot the backup just wrote (no question text, no data), on the hidden `contact_ids`
+  textarea. Its outcomes:
+  - `entryLimit <Type>-<N>` (`None-0` when that field has no limit, `Letters-<N>` when it
+    counts characters): the name is confirmed; go on.
+  - Nothing printed: that field never stored the property. That is not evidence against
+    `NOTES_PROPS`; go on. The template write's re-read (`add_session_notes.py` verifies every
+    `NOTES_PROPS` property after the create) and the browser test of the 1,000-character limit
+    are then the real check.
+  - Neither outcome stops the rollout; only the re-read's MISMATCH does (next bullet).
 - The apply prints a snapshot path and `re-read: verified`: the field once, its properties as
   `NOTES_PROPS` (the first `entryLimit` this account stores for the notes), every move landed, its
   place, no rule. A MISMATCH stops here, before any regional form: roll back from the snapshot
@@ -231,10 +236,11 @@ python3 tools/add_session_notes.py
   prints a submission's notes.
 - Jotform property names: `entryLimit` `Letters-1000` was never read from this account, and a
   property Jotform ignores would leave the field without its limit. Mitigation: before the
-  template write, the read-only `jq` read of the `contact_ids` textarea's limit property in the
-  backup's questions snapshot (stop unless `entryLimit` `<Type>-<N>`); the template first; the
-  tool's re-read compares every property and refuses to go on (MISMATCH, naming the snapshot)
-  before any regional form; the browser check types past 1,000 characters.
+  template write, the read-only `jq` read of the `contact_ids` textarea's `entryLimit` in the
+  backup's questions snapshot (`<Type>-<N>` confirms the name; nothing printed means that field
+  never stored one, not that the name is wrong); the template first; the tool's re-read compares
+  every property and refuses to go on (MISMATCH, naming the snapshot) before any regional form,
+  the only stop; the browser check types past 1,000 characters.
 - About ten moves per form before the create: a roster the runner writes in between, or a tie
   in the tail, could put the field in the wrong place. Mitigation: the tool refuses on a tie or
   a stray element, the re-read verifies every move and the field's place, the snapshot holds
