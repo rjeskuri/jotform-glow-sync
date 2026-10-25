@@ -54,14 +54,20 @@ dashboard, API 67.0). `evidence/build_vs_before.diff` is the diff against `befor
     the lookup matches on the account's name, and `Account__c.Name` is not a column of `Dhis2`);
   - the filter on a non-blank answer stays; label, `params` and the other attributes as they are.
 - Item 9 (`00ORP000004RJZC2A4`): Matrix, the answer `did_you_submit_your_GC_observation_form__c`
-  across; its column is the record name (a grouping is never also a column).
+  across (Yes, No, and NA in some older months); its column is the record name (a grouping is
+  never also a column). The form in use today (`dHIS2Controller`) clears this answer when no
+  session was observed.
 - Item 10 (`00ORP000004RJZD2A4`): Summary (no across grouping), the sum of
   `GC_sessions_did_you_observe_last_month__c`.
 - Item 11 (`00ORP000005uf412AA`): Matrix, a number bucket "Observed" on
   `GC_sessions_did_you_observe_last_month__c` across: No for 0 (`to` 0), Yes for 1 or more
   (`from` 0); the sum of the field stays a column. Each record is one partner's month, so the
   counts are partner-months; a partner with no Monthly Report for a month has no row (a missing
-  response, apart from a No).
+  response, apart from a No). An unanswered question is a No too, and the report does not tell it from 0:
+  the form shows the field as 0 until a number is typed, and `dHIS2Controller.setNumber` saves a
+  blank number as 0 (read in #74's retrieve of the controller and the LWC `dHIS2Forms`). So the
+  field is never blank, the `!= null` filter removes nothing, and "0 blank" in the Result comes
+  from the form, not from the data.
 - The dashboard: 3 components, on items 9, 10 and 11, titled with the reports' labels: item 9 a
   stacked column of Yes and No by month, item 10 a column of the sum by month, item 11 a stacked
   column of Yes and No by month. The six other components go: item 16's and the five on "DHIS2
@@ -87,8 +93,8 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
    (D3 runs as a specified user, so the clone is within the org's limit of 5 dynamic
    dashboards). Ryan names and describes the copy by hand in Lightning (`copy of
    01ZRP000006k2D32AI, #77`). The ledger rows are dated before the deploy.
-3. Check-only before the deploy: `sf project deploy start --dry-run -o glow -d force-app`, run
-   within `data/sf_dash_observations_2026-10-24/build/`; its id goes in the Result.
+3. On Ryan's go, check-only before the deploy: `sf project deploy start --dry-run -o glow -d force-app`,
+   run within `data/sf_dash_observations_2026-10-24/build/`; its id goes in the Result.
 4. On Ryan's go, the deploy: `sf project deploy start -o glow -d force-app` from the same
    folder; its deploy id goes in the Result.
 5. Read back: retrieve the three reports and the dashboard into
@@ -100,9 +106,12 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
    --method PUT`), and read its refresh date back by a GET.
 7. Check by SOQL on `DHIS2__c`, for the last complete month, that items 9-11 each equal their
    component (the RUNBOOK's query for each item) and that one partner's month equals the
-   per-partner query; the test accounts' records are absent from every component (their count
-   for the month, by SOQL with `Account__r.Name LIKE '%test%'`, is 0 for September 2026).
-   The counts go in the Result.
+   per-partner query. Then check the test-record rule on January 2026 and March 2026, the two
+   months of the last 12 that hold a Monthly Report on a test account (one in each, with 0
+   sessions and no item 9 answer): the item 11 component shows 33 No in January and 19 in March,
+   equal to SOQL with the rule, where SOQL without the rule gives 34 and 20, and item 10's report
+   counts 46 records in each of the two months, against 47 without the rule. So the test
+   accounts' records are absent from every component. The counts go in the Result.
 8. Move the five "DHIS2 Reports" reports D3 uses no more to Decommissioned, by the plan
    `data/sf_dash_observations_2026-10-24/move_plan.csv` (5 rows: `00ORP000005s3HN2AY`,
    `00ORP000005s3Iz2AI`, `00ORP000005s3nd2AA`, `00ORP000005s3qr2AA`, `00ORP000005uf0n2AA`): the
@@ -117,21 +126,28 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
 
 ## Rollback
 
-- Restore from the copies in Decommissioned: the three reports and the dashboard copied with
-  the tag #77 before the deploy. Open each copy, then Save As or move it back into "GLOW Monthly
-  Reports" or "GLOW Monthly Dashboards" (RUNBOOK "Decommissioned"). A copy put back keeps the
-  copy's Id, so the reports' and the dashboard's Ids change that way.
-- Or redeploy this change's retrieve `data/sf_dash_observations_2026-10-24/before/` (its D3 and
-  items 9-11: check-only, Ryan's go, deploy) only while a fresh retrieve equals `after/`. That
-  keeps every Id and the dashboard's place in the FlexiPage `Monthly_Report_Dashboards`.
-- When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report
-  since the deploy: the rollback then starts from that fresh retrieve, by the epic's ritual.
-- A rollback never deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
-- Before D3 goes back to its six other components, the five moved reports return to "DHIS2
-  Reports" by the undo of this change's ledger:
-  `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_observations_2026-10-24`
-  (the dry run lists the 5 moves), then the same with `--apply` on Ryan's go.
-- The copies stay in Decommissioned, and nothing is deleted.
+1. First the five moved reports return to "DHIS2 Reports" by the undo of this change's ledger,
+   because D3's six other components read them:
+   `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_observations_2026-10-24`
+   (the dry run lists the 5 moves), then the same with `--apply` on Ryan's go.
+2. Then D3 and items 9-11 roll back together: redeploy this change's retrieve
+   `data/sf_dash_observations_2026-10-24/before/` (D3 and the three reports: check-only, Ryan's
+   go, deploy) only while a fresh retrieve equals `after/`. That keeps every Id, so the
+   dashboard's components read the old reports again, and D3 keeps its place in the FlexiPage
+   `Monthly_Report_Dashboards`. This is the rollback that puts the dashboard back as it was.
+3. When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report
+   since the deploy: the rollback then starts from that fresh retrieve, by the epic's ritual.
+   A rollback never deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
+
+The copies in Decommissioned (tagged #77, made before the deploy) restore D3 and its reports in
+Lightning only as a set, because the dashboard copy points at the reports' original Ids, whose
+content this deploy rewrites: alone, it shows its old components on the new reports. To use them:
+move the three report copies and the dashboard copy back into "GLOW Monthly Reports" and "GLOW
+Monthly Dashboards" (RUNBOOK "Decommissioned"), then point each of the dashboard copy's three
+observation components at its report's copy (edit the component, its source report). The copies
+keep their own Ids, so the FlexiPage `Monthly_Report_Dashboards` then needs the dashboard copy
+in D3's place, by the ritual (check-only, Ryan's go, deploy). The copies stay in
+Decommissioned otherwise, and nothing is deleted.
 
 ## Result
 
@@ -147,10 +163,19 @@ The baseline the components must equal after the deploy, SOQL on `DHIS2__c` for 
 |---|---|---|
 | 9 | Submission of GC observation forms M & P | 26 answered: 23 Yes, 3 No |
 | 10 | Total Number of Club Observations M&P | sum 93 over 42 Monthly Reports |
-| 11 | Completed Observing Clubs Alteast Once P | 27 partners Yes (observed 1 or more), 15 No (0), 0 blank |
+| 11 | Completed Observing Clubs Alteast Once P | 27 partners Yes (observed 1 or more), 15 No (0), 0 blank (by the form: a blank is saved as 0) |
 
 - 42 Monthly Reports from 42 partners; the test-record rule leaves out 0 records in September
-  2026 and 2 in the last 12 months.
+  2026 and 2 in the last 12 months, both on a test account, one in January 2026 and one in
+  March 2026 (`evidence/test_records_last12.csv`; months and values only).
+- The rule's check, SOQL run 2026-10-25 (`evidence/soql_2026-10-25_test_months.txt`), with the
+  rule and without it:
+
+| Month | Item 9 (with = without) | Item 10 records, sum: with / without | Item 11 Yes; No: with / without |
+|---|---|---|---|
+| January 2026 | 7 Yes, 7 No, 8 NA | 46, 43 / 47, 43 | 13; 33 / 13; 34 |
+| March 2026 | 21 Yes, 6 No, 1 NA | 46, 116 / 47, 116 | 27; 19 / 27; 20 |
+
 - One partner, Abaana Community Outreach (ACO) Africa, September 2026: item 9 Yes, item 10 3
   sessions, item 11 Yes.
 - A report filed or changed later moves both sides.

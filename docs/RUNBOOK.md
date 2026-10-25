@@ -4061,9 +4061,11 @@ after each change (a PUT, Ryan's go) and Ryan's weekly Subscribe in Lightning ke
 The three components, each on its report in "GLOW Monthly Reports":
 - Item 9, "GLOW Club observation form submitted": the report "Submission of GC observation forms
   M & P" (`00ORP000004RJZC2A4`, matrix) counts Monthly Reports by the answer to
-  `did_you_submit_your_GC_observation_form__c` (Yes or No, across; a blank answer is filtered
-  out), for each partner and month. The component is a stacked column for each month, Yes and
-  No. SOQL signal (September 2026: 23 Yes, 3 No):
+  `did_you_submit_your_GC_observation_form__c` (its values across: Yes, No, and NA in some older
+  months; a blank answer is filtered out), for each partner and month. The form in use today
+  (`dHIS2Controller`) clears this answer when the partner observed no session, so a partner with
+  0 sessions has no answer here. The component is a stacked column for each month, one segment
+  per answer. SOQL signal (September 2026: 23 Yes, 3 No; January 2026: 7 Yes, 7 No, 8 NA):
   `SELECT did_you_submit_your_GC_observation_form__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND did_you_submit_your_GC_observation_form__c != null GROUP BY did_you_submit_your_GC_observation_form__c`.
 - Item 10, "Number of GLOW Club sessions observed": the report "Total Number of Club Observations
   M&P" (`00ORP000004RJZD2A4`, summary) sums `GC_sessions_did_you_observe_last_month__c` for each
@@ -4078,10 +4080,17 @@ The three components, each on its report in "GLOW Monthly Reports":
   partners who observed (September 2026: 27, and 15 with 0):
   `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c > 0`;
   the partners who observed none: the same query with `= 0`.
+  The field is never blank: the form shows it as 0 until the partner types a number, and
+  `dHIS2Controller` (`setNumber`) saves a blank number as 0. So a No is either 0 sessions
+  observed or the question left unanswered, and the report does not tell the two apart; the report's
+  `!= null` filter removes nothing (0 blank in September 2026, by the form, not by chance).
 
-A partner that filed no Monthly Report for a month has no `DHIS2__c` record for it, so it has no
-row in any of the three reports: a missing response, which the reports keep apart from a No by
-leaving it out. Who filed is "Reports completed on time" (item 18, D5).
+Two kinds of "no answer" the reports show differently:
+- A partner that filed no Monthly Report for a month has no `DHIS2__c` record for it, so it has
+  no row in any of the three reports: a missing response, which the reports keep apart from a No
+  by leaving it out. Who filed is "Reports completed on time" (item 18, D5).
+- A partner that filed but left the sessions question unanswered counts as 0 sessions: a No in item 11
+  and nothing added in item 10 (above).
 
 How the reports read the data:
 - Each report is grouped by the partner (`DHIS2__c.Account__c`), then by `Period__c` by calendar
@@ -4092,7 +4101,10 @@ How the reports read the data:
 - Each report carries the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
   (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
   `notContain` `test` (the lookup matches on the account's name). In September 2026 no Monthly
-  Report is on a test account or a blank Account; in the last 12 months, 2 are.
+  Report is on a test account or a blank Account; in the last 12 months, 2 are, both on a test
+  account: one in January 2026 and one in March 2026, each with 0 sessions and no item 9 answer.
+  With the rule, item 11 counts 33 No in January and 19 in March (34 and 20 without it), and
+  item 10's report 46 records in each of the two months (47 without it).
 - Each report also keeps its filter on a non-blank answer (its own field `!= null`).
 
 The dashboard's only filter is Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`,
@@ -4108,13 +4120,23 @@ items' values for one partner in one query (September 2026, Abaana Community Out
 Africa: Yes, 3 sessions, so observed):
 `SELECT Account__r.Name, did_you_submit_your_GC_observation_form__c, GC_sessions_did_you_observe_last_month__c FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`.
 
-Rollback: restore from the copies in Decommissioned of the three reports and the dashboard, made
-before the deploy by `copy --tag "#77"`; open the copy, then Save As or move it back
-(Decommissioned, above). Or redeploy this change's retrieve
-`data/sf_dash_observations_2026-10-24/before/` (check-only, Ryan's go, deploy) only while a fresh
-retrieve equals `after/`. When they differ, someone has changed the dashboard or a report since
-the deploy, and the rollback starts from a fresh retrieve by the ritual above. A rollback never
-deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
+Rollback:
+- The dashboard and items 9-11 roll back together: redeploy this change's retrieve
+  `data/sf_dash_observations_2026-10-24/before/` (D3 and the three reports: check-only, Ryan's
+  go, deploy) only while a fresh retrieve equals `after/`. That keeps every Id, so the
+  dashboard's components read the old reports again and the FlexiPage `Monthly_Report_Dashboards`
+  keeps D3 in its place. The five "DHIS2 Reports" reports go back to their folder first (the
+  plan's Rollback).
+- When they differ, someone has changed the dashboard or a report since the deploy, and the
+  rollback starts from a fresh retrieve by the ritual above. A rollback never deploys an older
+  build or another change's retrieve (DECISIONS 2026-10-16).
+- The copies in Decommissioned made before the deploy (`copy --tag "#77"`) restore D3 and its
+  reports in Lightning only as a set. The dashboard copy points at the reports' original Ids,
+  whose content this deploy rewrites, so its three observation components show the new reports.
+  Move the three report copies and the dashboard copy back (Decommissioned, above), then point
+  each of the dashboard copy's three components at its report's copy. The copies keep their own
+  Ids, so the FlexiPage then needs the dashboard copy in D3's place (the ritual: check-only,
+  Ryan's go, deploy).
 
 ## Interactive dashboard in Salesforce
 
