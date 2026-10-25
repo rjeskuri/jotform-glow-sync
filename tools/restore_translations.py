@@ -24,15 +24,31 @@ The POST replaces each language it carries, so --apply first saves the
 target's whole store to backups/translations/<form>-<stamp>-before.json
 (mode 600 - glow/translations.py).
 
+--from-file <saved store> is the rollback for a translations POST that read
+back MISMATCH: it puts a form's translated languages back exactly as one of
+those saved files holds them. The dry run prints, per language, how many keys
+differ, would be added and would be removed. --apply saves the CURRENT store
+first (a new file, never over the one restored from), POSTs each language that
+differs with its WHOLE saved dictionary (a replace), and re-reads: RESTORED, or
+MISMATCH naming the store saved before the restore (non-zero). English
+base/en are never posted; a language only the live store has is left alone
+(reported); a language the file holds empty is skipped (posting {} would wipe
+it). Refused: a file it cannot read, not JSON, not a store, or whose name
+(<form>-<stamp>-before.json) names no form or another form than --form.
+
 Usage:
     export JOTFORM_API_KEY=...
     python3 tools/restore_translations.py --form <TARGET_ID>                 # dry run
     python3 tools/restore_translations.py --form <TARGET_ID> --apply
     python3 tools/restore_translations.py --form <ID> --source <FORM> --apply # from another form
     python3 tools/restore_translations.py --form <ID> --check                # just report
+    python3 tools/restore_translations.py --form <ID> --from-file backups/translations/<ID>-<stamp>-before.json
+    python3 tools/restore_translations.py --form <ID> --from-file backups/translations/<ID>-<stamp>-before.json --apply
 """
 import argparse
+import json
 import os
+import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -60,13 +76,103 @@ def describe(form_id, client, store=None):
     return lang.get("options", ""), langs
 
 
+def load_saved(path, form_id):
+    """The translation store saved in `path` (a save_store() file), refusing - sys.exit - a
+    name that names no form or another form than `form_id`, a file it cannot read, not
+    JSON, or not a store ({language: {key: text}})."""
+    name = os.path.basename(path)
+    m = re.match(r"(\d{6,})-", name)
+    if not m:
+        sys.exit(f"{name}: the name names no form - a saved store is "
+                 "backups/translations/<form>-<stamp>-before.json")
+    if m.group(1) != form_id:
+        sys.exit(f"{name} was saved from form {m.group(1)}, not {form_id} - "
+                 f"restore it with --form {m.group(1)}, or pick a file of {form_id}")
+    try:
+        with open(path, encoding="utf-8") as f:
+            store = json.load(f)
+    except FileNotFoundError:
+        sys.exit(f"{name}: no such file ({path})")
+    except (OSError, UnicodeDecodeError) as err:
+        sys.exit(f"{name}: cannot be read ({type(err).__name__})")
+    except ValueError:
+        sys.exit(f"{name}: not JSON - not a saved translation store")
+    if not isinstance(store, dict) or not all(
+            isinstance(d, dict) and all(isinstance(t, str) for t in d.values()) for d in store.values()):
+        sys.exit(f"{name}: not a translation store ({{language: {{key: text}}}})")
+    return store
+
+
+def counts(saved, live):
+    """(differ, added, removed) of one language: keys in both with other text, keys only the
+    saved dictionary has, keys only the live one has."""
+    return (sum(1 for x in saved if x in live and live[x] != saved[x]),
+            sum(1 for x in saved if x not in live),
+            sum(1 for x in live if x not in saved))
+
+
+def restore_from_file(args, client):
+    """--from-file: the form's translated languages put back as the saved store holds them."""
+    saved = load_saved(args.from_file, args.form)
+    name = os.path.basename(args.from_file)
+    wanted = {lang: d for lang, d in saved.items() if lang not in ENGLISH_KEYS}
+    print(f"form {args.form}: restore from {name} (English base/en never posted)")
+    if not wanted:
+        print("   the file holds no translated language: nothing to restore")
+        return
+    live = translations.read_store(client, args.form)
+    changed = {}
+    for lang in sorted(wanted):
+        d = wanted[lang]
+        if not d:
+            print(f"   {lang}: skipped - empty in the file (posting it would wipe the language)")
+            continue
+        have = live.get(lang, {})
+        if have == d:
+            print(f"   {lang}: same already")
+            continue
+        differ, added, removed = counts(d, have)
+        print(f"   {lang}: {differ} differ, {added} added, {removed} removed - "
+              f"{'replaced' if args.apply else 'to replace'} by the file's {len(d)} entries")
+        changed[lang] = d
+    for lang in sorted(set(live) - set(wanted) - ENGLISH_KEYS):
+        print(f"   {lang}: only on the live form - left alone")
+
+    if not changed:
+        print("\nnothing differs - nothing to post")
+        return
+    if not args.apply:
+        print("\nDRY RUN - re-run with --apply to write (the current store is saved first)")
+        return
+
+    before = translations.save_store(args.form, live, backup.stamp())
+    before_rel = os.path.relpath(before, translations.REPO)
+    print(f"store saved: {before_rel}")
+    after = translations.replace_languages(client, args.form, changed, "restore translations", before)
+    bad = sorted(lang for lang, d in wanted.items() if d and after.get(lang) != d)
+    if bad:
+        sys.exit(f"MISMATCH - {', '.join(bad)} not as in {name} after the POST; "
+                 f"the store before this restore: {before_rel}")
+    print(f"RESTORED - {', '.join(sorted(changed))} as in {name}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--form", required=True, help="target form ID (a clone)")
-    ap.add_argument("--source", default=TEMPLATE, help="form to copy from (default: template)")
+    src = ap.add_mutually_exclusive_group()
+    src.add_argument("--source", help="form to copy from (default: template)")
+    src.add_argument("--from-file", help="a saved store (backups/translations/<form>-<stamp>-before.json) "
+                                         "to put the form's languages back from")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--check", action="store_true", help="only report the target's state")
     args = ap.parse_args()
+    if args.from_file:
+        if args.check:
+            sys.exit("--check only reports; leave it out with --from-file (its dry run reports)")
+        load_saved(args.from_file, args.form)          # refuse before any call
+        restore_from_file(args, Client(api_key(), apply=args.apply))
+        return
+    args.source = args.source or TEMPLATE
     client = Client(api_key(), apply=args.apply)
 
     options, langs = describe(args.form, client)
