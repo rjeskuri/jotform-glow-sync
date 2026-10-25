@@ -4120,13 +4120,22 @@ equals that partner's cell for that month in item 14's report.
 Rollback, in this order ([plan](plans/2026-10-25-sf-dash-training.md#rollback)):
 1. Once the two "DHIS2 Reports" reports are in Decommissioned, they go back first, since D4 as it
    was reads them: `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_training_2026-10-24`
-   (the dry run lists the 2 moves), then the same with `--apply` on Ryan's go.
+   (the dry run lists 3 moves, last first: the plan's `--limit 1` run moved its first report and
+   the full `--apply` run moved that report again, Decommissioned to Decommissioned, and the
+   second; the undo puts both reports back in "DHIS2 Reports"), then the same with `--apply` on
+   Ryan's go.
 2. Then restore from the copies in Decommissioned of the reports and the dashboard, made before
    the deploy by `copy --tag "#78"`; open the copy, then Save As or move it back (Decommissioned,
    above).
 3. Or redeploy from this change's retrieve `data/sf_dash_training_2026-10-24/before/` only the
    four components it touched, items 13-15 and D4, and only while a fresh retrieve of those four
-   equals `after/`: within `before/`, the check-only
+   equals `after/`. That fresh retrieve goes into a new folder
+   `data/sf_dash_training_2026-10-24/fresh_<date>/` (UTC date), made with
+   `mkdir -p fresh_<date>/force-app` and `cp before/sfdx-project.json fresh_<date>/` in
+   `data/sf_dash_training_2026-10-24/`. Within that folder:
+   `sf project retrieve start -o glow -x ../rollback/package.xml`. A retrieve never goes into
+   `before/`, which it would overwrite. Only while that fresh retrieve equals `after/`, within
+   `before/`, the check-only
    `sf project deploy start --dry-run -o glow -x ../rollback/package.xml`, then on Ryan's go the
    same without `--dry-run`. The manifest `data/sf_dash_training_2026-10-24/rollback/package.xml`
    lists exactly those four; nothing else that folder holds goes back (not item 16, the two "DHIS2

@@ -92,8 +92,17 @@ build was made by a script from a copy of `before/`.
 All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI login `glow`
 (`.claude/skills/salesforce`). Each copy goes to Decommissioned before anything changes.
 
+Every retrieve below goes into a new folder made for it, in `data/sf_dash_training_2026-10-24/`:
+`mkdir -p <folder>/force-app`, then `cp before/sfdx-project.json <folder>/`, then within
+`<folder>` `sf project retrieve start -o glow -x <manifest>`, which writes into that folder's
+`force-app/`. A retrieve never runs within `before/`, `build/`, `item16/before/` or an `after/`
+that already holds files: it would overwrite them, and `before/` is the redeploy's source. The
+manifest of D4 and items 13-15 is `rollback/package.xml` (`-x ../rollback/package.xml` from a
+folder directly in the work folder); the one of item 16 and D4 is `item16/package.xml` (step 9).
+
 1. Retrieved 2026-10-24, read-only: `data/sf_dash_training_2026-10-24/before/` (Context). Just
-   before step 2, a fresh retrieve of the dashboard and items 13-15 must equal `before/`; on a
+   before step 2, a fresh retrieve of the dashboard and items 13-15, into a new folder
+   `fresh_<date>/` (UTC date) by `rollback/package.xml` as above, must equal `before/`; on a
    difference, stop and build again from that fresh retrieve.
 2. Copy the four reports and the dashboard into Decommissioned, each on Ryan's go:
    `python3 tools/sf_report_folders.py copy --vpn-off --dir data/sf_dash_training_2026-10-24 --kind report --id 00ORP000004RJZE2A4 --tag "#78" --apply` (item 13),
@@ -111,7 +120,8 @@ All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI 
 4. On Ryan's go, the deploy: `sf project deploy start -o glow -d force-app` from the same
    `build/` folder; its deploy id goes in the Result.
 5. Read back: retrieve the three reports and the dashboard into
-   `data/sf_dash_training_2026-10-24/after/` and check that `after/` equals `build/` beyond
+   `data/sf_dash_training_2026-10-24/after/`, a new folder made as above, by
+   `rollback/package.xml`, and check that `after/` equals `build/` beyond
    Salesforce's normalisation (`expandOthers`, default attributes); a difference beyond it stops
    the rollout for Ryan.
 6. Refresh the dashboard on Ryan's go:
@@ -136,12 +146,16 @@ All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI 
    `00ORP000005ufNN2AY`): the dry run
    `python3 tools/sf_report_folders.py move --vpn-off --dir data/sf_dash_training_2026-10-24 --plan data/sf_dash_training_2026-10-24/move_plan.csv`,
    then on Ryan's go the same with `--apply --limit 1`, a SOQL check of that report, and the rest
-   with `--apply` (the same plan; the first row moves again within Decommissioned). Outside
+   with `--apply` (the same plan: the tool moves every row of a plan, so the first row moves
+   again, from Decommissioned to Decommissioned, and the ledger then holds 3 moves). Outside
    Decommissioned, D4 is the one dashboard using them (2026-10-24: their two other dashboards are
    in Decommissioned).
 9. Item 16, once #77 has landed (Ryan, 2026-10-24), as its own change in
    `data/sf_dash_training_2026-10-24/item16/` (its own `before/`, `build/` and `after/`):
-   - a fresh retrieve of item 16 and D4 into `item16/before/`, compared with item 16 in
+   - a fresh retrieve of item 16 and D4 into `item16/before/`, a new folder made as above (with
+     `cp before/sfdx-project.json item16/before/`), by the manifest `item16/package.xml` (item 16's
+     report and D4 by the developer names of their files in this change's retrieve, 2 members,
+     written by script; `-x ../package.xml` within `item16/before/`), compared with item 16 in
      `before/` and D4 in `after/`, and the differences written in the Result (#77 may have
      changed item 16; #80 may have added item 12 to D4 first);
    - before anything changes, a copy of each as it is that day into Decommissioned, on Ryan's go,
@@ -156,7 +170,8 @@ All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI 
      with every other component of the retrieve as it is; it never starts from this change's
      `build/` or `after/` when they differ from the fresh retrieve;
    - the same ritual follows: check-only of `item16/build/`, deploy on Ryan's go, read-back into
-     `item16/after/`, and the SOQL check of step 7 for item 16; the counts go in the Result.
+     `item16/after/` (a new folder made as above, by `item16/package.xml`), and the SOQL check of
+     step 7 for item 16; the counts go in the Result.
      Its rollback is its own copies and `item16/before/`, as below.
 10. Ryan sets a weekly Subscribe on the dashboard in Lightning (the refresh is a subscription,
    not metadata), as he did for "Jotform Attendance".
@@ -167,7 +182,9 @@ All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI 
   Reports" reports that step 8 moved, so they return to "DHIS2 Reports" before D4 goes back, by the
   undo of this change's ledger:
   `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_training_2026-10-24`
-  (the dry run lists the 2 moves), then the same with `--apply` on Ryan's go.
+  (the dry run lists 3 moves, the ledger's, last first: the second report back to "DHIS2
+  Reports", the first report's second move back to Decommissioned, where it already is, and the
+  first report back to "DHIS2 Reports"), then the same with `--apply` on Ryan's go.
 - Then restore the dashboard and its reports from their copies in Decommissioned, made with the tag
   #78 before the deploy: open each copy, then Save As or move it back into "GLOW Monthly Reports" or
   "GLOW Monthly Dashboards" (RUNBOOK "Decommissioned"). A copy put back keeps the copy's Id, so the
@@ -180,7 +197,9 @@ All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI 
   13), `GLOW_Monthly_Reports/Number_of_training_sessions_led_with_m_CLk` (item 14) and
   `GLOW_Monthly_Reports/Leading_training_sessions_with_ieq` (item 15), and the dashboard
   `GLOW_Monthly_Dashboards/fgMcyANlcTvERilgPVySaXCChURVlO` (D4). The fresh retrieve takes the same
-  manifest (`sf project retrieve start -o glow -x <manifest>` into a new folder). Only while that
+  manifest, into a new folder `data/sf_dash_training_2026-10-24/fresh_<date>/` (UTC date) made as
+  in the Rollout. Within that folder: `sf project retrieve start -o glow -x ../rollback/package.xml`.
+  It never goes into `before/`, the source of this redeploy, which it would overwrite. Only while that
   fresh retrieve equals `after/`, the deploy runs within `before/` with the manifest: first the
   check-only `sf project deploy start --dry-run -o glow -x ../rollback/package.xml`, then on Ryan's
   go the same without `--dry-run`. Nothing else in `before/` goes back: not item 16, the two "DHIS2
@@ -189,7 +208,8 @@ All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI 
 - When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report since
   the deploy (step 9 among them): the rollback then starts from that fresh retrieve, by the epic's
   ritual. Step 9's own change goes back first, from its copies or from `item16/before/` only while
-  a fresh retrieve of item 16 and D4 equals `item16/after/`.
+  a fresh retrieve of item 16 and D4, into a new folder `item16/fresh_<date>/` made as in the
+  Rollout by `item16/package.xml`, equals `item16/after/`.
 - A rollback never deploys an older build, never a `build/` and never another change's retrieve
   (DECISIONS 2026-10-16).
 - The copies stay in Decommissioned, and nothing is deleted.
