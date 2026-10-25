@@ -689,6 +689,26 @@ class SalesforceBackfill(Harness, unittest.TestCase):
         self.assertEqual(bf.outcome_of("Failed", "Error: NOT_FOUND, WILHELMINA ZIBBLEWICK"), "failed_NOT_FOUND")
         self.assertEqual(bf.outcome_of("AMARA ZIBBLEWICK", None), "no status_other")
 
+    def test_a_merged_correction_is_its_own_kind(self):
+        # 2026-10-22 (ticket #108): a mentor's corrected re-submission for a club and day that already has a
+        # Success batch adds its missing girls to that original batch and is itself a Success whose message
+        # is 'merged into <original batch id>' - its own kind, not the success_other a read-back marks CHECK
+        for original in ("a1l000000000000AAA", "a1lRP00000Xyz12YAB", "a1l000000000000001", "a1l00000000AbC"):   # 18 and 15 chars
+            with self.subTest(original):
+                self.assertEqual(bf.outcome_of("Success", f"merged into {original}"), "merged")
+        self.assertEqual(bf.outcome_of("Success", "merged into a1l000000000000AAA (2 girls added)"), "merged")
+        # the kind is the processor's exact text followed by an id, as 'Duplicate:' and 'No participants' are its
+        # exact texts: a Failed batch is never 'merged'; a 'merged into' with no id after it, or in other capitals,
+        # is not the processor's message, so it stays the success_other a read-back marks CHECK; the plain
+        # success keeps its own kind
+        self.assertEqual(bf.outcome_of("Failed", "merged into a1l000000000000AAA"), "failed_other")
+        for text in ("merged into", "merged into ", "Merged into a1l000000000000AAA", "MERGED INTO a1l000000000000AAA",
+                     "merged a1l000000000000AAA"):
+            with self.subTest(text):
+                self.assertEqual(bf.outcome_of("Success", text), "success_other")
+        self.assertEqual(bf.outcome_of("Success", "Processed successfully."), "success")
+        self.assertEqual(bf.outcome_of("Success", "Duplicate: A successful batch already exists"), "duplicate_batch")
+
 
 class SalesforceBackfillEdges(Harness, unittest.TestCase):
     """What the second review asked to have pinned: the read-back, unclear answers, stricter inputs."""

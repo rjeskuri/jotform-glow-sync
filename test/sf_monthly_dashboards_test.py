@@ -12,6 +12,23 @@ a dated DECISIONS entry records archive-not-delete; the salesforce skill points 
 Every part a test reads is also swept for what would contradict the rule (contradictions()): a
 deletion, a share, or a softener that makes the copy, the check-only or the revert optional.
 Counts and names of reports only: no figure from the org is pinned.
+
+KeepListDocs (ticket #70): the RUNBOOK's `### The keep list` names `glow/sf_keep_list.csv`, the five
+groups, Partner and Month, the unchanged labels, Decommissioned for what is off the list and the
+test-record filter; a dated DECISIONS entry records the keep list, Ryan's words, the rule and what was
+rejected (`Partner_Status__c` with its reason). Each rule is checked as stated, not negated, rejected,
+renamed, put off or softened, with #69's `locally_denied` and `contradictions`.
+
+CategoryFoldersDocs (ticket #73): one report folder "GLOW Monthly Reports" and one dashboard folder
+"GLOW Monthly Dashboards" (Ryan, 2026-10-21) for the kept items; the RUNBOOK's `### The five
+dashboards and their folders` table (read against `glow/sf_keep_list.csv`), the folders' shares
+copied from the DHIS2 folders (internal only), the plan (deploy, copies before moves, SOQL check,
+undo) and a dated bullet on the keep-list DECISIONS entry. Labels do not change (Ryan, 2026-10-23).
+RetiredReportsDocs (ticket #72): the RUNBOOK's `### Decommissioned` records the retirement (its date, 29
+reports and 10 dashboards moved, the 19 held for #75-#79, the ledger `data/sf_retire_2026-10-23/ledger.csv`)
+and how to bring an item back; the plan `docs/plans/<date>-sf-retire-reports.md` names #72, its Rollout has
+the dry run, `--limit 1`, Ryan's go, the dashboards by hand and the SOQL check by Id, its Rollback is the
+tool's undo from that ledger and deletes nothing, and its Result gives the counts.
 """
 import glob
 import os
@@ -388,6 +405,950 @@ class DecommissionedFoldersDocs(unittest.TestCase):
                         f"{where}: the archive rule says a copy goes to Decommissioned before each change (one "
                         "sentence, not negated)")
         self.assertNoContradiction(item, where, share=True)
+
+
+class KeepListDocs(unittest.TestCase):
+    """Ticket #70: GLOW's keep list (`glow/sf_keep_list.csv`, test/sf_keep_list_test.py) in the RUNBOOK and
+    DECISIONS, as Ryan answered on the ticket, 2026-10-23: the 19 items in five dashboards and one table, every
+    kept report by Partner and Month (Ryan, 2026-10-21); the labels unchanged ("Kept reports and dashboards keep
+    their current names"); everything off the list goes to Decommissioned and is kept there; the test-record
+    rule is the report filter `Account is not blank AND Account: Account Name does not contain "test"`, not
+    `Partner_Status__c`. Each rule must be stated as the rule: not negated, rejected, renamed or put off (#69's
+    `locally_denied` and `contradictions`)."""
+
+    longMessage = False         # the messages say what to fix
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
+    MONTHLY = "## Monthly Report dashboards in Salesforce"
+    KEEP = "### The keep list"
+    TICKET = re.compile(r"(?<![\w#])#70\b")
+    GROUPS = ("GLOW Club Attendance", "GLOW Club Implementation", "GLOW Club Observations", "GLOW Club Training",
+              "GLOW Club Reporting")
+    NEGATION = DecommissionedFoldersDocs.NEGATION
+    RYAN = "This data should be displayed by the Partner and Month"     # Ryan, 2026-10-21, verbatim
+
+    # the rule, in either order of its two conditions, quotes straight or curly
+    NOT_BLANK = re.compile(r"(?i)`?Account`?\s+(is\s+)?not\s+blank\b|`?Account`?\s+(is\s+)?not\s+(empty|null)\b|"
+                           r"`?Account`?\s*(!=|≠|<>)\s*(blank|null|['\"]{2})")
+    NO_TEST = re.compile(r"(?i)\bAccount Name`?\s+does\s+not\s+contain\s+[`\"“']+test[`\"”']+")
+    # words that make the rule a rejected one, before it ("A rejected filter: …", "we dropped …") ...
+    REJECT = re.compile(r"(?i)\b(reject\w*|dropped|dropping|discard\w*|abandon\w*|withdr[ae]w\w*|superseded|"
+                        r"instead|cannot|wrong|replac\w*|retired)\b")
+    # ... or after it ("… does not contain "test" was rejected")
+    REJECTED_AFTER = re.compile(r"(?i)\b(is|are|was|were|been|be)\s+(\w+\s+)?(rejected|dropped|discarded|abandoned|"
+                                r"replaced|superseded|wrong|withdrawn|not used|unused)\b|\brejected\b")
+    # Partner_Status__c used as the rule ("use Partner_Status__c", "filter on Partner_Status__c")
+    USES_STATUS = re.compile(r"(?i)\b(use|uses|using|used|filters?\s+(on|by)|filtered\s+(on|by)|rel(y|ies)\s+on|"
+                             r"keyed\s+on|by|with)\s+`?Partner_Status__c")
+    # why Partner_Status__c is rejected: blank on real partners too (it would drop real partners)
+    STATUS_REASON = re.compile(r"(?i)\bblank\b[^.;]{0,80}?\breal partners?\b|"
+                               r"\b(drops?|dropping|excludes?|excluding|loses?|hides?|removes?)\b[^.;]{0,30}?"
+                               r"\breal partners?\b")
+    # "keep their current names", "labels stay unchanged", "the labels are not changed", "do not change the labels"
+    SAME_LABELS = re.compile(r"(?i)\bkeep(s|ing)?\b[^.;]{0,30}?\b(current|today['’]s|existing|own|present)\s+"
+                             r"(labels?|names?)\b|\b(labels?|names?)\b[^.;]{0,40}?\b(unchanged|stay the same|"
+                             r"(are|is|stay|stays)\s+as\s+(they|it)\s+(are|is)|(are|is)\s+(not|never)\s+(changed|renamed)|"
+                             r"(do|does)\s+not\s+change|not\s+renamed|never\s+renamed)\b|"
+                             r"\b(do|does|did|will)\s+not\s+change\s+(the|their|its|any)\s+(\w+\s+)?(labels?|names?)\b")
+    # a label change stated as the plan ("rename all of them", "change the labels", "the names are changed")
+    RENAME = re.compile(r"(?i)\b(renam\w*|re-?label\w*|chang(e|es|ed|ing)\s+(the\s+|their\s+|its\s+|a\s+|each\s+|"
+                        r"every\s+|all\s+)?(\w+\s+)?(labels?|names?)|new\s+(labels?|names?))\b|"
+                        r"\b(labels?|names?)\s+(will\s+be\s+|are\s+|is\s+|get\s+)?(chang(e|es|ed)|renamed|relabel\w*)\b")
+    OFF_LIST = re.compile(r"(?i)\b(not on|off)\s+the\s+(keep\s+)?list\b")
+    MOVED = re.compile(r"(?i)\b(goes|go|going|moved?|moves|moving|retired?)\s+(\w+\s+){0,3}?(to|into)\s+(the\s+)?"
+                       r"[`\"“]?Decommissioned")
+    KEPT_THERE = re.compile(r"(?i)\b(kept|stays?|remains?)\s+(\w+\s+)?there\b|"
+                            r"\bkept\s+in\s+(the\s+)?[`\"“]?Decommissioned")
+    # what puts the move off or makes it conditional ("only once Ryan asks", "until then it stays in place")
+    DELAY = re.compile(r"(?i)\bonly\s+(once|if|when|after|on)\b|\buntil\b|\bunless\b|"
+                       r"\b(stays?|remains?|left|leave|kept)\s+in\s+place\b|\bstays?\s+where\b|\beventually\b|"
+                       r"\bwhen(ever)?\s+(Ryan|someone|asked|needed)\b|\bif\s+(Ryan|asked|needed|requested)\b|"
+                       r"\bon request\b|\boptional\w*|\bmay\b|\bmight\b|\bcould\b|\bsomeday\b|\bone day\b|"
+                       r"\bat some point\b|\bfor now\b|\bnot yet\b")
+    STAY_PUT = re.compile(r"(?i)\b(stays?|remains?|left|leave|kept)\s+(\w+\s+)?in\s+place\b|"
+                          r"\bstays?\s+where\s+(it|they)\s+(is|are)\b")
+    EVERY_REPORT = re.compile(r"(?i)\b(every|each|all)\b[^.;]{0,60}?\breports?\b")
+    NINETEEN = re.compile(r"(?i)\b19\s+(\w+\s+)?items\b")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = DecommissionedFoldersDocs()     # #69's helpers: locally_denied, contradictions
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def said(self, s, m):
+        """Match `m` of clause `s` stated, not denied: no negation in the words before it (#69's
+        `locally_denied`) and no "nothing", "none" or "no" right after it ("rename nothing")."""
+        return not self.d.locally_denied(s, m) and not re.match(r"\s+(nothing|none|no)\b", s[m.end():])
+
+    def stated(self, text, rx):
+        """The clauses of `text` where `rx` is said, not denied."""
+        return [s for s in sentences(text, ".;") if any(self.said(s, m) for m in rx.finditer(s))]
+
+    def keep_part(self):
+        """The `### The keep list` part of the Monthly Report section, to the next `###` or `##`."""
+        section = md_part(self.RUNBOOK, self.MONTHLY)
+        m = re.search(r"^" + re.escape(self.KEEP) + r"(?!\w).*$", section, re.M)
+        self.assertTrue(m, f"RUNBOOK section {self.MONTHLY[3:]!r}: no `{self.KEEP}` part under it")
+        rest = section[m.start():]
+        nxt = re.search(r"\n#{1,3} ", rest)
+        return rest[:nxt.start()] if nxt else rest
+
+    def decision(self):
+        entries = re.split(r"(?m)^(?=### )", read(self.DECISIONS))[1:]
+        new = [e for e in entries if re.match(r"### (\d{4}-\d\d-\d\d) ", e)
+               and re.match(r"### (\d{4}-\d\d-\d\d) ", e).group(1) >= "2026-10-21"
+               and re.search(r"(?i)\bkeep list\b", e.split("\n", 1)[0])]
+        self.assertTrue(new, "docs/DECISIONS.md: no dated entry (`### 2026-10-2x — GLOW's keep list: 19 items in five "
+                             "dashboards and one table; every kept report by Partner and Month`) whose heading names "
+                             "the keep list")
+        self.assertEqual(len(new), 1, "docs/DECISIONS.md: one dated entry on the keep list, not "
+                                      f"{len(new)}")
+        return new[0]
+
+    # --- the rules, shared by the RUNBOOK and the DECISIONS checks ------------------------------------------
+
+    def assertTestRecordRule(self, text, where):
+        """The rule stated in one clause, as a report filter, not rejected or dropped and without
+        `Partner_Status__c`; `Partner_Status__c` named only where it is denied, never used."""
+        rules = [s for s in sentences(text, ".;") if self.NOT_BLANK.search(s) and self.NO_TEST.search(s)]
+        self.assertTrue(rules, f"{where}: state the test-record rule in one sentence: `Account is not blank AND "
+                               "Account: Account Name does not contain \"test\"`")
+        for s in rules:             # every statement of it, so a rejected one cannot sit beside a stated one
+            a, b = self.NOT_BLANK.search(s), self.NO_TEST.search(s)
+            pre, post = s[:min(a.start(), b.start())], s[max(a.end(), b.end()):]
+            self.assertFalse(self.NEGATION.search(pre) or self.REJECT.search(pre) or self.REJECTED_AFTER.search(post)
+                             or "Partner_Status__c" in s,
+                             f"{where}: the test-record rule is stated as the rule (Ryan, 2026-10-23), not negated, "
+                             f"rejected or dropped, and `Partner_Status__c` is not in its sentence: {s[:200]!r}")
+        self.assertTrue([s for s in rules if re.search(r"(?i)\bfilters?\b", s)],
+                        f"{where}: the test-record rule is a report filter (say so in its sentence)")
+        for s in sentences(text, ".;"):
+            if "Partner_Status__c" not in s:
+                continue
+            used = [m for m in self.USES_STATUS.finditer(s) if self.said(s, m)]
+            self.assertFalse(used or not (self.NEGATION.search(s) or self.REJECT.search(s)),
+                             f"{where}: `Partner_Status__c` is not the test-record rule (Ryan, 2026-10-23); name it "
+                             f"only to say it is not used: {s[:200]!r}")
+
+    def assertSameLabels(self, text, where):
+        self.assertTrue(self.stated(text, self.SAME_LABELS),
+                        f"{where}: say kept reports and dashboards keep their current names (labels unchanged, Ryan "
+                        "2026-10-23), not negated")
+        for s in sentences(text, ".;"):
+            for m in self.SAME_LABELS.finditer(s):      # "never keep their current names"
+                self.assertFalse(m.group(0).lower().startswith("keep") and not self.said(s, m),
+                                 f"{where}: kept reports and dashboards keep their current names (Ryan, 2026-10-23), "
+                                 f"not negated: {s[:200]!r}")
+            for m in self.RENAME.finditer(s):
+                self.assertFalse(self.said(s, m), f"{where}: the labels are not changed (Ryan, 2026-10-23); a rename "
+                                                  "or relabel is only ever denied (`not renamed`, `nothing is "
+                                                  f"relabelled`): {s[:200]!r}")
+
+    def assertOffListDecommissioned(self, text, where):
+        """Everything off the list goes to Decommissioned and is kept there: said in one clause, and no
+        clause about the off-list or Decommissioned puts it off, makes it conditional or softens it."""
+        for s in sentences(text, ".;"):                 # "until then it stays in place", wherever it is said
+            for m in self.STAY_PUT.finditer(s):
+                self.assertFalse(self.said(s, m), f"{where}: what is off the keep list goes to Decommissioned, it "
+                                                  f"does not stay in place: {s[:200]!r}")
+        good = []
+        for s in sentences(text, "."):                  # whole sentences: a "; until …" tail belongs to the rule
+            if not (self.OFF_LIST.search(s) or "Decommissioned" in s):
+                continue
+            plain = self.OFF_LIST.sub(" ", s)       # "not on the list" is the subject, not a denial
+            delay = [m.group(0) for m in self.DELAY.finditer(plain) if self.said(plain, m)]
+            self.assertEqual(delay, [], f"{where}: what is off the keep list goes to Decommissioned now and stays "
+                                        f"there, with no condition or delay ({delay[:1]}): {s[:200]!r}")
+            found = self.d.contradictions(plain)
+            self.assertEqual(found, [], f"{where}: contradicts the rules (moved to Decommissioned, never deleted, "
+                                        "never optional): " + "; ".join(found))
+            if (self.OFF_LIST.search(s) and any(self.said(plain, m) for m in self.MOVED.finditer(plain))
+                    and any(self.said(plain, m) for m in self.KEPT_THERE.finditer(plain))):
+                good.append(s)
+        self.assertTrue(good, f"{where}: say, in one sentence, every report and dashboard not on the keep list goes to "
+                              "Decommissioned and is kept there (Ryan, 2026-10-23)")
+
+    def assertPartnerAndMonth(self, text, where):
+        said = [s for s in self.stated(text, re.compile(r"\bPartner and Month\b")) if self.EVERY_REPORT.search(s)]
+        self.assertTrue(said, f"{where}: say every kept report is by Partner and Month, in one sentence, not negated")
+
+    @staticmethod
+    def in_dashboard_context(part, name):
+        """`name` on a line that says dashboard, or in a list or table under a line (or header row) that does."""
+        lead = block = ""
+        for line in part.splitlines():
+            st = line.strip()
+            if not st:
+                continue
+            if not re.match(r"([-*+]|\d+\.)\s|\|", st):
+                lead, block = st, ""
+            elif not block:
+                block = st
+            if name in line and re.search(r"(?i)\bdashboards?\b", " ".join((line, block, lead))):
+                return True
+        return False
+
+    # --- the tests -------------------------------------------------------------------------------------------
+
+    def test_the_runbook_states_the_keep_list_and_the_test_record_rule(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.KEEP[4:]!r}"
+        part = self.keep_part()
+        text = self.norm(part)
+        self.assertIn("glow/sf_keep_list.csv", part, f"{where}: name the file `glow/sf_keep_list.csv`")
+        for group in self.GROUPS:
+            self.assertTrue(self.in_dashboard_context(part, group),
+                            f"{where}: name the group {group!r} as a dashboard (on a line that says dashboard, or in a "
+                            "list or table under one)")
+        self.assertRegex(text, r"(?i)\bGLOW of the Month Stories\b", f"{where}: name the table, item 19 \"GLOW of "
+                                                                      "the Month Stories\"")
+        self.assertTrue(self.stated(text, self.NINETEEN), f"{where}: say the list has 19 items (`19 items`)")
+        self.assertPartnerAndMonth(text, where)
+        self.assertRegex(text, r"(?i)\btest records?\b", f"{where}: call what the rule excludes test records")
+        self.assertTestRecordRule(text, where)
+        self.assertSameLabels(text, where)
+        self.assertOffListDecommissioned(text, where)
+
+    def test_a_decision_records_the_keep_list(self):
+        e = self.decision()
+        where = f"docs/DECISIONS.md {e.split(chr(10), 1)[0][4:14]}"
+        for part in ("**Why", "**Rejected", "**Consequences"):
+            self.assertIn(part, e, f"{where}: no {part}** bullet (the file's header)")
+        self.assertRegex(e, self.TICKET, f"{where}: name ticket #70")
+        flat_e = self.norm(e)
+        self.assertRegex(flat_e, r"\b19 items\b", f"{where}: say the list is 19 items")
+        self.assertRegex(flat_e, r"(?i)\bfive dashboards\b", f"{where}: say the 19 items are in five dashboards")
+        self.assertIn("glow/sf_keep_list.csv", e, f"{where}: name the file `glow/sf_keep_list.csv`")
+        why = self.norm(e.split("**Why", 1)[1].split("**Rejected", 1)[0])
+        self.assertTrue([m for m in re.finditer(re.escape(self.RYAN), why) if self.said(why, m)],
+                        f"{where}: **Why** quotes Ryan verbatim, not negated: \"{self.RYAN}.\"")
+        # everything outside **Rejected** states the agreed rules as rules
+        rest = self.norm(re.sub(r"(?ms)^- \*\*Rejected.*?(?=^- \*\*|\Z)", "", e))
+        self.assertPartnerAndMonth(rest, where)
+        self.assertTestRecordRule(rest, where)
+        self.assertSameLabels(rest, where)
+        self.assertOffListDecommissioned(rest, where)
+        rejected = self.norm(e.split("**Rejected", 1)[1].split("**Consequences", 1)[0])
+        self.assertTrue([s for s in sentences(rejected, ".;") if "Partner_Status__c" in s
+                         and self.STATUS_REASON.search(s)],
+                        f"{where}: **Rejected** names `Partner_Status__c` with its reason, in one sentence: blank on "
+                        "real partners too (it would drop real partners)")
+        self.assertRegex(rejected, r"(?i)\b(new\s+(\w+\s+)?(field|checkbox)|Obsolete_Record__c)\b",
+                         f"{where}: **Rejected** names a new test-record field or reusing `Obsolete_Record__c` (a "
+                         "field or record writes)")
+        self.assertFalse([s for s in sentences(rejected, ".;") if self.NOT_BLANK.search(s) and self.NO_TEST.search(s)],
+                         f"{where}: the agreed test-record rule is not under **Rejected**")
+
+
+class RetiredReportsDocs(unittest.TestCase):
+    """Ticket #72: the reports and dashboards off the keep list moved to Decommissioned, live 2026-10-23..24 on
+    Ryan's go (the ticket's comments): 29 reports by `tools/sf_report_folders.py` (27 of the 46 retiring in
+    "DHIS2 Reports", the other 19 held there for #75-#79 because kept dashboards use them, and 2 from "Public
+    Reports"), the ledger `data/sf_retire_2026-10-23/ledger.csv`; 10 dashboards moved by hand in Lightning (not in
+    the ledger). The RUNBOOK's `### Decommissioned` records it and how to bring an item back; the plan
+    `docs/plans/<date>-sf-retire-reports.md` carries the Rollout, a Rollback that is the tool's undo (nothing is
+    deleted) and the Result. The tool's undo reads only `ledger.csv` in its `--dir`, so a command that brings the
+    retirement back names `--dir data/sf_retire_2026-10-23`."""
+
+    longMessage = False         # the messages say what to fix
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    PLANS = os.path.join(REPO, "docs", "plans", "*-sf-retire-reports.md")
+    TICKET = re.compile(r"(?<![\w#])#72\b")
+    RETIRE_DIR = "data/sf_retire_2026-10-23"
+    LEDGER = RETIRE_DIR + "/ledger.csv"
+    DATE = re.compile(r"\b2026-10-2[34]\b")                 # the moves ran 2026-10-23 and 2026-10-24
+    MOVED = re.compile(r"(?i)\b(mov(e|ed|es|ing)|retired)\b")
+    REPORTS_29 = re.compile(r"(?i)\b29\s+(\w+\s+){0,3}?reports?\b")
+    DASHBOARDS_10 = re.compile(r"(?i)\b(10|ten)\s+(\w+\s+){0,3}?dashboards?\b")
+    HELD_19 = re.compile(r"(?i)\b19\s+(\w+\s+){0,3}?reports?\b")
+    SOQL = re.compile(r"(?i)\bSOQL\b|\bSELECT\b[^.;]{0,80}?\bFROM\s+(Report|Dashboard)\b")
+    IN_DECOM = re.compile(r"\bFolderName\s*=\s*['‘’]Decommissioned['‘’]")
+    BY_HAND = re.compile(r"(?i)\bby hand\b|\bLightning\b")
+    MOVE_VERB = re.compile(r"(?i)\bmov(e|ed|es|ing)\b")
+    # a folder a dashboard goes to or comes back to
+    FOLDER = re.compile(r"(?i)\bfolders?\b|\bDecommissioned\b|\bDHIS2 Dashboards\b|\bDhis2 Dashbords\b")
+    # the retired dashboards left where they were ("the dashboards stay where they are")
+    DASHBOARDS_STAY = re.compile(r"(?i)\b(the|retired|retiring|10|ten|these|those|each|all|every)\s+(\w+\s+)?"
+                                 r"dashboards?\s+(\w+\s+){0,2}?(stay|stays|stayed|remain|remains|remained|are left|"
+                                 r"were left)\b|\bdashboards?\b[^.;]{0,40}?\bwhere (they|it) (are|is|were|was)\b")
+    # what makes a factual statement a guess
+    HEDGE = re.compile(r"(?i)\b(rumou?r\w*|maybe|perhaps|possibly|probably|presumably|supposedly|allegedly|"
+                       r"reportedly|apparently|may or may not|might or might not|some ?day|assum\w*|in some sense|"
+                       r"somewhere|of something|(is|are)\s+(just\s+)?(a\s+)?words?|nice idea|ignored|in theory|"
+                       r"unverified|hopefully|guess\w*|in truth)\b")
+    # the moves' counts (the ticket's comments, 2026-10-23..24): reports moved 29 = 27 + 2 (plan_1 10, plan_2
+    # 17, --limit 1 one); dashboards moved 10; reports left 19 held + 17 kept = 36; dashboards left the 5 kept
+    COUNT = re.compile(r"(?i)(?<![\w#.\-/])(\d+)\s+((?:[\w\"“”'’-]+\s+){0,3}?)(reports?|dashboards?|rows?)\b")
+    MOVED_WORD = re.compile(r"(?i)\bmov(e|ed|es|ing)\b|\bretired\b|\bto\s+[\"“]?Decommissioned\b")
+    LEFT_WORD = re.compile(r"(?i)\b(remain\w*|stay\w*|held|left|kept)\b")
+    MOVED_COUNTS = {"report": {29, 27, 2, 10, 17, 1}, "dashboard": {10, 1}}
+    LEFT_COUNTS = {"report": {19, 17, 36}, "dashboard": {5, 0}}
+    ROWS = re.compile(r"(?i)\b31\s+(\w+\s+){0,2}?rows\b")
+    ROW_COUNTS = {31, 2}
+    # a second row, Decommissioned to Decommissioned: the full --apply run re-moved the row --limit 1 had moved
+    NOOP_ROWS = ("00ORP000005rT932AE", "00ORP000005gxSD2AY")
+    MOVE_CMD = re.compile(r"\bpython3\s+(\S*/)?sf_report_folders\.py\s+(move|undo)\b")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = DecommissionedFoldersDocs()     # #69's helpers: decommissioned(), contradictions, locally_denied
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def stated(self, s, rx):
+        """`rx` said in clause `s`, not denied in the words before it."""
+        return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
+
+    def commands(self, raw, verb=None):
+        """Each runnable `python3 …sf_report_folders.py move|undo …` command in `raw` (inline code, a fenced
+        line), flattened, in order; with `verb`, only that subcommand. An inline span wrapped over a line break
+        stays one command."""
+        segments = re.split(r"`+|\n\s*\n|\n(?=\s*(?:\$\s*)?python3\s)|(?=\bpython3\s)", raw)
+        out = []
+        for seg in segments:
+            m = self.MOVE_CMD.search(flat(seg))
+            if m and (verb is None or m.group(2) == verb):
+                out.append(flat(seg)[m.start():])
+        return out
+
+    @staticmethod
+    def flag(cmd, name):
+        """The values of `--name` in `cmd`, quotes and a trailing `/` stripped."""
+        return [v.strip("`'\"").rstrip("/") for v in re.findall(r"--" + name + r"(?:=|\s+)(\S+)", cmd)]
+
+    def assertCommandsUseTheDir(self, raw, where):
+        """Every move and undo command runs with `--vpn-off` and `--dir` the retirement's folder and no other `--dir`
+        (the tool writes and reads `ledger.csv` there, and undo refuses any other ledger); a `--ledger` is that
+        folder's `ledger.csv`; a `--plan` is a CSV in that folder."""
+        for c in self.commands(raw):
+            self.assertIn("--vpn-off", c, f"{where}: the tool refuses to run without `--vpn-off`: {c[:160]!r}")
+            dirs = self.flag(c, "dir")
+            self.assertTrue(dirs and set(dirs) == {self.RETIRE_DIR},
+                            f"{where}: every move and undo of this retirement runs with `--dir {self.RETIRE_DIR}` and no "
+                            f"other `--dir` (its ledger is `{self.LEDGER}`): {c[:160]!r}")
+            for v in self.flag(c, "ledger"):
+                self.assertEqual(v, self.LEDGER, f"{where}: undo reads only `ledger.csv` in its `--dir`; the ledger "
+                                                 f"is `{self.LEDGER}`: {c[:160]!r}")
+            for v in self.flag(c, "plan"):
+                self.assertRegex(v, r"^" + re.escape(self.RETIRE_DIR) + r"/[\w.-]+\.csv$",
+                                 f"{where}: a move's `--plan` is a CSV in `{self.RETIRE_DIR}/`: {c[:160]!r}")
+
+    def assertUndoFromTheLedger(self, raw, where):
+        """A dry run of the tool's undo for this retirement: `--vpn-off`, `--dir` the retirement's folder, no
+        `--apply`; and every move and undo command uses that folder."""
+        cmds = self.commands(raw, "undo")
+        self.assertTrue(cmds, f"{where}: give the command `python3 tools/sf_report_folders.py undo --vpn-off --dir "
+                              f"{self.RETIRE_DIR}`")
+        self.assertCommandsUseTheDir(raw, where)
+        self.assertTrue([c for c in cmds if "--apply" not in c],
+                        f"{where}: the undo's dry run, on one line: `python3 tools/sf_report_folders.py undo --vpn-off "
+                        f"--dir {self.RETIRE_DIR}` (no `--apply`)")
+
+    def assertNoHedge(self, text, where):
+        found = [f"{m.group(0)!r} in {s[:160]!r}" for s in sentences(self.norm(text), ".;:")
+                 for m in [self.HEDGE.search(s)] if m]
+        self.assertEqual(found, [], f"{where}: a record of what was done states it, it does not guess: " + "; ".join(found))
+
+    def assertNoDashboardsStay(self, text, where):
+        for s in sentences(self.norm(text), ".;:"):
+            for m in self.DASHBOARDS_STAY.finditer(s):
+                self.assertFalse("kept" not in m.group(0).lower() and not self.d.locally_denied(s, m),
+                                 f"{where}: the 10 retired dashboards moved to Decommissioned (by hand in Lightning); "
+                                 f"they did not stay where they were: {s[:160]!r}")
+
+    def assertCountsTrue(self, text, where):
+        """Every "N reports|dashboards" said moved or left, and every "N rows", is one of the moves' counts."""
+        bad = []
+        for s in sentences(self.norm(text), ".;"):
+            for m in self.COUNT.finditer(s):
+                n, noun = int(m.group(1)), m.group(3).lower().rstrip("s")
+                if noun == "row":
+                    if n not in self.ROW_COUNTS:
+                        bad.append(f"{n} rows: {s[:160]!r}")
+                    continue
+                around = s[max(0, m.start() - 25):m.start()] + " " + m.group(2) + " " + s[m.end():m.end() + 40]
+                moved, left = self.MOVED_WORD.search(around), self.LEFT_WORD.search(around)
+                ok = set()
+                if moved:
+                    ok |= self.MOVED_COUNTS[noun]
+                if left:
+                    ok |= self.LEFT_COUNTS[noun]
+                if (moved or left) and n not in ok:
+                    bad.append(f"{n} {noun}s: {s[:160]!r}")
+        self.assertEqual(bad, [], f"{where}: a count that is not the moves' (29 reports and 10 dashboards moved, 19 "
+                                  "held and 17 kept reports and 5 kept dashboards left, 31 ledger rows): "
+                                  + "; ".join(bad))
+
+    def retirement(self, text):
+        """The sentences of `text` that say, not negated and not hedged, 29 reports and 10 dashboards moved
+        to Decommissioned."""
+        return [s for s in sentences(self.norm(text), ".;") if self.stated(s, self.MOVED)
+                and self.REPORTS_29.search(s) and self.DASHBOARDS_10.search(s) and "Decommissioned" in s
+                and not self.HEDGE.search(s)]
+
+    def ledger_rows(self, text):
+        """The sentences of `text` that give the ledger's 31 move rows with the 29 reports, not negated."""
+        return [s for s in sentences(self.norm(text), ".;") if self.stated(s, self.ROWS) and self.REPORTS_29.search(s)
+                and not self.HEDGE.search(s)]
+
+    def back_by_hand(self, text):
+        """The sentences of `text` that name a dashboard and, in one of their parts (cut at a colon: "the
+        dashboards are not in the ledger: Ryan moves each back by hand to its old folder"), move it back by hand in
+        Lightning to a folder, the "back" and the move not denied, nothing hedged."""
+        back = re.compile(r"(?i)\bback\b")
+        return [s for s in sentences(text, ".;") if re.search(r"(?i)\bdashboards?\b", s) and not self.HEDGE.search(s)
+                and [p for p in re.split(r":\s", s) if self.BY_HAND.search(p) and self.stated(p, back)
+                     and self.stated(p, self.MOVE_VERB) and self.FOLDER.search(p)]]
+
+    def plan_path(self):
+        found = sorted(glob.glob(self.PLANS))
+        self.assertEqual(len(found), 1, "docs/plans/: one plan `YYYY-MM-DD-sf-retire-reports.md` for ticket #72 "
+                                        f"(found {[os.path.basename(p) for p in found]})")
+        self.assertRegex(os.path.basename(found[0]), r"^\d{4}-\d\d-\d\d-sf-retire-reports\.md$",
+                         "docs/plans/: the plan is named `YYYY-MM-DD-sf-retire-reports.md`")
+        return found[0]
+
+    def plan_part(self, path, heading, least):
+        """The body of `heading` in the plan, raw, after checking it says something."""
+        name = os.path.relpath(path, REPO)
+        part = md_part(path, heading)
+        raw = part.split("\n", 1)[1] if "\n" in part else ""
+        body = self.norm(raw)
+        self.assertNotRegex(body, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: `{heading}` is a placeholder")
+        distinct = {w.lower() for w in re.findall(r"[A-Za-z]\w*", body)}
+        self.assertGreaterEqual(len(distinct), least, f"{name}: `{heading}` says too little (at least {least} "
+                                                      "distinct words)")
+        return raw
+
+    # --- the RUNBOOK ----------------------------------------------------------------------------------------
+
+    def test_the_runbook_records_the_retirement_counts_and_ledger(self):
+        where = f"RUNBOOK section {self.d.MONTHLY[3:]!r}, {self.d.DECOM[4:]!r}"
+        part = self.d.decommissioned()          # the counts belong here, not anywhere in the RUNBOOK
+        text = self.norm(part)
+        clauses = sentences(text, ".;")
+        # one sentence: when, what moved, how many of each
+        said = [s for s in self.retirement(text) if self.DATE.search(s)]
+        self.assertTrue(said, f"{where}: say, in one sentence (not negated, not hedged), the retirement's date "
+                              "(2026-10-23..24), that it moved 29 reports and 10 dashboards to Decommissioned (\"On "
+                              "2026-10-23 and 24, #72 moved 29 reports … and 10 dashboards to Decommissioned\")")
+        self.assertTrue([s for s in clauses if "Public Reports" in s
+                         and re.search(r"(?i)\b(2|two)\s+(\w+\s+){0,3}?reports?\b", s)
+                         and re.search(r"(?i)\bfrom\b|\bmov\w*\b", s)],
+                        f"{where}: say 2 of the 29 reports came from \"Public Reports\" (in one sentence)")
+        self.assertTrue([s for s in clauses if self.HELD_19.search(s) and "DHIS2 Reports" in s
+                         and re.search(r"#7[5-9]\b", s) and self.stated(s, self.LEFT_WORD)],
+                        f"{where}: say the 19 retiring reports that kept dashboards still use stay in \"DHIS2 Reports\" "
+                        "for #75-#79 (in one sentence)")
+        self.assertIn(self.LEDGER, part, f"{where}: name the retirement's ledger `{self.LEDGER}`")
+        self.assertTrue(self.ledger_rows(text),
+                        f"{where}: say the ledger holds 31 move rows for the 29 reports (two reports have a second, "
+                        "no-op row from Decommissioned to Decommissioned), in one sentence")
+        # how to bring an item back: the reports by the tool's undo from that ledger, the dashboards by hand
+        self.assertUndoFromTheLedger(part, where)
+        self.assertTrue(self.back_by_hand(text),
+                        f"{where}: say a retired dashboard is moved back by hand in Lightning to its old folder (Move), "
+                        "in one sentence: the ledger holds only the reports")
+        self.assertNoDashboardsStay(part, where)
+        self.assertCountsTrue(part, where)
+        self.assertNoHedge(part, where)
+        self.d.assertNoContradiction(part, where, share=True)
+
+    # --- the plan ---------------------------------------------------------------------------------------------
+
+    def test_the_retirement_rollback_is_the_tools_undo(self):
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        where = f"{name}: `## Rollback`"
+        raw = self.plan_part(path, "## Rollback", 15)
+        body = self.norm(raw)
+        self.assertUndoFromTheLedger(raw, where)
+        self.assertTrue([c for c in self.commands(raw, "undo") if "--apply" in c],
+                        f"{where}: after the dry run, the undo's own command with `--apply`: `python3 "
+                        f"tools/sf_report_folders.py undo --vpn-off --dir {self.RETIRE_DIR} --apply`")
+        self.assertTrue([s for s in sentences(body, ".;") if re.search(r"Ryan['’]s go\b", s)
+                         and "--apply" in s and not self.HEDGE.search(s)],
+                        f"{where}: the undo's `--apply` waits for Ryan's go (in one sentence)")
+        self.assertTrue(self.back_by_hand(body),
+                        f"{where}: the 10 dashboards are not in the ledger; say they are moved back by hand in "
+                        "Lightning to their old folder")
+        self.assertNoDashboardsStay(raw, where)
+        self.assertNoHedge(raw, where)
+        # it deletes nothing: said, and no step contradicts it
+        self.assertTrue([s for s in sentences(body, ".;")
+                         if re.search(r"(?i)\b(nothing|never|no\s+\w+)\b[^.;]{0,40}?\bdelet\w*", s)],
+                        f"{where}: say nothing is deleted (\"nothing is deleted: the undo moves the reports back\")")
+        for rx, what in ((r"destructiveChanges", "a `destructiveChanges` deploy"),
+                         (r"\bsf project delete\b", "`sf project delete`"),
+                         (r"(-X\s*|--method\s+)DELETE\b|\bDELETE\s+/services/", "an HTTP DELETE")):
+            self.assertNotRegex(raw, rx, f"{where}: {what} deletes; the rollback is the tool's undo and deletes nothing")
+        found = self.d.contradictions(raw)
+        found += [f"says there is no rollback: {s[:160]!r}" for s in sentences(body, ".;:")
+                  if self.d.NO_ROLLBACK.search(s)]
+        self.assertEqual(found, [], f"{where}: contradicts the rule (the undo moves back, nothing is deleted, never "
+                                    "optional): " + "; ".join(found))
+
+    def test_a_plan_carries_the_moves(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        word, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertEqual(word, "done", f"{name}: the moves have run (2026-10-23..24): `status: done`")
+        self.assertRegex(keys.get("done", ""), r"^2026-10-(2[3-9]|3[01])\b",
+                         f"{name}: a done plan carries `done:` with the date the moves finished (2026-10-24 or later)")
+        opening = text.split("\n## ", 1)[0]
+        self.assertRegex(opening, self.TICKET,
+                         f"{name}: name ticket #72 in the frontmatter, the title or the opening paragraph")
+        self.assertNoHedge(opening.split("\n---\n", 1)[-1], f"{name}: the opening")
+        flat_text = self.norm(text)
+        self.assertTrue([s for s in sentences(flat_text, ".;") if re.search(r"(?i)\b46\s+(\w+\s+){0,3}?reports?\b", s)
+                         and re.search(r"(?i)\bretir\w*", s) and not self.HEDGE.search(s)],
+                        f"{name}: give the count of retiring reports in \"DHIS2 Reports\" (46 reports retiring), in one "
+                        "sentence")
+        self.assertTrue([s for s in sentences(flat_text, ".;") if re.search(r"(?i)\b17\s+(\w+\s+){0,3}?reports?\b", s)
+                         and re.search(r"(?i)\bkept\b", s) and not self.HEDGE.search(s)],
+                        f"{name}: give the count of kept reports staying (17 kept reports), in one sentence")
+
+        # the Rollout: the dry run, then --limit 1 of the same plan on Ryan's go, the dashboards by hand, the SOQL check
+        raw = self.plan_part(path, "## Rollout", 40)
+        rollout = self.norm(raw)
+        rclauses = sentences(rollout, ".;")
+        where = f"{name}: `## Rollout`"
+        self.assertRegex(rollout, r"(?i)\bdry[- ]run\b", f"{where} has the dry run (`move --vpn-off --plan …` without "
+                                                         "`--apply`)")
+        self.assertCommandsUseTheDir(raw, where)
+        moves = self.commands(raw, "move")
+        dry = [(i, self.flag(c, "plan")) for i, c in enumerate(moves) if self.flag(c, "plan") and "--apply" not in c]
+        self.assertTrue(dry, f"{where} gives the dry run's command, `python3 tools/sf_report_folders.py move --vpn-off "
+                             f"--plan {self.RETIRE_DIR}/<plan>.csv --dir {self.RETIRE_DIR}` without `--apply`")
+        first = [(i, self.flag(c, "plan")) for i, c in enumerate(moves)
+                 if "--apply" in c and self.flag(c, "limit") == ["1"] and self.flag(c, "plan")]
+        self.assertTrue(first, f"{where} moves one report first: `… move … --apply --limit 1`, then reads it back")
+        self.assertTrue([1 for i, p in first for j, q in dry if j < i and p == q],
+                        f"{where}: the `--apply --limit 1` move runs the same `--plan` as a dry run before it")
+        self.assertTrue([s for s in rclauses if re.search(r"Ryan['’]s go\b", s)
+                         and re.search(r"--apply|--limit[ =]1\b", s) and not self.d.denies(s)
+                         and not self.HEDGE.search(s)],
+                        f"{where}: the `--apply` moves wait for Ryan's go (one sentence with Ryan's go and `--apply`)")
+        self.assertTrue([s for s in rclauses if re.search(r"(?i)\bdashboards?\b", s) and self.BY_HAND.search(s)
+                         and self.stated(s, self.MOVE_VERB) and self.FOLDER.search(s) and not self.HEDGE.search(s)],
+                        f"{where}: the 10 dashboards are moved by hand in Lightning to Decommissioned (the API refuses "
+                        "it), in one sentence")
+        self.assertNoDashboardsStay(raw, where)
+        self.assertIn("Monthly_Report_Dashboards", rollout,
+                      f"{where}: the FlexiPage `Monthly_Report_Dashboards` loses the retiring dashboards' components "
+                      "before they move")
+        self.assertTrue([s for s in rclauses if self.SOQL.search(s) and self.IN_DECOM.search(s)
+                         and re.search(r"\bId\b", s) and self.stated(s, self.SOQL)],
+                        f"{where} checks by SOQL by Id that each item is in Decommissioned (`SELECT COUNT() FROM Report "
+                        "WHERE Id IN (…) AND FolderName = 'Decommissioned'`), in one sentence")
+        self.assertNoHedge(raw, where)
+        self.d.assertNoContradiction(raw, where)
+
+        # the Result: what moved, when, how many, the ledger's rows, checked by SOQL
+        self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        result_raw = self.plan_part(path, "## Result", 15)
+        result = self.norm(result_raw)
+        where = f"{name}: `## Result`"
+        self.assertRegex(result, self.DATE, f"{where} gives the dates of the moves (2026-10-23..24)")
+        self.assertTrue(self.retirement(result),
+                        f"{where}: say, in one sentence (not negated, not hedged), 29 reports and 10 dashboards moved to "
+                        "Decommissioned")
+        self.assertTrue([s for s in sentences(result, ".;") if self.HELD_19.search(s)
+                         and self.stated(s, self.LEFT_WORD) and not self.HEDGE.search(s)],
+                        f"{where} gives the 19 reports held in \"DHIS2 Reports\" (\"19 … reports stay …\")")
+        self.assertIn(self.LEDGER, result_raw, f"{where} names the ledger `{self.LEDGER}`")
+        self.assertTrue(self.ledger_rows(result),
+                        f"{where}: say the ledger holds 31 move rows for the 29 reports, in one sentence")
+        for rid in self.NOOP_ROWS:
+            self.assertIn(rid, result_raw, f"{where}: name report {rid}, one of the two with a second, no-op row from "
+                                           "Decommissioned to Decommissioned (the full `--apply` run's first PATCH "
+                                           "moved its plan's first row, already moved by `--limit 1`, again)")
+        soql = [s for s in sentences(result, ".;:") if self.SOQL.search(s)]
+        self.assertTrue([s for s in sentences(result, ".;") if self.stated(s, self.SOQL) and "Decommissioned" in s],
+                        f"{where} gives the SOQL read-back of Decommissioned, in one sentence")
+        self.assertEqual([s for s in soql if not self.stated(s, self.SOQL)], [],
+                         f"{where}: the SOQL read-back was run; no sentence denies it")
+        self.assertNoDashboardsStay(result_raw, where)
+        self.assertCountsTrue(result_raw, where)
+        self.assertNoHedge(result_raw, where)
+        self.d.assertNoContradiction(result_raw, where)
+
+
+class CategoryFoldersDocs(unittest.TestCase):
+    """Ticket #73: the kept reports and dashboards (`glow/sf_keep_list.csv`) go into their folders. Ryan,
+    2026-10-21: ONE report folder and ONE dashboard folder, not eleven per-category folders; the five groups
+    stay as categories (the RUNBOOK table's rows), and item 19 ("Report/Data Table Format") goes in the same
+    report folder. The names proposed on the ticket: report folder "GLOW Monthly Reports" (`ReportFolder`
+    `GLOW_Monthly_Reports`), dashboard folder "GLOW Monthly Dashboards" (`DashboardFolder`
+    `GLOW_Monthly_Dashboards`). Ryan, 2026-10-23: labels do NOT change - no relabel step.
+
+    The table's groups, dashboard labels and report counts are read from `glow/sf_keep_list.csv`, not pinned:
+    a group's report count is its rows on GLOW's keep list that are not a dashboard, item 12 ("New mentors
+    recruited", id `new`, built into the folder by #80) included - the table describes GLOW's list (18
+    reports in five dashboards, and the table), not what the org holds on one day."""
+
+    longMessage = False         # the messages say what to fix
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
+    KEEP_LIST = os.path.join(REPO, "glow", "sf_keep_list.csv")
+    PLANS = os.path.join(REPO, "docs", "plans", "*-sf-category-folders.md")
+    MONTHLY = "## Monthly Report dashboards in Salesforce"
+    PART = "### The five dashboards and their folders"
+    TICKET = re.compile(r"(?<![\w#])#73\b")
+    GROUPS = KeepListDocs.GROUPS
+    TABLE_GROUP = "Report/Data Table Format"
+    REPORT_FOLDER, REPORT_DEV = "GLOW Monthly Reports", "GLOW_Monthly_Reports"
+    DASH_FOLDER, DASH_DEV = "GLOW Monthly Dashboards", "GLOW_Monthly_Dashboards"
+    DHIS2_FOLDERS = DecommissionedFoldersDocs.DHIS2_FOLDERS
+    SHARES_API = DecommissionedFoldersDocs.SHARES_API
+    NEGATION = DecommissionedFoldersDocs.NEGATION
+    SF_ID = re.compile(r"\b0[0-9A-Z]{2}[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?\b")
+    # a share outside the org: only ever denied ("Partner and Month" is a grouping, not a share)
+    OUTSIDE = re.compile(r"(?i)\b(guest|portal|community|external|sharing\s+sets?|partners?(?!\s+(and|&)\s+month))\b")
+    # what puts a rule off or makes it temporary or optional, beyond #69's SOFTENER
+    SOFT_TIME = re.compile(r"(?i)\b(at first|for now|initially|to begin with|temporar\w*|for the time being|may|might|"
+                           r"could|now and then|from time to time|occasionally|eventually|later|someday|at some point|"
+                           r"until|not yet)\b")
+    # what makes a check an assumption
+    ASSUMED = re.compile(r"(?i)\b(assum\w*|presum\w*|suppos\w*|believ\w*|probably|likely)\b")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = DecommissionedFoldersDocs()     # #69's helpers: locally_denied, contradictions, denies
+        KeepListDocs.setUpClass()
+        cls.k = KeepListDocs()                  # #70's helpers: assertSameLabels, stated
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def clauses(self, text, ends=".;"):
+        return sentences(self.norm(text), ends)
+
+    def keep_rows(self):
+        import csv
+        with open(self.KEEP_LIST, encoding="utf-8", newline="") as f:
+            return list(csv.DictReader(f))
+
+    def part(self):
+        """The `### The five dashboards and their folders` part of the Monthly Report section."""
+        section = md_part(self.RUNBOOK, self.MONTHLY)
+        m = re.search(r"^" + re.escape(self.PART) + r"(?!\w).*$", section, re.M)
+        self.assertTrue(m, f"RUNBOOK section {self.MONTHLY[3:]!r}: no `{self.PART}` part under it (ticket #73)")
+        rest = section[m.start():]
+        nxt = re.search(r"\n#{1,3} ", rest)
+        return rest[:nxt.start()] if nxt else rest
+
+    @classmethod
+    def cell(cls, text):
+        """A table cell's text: backticks, quotes, bold and Salesforce ids stripped."""
+        text = re.sub(r"\(\s*\)", "", cls.SF_ID.sub("", re.sub(r"[`\"“”*]", "", text)))
+        return flat(text).strip().rstrip(".,;").strip()
+
+    def assertOnlyDenied(self, text, where):
+        """A guest, portal, community, partner or external share, or a sharing set, only ever denied: a negation
+        before it in its clause, and no "but" (or "however", "except", "yet") between."""
+        for s in self.clauses(text, ".;:?!"):
+            for m in self.OUTSIDE.finditer(s):
+                pre = re.split(r"(?i)\bbut\b|\bhowever\b|\bthough\b|\byet\b|\bexcept\b|\bapart from\b", s[:m.start()])[-1]
+                self.assertTrue(self.NEGATION.search(pre),
+                                f"{where}: a {m.group(0)!r} share is only ever denied (never a guest, portal, community "
+                                f"or partner share): {s[:200]!r}")
+
+    def assertNotSoftened(self, text, where):
+        """#69's contradiction sweep (a deletion, a softener), and nothing put off, made temporary or optional."""
+        self.d.assertNoContradiction(text, where)
+        for s in self.clauses(text, ".;:?!"):
+            for m in self.SOFT_TIME.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: the rule holds now and always, not {m.group(0)!r}: {s[:200]!r}")
+
+    def steps(self, raw, where):
+        """The Rollout's numbered steps (`1. …` and their indented lines), without any text before or after."""
+        out, inside = [], False
+        for line in raw.splitlines():
+            if re.match(r"\d+[.)]\s", line):
+                inside = True
+            elif inside and line.strip() and not line[:1].isspace():
+                break
+            if inside:
+                out.append(line)
+        self.assertGreaterEqual(len([x for x in out if re.match(r"\d+[.)]\s", x)]), 3,
+                                f"{where}: the Rollout is a numbered list of steps (`1. …`)")
+        return flat("\n".join(out))
+
+    def table(self, part, where):
+        """(columns, rows) of the first Markdown table in `part`: columns maps group, label, dashboard_folder,
+        report_folder and count to their index; rows are lists of raw cells."""
+        lines = [x.strip() for x in part.splitlines() if x.strip().startswith("|")]
+        self.assertGreaterEqual(len(lines), 3, f"{where}: no Markdown table (header, separator, rows)")
+        split = [[c.strip() for c in x.strip("|").split("|")] for x in lines]
+        header = [self.cell(h).lower() for h in split[0]]
+        self.assertTrue(all(re.fullmatch(r":?-{3,}:?", c) for c in split[1]), f"{where}: the table's second line is "
+                                                                                "its separator (`|---|---|`)")
+        want = {
+            "dashboard_folder": lambda h: "dashboard folder" in h,
+            "report_folder": lambda h: "report folder" in h,
+            "group": lambda h: re.search(r"\bgroup\b", h) and "folder" not in h,
+            "label": lambda h: "dashboard" in h and "folder" not in h and "group" not in h,
+            "count": lambda h: re.search(r"\b(count|number|reports)\b|#", h) and "folder" not in h
+                               and "dashboard" not in h and "group" not in h,
+        }
+        cols = {}
+        for key, ok in want.items():
+            found = [i for i, h in enumerate(header) if ok(h)]
+            self.assertEqual(len(found), 1, f"{where}: the table has one {key.replace('_', ' ')} column (columns: group, "
+                                            f"dashboard label, dashboard folder, report folder, report count); found "
+                                            f"{[split[0][i] for i in found]} in {split[0]}")
+            cols[key] = found[0]
+        rows = split[2:]
+        for r in rows:
+            self.assertEqual(len(r), len(header), f"{where}: row {r!r} has {len(r)} cells, not {len(header)}")
+        return cols, rows
+
+    def row_of(self, rows, cols, group, where):
+        found = [r for r in rows if group in self.cell(r[cols["group"]])]
+        self.assertEqual(len(found), 1, f"{where}: one table row whose group is {group!r} (found {len(found)})")
+        return found[0]
+
+    def plan_path(self):
+        found = sorted(glob.glob(self.PLANS))
+        self.assertEqual(len(found), 1, "docs/plans/: one plan `YYYY-MM-DD-sf-category-folders.md` for ticket #73 "
+                                        f"(found {[os.path.basename(p) for p in found]})")
+        self.assertRegex(os.path.basename(found[0]), r"^\d{4}-\d\d-\d\d-sf-category-folders\.md$",
+                         "docs/plans/: the plan is named `YYYY-MM-DD-sf-category-folders.md`")
+        return found[0]
+
+    def first(self, rx, text, where, what):
+        m = re.search(rx, text)
+        self.assertTrue(m, f"{where}: {what}")
+        return m.start()
+
+    # --- the RUNBOOK ---------------------------------------------------------------------------------------
+
+    def test_the_runbook_lists_the_five_dashboards_and_their_folders(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        part = self.part()
+        cols, rows = self.table(part, where)
+        keep = self.keep_rows()
+        self.assertEqual(len(rows), len(self.GROUPS) + 1, f"{where}: the table has six rows, the five groups and "
+                                                          f"{self.TABLE_GROUP!r} (found {len(rows)})")
+        for group in self.GROUPS + (self.TABLE_GROUP,):
+            r = self.row_of(rows, cols, group, where)
+            at = f"{where}, row {group!r}"
+            count = sum(1 for k in keep if k["group"] == group and k["kind"] != "dashboard")
+            self.assertRegex(self.cell(r[cols["count"]]), r"^\d+$",
+                             f"{at}: the report count cell is a number alone, not {r[cols['count']]!r}")
+            self.assertEqual(int(self.cell(r[cols["count"]])), count,
+                             f"{at}: the report count is {count}, its rows on `glow/sf_keep_list.csv` (item 12 "
+                             f"included), not {r[cols['count']]!r}")
+            self.assertEqual(self.cell(r[cols["report_folder"]]), self.REPORT_FOLDER,
+                             f"{at}: the report folder is {self.REPORT_FOLDER!r} exactly (one report folder for every "
+                             f"kept report, Ryan 2026-10-21), not {r[cols['report_folder']]!r}")
+            if group == self.TABLE_GROUP:
+                self.assertIn("GLOW of the Month Stories", self.cell(" ".join(r)),
+                              f"{at}: name item 19, \"GLOW of the Month Stories\"")
+                self.assertRegex(self.cell(r[cols["dashboard_folder"]]), r"^[-—–]?$",
+                                 f"{at}: the table is in no dashboard; its dashboard folder cell is blank or a dash, "
+                                 f"not {r[cols['dashboard_folder']]!r}")
+                continue
+            dash = [k for k in keep if k["group"] == group and k["kind"] == "dashboard"]
+            self.assertEqual(len(dash), 1, f"glow/sf_keep_list.csv: one dashboard row for {group!r}")
+            label = self.cell(r[cols["label"]])
+            self.assertEqual(label, dash[0]["label_today"],
+                             f"{at}: the dashboard label is its current label {dash[0]['label_today']!r} "
+                             f"({dash[0]['item']} in `glow/sf_keep_list.csv`; labels do not change, Ryan 2026-10-23), "
+                             f"not {label!r}")
+            self.assertEqual(self.cell(r[cols["dashboard_folder"]]), self.DASH_FOLDER,
+                             f"{at}: the dashboard folder is {self.DASH_FOLDER!r} exactly (one dashboard folder for the "
+                             f"five dashboards, Ryan 2026-10-21), not {r[cols['dashboard_folder']]!r}")
+        text = self.norm(part)
+        for kind, dev in (("ReportFolder", self.REPORT_DEV), ("DashboardFolder", self.DASH_DEV)):
+            self.assertTrue([s for s in self.clauses(part) if kind in s and re.search(r"\b%s\b" % dev, s)],
+                            f"{where}: give the {kind} DeveloperName `{dev}` (a sentence naming `{kind}` and `{dev}`)")
+        others = set(re.findall(r"\bGLOW_Monthly_\w+", flat(part))) - {self.REPORT_DEV, self.DASH_DEV}
+        self.assertFalse(others, f"{where}: the DeveloperNames are `{self.REPORT_DEV}` and `{self.DASH_DEV}`, not "
+                                 f"{sorted(others)}")
+        self.assertNotRegex(text, r"\bGLOW_Club_(Attendance|Implementation|Observations|Training|Reporting)\b",
+                            f"{where}: no per-category folder (Ryan, 2026-10-21: one report folder and one dashboard "
+                            "folder)")
+        self.k.assertSameLabels(text, where)
+
+    def test_the_new_folders_are_shared_with_internal_users_only(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        part = self.part()
+        text = self.norm(part)
+        cl = self.clauses(part)
+        for folder in self.DHIS2_FOLDERS + (self.REPORT_FOLDER, self.DASH_FOLDER):
+            self.assertIn(folder, text, f"{where}: name the folder {folder!r}")
+        share = re.compile(r"(?i)\bshar(e|es|ed|ing)\b")
+        copies = [s for s in cl if re.search(r"(?i)\bdhis2\b", s)
+                  and (all(f in s for f in self.DHIS2_FOLDERS) or re.search(r"(?i)\bunion\b|\ball three\b", s))
+                  and not re.search(r"(?i)\balone\b|\bignor\w*|\bonly one\b|\bjust one\b|\bexcept\b|\bexclud\w*|"
+                                    r"\bbut not\b", s)
+                  and re.search(r"(?i)\bcop(y|ies|ied)\b|\bsame\b", s)
+                  and any(not self.d.locally_denied(s, m) for m in share.finditer(s))]
+        self.assertTrue(copies, f"{where}: say, in one sentence, the new folders copy the shares of all three DHIS2 "
+                                "folders (the union of \"DHIS2 Reports\", \"DHIS2 Dashboards\" and \"Dhis2 Dashbords\"), "
+                                "not negated and not one of them alone")
+        same = [s for s in cl if share.search(s) and re.search(r"(?i)\bsame\b|\bidentical\b", s)
+                and re.search(r"(?i)\bboth\b|\btwo\b", s) and "Decommissioned" not in s]
+        self.assertTrue(same, f"{where}: say both new folders get the same shares as each other (a dashboard's viewers "
+                              "need its reports' folder), not the Decommissioned folders' (they have none)")
+        internal = re.compile(r"(?i)\binternal\s+users\b[^.;]{0,30}?\bgroups\b")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bonly\b", s)
+                         and any(not self.d.locally_denied(s, m) for m in internal.finditer(s))],
+                        f"{where}: say the new folders are shared with internal users and groups only")
+        self.assertTrue([s for s in cl if all(re.search(r"(?i)\b%s\b" % w, s) for w in ("guest", "portal", "community",
+                                                                                         "partner"))],
+                        f"{where}: say never a guest, portal, community or partner share, in one sentence")
+        self.assertOnlyDenied(part, where)
+        self.assertTrue([s for s in cl if self.SHARES_API.search(s)
+                         and re.search(r"(?i)\b(check\w*|read\w*|confirm\w*|verif\w*)\b", s)],
+                        f"{where}: say the shares are checked through the shares API, in one sentence")
+        self.assertNotSoftened(part, where)
+
+    def test_the_runbook_quotes_item_19_as_the_org_labels_it(self):
+        # the org's label for 00ORP000005p2L32AI (SOQL, 2026-10-23): "GLOW of the Month Stories Report"
+        row = [k for k in self.keep_rows() if k["item"] == "19"][0]
+        text = self.norm(md_part(self.RUNBOOK, self.MONTHLY))
+        self.assertNotIn("Report_2025", text, f"RUNBOOK section {self.MONTHLY[3:]!r}: item 19's label is \"GLOW of "
+                                              "the Month Stories Report\" in the org, not \"…Report_2025\"")
+        self.assertIn(row["label_today"], text, f"RUNBOOK section {self.MONTHLY[3:]!r}: quote item 19's label as "
+                                                f"`glow/sf_keep_list.csv` gives it, {row['label_today']!r}")
+
+    # --- the plan ---------------------------------------------------------------------------------------------
+
+    def test_a_plan_carries_the_folder_deploy_copies_and_moves(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        word, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertNotEqual(word, "superseded", f"{name}: the plan is the change in force")
+        self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
+                         f"{name}: name ticket #73 in the frontmatter, the title or the opening paragraph")
+        self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        raw = {}
+        for heading, least in (("## Rollout", 40), ("## Rollback", 15)):
+            part = md_part(path, heading)
+            raw[heading] = part.split("\n", 1)[1] if "\n" in part else ""
+            body = self.norm(raw[heading])
+            self.assertNotRegex(body, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: `{heading}` is a placeholder")
+            distinct = {w.lower() for w in re.findall(r"[A-Za-z]\w*", body)}
+            self.assertGreaterEqual(len(distinct), least,
+                                    f"{name}: `{heading}` says too little (at least {least} distinct words)")
+        where = f"{name}: `## Rollout`"
+        flat_out = flat(raw["## Rollout"])          # dots kept: `tools/sf_report_folders.py move`
+        cl = self.clauses(raw["## Rollout"])
+        for folder in (self.REPORT_FOLDER, self.DASH_FOLDER):
+            self.assertIn(folder, flat_out, f"{where}: name the new folder {folder!r}")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bretriev\w*", s) and re.search(r"(?i)\bdhis2\b", s)
+                         and not self.d.denies(s)],
+                        f"{where}: the folder build starts from a retrieve of the DHIS2 folders (one sentence)")
+        self.assertTrue([s for s in cl if re.search(r"(?i)check-only[^.;]*?\bdeploy", s) and not self.d.denies(s)],
+                        f"{where}: validate check-only before the deploy (one sentence, in that order)")
+        self.assertRegex(flat_out, r"Ryan['’]s go\b", f"{where}: the deploy and each `--apply` wait for Ryan's go")
+        self.assertRegex(flat_out, r"\bafter/", f"{where}: the read-back retrieves into `after/` and compares")
+        self.assertRegex(flat_out, self.SHARES_API, f"{where}: the read-back reads each new folder's shares through "
+                                                    "the shares API")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s
+                         and DecommissionedFoldersDocs.REPORT_AND_DASHBOARD.search(s) and not self.d.denies(s)],
+                        f"{where}: each kept report and dashboard is copied into Decommissioned (one sentence)")
+        # the order, read in the numbered steps only (a preface listing the steps proves nothing)
+        steps = self.steps(raw["## Rollout"], where)
+        check_only = self.first(r"(?i)check-only", steps, where, "no check-only in the numbered steps")
+        deploys = [s for s in sentences(steps, ".;,") if re.search(r"(?i)\bdeploy", s)
+                   and not re.search(r"(?i)check-only|--dry-run|\bvalidat", s)]
+        self.assertTrue(deploys, f"{where}: no deploy step (after the check-only, on Ryan's go)")
+        self.assertLess(check_only, steps.index(deploys[0]), f"{where}: the check-only comes before the deploy")
+        copies = [m.start() for m in re.finditer(r"sf_report_folders\.py\s+copy\b", steps)]
+        moves = [m.start() for m in re.finditer(r"sf_report_folders\.py\s+move\b", steps)]
+        self.assertTrue(copies, f"{where}: the copies into Decommissioned by `tools/sf_report_folders.py copy` (a step)")
+        self.assertTrue(moves, f"{where}: the report moves by `tools/sf_report_folders.py move` (a step)")
+        self.assertLess(check_only, copies[0], f"{where}: the folders are deployed (check-only, go, deploy) before the "
+                                               "copies")
+        self.assertLess(copies[-1], moves[0], f"{where}: every copy into Decommissioned comes BEFORE the first move "
+                                              "(copy, then move)")
+        dry = [m.start() for m in re.finditer(r"(?i)\bdry[- ]run\b", steps) if m.start() > copies[-1]]
+        limit = [m.start() for m in re.finditer(r"--limit 1\b", steps)]
+        self.assertTrue(dry and limit and dry[0] < limit[0] < moves[-1],
+                        f"{where}: after the copies, the moves go dry run, then `--limit 1`, then the rest (the last "
+                        "`move` step), in that order in the numbered steps")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bdashboards?\b", s) and re.search(r"(?i)\bmov\w*", s)
+                         and re.search(r"(?i)\bby hand\b|\bLightning\b", s) and not self.d.denies(s)
+                         and self.DASH_FOLDER in s
+                         and not re.search(r"(?i)dhis2", re.sub(r"(?i)\bfrom\s+(the\s+)?[`\"“]?(DHIS2|Dhis2)", "", s))],
+                        f"{where}: the dashboards are moved by hand in Lightning (the API refuses a dashboard PATCH) "
+                        f"to {self.DASH_FOLDER!r}, not to a DHIS2 folder (one sentence)")
+        soql = [s for s in cl if "SOQL" in s and re.search(r"\bId\b|\bIds\b", s) and re.search(r"(?i)\bfolder\b", s)
+                and re.search(r"(?i)\blabels?\b[^.;]{0,40}?\b(unchanged|the same)\b", s)]
+        self.assertTrue(soql, f"{where}: check by SOQL that each kept Id is in its folder with its label unchanged "
+                              "(one sentence)")
+        self.assertTrue([m for m in re.finditer(r"SOQL", steps) if m.start() > moves[-1]],
+                        f"{where}: the SOQL check comes after the moves (a later step)")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bdhis2\b", s) and re.search(r"(?i)\bkept\b", s)
+                         and re.search(r"(?i)\b(no|none|nothing|empty)\b", s)
+                         and re.search(r"(?i)\b(SOQL|quer\w*|confirm\w*|check\w*|verif\w*)\b", s)
+                         and not self.ASSUMED.search(s)],
+                        f"{where}: check (SOQL) that the three DHIS2 folders hold no kept item, not assume it (one "
+                        "sentence)")
+        self.k.assertSameLabels(self.norm(raw["## Rollout"]), where)
+        self.d.assertNoContradiction(raw["## Rollout"], where)
+        where = f"{name}: `## Rollback`"
+        cl = self.clauses(raw["## Rollback"])
+        self.assertTrue([s for s in cl if re.search(r"\bundo\b", s) and "ledger" in s and not self.d.denies(s)],
+                        f"{where}: the reports go back by `undo` from the ledger (`data/sf_report_folders/ledger.csv`)")
+        self.assertRegex(flat(raw["## Rollback"]), r"(?<![\w/.-])data/sf_report_folders/ledger\.csv(?![\w/-]|\.\w)",
+                         f"{where}: name the ledger `data/sf_report_folders/ledger.csv` exactly")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bdashboards?\b", s) and re.search(r"(?i)\bback\b", s)
+                         and re.search(r"(?i)\bby hand\b|\bLightning\b", s) and not self.d.denies(s)],
+                        f"{where}: the dashboards are moved back by hand in Lightning")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bfolders?\b", s)
+                         and re.search(r"(?i)\b(left|leave|stays?|remains?|kept)\b[^.;]{0,30}?\bin place\b", s)],
+                        f"{where}: the new folders are left in place, not deleted")
+        self.assertNotSoftened(raw["## Rollback"], where)
+        self.assertOnlyDenied(raw["## Rollback"], where)
+
+    # --- DECISIONS --------------------------------------------------------------------------------------------
+
+    def test_a_decision_records_one_report_folder_and_one_dashboard_folder(self):
+        e = self.k.decision()
+        where = f"docs/DECISIONS.md {e.split(chr(10), 1)[0][4:14]} (the keep list)"
+        bullets = re.findall(r"(?m)^[ \t]*- .*(?:\n(?![ \t]*- |\n|#).*)*", e)
+        dated = [flat(b) for b in bullets if re.match(r"-\s+\W{0,3}(\w+,?\s+){0,2}?2026-10-2[3-9]\b", flat(b))]
+        self.assertTrue(dated, f"{where}: no dated bullet (`- 2026-10-23: …`) on the entry")
+        good = []
+        for b in dated:
+            one = [re.search(r"(?i)\b(one|a single|single)\s+%s folder\b" % k, b) for k in ("report", "dashboard")]
+            if (all(one) and not any(self.d.locally_denied(b, m) for m in one)
+                    and self.REPORT_FOLDER in b and self.DASH_FOLDER in b
+                    and re.search(r"\bRyan\b", b) and "2026-10-21" in b
+                    and re.search(r"(?i)\b(instead of|rather than|not|in place of|replac\w*)\b[^.;]{0,40}?"
+                                  r"\b(per-category|categor(y|ies)|per group|each group|eleven)\b", b)
+                    and not re.search(r"(?i)\b(was|were|is|are|been)\s+(only\s+)?proposed\b|\bturned down\b|"
+                                      r"\bin favou?r of\b|\bdeclin\w*|\bvetoed\b|\boverruled\b", b)
+                    and not KeepListDocs.REJECTED_AFTER.search(b)
+                    and not re.search(r"(?i)\b(reject\w*|dropped|discard\w*|abandon\w*|withdr[ae]w\w*|superseded)\b", b)):
+                good.append(b)
+        self.assertTrue(good, f"{where}: a dated bullet records one report folder, {self.REPORT_FOLDER!r}, and one "
+                              f"dashboard folder, {self.DASH_FOLDER!r} (Ryan, 2026-10-21), as the decision, instead of "
+                              "per-category folders (\"instead of\", \"not\", \"rather than\", \"replaces\" before them); "
+                              "not proposed, turned down or rejected")
 
 
 if __name__ == "__main__":

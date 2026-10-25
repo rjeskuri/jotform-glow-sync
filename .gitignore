@@ -16,6 +16,9 @@ backups/
 # The partner -> Salesforce account map the automatic sync creates club accounts under:
 # organisation names and record ids only, no person (docs/plans/2026-10-06-sf-new-club-accounts.md).
 !glow/sf_partners.csv
+# GLOW's keep list of Monthly Report reports and dashboards (ticket #70): report and dashboard
+# ids and names only, never record data (test/sf_keep_list_test.py checks it).
+!glow/sf_keep_list.csv
 
 # Never commit credentials. The Jotform API key belongs in .env / the
 # environment (JOTFORM_API_KEY) and, for the Sheet scripts, in Script
