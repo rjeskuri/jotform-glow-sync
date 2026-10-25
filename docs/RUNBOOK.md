@@ -3850,7 +3850,7 @@ The moves:
 
 `tools/sf_report_folders.py` (ticket #71) makes the copies and the moves of the archive rule
 above through the Analytics API, exactly as the API proof sent them. It never deletes, and it
-reads `Folder`, `Report`, `Dashboard` and `DashboardComponent` only, never a record. Every
+reads `Folder`, `Report`, `Dashboard`, `DashboardComponent` and a report's describe only, never a record. Every
 subcommand needs `--vpn-off`; `copy`, `move` and `undo` are dry runs until `--apply` (Ryan's go,
 the live gate asks him). The folders named "Attendance" are never a source or a target.
 
@@ -3874,7 +3874,10 @@ the live gate asks him). The folders named "Attendance" are never a source or a 
   that report in Salesforce, then `--apply` for the rest. The whole plan is checked before the
   first write: a report that a dashboard outside Decommissioned still uses is refused a move to
   Decommissioned. Each move keeps the report's Id and is read back by SOQL; a read-back that
-  differs stops the run.
+  differs stops the run. Each move's (and undo's) `PATCH` carries the description the report's
+  describe (`GET analytics/reports/<id>/describe`) answers just before it, since Salesforce blanks
+  a description the `PATCH` leaves out (#142: 32 reports lost theirs); a describe that does not
+  answer it stops the run before that report's `PATCH`.
 - Dashboards are moved and renamed by hand in Lightning (the API proof: Salesforce refuses every
   dashboard `PATCH`, 400 `JSON_PARSER_ERROR`); a plan row of kind `dashboard` is refused. Check
   the hand move with SOQL on `Dashboard` (the same Id, `FolderName` following).

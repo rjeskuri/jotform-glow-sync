@@ -15,7 +15,10 @@ by a PATCH of the copy after the clone (#69's API proof, Report steps 1 and 5);
 a dashboard's clone takes no name or description (the API refuses them, #69's API proof).
 move: the plan CSV has the columns kind,id,to_folder,new_label; to_folder is a folder name that
 must be exactly one folder of the kind; a blank new_label keeps the label. A report is moved (and
-relabelled) by PATCH and keeps its Id. A dashboard row is refused: Salesforce refuses every
+relabelled) by PATCH and keeps its Id; the PATCH carries the description the report's describe
+(GET analytics/reports/<id>/describe) answers just before it, as Salesforce blanks a description the
+PATCH leaves out (#142), and a describe that does not answer it stops the run before that PATCH (move
+and undo alike). A dashboard row is refused: Salesforce refuses every
 dashboard PATCH, so a dashboard is moved or renamed by hand in Lightning.
 undo: puts each move of the ledger back to its from_folder_id and old_label, last first; copies stay.
 A from_folder_id that is the organization's id (00D...) is "Public Reports", which has no Folder.
@@ -28,8 +31,8 @@ it), retiring a report that a dashboard outside Decommissioned still uses, an un
 Each write is one request, read back by SOQL (the same Id, its folder and label); a write that does
 not read back stops the run. One ledger row per write (data/sf_report_folders/ledger.csv, owner
 only, never committed): on disk as "sending" before its request, rewritten in place as ok or failed
-before the next write (a copy's row gets the copy's id first). The tool reads Folder, Report, Dashboard and
-DashboardComponent only, and prints ids, labels, folder names, counts and HTTP codes, never an
+before the next write (a copy's row gets the copy's id first). The tool reads Folder, Report, Dashboard,
+DashboardComponent and a report's describe only, and prints ids, labels, folder names, counts and HTTP codes, never an
 answer. Salesforce access is glow/salesforce.py's (the CLI's login).
 """
 import argparse
@@ -173,12 +176,26 @@ def finish(ledger, row, **fields):
     return new
 
 
+def description_now(org, report_id, action):
+    """The report's description as its describe answers it now (None or "" when it has none); Refused
+    when the describe does not say it: a PATCH without the description blanks it (#142)."""
+    status, answer = org.call("GET", f"{ANALYTICS}/reports/{report_id}/describe")
+    meta = answer.get("reportMetadata") if status == 200 and isinstance(answer, dict) else None
+    if not isinstance(meta, dict) or not isinstance(meta.get("description", 0), (str, type(None))):
+        said = http_said(status, answer) if status != 200 else "its describe answered without reportMetadata.description"
+        raise Refused(f"{action} of report {report_id}: {said} - a PATCH without the description would blank it; "
+                      "STOPPED before its PATCH, nothing more written (the writes before it stand, on the ledger)")
+    return meta["description"]
+
+
 def patch_report(org, ledger, row, folder_id, name, label):
-    """One PATCH of a report's folder (and name), read back, its ledger row; Refused when it is not
-    as sent. `label` is the label the read-back expects (None: any)."""
+    """One PATCH of a report's folder (and name), with the description its describe answers just
+    before (Salesforce blanks a description the PATCH leaves out, #142), read back, its ledger row;
+    Refused when it is not as sent. `label` is the label the read-back expects (None: any)."""
     meta = {"folderId": folder_id}
     if name:
         meta["name"] = name
+    meta["description"] = description_now(org, row["id"], row["action"])
     row = sending(ledger, row)
     status, answer = org.call("PATCH", f"{ANALYTICS}/reports/{row['id']}", {"reportMetadata": meta})
     wrong = read_back(org, "report", row["id"], folder_id, label) if status == 200 else [http_said(status, answer)]
