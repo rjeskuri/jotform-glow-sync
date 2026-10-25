@@ -6,6 +6,7 @@
   python3 tools/sf_report_folders.py copy --vpn-off --kind report --id 00O... --tag "#72" [--apply]
   python3 tools/sf_report_folders.py move --vpn-off --plan plan.csv [--apply] [--limit 1]
   python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv [--apply] [--limit N]
+  python3 tools/sf_report_folders.py restore-descriptions --vpn-off --from DIR [--from DIR ...] [--apply] [--limit N]
 
 list (read-only): CSV on stdout, kind,id,developer_name,label,folder,last_run,used_by (used_by: the
 ids of the dashboards with a component on the report, ;-separated); the counts on stderr.
@@ -22,8 +23,17 @@ and undo alike). A dashboard row is refused: Salesforce refuses every
 dashboard PATCH, so a dashboard is moved or renamed by hand in Lightning.
 undo: puts each move of the ledger back to its from_folder_id and old_label, last first; copies stay.
 A from_folder_id that is the organization's id (00D...) is "Public Reports", which has no Folder.
+restore-descriptions (#142): puts back the descriptions the moves blanked, from local metadata retrieves
+(sfdx project dirs; every *.report-meta.xml under each DIR, its file name the report's DeveloperName,
+its <description> unescaped and stripped of leading bullets and whitespace and of trailing whitespace).
+Only a kept report whose description is blank now gets one, by a PATCH with its label and folder now
+(ledger action "describe", which undo ignores); a report in Decommissioned or in "Attendance" is left
+as it is, a name no report has is printed. Refused before any write: a DIR that is
+missing or holds no report file, two texts for one name, a name two reports have, a text over 255
+characters, a planned report whose label is over 40 characters. The texts are never printed.
 
-Every subcommand needs --vpn-off; copy, move and undo are dry runs unless --apply (Ryan's go).
+Every subcommand needs --vpn-off; copy, move, undo and restore-descriptions are dry runs unless --apply
+(Ryan's go).
 Refused before any write: the folders named "Attendance" (this repo's own dashboard) as a source or
 a target, a folder name that is not exactly one folder of the kind, a report label over 40
 characters (a new one, or the current one of a report the plan relabels: undo could not restore
@@ -40,6 +50,7 @@ import csv
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -54,7 +65,9 @@ LEDGER_COLS = ["when", "action", "kind", "id", "from_folder_id", "to_folder_id",
 LIST_COLS = ["kind", "id", "developer_name", "label", "folder", "last_run", "used_by"]
 PLAN_COLS = ["kind", "id", "to_folder", "new_label"]
 FOLDER_TYPE = {"report": "Report", "dashboard": "Dashboard"}
-DECOM, PROTECTED, NAME_LIMIT = "Decommissioned", "Attendance", 40
+DECOM, PROTECTED, NAME_LIMIT, DESC_LIMIT = "Decommissioned", "Attendance", 40, 255
+REPORT_FILE = ".report-meta.xml"            # an sfdx retrieve's report: <DeveloperName>.report-meta.xml
+LEADING = re.compile(r"^[\s●•*-]+")          # the stray bullets (and whitespace) before a saved description
 PUBLIC, ORG_ID_PREFIX = "Public Reports", "00D"     # "Public Reports" has no Folder: its id is the org's
 ID18 = re.compile(r"[A-Za-z0-9]{18}")
 BY_HAND = ("Salesforce refuses every dashboard PATCH (#69 API proof): move or rename a dashboard by hand "
@@ -196,14 +209,14 @@ def description_now(org, report_id, action):
     return meta["description"]
 
 
-def patch_report(org, ledger, row, folder_id, name, label):
-    """One PATCH of a report's folder (and name), with the description its describe answers just
-    before (Salesforce blanks a description the PATCH leaves out, #142), read back, its ledger row;
-    Refused when it is not as sent. `label` is the label the read-back expects (None: any)."""
+def patch_report(org, ledger, row, folder_id, name, label, description=None):
+    """One PATCH of a report's folder (and name), with `description` or (None) the one its describe
+    answers just before (Salesforce blanks a description the PATCH leaves out, #142), read back, its
+    ledger row; Refused when it is not as sent. `label` is the label the read-back expects (None: any)."""
     meta = {"folderId": folder_id}
     if name:
         meta["name"] = name
-    meta["description"] = description_now(org, row["id"], row["action"])
+    meta["description"] = description_now(org, row["id"], row["action"]) if description is None else description
     row = sending(ledger, row)
     status, answer = org.call("PATCH", f"{ANALYTICS}/reports/{row['id']}", {"reportMetadata": meta})
     wrong = read_back(org, "report", row["id"], folder_id, label, meta["description"]) if status == 200 else \
@@ -432,6 +445,92 @@ def do_undo(org, args, folder):
     print(f"undone and read back: {len(todo)}; ledger {rel(ledger.path)}")
 
 
+def saved_descriptions(dirs):
+    """{developer name: the cleaned description} from every *.report-meta.xml under each dir, or
+    Refused: a dir that is missing or holds no report file, an unreadable file, two texts for one name."""
+    texts, problems = {}, []
+    for d in dirs:
+        if not os.path.isdir(d):
+            raise Refused(f"--from: there is no folder {rel(d)}")
+        files = sorted(os.path.join(top, f) for top, _, names in os.walk(d) for f in names if f.endswith(REPORT_FILE))
+        if not files:
+            raise Refused(f"--from {rel(d)}: it holds no *{REPORT_FILE} file - is it a metadata retrieve of the reports?")
+        for path in files:
+            try:
+                found = ET.parse(path).getroot().find("{*}description")
+            except (ET.ParseError, OSError) as bad:
+                raise Refused(f"{rel(path)}: not readable as report metadata ({type(bad).__name__})") from None
+            text = LEADING.sub("", (found.text or "") if found is not None else "").rstrip()
+            name = os.path.basename(path)[:-len(REPORT_FILE)]
+            if text and texts.setdefault(name, text) != text:
+                problems.append(name)
+    if problems:
+        raise Refused("two different saved descriptions for the developer name " + ", ".join(sorted(set(problems)))
+                      + " - keep one retrieve's file, nothing was written")
+    return texts
+
+
+def plan_descriptions(org, texts):
+    """[(item, text)] for the kept reports whose description is blank now, the counts, the names no
+    report has; Refused (before any write) with every problem of the plan."""
+    names = sorted(texts)
+    found = []
+    for n in range(0, len(names), 200):         # SOQL's = ignores case, the match below does not
+        found += [i for i in items(org, "report", f"DeveloperName IN {in_list(names[n:n + 200])}")
+                  if i["developer_name"] in texts]
+    reports = {}
+    for i in found:
+        reports.setdefault(i["developer_name"], []).append(i)
+    twins = [n for n in names if len(reports.get(n, ())) > 1]
+    if twins:
+        raise Refused("several reports have the developer name " + ", ".join(twins) + " - nothing was written")
+    counts = dict.fromkeys(("planned", "already described", DECOM.lower(), "protected", "not found"), 0)
+    planned, ghosts, problems = [], [n for n in names if n not in reports], []
+    counts["not found"] = len(ghosts)
+    for name in names:
+        if name not in reports:
+            continue
+        item = reports[name][0]
+        word = DECOM.lower() if item["folder"] == DECOM else "protected" if item["folder"] == PROTECTED else \
+            "already described" if (item["description"] or "").strip() else "planned"
+        counts[word] += 1
+        if word != "planned":
+            continue
+        where = f'report {item["id"]} ({name})'
+        if len(texts[name]) > DESC_LIMIT:
+            problems.append(f"{where}: its saved description has {len(texts[name])} characters, Salesforce takes "
+                            f"{DESC_LIMIT} at most")
+        if len(item["label"]) > NAME_LIMIT:
+            problems.append(f"{where}: its label has {len(item['label'])} characters, over Salesforce's {NAME_LIMIT}: "
+                            "the PATCH must send it - shorten it in Lightning first")
+        planned.append((item, texts[name]))
+    if problems:
+        raise Refused("the restore is refused, nothing was written:\n  " + "\n  ".join(problems))
+    return planned, counts, ghosts
+
+
+def do_restore(org, args, folder):
+    planned, counts, ghosts = plan_descriptions(org, saved_descriptions(args.source))
+    for item, _ in planned:
+        print(f'  describe report {item["id"]} "{item["label"]}" in "{item["folder"]}" ({item["folder_id"]})')
+    for name in ghosts:
+        print(f'  not found, no report has the developer name "{name}"')
+    print("counts: " + ", ".join(f"{word}: {n}" for word, n in counts.items()))
+    todo = planned[:args.limit] if args.limit else planned
+    if not args.apply:
+        print(f"dry run: nothing was written ({len(todo)} to describe; --apply --vpn-off writes, with Ryan's go)")
+        return
+    ledger = open_ledger(folder)
+    for item, text in todo:
+        row = {"action": "describe", "kind": "report", "id": item["id"], "from_folder_id": item["folder_id"],
+               "to_folder_id": item["folder_id"], "old_label": item["label"], "new_label": ""}
+        patch_report(org, ledger, row, item["folder_id"], item["label"], item["label"], text)
+        print(f"  described report {item['id']}, read back")
+    left = len(planned) - len(todo)
+    print(f"described and read back: {len(todo)}" + (f"; left by --limit: {left}" if left else "")
+          + f"; ledger {rel(ledger.path)}")
+
+
 def main(argv=None, org=None):
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--org", default="glow", help="the Salesforce CLI alias (default: glow)")
@@ -456,6 +555,12 @@ def main(argv=None, org=None):
     p.add_argument("--ledger", help="the ledger (default and only: ledger.csv in --dir)")
     p.add_argument("--apply", action="store_true", help="write to Salesforce (needs Ryan's go)")
     p.add_argument("--limit", type=positive, help="undo at most the last N moves")
+    p = sub.add_parser("restore-descriptions", parents=[common], allow_abbrev=False,
+                       help="put saved descriptions back on the kept reports whose description is blank (#142)")
+    p.add_argument("--from", dest="source", action="append", required=True, metavar="DIR",
+                   help="a metadata retrieve (sfdx project dir) holding *.report-meta.xml files (repeatable)")
+    p.add_argument("--apply", action="store_true", help="write to Salesforce (needs Ryan's go)")
+    p.add_argument("--limit", type=positive, help="describe at most N reports")
     args = ap.parse_args(argv)
     try:
         require_vpn_off(args)
@@ -463,7 +568,8 @@ def main(argv=None, org=None):
             do_list(org or Org(args.org), args)
         else:
             folder = private_folder(args.dir, repo=REPO)
-            run = {"copy": do_copy, "move": do_move, "undo": do_undo}[args.command]
+            run = {"copy": do_copy, "move": do_move, "undo": do_undo,
+                   "restore-descriptions": do_restore}[args.command]
             run(org or Org(args.org), args, folder)
     except Refused as stop:
         sys.exit(str(stop))

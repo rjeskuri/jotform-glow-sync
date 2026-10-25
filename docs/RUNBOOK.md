@@ -3851,8 +3851,8 @@ The moves:
 `tools/sf_report_folders.py` (ticket #71) makes the copies and the moves of the archive rule
 above through the Analytics API, exactly as the API proof sent them. It never deletes, and it
 reads `Folder`, `Report`, `Dashboard`, `DashboardComponent` and a report's describe only, never a record. Every
-subcommand needs `--vpn-off`; `copy`, `move` and `undo` are dry runs until `--apply` (Ryan's go,
-the live gate asks him). The folders named "Attendance" are never a source or a target.
+subcommand needs `--vpn-off`; `copy`, `move`, `undo` and `restore-descriptions` are dry runs
+until `--apply` (Ryan's go, the live gate asks him). The folders named "Attendance" are never a source or a target.
 
 - List what a folder holds (read-only; CSV on stdout, the counts on stderr, which must equal SOQL's
   `SELECT OwnerId, COUNT(Id) FROM Report GROUP BY OwnerId` for that folder):
@@ -3892,6 +3892,22 @@ the live gate asks him). The folders named "Attendance" are never a source or a 
   refused (HTTP 4xx) never moved and is left as it is, and a move already undone is not undone
   again. Copies stay in
   Decommissioned.
+- Restore the descriptions the moves blanked (#142, Ryan's decision 2026-10-25: the kept reports
+  only, stray leading bullets stripped), from local metadata retrieves (sfdx project dirs, the
+  report files under `force-app/main/default/reports/<folder>/<DeveloperName>.report-meta.xml`):
+  `python3 tools/sf_report_folders.py restore-descriptions --vpn-off --from <retrieve dir> [--from <another>]`
+  (the dry run: one line per planned report with its id, label and folder, the names no report has,
+  and the counts planned, already described, decommissioned, protected, not found; never a text),
+  then `--apply --limit 1`, check that report in Salesforce, then `--apply` for the rest. Each saved
+  `<description>` is unescaped, stripped of leading bullets (`●•*-`) and whitespace and of trailing
+  whitespace; an empty one is ignored. Only a report whose description is blank now and that is not
+  in Decommissioned gets one; one in "Attendance" is left as it is (counted as protected). Refused before any write: a `--from`
+  dir that is missing or holds no report file, two different texts for one developer name, a name
+  two reports have, a text over 255 characters, a planned report whose label is over 40 characters
+  (the `PATCH` sends the label and folder it has now with the description). Each `PATCH` has a
+  `describe` ledger row and is read back by SOQL, the description included; one that does not read
+  back stops the run. Undo ignores `describe` rows; a second run finds the restored reports
+  "already described".
 
 ### Why the dashboards showed old data
 
