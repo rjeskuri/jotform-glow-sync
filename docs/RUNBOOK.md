@@ -3877,7 +3877,8 @@ the live gate asks him). The folders named "Attendance" are never a source or a 
   differs stops the run. Each move's (and undo's) `PATCH` carries the description the report's
   describe (`GET analytics/reports/<id>/describe`) answers just before it, since Salesforce blanks
   a description the `PATCH` leaves out (#142: 32 reports lost theirs); a describe that does not
-  answer it stops the run before that report's `PATCH`.
+  answer it stops the run before that report's `PATCH`. The read-back checks the description too
+  (`None` and `""` are the same blank): one that does not read back as sent stops the run there.
 - Dashboards are moved and renamed by hand in Lightning (the API proof: Salesforce refuses every
   dashboard `PATCH`, 400 `JSON_PARSER_ERROR`); a plan row of kind `dashboard` is refused. Check
   the hand move with SOQL on `Dashboard` (the same Id, `FolderName` following).

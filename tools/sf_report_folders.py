@@ -28,8 +28,8 @@ Refused before any write: the folders named "Attendance" (this repo's own dashbo
 a target, a folder name that is not exactly one folder of the kind, a report label over 40
 characters (a new one, or the current one of a report the plan relabels: undo could not restore
 it), retiring a report that a dashboard outside Decommissioned still uses, an unknown id.
-Each write is one request, read back by SOQL (the same Id, its folder and label); a write that does
-not read back stops the run. One ledger row per write (data/sf_report_folders/ledger.csv, owner
+Each write is one request, read back by SOQL (the same Id, its folder and label, and a move's or an
+undo's description as sent); a write that does not read back stops the run. One ledger row per write (data/sf_report_folders/ledger.csv, owner
 only, never committed): on disk as "sending" before its request, rewritten in place as ok or failed
 before the next write (a copy's row gets the copy's id first). The tool reads Folder, Report, Dashboard,
 DashboardComponent and a report's describe only, and prints ids, labels, folder names, counts and HTTP codes, never an
@@ -95,17 +95,19 @@ def folder_names(org, ids):
 
 
 def items(org, kind, where):
-    """Reports or dashboards as {kind, id, developer_name, label, folder_id, folder, last_run}."""
+    """Reports or dashboards as {kind, id, developer_name, label, folder_id, folder, last_run,
+    description} (a report's description: None or "" when it has none; a dashboard's: None)."""
     if kind == "report":
-        found = plain(org.query("SELECT Id, DeveloperName, Name, OwnerId, FolderName, LastRunDate FROM Report "
-                                f"WHERE {where}"))
+        found = plain(org.query("SELECT Id, DeveloperName, Name, OwnerId, FolderName, LastRunDate, Description "
+                                f"FROM Report WHERE {where}"))
         label, folder, last_run = "Name", "OwnerId", "LastRunDate"    # a report's OwnerId is its folder
     else:
         found = plain(org.query(f"SELECT Id, DeveloperName, Title, FolderId, FolderName FROM Dashboard WHERE {where}"))
         label, folder, last_run = "Title", "FolderId", None
     return [{"kind": kind, "id": r["Id"], "developer_name": r.get("DeveloperName") or "",
              "label": r.get(label) or "", "folder_id": r.get(folder) or "", "folder": r.get("FolderName") or "",
-             "last_run": (r.get(last_run) or "") if last_run else ""} for r in found]
+             "last_run": (r.get(last_run) or "") if last_run else "", "description": r.get("Description")}
+            for r in found]
 
 
 def by_id(org, kind, ids):
@@ -127,8 +129,12 @@ def used_by(org, report_ids):
     return out
 
 
-def read_back(org, kind, item_id, folder_id, label):
-    """What SOQL says is wrong with the item, [] when it is in folder_id with label (None: any label)."""
+NOT_CHECKED = object()      # read_back's description when it is not compared (None is a blank one)
+
+
+def read_back(org, kind, item_id, folder_id, label, description=NOT_CHECKED):
+    """What SOQL says is wrong with the item, [] when it is in folder_id with label (None: any label)
+    and, when given, the description (None and "" are the same blank; the text is never said)."""
     try:
         found = items(org, kind, f"Id = {quoted(item_id)}")
     except Refused as stop:
@@ -140,6 +146,8 @@ def read_back(org, kind, item_id, folder_id, label):
         wrong.append(f'it reads back in "{found[0]["folder"]}" ({found[0]["folder_id"]}), not {folder_id}')
     if label is not None and found[0]["label"] != label:
         wrong.append(f'its label reads back as "{found[0]["label"]}", not "{label}"')
+    if description is not NOT_CHECKED and (found[0]["description"] or "") != (description or ""):
+        wrong.append("its description did not read back as sent")
     return wrong
 
 
@@ -198,7 +206,8 @@ def patch_report(org, ledger, row, folder_id, name, label):
     meta["description"] = description_now(org, row["id"], row["action"])
     row = sending(ledger, row)
     status, answer = org.call("PATCH", f"{ANALYTICS}/reports/{row['id']}", {"reportMetadata": meta})
-    wrong = read_back(org, "report", row["id"], folder_id, label) if status == 200 else [http_said(status, answer)]
+    wrong = read_back(org, "report", row["id"], folder_id, label, meta["description"]) if status == 200 else \
+        [http_said(status, answer)]
     finish(ledger, row, status="failed" if wrong else "ok", http=status)
     if wrong:
         raise Refused(f"{row['action']} of report {row['id']}: " + "; ".join(wrong) + " - STOPPED, nothing more "

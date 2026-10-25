@@ -14,7 +14,7 @@ The fake org (ReportOrg) is Salesforce as far as this tool may see it, after the
 - query(soql) / query_all(soql): plain SOQL (SELECT fields FROM object [WHERE ...] with
   AND/OR/NOT/parentheses, =, !=, <, >, IN, NOT IN, LIKE; ORDER BY and LIMIT accepted and ignored)
   over Folder (Id, Name, DeveloperName, Type), Report (Id, DeveloperName, Name, OwnerId - its
-  folder's id - FolderName, LastRunDate), Dashboard (Id, DeveloperName, Title, FolderId,
+  folder's id - FolderName, LastRunDate, Description), Dashboard (Id, DeveloperName, Title, FolderId,
   FolderName, Type) and DashboardComponent (Id, DashboardId, CustomReportId, and the relationship
   Dashboard.*). Any other object is an AssertionError (recorded first).
 - call(method, path, body) -> (status, answer), paths under /services/data/v67.0:
@@ -30,7 +30,11 @@ The fake org (ReportOrg) is Salesforce as far as this tool may see it, after the
     did to 32 moved reports (#142); 200 with the report's metadata. drift[id] = "folder" | "name" makes the PATCH answer
     200 while that field stays as it was (a failed read-back); drift[id] = "echo" answers 200 with
     the values asked for while nothing is stored (only a SOQL read-back sees it); refuse_patch
-    makes it 400. misplace = True: a clone answers 200 with the folder asked for, but lands in its
+    makes it 400. desc_drift[id] = a DESC_DRIFT mode stores, instead of the description sent, what
+    that mode makes of it ("drop": None, as a Salesforce that ignored it blanks it; "empty": "";
+    "cut": its first half; "other": another text; "blank swap": "" for None and None for "", the
+    same blank), while the PATCH answer echoes the description sent (only a read-back sees it).
+    misplace = True: a clone answers 200 with the folder asked for, but lands in its
     source's folder (only a SOQL read-back sees it).
   * PATCH analytics/dashboards/<id>: always 400 JSON_PARSER_ERROR (the proof, steps 3-5).
   * GET .../describe answers a small describe; a report's reportMetadata.description is its stored
@@ -298,6 +302,7 @@ class ReportOrg:
         self.calls, self.seen = [], []
         self.drift, self.refuse_patch, self.misplace = {}, set(), False
         self.refuse_describe, self.describe_shape, self.on_patch = set(), {}, {}
+        self.desc_drift = {}
         self.folders, self.fid = [], {}
         for key, name, kind in FOLDERS:
             self.add_folder(key, name, kind)
@@ -480,8 +485,20 @@ class ReportOrg:
             r["Name"] = meta["name"].strip()
         # a PATCH that leaves the description out blanks it: Salesforce did so to 32 moved reports (#142)
         r["Description"] = meta.get("description")
-        return 200, {"reportMetadata": {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"]},
+        if rid in self.desc_drift:      # Salesforce kept something other than the description sent
+            r["Description"] = DESC_DRIFT[self.desc_drift[rid]](meta.get("description"))
+        return 200, {"reportMetadata": {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"],
+                                        "description": meta.get("description")},
                      "runningUser": {"name": CANARY}}
+
+
+DESC_DRIFT = {   # desc_drift modes: the description sent -> the one Salesforce keeps
+    "drop": lambda sent: None,
+    "empty": lambda sent: "",
+    "cut": lambda sent: (sent or "")[:len(sent or "") // 2],
+    "other": lambda sent: f"Kept for the regional review ({fresh_id('')})",
+    "blank swap": lambda sent: "" if sent is None else None if sent == "" else sent,
+}
 
 
 DESCRIPTION_SHAPES = [   # {t}: a fresh token, so a description cannot be hard-coded
@@ -1424,6 +1441,114 @@ class KeepDescription(Harness):
             self.assertEqual(o.state(), moved)
             self.assertEqual(self.descs(desc), desc)
             self.assertIn(order[0], said)
+
+    # -- the read-back checks the description too (#142 review: 32 blanked descriptions all read back ok)
+    def assert_no_description_printed(self, said, texts):
+        """The tool prints no answer: no description (the one sent, the one read back), no 30-character
+        start of one, no 18-character token of one is in its output."""
+        for text in texts:
+            if not text:
+                continue
+            self.assertNotIn(text, said, "the tool printed a description")
+            self.assertNotIn(text[:30], said, "the tool printed the start of a description")
+            for token in re.findall(r"[A-Za-z0-9]{18}", text):
+                self.assertNotIn(token, said, "the tool printed part of a description")
+
+    def test_a_move_whose_description_does_not_read_back_stops_the_run(self):
+        """A PATCH answered 200 whose description Salesforce dropped or changed (the PATCH answer
+        echoes the one sent: only a read-back sees it) is a failed write, as a wrong folder or label
+        is: its ledger row is failed, nothing is sent after it, the moves before it stand (ok)."""
+        for bad, mode in ((0, "drop"), (1, "other"), (2, "cut"), (1, "empty"), (2, "drop"), (0, "other")):
+            o = self.fresh()
+            original = o.state()[0]
+            rows = self.move_plan()
+            desc = set_descriptions(o, ["meet", "mentors", "stories"])
+            rid = rows[bad][1]
+            o.desc_drift[rid] = mode
+            said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+            where = f"row {bad}, {mode}"
+            self.assertEqual([p[1] for p in o.patches()],
+                             [f"{API_ROOT}analytics/reports/{x}" for _, x, _, _ in rows[:bad + 1]],
+                             f"{where}: nothing sent after the report whose description did not read back:\n{said}")
+            self.assertEqual(self.sent_to(o.patches(), rid).get("description"), desc[rid], where)
+            ledger = self.ledger()
+            self.assertEqual([(x["action"], x["id"], x["status"]) for x in ledger],
+                             [("move", x, "ok") for _, x, _, _ in rows[:bad]] + [("move", rid, "failed")], where)
+            for _, x, to, _ in rows[:bad]:
+                self.assertEqual(o.report(x)["OwnerId"], o.fid[self.target(to)], f"{where}: {x} stays moved")
+                self.assertEqual(o.report(x)["Description"], desc[x], f"{where}: {x} keeps its description")
+            for _, x, _, _ in rows[bad + 1:]:
+                self.assertEqual(o.state()[0][x], original[x], f"{where}: {x} is not touched")
+                self.assertEqual(o.report(x)["Description"], desc[x], where)
+            self.assertIn(rid, said, f"{where}: the refusal names the report")
+            self.assert_no_description_printed(said, list(desc.values()) + [o.report(rid)["Description"]])
+
+    def test_an_undo_whose_description_does_not_read_back_stops_the_run(self):
+        """The same for undo: the undo rows before it are ok and stay undone, its row is failed,
+        nothing is sent after it, the reports after it stay moved."""
+        for bad, mode in ((0, "drop"), (1, "cut"), (2, "other"), (0, "empty"), (1, "drop")):
+            o = self.fresh()
+            order, original = self.moved_three()
+            desc = set_descriptions(o, ["mentors", "stories", "observed"])
+            moved = o.state()[0]
+            rows_before = len(self.ledger())
+            rid = order[bad]
+            o.desc_drift[rid] = mode
+            sent = len(o.calls)
+            said = self.refused("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+            where = f"undo {bad}, {mode}"
+            patches = self.writes_since(sent)
+            self.assertEqual([p[1] for p in patches], [f"{API_ROOT}analytics/reports/{x}" for x in order[:bad + 1]],
+                             f"{where}: nothing sent after the report whose description did not read back:\n{said}")
+            self.assertEqual(self.sent_to(patches, rid).get("description"), desc[rid], where)
+            added = self.ledger()[rows_before:]
+            self.assertEqual([(x["action"], x["id"], x["status"]) for x in added],
+                             [("undo", x, "ok") for x in order[:bad]] + [("undo", rid, "failed")], where)
+            for x in order[:bad]:
+                self.assertEqual(o.state()[0][x], original[x], f"{where}: {x} stays undone")
+                self.assertEqual(o.report(x)["Description"], desc[x], where)
+            for x in order[bad + 1:]:
+                self.assertEqual(o.state()[0][x], moved[x], f"{where}: {x} stays moved")
+                self.assertEqual(o.report(x)["Description"], desc[x], where)
+            self.assertIn(rid, said, f"{where}: the refusal names the report")
+            self.assert_no_description_printed(said, list(desc.values()) + [o.report(rid)["Description"]])
+
+    def test_a_blank_description_read_back_as_the_other_blank_is_no_mismatch(self):
+        """Salesforce may answer None or "" for an empty description: a blank sent as None that
+        reads back as "" (or sent as "" and read back as None) is the same blank, its row ok. A text
+        that reads back blank after them still stops the run there."""
+        o = self.org
+        meet, mentors, stories, observed = (o.rid[k] for k in ("meet", "mentors", "stories", "observed"))
+        rows = self.move_plan() + [("report", observed, "GLOW Club Reports", "")]
+        o.report(meet)["Description"] = None
+        o.report(mentors)["Description"] = ""
+        desc = set_descriptions(o, ["stories", "observed"])
+        o.desc_drift.update({meet: "blank swap", mentors: "blank swap", observed: "drop"})
+        said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        self.assertEqual(o.report(meet)["Description"], "", "the fake swapped the blank (None sent)")
+        self.assertIsNone(o.report(mentors)["Description"], "the fake swapped the blank (\"\" sent)")
+        self.assertEqual([(x["id"], x["status"]) for x in self.ledger()],
+                         [(meet, "ok"), (mentors, "ok"), (stories, "ok"), (observed, "failed")],
+                         f"a blank read back as the other blank is no mismatch:\n{said}")
+        self.assertIn(observed, said)
+        self.assertEqual(o.report(stories)["Description"], desc[stories])
+
+        # the undo: blanks first (undo is last first), then a text that reads back blank
+        o = self.fresh()
+        order, original = self.moved_three()        # observed, stories, mentors
+        o.report(order[0])["Description"] = None
+        o.report(order[1])["Description"] = ""
+        desc = set_descriptions(o, ["mentors"])
+        o.desc_drift.update({order[0]: "blank swap", order[1]: "blank swap", order[2]: "drop"})
+        rows_before = len(self.ledger())
+        said = self.refused("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual([(x["id"], x["status"]) for x in self.ledger()[rows_before:]],
+                         [(order[0], "ok"), (order[1], "ok"), (order[2], "failed")],
+                         f"a blank read back as the other blank is no mismatch:\n{said}")
+        for x in order[:2]:
+            self.assertEqual(o.state()[0][x], original[x], f"{x} is undone")
+        self.assertIn(order[2], said)
+        self.assert_no_description_printed(said, list(desc.values()))
 
 
 class LedgerDurability(Harness):
