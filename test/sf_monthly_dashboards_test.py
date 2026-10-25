@@ -1393,7 +1393,7 @@ class TrainingDashboardDocs(unittest.TestCase):
     PART = "### GLOW Club Training"
     GROUP = "GLOW Club Training"
     TICKET = re.compile(r"(?<![\w#])#78\b")
-    # #74's per-item fields on DHIS2__c (RUNBOOK, "The check that a fix worked")
+    # #74's per-item fields on DHIS2__c (RUNBOOK "Why the dashboards showed old data", the check that a fix worked)
     FIELDS = {"13": "Mentors_attended_the_training_sessions__c", "14": "how_many_training_sessions_did_you_lead__c",
               "15": "Lead_any_training_sessions__c", "16": "Did_you_meet_with_mentors_as_a_group__c"}
     WORK_DIR = re.compile(r"data/sf_dash_training_\d{4}-\d\d-\d\d/")
