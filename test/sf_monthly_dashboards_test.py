@@ -33,8 +33,9 @@ tool's undo from that ledger and deletes nothing, and its Result gives the count
 ReportingDashboardDocs (ticket #79): the dashboard "GLOW Club Reporting" (D5, "Reporting") and its items 17-19,
 read from `glow/sf_keep_list.csv`, not pinned. The RUNBOOK's `### GLOW Club Reporting` names each measure, its
 label and Id, says each report groups by Partner (`Account__c`) and Month (`Period__c`), the period (the last 12
-months through `Period__c`), the test-record rule, the dashboard's Partner and Month filters, item 19 a tabular
-report with Partner and Month columns and filters, and one `SELECT ... FROM DHIS2__c` signal per item. The
+months through `Period__c`), the test-record rule, the dashboard's only filter Partner Manager
+(`Assigned_Partner_Manager__c`; no Partner or Month filter, Ryan 2026-10-24), item 19 a tabular report with Partner
+and Month columns, and one `SELECT ... FROM DHIS2__c` signal per item. The
 Rollback (the plan's and the RUNBOOK's): the reports from their Decommissioned copies; the dashboard, dynamic and
 so refused an API copy at the org's limit of 5 (Ryan, 2026-10-24), from this change's
 `data/sf_dash_reporting_<date>/before/` only while a fresh retrieve equals `after/`, never from an older build.
@@ -1370,7 +1371,10 @@ class ReportingDashboardDocs(unittest.TestCase):
     the last 12 months through `DHIS2__c.Period__c` (#128), grouped by Partner (`Account__c`), then the month; the
     test-record rule of #70 on every kept report; each report copied into Decommissioned before it changes; the
     three dynamic dashboards (D5 among them) refuse an API copy (the org is at its 5 dynamic dashboards), so for the
-    dashboard the retrieve into `before/` is the rollback. Labels, ids and measures are read from the CSV, not
+    dashboard the retrieve into `before/` is the rollback. Ryan, 2026-10-24 09:55 UTC on #79, for all five
+    dashboards: no Partner filter and no Month filter on any dashboard; the only dashboard filter is Partner Manager
+    (`Assigned_Partner_Manager__c`, each manager sees their partners); the reports stay grouped by Partner and Month,
+    and item 19 stays tabular with Partner and Month columns. Labels, ids and measures are read from the CSV, not
     pinned; the plan's Result waits for the live deploy, so no org figure is pinned either."""
 
     longMessage = False         # the messages say what to fix
@@ -1408,7 +1412,10 @@ class ReportingDashboardDocs(unittest.TestCase):
                              r"\bAccount__c\s*=\s*'001\w+'")
     MONTH_FILTER = re.compile(r"(?i)\bMonth\s+filter\b|\bfilters?\s+(on|by|for)\s+(the\s+)?Month\b")
     PARTNER_FILTER = re.compile(r"(?i)\bPartner\s+filter\b|\bfilters?\s+(on|by|for)\s+(the\s+)?Partner\b(?!\s+Manager)")
-    MONTH_FIELDS = re.compile(r"\b(CreatedDate|LastModifiedDate|YearMonth__c|Month__c|Year__c|\w+_Date__c)\b")
+    # "one filter, Partner Manager", "its only filter is Partner Manager", "the single filter: Partner Manager"
+    ONLY_PM_FILTER = re.compile(r"(?i)\b(only|one|single|sole)\s+(dashboard\s+)?filter\b[^.;]{0,40}?\bPartner Manager\b|"
+                                r"\bPartner Manager\b[^.;]{0,40}?\b(is|as)\s+(its|the)\s+(only|one|single|sole)\s+"
+                                r"(dashboard\s+)?filter\b")
     # a path in a rollback: only this change's retrieve, the copy tool's ledger folder, and the bare before/ after/
     PATH = re.compile(r"(?<![\w/.<>-])(?:[\w.<>*-]+/)+[\w.<>*-]*")
     # a fallback: "if before/ is missing, deploy …", "otherwise restore …"
@@ -1736,32 +1743,27 @@ class ReportingDashboardDocs(unittest.TestCase):
         # the test records
         self.assertRegex(text, r"(?i)\btest records?\b", f"{where}: call what the rule excludes test records")
         self.k.assertTestRecordRule(text, where)
-        # the dashboard's filters
-        filt = re.compile(r"(?i)\bfilters?\b")
-        self.assertTrue([s for s in cl if re.search(r"(?i)\bdashboard\b", s) and self.stated(s, filt)
-                         and self.stated(s, re.compile(r"\bPartner\b")) and self.stated(s, re.compile(r"\bMonth\b"))
-                         and not self.items_named(s, rows) & {"19"}],
-                        f"{where}: say, in one sentence, the dashboard has a Partner filter and a Month filter, not "
-                        "negated")
-        # what the filters read: the Month filter `Period__c`, the Partner filter `Account__c`, nothing else
-        month_filter = [s for s in cl if self.MONTH_FILTER.search(s)]
-        self.assertTrue([s for s in month_filter if self.stated(s, re.compile(r"Period__c\b"))],
-                        f"{where}: say the Month filter reads `Period__c` (in a sentence naming the Month filter)")
-        for s in month_filter:
-            wrong = [m.group(0) for m in self.MONTH_FIELDS.finditer(s) if not self.d.locally_denied(s, m)]
-            self.assertFalse(wrong, f"{where}: the Month filter reads `Period__c`, not {wrong}: {s[:200]!r}")
-        self.assertTrue([s for s in cl if self.PARTNER_FILTER.search(s) and self.stated(s, re.compile(r"Account__c\b"))],
-                        f"{where}: say the Partner filter reads `Account__c` (in a sentence naming the Partner filter)")
+        # the dashboard's filter: Partner Manager only (Ryan, 2026-10-24 on #79, every Monthly Report dashboard)
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bdashboard\b", s) and "Assigned_Partner_Manager__c" in s
+                         and self.stated(s, self.ONLY_PM_FILTER) and not self.items_named(s, rows) & {"19"}],
+                        f"{where}: say, in one sentence, the dashboard's only filter is Partner Manager "
+                        "(`Assigned_Partner_Manager__c`), not negated (Ryan, 2026-10-24)")
+        for s in cl:                    # no Partner or Month filter on the dashboard, except denied
+            if self.items_named(s, rows) & {"19"}:
+                continue                # item 19's own report columns and filters are not the dashboard's
+            for rx in (self.PARTNER_FILTER, self.MONTH_FILTER):
+                for m in rx.finditer(s):
+                    self.assertTrue(self.d.locally_denied(s, m),
+                                    f"{where}: the dashboard has no Partner filter and no Month filter, only Partner "
+                                    f"Manager (Ryan, 2026-10-24); name them only to deny them: {s[:200]!r}")
         self.assertCreatedDateOnlyReplaced(part, where)
         # item 19: tabular, Partner and Month its columns and filters
         about_19 = [s for s in cl if "19" in self.items_named(s, rows)]
         self.assertTrue([s for s in about_19 if self.stated(s, re.compile(r"(?i)\btabular\b"))],
                         f"{where}: say item 19 stays a tabular report (in a sentence naming it), not negated")
         self.assertTrue([s for s in about_19 if self.stated(s, re.compile(r"(?i)\bcolumns?\b"))
-                         and self.stated(s, filt) and self.stated(s, re.compile(r"\bPartner\b"))
-                         and self.stated(s, re.compile(r"\bMonth\b"))],
-                        f"{where}: say, in one sentence naming item 19, it has Partner and Month as columns and "
-                        "filters")
+                         and self.stated(s, re.compile(r"\bPartner\b")) and self.stated(s, re.compile(r"\bMonth\b"))],
+                        f"{where}: say, in one sentence naming item 19, it has Partner and Month as columns")
         # one SOQL signal per item, on DHIS2__c, with the period and the test-record rule
         blocks = self.blocks(part)
         for item in self.ITEMS:
