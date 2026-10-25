@@ -1428,10 +1428,33 @@ class TrainingDashboardDocs(unittest.TestCase):
         r"\bfilters?(?:\s*[:(]|\s+(?:is|are|include\w*|list\w*|cover\w*)\b)\s*(?:[\w,'’]+\s+){0,2}?" + _NAME + r"|"
         r"\bdashboard(?:['’]s)?\s+(?:\w+\s+){0,2}?filters?\s+(?:on|by|for)\s+(?:the\s+)?`?(?:DHIS2__c[_$])?"
         r"(?:Account__c|Period__c)\b")
-    # a second filter on the dashboard ("two filters", "another filter", "a second dashboard filter")
+    # the same control in other words (PR #141 review): "a month selector", "a Partner drop-down", "a slicer for the
+    # month", "a picker of partners", "a viewer can pick a month", "choose the partner", "narrow the dashboard to one
+    # partner", "switch between months", "view the dashboard by month"; never "grouped by partner then month" (no
+    # control word, no viewer's verb) and never "Partner Manager"
+    _CNAME = (r"[\"“”`']?(?:(?<![A-Za-z0-9])(?:DHIS2__c[_$])?(?:Account__c|Period__c)(?!\w)|"
+              r"(?<![\w-])(?:Partners?|Months?)(?![\w-])(?!\s+Managers?\b))[\"“”`']?")
+    _CONTROL = (r"(?:selectors?|pickers?|choosers?|drop[\s-]?downs?|dropdowns?|pull[\s-]?downs?|slicers?|toggles?|"
+                r"switch(?:er|ers|es)?|menus?|list[\s-]?box(?:es)?|combo[\s-]?box(?:es)?|controls?|facets?|"
+                r"selections?|choices?|options?|widgets?|segmenters?|views?|lens(?:es)?|parameters?|prompts?)")
+    _VERB = (r"(?:pick(?:s|ed|ing)?|choos(?:e|es|ing)|chos(?:e|en)|select(?:s|ed|ing)?|switch(?:es|ed|ing)?|"
+             r"toggl(?:e|es|ed|ing)|chang(?:e|es|ed|ing)|set(?:s|ting)?|narrow(?:s|ed|ing)?|limit(?:s|ed|ing)?|"
+             r"restrict(?:s|ed|ing)?|scop(?:e|es|ed|ing)|slic(?:e|es|ed|ing)|drill(?:s|ed|ing)?|"
+             r"focus(?:es|ed|ing)?|zoom(?:s|ed|ing)?|view(?:s|ed|ing)?|brows(?:e|es|ed|ing)|tick(?:s|ed|ing)?|"
+             r"click(?:s|ed|ing)?|tap(?:s|ped|ping)?)")
+    PARTNER_OR_MONTH_CONTROL = re.compile(
+        r"(?i)" + _CNAME + r"(?:\s*(?:,|and|or|&|/)\s*" + _CNAME + r")*[\s-]+(?:[\w'’-]+\s+)??" + _CONTROL + r"\b|"
+        r"\b" + _CONTROL + r"\s+(?:[\w'’-]+\s+){0,3}?(?:for|of|by|on|over|with|listing|lists?|between|across|"
+        r"to\s+" + _VERB + r")\s+(?:(?:the|a|an|one|each|any|every|their|its|all|which|single)\s+){0,2}" + _CNAME +
+        r"|\b" + _VERB + r"\s+(?:(?:it|them|the\s+dashboard|the\s+view|D4|down|in|into|to|on|onto|between|among|"
+        r"from|by|per|out|up|through|across)\s+){0,3}(?:(?:the|a|an|one|each|any|every|their|its|his|her|which|"
+        r"single|another|other|different)\s+){0,2}(?<![\w-])(?:Partners?|Months?)(?![\w-])(?!\s+Managers?\b)")
+    CNAME = re.compile(r"(?i)" + _CNAME)
+    # a second filter on the dashboard ("two filters", "another filter", "a second dashboard filter", "another
+    # selector")
     FILTER_NAME = re.compile(r"(?i)\bPartner\b(?!\s+Manager)|\bMonth\b")
     MORE_FILTERS = re.compile(r"(?i)\b(two|three|2|3|second|third|another|more|other|extra|further|additional)\s+"
-                              r"(dashboard\s+)?filters?\b")
+                              r"(dashboard\s+)?(filters?|" + _CONTROL + r")\b")
     # a figure that is not checked, only eyeballed
     SOFT = re.compile(r"(?i)\b(roughly|approximately|approx|about right|close enough|whichever|looks? right|"
                       r"seems? right|more or less|ballpark|eyeball\w*|near(ly)? enough|or so)\b")
@@ -1704,13 +1727,16 @@ class TrainingDashboardDocs(unittest.TestCase):
         ("no Partner or Month filter (Ryan, 2026-10-24)")."""
         for s in self.clauses(text, ".;"):
             prev = 0
-            for m in self.PARTNER_OR_MONTH_FILTER.finditer(s):
+            found = sorted([(m, self.FILTER_NAME) for m in self.PARTNER_OR_MONTH_FILTER.finditer(s)] +
+                           [(m, self.CNAME) for m in self.PARTNER_OR_MONTH_CONTROL.finditer(s)],
+                           key=lambda t: (t[0].start(), t[0].end()))
+            for m, name in found:
                 # the match's first Partner or Month (a list shares it: "no Partner or Month filter") is denied in
                 # the words before it, back to the last comma, dash or "but" and never past the previous match ("no
                 # Partner filter and a Month filter" states one)
-                first = self.FILTER_NAME.search(s, m.start(), m.end())
-                denied = self.denied_before(s, first.start() if first else m.start(), prev)
-                prev = m.end()
+                first = name.search(s, m.start(), m.end())
+                denied = self.denied_before(s, first.start() if first else m.start(), min(prev, m.start()))
+                prev = max(prev, m.end())
                 self.assertTrue(denied,
                                 f"{where}: the dashboard has no Partner filter and no Month filter (Ryan, 2026-10-24: "
                                 f"its one filter is Partner Manager); name one only to deny it: {m.group(0)!r} in "
@@ -1861,6 +1887,8 @@ class TrainingDashboardDocs(unittest.TestCase):
         self.assertNotEqual(word, "superseded", f"{name}: the plan is the change in force")
         if word == "done":
             self.assertRegex(keys.get("done", ""), r"^\d{4}-\d\d-\d\d", f"{name}: a done plan carries `done:`")
+        # the plan, like the RUNBOOK, never gives the dashboard a Partner or Month filter or control (Ryan, 2026-10-24)
+        self.assertNoPartnerOrMonthFilter(text, name)
         self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
                          f"{name}: name ticket #78 in the frontmatter, the title or the opening paragraph")
         self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
