@@ -4047,6 +4047,83 @@ Questions for GLOW:
   `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
   and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
 
+### GLOW Club Reporting
+
+The dashboard "Reporting" (`01ZRP000006oxSr2AI`, D5 in `glow/sf_keep_list.csv`, in "GLOW Monthly
+Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18. Item 19 is the table, on no
+dashboard. Ticket #79, [plan](plans/2026-10-24-sf-dash-reporting.md). Status: built 2026-10-24 in
+`data/sf_dash_reporting_2026-10-24/build/` from the retrieve `before/`, waiting for Ryan's go.
+
+What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
+- Item 17, GLOW's "Report approved by PO", is the report "Approved Approvals monthly report"
+  (`00ORP000006XXEf2AO`): the Monthly Reports with `Approved__c` ticked, a record count.
+- Item 18, GLOW's "Report submitted on time", is the report "Reports completed on time"
+  (`00ORP0000054DyH2AU`): the Monthly Reports filed, a record count, with each one's
+  `Monthly_Report_submission_date__c` and `Monthly_Report_Modified_Date__c` as columns. No report
+  computes "on time" yet (#119, on hold).
+- Item 19, GLOW's "GLOW of the Month Stories", is the report "GLOW of the Month Stories Report"
+  (`00ORP000005p2L32AI`): one row per Monthly Report with its stories (outstanding stories, peer
+  support, community impact, success story, personal growth).
+
+How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
+- Each report filters `Period__c equals LAST_N_MONTHS:12`, the last 12 months through `Period__c`
+  (#128), which leaves out the current, incomplete month. Its standard date column is `Period__c`,
+  range All Time, in place of `CreatedDate`. Item 19's fixed year (`Year__c equals 2026`) is
+  removed.
+- Both dashboard reports, items 17 and 18, group by Partner (`DHIS2__c.Account__c`, the partner
+  account), then by Month (`Period__c` by calendar month). The owner groupings
+  (`Account_Owner_Check__c`, `Account__c.Owner`) and item 17's `Approved__c` grouping are removed,
+  and a grouping is never also a column.
+- The test-record rule of #70 is a report filter on all three: `Account is not blank AND Account:
+  Account Name does not contain "test"`. It keeps the test records, a test account's or a blank
+  Account's Monthly Reports, out of every component and of the table. On 2026-10-24 it leaves out
+  2 of the 569 Monthly Reports of the window, and none of September 2026.
+- Item 19 is a tabular report: the org had it as a summary report grouped by `Month__c`, and the
+  build makes it tabular, with no grouping. Item 19 has Partner and Month as its columns and its
+  filters: the columns `Account__c` and `Period__c`, beside the stories.
+- Item 19's Month filter reads `Period__c` (`Period__c equals LAST_N_MONTHS:12`, which a viewer
+  can narrow to one month) and its Partner filter reads `Account__c` (Account not blank, which a
+  viewer can narrow to one partner). The "test" condition is locked.
+- The dashboard has one filter, Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`),
+  as today, so each manager picks their own partners (Ryan, 2026-10-24 on #79). It has no Partner
+  filter and no Month filter (Ryan, 2026-10-24, for every Monthly Report dashboard). The filter
+  offers 6 managers; 8 managers have partners in the window (2026-10-24 count).
+- The dashboard's components are two tables titled with the reports' labels, "Approved Approvals
+  monthly report" and "Reports completed on time", each a row per partner and month with its
+  count. They take the place of the one component today, on "Partner Report Submission On Time"
+  (`00ORP000005u1WP2AY`), one of the 19 reports held in "DHIS2 Reports", which moves to
+  Decommissioned once the dashboard no longer uses it.
+- The dashboard runs as the viewer (`LoggedInUser`), as today; its running user is unchanged.
+
+The SOQL signals, for the last complete month, each with the period and the test-record rule. A
+component is right when, refreshed, it shows the same total and the same number for one partner:
+- Item 17, "Report approved by PO": the total is `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c =
+  LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Approved__c = true`,
+  and one partner's number is `SELECT Account__r.Name, COUNT(Id) FROM DHIS2__c WHERE Period__c =
+  LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Approved__c = true
+  GROUP BY Account__r.Name`.
+- Item 18, "Report submitted on time": the total is `SELECT COUNT(Id) FROM DHIS2__c WHERE
+  Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`, and one
+  partner's number is `SELECT Account__r.Name, COUNT(Id) FROM DHIS2__c WHERE Period__c =
+  LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY
+  Account__r.Name`.
+- Item 19, "GLOW of the Month Stories": the table's rows are `SELECT Account__r.Name, Period__c
+  FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE
+  '%test%') ORDER BY Account__r.Name`, and their count `SELECT COUNT(Id) FROM DHIS2__c WHERE
+  Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`.
+
+The baseline, 2026-10-24 (September 2026, before the change; `evidence/` of this change): 16
+approved, 42 filed, 42 stories rows, from 42 partners; one partner, Development Consortium, 1 each.
+
+Rollback, each step on Ryan's go:
+- The reports, items 17-19, are restored from their copies in Decommissioned (`copy --tag "#79"`,
+  made before the change), as Decommissioned (above) says.
+- The dashboard "Reporting" (D5) is dynamic, and the API refuses its copy at the org's limit of 5
+  dynamic dashboards (Ryan, 2026-10-24). The dashboard is restored by redeploying it from
+  `data/sf_dash_reporting_2026-10-24/before/`, only while a fresh retrieve of it equals `after/`.
+- If a fresh retrieve differs from `after/`, stop and ask Ryan. A rollback never deploys an older
+  build or an earlier retrieve (DECISIONS 2026-10-16). Nothing is deleted.
+
 ## Interactive dashboard in Salesforce
 
 - **When:** before a change to the interactive dashboard (#81, #82, #83), or to read how it counts.
