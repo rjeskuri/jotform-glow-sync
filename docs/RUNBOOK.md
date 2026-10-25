@@ -4047,6 +4047,75 @@ Questions for GLOW:
   `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
   and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
 
+### GLOW Club Observations
+
+D3 in `glow/sf_keep_list.csv`, the GLOW Club Observations dashboard, is the dashboard "GLOW Club
+Training" (`01ZRP000006k2D32AI`) in "GLOW Monthly Dashboards", with items 9-11 (ticket #77,
+[plan](plans/2026-10-24-sf-dash-observations.md)). Its label and its reports' labels stay as they
+are (Ryan, 2026-10-23), and each component's title is its report's label. It runs as the
+specified running user (`SpecifiedUser`), so it shows the data of its last refresh: a refresh
+after each change (a PUT, Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current.
+#77's build is `data/sf_dash_observations_2026-10-24/build/`; until it is deployed on Ryan's go
+(the plan's Result), the org holds the vendor's dashboard and reports.
+
+The three components, each on its report in "GLOW Monthly Reports":
+- Item 9, "GLOW Club observation form submitted": the report "Submission of GC observation forms
+  M & P" (`00ORP000004RJZC2A4`, matrix) counts Monthly Reports by the answer to
+  `did_you_submit_your_GC_observation_form__c` (Yes or No, across; a blank answer is filtered
+  out), for each partner and month. The component is a stacked column for each month, Yes and
+  No. SOQL signal (September 2026: 23 Yes, 3 No):
+  `SELECT did_you_submit_your_GC_observation_form__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND did_you_submit_your_GC_observation_form__c != null GROUP BY did_you_submit_your_GC_observation_form__c`.
+- Item 10, "Number of GLOW Club sessions observed": the report "Total Number of Club Observations
+  M&P" (`00ORP000004RJZD2A4`, summary) sums `GC_sessions_did_you_observe_last_month__c` for each
+  partner and month. The component is a column of the sum for each month. SOQL signal (September
+  2026: 42 Monthly Reports, sum 93):
+  `SELECT COUNT(Id), SUM(GC_sessions_did_you_observe_last_month__c) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c != null`.
+- Item 11, "Whether or not PC has observed sessions": the report "Completed Observing Clubs
+  Alteast Once P" (`00ORP000005uf412AA`, matrix) is a yes/no for each partner and month. Its
+  bucket "Observed" on `GC_sessions_did_you_observe_last_month__c` reads Yes for 1 or more
+  sessions and No for 0 (across); each Monthly Report is one partner's month, so its counts are
+  partners. The component is a stacked column for each month, Yes and No. SOQL signal, the
+  partners who observed (September 2026: 27, and 15 with 0):
+  `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c > 0`;
+  the partners who observed none: the same query with `= 0`.
+
+A partner that filed no Monthly Report for a month has no `DHIS2__c` record for it, so it has no
+row in any of the three reports: a missing response, which the reports keep apart from a No by
+leaving it out. Who filed is "Reports completed on time" (item 18, D5).
+
+How the reports read the data:
+- Each report is grouped by the partner (`DHIS2__c.Account__c`), then by `Period__c` by calendar
+  month; the month is never `CreatedDate`, and a grouping is never also a column.
+- The default period is the last 12 months: the report filter `Period__c equals LAST_N_MONTHS:12`,
+  which leaves out the current, incomplete month. The standard date filter's column is
+  `Period__c`, range All Time, so the field filter sets the period.
+- Each report carries the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
+  (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
+  `notContain` `test` (the lookup matches on the account's name). In September 2026 no Monthly
+  Report is on a test account or a blank Account; in the last 12 months, 2 are.
+- Each report also keeps its filter on a non-blank answer (its own field `!= null`).
+
+The dashboard's only filter is Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`,
+its 6 partner managers), on every component, and viewers read the partner and the month from the
+reports' groupings (Ryan, 2026-10-24 on #77). It has no Partner filter and no Month filter. #77
+takes item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`) off this
+dashboard, with the five components on reports in "DHIS2 Reports"; #78 puts item 16 on D4. Those
+five reports go to Decommissioned by `tools/sf_report_folders.py move` once this dashboard
+uses none of them (no other dashboard outside Decommissioned uses them, 2026-10-24).
+
+For one partner's month, the same queries take `AND Account__r.Name = '<partner>'`; the three
+items' values for one partner in one query (September 2026, Abaana Community Outreach (ACO)
+Africa: Yes, 3 sessions, so observed):
+`SELECT Account__r.Name, did_you_submit_your_GC_observation_form__c, GC_sessions_did_you_observe_last_month__c FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`.
+
+Rollback: restore from the copies in Decommissioned of the three reports and the dashboard, made
+before the deploy by `copy --tag "#77"`; open the copy, then Save As or move it back
+(Decommissioned, above). Or redeploy this change's retrieve
+`data/sf_dash_observations_2026-10-24/before/` (check-only, Ryan's go, deploy) only while a fresh
+retrieve equals `after/`. When they differ, someone has changed the dashboard or a report since
+the deploy, and the rollback starts from a fresh retrieve by the ritual above. A rollback never
+deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
+
 ## Interactive dashboard in Salesforce
 
 - **When:** before a change to the interactive dashboard (#81, #82, #83), or to read how it counts.

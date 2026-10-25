@@ -1,0 +1,156 @@
+---
+title: GLOW Club Observations (D3) by partner and month, over the last 12 months
+author: Claude (ticket #77, with Ryan's decisions of 2026-10-23 and 2026-10-24)
+status: proposed         # ticket #77; built and dry-run 2026-10-24, nothing deployed
+created: 2026-10-24
+intent: none - SOW p.5, Approach 1 (dashboards that reflect current data) and Ryan, 2026-10-21, "This data should be displayed by the Partner and Month."
+---
+
+# Plan: the GLOW Club Observations dashboard by partner and month
+
+Ticket #77 (epic #68). The dashboard D3 of `glow/sf_keep_list.csv`, "GLOW Club Training"
+(`01ZRP000006k2D32AI`, folder "GLOW Monthly Dashboards"), and its three kept reports, items 9-11,
+show 2025 only (a fixed `Year__c` filter), by month name, and D3's snapshot dates from 2026-07-10
+(RUNBOOK "Why the dashboards showed old data"). This change applies #74's fix steps 1-5 to them:
+the last 12 months through `DHIS2__c.Period__c` (#128), grouped by the partner then the month, the
+test-record rule of #70, and only items 9-11 on the dashboard. Procedure and the SOQL signals:
+RUNBOOK "Monthly Report dashboards in Salesforce", `### GLOW Club Observations`.
+
+## Context
+
+- Ryan, 2026-10-24 on #77: the dashboard's only filter stays Partner Manager (each manager sees
+  their partners); there is no Partner filter and no Month filter on any Monthly Report
+  dashboard; viewers read the partner and the month from the reports' groupings. Labels stay as
+  they are (#70).
+- Item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`) is a D4 report on D3.
+  #77 takes its component off D3 and lands first; #78 reworks item 16 and puts it on D4
+  afterwards. Item 16's report itself is not changed here.
+- The retrieve, 2026-10-24, is in `data/sf_dash_observations_2026-10-24/before/` (owner only,
+  never committed): D3, its 4 kept reports (items 9, 10, 11, 16) in "GLOW Monthly Reports", the 5
+  "DHIS2 Reports" reports D3 also uses, the report types `Dhis2` and `Monthly_Reports`, and
+  `DHIS2__c`. Labels and folders equal the state #73 left. Against #74's retrieve of 2026-10-23,
+  #73's move through the Analytics API dropped the `<description>` of items 9, 10, 11 and 16 and
+  four unused bucket fields (on `Did_you_implement_GLOW_Club_last_month_f__c`) of items 9, 10 and
+  16. The build gives items 9-11 their descriptions again, worded for the new grouping; the unused
+  buckets stay out.
+- #73 made copies of D3 and of items 9-11 and 16 in Decommissioned on 2026-10-24 (08:21-08:23
+  UTC). This change makes its own copies, tagged #77, just before the deploy.
+- The retrieved XML carries staff names (the Partner Manager filter's values, the running user):
+  this plan carries counts and ids only.
+
+## Build
+
+`data/sf_dash_observations_2026-10-24/build/` (its own `package.xml`: the 3 reports and the
+dashboard, API 67.0). `evidence/build_vs_before.diff` is the diff against `before/`.
+
+- Items 9, 10 and 11, each:
+  - the filter `Year__c equals 2025` becomes `Period__c equals LAST_N_MONTHS:12`; the standard
+    date filter's column becomes `Period__c` (range All Time, `INTERVAL_CUSTOM`) in place of
+    `CreatedDate`;
+  - grouped down by `DHIS2__c$Account__c`, then `DHIS2__c$Period__c` by calendar month; the
+    `Account__c.Owner` grouping and the `Month__c` grouping go;
+  - the test-record rule: `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
+    `notContain` `test` (Account is not blank AND Account: Account Name does not contain "test";
+    the lookup matches on the account's name, and `Account__c.Name` is not a column of `Dhis2`);
+  - the filter on a non-blank answer stays; label, `params` and the other attributes as they are.
+- Item 9 (`00ORP000004RJZC2A4`): Matrix, the answer `did_you_submit_your_GC_observation_form__c`
+  across; its column is the record name (a grouping is never also a column).
+- Item 10 (`00ORP000004RJZD2A4`): Summary (no across grouping), the sum of
+  `GC_sessions_did_you_observe_last_month__c`.
+- Item 11 (`00ORP000005uf412AA`): Matrix, a number bucket "Observed" on
+  `GC_sessions_did_you_observe_last_month__c` across: No for 0 (`to` 0), Yes for 1 or more
+  (`from` 0); the sum of the field stays a column. Each record is one partner's month, so the
+  counts are partner-months; a partner with no Monthly Report for a month has no row (a missing
+  response, apart from a No).
+- The dashboard: 3 components, on items 9, 10 and 11, titled with the reports' labels: item 9 a
+  stacked column of Yes and No by month, item 10 a column of the sum by month, item 11 a stacked
+  column of Yes and No by month. The six other components go: item 16's and the five on "DHIS2
+  Reports" reports. The Partner Manager filter (6 values), the running user, `dashboardType`
+  `SpecifiedUser`, the title and the description are as retrieved; each component filters on
+  `DHIS2__c$Account__c.Assigned_Partner_Manager__c` as before.
+- Not verified before the check-only: the number bucket's `from`/`to` form (no number bucket in
+  any retrieve of this org), and a component grouped by `Period__c` alone on a report grouped by
+  partner then month. The check-only and the read-back settle both.
+
+## Rollout (live; each write on Ryan's go)
+
+All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI login `glow`
+(`.claude/skills/salesforce`). Each copy goes to Decommissioned before anything changes. The
+copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
+
+1. Copy the three reports into Decommissioned, on Ryan's go:
+   `python3 tools/sf_report_folders.py copy --vpn-off --dir data/sf_dash_observations_2026-10-24 --kind report --id 00ORP000004RJZC2A4 --tag "#77" --apply`,
+   `python3 tools/sf_report_folders.py copy --vpn-off --dir data/sf_dash_observations_2026-10-24 --kind report --id 00ORP000004RJZD2A4 --tag "#77" --apply` and
+   `python3 tools/sf_report_folders.py copy --vpn-off --dir data/sf_dash_observations_2026-10-24 --kind report --id 00ORP000005uf412AA --tag "#77" --apply`.
+2. Copy the dashboard, on Ryan's go:
+   `python3 tools/sf_report_folders.py copy --vpn-off --dir data/sf_dash_observations_2026-10-24 --kind dashboard --id 01ZRP000006k2D32AI --tag "#77" --apply`
+   (D3 runs as a specified user, so the clone is within the org's limit of 5 dynamic
+   dashboards). Ryan names and describes the copy by hand in Lightning (`copy of
+   01ZRP000006k2D32AI, #77`). The ledger rows are dated before the deploy.
+3. Check-only before the deploy: `sf project deploy start --dry-run -o glow -d force-app`, run
+   within `data/sf_dash_observations_2026-10-24/build/`; its id goes in the Result.
+4. On Ryan's go, the deploy: `sf project deploy start -o glow -d force-app` from the same
+   folder; its deploy id goes in the Result.
+5. Read back: retrieve the three reports and the dashboard into
+   `data/sf_dash_observations_2026-10-24/after/` and compare it with `build/`. A difference
+   beyond Salesforce's normalisation (`expandOthers`, default attributes) stops the rollout for
+   Ryan.
+6. Refresh the dashboard on Ryan's go:
+   `PUT /services/data/v67.0/analytics/dashboards/01ZRP000006k2D32AI` (`sf api request rest
+   --method PUT`), and read its refresh date back by a GET.
+7. Check by SOQL on `DHIS2__c`, for the last complete month, that items 9-11 each equal their
+   component (the RUNBOOK's query for each item) and that one partner's month equals the
+   per-partner query; the test accounts' records are absent from every component (their count
+   for the month, by SOQL with `Account__r.Name LIKE '%test%'`, is 0 for September 2026).
+   The counts go in the Result.
+8. Move the five "DHIS2 Reports" reports D3 uses no more to Decommissioned, by the plan
+   `data/sf_dash_observations_2026-10-24/move_plan.csv` (5 rows: `00ORP000005s3HN2AY`,
+   `00ORP000005s3Iz2AI`, `00ORP000005s3nd2AA`, `00ORP000005s3qr2AA`, `00ORP000005uf0n2AA`): the
+   dry run
+   `python3 tools/sf_report_folders.py move --vpn-off --dir data/sf_dash_observations_2026-10-24 --plan data/sf_dash_observations_2026-10-24/move_plan.csv`,
+   then on Ryan's go the same with `--apply --limit 1`, a SOQL check of that report, and the rest
+   with `--apply` (the same plan; the first row moves again within Decommissioned). On
+   2026-10-24 the dry run refused all 5 because D3 still used them (`move_dryrun.txt`); the only
+   other dashboard using them is #73's copy of D3, in Decommissioned.
+9. Ryan sets a weekly Subscribe on the dashboard in Lightning (the refresh is a subscription,
+   not metadata), as he did for "Jotform Attendance".
+
+## Rollback
+
+- Restore from the copies in Decommissioned: the three reports and the dashboard copied with
+  the tag #77 before the deploy. Open each copy, then Save As or move it back into "GLOW Monthly
+  Reports" or "GLOW Monthly Dashboards" (RUNBOOK "Decommissioned"). A copy put back keeps the
+  copy's Id, so the reports' and the dashboard's Ids change that way.
+- Or redeploy this change's retrieve `data/sf_dash_observations_2026-10-24/before/` (its D3 and
+  items 9-11: check-only, Ryan's go, deploy) only while a fresh retrieve equals `after/`. That
+  keeps every Id and the dashboard's place in the FlexiPage `Monthly_Report_Dashboards`.
+- When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report
+  since the deploy: the rollback then starts from that fresh retrieve, by the epic's ritual.
+- A rollback never deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
+- Before D3 goes back to its six other components, the five moved reports return to "DHIS2
+  Reports" by the undo of this change's ledger:
+  `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_observations_2026-10-24`
+  (the dry run lists the 5 moves), then the same with `--apply` on Ryan's go.
+- The copies stay in Decommissioned, and nothing is deleted.
+
+## Result
+
+Pending until the deploy. Done so far, read-only, 2026-10-24: the retrieve into `before/`, the
+build, the copies' dry run (4 lines, nothing written), and the move dry run (refused, as
+expected, while D3 uses the 5 reports).
+
+The baseline the components must equal after the deploy, SOQL on `DHIS2__c` for September 2026
+(`Period__c = LAST_MONTH`, Account not blank, no test account), run 2026-10-24
+(`evidence/soql_2026-10-24_september.txt`, `evidence/september_per_partner.csv`):
+
+| Item | Report | September 2026 |
+|---|---|---|
+| 9 | Submission of GC observation forms M & P | 26 answered: 23 Yes, 3 No |
+| 10 | Total Number of Club Observations M&P | sum 93 over 42 Monthly Reports |
+| 11 | Completed Observing Clubs Alteast Once P | 27 partners Yes (observed 1 or more), 15 No (0), 0 blank |
+
+- 42 Monthly Reports from 42 partners; the test-record rule leaves out 0 records in September
+  2026 and 2 in the last 12 months.
+- One partner, Abaana Community Outreach (ACO) Africa, September 2026: item 9 Yes, item 10 3
+  sessions, item 11 Yes.
+- A report filed or changed later moves both sides.
