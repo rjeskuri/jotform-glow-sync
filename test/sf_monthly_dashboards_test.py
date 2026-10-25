@@ -1407,10 +1407,13 @@ class AttendanceDashboardDocs(unittest.TestCase):
     NOT_NULL = re.compile(r"(?i)\bAccount__c\s*!=\s*null\b")
     NO_TEST_SOQL = re.compile(r"(?i)\bNOT\s+Account__r\.Name\s+LIKE\s+'%test%'")
     BEFORE_DIR = re.compile(r"\bdata/sf_dash_attendance_\d{4}-\d\d-\d\d/before/")
-    # a rebuild is a restore too ("rebuilt by hand", "re-create it", "redo the dashboard manually")
+    # a restore, as the positive checks read it ("the reports are restored from their copies")
+    _RESTORE = r"restor\w*|revert\w*|roll\w*\s+back|undo\w*|bring\w*\s+back|put\w*\s+back"
+    RESTORE = re.compile(r"(?i)\b(" + _RESTORE + r")\b")
+    # a rebuild makes a sentence a rollback sentence ("rebuilt by hand", "re-create it", "redo the dashboard
+    # manually"), so the sweeps read it; it never satisfies a positive check (a report rebuilt is not restored)
     _REBUILD = r"rebuil\w*|re-?creat\w*|redo\w*|redone|by\s+hand|manually"
-    RESTORE = re.compile(r"(?i)\b(restor\w*|revert\w*|roll\w*\s+back|undo\w*|bring\w*\s+back|put\w*\s+back|"
-                         + _REBUILD + r")\b")
+    ROLLBACK_WORD = re.compile(r"(?i)\b(" + _RESTORE + "|" + _REBUILD + r"|rollback)\b")
     # the dashboard as what is restored ("restore the dashboard", "the dashboard is redeployed", "roll D1 back")
     _BACK = (r"(restor\w*|revert\w*|roll\w*\s+back|undo\w*|bring\w*\s+back|brought\s+back|put\w*\s+back|"
              + _REBUILD + r"{deploy})")
@@ -1419,8 +1422,9 @@ class AttendanceDashboardDocs(unittest.TestCase):
                   r"\broll\w*\s+(the\s+)?{d}\s+back\b")
     DASH_BACK = {False: re.compile(_DASH_BACK.format(b=_BACK.format(deploy=""), d=_DASH)),
                  True: re.compile(_DASH_BACK.format(b=_BACK.format(deploy=r"|(re-?)?deploy\w*"), d=_DASH))}
-    # what no item comes back from, the reports included ("rebuilt from screenshots", "re-created from memory")
-    _HANDMADE = r"screen\s*shots?|screen\s*captures?|from\s+memory"
+    # what no item comes back from, the reports included ("rebuilt from screenshots", "re-created from memory",
+    # "rebuilt by hand", "a manual rebuild")
+    _HANDMADE = r"screen\s*shots?|screen\s*captures?|from\s+memory|by\s+hand|manual(ly)?"
     HANDMADE = re.compile(r"(?i)\b(" + _HANDMADE + r")\b")
     # a source other than this change's `before/` ("the September retrieve", "an older build", another data/ folder,
     # "by hand from screenshots", "from memory"); "undo the moves first then deploy" is an order, not a source
@@ -1428,7 +1432,7 @@ class AttendanceDashboardDocs(unittest.TestCase):
                               r"November|December|older|old|earlier|previous|prior|stale|first(?!,?\s+then\b)|another|"
                               r"other|original|vendor['’]?s?)\s+([\w-]+\s+)?(retrieve|build|backup|export|snapshot|"
                               r"version|copy|deploy(ment)?)\b|\bdata/sf_(?!dash_attendance_)[\w-]+/|"
-                              r"\b(" + _HANDMADE + r"|by\s+hand|manual(ly)?)\b")
+                              r"\b(" + _HANDMADE + r")\b")
     # a rollback that switches source on a condition ("if before/ is lost", "otherwise", "as a fallback")
     ROLLBACK_SOFT = re.compile(r"(?i)\bif\b[^.;]{0,40}?\b(lost|missing|gone|unavailable|absent|corrupt\w*|deleted|"
                                r"unreadable|not found|cannot be found|broken)\b|"
@@ -1636,8 +1640,7 @@ class AttendanceDashboardDocs(unittest.TestCase):
                                                     r"stale)\s+(\w+\s+)?(build|retrieve)\b", s)],
                         f"{where}: say never from an older build or retrieve (DECISIONS 2026-10-16), in one sentence")
         for s in cl:            # `build/` is never what a rollback deploys
-            if "build/" in s and (self.RESTORE.search(s) or re.search(r"(?i)\brollback\b", s)
-                                  or (whole and re.search(r"(?i)\bdeploy", s))):
+            if "build/" in s and (self.ROLLBACK_WORD.search(s) or (whole and re.search(r"(?i)\bdeploy", s))):
                 self.assertTrue(self.d.NEGATION.search(s), f"{where}: a rollback never deploys `build/`: {s[:200]!r}")
         # every sentence that brings the dashboard back brings back this change's `before/`, and nothing else
         for s in cl:
@@ -1650,17 +1653,69 @@ class AttendanceDashboardDocs(unittest.TestCase):
                 self.assertEqual(other, [], f"{where}: the dashboard comes back from this change's `before/` only, "
                                             f"never from another source: {s[:200]!r}")
         # and no condition switches the source ("if before/ is lost, ...", "otherwise", "as a fallback")
-        back = cl if whole else [s for s in cl if self.RESTORE.search(s) or re.search(r"(?i)\brollback\b", s)]
+        back = cl if whole else [s for s in cl if self.ROLLBACK_WORD.search(s)]
         for s in back:
             for m in self.ROLLBACK_SOFT.finditer(s):
                 self.assertTrue(self.d.locally_denied(s, m),
                                 f"{where}: the rollback has one source per item, with no fallback "
                                 f"({m.group(0)!r}): {s[:200]!r}")
-            # nothing comes back from screenshots or memory: the reports from their copies, D1 from `before/`
+            # nothing comes back from screenshots, memory or by hand: the reports from their copies, D1 from `before/`
             for m in self.HANDMADE.finditer(s):
                 self.assertTrue(self.d.locally_denied(s, m) or self.d.NEGATION.search(m.group(0)),
                                 f"{where}: the rollback restores from the copies and `before/` only, never from "
                                 f"{m.group(0)!r}: {s[:200]!r}")
+
+    UNDO_CMD = re.compile(r"\bsf_report_folders[._]py\s+undo\b")
+    # a check-only or deploy ("a check-only of `before/`", "deploy `before/`", "redeployed")
+    DEPLOY_WORD = re.compile(r"(?i)\bcheck-only\b|--dry-run\b|\b(re-?)?deploy\w*")
+    # ... said as what is still to come ("undo the moves before `before/` is deployed")
+    LATER = re.compile(r"(?i)\b(before|until|ahead of|prior to)\b[^.;,]{0,25}$")
+    # ... or as what fails ("a check-only of `before/` is refused")
+    REFUSED = re.compile(r"(?i)^[^.;,]{0,40}?\b((is|are|was|were|gets?|would be)\s+(refused|rejected|denied)|fails?)\b")
+
+    def rollback_text(self):
+        """The RUNBOOK part's rollback: from its `Rollback` line to the end of the part."""
+        part = self.part()
+        m = re.search(r"(?im)^\W*rollback\b", part)
+        self.assertTrue(m, f"RUNBOOK {self.PART!r}: no `Rollback` paragraph")
+        return part[m.start():]
+
+    def assertUndoFirst(self, raw, where):
+        """Step 7's moves are undone (`sf_report_folders.py undo`) before `before/` is checked or deployed: the
+        dashboard in `before/` names its reports at the paths the moves changed. Ahead of the undo, no sentence
+        brings the dashboard back from `before/` and no clause check-onlies or deploys `before/`; after it, the
+        dashboard is restored from `before/`."""
+        text = self.norm(raw)
+        undo = self.UNDO_CMD.search(text)
+        self.assertTrue(undo, f"{where}: undo step 7's moves, `python3 tools/sf_report_folders.py undo --vpn-off "
+                              "--dir data/sf_dash_attendance_<date>`, before `before/` is deployed")
+        early, restored, at = [], [], 0
+        for s in sentences(text, ".;"):
+            at = text.find(s, at)
+            if "before/" not in s:
+                continue
+            for m in self.DASH_BACK[True].finditer(s):
+                if not (self.d.locally_denied(s, m) or self.d.NEGATION.search(m.group(0))) \
+                        and at + m.start() < undo.start():
+                    early.append(s)
+            for c in re.finditer(r"[^,:()]+", s):
+                clause = c.group(0)
+                if "before/" not in clause:
+                    continue
+                for m in self.DEPLOY_WORD.finditer(clause):
+                    if self.d.locally_denied(clause, m) or self.LATER.search(clause[:m.start()]) \
+                            or self.REFUSED.search(clause[m.end():]):
+                        continue
+                    if at + c.start() + m.start() < undo.start():
+                        early.append(s)
+            if at > undo.start() and re.search(r"(?i)\bdashboard\b", s) \
+                    and (self.said(s, self.RESTORE) or self.said(s, r"(?i)\b(re-?)?deploy\w*\b")):
+                restored.append(s)
+        self.assertEqual(early, [], f"{where}: step 7's moves are undone (`sf_report_folders.py undo`) before "
+                                    "`before/` is checked or deployed, and before the dashboard is restored from it: "
+                                    + "; ".join(repr(s[:160]) for s in early))
+        self.assertTrue(restored, f"{where}: after the undo, say the dashboard is restored by deploying `before/` "
+                                  "(one sentence)")
 
     # --- the RUNBOOK ----------------------------------------------------------------------------------------
 
@@ -1812,6 +1867,13 @@ class AttendanceDashboardDocs(unittest.TestCase):
                                     "the rollback, never optional): " + "; ".join(found))
         # the RUNBOOK's part says the same rollback
         self.assertRollback(self.part(), f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}", whole=False)
+
+    def test_the_attendance_rollback_undoes_the_moves_before_the_deploy(self):
+        """Review of PR #143: `before/` names reports at their paths before step 7's moves, so its check-only is
+        refused until the moves are undone; the undo comes first, in the plan and in the RUNBOOK."""
+        path = self.plan_path()
+        self.assertUndoFirst(self.plan_part(path, "## Rollback", 15), f"{os.path.relpath(path, REPO)}: `## Rollback`")
+        self.assertUndoFirst(self.rollback_text(), f"RUNBOOK {self.PART!r}, its Rollback")
 
     # --- the plan ---------------------------------------------------------------------------------------------
 
