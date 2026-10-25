@@ -48,7 +48,9 @@ NOTES_PROPS = {
     "required": "No",
     "hidden": "No",
 }
-NOTES_EXPECTED = False    # True once task #105 has placed it: a form without it is then a problem
+NOTES_EXPECTED = True     # task #105 places it on all five forms: a form without it is a problem
+#                           (NOT CLEAN, never in-sync); land only after its rollout (docs/plans/
+#                           2026-10-25-session-notes.md)
 NOTES_FIX = "tools/add_session_notes.py (dry run first)"
 
 

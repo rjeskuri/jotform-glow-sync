@@ -1099,11 +1099,11 @@ what `--undo` can still restore: [plan](plans/2026-09-29-rosters-above-submit.md
 ## Session notes on the attendance forms
 
 - **When:** placing, re-checking or removing the optional session-notes field; `form_status` says `session notes: absent` once the field is expected, or flags one (`!!` lines naming `sessionNotes`).
-- **Status:** built, not live (ticket #104, 2026-10-23). Task #105 places it on the template and the four regional forms on Ryan's go, after a read-only `GET /form/{id}/questions` of a live textarea confirms the limit property (`entryLimit`, `Letters-1000`: the name from Jotform's own example, the value from the runtime; not yet read from this account), and flips `glow/layout.py` `NOTES_EXPECTED` to `True`.
-- **Dry run:** `python3 tools/add_session_notes.py`.
-- **Apply:** its `--apply`, the template first; the label's translations are a second step (task #105): until then every language shows it in English.
-- **Verify:** the tool's re-read after the write; `form_status` (`session notes:`, `layout:`).
-- **Rollback:** `--remove --apply`, the questions snapshot, or Revision History.
+- **Status:** on no form yet: the rollout is planned ([plan](plans/2026-10-25-session-notes.md), status proposed; ticket #105), the template first, then Africa, Asia, Latin America and U.S, each on Ryan's go. The label's translations are in the files; `glow/layout.py` `NOTES_EXPECTED` is `True` from #105's land on, which comes after the rollout (a form without the field is then NOT CLEAN). The limit property (`entryLimit` `Letters-1000`) is first read from this account by the template's write and its re-read.
+- **Dry run:** `python3 tools/add_session_notes.py --form <id>`, then `python3 tools/add_translations.py --form <id>`.
+- **Apply:** per form, after `python3 backup_forms.py --form <id>`: `python3 tools/add_session_notes.py --form <id> --apply`, then its translations with `python3 tools/add_translations.py --form <id> --apply` (GET, merge, POST; the store saved first), the template first.
+- **Verify:** the tool's re-read after the write; `python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv --partners data/partners_<date>.csv --rendered` (`session notes: present`, `layout:`, CLEAN); once all five carry it, `python3 tools/add_translations.py --audit` (the label untranslated nowhere).
+- **Rollback:** `python3 tools/add_session_notes.py --form <id> --remove --apply`, the questions snapshot, or Revision History; the translation store each POST saved first (`backups/translations/<id>-<stamp>-before.json`) for a language the POST damaged ([plan](plans/2026-10-25-session-notes.md), Rollback).
 
 One textarea named `sessionNotes` on every attendance form, found by its name
 (the qid differs per form): the label "Additional information about this
@@ -1116,11 +1116,28 @@ goes above it (the field is the first element of the fence `glow/layout.py`
 guards, like the links and Submit; test-pinned). Mentors' notes are free text
 that can name girls: no tool prints a submission's notes, counts only.
 
+The e-mails (ticket #105; [plan](plans/2026-10-25-session-notes.md), Context): the staff
+notification e-mail ("Notification 1", to GLOW's fixed staff address) carries the notes, as it
+carries the ticked girls' names. Jotform rebuilds a default e-mail body when questions change,
+and the 2026-09-29 Notification 1 was custom HTML, so the rollout reads each form's e-mails in
+the builder (Settings, Emails) and Ryan adds the field to that body where it lacks it. The
+mentor's confirmation (the autoresponder, to the address she typed) is read the same way and
+Ryan decides at the template step whether it shows the notes. These settings cannot be read
+offline: until the rollout's Result records them, what each form's e-mails hold is unverified.
+
+The label is translated in every form language (`tools/translations_additions.json`, and the
+Odia, Hindi and Persian files; written by us, not native-reviewed): per form, the translations
+go on right after the field, since `tools/add_translations.py` posts a string only to a form
+that shows it.
+
 ```bash
-python3 tools/add_session_notes.py                                # dry run, template + 4 regionals
-python3 tools/add_session_notes.py --form 262352490535154 --apply # the template first; open its page
-python3 tools/add_session_notes.py --apply                        # the four regional forms
-python3 tools/add_session_notes.py --remove --apply               # take it out again (the rollback)
+python3 tools/add_session_notes.py                                     # dry run, template + 4 regionals
+python3 backup_forms.py --form 262352490535154
+python3 tools/add_session_notes.py --form 262352490535154 --apply      # the template first; open its page
+python3 tools/add_translations.py --form 262352490535154               # dry run: one new entry per language
+python3 tools/add_translations.py --form 262352490535154 --apply       # the store saved first; GET, merge, POST
+python3 tools/add_translations.py --audit                              # after all five: nothing untranslated
+python3 tools/add_session_notes.py --form <id> --remove --apply        # take it out again (the rollback)
 ```
 
 The tool plans all five forms before it writes any. The field goes at an

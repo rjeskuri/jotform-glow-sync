@@ -12,6 +12,7 @@ import re
 import struct
 import sys
 import unittest
+from unittest import mock
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import REPO, SameNameFixture, create_at, link_form, move_all, read, rendered
@@ -740,6 +741,12 @@ class TranslationPlan(unittest.TestCase):
                 self.assertEqual(json.load(f), {"es": {"k": "half-written"}})
 
 
+# link_form predates the session-notes field (live on every form since task #105, which set
+# glow.layout.NOTES_EXPECTED): its absence is pinned in test/session_notes_test.py, not here.
+NOTES_NOT_EXPECTED = mock.patch.object(layout, "NOTES_EXPECTED", False)
+
+
+@NOTES_NOT_EXPECTED
 class RosterLayout(unittest.TestCase):
     """glow/layout.py: the fence, the new-roster slot, the one-time tail
     repair and the audit, on the fake form laid out like the live ones."""
@@ -923,6 +930,7 @@ class RosterLayout(unittest.TestCase):
                                               "rosters": 2, "rosters_below": 1, "first_below": "400"})
 
 
+@NOTES_NOT_EXPECTED
 class FixRosterOrderTool(unittest.TestCase):
     """tools/fix_roster_order.py main() on fake forms (FakeFormClient keeps an
     order as sent): planning, refusals, snapshot, drift, probe, verify."""

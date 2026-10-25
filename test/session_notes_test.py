@@ -16,26 +16,40 @@ link through Submit, and the hidden fields at the orders right after, down by on
 each lands on an empty order (the path Jotform keeps exactly), and refuses on a hidden or stray
 element in that run (Ryan, 2026-10-23, option A). Fictional clubs and girls only
 (helpers.common.link_form).
+
+Task #105 puts the field and its translations on the five live forms: the label (and a
+sub-label, if NOTES_PROPS ever carries one) in every form language through what
+tools/add_translations.py consumes and audits, and in the Odia, Hindi and Persian dictionaries
+(NotesTranslations); NOTES_EXPECTED True for real, so a form without the field is a problem
+(FormStatusNotes.test_form_status_flags_a_missing_field_once_expected); the plan beside the
+ticket, docs/plans/<date>-session-notes.md, with its Rollout per form, Rollback and generated
+index row (NotesPlan); the RUNBOOK section and the DECISIONS entry (NotesDocs). The live writes
+themselves are Ryan's go, never a test's.
 """
 import contextlib
 import copy
+import glob
 import io
 import json
 import os
 import re
 import sys
 import tempfile
+import unicodedata
 import unittest
 from unittest import mock
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
-from helpers.common import FakeForm, SameNameFixture, create_at, link_form, move_all, rendered
+from helpers.common import (REPO, FakeForm, SameNameFixture, create_at, flat, link_form, move_all, read,
+                            rendered)
+import add_translations
 import auto_sync
 import form_status
 from glow import backup as glow_backup
 from glow import forms as glow_forms
 from glow import layout
 from glow import links
+from glow.text import md5
 
 TEMPLATE = glow_forms.TEMPLATE
 AFRICA, ASIA, LATAM, US = (glow_forms.REGIONALS[r] for r in ("Africa", "Asia", "Latin America", "U.S"))
@@ -47,6 +61,176 @@ LIMIT = "Letters-1000"
 WANT = {"type": "control_textarea", "text": LABEL, "entryLimit": LIMIT, "required": "No"}
 # the tail of a live form in render order (what sits at or below the fence)
 TAIL = (links.ROSTER.name, links.PROBLEM.name, "submit2", "belowAre", "contact_ids")
+
+# Every language a live form offers (task #105: each gets the field's strings): the ten of the
+# 2026-08 translation pass, on every form, and Odia, Hindi and Persian, which the Asia form offers
+# from a dictionary of their own (tools/translations_<code>.json, posted by add_language.py).
+# tools/add_translations.py posts from tools/translations_additions.json alone, so the strings
+# reach the Asia form's or/hi/fa only from there - as the Club Roster Form link's and the club
+# guard's entries do (test/links_layout_test.py TranslationPlan.OFFERED).
+OFFERED = frozenset({"ar", "es", "fr", "km", "ne", "sw", "te", "th", "ur", "vi", "or", "hi", "fa"})
+OWN_DICTS = ("or", "hi", "fa")
+# the script each non-Latin language is written in (and Vietnamese's diacritics): a character of
+# it in every translation, so no language's entry is the English or another language's text
+SCRIPTS = {"ar": "؀-ۿ", "ur": "؀-ۿ", "fa": "؀-ۿ",
+           "km": "ក-៿", "ne": "ऀ-ॿ", "hi": "ऀ-ॿ",
+           "te": "ఀ-౿", "th": "฀-๿", "or": "଀-୿",
+           "vi": "À-ɏẠ-ỹ"}
+LATIN = frozenset({"es", "fr", "sw", "vi"})          # written in Latin letters (Vietnamese with diacritics)
+UNSPACED = frozenset({"th", "km"})                   # no space between words: judged by length alone
+# The label ends "(optional)": each language's own word for it, which a translation of ANY other
+# sentence lacks (a copy of the club guard's warning passed the script and length checks once).
+# Verified word by word, 2026-10-24; the usual alternatives are allowed so a real translation is
+# never rejected for its choice of word (the Arabic-script ones with either yeh, ي or ی, and
+# with or without a space / ZWNJ before the second word).
+OPTIONAL = {
+    "es": r"opcional|optativ[oa]|no (?:es )?obligatori[oa]",
+    "fr": r"facultati(?:f|ve)|optionnel(?:le)?|non obligatoire",
+    "sw": r"\bhiari\b|\bsi(?:y?o)? lazima\b",
+    "vi": r"tùy chọn|tuỳ chọn|không bắt buộc",
+    "ar": r"اخت[يی]ار[يی]|غ[يی]ر[\s‌]?[إا](?:لزام|جبار)[يی]|غ[يی]ر[\s‌]?مطلوب",
+    "ur": r"اخت[يی]ار[يی]|(?:لازم|ضرور)[يی] نہ[يی]ں|غ[يی]ر[\s‌]?(?:لازم|ضرور)[يی]",
+    "fa": r"اخت[يی]ار[يی]|دلبخواه|غ[يی]ر[\s‌]?(?:الزام|اجبار)[يی]",
+    "hi": r"वैकल्पिक|ऐच्छिक|अनिवार्य नहीं|आवश्यक नहीं|रूरी नहीं",
+    "ne": r"वैकल्पिक|ऐच्छिक|अनिवार्य छैन|आवश्यक छैन|रु?रूरी छैन|रुरी छैन",
+    "te": r"ఐచ్[ఛచ]ిక|తప్పనిసరి కాదు|ఆప్షనల్",
+    "th": r"ไม่บังคับ|ไม่จำเป็น|ถ้ามี",
+    "km": r"ជម្រើស|មិនចាំបាច់|ស្រេចចិត្ត|មិនតម្រូវ|បើមាន",
+    "or": r"ଐଚ୍ଛିକ|ବୈକଳ୍ପିକ|ଇଚ୍ଛାଧୀନ|ବାଧ୍ୟତାମୂଳକ ନୁହେଁ|ଆବଶ୍ୟକ ନୁହେଁ",
+}
+assert set(OPTIONAL) == OFFERED
+# What the plan's sections talk about, in the project's words - in prose, outside the commands a
+# procedure quotes. A section says at least so many DISTINCT ones (a list of unrelated words, or
+# one word repeated, is not a procedure): the floors are far below what a real plan says.
+ROLLOUT_WORDS = (r"backups?", r"snapshots?", r"dry[ -]runs?", r"appl(?:y|ied|ies)", r"re-?reads?|read[ -]back",
+                 r"verif(?:y|ied|ies|ication)", r"translations?|translated", r"dictionar(?:y|ies)", r"stores?", r"label",
+                 r"field", r"forms?", r"rosters?", r"Submit", r"runner", r"browser", r"languages?", r"English", r"preview",
+                 r"audit", r"untranslated", r"template", r"regions?|regional", r"CLEAN", r"in-sync", r"go", r"Ryan",
+                 r"mentors?", r"POST|GET", r"merged?", r"page", r"disabled", r"notes")
+ROLLBACK_WORDS = (r"snapshots?", r"remov(?:e|ed|es|al)|take[sn]? [^.;\n]{0,20}out", r"stores?", r"dictionar(?:y|ies)",
+                  r"POST", r"questions?", r"backups?", r"restor(?:e|ed|es)", r"re-?reads?|read[ -]back", r"languages?",
+                  r"field", r"forms?", r"translations?", r"saved", r"Revision History", r"orders?", r"mov(?:e|ed|es)",
+                  r"runner", r"Ryan", r"notes", r"English")
+RISK_WORDS = (r"translations?", r"dictionar(?:y|ies)", r"POST", r"replac(?:e|es|ed|ing)", r"e-?mails?", r"notification",
+              r"autoresponder|confirmation", r"girls?", r"names?", r"mentors?", r"notes?", r"field", r"snapshots?",
+              r"backups?", r"saved", r"re-?reads?|read[ -]back", r"dry[ -]runs?", r"refus(?:e|es|ed|al)", r"orders?",
+              r"mov(?:e|ed|es)", r"Jotform", r"stores?", r"languages?", r"Submit", r"rosters?", r"forms?", r"runner",
+              r"disabled", r"ties?")
+# the tools a Rollout step runs (one per command: a chain of them in one backticked span is not a step)
+TOOLS = ("backup_forms.py", "add_session_notes.py", "add_translations.py", "form_status.py")
+
+
+def nfc(text):
+    return unicodedata.normalize("NFC", text)
+
+
+def says_optional(lang, text):
+    """True when the text carries the language's own word for "optional" (OPTIONAL[lang]), the
+    Arabic-script vowel marks set aside."""
+    bare = re.sub(r"[ً-ْٰ]", "", nfc(text))
+    return re.search(nfc(OPTIONAL[lang]), bare, re.I) is not None
+
+
+def commands(text):
+    """A doc's commands in reading order, as (line number, command): every backticked span, and
+    every line of a fenced code block. Prose is never a command: `dry run` in backticks is a word."""
+    out, fence = [], False
+    for n, line in enumerate(text.split("\n")):
+        if line.strip().startswith("```"):
+            fence = not fence
+        elif fence:
+            if line.strip():
+                out.append((n, line.strip()))
+        else:
+            out.extend((n, span) for span in re.findall(r"`([^`\n]+)`", line))
+    return out
+
+
+def prose(text):
+    """What a doc says to its reader: the text outside backticked spans and fenced code blocks."""
+    out, fence = [], False
+    for line in text.split("\n"):
+        if line.strip().startswith("```"):
+            fence = not fence
+        elif not fence:
+            out.append(re.sub(r"`[^`\n]*`", " ", line))
+    return "\n".join(out)
+
+
+def said(text, words):
+    """The `words` (regexes) the prose of `text` uses, each once: the measure of being about the work."""
+    plain = prose(text)
+    return [w for w in words if re.search(rf"(?i)(?<![\w-])(?:{w})(?![\w-])", plain)]
+
+
+def assert_about_the_work(case, text, where, words, floor):
+    """A section written for its reader says what it does in the project's words: at least `floor`
+    distinct `words` in its prose, outside the commands it quotes."""
+    hits = said(text, words)
+    case.assertGreaterEqual(len(hits), floor,
+                            f"{where}: only {len(hits)} of the words a {where} uses ({', '.join(hits)}): not about this rollout")
+
+
+# How a doc says what the staff notification e-mail does with the notes (the ticket's 2026-10-23
+# note: Jotform e-mails can list every field, and mentors' notes can name girls). A clause naming
+# the notification: a negation of the carrying, or a carrying word, decides.
+NEGATED = (r"\b(?:neither|nor|omits?|omitted|without|lea(?:ve|ves|ving) out|left out|stripp?(?:ed|s)?|remov(?:e|es|ed)|"
+           r"dropp?(?:ed|s)?|exclud(?:e|es|ed))\b"
+           r"|\b(?:not|never|no longer)\s+(?:\w+\s+){0,3}?(?:carr\w*|includ\w*|list\w*|show\w*|appear\w*|contain\w*|"
+           r"reach\w*|keep\w*|kept|go\w*|sent|send\w*|forward\w*|copied|in|there|among)\b")
+CARRIES = (r"\b(?:carr(?:y|ies|ied|ying)|includ(?:e|es|ed|ing)|lists?|listed|shows?|shown|appears?|contains?|keeps?|kept|"
+           r"reach(?:es|ed)?|too|as well|also|every field|all fields)\b")
+
+
+def notification_verdict(text):
+    """"carries" or "omits": what `text` says the staff notification e-mail does with the notes,
+    read from the sentences naming the notification and an e-mail - first from their clauses
+    (split at ; : and dashes, and at a comma opening a new clause) that name the notification,
+    else from the whole sentence. None: not said; both: the doc contradicts itself."""
+    verdicts = set()
+    for piece in re.split(r"(?<=[.!?])\s+|\n(?=\s*(?:[-*]|\d+\.)\s)|\n{2,}", text):     # sentences; a bullet ends one
+        sentence = flat(piece)
+        if not (re.search(r"(?i)\bnotification", sentence) and re.search(r"(?i)\be-?mails?\b", sentence)):
+            continue
+        clauses = [c for c in re.split(r"\s*[;:]\s*|\s+[-—–]\s+|,\s+(?=(?:the|a|an|and|but|while|whereas|so|its|their|"
+                                       r"his|her|our|that|which|whose)\b)", sentence)
+                   if re.search(r"(?i)\bnotification", c)]
+        def verdict(words):
+            if re.search(f"(?i){NEGATED}", words):
+                return {"omits"}
+            if re.search(f"(?i){CARRIES}", words):
+                return {"carries"}
+            return set()
+
+        found = set()
+        for clause in clauses:
+            found |= verdict(clause)
+        if not found:
+            # the sentence as a whole - its notification half when it also speaks of the mentor's
+            # e-mail (the other e-mail's verdict is never the notification's)
+            other = re.search(r"(?i)\b(?:autoresponder|auto-?reply|confirmation)\b", sentence)
+            if other and other.start() > re.search(r"(?i)\bnotification", sentence).start():
+                found = verdict(sentence[:other.start()])
+            elif other:
+                found = verdict(sentence[other.end():])
+            else:
+                found = verdict(sentence)
+        verdicts |= found
+    return verdicts
+
+
+def notes_strings():
+    """The field's English strings a mentor sees, which every form language translates: the
+    label, and the sub-label when NOTES_PROPS carries one (today none: Ryan, 2026-10-22)."""
+    props = layout.NOTES_PROPS
+    return [s for s in (props["text"], props.get("subLabel") or "") if s.strip()]
+
+
+def healthy_but_for_the_notes(questions):
+    """audit_layout's lines on a form that has no notes field, the field's absence set aside
+    (NOTES_EXPECTED off for the call): [] = nothing else is wrong with its layout."""
+    with mock.patch.object(layout, "NOTES_EXPECTED", False):
+        return layout.audit_layout(questions)
 
 
 def tool():
@@ -148,7 +332,7 @@ class NotesDefinition(unittest.TestCase):
 
     def test_notes_props_are_ryans_answers(self):
         self.assertEqual(layout.NOTES_NAME, NOTES)
-        self.assertIs(layout.NOTES_EXPECTED, False)        # built, not live: absent is no problem yet
+        self.assertIs(layout.NOTES_EXPECTED, True)         # on every live form (task #105): absent is a problem
         props = layout.NOTES_PROPS
         for k, v in WANT.items():
             self.assertEqual(props[k], v, k)
@@ -466,7 +650,7 @@ class NotesTool(unittest.TestCase):
         for behaviour in ("insert", "tie"):
             for fid, base, last, first in cases:
                 with self.subTest(behaviour=behaviour, form=fid):
-                    self.assertEqual(layout.audit_layout(base), [])          # healthy, just no room
+                    self.assertEqual(healthy_but_for_the_notes(base), [])    # healthy, just no room
                     slot = links.order_of(base[first])                       # the first link's order, freed
                     block = shifted_block(base, first)
                     self.assertGreater(len(block), 1)
@@ -552,7 +736,7 @@ class NotesTool(unittest.TestCase):
                  ("visible stray", *between(stray), "q470", "somethingElse"),
                  ("hidden stray a rule shows", *between(dict(stray, hidden="Yes"), shown), "q470", "somethingElse"))
         for name, qs, conditions, who, word in cases:
-            self.assertEqual(layout.audit_layout(qs), [], name)          # nothing else wrong with the layout
+            self.assertEqual(healthy_but_for_the_notes(qs), [], name)    # nothing else wrong with the layout
             for argv in ((), ("--apply",)):
                 fake = FakeClient({TEMPLATE: copy.deepcopy(qs)}, conditions={TEMPLATE: conditions or []})
                 code, out = self.run_tool(fake, "--form", TEMPLATE, *argv)
@@ -696,7 +880,7 @@ class NotesTool(unittest.TestCase):
                                ("after --link roster, no problem link", bare, ("2", "103")),
                                ("two hidden fields tied", hidden_pair, ("103", "18"))):
             with self.subTest(case=name):
-                self.assertEqual(layout.audit_layout(qs), [])             # the form is healthy otherwise
+                self.assertEqual(healthy_but_for_the_notes(qs), [])       # the form is healthy otherwise
                 with self.assertRaises(SystemExit) as cm:
                     layout.notes_slot(qs)
                 for qid in pair:
@@ -933,13 +1117,13 @@ class FormStatusNotes(unittest.TestCase):
         self.assertIn("session notes: present (q812)", self.printed(other))
 
         absent = notes_form(gap=3)
-        self.assertEqual(self.notes_problems(self.report(absent)), [])     # built, not live: no problem yet
         self.assertIn("session notes: absent", self.printed(absent))
-        with mock.patch.object(layout, "NOTES_EXPECTED", True):           # task #105 flips it
-            self.assertEqual(len(self.notes_problems(self.report(absent))), 1)
-            self.assertTrue(any(NOTES in p for p in layout.audit_layout(absent)))
-            self.assertEqual(self.notes_problems(self.report(good)), [])
-            self.assertIn("session notes: present (q700)", self.printed(good))
+        with mock.patch.object(layout, "NOTES_EXPECTED", False):          # before task #105 placed it: no problem
+            self.assertEqual(self.notes_problems(self.report(absent)), [])
+            self.assertEqual(layout.audit_layout(absent), [])
+        # live, the flag as shipped (test_form_status_flags_a_missing_field_once_expected)
+        self.assertEqual(len(self.notes_problems(self.report(absent))), 1)
+        self.assertEqual(self.notes_problems(self.report(good)), [])
 
         twice = notes_form(gap=3, notes=True)
         twice["815"] = field("815", 16)
@@ -973,6 +1157,41 @@ class FormStatusNotes(unittest.TestCase):
         problems = self.notes_problems(self.report(low))
         self.assertTrue(any("q700" in p and "q400" in p and "below" in p for p in problems), problems)
         self.assertIn("session notes: present (q700)", self.printed(low))
+
+    def test_form_status_flags_a_missing_field_once_expected(self):
+        # task #105 put the field on all five forms and set NOTES_EXPECTED for real (no mock
+        # here): a form without it has one audit_layout line, naming the field and the tool that
+        # adds it, which form_report carries (one PROBLEM more than the same form with the field,
+        # so never CLEAN) and the runner's verify sees (never in-sync without it); the printed
+        # line says absent. Three layouts: one link, two links, no link.
+        self.assertIs(layout.NOTES_EXPECTED, True)
+        for kw, gap in (({}, 3), ({"roster": True}, 2), ({"problem": False}, 1)):
+            with self.subTest(**kw, gap=gap):
+                absent = notes_form(gap=gap, **kw)
+                self.assertEqual(layout.notes_fields(absent), [])
+                (line,) = layout.audit_layout(absent)
+                self.assertIn(NOTES, line)
+                self.assertIn("add_session_notes.py", line)                     # the fix, named
+                self.assertEqual(layout.misplaced(absent), [])                  # absence is the only problem
+                rep = self.report(absent)
+                self.assertEqual(self.notes_problems(rep), [line])
+                self.assertEqual(rep["session_notes"], [])
+                good = self.report(notes_form(gap=gap, notes=True, **kw))       # the same form, the field on it
+                self.assertEqual(self.notes_problems(good), [])
+                self.assertEqual(len(rep["rule_problems"]), len(good["rule_problems"]) + 1)
+                self.assertEqual([p for p in rep["rule_problems"] if p not in good["rule_problems"]], [line])
+                out = self.printed(absent)
+                self.assertIn("session notes: absent", out)
+                self.assertNotIn("CLEAN", out)
+                counted = int(re.search(r"→ (\d+) PROBLEM\(S\)", out).group(1))
+                with_field = self.printed(notes_form(gap=gap, notes=True, **kw))
+                self.assertIn("session notes: present (q700)", with_field)
+                self.assertEqual(counted, int(re.search(r"→ (\d+) PROBLEM\(S\)", with_field).group(1)) + 1)
+                clean = dict(rep, rule_problems=self.notes_problems(rep), languages=["a"] * 12,
+                             region_check={"missing_from_form": [], "not_in_roster": [], "rosters_out_of_date": []})
+                problems, _ = auto_sync.verify_report(clean)
+                self.assertTrue(any(NOTES in p for p in problems), problems)
+                self.assertEqual(auto_sync.verify_report(dict(clean, rule_problems=self.notes_problems(good)))[0], [])
 
     def test_form_status_flags_a_hidden_notes_field(self):
         # hidden, no mentor can fill it: an audit line (audit_layout's), whatever the qid, that
@@ -1102,6 +1321,464 @@ class TailRepairWithNotes(unittest.TestCase):
                 self.assertIn(f"the {stamp} orders are back", out)
                 self.tmp.cleanup()
                 self.tmp = tempfile.TemporaryDirectory()
+
+
+# ---------------------------------------------------------------------------------------------
+# Task #105: the field and its translations on the five live forms. Nothing below writes to a
+# form: the translations are checked as the tool consumes them, the plan and the docs as text.
+
+class NotesTranslations(unittest.TestCase):
+    """The field's strings in every form language: tools/translations_additions.json as
+    tools/add_translations.py consumes it (load_additions, plan_additions, merge) and audits it
+    (--audit), and the Odia, Hindi and Persian dictionaries of their own."""
+
+    def setUp(self):
+        self.raw = json.loads(read(os.path.join(REPO, "tools", "translations_additions.json")))
+        self.additions = add_translations.load_additions()                  # what the tool posts
+        self.dicts = {lang: json.loads(read(os.path.join(REPO, "tools", f"translations_{lang}.json")))
+                      for lang in OWN_DICTS}
+
+    @staticmethod
+    def store(*langs):
+        """A form's translation store with these languages (empty) and the two English source maps."""
+        return {**{lang: {} for lang in langs}, "base": {}, "en": {}}
+
+    def other_texts(self, strings):
+        """{language: every OTHER entry's translation in it}: tools/translations_additions.json
+        (every entry but the field's, as written) and the Odia, Hindi and Persian dictionaries.
+        The field's text is none of them, and holds none of them (a sentence of theirs - the
+        club guard's warning was copied under the label once - nor a label of ten characters or
+        more with the word for "optional" appended)."""
+        pool = {lang: [] for lang in OFFERED}
+        for english, entry in self.raw.items():
+            if english in strings or not isinstance(entry, dict):
+                continue
+            for lang, text in entry.items():
+                if lang in pool:
+                    pool[lang].append(text)
+        for lang in OWN_DICTS:
+            for english, text in self.dicts[lang].items():
+                if english not in strings and not english.startswith("_") and isinstance(text, str):
+                    pool[lang].append(text)
+        return pool
+
+    def test_every_form_language_has_the_notes_strings(self):
+        strings = notes_strings()
+        self.assertEqual(strings[0], LABEL)                                 # the label as Ryan spelled it
+        others = self.other_texts(strings)
+        for lang in OFFERED:
+            self.assertGreaterEqual(len(others[lang]), 10, lang)            # the pool is real: the 2026-08 pass
+        for english in strings:
+            with self.subTest(string=english):
+                self.assertIn(english, self.raw, "tools/translations_additions.json: keyed by the exact English")
+                entry = self.raw[english]
+                self.assertEqual(set(entry) - {"_note"}, OFFERED)           # every language a live form offers
+                # written by us, not native-reviewed: said in the note, as the link's and the
+                # guard's entries say it (the reviewer knows what to check)
+                note = entry.get("_note", "")
+                self.assertRegex(note, r"(?i)\bnot native[ -]reviewed\b")
+                self.assertRegex(note, r"(?i)\b(written|drafted|translated) by (us|claude)\b")
+                self.assertIn(english, self.additions)                      # the tool reads it as it is
+                posted = self.additions[english]
+                self.assertEqual({k: v for k, v in posted.items() if k != "_note"},
+                                 {k: v for k, v in entry.items() if k != "_note"})
+                texts = {}
+                for lang in sorted(OFFERED):
+                    text = posted[lang]
+                    self.assertIsInstance(text, str, lang)
+                    self.assertTrue(text.strip(), lang)
+                    self.assertEqual(text, text.strip(), lang)
+                    self.assertNotEqual(flat(text).lower(), flat(english).lower(), lang)   # a translation
+                    self.assertNotIn(flat(english).lower(), flat(text).lower(), lang)      # not the English with more
+                    self.assertFalse(set("&<>{}") & set(text), lang)                       # plain text, no {n}
+                    self.assertNotRegex(text, r"\d", lang)                                 # the label has no number
+                    # a sentence of the label's size: at least 40% of its characters, and, where
+                    # the language puts spaces between words, at least three words
+                    self.assertGreaterEqual(len(text), 0.4 * len(english), (lang, text))
+                    if lang not in UNSPACED:
+                        self.assertGreaterEqual(len(text.split()), 3, (lang, text))
+                    letters = [c for c in text if c.isalpha()]
+                    self.assertGreaterEqual(len(letters), 10, (lang, text))
+                    if lang in LATIN:                                                      # Latin letters only
+                        self.assertTrue(all(ord(c) < 0x250 or "Ạ" <= c <= "ỹ" for c in letters), (lang, text))
+                    if lang in SCRIPTS:                                                    # in its own script
+                        own = [c for c in letters if re.match(f"[{SCRIPTS[lang]}]", c)]
+                        if lang == "vi":
+                            self.assertGreaterEqual(len(own), 2, (lang, text))             # its diacritics
+                        else:
+                            self.assertGreaterEqual(len(own), 0.75 * len(letters), (lang, text))
+                    # a translation of THIS string: the language's own word for "(optional)" -
+                    # OPTIONAL[lang], alternatives included - which no other string of the form has
+                    if english == LABEL:
+                        self.assertTrue(says_optional(lang, text), (lang, text, f"no word for optional: {OPTIONAL[lang]}"))
+                    # …and not another entry's translation in that language, whole or in part:
+                    # neither equal to one, nor inside one (a clause of a longer sentence), nor
+                    # holding one of ten characters or more (a label with "optional" appended);
+                    # a short word such as the language's "session" may of course appear in it
+                    mine = nfc(flat(text)).lower()
+                    for other in others[lang]:
+                        theirs = nfc(flat(other)).lower()
+                        self.assertNotEqual(mine, theirs, (lang, "another entry's translation"))
+                        self.assertNotIn(mine, theirs, (lang, text, "part of another entry's translation"))
+                        if len(theirs) >= 10:
+                            self.assertNotIn(theirs, mine, (lang, text, f"holds another entry's translation: {other}"))
+                    texts[lang] = text
+                self.assertEqual(len(set(texts.values())), len(OFFERED), "two languages share one text")
+                # the Odia, Hindi and Persian dictionaries carry the same text (add_language.py
+                # posts them when a form gets the language): one translation, whichever tool posts it
+                for lang in OWN_DICTS:
+                    self.assertIn(english, self.dicts[lang], lang)
+                    self.assertEqual(self.dicts[lang][english], posted[lang], lang)
+        # the sub-label: translated if and only if the field has one (today: none)
+        sub = layout.NOTES_PROPS.get("subLabel") or ""
+        self.assertEqual(sub.strip() in self.raw, bool(sub.strip()))
+
+    def test_the_tool_posts_the_strings_to_every_language_a_form_offers_and_audits_none_untranslated(self):
+        strings = notes_strings()
+        for english in strings:
+            self.assertIn(english, self.additions, "tools/translations_additions.json lacks the string")
+        # (form, its questions with the field, the languages its store holds): the Asia form with
+        # Odia, Hindi and Persian too; the template with the ten; a store with three
+        cases = ((ASIA, notes_form(gap=2, notes=("812", 15), roster=True), OFFERED),
+                 (TEMPLATE, notes_form(gap=3, notes=True), OFFERED - set(OWN_DICTS)),
+                 (AFRICA, notes_form(gap=1, notes=("905", 15), problem=False), {"es", "fr", "sw"}))
+        for fid, qs, langs in cases:
+            with self.subTest(form=fid):
+                (q,) = layout.notes_fields(qs)
+                store = self.store(*langs)
+                payload, sources = add_translations.plan_additions(qs, store, self.additions)
+                self.assertLessEqual(set(payload), langs)              # a language the form lacks is never posted
+                for english in strings:
+                    key = md5(english)
+                    self.assertEqual(sources[key], english)             # base and en get the source (rule 9)
+                    for lang in langs:
+                        self.assertEqual(payload[lang][key], self.additions[english][lang], (fid, lang))
+                merged = add_translations.merge(store, payload, sources)
+                for source in ("base", "en"):
+                    for english in strings:
+                        self.assertEqual(merged[source][md5(english)], english, source)
+                # --audit: the field's strings are visible strings of the form, found at the
+                # field, and once the merged store is on the form none is untranslated in any of
+                # its languages (the audit's own test: md5(string) in the language's dictionary)
+                visible = add_translations.visible_strings(qs)
+                self.assertEqual(visible[LABEL], {f"q{q['qid']}.text"})
+                for english in strings:
+                    self.assertIn(english, visible)
+                for lang in langs:
+                    missing = sorted(s for s in visible if md5(s) not in merged.get(lang, {}))
+                    self.assertEqual([s for s in missing if s in strings], [], (fid, lang))
+                    self.assertNotIn("Girl", "".join(merged[lang].values()))   # no roster name in a posted language
+        # a form without the field gets none of its keys
+        payload, sources = add_translations.plan_additions(notes_form(gap=3), self.store(*OFFERED), self.additions)
+        keys = set(sources) | {k for d in payload.values() for k in d}
+        for english in strings:
+            self.assertNotIn(md5(english), keys)
+
+
+class NotesPlan(unittest.TestCase):
+    """docs/plans/<date>-session-notes.md: the live rollout of the field and its translations,
+    form by form on Ryan's go, its rollback, and the generated index (make docs-index)."""
+
+    PATTERN = os.path.join(REPO, "docs", "plans", "*-session-notes.md")
+    FORMS = (TEMPLATE, AFRICA, ASIA, LATAM, US)                          # the Rollout's order
+
+    def path(self):
+        found = sorted(glob.glob(self.PATTERN))
+        self.assertEqual(len(found), 1, f"one docs/plans/<date>-session-notes.md expected, found {found}")
+        return found[0]
+
+    def sections(self):
+        """({heading word: body}, the whole text) of the plan's `## ` sections, comments removed."""
+        text = re.sub(r"<!--.*?-->", "", read(self.path()), flags=re.S)
+        parts = re.split(r"^## ", text, flags=re.M)[1:]
+        return {p.split("\n", 1)[0].split()[0].strip(":"): (p.split("\n", 1)[1] if "\n" in p else "")
+                for p in parts}, text
+
+    def runs(self, cmds, tool, fid, apply):
+        """Where, in `cmds` (reading order), the tool runs on the form: its commands carrying
+        `--form <id>`, with --apply (apply=True) or without it (the dry run); never a --remove,
+        and never a chain - a span naming two of the tools is not one command."""
+        who, found = glow_forms.LIVE[fid], []
+        for i, (_, cmd) in enumerate(cmds):
+            if tool not in cmd or not re.search(rf"--form {fid}\b", cmd):
+                continue
+            self.assertEqual([t for t in TOOLS if t != tool and t in cmd], [],
+                             f"{who}: one command per backticked span or code line, not a chain: {cmd}")
+            if "--remove" not in cmd and ("--apply" in cmd) == apply:
+                found.append(i)
+        return found
+
+    def form_slices(self, rollout):
+        """{form id: its part of the Rollout}: from the line that first names the form to the
+        line that first names the next one (the last runs to the end). The forms come in the
+        Rollout's order - the template, Africa, Asia, Latin America, U.S - each named once
+        before the next."""
+        starts = []
+        for fid in self.FORMS:
+            self.assertIn(fid, rollout, glow_forms.LIVE[fid])
+            starts.append(rollout.rfind("\n", 0, rollout.index(fid)) + 1)
+        self.assertEqual(starts, sorted(starts), "the Rollout names the template first, then Africa, Asia, "
+                                                 "Latin America and U.S")
+        self.assertEqual(len(set(starts)), len(starts), "each form's steps start on a line of their own")
+        ends = starts[1:] + [len(rollout)]
+        return {fid: rollout[a:b] for fid, a, b in zip(self.FORMS, starts, ends)}
+
+    def assert_procedure(self, fid, part):
+        """One form's steps, each a command of its own (a backticked span or a code line)
+        carrying `--form <id>`, in this order: the backup; the notes tool's dry run - its command
+        without --apply - then its --apply; the translations tool's dry run, then its --apply;
+        form_status --rendered, and CLEAN said after it. The words "dry run" are no run."""
+        who, cmds = glow_forms.LIVE[fid], commands(part)
+        listed = [c for _, c in cmds]
+        backup = self.runs(cmds, "backup_forms.py", fid, apply=False)
+        self.assertTrue(backup, f"{who}: no `backup_forms.py --form {fid}` command: {listed}")
+        at = backup[0]
+        for tool in ("add_session_notes.py", "add_translations.py"):
+            dry = [i for i in self.runs(cmds, tool, fid, apply=False) if i > at]
+            self.assertTrue(dry, f"{who}: no dry run of {tool} - its command with --form {fid} and without --apply - "
+                                 f"after the step before it: {listed}")
+            applied = [i for i in self.runs(cmds, tool, fid, apply=True) if i > dry[0]]
+            self.assertTrue(applied, f"{who}: no `{tool} --form {fid} … --apply` command after its dry run: {listed}")
+            at = applied[0]
+        status = [i for i in self.runs(cmds, "form_status.py", fid, apply=False) if i > at and "--rendered" in cmds[i][1]]
+        self.assertTrue(status, f"{who}: no `form_status.py --form {fid} --rendered` after the translations' --apply: {listed}")
+        # the verdict that proves the writes landed, said to the reader (not a word in a command)
+        self.assertRegex(prose(part), r"\bCLEAN\b", f"{who}: CLEAN not said in its steps")
+
+    def test_the_plan_carries_a_plans_frontmatter_and_is_in_the_generated_index(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.path()
+        name = os.path.basename(path)
+        keys, h1 = docs_index.frontmatter(read(path))
+        template, _ = docs_index.frontmatter(read(os.path.join(REPO, "docs", "templates", "plan.md")))
+        self.assertLessEqual(set(keys), set(template))                       # no key a plan does not carry
+        for key_ in ("title", "author", "status", "created", "intent"):
+            self.assertTrue(keys.get(key_, "").partition("#")[0].strip(), key_)
+        word, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, keys["status"])
+        self.assertEqual(keys["created"], name[:10])                         # the date in its name
+        self.assertGreaterEqual(name[:10], "2026-10-22")                      # not before the ticket
+        self.assertRegex(keys["title"] + " " + h1, r"(?i)session[ -]notes|notes field")
+        done = keys.get("done", "").partition("#")[0].strip()
+        if word == "done":
+            self.assertRegex(done, r"^\d{4}-\d\d-\d\d$")
+        else:
+            self.assertEqual(done, "")
+        # the index (make docs-index) lists it with that status and is a fresh generation
+        plans, problems = docs_index.entries("plans")
+        self.assertEqual(problems, [])
+        (entry,) = [p for p in plans if p["name"] == name]
+        self.assertEqual(entry["status"], word)
+        intents, _ = docs_index.entries("intent")
+        index = read(os.path.join(REPO, "docs", "plans", "README.md"))
+        self.assertEqual(index, docs_index.render(plans, intents))
+        self.assertEqual(len([l for l in index.splitlines() if f"({name})" in l]), 1)
+
+    def test_the_plan_has_rollout_rollback_risks_and_result_in_that_order(self):
+        sections, text = self.sections()
+        headings = re.findall(r"^## (.+)$", text, re.M)
+        names = ("Rollout", "Rollback", "Risks", "Result")
+        for name in names:
+            self.assertEqual(len([h for h in headings if h.startswith(name)]), 1, name)
+        order = [next(i for i, h in enumerate(headings) if h.startswith(n)) for n in names]
+        self.assertEqual(order, sorted(order))
+        # prose about this rollout, not tokens or filler: the project's words, outside the commands
+        assert_about_the_work(self, sections["Rollout"], "Rollout", ROLLOUT_WORDS, 10)
+        assert_about_the_work(self, sections["Rollback"], "Rollback", ROLLBACK_WORDS, 6)
+        assert_about_the_work(self, sections["Risks"], "Risks", RISK_WORDS, 6)
+        # the plan is about this field: its name, its tools, the flag, the ticket, the label
+        for word in (NOTES, "add_session_notes.py", "add_translations.py", "NOTES_EXPECTED", "#105", LABEL):
+            self.assertIn(word, text)
+        # Risks: at least two, each a bullet with its mitigation; among them a translations POST
+        # replacing a language's dictionary (CLAUDE.md rule 9) and the notification e-mails that
+        # list every field - mentors' notes can name girls (the ticket's 2026-10-23 note)
+        risks = sections["Risks"]
+        bullets = [b for b in re.split(r"\n(?=- |\d+\. )", "\n" + risks.strip()) if b.strip()]
+        self.assertGreaterEqual(len(bullets), 2, risks)
+        for b in bullets:
+            self.assertGreaterEqual(len(b.split()), 12, b)                    # a risk and what is done about it
+        self.assertRegex(risks, r"(?i)translation")
+        self.assertRegex(risks, r"(?i)notification|e-?mail")
+        mitigations = {m for m in ("saved", "snapshot", "backup", "re-read", "read back", "dry run", "--remove", "refuses")
+                       if m in risks.lower()}
+        self.assertGreaterEqual(len(mitigations), 2, risks)
+        # Result: the template's placeholder gone; while the plan is not done it says the rollout
+        # has not run and awaits Ryan's go (true: the live writes come after this branch); done,
+        # it is the record of the rollout (dates, every form CLEAN, Ryan's go)
+        result = sections["Result"]
+        self.assertTrue(result.strip())
+        self.assertIsNone(re.search(r"<[a-z][^>]*>|\bTODO\b|\bTBD\b|\bXXX\b", result), result)
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        word = docs_index.status_of(docs_index.frontmatter(read(self.path()))[0]["status"])[0]
+        if word == "done":
+            self.assertGreaterEqual(len(result.split()), 60, result)
+            self.assertRegex(result, r"2026-\d\d-\d\d")
+            self.assertIn("CLEAN", result)
+            for fid in self.FORMS:
+                self.assertIn(fid, result, glow_forms.LIVE[fid])
+            self.assertRegex(result, r"(?i)\bryan\b")
+        else:
+            self.assertRegex(result, r"(?i)\b(not (yet )?(run|applied|done|started|happened)|has not|hasn't|"
+                                     r"pending|awaits?|awaiting|waits? for|to come|yet to)\b")
+            self.assertRegex(result, r"(?i)\bryan\b")                          # whose go it waits for
+        self.assertNotIn("AUTO_SYNC_APPLY=", text)                             # no step toggles the runner
+
+    def test_the_plan_backs_up_adds_translates_and_verifies_each_form(self):
+        sections, _ = self.sections()
+        rollout, rollback = sections["Rollout"], sections["Rollback"]
+        # each step on Ryan's go; the template first, then Africa, Asia, Latin America and U.S -
+        # every form by its id, in that order
+        self.assertRegex(rollout, r"(?i)ryan.s\b.{0,30}\bgo\b")
+        self.assertRegex(rollout, r"(?i)\btemplate\b")
+        for region in ("Africa", "Asia", "Latin America", "U.S"):
+            self.assertIn(region, rollout)
+        # per form - its own lines, in the Rollout's order - the same procedure, each command
+        # naming the form: the backup; the notes tool's dry run, then its --apply; the
+        # translations tool's dry run, then its --apply; form_status --rendered, CLEAN
+        parts = self.form_slices(rollout)
+        for fid, part in parts.items():
+            with self.subTest(form=glow_forms.LIVE[fid]):
+                self.assert_procedure(fid, part)
+        # the audit over the forms (nothing untranslated), the public page in English and another
+        # language with nothing submitted, and the runner's next run in-sync with the flag on
+        self.assertTrue(any("add_translations.py" in c and "--audit" in c for _, c in commands(rollout)),
+                        "no `add_translations.py … --audit` command in the Rollout")
+        self.assertRegex(rollout, r"(?i)browser|public page|preview")
+        self.assertRegex(rollout, r"(?i)\b(never|not|nothing|no)\b[^.\n]{0,40}\bsubmit")
+        self.assertIn("in-sync", rollout + sections.get("Proof", ""))
+        # the rollback: the field out by the tool's --remove --apply (a command); each language
+        # back from the store the translations tool saved before its POST (backups/translations/)
+        self.assertTrue(any("add_session_notes.py" in c and "--remove" in c and "--apply" in c
+                            for _, c in commands(rollback)), "no `add_session_notes.py … --remove --apply` command")
+        self.assertIn("backups/translations", rollback)
+
+
+class NotesDocs(unittest.TestCase):
+    """docs/RUNBOOK.md "Session notes on the attendance forms" and docs/DECISIONS.md once the
+    rollout has its plan: checkable facts only - the plan linked, the translations in the
+    procedure, the e-mail decision, the decision's label, limit, place and no rule."""
+
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    HEADING = "\n## Session notes on the attendance forms\n"
+
+    def section(self):
+        doc = read(self.RUNBOOK)
+        self.assertEqual(doc.count(self.HEADING), 1, "keep the RUNBOOK heading word for word")
+        return doc.split(self.HEADING, 1)[1].split("\n## ", 1)[0]
+
+    def bullet(self, section, name):
+        found = [l for l in section.split("\n") if l.startswith(f"- **{name}:**")]
+        self.assertEqual(len(found), 1, f"one `- **{name}:**` header bullet")
+        return found[0]
+
+    def test_the_runbook_section_rolls_the_translations_out_with_the_field(self):
+        section = self.section()
+        status = self.bullet(section, "Status")
+        plan = re.search(r"plans/(\d{4}-\d\d-\d\d-session-notes\.md)", status)   # links the plan
+        self.assertTrue(plan, status)
+        self.assertIn("#105", status)
+        self.assertNotIn("built, not live", status)                            # #104's wording: superseded
+        # …and says where the plan stands, in the plan's own status word (done: live, with its date)
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        plan_path = os.path.join(REPO, "docs", "plans", plan.group(1))
+        self.assertTrue(os.path.exists(plan_path), plan_path)
+        word = docs_index.status_of(docs_index.frontmatter(read(plan_path))[0]["status"])[0]
+        self.assertRegex(status, r"(?i)\b" + word.replace("-", "[ -]") + r"\b", f"the Status bullet says {word!r}")
+        if word == "done":
+            self.assertRegex(status, r"(?i)\blive\b")
+            self.assertRegex(status, r"2026-\d\d-\d\d")
+        # the Apply bullet: the translations tool's command is a step of the rollout, the field's
+        # English-only interim is gone
+        apply = self.bullet(section, "Apply")
+        self.assertRegex(apply, r"python3 tools/add_translations\.py( --\w+( \S+)?)*")
+        self.assertIn("--form", apply)
+        self.assertNotIn("second step", apply)
+        self.assertNotIn("until then every language shows it in English", section)
+        self.assertIn("--audit", self.bullet(section, "Verify"))
+        rollback = self.bullet(section, "Rollback")
+        self.assertIn("--remove --apply", rollback)
+        self.assertRegex(rollback, r"backups/translations|translation store")
+        text = flat(section)
+        for word_ in ("tools/add_translations.py", "tools/form_status.py", "--rendered"):
+            self.assertIn(word_, text)
+        # the e-mails: Jotform's notification and autoresponder can list every field, and
+        # mentors' notes can name girls (the ticket's 2026-10-23 note) - the section names both,
+        # the staff notification e-mail and the mentor's confirmation / autoresponder, and says
+        # in a clause what the notification does with the notes: carries or omits
+        # (notification_verdict reads it; the DECISIONS entry says the same:
+        # test_the_runbook_and_decisions_agree_on_the_notification_email)
+        self.assertRegex(text, r"(?i)\bnotification\b[^.]*\be-?mails?\b|\be-?mails?\b[^.]*\bnotification\b",
+                         "no sentence about the staff notification e-mail")
+        self.assertRegex(text, r"(?i)\b(autoresponder|auto-?reply|confirmation)\b", "the mentor's e-mail is not decided")
+        verdict = notification_verdict(self.section())
+        self.assertEqual(len(verdict), 1, "one clause says what the staff notification e-mail does with the notes - "
+                                          f"carries or omits - read: {verdict or 'nothing'}")
+        self.assertNotIn("Girl ", text)                                        # fictional names stay in the tests
+
+    def decisions_entry(self):
+        """The one dated docs/DECISIONS.md entry (2026-10-22 or later) whose heading names the session notes."""
+        doc = read(os.path.join(REPO, "docs", "DECISIONS.md"))
+        entries = re.split(r"^### ", doc, flags=re.M)[1:]
+        ours = [e for e in entries if re.match(r"\d{4}-\d\d-\d\d", e) and e[:10] >= "2026-10-22"
+                and re.search(r"(?i)session[ -]notes", e.split("\n", 1)[0])]
+        self.assertEqual(len(ours), 1, "one dated DECISIONS entry whose heading names the session notes")
+        return ours[0]
+
+    # what each bullet of the entry is about - the project's words, two of them at least (one for
+    # Consequences): a reason of the domain, a concrete alternative, a file or tool the decision reached
+    WHY_WORDS = (r"mentors?", r"girls?", r"Salesforce", r"rules?", r"required", r"hidden", r"limit", r"characters",
+                 r"rosters?", r"Submit", r"sync", r"optional", r"free[ -]text", r"translat\w*")
+    REJECTED_WORDS = (r"sub-?label", r"required", r"rules?", r"\d[\d,]* characters", r"above", r"below", r"hidden",
+                      r"translations?", r"Salesforce", r"dropdown", r"per[ -]girl", r"sub-?heading")
+    CONSEQUENCE_WORDS = (r"glow/layout\.py", r"add_session_notes\.py", r"add_translations\.py", r"form_status",
+                         r"NOTES_EXPECTED", r"RUNBOOK", r"auto_sync")
+
+    def test_decisions_records_the_label_the_limit_the_place_and_no_rule(self):
+        ours = self.decisions_entry()
+        entry = flat(ours)
+        self.assertIn(LABEL, entry)                                            # the label, verbatim
+        self.assertRegex(entry, r"1,000|1000|Letters-1000")                    # the limit
+        self.assertRegex(entry, r"(?i)after the last roster|above the links|above (the )?Submit")   # the place
+        self.assertRegex(entry, r"(?i)\bno rule\b|without (a |any )?rule|never [^.;]{0,30}\brule")   # no rule
+        self.assertRegex(entry, r"(?i)sub-?label")                             # Ryan's "no sub-label"
+        # the shape every entry since 2026-10 has: the decision, then Why, Rejected, Consequences -
+        # each said, not named (a reason of fifteen words; alternatives; what follows from it)…
+        body = ours.split("\n", 1)[1]
+        bullets = {}
+        for name, floor in (("Why", 15), ("Rejected", 8), ("Consequences", 8)):
+            m = re.search(rf"- \*\*{name}:\*\*(.*?)(?=\n- \*\*|\Z)", body, re.S)
+            self.assertTrue(m, f"no `- **{name}:**` bullet")
+            self.assertGreaterEqual(len(m.group(1).split()), floor, (name, m.group(1)))
+            bullets[name] = m.group(1)
+        self.assertRegex(flat(body.split("- **Why:**", 1)[0]), r"(?i)\bRyan\b")  # whose answers (2026-10-22)
+        # …and each about this decision, not a list of unrelated words: Why names reasons of the
+        # domain, Rejected names concrete alternatives, Consequences names what the decision reached
+        for name, words, floor in (("Why", self.WHY_WORDS, 2), ("Rejected", self.REJECTED_WORDS, 2),
+                                   ("Consequences", self.CONSEQUENCE_WORDS, 1)):
+            hits = [w for w in words if re.search(rf"(?i)(?<![\w/.-])(?:{w})(?![\w-])", bullets[name])]
+            self.assertGreaterEqual(len(hits), floor, (name, hits, bullets[name]))
+        # the e-mail decision (the ticket's 2026-10-23 note), per e-mail: the entry names the staff
+        # notification and the mentor's confirmation / autoresponder, and says in a clause what the
+        # notification does with the notes - carries or omits (the RUNBOOK says the same:
+        # test_the_runbook_and_decisions_agree_on_the_notification_email)
+        self.assertRegex(entry, r"(?i)\bnotification\b[^.]*\be-?mails?\b|\be-?mails?\b[^.]*\bnotification\b",
+                         "no sentence about the staff notification e-mail")
+        self.assertRegex(entry, r"(?i)\b(autoresponder|auto-?reply|confirmation)\b", "the mentor's e-mail is not decided")
+        verdict = notification_verdict(ours)
+        self.assertEqual(len(verdict), 1, "one clause says what the staff notification e-mail does with the notes - "
+                                          f"carries or omits - read: {verdict or 'nothing'}")
+
+    def test_the_runbook_and_decisions_agree_on_the_notification_email(self):
+        # Jotform's staff notification e-mail lists every field by default, and mentors' notes can
+        # name girls: whether it carries the notes is one decision, said in the RUNBOOK section
+        # (what staff see) and in the DECISIONS entry (why) - the same verdict in both
+        runbook, decisions = notification_verdict(self.section()), notification_verdict(self.decisions_entry())
+        self.assertEqual(len(runbook), 1, f"RUNBOOK: the staff notification e-mail carries or omits the notes - read {runbook or 'nothing'}")
+        self.assertEqual(len(decisions), 1, f"DECISIONS: the staff notification e-mail carries or omits the notes - read {decisions or 'nothing'}")
+        self.assertEqual(runbook, decisions, "the RUNBOOK and the DECISIONS entry disagree on the staff notification e-mail")
 
 
 if __name__ == "__main__":
