@@ -4117,13 +4117,25 @@ For one partner's month, each query takes `AND Account__r.Name = '<partner>'`; f
 `SELECT SUM(how_many_training_sessions_did_you_lead__c) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`
 equals that partner's cell for that month in item 14's report.
 
-Rollback: restore from the copies in Decommissioned of the reports and the dashboard, made before
-the deploy by `copy --tag "#78"`; open the copy, then Save As or move it back (Decommissioned,
-above). Or redeploy this change's retrieve `data/sf_dash_training_2026-10-24/before/`
-(check-only, Ryan's go, deploy) only while a fresh retrieve equals `after/`. When they differ,
-someone has changed the dashboard or a report since the deploy, and the rollback starts from a
-fresh retrieve by the ritual above. A rollback never deploys an older build or another change's
-retrieve (DECISIONS 2026-10-16).
+Rollback, in this order ([plan](plans/2026-10-25-sf-dash-training.md#rollback)):
+1. Once the two "DHIS2 Reports" reports are in Decommissioned, they go back first, since D4 as it
+   was reads them: `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_training_2026-10-24`
+   (the dry run lists the 2 moves), then the same with `--apply` on Ryan's go.
+2. Then restore from the copies in Decommissioned of the reports and the dashboard, made before
+   the deploy by `copy --tag "#78"`; open the copy, then Save As or move it back (Decommissioned,
+   above).
+3. Or redeploy from this change's retrieve `data/sf_dash_training_2026-10-24/before/` only the
+   four components it touched, items 13-15 and D4, and only while a fresh retrieve of those four
+   equals `after/`: within `before/`, the check-only
+   `sf project deploy start --dry-run -o glow -x ../rollback/package.xml`, then on Ryan's go the
+   same without `--dry-run`. The manifest `data/sf_dash_training_2026-10-24/rollback/package.xml`
+   lists exactly those four; nothing else that folder holds goes back (not item 16, the two "DHIS2
+   Reports" reports, the report types, the `DHIS2__c` fields, nor the folders; DECISIONS
+   2026-10-16).
+
+When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report since
+the deploy, and the rollback starts from a fresh retrieve by the ritual above. A rollback never
+deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
 
 ## Interactive dashboard in Salesforce
 

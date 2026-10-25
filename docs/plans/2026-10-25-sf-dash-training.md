@@ -32,8 +32,9 @@ Salesforce", `### GLOW Club Training`.
   this change, from a fresh retrieve. The layout leaves room for it.
 - The retrieve, 2026-10-24 (VPN off), is in `data/sf_dash_training_2026-10-24/before/` (owner
   only, never committed): D4, items 13-16 in "GLOW Monthly Reports", the two "DHIS2 Reports"
-  reports D4 uses, the report types `Dhis2` and `Monthly_Reports`, and the five `DHIS2__c` fields
-  the items read. D4's XML equals #74's retrieve of 2026-10-23, and the labels and folders equal
+  reports D4 uses, the report types `Dhis2` and `Monthly_Reports`, the `DHIS2__c` object and six
+  of its fields (`Account__c`, `Period__c` and the four the items read): 18 files, of which a
+  rollback redeploys only D4 and items 13-15 (Rollback). D4's XML equals #74's retrieve of 2026-10-23, and the labels and folders equal
   the state #73 left. #73's move through the Analytics API dropped the `<description>` of items
   13-16 and four unused bucket fields (on `Did_you_implement_GLOW_Club_last_month_f__c`); the build
   gives items 13-15 their descriptions again, worded for the new grouping, and the unused buckets
@@ -116,11 +117,20 @@ All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI 
 6. Refresh the dashboard on Ryan's go:
    `PUT /services/data/v67.0/analytics/dashboards/01ZRP000006quAj2AI` (`sf api request rest
    --method PUT`), and read its refresh date back by a GET.
-7. Check by SOQL on `DHIS2__c`, for the last complete month, that each component equals its
-   item's query (RUNBOOK `### GLOW Club Training`), that one partner's cell in each report equals
-   the one-partner query, and that the test accounts' records are absent from every component
-   (their count for the month, by SOQL with `Account__r.Name LIKE '%test%'`, is 0). The counts go
-   in the Result.
+7. Check by SOQL on `DHIS2__c`, over the reports' own period (`Period__c = LAST_N_MONTHS:12`),
+   that each component equals its item's query (RUNBOOK `### GLOW Club Training`, with
+   `LAST_N_MONTHS:12` in place of `LAST_MONTH`): the record counts of items 13 and 14 each equal
+   `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`
+   (567 on 2026-10-24) and their sums equal the queries' sums; item 15's grand total equals
+   the same count with `AND Lead_any_training_sessions__c != null`, and its Yes and No equal the
+   query's two groups. The test-record check is over the same 12 months, where the test accounts
+   have records:
+   `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND (Account__c = null OR Account__r.Name LIKE '%test%')`
+   is not 0 (2 on 2026-10-24: 569 Monthly Reports without the rule, 567 with it,
+   `evidence/soql_2026-10-24.txt`), and each report's count equals the count with the rule, not
+   the one without; a 0 there on the day means the check proves nothing, and the Result says so.
+   Then, for the last complete month, one partner's cell in each report equals the one-partner
+   query. The counts go in the Result.
 8. Move the two "DHIS2 Reports" reports D4 uses no more to Decommissioned, by the plan
    `data/sf_dash_training_2026-10-24/move_plan.csv` (2 rows: `00ORP000005uecc2AA`,
    `00ORP000005ufNN2AY`): the dry run
@@ -129,39 +139,67 @@ All with the VPN off (`route -n get default` shows `en0`), through the `sf` CLI 
    with `--apply` (the same plan; the first row moves again within Decommissioned). Outside
    Decommissioned, D4 is the one dashboard using them (2026-10-24: their two other dashboards are
    in Decommissioned).
-9. Item 16, once #77 has landed (Ryan, 2026-10-24): a fresh retrieve of item 16 and D4, which
-   must equal item 16 in `before/` and D4 in `after/`; item 16 gets the fix of items 13-15 (a
-   matrix with `Did_you_meet_with_mentors_as_a_group__c` across and its filter on a non-blank
-   answer kept), and its component goes in D4's free half row. The same ritual follows: a new
-   build from that retrieve, check-only, deploy on Ryan's go, read-back, and the SOQL check of
-   step 7 for item 16; the counts go in the Result.
+9. Item 16, once #77 has landed (Ryan, 2026-10-24), as its own change in
+   `data/sf_dash_training_2026-10-24/item16/` (its own `before/`, `build/` and `after/`):
+   - a fresh retrieve of item 16 and D4 into `item16/before/`, compared with item 16 in
+     `before/` and D4 in `after/`, and the differences written in the Result (#77 may have
+     changed item 16; #80 may have added item 12 to D4 first);
+   - before anything changes, a copy of each as it is that day into Decommissioned, on Ryan's go,
+     each after its dry run:
+     `python3 tools/sf_report_folders.py copy --vpn-off --dir data/sf_dash_training_2026-10-24 --kind dashboard --id 01ZRP000006quAj2AI --tag "#78" --apply`
+     (D4 as deployed) and
+     `python3 tools/sf_report_folders.py copy --vpn-off --dir data/sf_dash_training_2026-10-24 --kind report --id 00ORP000004RJZ72AO --tag "#78" --apply`
+     (item 16 as #77 left it);
+   - the build starts from that fresh retrieve and makes only the item-16 change on it: item 16
+     gets the fix of items 13-15 (a matrix with `Did_you_meet_with_mentors_as_a_group__c` across
+     and its filter on a non-blank answer kept), and its component goes in D4's free half row,
+     with every other component of the retrieve as it is; it never starts from this change's
+     `build/` or `after/` when they differ from the fresh retrieve;
+   - the same ritual follows: check-only of `item16/build/`, deploy on Ryan's go, read-back into
+     `item16/after/`, and the SOQL check of step 7 for item 16; the counts go in the Result.
+     Its rollback is its own copies and `item16/before/`, as below.
 10. Ryan sets a weekly Subscribe on the dashboard in Lightning (the refresh is a subscription,
    not metadata), as he did for "Jotform Attendance".
 
 ## Rollback
 
-- Restore the dashboard and its reports from their copies in Decommissioned, made with the tag #78
-  before the deploy: open each copy, then Save As or move it back into "GLOW Monthly Reports" or
-  "GLOW Monthly Dashboards" (RUNBOOK "Decommissioned"). A copy put back keeps the copy's Id, so the
-  reports' and the dashboard's Ids change that way.
-- Or redeploy this change's retrieve `data/sf_dash_training_2026-10-24/before/` (its D4 and items
-  13-15: check-only, Ryan's go, deploy) only while a fresh retrieve equals `after/`. That keeps
-  every Id.
-- When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report since
-  the deploy: the rollback then starts from that fresh retrieve, by the epic's ritual.
-- A rollback never deploys an older build, never a `build/` and never another change's retrieve
-  (DECISIONS 2026-10-16).
-- Before D4 goes back to its two old components, the two moved reports return to "DHIS2 Reports"
-  by the undo of this change's ledger:
+- First, once step 8 has run: D4 as it was (in `before/` and in its copy) reads the two "DHIS2
+  Reports" reports that step 8 moved, so they return to "DHIS2 Reports" before D4 goes back, by the
+  undo of this change's ledger:
   `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_training_2026-10-24`
   (the dry run lists the 2 moves), then the same with `--apply` on Ryan's go.
+- Then restore the dashboard and its reports from their copies in Decommissioned, made with the tag
+  #78 before the deploy: open each copy, then Save As or move it back into "GLOW Monthly Reports" or
+  "GLOW Monthly Dashboards" (RUNBOOK "Decommissioned"). A copy put back keeps the copy's Id, so the
+  reports' and the dashboard's Ids change that way.
+- Or redeploy from this change's retrieve `data/sf_dash_training_2026-10-24/before/` only the four
+  components this change touched, items 13-15 and D4, and only while a fresh retrieve of those four
+  equals `after/`. That keeps every Id.
+- The scope is the manifest `data/sf_dash_training_2026-10-24/rollback/package.xml`, written by
+  script, with exactly those four members: the reports `GLOW_Monthly_Reports/new_report_CBe` (item
+  13), `GLOW_Monthly_Reports/Number_of_training_sessions_led_with_m_CLk` (item 14) and
+  `GLOW_Monthly_Reports/Leading_training_sessions_with_ieq` (item 15), and the dashboard
+  `GLOW_Monthly_Dashboards/fgMcyANlcTvERilgPVySaXCChURVlO` (D4). The fresh retrieve takes the same
+  manifest (`sf project retrieve start -o glow -x <manifest>` into a new folder). Only while that
+  fresh retrieve equals `after/`, the deploy runs within `before/` with the manifest: first the
+  check-only `sf project deploy start --dry-run -o glow -x ../rollback/package.xml`, then on Ryan's
+  go the same without `--dry-run`. Nothing else in `before/` goes back: not item 16, the two "DHIS2
+  Reports" reports, the report types, the `DHIS2__c` object and its fields, nor the folders
+  (DECISIONS 2026-10-16: only the components the change touched).
+- When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report since
+  the deploy (step 9 among them): the rollback then starts from that fresh retrieve, by the epic's
+  ritual. Step 9's own change goes back first, from its copies or from `item16/before/` only while
+  a fresh retrieve of item 16 and D4 equals `item16/after/`.
+- A rollback never deploys an older build, never a `build/` and never another change's retrieve
+  (DECISIONS 2026-10-16).
 - The copies stay in Decommissioned, and nothing is deleted.
 
 ## Result
 
 Done so far, offline and read-only, 2026-10-24 and 2026-10-25: the retrieve into `before/`
 (VPN off), the build in `build/` (3 reports and the dashboard, 4 files; the diff in
-`evidence/build_vs_before.diff`) and the move plan (2 rows). Nothing is deployed, copied or moved:
+`evidence/build_vs_before.diff`), the move plan (2 rows) and the rollback manifest
+`rollback/package.xml` (4 members, written by script). Nothing is deployed, copied or moved:
 steps 2-10 of the Rollout are live and await Ryan's go, and step 9 also waits for #77.
 
 The baseline the components are checked against after the deploy, #74's SOQL on `DHIS2__c` for
