@@ -3381,9 +3381,10 @@ sharing stays as it is"):
     reports and the type may stay).
   - since task #102 (built 2026-10-24; deployed only on Ryan's go): the reports
     `Clubs_Not_Submitting_Last_Week`, `Submissions_by_Club_and_Week`,
-    `Late_Submissions_Last_Month` and `Submission_Delay_by_Partner_by_Month`, each copied to
-    Decommissioned first (DECISIONS 2026-10-21), after any dashboard component that reads them
-    (task #103); and the four columns `Submitted_At__c`, `Submission_Delay_Days__c`,
+    `Late_Submissions_Last_Month` and `Submission_Delay_by_Partner_by_Month`, each moved to
+    Decommissioned, never deleted (DECISIONS 2026-10-21), after any dashboard component that
+    reads them (task #103), and edited there to drop the timing fields before the columns go; and
+    the four columns `Submitted_At__c`, `Submission_Delay_Days__c`,
     `Session_Month__c` and `Session_Week__c` that #102 adds to the report type `Attendance_Totals`,
     taken out of a fresh retrieve of it and deployed (check-only, Ryan's go), never by deleting
     the type or redeploying an older copy ("Submission timing in Salesforce", The timing reports).
@@ -3538,8 +3539,10 @@ dropped silently ("Attendance dashboard in Salesforce", Access). A new report on
 needs that field's Read added to the set.
 
 **Rollback** ([plan](plans/2026-10-23-submission-timing.md#rollback)): the reports that use or
-filter on the fields go first (edited or deleted, each copied to Decommissioned before, the
-archive rule of DECISIONS 2026-10-21), then the four fields `Submitted_At__c`,
+filter on the fields go first, never deleted (the archive rule of DECISIONS 2026-10-21): each is
+edited to drop the fields, a copy to Decommissioned first, or retired, moved to Decommissioned
+and edited there to drop them, since a report that uses a field blocks its deletion wherever the
+report is; then the four fields `Submitted_At__c`,
 `Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` are deleted by a
 `destructiveChanges.xml` deploy, check-only first and on Ryan's go, their permission-set and
 Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
@@ -3548,10 +3551,13 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 
 ### The timing reports
 
-**Status:** built 2026-10-24 offline (task #102) into `data/sf_session_timing_2026-10-24/build/`
-(owner only, never committed): the four reports below, and the report type `Attendance_Totals`
-with the four fields added to its columns (a custom report type offers a new field only once it
-is in its layout; the retrieve of 2026-10-24 09:24 UTC, after the fields' deploy, had none of
+**Status:** built 2026-10-24 offline (task #102), for now in the job folder
+`~/.claude/jobs/392fafeb/tmp/t102_build/` (`build/`, `pattern/`; outside the repository, since
+the protected-paths hook refuses an agent's writes under `data/`, and a job folder can be cleaned
+up), pending the copy into `data/sf_session_timing_2026-10-24/` (owner only, never committed)
+that Ryan's live session makes before the retrieve: the four reports below, and the report
+type `Attendance_Totals` with the four fields added to its columns (a custom report type offers
+a new field only once it is in its layout; the retrieve of 2026-10-24 09:24 UTC, after the fields' deploy, had none of
 them). Nothing is deployed: the fresh retrieve, the check-only deploy, the deploy, the read-back
 and each report's run through the Analytics API against its SOQL check wait for Ryan's go, VPN
 off ([plan](plans/2026-10-23-submission-timing.md), "Task #102: the timing reports").
@@ -3602,11 +3608,13 @@ login `glow` or the read-only connector; counts and partner names only):
   Attendance_Batch__c WHERE Creator__c = 'Jotform' AND Processing_Status__c = 'Success' AND
   Attendance_Date__c >= N_MONTHS_AGO:11 GROUP BY Account__r.Parent.Name, Session_Month__c`.
 
-Not confirmed offline: SOQL may refuse `GROUP BY`, `AVG` or `MAX` on a formula field
-(`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`; the field's describe says
-`groupable` and `aggregatable`). If it does, the check selects the same rows with the same
-`WHERE` and the fields it would group or aggregate, and totals them offline; the reports
-themselves group by those fields, which reports allow.
+Not confirmed offline: SOQL often refuses `GROUP BY`, `AVG` or `MAX` on a formula field
+(`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`). The `GROUP BY` statements
+above are the first try. When SOQL refuses one, the check that the plan's Rollout step 7 runs is
+the fallback: select the same rows ungrouped, with the same `WHERE` and the fields the statement
+would group or aggregate, and total them offline (the count per partner, club and week; the
+average and the maximum per partner and month). The reports themselves group by those fields,
+which reports allow.
 
 **Who is left out** (Ryan, 2026-10-24): the clubs of the three partners that report monthly
 through Salesforce (Education and English for You, Tumaini La Maisha and Ng'aa Maskani, 38 clubs
@@ -3626,23 +3634,41 @@ a month in which it submitted through Jotform.
 **Not submitting last week** means no batch of any status whose session date
 (`Attendance_Date__c`) is in last week, as the existing lists count it (DECISIONS 2026-10-06): a
 blank or a refused duplicate counts as submitted, and the day a submission arrived plays no part.
-The week runs Sunday to Saturday: `LAST_WEEK`, in the report's cross filter and in its SOQL
-check, is the Sunday-to-Saturday week before this one, the week of the org's en_US reports. That
-week is a different thing from the session week `Session_Week__c` (the week of the month), which
+The week runs Sunday to Saturday for en_US viewers and on the dashboard, which runs as Ryan:
+`LAST_WEEK`, in the report's cross filter and in its SOQL check, is then the Sunday-to-Saturday
+week before this one. `LAST_WEEK` follows the locale of the user who runs the report (a report
+runs as its viewer), so a staff user whose locale starts the week on another day sees that
+locale's week when opening the report by hand; the SOQL check follows the locale of whoever runs
+it the same way. That week is a different thing from the session week `Session_Week__c` (the week of the month), which
 only labels the matrix's columns. `LAST_WEEK` needs no new field, so the formula checkbox
 `In_Last_Week__c` the ticket weighed is not built (DECISIONS 2026-10-24).
 
 **The late report:** `Late_Submissions_Last_Month` has no cut-off: every live Jotform batch of
 last month is in it with its delay, the largest delay first (Ryan, 2026-10-24; DECISIONS
 2026-10-23: nothing is flagged, staff read the delays). It is grouped by partner, as the ticket's
-outline has it, so the largest delay comes first within each partner's group.
+outline has it, and the largest delay comes first only within each partner's group: the month's
+largest delay heads its partner's group, which need not be the first. Ryan confirms that reading
+on the ticket before the check-only (the plan's Rollout step 1); if he wants one list across
+partners, the report becomes Tabular, sorted by the delay across every partner.
 
 **Rollback** of the timing reports: the dashboard components that read them go first (task
-#103); then each of the four reports is copied to Decommissioned (the archive rule, DECISIONS
-2026-10-21) and deleted by a `destructiveChanges.xml` deploy, check-only first and on Ryan's go;
-then the four columns come off the report type `Attendance_Totals`: retrieve it fresh, delete the
-four `<columns>` entries in that copy, check-only, Ryan's go, deploy. Never redeploy an older
-copy of `Attendance_Totals` (DECISIONS 2026-10-16). The fields' own rollback (above) needs both
+#103); then the four reports are retired, never deleted (the archive rule, DECISIONS
+2026-10-21): each is moved to Decommissioned and keeps its Id, by the Analytics API move
+(`PATCH …/analytics/reports/<id>` with `reportMetadata.folderId`, as "Copying and moving reports
+and dashboards" describes; `tools/sf_report_folders.py` refuses the Attendance folder as a
+source) or by hand in Lightning, on Ryan's go, read back by SOQL on `Report`. A moved report
+still uses the timing fields, and a report that uses a field blocks its deletion wherever the
+report is, so the three moved reports on `Attendance_Totals` are edited next to drop the fields:
+retrieve them fresh from Decommissioned; take `Session_Week__c` (the column grouping; the format
+becomes Summary) out of `Submissions_by_Club_and_Week`, the `Submitted_At__c` and
+`Submission_Delay_Days__c` columns and the sort on the delay out of
+`Late_Submissions_Last_Month`, and the `Session_Month__c` grouping, the delay column and the
+chart out of `Submission_Delay_by_Partner_by_Month`; check-only, Ryan's go, deploy.
+`Clubs_Not_Submitting_Last_Week` (on Accounts) uses none of the fields and moves as it is; the
+read-back `after/` keeps all four as deployed, to put one back from. Then the four columns come
+off the report type `Attendance_Totals`: retrieve it fresh, delete the four `<columns>` entries
+in that copy, check-only, Ryan's go, deploy. Never redeploy an older copy of `Attendance_Totals`
+(DECISIONS 2026-10-16). The fields' own rollback (above) needs both
 done first.
 
 ## Monthly Report dashboards in Salesforce

@@ -149,8 +149,10 @@ only). Only counts and batch Names reach the ticket, the conversation or this pl
 
 First the reports: every report that uses or filters on the four fields (task #102's, and any
 built by hand on `Attendance_Totals` or `Attendance_Batches_and_Girls` since) is edited to drop
-the fields or deleted - a copy as it was to Decommissioned first, the archive rule of DECISIONS
-2026-10-21 - since Salesforce refuses to delete a field a report filters on, and the dashboard
+the fields - a copy as it was to Decommissioned first, or, for a report retired, moved to
+Decommissioned and edited there, never deleted: the archive rule of DECISIONS 2026-10-21 (task
+#102's Rollback, below) - since Salesforce refuses to delete a field a report uses, in whatever
+folder the report is, and the dashboard
 components that read those reports go with them (task #103's Rollback). Then the four fields
 `Submitted_At__c`, `Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` go in
 one destructive deploy from a folder of their own: an empty `package.xml` (`<Package>` with only
@@ -259,7 +261,10 @@ on the dashboard.
 
 ### Build (2026-10-24, offline)
 
-Under `data/sf_session_timing_2026-10-24/` (owner only, never committed). `build/` is an SFDX
+For now in the job folder `~/.claude/jobs/392fafeb/tmp/t102_build/` (`build/`, `pattern/`),
+outside the repository because the protected-paths hook refuses an agent's writes under `data/`;
+pending the copy into `data/sf_session_timing_2026-10-24/` (owner only, never committed), which
+Ryan's live session makes before the retrieve (Rollout step 2). `build/` is an SFDX
 project: `sfdx-project.json` as `data/sf_girls_tiles_2026-10-20/build/`'s (API 62.0), and
 `package.xml` with `Report` × 4 (`Attendance/<name>`) and `ReportType` `Attendance_Totals`.
 `pattern/` holds the report type as retrieved 2026-10-24 09:24 UTC
@@ -280,11 +285,17 @@ project: `sfdx-project.json` as `data/sf_girls_tiles_2026-10-20/build/`'s (API 6
   `Submitted_At__c` and `Submission_Delay_Days__c`; locked criteria `Creator__c` equals `Jotform`
   and `Processing_Status__c` equals `Success`; the unlocked Partner and Club criteria; the time
   frame `INTERVAL_LASTMONTH` on `Attendance_Date__c` (as `Girls_Attended_Last_Month`);
-  `sortColumn` the delay, `Desc`, so each partner's batches run largest delay first.
+  `sortColumn` the delay, `Desc`, so each partner's batches run largest delay first. The sort
+  works only within each partner's group: the month's largest delay sits at the top of its
+  partner's group, which need not be the first group. That is the outline's reading of Ryan's
+  "largest first", not one he chose; he confirms it on the ticket (Rollout step 1), and if he
+  wants one list across partners, the report becomes Tabular (no grouping, the partner a column,
+  sorted by the delay, `Desc`).
 - `Submission_Delay_by_Partner_by_Month`: a Summary, rows partner then `Session_Month__c`, the
   delay column with `Average` and `Maximum`; the same two locked criteria plus
   `Attendance_Date__c` `greaterOrEqual` `N_MONTHS_AGO:11`; a `HorizontalBarGrouped` chart of the
-  average, a bar per partner with the months as its series.
+  average, a bar per partner with the months as its series; its summary's `axisBinding` is `y`,
+  as on every chart retrieved into `data/` (the horizontal bars included).
 - `reportTypes/Attendance_Totals.reportType-meta.xml`: `pattern/`'s file with four `<columns>`
   entries added to its one section, `Submitted_At__c`, `Submission_Delay_Days__c`,
   `Session_Month__c` and `Session_Week__c` (`checkedByDefault` false), nothing else changed: a
@@ -293,7 +304,7 @@ project: `sfdx-project.json` as `data/sf_girls_tiles_2026-10-20/build/`'s (API 6
 Offline checks, 2026-10-24: every XML file parses (`xmllint --noout`); `diff` of the report type
 with `pattern/` shows the four `<columns>` entries alone; every report description is within 255
 characters and every label within 40. Not proved offline, settled by the check-only (Rollout step
-2): the relative values `N_WEEKS_AGO:8`, `THIS_WEEK` and `N_MONTHS_AGO:11` in a criterion (the
+3): the relative values `N_WEEKS_AGO:8`, `THIS_WEEK` and `N_MONTHS_AGO:11` in a criterion (the
 cross filter's `LAST_N_DAYS:14` passed as it is on 2026-10-07), the chart type
 `HorizontalBarGrouped` with a `secondaryGroupingColumn`, and `sortColumn` on a formula field. A
 refusal is fixed in `build/` and run check-only again; a changed window changes the RUNBOOK and
@@ -301,53 +312,75 @@ its SOQL check with it.
 
 ### Rollout (live; pending Ryan's go, in the main session)
 
-None of these steps has run. All with the VPN off, through the CLI login `glow`; only counts and
-partner names reach the ticket, the conversation or this plan.
-1. VPN off. Retrieve what is live into `data/sf_session_timing_2026-10-24/before/`: `sf project
+None of these steps has run. Steps 2-8 with the VPN off, through the CLI login `glow`; only
+counts and partner names reach the ticket, the conversation or this plan.
+1. Ryan confirms on the ticket how `Late_Submissions_Last_Month` sorts: grouped by partner (the
+   outline), the largest delay first only within each partner's group, so the month's largest
+   delay need not be on top. If he wants one list across partners instead, the report becomes
+   Tabular (no grouping, the partner a column, sorted by `Submission_Delay_Days__c`, `Desc`):
+   `build/` and the RUNBOOK's paragraph on the late report change before step 3, and the change
+   goes on the ticket.
+2. VPN off. Retrieve what is live into `data/sf_session_timing_2026-10-24/before/`: `sf project
    retrieve start -o glow -m "Report:Attendance/Clubs_Not_Submitting_Last_14_Days" -m
    "Report:Attendance/Blank_Submissions" -m "ReportType:Attendance_Totals"` (the ticket's outline
    step 2). Compare the two reports with the copies the build started from and the report type
    with `pattern/`: a difference means someone changed it since, so the build is redone from the
    fresh retrieve and the difference goes on the ticket. SOQL on `Report` confirms none of the
    four DeveloperNames exists yet.
-2. Check-only: from within `build/`, `sf project deploy start --dry-run -o glow -d force-app`.
-3. Ryan's go in the conversation (the live gate puts the command to him as an approval prompt;
+3. Check-only: from within `build/`, `sf project deploy start --dry-run -o glow -d force-app`.
+4. Ryan's go in the conversation (the live gate puts the command to him as an approval prompt;
    his answer is the go).
-4. Deploy: the same command minus `--dry-run`, by Claude on his go or by Ryan in his own terminal
+5. Deploy: the same command minus `--dry-run`, by Claude on his go or by Ryan in his own terminal
    when auto mode refuses a production deploy; the deploy id and time (UTC) go into Result.
-5. Read back: retrieve the four reports and the report type into `after/` and compare with
+6. Read back: retrieve the four reports and the report type into `after/` and compare with
    `build/` (equal apart from Salesforce's normalisation: `expandOthers`, escaped apostrophes,
    default attributes), and the report type with `before/` (the four columns alone).
-6. Run each report through the Analytics API (`sf api request rest
+7. Run each report through the Analytics API (`sf api request rest
    '/services/data/v62.0/analytics/reports/<id>' -o glow`, a GET) and compare its totals with its
    SOQL check (the RUNBOOK's), for one checked week (last week) and one month (last month): the
    not-submitting count, the matrix's grand total, the late report's row count, and each
-   partner's average and maximum delay for last month. The results go on the ticket; a
-   difference stops here with its cause on the ticket.
-7. Ticket #102's definition of done ticked; this section's Result written; task #103 follows.
+   partner's average and maximum delay for last month. The RUNBOOK's `GROUP BY` statements are
+   the first try; where SOQL refuses `GROUP BY`, `AVG` or `MAX` on a formula field, the check is
+   the fallback the RUNBOOK names: the same rows selected ungrouped, with the same `WHERE`, and
+   totalled offline. The results go on the ticket; a difference stops here with its cause on the
+   ticket.
+8. Ticket #102's definition of done ticked; this section's Result written; task #103 follows.
 
 ### Rollback
 
-The dashboard components that read the reports go first (task #103's Rollback). Then each of the
-four reports is copied to Decommissioned (the archive rule, DECISIONS 2026-10-21), and the four
-go in one destructive deploy from a folder of their own: an empty `package.xml` (`<Package>` with
-only `<version>62.0</version>`) beside a `destructiveChanges.xml` listing the four `Report`
-members (`Attendance/Clubs_Not_Submitting_Last_Week` and so on), an `sfdx-project.json` and the
-empty `force-app/` it names; within that folder, check-only `sf project deploy start --dry-run -o
-glow --manifest package.xml --post-destructive-changes destructiveChanges.xml`, Ryan's go, then
-the same command minus `--dry-run`. Then the report type: retrieve `Attendance_Totals` fresh,
-delete the four `<columns>` entries in that copy, check-only, Ryan's go, deploy, and compare it
-with `before/`. Never redeploy the report type from `before/` or `pattern/` (DECISIONS
-2026-10-16). Only after both may the fields' Rollback (above) run. Revert this task's RUNBOOK
-and DECISIONS changes with it.
+The dashboard components that read the reports go first (task #103's Rollback). Then the four
+reports are retired, never deleted (the archive rule, DECISIONS 2026-10-21): each is moved to
+Decommissioned and keeps its Id, by the Analytics API move of the API proof (`PATCH
+…/analytics/reports/<id>` with `reportMetadata.folderId`; `tools/sf_report_folders.py` refuses
+the Attendance folder as a source) or by hand in Lightning, one report at a time on Ryan's go,
+each read back by SOQL on `Report` (the same Id, `FolderName` following). A moved report still
+uses the timing fields, and Salesforce refuses to delete a field a report uses, wherever the
+report is, so the three moved reports on `Attendance_Totals` are edited next to drop the four
+fields: retrieve them fresh (`Report:Decommissioned/<name>`) and take out of
+`Submissions_by_Club_and_Week` its `Session_Week__c` column grouping (its format becomes
+Summary), out of `Late_Submissions_Last_Month` the `Submitted_At__c` and
+`Submission_Delay_Days__c` columns and the sort on the delay, and out of
+`Submission_Delay_by_Partner_by_Month` the `Session_Month__c` grouping, the delay column and the
+chart; check-only, Ryan's go, deploy, and retrieve again to confirm that no report in
+Decommissioned names a timing field. `Clubs_Not_Submitting_Last_Week` (on Accounts) uses none of
+them and moves as it is. `after/` (Rollout step 6) keeps the four as deployed: a report put back
+starts from it. Then the report type: retrieve `Attendance_Totals` fresh, delete the four
+`<columns>` entries in that copy, check-only, Ryan's go, deploy, and compare it with `before/`.
+Never redeploy the report type from `before/` or `pattern/` (DECISIONS 2026-10-16). Only after
+both may the fields' Rollback (above) run. Revert this task's RUNBOOK and DECISIONS changes with
+it.
 
 ### Risks
 
-- **A formula field in SOQL's `GROUP BY`, `AVG` or `MAX`**: Salesforce may refuse to group by or
-  aggregate a formula field (`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`;
-  the field's describe says `groupable` and `aggregatable`), which was not checked offline. Then the checks of the matrix and the delay report select the same rows
-  ungrouped, with the same `WHERE`, and count or average them by hand; the reports themselves
-  group by the field, which reports allow.
+- **A formula field in SOQL's `GROUP BY`, `AVG` or `MAX`**: SOQL often refuses to group by or
+  aggregate a formula field (`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`),
+  which was not checked offline. The `GROUP BY` statements are the first try; when one is
+  refused, the check Rollout step 7 runs is the fallback: the same rows selected ungrouped, with
+  the same `WHERE`, and counted, averaged and maximised offline. The reports themselves group by
+  the field, which reports allow.
+- **The late report sorts within each partner**: grouped by partner, as the outline has it, its
+  largest delay comes first only within each partner's group; Ryan confirms that reading before
+  the check-only (Rollout step 1).
 - **The partner-name filter is hand-kept**: a partner newly off Jotform, a new U.S partner or a
   renamed partner account changes the weekly list until the filter is edited (RUNBOOK, Who is
   left out).
@@ -360,7 +393,11 @@ and DECISIONS changes with it.
 ### Result
 
 - 2026-10-24: built offline (Build, above); `scripts/harness_tests.sh test/session_timing_test.py`
-  and `scripts/verify.sh` pass. Nothing retrieved, validated or deployed; Rollout steps 1-7 wait
-  for Ryan's go. The build was written outside the repository, because the protected-paths hook
-  refuses an agent's writes under `data/`; it is copied into `data/sf_session_timing_2026-10-24/`
-  (`build/`, `pattern/`) before Rollout step 1.
+  and `scripts/verify.sh` pass. Nothing retrieved, validated or deployed; Rollout steps 1-8 wait
+  for Ryan. The build was written outside the repository, in the job folder
+  `~/.claude/jobs/392fafeb/tmp/t102_build/`, because the protected-paths hook refuses an agent's
+  writes under `data/`; Ryan's live session copies it into `data/sf_session_timing_2026-10-24/`
+  (`build/`, `pattern/`) before the retrieve (Rollout step 2).
+- 2026-10-25, review fixes: the delay chart's `axisBinding` set to `y` (it was `x`); the Rollback
+  moves the reports to Decommissioned and edits them off the fields instead of deleting them; the
+  late report's within-partner sort becomes Rollout step 1, Ryan's confirmation.
