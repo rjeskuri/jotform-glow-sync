@@ -3363,7 +3363,8 @@ sharing stays as it is"):
 - Test report: superseded 2026-10-16 - do not redeploy `before/` (it would undo the 2026-10-09
   label). To undo a change to it, retrieve it, edit only that change in the copy, check-only,
   Ryan's go, deploy.
-- The new components: delete them with a `destructiveChanges.xml`. Never delete
+- The new components: delete them with a `destructiveChanges.xml`, except task #102's (the last
+  entry below), which are moved to Decommissioned and never deleted. Never delete
   `Jotform_Monthly_Attendance_test`; it predates this work. The new components are:
   - the reports `Jotform_Attendance_by_Week`, `Jotform_Attendance_by_Month`,
     `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month` (deleted 2026-10-21),
@@ -3379,7 +3380,8 @@ sharing stays as it is"):
     2026-10-16: they would undo the 2026-10-09 and 2026-10-15 changes); before the six reports go,
     retrieve it, remove the `totals1/` tiles in that copy, check-only, Ryan's go, deploy (the six
     reports and the type may stay).
-  - since task #102 (built 2026-10-24; deployed only on Ryan's go): the reports
+  - the exception, never deleted: since task #102 (built 2026-10-24; deployed only on Ryan's
+    go), the reports
     `Clubs_Not_Submitting_Last_Week`, `Submissions_by_Club_and_Week`,
     `Late_Submissions_Last_Month` and `Submission_Delay_by_Partner_by_Month`, each moved to
     Decommissioned, never deleted (DECISIONS 2026-10-21), after any dashboard component that
@@ -3540,9 +3542,11 @@ needs that field's Read added to the set.
 
 **Rollback** ([plan](plans/2026-10-23-submission-timing.md#rollback)): the reports that use or
 filter on the fields go first, never deleted (the archive rule of DECISIONS 2026-10-21): each is
-edited to drop the fields, a copy to Decommissioned first, or retired, moved to Decommissioned
-and edited there to drop them, since a report that uses a field blocks its deletion wherever the
-report is; then the four fields `Submitted_At__c`,
+edited to drop the fields, since a report that uses a field blocks its deletion wherever the
+report is: a report kept is edited, and its copy to Decommissioned is edited to drop them too
+(a copy that kept them would block the deletion), so the report as it was, fields and all, is
+kept only in the fresh retrieve the edit starts from; a report retired is moved to
+Decommissioned and edited there to drop them; then the four fields `Submitted_At__c`,
 `Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` are deleted by a
 `destructiveChanges.xml` deploy, check-only first and on Ryan's go, their permission-set and
 Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
@@ -3610,7 +3614,7 @@ login `glow` or the read-only connector; counts and partner names only):
 
 Not confirmed offline: SOQL often refuses `GROUP BY`, `AVG` or `MAX` on a formula field
 (`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`). The `GROUP BY` statements
-above are the first try. When SOQL refuses one, the check that the plan's Rollout step 7 runs is
+above are the first try. When SOQL refuses one, the check that the plan's Task #102 Rollout step 7 runs is
 the fallback: select the same rows ungrouped, with the same `WHERE` and the fields the statement
 would group or aggregate, and total them offline (the count per partner, club and week; the
 average and the maximum per partner and month). The reports themselves group by those fields,
@@ -3648,7 +3652,7 @@ last month is in it with its delay, the largest delay first (Ryan, 2026-10-24; D
 2026-10-23: nothing is flagged, staff read the delays). It is grouped by partner, as the ticket's
 outline has it, and the largest delay comes first only within each partner's group: the month's
 largest delay heads its partner's group, which need not be the first. Ryan confirms that reading
-on the ticket before the check-only (the plan's Rollout step 1); if he wants one list across
+on the ticket before the check-only (the plan's Task #102 Rollout step 1); if he wants one list across
 partners, the report becomes Tabular, sorted by the delay across every partner.
 
 **Rollback** of the timing reports: the dashboard components that read them go first (task

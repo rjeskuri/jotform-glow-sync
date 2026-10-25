@@ -149,11 +149,13 @@ only). Only counts and batch Names reach the ticket, the conversation or this pl
 
 First the reports: every report that uses or filters on the four fields (task #102's, and any
 built by hand on `Attendance_Totals` or `Attendance_Batches_and_Girls` since) is edited to drop
-the fields - a copy as it was to Decommissioned first, or, for a report retired, moved to
-Decommissioned and edited there, never deleted: the archive rule of DECISIONS 2026-10-21 (task
-#102's Rollback, below) - since Salesforce refuses to delete a field a report uses, in whatever
-folder the report is, and the dashboard
-components that read those reports go with them (task #103's Rollback). Then the four fields
+the fields, since Salesforce refuses to delete a field a report uses, in whatever folder the
+report is. A report kept: its copy to Decommissioned (the archive rule of DECISIONS 2026-10-21)
+is edited to drop the fields as well, since a copy that kept them would block their deletion;
+the report as it was, fields and all, is kept only in the fresh retrieve the edit starts from
+(DECISIONS 2026-10-16), from which it can be put back if the fields are. A report retired:
+moved to Decommissioned and edited there, never deleted (task #102's Rollback, below). The
+dashboard components that read those reports go with them (task #103's Rollback). Then the four fields
 `Submitted_At__c`, `Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` go in
 one destructive deploy from a folder of their own: an empty `package.xml` (`<Package>` with only
 `<version>62.0</version>`) beside a `destructiveChanges.xml` listing the four `CustomField`
@@ -317,9 +319,12 @@ counts and partner names reach the ticket, the conversation or this plan.
 1. Ryan confirms on the ticket how `Late_Submissions_Last_Month` sorts: grouped by partner (the
    outline), the largest delay first only within each partner's group, so the month's largest
    delay need not be on top. If he wants one list across partners instead, the report becomes
-   Tabular (no grouping, the partner a column, sorted by `Submission_Delay_Days__c`, `Desc`):
-   `build/` and the RUNBOOK's paragraph on the late report change before step 3, and the change
-   goes on the ticket.
+   Tabular (no grouping, the partner a column, sorted by `Submission_Delay_Days__c`, `Desc`),
+   and before step 3 every place that describes it changes: `build/`'s report file; the
+   RUNBOOK's `Late_Submissions_Last_Month` bullet ("The timing reports") and its paragraph "The
+   late report"; this section's Build bullet on the report; and a dated bullet added to the
+   DECISIONS 2026-10-24 entry ("The weekly not-submitting list ...") saying what Ryan chose. The
+   change goes on the ticket.
 2. VPN off. Retrieve what is live into `data/sf_session_timing_2026-10-24/before/`: `sf project
    retrieve start -o glow -m "Report:Attendance/Clubs_Not_Submitting_Last_14_Days" -m
    "Report:Attendance/Blank_Submissions" -m "ReportType:Attendance_Totals"` (the ticket's outline
