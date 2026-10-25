@@ -1407,19 +1407,28 @@ class AttendanceDashboardDocs(unittest.TestCase):
     NOT_NULL = re.compile(r"(?i)\bAccount__c\s*!=\s*null\b")
     NO_TEST_SOQL = re.compile(r"(?i)\bNOT\s+Account__r\.Name\s+LIKE\s+'%test%'")
     BEFORE_DIR = re.compile(r"\bdata/sf_dash_attendance_\d{4}-\d\d-\d\d/before/")
-    RESTORE = re.compile(r"(?i)\b(restor\w*|revert\w*|roll\w*\s+back|undo\w*|bring\w*\s+back|put\w*\s+back)\b")
+    # a rebuild is a restore too ("rebuilt by hand", "re-create it", "redo the dashboard manually")
+    _REBUILD = r"rebuil\w*|re-?creat\w*|redo\w*|redone|by\s+hand|manually"
+    RESTORE = re.compile(r"(?i)\b(restor\w*|revert\w*|roll\w*\s+back|undo\w*|bring\w*\s+back|put\w*\s+back|"
+                         + _REBUILD + r")\b")
     # the dashboard as what is restored ("restore the dashboard", "the dashboard is redeployed", "roll D1 back")
-    _BACK = r"(restor\w*|revert\w*|roll\w*\s+back|undo\w*|bring\w*\s+back|brought\s+back|put\w*\s+back{deploy})"
+    _BACK = (r"(restor\w*|revert\w*|roll\w*\s+back|undo\w*|bring\w*\s+back|brought\s+back|put\w*\s+back|"
+             + _REBUILD + r"{deploy})")
     _DASH = r"(dashboard|D1)"
     _DASH_BACK = (r"(?i)\b{b}\s+([\w'’`\"“”-]+\s+){{0,3}}?{d}\b|\b{d}\b[^.;,]{{0,40}}?\b{b}|"
                   r"\broll\w*\s+(the\s+)?{d}\s+back\b")
     DASH_BACK = {False: re.compile(_DASH_BACK.format(b=_BACK.format(deploy=""), d=_DASH)),
                  True: re.compile(_DASH_BACK.format(b=_BACK.format(deploy=r"|(re-?)?deploy\w*"), d=_DASH))}
-    # a source other than this change's `before/` ("the September retrieve", "an older build", another data/ folder)
+    # what no item comes back from, the reports included ("rebuilt from screenshots", "re-created from memory")
+    _HANDMADE = r"screen\s*shots?|screen\s*captures?|from\s+memory"
+    HANDMADE = re.compile(r"(?i)\b(" + _HANDMADE + r")\b")
+    # a source other than this change's `before/` ("the September retrieve", "an older build", another data/ folder,
+    # "by hand from screenshots", "from memory"); "undo the moves first then deploy" is an order, not a source
     OTHER_SOURCE = re.compile(r"(?i)\b(January|February|March|April|May|June|July|August|September|October|"
-                              r"November|December|older|old|earlier|previous|prior|stale|first|another|other|"
-                              r"original|vendor['’]?s?)\s+([\w-]+\s+)?(retrieve|build|backup|export|snapshot|version|"
-                              r"copy|deploy(ment)?)\b|\bdata/sf_(?!dash_attendance_)[\w-]+/")
+                              r"November|December|older|old|earlier|previous|prior|stale|first(?!,?\s+then\b)|another|"
+                              r"other|original|vendor['’]?s?)\s+([\w-]+\s+)?(retrieve|build|backup|export|snapshot|"
+                              r"version|copy|deploy(ment)?)\b|\bdata/sf_(?!dash_attendance_)[\w-]+/|"
+                              r"\b(" + _HANDMADE + r"|by\s+hand|manual(ly)?)\b")
     # a rollback that switches source on a condition ("if before/ is lost", "otherwise", "as a fallback")
     ROLLBACK_SOFT = re.compile(r"(?i)\bif\b[^.;]{0,40}?\b(lost|missing|gone|unavailable|absent|corrupt\w*|deleted|"
                                r"unreadable|not found|cannot be found|broken)\b|"
@@ -1431,6 +1440,16 @@ class AttendanceDashboardDocs(unittest.TestCase):
                          r"remains|get|gets)\s+(still\s+)?(included|counted|shown|kept|in)\b|"
                          r"\b(includ\w*|count(s|ed|ing)?|show(s|n|ing)?|keeps?)\s+([\w'’]+\s+){0,3}?test\s+"
                          r"(accounts?|records?)\b")
+    # the test accounts, however named ("test records", `%test%`, "accounts named "Test …"", ""Test …" accounts")
+    TEST_TERM = re.compile(r"(?i)\btest\s+(accounts?|records?|partners?|clubs?)\b|%test%|"
+                           r"\b(accounts?|partners?|clubs?|records?)\s+(named|called|titled|whose\s+names?\s+"
+                           r"(starts?|begins?|contains?)(\s+with)?)\s+[`\"“'‘]*test\b|"
+                           r"[`\"“'‘]test\b[^`\"”'’]{0,20}[`\"”'’]+\s+(accounts?|partners?|clubs?)\b")
+    # ... and what puts them on the dashboard ("still appear", "stay in", "are counted")
+    TEST_SHOWN = re.compile(r"(?i)\b(appear\w*|show(s|n|ed|ing)?|stay(s|ed|ing)?|remain\w*|includ\w*|"
+                            r"count(s|ed|ing)?|kept|keeps?|listed|visible)\b")
+    # a denial right after the verb ("show none of them", "appear nowhere", "are counted in no component")
+    AFTER_DENIED = re.compile(r"(?i)^\s*([\w'’]+\s+){0,2}?(no|none|nowhere|never|not|zero)\b")
     # test accounts out ("a test account's records are absent", "no component includes a test account")
     TEST_OUT = re.compile(r"(?i)\btest\s+(accounts?|records?)\b(['’]s?)?[^.;]{0,40}?\b(absent|excluded|left out|none|"
                           r"zero|0|missing|not\s+(included|counted|shown|there))\b|"
@@ -1455,6 +1474,13 @@ class AttendanceDashboardDocs(unittest.TestCase):
     OTHER_PERIOD = re.compile(r"(?i)\bLAST_N_(?!MONTHS:12\b)\w+:\d+\b|\b(THIS|LAST|NEXT)_(YEAR|QUARTER|FISCAL_\w+)\b|"
                               r"\b(last|past|previous|rolling|trailing)\s+(?!(12|twelve)\b)" + NUMBER +
                               r"\s+(months?|weeks?|years?|days?|quarters?)\b")
+    # the grouping's levels, whatever the word order ("the month is the outer grouping", "the inner one is the
+    # partner", "`Account__c` nested in `Period__c`"): each level word goes with the nearest partner or month
+    LEVEL_SENTENCE = re.compile(r"(?i)\bgroup\w*|\bnest\w*|\blevels?\b")
+    LEVEL_TERM = re.compile(r"(?i)(?P<month>Period__c\b|\bmonths?\b)|(?P<partner>Account__c\b|\bpartners?\b(?![\s_-]+"
+                            r"Manager))")
+    LEVEL_WORD = re.compile(r"(?i)(?P<outer>\b(outer(most)?|first|top(-level)?|primary|highest|leading|parent)\b)|"
+                            r"(?P<inner>\b(inner(most)?|nested|second(ary)?|sub-?group\w*|lower|child)\b)")
     GO = re.compile(r"Ryan['’]s go\b")
     EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
 
@@ -1547,6 +1573,16 @@ class AttendanceDashboardDocs(unittest.TestCase):
             for m in self.TEST_IN.finditer(s):
                 self.assertTrue(self.d.locally_denied(s, m) or self.d.NEGATION.search(m.group(0)),
                                 f"{where}: no component includes a test account's records: {s[:200]!r}")
+            # any clause pairing the test accounts with appear/show/stay/included/counted, in either order, denies it
+            # (a SOQL statement is code, not a claim: its `NOT ... LIKE '%test%'` is the rule)
+            prose = re.sub(r"`[^`]*\bSELECT\b[^`]*`", " ", s)
+            for c in re.split(r"[,:|—–(]|\bbut\b|\bwhile\b|\bwhereas\b|\bthough\b", prose):
+                if not self.TEST_TERM.search(c):
+                    continue
+                for v in self.TEST_SHOWN.finditer(c):
+                    self.assertTrue(self.d.NEGATION.search(c[:v.start()]) or self.AFTER_DENIED.search(c[v.end():]),
+                                    f"{where}: the test accounts' records are on no component; no sentence says they "
+                                    f"{v.group(0)!r}: {s[:200]!r}")
 
     def plan_path(self):
         found = sorted(glob.glob(self.PLANS))
@@ -1620,6 +1656,11 @@ class AttendanceDashboardDocs(unittest.TestCase):
                 self.assertTrue(self.d.locally_denied(s, m),
                                 f"{where}: the rollback has one source per item, with no fallback "
                                 f"({m.group(0)!r}): {s[:200]!r}")
+            # nothing comes back from screenshots or memory: the reports from their copies, D1 from `before/`
+            for m in self.HANDMADE.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m) or self.d.NEGATION.search(m.group(0)),
+                                f"{where}: the rollback restores from the copies and `before/` only, never from "
+                                f"{m.group(0)!r}: {s[:200]!r}")
 
     # --- the RUNBOOK ----------------------------------------------------------------------------------------
 
@@ -1697,6 +1738,25 @@ class AttendanceDashboardDocs(unittest.TestCase):
                 self.assertFalse(a and p and p.start() < a.start(),
                                  f"{where}: the grouping is the partner (`Account__c`) first, then the month "
                                  f"(`Period__c`), never the month first: {s[:200]!r}")
+        for s in cl:            # the month never the outer level, the partner never the inner one
+            if not self.LEVEL_SENTENCE.search(s):
+                continue
+            terms = list(self.LEVEL_TERM.finditer(s))
+            for w in self.LEVEL_WORD.finditer(s):
+                near = sorted((w.start() - t.end() if t.end() <= w.start() else max(0, t.start() - w.end()), t.start(), t)
+                              for t in terms)
+                if not near or near[0][0] > 45:
+                    continue
+                t = near[0][2]
+                wrong = (t.lastgroup == "month" and w.lastgroup == "outer") or \
+                        (t.lastgroup == "partner" and w.lastgroup == "inner")
+                if not wrong:
+                    continue
+                first, last = (t, w) if t.start() < w.start() else (w, t)
+                denied = self.d.locally_denied(s, first) or self.d.NEGATION.search(s[first.end():last.start()])
+                self.assertTrue(denied, f"{where}: the partner (`Account__c`) is the outer grouping and the month "
+                                        f"(`Period__c`) the inner one, never the other way round ({t.group(0)!r} "
+                                        f"{w.group(0)!r}): {s[:200]!r}")
         for s in cl:
             if "CreatedDate" in s:
                 m = re.search(r"CreatedDate", s)

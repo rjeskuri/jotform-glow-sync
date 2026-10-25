@@ -110,15 +110,21 @@ All with the VPN off, through the `sf` CLI login `glow`, in the interactive sess
 - The dashboard is dynamic and the API refuses to copy it (the org is at its limit of 5 dynamic
   dashboards), so it has no Decommissioned copy: its rollback is this change's retrieve
   `data/sf_dash_attendance_2026-10-24/before/`.
-- The dashboard and its three reports are restored by deploying their files in `before/` only
-  while a fresh retrieve of them equals `after/` (nothing has changed them since this change's
-  deploy), never from an older build or retrieve (DECISIONS 2026-10-16), on Ryan's go after a
-  check-only.
+- The order, step 7's moves undone before anything is deployed: the dashboard in `before/` names
+  its six reports by folder path, and step 7 moves five of them (item 2's report from "GLOW
+  Monthly Reports", the four held reports from "DHIS2 Reports") to Decommissioned, so after step 7
+  a check-only of `before/` is refused (those reports are no longer at their paths) until the moves
+  are put back. They
+  are put back by
+  `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_attendance_2026-10-24`
+  (its dry run first, then `--apply` on Ryan's go), last first. Before step 7 there is nothing to
+  undo.
+- Then the dashboard and its three reports are restored by deploying their files in `before/`
+  only while a fresh retrieve of them equals `after/` (nothing has changed them since this
+  change's deploy), never from an older build or retrieve (DECISIONS 2026-10-16), on Ryan's go
+  after a check-only.
 - A Salesforce user restores a report from its copy in Decommissioned (step 2, tagged `#75`):
   open the copy, then Save As or move it into "GLOW Monthly Reports" (RUNBOOK, the archive rule).
-- The moves of step 7 are put back by
-  `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_attendance_2026-10-24`
-  (its dry run first, then `--apply` on Ryan's go), last first.
 - Nothing is deleted: the copies stay in Decommissioned.
 
 ## Result
