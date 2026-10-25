@@ -24,7 +24,7 @@ intent: none - Ryan's request of 2026-10-22 (ticket #109, epic #93): bring in th
 ## Files that change
 - `tools/sf_backfill.py`: `resend` (dry run by default, `--apply`, `--limit`, `--only`, `--since`,
   `--vpn-off` in both modes); `close` and `status` read its ledger too.
-- `test/sf_backfill_resend_test.py` (new, 15 tests) and `test/helpers/fake_org.py` (the merge
+- `test/sf_backfill_resend_test.py` (new, 20 tests) and `test/helpers/fake_org.py` (the merge
   rule and a generic SOQL reader), by the test author.
 - `docs/RUNBOOK.md`, `docs/ARCHITECTURE.md`, `.claude/skills/salesforce/SKILL.md`, this plan.
 - Nothing in Salesforce's metadata, no form, no sheet, nothing under `appsscript/`.
@@ -46,11 +46,15 @@ intent: none - Ryan's request of 2026-10-22 (ticket #109, epic #93): bring in th
    anything is sent), a `sending` ledger row, ONE insert - the failed batch's fields as they are,
    `Creator__c` `Jotform back-fill re-send <failed id>` - then the read-back: the copy `Success`
    `merged into <original id>`, no rows and no count of its own, the original's new rows and the
-   club's new contacts of the copy's own transaction (`CreatedDate` = the copy's: the after-insert
-   trigger writes them in it; a later correction merged into the same original is not the copy's
-   and never reaches its rollback list) exactly as predicted, the original's
-   `Girls_Present__c` its rows. Anything else is `CHECK` and stops the line. Every added row and
-   created contact is listed by id in `resend_added.csv`, tied to its copy.
+   club's new contacts written inside the copy's window (`CreatedDate` from the copy's
+   `CreatedDate` to its `LastModifiedDate`, the processor's status update and its last write:
+   nothing promises one timestamp to the second for the whole transaction) exactly as
+   predicted, the original's `Girls_Present__c` its rows. A later correction merged into the
+   same original falls after the window and never reaches the copy's rollback list; another
+   batch of the club and day created inside the window (a correction that adds nobody, or one
+   merged into the same original) makes the copy `CHECK`. Anything else is `CHECK` too and stops
+   the line. Every row and contact in the window is listed by id in `resend_added.csv`, tied
+   to its copy (`uncertain` `yes` when another batch landed in the window).
 4. The original Failed batches stay as they are (history). A copy carries no `Submitted_At__c`
    (its `Creator__c` is not `Jotform`), so the timing reports of #101 do not see it.
 
@@ -62,7 +66,10 @@ Each write on Ryan's go in the conversation; VPN off; from the main checkout (th
    Ryan before the go.
 2. Ryan's go.
 3. `resend --apply --vpn-off --limit 1`; read back (the tool does; `status`; the original's rows
-   and `Girls_Present__c` in Salesforce, counts only).
+   and `Girls_Present__c` in Salesforce, counts only). Read-only: the copy's `CreatedDate` and
+   `LastModifiedDate`, and the `CreatedDate` of the original's rows and contacts listed in
+   `resend_added.csv` - each inside that window, and the original's growth since the send equal
+   to the listed rows (counts and ids only).
 4. Then the rest: `resend --apply --vpn-off`.
 5. Afterwards: the dry run shows `to re-send: 0 batches`, every candidate `already_resent`;
    `tools/sf_girls_present.py check` OK; counts in Result; the plan `done`, `make docs-index`.
@@ -76,17 +83,25 @@ batches were never touched.
 
 ## Risks
 - **A live correction between the dry run and the send**: refused by the fresh prediction before
-  each copy. One merged after the copy (before its read-back or its settling) adds its rows to
-  the same original with a later `CreatedDate`: the read-back neither counts them for the copy nor
-  lists them in `resend_added.csv`, so the copy's rollback never removes a mentor's rows; a
-  contact it creates still shows in the club's growth, and the copy is `CHECK`.
+  each copy. One merged after the copy's window (before its read-back or its settling) adds its
+  rows to the same original with a later `CreatedDate`: the read-back neither counts them for the
+  copy nor lists them in `resend_added.csv`, so the copy's rollback never removes a mentor's rows;
+  a contact it creates still shows in the club's growth, and the copy is `CHECK`. One created
+  inside the copy's window cannot be told apart from the copy by time: the copy is `CHECK`, its
+  window's rows and contacts are listed marked `uncertain`, and the message says the list may be
+  incomplete or hold the other batch's rows - checked by hand before any removal.
+- **The window misses some of the copy's rows** (a processor write stamped outside
+  [`CreatedDate`, `LastModifiedDate`]): fewer rows or contacts than predicted or than the
+  original and the club grew by, so the copy is `CHECK` and the message says the rollback list
+  may be incomplete (and does not claim the rows are listed); the copy's rows are then found by
+  hand. Rollout step 3 checks the window on the first copy.
 - **The prediction and the processor disagree** (a name the processor reads differently; a
   batch with fuzzy matching on is skipped as `fuzzy_matching`, never sent): the copy is `CHECK`, the line stops, the copy's rows and contacts are listed.
 - **Several corrections of one day**: sent in order; `--only` refuses one whose earlier
   correction is not re-sent yet.
 
 ## Proof
-- Offline: `scripts/harness_tests.sh test/sf_backfill_resend_test.py` (15 tests) and
+- Offline: `scripts/harness_tests.sh test/sf_backfill_resend_test.py` (20 tests) and
   `make check` -> `CHECK PASSED`.
 - Live: the read-back of every copy, and Rollout step 5.
 

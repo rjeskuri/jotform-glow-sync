@@ -16,6 +16,14 @@ own or with Creator__c 'Partner report' stays Failed "Duplicate". With `merge_co
 fake is the processor before that day (every later batch Failed "Duplicate"): how a test builds the
 history the resend works on. Everything in it is fictional.
 
+Time: every write takes the next tick of a fake clock (one second each). By default a batch, the rows
+and contacts the processor writes for it, and its LastModifiedDate share the batch's CreatedDate. With
+`processor_lag` N > 0 the processor's writes run late, as they may in Salesforce (nothing promises one
+second-precision timestamp for a whole transaction): the first row (and the contact made for it) lands
+N ticks after the batch's CreatedDate, each next row a tick later, and the batch's LastModifiedDate (the
+processor's status update, its last write) a tick after its last row; a merge stamps the original's
+LastModifiedDate then too (its Girls_Present__c moved). A PATCH (update) does not touch it.
+
 Reads: the exact SOQL shapes the tools are known to send, then any explicit-field SELECT on the four
 sobjects the fake holds (FIELDS) with a WHERE of conditions joined by AND (=, !=, <, <=, >, >=, LIKE,
 IN, NOT IN; text compared as Salesforce does, case ignored; dates and datetimes by their moment),
@@ -40,7 +48,7 @@ FIELDS = {
     "Attendance_Batch__c": ("Id", "Name", "Account__c", "Account_Name__c", "Attendance_Date__c", "Module__c",
                             "Module_Week__c", "Module_Year__c", "Contact_IDs__c", "Creator__c", "CreatedDate",
                             "CreatedById", "Processing_Status__c", "Status_Message__c", "Girls_Present__c",
-                            "enable_fuzzy_matching__c"),
+                            "enable_fuzzy_matching__c", "LastModifiedDate"),
     "Attendance__c": ("Id", "Attendance_Batch__c", "Account__c", "Attendance_Date__c", "Contact__c", "CreatedDate",
                       "Contact__r.CreatedDate"),
     "Contact": ("Id", "Name", "AccountId", "Contact_Role__c", "CreatedDate"),
@@ -173,6 +181,7 @@ class FakeOrg:
         self.refuse_update = False   # Salesforce answers a PATCH with 400 and changes nothing
         self.drift_update = False    # Salesforce answers 204 but the value read back is the old one
         self.merge_corrections = True    # the processor since 2026-10-24; False: every later batch Failed "Duplicate"
+        self.processor_lag = 0       # ticks between a batch's CreatedDate and the first row the processor writes
         # ids from monotonic counters, as Salesforce never reuses one: a test that removes a batch, a row or a
         # contact (history, a drift) must not hand the next record the id of one still held
         self.serial = {"batch": 0, "row": 0, "contact": sum(len(c) for c in self.contacts.values())}
@@ -182,9 +191,19 @@ class FakeOrg:
         self.serial[kind] += 1
         return number
 
-    def clock(self):
-        self.tick += 1
+    def clock(self, ticks=1):
+        self.tick += ticks
         return f"2026-09-30T14:{self.tick // 60:02d}:{self.tick % 60:02d}.000+0000"
+
+    def row_moment(self, when, position):
+        """When the processor writes its row number `position` (from 0) of a batch created at `when`."""
+        if not self.processor_lag:
+            return when
+        return self.clock(self.processor_lag if position == 0 else 1)
+
+    def last_write(self, when):
+        """A batch's LastModifiedDate: its CreatedDate, or with a lag a tick after its last row."""
+        return self.clock() if self.processor_lag else when
 
     def state(self, read_at="2026-09-30T13:00:00Z"):
         days = {}
@@ -330,13 +349,14 @@ class FakeOrg:
             adds.append((name, found[0] if found else None))
         if not adds:
             return False
-        for name, contact in adds:
+        for position, (name, contact) in enumerate(adds):
+            at = self.row_moment(when, position)
             if contact is None:
-                contact = ("003NEW%09d" % self.next_serial("contact"), when)
+                contact = ("003NEW%09d" % self.next_serial("contact"), at)
                 mine[name.casefold()] = contact
             self.rows.append({"Id": "a1m%015d" % self.next_serial("row"), "Attendance_Batch__c": original["Id"], "Account__c": acc_id,
                               "Attendance_Date__c": day, "Contact__c": contact[0], "contact_created": contact[1],
-                              "CreatedDate": when})
+                              "CreatedDate": at})
         original["Girls_Present__c"] = sum(1 for r in self.rows if r["Attendance_Batch__c"] == original["Id"])
         batch.update(Processing_Status__c="Success", Status_Message__c=f"merged into {original['Id']}", Girls_Present__c=None)
         return True
@@ -360,14 +380,17 @@ class FakeOrg:
         batch = {"Id": "a1l%015d" % number, "Name": "BATCH-%06d" % number, "Account__c": acc["Id"],
                  "Account_Name__c": body["Account_Name__c"], "Attendance_Date__c": day, "Processing_Status__c": "Success",
                  "Creator__c": body["Creator__c"], "Status_Message__c": self.message or "Processed successfully.",
-                 "CreatedById": ME, "CreatedDate": when, "Girls_Present__c": typed, "Module__c": body.get("Module__c"),
+                 "CreatedById": ME, "CreatedDate": when, "LastModifiedDate": when, "Girls_Present__c": typed, "Module__c": body.get("Module__c"),
                  "Module_Week__c": body.get("Module_Week__c"), "Module_Year__c": body.get("Module_Year__c"),
                  "Contact_IDs__c": body.get("Contact_IDs__c"), "enable_fuzzy_matching__c": body.get("enable_fuzzy_matching__c")}
         names = [n.strip() for n in (body.get("Contact_IDs__c") or "").split(",") if n.strip()]
         originals = sorted((b for b in self.batches if b["Account__c"] == acc["Id"] and b["Attendance_Date__c"] == day
                             and b["Processing_Status__c"] == "Success"), key=lambda b: (b["CreatedDate"], b["Id"]))
         if originals:
-            if not self.merge(batch, originals[0], acc["Id"], day, body, when):
+            merged = self.merge(batch, originals[0], acc["Id"], day, body, when)
+            if merged and self.processor_lag:
+                originals[0]["LastModifiedDate"] = batch["LastModifiedDate"] = self.last_write(when)
+            if not merged:
                 batch.update(Processing_Status__c="Failed", Status_Message__c=DUPLICATE)
             names = []
         elif any(r["Account__c"] == acc["Id"] and r["Attendance_Date__c"] == day for r in self.rows):
@@ -383,19 +406,22 @@ class FakeOrg:
                 batch.update(Processing_Status__c="Failed",
                              Status_Message__c=f"Error: Insert failed. DUPLICATES_DETECTED, duplicate of {name}: []")
                 break
+            at = self.row_moment(when, position)
             contact = before.get(name.casefold())
             if contact is None:
-                contact = ("003NEW%09d" % self.next_serial("contact"), when)
+                contact = ("003NEW%09d" % self.next_serial("contact"), at)
                 mine = self.contacts[acc["Id"]]
                 mine[name.casefold() if name.casefold() not in mine else f"{name.casefold()} #{position}"] = contact
             self.rows.append({"Id": "a1m%015d" % self.next_serial("row"), "Attendance_Batch__c": batch["Id"], "Account__c": acc["Id"],
                               "Attendance_Date__c": day, "Contact__c": contact[0], "contact_created": contact[1],
-                              "CreatedDate": when})
+                              "CreatedDate": at})
             made += 1
         if batch["Processing_Status__c"] != "Success":
             batch["Girls_Present__c"] = None         # every Failed path clears the count
         elif names:
             batch["Girls_Present__c"] = made         # names win over a typed count; an aggregate keeps its own
+        if names and self.processor_lag:
+            batch["LastModifiedDate"] = self.last_write(when)
         if self.lose_answer:
             return 0, None
         return 201, {"id": batch["Id"], "success": True, "errors": []}

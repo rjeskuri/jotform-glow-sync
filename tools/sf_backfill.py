@@ -82,9 +82,12 @@ DONE, OPEN, UNSETTLED = {"ok", "accepted"}, {"CHECK"}, {"sending", "unknown"}
 RESEND_SINCE = datetime.date(2026, 9, 7)
 RESEND_CREATOR = f"{CREATOR} re-send"        # + the failed batch's id: the copy's marker
 RESEND_COLS = ["when_utc", "done_utc", "failed_id", "failed_name", "original_id", "account_id", "account_name",
-               "attendance_date", "names", "adds_expected", "contacts_expected", "participants_before", "batch_id",
-               "batch_name", "status", "outcome", "rows_added", "contacts_created", "participants_after", "note"]
-ADDED_COLS = ["failed_id", "batch_id", "kind", "record_id"]     # resend_added.csv: what a rollback removes
+               "attendance_date", "names", "adds_expected", "contacts_expected", "participants_before",
+               "original_rows_before", "batch_id", "batch_name", "status", "outcome", "rows_added", "contacts_created",
+               "participants_after", "note"]
+# resend_added.csv: what a rollback removes; `uncertain` "yes": another batch of the club and day was created in
+# the copy's window, so the line may be that batch's - checked by hand before any removal
+ADDED_COLS = ["failed_id", "batch_id", "kind", "record_id", "uncertain"]
 COPIED = ("Account_Name__c", "Attendance_Date__c", "Contact_IDs__c", "Module__c", "Module_Week__c", "Module_Year__c",
           "enable_fuzzy_matching__c")
 
@@ -1031,27 +1034,32 @@ def find_resend_batch(org, failed_id):
 def verify_resend(org, row, batch_id, paths, ledger):
     """Read a copy back and close its ledger entry as ok or CHECK: merged into its day's original, no
     rows and no count of its own, exactly the rows and contacts predicted, the original's count its rows."""
-    fid, oid = row["failed_id"], row["original_id"]
+    fid, oid, acc = row["failed_id"], row["original_id"], row["account_id"]
     found = org.query("SELECT Id, Name, Processing_Status__c, Status_Message__c, Account__c, CreatedDate, "
-                      f"Girls_Present__c FROM Attendance_Batch__c WHERE Id = {quoted(batch_id)}")
+                      f"LastModifiedDate, Girls_Present__c FROM Attendance_Batch__c WHERE Id = {quoted(batch_id)}")
     if len(found) != 1:
         raise Refused(f"{fid}: the copy {batch_id} is no longer in Salesforce - if it was removed on purpose: "
                       f"close {fid} --removed")
-    batch, since = found[0], found[0]["CreatedDate"][:19] + "Z"
+    batch = found[0]
+    # the copy's window: its CreatedDate to its LastModifiedDate (the processor's status update, its last write;
+    # nothing promises one timestamp for the whole transaction). What the original gained inside it is the
+    # copy's, unless another batch of the club and day was created inside it too (CHECK, below); a correction
+    # merged into the same original later falls after it, and its rows never reach resend_added.csv
+    window = (f"CreatedDate >= {batch['CreatedDate'][:19]}Z AND "
+              f"CreatedDate <= {(batch.get('LastModifiedDate') or batch['CreatedDate'])[:19]}Z")
     original = org.query(f"SELECT Id, Girls_Present__c FROM Attendance_Batch__c WHERE Id = {quoted(oid)}")
     original_rows = org.count(f"SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = {quoted(oid)}")
     own_rows = org.count(f"SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = {quoted(batch_id)}")
-    # the trigger (after insert, synchronous) writes the copy's rows and contacts in the copy's own transaction,
-    # so they carry exactly its CreatedDate: `=`, never `>=` - a later correction merged into the same original
-    # is not the copy's, and its rows must never reach resend_added.csv (the rollback list)
-    added = org.query(f"SELECT Id, Contact__c FROM Attendance__c WHERE Attendance_Batch__c = {quoted(oid)} "
-                      f"AND CreatedDate = {since}")
+    added = org.query(f"SELECT Id, Contact__c FROM Attendance__c WHERE Attendance_Batch__c = {quoted(oid)} AND {window}")
     girls = sorted({r["Contact__c"] for r in added if r.get("Contact__c")})
     created = sorted(c["Id"] for c in org.query(
-        f"SELECT Id FROM Contact WHERE Id IN ({', '.join(quoted(g) for g in girls)}) AND CreatedDate = {since}")) \
-        if girls else []
-    after = participants_of(org, row["account_id"])
+        f"SELECT Id FROM Contact WHERE Id IN ({', '.join(quoted(g) for g in girls)}) AND {window}")) if girls else []
+    others = org.query(f"SELECT Id FROM Attendance_Batch__c WHERE Account__c = {quoted(acc)} AND Attendance_Date__c = "
+                       f"{row['attendance_date']} AND Id != {quoted(batch_id)} AND {window}")
+    after = participants_of(org, acc)
     adds, new, grew = int(row["adds_expected"]), int(row["contacts_expected"]), after - int(row["participants_before"])
+    before = str(row.get("original_rows_before") or "").strip()
+    growth = original_rows - int(before) if before else adds
     outcome, message, wrong = outcome_of(batch["Processing_Status__c"], batch["Status_Message__c"]), \
         batch["Status_Message__c"] or "", []
     if outcome != "merged":
@@ -1069,21 +1077,32 @@ def verify_resend(org, row, batch_id, paths, ledger):
         wrong.append(f"the original's Girls_Present__c is {number_text(present)}, it has {original_rows} rows")
     if grew != new or len(created) != new:
         wrong.append(f"the club grew by {grew} participants, {len(created)} made by the copy, {new} predicted")
+    if others:
+        wrong.append(f"{len(others)} other batch(es) of the club and day created inside the copy's window")
     listed = {(r["kind"], r["record_id"]) for r in paths.resend_added.read()}
     for kind, ids in (("attendance", [r["Id"] for r in added]), ("contact", created)):   # the rollback list first
         for record_id in ids:
             if (kind, record_id) not in listed:
-                paths.resend_added.append({"failed_id": fid, "batch_id": batch_id, "kind": kind, "record_id": record_id})
+                paths.resend_added.append({"failed_id": fid, "batch_id": batch_id, "kind": kind, "record_id": record_id,
+                                           "uncertain": "yes" if others else ""})
     closed = dict(row, done_utc=stamp(), batch_id=batch_id, batch_name=batch["Name"], outcome=outcome,
                   rows_added=len(added), contacts_created=len(created), participants_after=after,
                   status="CHECK" if wrong else "ok", note="; ".join(wrong))
     paths.resend_ledger.append(closed, ledger)
     if wrong:
+        where = rel(paths.resend_added.path)
+        if others or not added or len(added) < max(adds, growth) or len(created) < max(new, grew):
+            listing = (f"the rollback list {where} may be incomplete"
+                       + (" or may hold the other batch's rows (marked uncertain)" if others else "")
+                       + f": it holds {len(added)} rows and {len(created)} contacts for this copy, the original grew "
+                       f"by {growth} rows and the club by {grew} participants - find the copy's own by hand before "
+                       "removing anything")
+        else:
+            listing = f"the rows and contacts it added are listed by id in {where}"
         raise Refused(f"{fid}: its copy {batch['Name']} ({batch_id}) is in Salesforce but not as predicted - "
-                      + "; ".join(wrong) + f". STOPPED. Look at the copy and the original {oid} in Salesforce (the "
-                      f"rows and contacts it added are listed by id in {rel(paths.resend_added.path)}); then either "
-                      f"remove them by hand and `close {fid} --removed`, or `close {fid} --accepted` (RUNBOOK, "
-                      "Back-fill of attendance into Salesforce)")
+                      + "; ".join(wrong) + f". STOPPED. Look at the copy and the original {oid} in Salesforce ("
+                      + listing + f"); then either remove them by hand and `close {fid} --removed`, or "
+                      f"`close {fid} --accepted` (RUNBOOK, Back-fill of attendance into Salesforce)")
     return closed
 
 
@@ -1106,7 +1125,9 @@ def resend_one(org, entry, club, ledger, paths):
     row = {"when_utc": stamp(), "failed_id": fid, "failed_name": failed["Name"], "original_id": entry["original"]["Id"],
            "account_id": acc, "account_name": club, "attendance_date": date, "names": entry["names"],
            "adds_expected": entry["adds"], "contacts_expected": entry["new"],
-           "participants_before": participants_of(org, acc), "status": "sending"}
+           "participants_before": participants_of(org, acc),
+           "original_rows_before": org.count("SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = "
+                                             + quoted(entry["original"]["Id"])), "status": "sending"}
     paths.resend_ledger.append(row, ledger)  # from here on the ledger knows a copy may exist
     status, batch_id = 0, None
     try:

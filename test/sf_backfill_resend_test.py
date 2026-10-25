@@ -37,9 +37,19 @@ The contract these tests pin:
   transaction. Rows a LATER correction (a live mentor's, merged after the copy and before its read-back
   or its settling) adds to the same original carry a later CreatedDate: never counted for the copy,
   never recorded for its rollback.
+- nothing promises that every write of the processor's transaction carries the copy's CreatedDate to the
+  second (review of PR #136): with the fake's `processor_lag` the copy's rows and contacts land after its
+  CreatedDate, and the copy's LastModifiedDate (the processor's status update, its last write) after its
+  rows. The copy's own are what it added to the original inside [its CreatedDate, its LastModifiedDate]:
+  such a copy is `ok` with every row and contact it made in resend_added.csv. When another batch of the
+  copy's club and day was created inside that window, rows in it could be that batch's: the copy is CHECK
+  and the run stops. A CHECK whose rollback list holds fewer rows than the original grew by (or none)
+  says the list may be incomplete (MAY_BE_INCOMPLETE) and does not claim the rows are listed; a CHECK whose
+  list is complete keeps `close <failed id> --removed` and does not say so.
 - never a girl's name and never the text of a status message, printed or written.
 """
 import csv
+import datetime
 import os
 import re
 import sys
@@ -71,6 +81,15 @@ RESEND_COLS = {"when_utc", "done_utc", "failed_id", "original_id", "account_id",
 BODY_FIELDS = {"Account_Name__c", "Attendance_Date__c", "Contact_IDs__c", "Module__c", "Module_Week__c",
                "Module_Year__c", "Creator__c", "enable_fuzzy_matching__c"}
 MODULE = "Self Advocacy"
+RESEND_ADDED = "resend_added.csv"
+MAY_BE_INCOMPLETE = "may be incomplete"      # in a CHECK's message, case ignored, when the rollback list is short
+CLAIMS_COMPLETE = "are listed by id in"      # the wording that tells the operator the list is complete
+
+
+def later(stamp, seconds):
+    """A Salesforce datetime `seconds` after `stamp`, in the fake's format."""
+    when = datetime.datetime.fromisoformat(stamp[:19]) + datetime.timedelta(seconds=seconds)
+    return when.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
 
 class ResendHarness(Harness):
@@ -717,6 +736,210 @@ class ResendApply(ResendHarness, unittest.TestCase):
         self.assertEqual((len(self.org.inserts), self.states()), (1, ["sending", "ok"]))
 
 
+class ResendWindow(ResendHarness, unittest.TestCase):
+    """A copy's own rows and contacts are those it added inside [its CreatedDate, its LastModifiedDate]."""
+
+    def contact_ids(self):
+        return {cid for mine in self.org.contacts.values() for cid, _ in mine.values()}
+
+    def watch(self, after_first=None, die_first=False):
+        """Wrap the org's insert: per insert the batch it made and the rows and contacts written during it
+        (self.made); `after_first(made)` runs after the first insert, `die_first` loses its read-back."""
+        real, self.made = self.org.insert, []
+
+        def insert(sobject, body):
+            rows, contacts = {r["Id"] for r in self.org.rows}, self.contact_ids()
+            answer = real(sobject, body)
+            self.made.append({"batch": self.org.batches[-1], "rows": [r for r in self.org.rows if r["Id"] not in rows],
+                              "contacts": self.contact_ids() - contacts})
+            if len(self.made) == 1:
+                if after_first:
+                    after_first(self.made[0])
+                if die_first:
+                    self.org.die_after_insert = 1
+            return answer
+        self.org.insert = insert
+
+    def added(self):
+        path = self.path(RESEND_ADDED)
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8", newline="") as fh:
+            return list(csv.DictReader(fh))
+
+    def listed_for(self, made, failed_id):
+        """(kind, record id) of each resend_added.csv line that names this re-send."""
+        return {(r["kind"], r["record_id"]) for r in self.added()
+                if r.get("batch_id") == made["batch"]["Id"] or r.get("failed_id") == failed_id}
+
+    def expected(self, made):
+        return {("attendance", r["Id"]) for r in made["rows"]} | {("contact", c) for c in made["contacts"]}
+
+    def move(self, rows, made_contacts, at):
+        """Stamp `rows` (and the contacts among `made_contacts` they point at) with `at`."""
+        for r in rows:
+            r["CreatedDate"] = at
+            if r["Contact__c"] in made_contacts:
+                r["contact_created"] = at
+                for mine in self.org.contacts.values():
+                    for key, (cid, _) in list(mine.items()):
+                        if cid == r["Contact__c"]:
+                            mine[key] = (cid, at)
+
+    def other_batch(self, club, date, names, at=None):
+        """A batch the processor takes while the tool runs (not something the tool sent); with `at`, it
+        and everything written for it carry that moment, as if it ran beside the copy's transaction."""
+        rows, contacts = {r["Id"] for r in self.org.rows}, self.contact_ids()
+        other = self.live_correction(club, date, names)
+        if at:
+            other["CreatedDate"] = other["LastModifiedDate"] = at
+            self.move([r for r in self.org.rows if r["Id"] not in rows], self.contact_ids() - contacts, at)
+        return other
+
+    def assert_check_stops(self, stop):
+        self.assertIsNotNone(stop)
+        self.assertEqual((len(self.org.inserts), self.states()), (1, ["sending", "CHECK"]))
+        again, refused = self.apply()                 # nothing more until it is dealt with
+        self.assertIsNotNone(refused)
+        self.assertEqual(len(self.org.inserts), 1)
+        return again, refused
+
+    def test_a_copy_whose_rows_land_after_its_created_date_is_ok_with_all_its_rows_and_contacts_listed(self):
+        labels = ("C1", "C2", "C11", "C13")
+        for lag in (1, 3):
+            for path in ("read back at once", "settled by the next run"):
+                with self.subTest(lag=lag, path=path):
+                    self.fresh()
+                    h = self.history()
+                    self.org.processor_lag = lag
+                    self.watch(die_first=path != "read back at once")
+                    out, stop = self.apply()
+                    if path == "read back at once":
+                        self.assertIsNone(stop, stop)
+                        self.assertEqual(self.states(), ["sending", "ok"] * 4)
+                    else:
+                        self.assertIsNotNone(stop)
+                        self.assertEqual(self.states(), ["sending", "unknown"])
+                        more, stop = self.apply()
+                        self.assertIsNone(stop, stop)
+                        self.assertEqual(self.states(), ["sending", "unknown", "ok"] + ["sending", "ok"] * 3)
+                        out += more
+                    self.assertEqual([(len(m["rows"]), len(m["contacts"])) for m in self.made],
+                                     [(2, 2), (1, 0), (1, 1), (3, 3)])
+                    for label, made in zip(labels, self.made):
+                        copy = made["batch"]
+                        self.assertIn(h[label]["Id"], copy["Creator__c"])
+                        for r in made["rows"]:      # the fake did lag: rows after the copy, its last write after them
+                            self.assertTrue(copy["CreatedDate"] < r["CreatedDate"] < copy["LastModifiedDate"],
+                                            (copy["CreatedDate"], r["CreatedDate"], copy["LastModifiedDate"]))
+                        self.assertEqual(self.listed_for(made, h[label]["Id"]), self.expected(made), label)
+                    self.assertEqual({(r["kind"], r["record_id"]) for r in self.added()},
+                                     set().union(*(self.expected(m) for m in self.made)))
+                    self.assertEqual([(r["failed_id"], r["rows_added"], r["contacts_created"])
+                                      for r in self.ledger() if r["status"] == "ok"],
+                                     [(h[label]["Id"], str(len(m["rows"])), str(len(m["contacts"])))
+                                      for label, m in zip(labels, self.made)])
+                    self.assertEqual([(len(self.rows_of(h[o])), h[o]["Girls_Present__c"]) for o in ("O1", "O2", "O11")],
+                                     [(4, 4), (2, 2), (5, 5)])
+                    self.assert_private(out)
+
+    def test_another_batch_of_the_club_and_day_inside_the_copy_s_window_is_check_and_the_list_may_be_incomplete(self):
+        """C1's copy (Aspen 2026-09-05) with the processor lagging 2 ticks: its window is [t, t+4], its rows at
+        t+2 and t+3. A batch of the same club and day created at t+1 makes the copy CHECK, whether it merged
+        a girl into the same original or added nobody (Failed "Duplicate"); a batch of another club, or of the
+        club on another day, inside the window, or one of the same day after the window, does not."""
+        cases = {   # name: (club, date, names, inside the window, CHECK)
+            "a correction of the day that adds nobody": (ASPEN, "2026-09-05", [AMARA], True, True),
+            "a correction of the day merged into the same original": (ASPEN, "2026-09-05", [NORA], True, True),
+            "another club's batch": (BIRCH, "2026-10-10", [DALIA], True, False),
+            "the club's batch of another day": (ASPEN, "2026-10-10", [AMARA], True, False),
+            "a correction of the day after the window": (ASPEN, "2026-09-05", [NORA], False, False),
+        }
+        for name, (club, date, names, inside, check) in cases.items():
+            with self.subTest(name):
+                self.fresh()
+                h = self.history()
+                # a girl the club knows, without a row on 09-05: a correction adds her, no new contact
+                self.org.contacts[ASPEN][NORA.casefold()] = ("003LATE00000000001", "2026-03-01T00:00:00.000+0000")
+                self.org.processor_lag = 2
+                others = []
+                self.watch(after_first=lambda made, others=others, club=club, date=date, names=names, inside=inside:
+                           others.append(self.other_batch(
+                               club, date, names, at=later(made["batch"]["CreatedDate"], 1) if inside else None)))
+                out, stop = self.apply("--limit", "1")
+                made, other = self.made[0], others[0]
+                copy = made["batch"]
+                self.assertIn(h["C1"]["Id"], copy["Creator__c"])
+                if inside:                          # the test placed it as it says
+                    self.assertTrue(copy["CreatedDate"] < other["CreatedDate"] < copy["LastModifiedDate"])
+                else:
+                    self.assertGreater(other["CreatedDate"], copy["LastModifiedDate"])
+                self.assertEqual(other["Status_Message__c"], DUPLICATE if names == [AMARA] and date == "2026-09-05"
+                                 else f"merged into {h['O1']['Id']}" if date == "2026-09-05" else "Processed successfully.")
+                if check:
+                    again, refused = self.assert_check_stops(stop)
+                    self.assertIn(MAY_BE_INCOMPLETE, stop.lower())
+                    self.assertNotIn(CLAIMS_COMPLETE, stop)
+                    self.assert_private(out, stop, again, refused)
+                else:
+                    self.assertIsNone(stop, stop)
+                    self.assertEqual(self.states(), ["sending", "ok"])
+                    done = self.ledger()[-1]
+                    self.assertEqual((done["rows_added"], done["contacts_created"]), ("2", "2"))
+                    self.assertEqual({(r["kind"], r["record_id"]) for r in self.added()}, self.expected(made))
+                    self.assert_private(out)
+
+    def test_a_check_whose_rollback_list_is_short_of_the_original_s_growth_says_it_may_be_incomplete(self):
+        """C1's copy adds 2 rows (2 new contacts) to O1. Rows stamped after the copy's last write fall outside
+        its window: the list holds fewer than the original grew by, and the CHECK says it may be incomplete."""
+        def every_row_late(made):
+            for i, r in enumerate(made["rows"]):
+                self.move([r], made["contacts"], later(made["batch"]["LastModifiedDate"], 5 + i))
+
+        def last_row_late(made):
+            self.move(made["rows"][-1:], made["contacts"], later(made["batch"]["LastModifiedDate"], 5))
+
+        for lag in (0, 1):
+            for name, change, inside in (("every row after its last write", every_row_late, 0),
+                                         ("its last row after its last write", last_row_late, 1)):
+                with self.subTest(lag=lag, case=name):
+                    self.fresh()
+                    h = self.history()
+                    self.org.processor_lag = lag
+                    self.watch(after_first=change)
+                    out, stop = self.apply()
+                    made = self.made[0]
+                    self.assertEqual((len(made["rows"]), len(self.rows_of(h["O1"])), h["O1"]["Girls_Present__c"]), (2, 4, 4))
+                    self.assertEqual(sum(1 for r in made["rows"] if r["CreatedDate"] <= made["batch"]["LastModifiedDate"]),
+                                     inside)
+                    again, refused = self.assert_check_stops(stop)
+                    self.assertIn(MAY_BE_INCOMPLETE, stop.lower())
+                    self.assertNotIn(CLAIMS_COMPLETE, stop)
+                    self.assertIn(h["C1"]["Id"], stop)
+                    self.assertTrue({("attendance", r["Id"]) for r in made["rows"][:inside]}
+                                    <= self.listed_for(made, h["C1"]["Id"]))
+                    self.assert_private(out, stop, again, refused)
+
+    def test_a_check_whose_rollback_list_is_complete_keeps_close_removed_and_does_not_say_incomplete(self):
+        cases = {"a count of its own": lambda made: made["batch"].__setitem__("Girls_Present__c", 2.0),
+                 "the original's count is not its rows": lambda made: self.h["O1"].__setitem__("Girls_Present__c", 1.0)}
+        for lag in (0, 2):
+            for name, change in cases.items():
+                with self.subTest(lag=lag, case=name):
+                    self.fresh()
+                    self.h = self.history()
+                    self.org.processor_lag = lag
+                    self.watch(after_first=change)
+                    out, stop = self.apply()
+                    again, refused = self.assert_check_stops(stop)
+                    made, fid = self.made[0], self.h["C1"]["Id"]
+                    self.assertEqual((len(made["rows"]), len(made["contacts"])), (2, 2))
+                    self.assertEqual(self.listed_for(made, fid), self.expected(made))
+                    self.assertNotIn(MAY_BE_INCOMPLETE, stop.lower())
+                    self.assertIn(f"close {fid} --removed", stop)
+                    self.assert_private(out, stop, again, refused)
+
+
 class MergeRuleOfTheFake(unittest.TestCase):
     """The fake's merge rule, as docs/plans/2026-10-22-correction-merge.md states the processor's (the
     tests above rely on it; green by design, it pins the test double, not the tool)."""
@@ -762,6 +985,27 @@ class MergeRuleOfTheFake(unittest.TestCase):
             org.query("SELECT Id, Email FROM Contact")
         with self.assertRaises(AssertionError):
             org.query("SELECT Id FROM Contact WHERE Id = 'x' OR Name = 'y'")
+
+    def test_with_a_processor_lag_rows_and_contacts_land_inside_the_batch_s_window(self):
+        org = BareOrg([account(ASPEN, "Aspen Club")])
+        body = {"Account_Name__c": "Aspen Club", "Attendance_Date__c": "2026-09-05", "Module__c": MODULE, "Creator__c": "Jotform"}
+        org.insert("Attendance_Batch__c", dict(body, Contact_IDs__c=AMARA))
+        first = org.batches[0]
+        self.assertEqual(first["LastModifiedDate"], first["CreatedDate"])        # no lag: one moment
+        org.processor_lag = 2
+        org.insert("Attendance_Batch__c", dict(body, Contact_IDs__c=f"{AMARA}, {BEATRICE}, {CHIARA}"))
+        merged = org.batches[-1]
+        late = org.rows[1:]
+        self.assertEqual([r["Attendance_Batch__c"] for r in late], [first["Id"]] * 2)
+        self.assertEqual([r["CreatedDate"] for r in late], [later(merged["CreatedDate"], 2), later(merged["CreatedDate"], 3)])
+        self.assertEqual([r["contact_created"] for r in late], [r["CreatedDate"] for r in late])
+        self.assertEqual(merged["LastModifiedDate"], later(merged["CreatedDate"], 4))
+        self.assertEqual(first["LastModifiedDate"], merged["LastModifiedDate"])
+        found = org.query(f"SELECT Id FROM Attendance__c WHERE Attendance_Batch__c = '{first['Id']}' AND CreatedDate >= "
+                          f"{merged['CreatedDate'][:19]}Z AND CreatedDate <= {merged['LastModifiedDate'][:19]}Z")
+        self.assertEqual([r["Id"] for r in found], [r["Id"] for r in late])
+        self.assertEqual(org.query(f"SELECT LastModifiedDate FROM Attendance_Batch__c WHERE Id = '{merged['Id']}'")[0]
+                         ["LastModifiedDate"], merged["LastModifiedDate"])
 
 
 if __name__ == "__main__":

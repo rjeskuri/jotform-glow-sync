@@ -4067,11 +4067,18 @@ Girls' names are compared inside the script; it prints counts, club names, dates
 Before each copy it reads the club and day again and refuses when the prediction changed (a live
 correction got there first); after it, it reads back that the copy is `Success` `merged into
 <original id>` with no rows or count of its own, that the original gained exactly the predicted
-rows and the club exactly the predicted contacts (the rows and contacts of the copy's own
-transaction: `CreatedDate` equal to the copy's, so a live correction merged into the same original
-afterwards is neither counted nor listed for the copy's rollback), and that the original's `Girls_Present__c` is
+rows and the club exactly the predicted contacts (the rows and contacts written inside the copy's
+window: `CreatedDate` from the copy's `CreatedDate` to its `LastModifiedDate`, the processor's
+status update and its last write, since nothing promises one timestamp for the whole
+transaction; a live correction merged into the same original after the window is neither counted
+nor listed for the copy's rollback), and that the original's `Girls_Present__c` is
 its rows - else the copy is `CHECK` and nothing more is sent until it is closed (`close <failed
-id> --removed` or `--accepted`). A lost answer is `unknown` and settled by the marker before the
+id> --removed` or `--accepted`). Another batch of the club and day created inside the window is
+`CHECK` too: its rows cannot be told from the copy's by time, so the window's rows and contacts
+are listed with `uncertain` `yes`. When the CHECK's rollback list may be incomplete (another
+batch in the window, or fewer rows or contacts in it than predicted or than the original and the
+club grew by) the message says so instead of "listed by id": find the copy's rows by hand before
+removing anything. A lost answer is `unknown` and settled by the marker before the
 next `--apply` sends anything. `--only <failed id>` sends one (refused while an earlier correction
 of its club and day is not re-sent), `--limit N` the first N. The original Failed batches stay as
 they are (history); a failed batch is never copied twice.
