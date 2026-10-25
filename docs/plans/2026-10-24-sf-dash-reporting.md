@@ -1,7 +1,7 @@
 ---
 title: GLOW Club Reporting (the dashboard "Reporting", items 17 and 18) and the GLOW of the Month table (item 19) by Partner and Month
-author: Claude (ticket #79, with Ryan's decisions of 2026-10-23 and 2026-10-24)
-status: proposed   # ticket #79; built and dry-run 2026-10-24, waiting for Ryan's go
+author: Claude (ticket #79, with Ryan's decisions of 2026-10-23, 2026-10-24 and 2026-10-25)
+status: accepted   # ticket #79; built and dry-run 2026-10-24, Ryan's go 2026-10-25, Rollout in an interactive session
 created: 2026-10-24
 intent: Ryan, 2026-10-21 - "This data should be displayed by the Partner and Month."
 ---
@@ -21,7 +21,9 @@ through `DHIS2__c.Period__c`; the test-record rule of #70 on every kept report; 
 of each report goes to Decommissioned before it changes, and the dashboard, dynamic, has the
 retrieve `before/` as its rollback (the API refuses its copy at the org's 5 dynamic dashboards);
 the dashboards keep the Partner Manager filter as their only filter, with no Partner or Month
-filter (2026-10-24, all five dashboards).
+filter (2026-10-24, all five dashboards; DECISIONS 2026-10-24). Ryan, 2026-10-25: go for this
+Rollout, run in an interactive session; add the missing active manager to the filter; item 19
+from summary to tabular confirmed.
 
 ## Build
 
@@ -48,8 +50,9 @@ Everything under `data/sf_dash_reporting_2026-10-24/` (owner only, never committ
     filters unlocked for the viewer, the "test" condition locked;
   - each: standard date column `Period__c`, All Time, in place of `CreatedDate`;
   - the dashboard: its one component gives way to two tables, items 17 and 18, titled with the
-    reports' labels, a row per partner and month; the Partner Manager filter as it is (6
-    managers), the only filter; running user and "run as the viewer" unchanged.
+    reports' labels, a row per partner and month; the Partner Manager filter, the only filter, with
+    7 managers: the 6 it offered plus the active manager it lacked (Ryan, 2026-10-25; the inactive
+    eighth is not offered, DECISIONS 2026-10-24), the name in the build only; running user and "run as the viewer" unchanged.
 - To check at the check-only: the table columns' names for the `Period__c` grouping
   (`DHIS2__c.Period__c`), not yet proven in this org.
 - Items 17 and 18 are also components of two retired dashboards in Decommissioned ("Approval
@@ -127,4 +130,4 @@ LAST_MONTH`, with the test-record rule; `evidence/soql_2026-10-24_baseline.txt`)
 - The test-record rule leaves out 2 of the 569 Monthly Reports of the last 12 months (11 of all
   time, on 2 test accounts or a blank Account), none of September 2026.
 - 58 partners and 8 partner managers have Monthly Reports in the last 12 months; the Partner
-  Manager filter offers 6 of the 8.
+  Manager filter offered 6 of the 8; the build offers 7 (the eighth is inactive).

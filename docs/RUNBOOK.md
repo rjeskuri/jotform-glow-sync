@@ -4086,8 +4086,9 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
   viewer can narrow to one partner). The "test" condition is locked.
 - The dashboard has one filter, Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`),
   as today, so each manager picks their own partners (Ryan, 2026-10-24 on #79). It has no Partner
-  filter and no Month filter (Ryan, 2026-10-24, for every Monthly Report dashboard). The filter
-  offers 6 managers; 8 managers have partners in the window (2026-10-24 count).
+  filter and no Month filter (Ryan, 2026-10-24, for every Monthly Report dashboard; DECISIONS
+  2026-10-24). The filter offers 7 managers: the 6 it offered plus the active manager it lacked
+  (Ryan, 2026-10-25); of the 8 managers with partners in the window, the eighth is inactive.
 - The dashboard's components are two tables titled with the reports' labels, "Approved Approvals
   monthly report" and "Reports completed on time", each a row per partner and month with its
   count. They take the place of the one component today, on "Partner Report Submission On Time"
