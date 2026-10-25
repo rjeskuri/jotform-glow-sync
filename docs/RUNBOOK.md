@@ -4118,9 +4118,18 @@ approved, 42 filed, 42 stories rows, from 42 partners; one partner, Development 
 Rollback, each step on Ryan's go:
 - The reports, items 17-19, are restored from their copies in Decommissioned (`copy --tag "#79"`,
   made before the change), as Decommissioned (above) says.
+- "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), moved to Decommissioned once the
+  dashboard no longer uses it, comes back first, before the dashboard, whose `before/` has its one
+  component on that report. It is one move in this change's own ledger:
+  `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_reporting_2026-10-24 --limit 1`,
+  whose dry run lists that report alone, then the same with `--apply`. If the dry run lists any
+  other move, stop and ask Ryan; he moves the report back to "DHIS2 Reports" by hand in Lightning.
 - The dashboard "Reporting" (D5) is dynamic, and the API refuses its copy at the org's limit of 5
   dynamic dashboards (Ryan, 2026-10-24). The dashboard is restored by redeploying it from
   `data/sf_dash_reporting_2026-10-24/before/`, only while a fresh retrieve of it equals `after/`.
+- Only the dashboard is deployed from `before/`, check-only first
+  (`-m "Dashboard:GLOW_Monthly_Dashboards/DGdiHNHQWRoBNviGBlNWJPnSYqTlMR"`), never the report type
+  `Dhis2`, the folders or the "DHIS2 Reports" report it also holds.
 - If a fresh retrieve differs from `after/`, stop and ask Ryan. A rollback never deploys an older
   build or an earlier retrieve (DECISIONS 2026-10-16). Nothing is deleted.
 

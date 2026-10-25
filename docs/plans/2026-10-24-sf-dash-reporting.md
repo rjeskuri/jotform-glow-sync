@@ -87,8 +87,10 @@ On Ryan's go, VPN off, in the main session (never a subagent), with `--vpn-off` 
    Period__c = LAST_N_MONTHS:12 AND (Account__c = null OR Account__r.Name LIKE '%test%')` gives
    the records the rule leaves out, and the components show none of them.
 8. Move "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), which the dashboard no longer
-   uses, to Decommissioned with `tools/sf_report_folders.py move` (a plan of one row, the dry run,
-   then `--apply --limit 1` on Ryan's go), its Id kept.
+   uses, to Decommissioned with `tools/sf_report_folders.py move --dir data/sf_dash_reporting_2026-10-24`
+   (a plan of one row, the dry run, then `--apply --limit 1` on Ryan's go), its Id kept. The move
+   goes in this change's own ledger, `data/sf_dash_reporting_2026-10-24/ledger.csv`, so its undo
+   touches no other ticket's move.
 9. Record the counts in Result, set `status: done`, and update the RUNBOOK's status line.
 
 ## Rollback
@@ -96,14 +98,23 @@ On Ryan's go, VPN off, in the main session (never a subagent), with `--vpn-off` 
 - The reports, items 17-19, are restored from their copies in Decommissioned, made by step 2 of
   the Rollout, as RUNBOOK "Decommissioned" says (open the copy, Save As into "GLOW Monthly
   Reports").
+- The report "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), which step 8 moved to
+  Decommissioned, comes back first, before the dashboard: the dashboard of `before/` has its one
+  component on that report. It is one move, in this change's own ledger: the dry run
+  `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_reporting_2026-10-24 --limit 1`
+  lists that report alone, back to "DHIS2 Reports", and then the same with `--apply` on Ryan's go.
+  If the dry run lists any other move, stop and ask Ryan; he moves the report back to "DHIS2
+  Reports" by hand in Lightning, and SOQL on `Report` shows the same Id there.
 - The dashboard "Reporting" (D5) has no copy: the API refuses it at the org's limit of 5 dynamic
   dashboards (Ryan, 2026-10-24). The dashboard is restored by redeploying it from
   `data/sf_dash_reporting_2026-10-24/before/`, only while a fresh retrieve of it equals `after/`.
-- That deploy waits for Ryan's go, with its check-only first.
+- Only the dashboard is deployed from `before/`, run in that folder: the check-only
+  `sf project deploy start --dry-run -o glow -m "Dashboard:GLOW_Monthly_Dashboards/DGdiHNHQWRoBNviGBlNWJPnSYqTlMR"`,
+  then the same deploy without `--dry-run` on Ryan's go. Never the report type `Dhis2`, the two
+  folders or the "DHIS2 Reports" report that `before/` also holds; the three reports come back from
+  their copies (above).
 - If a fresh retrieve differs from `after/`, stop and ask Ryan. A rollback never deploys an older
   build or an earlier retrieve (DECISIONS 2026-10-16). Nothing is deleted.
-- The report moved in step 8 comes back by `python3 tools/sf_report_folders.py undo --vpn-off
-  --ledger data/sf_report_folders/ledger.csv` (the dry run, then with `--apply` on Ryan's go).
 
 ## Result
 
