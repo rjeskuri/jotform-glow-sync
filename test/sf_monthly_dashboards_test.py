@@ -1781,6 +1781,236 @@ class ObservationsDashboardDocs(unittest.TestCase):
         self.d.assertNoContradiction(raw_plain, where)
         self.assertNotSoftened(raw_plain, where)
 
+    # --- the live rollout of 2026-10-25 and item 11's fix forward ------------------------------------------------
+    #
+    # #77 on 2026-10-25: steps 1-6 ran (copies, check-only, deploy, read-back, refresh); item 11's component
+    # (01aRP0000089gWVYAY) failed the refresh with 406 "One or more of the fields selected in the component is no
+    # longer available in the report". Cause (Analytics describe): item 11's report summarized a column
+    # (`aggregateTypes Sum` on GC_sessions_did_you_observe_last_month__c), so its aggregates list only that Sum, no
+    # RowCount, while its component measures RowCount. The fix: item 11's report summarizes no column, its chart
+    # measures the record count; item 11's report alone is redeployed on Ryan's go, then a refresh.
+
+    # the live ids of steps 1-6 (the ticket comment of 2026-10-25): each copy and the original it copies
+    COPIES = (("00ORP000009kM0L2AU", "00ORP000004RJZC2A4"), ("00ORP000009kM1x2AE", "00ORP000004RJZD2A4"),
+              ("00ORP000009kM3Z2AU", "00ORP000005uf412AA"), ("01ZRP00000BP52z2AD", "01ZRP000006k2D32AI"))
+    CHECK_ONLY_ID, DEPLOY_ID = "0AfRP000002i5dx0AA", "0AfRP000002i5hB0AQ"
+    ITEM11_COMPONENT = "01aRP0000089gWVYAY"
+    ITEM11_MDAPI = "Completed_Observing_Clubs_Alteast_Once_P_cn6"
+    OTHER_MDAPI = ("Submission_of_GC_observation_forms_M_P_iuz", "Total_Number_of_Club_Observations_by_M_q3M")
+    SF_ID = re.compile(r"\b0[0-9A-Za-z]{2}[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?\b")
+    # the record count a component measures
+    RECORD_COUNT = re.compile(r"(?i)\bRowCount\b|\brecords?\s+counts?\b|\bcounts?\s+of\s+(the\s+)?(\w+\s+)?records\b|"
+                              r"\bnumber\s+of\s+(\w+\s+)?records\b")
+    # a report that summarizes no column: "summarizes no column", "no summarized column", "no Sum aggregate",
+    # "does not summarize", "without a Sum", "drops the Sum aggregate"
+    NO_SUMMARY = re.compile(
+        r"(?i)\bsummari[sz]e[sd]?\s+no\s+(\w+\s+)?(columns?|fields?)\b|"
+        r"\bno\s+(\w+\s+){0,2}?(summari[sz]ed|summary)\s+(\w+\s+)?(columns?|fields?|aggregates?)\b|"
+        r"\bno\s+`?(Sum|aggregateTypes)\b|"
+        r"\b(does|do)\s+not\s+summari[sz]e\b|\bdoesn['’]t\s+summari[sz]e\b|"
+        r"\bwithout\s+(a\s+|any\s+|the\s+|its\s+)?(`?Sum\b|`?aggregateTypes\b|summar\w*|aggregates?\b)|"
+        r"\b(drops?|dropped|removes?|removed)\s+(the\s+|its\s+)?(`?Sum\b|`?aggregateTypes\b|summar\w*)")
+    # what says a sum is part of item 11 (a Sum aggregate, a summarized column, the sum stays)
+    SUM_WORD = re.compile(r"(?i)\bsums?\b|\bsummed\b|aggregateTypes|\bsummari[sz]\w*")
+    # the org fact: a component's measure must be one of its report's aggregates
+    RULE = re.compile(r"(?i)\bcomponents?\b[^.;]{0,120}?\b(must|only|has\s+to|have\s+to|needs?\s+to|always)\b"
+                      r"[^.;]{0,120}?\baggregates?\b|"
+                      r"\baggregates?\b[^.;]{0,120}?\b(must|only|has\s+to|have\s+to|needs?\s+to|always)\b"
+                      r"[^.;]{0,120}?\bcomponents?\b")
+    PAST = re.compile(r"(?i)\b(was|were|had|used\s+to|no\s+longer|formerly|previously|once)\b")
+    HEDGE = re.compile(r"(?i)\b(may|might|usually|often|sometimes|probably|likely|perhaps|seems?|apparently)\b")
+    SUMMARIZES = re.compile(r"(?i)\bsummari[sz]e[sd]?\b|\bSum\b|aggregateTypes")
+    NO_ROWCOUNT = re.compile(r"(?i)\b(no|without|lacks?|lacking|loses?|lost|omits?|omitted|drops?|dropped|"
+                             r"not\s+(offer|list|includ|provid)\w*)\s+(a\s+|the\s+|any\s+)?`?RowCount\b|"
+                             r"`?RowCount`?[^.;]{0,40}?\b(missing|absent|gone|disappear\w*|"
+                             r"not\s+(offered|listed|available|included))\b")
+
+    def item_blocks(self, part, item):
+        r = self.keep()[item]
+        return [b for b in self.blocks(part) if r["measure"] in b and r["label_today"] in b]
+
+    def affirmed(self, s, m):
+        """Match `m` of clause `s` said, not denied: no negation in the words before it and no "no", "none" or
+        "nothing" right after it ("summarizes no column")."""
+        return not self.d.locally_denied(s, m) and not re.match(r"`?\s+(nothing|none|no)\b", s[m.end():])
+
+    def test_the_runbook_says_item_11_charts_the_record_count_of_a_report_that_summarizes_no_column(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        rows = self.keep()
+        part = self.part()
+        mine = self.item_blocks(part, "11")
+        self.assertTrue(mine, f"{where}: item 11 ({rows['11']['measure']!r}, the report "
+                              f"{rows['11']['label_today']!r}) has its own row, list item or paragraph")
+        cl = [s for b in mine for s in sentences(b, ".;")]
+        # the component measures the record count (RowCount): partner-months per Yes/No per month
+        counted = [s for s in cl if re.search(r"(?i)\b(component|chart)s?\b", s)
+                   and any(self.affirmed(s, m) and not self.PAST.search(s[:m.end()]) for m in self.RECORD_COUNT.finditer(s))
+                   and not [m for m in self.SUM_WORD.finditer(s) if self.affirmed(s, m)]]
+        self.assertTrue(counted, f"{where}: item 11's block says its component (chart) measures the record count "
+                                 "(`RowCount`), in one sentence, present tense, not negated")
+        # its report summarizes no column: no Sum aggregate (a summarized column takes RowCount away, 2026-10-25)
+        self.assertTrue([s for s in cl if self.NO_SUMMARY.search(s)],
+                        f"{where}: item 11's block says its report summarizes no column (no Sum aggregate, no "
+                        "`aggregateTypes`), in one sentence")
+        r10 = rows["10"]
+        names10 = re.compile(re.escape(r10["label_today"]) + "|" + re.escape(r10["measure"]) + "|" + r10["id"]
+                             + r"|\bitem\s+10\b", re.I)
+        for s in cl:
+            if (self.SUM_WORD.search(s) and not self.d.denies(s) and not self.UNDONE.search(s)
+                    and not self.REMOVED.search(s) and not names10.search(s)
+                    and not re.search(r"(?i)\bdrops?\b", s)):
+                self.fail(f"{where}: item 11's report summarizes no column; a sum of sessions is item 10's measure, "
+                          f"not item 11's: {s[:200]!r}")
+        # the part no longer says the deploy is still to come
+        for s in sentences(flat(part), ".;"):
+            self.assertNotRegex(s, r"(?i)\buntil\s+(it\s+is\s+)?deployed\b|\bthe\s+org\s+holds\s+the\s+vendor['’]s\b|"
+                                   r"\bnothing\s+(is\s+|was\s+|has\s+been\s+)?deployed\b",
+                                f"{where}: the build was deployed on 2026-10-25 (deploy {self.DEPLOY_ID}); the part "
+                                f"still says it is not: {s[:200]!r}")
+
+    def test_the_monthly_section_states_that_a_component_measures_one_of_its_reports_aggregates(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}"
+        section = md_part(self.RUNBOOK, self.MONTHLY)
+        # the rule, present tense, not negated, not hedged
+        ruled = []
+        for s in sentences(self.norm(section), ".;"):
+            for m in self.RULE.finditer(s):
+                if (not self.d.locally_denied(s, m) and not self.PAST.search(s[:m.end()])
+                        and not self.HEDGE.search(m.group(0)) and not self.MORE_SOFT.search(s)):
+                    ruled.append(s)
+        self.assertTrue(ruled, f"{where}: state the org fact, present tense and not negated: a dashboard component's "
+                               "measure must be one of its report's aggregates (\"A component's measure must be one of "
+                               "its report's aggregates\")")
+        # the fact seen on 2026-10-25: a report that summarizes a column offered no RowCount (the 406)
+        seen = []
+        for b in self.blocks(section):
+            if "406" not in b or "2026-10-25" not in b:
+                continue
+            for s in sentences(b, ".;"):
+                if self.NO_ROWCOUNT.search(s) and [m for m in self.SUMMARIZES.finditer(s) if self.affirmed(s, m)]:
+                    seen.append(s)
+        self.assertTrue(seen, f"{where}: say, with the date 2026-10-25 and the 406 in the same row, item or paragraph, "
+                              "that a report that summarizes a column (a Sum aggregate) was seen to offer no `RowCount` "
+                              "(one sentence: the summarized column and the missing RowCount)")
+
+    def test_the_plan_records_the_live_steps_of_2026_10_25(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        word, _ = docs_index.status_of(keys.get("status", ""))
+        self.assertIn(word, ("in-progress", "done"), f"{name}: the deploy ran on 2026-10-25, so `status:` is "
+                                                     f"`in-progress` (or `done` when complete), not {word!r}")
+        self.assertNotRegex(keys.get("status", ""), r"(?i)nothing\s+deployed",
+                            f"{name}: the status comment still says nothing is deployed")
+        raw = self.plan_part(path, "## Result", 40)
+        where = f"{name}: `## Result`"
+        body = flat(raw)
+        blocks = self.blocks(raw)
+        self.assertNotRegex(body, r"(?i)\bpending\s+until\s+the\s+deploy\b|\bnothing\s+(is\s+|was\s+|has\s+been\s+)?"
+                                  r"deployed\b|\bnot\s+(yet\s+)?deployed\b",
+                            f"{where}: the deploy ran on 2026-10-25; the Result still says it is pending")
+        # steps 1-2: each copy in Decommissioned with the original it copies, in one row, item or paragraph
+        for copy, orig in self.COPIES:
+            self.assertIn(copy, body, f"{where}: record the copy {copy} (of {orig}) made in Decommissioned")
+            self.assertTrue([b for b in blocks if copy in b and orig in b],
+                            f"{where}: the copy {copy} and the original it copies, {orig}, in one row, item or "
+                            "paragraph")
+        self.assertTrue([s for s in sentences(body, ".;") if "Decommissioned" in s
+                         and [c for c, _ in self.COPIES if c in s]],
+                        f"{where}: say the copies are in Decommissioned (a sentence with a copy's id and "
+                        "\"Decommissioned\")")
+
+        # steps 3-4: the check-only and the deploy, each id beside its own word, each succeeded
+        def window(s, ident):
+            at = s.find(ident)
+            prev = [m.end() for m in self.SF_ID.finditer(s[:at])]
+            return s[(prev[-1] if prev else max(0, at - 120)):at]
+        check_only = re.compile(r"(?i)check-only|--dry-run|\bvalidat\w*")
+        for ident, what in ((self.CHECK_ONLY_ID, "check-only"), (self.DEPLOY_ID, "deploy")):
+            self.assertIn(ident, body, f"{where}: record the {what} id {ident}")
+            near = [window(b, ident) for b in blocks if ident in b]
+            if what == "check-only":
+                ok = [w for w in near if check_only.search(w)]
+            else:
+                ok = [w for w in near if re.search(r"(?i)\bdeploy", w) and not check_only.search(w)]
+            self.assertTrue(ok, f"{where}: the {what} id {ident} right after the word {what!r} (no other id between)")
+            self.assertTrue([b for b in blocks if ident in b and re.search(r"(?i)\bsucce\w+|\b0 errors\b", b)],
+                            f"{where}: the {what} {ident} succeeded (\"Succeeded\")")
+        # step 5: the read-back; the reports equal build/, the dashboard differs only in showValues true -> false on
+        # the two ColumnStacked components, which Ryan accepted as normalisation
+        cl = sentences(body, ".;")
+        self.assertTrue([s for s in cl if "build/" in s and re.search(r"(?i)\breports?\b", s)
+                         and self.EQUALS.search(s) and not self.d.denies(s.replace("no differences", ""))],
+                        f"{where}: say the read-back's reports equal `build/` (one sentence)")
+        accept = re.compile(r"(?i)\baccept\w*")
+        sv = [b for b in blocks if "showValues" in b]
+        good = [b for b in sv if re.search(r"(?i)\btrue\b[^.;]{0,30}?\bfalse\b", b)
+                and re.search(r"(?i)ColumnStacked|stacked\s+column", b) and re.search(r"Ryan", b)
+                and re.search(r"(?i)\bnormali[sz]\w*", b)
+                and [s for s in sentences(b, ".;") for m in accept.finditer(s) if self.affirmed(s, m)]]
+        self.assertTrue(good, f"{where}: the read-back's one difference, `showValues` true -> false on the two "
+                              "ColumnStacked components, and that Ryan accepted it as Salesforce's normalisation, in one "
+                              "row, item or paragraph")
+        # step 6: the refresh, item 11's 406 and its cause
+        r11 = self.keep()["11"]
+        names11 = re.compile(r"(?i)\bitem\s+11\b|" + r11["id"] + "|" + self.ITEM11_COMPONENT + "|"
+                             + re.escape(r11["label_today"]))
+        failed = [b for b in blocks if re.search(r"\b406\b", b) and names11.search(b)]
+        self.assertTrue(failed, f"{where}: record that item 11's component ({self.ITEM11_COMPONENT}) failed the "
+                                "refresh with 406, in one row, item or paragraph")
+        self.assertTrue([b for b in failed if re.search(r"\bRowCount\b", b)
+                         and re.search(r"(?i)\bSum\b|\bsummari[sz]\w*|aggregateTypes|\baggregates?\b", b)],
+                        f"{where}: the 406's cause beside it: item 11's report summarized a column (a Sum aggregate), "
+                        "so it offered no `RowCount`, which its component measures")
+
+    def test_the_rollout_fixes_item_11_forward_before_the_soql_check_and_the_moves(self):
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        raw = self.plan_part(path, "## Rollout", 40)
+        where = f"{name}: `## Rollout`"
+        steps = self.numbered_steps(raw)
+        r11 = self.keep()["11"]
+        names11 = re.compile(r"(?i)\bitem\s+11\b|" + r11["id"] + "|" + self.ITEM11_MDAPI + "|"
+                             + re.escape(r11["label_today"]))
+        redeploy = re.compile(r"(?i)\bre-?deploy\w*|\bdeploy\w*")
+        eq = self.EQUALS.pattern.replace("(?i)", "")
+        fresh_eq_after = re.compile(r"(?i)\bfresh\b[^.;]{0,20}?\bretriev\w*[^.;]{0,80}?(" + eq + r")[^.;]{0,40}?after/|"
+                                    r"after/[^.;]{0,40}?(" + eq + r")[^.;]{0,80}?\bfresh\b[^.;]{0,20}?\bretriev\w*")
+        fix = [i for i, s in enumerate(steps) if names11.search(s) and redeploy.search(s)
+               and fresh_eq_after.search(s) and re.search(r"Ryan['’]s go\b", s)
+               and re.search(r"(?i)check-only|--dry-run", s) and re.search(r"(?i)\brefresh", s)]
+        self.assertTrue(fix, f"{where}: a numbered step fixes item 11 forward: from a fresh retrieve that equals "
+                             "`after/`, check-only, on Ryan's go redeploy item 11's report, then refresh the dashboard")
+        i = fix[0]
+        s = steps[i]
+        self.assertTrue(self.ITEM11_MDAPI in s or re.search(r"(?i)\b(only|alone)\b", s),
+                        f"{where}: the fix step redeploys item 11's report only (`-m \"Report:GLOW_Monthly_Reports/"
+                        f"{self.ITEM11_MDAPI}\"`, or \"only\"): {s[:200]!r}")
+        for other in self.OTHER_MDAPI + ("Dashboard:",):
+            self.assertNotIn(other, s, f"{where}: the fix step redeploys item 11's report only, not {other!r}")
+        self.assertTrue(re.search(r"(?i)\bSum\b|aggregateTypes|\baggregates?\b|\bsummari[sz]\w*", s)
+                        and re.search(r"\bRowCount\b|(?i:record\s+count)", s),
+                        f"{where}: the fix step says what changes: item 11's report drops its Sum aggregate so it "
+                        "offers `RowCount`, the record count its component measures")
+        dep = [m.start() for m in redeploy.finditer(s) if not re.search(r"(?i)check-only|--dry-run", s[m.start():m.end() + 12])]
+        self.assertTrue(dep and max(m.start() for m in re.finditer(r"(?i)\brefresh", s)) > dep[0],
+                        f"{where}: the fix step refreshes the dashboard after the redeploy")
+        # after the first deploy (steps 3-6), before the SOQL check and the moves
+        first_deploy = [j for j, t in enumerate(steps) if re.search(r"sf project deploy start\b(?![^`]*--dry-run)", t)
+                        and j != i]
+        self.assertTrue(first_deploy and first_deploy[0] < i,
+                        f"{where}: the fix step comes after the deploy of the build")
+        soql = [j for j, t in enumerate(steps) if j != i and j > first_deploy[0] and re.search(r"\bSOQL\b", t)
+                and "DHIS2__c" in t]
+        moves = [j for j, t in enumerate(steps) if j != i and re.search(r"sf_report_folders\.py\s+move\b", t)]
+        self.assertTrue(soql and moves, f"{where}: the SOQL check and the moves stay numbered steps")
+        self.assertLess(i, soql[0], f"{where}: item 11's fix comes before the SOQL check (steps 7-8 wait until item "
+                                    "11 works)")
+        self.assertLess(i, moves[0], f"{where}: item 11's fix comes before the moves")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

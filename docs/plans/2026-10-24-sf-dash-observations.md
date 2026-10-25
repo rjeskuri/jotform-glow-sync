@@ -1,7 +1,7 @@
 ---
 title: GLOW Club Observations (D3) by partner and month, over the last 12 months
 author: Claude (ticket #77, with Ryan's decisions of 2026-10-23 and 2026-10-24)
-status: proposed         # ticket #77; built and dry-run 2026-10-24, nothing deployed
+status: in-progress      # ticket #77; D3 + items 9-11 deployed 2026-10-25 (0AfRP000002i5hB0AQ); item 11's chart fix to deploy
 created: 2026-10-24
 intent: none - SOW p.5, Approach 1 (dashboards that reflect current data) and Ryan, 2026-10-21, "This data should be displayed by the Partner and Month."
 ---
@@ -61,7 +61,8 @@ dashboard, API 67.0). `evidence/build_vs_before.diff` is the diff against `befor
   `GC_sessions_did_you_observe_last_month__c`.
 - Item 11 (`00ORP000005uf412AA`): Matrix, a number bucket "Observed" on
   `GC_sessions_did_you_observe_last_month__c` across: No for 0 (`to` 0), Yes for 1 or more
-  (`from` 0); the sum of the field stays a column. Each record is one partner's month, so the
+  (`from` 0); in `build/` the sum of the field stays a column (`build_item11/` drops that Sum
+  aggregate, below). Each record is one partner's month, so the
   counts are partner-months; a partner with no Monthly Report for a month has no row (a missing
   response, apart from a No). An unanswered question is a No too, and the report does not tell it from 0:
   the form shows the field as 0 until a number is typed, and `dHIS2Controller.setNumber` saves a
@@ -77,6 +78,14 @@ dashboard, API 67.0). `evidence/build_vs_before.diff` is the diff against `befor
 - Not verified before the check-only: the number bucket's `from`/`to` form (no number bucket in
   any retrieve of this org), and a component grouped by `Period__c` alone on a report grouped by
   partner then month. The check-only and the read-back settle both.
+- Item 11's fix forward, 2026-10-25: `data/sf_dash_observations_2026-10-24/build_item11/` (its
+  own `package.xml`: item 11's report only, API 67.0), from the fresh retrieve
+  `fresh_2026-10-25b/` of D3 and items 9-11, which equals `after/`. It drops the one
+  `<aggregateTypes>Sum</aggregateTypes>` of the column `GC_sessions_did_you_observe_last_month__c`,
+  which stays a plain column, so the report summarizes no column and offers `RowCount`, the record
+  count its component measures (the Result, step 6). The bucket, the groupings, the filters and
+  the description are as deployed; `evidence/build_item11_vs_after.diff` is that one line. The
+  dashboard is not in it: the component on item 11 stays as deployed.
 
 ## Rollout (live; each write on Ryan's go)
 
@@ -104,7 +113,19 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
 6. Refresh the dashboard on Ryan's go:
    `PUT /services/data/v67.0/analytics/dashboards/01ZRP000006k2D32AI` (`sf api request rest
    --method PUT`), and read its refresh date back by a GET.
-7. Check by SOQL on `DHIS2__c`, for the last complete month, that items 9-11 each equal their
+7. Fix item 11 forward (the refresh of step 6: item 11's component fails with 406, the Result).
+   Item 11's report summarizes a column (`aggregateTypes` `Sum`), so it offers no `RowCount`, the
+   record count its component measures; `build_item11/` drops that Sum aggregate and changes
+   nothing else (Build). First a fresh retrieve of D3 and items 9-11 that equals `after/`
+   (2026-10-25: `fresh_2026-10-25b/`); a difference stops the step for Ryan. On Ryan's go,
+   check-only, run within `data/sf_dash_observations_2026-10-24/build_item11/`:
+   `sf project deploy start --dry-run -o glow -m "Report:GLOW_Monthly_Reports/Completed_Observing_Clubs_Alteast_Once_P_cn6"`.
+   On Ryan's go, redeploy item 11's report only: the same command without `--dry-run`; its
+   deploy id goes in the Result. Read back: retrieve item 11's report again and compare it with
+   `build_item11/` (not `build/`). Then refresh the dashboard on Ryan's go (the PUT of step 6)
+   and read item 11's component back by a GET: Yes and No for each month, no error. The SOQL
+   check and the moves follow.
+8. Check by SOQL on `DHIS2__c`, for the last complete month, that items 9-11 each equal their
    component (the RUNBOOK's query for each item) and that one partner's month equals the
    per-partner query. Then check the test-record rule on January 2026 and March 2026, the two
    months of the last 12 that hold a Monthly Report on a test account (one in each, with 0
@@ -112,7 +133,7 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
    equal to SOQL with the rule, where SOQL without the rule gives 34 and 20, and item 10's report
    counts 46 records in each of the two months, against 47 without the rule. So the test
    accounts' records are absent from every component. The counts go in the Result.
-8. Move the five "DHIS2 Reports" reports D3 uses no more to Decommissioned, by the plan
+9. Move the five "DHIS2 Reports" reports D3 uses no more to Decommissioned, by the plan
    `data/sf_dash_observations_2026-10-24/move_plan.csv` (5 rows: `00ORP000005s3HN2AY`,
    `00ORP000005s3Iz2AI`, `00ORP000005s3nd2AA`, `00ORP000005s3qr2AA`, `00ORP000005uf0n2AA`): the
    dry run
@@ -125,8 +146,8 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
    Decommissioned to Decommissioned, for the first report). The ledger then holds 5 move rows. On
    2026-10-24 the dry run refused all 5 because D3 still used them (`move_dryrun.txt`); the only
    other dashboard using them is #73's copy of D3, in Decommissioned.
-9. Ryan sets a weekly Subscribe on the dashboard in Lightning (the refresh is a subscription,
-   not metadata), as he did for "Jotform Attendance".
+10. Ryan sets a weekly Subscribe on the dashboard in Lightning (the refresh is a subscription,
+    not metadata), as he did for "Jotform Attendance".
 
 ## Rollback
 
@@ -134,7 +155,7 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
    because D3's six other components read them:
    `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_observations_2026-10-24`
    then the same with `--apply` on Ryan's go. Its dry run lists 5 lines, one per move row of
-   step 8, newest first, each report back to "DHIS2 Reports"; any other line (another id or
+   step 9, newest first, each report back to "DHIS2 Reports"; any other line (another id or
    folder, or a count other than 5) stops the rollback for Ryan.
 2. Then D3 and items 9-11 roll back together: redeploy those 4 components of this change's
    retrieve `data/sf_dash_observations_2026-10-24/before/` (check-only, Ryan's go, deploy) only
@@ -148,7 +169,12 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
    2026-10-24 too, which the `after/` compare does not see, so it is never the rollback.
    Redeploying the 4 keeps every Id, so the dashboard's components read the old reports again,
    and D3 keeps its place in the FlexiPage `Monthly_Report_Dashboards`. This is the rollback that
-   puts the dashboard back as it was.
+   puts the dashboard back as it was. After Rollout step 7, item 11's report is compared with
+   `build_item11/` in place of `after/`: the 4 roll back only while a fresh retrieve of D3 and
+   items 9-10 equals `after/` and of item 11 equals `build_item11/`. Step 7 alone rolls back by
+   redeploying item 11's report from `after/` (check-only, Ryan's go, deploy, with
+   `-m "Report:GLOW_Monthly_Reports/Completed_Observing_Clubs_Alteast_Once_P_cn6"`) only while a
+   fresh retrieve of it equals `build_item11/`: for that step, `after/` is item 11's before.
 3. When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report
    since the deploy: the rollback then starts from that fresh retrieve, by the epic's ritual.
    A rollback never deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
@@ -165,9 +191,36 @@ Decommissioned otherwise, and nothing is deleted.
 
 ## Result
 
-Pending until the deploy. Done so far, read-only, 2026-10-24: the retrieve into `before/`, the
-build, the copies' dry run (4 lines, nothing written), and the move dry run (refused, as
-expected, while D3 uses the 5 reports).
+Read-only, 2026-10-24: the retrieve into `before/`, the build, the copies' dry run (4 lines,
+nothing written), and the move dry run (refused, as expected, while D3 uses the 5 reports).
+
+Steps 1-6 ran on 2026-10-25 in Ryan's interactive session, each write on his go, with the VPN
+off. Steps 8-10 wait until item 11's chart works (Ryan, 2026-10-25: keep the deploy and fix
+forward, step 7).
+
+- Before the copies, a fresh retrieve equalled `before/` (`fresh_2026-10-25/`).
+- Steps 1-2, the copies in Decommissioned, tagged #77, their ledger rows dated 2026-10-25
+  04:49-04:51 UTC, before the deploy:
+  - report copy `00ORP000009kM0L2AU` of item 9, `00ORP000004RJZC2A4`;
+  - report copy `00ORP000009kM1x2AE` of item 10, `00ORP000004RJZD2A4`;
+  - report copy `00ORP000009kM3Z2AU` of item 11, `00ORP000005uf412AA`;
+  - dashboard copy `01ZRP00000BP52z2AD` of D3, `01ZRP000006k2D32AI`; its rename by hand in
+    Lightning is still to do (Ryan).
+- Step 3, check-only `0AfRP000002i5dx0AA`: Succeeded. Step 4, deploy `0AfRP000002i5hB0AQ`:
+  Succeeded, 4 components, 0 errors.
+- Step 5, the read-back into `after/`: the three reports equal `build/`; the dashboard differs
+  from `build/` only in `showValues`, true -> false on the two ColumnStacked components (items 9
+  and 11), which Ryan accepted as Salesforce's normalisation.
+- Step 6, the refresh (PUT) at 07:28:20 UTC: the components on item 9 (`01aRP0000089gWTYAY`)
+  and item 10 (`01aRP0000089gWUYAY`) refreshed. Item 11's component, `01aRP0000089gWVYAY`,
+  fails with 406, "One or more of the fields selected in the component is no longer available in
+  the report" (NO_DATA); the report itself runs (Analytics API, 1,022 records). The cause, by the
+  Analytics describe (`GET /analytics/reports/00ORP000005uf412AA/describe`,
+  `evidence/describe_00ORP000005uf412AA.json`): item 11's report summarizes a column
+  (`aggregateTypes` `Sum` on `GC_sessions_did_you_observe_last_month__c`), so its aggregates list
+  only that Sum and no `RowCount`, while its component measures `RowCount`. Item 9's report
+  summarizes no column and lists `RowCount` (`evidence/describe_00ORP000004RJZC2A4.json`). The fix
+  is Rollout step 7 (`build_item11/`), not yet run.
 
 The baseline the components must equal after the deploy, SOQL on `DHIS2__c` for September 2026
 (`Period__c = LAST_MONTH`, Account not blank, no test account), run 2026-10-24
