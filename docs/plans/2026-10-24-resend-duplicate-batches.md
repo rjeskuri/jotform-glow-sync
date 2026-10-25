@@ -24,7 +24,7 @@ intent: none - Ryan's request of 2026-10-22 (ticket #109, epic #93): bring in th
 ## Files that change
 - `tools/sf_backfill.py`: `resend` (dry run by default, `--apply`, `--limit`, `--only`, `--since`,
   `--vpn-off` in both modes); `close` and `status` read its ledger too.
-- `test/sf_backfill_resend_test.py` (new, 13 tests) and `test/helpers/fake_org.py` (the merge
+- `test/sf_backfill_resend_test.py` (new, 15 tests) and `test/helpers/fake_org.py` (the merge
   rule and a generic SOQL reader), by the test author.
 - `docs/RUNBOOK.md`, `docs/ARCHITECTURE.md`, `.claude/skills/salesforce/SKILL.md`, this plan.
 - Nothing in Salesforce's metadata, no form, no sheet, nothing under `appsscript/`.
@@ -34,16 +34,21 @@ intent: none - Ryan's request of 2026-10-22 (ticket #109, epic #93): bring in th
    2026-09-07), in `CreatedDate` order; the message is filtered on, never selected or printed.
 2. For each, predict in memory by the processor's merge rule: the day's original (the oldest
    `Success`), refused as `no_success_original`, `original_not_mergeable` (a `Partner report` or
-   no rows of its own), `module_differs`, `no_names` or `adds_nobody`; else the girls it ticked
+   no rows of its own), `module_differs`, `no_names`, `fuzzy_matching` (`enable_fuzzy_matching__c`
+   true: the processor would match by edit distance, which the exact prediction cannot follow) or
+   `adds_nobody`; else the girls it ticked
    without a row on that club and day (names cleaned as the processor cleans them, a name twice
    once), and how many get a new contact. Corrections of one day are predicted in order, each
    after the earlier ones. A copy of this tool is `own_batch`; a failed batch in the ledger is
-   `already_resent`, whatever its outcome. Names are read and compared inside the script only.
+   `already_resent`, whatever its outcome. A skipped batch is counted, never sent; `--only` on it
+   refuses with `skipped, <reason>`. Names are read and compared inside the script only.
 3. `--apply`: per candidate, the club and day read again (a changed prediction is refused before
    anything is sent), a `sending` ledger row, ONE insert - the failed batch's fields as they are,
    `Creator__c` `Jotform back-fill re-send <failed id>` - then the read-back: the copy `Success`
-   `merged into <original id>`, no rows and no count of its own, the original's new rows (by
-   `CreatedDate` >= the copy's) and the club's new contacts exactly as predicted, the original's
+   `merged into <original id>`, no rows and no count of its own, the original's new rows and the
+   club's new contacts of the copy's own transaction (`CreatedDate` = the copy's: the after-insert
+   trigger writes them in it; a later correction merged into the same original is not the copy's
+   and never reaches its rollback list) exactly as predicted, the original's
    `Girls_Present__c` its rows. Anything else is `CHECK` and stops the line. Every added row and
    created contact is listed by id in `resend_added.csv`, tied to its copy.
 4. The original Failed batches stay as they are (history). A copy carries no `Submitted_At__c`
@@ -71,14 +76,17 @@ batches were never touched.
 
 ## Risks
 - **A live correction between the dry run and the send**: refused by the fresh prediction before
-  each copy, and the read-back catches what lands in between.
-- **The prediction and the processor disagree** (a fuzzy match, a name the processor reads
-  differently): the copy is `CHECK`, the line stops, the copy's rows and contacts are listed.
+  each copy. One merged after the copy (before its read-back or its settling) adds its rows to
+  the same original with a later `CreatedDate`: the read-back neither counts them for the copy nor
+  lists them in `resend_added.csv`, so the copy's rollback never removes a mentor's rows; a
+  contact it creates still shows in the club's growth, and the copy is `CHECK`.
+- **The prediction and the processor disagree** (a name the processor reads differently; a
+  batch with fuzzy matching on is skipped as `fuzzy_matching`, never sent): the copy is `CHECK`, the line stops, the copy's rows and contacts are listed.
 - **Several corrections of one day**: sent in order; `--only` refuses one whose earlier
   correction is not re-sent yet.
 
 ## Proof
-- Offline: `scripts/harness_tests.sh test/sf_backfill_resend_test.py` (13 tests) and
+- Offline: `scripts/harness_tests.sh test/sf_backfill_resend_test.py` (15 tests) and
   `make check` -> `CHECK PASSED`.
 - Live: the read-back of every copy, and Rollout step 5.
 

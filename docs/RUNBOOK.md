@@ -4055,8 +4055,11 @@ without a row on that club and day, and how many of them get a new contact. Each
 one line - the failed batch, the original, the club, the date, names ticked / girls to add / new
 contacts - then the totals, a line per club and `skipped, <reason>: N`: `no_success_original`,
 `original_not_mergeable` (a `Partner report` or no rows of its own), `module_differs`, `no_names`,
-`adds_nobody`, `own_batch` (a copy of this tool), `already_resent` (in the ledger, whatever the
-outcome). Corrections of one club and day are predicted in order, each after the earlier ones.
+`fuzzy_matching` (`enable_fuzzy_matching__c` true: the processor would match the names by edit
+distance, which the exact-match prediction cannot follow), `adds_nobody`, `own_batch` (a copy of
+this tool), `already_resent` (in the ledger, whatever the outcome). A skipped batch is counted,
+never listed and never sent; `--only` on it refuses with `skipped, <reason>`. Corrections of one
+club and day are predicted in order, each after the earlier ones.
 Girls' names are compared inside the script; it prints counts, club names, dates and ids only.
 
 `--apply` sends one copy per request, in that order: the failed batch's fields as they are, with
@@ -4064,7 +4067,9 @@ Girls' names are compared inside the script; it prints counts, club names, dates
 Before each copy it reads the club and day again and refuses when the prediction changed (a live
 correction got there first); after it, it reads back that the copy is `Success` `merged into
 <original id>` with no rows or count of its own, that the original gained exactly the predicted
-rows and the club exactly the predicted contacts, and that the original's `Girls_Present__c` is
+rows and the club exactly the predicted contacts (the rows and contacts of the copy's own
+transaction: `CreatedDate` equal to the copy's, so a live correction merged into the same original
+afterwards is neither counted nor listed for the copy's rollback), and that the original's `Girls_Present__c` is
 its rows - else the copy is `CHECK` and nothing more is sent until it is closed (`close <failed
 id> --removed` or `--accepted`). A lost answer is `unknown` and settled by the marker before the
 next `--apply` sends anything. `--only <failed id>` sends one (refused while an earlier correction

@@ -971,7 +971,9 @@ def predict(failed, day, contacts):
     names = clean_names(failed.get("Contact_IDs__c"))
     if not names:
         return "no_names", []
-    on_day, adds = {contact for _, contact in day["rows"]}, []
+    if failed.get("enable_fuzzy_matching__c"):   # the processor would match by edit distance: no exact prediction
+        return "fuzzy_matching", []
+    on_day, adds ={contact for _, contact in day["rows"]}, []
     for name in names:                       # the exact match, the oldest contact first
         found = next((cid for cid, folded in contacts if folded == name.casefold()), None)
         if found is None or found not in on_day:
@@ -1039,11 +1041,14 @@ def verify_resend(org, row, batch_id, paths, ledger):
     original = org.query(f"SELECT Id, Girls_Present__c FROM Attendance_Batch__c WHERE Id = {quoted(oid)}")
     original_rows = org.count(f"SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = {quoted(oid)}")
     own_rows = org.count(f"SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = {quoted(batch_id)}")
+    # the trigger (after insert, synchronous) writes the copy's rows and contacts in the copy's own transaction,
+    # so they carry exactly its CreatedDate: `=`, never `>=` - a later correction merged into the same original
+    # is not the copy's, and its rows must never reach resend_added.csv (the rollback list)
     added = org.query(f"SELECT Id, Contact__c FROM Attendance__c WHERE Attendance_Batch__c = {quoted(oid)} "
-                      f"AND CreatedDate >= {since}")    # the copy's rows carry its CreatedDate: >=
+                      f"AND CreatedDate = {since}")
     girls = sorted({r["Contact__c"] for r in added if r.get("Contact__c")})
     created = sorted(c["Id"] for c in org.query(
-        f"SELECT Id FROM Contact WHERE Id IN ({', '.join(quoted(g) for g in girls)}) AND CreatedDate >= {since}")) \
+        f"SELECT Id FROM Contact WHERE Id IN ({', '.join(quoted(g) for g in girls)}) AND CreatedDate = {since}")) \
         if girls else []
     after = participants_of(org, row["account_id"])
     adds, new, grew = int(row["adds_expected"]), int(row["contacts_expected"]), after - int(row["participants_before"])

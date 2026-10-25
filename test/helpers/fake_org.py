@@ -173,6 +173,14 @@ class FakeOrg:
         self.refuse_update = False   # Salesforce answers a PATCH with 400 and changes nothing
         self.drift_update = False    # Salesforce answers 204 but the value read back is the old one
         self.merge_corrections = True    # the processor since 2026-10-24; False: every later batch Failed "Duplicate"
+        # ids from monotonic counters, as Salesforce never reuses one: a test that removes a batch, a row or a
+        # contact (history, a drift) must not hand the next record the id of one still held
+        self.serial = {"batch": 0, "row": 0, "contact": sum(len(c) for c in self.contacts.values())}
+
+    def next_serial(self, kind):
+        number = self.serial[kind]
+        self.serial[kind] += 1
+        return number
 
     def clock(self):
         self.tick += 1
@@ -324,9 +332,9 @@ class FakeOrg:
             return False
         for name, contact in adds:
             if contact is None:
-                contact = ("003NEW%09d" % sum(len(c) for c in self.contacts.values()), when)
+                contact = ("003NEW%09d" % self.next_serial("contact"), when)
                 mine[name.casefold()] = contact
-            self.rows.append({"Id": "a1m%015d" % len(self.rows), "Attendance_Batch__c": original["Id"], "Account__c": acc_id,
+            self.rows.append({"Id": "a1m%015d" % self.next_serial("row"), "Attendance_Batch__c": original["Id"], "Account__c": acc_id,
                               "Attendance_Date__c": day, "Contact__c": contact[0], "contact_created": contact[1],
                               "CreatedDate": when})
         original["Girls_Present__c"] = sum(1 for r in self.rows if r["Attendance_Batch__c"] == original["Id"])
@@ -348,7 +356,8 @@ class FakeOrg:
             self.contacts[acc["Id"]] = {}
         day, when = body["Attendance_Date__c"], self.clock()
         typed = body.get("Girls_Present__c")         # a partner's count: an aggregate when there are no names
-        batch = {"Id": "a1l%015d" % len(self.batches), "Name": "BATCH-%06d" % len(self.batches), "Account__c": acc["Id"],
+        number = self.next_serial("batch")
+        batch = {"Id": "a1l%015d" % number, "Name": "BATCH-%06d" % number, "Account__c": acc["Id"],
                  "Account_Name__c": body["Account_Name__c"], "Attendance_Date__c": day, "Processing_Status__c": "Success",
                  "Creator__c": body["Creator__c"], "Status_Message__c": self.message or "Processed successfully.",
                  "CreatedById": ME, "CreatedDate": when, "Girls_Present__c": typed, "Module__c": body.get("Module__c"),
@@ -376,10 +385,10 @@ class FakeOrg:
                 break
             contact = before.get(name.casefold())
             if contact is None:
-                contact = ("003NEW%09d" % sum(len(c) for c in self.contacts.values()), when)
+                contact = ("003NEW%09d" % self.next_serial("contact"), when)
                 mine = self.contacts[acc["Id"]]
                 mine[name.casefold() if name.casefold() not in mine else f"{name.casefold()} #{position}"] = contact
-            self.rows.append({"Id": "a1m%015d" % len(self.rows), "Attendance_Batch__c": batch["Id"], "Account__c": acc["Id"],
+            self.rows.append({"Id": "a1m%015d" % self.next_serial("row"), "Attendance_Batch__c": batch["Id"], "Account__c": acc["Id"],
                               "Attendance_Date__c": day, "Contact__c": contact[0], "contact_created": contact[1],
                               "CreatedDate": when})
             made += 1

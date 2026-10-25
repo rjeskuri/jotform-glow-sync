@@ -15,14 +15,17 @@ The contract these tests pin:
   expected; a totals line `to re-send: N batches, A girls to add, C new contacts, K clubs`; a line
   per club with its girls to add; and `skipped, <reason>: N` per skip reason, the reasons being
   no_success_original, module_differs, original_not_mergeable (a Partner report or no rows of its own),
-  no_names, adds_nobody, own_batch (a batch carrying this tool's marker), already_resent (per ledger,
-  whatever the outcome; it wins over the prediction's reasons). A skipped batch is counted, not listed:
-  its id is not printed. The dry run is a live read: an open CHECK does not block it, only `--apply`.
+  no_names, adds_nobody, fuzzy_matching (Enable_Fuzzy_Matching__c true: the processor would match the
+  names by edit distance, which the exact-match prediction cannot follow), own_batch (a batch carrying
+  this tool's marker), already_resent (per ledger, whatever the outcome; it wins over the prediction's
+  reasons). A skipped batch is counted, not listed: its id is not printed, and it is never sent. The dry
+  run is a live read: an open CHECK does not block it, only `--apply`.
 - `--only X` refuses, sending nothing, when an earlier candidate of X's club and day is not re-sent
   yet (the queue under `--limit` keeps that order); in the dry run `--only X` shows X's prediction with
   the earlier same-day candidates simulated. `--only` naming a skipped batch, one already re-sent, or
   anything that is not a Failed "Duplicate" batch read (another Failed, a Success, an unknown id) is
-  refused in BOTH modes, the message naming the skip reason or saying "not a candidate".
+  refused in BOTH modes: a skipped one with `skipped, <its reason>` (and no other reason), anything else
+  with `not a Failed "Duplicate" batch created since <since>` (and no skip reason).
 - the ledger is <dir>/resend_ledger.csv (owner-only) with at least the columns RESEND_COLS; a
   candidate's rows go `sending` then `ok` / `CHECK` / `unknown` (a lost read-back: settled by the
   marker before the next `--apply` sends anything); the added rows and created contacts are recorded
@@ -30,8 +33,10 @@ The contract these tests pin:
   batch's), and nothing of what was there before - the originals' own rows, the club's earlier
   contacts - is ever recorded; `status` reports the re-sends and what a rollback would remove.
 - the fake gives a merged correction's rows the SAME CreatedDate as the correction's batch (Salesforce
-  writes them in the same second): the rows added "after" the new batch are read with >=, as the
-  existing read-back reads the contacts a batch made.
+  writes them in the same transaction): a copy's rows are the original's rows of the copy's own
+  transaction. Rows a LATER correction (a live mentor's, merged after the copy and before its read-back
+  or its settling) adds to the same original carry a later CreatedDate: never counted for the copy,
+  never recorded for its rollback.
 - never a girl's name and never the text of a status message, printed or written.
 """
 import csv
@@ -53,8 +58,12 @@ AMARA, BEATRICE, CHIARA = "Amara Zibblewick", "Beatrice Quornstead", "Chiara Vex
 DALIA, ESTHER, FIONA = "Dalia Fennimore", "Esther Wrenlock", "Fiona Thistlebury"
 GRETA, HANA, INES = "Greta Morrowind", "Hana Pellingbrook", "Ines Quibblestone"
 JANA, KIRA, LENA, MIRA = "Jana Fernsby", "Kira Wobblecastle", "Lena Pumpernick", "Mira Oakhollow"
+NORA = "Nora Quillfeather"
 SURNAMES = [n.split()[1] for n in (AMARA, BEATRICE, CHIARA, DALIA, ESTHER, FIONA, GRETA, HANA, INES, JANA, KIRA,
-                                   LENA, MIRA)]
+                                   LENA, MIRA, NORA)]
+REASONS = ("no_success_original", "module_differs", "original_not_mergeable", "no_names", "adds_nobody",
+           "fuzzy_matching", "own_batch", "already_resent")
+NOT_READ = 'not a Failed "Duplicate" batch created since'
 RESEND_LEDGER = "resend_ledger.csv"
 RESEND_COLS = {"when_utc", "done_utc", "failed_id", "original_id", "account_id", "account_name", "attendance_date",
                "names", "adds_expected", "contacts_expected", "batch_id", "batch_name", "status", "outcome",
@@ -131,8 +140,34 @@ class ResendHarness(Harness):
                 assert (status, message[:20]) == ("Failed", "Attendance already e"), (label, status, message)
             else:
                 assert (status, message) == ("Failed", DUPLICATE), (label, status, message)
+        assert len({record["Id"] for record in h.values()}) == len(h), "two batches of the history share an id"
         self.org.merge_corrections = True    # the processor since 2026-10-24 takes the re-sends
         return h
+
+    def live_correction(self, club, date, names, week=3):
+        """A mentor's correction the processor takes while the tool runs (not something the tool sent):
+        straight into the fake, past any hook on its insert."""
+        body = {"Account_Name__c": CLUBS[club], "Attendance_Date__c": date, "Module__c": MODULE, "Module_Week__c": week,
+                "Module_Year__c": 1, "Creator__c": "Jotform", "enable_fuzzy_matching__c": False,
+                "Contact_IDs__c": ", ".join(names)}
+        type(self.org).insert(self.org, "Attendance_Batch__c", body)
+        self.org.inserts.pop()
+        return self.org.batches[-1]
+
+    def assert_refusal(self, stop, why):
+        """An `--only` refusal that gives the reason it should: `skipped, <reason>` alone, or NOT_READ."""
+        self.assertIsNotNone(stop)
+        if why == NOT_READ:
+            self.assertIn(NOT_READ, stop)
+            self.assertNotIn("skipped,", stop)
+            for reason in REASONS:
+                self.assertNotIn(reason, stop)
+        else:
+            self.assertIn(f"skipped, {why}", stop)
+            self.assertNotIn(NOT_READ, stop)
+            for reason in REASONS:
+                if reason != why:
+                    self.assertNotIn(reason, stop)
 
     def hook(self, before=None, after=None):
         """Something that happens around the tool's next inserts (every one of them)."""
@@ -264,7 +299,8 @@ class ResendDryRun(ResendHarness, unittest.TestCase):
                 names = " , ," if skipped else [ESTHER]
             elif reason == "adds_nobody":
                 names = [DALIA, "dalia  fennimore"] if skipped else [DALIA, ESTHER]
-            correction = self.batch(BIRCH, "2026-09-05", names, module=module)
+            fuzzy = reason == "fuzzy_matching" and skipped       # the processor would match names by edit distance
+            correction = self.batch(BIRCH, "2026-09-05", names, module=module, enable_fuzzy_matching__c=fuzzy)
             if reason == "no_success_original" and skipped:
                 self.org.batches.remove(original)
             self.org.merge_corrections = True
@@ -272,7 +308,7 @@ class ResendDryRun(ResendHarness, unittest.TestCase):
 
         cases = {"no_success_original": "no_success_original", "module_differs": "module_differs",
                  "Partner report": "original_not_mergeable", "no rows of its own": "original_not_mergeable",
-                 "no_names": "no_names", "adds_nobody": "adds_nobody"}
+                 "no_names": "no_names", "adds_nobody": "adds_nobody", "fuzzy_matching": "fuzzy_matching"}
         for reason, printed in cases.items():
             with self.subTest(reason):
                 original, correction = pair(reason, skipped=True)
@@ -283,6 +319,9 @@ class ResendDryRun(ResendHarness, unittest.TestCase):
                 self.assertNotIn(correction["Id"], out)
                 self.assertIsNone(self.apply()[1])
                 self.assertEqual(self.org.inserts, [])
+                for run in (self.resend, self.apply):       # --only on it names this reason, in both modes
+                    self.assert_refusal(run("--only", correction["Id"])[1], printed)
+                self.assertEqual((self.org.inserts, self.ledger()), ([], []))
             with self.subTest(reason + " removed"):
                 original, correction = pair(reason, skipped=False)
                 out, stop = self.resend()
@@ -295,6 +334,32 @@ class ResendDryRun(ResendHarness, unittest.TestCase):
                 self.assertEqual((len(self.org.inserts), self.states()), (1, ["sending", "ok"]))
                 self.assertEqual((len(self.rows_of(original)), original["Girls_Present__c"]), (2, 2))
                 self.assert_private(out)
+
+    def test_a_correction_the_processor_would_match_fuzzily_is_counted_and_never_sent(self):
+        h = self.history()
+        self.org.merge_corrections = False   # Birch and Cedar on 10-03: each correction would add a girl by exact names
+        fuzzy = []
+        for club, original, names in ((BIRCH, [DALIA], [DALIA, ESTHER]), (CEDAR, [FIONA], [FIONA, INES, JANA])):
+            self.batch(club, "2026-10-03", original, week=7)
+            fuzzy.append(self.batch(club, "2026-10-03", names, week=7, enable_fuzzy_matching__c=True))
+        self.org.merge_corrections = True
+        out, stop = self.resend()
+        self.assertIsNone(stop, stop)
+        for record in fuzzy:
+            self.assertNotIn(record["Id"], out)
+        self.assertIn("to re-send: 4 batches, 7 girls to add, 6 new contacts, 2 clubs", out)     # the history's four
+        self.assertEqual(self.skip_counts(out), {"adds_nobody": 2, "module_differs": 1, "original_not_mergeable": 2,
+                                                 "no_success_original": 1, "no_names": 1, "fuzzy_matching": 2})
+        out, stop = self.apply()
+        self.assertIsNone(stop, stop)
+        self.assertEqual([next((l for l in ("C1", "C2", "C11", "C13") if h[l]["Id"] in b["Creator__c"]), b["Creator__c"])
+                          for b in self.org.inserts], ["C1", "C2", "C11", "C13"])
+        self.assertFalse({r["failed_id"] for r in self.ledger()} & {record["Id"] for record in fuzzy})
+        out, stop = self.resend()            # still counted afterwards, still not a candidate
+        self.assertIsNone(stop, stop)
+        self.assertEqual((self.skip_counts(out).get("fuzzy_matching"), self.skip_counts(out).get("already_resent")), (2, 4))
+        self.assertIn("to re-send: 0 batches, 0 girls to add, 0 new contacts, 0 clubs", out)
+        self.assert_private(out)
 
     def test_resend_needs_the_vpn_word_in_both_modes_and_only_sends_what_it_is_told(self):
         h = self.history()
@@ -519,6 +584,64 @@ class ResendApply(ResendHarness, unittest.TestCase):
                          [(4, 4), (2, 2), (5, 5)])
         self.assert_private(out)
 
+    def test_rows_a_later_correction_merges_into_the_original_are_not_the_copy_s(self):
+        """A live mentor's correction of the copy's club and day, merged by the processor after the copy and
+        before its read-back (or its settling by the next run): its row lands on the same original, later.
+        It is neither counted for the copy nor recorded for the copy's rollback; the copy is as predicted."""
+        def run_with_live_correction(path):
+            if path == "read back at once":
+                once = []
+
+                def after():
+                    if not once:
+                        once.append(self.live_correction(ASPEN, "2026-09-05", [NORA]))
+                self.hook(after=after)
+                out, stop = self.apply("--limit", "1")
+                self.assertIsNone(stop, stop)
+                self.assertEqual(self.states(), ["sending", "ok"])
+                return once[0], out
+            real = self.org.insert
+
+            def insert_then_die(sobject, body):
+                answer = real(sobject, body)
+                self.org.die_after_insert = 1    # the read-back gets no answer: settled by the next run
+                return answer
+            self.org.insert = insert_then_die
+            out, stop = self.apply("--limit", "1")
+            self.assertIsNotNone(stop)
+            self.assertEqual(self.states(), ["sending", "unknown"])
+            self.org.insert = real
+            live = self.live_correction(ASPEN, "2026-09-05", [NORA])
+            more, stop = self.apply()
+            self.assertIsNone(stop, stop)
+            self.assertEqual(self.states(), ["sending", "unknown", "ok"] + ["sending", "ok"] * 3)
+            return live, out + more
+
+        for path in ("read back at once", "settled by the next run"):
+            with self.subTest(path):
+                self.fresh()
+                h = self.history()
+                # a girl the club knows, without a row on 09-05: the live correction adds her, no new contact
+                self.org.contacts[ASPEN][NORA.casefold()] = ("003LATE00000000001", "2026-03-01T00:00:00.000+0000")
+                live, out = run_with_live_correction(path)
+                copy = next(b for b in self.org.batches if h["C1"]["Id"] in str(b["Creator__c"]))
+                self.assertEqual(live["Status_Message__c"], f"merged into {h['O1']['Id']}")      # the fake did merge it
+                self.assertGreater(live["CreatedDate"], copy["CreatedDate"])
+                theirs = [r for r in self.rows_of(h["O1"]) if r["CreatedDate"] == live["CreatedDate"]]
+                mine = [r for r in self.rows_of(h["O1"]) if r["CreatedDate"] == copy["CreatedDate"]]
+                self.assertEqual((len(theirs), len(mine), len(self.rows_of(h["O1"])), h["O1"]["Girls_Present__c"]),
+                                 (1, 2, 5, 5))
+                done = [r for r in self.ledger() if r["failed_id"] == h["C1"]["Id"]][-1]
+                self.assertEqual((done["status"], done["batch_id"], done["rows_added"], done["contacts_created"]),
+                                 ("ok", copy["Id"], "2", "2"))
+                text = self.folder_text()
+                self.assertNotIn(theirs[0]["Id"], text)                   # never removed by the copy's rollback
+                self.assertNotIn(theirs[0]["Contact__c"], text)
+                for r in mine:
+                    self.assertTrue(any(r["Id"] in line and (copy["Id"] in line or h["C1"]["Id"] in line)
+                                        for line in text.splitlines()), (r["Id"], text))
+                self.assert_private(out)
+
     def test_the_rollback_record_holds_only_what_each_re_send_added_tied_to_it(self):
         h = self.history()
         rows_before = [r["Id"] for r in self.org.rows]
@@ -573,17 +696,23 @@ class ResendApply(ResendHarness, unittest.TestCase):
 
     def test_only_names_what_it_cannot_re_send_and_sends_nothing(self):
         h = self.history()
+        self.org.merge_corrections = False   # a correction that would add a girl, but the processor would match fuzzily
+        self.batch(ASPEN, "2026-10-03", [AMARA], week=7)
+        fuzzy = self.batch(ASPEN, "2026-10-03", [AMARA, BEATRICE], week=7, enable_fuzzy_matching__c=True)
+        self.org.merge_corrections = True
         self.assertIsNone(self.apply("--only", h["C1"]["Id"])[1])
-        cases = {h["C4"]["Id"]: "module_differs", h["C3"]["Id"]: "adds_nobody", h["C5"]["Id"]: "original_not_mergeable",
-                 h["C6"]["Id"]: "original_not_mergeable", h["C7"]["Id"]: "no_success_original", h["C8"]["Id"]: "no_names",
-                 h["C1"]["Id"]: "already_resent", h["C9"]["Id"]: "not a candidate", h["O1"]["Id"]: "not a candidate",
-                 "a1l000000000000999": "not a candidate"}
-        for only, why in cases.items():
+        cases = [("C4", h["C4"]["Id"], "module_differs"), ("C3", h["C3"]["Id"], "adds_nobody"),
+                 ("C5", h["C5"]["Id"], "original_not_mergeable"), ("C6", h["C6"]["Id"], "original_not_mergeable"),
+                 ("C7", h["C7"]["Id"], "no_success_original"), ("C8", h["C8"]["Id"], "no_names"),
+                 ("C1", h["C1"]["Id"], "already_resent"), ("C9", h["C9"]["Id"], NOT_READ),
+                 ("O1", h["O1"]["Id"], NOT_READ), ("unknown", "a1l000000000000999", NOT_READ),
+                 ("fuzzy", fuzzy["Id"], "fuzzy_matching")]
+        self.assertEqual(len({only for _, only, _ in cases}), len(cases))      # each case its own batch
+        for label, only, why in cases:
             for run in (self.apply, self.resend):
-                with self.subTest((why, run.__name__)):
+                with self.subTest((label, why, run.__name__)):
                     out, stop = run("--only", only)
-                    self.assertIsNotNone(stop)
-                    self.assertIn(why, stop)
+                    self.assert_refusal(stop, why)
                     self.assert_private(out, stop)
         self.assertEqual((len(self.org.inserts), self.states()), (1, ["sending", "ok"]))
 
