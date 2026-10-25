@@ -4047,6 +4047,84 @@ Questions for GLOW:
   `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
   and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
 
+### GLOW Club Training
+
+D4 in `glow/sf_keep_list.csv`, the GLOW Club Training dashboard, is the dashboard "Mentors"
+(`01ZRP000006quAj2AI`) in "GLOW Monthly Dashboards", with items 12-16 (ticket #78,
+[plan](plans/2026-10-25-sf-dash-training.md)). The org's dashboard labelled "GLOW Club Training" is
+D3, the GLOW Club Observations dashboard. D4's label and its reports' labels stay as they are
+(#70), and each component's title is its report's label. It runs as the specified running user
+(`SpecifiedUser`), so it shows the data of its last refresh: a refresh after each change (a PUT,
+Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current. #78's build is
+`data/sf_dash_training_2026-10-24/build/`; until it is deployed on Ryan's go (the plan's Result),
+the org holds the vendor's dashboard and reports.
+
+The measures, each a report in "GLOW Monthly Reports" on the Monthly Report object `DHIS2__c`, and
+each component on its own report:
+- Item 13, "Number of mentors who attended training": the report
+  "Number of mentors trained about module" (`00ORP000004RJZE2A4`, summary) sums
+  `DHIS2__c.Mentors_attended_the_training_sessions__c` for each partner and month. The component is a column of the sum for each month. SOQL signal,
+  the last complete month:
+  `SELECT COUNT(Id), SUM(Mentors_attended_the_training_sessions__c) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`.
+- Item 14, "Number of training sessions led": the report "Number of training sessions led"
+  (`00ORP000004RJZ82AO`, summary) sums `DHIS2__c.how_many_training_sessions_did_you_lead__c` for
+  each partner and month. The component is a column of the sum for each month. SOQL signal, the
+  last complete month:
+  `SELECT COUNT(Id), SUM(how_many_training_sessions_did_you_lead__c) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`.
+- Item 15, "Whether PC led any training sessions with mentors": the report
+  "Leading training sessions with mentors" (`00ORP000004RJZ62AO`, matrix) counts Monthly Reports by the answer to
+  `DHIS2__c.Lead_any_training_sessions__c` (Yes or No, across; a blank answer is left out), for
+  each partner and month. Each Monthly Report is one partner's month, so its counts are partners.
+  The component is a stacked column for each month, Yes and No. SOQL signal, the last complete
+  month:
+  `SELECT Lead_any_training_sessions__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Lead_any_training_sessions__c != null GROUP BY Lead_any_training_sessions__c`.
+- Item 16, "Whether PC met with mentors as a group to discuss program implementation": the report
+  "Meeting with mentors to discuss program" (`00ORP000004RJZ72AO`, matrix) counts Monthly Reports
+  by the answer to `DHIS2__c.Did_you_meet_with_mentors_as_a_group__c` (Yes or No, across; a blank
+  answer is left out), for each partner and month, as item 15 does. Its component goes on D4 once
+  #77 has taken it off D3 (Ryan, 2026-10-24: #77 lands first); until then item 16's report is as
+  #73 left it. SOQL signal, the last complete month:
+  `SELECT Did_you_meet_with_mentors_as_a_group__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Did_you_meet_with_mentors_as_a_group__c != null GROUP BY Did_you_meet_with_mentors_as_a_group__c`.
+- Item 12, "New mentors recruited", has no report yet: #80 builds it and adds its component to D4
+  after #78, from a fresh retrieve. The grid keeps a row free for it, and the second row's right
+  half for item 16.
+
+A partner that filed no Monthly Report for a month has no `DHIS2__c` record for it, so it has no
+row in items 15 and 16: a missing response, which the reports keep apart from a No by leaving it
+out. Who filed is "Reports completed on time" (item 18, D5).
+
+How the reports read the data:
+- Each report is grouped by the partner (`DHIS2__c.Account__c`), then by `Period__c` by calendar
+  month; the month is never `CreatedDate`, and a grouping is never also a column.
+- The default period is the last 12 months: the report filter `Period__c equals LAST_N_MONTHS:12`,
+  which leaves out the current, incomplete month. The standard date filter's column is
+  `Period__c`, range All Time, so the field filter sets the period.
+- Each report carries the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
+  (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
+  `notContain` `test` (the lookup matches on the account's name). In the last 12 months the rule
+  leaves out 2 of 569 Monthly Reports (2026-10-24).
+- Items 15 and 16 also keep their filter on a non-blank answer.
+
+The dashboard's only filter is Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`,
+its 6 partner managers), on every component (Ryan, 2026-10-24): each manager sees their partners.
+It has no Partner or Month filter (Ryan, 2026-10-24); viewers read one partner's month from the
+reports' grouping by partner and month. The two tables it had, on the "DHIS2 Reports" reports
+"Mentors Discuss Program Implementation" (`00ORP000005uecc2AA`) and "Lead Training Session with
+Mentors LastM" (`00ORP000005ufNN2AY`), both on 2025 only, come off it; those two reports go to
+Decommissioned by `tools/sf_report_folders.py move` once D4 uses neither, on Ryan's go.
+
+For one partner's month, each query takes `AND Account__r.Name = '<partner>'`; for item 14:
+`SELECT SUM(how_many_training_sessions_did_you_lead__c) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`
+equals that partner's cell for that month in item 14's report.
+
+Rollback: restore from the copies in Decommissioned of the reports and the dashboard, made before
+the deploy by `copy --tag "#78"`; open the copy, then Save As or move it back (Decommissioned,
+above). Or redeploy this change's retrieve `data/sf_dash_training_2026-10-24/before/`
+(check-only, Ryan's go, deploy) only while a fresh retrieve equals `after/`. When they differ,
+someone has changed the dashboard or a report since the deploy, and the rollback starts from a
+fresh retrieve by the ritual above. A rollback never deploys an older build or another change's
+retrieve (DECISIONS 2026-10-16).
+
 ## Interactive dashboard in Salesforce
 
 - **When:** before a change to the interactive dashboard (#81, #82, #83), or to read how it counts.
