@@ -6,7 +6,7 @@
   python3 tools/sf_report_folders.py copy --vpn-off --kind report --id 00O... --tag "#72" [--apply]
   python3 tools/sf_report_folders.py move --vpn-off --plan plan.csv [--apply] [--limit 1]
   python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv [--apply] [--limit N]
-  python3 tools/sf_report_folders.py restore-descriptions --vpn-off --from DIR [--from DIR ...] [--apply] [--limit N]
+  python3 tools/sf_report_folders.py restore-descriptions --vpn-off --expect N --from DIR [--from DIR ...] [--apply] [--limit N]
 
 list (read-only): CSV on stdout, kind,id,developer_name,label,folder,last_run,used_by (used_by: the
 ids of the dashboards with a component on the report, ;-separated); the counts on stderr.
@@ -30,7 +30,9 @@ Only a kept report whose description is blank now gets one, by a PATCH with its 
 (ledger action "describe", which undo ignores); a report in Decommissioned or in "Attendance" is left
 as it is, a name no report has is printed. Refused before any write: a DIR that is
 missing or holds no report file, two texts for one name, a name two reports have, a text over 255
-characters, a planned report whose label is over 40 characters. The texts are never printed.
+characters, a planned report whose label is over 40 characters. --expect N is the planned count the
+run must find (the whole plan, before --limit): another count is refused once the plan and the
+counts are printed, the dry run too, before any write. The texts are never printed.
 
 Every subcommand needs --vpn-off; copy, move, undo and restore-descriptions are dry runs unless --apply
 (Ryan's go).
@@ -516,6 +518,9 @@ def do_restore(org, args, folder):
     for name in ghosts:
         print(f'  not found, no report has the developer name "{name}"')
     print("counts: " + ", ".join(f"{word}: {n}" for word, n in counts.items()))
+    if len(planned) != args.expect:
+        raise Refused(f"--expect {args.expect}, but {len(planned)} reports are planned: not the agreed set - "
+                      "look at the plan above; nothing was written")
     todo = planned[:args.limit] if args.limit else planned
     if not args.apply:
         print(f"dry run: nothing was written ({len(todo)} to describe; --apply --vpn-off writes, with Ryan's go)")
@@ -529,6 +534,14 @@ def do_restore(org, args, folder):
     left = len(planned) - len(todo)
     print(f"described and read back: {len(todo)}" + (f"; left by --limit: {left}" if left else "")
           + f"; ledger {rel(ledger.path)}")
+
+
+def whole(text):
+    """argparse type: a whole number of 0 or more (--expect)."""
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
+    return value
 
 
 def main(argv=None, org=None):
@@ -561,6 +574,8 @@ def main(argv=None, org=None):
                    help="a metadata retrieve (sfdx project dir) holding *.report-meta.xml files (repeatable)")
     p.add_argument("--apply", action="store_true", help="write to Salesforce (needs Ryan's go)")
     p.add_argument("--limit", type=positive, help="describe at most N reports")
+    p.add_argument("--expect", type=whole, required=True, metavar="N",
+                   help="the planned count the run must find, the whole plan before --limit (refused otherwise)")
     args = ap.parse_args(argv)
     try:
         require_vpn_off(args)

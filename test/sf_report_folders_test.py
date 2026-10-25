@@ -2022,6 +2022,10 @@ class RestoreDescriptions(Harness):
     def restore(self, *argv):
         return self.ok("restore-descriptions", "--vpn-off", *argv)
 
+    def expect(self, n):
+        """--expect N: the planned count the run must find (#142 review: the plan is the set Ryan agreed)."""
+        return ["--expect", str(n)]
+
     def count_of(self, said, word, absent=None):
         """The count printed for `word` ("word: N" or "N word"); every mention agrees."""
         w = re.escape(word).replace(r"\ ", r"\s+")
@@ -2055,7 +2059,7 @@ class RestoreDescriptions(Harness):
             o = self.fresh()
             s = self.stage(name)
             before, descs = o.state(), self.descs()
-            said = self.restore(*s.from_args)
+            said = self.restore(*self.expect(len(s.planned)), *s.from_args)
             self.assert_nothing_written(before)
             self.assertEqual(self.descs(), descs, f"{name}: a dry run changes no description")
             for rid in s.planned:
@@ -2073,7 +2077,7 @@ class RestoreDescriptions(Harness):
             o = self.fresh()
             s = self.stage(name)
             before, descs = o.state(), self.descs()
-            said = self.restore("--apply", *s.from_args)
+            said = self.restore("--apply", *self.expect(len(s.planned)), *s.from_args)
             self.assertEqual(o.posts(), [], "a restore is a PATCH, never a clone")
             patches = o.patches()
             self.assertEqual(sorted(self.patched_ids()), sorted(s.planned),
@@ -2096,13 +2100,13 @@ class RestoreDescriptions(Harness):
                 self.assert_no_text_printed(fh.read(), s.texts)
             self.assert_no_text_printed(said, s.texts)
 
-            # a second run finds nothing left to restore
+            # a second run finds nothing left to restore (planned 0: --expect 0 is its count)
             sent = len(o.calls)
-            said = self.restore(*s.from_args)
+            said = self.restore(*self.expect(0), *s.from_args)
             again = dict(s.counts, planned=0)
             again["already described"] += len(s.planned)
             self.assert_counts(said, again)
-            self.restore("--apply", *s.from_args)
+            self.restore("--apply", *self.expect(0), *s.from_args)
             self.assertEqual(self.writes_since(sent), [], f"{name}: every description is back already")
             self.assertEqual(len(self.ledger()), len(s.planned))
 
@@ -2117,7 +2121,7 @@ class RestoreDescriptions(Harness):
             prefix, suffix = PREFIXES[(n + 1) % len(PREFIXES)], SUFFIXES[(n + 2) % len(SUFFIXES)]
             want[rid] = core
             files.append((f"reports/Folder_{n % 3}", self.dn(rid), prefix + core + suffix))
-        said = self.restore("--apply", "--from", self.retrieve(files))
+        said = self.restore("--apply", *self.expect(len(want)), "--from", self.retrieve(files))
         for rid, core in want.items():
             self.assertEqual(o.report(rid)["Description"], core,
                              f"{rid}: unescaped, the leading bullets and whitespace and the trailing whitespace gone; "
@@ -2137,7 +2141,7 @@ class RestoreDescriptions(Harness):
                 args = ["--from", self.retrieve(files + [other])]
             before = o.state()
             for extra in ([], ["--apply"]):
-                said = self.refused("restore-descriptions", "--vpn-off", *args, *extra)
+                said = self.refused("restore-descriptions", "--vpn-off", *self.expect(2), *args, *extra)
                 self.assert_nothing_written(before)
                 self.assertIn(self.dn(meet), said, f"{layout}: the refusal names the developer name")
                 self.assert_no_text_printed(said, [a, b, c])
@@ -2145,7 +2149,8 @@ class RestoreDescriptions(Harness):
         o = self.fresh()
         meet = o.rid["meet"]
         a = core_text(3)
-        self.restore("--apply", "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + a + "  ")]),
+        self.restore("--apply", *self.expect(1),
+                     "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + a + "  ")]),
                      "--from", self.retrieve([("reports/Old_Exports", self.dn(meet), a)]))
         self.assertEqual(self.patched_ids(), [meet])
         self.assertEqual(o.report(meet)["Description"], a)
@@ -2159,10 +2164,10 @@ class RestoreDescriptions(Harness):
             texts = [core_text(n) for n in range(1, count + 1)]
             d = self.retrieve([("reports/DHIS2_Reports", self.dn(girls), text)]
                               + [("reports/Old_Exports", g, "●\t" + t) for g, t in zip(ghosts, texts)])
-            said = self.restore("--from", d)
+            said = self.restore(*self.expect(1), "--from", d)
             self.assertEqual(self.count_of(said, "not found"), count, said)
             self.assertEqual(self.count_of(said, "planned"), 1, said)
-            said = self.restore("--apply", "--from", d)
+            said = self.restore("--apply", *self.expect(1), "--from", d)
             for g in ghosts:
                 self.assertIn(g, said, "the saved name no report has is reported")
             self.assertEqual(self.patched_ids(), [girls])
@@ -2179,13 +2184,13 @@ class RestoreDescriptions(Harness):
                            ("reports/DHIS2_Reports", self.dn(o.rid["girls"]), texts[1])])
         before = o.state()
         for extra in ([], ["--apply"]):
-            said = self.refused("restore-descriptions", "--vpn-off", "--from", d, *extra)
+            said = self.refused("restore-descriptions", "--vpn-off", *self.expect(2), "--from", d, *extra)
             self.assert_nothing_written(before)
             self.assertIn(meet["DeveloperName"], said, "the refusal names the developer name")
             self.assert_no_text_printed(said, texts)
         # the control: one report of that name again
         o.reports.remove(twin)
-        self.restore("--apply", "--from", d)
+        self.restore("--apply", *self.expect(2), "--from", d)
         self.assertEqual(sorted(self.patched_ids()), sorted([meet["Id"], o.rid["girls"]]))
 
     def test_a_description_over_255_characters_is_refused_before_any_write(self):
@@ -2197,7 +2202,7 @@ class RestoreDescriptions(Harness):
                                ("reports/DHIS2_Reports", self.dn(meet), "●\t" + texts[1])])
             before = o.state()
             for extra in ([], ["--apply"]):
-                said = self.refused("restore-descriptions", "--vpn-off", "--from", d, *extra)
+                said = self.refused("restore-descriptions", "--vpn-off", *self.expect(2), "--from", d, *extra)
                 self.assert_nothing_written(before)
                 self.assertIn("255", said, f"{length}: the refusal says the limit")
                 self.assertTrue(self.dn(meet) in said or meet in said, f"{length}: it names the report:\n{said}")
@@ -2206,7 +2211,8 @@ class RestoreDescriptions(Harness):
         o = self.fresh()
         meet = o.rid["meet"]
         text = text_of_length(255)
-        self.restore("--apply", "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + text + "  ")]))
+        self.restore("--apply", *self.expect(1),
+                     "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + text + "  ")]))
         self.assertEqual(o.report(meet)["Description"], text)
 
     def test_a_from_dir_that_is_missing_or_holds_no_report_file_is_refused(self):
@@ -2222,10 +2228,10 @@ class RestoreDescriptions(Harness):
         for bad in (missing, empty, dashboards):
             for args in (["--from", bad], ["--from", good, "--from", bad]):
                 for extra in ([], ["--apply"]):
-                    said = self.refused("restore-descriptions", "--vpn-off", *args, *extra)
+                    said = self.refused("restore-descriptions", "--vpn-off", *self.expect(1), *args, *extra)
                     self.assert_nothing_written(before)
                     self.assertIn(os.path.basename(bad), said, f"the refusal names the dir:\n{said}")
-        self.restore("--apply", "--from", good)
+        self.restore("--apply", *self.expect(1), "--from", good)
         self.assertEqual(self.patched_ids(), [meet])
         self.assertEqual(o.report(meet)["Description"], text)
 
@@ -2233,7 +2239,7 @@ class RestoreDescriptions(Harness):
         for n in (1, 2, 3):
             o = self.fresh()
             s = self.stage("A")
-            self.restore("--apply", "--limit", str(n), *s.from_args)
+            self.restore("--apply", "--limit", str(n), *self.expect(len(s.planned)), *s.from_args)
             first = self.patched_ids()
             self.assertEqual(len(first), n, f"--limit {n}")
             self.assertEqual(len(set(first)), n)
@@ -2242,7 +2248,7 @@ class RestoreDescriptions(Harness):
             for rid, text in s.planned.items():
                 self.assertEqual(o.report(rid)["Description"] or "", text if rid in first else "", f"--limit {n}: {rid}")
             sent = len(o.calls)
-            self.restore("--apply", *s.from_args)
+            self.restore("--apply", *self.expect(len(s.planned) - n), *s.from_args)
             rest = self.patched_ids(self.writes_since(sent))
             self.assertEqual(sorted(rest), sorted(set(s.planned) - set(first)), f"--limit {n}: the rest, later")
             for rid, text in s.planned.items():
@@ -2264,7 +2270,8 @@ class RestoreDescriptions(Harness):
                     o.refuse_patch.add(bad)
                 else:
                     o.desc_drift[bad] = mode
-                said = self.refused("restore-descriptions", "--vpn-off", "--apply", *s.from_args)
+                said = self.refused("restore-descriptions", "--vpn-off", "--apply", *self.expect(len(s.planned)),
+                                    *s.from_args)
                 where = f"{mode}, planned report {k}"
                 ids = self.patched_ids()
                 self.assertTrue(ids and ids[-1] == bad, f"{where}: nothing sent after {bad}:\n{ids}\n{said}")
@@ -2285,7 +2292,7 @@ class RestoreDescriptions(Harness):
     def test_each_describe_row_is_on_disk_before_its_patch(self):
         o = self.org = self.renamed(WatchedOrg(self.ledger_path))
         s = self.stage("B")
-        self.restore("--apply", *s.from_args)
+        self.restore("--apply", *self.expect(len(s.planned)), *s.from_args)
         self.assertEqual([m for m, _, _ in o.on_disk], ["PATCH"] * len(s.planned))
         ids = [p.rsplit("/", 1)[1] for _, p, _ in o.on_disk]
         for k, (_, _, seen) in enumerate(o.on_disk):
@@ -2302,7 +2309,8 @@ class RestoreDescriptions(Harness):
         meet, girls = o.rid["meet"], o.rid["girls"]
         self.apply_moves([[("report", meet, "GLOW Club Reports", "Club meeting frequency")]])
         texts = [core_text(0), core_text(1)]
-        self.restore("--apply", "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + texts[0]),
+        self.restore("--apply", *self.expect(2),
+                     "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + texts[0]),
                                                          ("reports/DHIS2_Reports", self.dn(girls), texts[1])]))
         ledger = self.ledger()
         self.assertEqual(sorted((x["action"], x["id"]) for x in ledger),
@@ -2325,11 +2333,132 @@ class RestoreDescriptions(Harness):
         self.assertEqual(self.writes_since(sent), [], "nothing left to undo")
         self.assert_no_text_printed(said, texts)
 
+    # -- review fix: --expect N, the planned count Ryan agreed (the 12 kept reports the #73 moves blanked)
+    def refusal(self, said):
+        """What a run said on stderr and in its exit message, without its stdout (the plan, the counts)."""
+        return said[len(self.out):]
+
+    def assert_names(self, text, *numbers):
+        for n in numbers:
+            self.assertRegex(text, rf"(?<!\d){n}(?!\d)", f"the refusal names {n}:\n{text}")
+
+    def test_expect_must_be_the_planned_count_or_the_run_is_refused(self):
+        """--expect N counts the whole plan: planned == N runs as before; any other N is refused (the dry
+        run after printing its plan and its counts, --apply before any write), naming both numbers; with
+        --limit too, N is still the whole plan's count, never the limited part."""
+        for name in SCENARIOS:
+            o = self.fresh()
+            s = self.stage(name)
+            planned = len(s.planned)
+            self.assertGreaterEqual(planned, 3, "the scenario plans enough reports to tell the counts apart")
+            others = sorted({0, planned - 1, planned + 1, planned + 5, sum(s.counts.values()),
+                             planned + s.counts["not found"]} - {planned})
+            before, descs = o.state(), self.descs()
+            for n in others:
+                where = f"{name}: {planned} planned, --expect {n}"
+                said, code = self.run_tool("restore-descriptions", "--vpn-off", *self.expect(n), *s.from_args)
+                self.assertNotIn(code, (None, 0), f"{where}: the dry run ends refused:\n{said}")
+                self.assert_nothing_written(before)
+                for rid in s.planned:
+                    self.assertEqual(len(self.lines_with(self.out, rid)), 1, f"{where}: the dry run prints its plan")
+                self.assert_counts(self.out, s.counts)
+                self.assert_names(self.refusal(said), n, planned)
+                self.assert_no_text_printed(said, s.texts)
+                for extra in (["--apply"], ["--apply", "--limit", "1"]):
+                    said = self.refused("restore-descriptions", "--vpn-off", *extra, *self.expect(n), *s.from_args)
+                    self.assert_nothing_written(before)
+                    self.assertEqual(self.descs(), descs, where)
+                    self.assert_names(self.refusal(said), n, planned)
+                    self.assert_no_text_printed(said, s.texts)
+            # --expect is the whole plan's count: --limit k with --expect k (k < planned) is refused
+            for k in range(1, planned):
+                self.refused("restore-descriptions", "--vpn-off", "--apply", "--limit", str(k), *self.expect(k),
+                             *s.from_args)
+                self.assert_nothing_written(before)
+            # the control: --expect the planned count, with --limit, then the rest
+            self.restore("--apply", "--limit", "1", *self.expect(planned), *s.from_args)
+            first = self.patched_ids()
+            self.assertEqual(len(first), 1)
+            self.restore("--apply", *self.expect(planned - 1), *s.from_args)
+            self.assertEqual(sorted(self.patched_ids()), sorted(s.planned))
+            for rid, text in s.planned.items():
+                self.assertEqual(o.report(rid)["Description"], text, f"{name}: {rid}")
+
+    def test_expect_is_required_and_a_number(self):
+        o = self.org
+        d = self.retrieve([("reports/DHIS2_Reports", self.dn(o.rid["meet"]), core_text(0))])
+        for args in ([], ["--apply"], ["--apply", "--limit", "1"], ["--expect", "twelve"], ["--expect", ""],
+                     ["--apply", "--expect", "1.5"]):
+            said, code = self.run_tool("restore-descriptions", "--vpn-off", *args, "--from", d)
+            self.assertEqual(code, 2, f"{args}: an argparse error:\n{said}")
+            self.assertIn("--expect", said, args)
+            self.assertEqual((o.calls, o.seen), ([], []), f"{args}: Salesforce was asked")
+            self.assertFalse(os.path.exists(self.ledger_path), args)
+
+    # -- the ruling: a planned report whose label is over 40 characters is refused before any write
+    def test_a_planned_report_whose_label_is_over_40_is_refused_before_any_write(self):
+        keys = ["meet", "girls", "mentors", "stories", "observed"]     # all blank, in DHIS2 Reports
+        for label, key in ((L41, "observed"), (LONG, "mentors"), (L60, "girls")):
+            o = self.fresh()
+            rid = o.rid[key]
+            o.report(rid)["Name"] = label
+            texts = [core_text(n) for n in range(len(keys))]
+            d = self.retrieve([("reports/DHIS2_Reports", self.dn(o.rid[k]), "●\t" + t) for k, t in zip(keys, texts)])
+            before = o.state()
+            for extra in ([], ["--apply"], ["--apply", "--limit", "1"]):
+                where = f"{len(label)} characters, {extra}"
+                said = self.refused("restore-descriptions", "--vpn-off", *extra, *self.expect(len(keys)), "--from", d)
+                self.assert_nothing_written(before)
+                self.assertEqual(o.report(rid)["Description"], "", where)
+                self.assertTrue(rid in said or self.dn(rid) in said, f"{where}: the refusal names the report:\n{said}")
+                self.assert_no_text_printed(said, texts)
+        # the control: a 40-character label is restored with it
+        o = self.fresh()
+        rid = o.rid["observed"]
+        o.report(rid)["Name"] = L40
+        want = {o.rid[k]: core_text(n) for n, k in enumerate(keys)}
+        d = self.retrieve([("reports/DHIS2_Reports", self.dn(r), t) for r, t in want.items()])
+        self.restore("--apply", *self.expect(len(keys)), "--from", d)
+        self.assertEqual(sorted(self.patched_ids()), sorted(want))
+        sent = [p for p in o.patches() if p[1] == self.path_of(rid)]
+        self.assertEqual(sent[0][2]["reportMetadata"]["name"], L40)
+        for r, t in want.items():
+            self.assertEqual(o.report(r)["Description"], t)
+
+    def test_a_long_label_on_a_report_that_is_not_planned_does_not_block_the_run(self):
+        o = self.org
+        planned = {o.rid[k]: core_text(n) for n, k in enumerate(["meet", "girls", "stories"])}
+        skipped = {   # long-labelled reports with a saved text, none planned
+            "mentors": (L41, "r_dhis2", f"Edited in Salesforce ({fresh_id('')})"),     # already described
+            "observed": (LONG, "r_decom", ""),                                         # in Decommissioned
+            "att": (L60, "r_att", ""),                                                 # in Attendance
+        }
+        files = [("reports/DHIS2_Reports", self.dn(r), t) for r, t in planned.items()]
+        texts = list(planned.values())
+        for n, (key, (label, folder, now)) in enumerate(skipped.items()):
+            r = o.report(o.rid[key])
+            r.update(Name=label, OwnerId=o.fid[folder], Description=now)
+            text = core_text(n + 3)
+            texts += [text] + ([now] if now else [])
+            files.append(("reports/Old_Exports", r["DeveloperName"], text))
+        o.report(o.rid["long"])["Description"] = ""        # LONG (43), blank, not in the retrieve
+        d = self.retrieve(files)
+        before, descs = o.state(), self.descs()
+        said = self.restore(*self.expect(len(planned)), "--from", d)
+        self.assert_counts(said, {"planned": 3, "already described": 1, "decommissioned": 1, "protected": 1,
+                                  "not found": 0})
+        said = self.restore("--apply", *self.expect(len(planned)), "--from", d)
+        self.assertEqual(sorted(self.patched_ids()), sorted(planned))
+        for rid, was in descs.items():
+            self.assertEqual(o.report(rid)["Description"], planned.get(rid, was), rid)
+        self.assertEqual(o.state(), before, "no folder or label changed")
+        self.assert_no_text_printed(said, texts)
+
     def test_restore_refuses_without_vpn_off(self):
         o = self.org
         d = self.retrieve([("reports/DHIS2_Reports", self.dn(o.rid["meet"]), core_text(0))])
         for extra in ([], ["--apply"]):
-            said = self.refused("restore-descriptions", "--from", d, *extra)
+            said = self.refused("restore-descriptions", *self.expect(1), "--from", d, *extra)
             self.assertIn("--vpn-off", said, extra)
             self.assertEqual((o.calls, o.seen), ([], []), f"Salesforce was asked: {extra}")
             self.assertFalse(os.path.exists(self.ledger_path), extra)
@@ -2337,8 +2466,8 @@ class RestoreDescriptions(Harness):
     def test_restore_reads_reports_and_folders_and_writes_report_patches_only(self):
         o = self.org
         s = self.stage("A")
-        self.restore(*s.from_args)
-        self.restore("--apply", *s.from_args)
+        self.restore(*self.expect(len(s.planned)), *s.from_args)
+        self.restore("--apply", *self.expect(len(s.planned)), *s.from_args)
         self.assertTrue(o.seen and o.patches())
         self.assertLessEqual({c[0] for c in o.calls}, {"GET", "PATCH"})
         for soql in o.seen:
@@ -2354,7 +2483,7 @@ class RestoreDescriptions(Harness):
         done = subprocess.run([sys.executable, TOOL, "restore-descriptions", "--help"], capture_output=True, text=True,
                               cwd=REPO, timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
-        for word in ("--from", "--apply", "--limit", "--vpn-off"):
+        for word in ("--from", "--apply", "--limit", "--vpn-off", "--expect"):
             self.assertIn(word, done.stdout)
 
 

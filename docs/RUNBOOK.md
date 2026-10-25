@@ -3895,10 +3895,14 @@ until `--apply` (Ryan's go, the live gate asks him). The folders named "Attendan
 - Restore the descriptions the moves blanked (#142, Ryan's decision 2026-10-25: the kept reports
   only, stray leading bullets stripped), from local metadata retrieves (sfdx project dirs, the
   report files under `force-app/main/default/reports/<folder>/<DeveloperName>.report-meta.xml`):
-  `python3 tools/sf_report_folders.py restore-descriptions --vpn-off --from <retrieve dir> [--from <another>]`
+  `python3 tools/sf_report_folders.py restore-descriptions --vpn-off --expect 12 --from <retrieve dir> [--from <another>]`
   (the dry run: one line per planned report with its id, label and folder, the names no report has,
-  and the counts planned, already described, decommissioned, protected, not found; never a text),
-  then `--apply --limit 1`, check that report in Salesforce, then `--apply` for the rest. Each saved
+  and the counts planned, already described, decommissioned, protected, not found; never a text).
+  `--expect 12` is the agreed set, the 12 kept reports of #73 (its moves' ledgers are gone): a
+  planned count (the whole plan, before `--limit`) other than `--expect` is refused, the dry run
+  too, and nothing is written - stop and look when the dry run's count differs. Then
+  `--apply --limit 1 --expect 12`, check that report in Salesforce, then `--apply --expect 11` for
+  the rest (the plan is what is left). Each saved
   `<description>` is unescaped, stripped of leading bullets (`●•*-`) and whitespace and of trailing
   whitespace; an empty one is ignored. Only a report whose description is blank now and that is not
   in Decommissioned gets one; one in "Attendance" is left as it is (counted as protected). Refused before any write: a `--from`
