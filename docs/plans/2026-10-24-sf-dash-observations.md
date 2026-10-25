@@ -61,8 +61,9 @@ dashboard, API 67.0). `evidence/build_vs_before.diff` is the diff against `befor
   `GC_sessions_did_you_observe_last_month__c`.
 - Item 11 (`00ORP000005uf412AA`): Matrix, a number bucket "Observed" on
   `GC_sessions_did_you_observe_last_month__c` across: No for 0 (`to` 0), Yes for 1 or more
-  (`from` 0); in `build/` the sum of the field stays a column (`build_item11/` drops that Sum
-  aggregate, below). Each record is one partner's month, so the
+  (`from` 0); the sum of the field stays a column, and the report's record count stays off as
+  retrieved (the param `co` 0; `build_item11/` turns it on, below). Each record is one partner's
+  month, so the
   counts are partner-months; a partner with no Monthly Report for a month has no row (a missing
   response, apart from a No). An unanswered question is a No too, and the report does not tell it from 0:
   the form shows the field as 0 until a number is typed, and `dHIS2Controller.setNumber` saves a
@@ -80,12 +81,12 @@ dashboard, API 67.0). `evidence/build_vs_before.diff` is the diff against `befor
   partner then month. The check-only and the read-back settle both.
 - Item 11's fix forward, 2026-10-25: `data/sf_dash_observations_2026-10-24/build_item11/` (its
   own `package.xml`: item 11's report only, API 67.0), from the fresh retrieve
-  `fresh_2026-10-25b/` of D3 and items 9-11, which equals `after/`. It drops the one
-  `<aggregateTypes>Sum</aggregateTypes>` of the column `GC_sessions_did_you_observe_last_month__c`,
-  which stays a plain column, so the report summarizes no column and offers `RowCount`, the record
-  count its component measures (the Result, step 6). The bucket, the groupings, the filters and
-  the description are as deployed; `evidence/build_item11_vs_after.diff` is that one line. The
-  dashboard is not in it: the component on item 11 stays as deployed.
+  `fresh_2026-10-25b/` of D3 and items 9-11, which equals `after/`. It changes one value, the
+  report param `co` from 0 to 1, which turns the report's record count on, so the report offers
+  `RowCount`, the record count its component measures, beside its Sum (the Result, step 6). The
+  Sum, the bucket, the groupings, the filters and the description are as deployed;
+  `evidence/build_item11_vs_after.diff` is that one line. The dashboard is not in it: the
+  component on item 11 stays as deployed.
 
 ## Rollout (live; each write on Ryan's go)
 
@@ -114,9 +115,9 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
    `PUT /services/data/v67.0/analytics/dashboards/01ZRP000006k2D32AI` (`sf api request rest
    --method PUT`), and read its refresh date back by a GET.
 7. Fix item 11 forward (the refresh of step 6: item 11's component fails with 406, the Result).
-   Item 11's report summarizes a column (`aggregateTypes` `Sum`), so it offers no `RowCount`, the
-   record count its component measures; `build_item11/` drops that Sum aggregate and changes
-   nothing else (Build). First a fresh retrieve of D3 and items 9-11 that equals `after/`
+   Item 11's report has its record count off (`co` 0, describe `hasRecordCount: false`), so it
+   offers no `RowCount`, the record count its component measures; `build_item11/` turns the
+   record count on (`co` 1, so `RowCount` beside its Sum) and changes nothing else (Build). First a fresh retrieve of D3 and items 9-11 that equals `after/`
    (2026-10-25: `fresh_2026-10-25b/`); a difference stops the step for Ryan. On Ryan's go,
    check-only, run within `data/sf_dash_observations_2026-10-24/build_item11/`:
    `sf project deploy start --dry-run -o glow -m "Report:GLOW_Monthly_Reports/Completed_Observing_Clubs_Alteast_Once_P_cn6"`.
@@ -216,11 +217,14 @@ forward, step 7).
   fails with 406, "One or more of the fields selected in the component is no longer available in
   the report" (NO_DATA); the report itself runs (Analytics API, 1,022 records). The cause, by the
   Analytics describe (`GET /analytics/reports/00ORP000005uf412AA/describe`,
-  `evidence/describe_00ORP000005uf412AA.json`): item 11's report summarizes a column
-  (`aggregateTypes` `Sum` on `GC_sessions_did_you_observe_last_month__c`), so its aggregates list
-  only that Sum and no `RowCount`, while its component measures `RowCount`. Item 9's report
-  summarizes no column and lists `RowCount` (`evidence/describe_00ORP000004RJZC2A4.json`). The fix
-  is Rollout step 7 (`build_item11/`), not yet run.
+  `evidence/describe_00ORP000005uf412AA.json`): item 11's report has its record count off (the
+  param `co` 0, describe `hasRecordCount: false`, as in `before/`), so its aggregates list only
+  its Sum and no `RowCount`, while its component measures `RowCount`. Item 10's report sums the
+  same column with `co` 1 and lists the Sum and `RowCount`
+  (`data/sf_stale_2026-10-23/evidence/runs/00ORP000004RJZD2A4.json`); item 9's report has `co` 1
+  and lists `RowCount` (`evidence/describe_00ORP000004RJZC2A4.json`). A first diagnosis on
+  2026-10-25 named the wrong cause; the reviewer's check of `co` corrected it. The fix is Rollout
+  step 7 (`build_item11/`), not yet run.
 
 The baseline the components must equal after the deploy, SOQL on `DHIS2__c` for September 2026
 (`Period__c = LAST_MONTH`, Account not blank, no test account), run 2026-10-24

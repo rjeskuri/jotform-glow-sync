@@ -3622,12 +3622,14 @@ check-only, Ryan's go, deploy, retrieve `after/` and compare; never an older bui
 2026-10-16).
 
 A dashboard component's measure must be one of its report's aggregates, as the Analytics describe
-lists them (`GET /analytics/reports/<id>/describe`, its `aggregates`): `RowCount` for a report
-that summarizes no column. On 2026-10-25 a report that summarizes a column (`aggregateTypes`
-`Sum`) offered that Sum and no `RowCount`: item 11's report (#77) listed only the Sum of
-`GC_sessions_did_you_observe_last_month__c`, and its component, which measures `RowCount`, failed
-the refresh with 406 ("One or more of the fields selected in the component is no longer available
-in the report"). The check-only deploy passes such a component; only the refresh shows the 406.
+lists them (`GET /analytics/reports/<id>/describe`, its `aggregates`). A report offers `RowCount`
+only when its record count is on (the report param `co` 1, describe `hasRecordCount: true`),
+whatever columns it summarizes: item 10's report sums `GC_sessions_did_you_observe_last_month__c`
+with `co` 1 and lists the Sum and `RowCount` together. On 2026-10-25 item 11's report (#77) had
+its record count off (`co` 0, describe `hasRecordCount: false`) and listed only its Sum, so its
+component, which measures `RowCount`, failed the refresh with 406 ("One or more of the fields
+selected in the component is no longer available in the report"). The check-only deploy passes
+such a component; only the refresh shows the 406.
 
 ### Decommissioned
 
@@ -4086,12 +4088,13 @@ The three components, each on its report in "GLOW Monthly Reports":
   Alteast Once P" (`00ORP000005uf412AA`, matrix) is a yes/no for each partner and month. Its
   bucket "Observed" on `GC_sessions_did_you_observe_last_month__c` reads Yes for 1 or more
   sessions and No for 0 (across); each Monthly Report is one partner's month, so its counts are
-  partners. Its report summarizes no column: `GC_sessions_did_you_observe_last_month__c` is a
-  plain column, and the sum of sessions is item 10's measure. The component is a stacked column
-  for each month, Yes and No; its chart measures the record count (`RowCount`), the
-  partner-months in each Yes/No bucket for each month. The org's report keeps the Sum aggregate
-  that `build_item11/` drops until its redeploy on Ryan's go, and until then the chart fails the
-  refresh with 406. SOQL signal, the partners who observed (September 2026: 27, and 15 with 0):
+  partners. Its report keeps the sum of `GC_sessions_did_you_observe_last_month__c` as a column
+  and, from the plan's Rollout step 7 on, has its record count on (the report param `co` 1), so
+  its aggregates offer `RowCount` beside the Sum. The component is a stacked column for each
+  month, Yes and No; its chart measures the record count (`RowCount`), the partner-months in each
+  Yes/No bucket for each month. The org's report has its record count off (`co` 0) until its
+  redeploy from `build_item11/` on Ryan's go, and until then the chart fails the refresh with
+  406. SOQL signal, the partners who observed (September 2026: 27, and 15 with 0):
   `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c > 0`;
   the partners who observed none: the same query with `= 0`.
   The field is never blank: the form shows it as 0 until the partner types a number, and

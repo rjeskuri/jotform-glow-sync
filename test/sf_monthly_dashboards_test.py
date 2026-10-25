@@ -1785,10 +1785,12 @@ class ObservationsDashboardDocs(unittest.TestCase):
     #
     # #77 on 2026-10-25: steps 1-6 ran (copies, check-only, deploy, read-back, refresh); item 11's component
     # (01aRP0000089gWVYAY) failed the refresh with 406 "One or more of the fields selected in the component is no
-    # longer available in the report". Cause (Analytics describe): item 11's report summarized a column
-    # (`aggregateTypes Sum` on GC_sessions_did_you_observe_last_month__c), so its aggregates list only that Sum, no
-    # RowCount, while its component measures RowCount. The fix: item 11's report summarizes no column, its chart
-    # measures the record count; item 11's report alone is redeployed on Ryan's go, then a refresh.
+    # longer available in the report". Cause (Analytics describe, the reviewer's finding confirmed on #77): item
+    # 11's report has its record count OFF (`<params><name>co</name><value>0</value></params>`, describe
+    # `hasRecordCount: false`, since before/), so its aggregates list only its Sum and no RowCount, while its
+    # component measures RowCount. Not the Sum: item 10's report sums the same column with co=1 and lists Sum AND
+    # RowCount; item 9 has co=1 and RowCount. The fix: item 11's report gets co=1 (record count on) and KEEPS its
+    # Sum; its chart measures the record count; item 11's report alone is redeployed on Ryan's go, then a refresh.
 
     # the live ids of steps 1-6 (the ticket comment of 2026-10-25): each copy and the original it copies
     COPIES = (("00ORP000009kM0L2AU", "00ORP000004RJZC2A4"), ("00ORP000009kM1x2AE", "00ORP000004RJZD2A4"),
@@ -1801,17 +1803,39 @@ class ObservationsDashboardDocs(unittest.TestCase):
     # the record count a component measures
     RECORD_COUNT = re.compile(r"(?i)\bRowCount\b|\brecords?\s+counts?\b|\bcounts?\s+of\s+(the\s+)?(\w+\s+)?records\b|"
                               r"\bnumber\s+of\s+(\w+\s+)?records\b")
-    # a report that summarizes no column: "summarizes no column", "no summarized column", "no Sum aggregate",
-    # "does not summarize", "without a Sum", "drops the Sum aggregate"
-    NO_SUMMARY = re.compile(
-        r"(?i)\bsummari[sz]e[sd]?\s+no\s+(\w+\s+)?(columns?|fields?)\b|"
-        r"\bno\s+(\w+\s+){0,2}?(summari[sz]ed|summary)\s+(\w+\s+)?(columns?|fields?|aggregates?)\b|"
-        r"\bno\s+`?(Sum|aggregateTypes)\b|"
-        r"\b(does|do)\s+not\s+summari[sz]e\b|\bdoesn['’]t\s+summari[sz]e\b|"
-        r"\bwithout\s+(a\s+|any\s+|the\s+|its\s+)?(`?Sum\b|`?aggregateTypes\b|summar\w*|aggregates?\b)|"
-        r"\b(drops?|dropped|removes?|removed)\s+(the\s+|its\s+)?(`?Sum\b|`?aggregateTypes\b|summar\w*)")
-    # what says a sum is part of item 11 (a Sum aggregate, a summarized column, the sum stays)
-    SUM_WORD = re.compile(r"(?i)\bsums?\b|\bsummed\b|aggregateTypes|\bsummari[sz]\w*")
+    # a report's record count ON: the report param `co` 1 (`co=1`, "`co` 1", "co set to 1", the XML), describe
+    # `hasRecordCount: true`, "record count on / shown / enabled", "turns on the record count"
+    RECORD_COUNT_ON = re.compile(
+        r"(?i)<name>co</name>\s*<value>1</value>|"
+        r"(?<![\w-])`?co`?\s*(=|:|is|to|set\s+to|of|at)?\s*`?1\b(?![.\d])|"
+        r"\bhasRecordCount`?\s*(:|=|is|as)?\s*`?true\b|"
+        r"\brecord\s+count`?\s+(is\s+|turned\s+|switched\s+|set\s+|stays\s+)?(on|shown|enabled|visible)\b|"
+        r"\b(shows?|showing|turns?\s+on|turning\s+on|enables?|enabling|switch(es)?\s+on)\s+(the\s+|its\s+|a\s+)?"
+        r"record\s+count\b")
+    # ... and OFF: `co` 0, `hasRecordCount: false`, "record count off / hidden / disabled"
+    RECORD_COUNT_OFF = re.compile(
+        r"(?i)<name>co</name>\s*<value>0</value>|"
+        r"(?<![\w-])`?co`?\s*(=|:|is|was|to|set\s+to|of|at)?\s*`?0\b(?![.\d])|"
+        r"\bhasRecordCount`?\s*(:|=|is|was|as)?\s*`?false\b|"
+        r"\brecord\s+count`?\s+(is\s+|was\s+|turned\s+|switched\s+|set\s+)?(off|hidden|disabled)\b")
+    # "RowCount ... only when / if / while / requires / needs" the record count is on
+    CONDITION = re.compile(r"(?i)\bonly\s+(when|if|while|with)\b|\bas\s+long\s+as\b|\brequir\w*|\bneeds?\b|"
+                           r"\bdepends?\s+on\b|\bunless\b|\bprovided\b|\bwhenever\b|\bwhen\b|\bif\b")
+    # the wrong mechanism: a Sum (a summarized column) causes, removes or blocks RowCount
+    # ("a Sum, so no RowCount" is the Sum with "no RowCount" in one sentence: sum_blamed's other branch)
+    SUM_CAUSE = re.compile(r"(?i)(\bSum\b|\bsummari[sz]\w*|aggregateTypes)[^.;]{0,100}?\b("
+                           r"caus\w*|remov\w*|block\w*|takes?\s+away|took\s+away|drops?|dropp\w*|hides?|hid|"
+                           r"replac\w*|prevent\w*|suppress\w*|costs?|loses?|lost)\b[^.;]{0,100}?RowCount|"
+                           r"RowCount[^.;]{0,60}?\b(because|since|due\s+to)\b[^.;]{0,60}?"
+                           r"(\bSum\b|\bsummari[sz]\w*|aggregateTypes)")
+    # what disowns a sentence about the Sum: the first, wrong diagnosis said as such
+    DISOWNED = re.compile(r"(?i)\b(thought|suspected|misread|mistaken\w*|wrong(ly)?|ruled\s+out|first\s+diagnosis|"
+                          r"not\s+the\s+cause|isn['’]t\s+the\s+cause|is\s+not\s+what)\b")
+    # dropping the Sum (the fix keeps it)
+    SUM_DROP = re.compile(r"(?i)\b(drops?|dropping|dropped|removes?|removing|removed|deletes?|deleted|takes?\s+out)\s+"
+                          r"(the\s+|its\s+|that\s+|item\s+11['’]s\s+)?(one\s+)?(`?<?aggregateTypes>?\b|`?Sum\b|summar\w*)")
+    # the measure a sum (for "measures the sum, not the record count (RowCount)")
+    SUM_MEASURE = re.compile(r"(?i)\b(measur\w*|charts?|counts?)\s+(the\s+|a\s+|its\s+)?(sum|total)\b")
     # the org fact: a component's measure must be one of its report's aggregates
     RULE = re.compile(r"(?i)\bcomponents?\b[^.;]{0,120}?\b(must|only|has\s+to|have\s+to|needs?\s+to|always)\b"
                       r"[^.;]{0,120}?\baggregates?\b|"
@@ -1834,7 +1858,22 @@ class ObservationsDashboardDocs(unittest.TestCase):
         "nothing" right after it ("summarizes no column")."""
         return not self.d.locally_denied(s, m) and not re.match(r"`?\s+(nothing|none|no)\b", s[m.end():])
 
-    def test_the_runbook_says_item_11_charts_the_record_count_of_a_report_that_summarizes_no_column(self):
+    def sum_blamed(self, text):
+        """The sentences of `text` that blame the Sum for the missing RowCount: a Sum (a summarized column) said to
+        cause, remove or block RowCount, or said with "no RowCount" and no record count off beside it; not denied
+        ("not the Sum") and not disowned as the first, wrong diagnosis."""
+        out = []
+        for s in sentences(flat(text), ".;"):
+            if self.DISOWNED.search(s):
+                continue
+            sums = [m for m in self.SUMMARIZES.finditer(s) if self.affirmed(s, m)]
+            causal = [m for m in self.SUM_CAUSE.finditer(s) if not self.d.locally_denied(s, m)
+                      and not self.d.NEGATION.search(m.group(0))]
+            if causal or (sums and self.NO_ROWCOUNT.search(s) and not self.RECORD_COUNT_OFF.search(s)):
+                out.append(s)
+        return out
+
+    def test_the_runbook_says_item_11_charts_the_record_count_with_its_reports_record_count_on(self):
         where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
         rows = self.keep()
         part = self.part()
@@ -1845,22 +1884,23 @@ class ObservationsDashboardDocs(unittest.TestCase):
         # the component measures the record count (RowCount): partner-months per Yes/No per month
         counted = [s for s in cl if re.search(r"(?i)\b(component|chart)s?\b", s)
                    and any(self.affirmed(s, m) and not self.PAST.search(s[:m.end()]) for m in self.RECORD_COUNT.finditer(s))
-                   and not [m for m in self.SUM_WORD.finditer(s) if self.affirmed(s, m)]]
+                   and not [m for m in self.SUM_MEASURE.finditer(s) if self.affirmed(s, m)]]
         self.assertTrue(counted, f"{where}: item 11's block says its component (chart) measures the record count "
                                  "(`RowCount`), in one sentence, present tense, not negated")
-        # its report summarizes no column: no Sum aggregate (a summarized column takes RowCount away, 2026-10-25)
-        self.assertTrue([s for s in cl if self.NO_SUMMARY.search(s)],
-                        f"{where}: item 11's block says its report summarizes no column (no Sum aggregate, no "
-                        "`aggregateTypes`), in one sentence")
-        r10 = rows["10"]
-        names10 = re.compile(re.escape(r10["label_today"]) + "|" + re.escape(r10["measure"]) + "|" + r10["id"]
-                             + r"|\bitem\s+10\b", re.I)
+        # its report has the record count on (`co` 1, `hasRecordCount: true`): what makes RowCount one of its
+        # aggregates (2026-10-25: item 11's report had co=0, hence the 406); it may keep its Sum
+        self.assertTrue([s for s in cl for m in self.RECORD_COUNT_ON.finditer(s) if self.affirmed(s, m)],
+                        f"{where}: item 11's block says its report has the record count on (the report param `co` 1, "
+                        "describe `hasRecordCount: true`, \"record count on\"), in one sentence, not negated")
+        # ... and never that its Sum took RowCount away (item 10 sums the same column and lists RowCount)
+        blamed = self.sum_blamed(" ".join(mine))
+        self.assertFalse(blamed, f"{where}: item 11's 406 came from its record count off (`co` 0), not from its Sum: "
+                                 f"item 10's report sums the same column and offers RowCount: {blamed[0][:200]!r}"
+                         if blamed else "")
         for s in cl:
-            if (self.SUM_WORD.search(s) and not self.d.denies(s) and not self.UNDONE.search(s)
-                    and not self.REMOVED.search(s) and not names10.search(s)
-                    and not re.search(r"(?i)\bdrops?\b", s)):
-                self.fail(f"{where}: item 11's report summarizes no column; a sum of sessions is item 10's measure, "
-                          f"not item 11's: {s[:200]!r}")
+            for m in self.SUM_DROP.finditer(s):
+                self.assertFalse(self.affirmed(s, m) and not self.PAST.search(s),
+                                 f"{where}: item 11's fix keeps its Sum (it turns the record count on): {s[:200]!r}")
         # the part no longer says the deploy is still to come
         for s in sentences(flat(part), ".;"):
             self.assertNotRegex(s, r"(?i)\buntil\s+(it\s+is\s+)?deployed\b|\bthe\s+org\s+holds\s+the\s+vendor['’]s\b|"
@@ -1881,17 +1921,32 @@ class ObservationsDashboardDocs(unittest.TestCase):
         self.assertTrue(ruled, f"{where}: state the org fact, present tense and not negated: a dashboard component's "
                                "measure must be one of its report's aggregates (\"A component's measure must be one of "
                                "its report's aggregates\")")
-        # the fact seen on 2026-10-25: a report that summarizes a column offered no RowCount (the 406)
+        # the fact seen on 2026-10-25, in one row, item or paragraph with the date and the 406: a report offers
+        # RowCount only when its record count is on (`co` 1, `hasRecordCount: true`); item 11's report had it off
+        # (`co` 0), so its RowCount component failed with 406
+        r11 = self.keep()["11"]
+        names11 = re.compile(r"(?i)\bitem\s+11\b|" + r11["id"] + "|" + re.escape(r11["label_today"]))
+        on_cond = re.compile(r"(?i)\bRowCount\b")
         seen = []
         for b in self.blocks(section):
             if "406" not in b or "2026-10-25" not in b:
                 continue
-            for s in sentences(b, ".;"):
-                if self.NO_ROWCOUNT.search(s) and [m for m in self.SUMMARIZES.finditer(s) if self.affirmed(s, m)]:
-                    seen.append(s)
-        self.assertTrue(seen, f"{where}: say, with the date 2026-10-25 and the 406 in the same row, item or paragraph, "
-                              "that a report that summarizes a column (a Sum aggregate) was seen to offer no `RowCount` "
-                              "(one sentence: the summarized column and the missing RowCount)")
+            ss = sentences(b, ".;")
+            cond = [s for s in ss if on_cond.search(s) and self.CONDITION.search(s)
+                    and [m for m in self.RECORD_COUNT_ON.finditer(s) if not self.d.locally_denied(s, m)]
+                    and not self.HEDGE.search(s)
+                    and not re.search(r"(?i)\beven\s+(when|if|with)\b|\bregardless\s+of\s+(the\s+|its\s+)?record", s)]
+            off = [s for s in ss if names11.search(s) and self.RECORD_COUNT_OFF.search(s)]
+            if cond and off:
+                seen.append(b)
+        self.assertTrue(seen, f"{where}: say, in one row, item or paragraph with the date 2026-10-25 and the 406, that a "
+                              "report offers `RowCount` only when its record count is on (the param `co` 1, describe "
+                              "`hasRecordCount: true`), and that item 11's report had it off (`co` 0), hence the 406")
+        # ... and nowhere that a summarized column (a Sum) removes RowCount: item 10 sums a column and lists RowCount
+        blamed = self.sum_blamed(section)
+        self.assertFalse(blamed, f"{where}: a Sum does not take RowCount away (item 10's report sums the same column "
+                                 "with the record count on and lists Sum and RowCount); the 406 was item 11's record "
+                                 f"count off: {blamed[0][:200]!r}" if blamed else "")
 
     def test_the_plan_records_the_live_steps_of_2026_10_25(self):
         sys.path.insert(0, os.path.join(REPO, "scripts"))
@@ -1961,10 +2016,20 @@ class ObservationsDashboardDocs(unittest.TestCase):
         failed = [b for b in blocks if re.search(r"\b406\b", b) and names11.search(b)]
         self.assertTrue(failed, f"{where}: record that item 11's component ({self.ITEM11_COMPONENT}) failed the "
                                 "refresh with 406, in one row, item or paragraph")
-        self.assertTrue([b for b in failed if re.search(r"\bRowCount\b", b)
-                         and re.search(r"(?i)\bSum\b|\bsummari[sz]\w*|aggregateTypes|\baggregates?\b", b)],
-                        f"{where}: the 406's cause beside it: item 11's report summarized a column (a Sum aggregate), "
-                        "so it offered no `RowCount`, which its component measures")
+        self.assertTrue([b for b in failed if re.search(r"\bRowCount\b", b) and self.RECORD_COUNT_OFF.search(b)],
+                        f"{where}: the 406's cause beside it: item 11's report has its record count off (the param "
+                        "`co` 0, describe `hasRecordCount: false`), so it offers no `RowCount`, which its component "
+                        "measures")
+        # ... not its Sum, anywhere in the plan; and the fix keeps the Sum
+        blamed = self.sum_blamed(read(path))
+        self.assertFalse(blamed, f"{name}: the 406 came from item 11's record count off (`co` 0), not from its Sum "
+                                 "(item 10's report sums the same column and lists RowCount): "
+                                 f"{blamed[0][:200]!r}" if blamed else "")
+        for s in sentences(flat(read(path)), ".;"):
+            for m in self.SUM_DROP.finditer(s):
+                self.assertFalse(self.affirmed(s, m) and not self.PAST.search(s) and not self.DISOWNED.search(s),
+                                 f"{name}: item 11's fix keeps its Sum and turns its record count on (`co` 1): "
+                                 f"{s[:200]!r}")
 
     def test_the_rollout_fixes_item_11_forward_before_the_soql_check_and_the_moves(self):
         path = self.plan_path()
@@ -1991,10 +2056,17 @@ class ObservationsDashboardDocs(unittest.TestCase):
                         f"{self.ITEM11_MDAPI}\"`, or \"only\"): {s[:200]!r}")
         for other in self.OTHER_MDAPI + ("Dashboard:",):
             self.assertNotIn(other, s, f"{where}: the fix step redeploys item 11's report only, not {other!r}")
-        self.assertTrue(re.search(r"(?i)\bSum\b|aggregateTypes|\baggregates?\b|\bsummari[sz]\w*", s)
-                        and re.search(r"\bRowCount\b|(?i:record\s+count)", s),
-                        f"{where}: the fix step says what changes: item 11's report drops its Sum aggregate so it "
-                        "offers `RowCount`, the record count its component measures")
+        self.assertTrue([m for m in self.RECORD_COUNT_ON.finditer(s) if self.affirmed(s, m)]
+                        and re.search(r"\bRowCount\b", s),
+                        f"{where}: the fix step says what changes: item 11's report gets its record count on (the "
+                        "param `co` 1, describe `hasRecordCount: true`) so it offers `RowCount`, which its component "
+                        "measures")
+        blamed = self.sum_blamed(s)
+        self.assertFalse(blamed, f"{where}: the fix step blames the Sum; the cause is item 11's record count off "
+                                 f"(`co` 0): {blamed[0][:200]!r}" if blamed else "")
+        for m in self.SUM_DROP.finditer(s):
+            self.assertFalse(self.affirmed(s, m), f"{where}: the fix step keeps item 11's Sum (it changes `co` "
+                                                  f"only): {s[:200]!r}")
         dep = [m.start() for m in redeploy.finditer(s) if not re.search(r"(?i)check-only|--dry-run", s[m.start():m.end() + 12])]
         self.assertTrue(dep and max(m.start() for m in re.finditer(r"(?i)\brefresh", s)) > dep[0],
                         f"{where}: the fix step refreshes the dashboard after the redeploy")
