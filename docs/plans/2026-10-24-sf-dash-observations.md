@@ -118,7 +118,11 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
    dry run
    `python3 tools/sf_report_folders.py move --vpn-off --dir data/sf_dash_observations_2026-10-24 --plan data/sf_dash_observations_2026-10-24/move_plan.csv`,
    then on Ryan's go the same with `--apply --limit 1`, a SOQL check of that report, and the rest
-   with `--apply` (the same plan; the first row moves again within Decommissioned). On
+   with
+   `python3 tools/sf_report_folders.py move --vpn-off --dir data/sf_dash_observations_2026-10-24 --plan data/sf_dash_observations_2026-10-24/move_plan_rest.csv --apply`
+   (`move_plan_rest.csv` is `move_plan.csv` without its first row, 4 rows: `move` moves a report
+   again even when it is in its target already, so the full plan would write a sixth move row,
+   Decommissioned to Decommissioned, for the first report). The ledger then holds 5 move rows. On
    2026-10-24 the dry run refused all 5 because D3 still used them (`move_dryrun.txt`); the only
    other dashboard using them is #73's copy of D3, in Decommissioned.
 9. Ryan sets a weekly Subscribe on the dashboard in Lightning (the refresh is a subscription,
@@ -129,12 +133,22 @@ copies' dry run ran on 2026-10-24 (`copy_dryrun.txt`: 4 lines, nothing written).
 1. First the five moved reports return to "DHIS2 Reports" by the undo of this change's ledger,
    because D3's six other components read them:
    `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_observations_2026-10-24`
-   (the dry run lists the 5 moves), then the same with `--apply` on Ryan's go.
-2. Then D3 and items 9-11 roll back together: redeploy this change's retrieve
-   `data/sf_dash_observations_2026-10-24/before/` (D3 and the three reports: check-only, Ryan's
-   go, deploy) only while a fresh retrieve equals `after/`. That keeps every Id, so the
-   dashboard's components read the old reports again, and D3 keeps its place in the FlexiPage
-   `Monthly_Report_Dashboards`. This is the rollback that puts the dashboard back as it was.
+   then the same with `--apply` on Ryan's go. Its dry run lists 5 lines, one per move row of
+   step 8, newest first, each report back to "DHIS2 Reports"; any other line (another id or
+   folder, or a count other than 5) stops the rollback for Ryan.
+2. Then D3 and items 9-11 roll back together: redeploy those 4 components of this change's
+   retrieve `data/sf_dash_observations_2026-10-24/before/` (check-only, Ryan's go, deploy) only
+   while a fresh retrieve of the same 4 equals `after/`. The deploy names the 4 components one by
+   one, within `before/`: the check-only is
+   `sf project deploy start --dry-run -o glow -m "Dashboard:GLOW_Monthly_Dashboards/vbKFAhzWWcXLOmmkSckbvWkgmwtdrM" -m "Report:GLOW_Monthly_Reports/Submission_of_GC_observation_forms_M_P_iuz" -m "Report:GLOW_Monthly_Reports/Total_Number_of_Club_Observations_by_M_q3M" -m "Report:GLOW_Monthly_Reports/Completed_Observing_Clubs_Alteast_Once_P_cn6"`,
+   and the deploy the same command with `--dry-run` dropped, on Ryan's go. `before/` also holds
+   item 16's report, the five "DHIS2 Reports" reports, the report types `Dhis2` and
+   `Monthly_Reports` and `DHIS2__c`, which this change leaves as they are: a deploy of the whole
+   folder (`-d force-app` or its `package.xml`) would put those back to their state of
+   2026-10-24 too, which the `after/` compare does not see, so it is never the rollback.
+   Redeploying the 4 keeps every Id, so the dashboard's components read the old reports again,
+   and D3 keeps its place in the FlexiPage `Monthly_Report_Dashboards`. This is the rollback that
+   puts the dashboard back as it was.
 3. When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report
    since the deploy: the rollback then starts from that fresh retrieve, by the epic's ritual.
    A rollback never deploys an older build or another change's retrieve (DECISIONS 2026-10-16).

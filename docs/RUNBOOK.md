@@ -4121,12 +4121,17 @@ Africa: Yes, 3 sessions, so observed):
 `SELECT Account__r.Name, did_you_submit_your_GC_observation_form__c, GC_sessions_did_you_observe_last_month__c FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`.
 
 Rollback:
-- The dashboard and items 9-11 roll back together: redeploy this change's retrieve
-  `data/sf_dash_observations_2026-10-24/before/` (D3 and the three reports: check-only, Ryan's
-  go, deploy) only while a fresh retrieve equals `after/`. That keeps every Id, so the
-  dashboard's components read the old reports again and the FlexiPage `Monthly_Report_Dashboards`
-  keeps D3 in its place. The five "DHIS2 Reports" reports go back to their folder first (the
-  plan's Rollback).
+- The dashboard and items 9-11 roll back together: redeploy those 4 components of this change's
+  retrieve `data/sf_dash_observations_2026-10-24/before/` (check-only, Ryan's go, deploy) only
+  while a fresh retrieve of the same 4 equals `after/`. The deploy names each of the 4 with `-m`,
+  within `before/`:
+  `sf project deploy start -o glow -m "Dashboard:GLOW_Monthly_Dashboards/vbKFAhzWWcXLOmmkSckbvWkgmwtdrM" -m "Report:GLOW_Monthly_Reports/Submission_of_GC_observation_forms_M_P_iuz" -m "Report:GLOW_Monthly_Reports/Total_Number_of_Club_Observations_by_M_q3M" -m "Report:GLOW_Monthly_Reports/Completed_Observing_Clubs_Alteast_Once_P_cn6"`,
+  with `--dry-run` for the check-only. `before/` also holds item 16's report, the five "DHIS2
+  Reports" reports, two report types and `DHIS2__c`, which a whole-folder deploy would put back
+  too, unseen by the `after/` compare: the rollback deploy is the 4 only. That keeps every Id, so
+  the dashboard's components read the old reports again and the FlexiPage
+  `Monthly_Report_Dashboards` keeps D3 in its place. The five "DHIS2 Reports" reports go back to
+  their folder first (the plan's Rollback).
 - When they differ, someone has changed the dashboard or a report since the deploy, and the
   rollback starts from a fresh retrieve by the ritual above. A rollback never deploys an older
   build or another change's retrieve (DECISIONS 2026-10-16).
