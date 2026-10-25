@@ -1908,7 +1908,9 @@ Their clubs stay in the Roster — the girls are active and enrolled, their ids
 are kept, the Club Roster Form still lists the clubs — but they leave the
 attendance forms' Club picker. Never give such a club a blank region (CLAUDE.md
 rule 6: that says "fix me" and raises ATTENTION on every run); mark the
-partner instead.
+partner instead. A partner marked `no` also goes, by hand, into the partner-name
+filter of the Salesforce report `Clubs_Not_Submitting_Last_Week` ("Submission
+timing in Salesforce", The timing reports), or its clubs show there every week.
 
 **The marker.** The Partners tab's fourth column, `jotform`: `no` = the
 partner's clubs are not on Jotform; `yes` or blank = on Jotform (the default;
@@ -3377,6 +3379,14 @@ sharing stays as it is"):
     2026-10-16: they would undo the 2026-10-09 and 2026-10-15 changes); before the six reports go,
     retrieve it, remove the `totals1/` tiles in that copy, check-only, Ryan's go, deploy (the six
     reports and the type may stay).
+  - since task #102 (built 2026-10-24; deployed only on Ryan's go): the reports
+    `Clubs_Not_Submitting_Last_Week`, `Submissions_by_Club_and_Week`,
+    `Late_Submissions_Last_Month` and `Submission_Delay_by_Partner_by_Month`, each copied to
+    Decommissioned first (DECISIONS 2026-10-21), after any dashboard component that reads them
+    (task #103); and the four columns `Submitted_At__c`, `Submission_Delay_Days__c`,
+    `Session_Month__c` and `Session_Week__c` that #102 adds to the report type `Attendance_Totals`,
+    taken out of a fresh retrieve of it and deployed (check-only, Ryan's go), never by deleting
+    the type or redeploying an older copy ("Submission timing in Salesforce", The timing reports).
 - The 2026-10-15 change (the total as Jotform plus the three partners, ticket #35): it changed
   three components, the dashboard `Attendance/Jotform_Attendance_test` and the reports
   `Attendance/Total_Attendance_Last_Month` and `Attendance/Total_Attendance_by_Partner_by_Month`
@@ -3457,7 +3467,8 @@ sharing stays as it is"):
   06:41 UTC, Ryan's go). The first delay formula was a day short for submissions before about
   07:00 UTC (the check: 153 of 1,123 batches); `Submission_Delay_Days__c` was redeployed alone
   with the corrected text the same day (deploy `0AfRP000002i4LJ0AY`, 06:59 UTC), and the check
-  reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result).
+  reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result). The four
+  timing reports of task #102 are built, not deployed ("The timing reports", below).
 - **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
   is read-only.
 - **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
@@ -3534,6 +3545,105 @@ archive rule of DECISIONS 2026-10-21), then the four fields `Submitted_At__c`,
 Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
 the four fields and only added their entries to the permission set and the Admin profile, which
 go with the fields when they are deleted, so nothing is redeployed from its `before/`.
+
+### The timing reports
+
+**Status:** built 2026-10-24 offline (task #102) into `data/sf_session_timing_2026-10-24/build/`
+(owner only, never committed): the four reports below, and the report type `Attendance_Totals`
+with the four fields added to its columns (a custom report type offers a new field only once it
+is in its layout; the retrieve of 2026-10-24 09:24 UTC, after the fields' deploy, had none of
+them). Nothing is deployed: the fresh retrieve, the check-only deploy, the deploy, the read-back
+and each report's run through the Analytics API against its SOQL check wait for Ryan's go, VPN
+off ([plan](plans/2026-10-23-submission-timing.md), "Task #102: the timing reports").
+
+The four reports are in the Attendance report folder (`Attendance`), beside the dashboard's other
+reports, and answer what GLOW staff asked on 2026-10-22: which clubs have not submitted for a
+week, and how long clubs take from a session to its submission. Each report carries the partner,
+the column the dashboard's Partner filter uses (`PARENT.NAME` on the Account report,
+`Attendance_Batch__c$Account__c.Parent` on the three batch reports), and the unlocked Partner and
+Club "contains" filters of the other attendance reports. They read only fields the existing
+reports already show and the four timing fields, which `Attendance_Report_Viewer` reads (Access,
+above). The SOQL check beside each name reproduces the report's total (read only, VPN off, the CLI
+login `glow` or the read-only connector; counts and partner names only):
+
+- `Clubs_Not_Submitting_Last_Week` ("Clubs Not Submitting - Last Week", on Accounts, built from
+  `Clubs_Not_Submitting_Last_14_Days`) answers which clubs sent nothing for last week's sessions:
+  the club accounts with a partner and no batch of any status dated last week, grouped by
+  partner, less the partners left out (below). Check: `SELECT COUNT(Id) FROM Account WHERE
+  RecordType.DeveloperName = 'Club' AND ParentId != null AND Parent.Name NOT IN ('Education and
+  English for You', 'Tumaini La Maisha', 'Ng\'aa Maskani', 'Angelo Patri School', 'Detroit Public
+  Schools', 'Ewa Makai Middle School', 'Farmington Municipal School District', 'HOLA', 'Holbrook
+  Unified School District') AND Id NOT IN (SELECT Account__c FROM Attendance_Batch__c WHERE
+  Attendance_Date__c = LAST_WEEK)`.
+- `Submissions_by_Club_and_Week` ("Submissions by Club and Week", a matrix on `Attendance_Totals`)
+  answers in which weeks each club submitted: rows partner then club, columns the session week
+  (`Session_Week__c`, as `2026-10 week 2`), each cell the count of batches of any status, for
+  sessions dated this week and the 8 weeks before it (`N_WEEKS_AGO:8` to `THIS_WEEK`); a blank
+  cell is a week with no submission. Check: `SELECT Account__r.Parent.Name, Account__r.Name,
+  Session_Week__c, COUNT(Id) FROM Attendance_Batch__c WHERE Attendance_Date__c >= N_WEEKS_AGO:8
+  AND Attendance_Date__c <= THIS_WEEK GROUP BY Account__r.Parent.Name, Account__r.Name,
+  Session_Week__c`.
+- `Late_Submissions_Last_Month` ("Late Submissions - Last Month", a summary on
+  `Attendance_Totals`) answers how long each submission of last month took: every live Jotform
+  batch (`Creator__c` `Jotform`, `Processing_Status__c` `Success`) with a session date last month,
+  grouped by partner, with its club, session date, submission time (`Submitted_At__c`) and days
+  from session to submission (`Submission_Delay_Days__c`), each partner's batches sorted with the
+  largest delay first. Check: `SELECT
+  Account__r.Parent.Name, Account__r.Name, Attendance_Date__c, Submitted_At__c,
+  Submission_Delay_Days__c FROM Attendance_Batch__c WHERE Creator__c = 'Jotform' AND
+  Processing_Status__c = 'Success' AND Attendance_Date__c = LAST_MONTH ORDER BY
+  Submission_Delay_Days__c DESC`.
+- `Submission_Delay_by_Partner_by_Month` ("Submission Delay by Partner by Month", a summary with a
+  bar chart) answers how long each partner's clubs take, month by month: the average and the
+  maximum of `Submission_Delay_Days__c` over the live Jotform batches, by partner and session
+  month (`Session_Month__c`), this month and the 11 before it (`N_MONTHS_AGO:11`); the chart shows
+  the average, a bar per partner and month. Check: `SELECT Account__r.Parent.Name,
+  Session_Month__c, AVG(Submission_Delay_Days__c), MAX(Submission_Delay_Days__c), COUNT(Id) FROM
+  Attendance_Batch__c WHERE Creator__c = 'Jotform' AND Processing_Status__c = 'Success' AND
+  Attendance_Date__c >= N_MONTHS_AGO:11 GROUP BY Account__r.Parent.Name, Session_Month__c`.
+
+Not confirmed offline: SOQL may refuse `GROUP BY`, `AVG` or `MAX` on a formula field
+(`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`; the field's describe says
+`groupable` and `aggregatable`). If it does, the check selects the same rows with the same
+`WHERE` and the fields it would group or aggregate, and totals them offline; the reports
+themselves group by those fields, which reports allow.
+
+**Who is left out** (Ryan, 2026-10-24): the clubs of the three partners that report monthly
+through Salesforce (Education and English for You, Tumaini La Maisha and Ng'aa Maskani, 38 clubs
+off the forms since 2026-10-16) and the U.S clubs (their form is disabled) are left out of
+`Clubs_Not_Submitting_Last_Week`, where they would otherwise show every week. They are left out
+by a filter on their partner account names, `Parent.Name` in the SOQL check and a locked
+`PARENT.NAME` "not equal to" in the report, which names the three partners and the six U.S
+partner accounts, Angelo Patri School, Detroit Public Schools, Ewa Makai Middle School,
+Farmington Municipal School District, HOLA and Holbrook Unified School District, as
+`glow/sf_partners.csv` spells them. A new partner of that kind needs the report's filter edited by
+hand (a fresh retrieve, check-only, Ryan's go, deploy): one that reports monthly through
+Salesforce, or whose clubs stop using Jotform (the Partners tab's `jotform` set to `no`, "Clubs
+that do not use Jotform"). `Submissions_by_Club_and_Week` is unaffected: it shows only the clubs
+with a batch in its window. The two delay reports keep every partner: they show a club only for
+a month in which it submitted through Jotform.
+
+**Not submitting last week** means no batch of any status whose session date
+(`Attendance_Date__c`) is in last week, as the existing lists count it (DECISIONS 2026-10-06): a
+blank or a refused duplicate counts as submitted, and the day a submission arrived plays no part.
+The week runs Sunday to Saturday: `LAST_WEEK`, in the report's cross filter and in its SOQL
+check, is the Sunday-to-Saturday week before this one, the week of the org's en_US reports. That
+week is a different thing from the session week `Session_Week__c` (the week of the month), which
+only labels the matrix's columns. `LAST_WEEK` needs no new field, so the formula checkbox
+`In_Last_Week__c` the ticket weighed is not built (DECISIONS 2026-10-24).
+
+**The late report:** `Late_Submissions_Last_Month` has no cut-off: every live Jotform batch of
+last month is in it with its delay, the largest delay first (Ryan, 2026-10-24; DECISIONS
+2026-10-23: nothing is flagged, staff read the delays). It is grouped by partner, as the ticket's
+outline has it, so the largest delay comes first within each partner's group.
+
+**Rollback** of the timing reports: the dashboard components that read them go first (task
+#103); then each of the four reports is copied to Decommissioned (the archive rule, DECISIONS
+2026-10-21) and deleted by a `destructiveChanges.xml` deploy, check-only first and on Ryan's go;
+then the four columns come off the report type `Attendance_Totals`: retrieve it fresh, delete the
+four `<columns>` entries in that copy, check-only, Ryan's go, deploy. Never redeploy an older
+copy of `Attendance_Totals` (DECISIONS 2026-10-16). The fields' own rollback (above) needs both
+done first.
 
 ## Monthly Report dashboards in Salesforce
 
