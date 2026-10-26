@@ -1,7 +1,7 @@
 ---
 title: A standalone Apps Script moves Jotform's photo subfolders from Ryan's My Drive to the company Shared Drive
 author: Claude (ticket #89, with Ryan's decision of 2026-10-21)
-status: accepted         # built offline 2026-10-21 (drive-sync/); set up before #63 (Ryan, 2026-10-22); every live step below waits for Ryan's go
+status: in-progress      # set up and its trigger live 2026-10-23; every move failed (#132); the file-by-file fix of 2026-10-24 awaits Ryan's paste into the live project (Result)
 created: 2026-10-21
 intent: Ryan, 2026-10-21 (ticket #89) - "Jotform will only use my local company gmail, but it needs to go to a company shared drive. So photos will be uploaded to me and then need to be transferred to the shared drive. Can we create a custom way to do this sync."
 ---
@@ -28,9 +28,15 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
   own manifest (time zone America/New_York, the sheet's zone; scopes `drive` and
   `script.scriptapp`, nothing else), its own `.clasp.json` (a template in the repo, the real one
   gitignored), the same pinned Node 18 / clasp 2.4.2.
-- **The move.** `DriveApp` `Folder.moveTo` / `File.moveTo`: the `drive` scope only. Drive API v3
-  `files.update` with `addParents`/`removeParents` and `supportsAllDrives` needs the same scope
-  plus an enabled advanced service, so `DriveApp` is the smaller of the two.
+- **The move.** Planned as `DriveApp` `Folder.moveTo` / `File.moveTo` (the `drive` scope only).
+  Live, every folder move failed (2026-10-23, #132): Google's API does not move a folder from My
+  Drive into a shared drive at any role (`teamDrivesFolderMoveInNotSupported`). Since 2026-10-24
+  the mover makes a folder of the subfolder's name in the region folder and moves its files into
+  it one by one through the advanced Drive service, v3 (`Drive.Files.create`, then
+  `Drive.Files.update` with `addParents`/`removeParents` and `supportsAllDrives: true`; the
+  manifest enables the service, the `drive` scope covers it); a merge moves files the same way.
+  The emptied subfolder stays in My Drive (nothing is trashed; Ryan clears them by hand), and a
+  move cut short by a failure or the time budget is finished by a later run as a merge.
 - **What moves** (`planMoves_` in `drive-sync/Plan.gs`, pure, tested offline by
   `test/drive_sync_test.js`):
   - only folders named exactly `Attendance photos - <Region>`, region one of Africa, Asia,
@@ -38,8 +44,8 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
     folder is reported unknown and left alone; any other folder is ignored;
   - a subfolder whose newest file changed less than **10 minutes** ago waits (still uploading);
     an empty one is left alone;
-  - a settled subfolder whose name is not in the region folder on the Shared Drive **moves
-    whole**;
+  - a settled subfolder whose name is not in the region folder on the Shared Drive **moves**: a
+    folder of its name is made there and all its files (the plan's `files`) move into it;
   - its name already there **once** (a resubmission): **merged** file by file, each file moved
     in beside what is there; a file with the same name **and** size already there stays in My
     Drive (`kept`); nothing on the Shared Drive is replaced (a move never overwrites);
@@ -55,7 +61,8 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
   at a time (`LockService`); a run stops reading new subfolders after half its 4.5-minute budget
   and starting new moves after 4.5 minutes (Apps Script's limit is 6), and leaves the rest to the
   next. Each source subfolder is read together with the target's subfolders of its name, so a
-  subfolder in the plan always has its target side read. Every failure is logged
+  subfolder in the plan always has its target side read (an emptied subfolder, no files, costs
+  its one listing and nothing more). Every failure is logged
   by code (`MOVE_FAILED`, `MERGE_FAILED`, `CONFIG refused`, `LOCKED`, `TIME_BUDGET`) and a run
   with a failure ends in an error, so the execution shows as failed.
 - **The log**: per region `move N, merge N (F file(s) in, K kept), waiting N, refused N`, then one
@@ -105,10 +112,11 @@ template test and the trigger come next, and only then the regional forms' integ
    (RUNBOOK "Photos", steps 3-4: a neutral image with nobody in it; the read-back checks the
    subfolder's name and which folder Jotform wrote into, see Risks). After 10 minutes,
    `previewMoves` → `would move 1` naming `<club> <date>`; then `moveSettledPhotos` by hand,
-   once → `done: 1 folder(s) moved, 0 file(s) merged, 0 failure(s)`; the subfolder is in the
-   Template folder on the Shared Drive and gone from `Attendance photos - Template`, which
-   stays. Then `installTrigger`; the next executions (every 15 minutes) log `move 0 … waiting 0`
-   or the folders they moved.
+   once → `done: 1 folder(s) moved (1 file(s)), 0 file(s) merged, 0 failure(s)`; a folder of the
+   subfolder's name is in the Template folder on the Shared Drive with the photo, and the
+   emptied subfolder is still in `Attendance photos - Template` (deleted by hand; that folder
+   itself stays). Then `installTrigger`; the next executions (every 15 minutes) log `move 0 …
+   waiting 0` or the folders they moved.
 5. **#63, the regional forms** (Ryan, in the builder; RUNBOOK "Photos", step 5), only after
    step 4 passed, one form at a time: its integration pointed at `Attendance photos - <Region>`;
    then the next run's log for that region (no `CONFIG refused`, no `UNKNOWN`), and its first
@@ -117,9 +125,12 @@ template test and the trigger come next, and only then the regional forms' integ
 ## Rollback
 
 - Stop: `removeTrigger`, or delete the trigger in the editor (Triggers). Nothing else runs it.
-- Undo a move: move the subfolder (or the merged files) back into `Attendance photos - <Region>`
-  by hand; the mover changes nothing else. A merged file is told apart by its date; the log names
-  the subfolder it went into.
+- Undo a move: move the files back into the emptied subfolder in `Attendance photos - <Region>`
+  (or a new folder of its name, once it was cleared) by hand; the mover changes nothing else. A
+  merged file is told apart by its date; the log names the folder it went into. Moving files out
+  of a shared drive needs Manager on it (Google, "How file access works in shared drives": "If
+  you have Manager access to a shared drive, you can move files and folders out of shared drive
+  to My Drive"; RUNBOOK "Photo mover", Rollback): a Manager does it, or Ryan's role is raised.
 - Remove entirely: delete the trigger, then the standalone project. Jotform's integration keeps
   writing into Ryan's My Drive as before; `appsscript/` and the forms are untouched by any of it.
 
@@ -129,13 +140,21 @@ template test and the trigger come next, and only then the regional forms' integ
   content managers move files; folders may need the Manager role or a domain setting:
   unverified). The dry run cannot show it; the template test's first real move does
   (`MOVE_FAILED`). Mitigation: Ryan's role on the drive raised to Manager, then the test again.
+  - 2026-10-24 (#132): it failed live, and no role fixes it: Google's API does not move a folder
+    from My Drive into a shared drive (`403 teamDrivesFolderMoveInNotSupported`; only the Drive
+    UI, as a Manager). The mover now makes the folder on the Shared Drive and moves the files
+    into it one by one through the advanced Drive service (`Drive.Files.update`,
+    `supportsAllDrives`); Ryan owns the files, for which Content manager (Contributor at least)
+    suffices. The emptied subfolder stays in My Drive.
 - **A late file.** A file Jotform adds after the subfolder moved: the settle time (10 minutes
   since the newest file) makes it unlikely; if Jotform makes a new subfolder of the same name, it
   is merged on a later run; if it writes into the moved folder, it is already on the Shared
   Drive.
 - **Leftovers in My Drive.** A merge leaves the files it kept (same name and size already on
   the Shared Drive) in their subfolder, logged as kept every run. Ryan deletes such a subfolder
-  by hand after a look; the mover never trashes.
+  by hand after a look; the mover never trashes. Every move leaves its subfolder emptied; each
+  costs every run one listing of the read budget, so Ryan clears them regularly (RUNBOOK "Photo
+  mover", step 6).
 - **A backlog** (the first run after a pause, or a busy day): a run reads for at most about 2
   minutes (half its budget, `TIME_BUDGET` in the log) and never moves a subfolder it did not
   read; the rest waits for the next run, 15 minutes later. Same-name copies clear one per run
@@ -165,4 +184,12 @@ template test and the trigger come next, and only then the regional forms' integ
 
 ## Result
 
-Not rolled out yet: built offline on 2026-10-21 (ticket #89). Filled in after the rollout.
+- 2026-10-23: set up as planned (the Shared Drive's region folders, the source folders, the
+  project, its Script Properties, `previewMoves` clean) and the trigger installed; the forms'
+  integrations write into the source folders. Every real move failed: `cannot use this
+  operation on a shared drive item` - Google's API does not move a folder from My Drive into a
+  shared drive (`teamDrivesFolderMoveInNotSupported`), whatever the role.
+- 2026-10-24 (#132): fixed in the repo - the folder is made on the Shared Drive and the files
+  move into it one by one through the advanced Drive service (Design, "The move"; Risks). The
+  live project awaits Ryan's paste of `Plan.gs`, `Mover.gs` and the manifest, then one
+  `moveSettledPhotos` and its log (RUNBOOK "Photo mover", the update steps).

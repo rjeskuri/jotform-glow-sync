@@ -289,8 +289,10 @@ before and the one after.*
    → the only hunks are inside `integrations` (the upload row gone); `emails`, `conditions`,
    `clearFieldOnHide` byte-identical; `python3 backup_forms.py` again for the other four and
    the same diff on each → empty. Then `python3 tools/integration_status.py` → every live form
-   `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
-   this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
+   `ok (one action, 9 fields, Account_Name__c from q5, Session_Notes__c from q<N>, no upload)`
+   (the U.S form, DISABLED: 8 fields, `Session_Notes__c not wanted (form DISABLED)`),
+   `integration: ok`. Until this step the template reads `NOT RIGHT: the upload field is
+   ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
    Settings → Integrations → Google Drive → Authorize → log in as the role account (never your
    own) → Folder Name `Attendance photos - Template` → Create Subfolders for Submissions ON,

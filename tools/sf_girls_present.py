@@ -24,10 +24,14 @@ this tool fills them once, from their rows.
 Only a Success batch whose Girls_Present__c is empty is written (= its rows; 0 for a blank). Failed
 batches stay empty, as the processor leaves them, so the field means one thing: the count behind a
 success. A batch with a value is never touched - a typed aggregate survives, and a second run finds
-nothing to set. Salesforce access is glow/salesforce.py's (the CLI's login, the token on curl's
-stdin, never on a command line); it reads ids, names of batches, statuses, creators and counts -
-never a girl's name, never Contact_IDs__c. plan.csv and ledger.csv live in data/sf_girls_present/
-(never committed, owner only), although they hold ids and counts only.
+nothing to set. A mentor's merged correction (since 2026-10-22: a Success whose Status_Message__c
+is 'merged into <original batch id>', no count and no rows of its own - its girls are rows of the
+original batch, whose count moved with them) is left out of plan, set and check by a condition on
+that message in the SOQL WHERE. Salesforce access is glow/salesforce.py's (the CLI's login, the
+token on curl's stdin, never on a command line); it reads ids, names of batches, statuses, creators
+and counts - never a girl's name, never Contact_IDs__c, never Status_Message__c (a condition on it,
+never selected or printed). plan.csv and ledger.csv live in data/sf_girls_present/ (never
+committed, owner only), although they hold ids and counts only.
 """
 import argparse
 import csv
@@ -43,12 +47,19 @@ from glow.salesforce import Org, Refused, add_vpn_flag, as_int, positive, quoted
 DEFAULT_DIR = os.path.join(REPO, "data", "sf_girls_present")
 FIELD, SOBJECT, OK = "Girls_Present__c", "Attendance_Batch__c", "Success"
 JOTFORM = "Jotform"                          # Creator__c of the live flow and of the back-fill ("Jotform back-fill ...")
-BATCHES = f"SELECT Id, Name, Processing_Status__c, Creator__c, {FIELD} FROM {SOBJECT} ORDER BY Name"
+# 2026-10-22 (ticket #108): a mentor's merged correction is a Success batch whose Status_Message__c is
+# 'merged into <original batch id>', with no count and no rows of its own (its girls are rows of the original
+# batch, whose count moved with them): neither to set nor to check. The message is a condition in a WHERE
+# only - never selected, never printed: on other batches it can quote a girl's name.
+MERGED = "Status_Message__c LIKE 'merged into %'"
+BATCHES = (f"SELECT Id, Name, Processing_Status__c, Creator__c, {FIELD} FROM {SOBJECT} "
+           f"WHERE NOT (Processing_Status__c = '{OK}' AND {MERGED}) ORDER BY Name")
 ROWS = "SELECT Attendance_Batch__c, COUNT(Id) n FROM Attendance__c WHERE Attendance_Batch__c IN ({ids}) GROUP BY Attendance_Batch__c"
 CHUNK = 200                                  # batch ids per ROWS query: an aggregate query is one page (2,000 groups), no next page
 JOTFORM_SUCCESS = (f"SELECT Id, {FIELD} FROM {SOBJECT} WHERE Processing_Status__c = '{OK}' "
-                   f"AND Creator__c LIKE '{JOTFORM}%'")
-WITHOUT_VALUE = f"SELECT COUNT() FROM {SOBJECT} WHERE Processing_Status__c = '{OK}' AND {FIELD} = null"
+                   f"AND Creator__c LIKE '{JOTFORM}%' AND (NOT {MERGED})")
+WITHOUT_VALUE = (f"SELECT COUNT() FROM {SOBJECT} WHERE Processing_Status__c = '{OK}' AND {FIELD} = null "
+                 f"AND (NOT {MERGED})")
 PLAN_COLS = ["batch_id", "name", "status", "creator", "rows", "value"]
 LEDGER_COLS = ["when_utc", "batch_id", "rows", "read_back", "outcome"]
 

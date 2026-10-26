@@ -11,10 +11,16 @@ description: Salesforce for this project - what lives there (attendance batches 
   `Attendance_Batch__c`. The Apex attendance processor (after-insert trigger only, so a batch
   `PATCH` runs none of it) matches the club Account by name (capitals ignored; no match creates a
   partner-less Club account), finds or creates one Contact per ticked girl and writes the
-  `Attendance__c` rows (master-detail on the Contact). A batch for a club and date that already
-  has a `Success` one is `Failed` "Duplicate". `Girls_Present__c` on the batch is the one attendance count: set by the
-  processor on `Success`, typed in for partner-reported aggregates (RUNBOOK "Attendance totals and
-  partner-reported counts").
+  `Attendance__c` rows (master-detail on the Contact). A second batch for a club and date that
+  already has a `Success` one (a mentor's corrected re-submission; since 2026-10-22, #108) is
+  merged into the oldest `Success` batch of that club and date when its `Module__c` is the same:
+  only the girls not yet on that date get an `Attendance__c` row, as rows of that original batch,
+  whose `Girls_Present__c` moves to its row count; the correction is `Success` with
+  `Status_Message__c` `merged into <original batch id>`, no count and no rows of its own. A
+  different module, or a correction that adds nobody, is `Failed` "Duplicate" as before (never a
+  row removed, never a girl twice). `Girls_Present__c` on the batch is the one attendance count:
+  set by the processor on `Success`, moved on a merge, typed in for partner-reported aggregates
+  (RUNBOOK "Attendance totals and partner-reported counts").
 - **Accounts.** Every active club has a Club account (record type Club) named exactly as question
   5 sends it, parented to its partner's account (`glow/sf_partners.csv`). Never rename a club in
   Salesforce first: a rename starts in the sheet (RUNBOOK "Renaming a club").
@@ -75,6 +81,7 @@ description: Salesforce for this project - what lives there (attendance batches 
 |---|---|---|---|
 | Write connector `Global_Glow_Full_Access` | One record per call (a Club account by hand, a `ParentId`, a permission-set assignment) | Ryan's go only; no hook sees it | The record's values read before the write; a created account is deleted only while it has no Contacts and no attendance |
 | `tools/sf_backfill.py send --apply` | New attendance batches (the processor makes the contacts and rows) | Hook (`--apply`), `--vpn-off`, `--limit 1` first | By id from `ledger.csv` and `created_contacts.csv`, never a time window; never delete a back-fill contact that carries live rows (BACKLOG 78) |
+| `tools/sf_backfill.py resend --apply` | A copy of each Failed "Duplicate" correction since 2026-09-07; the processor merges its missing girls into the day's original batch (rows, new contacts, the original's `Girls_Present__c`) | Hook (`--apply`), `--vpn-off` (dry run too), `--limit 1` first | By id from `resend_ledger.csv` and `resend_added.csv`: the added rows, the contacts only while they carry no other rows, the copies; each original's `Girls_Present__c` back to its own rows |
 | `tools/fix_module_values.py --apply` | `Module__c` on batches and their rows | Hook, `--vpn-off` | `--undo <ledger> --vpn-off --apply` |
 | `tools/sf_partner_monthly.py --apply` | One `Partner report` batch per partner a month (the three partners' Monthly Max), or its `Girls_Present__c` when the report changed | Hook (`--apply`), `--vpn-off`, `--limit 1` first | By id from `data/sf_partner_monthly/ledger.csv`: delete an inserted batch, set an updated one back to its `old` count |
 | `tools/sf_report_folders.py copy`, `move`, `undo` with `--apply` | `copy`: a clone of a report or dashboard in Decommissioned; `move`: a report's folder and label (its Id kept); `undo`: those moves put back. Never a dashboard's folder or name (by hand in Lightning) and never the Attendance folders | Hook (`--apply`), `--vpn-off`, `move --limit 1` first | `undo --ledger data/sf_report_folders/ledger.csv --vpn-off --apply`, last first; a copy stays in Decommissioned |
