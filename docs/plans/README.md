@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-10-26 | Item 12, "Partners that recruited new mentors", a component on GLOW Club Training (D4) | in-progress |  | [2026-10-26-sf-new-mentors.md](2026-10-26-sf-new-mentors.md) |
 | 2026-10-25 | GLOW Club Training (D4, "Mentors") by partner and month, over the last 12 months | in-progress |  | [2026-10-25-sf-dash-training.md](2026-10-25-sf-dash-training.md) |
 | 2026-10-24 | GLOW Club Reporting (the dashboard "Reporting", items 17 and 18) and the GLOW of the Month table (item 19) by Partner and Month | done |  | [2026-10-24-sf-dash-reporting.md](2026-10-24-sf-dash-reporting.md) |
 | 2026-10-24 | GLOW Club Observations (D3) by partner and month, over the last 12 months | in-progress |  | [2026-10-24-sf-dash-observations.md](2026-10-24-sf-dash-observations.md) |
