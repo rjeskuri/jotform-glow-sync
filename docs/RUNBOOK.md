@@ -977,7 +977,7 @@ agree.
 - **Dry run:** each command without `--apply`.
 - **Apply:** with `--apply`, Ryan's go.
 - **Verify:** `--audit` again; `switcher_flags.py --check-page`.
-- **Rollback:** each write saves the form's whole store before its POST, to `backups/translations/<form>-<stamp>-before.json` (mode 600, never over an earlier file); without that file `glow/translations.py` sends nothing. Since 2026-10-09 that includes `add_language.py` and `restore_translations.py`, which used to POST without it.
+- **Rollback:** each write saves the form's whole store before its POST, to `backups/translations/<form>-<stamp>-before.json` (mode 600, never over an earlier file); without that file `glow/translations.py` sends nothing. Since 2026-10-09 that includes `add_language.py` and `restore_translations.py`, which used to POST without it. To put a saved store back: `python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json` (a dry run: per language how many keys differ, are added, are removed), then the same command with `--apply` on Ryan's go (the current store saved first, each differing language posted whole, re-read: RESTORED or MISMATCH).
 
 ```bash
 python3 tools/add_translations.py --audit                 # which labels lack translations
@@ -986,6 +986,8 @@ python3 tools/add_translations.py --apply
 python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json          # preview
 python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json --apply
 python3 tools/restore_translations.py --form <clone id> --check   # after a clone: is the switcher intact?
+python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json   # put a saved store back: dry run
+python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json --apply   # on Ryan's go
 python3 tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict tools/translations_hi.json     # Asia only (2026-09-20)
 python3 tools/add_language.py --form 262383129464057 --code fa --name Persian --dict tools/translations_fa.json   # Asia only (2026-09-20)
 python3 tools/switcher_flags.py --check-page             # which switcher languages have no built-in flag (public page, no key)
@@ -1032,7 +1034,8 @@ by a test to the table in "The forms"):
 
 The Club Roster Form link sits above the problem link, so a mentor with a
 roster change meets it first. Place it only after the session-notes field
-(task #105; "Session notes on the attendance forms"): the notes go on first,
+(on all five forms since 2026-10-26, task #105; "Session notes on the
+attendance forms"): the notes go on first,
 because placing this link leaves Submit sharing an order with the hidden field
 below it, and `add_session_notes.py` then refuses on the tie. Adding,
 re-checking or removing one:
@@ -1106,11 +1109,11 @@ what `--undo` can still restore: [plan](plans/2026-09-29-rosters-above-submit.md
 ## Session notes on the attendance forms
 
 - **When:** placing, re-checking or removing the optional session-notes field; `form_status` says `session notes: absent` once the field is expected, or flags one (`!!` lines naming `sessionNotes`).
-- **Status:** built, not live (ticket #104, 2026-10-23). Task #105 places it on the template and the four regional forms on Ryan's go, after a read-only `GET /form/{id}/questions` of a live textarea confirms the limit property (`entryLimit`, `Letters-1000`: the name from Jotform's own example, the value from the runtime; not yet read from this account), and flips `glow/layout.py` `NOTES_EXPECTED` to `True`.
-- **Dry run:** `python3 tools/add_session_notes.py`.
-- **Apply:** its `--apply`, the template first; the label's translations are a second step (task #105): until then every language shows it in English.
-- **Verify:** the tool's re-read after the write; `form_status` (`session notes:`, `layout:`).
-- **Rollback:** `--remove --apply`, the questions snapshot, or Revision History.
+- **Status:** live on all five forms since 2026-10-26, the label translated in every language each form offers ([plan](plans/2026-10-25-session-notes.md), status done; ticket #105, on Ryan's go): the template q489, Africa q476, Asia q457, Latin America q454 and the disabled U.S q446, each CLEAN. `glow/layout.py` `NOTES_EXPECTED` is `True` from #105's land on (a form without the field is then NOT CLEAN); the runner's first run after the land is still to be read for in-sync (plan, Result). The limit is `entryLimit` `Letters-1000`, verified by the template write's re-read. Neither e-mail shows the notes yet: ticket #148 adds them to both (below).
+- **Dry run:** `python3 tools/add_session_notes.py --form <id>`, then `python3 tools/add_translations.py --form <id>`.
+- **Apply:** per form, after `python3 backup_forms.py --form <id>`: `python3 tools/add_session_notes.py --form <id> --apply`, then its translations with `python3 tools/add_translations.py --form <id> --apply` (GET, merge, POST; the store saved first), the template first.
+- **Verify:** the tool's re-read after the write; `python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv --partners data/partners_<date>.csv --rendered` (`session notes: present`, `layout:`, CLEAN); once all five carry it, `python3 tools/add_translations.py --audit` (the label untranslated nowhere; the audit truncates its lists, so the 2026-10-26 rollout's proof was a direct read of each form's store, plan Result).
+- **Rollback:** `python3 tools/add_session_notes.py --form <id> --remove --apply`, the questions snapshot, or Revision History. A language a translations POST damaged (`MISMATCH after write`) comes back from the translation store that POST saved first: `python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json` (a dry run: per language how many keys differ, are added, are removed), then the same command with `--apply` on Ryan's go (the current store saved first, each differing language posted whole, re-read: RESTORED or MISMATCH; [plan](plans/2026-10-25-session-notes.md), Rollback).
 
 One textarea named `sessionNotes` on every attendance form, found by its name
 (the qid differs per form): the label "Additional information about this
@@ -1123,23 +1126,41 @@ goes above it (the field is the first element of the fence `glow/layout.py`
 guards, like the links and Submit; test-pinned). Mentors' notes are free text
 that can name girls: no tool prints a submission's notes, counts only.
 
+The e-mails (ticket #105; [plan](plans/2026-10-25-session-notes.md), Result). Mentors' notes
+can name girls, so Ryan decided per e-mail, on 2026-10-26: the notes go in both. The staff
+notification e-mail ("Notification 1", to GLOW's fixed staff address) carries them, and so does
+the mentor's confirmation (the autoresponder, to the address she typed). Both are custom bodies
+that list fixed fields (read in the template's builder, Settings, Emails, 2026-10-26), and
+Jotform rebuilds only a default body when questions change, so today neither shows the notes:
+they are in Jotform's submissions only. Ticket #148, Ryan's by hand in the builder after #105
+lands, adds `{sessionNotes}` to both bodies on each of the five forms (ten bodies).
+
+The label is translated in every form language (`tools/translations_additions.json`, and the
+Odia, Hindi and Persian files; written by us, not native-reviewed): per form, the translations
+go on right after the field, since `tools/add_translations.py` posts a string only to a form
+that shows it.
+
 ```bash
-python3 tools/add_session_notes.py                                # dry run, template + 4 regionals
-python3 tools/add_session_notes.py --form 262352490535154 --apply # the template first; open its page
-python3 tools/add_session_notes.py --apply                        # the four regional forms
-python3 tools/add_session_notes.py --remove --apply               # take it out again (the rollback)
+python3 tools/add_session_notes.py                                     # dry run, template + 4 regionals
+python3 backup_forms.py --form 262352490535154
+python3 tools/add_session_notes.py --form 262352490535154 --apply      # the template first; open its page
+python3 tools/add_translations.py --form 262352490535154               # dry run: one new entry per language
+python3 tools/add_translations.py --form 262352490535154 --apply       # the store saved first; GET, merge, POST
+python3 tools/add_translations.py --audit                              # after all five: nothing untranslated
+python3 tools/add_session_notes.py --form <id> --remove --apply        # take it out again (the rollback)
 ```
 
 The tool plans all five forms before it writes any. The field goes at an
 empty order between the last roster and the first link, where nothing moves
-whether Jotform inserts or ties. The live forms have none today (the
-2026-09-30 repair put the links, Submit and the hidden bridge fields at the
-orders right after the last roster, and every roster inserted since kept them
-there), so the tool first makes room the way `add_feedback_link.py` does
-(Ryan, 2026-10-23): the first link through Submit and the hidden fields at the
-orders right after move one down, bottom-up so each lands on an empty order
-(the path Jotform keeps exactly), then one create at the freed order - about
-ten writes per form, each printed as `move <name> (qN) a -> b`. So the
+whether Jotform inserts or ties. The live forms had none before the
+2026-10-26 rollout (the 2026-09-30 repair put the links, Submit and the hidden
+bridge fields at the orders right after the last roster, and every roster
+inserted since kept them there), so the tool first made room the way
+`add_feedback_link.py` does (Ryan, 2026-10-23): the first link through Submit
+and the hidden fields at the orders right after move one down, bottom-up so
+each lands on an empty order (the path Jotform keeps exactly), then one create
+at the freed order - ten writes per form (9 moves and the create), each
+printed as `move <name> (qN) a -> b`. So the
 sequence matters: **the session notes go on before the Club Roster Form link**
 (`add_feedback_link.py --link roster`, BACKLOG 46; "Links above Submit"), whose
 placing leaves Submit sharing an order with the hidden field below it. After

@@ -15,6 +15,7 @@ names the BACKLOG items a plan is about. Newest first.
 |---|---|---|---|---|
 | 2026-10-26 | The session notes in Salesforce - Attendance_Batch__c.Session_Notes__c, mapped from each form's sessionNotes, and the audit that requires it | in-progress |  | [2026-10-26-session-notes-salesforce.md](2026-10-26-session-notes-salesforce.md) |
 | 2026-10-25 | GLOW Club Training (D4, "Mentors") by partner and month, over the last 12 months | in-progress |  | [2026-10-25-sf-dash-training.md](2026-10-25-sf-dash-training.md) |
+| 2026-10-25 | The optional session-notes field and its translations on all five attendance forms | done 2026-10-26 |  | [2026-10-25-session-notes.md](2026-10-25-session-notes.md) |
 | 2026-10-24 | GLOW Club Reporting (the dashboard "Reporting", items 17 and 18) and the GLOW of the Month table (item 19) by Partner and Month | done |  | [2026-10-24-sf-dash-reporting.md](2026-10-24-sf-dash-reporting.md) |
 | 2026-10-24 | GLOW Club Observations (D3) by partner and month, over the last 12 months | in-progress |  | [2026-10-24-sf-dash-observations.md](2026-10-24-sf-dash-observations.md) |
 | 2026-10-24 | GLOW Club Implementation (D2) by partner and month, over the last 12 months | done 2026-10-26 |  | [2026-10-24-sf-dash-implementation.md](2026-10-24-sf-dash-implementation.md) |

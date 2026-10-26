@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import (AutoSyncFixture, FakeForm, REPO, SameNameFixture, read,
@@ -17,6 +18,7 @@ import auto_sync
 import form_status
 import sync_attendance_form as sync
 from glow import forms as glow_forms
+from glow import layout
 from glow import sync as glow_sync
 
 
@@ -686,6 +688,9 @@ class RetiredRosters(unittest.TestCase):
         self.assertIn("1 roster(s) still await retirement: Beta Club", run.results[0][8])
 
 
+# SameNameFixture's form predates the session-notes field (live on every form since task #105,
+# which set glow.layout.NOTES_EXPECTED): its absence is pinned in test/session_notes_test.py.
+@mock.patch.object(layout, "NOTES_EXPECTED", False)
 class RetiredRostersAudit(unittest.TestCase):
     """tools/form_status.py and the retired rosters (docs/plans/2026-10-06-clubs-off-
     jotform.md): with --partners a roster the Roster says is retired is clean off the
