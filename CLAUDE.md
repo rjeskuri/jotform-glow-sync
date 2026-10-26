@@ -70,4 +70,4 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
     until the owner re-authorizes, the form-submit trigger FAILS HARD (`make gs` fails on a 9th
     service). Push, rollback and its floors: `.claude/skills/deploy-appsscript/SKILL.md`.
 12. Salesforce: VPN off before any `sf` call (Salesforce freezes the user); the tools take `--vpn-off`.
-    Writes per rule 1, subagents' too (merges ask); one record per call; `.claude/skills/salesforce`.
+    Writes: rule 1, subagents' too (merges ask); connector's: main session, Ryan's go; 1 record/call.

@@ -2411,14 +2411,14 @@ wording; forms built before 2026-09-28 get it once, from the menu
 - **When:** any change under `appsscript/`.
 - **Status:** the 2026-10-09 cleanup's changes (the Club Roster Form handlers' write order, the rebuild's YES/NO, the dropdown update under the lock, the consolidations) are in the repository, not deployed: they wait for Ryan's push. No new Google service, so no re-authorization is expected ([Result](plans/2026-10-09-repo-cleanup.md#result)).
 - **Dry run:** `make gs` (and `make check`).
-- **Apply:** `nvm use 18`, then `npm run clasp:push` at a quiet moment: Ryan, or Claude on his yes to the gate's prompt. Ryan can run the push with Claude through the user-only `/deploy-appsscript` skill.
+- **Apply:** Ryan picks the quiet moment before anyone runs the push; then `nvm use 18` and `npm run clasp:push`. With everything under `appsscript/` committed, the push goes through automatically, logged and notified; anything uncommitted there and the gate asks, refused where no prompt can show. Ryan can run it himself, or with Claude through the user-only `/deploy-appsscript` skill.
 - **Verify:** a new Google service: authorize at once, then "Process any missed form responses" and read its preview.
 - **Rollback:** a push of the previously deployed `appsscript/` ("Rolling back `appsscript/`", below).
 
 ```bash
 make gs                 # parse, pinned services, calls that resolve (below)
 nvm use 18              # clasp 2.4.2: the npm scripts refuse any other Node
-npm run clasp:push      # gated: Claude asks, your answer is the go; or run it yourself
+npm run clasp:push      # automatic once appsscript/ is committed; or run it yourself
 ```
 
 `make gs` (`scripts/check_gs.js`) checks offline what would otherwise fail only live,
