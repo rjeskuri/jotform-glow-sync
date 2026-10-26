@@ -1355,11 +1355,11 @@ owner's to delete (the CEO's retention decision).
 ## Photo mover
 
 - **When:** setting it up (once, before #63 points the forms' Drive integrations at its source folders), the template's test upload after #63, a `REFUSED`, `MOVE_FAILED` or `MERGE_FAILED` in the log, or stopping it.
-- **Status:** built offline 2026-10-21 (ticket #89), not set up yet; it is set up first, then #63 (Ryan, 2026-10-22; [plan](plans/2026-10-21-drive-photo-mover.md#result)).
+- **Status:** built offline 2026-10-21 (ticket #89); set up and its trigger installed 2026-10-23 ([plan](plans/2026-10-21-drive-photo-mover.md#result)); every real move then failed (Drive does not move a folder from My Drive into a Shared Drive), fixed in the repo 2026-10-24 (#132: the files move one by one into a folder made there); the live project's update is Ryan's, "Updating the live project" below.
 - **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, by counts and folder names; nothing changes.
-- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2).
-- **Verify:** the execution's log (`done: N folder(s) moved, N file(s) merged, 0 failure(s)`); the subfolder is in the region's folder on the Shared Drive and gone from `Attendance photos - <Region>`, which stays.
-- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; move a subfolder back into `Attendance photos - <Region>` by hand to undo a move.
+- **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2; or paste by hand, below).
+- **Verify:** the execution's log (`done: N folder(s) moved (N file(s)), N file(s) merged, 0 failure(s)`); a folder of the subfolder's name is in the region's folder on the Shared Drive with its photos; the emptied subfolder is still in `Attendance photos - <Region>` (expected; delete it by hand), and that folder itself stays.
+- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it; to undo a move, move the files back into the emptied subfolder in `Attendance photos - <Region>` (or a new folder of its name, once it was cleared) by hand. That move out of the Shared Drive needs **Manager** on it: Google's "How file access works in shared drives" (https://support.google.com/a/users/answer/12380484) lets a Contributor or Content manager move files from My Drive into a shared drive and a Content manager move them within it, but for out of it says only "If you have Manager access to a shared drive, you can move files and folders out of shared drive to My Drive". So a Manager does it, or Ryan's role is raised for it.
 
 Jotform's Google Drive integration writes only into Ryan's My Drive ("Photos", above); the
 photos belong on the company Shared Drive. `drive-sync/` is a standalone Apps Script project
@@ -1385,10 +1385,36 @@ The order, each live step on Ryan's go (Ryan, 2026-10-22):
    time, each followed by a check of the next run's log for that region (no `CONFIG refused`,
    no `UNKNOWN`; its first subfolder moved) before the next form.
 
+**Updating the live project** (#132; Ryan, once). Every run since 2026-10-23 ended in
+`MOVE_FAILED … cannot use this operation on a shared drive item`: Google's API does not move a
+folder from My Drive into a shared drive at any role (`teamDrivesFolderMoveInNotSupported`), so
+the mover now makes the folder on the Shared Drive and moves the files into it one by one through
+the advanced Drive service. The code is in the repo; the live project is updated by hand (clasp
+is logged in as another account):
+
+1. As the company account, open the `GLOW photo mover` project at script.google.com.
+2. Replace the editor's `Plan.gs` and `Mover.gs` with the repo's `drive-sync/Plan.gs` and
+   `drive-sync/Mover.gs` (the whole file each).
+3. Project Settings → "Show appsscript.json manifest file in editor"; replace the editor's
+   `appsscript.json` with the repo's `drive-sync/appsscript.json` (it enables the advanced Drive
+   service; the scopes are unchanged). Or: Editor → Services `+` → Drive API, version v3,
+   identifier `Drive` → Add. Save.
+4. Run `previewMoves`; re-authorise if asked. Its log is the plan as before (`would move N …`);
+   nothing changes.
+5. Run `moveSettledPhotos` once. Executions → its log: `done: N folder(s) moved (N file(s)), N
+   file(s) merged, 0 failure(s)`; a `MOVE_FAILED` line names the region and the folder (never a
+   file). The photos are in a folder of each subfolder's name in the region's folder.
+6. The emptied subfolders stay in `Attendance photos - <Region>` in My Drive: expected; delete
+   them by hand, now and regularly from then on (each leftover costs every run one listing; the
+   mover never trashes). The trigger needs no change (it keeps calling `moveSettledPhotos`).
+
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N`,
 then the folders by name (club and date; never a file's name or contents).
 
-- **move**: the whole subfolder went to the Shared Drive.
+- **move**: a folder of that name was made in the region's folder and the subfolder's files
+  moved into it (Drive cannot move the folder itself, #132); the emptied subfolder stays in My
+  Drive (the mover never trashes). Each leftover slows every run by one listing, so clear them
+  regularly by hand.
 - **merge**: that name was already there once (a resubmission): its files went in one by one,
   beside what is there; **kept** files (same name and size already there) stay in My Drive. A
   subfolder of kept files only (`0 file(s) in`) changes nothing, never holds up a same-name copy
@@ -1398,7 +1424,8 @@ then the folders by name (club and date; never a file's name or contents).
   moved or merged files this run; the next run takes it (a backlog of same-name copies clears
   one per run).
 - **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
-  moving at 4.5; what it did not read is not touched, and the next run carries on.
+  moving at 4.5; what it did not read is not touched, and the next run carries on (a move cut
+  short, its folder made and some files moved, is finished by the next run as a merge).
 - **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
   hand (pick the right folder), or rename one of the two there.
 - **UNKNOWN**: a folder that is no region's; left alone.
@@ -1406,10 +1433,15 @@ then the folders by name (club and date; never a file's name or contents).
   source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
   `Africa`, `Asia`, `Latin America`, `U.S` or `Template`); nothing read, nothing moved. Fix the
   property in Project Settings → Script Properties, or the folder's name.
-- **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a move; the run ends in an error and Google
-  sends the owner its failure summary. On the first move, a permission error means Ryan's role on
-  the Shared Drive must be raised to Manager ([plan](plans/2026-10-21-drive-photo-mover.md),
-  Risks).
+- **MOVE_FAILED** / **MERGE_FAILED**: Drive refused a file's move, or did not confirm the new
+  folder (`folder not confirmed, its files stay in My Drive`: the next run merges into it if it
+  exists, or moves again); the line names the region and the folder, the rest of the run goes
+  on, the run ends in an error and Google sends the owner its failure summary. A move whose
+  folder exists but whose files did not all move is finished by the next run as a merge.
+  A permission error means Ryan's role on the Shared Drive is below Content manager, or the
+  advanced Drive service is not enabled (above). Before 2026-10-24 every move failed with
+  `cannot use this operation on a shared drive item`: the folder move Drive does not support
+  (#132; [plan](plans/2026-10-21-drive-photo-mover.md), Risks).
 
 Nothing is shared beyond the Shared Drive's members (the named list: the CEO and Ryan, never
 "anyone with the link"): the mover never shares, links, copies, trashes or e-mails a file.
@@ -3582,7 +3614,7 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 ## Monthly Report dashboards in Salesforce
 
 - **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
-- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)).
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)); D3 and items 9-11 (#77) deployed 2026-10-25 on Ryan's go (deploy `0AfRP000002i5hB0AQ`, check-only `0AfRP000002i5dx0AA`) and read back; item 11's report redeployed 2026-10-26 on Ryan's go with its record count on (`co` 1; deploy `0AfRP000002i6yE0AQ`, check-only `0AfRP000002i7JB0AY`), read back equal to `build_item11/`, that day's refresh returning data on all three D3 components; the 5 "DHIS2 Reports" reports D3 no longer uses moved to Decommissioned 2026-10-26 ([plan and Result](plans/2026-10-24-sf-dash-observations.md#result)).
 - **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
 - **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
 - **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
@@ -3620,6 +3652,16 @@ dashboard in Salesforce"); epic #68 leaves them untouched. A change here follows
 ritual: VPN off, retrieve live into `data/sf_<topic>_<date>/before/`, build in a copy,
 check-only, Ryan's go, deploy, retrieve `after/` and compare; never an older build (DECISIONS
 2026-10-16).
+
+A dashboard component's measure must be one of its report's aggregates, as the Analytics describe
+lists them (`GET /analytics/reports/<id>/describe`, its `aggregates`). A report offers `RowCount`
+only when its record count is on (the report param `co` 1, describe `hasRecordCount: true`),
+whatever columns it summarizes: item 10's report sums `GC_sessions_did_you_observe_last_month__c`
+with `co` 1 and lists the Sum and `RowCount` together. On 2026-10-25 item 11's report (#77) had
+its record count off (`co` 0, describe `hasRecordCount: false`) and listed only its Sum, so its
+component, which measures `RowCount`, failed the refresh with 406 ("One or more of the fields
+selected in the component is no longer available in the report"). The check-only deploy passes
+such a component; only the refresh shows the 406.
 
 ### Decommissioned
 
@@ -4046,6 +4088,305 @@ Questions for GLOW:
 - The sources are answered: Ryan, 2026-10-23 on #74, "use the candidates": item 1 counts
   `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
   and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
+
+### GLOW Club Observations
+
+D3 in `glow/sf_keep_list.csv`, the GLOW Club Observations dashboard, is the dashboard "GLOW Club
+Training" (`01ZRP000006k2D32AI`) in "GLOW Monthly Dashboards", with items 9-11 (ticket #77,
+[plan](plans/2026-10-24-sf-dash-observations.md)). Its label and its reports' labels stay as they
+are (Ryan, 2026-10-23), and each component's title is its report's label. It runs as the
+specified running user (`SpecifiedUser`), so it shows the data of its last refresh: a refresh
+after each change (a PUT, Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current.
+#77's build `data/sf_dash_observations_2026-10-24/build/` is deployed since 2026-10-25 on Ryan's
+go (deploy `0AfRP000002i5hB0AQ`, the plan's Result) and read back into `after/`. Item 11's report
+was redeployed from `data/sf_dash_observations_2026-10-24/build_item11/` on 2026-10-26 on Ryan's
+go (deploy `0AfRP000002i6yE0AQ`; item 11, below), and that day's refresh returned data on all
+three components.
+
+The three components, each on its report in "GLOW Monthly Reports":
+- Item 9, "GLOW Club observation form submitted": the report "Submission of GC observation forms
+  M & P" (`00ORP000004RJZC2A4`, matrix) counts Monthly Reports by the answer to
+  `did_you_submit_your_GC_observation_form__c` (its values across: Yes, No, and NA in some older
+  months; a blank answer is filtered out), for each partner and month. The form in use today
+  (`dHIS2Controller`) clears this answer when the partner observed no session, so a partner with
+  0 sessions has no answer here. The component is a stacked column for each month, one segment
+  per answer. SOQL signal (September 2026: 23 Yes, 3 No; January 2026: 7 Yes, 7 No, 8 NA):
+  `SELECT did_you_submit_your_GC_observation_form__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND did_you_submit_your_GC_observation_form__c != null GROUP BY did_you_submit_your_GC_observation_form__c`.
+- Item 10, "Number of GLOW Club sessions observed": the report "Total Number of Club Observations
+  M&P" (`00ORP000004RJZD2A4`, summary) sums `GC_sessions_did_you_observe_last_month__c` for each
+  partner and month. The component is a column of the sum for each month. SOQL signal (September
+  2026: 42 Monthly Reports, sum 93):
+  `SELECT COUNT(Id), SUM(GC_sessions_did_you_observe_last_month__c) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c != null`.
+- Item 11, "Whether or not PC has observed sessions": the report "Completed Observing Clubs
+  Alteast Once P" (`00ORP000005uf412AA`, matrix) is a yes/no for each partner and month. Its
+  bucket "Observed" on `GC_sessions_did_you_observe_last_month__c` reads Yes for 1 or more
+  sessions and No for 0 (across); each Monthly Report is one partner's month, so its counts are
+  partners. Its report keeps the sum of `GC_sessions_did_you_observe_last_month__c` as a column
+  and has its record count on (the report param `co` 1, redeployed on 2026-10-26), so
+  its aggregates offer `RowCount` beside the Sum. The component is a stacked column for each
+  month, Yes and No; its chart measures the record count (`RowCount`), the partner-months in each
+  Yes/No bucket for each month. Before that redeploy from `build_item11/` its record count was
+  off (`co` 0) and the chart failed the refresh with 406 (2026-10-25). SOQL signal, the partners who observed (September 2026: 27, and 15 with 0):
+  `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c > 0`;
+  the partners who observed none: the same query with `= 0`.
+  The field is never blank: the form shows it as 0 until the partner types a number, and
+  `dHIS2Controller` (`setNumber`) saves a blank number as 0. So a No is either 0 sessions
+  observed or the question left unanswered, and the report does not tell the two apart; the report's
+  `!= null` filter removes nothing (0 blank in September 2026, by the form, not by chance).
+
+Two kinds of "no answer" the reports show differently:
+- A partner that filed no Monthly Report for a month has no `DHIS2__c` record for it, so it has
+  no row in any of the three reports: a missing response, which the reports keep apart from a No
+  by leaving it out. Who filed is "Reports completed on time" (item 18, D5).
+- A partner that filed but left the sessions question unanswered counts as 0 sessions: a No in item 11
+  and nothing added in item 10 (above).
+
+How the reports read the data:
+- Each report is grouped by the partner (`DHIS2__c.Account__c`), then by `Period__c` by calendar
+  month; the month is never `CreatedDate`, and a grouping is never also a column.
+- The default period is the last 12 months: the report filter `Period__c equals LAST_N_MONTHS:12`,
+  which leaves out the current, incomplete month. The standard date filter's column is
+  `Period__c`, range All Time, so the field filter sets the period.
+- Each report carries the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
+  (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
+  `notContain` `test` (the lookup matches on the account's name). In September 2026 no Monthly
+  Report is on a test account or a blank Account; in the last 12 months, 2 are, both on a test
+  account: one in January 2026 and one in March 2026, each with 0 sessions and no item 9 answer.
+  With the rule, item 11 counts 33 No in January and 19 in March (34 and 20 without it), and
+  item 10's report 46 records in each of the two months (47 without it).
+- Each report also keeps its filter on a non-blank answer (its own field `!= null`).
+
+The dashboard's only filter is Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`,
+its 6 partner managers), on every component, and viewers read the partner and the month from the
+reports' groupings (Ryan, 2026-10-24 on #77). It has no Partner filter and no Month filter. #77
+takes item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`) off this
+dashboard, with the five components on reports in "DHIS2 Reports"; #78 puts item 16 on D4. Those
+five reports were moved to Decommissioned by `tools/sf_report_folders.py move` on 2026-10-26,
+once this dashboard used none of them; the only components still on them are on dashboards in
+Decommissioned.
+
+For one partner's month, the same queries take `AND Account__r.Name = '<partner>'`; the three
+items' values for one partner in one query (September 2026, Abaana Community Outreach (ACO)
+Africa: Yes, 3 sessions, so observed):
+`SELECT Account__r.Name, did_you_submit_your_GC_observation_form__c, GC_sessions_did_you_observe_last_month__c FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`.
+
+Rollback:
+- The dashboard and items 9-11 roll back together: redeploy those 4 components of this change's
+  retrieve `data/sf_dash_observations_2026-10-24/before/` (check-only, Ryan's go, deploy) only
+  while a fresh retrieve of the same 4 equals `after/`. The deploy names each of the 4 with `-m`,
+  within `before/`:
+  `sf project deploy start -o glow -m "Dashboard:GLOW_Monthly_Dashboards/vbKFAhzWWcXLOmmkSckbvWkgmwtdrM" -m "Report:GLOW_Monthly_Reports/Submission_of_GC_observation_forms_M_P_iuz" -m "Report:GLOW_Monthly_Reports/Total_Number_of_Club_Observations_by_M_q3M" -m "Report:GLOW_Monthly_Reports/Completed_Observing_Clubs_Alteast_Once_P_cn6"`,
+  with `--dry-run` for the check-only. `before/` also holds item 16's report, the five "DHIS2
+  Reports" reports, two report types and `DHIS2__c`, which a whole-folder deploy would put back
+  too, unseen by the `after/` compare: the rollback deploy is the 4 only. That keeps every Id, so
+  the dashboard's components read the old reports again and the FlexiPage
+  `Monthly_Report_Dashboards` keeps D3 in its place. The five "DHIS2 Reports" reports go back to
+  their folder first (the plan's Rollback). After item 11's fix forward (the plan's Rollout),
+  item 11's report is compared with `data/sf_dash_observations_2026-10-24/build_item11/` in place
+  of `after/`; the fix alone rolls back by redeploying item 11's report from `after/` only while
+  a fresh retrieve of it equals `build_item11/`.
+- When they differ, someone has changed the dashboard or a report since the deploy, and the
+  rollback starts from a fresh retrieve by the ritual above. A rollback never deploys an older
+  build or another change's retrieve (DECISIONS 2026-10-16).
+- The copies in Decommissioned made before the deploy (`copy --tag "#77"`) restore D3 and its
+  reports in Lightning only as a set. The dashboard copy points at the reports' original Ids,
+  whose content this deploy rewrites, so its three observation components show the new reports.
+  Move the three report copies and the dashboard copy back (Decommissioned, above), then point
+  each of the dashboard copy's three components at its report's copy. The copies keep their own
+  Ids, so the FlexiPage then needs the dashboard copy in D3's place (the ritual: check-only,
+  Ryan's go, deploy).
+
+### GLOW Club Implementation
+
+D2 in `glow/sf_keep_list.csv`, the GLOW Club Implementation dashboard, is the dashboard
+"Implementation Dashboard" (`01ZRP000006jU9o2AE`) in "GLOW Monthly Dashboards", with items 5-8
+(ticket #76, [plan](plans/2026-10-24-sf-dash-implementation.md)). Its label and its reports'
+labels stay as they are (Ryan, 2026-10-23), and each component's title is its report's label.
+It runs as the viewer (`LoggedInUser`); a daily Subscribe in Lightning refreshes it (a
+subscription, not metadata; Ryan's to set, as for "Jotform Attendance"). #76's changes are live since 2026-10-26 on Ryan's go (deploy
+`0AfRP000002i7Cj0AI`, check-only `0AfRP000002i7B70AI`), read back into `after/` and checked
+against SOQL (the plan's Result).
+
+The four components, each a stacked column for each month, one segment per answer or module:
+- Item 5, "GLOW Club activities carried out": the report "Copy of GLOW Club Implementation by
+  M&P" (`00ORP000005rY3t2AE`, matrix) counts Monthly Reports by the answer to
+  `Did_you_implement_GLOW_Club_last_month_f__c` (across), for each partner and month. Its filter
+  leaves out a blank answer and the answer "No, we did not implement at all", as before #76 (4
+  answers in the last 12 months). SOQL signal (2026-10-26: 565 in the last 12 months, September
+  2026 41 from 41 partners):
+  `SELECT Did_you_implement_GLOW_Club_last_month_f__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Did_you_implement_GLOW_Club_last_month_f__c != null AND Did_you_implement_GLOW_Club_last_month_f__c != 'No, we did not implement at all' GROUP BY Did_you_implement_GLOW_Club_last_month_f__c`.
+- Item 6, "GLOW Club modules implemented": the report "Glow Club Modules Implemented by M&P"
+  (`00ORP000009kUNh2AM`, matrix, new in #76 on the report type `Attendance_Totals`) counts the
+  Jotform batches on `Attendance_Batch__c` by their `Module__c`, one batch per club and session
+  date, where `Processing_Status__c` equals `Success`, `Creator__c` starts with `Jotform`, and
+  `Attendance_Date__c` (the session date) is in the last 12 months and on or after 2026-09-01
+  (Ryan, 2026-10-25: the February-August 2026 pilot batches stay out). In the report filter that
+  floor is in the locale format, `9/1/2026`. Item 6 is grouped by the partner, the club's parent
+  (`Account__c.Parent`), then by month of `Attendance_Date__c`, then by `Module__c` across. Item 6
+  takes the test-record rule on the club's parent: not blank, and its name does not contain
+  "test". The old item 6 report (`00ORP000005rZxd2AE`) counted the form's module field, which is
+  blank since 2025-10; it is in Decommissioned since 2026-10-26, and `glow/sf_keep_list.csv`
+  keeps its id as #70 recorded it. SOQL signal (2026-10-26: 533 batches in 17 modules, all in
+  September 2026, from 31 partners):
+  `SELECT Module__c, COUNT(Id) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c = LAST_N_MONTHS:12 AND Attendance_Date__c >= 2026-09-01 AND Account__r.ParentId != null AND (NOT Account__r.Parent.Name LIKE '%test%') GROUP BY Module__c`.
+- Item 7, "GLOW Club modules adapted to the local context": the report "GLOW Club Modules Adapted
+  By Month" (`00ORP000005uehR2AQ`, matrix) counts Monthly Reports by the answer to
+  `Adapted_to_the_local_culture_or_context__c` (Yes or No, across), for each partner and month;
+  a blank answer is filtered out. SOQL signal (2026-10-26: 543 in the last 12 months, September
+  2026 42 from 42 partners):
+  `SELECT Adapted_to_the_local_culture_or_context__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Adapted_to_the_local_culture_or_context__c != null GROUP BY Adapted_to_the_local_culture_or_context__c`.
+- Item 8, "Summits completed": the report "Local and Regional Summits By Month 2"
+  (`00ORP000005uekf2AA`, matrix) counts Monthly Reports by the answer to
+  `Select_summits_completed_last_month__c` (across, 5 answers in the last 12 months), for each
+  partner and month; a blank answer is filtered out. SOQL signal (2026-10-26: 437 in the last 12
+  months, September 2026 38 from 38 partners):
+  `SELECT Select_summits_completed_last_month__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Select_summits_completed_last_month__c != null GROUP BY Select_summits_completed_last_month__c`.
+
+How the reports read the data:
+- Items 5, 7 and 8 are each grouped by the partner (`DHIS2__c.Account__c`), then by `Period__c`
+  by calendar month (the Monthly Report's month, never `CreatedDate`), the answer across; a
+  grouping is never also a column.
+- Their period is the last 12 months, the report filter `Period__c equals LAST_N_MONTHS:12`,
+  which leaves out the current, incomplete month; the standard date filter's column is
+  `Period__c`, range All Time, so the field filter sets the period.
+- Items 5, 7 and 8 carry the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
+  (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
+  `notContain` `test` (the lookup matches on the account's name).
+- Item 6 reads `Attendance_Batch__c`, not the Monthly Report: its period, grouping and
+  test-record rule are in its own entry above.
+
+The dashboard's only filter is Partner Manager ("Assigned Partner Manager", 6 partner managers),
+on `DHIS2__c$Account__c.Assigned_Partner_Manager__c` for items 5, 7 and 8 and on
+`Attendance_Batch__c$Account__c.Parent.Assigned_Partner_Manager__c` for item 6 (Ryan, 2026-10-24
+on #76). It has no Partner filter and no Month filter: viewers read the partner and the month
+from the reports' groupings. The shared report type `Attendance_Totals` gets one new column,
+`Account__c.Parent.Assigned_Partner_Manager__c` (the partner's manager, through the club's
+parent), so that the Partner Manager filter reaches item 6; the Attendance reports on that type
+are unchanged. The 7 "DHIS2 Reports" reports D2 used before #76 and the old item 6 report moved
+to Decommissioned on 2026-10-26; no dashboard component uses any of them.
+
+For one partner's month, the three `DHIS2__c` answers in one query (`Period__c = LAST_MONTH` is
+September 2026 until 2026-10-31):
+`SELECT Account__r.Name, Did_you_implement_GLOW_Club_last_month_f__c, Adapted_to_the_local_culture_or_context__c, Select_summits_completed_last_month__c FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`;
+and for one partner's month of item 6:
+`SELECT Module__c, COUNT(Id) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c = LAST_MONTH AND Account__r.Parent.Name = '<partner>' GROUP BY Module__c`.
+
+Rollback (#76; this change's retrieve is `data/sf_dash_implementation_2026-10-24/before/`):
+- Each of the four reports has a copy in Decommissioned, made 2026-10-26 before the deploy
+  (`copy --tag "#76"`, ledger `data/sf_dash_implementation_2026-10-24/ledger.csv`):
+  `00ORP000009kUFd2AM` of item 5, `00ORP000009kUHF2A2` of the old item 6, `00ORP000009kUIr2AM`
+  of item 7 and `00ORP000009kUKT2A2` of item 8.
+- The reports roll back from their copies in Decommissioned: move a copy back into "GLOW Monthly
+  Reports" (Decommissioned, above) and point D2's component at it in Lightning; the copies keep
+  their own Ids.
+- D2 is a dynamic dashboard and the org is at its limit of 5 dynamic dashboards, so the
+  Analytics API refuses its copy and D2 has no copy in Decommissioned: its rollback is this
+  change's retrieve `data/sf_dash_implementation_2026-10-24/before/`.
+- First the 8 moved reports go back to their folders by the undo of this change's ledger
+  (`python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_implementation_2026-10-24`,
+  its dry run, then the same with the apply flag on Ryan's go), because D2's old components read
+  them.
+- Then D2, items 5, 7 and 8 and `Attendance_Totals` roll back together: redeploy those 5
+  components of `data/sf_dash_implementation_2026-10-24/before/` (check-only, Ryan's go, deploy,
+  each named with `-m` within `before/`) only while a fresh retrieve of the same 5 equals
+  `after/`. That keeps every Id, so D2's components read the old reports again; the new item 6
+  report then goes to Decommissioned by `move` (the plan's Rollback).
+- `before/` also holds the old item 6 report, the 7 "DHIS2 Reports" reports and the report type
+  `Dhis2`, which #76 leaves as they are: the rollback deploy is the 5 only, never the whole
+  folder.
+- When a fresh retrieve and `after/` differ, someone has changed D2 or a report since the
+  deploy: stop, ask Ryan, and start the rollback from that fresh retrieve by the ritual above.
+- A rollback never deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
+
+### GLOW Club Reporting
+
+The dashboard "Reporting" (`01ZRP000006oxSr2AI`, D5 in `glow/sf_keep_list.csv`, in "GLOW Monthly
+Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18. Item 19 is the table, on no
+dashboard. Ticket #79, [plan](plans/2026-10-24-sf-dash-reporting.md). Status: deployed 2026-10-26
+(`0AfRP000002i7330AA`) from `data/sf_dash_reporting_2026-10-24/build/`, read back into `after/`
+and checked against SOQL (the plan's Result).
+
+What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
+- Item 17, GLOW's "Report approved by PO", is the report "Approved Approvals monthly report"
+  (`00ORP000006XXEf2AO`): the Monthly Reports with `Approved__c` ticked, a record count.
+- Item 18, GLOW's "Report submitted on time", is the report "Reports completed on time"
+  (`00ORP0000054DyH2AU`): the Monthly Reports filed, a record count, with each one's
+  `Monthly_Report_submission_date__c` and `Monthly_Report_Modified_Date__c` as columns. No report
+  computes "on time" yet (#119, on hold).
+- Item 19, GLOW's "GLOW of the Month Stories", is the report "GLOW of the Month Stories Report"
+  (`00ORP000005p2L32AI`): one row per Monthly Report with its stories (outstanding stories, peer
+  support, community impact, success story, personal growth).
+
+How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
+- Each report filters `Period__c equals LAST_N_MONTHS:12`, the last 12 months through `Period__c`
+  (#128), which leaves out the current, incomplete month. Its standard date column is `Period__c`,
+  range All Time, in place of `CreatedDate`. Item 19's fixed year (`Year__c equals 2026`) is
+  removed.
+- Both dashboard reports, items 17 and 18, group by Partner (`DHIS2__c.Account__c`, the partner
+  account), then by Month (`Period__c` by calendar month). The owner groupings
+  (`Account_Owner_Check__c`, `Account__c.Owner`) and item 17's `Approved__c` grouping are removed,
+  and a grouping is never also a column.
+- The test-record rule of #70 is a report filter on all three: `Account is not blank AND Account:
+  Account Name does not contain "test"`. It keeps the test records, a test account's or a blank
+  Account's Monthly Reports, out of every component and of the table. On 2026-10-24 it leaves out
+  2 of the 569 Monthly Reports of the window, and none of September 2026.
+- Item 19 is a tabular report: the org had it as a summary report grouped by `Month__c`, and the
+  build makes it tabular, with no grouping. Item 19 has Partner and Month as its columns and its
+  filters: the columns `Account__c` and `Period__c`, beside the stories.
+- Item 19's Month filter reads `Period__c` (`Period__c equals LAST_N_MONTHS:12`, which a viewer
+  can narrow to one month) and its Partner filter reads `Account__c` (Account not blank, which a
+  viewer can narrow to one partner). The "test" condition is locked.
+- The dashboard has one filter, Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`),
+  as today, so each manager picks their own partners (Ryan, 2026-10-24 on #79). It has no Partner
+  filter and no Month filter (Ryan, 2026-10-24, for every Monthly Report dashboard; DECISIONS
+  2026-10-24). The filter offers 7 managers: the 6 it offered plus the active manager it lacked
+  (Ryan, 2026-10-25); of the 8 managers with partners in the window, the eighth, inactive, is
+  left out by a Ruling made in the build, not by Ryan: open for him to reverse, and no rule for
+  the other Monthly Report dashboards until he confirms it.
+- The dashboard's components are two tables titled with the reports' labels, "Approved Approvals
+  monthly report" and "Reports completed on time", each a row per partner and month with its
+  count. They take the place of the one component today, on "Partner Report Submission On Time"
+  (`00ORP000005u1WP2AY`), one of the 19 reports held in "DHIS2 Reports", which moves to
+  Decommissioned once the dashboard no longer uses it.
+- The dashboard runs as the viewer (`LoggedInUser`), as today; its running user is unchanged.
+
+The SOQL signals, for the last complete month, each with the period and the test-record rule. A
+component is right when, refreshed, it shows the same total and the same number for one partner:
+- Item 17, "Report approved by PO": the total is `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c =
+  LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Approved__c = true`,
+  and one partner's number is `SELECT Account__r.Name, COUNT(Id) FROM DHIS2__c WHERE Period__c =
+  LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Approved__c = true
+  GROUP BY Account__r.Name`.
+- Item 18, "Report submitted on time": the total is `SELECT COUNT(Id) FROM DHIS2__c WHERE
+  Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`, and one
+  partner's number is `SELECT Account__r.Name, COUNT(Id) FROM DHIS2__c WHERE Period__c =
+  LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY
+  Account__r.Name`.
+- Item 19, "GLOW of the Month Stories": the table's rows are `SELECT Account__r.Name, Period__c
+  FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE
+  '%test%') ORDER BY Account__r.Name`, and their count `SELECT COUNT(Id) FROM DHIS2__c WHERE
+  Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`.
+
+The baseline, 2026-10-24 (September 2026, before the change; `evidence/` of this change): 16
+approved, 42 filed, 42 stories rows, from 42 partners; one partner, Development Consortium, 1 each.
+
+Rollback, each step on Ryan's go:
+- The reports, items 17-19, are restored from their copies in Decommissioned (`copy --tag "#79"`,
+  made before the change), as Decommissioned (above) says.
+- "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), moved to Decommissioned once the
+  dashboard no longer uses it, comes back first, before the dashboard, whose `before/` has its one
+  component on that report. It is one move in this change's own ledger:
+  `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_reporting_2026-10-24 --limit 1`,
+  whose dry run lists that report alone, then the same with `--apply`. If the dry run lists any
+  other move, stop and ask Ryan; he moves the report back to "DHIS2 Reports" by hand in Lightning.
+- The dashboard "Reporting" (D5) is dynamic, and the API refuses its copy at the org's limit of 5
+  dynamic dashboards (Ryan, 2026-10-24). The dashboard is restored by redeploying it from
+  `data/sf_dash_reporting_2026-10-24/before/`, only while a fresh retrieve of it equals `after/`.
+- Only the dashboard is deployed from `before/`, check-only first
+  (`-m "Dashboard:GLOW_Monthly_Dashboards/DGdiHNHQWRoBNviGBlNWJPnSYqTlMR"`), never the report type
+  `Dhis2`, the folders or the "DHIS2 Reports" report it also holds.
+- If a fresh retrieve differs from `after/`, stop and ask Ryan. A rollback never deploys an older
+  build or an earlier retrieve (DECISIONS 2026-10-16). Nothing is deleted.
 
 ### GLOW Club Training
 
