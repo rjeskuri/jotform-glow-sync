@@ -289,10 +289,10 @@ project: `sfdx-project.json` as `data/sf_girls_tiles_2026-10-20/build/`'s (API 6
   frame `INTERVAL_LASTMONTH` on `Attendance_Date__c` (as `Girls_Attended_Last_Month`);
   `sortColumn` the delay, `Desc`, so each partner's batches run largest delay first. The sort
   works only within each partner's group: the month's largest delay sits at the top of its
-  partner's group, which need not be the first group. That is the outline's reading of Ryan's
-  "largest first", not one he chose; he confirms it on the ticket (Rollout step 1), and if he
-  wants one list across partners, the report becomes Tabular (no grouping, the partner a column,
-  sorted by the delay, `Desc`).
+  partner's group, which need not be the first group. That was the outline's reading of Ryan's
+  "largest first"; Ryan confirmed it on the ticket on 2026-10-26 (Rollout step 1): grouped by
+  partner, largest first within each partner. If it is ever changed to one list across partners,
+  the report becomes Tabular (no grouping, the partner a column, sorted by the delay, `Desc`).
 - `Submission_Delay_by_Partner_by_Month`: a Summary, rows partner then `Session_Month__c`, the
   delay column with `Average` and `Maximum`; the same two locked criteria plus
   `Attendance_Date__c` `greaterOrEqual` `N_MONTHS_AGO:11`; a `HorizontalBarGrouped` chart of the
@@ -314,17 +314,18 @@ its SOQL check with it.
 
 ### Rollout (live; pending Ryan's go, in the main session)
 
-None of these steps has run. Steps 2-8 with the VPN off, through the CLI login `glow`; only
-counts and partner names reach the ticket, the conversation or this plan.
-1. Ryan confirms on the ticket how `Late_Submissions_Last_Month` sorts: grouped by partner (the
-   outline), the largest delay first only within each partner's group, so the month's largest
-   delay need not be on top. If he wants one list across partners instead, the report becomes
-   Tabular (no grouping, the partner a column, sorted by `Submission_Delay_Days__c`, `Desc`),
-   and before step 3 every place that describes it changes: `build/`'s report file; the
-   RUNBOOK's `Late_Submissions_Last_Month` bullet ("The timing reports") and its paragraph "The
-   late report"; this section's Build bullet on the report; and a dated bullet added to the
-   DECISIONS 2026-10-24 entry ("The weekly not-submitting list ...") saying what Ryan chose. The
-   change goes on the ticket.
+Step 1 is done (2026-10-26); steps 2-8 have not run. Steps 2-8 with the VPN off, through the CLI
+login `glow`; only counts and partner names reach the ticket, the conversation or this plan.
+1. Done 2026-10-26: Ryan confirmed on the ticket how `Late_Submissions_Last_Month` sorts: grouped
+   by partner (the outline), the largest delay first within each partner's group, so the month's
+   largest delay need not be on top; `build/` stands as built. If it is ever changed to one list
+   across partners, the report becomes Tabular (no grouping, the partner a column, sorted by
+   `Submission_Delay_Days__c`, `Desc`), and before its next check-only every place that describes
+   it changes: `build/`'s report file; the RUNBOOK's `Late_Submissions_Last_Month` bullet ("The
+   timing reports") and its paragraph "The late report"; this section's Build bullet on the
+   report and its Risks bullet on the sort; and a dated bullet added to the DECISIONS 2026-10-24
+   entry ("The weekly not-submitting list ...") saying what Ryan chose. The change goes on the
+   ticket.
 2. VPN off. Retrieve what is live into `data/sf_session_timing_2026-10-24/before/`: `sf project
    retrieve start -o glow -m "Report:Attendance/Clubs_Not_Submitting_Last_14_Days" -m
    "Report:Attendance/Blank_Submissions" -m "ReportType:Attendance_Totals"` (the ticket's outline
@@ -384,8 +385,8 @@ it.
   the same `WHERE`, and counted, averaged and maximised offline. The reports themselves group by
   the field, which reports allow.
 - **The late report sorts within each partner**: grouped by partner, as the outline has it, its
-  largest delay comes first only within each partner's group; Ryan confirms that reading before
-  the check-only (Rollout step 1).
+  largest delay comes first only within each partner's group; Ryan confirmed that reading on the
+  ticket on 2026-10-26 (Rollout step 1): grouped by partner, largest first within each partner.
 - **The partner-name filter is hand-kept**: a partner newly off Jotform, a new U.S partner or a
   renamed partner account changes the weekly list until the filter is edited (RUNBOOK, Who is
   left out).
@@ -406,3 +407,5 @@ it.
 - 2026-10-25, review fixes: the delay chart's `axisBinding` set to `y` (it was `x`); the Rollback
   moves the reports to Decommissioned and edits them off the fields instead of deleting them; the
   late report's within-partner sort becomes Rollout step 1, Ryan's confirmation.
+- 2026-10-26: Rollout step 1 done: Ryan confirmed on the ticket that the late report stays grouped
+  by partner, largest first within each partner; `build/` is unchanged. Steps 2-8 wait for his go.

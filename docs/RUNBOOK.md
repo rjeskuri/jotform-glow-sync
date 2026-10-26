@@ -3651,9 +3651,9 @@ only labels the matrix's columns. `LAST_WEEK` needs no new field, so the formula
 last month is in it with its delay, the largest delay first (Ryan, 2026-10-24; DECISIONS
 2026-10-23: nothing is flagged, staff read the delays). It is grouped by partner, as the ticket's
 outline has it, and the largest delay comes first only within each partner's group: the month's
-largest delay heads its partner's group, which need not be the first. Ryan confirms that reading
-on the ticket before the check-only (the plan's Task #102 Rollout step 1); if he wants one list across
-partners, the report becomes Tabular, sorted by the delay across every partner.
+largest delay heads its partner's group, which need not be the first. Ryan confirmed that reading
+on the ticket on 2026-10-26 (the plan's Task #102 Rollout step 1); if it is ever changed to one list
+across partners, the report becomes Tabular, sorted by the delay across every partner.
 
 **Rollback** of the timing reports: the dashboard components that read them go first (task
 #103); then the four reports are retired, never deleted (the archive rule, DECISIONS
