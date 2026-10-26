@@ -2889,7 +2889,7 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 ## Duplicate and obsolete records in Salesforce
 
 - **When:** the monthly check (with "Duplicate girls in Salesforce"); a flag to set or clear; GLOW's own definitions arrive (DECISIONS 2026-10-21).
-- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day, 12:58 UTC, on his go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch `RecordFlagBatch` (ticket #85) is built and not yet run ("The flagging batch", below).
+- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day, 12:58 UTC, on his go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch `RecordFlagBatch` (ticket #85) is deployed (`0AfRP000002i7np0AA`, 2026-10-26 07:03 UTC). The flagging batch ran on 2026-10-26 on Ryan's go: Account in flag mode, job `707RP00002cLzc0YAC`, 07:45 UTC, duplicate 0, obsolete 26; Contact in flag mode, job `707RP00002cM4WlYAK`, 07:48 UTC, duplicate 20, obsolete 0 ("The flagging batch", below; the plan's [Result](plans/2026-10-23-sf-record-flag-batch.md#result)).
 - **Dry run:** the check-only deploy (`sf project deploy start --dry-run`), step 3 of the plan's Rollout.
 - **Apply:** the same with its dry-run flag taken off, Ryan's go (VPN off); then the proof, also on his go: the no-DML `Datacloud.FindDuplicates` diagnostic (`sf apex run -f diag.apex`, the plan's step 6), which runs the active rules over three unsaved copies of existing accounts, inserts nothing and prints only `DIAG|` lines with each rule's name and its match count.
 - **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (the three Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rules' `DuplicateRecordSet`s (a cross-type pair, a Household account and a Club of one name and parent, is a set without a group: looked at by hand), and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
@@ -3008,8 +3008,8 @@ Counts and ids only in what is said about it.
 
 ### The flagging batch
 
-`RecordFlagBatch` (ticket #85; [plan](plans/2026-10-23-sf-record-flag-batch.md); built, not yet
-run) sets the two flags by the criteria above, one batch job per object in scopes of 200
+`RecordFlagBatch` (ticket #85; [plan](plans/2026-10-23-sf-record-flag-batch.md); deployed and
+run on 2026-10-26, the Status line above) sets the two flags by the criteria above, one batch job per object in scopes of 200
 (`Database.Batchable` with `Database.Stateful`); the class and its test class live in
 `data/sf_record_flags_2026-10-23/build/`, never in git. Three modes: `dryRun` counts and writes
 nothing; `flag` only sets a flag and never unsets one - it sets a flag where the criteria ask for
@@ -3040,8 +3040,9 @@ months on `Attendance__c.Attendance_Date__c`.
 root). The script writer `tools/sf_record_flags.py` reads the sheet's exports and Salesforce and
 writes the anonymous Apex, ids only: for Account it needs the day's Roster and Partners exports
 (the deactivated clubs' Club accounts and the `jotform=no` partners' accounts, which Apex cannot
-read: Ryan, decision 1a); for Contact it first counts the three things the NPSP and Volunteers
-workflow rules act on and writes no script while any count is not 0 (the guard, below). Each
+read: Ryan, decision 1a); for Account it first counts the Households Settings rows with NPSP Automatic Household Naming
+on, and for Contact the three things the NPSP and Volunteers workflow rules act on; it writes no
+script while any count is not 0 (the guards, below). Each
 script is pasted in full in the session, then `sf apex run` runs it and prints no job id (a
 one-statement script prints nothing): the read-only `AsyncApexJob` query below, newest first,
 gives the job's id and status, and the batch job's finish line in the debug log,
@@ -3070,6 +3071,15 @@ else. The tool counts them right before each Contact script (three `SELECT COUNT
 WHERE …`, counts only) and refuses the script while any count is not 0; the plan's Rollout counts
 them again before the Contact run. The NPSP handlers and MC4SF are accepted as harmless for a
 flag-only update (Ryan, 2026-10-23).
+
+**The household-naming guard** (Ryan, 2026-10-26): with NPSP's Automatic Household Naming on, an
+update of a partner's household Account renames it, so a `flag` or `clear` run over Accounts would
+rename partners. Production has it off (the org default, `npo02__Households_Settings__c`), but
+NPSP forces it on inside Apex tests, which is how the second check-only of 2026-10-26 found it.
+Before every Account script, in each mode, the tool runs `SELECT COUNT() FROM
+npo02__Households_Settings__c WHERE npo02__Advanced_Household_Naming__c = true` (every row: the
+org default, a profile's or a user's), prints it, and writes no script while it is not 0: turn
+the naming off in NPSP Settings, or ask Ryan.
 
 **The way back:** a `clear` run of the same batch, `new RecordFlagBatch('Account', 'clear')` and
 `new RecordFlagBatch('Contact', 'clear')` through `tools/sf_record_flags.py --mode clear` and

@@ -1,7 +1,8 @@
 ---
 title: Historical duplicate and obsolete Accounts and Contacts flagged by Batch Apex (RecordFlagBatch), the sheet's criteria carried by a read-only script writer
 author: Claude (Ryan's decisions of 2026-10-23: 1a, 2a and the Contact workflow guard; 2026-10-24: a flag run only sets)
-status: accepted      # ticket #85; nothing has run: the check-only, the deploy, the dry run and the run each still wait for Ryan's go
+status: done          # ticket #85; deployed and run on 2026-10-26 (Result)
+done: 2026-10-26
 created: 2026-10-23
 intent: none - SOW p.9 (Batch Apex over the historical records), ticket #85
 ---
@@ -344,12 +345,40 @@ destructive deploy of its own (`destructiveChanges.xml` naming `RecordFlagBatch`
 
 ## Result
 
-Nothing has run yet (2026-10-24): the class and its tests are written and desk-checked, not
-compiled; the check-only validate, the deploy, the dry run and the run each still wait for Ryan's
-go. When they have happened, this section carries, in order and with counts and ids only: the
-check-only's id and result; the deploy id and time (UTC); the guard's three counts; the hand-set
-flags' counts; per object and flag the dry run's count and the run's count, which agree, a clause
-per object of step 4's count of each flag set by hand outside the criteria (0 included), and the
-read-back's count, exactly the dry run's plus that hand-set count (a `flag` run never unsets a
-flag); each run's AsyncApexJob id with its date and time (UTC); and the plan goes `status: done`
-with its `done:` date.
+Done 2026-10-26, in Ryan's interactive session with the VPN off; every write was made on his go
+at the live-gate prompt, never from a subagent or a headless run.
+
+- Check-only (step 1), three tries: `0AfRP000002i7av0AA` failed to compile (two locals hid class
+  constants: Apex is case-insensitive; renamed); `0AfRP000002i7cX0AQ` compiled and failed 2 test
+  methods (NPSP forces Automatic Household Naming on inside Apex tests, so a flag update renamed
+  the test's partner households; a test-only fix, the class itself unchanged); `0AfRP000002i7mD0AQ`
+  passed: 2/2 components, 12/12 tests, coverage 95%. Diffs in
+  `data/sf_record_flags_2026-10-23/evidence/`.
+- Deploy (step 2): quick deploy `0AfRP000002i7np0AA` at 07:03 UTC; the read-back of the metadata
+  into `after/` equals `build/` beyond Salesforce's normalisation (a final newline, NPSP
+  packageVersions).
+- The guards (step 3, and again right before each flag run): the blank-Email, blank-Phone and
+  Volunteers-signup counts 0, 0 and 0; the household-naming guard, added by Ryan on 2026-10-26
+  ("The household-naming guard" in the RUNBOOK; DECISIONS 2026-10-26), 0.
+- Account set by hand outside the criteria (step 4): duplicate 0, obsolete 0; Contact set by hand
+  outside the criteria (step 4): duplicate 0, obsolete 0. Nothing was set by hand before the run,
+  so a rollback has nothing to set again.
+- Account dry run (step 5), job `707RP00002cM8JNYA0`: duplicate 0, obsolete 26, written 0, failed
+  0; Contact dry run (step 5), job `707RP00002cMAbLYAW`: duplicate 20, obsolete 0, written 0,
+  failed 0. Cross-checks: 21 Archived partners plus 5 clubs; the Contact rule's 14 sets of 21
+  records; the reads of 2026-10-21 found no Account group.
+- Step 6: Ryan confirmed these counts on the ticket's session the same day, before any flag run.
+- Account ran in flag mode (step 7), job `707RP00002cLzc0YAC`, 07:45 UTC, Completed 3/3 with no
+  errors: duplicate 0, obsolete 26; Contact ran in flag mode (step 8), job `707RP00002cM4WlYAK`,
+  07:48 UTC, Completed 23/23 with no errors: duplicate 20, obsolete 0. Neither job's finish line
+  was in the debug logs (the trace flag of the morning had lapsed), so the counts are the
+  read-back's.
+- Account read-back (step 9, SOQL): duplicate 0, obsolete 26; Contact read-back (step 9, SOQL):
+  duplicate 20, obsolete 0. The ids are in `data/sf_record_flags_2026-10-23/flagged.csv` (object,
+  id, flag; ids only).
+- Nothing else was written: by `LastModifiedDate`, the Accounts modified since 07:45 UTC are 26,
+  every one flagged; the Contacts modified since then are 20, every one flagged. Field history is
+  not tracked on these objects, so the fields a write touched are not read back one by one. No
+  `Attendance_Batch__c` was created between the runs and the read-back, so none failed with
+  `DUPLICATES_DETECTED`. The sync's dry run (`tools/auto_sync.py`) was not run in this session
+  (the Jotform key was not loaded); the flags are outside the sync's path.
