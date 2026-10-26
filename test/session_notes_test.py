@@ -1719,13 +1719,21 @@ class NotesDocs(unittest.TestCase):
         self.assertNotIn("Girl ", text)                                        # fictional names stay in the tests
 
     def decisions_entry(self):
-        """The one dated docs/DECISIONS.md entry (2026-10-22 or later) whose heading names the session notes."""
+        """The one dated docs/DECISIONS.md entry (2026-10-22 or later) whose heading names the session
+        notes as the field on the forms - this ticket's decision. Other entries about the notes are
+        not it: #106's (2026-10-26) is about their Salesforce mapping, and a later one about where
+        else the notes go names that system in its heading, so a heading naming Salesforce or a
+        mapping is left out."""
         doc = read(os.path.join(REPO, "docs", "DECISIONS.md"))
         entries = re.split(r"^### ", doc, flags=re.M)[1:]
-        ours = [e for e in entries if re.match(r"\d{4}-\d\d-\d\d", e) and e[:10] >= "2026-10-22"
-                and re.search(r"(?i)session[ -]notes", e.split("\n", 1)[0])]
-        self.assertEqual(len(ours), 1, "one dated DECISIONS entry whose heading names the session notes")
-        return ours[0]
+        ours = [(e.split("\n", 1)[0], e) for e in entries if re.match(r"\d{4}-\d\d-\d\d", e) and e[:10] >= "2026-10-22"]
+        ours = [(h, e) for h, e in ours
+                if re.search(r"(?i)session[ -]notes", h)                     # names the session notes
+                and re.search(r"(?i)\bfields?\b|\bforms?\b", h)              # as the field on the forms
+                and not re.search(r"(?i)\bSalesforce\b|\bmapp(ing|ed)\b", h)]  # not where they go after
+        self.assertEqual(len(ours), 1, "one dated DECISIONS entry whose heading names the session notes field on "
+                                       f"the forms (not their Salesforce mapping) - read: {[h for h, _ in ours] or 'nothing'}")
+        return ours[0][1]
 
     # what each bullet of the entry is about - the project's words, two of them at least (one for
     # Consequences): a reason of the domain, a concrete alternative, a file or tool the decision reached
