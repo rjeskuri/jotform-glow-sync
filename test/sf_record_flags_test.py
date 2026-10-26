@@ -185,10 +185,14 @@ def contact(n, **fields):
     return base
 
 
-def naming_setting(n, on):
-    """A Households Settings record (the org default's, or a profile's or a user's: a hierarchy custom setting
-    has one row per level) with Automatic Household Naming on or off."""
-    return {"Id": f"a0H{n:015d}", "SetupOwnerId": f"00D{n:015d}", NAMING: on}
+# a hierarchy custom setting's row belongs to the org (its default), a profile or a user: SetupOwnerId's key prefix
+OWNER_PREFIX = {"org": "00D", "profile": "00e", "user": "005"}
+
+
+def naming_setting(n, on, owner="org"):
+    """A Households Settings record with Automatic Household Naming on or off, owned by the org (the org
+    default), a profile or a user (`owner`): a hierarchy custom setting has one row per level, and each counts."""
+    return {"Id": f"a0H{n:015d}", "SetupOwnerId": f"{OWNER_PREFIX[owner]}{n:015d}", NAMING: on}
 
 
 def says_naming_count(text, n):
@@ -1002,11 +1006,17 @@ class HouseholdNamingGuard(Fixture):
         """A count above 0 stops the Account run in each mode (dryRun, flag and clear: each runs an update or precedes
         one), whatever the exports hold: the refusal names the household-naming guard, the count is printed on a
         line that names household naming, and no script is written. Only the rows with naming on count: a row
-        with it off beside them does not."""
+        with it off beside them does not. Every row counts, whoever owns it: a profile's or a user's row with
+        naming on refuses the run as the org default's does (NPSP reads the setting for the running user)."""
         cases = (("the org default on", 1, [naming_setting(1, True)], self.THREE_DEACTIVATED, self.TWO_MARKED),
                  ("a profile's row on, the org default off", 1,
-                  [naming_setting(1, False), naming_setting(2, True), naming_setting(3, False)],
+                  [naming_setting(1, False, "org"), naming_setting(2, True, "profile"),
+                   naming_setting(3, False, "user")],
                   self.ONE_DEACTIVATED, self.ONE_MARKED),
+                 ("a user's row on, the org default and a profile's off", 1,
+                  [naming_setting(1, False, "org"), naming_setting(2, False, "profile"),
+                   naming_setting(3, True, "user")],
+                  self.ONE_DEACTIVATED, self.TWO_MARKED),
                  ("two rows on, one off, nothing to flag", 2,
                   [naming_setting(1, True), naming_setting(2, False), naming_setting(3, True)],
                   self.NONE_DEACTIVATED, self.NONE_MARKED),
@@ -1036,7 +1046,9 @@ class HouseholdNamingGuard(Fixture):
         household naming."""
         cases = (("the org default off", [naming_setting(1, False)], self.THREE_DEACTIVATED, self.TWO_MARKED,
                   [SUN, STA1, NIG], [P2, P4]),
-                 ("three rows, all off", [naming_setting(1, False), naming_setting(2, False), naming_setting(3, False)],
+                 ("three rows, all off: the org default, a profile's and a user's",
+                  [naming_setting(1, False, "org"), naming_setting(2, False, "profile"),
+                   naming_setting(3, False, "user")],
                   self.ONE_DEACTIVATED, self.ONE_MARKED, [NIG], [P1]),
                  ("no Households Settings row", [], self.NONE_DEACTIVATED, self.NONE_MARKED, [], []))
         for mode in MODES:
