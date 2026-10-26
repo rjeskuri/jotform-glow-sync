@@ -1216,7 +1216,12 @@ before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing
 fields, Account_Name__c from q5, no upload)` is right, a mapped photo reads `NOT RIGHT: the
 upload field is ['19'], not []`, and `other integrations:` lists the other blocks the form
 carries - the Google Drive block's key once step 2 is done (whether the API shows the block at
-all is unverified until then; `none` on every form on 2026-10-06).
+all is unverified until then; `none` on every form on 2026-10-06). A form with the session
+notes mapped (ticket #106) reads `ok (one action, 9 fields, Account_Name__c from q5,
+Session_Notes__c from q<N>, no upload)`, q<N> being that form's own question named
+`sessionNotes` (found by its name: the qid differs per form); a notes mapping from any other
+question is `NOT RIGHT`. A form without it is right until `NOTES_MAPPING_WANTED` in the tool
+goes True, once all five live forms are mapped.
 
 *Setting it up (Ryan, in the builder; the API cannot; template first). Every builder save is a
 live write to a form, so each one follows the ritual: a quiet moment with no other rollout on
