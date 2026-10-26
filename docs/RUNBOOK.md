@@ -3700,9 +3700,14 @@ builder, form by form (edit the action → remove the Session notes row → save
 connected account), and set `NOTES_MAPPING_WANTED = False` in the tool; the field may stay. The
 field itself goes only on Ryan's word and only after every form is unmapped:
 `NOTES_MAPPING_WANTED = False` first (so the audit does not demand the mapping), then `python3
-tools/integration_status.py` → 8 fields on every live form. A field deleted while a form still
-maps it (empty, because no note was typed yet, is not enough) makes Salesforce refuse each
-insert from that form, and the whole batch is lost. Then the layout, the permission set and the
+tools/integration_status.py` → 8 fields on every live form but the template. Until "Photos"
+step 1 the template prints only its upload row (`NOT RIGHT`, exit 1), mapped or not: confirm it
+unmapped by its properties diff instead, `python3 backup_forms.py --form 262352490535154` before
+and after its builder save, `diff` of the two `backups/262352490535154/properties-<stamp>.json`
+→ the Session notes row (`Session_Notes__c`) gone inside `integrations`, nothing else changed.
+A field deleted while a form still maps it (empty, because no note was typed yet, is not enough)
+makes Salesforce refuse each insert from that form, and the whole batch is lost. Then the
+layout, the permission set and the
 report type from the deploy's `before/` while a fresh retrieve equals its `after/` (never an
 older build, DECISIONS 2026-10-16), and the field by a destructive change
 (`destructiveChanges.xml`, check-only first, Ryan's go). While it holds no data that loses

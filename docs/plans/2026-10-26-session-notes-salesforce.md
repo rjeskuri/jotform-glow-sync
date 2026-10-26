@@ -93,7 +93,12 @@ outline put this Rollout in #105's plan; it has its own plan because #105 lands 
   Before and after each save `python3 backup_forms.py --form <id>`, and the diff of the two
   properties snapshots has hunks inside `integrations` only. Then set `NOTES_MAPPING_WANTED =
   False` (a present mapping is still checked; a form without one is right) and
-  `python3 tools/integration_status.py` reads 8 fields on every form unmapped. The field may
+  `python3 tools/integration_status.py` reads 8 fields on every form unmapped but the template.
+  Until RUNBOOK "Photos" step 1 the template prints only its upload row (`NOT RIGHT`, exit 1),
+  mapped or not: confirm it unmapped by its properties diff instead, `python3 backup_forms.py
+  --form 262352490535154` before and after its builder save, `diff` of the two
+  `backups/262352490535154/properties-<stamp>.json` → the Session notes row
+  (`Session_Notes__c`) gone inside `integrations`, nothing else changed. The field may
   stay: a batch without a note leaves it blank, and nothing reads it but people.
 - **The field**, only if Ryan wants it gone, after the mapping is off: the layout, the
   permission set and the report type from `before/` - under the rule never to redeploy an older
