@@ -1383,7 +1383,15 @@ class TrainingDashboardDocs(unittest.TestCase):
     "roughly"; one copy command per item id and for the dashboard; the deploy's go and check-only are read per
     numbered step. Round 3: each copy runs `--apply`; the check-only and deploy steps name `build/` (never `before/`);
     the read-back says `after/` equals `build/` with nothing between; every `before/` deploy carries its guard, and
-    nothing ("anyway", "at any time") voids it; the one-partner query is an item's full query."""
+    nothing ("anyway", "at any time") voids it; the one-partner query is an item's full query.
+
+    The rollout (the ticket's comment of 2026-10-26: steps 1-8 done on Ryan's go): the plan's `## Result` records
+    the check-only and deploy ids, the Decommissioned copies' ids (each beside its own item), the ledger dated
+    before the deploy, the SOQL check's counts for the 12 months and the one-partner check, and the read-back's one
+    difference; it no longer says nothing is deployed, and the plan stays `in-progress` while steps 9 (after #77)
+    and 10 remain. Step 6's refresh PUT carries a body (`-b '{}'`; sf 2.151 refuses a bodiless PUT). The RUNBOOK
+    says the build is deployed (2026-10-26). These ids and counts are the rollout's record (that comment), pinned
+    here as the facts the Result must carry; counts and ids only."""
 
     longMessage = False         # the messages say what to fix
     RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
@@ -1981,6 +1989,236 @@ class TrainingDashboardDocs(unittest.TestCase):
         first(lambda c, st: re.search(r"\bSOQL\b|\bFROM\s+DHIS2__c\b", c), at_after, "SOQL check")
         self.assertNoOlderBuild(raw, where)
         self.d.assertNoContradiction(raw, where)
+
+    # --- the rollout's Result (the ticket's comment of 2026-10-26: steps 1-8 done) ---------------------------------
+
+    # the rollout's record, from that comment (not read from the docs under test)
+    CHECK_ONLY_ID = "0AfRP000002i74f0AA"
+    DEPLOY_ID = "0AfRP000002i76H0AQ"
+    COPIES = {"13": "00ORP000009kU9B2AU", "14": "00ORP000009kUAn2AM", "15": "00ORP000009kUCP2A2",
+              "16": "00ORP000009kUE12AM", "D4": "01ZRP00000BPIjN2AX"}
+    ZERO_AF = re.compile(r"(?<![A-Za-z0-9])0Af[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?(?![A-Za-z0-9])")
+    CHECK_WORD = re.compile(r"(?i)check-only|--dry-run|\bvalidat\w*|\bcheck\s+only\b")
+    DEPLOY_WORD = re.compile(r"(?i)\bdeploy\w*")
+    ITEM_REF = re.compile(r"(?i)\bitems?\s+((?:1[2-6]\b(?:\s*(?:,|and|&|-|–|to)\s*(?=1[2-6]\b))?)+)")
+    STEP_REF = re.compile(r"(?i)\bsteps?\s+((?:\d{1,2}\b(?:\s*(?:,|and|&|-|–|to)\s*(?=\d{1,2}\b))?)+)")
+    REMAINS = re.compile(r"(?i)\b(remain\w*|left|wait\w*|await\w*|pending|still|open|to do|not yet|outstanding|"
+                         r"later)\b")
+    STILL_TO_RUN = re.compile(r"(?i)\b(remain\w*|wait\w*|await\w*|pending|not yet|outstanding)\b")
+    # item 16 may still be "not deployed" (step 9); the build is not
+    NOTHING_DEPLOYED = re.compile(r"(?i)\bnothing\s+(is\s+|was\s+|has\s+been\s+)?(yet\s+)?deployed\b")
+    PUT_BODY = re.compile(r"(?:(?<!\S)-b|--body)(?:=|\s+)['\"]?\{\s*\}['\"]?")
+
+    @staticmethod
+    def expand(nums):
+        """`13-15`, `13, 14 and 15`, `9 and 10` -> the set of numbers, as strings."""
+        got = set(re.findall(r"\d+", nums))
+        for a, b in re.findall(r"(\d+)\s*(?:-|–|to)\s*(\d+)", nums):
+            got |= {str(i) for i in range(int(a), int(b) + 1)}
+        return got
+
+    @staticmethod
+    def num(n):
+        """Integer `n` as written in prose: `1,422` or `1422`, not part of a longer number."""
+        body = re.escape(f"{n:,}").replace(",", ",?")
+        return re.compile(r"(?<![\d,.])" + body + r"(?![\d]|[,.]\d)")
+
+    def result(self):
+        path = self.plan_path()
+        return path, self.plan_part(path, "## Result", 40)
+
+    def result_units(self, raw):
+        """The Result's units (a table row, a list item, a sentence), a `;` kept inside its sentence."""
+        return self.units(raw.replace(";", ","))
+
+    def item_segments(self, raw):
+        """[(items, text)]: each unit cut at each item reference (`item 13`, `items 13 and 14`, a table row's first
+        cell), each piece running to the next reference in the same unit."""
+        out = []
+        for unit in self.result_units(raw):
+            row = re.match(r"\|\s*`?(1[2-6])`?\s*\|", unit)
+            if row:
+                out.append(({row.group(1)}, unit))
+            refs = list(self.ITEM_REF.finditer(unit))
+            for i, m in enumerate(refs):
+                end = refs[i + 1].start() if i + 1 < len(refs) else len(unit)
+                out.append((self.expand(m.group(1)), unit[m.start():end]))
+        return out
+
+    @staticmethod
+    def nearest(unit, at, length, refs):
+        """Of [(match, key)], the key of the match nearest to `unit[at:at+length]`; before it wins a tie."""
+        best = None
+        for m, key in refs:
+            if m.end() <= at:
+                d = (at - m.end(), 0)
+            elif m.start() >= at + length:
+                d = (m.start() - (at + length), 1)
+            else:
+                continue
+            if best is None or d < best[0]:
+                best = (d, key)
+        return best[1] if best else None
+
+    def test_the_training_result_records_the_deploy_and_the_copies(self):
+        path, raw = self.result()
+        where = f"{os.path.relpath(path, REPO)}: `## Result`"
+        fl = flat(raw)
+        # broad: two deploy-request ids (`0Af…`), one the check-only's and one the deploy's
+        ids = set(self.ZERO_AF.findall(fl))
+        self.assertGreaterEqual(len(ids), 2, f"{where}: record the check-only's and the deploy's ids (`0Af…`, two "
+                                             f"different ids); found {sorted(ids)}")
+        for rid, want, what in ((self.CHECK_ONLY_ID, "check", "the check-only (step 3)"),
+                                (self.DEPLOY_ID, "deploy", "the deploy (step 4)")):
+            units = [u for u in self.result_units(raw) if rid in u]
+            self.assertTrue(units, f"{where}: record {what}'s id `{rid}`")
+            got = set()
+            for u in units:
+                at = u.index(rid)
+                checks = list(self.CHECK_WORD.finditer(u))
+                spans = [(c.start(), c.end()) for c in checks]
+                refs = [(m, "check") for m in checks]
+                refs += [(m, "deploy") for m in self.DEPLOY_WORD.finditer(u)
+                         if not any(a <= m.start() < b or m.start() <= a < m.end() for a, b in spans)
+                         and not re.search(r"(?i)check[\s-]*$|--dry-run\s*$", u[:m.start()])]
+                got.add(self.nearest(u, at, len(rid), refs))
+            self.assertIn(want, got, f"{where}: `{rid}` is {what}'s id: name it beside that id "
+                                     f"(\"check-only `{self.CHECK_ONLY_ID}`\", \"deploy `{self.DEPLOY_ID}`\")")
+        # the copies in Decommissioned, each id beside its own item (or D4 / the dashboard)
+        self.assertTrue([s for s in self.clauses(raw) if self.stated(s, self.COPY) and "Decommissioned" in s],
+                        f"{where}: say the copies are in Decommissioned (one sentence, not negated)")
+        originals = {n: r["id"] for n, r in self.items().items()}
+        originals["D4"] = self.dashboard()["id"]
+        for key, cid in self.COPIES.items():
+            what = "D4" if key == "D4" else f"item {key}"
+            units = [u for u in self.result_units(raw) if cid in u]
+            self.assertTrue(units, f"{where}: record the Decommissioned copy of {what}, `{cid}`")
+            got = set()
+            for u in units:
+                refs = [(m, min(got)) for m in self.ITEM_REF.finditer(u) for got in [self.expand(m.group(1))]
+                        if len(got) == 1]
+                refs += [(m, k) for k, oid in originals.items() for m in re.finditer(re.escape(oid), u)]
+                refs += [(m, "D4") for m in re.finditer(r"(?i)\bD4\b|\bdashboard\b", u)]
+                got.add(self.nearest(u, u.index(cid), len(cid), refs))
+            self.assertIn(key, got, f"{where}: the copy `{cid}` is {what}'s; name {what} beside it (\"{what} "
+                                    f"`{cid}`\")")
+        # the ledger, dated before the deploy
+        self.assertRegex(fl, r"data/sf_dash_training_\d{4}-\d\d-\d\d/ledger\.csv",
+                         f"{where}: name the ledger `data/sf_dash_training_2026-10-24/ledger.csv`")
+        before = [s for s in self.clauses(raw) if re.search(r"(?i)\bledger\b", s)
+                  and re.search(r"(?i)\bbefore\s+(the\s+|its\s+|this\s+)?(\w+\s+)?deploy\w*", s) and not self.d.denies(s)]
+        self.assertTrue(before, f"{where}: say the ledger's copy rows are dated before the deploy (one sentence "
+                                "naming the ledger, \"before the deploy\", not negated)")
+
+    def test_the_training_result_carries_the_soql_counts_and_the_read_back(self):
+        path, raw = self.result()
+        where = f"{os.path.relpath(path, REPO)}: `## Result`"
+        fl = flat(raw)
+        units = self.result_units(raw)
+        segs = self.item_segments(raw)
+        # broad: the period, then each item's numbers in its own piece of text
+        self.assertRegex(fl, r"(?i)LAST_N_MONTHS:12|\b12\s+months\b",
+                         f"{where}: the SOQL check runs over the reports' period, the last 12 months")
+        want = {"13": (567, 1422), "14": (567, 524), "15": (524, 199, 325)}
+        for n, numbers in want.items():
+            mine = [t for items, t in segs if n in items]
+            self.assertTrue(mine, f"{where}: give item {n}'s counts (\"item {n}: …\")")
+            hit = [t for t in mine if all(self.num(x).search(t) for x in numbers)]
+            self.assertTrue(hit, f"{where}: item {n}'s report and SOQL: " + ", ".join(f"{x:,}" for x in numbers)
+                                 + f" (in the text naming item {n}; found {mine[:3]})")
+        # item 15: Yes 199, No 325 (the split, not just the numbers)
+        yes = re.compile(r"(?i)\bYes\b\W{0,4}" + self.num(199).pattern + r"|" + self.num(199).pattern + r"\W{0,4}Yes\b")
+        no = re.compile(r"(?i)\bNo\b\W{0,4}" + self.num(325).pattern + r"|" + self.num(325).pattern + r"\W{0,4}No\b")
+        self.assertTrue([t for items, t in segs if "15" in items and yes.search(t) and no.search(t)],
+                        f"{where}: item 15's split, Yes 199 and No 325")
+        # each equals SOQL
+        self.assertTrue([u for u in units if re.search(r"\bSOQL\b", u)
+                         and (self.stated(self.norm(u), self.EQUAL_STRICT) or re.search(r"\s=\s|=\s*SOQL", u))],
+                        f"{where}: say each component's numbers equal SOQL")
+        # the test-record rule: 567 with it, 2 test records left out
+        self.assertTrue([u for u in units if self.num(567).search(u) and re.search(r"(?i)\brule\b|\btest\b", u)],
+                        f"{where}: 567 Monthly Reports with the test-record rule")
+        two_test = re.compile(r"(?i)(?<![\d,.])2\s+(?:[\w`'-]+\s+){0,2}?test\b|"
+                              r"\btest[\w-]*\s+(?:[\w:`'-]+\s+){0,3}?\(?2(?!\d|[,.]\d)")
+        self.assertTrue([u for u in units if two_test.search(u)],
+                        f"{where}: the 2 test records the rule leaves out (the check means something)")
+        # one partner, September 2026, item 14: 1 = 1
+        sept = re.compile(r"(?i)\bSept(?:ember|\.)?\s+2026\b|\b2026-09\b|\b202609\b")
+        one_partner = re.compile(r"(?i)\b(one|a single|single|one-)\s*partner")
+        one_eq = re.compile(r"(?<![\d,.])1\s*(?:=|/|equals?|matches|and|,)\s*(?:the\s+)?(?:SOQL\s+|query\s+)?1(?!\d|[,.]\d)")
+        self.assertTrue([t for items, t in segs if "14" in items and one_eq.search(t)
+                         and [u for u in units if t in u and sept.search(u) and one_partner.search(u)]],
+                        f"{where}: the one-partner check: one partner, September 2026, item 14, report 1 = SOQL 1")
+        # the read-back: after/ equals build/ beyond normalisation, the one difference named
+        rb = [s for s in self.clauses(raw) if [m for m in self.READBACK.finditer(s) if not self.d.locally_denied(s, m)]]
+        self.assertTrue(rb, f"{where}: the read-back: `after/` equals `build/` (beyond normalisation)")
+        self.assertRegex(fl, r"(?i)normali[sz]ation", f"{where}: `after/` equals `build/` beyond normalisation")
+        diff = [u for u in units if "showValues" in u and re.search(r"(?i)\btrue`?\s*(->|→|to)\s*`?false\b", u)
+                and ([1 for m in self.ITEM_REF.finditer(u) if "15" in self.expand(m.group(1))]
+                     or re.search(r"(?i)ColumnStacked|stacked column", u))]
+        self.assertTrue(diff, f"{where}: the one difference: `showValues` true -> false on item 15's ColumnStacked "
+                              "component")
+
+    def test_the_training_plan_is_in_progress_with_steps_9_and_10_left(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path, raw = self.result()
+        name = os.path.relpath(path, REPO)
+        where = f"{name}: `## Result`"
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        front = text.split("\n---", 1)[0] if text.startswith("---") else ""
+        for part, label in ((raw, where), (front, f"{name}: the frontmatter")):
+            for s in self.clauses(part, ".;:\n"):
+                m = self.NOTHING_DEPLOYED.search(s)
+                self.assertIsNone(m, f"{label}: the build is deployed (2026-10-26); drop {m and m.group(0)!r}: "
+                                     f"{s[:200]!r}")
+        word, problem = docs_index.status_of(keys.get("status", ""))
+        self.assertEqual(word, "in-progress", f"{name}: `status:` stays `in-progress` while step 9 waits for #77")
+        units = self.result_units(raw)
+        steps = [(self.expand(m.group(1)), u) for u in units for m in self.STEP_REF.finditer(u)]
+        self.assertTrue([u for got, u in steps if "9" in got and re.search(r"(?<![\w#])#77\b", u)
+                         and self.REMAINS.search(u)],
+                        f"{where}: say step 9 (item 16) remains, after #77 lands")
+        self.assertTrue([u for got, u in steps if "10" in got and self.REMAINS.search(u)]
+                        + [u for u in units if re.search(r"(?i)\bSubscribe\b", u) and self.REMAINS.search(u)],
+                        f"{where}: say step 10 (the weekly Subscribe) remains")
+        # what a reference to steps 2-8 says, to the next step reference or the end of its clause, never waits
+        done = []
+        for u in self.units(raw):
+            refs = list(self.STEP_REF.finditer(u))
+            for i, m in enumerate(refs):
+                seg = u[m.start():refs[i + 1].start() if i + 1 < len(refs) else len(u)]
+                got = self.expand(m.group(1))
+                if got & {str(i) for i in range(2, 9)} and self.stated(self.norm(seg), self.STILL_TO_RUN):
+                    done.append(seg)
+        self.assertEqual(done, [], f"{where}: steps 1-8 are done (2026-10-26); none of them waits: {done[:1]}")
+
+    def test_the_rollout_refresh_put_has_a_body(self):
+        path = self.plan_path()
+        where = f"{os.path.relpath(path, REPO)}: `## Rollout`"
+        raw = self.plan_part(path, "## Rollout", 40)
+        steps = [(n, st) for n, st, _c in self.step_clauses(raw, where) if re.search(r"\bPUT\b", st)]
+        self.assertTrue(steps, f"{where}: the refresh step names its `PUT` on the dashboard")
+        for n, st in steps:
+            self.assertRegex(st, self.PUT_BODY, f"{where}: step {n}'s PUT carries a body, `-b '{{}}'` (sf 2.151 "
+                                                f"refuses a bodiless PUT: \"No 'mode' found in 'body'\")")
+        for u in self.units(read(path)):
+            if re.search(r"--method\s+PUT\b", u):
+                self.assertRegex(u, self.PUT_BODY, f"{os.path.relpath(path, REPO)}: every `--method PUT` carries "
+                                                   f"`-b '{{}}'`: {u[:200]!r}")
+
+    def test_the_runbook_says_training_is_deployed(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        part = self.part()
+        stale = re.compile(r"(?i)\buntil\s+(it|the\s+build|#78['’]s\s+build|D4)\s+(is|has\s+been)\s+deployed\b|"
+                           r"\bholds\s+the\s+vendor['’]s\b|\bnothing\s+(is\s+)?deployed\b|\bundeployed\b")
+        for s in self.clauses(part):
+            m = stale.search(s)
+            self.assertIsNone(m, f"{where}: the build is deployed (2026-10-26); drop {m and m.group(0)!r}: {s[:200]!r}")
+        said = [s for s in self.clauses(part) if "2026-10-26" in s
+                and [m for m in self.DEPLOY_WORD.finditer(s) if not self.d.locally_denied(s, m)]]
+        self.assertTrue(said, f"{where}: say #78's build is deployed, 2026-10-26 (one sentence, not negated)")
 
 
 if __name__ == "__main__":
