@@ -37,8 +37,11 @@ FIX = "run tools/fix_roster_order.py (dry run first)"
 # label, no sub-label, 1,000 characters). One textarea, found by its name - the
 # qid differs per form - with no rule, never required or hidden; the sync leaves
 # it alone. Jotform's textarea keeps its limit as `entryLimit` "<Type>-<N>" and
-# the runtime counts `Letters` as characters: task #105 reads a live textarea's
-# value before the first create (RUNBOOK "Session notes on the attendance forms").
+# the runtime counts `Letters` as characters. Before the first create, #105's
+# rollout reads the limit property of the template's hidden `contact_ids`
+# textarea from the questions snapshot backup_forms.py takes, and stops unless it
+# is `entryLimit` "<Type>-<N>"; the create's re-read then compares every property
+# (docs/plans/2026-10-25-session-notes.md, Rollout).
 NOTES_NAME = "sessionNotes"
 NOTES_PROPS = {
     "type": "control_textarea",
@@ -48,7 +51,9 @@ NOTES_PROPS = {
     "required": "No",
     "hidden": "No",
 }
-NOTES_EXPECTED = False    # True once task #105 has placed it: a form without it is then a problem
+NOTES_EXPECTED = True     # task #105 places it on all five forms: a form without it is a problem
+#                           (NOT CLEAN, never in-sync); land only after its rollout (docs/plans/
+#                           2026-10-25-session-notes.md)
 NOTES_FIX = "tools/add_session_notes.py (dry run first)"
 
 

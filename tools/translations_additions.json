@@ -196,5 +196,21 @@
   "or": "ଆପଣ ଗୋଟିଏରୁ ଅଧିକ କ୍ଲବ ବାଛିଛନ୍ତି। “କ୍ଲବ ନାମ” ରେ କେବଳ ଆପଣଙ୍କ ନିଜ କ୍ଲବ ରଖନ୍ତୁ, ତାହାହେଲେ “ଦାଖଲ କରନ୍ତୁ” ବଟନ୍ ପୁଣି ଦେଖାଯିବ।",
   "hi": "आपने एक से ज़्यादा क्लब चुने हैं। “क्लब का नाम” में सिर्फ़ अपना क्लब रहने दें, तो “जमा करें” बटन फिर से दिखेगा।",
   "fa": "شما بیش از یک باشگاه انتخاب کرده‌اید. در «نام باشگاه» فقط باشگاه خودتان را نگه دارید تا دکمهٔ «ارسال» دوباره نمایش داده شود."
+ },
+ "Additional information about this session (optional)": {
+  "_note": "the optional session-notes field's label (glow/layout.py NOTES_PROPS, ticket #104; placed on the forms by task #105, docs/plans/2026-10-25-session-notes.md). Written by us and NOT native-reviewed (like the Odia, Hindi and Persian sets) - corrections go here and, for or, hi and fa, in tools/translations_<code>.json too, and are re-applied with tools/add_translations.py --apply. Each language says \"(optional)\" with its own word and \"session\" as its Session dropdown does, except Thai, whose Session label is a counter (ครั้งที่): there \"this activity\" (กิจกรรมครั้งนี้). No sub-label (Ryan, 2026-10-22), so the label is the only string. hi and fa reach the Asia form only",
+  "es": "Información adicional sobre esta sesión (opcional)",
+  "fr": "Informations complémentaires sur cette séance (facultatif)",
+  "th": "ข้อมูลเพิ่มเติมเกี่ยวกับกิจกรรมครั้งนี้ (ไม่บังคับ)",
+  "ur": "اس سیشن کے بارے میں اضافی معلومات (اختیاری)",
+  "te": "ఈ సెషన్ గురించి అదనపు సమాచారం (ఐచ్ఛికం)",
+  "vi": "Thông tin bổ sung về buổi này (không bắt buộc)",
+  "ne": "यस सत्रबारे थप जानकारी (वैकल्पिक)",
+  "km": "ព័ត៌មានបន្ថែមអំពីវគ្គនេះ (មិនចាំបាច់)",
+  "sw": "Maelezo ya ziada kuhusu kipindi hiki (hiari)",
+  "ar": "معلومات إضافية عن هذه الجلسة (اختياري)",
+  "or": "ଏହି ସେସନ ବିଷୟରେ ଅତିରିକ୍ତ ସୂଚନା (ଐଚ୍ଛିକ)",
+  "hi": "इस सेशन के बारे में अतिरिक्त जानकारी (वैकल्पिक)",
+  "fa": "اطلاعات بیشتر دربارهٔ این جلسه (اختیاری)"
  }
 }
