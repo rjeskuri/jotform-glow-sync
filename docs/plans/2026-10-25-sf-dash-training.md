@@ -246,7 +246,10 @@ build in `build/` (3 reports and the dashboard, 4 files; the diff in
   Monthly Reports with the test-record rule, which leaves out the 2 test records, so the check
   means something. Each report's numbers equal SOQL: item 13: 567 records, sum 1,422; item 14: 567
   records, sum 524; item 15: 524 answered, Yes 199, No 325. For one partner, September 2026, item
-  14: report 1 = SOQL 1.
+  14: report 1 = SOQL 1. That one-partner, last-complete-month check was recorded for item 14 only.
+  For items 13 and 15 the 12-month equality above (the same reports, grouping and test-record rule)
+  stands in: their one-partner checks were not recorded on 2026-10-26, and a read-only SOQL run
+  (such as step 9's check) can add them.
 - Step 8: both "DHIS2 Reports" reports D4 used are in Decommissioned: `00ORP000005ufNN2AY` first
   (`--limit 1`, then a SOQL check of it), then by the plan `00ORP000005uecc2AA`. The ledger holds 3
   moves (the first report moved twice, the second time Decommissioned to Decommissioned).
