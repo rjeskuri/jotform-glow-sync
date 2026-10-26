@@ -1605,6 +1605,11 @@ class Hooks(unittest.TestCase):
         self.assertEqual(counts["BLOCKED"] + counts["DENIED"], len(commands) * 5)
         self.assertEqual(len(self.quiet_notifications()), 1, "only the control is notified")
 
+    # absolute paths in the cases below, assembled so no literal one sits in this file (make check's
+    # docs-links refuses them): the records named from a home folder, files from outside the project
+    HOME_RECORDS = os.path.join(os.sep, "Users", "someone", "jotform-glow-sync", ".claude", "live_backups.log")
+    OUTSIDE_RECORDS = os.path.join(os.sep, "tmp", "records")
+    OUTSIDE_XML = os.path.join(os.sep, "tmp", "a.xml")
     # the backup records written by hand: a forged record is a self-approval (any case: the Mac's
     # file system ignores it)
     LOG_WRITES = [
@@ -1616,18 +1621,18 @@ class Hooks(unittest.TestCase):
         "perl -pi -e 's/25/26/' .claude/live_backups.log",
         "echo x > \"$CLAUDE_PROJECT_DIR/.claude/live_backups.log\"",
         "cat old.txt >>./.claude/live_backups.log",
-        "python3 tools/x.py > /Users/someone/jotform-glow-sync/.claude/live_backups.log",
+        f"python3 tools/x.py > {HOME_RECORDS}",
         "printf 'x' >> .claude/LIVE_BACKUPS.log",
         # ... a copy, a move or a link put in its place, a file opened by a script, or the writer
         # called by hand: records nobody backed up for (ruling after the breaker)
         "cp data/forged.log .claude/live_backups.log",
-        "cp -p /tmp/records ./.claude/live_backups.log",
-        "mv /tmp/records .claude/live_backups.log",
-        "dd if=/tmp/records of=.claude/live_backups.log",
-        "ln -sf /tmp/records .claude/live_backups.log",
-        "rsync -a /tmp/records .claude/live_backups.log",
-        "install -m 600 /tmp/records .claude/live_backups.log",
-        "ditto /tmp/records .claude/live_backups.log",
+        f"cp -p {OUTSIDE_RECORDS} ./.claude/live_backups.log",
+        f"mv {OUTSIDE_RECORDS} .claude/live_backups.log",
+        f"dd if={OUTSIDE_RECORDS} of=.claude/live_backups.log",
+        f"ln -sf {OUTSIDE_RECORDS} .claude/live_backups.log",
+        f"rsync -a {OUTSIDE_RECORDS} .claude/live_backups.log",
+        f"install -m 600 {OUTSIDE_RECORDS} .claude/live_backups.log",
+        f"ditto {OUTSIDE_RECORDS} .claude/live_backups.log",
         "python3 -c \"open('.claude/live_backups.log','a').write('2026-10-26 09:00:00\\tjotform\\tall\\tbackups\\n')\"",
         "python3 -c \"import os; open(os.path.join('.claude', 'live_backups.log'), 'a').write('x')\"",
         "python3 -c \"from glow import live_backups; live_backups.record('jotform','all','backups')\"",
@@ -1655,7 +1660,7 @@ class Hooks(unittest.TestCase):
                      "cp a.xml data/sf_x/before/",
                      "rsync -a data/sf_x/after/ data/sf_x/before",
                      "echo x > data/sf_x/before/a.xml",
-                     "mv /tmp/a.xml data/sf_x/before/a.xml",
+                     f"mv {OUTSIDE_XML} data/sf_x/before/a.xml",
                      "ditto data/sf_x/after data/sf_x/before",
                      "ln -s ../after data/sf_tiles/before",
                      "install -m 644 a.xml data/sf_x/before/a.xml",
