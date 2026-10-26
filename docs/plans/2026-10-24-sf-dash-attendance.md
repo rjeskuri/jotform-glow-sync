@@ -175,5 +175,9 @@ All with the VPN off, through the `sf` CLI login `glow`, in the interactive sess
   folder). The only component that uses any of the 5 is on a dashboard in Decommissioned; all 5
   read back in Decommissioned.
 - Step 8: no dashboard subscription on D1 (Ryan, 2026-10-25).
-- Not verified: the Partner Manager filter view itself was not opened in the dashboard; the
-  manager's numbers were checked by SOQL only.
+- 2026-10-26 ~03:50 UTC, the Partner Manager filter view, read-only: D1 refreshed with
+  `?filter1=` set to the manager `005RP000000qlipYAA`'s filter option `0ICRP000000D5l74AC` (a
+  filtered PUT), then a filtered GET: item 1 September 7 (ticked); item 3 September 1,300 over 9
+  partners with a value, 12 partners listed; item 4 September 1,300, 9 records, weeks 851, 499,
+  361, 235 and 43. Equal to the SOQL of step 6 (12 partners; September 9, 1,300, 7 ticked).
+- Not verified: the filter view was not opened in Lightning.
