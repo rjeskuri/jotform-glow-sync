@@ -61,6 +61,14 @@ before the tool exists: this file is its contract.
     (ids only, as Ryan decided for the script; a refusal names the club or partner to fix).
     --vpn-off is required before anything is read (glow.salesforce.add_vpn_flag / require_vpn_off,
     like the other sf tools).
+    The household-naming guard (Ryan, 2026-10-26): NPSP's Automatic Household Naming would rename the
+    partners' household Accounts on any Account update, so before every Account script - dryRun, flag
+    and clear alike, each runs an update or precedes one - the tool runs one read-only SOQL count,
+      SELECT COUNT() FROM npo02__Households_Settings__c WHERE npo02__Advanced_Household_Naming__c = true
+    (Org.count; a hierarchy custom setting: the org default and any profile's or user's row) and
+    prints it on a line that names household naming. It writes the script only when the count is 0;
+    above 0 it refuses (sys.exit) naming the household-naming guard, and writes no script. A Contact
+    run never reads the household settings and is not stopped by them.
 
 Everything here is fictional: clubs, partners, girls (test/fixtures/make_fixture.py's pools) and
 Salesforce ids are invented. A fake org answers the tool's SOQL with a small evaluator (SELECT …
@@ -106,6 +114,10 @@ CLUB_WORDS = ("Sunrise", "River Club", "Dawn Club", "Stars", "Night Owls", "Lost
 EMAILS = ("npe01__WorkEmail__c", "npe01__HomeEmail__c", "npe01__AlternateEmail__c")
 PHONES = ("npe01__WorkPhone__c", "HomePhone", "MobilePhone", "OtherPhone")
 SIGNUP = "GW_Volunteers__Volunteer_Last_Web_Signup_Date__c"
+# NPSP's Households Settings (a hierarchy custom setting) and its Automatic Household Naming checkbox
+HH_SETTINGS, NAMING = "npo02__Households_Settings__c", "npo02__Advanced_Household_Naming__c"
+# a line or a refusal that names the household-naming guard
+NAMING_GUARD = r"(?i)household[^\n]*naming|naming[^\n]*household"
 # the guard's three kinds, as a refusal names them
 KINDS = {"email": r"(?i)e-?mails?", "phone": r"(?i)phones?", "volunteer": r"(?i)volunteers?|sign-?ups?"}
 SF_ID = re.compile(r"[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?")
@@ -171,6 +183,17 @@ def contact(n, **fields):
     base.update({f: None for f in EMAILS + PHONES})
     base.update(fields)
     return base
+
+
+def naming_setting(n, on):
+    """A Households Settings record (the org default's, or a profile's or a user's: a hierarchy custom setting
+    has one row per level) with Automatic Household Naming on or off."""
+    return {"Id": f"a0H{n:015d}", "SetupOwnerId": f"00D{n:015d}", NAMING: on}
+
+
+def says_naming_count(text, n):
+    """A line of `text` names household naming and carries the number n as a word of its own."""
+    return any(re.search(NAMING_GUARD, line) and re.search(rf"\b{n}\b", line) for line in text.splitlines())
 
 
 # ---- a fake Salesforce: the tool's SOQL evaluated over fixture records ---------------------------
@@ -334,12 +357,15 @@ def holds(node, rec):
 
 
 class FakeOrg:
-    """Salesforce as far as the tool can read it: Accounts and Contacts, reachable through SOQL alone (the
-    records live in a closure: no attribute of the org holds them). Read-only: a write fails."""
+    """Salesforce as far as the tool can read it: Accounts, Contacts and NPSP's Households Settings, reachable
+    through SOQL alone (the records live in a closure: no attribute of the org holds them). Read-only: a write
+    fails. `settings` defaults to production's own (2026-10-26): the org default alone, naming off."""
     alias = "fake"
 
-    def __init__(self, accounts=(), contacts=()):
-        tables = {"Account": [dict(a) for a in accounts], "Contact": [dict(c) for c in contacts]}
+    def __init__(self, accounts=(), contacts=(), settings=None):
+        settings = [naming_setting(0, False)] if settings is None else settings
+        tables = {"Account": [dict(a) for a in accounts], "Contact": [dict(c) for c in contacts],
+                  HH_SETTINGS: [dict(s) for s in settings]}
         self.queries, self.token, self.revoked = [], "t", False
 
         def rows(obj, where):
@@ -945,6 +971,109 @@ class CommandLine(Fixture):
                     code, out, err = self.cli(argv, org)
                     self.assertTrue(self.ok(code), self.said(code, out, err))
                     self.assertTrue(org.queries, "Salesforce was read")
+
+
+# ---- the household-naming guard (Ryan, 2026-10-26) -------------------------------------------------------
+class HouseholdNamingGuard(Fixture):
+    """NPSP's Automatic Household Naming would rename the partners' household Accounts on any Account update:
+    before every Account script, in every mode, one read-only count of the Households Settings rows with it on;
+    the script only when that count is 0. Contact runs never read it."""
+
+    def fresh(self, clubs, partners):
+        self.write_roster(clubs)
+        self.write_partners(partners)
+        if os.path.exists(self.out):
+            os.remove(self.out)
+
+    def assertNamingCountRead(self, org):
+        """The household settings were read, by a count only: `SELECT COUNT() FROM npo02__Households_Settings__c
+        WHERE …` naming the naming checkbox and `true`, never a record read."""
+        reads = [q for q in org.queries if re.search(rf"(?i)\b{HH_SETTINGS}\b", q)]
+        self.assertTrue(reads, f"the household-naming count was not read: {org.queries!r}")
+        for q in reads:
+            m = COUNT.fullmatch(q.strip())
+            self.assertTrue(m and m.group(1) == HH_SETTINGS,
+                            f"the household-naming guard reads a count only, `SELECT COUNT() FROM {HH_SETTINGS} "
+                            f"WHERE …`: {q!r}")
+            self.assertTrue(names_field(q, NAMING) and re.search(r"(?i)\btrue\b", q),
+                            f"the count names {NAMING} = true: {q!r}")
+
+    def test_household_naming_on_refuses_every_account_script(self):
+        """A count above 0 stops the Account run in each mode (dryRun, flag and clear: each runs an update or precedes
+        one), whatever the exports hold: the refusal names the household-naming guard, the count is printed on a
+        line that names household naming, and no script is written. Only the rows with naming on count: a row
+        with it off beside them does not."""
+        cases = (("the org default on", 1, [naming_setting(1, True)], self.THREE_DEACTIVATED, self.TWO_MARKED),
+                 ("a profile's row on, the org default off", 1,
+                  [naming_setting(1, False), naming_setting(2, True), naming_setting(3, False)],
+                  self.ONE_DEACTIVATED, self.ONE_MARKED),
+                 ("two rows on, one off, nothing to flag", 2,
+                  [naming_setting(1, True), naming_setting(2, False), naming_setting(3, True)],
+                  self.NONE_DEACTIVATED, self.NONE_MARKED),
+                 ("three rows on", 3, [naming_setting(1, True), naming_setting(2, True), naming_setting(3, True)],
+                  self.THREE_DEACTIVATED, self.ONE_MARKED))
+        for mode in MODES:
+            for label, n, settings, clubs, partners in cases:
+                with self.subTest(mode=mode, label=label):
+                    self.fresh(clubs, partners)
+                    org = FakeOrg(base_accounts(), [contact(1)], settings)
+                    code, out, err = self.cli(self.account_argv(mode), org)
+                    said = self.said(code, out, err)
+                    self.assertFalse(self.ok(code), f"household naming is on ({n}) and the Account run went on: {said}")
+                    refusal = code if isinstance(code, str) else err
+                    self.assertTrue(refusal.strip(), "the refusal says why: sys.exit('…'), or a line on stderr")
+                    self.assertRegex(refusal, NAMING_GUARD,
+                                     f"the refusal names the household-naming guard: {refusal!r}")
+                    self.assertTrue(says_naming_count(said, n),
+                                    f"the count, {n}, is printed on a line naming household naming: {said!r}")
+                    self.assertFalse(os.path.exists(self.out), "no script while household naming is on")
+                    self.assertNamingCountRead(org)
+                    self.assertNoName(said, "the household-naming refusal", clubs=True)
+
+    def test_household_naming_off_writes_the_account_script_and_prints_the_count(self):
+        """A count of 0 - no row with naming on, however many rows with it off, or no row at all - lets the Account
+        script be written in each mode, with the ids the exports give, and the 0 is printed on a line that names
+        household naming."""
+        cases = (("the org default off", [naming_setting(1, False)], self.THREE_DEACTIVATED, self.TWO_MARKED,
+                  [SUN, STA1, NIG], [P2, P4]),
+                 ("three rows, all off", [naming_setting(1, False), naming_setting(2, False), naming_setting(3, False)],
+                  self.ONE_DEACTIVATED, self.ONE_MARKED, [NIG], [P1]),
+                 ("no Households Settings row", [], self.NONE_DEACTIVATED, self.NONE_MARKED, [], []))
+        for mode in MODES:
+            for label, settings, clubs, partners, deactivated, marked in cases:
+                with self.subTest(mode=mode, label=label):
+                    self.fresh(clubs, partners)
+                    org = FakeOrg(base_accounts(), [contact(1)], settings)
+                    code, out, err = self.cli(self.account_argv(mode), org)
+                    self.assertTrue(self.ok(code), self.said(code, out, err))
+                    script = self.script()
+                    m = ACCOUNT_CALL.search(script)
+                    self.assertTrue(m, script)
+                    self.assertEqual(m.group(1), mode)
+                    self.assertEqual(sorted(ids_in(m.group(2))), sorted(deactivated))
+                    self.assertEqual(sorted(ids_in(m.group(3))), sorted(marked))
+                    self.assertTrue(says_naming_count(out, 0),
+                                    f"the count, 0, is printed on a line naming household naming: {out!r}")
+                    self.assertNamingCountRead(org)
+                    self.assertNoName(out + err + script, "the Account run's output", clubs=True)
+
+    def test_the_contact_run_never_reads_the_household_settings(self):
+        """The household-naming guard is the Account run's alone: a Contact run, in each mode, with naming on in
+        Salesforce, reads no Households Settings and writes its script."""
+        for mode in MODES:
+            for settings in ([naming_setting(1, True)], [naming_setting(1, True), naming_setting(2, True)]):
+                with self.subTest(mode=mode, on=len(settings)):
+                    if os.path.exists(self.out):
+                        os.remove(self.out)
+                    org = FakeOrg(base_accounts(), [contact(1), contact(2)], settings)
+                    code, out, err = self.cli(self.contact_argv(mode), org)
+                    self.assertTrue(self.ok(code), self.said(code, out, err))
+                    m = CONTACT_CALL.search(self.script())
+                    self.assertTrue(m)
+                    self.assertEqual(m.group(1), mode)
+                    self.assertTrue(org.queries, "Salesforce was read")
+                    self.assertEqual([q for q in org.queries if re.search(r"(?i)households?_settings", q)], [],
+                                     "a Contact run reads no Households Settings")
 
 
 if __name__ == "__main__":
