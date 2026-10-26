@@ -263,10 +263,9 @@ on the dashboard.
 
 ### Build (2026-10-24, offline)
 
-For now in the job folder `~/.claude/jobs/392fafeb/tmp/t102_build/` (`build/`, `pattern/`),
-outside the repository because the protected-paths hook refuses an agent's writes under `data/`;
-pending the copy into `data/sf_session_timing_2026-10-24/` (owner only, never committed), which
-Ryan's live session makes before the retrieve (Rollout step 2). `build/` is an SFDX
+In `data/sf_session_timing_2026-10-24/t102_build/` (`build/`, `pattern/`; owner only, never
+committed), copied there unchanged on 2026-10-26 from the job folder it was first written in,
+since the protected-paths hook refuses an agent's writes under `data/`. `build/` is an SFDX
 project: `sfdx-project.json` as `data/sf_girls_tiles_2026-10-20/build/`'s (API 62.0), and
 `package.xml` with `Report` × 4 (`Attendance/<name>`) and `ReportType` `Attendance_Totals`.
 `pattern/` holds the report type as retrieved 2026-10-24 09:24 UTC
@@ -402,10 +401,11 @@ it.
   and `scripts/verify.sh` pass. Nothing retrieved, validated or deployed; Rollout steps 1-8 wait
   for Ryan. The build was written outside the repository, in the job folder
   `~/.claude/jobs/392fafeb/tmp/t102_build/`, because the protected-paths hook refuses an agent's
-  writes under `data/`; Ryan's live session copies it into `data/sf_session_timing_2026-10-24/`
-  (`build/`, `pattern/`) before the retrieve (Rollout step 2).
+  writes under `data/`; copied into `data/` on 2026-10-26 (below).
 - 2026-10-25, review fixes: the delay chart's `axisBinding` set to `y` (it was `x`); the Rollback
   moves the reports to Decommissioned and edits them off the fields instead of deleting them; the
   late report's within-partner sort becomes Rollout step 1, Ryan's confirmation.
 - 2026-10-26: Rollout step 1 done: Ryan confirmed on the ticket that the late report stays grouped
-  by partner, largest first within each partner; `build/` is unchanged. Steps 2-8 wait for his go.
+  by partner, largest first within each partner; `build/` is unchanged. The build was copied
+  unchanged from the job folder into `data/sf_session_timing_2026-10-24/t102_build/` (`build/`,
+  `pattern/`). Steps 2-8 wait for his go.

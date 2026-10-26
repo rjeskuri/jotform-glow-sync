@@ -3555,11 +3555,8 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 
 ### The timing reports
 
-**Status:** built 2026-10-24 offline (task #102), for now in the job folder
-`~/.claude/jobs/392fafeb/tmp/t102_build/` (`build/`, `pattern/`; outside the repository, since
-the protected-paths hook refuses an agent's writes under `data/`, and a job folder can be cleaned
-up), pending the copy into `data/sf_session_timing_2026-10-24/` (owner only, never committed)
-that Ryan's live session makes before the retrieve: the four reports below, and the report
+**Status:** built 2026-10-24 offline (task #102), in `data/sf_session_timing_2026-10-24/t102_build/`
+(`build/`, `pattern/`; owner only, never committed): the four reports below, and the report
 type `Attendance_Totals` with the four fields added to its columns (a custom report type offers
 a new field only once it is in its layout; the retrieve of 2026-10-24 09:24 UTC, after the fields' deploy, had none of
 them). Nothing is deployed: the fresh retrieve, the check-only deploy, the deploy, the read-back
