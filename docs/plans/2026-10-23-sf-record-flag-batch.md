@@ -359,7 +359,7 @@ at the live-gate prompt, never from a subagent or a headless run.
   packageVersions).
 - The guards (step 3, and again right before each flag run): the blank-Email, blank-Phone and
   Volunteers-signup counts 0, 0 and 0; the household-naming guard, added by Ryan on 2026-10-26
-  ("The household-naming guard" in the RUNBOOK; DECISIONS 2026-10-26), 0.
+  (RUNBOOK "The flagging batch"; DECISIONS 2026-10-26), 0.
 - Account set by hand outside the criteria (step 4): duplicate 0, obsolete 0; Contact set by hand
   outside the criteria (step 4): duplicate 0, obsolete 0. Nothing was set by hand before the run,
   so a rollback has nothing to set again.
