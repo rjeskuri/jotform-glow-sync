@@ -99,9 +99,9 @@ outline put this Rollout in #105's plan; it has its own plan because #105 lands 
   permission set and the report type from `before/` - under the rule never to redeploy an older
   build (DECISIONS 2026-10-16): only while a fresh retrieve of them equals `after/`; otherwise
   the fresh retrieve without the field's entries is the build. The field itself by a destructive
-  change (`destructiveChanges.xml`, check-only first, Ryan's go) only while it holds no data:
-  once a note has reached Salesforce, deleting the field deletes the notes, which is Ryan's
-  decision with the count in front of him.
+  change (`destructiveChanges.xml`, check-only first, Ryan's go). While it holds no data that
+  loses nothing; once a note has reached Salesforce, deleting the field deletes the notes, so it
+  goes only on Ryan's decision with the count of notes in front of him.
 
 ## Proof
 

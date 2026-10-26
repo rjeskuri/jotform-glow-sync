@@ -3698,9 +3698,16 @@ sf data query -o glow --json -q "SELECT Session_Notes__c, Processing_Status__c F
 **Rollback** ([plan](plans/2026-10-26-session-notes-salesforce.md#rollback)): unmap in the
 builder, form by form (edit the action → remove the Session notes row → save; never remove the
 connected account), and set `NOTES_MAPPING_WANTED = False` in the tool; the field may stay. The
-field itself goes only on Ryan's word: the layout, the permission set and the report type from
-the deploy's `before/` while a fresh retrieve equals its `after/` (never an older build,
-DECISIONS 2026-10-16), and the field by a destructive change only while it holds no data.
+field itself goes only on Ryan's word and only after every form is unmapped:
+`NOTES_MAPPING_WANTED = False` first (so the audit does not demand the mapping), then `python3
+tools/integration_status.py` → 8 fields on every live form. A field deleted while a form still
+maps it (empty, because no note was typed yet, is not enough) makes Salesforce refuse each
+insert from that form, and the whole batch is lost. Then the layout, the permission set and the
+report type from the deploy's `before/` while a fresh retrieve equals its `after/` (never an
+older build, DECISIONS 2026-10-16), and the field by a destructive change
+(`destructiveChanges.xml`, check-only first, Ryan's go). While it holds no data that loses
+nothing; once a note has reached Salesforce, deleting the field deletes the notes, so it goes
+only on Ryan's decision with the count of notes (above) in front of him.
 
 ## Monthly Report dashboards in Salesforce
 
