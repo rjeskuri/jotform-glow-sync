@@ -4306,11 +4306,17 @@ The backups, from today (the Mac's local date), and the command that makes each:
   `backups/github/switches-<stamp>.json`).
 - Apps Script - `clasp push`: no record; `appsscript/` is tracked with nothing
   changed or untracked under it, so the version before the push is in git.
-  Commit first.
+  Commit first. `npx clasp push` goes through only from `appsscript/` (the Bash
+  tool's working folder), `npm run clasp:push` only from the checkout, and never
+  with `-P`, `--project` or `--rootDir`.
 - Salesforce, raw - `sf`/`sfdx` deploys, data writes, `apex run`, `sf api
   request` writes, `.salesforce.com/services/`: no record; the command names a
   path inside `data/sf_<topic>/` and `data/sf_<topic>/before/` holds a file
-  modified today (the plan's `before/` retrieve).
+  modified today (the plan's `before/` retrieve, or a `sf data query` or `sf
+  data export` saved there). `apex run` goes through only on a `--file` inside
+  the checkout that the hook reads; a file holding `delete`, `merge`,
+  `undelete` or `emptyRecycleBin` is a delete, and so is a deploy of a folder
+  holding a `destructiveChanges*.xml`: they ask.
 - Salesforce tools - `sf_backfill.py send`, `sf_dupes.py merge --rehearse`,
   `sf_girls_present.py set`, `sf_partner_monthly.py` and `sf_report_folders.py
   copy|move|undo` write their own rollback record (a `ledger.csv` row,
@@ -4318,7 +4324,9 @@ The backups, from today (the Mac's local date), and the command that makes each:
   `sf_dupes.py`'s `--apply` asks: a merge deletes the losing record.
 
 Never automatic: `gh api` or `api.github.com` on `dispatches` or `graphql`;
-`auto_sync.py --apply-salesforce` (Salesforce accounts, no rollback record); any
+`auto_sync.py --apply-salesforce` (Salesforce accounts, no rollback record); a
+`--metadata-dir` or `force:mdapi:deploy` deploy; `force:apex:execute`; `apex
+run` with the Apex on standard input; any
 tool the hook does not list (the Drive photo mover, `upload_roster.py`,
 `deactivate_clubs.py`, `fix_module_values.py`, `sf_new_clubs.py`).
 
