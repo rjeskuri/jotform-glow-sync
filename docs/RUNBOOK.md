@@ -4730,7 +4730,7 @@ The live commands of the procedure refuse without `--vpn-off`: the word that you
 
 - **When:** corrected re-submissions the processor failed whole as `Duplicate` before 2026-10-24
   (it merges a correction since: ticket #108); their girls are missing from that club and day.
-- **Status:** built 2026-10-24 (ticket #109, [plan](plans/2026-10-24-resend-duplicate-batches.md)); the live run waits for Ryan's go.
+- **Status:** built 2026-10-24 (ticket #109, [plan](plans/2026-10-24-resend-duplicate-batches.md)). Run live 2026-10-26 (#153): 19 corrections re-sent (72 rows, 12 new girls). 12 batches from 2 clubs are held for GLOW (the plan's Result).
 - **Dry run:** `python3 tools/sf_backfill.py resend --vpn-off` (it reads Salesforce, so `--vpn-off` too).
 - **Apply:** `resend --apply --vpn-off --limit 1`, read back, then the rest, Ryan's go.
 - **Verify:** every copy is read back as it is sent; `sf_backfill.py status`.
