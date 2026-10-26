@@ -5588,7 +5588,13 @@ class NewMentorsDocs(unittest.TestCase):
     any date field but `Period__c` (standard, or a custom one like `Submitted_On__c`), `Newly_recruited__c` or a
     "Lead Mentor" contact as the source. The plan's six-month query has a period on `Period__c` and runs month by
     month; Rejected gives each source's reason; Consequences says the figure counts partners. The "No" of a
-    Yes/No answer is masked before a denial is looked for."""
+    Yes/No answer is masked before a denial is looked for.
+
+    Round 3: "recruits" count as mentors; a person per partner ("the recruits each partner signed up") or per
+    answer ("one new mentor brought in") fails, and a clause saying what a Yes stands for beside a mentor says one
+    partner's month; a dashboard of its own or "in place of D4" fails outside Rejected; a window other than 12
+    months fails in item 12's units and the decision; each Rejected reason is the agreed one ("still need
+    orientation", household accounts with no partner link, D4 enough) and nothing turns it around."""
 
     longMessage = False         # the messages say what to fix
     DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
@@ -5640,7 +5646,27 @@ class NewMentorsDocs(unittest.TestCase):
     # "mentors" (field names, the report's label, the keep list's labels, the question) are blanked
     QUANTITY = re.compile(r"(?i)\b(numbers?|counts?|counted|counting|totals?|totall?ed|sums?|summed|summing|"
                           r"add(s|ed|ing)?\s+up|how\s+many|head\s*counts?|tall(y|ies)|figures?|amounts?)\b")
-    MENTOR_WORD = re.compile(r"(?i)\bmentors?\b")
+    # round 3: a recruit is a mentor too ("the recruits each partner signed up")
+    MENTOR_WORD = re.compile(r"(?i)\bmentors?\b|\brecruits\b|\brecruitees?\b|\brecruited\s+(people|persons|adults|"
+                             r"volunteers|women)\b")
+    # a person per partner ("the recruits each partner signed up", "new mentors each partner recruited") or one
+    # person per answer ("one new mentor brought in"; "at least one new mentor" is what a Yes means, and passes)
+    PERSON_PER_PARTNER = re.compile(r"(?i)\b(mentors?|recruits)\s+(that\s+|who\s+|whom\s+)?(each|every|the|a|that|this|"
+                                    r"one|per)\s+partner\b")
+    ONE_PERSON = re.compile(r"(?i)(?<!least\s)\b(one|a\s+single|each|every)\s+(new\s+|recruited\s+)?(mentor|recruit)\b")
+    AT_LEAST_ONE = re.compile(r"(?i)\bat\s+least\s+one\b")
+    # the rejected field's own description, which names recruits: "recruits still needing orientation"
+    ORIENTATION_REASON = re.compile(r"(?i)\bstill\s+need\w*\s+(\w+\s+){0,3}?orientation\b")
+    # a window other than the last 12 months ("the last 24 months", `LAST_N_MONTHS:24`)
+    WINDOW = re.compile(r"(?i)\bLAST_N_MONTHS:(?P<n>\d+)\b|\b(last|past|previous)\s+(?P<w>\d+|one|two|three|six|nine|"
+                        r"twelve|eighteen|twenty-four|thirty-six)\s+(complete\s+|calendar\s+|full\s+)?months\b")
+    # D4 replaced ("in place of D4", "instead of GLOW Club Training")
+    IN_PLACE_OF_D4 = re.compile(r"(?i)\b(in\s+place\s+of|instead\s+of|rather\s+than)\s+(the\s+)?"
+                                r"(dashboard\s+)?(D4|GLOW Club Training|[\"“]Mentors[\"”])")
+    # what turns a Rejected reason around ("rejected only because", "even though", "for now", "D4 is not enough")
+    TURNED = re.compile(r"(?i)\b(even\s+though|although|though|despite|only\s+because|for\s+now|later|until|yet|"
+                        r"not\s+enough|insufficient|carr(y|ies)\s+a\s+partner|ha(ve|s)\s+a\s+partner\s+link)\b|"
+                        r"isn['’]t\s+enough")
     QUESTION = "Did you recruit any new mentors last month?"
     NAME_TOKEN = re.compile(r"\b\w+__[cr]\b")
     # the one way to speak of a mentor count: the true count a future form question would give
@@ -5659,7 +5685,7 @@ class NewMentorsDocs(unittest.TestCase):
     PARTNER_UNIT = re.compile(r"(?i)\bpartner['’]s\s+months?\b|\bpartner[- ]months?\b|\b(number|count)\s+of\s+"
                               r"partners\b|\bcounts?\s+(\w+\s+){0,2}?partners\b|\bpartners,?\s+not\s+mentors\b")
     # each rejected source with its reason
-    LEAD_REASON = re.compile(r"(?i)\bhousehold|\bno partner\b|\bnot linked\b|\bno link\b|\bpartner link\b|"
+    LEAD_REASON = re.compile(r"(?i)\bhousehold|\bno partner\b|\bnot linked\b|\bno link\b|\bwithout\s+(a\s+)?partner\b|"
                              r"\bnot (tied|attached|connected) to\b|\bno mentor list\b")
     DASH_REASON = re.compile(r"(?i)\bD4\b|\bcomponent\b|GLOW Club Training|\bkeep list\b|\benough\b")
 
@@ -5701,17 +5727,54 @@ class NewMentorsDocs(unittest.TestCase):
         recruited", "adds up the Yes answers as the new mentors", "a mentor headcount"): each Yes is one partner's
         month (Ryan, 2026-10-26). A quantity word beside "mentor(s)" is only ever denied, but for the true count a
         form question would give."""
+        rule = "item 12 counts Monthly Reports, each Yes one partner's month, never a number of mentors or recruits " \
+               "(Ryan, 2026-10-26)"
         for s in sentences(flat(text), ".;:"):
             if self.TRUE_COUNT.search(s) and self.FORM_QUESTION.search(s):
                 continue
             k = self.unno(self.NAMES.sub(lambda m: "X" * len(m.group(0)), self.NAME_TOKEN.sub(
                 lambda m: "X" * len(m.group(0)), s)))
-            qty = [m for m in self.QUANTITY.finditer(k) if not self.d.locally_denied(k, m)]
             who = [m for m in self.MENTOR_WORD.finditer(k) if not self.d.locally_denied(k, m)]
-            if qty and who:
-                self.fail(f"{where}: item 12 counts Monthly Reports, each Yes one partner's month, never a number of "
-                          f"mentors (Ryan, 2026-10-26); {qty[0].group(0)!r} beside \"mentor\" says otherwise (name a "
+            if not who:
+                continue
+            for rx, what in ((self.PERSON_PER_PARTNER, "people per partner"), (self.ONE_PERSON, "one person per answer")):
+                for m in rx.finditer(k):
+                    self.assertTrue(self.d.locally_denied(k, m), f"{where}: {rule}; {m.group(0)!r} counts {what} (name "
+                                                                 f"it only to deny it): {s[:200]!r}")
+            # the rejected field's own description ("recruits still needing orientation") is no claim about item 12
+            qty = [m for m in self.QUANTITY.finditer(k) if not self.d.locally_denied(k, m)]
+            if qty and not self.ORIENTATION_REASON.search(s):
+                self.fail(f"{where}: {rule}; {qty[0].group(0)!r} beside {who[0].group(0)!r} says otherwise (name a "
                           f"mentor count only to deny it): {s[:200]!r}")
+            # what a Yes stands for, said beside a mentor: one partner's month, or a denied headcount
+            if [m for m in self.YES.finditer(k) if not self.d.locally_denied(k, m)]:
+                self.assertTrue(self.stated(s, self.PARTNER_MONTH) or self.NOT_HEADCOUNT.search(s)
+                                or self.AT_LEAST_ONE.search(s) or re.search(r"(?i)\bpartner['’]s\s+(Yes|answer)\b", s),
+                                f"{where}: {rule}; a clause that says what a Yes stands for beside a mentor says one "
+                                f"partner's month (\"not a number of mentors\"): {s[:200]!r}")
+
+    def assertTwelveMonths(self, text, where):
+        """No window but the last 12 months (`Period__c = LAST_N_MONTHS:12`), unless denied."""
+        words = {"twelve": 12}
+        for s in sentences(flat(text), ".;:"):
+            for m in self.WINDOW.finditer(s):
+                n = m.group("n") or m.group("w")
+                if (int(n) if n.isdigit() else words.get(n.lower(), 0)) == 12:
+                    continue
+                self.assertTrue(self.denied(s, m), f"{where}: the period is the last 12 months (`Period__c = "
+                                                   f"LAST_N_MONTHS:12`, Ryan 2026-10-26), not {m.group(0)!r}: {s[:200]!r}")
+
+    def assertNoSeparateDashboard(self, text, where):
+        """The measure is a component on D4 (Ryan, 2026-10-26: no separate dashboard): a dashboard of its own is
+        only ever denied, and nothing replaces D4."""
+        for s in sentences(flat(text), ".;:"):
+            for m in self.SEPARATE_DASHBOARD.finditer(s):
+                self.assertTrue(self.denied(s, m) or re.search(r"(?i)\brejected\b", s[:m.start()]),
+                                f"{where}: the measure is a component on D4, GLOW Club Training, and no dashboard of "
+                                f"its own (Ryan, 2026-10-26); name one only to deny it: {s[:200]!r}")
+            for m in self.IN_PLACE_OF_D4.finditer(s):
+                self.assertTrue(self.denied(s, m), f"{where}: the component goes on D4, never in its place: "
+                                                   f"{s[:200]!r}")
 
     def assertMonthIsPeriod(self, text, where):
         """The month is `Period__c`: a standard date field (#78's `assertNoOtherDate`) or a custom field that reads
@@ -5831,6 +5894,8 @@ class NewMentorsDocs(unittest.TestCase):
                          and self.NOT_HEADCOUNT.search(s)],
                         f"{where}: say, in one sentence, that each Yes is one partner's month, not a number of mentors")
         self.assertNoHeadcount(text, where)
+        self.assertTwelveMonths(text, where)
+        self.assertNoSeparateDashboard(text, where)
         # the SOQL signal: GROUP BY the answer over the last 12 months on Period__c, with the test-record rule
         f = self.FIELD
         self.assertTrue([q for u in units for q in self.queries(u) if self.item_query(q, self.LAST_12_Q)],
@@ -5880,6 +5945,7 @@ class NewMentorsDocs(unittest.TestCase):
         self.assertOnlyDenied(text, self.LEAD_MENTOR, name, "a \"Lead Mentor\" contact")
         self.assertMonthIsPeriod(text, name)
         self.assertNoHeadcount(text, name)
+        self.assertNoSeparateDashboard(text, name)
         dash = self.t.dashboard()
 
         # --- the Rollout
@@ -6070,15 +6136,22 @@ class NewMentorsDocs(unittest.TestCase):
         # partner link), a separate dashboard (a component on D4 is enough)
         rw = f"{where}: **Rejected**"
         items = [flat(x) for x in re.split(r"[.;]\s|\n\s*[-*+]\s", rejected) if x.strip()]
-        self.assertTrue([x for x in items if self.NEWLY in x and re.search(r"(?i)\borientation\b", x)],
-                        f"{rw}: name `{self.NEWLY}` with why it is not it, in its clause: it counts recruits still "
-                        "needing orientation, not recruits")
+        self.assertTrue([x for x in items if self.NEWLY in x and self.ORIENTATION_REASON.search(x)],
+                        f"{rw}: name `{self.NEWLY}` with why it is not it, in its clause: it holds recruits who still "
+                        "need orientation, not recruits")
         self.assertTrue([x for x in items if self.LEAD_MENTOR.search(x) and self.LEAD_REASON.search(x)],
                         f"{rw}: name the \"Lead Mentor\" contacts with why, in their clause: household accounts, no "
                         "partner link")
         self.assertTrue([x for x in items if self.SEPARATE_DASHBOARD.search(x) and self.DASH_REASON.search(x)],
                         f"{rw}: name a separate dashboard with why, in its clause: a component on D4 (GLOW Club "
                         "Training) is enough")
+        # a reason is not turned around ("only because", "even though they carry a partner link", "for now though
+        # D4 is not enough")
+        for x in items:
+            if self.NEWLY in x or self.LEAD_MENTOR.search(x) or self.SEPARATE_DASHBOARD.search(x):
+                m = self.TURNED.search(x)
+                self.assertFalse(m, f"{rw}: each source is rejected for its reason, as stated, with nothing that turns "
+                                    f"it around ({m.group(0)!r}): {x[:200]!r}" if m else rw)
         # Consequences: what the figure is, partners (partner-months), not mentors
         self.assertGreaterEqual(len({w.lower() for w in re.findall(r"[A-Za-z]\w*", self.norm(cons))}), 10,
                                 f"{where}: **Consequences** says too little")
@@ -6094,6 +6167,8 @@ class NewMentorsDocs(unittest.TestCase):
         self.assertOnlyDenied(rest, self.LEAD_MENTOR, where, "a \"Lead Mentor\" contact")
         self.assertMonthIsPeriod(rest, where)
         self.assertNoHeadcount(rest, where)
+        self.assertTwelveMonths(rest, where)
+        self.assertNoSeparateDashboard(rest, where)
         self.d.assertNoContradiction(rest, where)
 
 
