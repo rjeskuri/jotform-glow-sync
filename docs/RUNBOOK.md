@@ -3573,7 +3573,7 @@ sharing stays as it is"):
     2026-10-16: they would undo the 2026-10-09 and 2026-10-15 changes); before the six reports go,
     retrieve it, remove the `totals1/` tiles in that copy, check-only, Ryan's go, deploy (the six
     reports and the type may stay).
-  - the exception, never deleted: since task #102 (built 2026-10-24; deployed only on Ryan's
+  - the exception, never deleted: since task #102 (deployed 2026-10-26, #157, on Ryan's
     go), the reports
     `Clubs_Not_Submitting_Last_Week`, `Submissions_by_Club_and_Week`,
     `Late_Submissions_Last_Month` and `Submission_Delay_by_Partner_by_Month`, each moved to
@@ -3664,7 +3664,8 @@ sharing stays as it is"):
   07:00 UTC (the check: 153 of 1,123 batches); `Submission_Delay_Days__c` was redeployed alone
   with the corrected text the same day (deploy `0AfRP000002i4LJ0AY`, 06:59 UTC), and the check
   reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result). The four
-  timing reports of task #102 are built, not deployed ("The timing reports", below).
+  timing reports of task #102 are deployed since 2026-10-26 12:34 UTC (#157, deploy
+  `0AfRP000002i9xh0AA`; "The timing reports", below).
 - **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
   is read-only.
 - **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).

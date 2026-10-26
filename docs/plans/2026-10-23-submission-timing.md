@@ -313,7 +313,7 @@ its SOQL check with it.
 
 ### Rollout (live; run 2026-10-26 on Ryan's go, in the main session, ticket #157)
 
-All eight steps ran on 2026-10-26 (Result). Steps 2-8 with the VPN off, through the CLI
+Steps 2-7 ran on 2026-10-26 (Result); step 8's definition of done is #157's, which replaced #102's for the rollout once #102 had landed. Steps 2-8 with the VPN off, through the CLI
 login `glow`; only counts and partner names reach the ticket, the conversation or this plan.
 1. Done 2026-10-26: Ryan confirmed on the ticket how `Late_Submissions_Last_Month` sorts: grouped
    by partner (the outline), the largest delay first within each partner's group, so the month's
@@ -371,7 +371,7 @@ Decommissioned names a timing field. `Clubs_Not_Submitting_Last_Week` (on Accoun
 them and moves as it is. `after/` (Rollout step 6) keeps the four as deployed: a report put back
 starts from it. Then the report type: retrieve `Attendance_Totals` fresh, delete the four
 `<columns>` entries in that copy, check-only, Ryan's go, deploy, and compare it with `before/`.
-Never redeploy the report type from `before/` or `pattern/` (DECISIONS 2026-10-16). Only after
+Never redeploy the report type from `before/` or `pattern/`, nor from the superseded builds `t102_build/build/` and `data/sf_session_timing_2026-10-24/build/`, whose `Attendance_Totals` lacks the Partner Manager and Session notes columns (DECISIONS 2026-10-16); what was deployed is `build_2026-10-26/`. Only after
 both may the fields' Rollback (above) run. Revert this task's RUNBOOK and DECISIONS changes with
 it.
 
@@ -426,8 +426,10 @@ it.
     `00ORP000009kYPh2AM`, `Late_Submissions_Last_Month` `00ORP000009kYPi2AM`,
     `Submission_Delay_by_Partner_by_Month` `00ORP000009kYPj2AM`, `Submissions_by_Club_and_Week`
     `00ORP000009kYPk2AM`, all in the Attendance folder.
-  - Step 7, each report through the Analytics API against its SOQL check (12:3x UTC). The checks
-    selected rows ungrouped and totalled them offline, the RUNBOOK's fallback:
+  - Step 7, each report through the Analytics API against its SOQL check, between 12:35 and 12:50
+    UTC. The checks went straight to the RUNBOOK's fallback, selecting rows ungrouped and totalling
+    them offline; the `GROUP BY`/`AVG`/`MAX` first try was not run, so whether SOQL accepts it on
+    the formula fields is still open:
     - not submitting last week: 202 clubs = 202;
     - the matrix's grand total: 1,229 batches = 1,229;
     - the late report: 170 rows = 170;
