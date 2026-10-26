@@ -8,7 +8,9 @@ it, and through the forms, Salesforce). The forms and the sheet went live on
 
 How to read it. A procedure starts with the same short list, where it applies:
 **When** to use it, its **Status** (one line, with a link to its plan's Result),
-the **Dry run**, the **Apply** (a live write: Ryan's go, CLAUDE.md rule 1), how to
+the **Dry run**, the **Apply** (a live write, on the go of CLAUDE.md rule 1:
+since 2026-10-26 automatic for a listed write whose backup from today is on
+record, else Ryan's - what an Apply line's "Ryan's go" now means), how to
 **Verify** it and the **Rollback**. History - who decided what and when, how a
 rollout went - lives in the plan it belongs to (`docs/plans/`), linked by a
 **History** line. A finished one-time procedure keeps a short stub here; its

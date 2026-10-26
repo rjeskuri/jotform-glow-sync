@@ -62,8 +62,8 @@ description: Salesforce for this project - what lives there (attendance batches 
   sees connector calls. Bulk changes go through the plan/apply tools below, which keep ledgers.
 - **Metadata** (Apex, fields, reports, dashboards, permission sets, folders): retrieve what is
   live into a dated `before/` folder → check-only (`sf project deploy validate -o glow …` with the
-  tests an Apex change needs, or `sf project deploy start --dry-run`) → Ryan's go → quick deploy of
-  the validation (`sf project deploy quick -o glow -i <validation id>`) or the same `start` without
+  tests an Apex change needs, or `sf project deploy start --dry-run`) → the go (below) → quick deploy
+  of the validation (`sf project deploy quick -o glow -i <validation id>`) or the same `start` without
   `--dry-run` → retrieve again and compare with the build. The hook gates the check-only run too:
   since 2026-10-26 (#146) a `validate` or `start` that names the plan folder `data/sf_<topic>/`
   goes through automatically when its `before/` holds a file from today; a `quick` deploy by its
