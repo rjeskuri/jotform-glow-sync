@@ -51,10 +51,13 @@ Everything under `data/sf_dash_reporting_2026-10-24/` (owner only, never committ
   - each: standard date column `Period__c`, All Time, in place of `CreatedDate`;
   - the dashboard: its one component gives way to two tables, items 17 and 18, titled with the
     reports' labels, a row per partner and month; the Partner Manager filter, the only filter, with
-    7 managers: the 6 it offered plus the active manager it lacked (Ryan, 2026-10-25; the inactive
-    eighth is not offered, DECISIONS 2026-10-24), the name in the build only; running user and "run as the viewer" unchanged.
-- To check at the check-only: the table columns' names for the `Period__c` grouping
-  (`DHIS2__c.Period__c`), not yet proven in this org.
+    7 managers: the 6 it offered plus the active manager it lacked (Ryan, 2026-10-25), the name in
+    the build only; the inactive eighth (one partner) left out by a Ruling made in the build, not
+    by Ryan, open for him to reverse and no rule for #75-#78 until he confirms it; running user
+    and "run as the viewer" unchanged.
+- The table columns' names for the `Period__c` grouping (`DHIS2__c.Period__c`): proven in this
+  org by the check-only `0AfRP000002i6N70AI` and the deploy `0AfRP000002i7330AA`, both
+  succeeded, and the read-back `after/` equals `build/` (Result, steps 3 to 5).
 - Items 17 and 18 are also components of two retired dashboards in Decommissioned ("Approval
   Status Monthly Reports", "Reporting Rate Dashboards"); those components follow the new groupings.
 
@@ -162,4 +165,5 @@ LAST_MONTH`, with the test-record rule; `evidence/soql_2026-10-24_baseline.txt`)
 - The test-record rule leaves out 2 of the 569 Monthly Reports of the last 12 months (11 of all
   time, on 2 test accounts or a blank Account), none of September 2026.
 - 58 partners and 8 partner managers have Monthly Reports in the last 12 months; the Partner
-  Manager filter offered 6 of the 8; the build offers 7 (the eighth is inactive).
+  Manager filter offered 6 of the 8; the build offers 7 (the eighth, inactive, left out by a
+  Ruling of the build, not Ryan's decision).

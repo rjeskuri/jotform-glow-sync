@@ -4089,7 +4089,9 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
   as today, so each manager picks their own partners (Ryan, 2026-10-24 on #79). It has no Partner
   filter and no Month filter (Ryan, 2026-10-24, for every Monthly Report dashboard; DECISIONS
   2026-10-24). The filter offers 7 managers: the 6 it offered plus the active manager it lacked
-  (Ryan, 2026-10-25); of the 8 managers with partners in the window, the eighth is inactive.
+  (Ryan, 2026-10-25); of the 8 managers with partners in the window, the eighth, inactive, is
+  left out by a Ruling made in the build, not by Ryan: open for him to reverse, and no rule for
+  the other Monthly Report dashboards until he confirms it.
 - The dashboard's components are two tables titled with the reports' labels, "Approved Approvals
   monthly report" and "Reports completed on time", each a row per partner and month with its
   count. They take the place of the one component today, on "Partner Report Submission On Time"
