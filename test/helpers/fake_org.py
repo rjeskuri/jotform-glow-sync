@@ -39,6 +39,8 @@ import unicodedata
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, REPO)
 from glow.salesforce import CLUB_RECORD_TYPE, Refused  # noqa: E402
+sys.path.insert(0, os.path.join(REPO, "test", "fixtures"))
+import make_fixture                                    # noqa: E402  the invented name pools
 
 ME = "005000000000000MEE"
 DUPLICATE = "Duplicate: A successful batch already exists for this account and date."
@@ -365,7 +367,7 @@ class FakeOrg:
         assert sobject == "Attendance_Batch__c"
         self.inserts.append(body)
         if self.refuse:
-            return 400, [{"errorCode": "CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY", "message": "limit for Amara Zibblewick"}]
+            return 400, [{"errorCode": "CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY", "message": f"limit for {make_fixture.FIRST[0]} {make_fixture.LAST[0]}"}]
         wanted = body["Account_Name__c"].strip().casefold()
         acc = next((a for a in self.accounts if a["Name"].casefold() == wanted), None)
         if acc is None:                      # the processor creates a Club account without a partner

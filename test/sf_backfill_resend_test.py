@@ -61,14 +61,14 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 from glow.salesforce import PARTNER_RECORD_TYPE            # noqa: E402
 from helpers.fake_org import DUPLICATE, FakeOrg as BareOrg   # noqa: E402
 from sf_backfill_test import PARTNER, FakeOrg, Harness, account   # noqa: E402
+sys.path.insert(0, os.path.join(REPO, "test", "fixtures"))
+import make_fixture                                          # noqa: E402  the invented name pools
 
 ASPEN, BIRCH, CEDAR = "001000000000000CAA", "001000000000000CBB", "001000000000000CCC"
 CLUBS = {ASPEN: "Aspen Club", BIRCH: "Birch Club", CEDAR: "Cedar Club"}      # name order = id order
-AMARA, BEATRICE, CHIARA = "Amara Zibblewick", "Beatrice Quornstead", "Chiara Vexholm"
-DALIA, ESTHER, FIONA = "Dalia Fennimore", "Esther Wrenlock", "Fiona Thistlebury"
-GRETA, HANA, INES = "Greta Morrowind", "Hana Pellingbrook", "Ines Quibblestone"
-JANA, KIRA, LENA, MIRA = "Jana Fernsby", "Kira Wobblecastle", "Lena Pumpernick", "Mira Oakhollow"
-NORA = "Nora Quillfeather"
+# girls: invented, from the fixture's pools (CLAUDE.md); 14 distinct, first names in order, initials A to N
+(AMARA, BEATRICE, CHIARA, DALIA, ESTHER, FIONA, GRETA, HANA, INES, JANA, KIRA, LENA, MIRA,
+ NORA) = [f"{make_fixture.FIRST[i]} {make_fixture.LAST[i]}" for i in range(14)]
 SURNAMES = [n.split()[1] for n in (AMARA, BEATRICE, CHIARA, DALIA, ESTHER, FIONA, GRETA, HANA, INES, JANA, KIRA,
                                    LENA, MIRA, NORA)]
 REASONS = ("no_success_original", "module_differs", "original_not_mergeable", "no_names", "adds_nobody",
@@ -317,7 +317,7 @@ class ResendDryRun(ResendHarness, unittest.TestCase):
             elif reason == "no_names":
                 names = " , ," if skipped else [ESTHER]
             elif reason == "adds_nobody":
-                names = [DALIA, "dalia  fennimore"] if skipped else [DALIA, ESTHER]
+                names = [DALIA, DALIA.lower().replace(" ", "  ")] if skipped else [DALIA, ESTHER]
             fuzzy = reason == "fuzzy_matching" and skipped       # the processor would match names by edit distance
             correction = self.batch(BIRCH, "2026-09-05", names, module=module, enable_fuzzy_matching__c=fuzzy)
             if reason == "no_success_original" and skipped:
@@ -477,14 +477,15 @@ class ResendApply(ResendHarness, unittest.TestCase):
 
     def test_a_name_ticked_twice_with_odd_spacing_or_other_capitals_is_one_girl(self):
         o1 = self.batch(CEDAR, "2026-09-05", [FIONA])
-        self.batch(CEDAR, "2026-09-12", [GRETA], week=4)        # Greta has a contact, and no row on 09-05
-        ticked = (f"{FIONA}, {FIONA.lower()},{FIONA.upper().replace(' ', '   ')} , GRETA MORROWIND, Greta{chr(0x200B)} Morrowind,"
+        self.batch(CEDAR, "2026-09-12", [GRETA], week=4)        # GRETA has a contact, and no row on 09-05
+        ticked = (f"{FIONA}, {FIONA.lower()},{FIONA.upper().replace(' ', '   ')} , {GRETA.upper()}, "
+                  f"{GRETA.replace(' ', chr(0x200B) + ' ')},"
                   f"{HANA}, {HANA}")
         correction = self.batch(CEDAR, "2026-09-05", ticked)
         self.org.merge_corrections = True
         out, stop = self.resend()
         self.assertIsNone(stop, stop)
-        self.assertIn("to re-send: 1 batches, 2 girls to add, 1 new contacts, 1 clubs", out)   # Greta and Hana; Hana new
+        self.assertIn("to re-send: 1 batches, 2 girls to add, 1 new contacts, 1 clubs", out)   # GRETA and HANA; HANA new
         self.assertTrue({2, 1} <= self.counts_in(self.line_of(out, correction), "Cedar Club"))
         contacts = len(self.org.contacts[CEDAR])
         out, stop = self.apply()
@@ -949,7 +950,7 @@ class MergeRuleOfTheFake(unittest.TestCase):
         body = {"Account_Name__c": "Aspen Club", "Attendance_Date__c": "2026-09-05", "Module__c": MODULE, "Creator__c": "Jotform"}
         org.insert("Attendance_Batch__c", dict(body, Contact_IDs__c=AMARA))
         original = org.batches[0]
-        org.insert("Attendance_Batch__c", dict(body, Contact_IDs__c=f"{AMARA}, {BEATRICE},beatrice  quornstead, BEATRICE QUORNSTEAD"))
+        org.insert("Attendance_Batch__c", dict(body, Contact_IDs__c=f"{AMARA}, {BEATRICE},{BEATRICE.lower().replace(' ', '  ')}, {BEATRICE.upper()}"))
         merged = org.batches[-1]
         self.assertEqual((merged["Processing_Status__c"], merged["Status_Message__c"], merged["Girls_Present__c"]),
                          ("Success", f"merged into {original['Id']}", None))
