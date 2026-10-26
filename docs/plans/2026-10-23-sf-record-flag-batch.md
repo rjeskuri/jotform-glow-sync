@@ -365,8 +365,10 @@ at the live-gate prompt, never from a subagent or a headless run.
   so a rollback has nothing to set again.
 - Account dry run (step 5), job `707RP00002cM8JNYA0`: duplicate 0, obsolete 26, written 0, failed
   0; Contact dry run (step 5), job `707RP00002cMAbLYAW`: duplicate 20, obsolete 0, written 0,
-  failed 0. Cross-checks: 21 Archived partners plus 5 clubs; the Contact rule's 14 sets of 21
-  records; the reads of 2026-10-21 found no Account group.
+  failed 0. Cross-checks: 21 Archived partners plus 5 clubs; the Contact rule's sets held 21
+  records; the reads of 2026-10-21 found no Account group. A read after the runs: the rule's sets
+  with two or more items hold 20 Contacts, none of them in two sets, and the 21st item is a
+  one-item set, which the batch skips by design (Risks, "A one-item set").
 - Step 6: Ryan confirmed these counts on the ticket's session the same day, before any flag run.
 - Account ran in flag mode (step 7), job `707RP00002cLzc0YAC`, 07:45 UTC, Completed 3/3 with no
   errors: duplicate 0, obsolete 26; Contact ran in flag mode (step 8), job `707RP00002cM4WlYAK`,
