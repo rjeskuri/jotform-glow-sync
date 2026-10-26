@@ -1807,7 +1807,7 @@ class ObservationsDashboardDocs(unittest.TestCase):
     # `hasRecordCount: true`, "record count on / shown / enabled", "turns on the record count"
     RECORD_COUNT_ON = re.compile(
         r"(?i)<name>co</name>\s*<value>1</value>|"
-        r"(?<![\w-])`?co`?\s*(=|:|is|to|set\s+to|of|at)?\s*`?1\b(?![.\d])|"
+        r"(?<![\w-])`?co`?\s*(=|:|is|to|set\s+to|of|at)?\s*`?1\b(?!\.?\d)|"
         r"\bhasRecordCount`?\s*(:|=|is|as)?\s*`?true\b|"
         r"\brecord\s+count`?\s+(is\s+|turned\s+|switched\s+|set\s+|stays\s+)?(on|shown|enabled|visible)\b|"
         r"\b(shows?|showing|turns?\s+on|turning\s+on|enables?|enabling|switch(es)?\s+on)\s+(the\s+|its\s+|a\s+)?"
@@ -1815,7 +1815,7 @@ class ObservationsDashboardDocs(unittest.TestCase):
     # ... and OFF: `co` 0, `hasRecordCount: false`, "record count off / hidden / disabled"
     RECORD_COUNT_OFF = re.compile(
         r"(?i)<name>co</name>\s*<value>0</value>|"
-        r"(?<![\w-])`?co`?\s*(=|:|is|was|to|set\s+to|of|at)?\s*`?0\b(?![.\d])|"
+        r"(?<![\w-])`?co`?\s*(=|:|is|was|to|set\s+to|of|at)?\s*`?0\b(?!\.?\d)|"
         r"\bhasRecordCount`?\s*(:|=|is|was|as)?\s*`?false\b|"
         r"\brecord\s+count`?\s+(is\s+|was\s+|turned\s+|switched\s+|set\s+)?(off|hidden|disabled)\b")
     # "RowCount ... only when / if / while / requires / needs" the record count is on
@@ -1826,6 +1826,8 @@ class ObservationsDashboardDocs(unittest.TestCase):
     SUM_CAUSE = re.compile(r"(?i)(\bSum\b|\bsummari[sz]\w*|aggregateTypes)[^.;]{0,100}?\b("
                            r"caus\w*|remov\w*|block\w*|takes?\s+away|took\s+away|drops?|dropp\w*|hides?|hid|"
                            r"replac\w*|prevent\w*|suppress\w*|costs?|loses?|lost)\b[^.;]{0,100}?RowCount|"
+                           r"(\bSum\b|\bsummari[sz]\w*|aggregateTypes)[^.;]{0,100}?\b(takes?|took|taking|taken)\b"
+                           r"[^.;]{0,60}?RowCount\b[^.;]{0,60}?\baway\b|"
                            r"RowCount[^.;]{0,60}?\b(because|since|due\s+to)\b[^.;]{0,60}?"
                            r"(\bSum\b|\bsummari[sz]\w*|aggregateTypes)")
     # what disowns a sentence about the Sum: the first, wrong diagnosis said as such
@@ -1844,6 +1846,9 @@ class ObservationsDashboardDocs(unittest.TestCase):
     PAST = re.compile(r"(?i)\b(was|were|had|used\s+to|no\s+longer|formerly|previously|once)\b")
     HEDGE = re.compile(r"(?i)\b(may|might|usually|often|sometimes|probably|likely|perhaps|seems?|apparently)\b")
     SUMMARIZES = re.compile(r"(?i)\bsummari[sz]e[sd]?\b|\bSum\b|aggregateTypes")
+    # where a SUM_CAUSE match may start: every Sum and RowCount of a sentence, so a later clause is read on its own
+    # ("summarizes no column, but item 11's Sum removes RowCount": the match from "summarizes" holds the "no")
+    CAUSE_START = re.compile(r"(?i)\bSum\b|\bsummari[sz]|aggregateTypes|RowCount")
     NO_ROWCOUNT = re.compile(r"(?i)\b(no|without|lacks?|lacking|loses?|lost|omits?|omitted|drops?|dropped|"
                              r"not\s+(offer|list|includ|provid)\w*)\s+(a\s+|the\s+|any\s+)?`?RowCount\b|"
                              r"`?RowCount`?[^.;]{0,40}?\b(missing|absent|gone|disappear\w*|"
@@ -1867,7 +1872,8 @@ class ObservationsDashboardDocs(unittest.TestCase):
             if self.DISOWNED.search(s):
                 continue
             sums = [m for m in self.SUMMARIZES.finditer(s) if self.affirmed(s, m)]
-            causal = [m for m in self.SUM_CAUSE.finditer(s) if not self.d.locally_denied(s, m)
+            starts = (self.SUM_CAUSE.match(s, c.start()) for c in self.CAUSE_START.finditer(s))
+            causal = [m for m in starts if m and not self.d.locally_denied(s, m)
                       and not self.d.NEGATION.search(m.group(0))]
             if causal or (sums and self.NO_ROWCOUNT.search(s) and not self.RECORD_COUNT_OFF.search(s)):
                 out.append(s)
@@ -2082,6 +2088,465 @@ class ObservationsDashboardDocs(unittest.TestCase):
         self.assertLess(i, soql[0], f"{where}: item 11's fix comes before the SOQL check (steps 7-8 wait until item "
                                     "11 works)")
         self.assertLess(i, moves[0], f"{where}: item 11's fix comes before the moves")
+
+    # --- the guard itself: sum_blamed flags every phrasing that blames the Sum, and nothing else -----------------
+    #
+    # A review of #77 (low) found two phrasings the guard let through: the verb split from "away" around RowCount
+    # ("A Sum aggregate takes RowCount away."), and a Sum-blaming clause after "summarizes no column" in the same
+    # sentence (the exemption for "summarizes no column" swallowed the clause that followed it).
+
+    BLAMES_SUM = (
+        # the review's phrasing (a): "takes ... away" around RowCount
+        "A Sum aggregate takes RowCount away.",
+        "Its Sum takes the RowCount away from item 11's report.",
+        "The Sum took `RowCount` away.",
+        "A summarized column takes RowCount away from the report.",
+        # the review's phrasing (b): a Sum-blaming clause after "summarizes no column", one sentence
+        "Item 9's report summarizes no column, but item 11's Sum removes RowCount.",
+        "Item 9's report summarizes no column, while a Sum blocks RowCount.",
+        "Item 9's report summarizes no column, and its Sum caused the missing RowCount.",
+        "Item 9's report summarizes nothing, and item 11's Sum takes RowCount away.",
+        # what the guard already flags (kept flagged)
+        "The Sum removes RowCount.",
+        "Item 11's Sum causes the missing RowCount.",
+        "Item 11's report has a Sum, so no RowCount.",
+        "RowCount is gone because of the Sum.",
+    )
+    CLEARS_SUM = (
+        "Item 11's report summarizes no column.",
+        "Item 9's report summarizes no column, and it lists RowCount.",
+        "Item 11's report has its record count off (`co` 0), so its aggregates list only its Sum and no `RowCount`.",
+        "Item 10's report sums the same column with `co` 1 and lists the Sum and `RowCount`.",
+        "Not the Sum: item 10's report sums the same column and lists RowCount.",
+        "A first diagnosis named the wrong cause: the Sum took RowCount away.",
+        "Item 11's report keeps its Sum and turns its record count on (`co` 1), so it offers RowCount.",
+        "The component measures the record count (`RowCount`).",
+    )
+
+    def test_the_sum_blaming_guard_flags_every_phrasing_that_blames_the_sum(self):
+        missed = [s for s in self.BLAMES_SUM if not self.sum_blamed(s)]
+        self.assertFalse(missed, "sum_blamed (the guard of #77's docs) lets through sentences that blame the Sum for "
+                                 f"the missing RowCount: {missed!r}")
+        # inside a paragraph of correct sentences too
+        for s in self.BLAMES_SUM:
+            text = ("Item 11's report has its record count off (`co` 0). " + s
+                    + " Item 10's report sums the same column with `co` 1 and lists RowCount.")
+            self.assertTrue(self.sum_blamed(text), f"sum_blamed misses {s!r} inside a paragraph")
+
+    def test_the_sum_blaming_guard_passes_what_does_not_blame_the_sum(self):
+        flagged = [s for s in self.CLEARS_SUM if self.sum_blamed(s)]
+        self.assertFalse(flagged, f"sum_blamed flags sentences that do not blame the Sum: {flagged!r}")
+        self.assertFalse(self.sum_blamed(" ".join(self.CLEARS_SUM)),
+                         "sum_blamed flags the paragraph of sentences that do not blame the Sum")
+
+    # --- the live steps of 2026-10-26: item 11 fixed forward, the SOQL check, the moves --------------------------
+    #
+    # #77 on 2026-10-26 ~03:10 UTC, on Ryan's go: step 7 redeployed item 11's report with `co` 1 (check-only
+    # 0AfRP000002i7JB0AY, deploy 0AfRP000002i6yE0AQ) after a fresh retrieve `fresh_2026-10-26/` equalled `after/`;
+    # the read-back `after_item11/` equals `build_item11/`; the refresh at 03:06 UTC returned data on 3/3 components,
+    # item 11's 01aRP0000089gWVYAY included. Step 8: SOQL for September 2026 equals the components (item 9 23 Yes /
+    # 3 No, item 10 sum 93 over 42, item 11 27 Yes / 15 No, one partner's September equal); the test-record rule:
+    # item 11 No 33 in January and 19 in March 2026 with the rule (34 and 20 without), item 10 46 records each month
+    # (47 without). Step 9: 5 reports moved to Decommissioned, 5/5 read back, the ledger holds 5 move rows. Step 10
+    # (the weekly Subscribe) and the dashboard copy's rename are Ryan's and stay open.
+    #
+    # The test-breaker passed the first version with a false Result: the ids beside "failed" and "rolled back",
+    # `co` 1 said of the plan, a retrieve that "differed", a read-back that "would" equal, a refresh that "still
+    # fails with 406; 3/3 is the goal", the counts swapped between the items, a step 9 "refused", and the stale
+    # words put before the step numbers. Each claim is now read in its own sentence (or table row): bound to its
+    # id, folder, item or month, said (not denied), real (not a plan, a hope or a guess) and free of failure words.
+    LIVE_DAY = "2026-10-26"
+    CHECK_ONLY_7, DEPLOY_7 = "0AfRP000002i7JB0AY", "0AfRP000002i6yE0AQ"
+    STEP_REF = re.compile(r"(?i)\bsteps?\s+(\d+)(?:\s*(?:-|–|to|through)\s*(\d+))?")
+    # what says a live step did not do what the Result claims ("0 errors", "no errors" are no error)
+    FAILED = re.compile(r"(?i)\bfail\w*|\brolled\s+back\b|\brollback\b|\brefus\w*|\berrors?\b|\b406\b|\bNO_DATA\b|"
+                        r"\babort\w*|\bcancel\w*|\breject\w*|\bundone\b")
+    NO_ERRORS = re.compile(r"(?i)\b(0|no|zero|without)\s+errors?\b")
+    # what makes a claim a plan, a hope or a guess instead of what happened
+    UNREAL = re.compile(r"(?i)\b(would|should|could|might|may|will|shall|in\s+theory|theoretically|expect\w*|"
+                        r"supposed|hop(e|es|ed|ing)|plans?\s+to|planned|goal|target|aim(s|ed)?|assum\w*|presum\w*|"
+                        r"probably|likely|perhaps|maybe|ideally)\b")
+    SUCCEEDED = re.compile(r"(?i)\bsucce\w+|\b0\s+errors\b")
+    DIFFERS = re.compile(r"(?i)\bdiffer\w*|\bmismatch\w*|\bdiscrepanc\w*|\bdeviat\w*")
+    WAITS = re.compile(r"(?i)\b(a)?wait\w*|\bnot\s+yet\b|\byet\s+to\b|\bstill\s+to\s+(do|run|come)\b|\bpending\b|"
+                       r"\bto\s+be\s+(run|done)\b")
+    # a side of the test-record rule's check as the label of a count beside it ("33 with the rule", "without it
+    # 34", "19 with and 20 without"); "with the VPN off" or "with Yes and No" is no side
+    SIDE = re.compile(r"(?i)\b(with(?:out)?)\b(?=\s+(?:the\s+)?(?:test[- ]record\s+)?(?:rule|filter)\b|\s+(?:it|them)\b|"
+                      r"\s*[/,;:.()|]|\s*$|\s+\d|\s+and\b)")
+    SIDES = re.compile(r"(?i)\b(with(?:out)?)\s*/\s*(with(?:out)?)\b")      # a table's "with / without" header
+    # round 2's false Result ended "At 05:10 UTC Ryan undid all of it ... Nothing of the above is in the org now":
+    # what says the live steps were taken back afterwards ("read back" is the read-back, not this)
+    UNDID = re.compile(r"(?i)\bundid\b|\bundone\b|\bundo(es|ing)\b|\brevert(ed|s|ing)\b|\brestored\b|"
+                       r"\b(roll(s|ed|ing)?|went|go(es|ne)?|put|moved?|brought|turned|set)\s+(\w+\s+){0,3}?"
+                       r"(?<!read )back\b|"
+                       r"(?<!read-)(?<!read )\bback\s+(to|on|in|at|into)\b|\bout\s+of\s+(the\s+)?Decommissioned\b|"
+                       r"\b(nothing|none)\s+of\s+(the\s+above|this|that|it)\b")
+    # a failure state of item 11 (406, the record count off); a sentence with it is history only when it also says
+    # the fix, or says it in the past with no word of a later change
+    BROKEN = re.compile(r"(?i)\b406\b|\bNO_DATA\b")
+    FIXED = re.compile(r"(?i)\breturn\w*\s+(its\s+)?data\b|\bYes\s+and\s+No\b|\bno\s+longer\b|\bfixed\b|\bgone\b")
+    LATER = re.compile(r"(?i)\b(again|now|currently|still|today|back|since|set|changed|switched|turned|"
+                       r"redeployed|deployed|moved|returned|is|are|has|have|remains?|stays?|fails?)\b|\b\d\d:\d\d\b")
+    PAST = re.compile(r"(?i)\b(had|was|were|failed|before|first|earlier|previously|old)\b|\bbefore/")
+    HISTORY_DAY = re.compile(r"\b2026-10-2[45]\b")
+
+    def names_step(self, s, n):
+        """`s` names Rollout step `n`: "step n", or a range "steps a-b" around it."""
+        for m in self.STEP_REF.finditer(s):
+            lo, hi = int(m.group(1)), int(m.group(2) or m.group(1))
+            if lo <= n <= hi:
+                return True
+        return False
+
+    def result_blocks(self):
+        path = self.plan_path()
+        raw = self.plan_part(path, "## Result", 40)
+        return os.path.relpath(path, REPO), raw, self.blocks(raw)
+
+    def step_parts(self, blocks, n):
+        """Each block of the Result that names step `n`, with the table rows right after it (a list per block)."""
+        out = []
+        for i, b in enumerate(blocks):
+            if not self.names_step(b, n) or b.startswith("|"):
+                continue
+            j, parts = i + 1, [b]
+            while j < len(blocks) and blocks[j].startswith("|"):
+                parts.append(blocks[j])
+                j += 1
+            out.append(parts)
+        return out
+
+    @staticmethod
+    def units(parts_list):
+        """The claims of a step: each sentence of its blocks, and each table row as one claim with every cell
+        prefixed by its column's header ("Item: 9 | Yes: 23 | No: 3")."""
+        def cells(row):
+            return [c.strip() for c in row.strip().strip("|").split("|")]
+
+        def rule(row):
+            return row.startswith("|") and all(re.fullmatch(r":?-{2,}:?", c) for c in cells(row))
+        out = []
+        for parts in parts_list:
+            header = None
+            for i, p in enumerate(parts):
+                if not p.startswith("|"):
+                    header = None
+                    out += sentences(p, ".;")
+                elif i + 1 < len(parts) and rule(parts[i + 1]):
+                    header = cells(p)           # the row above a |---| rule names the columns
+                elif rule(p):
+                    continue
+                elif header is None:
+                    out.append(p)
+                else:
+                    row = cells(p)
+                    out.append(" | ".join(f"{h}: {c}" for h, c in zip(header + [""] * len(row), row)))
+        return out
+
+    def said(self, u, rx):
+        """The matches of `rx` in claim `u` said, not denied ("0 errors", "no errors" taken out first)."""
+        u = self.NO_ERRORS.sub(" ", u)
+        return [m.group(0) for m in rx.finditer(u) if self.affirmed(u, m)]
+
+    def real(self, u):
+        """Claim `u` says what happened: no failure word said and no plan, hope or guess."""
+        return not self.said(u, self.FAILED) and not self.UNREAL.search(u)
+
+    def equal_said(self, u):
+        """Claim `u` affirms an equality ("equals", "matches", "no differences") and no difference, really."""
+        plain = re.sub(r"(?i)\bno\s+differences?\b", " ", u)
+        return (bool([m for m in self.EQUALS.finditer(u) if self.affirmed(u, m)])
+                and not [m for m in self.DIFFERS.finditer(plain) if self.affirmed(plain, m)]
+                and not self.UNREAL.search(u))
+
+    def succeeded(self, u, ident):
+        """Claim `u` says the job `ident` succeeded: "Succeeded" (or "0 errors") after the id and before the next
+        id, or anywhere in `u` when it names no other id, or "both / each ... succeeded" after the last id."""
+        ok = [m for m in self.SUCCEEDED.finditer(u) if self.affirmed(u, m)]
+        ids = list(self.SF_ID.finditer(u))
+        end = u.find(ident) + len(ident)
+        nxt = [m.start() for m in ids if m.start() >= end]
+        stop = nxt[0] if nxt else len(u)
+        if [m for m in ok if end <= m.start() < stop]:
+            return True
+        if ok and {m.group(0) for m in ids} == {ident}:
+            return True
+        last = ids[-1].end() if ids else 0
+        return bool([m for m in ok if m.start() >= last and re.search(r"(?i)\b(both|each|all)\b", u[last:m.start()])])
+
+    @staticmethod
+    def num(n):
+        return r"(?<![\d.,/:-])" + n + r"(?![\d.,:-]\d|\d)"
+
+    def pair(self, n, label):
+        """`n` bound to `label` ("23 Yes", "27 partners Yes", "Yes 23", "Yes: 23"), no other count or label between."""
+        return re.compile(r"(?i)" + self.num(n) + r"(?:\s+(?!(?:yes|no)\b)[A-Za-z]\w*){0,2}\s+" + label + r"\b|"
+                          r"\b" + label + r"\s*[:=]?\s*" + self.num(n))
+
+    @staticmethod
+    def item_parts(u, item):
+        """The parts of claim `u` about `item`: from "item <item>" (a table's "Item: <item>") to the next item."""
+        marks = list(re.finditer(r"(?i)\bitem\W{1,3}(9|10|11)\b", u))
+        return [u[m.end():(marks[k + 1].start() if k + 1 < len(marks) else len(u))]
+                for k, m in enumerate(marks) if m.group(1) == item]
+
+    def in_order(self, u, *words):
+        """`words` (a number, or a word) in claim `u` in this order."""
+        at = 0
+        for w in words:
+            m = re.compile(self.num(w) if w.isdigit() else r"(?i)\b" + w + r"\b").search(u, at)
+            if not m:
+                return False
+            at = m.end()
+        return True
+
+    def sides(self, u, numbers):
+        """{number: {side}}: each of `numbers` in claim `u` bound to "with" or "without" (the test-record rule). A
+        table cell "with / without: 46, 43 / 47, 43" binds by its slash; anywhere else the sides and these numbers,
+        in their order, bind each number to the side after it when the run starts with a number and ends with a side
+        ("33 with the rule and 34 without it"), to the side before it when it starts with a side and ends with a
+        number ("with the rule 33, without it 34"); a run with a side at both ends or at neither binds nothing."""
+        got = {}
+        for cell in u.split(" | "):
+            head = self.SIDES.search(cell)
+            halves = cell[head.end():].split("/") if head else []
+            if len(halves) == 2:
+                for side, half in zip(head.groups(), halves):
+                    for n in numbers:
+                        if re.search(self.num(n), half):
+                            got.setdefault(n, set()).add(side.lower())
+                continue
+            toks = sorted([(m.start(), m.group(1).lower()) for m in self.SIDE.finditer(cell)]
+                          + [(m.start(), n) for n in numbers for m in re.finditer(self.num(n), cell)])
+            seq = [t for _, t in toks]
+            if not seq or (seq[0] in ("with", "without")) == (seq[-1] in ("with", "without")):
+                continue
+            side = None
+            for t in (seq if seq[0] in ("with", "without") else reversed(seq)):
+                if t in ("with", "without"):
+                    side = t
+                else:
+                    got.setdefault(t, set()).add(side)
+        return got
+
+    def step_refs(self, s):
+        return [(int(m.group(1)), int(m.group(2) or m.group(1))) for m in self.STEP_REF.finditer(s)]
+
+    def live_ref(self, s):
+        """`s` names one of steps 7-9 (or what only step 7 made), the steps of 2026-10-26."""
+        return (bool([r for r in self.step_refs(s) if r[0] <= 9 and r[1] >= 7])
+                or bool(re.search(r"fresh_2026-10-26/|after_item11/|build_item11/", s)))
+
+    def history(self, s):
+        """`s` is about the dry runs of 2026-10-24 or steps 1-6 of 2026-10-25: it says one of those days, or names
+        only steps up to 6, and says neither 2026-10-26 nor one of steps 7-9."""
+        early = self.HISTORY_DAY.search(s) or (self.step_refs(s) and all(hi <= 6 for _, hi in self.step_refs(s)))
+        return bool(early) and self.LIVE_DAY not in s and not self.live_ref(s)
+
+    def assertNotUndone(self, blocks, where):
+        """No sentence of the Result says steps 7-9 were taken back (undid, went back), and none from their first
+        claim on says `co` 0 or 406 as the state after, unless it is the history of 2026-10-24 and 2026-10-25: an
+        undo word is history only in a sentence of its own about those days; a failure state also in a block led by
+        such a sentence (step 6's 406, `co` 0 in `before/`)."""
+        seen = False
+        for b in blocks:
+            said = sentences(b, ".;")
+            lead_history = self.history(said[0])
+            for s in said:
+                if self.history(s):
+                    continue
+                undid = self.said(s, self.UNDID)
+                self.assertFalse(undid, f"{where}: steps 7-9 ran on {self.LIVE_DAY} and stand; a sentence says they "
+                                        f"were taken back ({undid[0]!r}): {s[:200]!r}" if undid else "")
+                seen = seen or (self.LIVE_DAY in s and self.live_ref(s))
+                if not seen or (lead_history and not self.live_ref(s) and self.LIVE_DAY not in s):
+                    continue
+                broken = [m.group(0) for rx in (self.BROKEN, self.RECORD_COUNT_OFF) for m in rx.finditer(s)
+                          if self.affirmed(s, m)]
+                if not broken or self.FIXED.search(s) or [m for m in self.RECORD_COUNT_ON.finditer(s)
+                                                          if self.affirmed(s, m)]:
+                    continue
+                self.assertFalse(self.LATER.search(s) or not self.PAST.search(s),
+                                 f"{where}: item 11 works since step 7 ({self.LIVE_DAY}); a sentence says "
+                                 f"{broken[0]!r} as its state after: {s[:200]!r}")
+
+    def test_the_result_records_item_11s_redeploy_and_refresh_of_2026_10_26(self):
+        name, raw, blocks = self.result_blocks()
+        where = f"{name}: `## Result`"
+        body = flat(raw)
+        self.assertIn(self.LIVE_DAY, body, f"{where}: record the live steps of {self.LIVE_DAY} (steps 7-9)")
+        self.assertTrue([b for b in blocks if self.LIVE_DAY in b and self.names_step(b, 7)],
+                        f"{where}: say step 7 ran on {self.LIVE_DAY} (\"Step 7\" or \"Steps 7-9\" beside the date)")
+        parts7 = self.step_parts(blocks, 7)
+        self.assertTrue(parts7, f"{where}: a row, item or paragraph for step 7 (\"Step 7, ...\")")
+        s7 = " ".join(" ".join(p) for p in parts7)
+        units7 = self.units(parts7)
+
+        # the check-only and the deploy, each id beside its own word (no other id between), each succeeded in its
+        # own sentence, and no failure, rollback or refusal said beside either id
+        def window(s, ident):
+            at = s.find(ident)
+            prev = [m.end() for m in self.SF_ID.finditer(s[:at])]
+            return s[(prev[-1] if prev else max(0, at - 120)):at]
+        check_only = re.compile(r"(?i)check-only|--dry-run|\bvalidat\w*")
+        for ident, what in ((self.CHECK_ONLY_7, "check-only"), (self.DEPLOY_7, "deploy")):
+            self.assertIn(ident, s7, f"{where}: step 7 records item 11's {what} id {ident}")
+            w = window(s7, ident)
+            ok = check_only.search(w) if what == "check-only" else (re.search(r"(?i)\b(re-?)?deploy", w)
+                                                                     and not check_only.search(w))
+            self.assertTrue(ok, f"{where}: step 7's {what} id {ident} right after the word {what!r} (no other id "
+                                "between)")
+            mine = [u for u in units7 if ident in u]
+            for u in mine:
+                bad = self.said(u, self.FAILED)
+                self.assertFalse(bad, f"{where}: step 7's {what} {ident} succeeded; its sentence says {bad[0]!r}: "
+                                      f"{u[:200]!r}" if bad else "")
+            self.assertTrue([u for u in mine if self.succeeded(u, ident) and not self.UNREAL.search(u)],
+                            f"{where}: step 7's {what} {ident} succeeded (\"Succeeded\" after the id, in its sentence)")
+        # what changed: item 11's report redeployed with the record count on (`co` 1), in one sentence
+        redeploy = re.compile(r"(?i)\b(re-?)?deploy\w*")
+        self.assertTrue([u for u in units7 if [m for m in self.RECORD_COUNT_ON.finditer(u) if self.affirmed(u, m)]
+                         and [m for m in redeploy.finditer(u) if self.affirmed(u, m)]
+                         and self.real(u) and not re.search(r"(?i)\bplan\b|\bRollout\b", u)],
+                        f"{where}: step 7 says item 11's report was redeployed with its record count on (`co` 1), in "
+                        "one sentence, not denied, not a plan")
+        # the guard before it: the fresh retrieve equalled after/
+        self.assertTrue([u for u in units7 if "fresh_2026-10-26/" in u and "after/" in u and self.equal_said(u)
+                         and self.real(u)],
+                        f"{where}: step 7 says the fresh retrieve `fresh_2026-10-26/` equalled `after/` before the "
+                        "redeploy (one sentence, no difference)")
+        # the read-back after it: after_item11/ equals build_item11/
+        self.assertTrue([u for u in units7 if "after_item11/" in u and "build_item11/" in u and self.equal_said(u)
+                         and self.real(u)],
+                        f"{where}: step 7's read-back `after_item11/` equals `build_item11/` (one sentence, said as "
+                        "what happened, no difference)")
+        # the refresh: item 11's component returns data, in the sentence that names it, with no failure
+        data = re.compile(r"(?i)\b(return\w*|with|show\w*|ha[sd]|have|gave|gives)\s+(its\s+|their\s+)?data\b|"
+                          r"\b3/3\b|\b(all\s+)?(three|3)\s+of\s+(the\s+)?(three|3)\b|\ball\s+(three|3)\s+components\b|"
+                          r"\bYes\s+and\s+No\b")
+        refreshed = [b for b in blocks if self.ITEM11_COMPONENT in b and re.search(r"(?i)\brefresh", b)
+                     and (self.LIVE_DAY in b or "03:06" in b)
+                     and [u for u in sentences(b, ".;") if self.ITEM11_COMPONENT in u and self.real(u)
+                          and [m for m in data.finditer(u) if self.affirmed(u, m)]]]
+        self.assertTrue(refreshed, f"{where}: the refresh of {self.LIVE_DAY} (03:06 UTC) and item 11's component "
+                                   f"{self.ITEM11_COMPONENT} returning data (3/3 components), the id and the data in "
+                                   "one sentence with no failure (406, error) and no goal or expectation")
+        blamed = self.sum_blamed(raw)
+        self.assertFalse(blamed, f"{where}: the 406 was item 11's record count off, not its Sum: {blamed[0][:200]!r}"
+                         if blamed else "")
+        self.assertNotUndone(blocks, where)
+
+    def test_the_result_records_the_soql_check_and_the_moves_of_2026_10_26(self):
+        name, raw, blocks = self.result_blocks()
+        where = f"{name}: `## Result`"
+        # step 8: the September counts equal the components, one partner's month equal, the test-record months
+        parts8 = self.step_parts(blocks, 8)
+        self.assertTrue([p for p in parts8 if self.LIVE_DAY in " ".join(p)],
+                        f"{where}: a row, item or paragraph for step 8 (\"Step 8, ...\"), run on {self.LIVE_DAY}")
+        s8 = " ".join(" ".join(p) for p in parts8)
+        units8 = self.units(parts8)
+        self.assertTrue([u for u in units8 if re.search(r"(?i)\bcomponents?\b", u) and self.equal_said(u)
+                         and self.real(u)],
+                        f"{where}: step 8 says the SOQL counts equal the components (one sentence, not denied)")
+        for u in units8:
+            if re.search(r"(?i)\bwithout\b", u):
+                continue        # the counts without the test-record rule are meant to differ
+            plain = re.sub(r"(?i)\bno\s+differences?\b", " ", u)
+            denied = [m.group(0) for m in self.EQUALS.finditer(u) if self.d.locally_denied(u, m)]
+            denied += self.said(plain, self.DIFFERS)
+            self.assertFalse(denied, f"{where}: step 8's SOQL equals the components; a sentence says otherwise "
+                                     f"({denied[0]!r}): {u[:200]!r}" if denied else "")
+        for month in ("September", "January", "March"):
+            self.assertIn(month, s8, f"{where}: step 8 names {month} 2026")
+        # each count bound to its item and its answer, in one sentence or table row
+        for item, binds, what in (("9", (self.pair("23", "Yes"), self.pair("3", "No")), "23 Yes and 3 No"),
+                                  ("11", (self.pair("27", "Yes"), self.pair("15", "No")), "27 Yes and 15 No")):
+            self.assertTrue([u for u in units8 for t in self.item_parts(u, item)
+                             if all(rx.search(t) for rx in binds) and self.real(u)],
+                            f"{where}: step 8 records item {item}'s September, {what}, after \"item {item}\" in one "
+                            "sentence or table row")
+        def summed(n):
+            return re.compile(r"(?i)\b(sum\w*|total)(\s+(of|was|is|came\s+to|to))?\s*[:=]?\s*" + self.num(n) + "|"
+                              + self.num(n) + r"\s+(in\s+)?(sum|total)\b")
+
+        def over(n):
+            return re.compile(r"(?i)\b(over|across|from|in)\s+(the\s+)?" + self.num(n) + "|" + self.num(n)
+                              + r"\s+(\w+\s+)?(Monthly\s+Reports?|records?|reports?)\b")
+        self.assertTrue([u for u in units8 for t in self.item_parts(u, "10")
+                         if summed("93").search(t) and over("42").search(t)
+                         and not summed("42").search(t) and not over("93").search(t) and self.real(u)],
+                        f"{where}: step 8 records item 10's September, sum 93 over 42 Monthly Reports (93 beside "
+                        "\"sum\", 42 beside \"over\" or \"Monthly Reports\"), after \"item 10\" in one sentence or table "
+                        "row")
+        # the test-record rule's check, each count bound to its side: with the rule 33 (January), 19 (March) and 46
+        # records; without it 34, 20 and 47 (round 2 swapped the sides and passed)
+        with_rule, without_rule = ("33", "19", "46"), ("34", "20", "47")
+        for at, w, wo, what in ((r"\bJanuary\b", "33", "34", "item 11's No in January 2026"),
+                                (r"\bMarch\b", "19", "20", "item 11's No in March 2026"),
+                                (r"(?i)\bitem\W{1,3}10\b|\brecords\b", "46", "47", "item 10's records each month")):
+            self.assertTrue([u for u in units8 if re.search(at, u) and self.real(u)
+                             and self.sides(u, with_rule + without_rule).get(w) == {"with"}
+                             and self.sides(u, with_rule + without_rule).get(wo) == {"without"}],
+                            f"{where}: step 8 records {what}, {w} with the rule and {wo} without it, each count beside "
+                            "its side (\"33 with the rule and 34 without it\", or a table's \"with / without\" "
+                            "columns), in one sentence or table row")
+        for u in units8:
+            got = self.sides(u, with_rule + without_rule)
+            wrong = ([n for n in with_rule if got.get(n, set()) - {"with"}]
+                     + [n for n in without_rule if got.get(n, set()) - {"without"}])
+            self.assertFalse(wrong, f"{where}: step 8's test-record counts are 33, 19, 46 with the rule and 34, 20, "
+                                    f"47 without it; a claim binds {wrong[0] if wrong else ''} to the other side: "
+                                    f"{u[:200]!r}" if wrong else "")
+        self.assertTrue([u for u in units8 if re.search(r"(?i)\b(one|a|single)\s+partner", u) and self.equal_said(u)
+                         and self.real(u)],
+                        f"{where}: step 8 says one partner's month equals the per-partner query (one sentence)")
+        # step 9: the 5 moves to Decommissioned, read back, and the ledger's 5 move rows; no refusal or failure
+        parts9 = self.step_parts(blocks, 9)
+        self.assertTrue(parts9, f"{where}: a row, item or paragraph for step 9 (\"Step 9, ...\")")
+        units9 = self.units(parts9)
+        dated9 = self.units([p for p in parts9 if self.LIVE_DAY in " ".join(p)])     # the moves' own claims, dated
+        bad9 = re.compile(r"(?i)\brefus\w*|\bfail\w*|\berrors?\b|\bnone\b|\brolled\s+back\b|\bundone\b|\bskipp\w*")
+
+        def clean9(u):
+            return not self.said(u, bad9) and not self.UNREAL.search(u)
+        for u in units9:
+            if "2026-10-24" in u:
+                continue        # the dry run of 2026-10-24 refused the moves while D3 still used the reports
+            bad = self.said(u, re.compile(r"(?i)\brefus\w*|\bfail\w*"))
+            self.assertFalse(bad, f"{where}: step 9 moved the 5 reports on {self.LIVE_DAY}; a sentence says "
+                                  f"{bad[0]!r}: {u[:200]!r}" if bad else "")
+        moved = re.compile(r"(?i)\bmov(e|es|ed)\b")
+        self.assertTrue([u for u in dated9 if "Decommissioned" in u and clean9(u)
+                         and [m for m in moved.finditer(u) if self.affirmed(u, m)]
+                         and re.search(r"(?i)\b(5|five)\s+([\w\"“”'’]+\s+){0,4}reports?\b|\b5/5\b", u)],
+                        f"{where}: step 9 moved the 5 reports to Decommissioned on {self.LIVE_DAY} (one sentence, "
+                        "not denied, in a part of step 9 that says the date)")
+        self.assertTrue([u for u in dated9 if clean9(u)
+                         and re.search(r"(?i)\b5/5\b|\b(5|five)\s+of\s+(the\s+)?(5|five)\b", u)
+                         and [m for m in re.finditer(r"(?i)\bread\s*-?\s*back\b|\bre-?read\w*", u)
+                              if self.affirmed(u, m)]],
+                        f"{where}: step 9 read the 5 back in Decommissioned (\"5/5 read back\", one sentence)")
+        self.assertTrue([u for u in dated9 if clean9(u) and re.search(
+                            r"(?i)\bledger\b[^.;]{0,80}?\b(5|five)\s+(\w+\s+)?move\s+rows?\b|"
+                            r"\b(5|five)\s+(\w+\s+)?move\s+rows?\b[^.;]{0,80}?\bledger\b", u)],
+                        f"{where}: step 9 says the ledger holds 5 move rows (one sentence, no failure)")
+        # no longer: step 7 not yet run, steps 8-10 waiting; each stale word is read against the step reference
+        # nearest it in its sentence (`build_item11/` counts as step 7), before or after it
+        for s in sentences(flat(raw), ".;"):
+            refs = [(m.start(), m.end(), int(m.group(1)), int(m.group(2) or m.group(1)))
+                    for m in self.STEP_REF.finditer(s)]
+            refs += [(m.start(), m.end(), 7, 7) for m in re.finditer(r"build_item11/", s)]
+            if not [r for r in refs if r[2] <= 9 and r[3] >= 7]:
+                continue
+            for w in self.WAITS.finditer(s):
+                if self.d.locally_denied(s, w):
+                    continue
+                near = min(refs, key=lambda r: max(r[0] - w.end(), w.start() - r[1], 0))
+                self.assertFalse(near[2] <= 9 and near[3] >= 7,
+                                 f"{where}: steps 7-9 ran on {self.LIVE_DAY}; the Result still says "
+                                 f"{s[near[0]:near[1]]!r} {w.group(0)!r}: {s[:200]!r}")
+        self.assertNotUndone(blocks, where)
 
 
 if __name__ == "__main__":

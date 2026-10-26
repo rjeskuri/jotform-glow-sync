@@ -4066,9 +4066,10 @@ are (Ryan, 2026-10-23), and each component's title is its report's label. It run
 specified running user (`SpecifiedUser`), so it shows the data of its last refresh: a refresh
 after each change (a PUT, Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current.
 #77's build `data/sf_dash_observations_2026-10-24/build/` is deployed since 2026-10-25 on Ryan's
-go (deploy `0AfRP000002i5hB0AQ`, the plan's Result) and read back into `after/`. Item 11's chart
-fails the refresh with 406 until its report is redeployed from
-`data/sf_dash_observations_2026-10-24/build_item11/` (item 11, below; the plan's Rollout).
+go (deploy `0AfRP000002i5hB0AQ`, the plan's Result) and read back into `after/`. Item 11's report
+was redeployed from `data/sf_dash_observations_2026-10-24/build_item11/` on 2026-10-26 on Ryan's
+go (deploy `0AfRP000002i6yE0AQ`; item 11, below), and that day's refresh returned data on all
+three components.
 
 The three components, each on its report in "GLOW Monthly Reports":
 - Item 9, "GLOW Club observation form submitted": the report "Submission of GC observation forms
@@ -4089,12 +4090,11 @@ The three components, each on its report in "GLOW Monthly Reports":
   bucket "Observed" on `GC_sessions_did_you_observe_last_month__c` reads Yes for 1 or more
   sessions and No for 0 (across); each Monthly Report is one partner's month, so its counts are
   partners. Its report keeps the sum of `GC_sessions_did_you_observe_last_month__c` as a column
-  and, from the plan's Rollout step 7 on, has its record count on (the report param `co` 1), so
+  and has its record count on (the report param `co` 1, redeployed on 2026-10-26), so
   its aggregates offer `RowCount` beside the Sum. The component is a stacked column for each
   month, Yes and No; its chart measures the record count (`RowCount`), the partner-months in each
-  Yes/No bucket for each month. The org's report has its record count off (`co` 0) until its
-  redeploy from `build_item11/` on Ryan's go, and until then the chart fails the refresh with
-  406. SOQL signal, the partners who observed (September 2026: 27, and 15 with 0):
+  Yes/No bucket for each month. Before that redeploy from `build_item11/` its record count was
+  off (`co` 0) and the chart failed the refresh with 406 (2026-10-25). SOQL signal, the partners who observed (September 2026: 27, and 15 with 0):
   `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c > 0`;
   the partners who observed none: the same query with `= 0`.
   The field is never blank: the form shows it as 0 until the partner types a number, and
@@ -4129,8 +4129,9 @@ its 6 partner managers), on every component, and viewers read the partner and th
 reports' groupings (Ryan, 2026-10-24 on #77). It has no Partner filter and no Month filter. #77
 takes item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`) off this
 dashboard, with the five components on reports in "DHIS2 Reports"; #78 puts item 16 on D4. Those
-five reports go to Decommissioned by `tools/sf_report_folders.py move` once this dashboard
-uses none of them (no other dashboard outside Decommissioned uses them, 2026-10-24).
+five reports were moved to Decommissioned by `tools/sf_report_folders.py move` on 2026-10-26,
+once this dashboard used none of them; the only components still on them are on dashboards in
+Decommissioned.
 
 For one partner's month, the same queries take `AND Account__r.Name = '<partner>'`; the three
 items' values for one partner in one query (September 2026, Abaana Community Outreach (ACO)

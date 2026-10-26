@@ -1,7 +1,7 @@
 ---
 title: GLOW Club Observations (D3) by partner and month, over the last 12 months
 author: Claude (ticket #77, with Ryan's decisions of 2026-10-23 and 2026-10-24)
-status: in-progress      # ticket #77; D3 + items 9-11 deployed 2026-10-25 (0AfRP000002i5hB0AQ); item 11's chart fix to deploy
+status: in-progress      # ticket #77; D3 + items 9-11 deployed 2026-10-25 (0AfRP000002i5hB0AQ); item 11 fixed, SOQL check and moves done 2026-10-26; open: step 10 and the D3 copy's rename (Ryan)
 created: 2026-10-24
 intent: none - SOW p.5, Approach 1 (dashboards that reflect current data) and Ryan, 2026-10-21, "This data should be displayed by the Partner and Month."
 ---
@@ -196,8 +196,8 @@ Read-only, 2026-10-24: the retrieve into `before/`, the build, the copies' dry r
 nothing written), and the move dry run (refused, as expected, while D3 uses the 5 reports).
 
 Steps 1-6 ran on 2026-10-25 in Ryan's interactive session, each write on his go, with the VPN
-off. Steps 8-10 wait until item 11's chart works (Ryan, 2026-10-25: keep the deploy and fix
-forward, step 7).
+off. Steps 7-9 ran on 2026-10-26 (about 03:10 UTC) the same way (below); step 10, the weekly
+Subscribe, and the dashboard copy's rename are Ryan's and open.
 
 - Before the copies, a fresh retrieve equalled `before/` (`fresh_2026-10-25/`).
 - Steps 1-2, the copies in Decommissioned, tagged #77, their ledger rows dated 2026-10-25
@@ -214,17 +214,37 @@ forward, step 7).
   and 11), which Ryan accepted as Salesforce's normalisation.
 - Step 6, the refresh (PUT) at 07:28:20 UTC: the components on item 9 (`01aRP0000089gWTYAY`)
   and item 10 (`01aRP0000089gWUYAY`) refreshed. Item 11's component, `01aRP0000089gWVYAY`,
-  fails with 406, "One or more of the fields selected in the component is no longer available in
-  the report" (NO_DATA); the report itself runs (Analytics API, 1,022 records). The cause, by the
+  failed with 406, "One or more of the fields selected in the component is no longer available in
+  the report" (NO_DATA); the report itself ran (Analytics API, 1,022 records). The cause, by the
   Analytics describe (`GET /analytics/reports/00ORP000005uf412AA/describe`,
-  `evidence/describe_00ORP000005uf412AA.json`): item 11's report has its record count off (the
-  param `co` 0, describe `hasRecordCount: false`, as in `before/`), so its aggregates list only
+  `evidence/describe_00ORP000005uf412AA.json`): item 11's report had its record count off (the
+  param `co` 0, describe `hasRecordCount: false`, as in `before/`), so its aggregates listed only
   its Sum and no `RowCount`, while its component measures `RowCount`. Item 10's report sums the
   same column with `co` 1 and lists the Sum and `RowCount`
   (`data/sf_stale_2026-10-23/evidence/runs/00ORP000004RJZD2A4.json`); item 9's report has `co` 1
   and lists `RowCount` (`evidence/describe_00ORP000004RJZC2A4.json`). A first diagnosis on
-  2026-10-25 named the wrong cause; the reviewer's check of `co` corrected it. The fix is Rollout
-  step 7 (`build_item11/`), not yet run.
+  2026-10-25 named the wrong cause; the reviewer's check of `co` corrected it. Step 7 fixed it
+  on 2026-10-26 (below).
+- Step 7, 2026-10-26, item 11 fixed forward: a fresh retrieve of D3 and items 9-11,
+  `fresh_2026-10-26/`, equalled `after/`. `build_item11/` differs from it in one value only: it
+  sets item 11's `co` to 1 (from 0). Check-only `0AfRP000002i7JB0AY`: Succeeded (1/1). Deploy
+  `0AfRP000002i6yE0AQ`: Succeeded (1/1), item 11's report redeployed with `co` 1, its record
+  count on. The read-back `after_item11/` equals `build_item11/`. The refresh of D3
+  (`01ZRP000006k2D32AI`) at 03:06 UTC returned data on 3/3 components, item 11's
+  `01aRP0000089gWVYAY` included. On 2026-10-25, in step 6, that component had failed with 406.
+- Step 8, 2026-10-26, the SOQL check on `DHIS2__c` (`evidence/soql_check_2026-10-26.txt`): for
+  September 2026 each of items 9-11 equals its component: item 9 Yes 23 and No 3, item 10 sum 93
+  over 42 Monthly Reports, item 11 Yes 27 and No 15. One partner's September cell on item 10
+  equals the per-partner query (3 sessions over 1 Monthly Report). The test-record rule: item
+  11's No is 33 in January and 19 in March 2026 with the rule, 34 and 20 without it. Item 10
+  counts 46 records in each of the two months with the rule and 47 without it. These equal the
+  counts Rollout step 8 named.
+- Step 9, 2026-10-26: `--apply --limit 1` first, a SOQL check of that report, then the other 4
+  by `move_plan_rest.csv`. The 5 "DHIS2 Reports" reports moved to Decommissioned; the only
+  components still on them are 10 on dashboards in Decommissioned. The read-back finds 5/5 in
+  Decommissioned, and the ledger holds 5 move rows.
+- Open, Ryan's: the dashboard copy `01ZRP00000BP52z2AD`'s rename in Lightning (`copy of
+  01ZRP000006k2D32AI, #77`) and step 10, the weekly Subscribe.
 
 The baseline the components must equal after the deploy, SOQL on `DHIS2__c` for September 2026
 (`Period__c = LAST_MONTH`, Account not blank, no test account), run 2026-10-24
