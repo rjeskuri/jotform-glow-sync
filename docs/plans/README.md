@@ -13,11 +13,21 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-10-25 | GLOW Club Training (D4, "Mentors") by partner and month, over the last 12 months | in-progress |  | [2026-10-25-sf-dash-training.md](2026-10-25-sf-dash-training.md) |
 | 2026-10-25 | The optional session-notes field and its translations on all five attendance forms | done 2026-10-26 |  | [2026-10-25-session-notes.md](2026-10-25-session-notes.md) |
+| 2026-10-24 | GLOW Club Reporting (the dashboard "Reporting", items 17 and 18) and the GLOW of the Month table (item 19) by Partner and Month | done |  | [2026-10-24-sf-dash-reporting.md](2026-10-24-sf-dash-reporting.md) |
+| 2026-10-24 | GLOW Club Observations (D3) by partner and month, over the last 12 months | in-progress |  | [2026-10-24-sf-dash-observations.md](2026-10-24-sf-dash-observations.md) |
+| 2026-10-24 | GLOW Club Implementation (D2) by partner and month, over the last 12 months | done 2026-10-26 |  | [2026-10-24-sf-dash-implementation.md](2026-10-24-sf-dash-implementation.md) |
+| 2026-10-24 | The GLOW Club Attendance dashboard (D1) and its reports by Partner and Month, last 12 months | done 2026-10-26 |  | [2026-10-24-sf-dash-attendance.md](2026-10-24-sf-dash-attendance.md) |
+| 2026-10-24 | A Period date on the Monthly Report (DHIS2) records and in the Dhis2 report type, for the last-12-months period | done 2026-10-24 |  | [2026-10-24-dhis2-period-date.md](2026-10-24-dhis2-period-date.md) |
+| 2026-10-23 | Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them | done 2026-10-24 |  | [2026-10-23-submission-timing.md](2026-10-23-submission-timing.md) |
+| 2026-10-23 | Move the Monthly Report (DHIS2) reports and dashboards off the keep list to Decommissioned | done 2026-10-24 |  | [2026-10-23-sf-retire-reports.md](2026-10-23-sf-retire-reports.md) |
+| 2026-10-23 | The kept Monthly Report reports and dashboards into one report folder and one dashboard folder | done |  | [2026-10-23-sf-category-folders.md](2026-10-23-sf-category-folders.md) |
 | 2026-10-22 | Roster changes sent as problem reports point their sender to the Club Roster Form, and girls "not on the form" count as one | proposed |  | [2026-10-22-roster-change-reports-to-roster-form.md](2026-10-22-roster-change-reports-to-roster-form.md) |
+| 2026-10-22 | Attendance processor - a corrected re-submission adds its missing girls to the day's original batch | in-progress |  | [2026-10-22-correction-merge.md](2026-10-22-correction-merge.md) |
 | 2026-10-21 | Inventory of the Monthly Report (DHIS2) reports, dashboards and interactive dashboard; the two hidden Decommissioned folders; the copy-and-move API proof | done 2026-10-23 |  | [2026-10-21-sf-reporting-inventory.md](2026-10-21-sf-reporting-inventory.md) |
 | 2026-10-21 | Duplicate and obsolete flags on Account and Contact, and Account duplicate rules that report only | in-progress |  | [2026-10-21-sf-duplicate-obsolete-flags.md](2026-10-21-sf-duplicate-obsolete-flags.md) |
-| 2026-10-21 | A standalone Apps Script moves Jotform's photo subfolders from Ryan's My Drive to the company Shared Drive | accepted |  | [2026-10-21-drive-photo-mover.md](2026-10-21-drive-photo-mover.md) |
+| 2026-10-21 | A standalone Apps Script moves Jotform's photo subfolders from Ryan's My Drive to the company Shared Drive | in-progress |  | [2026-10-21-drive-photo-mover.md](2026-10-21-drive-photo-mover.md) |
 | 2026-10-20 | The dashboard's top row becomes two girls-who-attended tiles (Jotform + 3 partners); total attendance no longer tracked | done 2026-10-21 | 72 | [2026-10-20-girls-attended-tiles.md](2026-10-20-girls-attended-tiles.md) |
 | 2026-10-19 | The three Salesforce-reporting partners' Monthly Max copied into attendance, one Partner report batch per partner per month | done 2026-10-20 | 72 | [2026-10-19-partner-monthly-max.md](2026-10-19-partner-monthly-max.md) |
 | 2026-10-15 | The dashboard's total attendance counts Jotform plus the three Salesforce-reporting partners only, shown beside Jotform only | done 2026-10-15 | 72 | [2026-10-15-attendance-total-three-partners.md](2026-10-15-attendance-total-three-partners.md) |

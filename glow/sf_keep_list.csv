@@ -17,7 +17,7 @@ item,group,measure,kind,id,label_today,label_target
 16,GLOW Club Training,Whether PC met with mentors as a group to discuss program implementation,report,00ORP000004RJZ72AO,Meeting with mentors to discuss program,Meeting with mentors to discuss program
 17,GLOW Club Reporting,Report approved by PO,report,00ORP000006XXEf2AO,Approved Approvals monthly report,Approved Approvals monthly report
 18,GLOW Club Reporting,Report submitted on time,report,00ORP0000054DyH2AU,Reports completed on time,Reports completed on time
-19,Report/Data Table Format,GLOW of the Month Stories,table,00ORP000005p2L32AI,GLOW of the Month Stories Report_2025,GLOW of the Month Stories Report_2025
+19,Report/Data Table Format,GLOW of the Month Stories,table,00ORP000005p2L32AI,GLOW of the Month Stories Report,GLOW of the Month Stories Report
 D1,GLOW Club Attendance,GLOW Club Attendance,dashboard,01ZRP000006iWqL2AU,Glow Club Attendance,Glow Club Attendance
 D2,GLOW Club Implementation,GLOW Club Implementation,dashboard,01ZRP000006jU9o2AE,Implementation Dashboard,Implementation Dashboard
 D3,GLOW Club Observations,GLOW Club Observations,dashboard,01ZRP000006k2D32AI,GLOW Club Training,GLOW Club Training
