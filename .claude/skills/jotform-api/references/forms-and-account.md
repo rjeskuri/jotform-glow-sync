@@ -35,7 +35,9 @@ disagree, this file won.
 
 ## Integrations
 - Native Salesforce V2 integration, 8 mapping rows keyed to question ids
-  (5, 17, 18, 98, 100, 102, 105, 109), byte-identical across the forms; it survives a clone. Its
+  (5, 17, 18, 98, 100, 102, 105, 109), the same on every form, and since 2026-10-26 a ninth,
+  `Session_Notes__c` from the form's own `sessionNotes` question (its qid differs per form; the
+  DISABLED U.S form has none: RUNBOOK "Session notes in Salesforce"); it survives a clone. Its
   upload row (`uploadFields`) has been **empty since 2026-10-01** on the four regional forms (the
   CEO: no photo in Salesforce; the template follows at RUNBOOK "Photos" step 1, until then it still
   reads `['19']`); `tools/integration_status.py` expects `[]`. The club name is read from q5 and matching happens inside Salesforce. q5 is the picked
