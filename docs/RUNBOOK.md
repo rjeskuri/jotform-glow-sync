@@ -3582,7 +3582,7 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 ## Monthly Report dashboards in Salesforce
 
 - **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
-- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)); D1 "Glow Club Attendance" and its reports built 2026-10-24 for #75, waiting for Ryan's go (GLOW Club Attendance, below).
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)); D1 "Glow Club Attendance" and its reports by Partner and Month (#75) deployed 2026-10-26 on Ryan's go (deploy `0AfRP000002i7HZ0AY`, check-only `0AfRP000002i7Fx0AI`), with item 1's column in the `Dhis2` report type, read back and checked against SOQL; the 5 reports it no longer uses moved to Decommissioned ([plan and Result](plans/2026-10-24-sf-dash-attendance.md#result); GLOW Club Attendance, below).
 - **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
 - **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
 - **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
@@ -3672,7 +3672,7 @@ The retirement (#72, [plan and Result](plans/2026-10-23-sf-retire-reports.md#res
   (`00ORP000006XSy92AG`, `00ORP000006V09x2AC`, Ryan's decision of 2026-10-23), because only
   retiring dashboards used them.
 - 19 retiring reports stay in "DHIS2 Reports", held for #75-#79 because the 5 kept dashboards
-  use them; each moves when its dashboard is reworked.
+  use them; each moves when its dashboard is reworked (#75 moved D1's four on 2026-10-26).
 - The ledger `data/sf_retire_2026-10-23/ledger.csv` has 31 move rows for the 29 reports: two
   reports have a second row, Decommissioned to Decommissioned, which changed nothing. Each is the
   first PATCH of a plan's full `--apply` run, which moved that plan's first report again after
@@ -4051,9 +4051,20 @@ Questions for GLOW:
 
 D1 (ticket #75, [plan](plans/2026-10-24-sf-dash-attendance.md)): the dashboard "Glow Club
 Attendance" (`01ZRP000006iWqL2AU`) in "GLOW Monthly Dashboards", and items 1-4 of
-`glow/sf_keep_list.csv` in "GLOW Monthly Reports". Status, 2026-10-24: retrieved live into
+`glow/sf_keep_list.csv` in "GLOW Monthly Reports". Status: retrieved live 2026-10-24 into
 `data/sf_dash_attendance_2026-10-24/before/` and built in `data/sf_dash_attendance_2026-10-24/build/`;
-the copies, the check-only, the deploy and the moves wait for Ryan's go, and none has run.
+the 4 copies made 2026-10-25 and the build deployed 2026-10-26 on Ryan's go (deploy
+`0AfRP000002i7HZ0AY`, check-only `0AfRP000002i7Fx0AI`), read back into `after/`, each report's
+September 2026 total equal to its SOQL signal below; the 5 reports D1 no longer uses moved to
+Decommissioned the same day; no dashboard subscription (Ryan, 2026-10-25)
+([Result](plans/2026-10-24-sf-dash-attendance.md#result)).
+- Item 1's column `Attendance_submitted_electronically__c` was not in the custom report type
+  `Dhis2`, so the first check-only (`0AfRP000002i7EL0AY`) refused item 1; on Ryan's decision
+  (2026-10-26) the same deploy added `DHIS2__c$Attendance_submitted_electronically__c` to
+  `Dhis2` (not checked by default). Its rollback: the column is additive and harmless and may
+  stay; to take it out, deploy `data/sf_dash_attendance_2026-10-24/fresh_2026-10-26/`'s
+  `Dhis2.reportType-meta.xml` after a check-only, on Ryan's go, once item 1's report no longer
+  uses it.
 
 The retrieve of 2026-10-24 has the labels and folders #73 left. D1 runs as the viewer
 (`LoggedInUser`, a dynamic dashboard), and its one dashboard filter today is Assigned Partner

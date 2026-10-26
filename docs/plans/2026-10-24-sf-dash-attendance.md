@@ -1,7 +1,8 @@
 ---
 title: The GLOW Club Attendance dashboard (D1) and its reports by Partner and Month, last 12 months
 author: Claude (ticket #75, with Ryan's decisions of 2026-10-23 and 2026-10-24)
-status: proposed         # ticket #75; built 2026-10-24, the copies, check-only and deploy wait for Ryan's go
+status: done             # ticket #75; deployed 2026-10-26 on Ryan's go (0AfRP000002i7HZ0AY), read back, checked against SOQL, moves done
+done: 2026-10-26
 created: 2026-10-24
 intent: Ryan, 2026-10-21 - "This data should be displayed by the Partner and Month."; SOW p.5, Approach 1
 ---
@@ -37,7 +38,10 @@ its SOQL signal and the rollback: RUNBOOK `### GLOW Club Attendance`.
 ## Build
 
 `build/` holds only what changes: the dashboard and the reports of items 1, 3 and 4. Item 2's
-report and the report types `Dhis2` and `Monthly_Reports` are unchanged and left out.
+report and the report type `Monthly_Reports` are unchanged and left out. The report type `Dhis2`
+joined the build on 2026-10-26 (Ryan's decision, after the first check-only refused item 1, step
+3): `Dhis2.reportType-meta.xml` is the fresh retrieve of 2026-10-26 plus the one column
+`DHIS2__c$Attendance_submitted_electronically__c` (not checked by default), which item 1 needs.
 
 - Every report: `Year__c equals <year>` becomes `Period__c equals LAST_N_MONTHS:12`; the standard
   date filter's column becomes `Period__c` (All Time) in place of `CreatedDate`; two filter lines
@@ -84,7 +88,9 @@ All with the VPN off, through the `sf` CLI login `glow`, in the interactive sess
    the retrieve in `before/`.
 3. Check-only: `sf project deploy start --dry-run -o glow -d force-app` within
    `data/sf_dash_attendance_2026-10-24/build/`, on Ryan's go (a check-only is a write in this
-   epic), after the copies read back in Decommissioned.
+   epic), after the copies read back in Decommissioned. On 2026-10-26 the first check-only was
+   refused because the report type `Dhis2` lacked item 1's column; the column was added to
+   `build/` (Build, above) and the check-only run again.
 4. On Ryan's go, deploy: `sf project deploy start -o glow -d force-app` within `build/`, its id
    recorded in the Result.
 5. Read back: retrieve the dashboard and the three reports into
@@ -123,6 +129,11 @@ All with the VPN off, through the `sf` CLI login `glow`, in the interactive sess
   only while a fresh retrieve of them equals `after/` (nothing has changed them since this
   change's deploy), never from an older build or retrieve (DECISIONS 2026-10-16), on Ryan's go
   after a check-only.
+- The column `Attendance_submitted_electronically__c` added to the report type `Dhis2` is
+  additive and harmless, so it may stay. To take it out as well, after the reports are back,
+  check-only and deploy `data/sf_dash_attendance_2026-10-24/fresh_2026-10-26/`'s
+  `Dhis2.reportType-meta.xml` (the report type as it was before the deploy) on Ryan's go: the
+  item 1 report in `before/` does not use the column.
 - A Salesforce user restores a report from its copy in Decommissioned (step 2, tagged `#75`):
   open the copy, then Save As or move it into "GLOW Monthly Reports" (RUNBOOK, the archive rule).
 - Nothing is deleted: the copies stay in Decommissioned.
@@ -135,6 +146,34 @@ All with the VPN off, through the `sf` CLI login `glow`, in the interactive sess
   user since his hand move; both left as they are in the build.
 - 2026-10-24: the dry runs of the 4 copies (4 lines, nothing written) and of the moves (refused,
   as expected); the build made and the SOQL numbers of step 6 counted.
-- The live steps 2 to 8 have not run yet. The Result will record the copies' ids and ledger rows,
-  the check-only's and the deploy's ids, the `after/` compare, the step 6 numbers as the
-  dashboard shows them, and the moves.
+- 2026-10-25 07:45-07:47 UTC, step 2 on Ryan's go (his answer on #75, 2026-10-25): the 4 copies
+  into Decommissioned, tagged `#75`, 4 ledger rows `ok`: item 1 `00ORP000009kMtB2AU`, item 2
+  `00ORP000009kMun2AE`, item 3 `00ORP000009kMwP2AU`, item 4 `00ORP000009kMy12AE`.
+- 2026-10-26, before the check-only: a fresh retrieve of D1 and the reports of items 1, 3 and 4
+  into `data/sf_dash_attendance_2026-10-24/fresh_2026-10-26/` is byte-equal to `before/`; the
+  report type `Dhis2` is unchanged since 2026-10-24.
+- 2026-10-26, step 3: the first check-only (`0AfRP000002i7EL0AY`) failed: item 1's column
+  `DHIS2__c$Attendance_submitted_electronically__c` is not in the report type `Dhis2`. Ryan,
+  2026-10-26: add the column in the same deploy. `build/` then also held
+  `Dhis2.reportType-meta.xml`, the fresh retrieve plus that one column (not checked by default);
+  its rollback is `fresh_2026-10-26/`'s file (Rollback). The second check-only
+  (`0AfRP000002i7Fx0AI`) passed, 5/5 components.
+- 2026-10-26, step 4, on Ryan's go: deploy `0AfRP000002i7HZ0AY`, 5/5 components, Succeeded.
+- 2026-10-26, step 5: `after/` equals `build/`, apart from CR line endings in one formula of
+  item 4.
+- 2026-10-26, step 6: D1 refreshed 03:01 UTC, 3/3 components with data. The reports against SOQL
+  for September 2026 (`evidence/soql_check_2026-10-26.txt`), every number equal to the expected
+  one in step 6: item 1 = 21; item 3 = 4,861 over 42 Monthly Reports; item 4 = 4,861 over 36,
+  weeks 2,428, 1,676, 1,492, 1,314 and 518; "Mahila Margadarshi" = 1 record, 220, weeks 60, 61,
+  60, 25 and 0, ticked 1; the manager `005RP000000qlipYAA`: 12 partners over the 12 months, and
+  for September 2026 9 partners, 1,300 and 7 ticked (SOQL). The 2 Monthly Reports of test
+  accounts in the window are absent from the reports' totals.
+- 2026-10-26 03:03-03:04 UTC, step 7 on Ryan's go: the 5 reports (item 2's and the four held for
+  D1) moved to Decommissioned, `--limit 1` first, then the rest; 6 ledger rows, the second a
+  Decommissioned-to-Decommissioned row for item 2's report (the full run moving `--limit 1`'s
+  report again, which changed nothing; the undo, last first, still ends with it in its old
+  folder). The only component that uses any of the 5 is on a dashboard in Decommissioned; all 5
+  read back in Decommissioned.
+- Step 8: no dashboard subscription on D1 (Ryan, 2026-10-25).
+- Not verified: the Partner Manager filter view itself was not opened in the dashboard; the
+  manager's numbers were checked by SOQL only.
