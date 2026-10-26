@@ -4051,8 +4051,9 @@ Questions for GLOW:
 
 The dashboard "Reporting" (`01ZRP000006oxSr2AI`, D5 in `glow/sf_keep_list.csv`, in "GLOW Monthly
 Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18. Item 19 is the table, on no
-dashboard. Ticket #79, [plan](plans/2026-10-24-sf-dash-reporting.md). Status: built 2026-10-24 in
-`data/sf_dash_reporting_2026-10-24/build/` from the retrieve `before/`, waiting for Ryan's go.
+dashboard. Ticket #79, [plan](plans/2026-10-24-sf-dash-reporting.md). Status: deployed 2026-10-26
+(`0AfRP000002i7330AA`) from `data/sf_dash_reporting_2026-10-24/build/`, read back into `after/`
+and checked against SOQL (the plan's Result).
 
 What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
 - Item 17, GLOW's "Report approved by PO", is the report "Approved Approvals monthly report"

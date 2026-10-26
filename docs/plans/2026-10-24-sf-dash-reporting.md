@@ -1,7 +1,7 @@
 ---
 title: GLOW Club Reporting (the dashboard "Reporting", items 17 and 18) and the GLOW of the Month table (item 19) by Partner and Month
 author: Claude (ticket #79, with Ryan's decisions of 2026-10-23, 2026-10-24 and 2026-10-25)
-status: accepted   # ticket #79; built and dry-run 2026-10-24, Ryan's go 2026-10-25, Rollout in an interactive session
+status: done   # ticket #79; built 2026-10-24, Ryan's go 2026-10-25, deployed 2026-10-26 and checked against SOQL
 created: 2026-10-24
 intent: Ryan, 2026-10-21 - "This data should be displayed by the Partner and Month."
 ---
@@ -121,7 +121,39 @@ On Ryan's go, VPN off, in the main session (never a subagent), with `--vpn-off` 
 
 ## Result
 
-Pending Ryan's go. The baseline, 2026-10-24, before the change (September 2026, `Period__c =
+Done 2026-10-26, on Ryan's go of 2026-10-25 in the interactive session, VPN off
+(`evidence/rollout_2026-10-26.txt`, counts only):
+- Step 1: the fresh retrieve of 2026-10-25 (`data/sf_dash_reporting_2026-10-25/before/`, 8
+  components) equals `data/sf_dash_reporting_2026-10-24/before/`: no difference, `build/` stands.
+- Step 2: the three copies in Decommissioned, read back, ledger rows `ok` dated 2026-10-25, before
+  the deploy: item 17 as `00ORP000009kP7t2AE`, item 18 as `00ORP000009kPHZ2A2`, item 19 as
+  `00ORP000009kPJB2A2`.
+- Steps 3 and 4: the check-only `0AfRP000002i6N70AI` (2026-10-25) and the deploy
+  `0AfRP000002i7330AA` (2026-10-26) both succeeded, 4/4 components. A first deploy call, on
+  2026-10-25, was cut off when the session ended and never reached the org: the four components'
+  `LastModifiedDate` was still 2026-10-24.
+- Step 5: `after/` equals `build/` exactly (`diff -r` empty, 4 files).
+- Step 6: the refresh needs a body (`-X PUT -b '{}'`, as in RUNBOOK "Attendance dashboard in
+  Salesforce"); without it nothing refreshed. Refreshed 2026-10-26 02:44 UTC. For September
+  2026, each component equals SOQL on `DHIS2__c`:
+  - Item 17: 16 approved from 16 partners (SOQL 16); 437 in the last 12 months (SOQL 437).
+  - Item 18: 42 filed from 42 partners (SOQL 42); 567 in the last 12 months (SOQL 567).
+  - One partner, Development Consortium: 1 in item 17 and 1 in item 18 (SOQL 1 and 1).
+  - Item 19, now tabular with the columns Partner and Period: 42 rows for September (SOQL 42) and
+    567 in the window (SOQL 567).
+- Step 7: the test-record rule leaves out 2 Monthly Reports of the window (SOQL). No component
+  has a blank-Account group or a partner whose name contains "test"; item 18 has 58 partners, as
+  SOQL gives for the window.
+- The Partner Manager filter, the only filter, offers 7 managers. A refresh filtered to one
+  manager through the Analytics API (`PUT` with `{"filters":[<option id>]}`) returned a status
+  URL, but the filtered results stayed empty through the API, so one manager's view is not proven
+  here: Ryan checks it in Lightning.
+- Step 8: "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), on no dashboard after the
+  deploy, moved to Decommissioned 2026-10-26, read back, `ok` in this change's own ledger.
+- Still to do by Ryan: the daily refresh (a Subscribe on the dashboard, Outline step 6) and the
+  one-click check of the Partner Manager filter.
+
+The baseline, 2026-10-24, before the change (September 2026, `Period__c =
 LAST_MONTH`, with the test-record rule; `evidence/soql_2026-10-24_baseline.txt`):
 - Item 17: 16 Monthly Reports approved (437 in the last 12 months).
 - Item 18: 42 Monthly Reports filed, from 42 partners (567 in the last 12 months).
