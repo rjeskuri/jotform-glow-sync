@@ -5679,6 +5679,11 @@ class NewMentorsDocs(unittest.TestCase):
     # a query's period on Period__c, and one that gives month by month (grouped by the month, or one month)
     Q_PERIOD = re.compile(r"(?i)\bPeriod__c\s*(=\s*(LAST_N_MONTHS:\d+|LAST_MONTH|\d{4}-\d\d-\d\d)\b|"
                           r"(>=|<=|>|<)\s*\d{4}-\d\d-\d\d\b)")
+    # fix round (PR #155 review): the six months' check groups by the month and covers exactly six complete months
+    BY_MONTH_GROUP = re.compile(r"(?i)\bGROUP\s+BY\s+[^`;]*?(CALENDAR_MONTH\(\s*Period__c\s*\)|\bPeriod__c\b)")
+    N_MONTHS = re.compile(r"(?i)\bPeriod__c\s*=\s*LAST_N_MONTHS:(\d+)\b")
+    BOUND = re.compile(r"(?i)\bPeriod__c\s*(>=|<=|>|<|=)\s*(\d{4})-(\d\d)-(\d\d)\b")
+    OTHER_LITERAL = re.compile(r"(?i)\bPeriod__c\s*=\s*(?!LAST_N_MONTHS:)[A-Z_]+(:\d+)?\b")
     BY_MONTH_Q = re.compile(r"(?i)\bGROUP\s+BY\s+[^`;]*?(CALENDAR_MONTH\(\s*Period__c\s*\)|\bPeriod__c\b)|"
                             r"\bPeriod__c\s*=\s*(LAST_MONTH|\d{4}-\d\d-\d\d)\b|\bPeriod__c\s*>=?\s*\d{4}-\d\d-\d\d\b")
     # what the measure counts, as a consequence: partners or partner-months, not mentors
@@ -5817,6 +5822,32 @@ class NewMentorsDocs(unittest.TestCase):
 
     def queries(self, text):
         return [m.group(0) for m in self.t.QUERY.finditer(flat(text))]
+
+    def six_complete_months(self, q, today=None):
+        """Query `q`'s period on `Period__c` (the first day of the report's month) is exactly the last six complete
+        months: `Period__c = LAST_N_MONTHS:6` (which leaves out the current month) and no other window, or a closed
+        date range (a lower and an upper bound) that six whole months satisfy, the last before the current month."""
+        import datetime
+        today = today or datetime.date.today()
+        relative = self.N_MONTHS.findall(q)
+        bounds = [(op, datetime.date(int(y), int(mo), int(d))) for op, y, mo, d in self.BOUND.findall(q)]
+        if self.OTHER_LITERAL.search(q):
+            return False                                    # LAST_MONTH, THIS_YEAR, …: not six months
+        if relative:
+            return set(relative) == {"6"} and not bounds
+        if any(op == "=" for op, _ in bounds) or not any(op in (">", ">=") for op, _ in bounds) \
+                or not any(op in ("<", "<=") for op, _ in bounds):
+            return False                                    # a closed range: both bounds
+        tests = {">=": lambda a, b: a >= b, ">": lambda a, b: a > b, "<=": lambda a, b: a <= b, "<": lambda a, b: a < b}
+        lo = min(d for _, d in bounds)
+        months, y, m = [], lo.year, lo.month
+        hi = max(d for _, d in bounds)
+        while (y, m) <= (hi.year, hi.month):
+            first = datetime.date(y, m, 1)
+            if all(tests[op](first, d) for op, d in bounds):
+                months.append(first)
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        return len(months) == 6 and months[-1] < datetime.date(today.year, today.month, 1)
 
     def assertOnlyDenied(self, text, rx, where, what):
         """Every clause of `text` naming `rx` denies or rejects it."""
@@ -5996,11 +6027,13 @@ class NewMentorsDocs(unittest.TestCase):
                         f"{where}: check one partner's figures equal SOQL (one sentence naming one partner and that "
                         "they equal)")
         qs = self.queries(raw)
-        self.assertTrue([q for q in qs if self.item_query(q, self.Q_PERIOD) and self.BY_MONTH_Q.search(q)],
-                        f"{where}: give the six months' query, month by month: item 12's (`SELECT "
-                        f"CALENDAR_MONTH(Period__c), {self.FIELD}, COUNT(Id) … GROUP BY CALENDAR_MONTH(Period__c), "
-                        f"{self.FIELD}`, or one month's `Period__c = <date>`), with a period on `Period__c` "
-                        f"(`LAST_N_MONTHS:6`, a date range), the test-record rule, `{self.FIELD} != null`, no OR")
+        self.assertTrue([q for q in qs if self.item_query(q, self.Q_PERIOD) and self.BY_MONTH_GROUP.search(q)
+                         and self.six_complete_months(q) and not self.PARTNER_Q.search(q)],
+                        f"{where}: give the six months' query, for all partners (not the one-partner query), month by "
+                        f"month, over exactly the last six complete months: item 12's (`SELECT Period__c, {self.FIELD}, COUNT(Id) … GROUP BY Period__c, "
+                        f"{self.FIELD}`, or by `CALENDAR_MONTH(Period__c)`) with `Period__c = LAST_N_MONTHS:6`, or a "
+                        "closed range of six whole months ending before the current month (`Period__c >= 2026-04-01 "
+                        f"AND Period__c < 2026-10-01`), the test-record rule, `{self.FIELD} != null`, no OR")
         self.assertTrue([q for q in qs if self.item_query(q, self.Q_PERIOD) and self.PARTNER_Q.search(q)],
                         f"{where}: give the one-partner query: item 12's query, with a period on `Period__c`, and `AND "
                         "Account__r.Name = '<partner>'`")
@@ -6090,6 +6123,37 @@ class NewMentorsDocs(unittest.TestCase):
         self.t.assertBeforeGuarded(raw, where)
         self.t.assertNotSoft(raw, where)
         self.d.assertNoContradiction(raw, where, rollback=True)
+
+    def test_the_six_months_check_takes_exactly_six_complete_months(self):
+        """The guard behind the plan's six months' query (PR #155 review), on a fixed day, 2026-10-26: Period__c is
+        the first of the report's month, so April-September 2026 are the six complete months."""
+        import datetime
+        today = datetime.date(2026, 10, 26)
+        base = ("SELECT Period__c, {f}, COUNT(Id) FROM DHIS2__c WHERE {w} AND Account__c != null AND (NOT "
+                "Account__r.Name LIKE '%test%') AND {f} != null GROUP BY Period__c, {f}")
+        cases = [
+            ("Period__c = LAST_N_MONTHS:6", True),
+            ("Period__c >= 2026-04-01 AND Period__c < 2026-10-01", True),
+            ("Period__c >= 2026-04-01 AND Period__c <= 2026-09-30", True),
+            ("Period__c > 2026-03-31 AND Period__c <= 2026-09-01", True),
+            ("Period__c >= 2026-03-01 AND Period__c < 2026-09-01", True),        # six whole months, all complete
+            ("Period__c = LAST_N_MONTHS:12", False),                            # twelve
+            ("Period__c = LAST_N_MONTHS:5", False),
+            ("Period__c = LAST_N_MONTHS:6 AND Period__c = LAST_N_MONTHS:12", False),
+            ("Period__c >= 2026-04-01", False),                                 # open: takes in October, partial
+            ("Period__c <= 2026-09-30", False),                                 # open below
+            ("Period__c >= 2026-05-01 AND Period__c < 2026-11-01", False),      # ends in the current month
+            ("Period__c >= 2026-05-01 AND Period__c <= 2026-10-01", False),     # the same, inclusive
+            ("Period__c >= 2026-04-01 AND Period__c < 2026-09-01", False),      # five months
+            ("Period__c >= 2026-04-02 AND Period__c < 2026-10-01", False),      # April's first day left out: five
+            ("Period__c >= 2026-03-01 AND Period__c < 2026-10-01", False),      # seven
+            ("Period__c = LAST_MONTH", False),
+            ("Period__c = 2026-09-01", False),
+        ]
+        for window, want in cases:
+            q = base.format(f=self.FIELD, w=window)
+            self.assertEqual(self.six_complete_months(q, today), want, f"six complete months on 2026-10-26: "
+                                                                       f"{window!r} should be {want}")
 
     # --- DECISIONS --------------------------------------------------------------------------------------------
 
