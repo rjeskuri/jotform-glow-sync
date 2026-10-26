@@ -1220,8 +1220,10 @@ all is unverified until then; `none` on every form on 2026-10-06). A form with t
 notes mapped (ticket #106) reads `ok (one action, 9 fields, Account_Name__c from q5,
 Session_Notes__c from q<N>, no upload)`, q<N> being that form's own question named
 `sessionNotes` (found by its name: the qid differs per form); a notes mapping from any other
-question is `NOT RIGHT`. A form without it is right until `NOTES_MAPPING_WANTED` in the tool
-goes True, once all five live forms are mapped.
+question is `NOT RIGHT`. Until step 1 below the template stays `NOT RIGHT` on its upload row
+(exit 1) whatever its notes: only a `Session_Notes__c` line there is the notes' concern. A form
+without it is right until `NOTES_MAPPING_WANTED` in the tool goes True, once all five live
+forms are mapped.
 
 *Setting it up (Ryan, in the builder; the API cannot; template first). Every builder save is a
 live write to a form, so each one follows the ritual: a quiet moment with no other rollout on
@@ -1239,7 +1241,8 @@ plain `diff` of the snapshot before and the one after.*
    → the only hunks are inside `integrations` (the upload row gone); `emails`, `conditions`,
    `clearFieldOnHide` byte-identical; `python3 backup_forms.py` again for the other four and
    the same diff on each → empty. Then `python3 tools/integration_status.py` → every live form
-   `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
+   `ok (one action, 8 fields, Account_Name__c from q5, no upload)` (9 fields, with
+   `Session_Notes__c from q<N>`, once a form's notes are mapped), `integration: ok`. Until
    this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
    Settings → Integrations → Google Drive → Authorize → log in as Ryan's company account (the
