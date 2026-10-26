@@ -2411,7 +2411,7 @@ wording; forms built before 2026-09-28 get it once, from the menu
 - **When:** any change under `appsscript/`.
 - **Status:** the 2026-10-09 cleanup's changes (the Club Roster Form handlers' write order, the rebuild's YES/NO, the dropdown update under the lock, the consolidations) are in the repository, not deployed: they wait for Ryan's push. No new Google service, so no re-authorization is expected ([Result](plans/2026-10-09-repo-cleanup.md#result)).
 - **Dry run:** `make gs` (and `make check`).
-- **Apply:** Ryan picks the quiet moment before anyone runs the push; then `nvm use 18` and `npm run clasp:push`. With everything under `appsscript/` committed, the push goes through automatically, logged and notified; anything uncommitted there and the gate asks, refused where no prompt can show. Ryan can run it himself, or with Claude through the user-only `/deploy-appsscript` skill.
+- **Apply:** Ryan picks the quiet moment before anyone runs the push; then `nvm use 18` and `npm run clasp:push`, run in the checkout (not in `appsscript/`: "Live gate (Claude Code)"). With everything under `appsscript/` committed, the push goes through automatically, logged and notified; anything uncommitted there and the gate asks, refused where no prompt can show. Ryan can run it himself, or with Claude through the user-only `/deploy-appsscript` skill.
 - **Verify:** a new Google service: authorize at once, then "Process any missed form responses" and read its preview.
 - **Rollback:** a push of the previously deployed `appsscript/` ("Rolling back `appsscript/`", below).
 
@@ -4306,11 +4306,20 @@ The backups, from today (the Mac's local date), and the command that makes each:
   `backups/github/switches-<stamp>.json`).
 - Apps Script - `clasp push`: no record; `appsscript/` is tracked with nothing
   changed or untracked under it, so the version before the push is in git.
-  Commit first.
+  Commit first. clasp pushes the project of the folder it runs in, so the push
+  runs from the Bash tool's working folder that holds it: `npx clasp push` or
+  `clasp push` in `appsscript/`, `npm run clasp:push` in the checkout, bare or
+  with `-f`/`--force`. From another folder (`drive-sync/`, another checkout),
+  or with `-P`, `--project`, `--rootDir` or another flag, it asks.
 - Salesforce, raw - `sf`/`sfdx` deploys, data writes, `apex run`, `sf api
   request` writes, `.salesforce.com/services/`: no record; the command names a
   path inside `data/sf_<topic>/` and `data/sf_<topic>/before/` holds a file
-  modified today (the plan's `before/` retrieve).
+  modified today (the plan's `before/` retrieve). `apex run` also needs
+  `--file` (`-f`) naming a file the hook reads: a regular file inside the
+  checkout, no link. An Apex file holding a word that starts `delete`,
+  `undelete`, `merge` or `emptyRecycleBin`, and a deploy naming a folder with a
+  `destructiveChanges*.xml` below it, are deletes: they ask, and are refused
+  where no prompt can show.
 - Salesforce tools - `sf_backfill.py send`, `sf_dupes.py merge --rehearse`,
   `sf_girls_present.py set`, `sf_partner_monthly.py` and `sf_report_folders.py
   copy|move|undo` write their own rollback record (a `ledger.csv` row,
@@ -4318,7 +4327,9 @@ The backups, from today (the Mac's local date), and the command that makes each:
   `sf_dupes.py`'s `--apply` asks: a merge deletes the losing record.
 
 Never automatic: `gh api` or `api.github.com` on `dispatches` or `graphql`;
-`auto_sync.py --apply-salesforce` (Salesforce accounts, no rollback record); any
+`auto_sync.py --apply-salesforce` (Salesforce accounts, no rollback record); a
+metadata (mdapi) deploy (`--metadata-dir`, `force:mdapi:deploy`) and
+`force:apex:execute`, whose changes the hook does not read; any
 tool the hook does not list (the Drive photo mover, `upload_roster.py`,
 `deactivate_clubs.py`, `fix_module_values.py`, `sf_new_clubs.py`).
 
@@ -4342,11 +4353,16 @@ a command that sets `GLOW_LIVE_OK`, writes a file the next launch takes its
 environment from (`~/.zshrc` and the other shell startup files, `.envrc`, `.env`:
 a redirect, `tee`, `sed -i`, `perl -i`), or `launchctl setenv`; and a forged
 backup - `.claude/live_backups.log` written, copied, moved, linked, touched or
-truncated by hand (any spelling of its path), its writer `glow/live_backups.py`
-imported or called by hand, or a Salesforce plan's `before/` made by hand
-(`touch` under it, `cp`/`mv`/`rsync`/`ditto`/`ln`/`install` onto it, a redirect
-or `tee` into it). Reading them, copying from a `before/` and the retrieve into
-one pass.
+truncated by hand (any spelling of its path; a redirect whose target is the
+records, or one the hook cannot read: a variable, a substitution, a glob), its
+writer `glow/live_backups.py` imported or called by hand, or a Salesforce plan's
+`before/` made by hand (`touch` under it, `cp`/`mv`/`rsync`/`ditto`/`ln`/`install`
+onto it, a redirect or `tee` into it from anything but a query). The refusal
+says what to run instead. Reading the records (their output or errors redirected
+elsewhere, such as into a file under `data/`), copying from a `before/`, and a query,
+an export or a retrieve saved into one, each alone (`sf data query … >
+data/sf_<topic>/before/<file>`, `sf data export … --output-dir`, `sf project
+retrieve start … --target-dir`), pass.
 
 Where no prompt can show - a subagent (an `agent_id` in the hook's input), or a
 permission mode other than `default`, `acceptEdits`, `auto` or `plan`
@@ -4365,7 +4381,10 @@ prompt was shown only in an interactive session: a headless run's ask is logged
 `.claude/settings.json` backs the hook with `ask` rules on the deletes only (`sf
 data delete`, `sf project delete source`, `gh variable|secret delete|remove`):
 a hook's `allow` does not get past an `ask` rule, so the families with an
-automatic go have none. It also has `onFailure: block`, so a hook that fails
+automatic go have none. In `dontAsk` only allow-listed commands run, so the
+backups a headless run takes have `allow` rules: `backup_forms.py`, `sheets_client.py
+export` and `export-all`, `github_switches.py backup` and `sf project retrieve
+start`. It also has `onFailure: block`, so a hook that fails
 stops the command. `Bash(gh api:*)` is in `allow` (the harness reads with it):
 any other `gh api` call runs without a prompt, while the hook still decides on
 `actions/`, `dispatches` and `graphql`. The auto-mode classifier is Claude Code's

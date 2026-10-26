@@ -30,7 +30,8 @@ e-mail and the GLOW menu: a bad push stops them. Detail lives in RUNBOOK "Apps S
 5. **A quiet moment.** Ask Ryan: no other rollout running (a sync apply, a Salesforce deploy), no
    Club Roster Form response or problem report expected in the next minutes.
 6. **Push.** Ryan's word on step 5 comes before running it. `nvm use 18` (the script refuses any
-   other Node; clasp 2.4.2), then `npm run clasp:push`, by Ryan or Claude. With step 4's checkout
+   other Node; clasp 2.4.2), then `npm run clasp:push` in the checkout's root (the gate checks the
+   folder it runs in), by Ryan or Claude. With step 4's checkout
    committed, the push goes through automatically, logged and notified; anything uncommitted under
    `appsscript/` and the gate asks (refused where no prompt can show).
 7. **Authorize.** Ryan opens the sheet and runs a GLOW menu item (Show roster summary); if Google
