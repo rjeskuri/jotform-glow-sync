@@ -1027,7 +1027,8 @@ by a test to the table in "The forms"):
 
 The Club Roster Form link sits above the problem link, so a mentor with a
 roster change meets it first. Place it only after the session-notes field
-(task #105; "Session notes on the attendance forms"): the notes go on first,
+(on all five forms since 2026-10-26, task #105; "Session notes on the
+attendance forms"): the notes go on first,
 because placing this link leaves Submit sharing an order with the hidden field
 below it, and `add_session_notes.py` then refuses on the tie. Adding,
 re-checking or removing one:
@@ -1101,10 +1102,10 @@ what `--undo` can still restore: [plan](plans/2026-09-29-rosters-above-submit.md
 ## Session notes on the attendance forms
 
 - **When:** placing, re-checking or removing the optional session-notes field; `form_status` says `session notes: absent` once the field is expected, or flags one (`!!` lines naming `sessionNotes`).
-- **Status:** on no form yet: the rollout is planned ([plan](plans/2026-10-25-session-notes.md), status proposed; ticket #105), the template first, then Africa, Asia, Latin America and U.S, each on Ryan's go. The label's translations are in the files; `glow/layout.py` `NOTES_EXPECTED` is `True` from #105's land on, which comes after the rollout (a form without the field is then NOT CLEAN). The limit property (`entryLimit` `Letters-1000`) is checked first, read-only, on the template's hidden `contact_ids` textarea in the questions snapshot the backup takes, before the template write; then by that write's re-read.
+- **Status:** live on all five forms since 2026-10-26, the label translated in every language each form offers ([plan](plans/2026-10-25-session-notes.md), status done; ticket #105, on Ryan's go): the template q489, Africa q476, Asia q457, Latin America q454 and the disabled U.S q446, each CLEAN. `glow/layout.py` `NOTES_EXPECTED` is `True` from #105's land on (a form without the field is then NOT CLEAN); the runner's first run after the land is still to be read for in-sync (plan, Result). The limit is `entryLimit` `Letters-1000`, verified by the template write's re-read. Neither e-mail shows the notes yet: ticket #148 adds them to both (below).
 - **Dry run:** `python3 tools/add_session_notes.py --form <id>`, then `python3 tools/add_translations.py --form <id>`.
 - **Apply:** per form, after `python3 backup_forms.py --form <id>`: `python3 tools/add_session_notes.py --form <id> --apply`, then its translations with `python3 tools/add_translations.py --form <id> --apply` (GET, merge, POST; the store saved first), the template first.
-- **Verify:** the tool's re-read after the write; `python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv --partners data/partners_<date>.csv --rendered` (`session notes: present`, `layout:`, CLEAN); once all five carry it, `python3 tools/add_translations.py --audit` (the label untranslated nowhere).
+- **Verify:** the tool's re-read after the write; `python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv --partners data/partners_<date>.csv --rendered` (`session notes: present`, `layout:`, CLEAN); once all five carry it, `python3 tools/add_translations.py --audit` (the label untranslated nowhere; the audit truncates its lists, so the 2026-10-26 rollout's proof was a direct read of each form's store, plan Result).
 - **Rollback:** `python3 tools/add_session_notes.py --form <id> --remove --apply`, the questions snapshot, or Revision History. A language a translations POST damaged (`MISMATCH after write`) comes back from the translation store that POST saved first: `python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json` (a dry run: per language how many keys differ, are added, are removed), then the same command with `--apply` on Ryan's go (the current store saved first, each differing language posted whole, re-read: RESTORED or MISMATCH; [plan](plans/2026-10-25-session-notes.md), Rollback).
 
 One textarea named `sessionNotes` on every attendance form, found by its name
@@ -1118,16 +1119,14 @@ goes above it (the field is the first element of the fence `glow/layout.py`
 guards, like the links and Submit; test-pinned). Mentors' notes are free text
 that can name girls: no tool prints a submission's notes, counts only.
 
-The e-mails (ticket #105; [plan](plans/2026-10-25-session-notes.md), Context) are not decided
-yet. Mentors' notes can name girls, so Ryan decides per e-mail at the rollout's template step,
-and this paragraph is rewritten to his choices then. Proposed: the staff notification e-mail
-("Notification 1", to GLOW's fixed staff address) carries the notes. Jotform rebuilds a default
-e-mail body when questions change, and the 2026-09-29 Notification 1 was custom HTML, so the
-rollout reads each form's e-mails in the builder (Settings, Emails), what Notification 1 lists
-today included; if Ryan keeps the proposal, he adds the field to that body where it lacks it.
-The mentor's confirmation (the autoresponder, to the address she typed) is read the same way
-and Ryan decides at the template step whether it shows the notes. These settings cannot be read
-offline: until the rollout's Result records them, what each form's e-mails hold is unverified.
+The e-mails (ticket #105; [plan](plans/2026-10-25-session-notes.md), Result). Mentors' notes
+can name girls, so Ryan decided per e-mail, on 2026-10-26: the notes go in both. The staff
+notification e-mail ("Notification 1", to GLOW's fixed staff address) carries them, and so does
+the mentor's confirmation (the autoresponder, to the address she typed). Both are custom bodies
+that list fixed fields (read in the template's builder, Settings, Emails, 2026-10-26), and
+Jotform rebuilds only a default body when questions change, so today neither shows the notes:
+they are in Jotform's submissions only. Ticket #148, Ryan's by hand in the builder after #105
+lands, adds `{sessionNotes}` to both bodies on each of the five forms (ten bodies).
 
 The label is translated in every form language (`tools/translations_additions.json`, and the
 Odia, Hindi and Persian files; written by us, not native-reviewed): per form, the translations
@@ -1146,14 +1145,15 @@ python3 tools/add_session_notes.py --form <id> --remove --apply        # take it
 
 The tool plans all five forms before it writes any. The field goes at an
 empty order between the last roster and the first link, where nothing moves
-whether Jotform inserts or ties. The live forms have none today (the
-2026-09-30 repair put the links, Submit and the hidden bridge fields at the
-orders right after the last roster, and every roster inserted since kept them
-there), so the tool first makes room the way `add_feedback_link.py` does
-(Ryan, 2026-10-23): the first link through Submit and the hidden fields at the
-orders right after move one down, bottom-up so each lands on an empty order
-(the path Jotform keeps exactly), then one create at the freed order - about
-ten writes per form, each printed as `move <name> (qN) a -> b`. So the
+whether Jotform inserts or ties. The live forms had none before the
+2026-10-26 rollout (the 2026-09-30 repair put the links, Submit and the hidden
+bridge fields at the orders right after the last roster, and every roster
+inserted since kept them there), so the tool first made room the way
+`add_feedback_link.py` does (Ryan, 2026-10-23): the first link through Submit
+and the hidden fields at the orders right after move one down, bottom-up so
+each lands on an empty order (the path Jotform keeps exactly), then one create
+at the freed order - ten writes per form (9 moves and the create), each
+printed as `move <name> (qN) a -> b`. So the
 sequence matters: **the session notes go on before the Club Roster Form link**
 (`add_feedback_link.py --link roster`, BACKLOG 46; "Links above Submit"), whose
 placing leaves Submit sharing an order with the hidden field below it. After

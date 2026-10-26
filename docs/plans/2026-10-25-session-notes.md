@@ -1,7 +1,8 @@
 ---
 title: The optional session-notes field and its translations on all five attendance forms
 author: Claude (ticket #105, with Ryan's answers on #104)
-status: proposed         # ticket #105; the offline part is on its branch, the live rollout waits for Ryan's go
+status: done             # ticket #105; live on all five forms 2026-10-26 (Result); the e-mails are ticket #148
+done: 2026-10-26
 created: 2026-10-25
 intent: Ryan, 2026-10-22 - "the optional free-text field on the live attendance forms", translated into every form language (epic #93, item 3)
 ---
@@ -51,8 +52,9 @@ four regional forms.
   proposal and its custom body lacks the field, he adds the field to it in the builder. The
   mentor confirmation (autoresponder) goes to the address the mentor typed: it is read the same
   way and Ryan decides at the template step whether it shows the notes (proposed: leave it as
-  Jotform keeps it - the mentor's own words back to her). The RUNBOOK and DECISIONS say
-  "proposed" until then and are rewritten to his choices before the land.
+  Jotform keeps it - the mentor's own words back to her). Read and decided 2026-10-26 (Result):
+  both bodies are custom and neither lists the field; Ryan chose both e-mails, the field added
+  to both bodies on each form by hand as ticket #148. The RUNBOOK and DECISIONS say so.
 
 ## Rollout (live; each step on Ryan's go)
 
@@ -112,7 +114,8 @@ python3 tools/form_status.py --form 262352490535154 --roster data/roster_<date>.
   lists the field (or is a default body) and what else it lists - and Ryan decides whether it
   carries the notes (proposed: it does; then, if its body lacks the field, he adds it there).
   The mentor confirmation: read, and Ryan decides whether it shows the notes. Both decisions
-  are recorded in the Result and applied the same way on each regional form.
+  are recorded in the Result and applied the same way on each regional form. (As run: both
+  bodies custom, neither listing the field; Ryan chose both e-mails, by hand as ticket #148.)
 
 **Africa** (`262382821971058`):
 
@@ -258,9 +261,53 @@ python3 tools/add_session_notes.py
   in-sync in every region.
 
 ## Result
-Not yet run: the live rollout awaits Ryan's go in an interactive session. This branch wrote
-nothing live: the translations, `NOTES_EXPECTED = True`, this plan, the RUNBOOK and the
-DECISIONS entry. The forms' e-mail settings could not be read offline; they are read during the
-rollout, and Ryan's decisions on Notification 1 and the mentor confirmation (proposed: the
-notification carries the notes, the confirmation stays as Jotform keeps it) go here with the
-dates (UTC), Ryan's go and each form's CLEAN report, committed on the PR before the land.
+Done 2026-10-26: the field and its translations are live on all five forms. Run 03:15-03:30 UTC
+in Ryan's interactive session, from this branch at `c7d3f55`, on Ryan's go (given on the ticket
+2026-10-25; each live-gate prompt approved by him 2026-10-26). No Auto sync run was in progress
+(the last had run 2026-10-25 15:25 UTC).
+
+- Dry runs first, read in full: on every form the notes tool planned 9 moves and one
+  `ADD sessionNotes` after the last roster, above q443 and Submit; the translations tool had
+  nothing new for the label (no form showed it yet).
+- The limit's property: the `jq` read of the template's `contact_ids` in the backup's questions
+  snapshot printed `entryLimit None-0`, so the name is confirmed. The template write's re-read
+  then verified every `NOTES_PROPS` property, `entryLimit` `Letters-1000` among them.
+- Per form, in the Rollout's order (each backup's questions snapshot is stamped in the Mac's
+  local time, UTC+9):
+
+| Form | Questions snapshot | Notes qid | Re-read | Translations | `form_status.py --rendered` |
+|---|---|---|---|---|---|
+| template 262352490535154 | `questions-2026-10-26T121529` | q489 | verified | 11 new, stored | CLEAN, `session notes: present` |
+| Africa 262382821971058 | `questions-2026-10-26T122436` | q476 | verified | 11 new, stored | CLEAN, present |
+| Asia 262383129464057 | `questions-2026-10-26T122535` | q457 | verified | 13 new, stored | CLEAN, present |
+| Latin America 262383455778067 | `questions-2026-10-26T122707` | q454 | verified | 11 new, stored | CLEAN, present |
+| U.S 262382706852058 (disabled) | `questions-2026-10-26T122928` | q446 | verified | 11 new, applied (next bullet) | CLEAN from the API; the rendered page skipped (disabled) |
+
+- Each translations apply saved the form's whole store before its POST, in
+  `backups/translations/` (one `-before.json` per form, stamped 2026-10-26T12…), then merged,
+  posted and read back: `stored` on the template, Africa, Asia and Latin America.
+- U.S: the POST returned an HTML 504, but Jotform had applied it. Proven by the dry run again
+  (0 new) and by the store read back against the one saved before the POST: in every language
+  one key added, none differing, none removed.
+- After all five: the notes tool's dry run said `present (qN) - as wanted` five times, and a
+  direct read of each store found the label's key in `base`/`en` and translated in every
+  language of every form (11 of 11; Asia 13 of 13). `add_translations.py --audit` truncates
+  its lists, so it was not used as the proof. The field has no sub-label: nothing else to
+  translate.
+- Not done: the browser preview (the public page in English and one other language, typing
+  stopping at 1,000 characters). Ryan skipped it on 2026-10-26; the template write's re-read
+  (`re-read: verified`, `entryLimit` `Letters-1000`) and the rendered reports CLEAN on the four
+  enabled forms stand in for it.
+- The e-mails, read in the template's builder: both are custom bodies that list fixed fields
+  (`clubName`, `date`, `module_id`, `week_id`, `year_id`, `contact_ids` and others), and neither
+  has `{sessionNotes}`, so the notes are in neither e-mail yet. Ryan decided on 2026-10-26 that
+  they go in both, GLOW staff's Notification 1 and the mentor confirmation: he adds
+  `{sessionNotes}` to both bodies on each form (ten bodies) by hand in the builder, ticket #148,
+  after this branch lands. Pending #148.
+- Still to read: the runner's next scheduled run (cron 11:00 UTC daily), in-sync in every
+  region. None had run since the rollout when this was written (2026-10-26 05:20 UTC; the last
+  was 2026-10-25 15:25 UTC). The runner runs `main`, where `NOTES_EXPECTED` is `False` until
+  this branch lands: a run before the land shows the sync leaving the field alone, the first
+  run after it the regions in-sync with the field expected. As the Rollout says, the post-land
+  `auto_sync.py` dry run and that run go in a dated bullet here on the next ticket branch that
+  touches the docs; a region not in-sync is a ticket of its own.

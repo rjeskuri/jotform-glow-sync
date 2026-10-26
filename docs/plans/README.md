@@ -13,7 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
-| 2026-10-25 | The optional session-notes field and its translations on all five attendance forms | proposed |  | [2026-10-25-session-notes.md](2026-10-25-session-notes.md) |
+| 2026-10-25 | The optional session-notes field and its translations on all five attendance forms | done 2026-10-26 |  | [2026-10-25-session-notes.md](2026-10-25-session-notes.md) |
 | 2026-10-22 | Roster changes sent as problem reports point their sender to the Club Roster Form, and girls "not on the form" count as one | proposed |  | [2026-10-22-roster-change-reports-to-roster-form.md](2026-10-22-roster-change-reports-to-roster-form.md) |
 | 2026-10-21 | Inventory of the Monthly Report (DHIS2) reports, dashboards and interactive dashboard; the two hidden Decommissioned folders; the copy-and-move API proof | done 2026-10-23 |  | [2026-10-21-sf-reporting-inventory.md](2026-10-21-sf-reporting-inventory.md) |
 | 2026-10-21 | Duplicate and obsolete flags on Account and Contact, and Account duplicate rules that report only | in-progress |  | [2026-10-21-sf-duplicate-obsolete-flags.md](2026-10-21-sf-duplicate-obsolete-flags.md) |
