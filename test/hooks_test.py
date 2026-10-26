@@ -986,7 +986,9 @@ class GateSettings(unittest.TestCase):
         for rule in self.ASK_BEFORE:
             self.assertIn(rule, self.permissions["ask"])
         self.assertEqual(self.permissions["deny"], self.DENY_BEFORE)
-        self.assertEqual(sorted(self.settings["env"]), ["CLAUDE_VERIFY_CMD", "HARNESS_TEST_CMD", "HARNESS_WORKTREE_SETUP"])
+        self.assertEqual(sorted(self.settings["env"]),
+                         ["CLAUDE_VERIFY_CMD", "HARNESS_TEST_CMD", "HARNESS_ULTRAREVIEW", "HARNESS_WORKTREE_SETUP"])
+        self.assertEqual(self.settings["env"]["HARNESS_ULTRAREVIEW"], "off")   # no ultrareview: it bills usage credits (2026-10-26)
 
     def test_the_live_gate_still_runs_on_every_bash_command(self):
         pre = self.settings["hooks"]["PreToolUse"]
