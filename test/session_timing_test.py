@@ -17,6 +17,11 @@ go); its repo side is the same RUNBOOK section, checked by TimingReportsDocs: th
 DeveloperName, each with the SOQL check that reproduces it beside its name, and Ryan's answers of
 2026-10-24 on who is left out of the weekly not-submitting list and what "not submitting" means.
 
+Ticket #103 puts three of those reports on the "Jotform Attendance" dashboard (four components and
+the timing in its "How to read this dashboard" box; deployed on Ryan's go); its repo side is the
+RUNBOOK section "Attendance dashboard in Salesforce" and the plan's "Task #103" section, checked by
+DashboardTimingDocs. The build in `data/` is never committed and never read here.
+
 Live finding (2026-10-24, after the first deploy): Salesforce's DATEVALUE(<date/time>) converts in the
 org's time zone (America/Los_Angeles), not UTC, so `DATEVALUE(Submitted_At__c)` gave a delay one day
 short for every submission between 00:00 and about 07:00 UTC (153 of 1,123 batches). Ryan kept the UTC
@@ -1284,6 +1289,373 @@ class TimingReportsDocs(unittest.TestCase):
             self.assertNotRegex(stmt, self.THRESHOLD,
                                 f"{where}: the late report has no threshold (Ryan 2026-10-24), but its SOQL check compares "
                                 f"`Submission_Delay_Days__c` with a number: {stmt[:120]!r}")
+
+
+# Ticket #103: the three reports the new dashboard components read (`Submissions_by_Club_and_Week` stays
+# off the dashboard), the folder of the build (`data/sf_session_timing_2026-10-26/`: `dashboard_before/`
+# is the fresh retrieve, `after/` the read-back; never committed, so only what the docs say of it is
+# tested) and the dashboard's DeveloperName
+DASH_REPORTS = ("Clubs_Not_Submitting_Last_Week", "Late_Submissions_Last_Month", "Submission_Delay_by_Partner_by_Month")
+DASH_FOLDER = "sf_session_timing_2026-10-26"
+DASHBOARD = "Jotform_Attendance_test"
+# `--dry-run` said of a check-only or validation, or inside the deploy command itself
+CHECK_ONLY = re.compile(r"(?i)(?:check-only|\bvalidat\w*)[^.]{0,120}?--dry-run|--dry-run[^.]{0,120}?(?:check-only|\bvalidat\w*)|"
+                        r"sf project deploy start[^.(]{0,80}?--dry-run")
+RYANS_GO = near(r"\bRyan'?s?\b", r"\bgo\b", 40)
+# what the not-submitting list is called ("Clubs not submitting last week", "no batch dated last week") names it;
+# it denies nothing
+NOT_SUBMITTING = re.compile(r"(?i)\b(?:not|never|no)\s+(?=(?:\w+\s+){0,2}?(?:submit\w*|submission\w*|batch\w*)\b)")
+
+
+def names_unnegated(text):
+    """`text` with the not-submitting list's name taken out of the negation scan: "not submitting" reads
+    "non-submitting", "no batch" "non-batch"."""
+    return NOT_SUBMITTING.sub("non-", text)
+
+
+def top_items(part):
+    """The top-level list items of a Markdown part, each flattened with everything it holds: its indented
+    lines, nested lists, lazy continuations and the indented paragraphs after a blank line inside it. A
+    heading, an unindented paragraph after a blank line or the next top-level marker ends it."""
+    items, current, blank = [], None, False
+    for line in part.splitlines():
+        if LIST_ITEM.match(line):
+            current = [line[LIST_ITEM.match(line).end():]]
+            items.append(current)
+        elif line.startswith("#"):
+            current = None
+        elif not line.strip():
+            blank = True
+            continue
+        elif current is not None and (line[:1].isspace() or not blank):
+            current.append(line)
+        else:
+            current = None
+        blank = False
+    return [flat(" ".join(item)) for item in items]
+
+
+def md_sub(text, heading):
+    """The part of Markdown `text` under the first heading line that starts with `heading`, that line
+    included, to the next heading of its level or higher; None when there is no such heading."""
+    m = re.search(r"^" + re.escape(heading) + r"(?!\w).*$", text, re.M)
+    if not m:
+        return None
+    level = len(heading) - len(heading.lstrip("#"))
+    rest = text[m.start():]
+    nxt = re.search(r"\n#{1,%d} " % level, rest)
+    return rest[:nxt.start()] if nxt else rest
+
+
+class DashboardTimingDocs(unittest.TestCase):
+    """Ticket #103: four components on the "Jotform Attendance" dashboard (`Attendance/Jotform_Attendance_test`,
+    or a sibling dashboard "Attendance Submissions" if the check-only refuses the component count), deployed
+    on Ryan's go; the repo keeps docs/RUNBOOK.md "Attendance dashboard in Salesforce" (that section alone, to
+    the next `## `) and the plan's "## Task #103" section.
+
+    The section names each new component beside the report it reads: a metric of the clubs not submitting
+    last week and a table of them by partner (`Clubs_Not_Submitting_Last_Week`), a metric of last month's
+    submissions (`Late_Submissions_Last_Month`) and a bar chart of the average days from session to
+    submission by partner (`Submission_Delay_by_Partner_by_Month`); that each follows the dashboard's
+    Partner filter; and what the "How to read this dashboard" box says: last week is Sunday to Saturday
+    (`LAST_WEEK`), "submitted at" is the batch's `CreatedDate` (`Submitted_At__c`), the September back-fill
+    and the three partners' monthly batches have none, and there is no late threshold. No threshold
+    anywhere (Ryan 2026-10-22, DECISIONS 2026-10-23: "tasks #102 and #103 drop any threshold"; Ruling of
+    2026-10-26: the outline's "Late submissions last month (over N days)" becomes a threshold-free metric
+    headed so that nobody reads it as a count of late ones): no sentence about late submissions, the delay
+    or a metric states a number of days as a cut-off, and no metric is headed "Late ...".
+
+    Its Rollback for #103 redeploys only the dashboard, from `data/sf_session_timing_2026-10-26/dashboard_before/`,
+    check-only first and on Ryan's go, and only after a fresh retrieve equals the read-back (`after/`) -
+    a difference stops it, and the rollback is built from the fresh retrieve; never an older package
+    (DECISIONS 2026-10-16); #102's reports stay (the archive rule: nothing deleted), and a sibling
+    dashboard, when there is one, is retired with it. The plan's "## Task #103" carries Build, Rollout,
+    Rollback, Risks and Result; its Rollout's items run, in order, the fresh retrieve compared with
+    `dashboard_before/`, the check-only (`build/`, and `build_sibling/` on a component-count refusal),
+    Ryan's go, the deploy, the read-back into `after/` compared with the build, the refresh, and each
+    component against its report and its SOQL under All and under one partner. Meaning, not sentences:
+    tolerant matching on names and key words; a negated statement does not count."""
+
+    RUNBOOK = SubmissionTimingDocs.RUNBOOK
+    HEADING = "## Attendance dashboard in Salesforce"
+    # the components' kinds, and each component as (what, report, kind, [(what it must say, regex), ...]): the
+    # extras are words beyond the report's name (`\b` does not match inside `Clubs_Not_Submitting_Last_Week`)
+    METRIC = r"\bmetrics?\b|\btiles?\b"
+    TABLE = r"\b(?:flex ?)?tables?\b|FlexTable"
+    CHART = r"\bbar charts?\b|\bbars?\b|\bcharts?\b|HorizontalBar\w*"
+    COMPONENTS = (
+        ("the metric \"Clubs not submitting last week\"", "Clubs_Not_Submitting_Last_Week", METRIC,
+         (("that it counts the clubs not submitting", r"\bnot submitting\b|\bdid not submit\b|\bno submission\b|\bnot submitted\b|"
+                                                      r"\bwithout a (?:batch|submission)\b"),
+          ("last week", r"\blast week\b|\bLAST_WEEK\b"))),
+        ("the table of those clubs by partner", "Clubs_Not_Submitting_Last_Week", TABLE,
+         (("by partner", r"\bpartners?\b"),)),
+        ("the metric of last month's submissions", "Late_Submissions_Last_Month", METRIC,
+         (("the submissions it counts", r"\bsubmissions?\b|\bbatch(?:es)?\b"), ("last month", r"\blast month\b|\bLAST_MONTH\b"))),
+        ("the bar chart of the average days from session to submission, by partner", "Submission_Delay_by_Partner_by_Month",
+         CHART, (("the average", r"\baverage\b|\bAVG\b|\bmean\b"), ("by partner", r"\bpartners?\b"),
+                 ("the delay in days", r"\bdays?\b|\bdelay\b"))),
+    )
+    # the late metric counts every submission of last month, whatever its delay (affirmed), or says no threshold
+    ALL_SUBMISSIONS = (r"\b(?:every|all|each)\b[^.;]{0,40}\b(?:submissions?|batch(?:es)?|forms?)\b|\bwhatever (?:its|the|their) delay\b|"
+                       r"\bany delay\b|(?<![Ll]ate )\bsubmissions (?:of|in|from|dated) last month\b")
+    NO_THRESHOLD = (r"(?i)\b(?:no|without(?: a| any)?|never a)\s+(?:(?:late|delay|big[- ]delay|[\"“']big delay[\"”'])\s+)?"
+                    r"(?:threshold|cut-?off|flag)s?\b|\bnothing is flagged\b|\b(?:never|not) flagged\b|\bthreshold\b\W{0,4}none\b")
+    # the Partner filter followed, said in a block about the timing components
+    PARTNER_FILTER = r"\bPartner\b[*`\"”'’]*\s+filters?\b|\bfilters?\s+(?:on|by|for)\s+(?:the\s+)?partners?\b"
+    FOLLOWS = (r"\bfollow\w*|\bcover\w*|\bappl(?:y|ies|ied)\b|\bfiltered\b|\bnarrow\w*|\bobey\w*|\brespect\w*|\bhonou?r\w*|"
+               r"\bwired\b|\bconnected\b|\blinked\b|\brespond\w*|\bdriven\b|\bsame\b|\bshare\w*|\bcarr\w*")
+    TIMING = "|".join(DASH_REPORTS) + r"|\btiming\b|(?<![\w#])#103\b|Attendance_Submissions|\bAttendance Submissions\b"
+    EACH = r"(?i)\b(?:each|every|all|four|three|both|they|these|them)\b"
+    # the new components named as such in the sentence itself ("each new component", "all four")
+    NEW_ONES = (r"(?i)\b(?:four|new|timing|#103's?)\b[^.;]{0,30}\bcomponents?\b|\b(?:each|all|every one) of the (?:four|new)\b|"
+                r"\ball four\b|\bthe four\b")
+    # the How-to box, documented with the timing
+    BOX = r"(?i)How to read this dashboard|\bhow-to\b|\bbox\b"
+    BOX_TIMING = (r"(?i)\bweek\b|\bLAST_WEEK\b|\bsubmitted at\b|Submitted_At__c|\bsubmission time\b|\bthreshold\b|\bdelay\b|"
+                  r"\btiming\b|(?<![\w#])#103\b|\bsubmi\w*|Attendance_Submissions|\bAttendance Submissions\b")
+    # "submitted at": the batch's CreatedDate (when the Jotform integration created it)
+    SUBMITTED = (r"\bsubmitted at\b|Submitted_At__c|\bsubmission time\b|\btime (?:of|it was|the form was) submi\w*|"
+                 r"\bwhen (?:the|a|its) form was submitted\b")
+    CREATED = r"CreatedDate|\bcreat\w*"
+    # sentences that may state a threshold, and the threshold they must not state ("over N days" too)
+    ABOUT_DELAY = r"(?i)\blate\b|\bdelay|\bthreshold|\bcut-?off|Late_Submissions_Last_Month|\bsubmi\w*|\bmetric|\btile"
+    DAY_THRESHOLD = (r"\b\d+\s*(?:or more |or fewer |\+ ?)?days?\s+(?:late|or more|and more|or longer|behind|of delay|late[rn])\b|"
+                     r"\b(?:above|over|more than|at least|beyond|exceed\w*|greater than|longer than|later than|under|below|less than)"
+                     r"\s+(?:\d+|N|X)\s*days?\b|\bthreshold of\b|\bcut-?off (?:of|at)\b|\b(?:threshold|cut-?off)\s*(?:of|is|=|:)?\s*\d+\b")
+    LATE_HEADER = r"\b(?:metric|tile|header|headed|title|titled|label|labell?ed)\b[^.;]{0,20}?[\"“']Late\b"
+    NOT_SAID = r"\bnot\b|\bnever\b|\bnobody\b|\bno one\b|\brather than\b|\binstead of\b"
+    # the rollback
+    FRESH = r"\bretriev\w*|\bfresh\b"
+    COMPARE = r"\bcompar\w*|\bequal\w*|\bidentical\b|\bmatch\w*|\bsame as\b|\bdiff\b"
+    READ_BACK = rf"(?:{DASH_FOLDER}/|`)after/"
+    DIFFER = r"(?i)\bdiffer\w*|\bdifferences?\b|\bnot equal\b|\bunequal\b|\bmismatch\w*|\bchanged\b|\bnot the same\b"
+    STOP = (r"\bstop\w*|\bhalt\w*|\babort\w*|\bbuild\w*\b[^.;]{0,60}\bfrom (?:that|the|this|a) fresh\b|"
+            r"\bfrom (?:that|the|this) fresh retrieve\b")
+    ONLY = r"\bonly\b|\balone\b|\bnothing else\b|\bthe one (?:file|component)\b|\bjust\b|\bsingle\b"
+    OLDER = (r"(?i)\b(?:never|not|no|nor)\b[^.;]{0,80}?\b(?:older|old|earlier|previous|superseded|stale)\b[^.;]{0,40}?"
+             r"(?:\bpackages?\b|\bcop(?:y|ies)\b|\bretrieves?\b|\bfolders?\b|\bbuilds?\b|before/|after/)|"
+             r"\bnever\b[^.;]{0,80}?sf_girls_tiles_2026-10-20")
+    REPORT_WORD = r"\breports?\b|" + "|".join(REPORTS)
+    WHOSE = r"(?i)(?<![\w#])#102\b|\bfour\b|\btiming\b|" + "|".join(REPORTS)
+    STAY = (r"\bstay\w*|\bremain\w*|\bkept\b|\bkeeps?\b|\buntouched\b|\bin place\b|\bunchanged\b|\bleft (?:as|alone|in place|untouched)\b|"
+            r"\bleaves?\b[^.;]{0,60}\b(?:in place|as they are|alone|untouched)\b|\bnot (?:deleted|moved|touched|changed|retired)\b|"
+            r"\bnever (?:deleted|touched|moved)\b")
+    DELETE = r"\bdelet\w*|\bdestructive\w*"
+    SIBLING_NAME = r"Attendance_Submissions|\bAttendance Submissions\b"
+    SIBLING = SIBLING_NAME + r"|\bsibling\b"
+    RETIRE = r"\bDecommissioned\b|\bretir\w*|\bmov\w*|\bdelet\w*|\bremov\w*|\bdestructive\w*"
+    # the plan's Rollout: its list items in this order, each affirmed
+    ROLLOUT = (
+        ("a fresh retrieve of the dashboard, first", near(FRESH, r"dashboard_before\b")),
+        ("the fresh retrieve compared with `dashboard_before/` (a difference: someone changed it since)",
+         near(r"\bcompar\w*|\bequal\w*|\bdiffer\w*|\bdiff\b|\bidentical\b|\bsame as\b", r"dashboard_before\b")),
+        ("the check-only deploy (`sf project deploy start --dry-run`), after the compare", CHECK_ONLY),
+        ("Ryan's go, after the check-only deploy", RYANS_GO),
+        ("the deploy, after the go", re.compile(r"(?i)\bdeploy\w*")),
+        ("the read-back after the deploy: retrieve into `after/`", near(r"\bretriev\w*|\bread[- ]?back\b", r"after/")),
+        ("the read-back compared with the build", near(r"after/", r"\bcompar\w*|\bequal\w*|\bdiff\w*")),
+        ("the refresh (the PUT of RUNBOOK \"Attendance dashboard in Salesforce\"), after the read-back",
+         re.compile(r"(?i)\brefresh\w*")),
+        ("each new component against its report's total and its SOQL, after the refresh",
+         near(r"\bSOQL\b", r"\breports?\b|\btotals?\b|\bcomponents?\b")),
+    )
+    ROLLOUT_DENIABLE = (("comparing the fresh retrieve with `dashboard_before/`", near(r"\bcompar\w*", r"dashboard_before\b")),
+                        ("comparing `after/` with the build", near(r"after/", r"\bcompar\w*")))
+    UNFILTERED = r"\bAll\b|(?i:\bunfiltered\b|\bno filter\b|\bwithout (?:a |any )?filter\b)"
+    ONE_PARTNER = r"(?i)filter1|\bone partner|\ba partner\b|\bsingle partner|\bone of the partners\b|\beach partner"
+
+    def section(self):
+        """The section's raw Markdown; a missing heading fails here (md_part)."""
+        return md_part(self.RUNBOOK, self.HEADING)
+
+    def rollback_parts(self):
+        """Every Rollback part of the section: from a run-in `**Rollback...**` paragraph at the start of a line,
+        or a heading that names Rollback, to the next such paragraph or heading."""
+        part = self.section()
+        out = []
+        for m in re.finditer(r"(?m)^(?:\*\*[^*\n]*\bRollback\b[^*\n]*\*\*|#{3,6} [^\n]*\bRollback\b)[^\n]*", part):
+            rest = part[m.end():]
+            nxt = re.search(r"(?m)^(?:\*\*[^*\n]+\*\*|#{1,6} )", rest)
+            out.append(rest[:nxt.start()] if nxt else rest)
+        return out
+
+    @classmethod
+    def deletes_reports(cls, sentence):
+        """A report deletion the sentence affirms: a deletion verb beside a report, neither negated nor
+        "nothing is deleted" / "none of them" in its clause."""
+        for m in matches(sentence, near(cls.DELETE, cls.REPORT_WORD, 60)):
+            if negated(sentence, m):
+                continue
+            if any(re.search(r"(?i)\bnothing\b|\bnone\b", clause_of(sentence, at)) for at in (m.start(), max(m.end() - 1, m.start()))):
+                continue
+            return m
+        return None
+
+    def test_the_runbook_lists_the_dashboard_timing_components(self):
+        part = self.section()
+        raw = flat(part)
+        text = prose(raw)
+        said = sentences(text, ".;")
+        units = [prose(b) for b in blocks(part)]
+        where = f"RUNBOOK section {self.HEADING[3:]!r}"
+        # the four components, each beside the report it reads: its kind and the report's DeveloperName in one
+        # sentence, not negated, and the block (bullet, paragraph, table row) saying what it shows
+        for what, report, kind, extras in self.COMPONENTS:
+            with self.subTest(component=what):
+                found = [u for u in units if affirmed(names_unnegated(u), near(kind, report, 200))]
+                self.assertTrue(found, f"{where}: name {what} beside the report it reads, `{report}` - the component's kind "
+                                       "and the report's DeveloperName in one sentence (a negation does not count)")
+                lacks = min(([label for label, p in extras if not re.search(f"(?i){p}", u)] for u in found), key=len)
+                self.assertFalse(lacks, f"{where}: {what} on `{report}`: say {' and '.join(lacks)} where it is named (the "
+                                        "same bullet, paragraph or table row)")
+        # the submissions metric counts every submission of last month, whatever its delay - not late ones
+        late = [u for u in units if affirmed(names_unnegated(u), near(self.METRIC, "Late_Submissions_Last_Month", 200))]
+        self.assertTrue([u for u in late if affirms(u, self.ALL_SUBMISSIONS) or re.search(self.NO_THRESHOLD, u)],
+                        f"{where}: the metric on `Late_Submissions_Last_Month` counts every Jotform submission of last month, "
+                        "whatever its delay (no threshold: DECISIONS 2026-10-23) - say so where it is named")
+        # each follows the dashboard's Partner filter: said in a block about the timing components, or in a sentence
+        # that names them as the new (four, timing) components
+        follow = near(self.PARTNER_FILTER, self.FOLLOWS, 120)
+        timing = [s for u in units if re.search(self.TIMING, u) for s in sentences(u, ".;")
+                  if re.search(self.EACH, s) or all(r in s for r in DASH_REPORTS)]
+        self.assertTrue([s for s in timing + [s for s in said if re.search(self.NEW_ONES, s)] if affirmed(names_unnegated(s), follow)],
+                        f"{where}: say each new component follows the dashboard's Partner filter, in a sentence that names "
+                        "them (\"each new component\", \"the four\") or in the bullet or paragraph about them (\"The "
+                        "dashboard's Partner filter covers every component\" says it of the old ones); a negation does not count")
+        # the How-to box, documented with the timing it now defines
+        self.assertTrue([u for u in units if re.search(self.BOX, u) and re.search(self.BOX_TIMING, u)],
+                        f"{where}: say what the \"How to read this dashboard\" box adds for the timing (the week, the "
+                        "submission time, no threshold), in a bullet or paragraph that names the box")
+        # the week: last week, Sunday to Saturday, Salesforce's LAST_WEEK; no Monday-start week affirmed
+        self.assertIn("LAST_WEEK", raw, f"{where}: name `LAST_WEEK`, the report's week (DECISIONS 2026-10-24)")
+        self.assertTrue([s for s in said if re.search(r"(?i)\blast week\b|\bLAST_WEEK\b", s) and affirms(s, TimingReportsDocs.SUN_SAT)
+                         and not re.search(r"(?i)\bMonday\b", s)],
+                        f"{where}: say last week runs Sunday to Saturday (`LAST_WEEK`), in a sentence with no negation right "
+                        "before it and no Monday in it")
+        monday = [s for s in said if affirms(s, TimingReportsDocs.MON_SUN)]
+        self.assertFalse(monday, f"{where}: a sentence affirms a Monday-start week: {monday[0] if monday else ''!r}")
+        # "submitted at": the batch's CreatedDate; the back-fill and the partners' monthly batches have none
+        self.assertTrue([s for s in said if affirmed(s, near(self.SUBMITTED, self.CREATED, 150))],
+                        f"{where}: say what \"submitted at\" (`Submitted_At__c`, the submission time) is - the batch's "
+                        "`CreatedDate`, when the Jotform form created it - in a sentence (a negation does not count)")
+        no_time = near(SubmissionTimingDocs.NONE, self.SUBMITTED + r"|\bdelay\b", 80)
+        for kind, pattern in (("the September back-fill batches", r"back-?fill"),
+                              ("the three partners' monthly batches (`Partner report`)", r"Partner report|\bmonthly\b|\bthree partners\b")):
+            with self.subTest(batches=kind):
+                self.assertTrue([s for s in said if re.search(f"(?i){pattern}", s) and no_time.search(s)],
+                                f"{where}: say {kind} have no submission time (and so no delay), in a sentence")
+        # no threshold: said, and never stated as a number of days or a "Late ..." header
+        self.assertTrue([s for s in said if re.search(self.NO_THRESHOLD, s)],
+                        f"{where}: say there is no late threshold - the delay in days is shown and staff judge it "
+                        "(DECISIONS 2026-10-23) - in a sentence")
+        cut = [s for s in said if re.search(self.ABOUT_DELAY, s) and affirms(s, self.DAY_THRESHOLD)]
+        self.assertFalse(cut, f"{where}: a sentence about late submissions, the delay or a metric states a cut-off in days "
+                              f"(none: DECISIONS 2026-10-23; quote no threshold, not even the outline's): {cut[0] if cut else ''!r}")
+        headed = [s for s in said if affirms(s, self.LATE_HEADER, denied=self.NOT_SAID)]
+        self.assertFalse(headed, f"{where}: a metric headed \"Late ...\" reads as a count of late submissions (Ruling: the "
+                                 f"submissions metric is headed so nobody reads it so): {headed[0] if headed else ''!r}")
+
+    def dashboard_rollback(self, where, text, sibling):
+        """#103's rollback in `text` (flattened, prose()): `sibling` says the sibling dashboard is named beside it."""
+        said = sentences(text, ".;")
+        self.assertIn(DASH_FOLDER, text, f"{where}: name the folder `data/{DASH_FOLDER}/` the rollback deploys from")
+        self.assertIn(DASHBOARD, text, f"{where}: name the dashboard `Attendance/{DASHBOARD}`")
+        self.assertTrue(affirmed(text, near(r"\b(?:re)?deploy\w*", r"dashboard_before\b")),
+                        f"{where}: the dashboard is redeployed from `data/{DASH_FOLDER}/dashboard_before/` (said of the "
+                        "deploy, not negated)")
+        self.assertTrue([s for s in said if re.search(r"(?i)\b(?:re)?deploy\w*", s)
+                         and affirmed(s, near(self.ONLY, rf"{DASHBOARD}|\bdashboard\b", 60))],
+                        f"{where}: redeploy ONLY the dashboard (`{DASHBOARD}`), said in the deploy's sentence")
+        self.assertTrue([s for s in said if re.search(self.READ_BACK, s) and affirmed(s, near(self.FRESH, self.COMPARE))],
+                        f"{where}: first a fresh retrieve of the dashboard, compared with the read-back (`data/{DASH_FOLDER}/"
+                        "after/`), in one sentence; a negation does not count")
+        self.assertTrue([s for s in said if re.search(self.DIFFER, s) and affirms(s, self.STOP)],
+                        f"{where}: when the fresh retrieve differs from `after/`, someone changed it since - stop and build "
+                        "the rollback from the fresh retrieve - in a sentence")
+        self.assertTrue(affirmed(text, CHECK_ONLY), f"{where}: check-only first (`sf project deploy start --dry-run`)")
+        self.assertTrue(affirmed(text, RYANS_GO), f"{where}: the redeploy on Ryan's go")
+        self.assertRegex(text, self.OLDER, f"{where}: never an older package (DECISIONS 2026-10-16) - e.g. #59's "
+                                           "`data/sf_girls_tiles_2026-10-20/before/` - said for this rollback")
+        reports = [s for s in said if re.search(f"(?i){self.REPORT_WORD}", s)]
+        deleting = [s for s in reports if self.deletes_reports(s)]
+        self.assertFalse(deleting, f"{where}: deletes reports - #102's reports are never deleted (DECISIONS 2026-10-21; "
+                                   f"Task #102's Rollback retires them): {deleting[0] if deleting else ''!r}")
+        retired = [s for s in said if re.search(self.SIBLING, s) and affirms(s, self.RETIRE)]
+        if sibling:
+            self.assertTrue(retired, f"{where}: the sibling dashboard \"Attendance Submissions\" is named: retire it with the "
+                                     "rollback (to Decommissioned), not leave it behind")
+        else:
+            self.assertTrue([s for s in reports if re.search(self.WHOSE, s) and affirms(s, self.STAY)],
+                            f"{where}: say #102's four reports stay (the rollback changes only the dashboard), in a sentence")
+
+    def test_the_dashboard_rollback_redeploys_only_the_changed_dashboard(self):
+        where = f"RUNBOOK section {self.HEADING[3:]!r}, Rollback"
+        parts = self.rollback_parts()
+        self.assertTrue(parts, f"{where}: no Rollback part (`**Rollback:**`)")
+        items = [i for p in parts for i in top_items(p) if re.search(r"dashboard_before\b", i)]
+        self.assertTrue(items, f"{where}: no item for #103's rollback - redeploy only the dashboard `Attendance/{DASHBOARD}` "
+                               f"from `data/{DASH_FOLDER}/dashboard_before/`, after a fresh retrieve equals `after/`")
+        sibling = bool(re.search(self.SIBLING_NAME, flat(self.section())))
+        self.dashboard_rollback(where + " (#103)", prose(" ".join(items)), sibling)
+
+    def dashboard_rollout(self, where, part):
+        """The steps in this order over the Rollout's list items, each affirmed at or after the one before it; no
+        compare argued against anywhere in the Rollout; a check of each component under All and under one
+        partner; `build_sibling/` on a component-count refusal."""
+        text = prose(flat(part))
+        self.assertIn("sf project deploy start", text, f"{where}: the deploy command `sf project deploy start`")
+        for what, pattern in self.ROLLOUT_DENIABLE:
+            m = denied(text, pattern)
+            self.assertIsNone(m, f"{where}: argues against {what}: {clause_of(text, m.start()).strip()!r}" if m else None)
+        items = list_items(part)
+        self.assertGreaterEqual(len(items), 5, f"{where}: the steps as a numbered (or bulleted) list, in order")
+        walk = " . ".join(prose(item) for item in items)
+        at = 0
+        for what, pattern in self.ROLLOUT:
+            m = affirmed(walk, pattern, at)
+            self.assertTrue(m, f"{where}: {what} (the steps in that order, in the list's items; a negated statement does "
+                               "not count)")
+            at = m.start()
+        self.assertTrue([i for i in items if re.search(r"\bSOQL\b", i) and re.search(self.UNFILTERED, i)
+                         and re.search(self.ONE_PARTNER, i)],
+                        f"{where}: a step checks each new component against its report and its SOQL under All (unfiltered) "
+                        "and under one partner's filter (`?filter1=<option id>`)")
+        self.assertTrue(affirmed(text, near(r"--dry-run|check-only|\bvalidat\w*", r"(?<!\w)build/")),
+                        f"{where}: the check-only of `build/` (the four components on `{DASHBOARD}`)")
+        self.assertRegex(text, near(r"build_sibling/", r"\brefus\w*|\breject\w*|\blimit\w*|\btoo many\b|\bcomponent count\b|\bfails?\b", 200),
+                         f"{where}: `build_sibling/` (the dashboard \"Attendance Submissions\") when the check-only refuses "
+                         "`build/`'s component count")
+
+    def test_the_plan_carries_the_dashboard_rollout(self):
+        plans = SubmissionTimingDocs.plans_naming(self, 103)
+        self.assertTrue(plans, "docs/plans/: no plan names ticket #103 in its head (the dashboard change is live: CLAUDE.md "
+                               "conventions)")
+        tasks = [(p, md_sub(read(p), "## Task #103")) for p in plans]
+        tasks = [(p, t) for p, t in tasks if t]
+        self.assertTrue(tasks, f"{', '.join(os.path.relpath(p, REPO) for p in plans)}: no section `## Task #103: ...` (the "
+                               "dashboard's Build, Rollout, Rollback, Risks and Result, after Task #102's)")
+        for path, task in tasks:
+            name = os.path.relpath(path, REPO)
+            parts = {}
+            for heading, least in (("### Build", 30), ("### Rollout", 60), ("### Rollback", 30), ("### Risks", 15),
+                                   ("### Result", 15)):
+                sub = md_sub(task, heading)
+                self.assertIsNotNone(sub, f"{name}: `## Task #103` has no `{heading}`")
+                body = sub.split("\n", 1)[1] if "\n" in sub else ""
+                self.assertNotRegex(flat(body), r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: Task #103 `{heading}` is a placeholder")
+                self.assertGreaterEqual(len(re.findall(r"\w+", body)), least,
+                                        f"{name}: Task #103 `{heading}` says too little (at least {least} words)")
+                parts[heading] = body
+            build = flat(parts["### Build"])
+            self.assertRegex(build, r"(?<!\w)build/", f"{name}: Task #103 Build: what `build/` holds")
+            self.assertRegex(build, r"dashboard_before\b", f"{name}: Task #103 Build: built from the fresh retrieve "
+                                                          "`dashboard_before/`")
+            self.dashboard_rollout(f"{name}: Task #103 Rollout", parts["### Rollout"])
+            sibling = bool(re.search(self.SIBLING_NAME, flat(task)))
+            self.dashboard_rollback(f"{name}: Task #103 Rollback", prose(flat(parts["### Rollback"])), sibling)
+            SubmissionTimingDocs.risks_name_a_real_risk(self, f"{name}: Task #103", flat(parts["### Risks"]))
+            self.assertRegex(parts["### Result"], r"\b20\d\d-\d\d-\d\d\b", f"{name}: Task #103 Result: dated entries")
 
 
 if __name__ == "__main__":
