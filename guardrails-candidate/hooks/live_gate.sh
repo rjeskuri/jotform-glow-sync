@@ -1,0 +1,645 @@
+#!/bin/bash
+# PreToolUse hook (Bash): the live-system gate.
+#
+# A command that can change a LIVE system - the Jotform forms, the master Google
+# Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches
+# on GitHub - gets one of three answers (since 2026-10-26, ticket #146):
+#   - "allow", with no prompt, for a backed WRITE: one simple command whose tool or
+#     raw shape is on the lists below and whose backup from today is on record - in
+#     the modes default, acceptEdits, auto, dontAsk, bypassPermissions or a missing
+#     one, from a subagent too. Logged ALLOWED (mode, target, backup) in
+#     .claude/live_gate.log, and a macOS notification (osascript, run detached, the
+#     command only ever an argument) tells Ryan what went through;
+#   - "ask" (Ryan's prompt in the session; his answer is the go) for everything else
+#     live, in default, acceptEdits, auto and plan: a DELETE (--prune, the words
+#     delete, remove or destructive in any case and position, sf_dupes.py --apply),
+#     a write without its backup from today (the reason names the backup command),
+#     a chained or prefixed command, a tool no list names, plan mode;
+#   - "deny" where nobody can answer that prompt: a subagent (agent_id in the input;
+#     agent_type alone is the main thread of a session started with --agent), and
+#     the modes dontAsk, bypassPermissions, a missing or an unknown value (a
+#     headless or dispatched run: the reason is its needs-input). And a command
+#     that approves itself is refused whatever the mode and the caller: one that
+#     sets GLOW_LIVE_OK, writes a file the next launch reads its environment from
+#     (~/.zshrc and the other shell startup files, a direnv .envrc, the repository's
+#     .env: a redirect, tee, sed -i or perl -i into one, or launchctl setenv), or
+#     forges a backup - writes, copies, touches or records .claude/live_backups.log
+#     by hand, imports its writer glow/live_backups.py, or writes a Salesforce plan's
+#     before/ (touch under it, cp|mv|rsync|ditto|ln|install onto it, > or tee into it).
+#
+# The automatic go needs ALL of:
+#   - one simple command: none of ; & | ` $( <( > # or a line break (a
+#     backslash-newline too), and a first word that is python3 (or any path ending
+#     /python3), node, npm, npx, sf, sfdx, gh, curl or clasp - never env, sudo,
+#     nohup, time, exec, a shell's -c or a VAR=value;
+#   - a recognised write, each target with its backup: a record in
+#     .claude/live_backups.log - `<YYYY-MM-DD HH:MM:SS>\t<target>\t<id>\t<path>`,
+#     written by glow/live_backups.py - whose first field is from today (the local
+#     date) and whose path is relative, never climbs (..) and still exists here:
+#       jotform <form id>|all  the form tools' --apply or --rehearse (FORM_TOOLS
+#                              below, by exact path), api.jotform.com,
+#                              apply_changes=True; a form id is one after --form
+#                              (--form=<id>) or in an API path /form/<id>; a
+#                              command naming none, or an odd --form, needs `all`
+#                              (backup_forms.py and every tool's own snapshot);
+#       sheet <Tab>|all        sheets_client.py import <Tab> (the tab matched
+#                              whole); values().update|append|clear, batchUpdate
+#                              and rename_club.py: `all` (sheets_client.py export);
+#       github all             gh variable|secret set, gh workflow enable|disable,
+#                              gh api or api.github.com on actions/
+#                              (tools/github_switches.py backup);
+#       jotform all            gh workflow run ... apply=true, gh run rerun: they
+#                              run the sync, which writes the forms;
+#     and with no record:
+#       appsscript             clasp push: appsscript/ tracked, nothing uncommitted
+#                              or untracked under it (the version before is in git);
+#       salesforce, raw        sf|sfdx deploys, data writes, apex run, sf api
+#                              request writes, .salesforce.com/services/: the
+#                              command names a path inside data/sf_<topic>/ and
+#                              data/sf_<topic>/before/ holds a file modified today
+#                              (the plan's before/ retrieve);
+#       salesforce, tools      SF_TOOLS below: each writes its own rollback record
+#                              (a ledger row, merge_rollback.json) before every write.
+#   Never automatic: gh api or api.github.com on dispatches or graphql; auto_sync.py
+#   with --apply-salesforce (Salesforce accounts, no rollback record); any other
+#   tool (the Drive photo mover, upload_roster.py, deactivate_clubs.py, ...).
+#
+# Fast: a few greps, awk, find and git, no network, well inside the 5 s timeout.
+# Every decision on a live command is appended to .claude/live_gate.log
+# (gitignored), with the mode it was taken in.
+#
+# Limits: the gate reads the command's text, never its shell words. A write through
+# another program (cp, an editor, a script), or a flag assembled at run time, is not
+# seen: it guards against mistakes, not against intent. Text that only names a live
+# command (a commit message, a PR body) asks too, unless it is read-only and alone.
+#
+# A read-only command that only mentions a live flag (grep -n -- '--apply'
+# docs/RUNBOOK.md) passes: its first word is grep, rg, cat, head, tail, wc or ls,
+# or git log|show|diff|grep|blame|status, AND it has no ; & | ` $( <( > or line
+# break, so nothing else runs (nor rg --pre / git grep -O, which run a program).
+set -u
+INPUT=$(cat)
+# three fields from the input: the permission mode as JSON text (so "default" stays
+# apart from a missing, numeric or oddly spelt value), whether it comes from a subagent
+# (an agent_id), then the command. Unreadable input gives no fields, hence no command and
+# no decision.
+if command -v jq >/dev/null 2>&1; then
+  FIELDS=$(printf '%s' "$INPUT" | jq -r '[(.permission_mode | @json), (has("agent_id") | tostring), (.tool_input.command | if type == "string" then . else "" end)] | join("\n")')
+else
+  FIELDS=$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+mode = json.dumps(d.get("permission_mode"))
+agent = "true" if "agent_id" in d else "false"
+cmd = (d.get("tool_input") or {}).get("command")
+print(mode)
+print(agent)
+print(cmd if isinstance(cmd, str) else "", end="")')
+fi
+MODE=${FIELDS%%$'\n'*}
+REST=${FIELDS#*$'\n'}
+case "$REST" in
+  *$'\n'*) AGENT=${REST%%$'\n'*}; CMD=${REST#*$'\n'} ;;
+  *) AGENT=$REST; CMD= ;;
+esac
+[ -z "$CMD" ] && exit 0
+
+# Tool flags AND the raw API shapes the tools wrap - a direct curl PUT to
+# Jotform or a python snippet with apply_changes=True is just as live a write.
+# Salesforce, through sf or the older sfdx: a deploy (a check-only one too) or a
+# delete of metadata, data writes, anonymous Apex, the REST API itself, and
+# --rehearse (sf_dupes.py's production DML, rolled back).
+SF='(^|[^[:alnum:]_.-])sf(dx)?[[:space:]]+'
+PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|api\.jotform\.com|api\.github\.com/[^[:space:]]*(actions/|dispatches|graphql)|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
+PATTERN+="|${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}deploy[[:space:]]+metadata|${SF}project[[:space:]]+delete[[:space:]]+source"
+PATTERN+="|${SF}data[[:space:]]+(create|update|delete|upsert|import)|${SF}apex[[:space:]]+run"
+PATTERN+="|${SF}force:(apex:execute|source:(deploy|delete|push)|mdapi:deploy|data:(record|bulk|tree):)|\.salesforce\.com/services/"
+# GitHub: the sync's switches (repository variables and secrets: SF_SYNC, AUTO_SYNC_APPLY),
+# the workflow itself, a run that applies (apply given true, from a file, by expansion, or
+# inputs as JSON) and a rerun (it repeats the recorded inputs); gh api is below. A -R x,
+# --repo x or --repo=x may stand before or between the words (gh variable -R o/r set).
+# The GitHub API by its URL (curl, a script) is live on the paths the gh api rule below
+# names: the Actions API, a dispatch and GraphQL, whatever the method.
+REPO='((-R|--repo)[[:space:]=]?[^[:space:]]+[[:space:]]+)?'
+GH="(^|[^[:alnum:]_.-])gh[[:space:]]+${REPO}"
+APPLY_ON='apply["'\'']?[[:space:]]*[=:][[:space:]]*["'\'']?([Tt][Rr][Uu][Ee]|1|[$@`])'
+PATTERN+="|${GH}(variable|secret)[[:space:]]+${REPO}(set|delete|remove)|${GH}workflow[[:space:]]+${REPO}(enable|disable)|${GH}run[[:space:]]+${REPO}rerun"
+PATTERN+="|${GH}workflow[[:space:]]+${REPO}run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+${REPO}run"
+# self-approval: the flag in the command, or written where the next launch picks it up
+STARTUP='(\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bashrc|\.bash_profile|\.bash_login|\.profile|\.envrc|\.env)([^[:alnum:]_.-]|$)'
+WRITES='(>|tee[[:space:]]|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i)[^;&|]*'
+SELF="GLOW_LIVE_OK\\+?=|${WRITES}${STARTUP}|launchctl[[:space:]]+setenv"
+PATTERN+="|${SELF})"
+# Prompt, don't parse (Ryan, 2026-10-14): the command is matched as text, never read as
+# shell words - a reader fails open on every gap between it and the shell, a text pattern
+# fails closed. Every pattern is tried, in any case, on the command on one line (a command
+# continued with \ or spread over lines is still one command), on the same with each
+# backslash-newline (LF or CRLF) removed, as the shell removes it inside a word (--ap\<LF>ply
+# is --apply), and on both with the quote and backslash characters removed (gh 'workflow'
+# run, g""h, var\iable, --ap""ply).
+JOIN=$'\\\n' JOIN_CRLF=$'\\\r\n'
+JOINED=${CMD//"$JOIN_CRLF"/}
+JOINED=${JOINED//"$JOIN"/}
+FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
+JOINED=$(printf '%s' "$JOINED" | tr '\n\r' '  ')
+bare() { printf '%s' "$1" | tr -d '\\"'"'"; }
+BARE=$(bare "$JOINED")
+TEXTS=$FLAT$'\n'$(bare "$FLAT")$'\n'$JOINED$'\n'$BARE
+has() { printf '%s\n' "$TEXTS" | grep -Eiq -e "$1"; }
+first() { printf '%s\n' "$TEXTS" | grep -Eio -e "$1" | head -1; }
+MATCH=$(first "$PATTERN") || true
+# gh api: a gh word (any case, a path ending in /gh, =gh) and the word api, with actions/,
+# dispatches or graphql anywhere in the command: the Actions API (the sync's variables,
+# secrets, workflows and runs), a repository dispatch, GraphQL (a mutation can hide in
+# -F query=@file). Live whatever the method - a read of them asks too. Every other gh api
+# call (issues, comments, labels, the harness's resume reads) is ungated, as before 2026-10-14,
+# and so is a message that mentions gh api without those words.
+GH_API=
+if has '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' && has '(^|[^[:alnum:]_])api([^[:alnum:]_]|$)'; then
+  ON=$(first 'actions/|dispatches|graphql' | tr '[:upper:]' '[:lower:]')
+  [ -n "$ON" ] && GH_API="gh api on $ON"
+fi
+[ -z "$MATCH" ] && MATCH=$GH_API
+# sf api request: any GraphQL call (a mutation writes), and a REST call that writes - a method
+# other than GET (the CLI offers GET POST PUT PATCH HEAD DELETE OPTIONS TRACE), a body (-b,
+# --body) or a request file (-f, --file: it carries its own method and body). A relative path
+# (/services/data/...) does not name the host, so the URL pattern above does not see it.
+SF_API=
+if has "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
+  SF_API="sf api request graphql"
+elif has "${SF}api[[:space:]]+request[[:space:]]+rest" \
+    && has '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file)'; then
+  SF_API="sf api request rest that writes"
+fi
+[ -z "$MATCH" ] && MATCH=$SF_API
+# A forged backup is a self-approval too (#146): the records the automatic go trusts
+# (.claude/live_backups.log, any spelling of its path) named together with a write verb;
+# their writer (glow/live_backups.py) imported or called by hand; a Salesforce plan's
+# before/ written by hand. Reading them, copying FROM a before/, the retrieve into one,
+# their tests and a commit message that names them are no forgery.
+VERB='(^|[^[:alnum:]_.-])(tee|cp|mv|dd|ln|install|rsync|ditto|touch|truncate)([^[:alnum:]_.-]|$)'
+FORGED=
+if has 'live_backups\.log' && has ">|${VERB}|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i|open\(|write_text|write_bytes"; then
+  FORGED=$(first 'live_backups\.log')
+elif has 'live_backups' && has 'import|live_backups\.record'; then
+  FORGED=$(first 'live_backups')
+else
+  TRIMMED=${BARE%"${BARE##*[![:space:]]}"}
+  LAST=${TRIMMED##*[[:space:]]}
+  case "$LAST" in before | before/* | */before | */before/*) LAST_BEFORE=1 ;; *) LAST_BEFORE= ;; esac
+  if { has '(^|[^[:alnum:]_.-])touch([^[:alnum:]_.-]|$)' && has '(^|[[:space:]/=])before/'; } \
+      || { [ -n "$LAST_BEFORE" ] && has '(^|[^[:alnum:]_.-])(cp|mv|rsync|ditto|ln|install)([^[:alnum:]_.-]|$)'; } \
+      || has '(>|(^|[^[:alnum:]_.-])tee[[:space:]])[^;&|]*(^|[[:space:]/=])before/'; then
+    FORGED="before/"
+  fi
+fi
+[ -z "$MATCH" ] && MATCH=$FORGED
+[ -z "$MATCH" ] && exit 0
+
+# read-only and alone: a live flag it mentions is text, not an action
+read_only() {
+  case "$CMD" in
+    *';'* | *'&'* | *'|'* | *'`'* | *'$('* | *'<('* | *'>'* | *$'\n'* | *$'\r'*) return 1 ;;
+  esac
+  local first second _
+  read -r first second _ <<<"$CMD"
+  case "$first" in
+    grep | head | tail | cat | wc | ls) return 0 ;;
+    rg) ! printf '%s' "$CMD" | grep -q -- '--pre' ;;              # --pre runs a program per file
+    git)
+      case "$second" in
+        log | show | diff | blame | status) return 0 ;;
+        grep) ! printf '%s' "$CMD" | grep -Eq -- '-[^[:space:]]*O|--o' ;;   # -O / --open-files-in-pager
+        *) return 1 ;;
+      esac ;;
+    *) return 1 ;;
+  esac
+}
+read_only && exit 0
+
+# A live command: one decision, logged with the mode and the caller.
+PROJECT=${CLAUDE_PROJECT_DIR:-}
+LOG="${PROJECT:-.}/.claude/live_gate.log"
+CALLER=
+[ "$AGENT" = "true" ] && CALLER=" agent"
+log() { printf '%s %s mode=%s%s %s\n' "$(date '+%F %T')" "$1" "$MODE" "$CALLER" "$CMD" >> "$LOG"; }
+SHOWN=${FLAT:0:300}
+[ ${#FLAT} -gt 300 ] && SHOWN="$SHOWN ..."
+RUNBOOK='See docs/RUNBOOK.md, "Live gate (Claude Code)".'
+# the decision as Claude Code reads it: JSON on stdout, built by jq or python, never
+# interpolated by hand (the matched text and the command can hold quotes)
+decide() {
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg d "$1" --arg r "$2" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $d, permissionDecisionReason: $r}}'
+  else
+    python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": sys.argv[1], "permissionDecisionReason": sys.argv[2]}}))' "$1" "$2"
+  fi
+}
+# refused: a deny decision with the reason, or - should no JSON come out - exit 2 with
+# the reason on stderr, which blocks just the same
+refuse() {
+  REASON="BLOCKED by .claude/hooks/live_gate.sh - matched \"$MATCH\" in: $SHOWN
+$1
+$RUNBOOK"
+  OUT=$(decide deny "$REASON") || OUT=
+  log BLOCKED
+  if [ -n "$OUT" ]; then
+    printf '%s\n' "$OUT"
+    exit 0
+  fi
+  printf '%s\n' "$REASON" >&2
+  exit 2
+}
+# Ryan's prompt in the session, with why the command is not automatic
+ask() {
+  REASON="LIVE command - matched \"$MATCH\" in: $SHOWN
+$1
+It can change a live system: the Jotform attendance forms, the master enrollment Google
+Sheet, the deployed Apps Script, Salesforce, or the automatic sync's switches on GitHub
+(live since 2026-09-01). Ryan's answer here is the go. Yes only after the dry run was read
+and the backup exists. The gate matches text: a message that only names a live command
+asks too.
+$RUNBOOK"
+  OUT=$(decide ask "$REASON") || OUT=
+  if [ -n "$OUT" ]; then
+    log ASKED
+    printf '%s\n' "$OUT"
+    exit 0
+  fi
+  # no ask could be built (jq and python3 both failed): refuse rather than let it through
+  log BLOCKED
+  printf '%s\n' "BLOCKED by .claude/hooks/live_gate.sh - the ask decision could not be built. $REASON" >&2
+  exit 2
+}
+# not automatic: Ryan is asked where a prompt can show, refused where none can
+not_automatic() {
+  if [ "$AGENT" = "true" ]; then
+    refuse "$1
+A subagent cannot show Ryan the prompt (the input carries an agent_id): from one, only a
+backed write goes through, and this one is not. The main session asks Ryan, and his
+answer is the go; a headless run takes it to needs-input."
+  fi
+  case "$MODE" in
+    '"default"' | '"acceptEdits"' | '"auto"' | '"plan"') ask "$1" ;;
+  esac
+  refuse "$1
+This session cannot show Ryan the approval prompt (permission_mode $MODE; only
+default, acceptEdits, auto and plan can): needs-input. Run it in an interactive session,
+or Ryan runs it in his terminal."
+}
+
+if has "$SELF" || [ -n "$FORGED" ]; then
+  refuse "The command approves itself: it sets GLOW_LIVE_OK, writes a file the next launch
+reads its environment from, or forges a backup - writes .claude/live_backups.log or a
+Salesforce plan's before/ by hand, or calls their writer. Nothing pre-approves a live
+command: a backup tool's own record, or Ryan's answer to the session's prompt, is the go.
+GLOW_LIVE_OK grants nothing since 2026-10-14."
+fi
+
+# DELETES ask whatever the backups (Ryan, 2026-10-26): --prune (and the words argparse
+# takes for it or --remove: --pr, --re, ...), delete, remove or destructive in any case and
+# position (sf data delete, sf project delete source, destructiveChanges, gh variable|secret
+# delete|remove, an HTTP DELETE however spelt), and sf_dupes.py --apply (a merge deletes the
+# losing record).
+if has '--prune|delete|remove|destructive|(^|[[:space:]])--(p|pr|pru|prun|r|re|rem|remo|remov)([[:space:]=]|$)' \
+    || { has 'sf_dupes' && has '--apply'; }; then
+  not_automatic "A delete or --prune: it asks whatever the backups (ticket #146)."
+fi
+
+# ---- a WRITE: automatic when it is one simple command, recognised, and backed up today
+TODAY=$(date +%F)
+BACKUPS="$PROJECT/.claude/live_backups.log"
+WHY=        # why not automatic (the first reason found)
+NEEDS=      # what must be backed up: "<target>\t<id>" lines
+HINTS=      # the backup commands that are missing
+TARGETS=    # what goes through, for the log and the notification
+USED=       # the backups used
+nope() { [ -z "$WHY" ] && WHY=$1; }
+need() { case $'\n'"$NEEDS" in *$'\n'"$1"$'\t'"$2"$'\n'*) ;; *) NEEDS="$NEEDS$1"$'\t'"$2"$'\n' ;; esac; }
+add_target() {   # target id
+  case " $TARGETS " in *" $1 "*) ;; *) TARGETS="${TARGETS:+$TARGETS }$1" ;; esac
+  IDS="${IDS:+$IDS, }$1 $2"
+}
+add_used() { case ", $USED, " in *", $1, "*) ;; *) USED="${USED:+$USED, }$1" ;; esac; }
+IDS=
+
+case "$CMD" in
+  *';'* | *'&'* | *'|'* | *'`'* | *'$('* | *'<('* | *'>'* | *'#'* | *$'\n'* | *$'\r'*)
+    nope "it is no single simple command (a ; & | \` \$( <( > # or line break in it)." ;;
+esac
+read -r W1 W2 W3 _ <<<"$CMD"
+case "$W1" in *=*) nope "it starts with a variable assignment ($W1)." ;; esac
+LAUNCHER=
+case "$W1" in
+  python3 | */python3) LAUNCHER=python ;;
+  node | npm | npx | clasp | sf | sfdx | gh | curl) LAUNCHER=$W1 ;;
+  *) nope "its first word ($W1) is no launcher the automatic go knows (python3, node, npm, npx, sf, sfdx, gh, curl, clasp)." ;;
+esac
+[ -z "$PROJECT" ] || [ ! -d "$PROJECT" ] && nope "CLAUDE_PROJECT_DIR is not set."
+
+# the tool a python3 command runs, by its path from the checkout (./ and the checkout's
+# own path allowed before it)
+SCRIPT=${W2:-}
+SCRIPT=${SCRIPT#./}
+[ -n "$PROJECT" ] && SCRIPT=${SCRIPT#"$PROJECT"/}
+FORM_TOOLS=" sync_attendance_form.py restore_conditions.py tools/add_feedback_link.py tools/add_language.py tools/add_session_notes.py tools/add_translations.py tools/auto_sync.py tools/disable_form.py tools/fix_name_translations.py tools/fix_roster_order.py tools/rename_club.py tools/restore_translations.py tools/switcher_flags.py tools/update_static_fields.py "
+SF_TOOLS=" tools/sf_backfill.py tools/sf_dupes.py tools/sf_girls_present.py tools/sf_partner_monthly.py tools/sf_report_folders.py "
+TOOL=
+if [ "$LAUNCHER" = python ]; then
+  case "$FORM_TOOLS" in *" $SCRIPT "*) TOOL=form ;; esac
+  case "$SF_TOOLS" in *" $SCRIPT "*) TOOL=sf ;; esac
+  [ "$SCRIPT" = tools/sheets_client.py ] && TOOL=sheets
+  [ "$SCRIPT" = -c ] && TOOL=snippet
+  [ -z "$TOOL" ] && nope "${SCRIPT:-python3} is on no list of tools whose write is automatic."
+fi
+[ "$LAUNCHER" = node ] && nope "no node tool's write is automatic."
+
+# the command's words, quotes and backslashes removed (for the flags and paths read below)
+set -f
+WORDS=($BARE)
+set +f
+words() { [ ${#WORDS[@]} -gt 0 ] && printf '%s\n' "${WORDS[@]}"; }
+# a word argparse would take for FLAG: FLAG itself or a prefix of it at least MIN long
+abbrev_of() {   # FLAG MIN
+  local w
+  while IFS= read -r w; do
+    [ ${#w} -ge "$2" ] && case "$1" in "$w"*) return 0 ;; esac
+  done <<EOF
+$(words)
+EOF
+  return 1
+}
+# the form ids a command writes: each after --form (or a prefix argparse takes for it) and
+# in an API path /form/<id>; a value that is no 15-digit id makes it "all"
+jotform_needs() {
+  local w expecting= ids= all= v
+  while IFS= read -r w; do
+    if [ -n "$expecting" ]; then
+      expecting=
+      case "$w" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ids="$ids $w" ;; *) all=1 ;; esac
+      continue
+    fi
+    case "$w" in
+      --f | --fo | --for | --form) expecting=1 ;;
+      --f=* | --fo=* | --for=* | --form=*)
+        v=${w#*=}
+        case "$v" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ids="$ids $v" ;; *) all=1 ;; esac ;;
+    esac
+  done <<EOF
+$(words)
+EOF
+  [ -n "$expecting" ] && all=1
+  while IFS= read -r v; do
+    [ -z "$v" ] && continue
+    v=${v#/[Ff][Oo][Rr][Mm]/}
+    case "$v" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ids="$ids $v" ;; *) all=1 ;; esac
+  done <<EOF
+$(printf '%s\n' "$BARE" | grep -Eio '/form/[^/?&[:space:]]*')
+EOF
+  if [ -n "$all" ] || [ -z "$ids" ]; then
+    need jotform all
+  else
+    for v in $ids; do need jotform "$v"; done
+  fi
+}
+# the tab of `sheets_client.py import <Tab>`, as the shell hands it over: a quoted name whole,
+# an unquoted one its first word; anything it cannot read for sure needs `sheet all`
+sheet_tab() {
+  local rest tab= after= i
+  [ "$W3" = import ] || return 0
+  rest=$CMD
+  for i in 1 2 3; do
+    rest=${rest#"${rest%%[![:space:]]*}"}
+    rest=${rest#"${rest%%[[:space:]]*}"}
+  done
+  rest=${rest#"${rest%%[![:space:]]*}"}
+  case "$rest" in
+    \"*) tab=${rest#\"}
+         case "$tab" in *\"*) after=${tab#*\"}; tab=${tab%%\"*} ;; *) tab= ;; esac
+         case "$tab" in *[\$\`\\]*) tab= ;; esac ;;
+    \'*) tab=${rest#\'}
+         case "$tab" in *\'*) after=${tab#*\'}; tab=${tab%%\'*} ;; *) tab= ;; esac ;;
+    *) tab=${rest%%[[:space:]]*}; after=${rest#"$tab"}
+       case "$tab" in *[\"\'\$\`\\]*) tab= ;; esac ;;
+  esac
+  case "$after" in '' | [[:space:]]*) ;; *) tab= ;; esac
+  printf '%s' "$tab"
+}
+
+# the families of live text in the command; each must be one its launcher writes through
+FAMILIES=
+has '--apply|--rehearse' && FAMILIES="$FAMILIES toolflag"
+has 'clasp[[:space:]]+push|clasp:push' && FAMILIES="$FAMILIES clasp"
+has 'sheets_client\.py[[:space:]]+import' && FAMILIES="$FAMILIES sheetimport"
+has 'api\.jotform\.com|apply_changes[[:space:]]*=[[:space:]]*True' && FAMILIES="$FAMILIES jotform"
+has 'values\(\)\.(update|append|clear)|batchUpdate' && FAMILIES="$FAMILIES sheetapi"
+has 'api\.github\.com/[^[:space:]]*(actions/|dispatches|graphql)' && FAMILIES="$FAMILIES ghurl"
+has '\.salesforce\.com/services/' && FAMILIES="$FAMILIES sfurl"
+has "${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}deploy[[:space:]]+metadata|${SF}data[[:space:]]+(create|update|upsert|import)|${SF}apex[[:space:]]+run|${SF}force:(apex:execute|source:(deploy|push)|mdapi:deploy|data:(record|bulk|tree):)" \
+  && FAMILIES="$FAMILIES sfraw"
+[ -n "$SF_API" ] && FAMILIES="$FAMILIES sfraw"
+has "${GH}(variable|secret)[[:space:]]+${REPO}set|${GH}workflow[[:space:]]+${REPO}(enable|disable)" && FAMILIES="$FAMILIES ghswitch"
+has "${GH}run[[:space:]]+${REPO}rerun|${GH}workflow[[:space:]]+${REPO}run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+${REPO}run" \
+  && FAMILIES="$FAMILIES ghrun"
+[ -n "$GH_API" ] && FAMILIES="$FAMILIES ghapi"
+[ -z "$FAMILIES" ] && nope "no write the automatic go knows."
+case "$LAUNCHER:$TOOL" in
+  python:form | python:sf) OK_FAMILIES=" toolflag " ;;
+  python:sheets) OK_FAMILIES=" sheetimport " ;;
+  python:snippet) OK_FAMILIES=" jotform sheetapi ghurl sfurl " ;;
+  curl:) OK_FAMILIES=" jotform ghurl sfurl " ;;
+  sf: | sfdx:) OK_FAMILIES=" sfraw sfurl " ;;
+  gh:) OK_FAMILIES=" ghswitch ghrun ghapi ghurl " ;;
+  npm: | npx: | clasp:) OK_FAMILIES=" clasp " ;;
+  *) OK_FAMILIES=" " ;;
+esac
+for f in $FAMILIES; do
+  case "$OK_FAMILIES" in *" $f "*) ;; *) nope "it is no write the automatic go knows ($f text under $W1${TOOL:+ $SCRIPT})." ;; esac
+done
+
+# what each family writes, and so must be backed up
+if [ -z "$WHY" ]; then
+  for f in $FAMILIES; do
+    case "$f" in
+      toolflag)
+        if [ "$TOOL" = sf ]; then
+          need salesforce "${SCRIPT#tools/}"
+        else
+          jotform_needs
+          [ "$SCRIPT" = tools/rename_club.py ] && need sheet all
+          if [ "$SCRIPT" = tools/auto_sync.py ]; then
+            abbrev_of --apply-salesforce 8 && nope "auto_sync.py --apply-salesforce creates Salesforce accounts with no rollback record."
+            abbrev_of --synclog 3 && need sheet all
+          fi
+        fi ;;
+      clasp) need appsscript HEAD ;;
+      sheetimport) TAB=$(sheet_tab); need sheet "${TAB:-all}" ;;
+      jotform) jotform_needs ;;
+      sheetapi) need sheet all ;;
+      ghurl | ghapi)
+        if has 'dispatches|graphql'; then
+          nope "a repository dispatch or GraphQL call is never automatic."
+        else
+          need github all
+        fi ;;
+      sfurl | sfraw) need salesforce-plan - ;;
+      ghswitch) need github all ;;
+      ghrun) need jotform all ;;
+    esac
+  done
+fi
+
+# a backup record of today that still holds: the path of the last one for target and id
+record() {   # target id
+  [ -f "$BACKUPS" ] || return 1
+  local p found=
+  while IFS= read -r p; do
+    case "$p" in '' | . | /* | .. | ../* | */.. | */../*) continue ;; esac
+    [ -e "$PROJECT/$p" ] && found=$p
+  done <<EOF
+$(T=$1 I=$2 D=$TODAY awk -F'\t' 'NF == 4 && $2 == ENVIRON["T"] && $3 == ENVIRON["I"] && substr($1, 1, 11) == ENVIRON["D"] " " && $1 ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/ { print $4 }' "$BACKUPS" 2>/dev/null)
+EOF
+  [ -n "$found" ] || return 1
+  printf '%s' "$found"
+}
+# the Salesforce plan folders a raw write names (data/sf_<topic>/...): each needs a file in
+# its before/ modified today
+sf_topics() {
+  local w
+  while IFS= read -r w; do
+    w=${w#--*=}
+    w=${w#@}
+    w=${w#./}
+    case "$w" in data/sf_*/?*) ;; *) continue ;; esac
+    case "/$w/" in */../*) continue ;; esac
+    w=${w#data/}
+    printf '%s\n' "data/${w%%/*}"
+  done <<EOF
+$(words)
+EOF
+}
+before_today() {   # data/sf_<topic>
+  [ -d "$PROJECT/$1/before" ] || return 1
+  [ -n "$(find "$PROJECT/$1/before" -type f -newermt "$TODAY" ! -newermt "$TODAY 23:59:59" 2>/dev/null | head -1)" ]
+}
+# appsscript/ tracked, with nothing uncommitted or untracked under it: the short HEAD
+appsscript_head() (
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_CEILING_DIRECTORIES
+  [ -d "$PROJECT/appsscript" ] || exit 1
+  command -v git >/dev/null 2>&1 || exit 1
+  [ -n "$(git -C "$PROJECT" ls-files -- appsscript 2>/dev/null | head -1)" ] || exit 1
+  STATUS=$(git -C "$PROJECT" status --porcelain --untracked-files=all -- appsscript 2>/dev/null) || exit 1
+  [ -z "$STATUS" ] || exit 1
+  SHA=$(git -C "$PROJECT" rev-parse HEAD 2>/dev/null) || exit 1
+  [ -n "$SHA" ] || exit 1
+  printf '%s' "${SHA:0:7}"
+)
+sf_tool_record() {   # tool file name: its own rollback record, written before each write
+  case "$1" in
+    sf_backfill.py) echo "ledger.csv in its --dir (default data/backfill_2026-09)" ;;
+    sf_dupes.py) echo "merge_rollback.json in the plan's folder" ;;
+    sf_girls_present.py) echo "ledger.csv in its --dir (default data/sf_girls_present)" ;;
+    sf_partner_monthly.py) echo "ledger.csv in its --dir (default data/sf_partner_monthly)" ;;
+    sf_report_folders.py) echo "ledger.csv in its --dir (default data/sf_report_folders)" ;;
+  esac
+}
+
+if [ -z "$WHY" ]; then
+  while IFS=$'\t' read -r target ident; do
+    [ -z "$target" ] && continue
+    case "$target" in
+      jotform)
+        if [ "$ident" != all ] && p=$(record jotform "$ident"); then
+          add_used "$p"; add_target jotform "$ident"
+        elif p=$(record jotform all); then
+          add_used "$p"; add_target jotform "$ident"
+        elif [ "$ident" = all ]; then
+          HINTS="$HINTS
+- no backup from today of every form (jotform all): run python3 backup_forms.py first."
+        else
+          HINTS="$HINTS
+- no backup from today of form $ident: run python3 backup_forms.py --form $ident first."
+        fi ;;
+      sheet)
+        if [ "$ident" != all ] && p=$(record sheet "$ident"); then
+          add_used "$p"; add_target sheet "$ident"
+        elif p=$(record sheet all); then
+          add_used "$p"; add_target sheet "$ident"
+        elif [ "$ident" = all ]; then
+          HINTS="$HINTS
+- no backup from today of the Sheet (sheet all): run python3 tools/sheets_client.py export-all data/sheet_$TODAY first."
+        else
+          HINTS="$HINTS
+- no backup from today of the Sheet's $ident tab: run python3 tools/sheets_client.py export \"$ident\" data/sheet_$TODAY/$ident.csv (or export-all) first."
+        fi ;;
+      github)
+        if p=$(record github all); then
+          add_used "$p"; add_target github all
+        else
+          HINTS="$HINTS
+- no backup from today of the sync's GitHub switches (github all): run python3 tools/github_switches.py backup first."
+        fi ;;
+      appsscript)
+        if sha=$(appsscript_head); then
+          add_used "appsscript/ at HEAD $sha"; add_target appsscript "$sha"
+        else
+          HINTS="$HINTS
+- appsscript/ is not clean and committed (a change, an untracked file, or no git): commit it first, so the version before the push is in git."
+        fi ;;
+      salesforce)
+        add_used "$(sf_tool_record "$ident")"; add_target salesforce "$ident" ;;
+      salesforce-plan)
+        TOPICS=$(sf_topics | sort -u)
+        if [ -z "$TOPICS" ]; then
+          HINTS="$HINTS
+- no backup from today: the command names no plan folder data/sf_<topic>/ whose before/ retrieve is from today (sf project retrieve start ... --target-dir data/sf_<topic>/before first)."
+        fi
+        while IFS= read -r topic; do
+          [ -z "$topic" ] && continue
+          if before_today "$topic"; then
+            add_used "$topic/before"; add_target salesforce "${topic#data/}"
+          else
+            HINTS="$HINTS
+- no backup from today of $topic/: retrieve what it changes into $topic/before/ first (sf project retrieve start ... --target-dir $topic/before)."
+          fi
+        done <<EOF
+$TOPICS
+EOF
+        ;;
+    esac
+  done <<EOF
+$NEEDS
+EOF
+  [ -n "$HINTS" ] && nope "Not automatic - a backup is missing:$HINTS"
+  [ -z "$USED" ] && nope "no backup on record."
+else
+  WHY="Not automatic: $WHY"
+fi
+
+if [ -z "$WHY" ]; then
+  case "$MODE" in
+    '"default"' | '"acceptEdits"' | '"auto"' | '"dontAsk"' | '"bypassPermissions"' | null) ;;
+    '"plan"') WHY="Not automatic in plan mode (a hook's allow has no effect there); its backup from today is on record: $USED." ;;
+    *) WHY="Not automatic in this mode; its backup from today is on record: $USED." ;;
+  esac
+fi
+[ -n "$WHY" ] && not_automatic "$WHY"
+
+# ALLOWED: the answer, then the log line, then the notification (detached: the hook never
+# waits on it; the command only ever an argument, never AppleScript text)
+TARGET=${TARGETS// /+}
+REASON="AUTO-APPROVED by .claude/hooks/live_gate.sh - a live write to $IDS, backed up today: $USED.
+Logged in .claude/live_gate.log; Ryan is notified. $RUNBOOK"
+OUT=$(decide allow "$REASON") || OUT=
+if [ -z "$OUT" ]; then
+  log BLOCKED
+  printf '%s\n' "BLOCKED by .claude/hooks/live_gate.sh - the allow decision could not be built for: $SHOWN" >&2
+  exit 2
+fi
+printf '%s ALLOWED mode=%s%s target=%s backup=%s %s\n' "$(date '+%F %T')" "$MODE" "$CALLER" "$TARGET" "$USED" "$CMD" >> "$LOG"
+if command -v osascript >/dev/null 2>&1; then
+  (osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' \
+    "GLOW live write auto-approved" "$IDS: ${CMD:0:120}" </dev/null >/dev/null 2>&1 &)
+fi
+printf '%s\n' "$OUT"
+exit 0
