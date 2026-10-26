@@ -4055,9 +4055,10 @@ D4 in `glow/sf_keep_list.csv`, the GLOW Club Training dashboard, is the dashboar
 D3, the GLOW Club Observations dashboard. D4's label and its reports' labels stay as they are
 (#70), and each component's title is its report's label. It runs as the specified running user
 (`SpecifiedUser`), so it shows the data of its last refresh: a refresh after each change (a PUT,
-Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current. #78's build is
-`data/sf_dash_training_2026-10-24/build/`; until it is deployed on Ryan's go (the plan's Result),
-the org holds the vendor's dashboard and reports.
+Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current. #78's build
+(`data/sf_dash_training_2026-10-24/build/`) was deployed on 2026-10-26 (deploy
+`0AfRP000002i76H0AQ`, the plan's Result): items 13-15 are live on D4, and item 16 joins it after
+#77 lands (the plan's step 9).
 
 The measures, each a report in "GLOW Monthly Reports" on the Monthly Report object `DHIS2__c`, and
 each component on its own report:
@@ -4102,7 +4103,7 @@ How the reports read the data:
 - Each report carries the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
   (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
   `notContain` `test` (the lookup matches on the account's name). In the last 12 months the rule
-  leaves out 2 of 569 Monthly Reports (2026-10-24).
+  leaves out 2 of 569 Monthly Reports (2026-10-24; on 2026-10-26 the same, 567 with the rule).
 - Items 15 and 16 also keep their filter on a non-blank answer.
 
 The dashboard's only filter is Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`,

@@ -1,7 +1,7 @@
 ---
 title: GLOW Club Training (D4, "Mentors") by partner and month, over the last 12 months
 author: Claude (ticket #78, with Ryan's decisions of 2026-10-23 and 2026-10-24)
-status: in-progress      # ticket #78; built 2026-10-25, nothing deployed, the live steps await Ryan's go
+status: in-progress      # ticket #78; steps 1-8 ran 2026-10-26 (items 13-15 and D4 deployed); step 9 (item 16) after #77 and step 10 (Ryan's Subscribe) left
 created: 2026-10-25
 intent: none - SOW p.5, Approach 1 (dashboards that reflect current data) and Ryan, 2026-10-21, "This data should be displayed by the Partner and Month."
 ---
@@ -10,8 +10,8 @@ intent: none - SOW p.5, Approach 1 (dashboards that reflect current data) and Ry
 
 Ticket #78 (epic #68). The dashboard D4 of `glow/sf_keep_list.csv`, labelled "Mentors" in the
 org (`01ZRP000006quAj2AI`, folder "GLOW Monthly Dashboards"), and its kept reports, items 13-16,
-show 2025 only (a fixed `Year__c` filter), with the month name as a column, and D4's snapshot
-dates from 2026-08-13 (RUNBOOK "Why the dashboards showed old data"). This change applies #74's
+showed 2025 only (a fixed `Year__c` filter), with the month name as a column, and D4's snapshot
+dated from 2026-08-13 (RUNBOOK "Why the dashboards showed old data"). This change applies #74's
 fix steps 1-5 to them: the last 12 months through `DHIS2__c.Period__c` (#128), grouped by the
 partner then the month, the test-record rule of #70, and items 13-15 on the dashboard now, item 16
 once #77 has landed. Procedure and the SOQL signals: RUNBOOK "Monthly Report dashboards in
@@ -39,7 +39,7 @@ Salesforce", `### GLOW Club Training`.
   13-16 and four unused bucket fields (on `Did_you_implement_GLOW_Club_last_month_f__c`); the build
   gives items 13-15 their descriptions again, worded for the new grouping, and the unused buckets
   stay out.
-- D4 today: 2 components, both tables on "DHIS2 Reports" reports filtered on 2025 ("Mentors Discuss
+- D4 as retrieved 2026-10-24, before the deploy: 2 components, both tables on "DHIS2 Reports" reports filtered on 2025 ("Mentors Discuss
   Program Implementation" `00ORP000005uecc2AA`, "Lead Training Session with Mentors LastM"
   `00ORP000005ufNN2AY`), none of items 13-16. Its filter "Assigned Partner Manager" has 6 values;
   its running user is active (`SpecifiedUser`) and stays as it is.
@@ -85,7 +85,8 @@ build was made by a script from a copy of `before/`.
 - Item 16's report and the two "DHIS2 Reports" reports are as retrieved and are in no deploy of
   this build.
 - Not verified before the check-only: a component grouped by `Period__c` alone on a report grouped
-  by partner then month (the same form as #77's build). The check-only and the read-back settle it.
+  by partner then month (the same form as #77's build). The check-only and the read-back settled
+  it (Result).
 
 ## Rollout (live; each write on Ryan's go)
 
@@ -124,9 +125,11 @@ folder directly in the work folder); the one of item 16 and D4 is `item16/packag
    `rollback/package.xml`, and check that `after/` equals `build/` beyond
    Salesforce's normalisation (`expandOthers`, default attributes); a difference beyond it stops
    the rollout for Ryan.
-6. Refresh the dashboard on Ryan's go:
-   `PUT /services/data/v67.0/analytics/dashboards/01ZRP000006quAj2AI` (`sf api request rest
-   --method PUT`), and read its refresh date back by a GET.
+6. Refresh the dashboard on Ryan's go, a `PUT` on
+   `/services/data/v67.0/analytics/dashboards/01ZRP000006quAj2AI` with an empty body
+   (`sf api request rest /services/data/v67.0/analytics/dashboards/01ZRP000006quAj2AI --method PUT -b '{}'`),
+   and read its refresh date back by a GET. The body is needed: in sf 2.151 the PUT without it
+   fails with "No 'mode' found in 'body'" (2026-10-26).
 7. Check by SOQL on `DHIS2__c`, over the reports' own period (`Period__c = LAST_N_MONTHS:12`),
    that each component equals its item's query (RUNBOOK `### GLOW Club Training`, with
    `LAST_N_MONTHS:12` in place of `LAST_MONTH`): the record counts of items 13 and 14 each equal
@@ -216,14 +219,40 @@ folder directly in the work folder); the one of item 16 and D4 is `item16/packag
 
 ## Result
 
-Done so far, offline and read-only, 2026-10-24 and 2026-10-25: the retrieve into `before/`
-(VPN off), the build in `build/` (3 reports and the dashboard, 4 files; the diff in
-`evidence/build_vs_before.diff`), the move plan (2 rows) and the rollback manifest
-`rollback/package.xml` (4 members, written by script). Nothing is deployed, copied or moved:
-steps 2-10 of the Rollout are live and await Ryan's go, and step 9 also waits for #77.
+Rollout steps 1-8 done on 2026-10-26 (UTC), in an interactive session with the VPN off (route
+`en0`), on Ryan's go (2026-10-25, and the live-gate prompts on the day). Steps 9 and 10 remain:
+step 9 (item 16) waits for #77 to land, and step 10 is Ryan's weekly Subscribe in Lightning.
 
-The baseline the components are checked against after the deploy, #74's SOQL on `DHIS2__c` for
-September 2026, the last complete month, run 2026-10-23 (RUNBOOK "Why the dashboards showed old
-data"): item 13 152, item 14 27, item 15 41 answered (19 Yes, 22 No), item 16 41 answered (37 Yes,
-4 No), from 42 partners with none on a test account. A report filed or changed later moves both
-sides; step 7 runs the queries again on its day.
+Before them, offline and read-only, 2026-10-24 and 2026-10-25: the retrieve into `before/`, the
+build in `build/` (3 reports and the dashboard, 4 files; the diff in
+`evidence/build_vs_before.diff`), the move plan (2 rows) and the rollback manifest
+`rollback/package.xml` (4 members, written by script).
+
+- Step 1: the fresh retrieve `fresh_2026-10-26/` equals `before/` (4 files, byte-equal; it also
+  equals `fresh_2026-10-25/`).
+- Step 2: the copies are in Decommissioned, tagged #78, each after its dry run: item 13
+  `00ORP000009kU9B2AU`, item 14 `00ORP000009kUAn2AM`, item 15 `00ORP000009kUCP2A2`, item 16
+  `00ORP000009kUE12AM` and D4 `01ZRP00000BPIjN2AX`. The ledger
+  `data/sf_dash_training_2026-10-24/ledger.csv` holds their 5 copy rows, dated before the deploy:
+  the copies ran before step 4. D4's copy is for Ryan to rename in Lightning
+  (`copy of 01ZRP000006quAj2AI, #78`).
+- Step 3: the check-only `0AfRP000002i74f0AA` succeeded (4 components).
+- Step 4: the deploy `0AfRP000002i76H0AQ` succeeded, from `build/`.
+- Step 5: read back into `after/`, `after/` equals `build/` except `showValues` true -> false on
+  item 15's ColumnStacked component, the same normalisation Ryan accepted on #77.
+- Step 6: the refresh ran as `sf api request rest … --method PUT -b '{}'` (the bodiless PUT the
+  Rollout first named fails in sf 2.151 with "No 'mode' found in 'body'", so step 6 now carries
+  the body): 3 of 3 components refreshed, 02:45 UTC.
+- Step 7: the SOQL check over `LAST_N_MONTHS:12` (`evidence/soql_check_2026-10-26.txt`) counts 567
+  Monthly Reports with the test-record rule, which leaves out the 2 test records, so the check
+  means something. Each report's numbers equal SOQL: item 13: 567 records, sum 1,422; item 14: 567
+  records, sum 524; item 15: 524 answered, Yes 199, No 325. For one partner, September 2026, item
+  14: report 1 = SOQL 1.
+- Step 8: both "DHIS2 Reports" reports D4 used are in Decommissioned: `00ORP000005ufNN2AY` first
+  (`--limit 1`, then a SOQL check of it), then by the plan `00ORP000005uecc2AA`. The ledger holds 3
+  moves (the first report moved twice, the second time Decommissioned to Decommissioned).
+
+The September 2026 baseline, #74's SOQL on `DHIS2__c` for the last complete month, run 2026-10-23
+(RUNBOOK "Why the dashboards showed old data"): item 13 152, item 14 27, item 15 41 answered (19
+Yes, 22 No), item 16 41 answered (37 Yes, 4 No), from 42 partners with none on a test account.
+Step 7 checked the components against SOQL run on 2026-10-26, over the reports' 12 months.
