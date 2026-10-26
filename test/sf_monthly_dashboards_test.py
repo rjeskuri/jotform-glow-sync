@@ -1668,8 +1668,9 @@ class AttendanceDashboardDocs(unittest.TestCase):
     UNDO_CMD = re.compile(r"\bsf_report_folders[._]py\s+undo\b")
     # a check-only or deploy ("a check-only of `before/`", "deploy `before/`", "redeployed")
     DEPLOY_WORD = re.compile(r"(?i)\bcheck-only\b|--dry-run\b|\b(re-?)?deploy\w*")
-    # ... said as what is still to come ("undo the moves before `before/` is deployed")
-    LATER = re.compile(r"(?i)\b(before|until|ahead of|prior to)\b[^.;,]{0,25}$")
+    # ... said as what is still to come ("undo the moves before `before/` is deployed"); "before/" is the folder,
+    # not the word (review of PR #143: "First `before/` is deployed" is no deploy still to come)
+    LATER = re.compile(r"(?i)\b(before\b(?!/)|(until|ahead of|prior to)\b)[^.;,]{0,25}$")
     # ... or as what fails ("a check-only of `before/` is refused")
     REFUSED = re.compile(r"(?i)^[^.;,]{0,40}?\b((is|are|was|were|gets?|would be)\s+(refused|rejected|denied)|fails?)\b")
 
@@ -1686,7 +1687,14 @@ class AttendanceDashboardDocs(unittest.TestCase):
         brings the dashboard back from `before/` and no clause check-onlies or deploys `before/`; after it, the
         dashboard is restored from `before/`."""
         text = self.norm(raw)
-        undo = self.UNDO_CMD.search(text)
+        # the undo is the first one run, not one denied ("do not run `... undo` yet"; review of PR #143)
+        undo, at = None, 0
+        for s in sentences(text, ".;"):
+            at = text.find(s, at)
+            m = next((m for m in self.UNDO_CMD.finditer(s) if not self.d.locally_denied(s, m)), None)
+            if m:
+                undo = self.UNDO_CMD.search(text, at + m.start())
+                break
         self.assertTrue(undo, f"{where}: undo step 7's moves, `python3 tools/sf_report_folders.py undo --vpn-off "
                               "--dir data/sf_dash_attendance_<date>`, before `before/` is deployed")
         early, restored, at = [], [], 0
@@ -1874,6 +1882,34 @@ class AttendanceDashboardDocs(unittest.TestCase):
         path = self.plan_path()
         self.assertUndoFirst(self.plan_part(path, "## Rollback", 15), f"{os.path.relpath(path, REPO)}: `## Rollback`")
         self.assertUndoFirst(self.rollback_text(), f"RUNBOOK {self.PART!r}, its Rollback")
+
+    def test_the_undo_first_check_rejects_a_deploy_ahead_of_the_undo(self):
+        """Review of PR #143 (on b8d56e7): the folder name `before/` is not the word "before", and a denied undo
+        ("do not run ... undo yet") is not where the undo runs. A correct order still passes."""
+        undo = "`python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_attendance_<date>`"
+        wrong = {
+            "the folder read as 'before'": f"First `before/` is deployed. Then the moves are undone with {undo}. "
+                                           "After that the dashboard is restored by deploying `before/`.",
+            "a denied undo, never run": f"Do not run {undo} yet; deploy `before/` now. Then run the undo; "
+                                        "the dashboard is restored by deploying `before/`.",
+            "a denied undo, run later": f"Do not run {undo} yet; deploy `before/` now. Then run {undo}; "
+                                        "the dashboard is restored by deploying `before/`.",
+        }
+        for name, probe in wrong.items():
+            with self.subTest(name), \
+                    self.assertRaises(AssertionError, msg=f"assertUndoFirst accepts {name}: {probe!r}"):
+                self.assertUndoFirst(probe, name)
+        right = {
+            "undo, check-only, deploy": f"First the moves are undone with {undo}. Then a check-only of `before/`, "
+                                        "then deploy `before/`; the dashboard is restored by deploying `before/`.",
+            "undo said ahead of the deploy": f"Undo the moves before `before/` is deployed: {undo}. Then a check-only "
+                                             "of `before/` passes and the dashboard is restored by deploying `before/`.",
+            "a denial in the sentence before": f"The moves are not reverted by the deploy. Run {undo}; then the "
+                                               "dashboard is restored by deploying `before/`.",
+        }
+        for name, probe in right.items():
+            with self.subTest(name):
+                self.assertUndoFirst(probe, name)
 
     # --- the plan ---------------------------------------------------------------------------------------------
 
