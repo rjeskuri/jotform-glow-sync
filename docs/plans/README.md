@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-10-26 | Item 12, "Partners that recruited new mentors", a component on GLOW Club Training (D4) | done 2026-10-26 |  | [2026-10-26-sf-new-mentors.md](2026-10-26-sf-new-mentors.md) |
 | 2026-10-26 | The session notes in Salesforce - Attendance_Batch__c.Session_Notes__c, mapped from each form's sessionNotes, and the audit that requires it | in-progress |  | [2026-10-26-session-notes-salesforce.md](2026-10-26-session-notes-salesforce.md) |
 | 2026-10-25 | GLOW Club Training (D4, "Mentors") by partner and month, over the last 12 months | in-progress |  | [2026-10-25-sf-dash-training.md](2026-10-25-sf-dash-training.md) |
 | 2026-10-25 | The optional session-notes field and its translations on all five attendance forms | done 2026-10-26 |  | [2026-10-25-session-notes.md](2026-10-25-session-notes.md) |

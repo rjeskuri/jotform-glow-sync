@@ -78,6 +78,16 @@ rule; the rollback: the reports from their Decommissioned copies, the dynamic da
 change's `before/` only while a fresh retrieve equals `after/`, never an older build; the plan
 `docs/plans/<date>-sf-dash-attendance.md` names #75 and its Rollout runs before/, copies, check-only, Ryan's go,
 deploy, `after/`, SOQL in that order.
+
+NewMentorsDocs (ticket #80): item 12, the report "Partners that recruited new mentors" (Ryan, 2026-10-26: option A),
+a component on D4. The RUNBOOK's `### GLOW Club Training` defines it: the Monthly Reports (`DHIS2__c`) answering Yes
+and No to `Recruit_any_new_mentors_last_month__c`, by partner (`Account__c`) and month (`Period__c`), blank answers
+left out, each Yes one partner's month and not a number of mentors, with a SOQL signal (GROUP BY the answer,
+`LAST_N_MONTHS:12`, the test-record rule), kept apart from item 13; `Newly_recruited__c` and "Lead Mentor" contacts
+only ever denied. The plan `docs/plans/<date>-sf-new-mentors.md` names #80; its Rollout runs before/, the copy of
+D4, check-only, Ryan's go, deploy, `after/` against `build/`, SOQL for six complete months and one partner; its
+Rollback restores D4 from its copy or a guarded `before/`, then moves the new report to Decommissioned, deleting
+nothing. A dated DECISIONS entry records the definition with **Why**, **Rejected** and **Consequences**.
 """
 import glob
 import os
@@ -1043,7 +1053,7 @@ class CategoryFoldersDocs(unittest.TestCase):
 
     The table's groups, dashboard labels and report counts are read from `glow/sf_keep_list.csv`, not pinned:
     a group's report count is its rows on GLOW's keep list that are not a dashboard, item 12 ("New mentors
-    recruited", id `new`, built into the folder by #80) included - the table describes GLOW's list (18
+    recruited", built into the folder by #80) included - the table describes GLOW's list (18
     reports in five dashboards, and the table), not what the org holds on one day."""
 
     longMessage = False         # the messages say what to fix
@@ -4036,11 +4046,12 @@ class TrainingDashboardDocs(unittest.TestCase):
         return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
 
     def items(self):
-        """Items 13-16 of `glow/sf_keep_list.csv`, one row each (the file repeats some rows)."""
+        """Items 13-16 of `glow/sf_keep_list.csv`, one row each (the file repeats some rows): the group's reports
+        but item 12, which is #80's own report (selected by its item number, not by an id reading `new`)."""
         import csv
         with open(self.KEEP_LIST, encoding="utf-8", newline="") as f:
             rows = [r for r in csv.DictReader(f) if r["group"] == self.GROUP and r["kind"] == "report"
-                    and r["id"] != "new"]
+                    and r["item"] != "12"]
         out = {}
         for r in rows:
             out.setdefault(r["item"], r)
@@ -5552,6 +5563,678 @@ class AttendanceDashboardDocs(unittest.TestCase):
                         f"{where}: item {self.RETIRED}'s report ({r['id']}) is moved to Decommissioned after the deploy, "
                         "once the dashboard no longer uses it (one sentence naming it, `move` and Decommissioned)")
         self.d.assertNoContradiction(raw, where)
+
+
+class NewMentorsDocs(unittest.TestCase):
+    """Ticket #80: keep-list item 12, "New mentors recruited", on the dashboard GLOW Club Training (`D4`).
+
+    The agreed definition (Ryan, 2026-10-26, on the ticket: option A): the report "Partners that recruited new
+    mentors" counts the Monthly Reports (`DHIS2__c`) answering Yes and No to
+    `Recruit_any_new_mentors_last_month__c` ("Did you recruit any new mentors last month?"), by partner
+    (`Account__c`) and month (`Period__c`, the month the report covers), blank answers left out, with the
+    test-record rule (#70) and the last 12 months (`Period__c = LAST_N_MONTHS:12`, #128), like items 15 and 16.
+    Each Yes is one partner's month, not a number of mentors. Rejected: `Newly_recruited__c` (recruits still
+    needing orientation, not recruits), the contacts with a "Lead Mentor" role, and a separate dashboard (a
+    component on D4 is enough). These facts are pinned here from the ticket, not read from the docs under test;
+    D4's id comes from `glow/sf_keep_list.csv`.
+
+    The live deploy runs later, in an interactive session: the report's id does not exist yet, so item 12's id
+    in `glow/sf_keep_list.csv` (test/sf_keep_list_test.py) is not tested here, and the plan's `## Result` may
+    say the deploy is pending. The helpers are #78's (`TrainingDashboardDocs`) and #69's; counts and ids only.
+
+    Round 2 (the test-breaker passed with wrong claims beside the right ones): a wrong claim fails wherever it
+    stands, in item 12's RUNBOOK units, the whole plan (its `## Result` included) and the whole decision but its
+    Rejected bullet: a mentor headcount (a quantity word beside "mentor(s)", not denied: "how many new mentors
+    each partner recruited", "adds up the Yes answers as the new mentors", "a mentor headcount"), a month from
+    any date field but `Period__c` (standard, or a custom one like `Submitted_On__c`), `Newly_recruited__c` or a
+    "Lead Mentor" contact as the source. The plan's six-month query has a period on `Period__c` and runs month by
+    month; Rejected gives each source's reason; Consequences says the figure counts partners. The "No" of a
+    Yes/No answer is masked before a denial is looked for.
+
+    Round 3: "recruits" count as mentors; a person per partner ("the recruits each partner signed up") or per
+    answer ("one new mentor brought in") fails, and a clause saying what a Yes stands for beside a mentor says one
+    partner's month; a dashboard of its own or "in place of D4" fails outside Rejected; a window other than 12
+    months fails in item 12's units and the decision; each Rejected reason is the agreed one ("still need
+    orientation", household accounts with no partner link, D4 enough) and nothing turns it around."""
+
+    longMessage = False         # the messages say what to fix
+    DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
+    PLANS = os.path.join(REPO, "docs", "plans", "*-sf-new-mentors.md")
+    TICKET = re.compile(r"(?<![\w#])#80\b")
+    ITEM = "12"
+    LABEL = "Partners that recruited new mentors"           # the report's label (Ryan, 2026-10-26)
+    FIELD = "Recruit_any_new_mentors_last_month__c"         # Yes/No, one answer per partner per month
+    NEWLY = "Newly_recruited__c"                            # rejected: recruits still needing orientation
+    OTHER_FIELDS = TrainingDashboardDocs.FIELDS             # items 13-16 (#74)
+    WORK_DIR = re.compile(r"data/sf_new_mentors_\d{4}-\d\d-\d\d/")
+    BEFORE = re.compile(r"data/sf_new_mentors_\d{4}-\d\d-\d\d/before/")
+    LAST_12_Q = re.compile(r"(?i)\bPeriod__c\s*=\s*LAST_N_MONTHS:12\b")
+    ANSWER_NOT_NULL = re.compile(r"(?i)\bRecruit_any_new_mentors_last_month__c\s*(!=|<>)\s*null\b")
+    COUNT = re.compile(r"(?i)\bCOUNT\(\s*(Id)?\s*\)")
+    OR = re.compile(r"(?i)\bOR\b")
+    PARTNER_Q = re.compile(r"(?i)\bAccount__r\.Name\s*=\s*'|\bAccount__c\s*=\s*'")
+    YES_AND_NO = re.compile(r"\bYes\b\s*(,|and|or|/|&)\s*\bNo\b|\bNo\b\s*(,|and|or|/|&)\s*\bYes\b")
+    YES = re.compile(r"\bYes\b")
+    # "each Yes is one partner's month", "a partner's month", "counts partners"
+    PARTNER_MONTH = re.compile(r"(?i)\b(one\s+|a\s+)?partner['’]s\s+month\b")
+    # "not a number of mentors", "never a count of new mentors": that denial is the rule itself
+    NOT_HEADCOUNT = re.compile(r"(?i)\b(not|never|no)\s+(a\s+|the\s+)?(number|count|head\s*count|total|tally)\s+of\s+"
+                               r"(new\s+|recruited\s+)?mentors\b")
+    BLANK_OUT = re.compile(r"(?i)\bblank\b[^.;]{0,40}?\b(left out|excluded|not counted|never counted|dropped)\b|"
+                           r"\bleav\w*\s+out\s+(\w+\s+){0,2}?blank\b|\bexclud\w*\s+(\w+\s+){0,2}?blank\b")
+    EACH_PARTNER_MONTH = re.compile(r"(?i)\b(each|every|per|by)\s+(the\s+)?partner\b[^.;]{0,40}?\bmonths?\b")
+    LEAD_MENTOR = re.compile(r"(?i)\bLead Mentor\b")
+    SEPARATE_DASHBOARD = re.compile(r"(?i)\b(separate|sixth|own|new|second|standalone|stand-alone|extra|"
+                                    r"dedicated)\s+(\w+\s+)?dashboard\b")
+    NEW_REPORT = re.compile(r"(?i)\bnew report\b|\bitem 12['’]s report\b|\bthe report of item 12\b|"
+                            + re.escape(LABEL))
+    MOVE = re.compile(r"(?i)\bmov(e|es|ed|ing)\b")
+    NOTHING_DELETED = re.compile(r"(?i)\b(nothing|never|no\s+\w+)\b[^.;]{0,40}?\bdelet\w*")
+    REJECT = KeepListDocs.REJECT
+    TEST_RECORD = re.compile(r"(?i)\btest[- ]record rule\b")
+    SIX_MONTHS = re.compile(r"(?i)\b(six|6)\s+(last\s+)?complete\s+months?\b|\blast\s+(six|6)\s+complete\s+months?\b|"
+                            r"\b(six|6)\s+months?\b[^.;]{0,20}?\bcomplete\b")
+    ONE_PARTNER = re.compile(r"(?i)\b(one|a single)\s+partner\b")
+    # another ticket's build, retrieve or folder (#78's OTHER_CHANGE, for this change)
+    OTHER_CHANGE = re.compile(r"#(?!80\b)\d+['’]s\s+(\w+\s+)?`?(build|retrieve|before/|after/|build/|copy|copies|backup)|"
+                              r"\b(build|retrieve|before/|after/|build/)`?\s+(of|from)\s+(ticket\s+)?#(?!80\b)\d+|"
+                              r"\bdata/sf_(?!new_mentors_)[\w.-]+/(build|before|after)/")
+    # round 2 (the test-breaker): the "No" of a Yes/No answer is no negation ("the Yes and No answers for each
+    # partner and month"); it is masked (same length) before a denial is looked for
+    ANSWER_NO = re.compile(r"\bYes\b\s*(,|and|or|/|&)\s*\bNo\b|\bNo\b\s*(,|and|or|/|&)\s*\bYes\b|"
+                           r"\b(a|the|each|every|one)\s+No\b|\bNo\s+answers?\b|\bNo\s+(counts?|groups?|columns?)\b")
+    # a headcount claim: a quantity word and "mentor(s)" in one clause, neither denied, once the names that hold
+    # "mentors" (field names, the report's label, the keep list's labels, the question) are blanked
+    QUANTITY = re.compile(r"(?i)\b(numbers?|counts?|counted|counting|totals?|totall?ed|sums?|summed|summing|"
+                          r"add(s|ed|ing)?\s+up|how\s+many|head\s*counts?|tall(y|ies)|figures?|amounts?)\b")
+    # round 3: a recruit is a mentor too ("the recruits each partner signed up")
+    MENTOR_WORD = re.compile(r"(?i)\bmentors?\b|\brecruits\b|\brecruitees?\b|\brecruited\s+(people|persons|adults|"
+                             r"volunteers|women)\b")
+    # a person per partner ("the recruits each partner signed up", "new mentors each partner recruited") or one
+    # person per answer ("one new mentor brought in"; "at least one new mentor" is what a Yes means, and passes)
+    PERSON_PER_PARTNER = re.compile(r"(?i)\b(mentors?|recruits)\s+(that\s+|who\s+|whom\s+)?(each|every|the|a|that|this|"
+                                    r"one|per)\s+partner\b")
+    ONE_PERSON = re.compile(r"(?i)(?<!least\s)\b(one|a\s+single|each|every)\s+(new\s+|recruited\s+)?(mentor|recruit)\b")
+    AT_LEAST_ONE = re.compile(r"(?i)\bat\s+least\s+one\b")
+    # the rejected field's own description, which names recruits: "recruits still needing orientation"
+    ORIENTATION_REASON = re.compile(r"(?i)\bstill\s+need\w*\s+(\w+\s+){0,3}?orientation\b")
+    # a window other than the last 12 months ("the last 24 months", `LAST_N_MONTHS:24`)
+    WINDOW = re.compile(r"(?i)\bLAST_N_MONTHS:(?P<n>\d+)\b|\b(last|past|previous)\s+(?P<w>\d+|one|two|three|six|nine|"
+                        r"twelve|eighteen|twenty-four|thirty-six)\s+(complete\s+|calendar\s+|full\s+)?months\b")
+    # D4 replaced ("in place of D4", "instead of GLOW Club Training")
+    IN_PLACE_OF_D4 = re.compile(r"(?i)\b(in\s+place\s+of|instead\s+of|rather\s+than)\s+(the\s+)?"
+                                r"(dashboard\s+)?(D4|GLOW Club Training|[\"“]Mentors[\"”])")
+    # what turns a Rejected reason around ("rejected only because", "even though", "for now", "D4 is not enough")
+    TURNED = re.compile(r"(?i)\b(even\s+though|although|though|despite|only\s+because|for\s+now|later|until|yet|"
+                        r"not\s+enough|insufficient|carr(y|ies)\s+a\s+partner|ha(ve|s)\s+a\s+partner\s+link)\b|"
+                        r"isn['’]t\s+enough")
+    QUESTION = "Did you recruit any new mentors last month?"
+    NAME_TOKEN = re.compile(r"\b\w+__[cr]\b")
+    # the one way to speak of a mentor count: the true count a future form question would give
+    TRUE_COUNT = re.compile(r"(?i)\b(true|real|actual|exact)\s+(number|count|total|headcount)\b")
+    FORM_QUESTION = re.compile(r"(?i)\b(question|form)\b")
+    # a custom field that reads as a date (`Submitted_On__c`, `YearMonth__c`), which is never the month
+    IDENT = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_]*?__c\b")
+    DATE_LIKE = re.compile(r"(?i)date|day|week|month|year|time|stamp|period|created|submitted|modified|_on$|_at$")
+    BUILT_FROM = re.compile(r"(?i)\b(built|computed|made|derived|formula|calculated)\b")
+    # a query's period on Period__c, and one that gives month by month (grouped by the month, or one month)
+    Q_PERIOD = re.compile(r"(?i)\bPeriod__c\s*(=\s*(LAST_N_MONTHS:\d+|LAST_MONTH|\d{4}-\d\d-\d\d)\b|"
+                          r"(>=|<=|>|<)\s*\d{4}-\d\d-\d\d\b)")
+    # fix round (PR #155 review): the six months' check groups by the month and covers exactly six complete months
+    BY_MONTH_GROUP = re.compile(r"(?i)\bGROUP\s+BY\s+[^`;]*?(CALENDAR_MONTH\(\s*Period__c\s*\)|\bPeriod__c\b)")
+    N_MONTHS = re.compile(r"(?i)\bPeriod__c\s*=\s*LAST_N_MONTHS:(\d+)\b")
+    BOUND = re.compile(r"(?i)\bPeriod__c\s*(>=|<=|>|<|=)\s*(\d{4})-(\d\d)-(\d\d)\b")
+    OTHER_LITERAL = re.compile(r"(?i)\bPeriod__c\s*=\s*(?!LAST_N_MONTHS:)[A-Z_]+(:\d+)?\b")
+    BY_MONTH_Q = re.compile(r"(?i)\bGROUP\s+BY\s+[^`;]*?(CALENDAR_MONTH\(\s*Period__c\s*\)|\bPeriod__c\b)|"
+                            r"\bPeriod__c\s*=\s*(LAST_MONTH|\d{4}-\d\d-\d\d)\b|\bPeriod__c\s*>=?\s*\d{4}-\d\d-\d\d\b")
+    # what the measure counts, as a consequence: partners or partner-months, not mentors
+    PARTNER_UNIT = re.compile(r"(?i)\bpartner['’]s\s+months?\b|\bpartner[- ]months?\b|\b(number|count)\s+of\s+"
+                              r"partners\b|\bcounts?\s+(\w+\s+){0,2}?partners\b|\bpartners,?\s+not\s+mentors\b")
+    # each rejected source with its reason
+    LEAD_REASON = re.compile(r"(?i)\bhousehold|\bno partner\b|\bnot linked\b|\bno link\b|\bwithout\s+(a\s+)?partner\b|"
+                             r"\bnot (tied|attached|connected) to\b|\bno mentor list\b")
+    DASH_REASON = re.compile(r"(?i)\bD4\b|\bcomponent\b|GLOW Club Training|\bkeep list\b|\benough\b")
+
+    @classmethod
+    def setUpClass(cls):
+        TrainingDashboardDocs.setUpClass()
+        cls.t = TrainingDashboardDocs()         # #78's helpers: part, units, step_clauses, the guards
+        cls.d = cls.t.d                         # #69's: locally_denied, denies, assertNoContradiction
+        cls.k = cls.t.k                         # #70's
+        import csv
+        with open(TrainingDashboardDocs.KEEP_LIST, encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+        # names of two words or more: D4's label is the bare word "Mentors", which is the word looked for
+        names = {r[c] for r in rows for c in ("measure", "label_today", "label_target") if len(r[c].split()) > 1}
+        names |= {cls.LABEL, cls.QUESTION}
+        cls.NAMES = re.compile("|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+                               + r"|\bLead Mentors?\b", re.I)
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def clauses(self, text, ends=".;"):
+        return sentences(self.norm(text), ends)
+
+    @classmethod
+    def unno(cls, s):
+        """`s` with the "No" of a Yes/No answer masked, the same length (positions hold)."""
+        return cls.ANSWER_NO.sub(lambda m: re.sub(r"\bNo\b", "N_", m.group(0)), s)
+
+    def denied(self, s, m):
+        return self.d.locally_denied(self.unno(s), m)
+
+    def stated(self, s, rx):
+        return any(not self.denied(s, m) for m in rx.finditer(s))
+
+    def assertNoHeadcount(self, text, where):
+        """No clause of `text` says the measure is a number of mentors ("how many new mentors each partner
+        recruited", "adds up the Yes answers as the new mentors", "a mentor headcount"): each Yes is one partner's
+        month (Ryan, 2026-10-26). A quantity word beside "mentor(s)" is only ever denied, but for the true count a
+        form question would give."""
+        rule = "item 12 counts Monthly Reports, each Yes one partner's month, never a number of mentors or recruits " \
+               "(Ryan, 2026-10-26)"
+        for s in sentences(flat(text), ".;:"):
+            if self.TRUE_COUNT.search(s) and self.FORM_QUESTION.search(s):
+                continue
+            k = self.unno(self.NAMES.sub(lambda m: "X" * len(m.group(0)), self.NAME_TOKEN.sub(
+                lambda m: "X" * len(m.group(0)), s)))
+            who = [m for m in self.MENTOR_WORD.finditer(k) if not self.d.locally_denied(k, m)]
+            if not who:
+                continue
+            for rx, what in ((self.PERSON_PER_PARTNER, "people per partner"), (self.ONE_PERSON, "one person per answer")):
+                for m in rx.finditer(k):
+                    self.assertTrue(self.d.locally_denied(k, m), f"{where}: {rule}; {m.group(0)!r} counts {what} (name "
+                                                                 f"it only to deny it): {s[:200]!r}")
+            # the rejected field's own description ("recruits still needing orientation") is no claim about item 12
+            qty = [m for m in self.QUANTITY.finditer(k) if not self.d.locally_denied(k, m)]
+            if qty and not self.ORIENTATION_REASON.search(s):
+                self.fail(f"{where}: {rule}; {qty[0].group(0)!r} beside {who[0].group(0)!r} says otherwise (name a "
+                          f"mentor count only to deny it): {s[:200]!r}")
+            # what a Yes stands for, said beside a mentor: one partner's month, or a denied headcount
+            if [m for m in self.YES.finditer(k) if not self.d.locally_denied(k, m)]:
+                self.assertTrue(self.stated(s, self.PARTNER_MONTH) or self.NOT_HEADCOUNT.search(s)
+                                or self.AT_LEAST_ONE.search(s) or re.search(r"(?i)\bpartner['’]s\s+(Yes|answer)\b", s),
+                                f"{where}: {rule}; a clause that says what a Yes stands for beside a mentor says one "
+                                f"partner's month (\"not a number of mentors\"): {s[:200]!r}")
+
+    def assertTwelveMonths(self, text, where):
+        """No window but the last 12 months (`Period__c = LAST_N_MONTHS:12`), unless denied."""
+        words = {"twelve": 12}
+        for s in sentences(flat(text), ".;:"):
+            for m in self.WINDOW.finditer(s):
+                n = m.group("n") or m.group("w")
+                if (int(n) if n.isdigit() else words.get(n.lower(), 0)) == 12:
+                    continue
+                self.assertTrue(self.denied(s, m), f"{where}: the period is the last 12 months (`Period__c = "
+                                                   f"LAST_N_MONTHS:12`, Ryan 2026-10-26), not {m.group(0)!r}: {s[:200]!r}")
+
+    def assertNoSeparateDashboard(self, text, where):
+        """The measure is a component on D4 (Ryan, 2026-10-26: no separate dashboard): a dashboard of its own is
+        only ever denied, and nothing replaces D4."""
+        for s in sentences(flat(text), ".;:"):
+            for m in self.SEPARATE_DASHBOARD.finditer(s):
+                self.assertTrue(self.denied(s, m) or re.search(r"(?i)\brejected\b", s[:m.start()]),
+                                f"{where}: the measure is a component on D4, GLOW Club Training, and no dashboard of "
+                                f"its own (Ryan, 2026-10-26); name one only to deny it: {s[:200]!r}")
+            for m in self.IN_PLACE_OF_D4.finditer(s):
+                self.assertTrue(self.denied(s, m), f"{where}: the component goes on D4, never in its place: "
+                                                   f"{s[:200]!r}")
+
+    def assertMonthIsPeriod(self, text, where):
+        """The month is `Period__c`: a standard date field (#78's `assertNoOtherDate`) or a custom field that reads
+        as a date (`Submitted_On__c`, `YearMonth__c`) is only ever denied; `Year__c` and `Month__c` may be named
+        as what `Period__c` is built from."""
+        self.t.assertNoOtherDate(text, where)
+        exempt = {"Period__c", self.FIELD, self.NEWLY, "DHIS2__c", "Account__c"} | set(self.OTHER_FIELDS.values())
+        for s in sentences(flat(text), ".;:"):
+            for m in self.IDENT.finditer(s):
+                name = m.group(0)
+                if name in exempt or not self.DATE_LIKE.search(name[:-3]):
+                    continue
+                if name in ("Year__c", "Month__c") and "Period__c" in s and self.BUILT_FROM.search(s):
+                    continue
+                self.assertTrue(self.denied(s, m),
+                                f"{where}: the month is the Monthly Report's `Period__c`, never `{name}`; name it only "
+                                f"to deny it: {s[:200]!r}")
+
+    def item_units(self, part):
+        """The units (table row, list item, sentence) of `part` about item 12: those carrying its field, or naming
+        item 12 (by `item 12` or its label) and no other item."""
+        out = []
+        for u in self.t.units(part):
+            refs = self.t.item_refs(u, {self.ITEM: self.LABEL})
+            if self.FIELD in u or (self.ITEM in refs and refs <= {self.ITEM}):
+                out.append(u)
+        return out
+
+    def item_query(self, q, period=None):
+        """Query `q` (a whole `SELECT … FROM DHIS2__c …`) is item 12's: it selects the answer and counts, groups by
+        the answer, leaves blank answers out, carries the test-record rule, has no OR, never touches
+        `Newly_recruited__c`, and has a period on `Period__c` (`period`, a pattern, when given)."""
+        select = re.match(r"(?i)SELECT\s+(.*?)\s+FROM\s", q).group(1)
+        f = re.escape(self.FIELD)
+        return bool(re.search(f, select) and self.COUNT.search(select)
+                    and re.search(r"(?i)\bGROUP\s+BY\s+[^`;]*?\b%s\b" % f, q)
+                    and self.ANSWER_NOT_NULL.search(q) and self.t.SOQL_NOT_BLANK.search(q)
+                    and self.t.SOQL_NO_TEST.search(q) and not self.OR.search(q) and self.NEWLY not in q
+                    and re.search(r"\bPeriod__c\b", q) and (period is None or period.search(q)))
+
+    def queries(self, text):
+        return [m.group(0) for m in self.t.QUERY.finditer(flat(text))]
+
+    def six_complete_months(self, q, today=None):
+        """Query `q`'s period on `Period__c` (the first day of the report's month) is exactly the last six complete
+        months: `Period__c = LAST_N_MONTHS:6` (which leaves out the current month) and no other window, or a closed
+        date range (a lower and an upper bound) that six whole months satisfy, the last before the current month."""
+        import datetime
+        today = today or datetime.date.today()
+        relative = self.N_MONTHS.findall(q)
+        bounds = [(op, datetime.date(int(y), int(mo), int(d))) for op, y, mo, d in self.BOUND.findall(q)]
+        if self.OTHER_LITERAL.search(q):
+            return False                                    # LAST_MONTH, THIS_YEAR, …: not six months
+        if relative:
+            return set(relative) == {"6"} and not bounds
+        if any(op == "=" for op, _ in bounds) or not any(op in (">", ">=") for op, _ in bounds) \
+                or not any(op in ("<", "<=") for op, _ in bounds):
+            return False                                    # a closed range: both bounds
+        tests = {">=": lambda a, b: a >= b, ">": lambda a, b: a > b, "<=": lambda a, b: a <= b, "<": lambda a, b: a < b}
+        lo = min(d for _, d in bounds)
+        months, y, m = [], lo.year, lo.month
+        hi = max(d for _, d in bounds)
+        while (y, m) <= (hi.year, hi.month):
+            first = datetime.date(y, m, 1)
+            if all(tests[op](first, d) for op, d in bounds):
+                months.append(first)
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        return len(months) == 6 and months[-1] < datetime.date(today.year, today.month, 1)
+
+    def assertOnlyDenied(self, text, rx, where, what):
+        """Every clause of `text` naming `rx` denies or rejects it."""
+        for s in self.clauses(text, ".;:"):
+            for m in rx.finditer(s):
+                self.assertTrue(self.denied(s, m) or self.d.NEGATION.search(self.unno(s)) or self.REJECT.search(s),
+                                f"{where}: {what} is not item 12's source (Ryan, 2026-10-26); name it only to deny or "
+                                f"reject it: {s[:200]!r}")
+
+    def assertNoOtherChange(self, text, where):
+        for s in self.clauses(text, ".;:"):
+            for m in self.OTHER_CHANGE.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: restore only from this change's copy or `before/`, never from another "
+                                f"ticket's build or retrieve: {s[:200]!r}")
+            if self.stated(s, self.t.RESTORE):
+                for m in self.t.BUILD_DIR.finditer(s):
+                    self.assertTrue(self.d.locally_denied(s, m),
+                                    f"{where}: a rollback never deploys a `build/` (DECISIONS 2026-10-16); name "
+                                    f"`build/` there only to deny it: {s[:200]!r}")
+
+    def plan_path(self):
+        found = sorted(glob.glob(self.PLANS))
+        self.assertEqual(len(found), 1, "docs/plans/: one plan `YYYY-MM-DD-sf-new-mentors.md` for ticket #80 "
+                                        f"(found {[os.path.basename(p) for p in found]})")
+        self.assertRegex(os.path.basename(found[0]), r"^\d{4}-\d\d-\d\d-sf-new-mentors\.md$",
+                         "docs/plans/: the plan is named `YYYY-MM-DD-sf-new-mentors.md`")
+        return found[0]
+
+    def decision(self):
+        entries = re.split(r"(?m)^(?=### )", read(self.DECISIONS))[1:]
+        new = [e for e in entries if re.match(r"### (\d{4}-\d\d-\d\d) ", e)
+               and re.match(r"### (\d{4}-\d\d-\d\d) ", e).group(1) >= "2026-10-26"
+               and self.FIELD in e]
+        self.assertTrue(new, "docs/DECISIONS.md: no dated entry (`### 2026-10-26 — …`, or later) defining a new mentor "
+                             f"by `DHIS2__c.{self.FIELD}` (ticket #80)")
+        self.assertEqual(len(new), 1, f"docs/DECISIONS.md: one dated entry defining a new mentor, not {len(new)}")
+        return new[0]
+
+    # --- the RUNBOOK ----------------------------------------------------------------------------------------
+
+    def test_the_runbook_defines_a_new_mentor_and_its_month(self):
+        where = f"RUNBOOK section {self.t.MONTHLY[3:]!r}, {self.t.PART[4:]!r}, item 12"
+        part = self.t.part()
+        units = self.item_units(part)
+        self.assertTrue([u for u in units if self.FIELD in u], f"{where}: no row, list item or sentence about item "
+                                                                f"12 carries its field "
+                               f"`DHIS2__c.{self.FIELD}`")
+        text = " ".join(units)
+        # who counts and which date places it in a month, in one unit: item 12 (its label), the field, Yes,
+        # Period__c
+        self.assertTrue([u for u in units if self.LABEL in u and self.FIELD in u and self.stated(self.norm(u), self.YES)
+                         and self.stated(self.norm(u), self.t.PERIOD)],
+                        f"{where}: in one row, list item or sentence: the report \"{self.LABEL}\" (item 12) counts the "
+                        f"Monthly Reports (`DHIS2__c`) answering Yes to `{self.FIELD}`, each in the month of its "
+                        "`Period__c` (Ryan, 2026-10-26)")
+        self.assertIn("DHIS2__c", text, f"{where}: name the source object, the Monthly Report `DHIS2__c`")
+        self.assertRegex(text, self.YES_AND_NO, f"{where}: the report counts the Yes and the No answers")
+        cl = self.clauses(text)
+        self.assertTrue([s for s in cl if self.stated(s, self.BLANK_OUT)
+                         and not re.search(r"(?i)\b(not|never)\s+(left|excluded|dropped)\b", s)],
+                        f"{where}: say a blank answer is left out (as items 15 and 16), not negated")
+        # the month is the Monthly Report's period, and the partner its account
+        self.assertTrue([s for s in cl if self.stated(s, self.t.PERIOD) and re.search(r"(?i)\bmonths?\b", s)],
+                        f"{where}: the month is the report's `Period__c` (the month the Monthly Report covers), in one "
+                        "sentence, not negated")
+        self.assertMonthIsPeriod(text, where)
+        self.assertTrue(self.stated(self.norm(text), self.t.ACCOUNT),
+                        f"{where}: the partner is the Monthly Report's `Account__c`")
+        self.assertTrue([s for s in cl if self.stated(s, self.EACH_PARTNER_MONTH)],
+                        f"{where}: the counts are for each partner and month (\"for each partner and month\"), not "
+                        "negated")
+        # what a Yes means: one partner's month, never a number of mentors
+        self.assertTrue([s for s in cl if self.stated(s, self.YES) and self.stated(s, self.PARTNER_MONTH)
+                         and self.NOT_HEADCOUNT.search(s)],
+                        f"{where}: say, in one sentence, that each Yes is one partner's month, not a number of mentors")
+        self.assertNoHeadcount(text, where)
+        self.assertTwelveMonths(text, where)
+        self.assertNoSeparateDashboard(text, where)
+        # the SOQL signal: GROUP BY the answer over the last 12 months on Period__c, with the test-record rule
+        f = self.FIELD
+        self.assertTrue([q for u in units for q in self.queries(u) if self.item_query(q, self.LAST_12_Q)],
+                        f"{where}: give item 12's SOQL signal as a query in its row, item or sentence: `SELECT {f}, "
+                        f"COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT "
+                        f"Account__r.Name LIKE '%test%') AND {f} != null GROUP BY {f}` (no OR)")
+        # kept apart from items 13-16: no unit carries both item 12's field and another item's
+        for u in self.t.units(part):
+            if self.FIELD in u:
+                stray = sorted(n for n, other in self.OTHER_FIELDS.items() if other in u)
+                self.assertFalse(stray, f"{where}: item 12's field and the field of item(s) {stray} share a row, item "
+                                        f"or sentence; item 12 (recruiting) is not item 13 (mentors trained): {u[:200]!r}")
+        for u in units:
+            for n, other in self.t.items().items():
+                self.assertNotIn(other["label_today"], u, f"{where}: item 12 is never labelled or described as item "
+                                                          f"{n}, {other['label_today']!r}: {u[:200]!r}")
+        # the rejected sources are only ever denied
+        self.assertOnlyDenied(part, re.compile(re.escape(self.NEWLY)), where, f"`{self.NEWLY}`")
+        self.assertOnlyDenied(part, self.LEAD_MENTOR, where, "a \"Lead Mentor\" contact")
+        self.t.assertNotSoft(text, where)
+        self.t.assertNoPartnerOrMonthFilter(text, where)
+        self.d.assertNoContradiction(text, where)
+
+    # --- the plan ---------------------------------------------------------------------------------------------
+
+    def test_a_plan_carries_the_new_mentors_deploy(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        word, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertNotEqual(word, "superseded", f"{name}: the plan is the change in force")
+        if word == "done":
+            self.assertRegex(keys.get("done", ""), r"^\d{4}-\d\d-\d\d", f"{name}: a done plan carries `done:`")
+        self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
+                         f"{name}: name ticket #80 in the frontmatter, the title or the opening paragraph")
+        self.assertIn(self.LABEL, text, f"{name}: name the new report, \"{self.LABEL}\"")
+        self.assertIn(self.FIELD, text, f"{name}: name the field the report counts, `DHIS2__c.{self.FIELD}`")
+        self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        self.t.assertNoPartnerOrMonthFilter(text, name)
+        # the whole plan, `## Result` included: no rejected source, no other month, no mentor headcount
+        self.assertOnlyDenied(text, re.compile(re.escape(self.NEWLY)), name, f"`{self.NEWLY}`")
+        self.assertOnlyDenied(text, self.LEAD_MENTOR, name, "a \"Lead Mentor\" contact")
+        self.assertMonthIsPeriod(text, name)
+        self.assertNoHeadcount(text, name)
+        self.assertNoSeparateDashboard(text, name)
+        dash = self.t.dashboard()
+
+        # --- the Rollout
+        raw = self.t.plan_part(path, "## Rollout", 40)
+        where = f"{name}: `## Rollout`"
+        cl = self.clauses(raw)
+        self.assertRegex(flat(raw), self.BEFORE, f"{where}: retrieve D4 fresh into `data/sf_new_mentors_<date>/before/`")
+        cmds = [flat(seg)[m.start():] for seg in re.split(r"`+|\n\s*\n|(?=\bpython3\s)", raw)
+                for m in [self.t.COPY_CMD.search(flat(seg))] if m]
+        self.assertTrue(cmds, f"{where}: the copy of D4 by `python3 tools/sf_report_folders.py copy --vpn-off --kind "
+                              f"dashboard --id {dash['id']} --tag \"#80\" --apply`")
+        for c in cmds:
+            self.assertIn("--vpn-off", c, f"{where}: the tool refuses to run without `--vpn-off`: {c[:160]!r}")
+            self.assertRegex(c, r"--apply\b", f"{where}: the copy runs with `--apply` (on Ryan's go); without it the "
+                                              f"tool makes no copy: {c[:160]!r}")
+            tags = [v.strip("`'\"") for v in re.findall(r"--tag(?:=|\s+)(\S+)", c)]
+            self.assertTrue(tags and all(t == "#80" for t in tags), f"{where}: the copy is tagged `--tag \"#80\"`: "
+                                                                    f"{c[:160]!r}")
+
+        def flag(c, f):
+            return [v.strip("`'\".,;") for v in re.findall(r"--%s(?:=|\s+)(\S+)" % f, c)]
+        self.assertTrue([c for c in cmds if dash["id"] in flag(c, "id") and flag(c, "kind") == ["dashboard"]],
+                        f"{where}: copy the dashboard {dash['item']} with `python3 tools/sf_report_folders.py copy "
+                        f"--vpn-off --kind dashboard --id {dash['id']} --tag \"#80\" --apply` (its id from "
+                        "`glow/sf_keep_list.csv`, no placeholder)")
+        self.assertTrue([s for s in cl if self.stated(s, self.t.COPY) and "Decommissioned" in s
+                         and re.search(r"(?i)\bdashboard\b|\bD4\b", s)],
+                        f"{where}: the dashboard D4 is copied into Decommissioned before it changes (one sentence, not "
+                        "negated)")
+        self.assertTrue([s for s in cl if re.search(r"(?i)check-only|--dry-run", s) and re.search(r"(?i)\bdeploy", s)
+                         and not self.d.denies(s)],
+                        f"{where}: validate check-only (`sf project deploy start --dry-run`) before the deploy (one "
+                        "sentence)")
+        self.assertTrue([s for s in cl if re.search(r"Ryan['’]s go\b", s) and re.search(r"(?i)\bdeploy|--apply", s)
+                         and not self.d.denies(s)],
+                        f"{where}: the deploy and each `--apply` wait for Ryan's go (one sentence)")
+        readback = [s for s in cl if [m for m in self.t.READBACK.finditer(s) if not self.d.locally_denied(s, m)]
+                    and re.search(r"(?i)\bretriev\w*|\bread\w*\s+(it\s+)?back\b", s)]
+        self.assertTrue(readback, f"{where}: read back: retrieve into `after/` and check `after/` equals `build/`, in one "
+                                  "sentence")
+        # the SOQL check: the component equals SOQL on DHIS2__c for six complete months and for one partner
+        self.assertTrue([s for s in cl if (re.search(r"\bSOQL\b", s) or self.t.SOQL_ON_DHIS2.search(s))
+                         and self.stated(s, self.t.EQUAL_STRICT) and re.search(r"(?i)\bcomponents?\b", s)
+                         and self.stated(s, self.SIX_MONTHS)],
+                        f"{where}: check that the component equals SOQL on `DHIS2__c` for each of the last six complete "
+                        "months (one sentence naming the component, SOQL, six complete months and that they equal)")
+        self.assertTrue([s for s in cl if self.stated(s, self.ONE_PARTNER) and self.stated(s, self.t.EQUAL_STRICT)],
+                        f"{where}: check one partner's figures equal SOQL (one sentence naming one partner and that "
+                        "they equal)")
+        qs = self.queries(raw)
+        self.assertTrue([q for q in qs if self.item_query(q, self.Q_PERIOD) and self.BY_MONTH_GROUP.search(q)
+                         and self.six_complete_months(q) and not self.PARTNER_Q.search(q)],
+                        f"{where}: give the six months' query, for all partners (not the one-partner query), month by "
+                        f"month, over exactly the last six complete months: item 12's (`SELECT Period__c, {self.FIELD}, COUNT(Id) … GROUP BY Period__c, "
+                        f"{self.FIELD}`, or by `CALENDAR_MONTH(Period__c)`) with `Period__c = LAST_N_MONTHS:6`, or a "
+                        "closed range of six whole months ending before the current month (`Period__c >= 2026-04-01 "
+                        f"AND Period__c < 2026-10-01`), the test-record rule, `{self.FIELD} != null`, no OR")
+        self.assertTrue([q for q in qs if self.item_query(q, self.Q_PERIOD) and self.PARTNER_Q.search(q)],
+                        f"{where}: give the one-partner query: item 12's query, with a period on `Period__c`, and `AND "
+                        "Account__r.Name = '<partner>'`")
+        self.t.assertNotSoft(raw, where)
+        self.t.assertNoOlderBuild(raw, where)
+        self.d.assertNoContradiction(raw, where)
+        # the order, step by step: before/, the copy, check-only, deploy on Ryan's go, after/, SOQL
+        steps = self.t.step_clauses(raw, where)
+        flat_cl = [(i, j, st, c) for i, (n, st, cs) in enumerate(steps) for j, c in enumerate(cs)]
+        not_check = re.compile(r"(?i)check-only|--dry-run|\bvalidat\w*")
+        deploy_verb = re.compile(r"(?i)(?<!\bthe )(?<!\ba )(?<!\bits )(?<!\bfor )(?<!\bthis )(?<!\bto )"
+                                 r"\bdeploy(s|ed|ing)?\b")
+
+        def first(pred, after=(-1, -1), what=""):
+            found = [(i, j) for i, j, st, c in flat_cl if (i, j) > after and pred(c, st)]
+            self.assertTrue(found, f"{where}: in the numbered steps, no {what}"
+                                   + (" after the step before it" if after != (-1, -1) else ""))
+            return found[0]
+        at_before = first(lambda c, st: self.BEFORE.search(c), what="retrieve into `before/`")
+        at_copy = first(lambda c, st: re.search(r"sf_report_folders[._]py\s+copy\b", c), at_before,
+                        "copy step (`tools/sf_report_folders.py copy`)")
+        at_check = first(lambda c, st: not_check.search(c), at_copy, "check-only (`--dry-run`)")
+        early = [c for i, j, st, c in flat_cl if (i, j) < at_check and not not_check.search(c)
+                 for m in deploy_verb.finditer(c) if not self.d.locally_denied(c, m)]
+        self.assertEqual(early, [], f"{where}: nothing deploys before the check-only: {early[:1]}")
+        at_deploy = first(lambda c, st: re.search(r"(?i)\bdeploy\w*", c) and not not_check.search(c), at_check,
+                          "deploy after the check-only")
+        deploy_step, check_step = steps[at_deploy[0]], steps[at_check[0]]
+        self.assertRegex(deploy_step[1], r"Ryan['’]s go\b",
+                         f"{where}: step {deploy_step[0]}, the deploy, waits for Ryan's go (say so in that step)")
+        for st, what in ((check_step, "the check-only"), (deploy_step, "the deploy")):
+            self.assertRegex(st[1], r"\bbuild/", f"{where}: step {st[0]}, {what}, names what it deploys: `build/`")
+            nst = self.norm(st[1])
+            for m in re.finditer(r"before/", nst):
+                self.assertTrue(self.d.locally_denied(nst, m),
+                                f"{where}: step {st[0]}, {what}, deploys `build/`, never `before/` (that is the "
+                                f"rollback's): {nst[:200]!r}")
+        for n, st, _cs in steps:
+            if "--apply" in st:
+                self.assertRegex(st, r"Ryan['’]s go\b", f"{where}: step {n} runs `--apply`; say in that step it waits "
+                                                       "for Ryan's go")
+        at_after = first(lambda c, st: "after/" in c, at_deploy, "retrieve into `after/`")
+        first(lambda c, st: re.search(r"\bSOQL\b|\bFROM\s+DHIS2__c\b", c), at_after, "SOQL check")
+
+        # --- the Rollback
+        raw = self.t.plan_part(path, "## Rollback", 20)
+        where = f"{name}: `## Rollback`"
+        cl = self.clauses(raw)
+        restore_d4 = [k for k, s in enumerate(cl) if self.stated(s, self.t.RESTORE) and "Decommissioned" in s
+                      and self.t.COPY.search(s) and re.search(r"(?i)\bdashboard\b|\bD4\b", s)]
+        self.assertTrue(restore_d4, f"{where}: restore the dashboard D4 from its copy in Decommissioned (one sentence, "
+                                    "not negated)")
+        self.assertRegex(raw, self.BEFORE, f"{where}: name this change's `before/`, `data/sf_new_mentors_<date>/before/`")
+        dirs = set(self.WORK_DIR.findall(flat(raw)))
+        self.assertEqual(len(dirs), 1, f"{where}: one folder for this change, `data/sf_new_mentors_<date>/` (found "
+                                       f"{sorted(dirs)})")
+        guarded = [s for s in cl if "before/" in s and "after/" in s and self.t.FRESH.search(s)
+                   and self.stated(s, self.t.EQUAL_STRICT) and self.stated(s, self.t.CONDITION)]
+        self.assertTrue(guarded, f"{where}: deploy `before/` back only while a fresh retrieve equals `after/` (one "
+                                 "sentence naming `before/`, a fresh retrieve, `after/`, the condition and \"equals\")")
+        for s in guarded:
+            for m in self.t.DIFFER.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: `before/` goes back only while the fresh retrieve EQUALS `after/`, never when "
+                                f"it differs: {s[:200]!r}")
+        self.assertTrue([s for s in cl for m in self.t.OLDER_BUILD.finditer(s) if self.d.locally_denied(s, m)],
+                        f"{where}: say never from an older build (DECISIONS 2026-10-16), in one sentence")
+        # the new report: off D4 with it, then moved to Decommissioned (the epic deletes nothing)
+        moved = [k for k, s in enumerate(cl) if self.stated(s, self.NEW_REPORT) and "Decommissioned" in s
+                 and self.stated(s, self.MOVE)]
+        self.assertTrue(moved, f"{where}: the new report (\"{self.LABEL}\") is moved to Decommissioned, not deleted (one "
+                               "sentence naming it, a move and Decommissioned, not negated)")
+        self.assertGreater(moved[0], restore_d4[0],
+                           f"{where}: the dashboard goes back first, then the report it no longer uses moves to "
+                           "Decommissioned")
+        self.assertTrue([s for s in cl if self.NOTHING_DELETED.search(s)],
+                        f"{where}: say nothing is deleted (epic #68)")
+        body = self.norm(raw)
+        self.assertRegex(body, r"(?i)check-only|--dry-run", f"{where}: a deploy of `before/` is checked-only first")
+        self.assertRegex(body, r"Ryan['’]s go\b", f"{where}: the rollback's writes wait for Ryan's go")
+        for rx, what in ((r"destructiveChanges", "a `destructiveChanges` deploy"),
+                         (r"\bsf project delete\b", "`sf project delete`"),
+                         (r"(-X\s*|--method\s+)DELETE\b|\bDELETE\s+/services/", "an HTTP DELETE")):
+            self.assertNotRegex(raw, rx, f"{where}: {what} deletes; the rollback restores and deletes nothing")
+        self.t.assertNoOlderBuild(raw, where)
+        self.assertNoOtherChange(raw, where)
+        self.t.assertBeforeGuarded(raw, where)
+        self.t.assertNotSoft(raw, where)
+        self.d.assertNoContradiction(raw, where, rollback=True)
+
+    def test_the_six_months_check_takes_exactly_six_complete_months(self):
+        """The guard behind the plan's six months' query (PR #155 review), on a fixed day, 2026-10-26: Period__c is
+        the first of the report's month, so April-September 2026 are the six complete months."""
+        import datetime
+        today = datetime.date(2026, 10, 26)
+        base = ("SELECT Period__c, {f}, COUNT(Id) FROM DHIS2__c WHERE {w} AND Account__c != null AND (NOT "
+                "Account__r.Name LIKE '%test%') AND {f} != null GROUP BY Period__c, {f}")
+        cases = [
+            ("Period__c = LAST_N_MONTHS:6", True),
+            ("Period__c >= 2026-04-01 AND Period__c < 2026-10-01", True),
+            ("Period__c >= 2026-04-01 AND Period__c <= 2026-09-30", True),
+            ("Period__c > 2026-03-31 AND Period__c <= 2026-09-01", True),
+            ("Period__c >= 2026-03-01 AND Period__c < 2026-09-01", True),        # six whole months, all complete
+            ("Period__c = LAST_N_MONTHS:12", False),                            # twelve
+            ("Period__c = LAST_N_MONTHS:5", False),
+            ("Period__c = LAST_N_MONTHS:6 AND Period__c = LAST_N_MONTHS:12", False),
+            ("Period__c >= 2026-04-01", False),                                 # open: takes in October, partial
+            ("Period__c <= 2026-09-30", False),                                 # open below
+            ("Period__c >= 2026-05-01 AND Period__c < 2026-11-01", False),      # ends in the current month
+            ("Period__c >= 2026-05-01 AND Period__c <= 2026-10-01", False),     # the same, inclusive
+            ("Period__c >= 2026-04-01 AND Period__c < 2026-09-01", False),      # five months
+            ("Period__c >= 2026-04-02 AND Period__c < 2026-10-01", False),      # April's first day left out: five
+            ("Period__c >= 2026-03-01 AND Period__c < 2026-10-01", False),      # seven
+            ("Period__c = LAST_MONTH", False),
+            ("Period__c = 2026-09-01", False),
+        ]
+        for window, want in cases:
+            q = base.format(f=self.FIELD, w=window)
+            self.assertEqual(self.six_complete_months(q, today), want, f"six complete months on 2026-10-26: "
+                                                                       f"{window!r} should be {want}")
+
+    # --- DECISIONS --------------------------------------------------------------------------------------------
+
+    def test_a_decision_records_the_new_mentor_definition(self):
+        e = self.decision()
+        where = f"docs/DECISIONS.md {e.split(chr(10), 1)[0][4:14]}"
+        for part in ("**Why", "**Rejected", "**Consequences"):
+            self.assertIn(part, e, f"{where}: no {part}** bullet (the file's header)")
+        self.assertLess(e.index("**Why"), e.index("**Rejected"), f"{where}: **Why**, then **Rejected**")
+        self.assertLess(e.index("**Rejected"), e.index("**Consequences"), f"{where}: **Rejected**, then **Consequences**")
+        self.assertRegex(e, self.TICKET, f"{where}: name ticket #80")
+        head = e.split("\n", 1)[1].split("**Why", 1)[0]
+        why = e.split("**Why", 1)[1].split("**Rejected", 1)[0]
+        rejected = e.split("**Rejected", 1)[1].split("**Consequences", 1)[0]
+        cons = e.split("**Consequences", 1)[1]
+        # the decision itself: who counts, which month, the partner, the window, the rule
+        dw = f"{where}, the decision (before **Why**)"
+        hc = self.clauses(head)
+        self.assertIn(self.FIELD, head, f"{dw}: a new mentor is a Yes to `DHIS2__c.{self.FIELD}`")
+        self.assertIn("DHIS2__c", head, f"{dw}: name the source object `DHIS2__c`")
+        self.assertTrue([s for s in hc if self.FIELD in s and self.stated(s, self.YES)],
+                        f"{dw}: the Monthly Reports answering Yes to `{self.FIELD}` count, in one sentence, not negated")
+        self.assertRegex(head, self.YES_AND_NO, f"{dw}: the report counts the Yes and the No answers")
+        self.assertTrue([s for s in hc if self.stated(s, self.t.PERIOD) and re.search(r"(?i)\bmonths?\b", s)],
+                        f"{dw}: the month is `Period__c`, the month the Monthly Report covers (one sentence, not negated)")
+        self.assertTrue(self.stated(self.norm(head), self.t.ACCOUNT), f"{dw}: the partner is `Account__c`")
+        self.assertTrue([s for s in hc if self.stated(s, self.BLANK_OUT)
+                         and not re.search(r"(?i)\b(not|never)\s+(left|excluded|dropped)\b", s)],
+                        f"{dw}: blank answers are left out")
+        self.assertRegex(self.norm(head), r"\bLAST_N_MONTHS:12\b|(?i:\blast 12 months\b)",
+                         f"{dw}: the period is the last 12 months (`Period__c = LAST_N_MONTHS:12`)")
+        self.assertTrue([s for s in hc if self.stated(s, self.TEST_RECORD)], f"{dw}: the test-record rule applies (#70)")
+        self.assertTrue([s for s in hc if self.stated(s, self.PARTNER_MONTH) and self.NOT_HEADCOUNT.search(s)],
+                        f"{dw}: each Yes is one partner's month, not a number of mentors (one sentence)")
+        self.assertIn(self.LABEL, e, f"{where}: name the report, \"{self.LABEL}\"")
+        self.assertTrue([s for s in self.clauses(e) if self.stated(s, re.compile(r"(?i)\bcomponent\b"))
+                         and re.search(r"\bD4\b|GLOW Club Training", s)],
+                        f"{where}: the measure is a component on GLOW Club Training (D4), in one sentence, not negated")
+        # Why: Ryan's answer on the ticket
+        self.assertRegex(why, r"\bRyan\b", f"{where}: **Why** gives Ryan's answer")
+        self.assertIn("2026-10-26", why, f"{where}: **Why** dates Ryan's answer (2026-10-26)")
+        # Rejected: each source with its reason, in one clause (`;`, `.` or a sub-bullet apart from the others):
+        # Newly_recruited__c (recruits still needing orientation), the Lead Mentor contacts (household accounts, no
+        # partner link), a separate dashboard (a component on D4 is enough)
+        rw = f"{where}: **Rejected**"
+        items = [flat(x) for x in re.split(r"[.;]\s|\n\s*[-*+]\s", rejected) if x.strip()]
+        self.assertTrue([x for x in items if self.NEWLY in x and self.ORIENTATION_REASON.search(x)],
+                        f"{rw}: name `{self.NEWLY}` with why it is not it, in its clause: it holds recruits who still "
+                        "need orientation, not recruits")
+        self.assertTrue([x for x in items if self.LEAD_MENTOR.search(x) and self.LEAD_REASON.search(x)],
+                        f"{rw}: name the \"Lead Mentor\" contacts with why, in their clause: household accounts, no "
+                        "partner link")
+        self.assertTrue([x for x in items if self.SEPARATE_DASHBOARD.search(x) and self.DASH_REASON.search(x)],
+                        f"{rw}: name a separate dashboard with why, in its clause: a component on D4 (GLOW Club "
+                        "Training) is enough")
+        # a reason is not turned around ("only because", "even though they carry a partner link", "for now though
+        # D4 is not enough")
+        for x in items:
+            if self.NEWLY in x or self.LEAD_MENTOR.search(x) or self.SEPARATE_DASHBOARD.search(x):
+                m = self.TURNED.search(x)
+                self.assertFalse(m, f"{rw}: each source is rejected for its reason, as stated, with nothing that turns "
+                                    f"it around ({m.group(0)!r}): {x[:200]!r}" if m else rw)
+        # Consequences: what the figure is, partners (partner-months), not mentors
+        self.assertGreaterEqual(len({w.lower() for w in re.findall(r"[A-Za-z]\w*", self.norm(cons))}), 10,
+                                f"{where}: **Consequences** says too little")
+        self.assertTrue([s for s in self.clauses(cons) if self.stated(s, self.PARTNER_UNIT)],
+                        f"{where}: **Consequences** says what the figure counts: partners (one partner's month each), "
+                        "not mentors, in one clause, not negated")
+        self.assertNotRegex(e, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{where}: a placeholder")
+        # outside Rejected (Consequences included), the rejected sources are only ever denied, the month is only
+        # Period__c, no clause makes the figure a mentor headcount, and nothing contradicts the rules
+        rest = re.sub(r"(?ms)^- \*\*Rejected.*?(?=^- \*\*|\Z)", "", e)
+        self.assertNotIn("**Rejected", rest, f"{where}: **Rejected** is a bullet of its own (`- **Rejected:** …`)")
+        self.assertOnlyDenied(rest, re.compile(re.escape(self.NEWLY)), where, f"`{self.NEWLY}`")
+        self.assertOnlyDenied(rest, self.LEAD_MENTOR, where, "a \"Lead Mentor\" contact")
+        self.assertMonthIsPeriod(rest, where)
+        self.assertNoHeadcount(rest, where)
+        self.assertTwelveMonths(rest, where)
+        self.assertNoSeparateDashboard(rest, where)
+        self.d.assertNoContradiction(rest, where)
 
 
 if __name__ == "__main__":

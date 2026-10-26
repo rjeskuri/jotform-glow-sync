@@ -789,6 +789,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - #80 builds item 12; until then its row reads `new`, with GLOW's measure as its label. Item 18 maps to "Reports completed on time", which lists submission and modified dates; computing "on time" is #119, on hold.
   - The rule covers the Monthly Report reports only: the Attendance side (the "Jotform Attendance" dashboard and its folders) stays outside epic #68.
 - 2026-10-23: the kept items go into one report folder, "GLOW Monthly Reports" (`ReportFolder` `GLOW_Monthly_Reports`), and one dashboard folder, "GLOW Monthly Dashboards" (`DashboardFolder` `GLOW_Monthly_Dashboards`), instead of per-category folders (Ryan, 2026-10-21, on #73). The five groups stay as the dashboards' categories, and item 19, the table, goes in the same report folder. Both folders get the same shares, since a dashboard's viewers need its reports' folder: the union of the shares of "DHIS2 Reports", "DHIS2 Dashboards" and "Dhis2 Dashbords", 7 entries (4 internal users View, 2 internal users Manage, 1 group Manage), internal users and groups only, never a guest, portal, community or partner share (RUNBOOK "The five dashboards and their folders"; [plan](plans/2026-10-23-sf-category-folders.md)).
+- 2026-10-26: #80 names item 12's report "Partners that recruited new mentors" (the 2026-10-26 entry, Ryan's answer on #80); its row reads `new`, with GLOW's measure as its label, until #80's deploy gives it the report's id and label.
 
 ### 2026-10-24 — The delay keeps the UTC day; the formula takes it through DATEVALUE(TEXT(...))
 
@@ -847,3 +848,19 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Why:** Ryan, 2026-10-26, during the rollout: with NPSP's Automatic Household Naming on, any update of a partner's household Account renames it, so a flag run would rename partners. Production has it off, but NPSP forces it on inside Apex tests, which is how the second check-only found it (two test methods failed on renamed households).
 - **Rejected:** relying on production's setting as read once on 2026-10-26 (a setting can change between runs, and a rename of every partner household is costly to undo); counting only the org default (a profile's or a user's row also turns naming on for that user's updates).
 - **Consequences:** a run with naming on stops before any Account is read, and the refusal says to turn it off in NPSP Settings or ask Ryan. The guard ran by hand before the 2026-10-26 Account runs (count 0) and is in the tool from then on (RUNBOOK "The flagging batch", its household-naming guard).
+
+### 2026-10-26 — Item 12, "New mentors recruited", counts the partners answering Yes or No, by month
+
+- Keep-list item 12 (ticket #80, epic #68) is the report "Partners that recruited new mentors", in "GLOW Monthly Reports". It counts the Monthly Reports (`DHIS2__c`) answering Yes and No to `Recruit_any_new_mentors_last_month__c` ("Did you recruit any new mentors last month?"), by partner (`Account__c`) and month. The month is `Period__c`, the month the Monthly Report covers. Blank answers are left out, the test-record rule applies (#70), and the period is the last 12 months (`Period__c = LAST_N_MONTHS:12`), as for items 15 and 16 (#78). Each Yes is one partner's month, not a number of mentors.
+- The measure is a component on GLOW Club Training (D4, `01ZRP000006quAj2AI`), a stacked column of Yes and No for each month, in the left half of D4's third row. The live deploy runs in an interactive session with Ryan ([plan](plans/2026-10-26-sf-new-mentors.md)).
+- **Why:** Ryan, 2026-10-26, on #80, chose option A of the ticket's needs-input question. No Salesforce field or object holds the number recruited: the Monthly Report's Yes/No question is the one source with monthly data by partner, and the contacts and the Training and Volunteer objects hold no mentor list (the question's evidence, counts only). Over the last 12 months, 2026-10-26: 524 Monthly Reports answer it (73 Yes, 451 No) and 43 leave it blank, from 58 partners.
+- **Rejected:**
+  - `Newly_recruited__c` (option B, its sum): it holds how many of the recruits still need orientation, not how many were recruited, and 23 of the 73 Yes answers give 0 there.
+  - Option C, the Yes/No count and that sum on one report: it would carry the sum's wrong meaning beside the count.
+  - The contacts with a "Lead Mentor" role: 16 in all, each on a household account with no partner link.
+  - A separate dashboard for the measure, as the SOW describes it: a component on D4 (GLOW Club Training) is enough, as the keep list has it (Ryan, 2026-10-26).
+- **Consequences:**
+  - The figure counts partners, not mentors: a Yes is a partner's month with at least one recruit, and a month's Yes count is the number of partners that recruited that month.
+  - Item 12 stays apart from item 13, "Number of mentors who attended training", in its label, its field and its component.
+  - A true count of new mentors needs a new question on the Monthly Report form ("How many new mentors did you recruit last month?"), outside #80; it would count from the day it is added.
+  - `glow/sf_keep_list.csv` item 12 reads `new` until the deploy, then takes the report's id, and its `label_today` and `label_target` become "Partners that recruited new mentors".

@@ -5,10 +5,14 @@ reports and dashboards, each item mapped to the report or dashboard in the org t
 
 KeepList: the 19 items and the five dashboards, each with its group and GLOW's measure verbatim (the
 GLOW team via Ryan, 2026-10-21; the test carries the list), mapped to the ids Ryan agreed on the
-ticket (2026-10-23, "all as proposed"; item 12 is new, task #80). Ryan's answer (c), "do NOT change
-the labels. Kept reports and dashboards keep their current names", replaces the ticket's first label
-convention (drop "M&P", a dashboard named after its group): every row's target label is its label
-today; item 12, which has no report today, takes GLOW's measure until #80 builds it.
+ticket (2026-10-23, "all as proposed"; item 12 had no report until task #80 built it). Ryan's answer
+(c), "do NOT change the labels. Kept reports and dashboards keep their current names", replaces the
+ticket's first label convention (drop "M&P", a dashboard named after its group): every row's target
+label is its label today.
+
+NewMentorsReport (ticket #80, plan docs/plans/2026-10-26-sf-new-mentors.md, Rollout step 8): item 12
+is the report #80 deployed on 2026-10-26, "Partners that recruited new mentors" (GLOW Monthly Reports),
+so no row's id reads `new` any more.
 The file holds report and dashboard ids and names only, never record data.
 """
 import csv
@@ -66,7 +70,7 @@ AGREED = {
     "9": ("report", "00ORP000004RJZC2A4", "Submission of GC observation forms M & P"),
     "10": ("report", "00ORP000004RJZD2A4", "Total Number of Club Observations M&P"),
     "11": ("report", "00ORP000005uf412AA", "Completed Observing Clubs Alteast Once P"),
-    "12": ("report", "new", ""),
+    "12": ("report", "00ORP000009kXev2AE", "Partners that recruited new mentors"),  # #80, deployed 2026-10-26
     "13": ("report", "00ORP000004RJZE2A4", "Number of mentors trained about module"),
     "14": ("report", "00ORP000004RJZ82AO", "Number of training sessions led"),
     "15": ("report", "00ORP000004RJZ62AO", "Leading training sessions with mentors"),
@@ -80,7 +84,9 @@ AGREED = {
     "D4": ("dashboard", "01ZRP000006quAj2AI", "Mentors"),
     "D5": ("dashboard", "01ZRP000006oxSr2AI", "Reporting"),
 }
-NEW = {"12"}            # items with no report today (Ryan, 2026-10-23: item 12 only, task #80)
+# ticket #80: the report it deployed for item 12 (2026-10-26, folder GLOW Monthly Reports)
+ITEM_12_ID = "00ORP000009kXev2AE"
+ITEM_12_LABEL = "Partners that recruited new mentors"
 
 
 def case_safe_suffix(id15):
@@ -158,15 +164,10 @@ class KeepList(unittest.TestCase):
             self.assertEqual(target, target.strip(), f"{where}: label_target has stray spaces")
             self.assertLessEqual(len(target), 40, f"{where}: label_target {target!r} is over 40 characters "
                                                   "(Salesforce's limit on a report's name)")
-            if item in NEW:
-                self.assertEqual(row["label_today"], "", f"{where}: a new report has no label today (blank)")
-                self.assertEqual(target, row["measure"], f"{where}: a new report's label_target is GLOW's measure "
-                                                         f"{row['measure']!r} until its own ticket names it (#80)")
-            else:
-                self.assertTrue(row["label_today"].strip(), f"{where}: label_today is blank")
-                self.assertEqual(target, row["label_today"],
-                                 f"{where}: label_target is the label today, {row['label_today']!r} (Ryan, "
-                                 "2026-10-23: kept reports and dashboards keep their current names)")
+            self.assertTrue(row["label_today"].strip(), f"{where}: label_today is blank")
+            self.assertEqual(target, row["label_today"],
+                             f"{where}: label_target is the label today, {row['label_today']!r} (Ryan, "
+                             "2026-10-23: kept reports and dashboards keep their current names)")
 
     # --- specific ------------------------------------------------------------------------------------
 
@@ -179,7 +180,7 @@ class KeepList(unittest.TestCase):
         self.assertEqual(others, [], f"glow/sf_keep_list.csv: only item 19 is a table of {TABLE_GROUP!r} "
                                      f"(also {others})")
 
-    def test_only_item_12_may_lack_an_id(self):
+    def test_every_item_has_its_id(self):
         rows = self.by_item()
         prefix = {"report": "00O", "table": "00O", "dashboard": "01Z"}
         for item, row in rows.items():
@@ -188,11 +189,9 @@ class KeepList(unittest.TestCase):
                 self.assertNotIn("?", row[col], f"{where}: `?` left in {col} (no row is undecided)")
             self.assertIn(row["kind"], prefix, f"{where}: kind is report, table or dashboard, not {row['kind']!r}")
             sf_id = row["id"]
-            if item in NEW and sf_id == "new":
-                continue
             self.assertRegex(sf_id, r"^[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?$",
-                             f"{where}: id {sf_id!r} is a 15- or 18-character Salesforce id"
-                             + ("" if item in NEW else " (only item 12 may read `new`)"))
+                             f"{where}: id {sf_id!r} is a 15- or 18-character Salesforce id (no item reads `new` "
+                             "since #80 built item 12's report)")
             self.assertTrue(sf_id.startswith(prefix[row["kind"]]),
                             f"{where}: a {row['kind']}'s id starts {prefix[row['kind']]}, not {sf_id[:3]!r}")
             if len(sf_id) == 18:
@@ -202,12 +201,39 @@ class KeepList(unittest.TestCase):
 
     def test_no_id_is_kept_twice(self):
         rows = self.rows()
-        ids = [r["id"] for r in rows if r["id"] != "new"]
+        ids = [r["id"] for r in rows]
         # a 15-character id and its 18-character form are the same record
         keys = [i[:15] for i in ids]
         twice = sorted({i for i in ids if keys.count(i[:15]) > 1})
         self.assertEqual(twice, [], f"glow/sf_keep_list.csv: id(s) {twice} on more than one row")
-        self.assertEqual(len(ids), 23, f"glow/sf_keep_list.csv: 23 ids (every row but item 12), found {len(ids)}")
+        self.assertEqual(len(ids), 24, f"glow/sf_keep_list.csv: 24 ids (every row, item 12 included since #80), "
+                                       f"found {len(ids)}")
+
+    def test_item_12_has_its_new_report(self):
+        # ticket #80, plan Rollout step 8: item 12's id is the report #80 deployed, both labels its name
+        rows = self.by_item()
+        where = "glow/sf_keep_list.csv item 12"
+        self.assertIn("12", rows, f"{where}: no row")
+        row = rows["12"]
+        self.assertEqual((row["group"], row["measure"], row["kind"]),
+                         ("GLOW Club Training", "New mentors recruited", "report"),
+                         f"{where}: still GLOW Club Training's report for GLOW's measure 'New mentors recruited'")
+        sf_id = row["id"]
+        self.assertNotEqual(sf_id, "new", f"{where}: id still reads `new`; it is the report #80 deployed, "
+                                          f"{ITEM_12_ID} (plan docs/plans/2026-10-26-sf-new-mentors.md, Rollout step 8)")
+        self.assertRegex(sf_id, r"^00O[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?$",
+                         f"{where}: id {sf_id!r} is a report id (00O, 15 or 18 characters)")
+        if len(sf_id) == 18:
+            self.assertEqual(sf_id[15:], case_safe_suffix(sf_id[:15]),
+                             f"{where}: id {sf_id!r} is mistyped (its last three characters do not match the "
+                             "first fifteen)")
+        self.assertEqual(sf_id[:15], ITEM_12_ID[:15], f"{where}: id is {ITEM_12_ID} (the report #80 deployed), "
+                                                      f"not {sf_id!r}")
+        for col in ("label_today", "label_target"):
+            self.assertEqual(row[col], ITEM_12_LABEL, f"{where}: {col} is the deployed report's name "
+                                                      f"{ITEM_12_LABEL!r}, not {row[col]!r}")
+        news = [r["item"] for r in rows.values() if r["id"].strip().lower() == "new"]
+        self.assertEqual(news, [], f"glow/sf_keep_list.csv: item(s) {news} still read `new` (every item has its report)")
 
     def test_no_report_from_the_attendance_folders_is_in_it(self):
         # the "Jotform Attendance" dashboard and the two Attendance folders stay untouched (epic #68); their
