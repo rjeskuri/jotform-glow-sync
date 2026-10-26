@@ -10,13 +10,20 @@ procedure: RUNBOOK "Photo mover".
 
 It is **not** the sheet's Apps Script (`appsscript/`): a Drive scope there would stop the
 form-submit trigger until the owner re-authorises (CLAUDE.md rule 11). This project has its own
-scopes, `drive` and `script.scriptapp` (the trigger), and nothing else.
+scopes, `drive` and `script.scriptapp` (the trigger), and nothing else; the moves go through the
+advanced Drive service (v3, enabled in its manifest), which uses the same `drive` scope.
 
 What it does and never does:
 
-- a whole subfolder moves (`Folder.moveTo`); when that name is already in the region folder once
-  (a resubmission) its files move in one by one beside what is there, and a file whose name and
-  size are both already there stays in My Drive (logged as kept). Nothing is ever replaced;
+- a settled subfolder moves as its files: Drive cannot move a folder from My Drive into a Shared
+  Drive (#132, 2026-10-24: `teamDrivesFolderMoveInNotSupported`, whatever the role), so the mover
+  makes a folder of the subfolder's name in the region folder and moves the files into it one by
+  one (`Drive.Files.update` with `addParents`/`removeParents`, `supportsAllDrives`); the emptied
+  subfolder stays in My Drive (expected; each leftover costs every run one listing, so Ryan
+  clears them regularly by hand). When that name is already in the
+  region folder once (a resubmission) its files move in the same way beside what is there, and a
+  file whose name and size are both already there stays in My Drive (logged as kept). Nothing is
+  ever replaced;
 - two or more folders of that name on the Shared Drive: refused and logged, moved by hand;
 - the `Attendance photos - <Region>` folders themselves stay: Jotform writes into them;
 - it never shares, links, copies, trashes or e-mails a file. The photos show girls' faces; only
@@ -24,8 +31,8 @@ What it does and never does:
 - the log (Executions) holds counts and folder names, never a file's name or contents.
 
 Files: `Plan.gs` (the planner, pure, tested by `test/drive_sync_test.js`), `Mover.gs` (the entry
-points), `appsscript.json` (time zone America/New_York, the sheet's; the two scopes),
-`.clasp.json.example` (the clasp link template), `.claspignore`.
+points), `appsscript.json` (time zone America/New_York, the sheet's; the two scopes; the advanced
+Drive service `Drive`, v3), `.clasp.json.example` (the clasp link template), `.claspignore`.
 
 ## Setup (once, Ryan)
 
@@ -38,7 +45,10 @@ upload on it, and step 9 (the regional forms) comes last.
    `Africa`, `Asia`, `Latin America`, `Template` (and `U.S` only if that form is re-enabled):
    the mover refuses a target folder with any other name. Members: the named list only
    (the CEO and Ryan); never "anyone with the link". Ryan's company account is at least a
-   **Content manager** (moving items in needs it; see the plan's Risks on moving folders).
+   **Content manager**: Ryan owns the files (Jotform uploads as his account), and Google's
+   documented minimum for moving one's own files into a shared drive is Contributor. Manager is
+   not needed: no role lets the API move a folder in, which is why the mover moves files
+   (#132, 2026-10-24; the plan's Risks).
 2. **The source folders.** In the company account's My Drive, one folder per region in use for
    Jotform's uploads, named exactly `Attendance photos - <Region>` (`Attendance photos -
    Africa`, … `Attendance photos - Template`): the mover refuses a source folder with any other
@@ -51,7 +61,10 @@ upload on it, and step 9 (the regional forms) comes last.
    `nvm use 18`, then `cd drive-sync && npx clasp push -f`. clasp must be logged in as the
    company account (`npx clasp login`; the login is global, in `~/.clasprc.json`, so check it
    again before the next `appsscript/` push). Or paste `Plan.gs`, `Mover.gs` and the manifest
-   into the editor by hand (Project Settings → show the manifest).
+   into the editor by hand (Project Settings → show the manifest). The manifest enables the
+   **advanced Drive service** (`dependencies.enabledAdvancedServices`: `Drive`, v3), which the
+   moves need (#132); pasted by hand, the same is Editor → Services `+` → Drive API, version
+   v3, identifier `Drive` → Add. Its scope is the `drive` scope already declared.
 5. **Script Properties** (Project Settings → Script Properties). One pair per region in use; the
    id of a folder is the last part of its Drive URL, after `/folders/`:
 
@@ -90,5 +103,9 @@ steps 1-4). No regional form yet.
 ## Stopping it
 
 Run `removeTrigger`, or delete the trigger in the editor (Triggers, the clock icon). Nothing else
-runs the mover. Undo a move by moving the subfolder back into `Attendance photos - <Region>` by
-hand (RUNBOOK "Photo mover", Rollback).
+runs the mover. Undo a move by moving its files back into the emptied subfolder in
+`Attendance photos - <Region>` (or a new folder of its name, once it was cleared) by hand. That
+move out of the Shared Drive needs **Manager** on it (Google, "How file access works in shared
+drives", https://support.google.com/a/users/answer/12380484: "If you have Manager access to a
+shared drive, you can move files and folders out of shared drive to My Drive"; no lower role is
+named), so a Manager does it, or Ryan's role is raised for it (RUNBOOK "Photo mover", Rollback).
