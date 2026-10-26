@@ -3766,9 +3766,9 @@ Decommissioned, kept there; #73 leaves item 2's report in its folder, for #75 to
 Item 19, "GLOW of the Month Stories" (group "Report/Data Table Format"), is the report "GLOW of the
 Month Stories Report" (`00ORP000005p2L32AI`), the org's label since 2026-10-21, which the file
 follows (Ryan, 2026-10-23). It is the table: a tabular report on no
-dashboard, and it stays tabular, not grouped (below). Item 12, "New mentors recruited", has no report in the org until
-#80's deploy: #80 has built it, "Partners that recruited new mentors" (`### GLOW Club Training`), and the
-file reads `new` for its Id until the deploy (an interactive session with Ryan). Item 18, "Report submitted on time", maps to "Reports
+dashboard, and it stays tabular, not grouped (below). Item 12, "New mentors recruited", is the report #80
+deployed on 2026-10-26, "Partners that recruited new mentors" (`00ORP000009kXev2AE`, `### GLOW Club
+Training`), and the file carries its Id. Item 18, "Report submitted on time", maps to "Reports
 completed on time" (`00ORP0000054DyH2AU`), which lists submission and modified dates; no report
 computes "on time" today, and that computation is a later task, on hold (#119).
 
@@ -3781,9 +3781,8 @@ filters. Tasks #75 to #79 bring each dashboard and its reports to that, with cur
 
 Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
 `label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
-keep the dashboard names listed above. Item 12 has no label today; its `label_target` is GLOW's
-measure, "New mentors recruited", until #80's deploy, when both become the report's label,
-"Partners that recruited new mentors" (Ryan, 2026-10-26).
+keep the dashboard names listed above. Item 12's `label_today` and `label_target` are the label
+of the report #80 deployed, "Partners that recruited new mentors" (Ryan, 2026-10-26).
 
 Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
 a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's three folders, which
@@ -3826,8 +3825,8 @@ the five dashboards. The five groups are categories, the rows of this table:
 | Report/Data Table Format | — (item 19, the table "GLOW of the Month Stories Report", on no dashboard) | — | GLOW Monthly Reports | 1 |
 
 - The counts are GLOW's list: 18 reports in five dashboards and the table. Item 12 ("New mentors
-  recruited", GLOW Club Training) has no report in the org until #80's deploy; #80 has built it
-  for "GLOW Monthly Reports". The report folder holds the other 18 kept reports: 17 of the five dashboards and item 19.
+  recruited", GLOW Club Training) is the report #80 deployed into "GLOW Monthly Reports" on
+  2026-10-26. The report folder holds all 19 kept reports: 18 of the five dashboards and item 19.
 - The report folder is the `ReportFolder` `GLOW_Monthly_Reports` and the dashboard folder the
   `DashboardFolder` `GLOW_Monthly_Dashboards`, both new, built in
   `data/sf_folders_2026-10-23/build/` from a retrieve of the three DHIS2 folders.
@@ -4540,7 +4539,8 @@ D3, the GLOW Club Observations dashboard. D4's label and its reports' labels sta
 Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current. #78's build
 (`data/sf_dash_training_2026-10-24/build/`) was deployed on 2026-10-26 (deploy
 `0AfRP000002i76H0AQ`, the plan's Result): items 13-15 are live on D4, and item 16 joins it after
-#77 lands (the plan's step 9).
+#77 lands (the plan's step 9). Item 12's component joined D4 on 2026-10-26 (#80, deploy
+`0AfRP000002i9BJ0AY`; below).
 
 The measures, each a report in "GLOW Monthly Reports" on the Monthly Report object `DHIS2__c`, and
 each component on its own report:
@@ -4580,9 +4580,10 @@ each component on its own report:
   column for each month, Yes and No, in the left half of D4's third row; the second row's right
   half stays free for item 16. SOQL signal, the last 12 months:
   `SELECT Recruit_any_new_mentors_last_month__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Recruit_any_new_mentors_last_month__c != null GROUP BY Recruit_any_new_mentors_last_month__c`
-  (2026-10-26: 73 Yes, 451 No). The report and the component are built and wait for the deploy
-  in an interactive session with Ryan ([plan](plans/2026-10-26-sf-new-mentors.md)); until then
-  the keep list reads `new` for item 12.
+  (2026-10-26: 73 Yes, 451 No). Status: deployed 2026-10-26 11:54 UTC on Ryan's go (#80; deploy
+  `0AfRP000002i9BJ0AY`, check-only `0AfRP000002i9850AA`), the report `00ORP000009kXev2AE`, read
+  back and checked against SOQL month by month; the keep list carries its id
+  ([plan and Result](plans/2026-10-26-sf-new-mentors.md#result)).
 
 A partner that filed no Monthly Report for a month has no `DHIS2__c` record for it, so it has no
 row in items 15 and 16: a missing response, which the reports keep apart from a No by leaving it

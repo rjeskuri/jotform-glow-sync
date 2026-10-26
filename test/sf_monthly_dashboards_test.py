@@ -1053,7 +1053,7 @@ class CategoryFoldersDocs(unittest.TestCase):
 
     The table's groups, dashboard labels and report counts are read from `glow/sf_keep_list.csv`, not pinned:
     a group's report count is its rows on GLOW's keep list that are not a dashboard, item 12 ("New mentors
-    recruited", id `new`, built into the folder by #80) included - the table describes GLOW's list (18
+    recruited", built into the folder by #80) included - the table describes GLOW's list (18
     reports in five dashboards, and the table), not what the org holds on one day."""
 
     longMessage = False         # the messages say what to fix
@@ -4046,11 +4046,12 @@ class TrainingDashboardDocs(unittest.TestCase):
         return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
 
     def items(self):
-        """Items 13-16 of `glow/sf_keep_list.csv`, one row each (the file repeats some rows)."""
+        """Items 13-16 of `glow/sf_keep_list.csv`, one row each (the file repeats some rows): the group's reports
+        but item 12, which is #80's own report (selected by its item number, not by an id reading `new`)."""
         import csv
         with open(self.KEEP_LIST, encoding="utf-8", newline="") as f:
             rows = [r for r in csv.DictReader(f) if r["group"] == self.GROUP and r["kind"] == "report"
-                    and r["id"] != "new"]
+                    and r["item"] != "12"]
         out = {}
         for r in rows:
             out.setdefault(r["item"], r)
