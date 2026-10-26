@@ -2467,8 +2467,11 @@ class ObservationsDashboardDocs(unittest.TestCase):
                             f"{where}: step 8 records item {item}'s September, {what}, after \"item {item}\" in one "
                             "sentence or table row")
         def summed(n):
+            # `n` beside "sum"/"total", or bound to "sessions" ("93 sessions", a table's "Sessions: 93"): item 10's
+            # Sum is its sessions, so "93 sessions in 42 Monthly Reports" is accurate
             return re.compile(r"(?i)\b(sum\w*|total)(\s+(of|was|is|came\s+to|to))?\s*[:=]?\s*" + self.num(n) + "|"
-                              + self.num(n) + r"\s+(in\s+)?(sum|total)\b")
+                              + self.num(n) + r"\s+(in\s+)?(sum|total|sessions?)\b|"
+                              r"\bsessions?\s*[:=]\s*" + self.num(n))
 
         def over(n):
             return re.compile(r"(?i)\b(over|across|from|in)\s+(the\s+)?" + self.num(n) + "|" + self.num(n)
@@ -2477,8 +2480,8 @@ class ObservationsDashboardDocs(unittest.TestCase):
                          if summed("93").search(t) and over("42").search(t)
                          and not summed("42").search(t) and not over("93").search(t) and self.real(u)],
                         f"{where}: step 8 records item 10's September, sum 93 over 42 Monthly Reports (93 beside "
-                        "\"sum\", 42 beside \"over\" or \"Monthly Reports\"), after \"item 10\" in one sentence or table "
-                        "row")
+                        "\"sum\" or \"sessions\", 42 beside \"over\" or \"Monthly Reports\"), after \"item 10\" in one "
+                        "sentence or table row")
         # the test-record rule's check, each count bound to its side: with the rule 33 (January), 19 (March) and 46
         # records; without it 34, 20 and 47 (round 2 swapped the sides and passed)
         with_rule, without_rule = ("33", "19", "46"), ("34", "20", "47")
