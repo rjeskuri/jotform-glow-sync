@@ -26,7 +26,10 @@ description: Salesforce for this project - what lives there (attendance batches 
   Salesforce first: a rename starts in the sheet (RUNBOOK "Renaming a club").
 - **Duplicate and obsolete flags.** `Duplicate_Record__c` and `Obsolete_Record__c` ("Duplicate
   Record", "Obsolete Record") on Account and Contact, set by hand by administrators alone and by
-  rule by the flagging batch (#85). The Matching Rule `Account.Name_Parent` (same name ignoring
+  rule by the flagging batch (#85): `RecordFlagBatch`, run as anonymous Apex on a script
+  `tools/sf_record_flags.py` writes (ids only; the Contact script only while the guard's three
+  counts are 0; `clear` mode is the rollback; RUNBOOK "Duplicate and obsolete records in
+  Salesforce", The flagging batch). The Matching Rule `Account.Name_Parent` (same name ignoring
   capitals and spacing, same parent) and one Duplicate Rule per record type, Club and Household
   (`Account.Name_Parent_Club_Report`, `Account.Name_Parent_Household_Report`, the condition Record
   Type equals that type), are Allow with Report only, no Alert and no Block, because an alert
@@ -93,6 +96,7 @@ description: Salesforce for this project - what lives there (attendance batches 
 | `tools/auto_sync.py --apply-salesforce` (GitHub Actions, as Ryan's own user through the External Client App GLOW Sync (client credentials), through `tools/sf_new_clubs.py`) | Creates new clubs' Club accounts (at most 5 per region per run) and marks their SF Pending rows | `SF_SYNC=apply` and `AUTO_SYNC_APPLY=1`, repository variables that only Ryan changes | `SF_SYNC=off`; a created account (Description `created by the automatic sync <date>`; `CreatedById` is Ryan's, not the sync's) is deleted only while it has no Contacts and no attendance. A freeze of Ryan's user also revokes the Jotform connection (RUNBOOK "New clubs' accounts, automatically", The risks of running as Ryan) |
 | `sf project deploy validate`, `start`, `quick` | Metadata | Hook (check-only too) | Redeploy only the components that change made, from its `before/`, after a fresh retrieve of them equals its `after/`, never an older build (2026-10-15: RUNBOOK "Attendance dashboard in Salesforce", Rollback); a `destructiveChanges.xml` for new components |
 | `sf apex run` (the rolled-back proof of a processor change) | Inserts inside a transaction that ends in `Database.rollback` | Hook; the script pasted in full first | Nothing left, unless the script misses its rollback call |
+| `sf apex run -o glow -f <script>` of `RecordFlagBatch` in `flag` or `clear` mode (the script from `tools/sf_record_flags.py`, ticket #85) | `Duplicate_Record__c` and `Obsolete_Record__c` on every Account or Contact whose flag changes, in scopes of 200 | Hook; `dryRun` first and its counts confirmed by Ryan; the Contact script only while the guard's three counts are 0; a quiet hour; the script pasted in full first | `clear` mode (the hand-set flags come off too: counted first), or the saved ids `data/sf_record_flags_<date>/flagged.csv` record by record |
 | `sf data create`, `update`, `delete`, `upsert`, `import` | Records | Hook | Prefer the write connector (one record) or a tool with a ledger |
 | `sf api request rest` with a method other than GET, a body (`-b`/`--body`) or a request file (`-f`/`--file`); `sf api request graphql` | Anything | Hook (a GET without a body or file passes: a read) | As for the record or metadata it changed |
 
