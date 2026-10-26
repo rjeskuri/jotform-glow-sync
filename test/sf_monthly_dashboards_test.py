@@ -1391,7 +1391,15 @@ class TrainingDashboardDocs(unittest.TestCase):
     difference; it no longer says nothing is deployed, and the plan stays `in-progress` while steps 9 (after #77)
     and 10 remain. Step 6's refresh PUT carries a body (`-b '{}'`; sf 2.151 refuses a bodiless PUT). The RUNBOOK
     says the build is deployed (2026-10-26). These ids and counts are the rollout's record (that comment), pinned
-    here as the facts the Result must carry; counts and ids only."""
+    here as the facts the Result must carry; counts and ids only.
+
+    Tightened after the test-breaker: every occurrence of an id stands beside its own label (never another
+    item's or step's); the ledger's "before the deploy" is a fact, not what the plan wanted; item 15's Yes 199 and
+    No 325 are never crossed; the 2 test records are left out, not kept; step 1's fresh retrieve equals `before/`
+    and step 8's ledger holds 3 moves; steps 1-8 are said done, steps 9 and 10 neither done nor "not needed"; no
+    Result line says failed, rolled back, mismatch, not equal, differs (but the read-back's `showValues` line) or
+    still to run (but steps 9 and 10); the PUT's body is in the same command as `--method PUT`; the RUNBOOK says
+    "was deployed", not "scheduled" or "still runs"."""
 
     longMessage = False         # the messages say what to fix
     RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
@@ -1997,17 +2005,37 @@ class TrainingDashboardDocs(unittest.TestCase):
     DEPLOY_ID = "0AfRP000002i76H0AQ"
     COPIES = {"13": "00ORP000009kU9B2AU", "14": "00ORP000009kUAn2AM", "15": "00ORP000009kUCP2A2",
               "16": "00ORP000009kUE12AM", "D4": "01ZRP00000BPIjN2AX"}
+    MOVED = ("00ORP000005ufNN2AY", "00ORP000005uecc2AA")     # step 8: the two "DHIS2 Reports" reports
     ZERO_AF = re.compile(r"(?<![A-Za-z0-9])0Af[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?(?![A-Za-z0-9])")
     CHECK_WORD = re.compile(r"(?i)check-only|--dry-run|\bvalidat\w*|\bcheck\s+only\b")
     DEPLOY_WORD = re.compile(r"(?i)\bdeploy\w*")
     ITEM_REF = re.compile(r"(?i)\bitems?\s+((?:1[2-6]\b(?:\s*(?:,|and|&|-|–|to)\s*(?=1[2-6]\b))?)+)")
     STEP_REF = re.compile(r"(?i)\bsteps?\s+((?:\d{1,2}\b(?:\s*(?:,|and|&|-|–|to)\s*(?=\d{1,2}\b))?)+)")
-    REMAINS = re.compile(r"(?i)\b(remain\w*|left|wait\w*|await\w*|pending|still|open|to do|not yet|outstanding|"
-                         r"later)\b")
+    # a step still to run; "left" only as "Left:", "is/are left", "left to" (never "nothing left", "#77 left it")
+    REMAINS = re.compile(r"(?i)\b(remain\w*|wait\w*|await\w*|pending|not yet|outstanding|later|to do)\b|"
+                         r"\bleft\s*:|\b(is|are|still)\s+left\b|\bleft\s+to\b")
     STILL_TO_RUN = re.compile(r"(?i)\b(remain\w*|wait\w*|await\w*|pending|not yet|outstanding)\b")
+    DONE = re.compile(r"(?i)\b(done|ran|completed?|succeeded|finished|carried out|performed|executed)\b")
+    # what steps 9 and 10 are not (2026-10-26): done, or not needed
+    NOT_LEFT = re.compile(r"(?i)\b(done|ran|completed?|succeeded|finished|carried out|performed|executed|not needed|"
+                          r"no longer needed|unnecessary|unneeded|needless|skipped|dropped|cancell?ed|moot)\b")
+    # a Result line that says something went wrong (a negation before it voids it)
+    WRONG = re.compile(r"(?i)\b(mismatch\w*|fail(s|ed|ing|ures?)?|rolled\s+(it\s+|them\s+)?back|reverted|undone|"
+                       r"unequal|discrepanc\w*|inconsistent|wrong|errors?)\b|≠")
+    # a count that disagrees: the negated equality is itself the contradiction
+    NOT_EQUAL = re.compile(r"(?i)\b(does|do|did|is|are|was|were)\s*(not|n['’]t)\s+(equal|match|agree|the same)\w*|"
+                           r"\bnot\s+(equal|identical|the same)\b")
+    DIFFERS = re.compile(r"(?i)\b(differ|differs|differed|different|diverg\w*)\b")
+    # a failure the Result may honestly record: the bodiless PUT in sf 2.151
+    PUT_CONTEXT = re.compile(r"\bPUT\b|(?<![^\s`])-b\b|\bbody\b|\b2\.151\b")
+    # before what a sentence says happened, a wish, a condition or a future: not that it happened
+    WISH = re.compile(r"(?i)\b(should|would|could|must|ought|want\w*|supposed|meant|intended|planned|plans?|expected|"
+                      r"asks?|asked|to\s+be|will|shall|needs?\s+to|scheduled|due|going\s+to|ready\s+to|until|once|"
+                      r"when|if|can|may|might|be|yet)\b")
     # item 16 may still be "not deployed" (step 9); the build is not
     NOTHING_DEPLOYED = re.compile(r"(?i)\bnothing\s+(is\s+|was\s+|has\s+been\s+)?(yet\s+)?deployed\b")
-    PUT_BODY = re.compile(r"(?:(?<!\S)-b|--body)(?:=|\s+)['\"]?\{\s*\}['\"]?")
+    PUT_BODY = re.compile(r"(?:(?<![^\s`])-b|--body)(?:=|\s+)['\"]?\{\s*\}['\"]?")
+    PUT_METHOD = re.compile(r"(?:--method|-X)(?:=|\s+)['\"]?PUT\b")
 
     @staticmethod
     def expand(nums):
@@ -2023,6 +2051,11 @@ class TrainingDashboardDocs(unittest.TestCase):
         body = re.escape(f"{n:,}").replace(",", ",?")
         return re.compile(r"(?<![\d,.])" + body + r"(?![\d]|[,.]\d)")
 
+    @staticmethod
+    def at(text, pos):
+        """A match at `pos` of `text`, for `locally_denied`."""
+        return re.compile("").match(text, pos)
+
     def result(self):
         path = self.plan_path()
         return path, self.plan_part(path, "## Result", 40)
@@ -2030,6 +2063,13 @@ class TrainingDashboardDocs(unittest.TestCase):
     def result_units(self, raw):
         """The Result's units (a table row, a list item, a sentence), a `;` kept inside its sentence."""
         return self.units(raw.replace(";", ","))
+
+    def segments(self, unit, rx):
+        """[(numbers, text)]: `unit` cut at each reference `rx` (`item 13`, `steps 9 and 10`), each piece running to
+        the next reference."""
+        refs = list(rx.finditer(unit))
+        return [(self.expand(m.group(1)), unit[m.start():refs[i + 1].start() if i + 1 < len(refs) else len(unit)])
+                for i, m in enumerate(refs)]
 
     def item_segments(self, raw):
         """[(items, text)]: each unit cut at each item reference (`item 13`, `items 13 and 14`, a table row's first
@@ -2039,11 +2079,25 @@ class TrainingDashboardDocs(unittest.TestCase):
             row = re.match(r"\|\s*`?(1[2-6])`?\s*\|", unit)
             if row:
                 out.append(({row.group(1)}, unit))
-            refs = list(self.ITEM_REF.finditer(unit))
-            for i, m in enumerate(refs):
-                end = refs[i + 1].start() if i + 1 < len(refs) else len(unit)
-                out.append((self.expand(m.group(1)), unit[m.start():end]))
+            out += self.segments(unit, self.ITEM_REF)
         return out
+
+    def labels(self, raw, rid, refs_of):
+        """[(label, unit)]: the label of each occurrence of id `rid` in the Result: in its comma-bounded clause the
+        nearest before it, else the nearest after it; with none in that clause, the nearest in its unit (None: none
+        in its unit)."""
+        got = []
+        for u in self.result_units(raw):
+            refs = refs_of(u)
+            for m in re.finditer(re.escape(rid), u):
+                at, end = m.start(), m.end()
+                lo, hi = u.rfind(",", 0, at) + 1, (u.find(",", end) + 1 or len(u) + 1) - 1
+                before = [(r, k) for r, k in refs if lo <= r.start() and r.end() <= at]
+                after = [(r, k) for r, k in refs if end <= r.start() and r.end() <= hi]
+                label = (max(before, key=lambda rk: rk[0].end())[1] if before else
+                         min(after, key=lambda rk: rk[0].start())[1] if after else self.nearest(u, at, len(rid), refs))
+                got.append((label, u))
+        return got
 
     @staticmethod
     def nearest(unit, at, length, refs):
@@ -2068,47 +2122,59 @@ class TrainingDashboardDocs(unittest.TestCase):
         ids = set(self.ZERO_AF.findall(fl))
         self.assertGreaterEqual(len(ids), 2, f"{where}: record the check-only's and the deploy's ids (`0Af…`, two "
                                              f"different ids); found {sorted(ids)}")
+
+        def deploy_refs(u):
+            checks = list(self.CHECK_WORD.finditer(u))
+            spans = [(c.start(), c.end()) for c in checks]
+            refs = [(m, "check") for m in checks]
+            refs += [(m, "deploy") for m in self.DEPLOY_WORD.finditer(u)
+                     if not any(a <= m.start() < b or m.start() <= a < m.end() for a, b in spans)
+                     and not re.search(r"(?i)check[\s-]*$|--dry-run\s*$", u[:m.start()])]
+            return refs
+        # every occurrence of each id beside its own label, never the other's
         for rid, want, what in ((self.CHECK_ONLY_ID, "check", "the check-only (step 3)"),
                                 (self.DEPLOY_ID, "deploy", "the deploy (step 4)")):
-            units = [u for u in self.result_units(raw) if rid in u]
-            self.assertTrue(units, f"{where}: record {what}'s id `{rid}`")
-            got = set()
-            for u in units:
-                at = u.index(rid)
-                checks = list(self.CHECK_WORD.finditer(u))
-                spans = [(c.start(), c.end()) for c in checks]
-                refs = [(m, "check") for m in checks]
-                refs += [(m, "deploy") for m in self.DEPLOY_WORD.finditer(u)
-                         if not any(a <= m.start() < b or m.start() <= a < m.end() for a, b in spans)
-                         and not re.search(r"(?i)check[\s-]*$|--dry-run\s*$", u[:m.start()])]
-                got.add(self.nearest(u, at, len(rid), refs))
-            self.assertIn(want, got, f"{where}: `{rid}` is {what}'s id: name it beside that id "
-                                     f"(\"check-only `{self.CHECK_ONLY_ID}`\", \"deploy `{self.DEPLOY_ID}`\")")
-        # the copies in Decommissioned, each id beside its own item (or D4 / the dashboard)
+            got = self.labels(raw, rid, deploy_refs)
+            self.assertTrue(got, f"{where}: record {what}'s id `{rid}`")
+            self.assertIn(want, {k for k, _u in got}, f"{where}: `{rid}` is {what}'s id: name it beside that id "
+                                                     f"(\"check-only `{self.CHECK_ONLY_ID}`\", \"deploy "
+                                                     f"`{self.DEPLOY_ID}`\")")
+            wrong = [u for k, u in got if k not in (want, None)]
+            self.assertEqual(wrong, [], f"{where}: `{rid}` is {what}'s id only; here it stands beside the other "
+                                        f"step's name: {wrong[:1]}")
+        # the copies in Decommissioned, each id beside its own item (or D4 / the dashboard), never another's
         self.assertTrue([s for s in self.clauses(raw) if self.stated(s, self.COPY) and "Decommissioned" in s],
                         f"{where}: say the copies are in Decommissioned (one sentence, not negated)")
         originals = {n: r["id"] for n, r in self.items().items()}
         originals["D4"] = self.dashboard()["id"]
+
+        def copy_refs(u):
+            refs = [(m, min(n)) for m in self.ITEM_REF.finditer(u) for n in [self.expand(m.group(1))] if len(n) == 1]
+            refs += [(m, k) for k, oid in originals.items() for m in re.finditer(re.escape(oid), u)]
+            refs += [(m, "D4") for m in re.finditer(r"(?i)\bD4\b|\bdashboard\b", u)]
+            return refs
         for key, cid in self.COPIES.items():
             what = "D4" if key == "D4" else f"item {key}"
-            units = [u for u in self.result_units(raw) if cid in u]
-            self.assertTrue(units, f"{where}: record the Decommissioned copy of {what}, `{cid}`")
-            got = set()
-            for u in units:
-                refs = [(m, min(got)) for m in self.ITEM_REF.finditer(u) for got in [self.expand(m.group(1))]
-                        if len(got) == 1]
-                refs += [(m, k) for k, oid in originals.items() for m in re.finditer(re.escape(oid), u)]
-                refs += [(m, "D4") for m in re.finditer(r"(?i)\bD4\b|\bdashboard\b", u)]
-                got.add(self.nearest(u, u.index(cid), len(cid), refs))
-            self.assertIn(key, got, f"{where}: the copy `{cid}` is {what}'s; name {what} beside it (\"{what} "
-                                    f"`{cid}`\")")
-        # the ledger, dated before the deploy
+            got = self.labels(raw, cid, copy_refs)
+            self.assertTrue(got, f"{where}: record the Decommissioned copy of {what}, `{cid}`")
+            self.assertIn(key, {k for k, _u in got}, f"{where}: the copy `{cid}` is {what}'s; name {what} beside it "
+                                                    f"(\"{what} `{cid}`\")")
+            wrong = [(k, u) for k, u in got if k not in (key, None)]
+            self.assertEqual(wrong, [], f"{where}: the copy `{cid}` is {what}'s only; here it stands beside "
+                                        f"another: {wrong[:1]}")
+        # the ledger, dated before the deploy: said as a fact, not as what was wanted
         self.assertRegex(fl, r"data/sf_dash_training_\d{4}-\d\d-\d\d/ledger\.csv",
                          f"{where}: name the ledger `data/sf_dash_training_2026-10-24/ledger.csv`")
-        before = [s for s in self.clauses(raw) if re.search(r"(?i)\bledger\b", s)
-                  and re.search(r"(?i)\bbefore\s+(the\s+|its\s+|this\s+)?(\w+\s+)?deploy\w*", s) and not self.d.denies(s)]
-        self.assertTrue(before, f"{where}: say the ledger's copy rows are dated before the deploy (one sentence "
-                                "naming the ledger, \"before the deploy\", not negated)")
+        before = []
+        for s in self.clauses(raw):
+            for part in re.split(r"(?i)\b(?:though|although|but|however|whereas|yet|while)\b", s):
+                m = re.search(r"(?i)\bbefore\s+(the\s+|its\s+|this\s+)?(\w+\s+)?deploy\w*", part)
+                if (m and re.search(r"(?i)\bledger\b", part) and not self.d.denies(part)
+                        and not self.WISH.search(part[:m.start()])):
+                    before.append(part)
+        self.assertTrue(before, f"{where}: say the ledger's copy rows are dated before the deploy, as a fact (one "
+                                "clause naming the ledger and \"before the deploy\", not negated, not what the plan "
+                                "wanted)")
 
     def test_the_training_result_carries_the_soql_counts_and_the_read_back(self):
         path, raw = self.result()
@@ -2126,22 +2192,39 @@ class TrainingDashboardDocs(unittest.TestCase):
             hit = [t for t in mine if all(self.num(x).search(t) for x in numbers)]
             self.assertTrue(hit, f"{where}: item {n}'s report and SOQL: " + ", ".join(f"{x:,}" for x in numbers)
                                  + f" (in the text naming item {n}; found {mine[:3]})")
-        # item 15: Yes 199, No 325 (the split, not just the numbers)
-        yes = re.compile(r"(?i)\bYes\b\W{0,4}" + self.num(199).pattern + r"|" + self.num(199).pattern + r"\W{0,4}Yes\b")
-        no = re.compile(r"(?i)\bNo\b\W{0,4}" + self.num(325).pattern + r"|" + self.num(325).pattern + r"\W{0,4}No\b")
-        self.assertTrue([t for items, t in segs if "15" in items and yes.search(t) and no.search(t)],
-                        f"{where}: item 15's split, Yes 199 and No 325")
+        # item 15: Yes 199, No 325, each number beside its own answer, never crossed
+        pairs = []
+        for items, t in segs:
+            if "15" in items:
+                words = [(m, m.group(0).lower()) for m in re.finditer(r"(?i)\b(yes|no)\b", t)]
+                pairs.append(({x: {self.nearest(t, m.start(), len(m.group(0)), words) for m in self.num(x).finditer(t)}
+                               for x in (199, 325)}, t))
+        self.assertTrue([t for p, t in pairs if p[199] == {"yes"} and p[325] == {"no"}],
+                        f"{where}: item 15's split, Yes 199 and No 325, each number beside its answer")
+        crossed = [t for p, t in pairs if "no" in p[199] or "yes" in p[325]]
+        self.assertEqual(crossed, [], f"{where}: item 15 is Yes 199, No 325, not the other way round: {crossed[:1]}")
         # each equals SOQL
         self.assertTrue([u for u in units if re.search(r"\bSOQL\b", u)
                          and (self.stated(self.norm(u), self.EQUAL_STRICT) or re.search(r"\s=\s|=\s*SOQL", u))],
                         f"{where}: say each component's numbers equal SOQL")
-        # the test-record rule: 567 with it, 2 test records left out
+        # the test-record rule: 567 with it, the 2 test records left out (not kept in)
         self.assertTrue([u for u in units if self.num(567).search(u) and re.search(r"(?i)\brule\b|\btest\b", u)],
                         f"{where}: 567 Monthly Reports with the test-record rule")
         two_test = re.compile(r"(?i)(?<![\d,.])2\s+(?:[\w`'-]+\s+){0,2}?test\b|"
                               r"\btest[\w-]*\s+(?:[\w:`'-]+\s+){0,3}?\(?2(?!\d|[,.]\d)")
-        self.assertTrue([u for u in units if two_test.search(u)],
-                        f"{where}: the 2 test records the rule leaves out (the check means something)")
+        out = re.compile(r"(?i)\b(left\s+out|leaves?\s+out|leaving\s+out|exclud\w*|filter(s|ed|ing)?\s+out|"
+                         r"drops?|dropped|removes?|removed|without\s+(them|those|the\s+2|the\s+two))\b|"
+                         r"(?<![\d,.])567\s+(Monthly\s+Reports\s+|records\s+)?with\s+(the|its)\s+(test[\w-]*\s+)?rule\b")
+        keep = re.compile(r"(?i)\b(keeps?|kept|keeping|includ\w*|counted|left\s+in|lets?\s+in|let\s+through|"
+                          r"in\s+the\s+count)\b")
+        two = []
+        for u in units:
+            for m in two_test.finditer(u):
+                clause = re.split(r"[,(]", u[:m.start()])[-1] + re.split(r"[,)]", u[m.start():])[0]
+                if self.stated(u, out) and not self.stated(clause, keep):
+                    two.append(u)
+        self.assertTrue(two, f"{where}: the 2 test records the rule leaves out (the check means something), not kept "
+                             "in")
         # one partner, September 2026, item 14: 1 = 1
         sept = re.compile(r"(?i)\bSept(?:ember|\.)?\s+2026\b|\b2026-09\b|\b202609\b")
         one_partner = re.compile(r"(?i)\b(one|a single|single|one-)\s*partner")
@@ -2149,15 +2232,56 @@ class TrainingDashboardDocs(unittest.TestCase):
         self.assertTrue([t for items, t in segs if "14" in items and one_eq.search(t)
                          and [u for u in units if t in u and sept.search(u) and one_partner.search(u)]],
                         f"{where}: the one-partner check: one partner, September 2026, item 14, report 1 = SOQL 1")
-        # the read-back: after/ equals build/ beyond normalisation, the one difference named
+        # step 1: the fresh retrieve equals `before/`
+        eq = (r"(equal(s|led)?|match(es|ed)?|(is|was)\s+identical\s+to|identical\s+to|(is|was)\s+the\s+same\s+as|"
+              r"byte-equal\s+to)")
+        fresh = re.compile(r"(?i)\bfresh\b[^.]{0,80}?\b" + eq + r"\b[^.]{0,30}?before/|"
+                           r"before/`?\s+" + eq + r"\b[^.]{0,80}?\bfresh\b")
+        self.assertTrue([u for u in units for m in fresh.finditer(self.norm(u)) if re.search(r"(?i)retriev", u)
+                         and not self.d.locally_denied(self.norm(u), m)],
+                        f"{where}: step 1: the fresh retrieve equals `before/` (\"fresh retrieve `fresh_2026-10-26/` "
+                        "equals `before/`\")")
+        # the read-back: after/ equals build/ beyond normalisation, the one difference named, on item 15
         rb = [s for s in self.clauses(raw) if [m for m in self.READBACK.finditer(s) if not self.d.locally_denied(s, m)]]
         self.assertTrue(rb, f"{where}: the read-back: `after/` equals `build/` (beyond normalisation)")
         self.assertRegex(fl, r"(?i)normali[sz]ation", f"{where}: `after/` equals `build/` beyond normalisation")
-        diff = [u for u in units if "showValues" in u and re.search(r"(?i)\btrue`?\s*(->|→|to)\s*`?false\b", u)
-                and ([1 for m in self.ITEM_REF.finditer(u) if "15" in self.expand(m.group(1))]
-                     or re.search(r"(?i)ColumnStacked|stacked column", u))]
+        diff = []
+        for u in units:
+            sv = re.search(r"showValues", u)
+            if not sv or not re.search(r"(?i)\btrue`?\s*(->|→|to)\s*`?false\b", u):
+                continue
+            refs = [(m, frozenset(self.expand(m.group(1)))) for m in self.ITEM_REF.finditer(u)]
+            if self.nearest(u, sv.start(), len(sv.group(0)), refs) == frozenset({"15"}):
+                diff.append(u)
         self.assertTrue(diff, f"{where}: the one difference: `showValues` true -> false on item 15's ColumnStacked "
-                              "component")
+                              "component (item 15 named beside it)")
+
+    def assertNothingWentWrong(self, raw, where):
+        """The record of 2026-10-26 is steps 1-8 done, every count equal to SOQL: the Result says no step failed or
+        was rolled back, no count disagrees, nothing but the read-back's `showValues` differs, and nothing but
+        steps 9 and 10 (item 16, #77, the Subscribe) is still to run."""
+        found = []
+        for u in self.result_units(raw):
+            n = self.norm(u)
+            for m in self.WRONG.finditer(n):
+                if re.match(r"(?i)fail|error", m.group(0)) and self.PUT_CONTEXT.search(u):
+                    continue            # the bodiless PUT that fails in sf 2.151
+                if not self.d.locally_denied(n, m):
+                    found.append(f"{m.group(0)!r}: {u[:160]!r}")
+                    break
+            m = self.NOT_EQUAL.search(n)
+            if m:
+                found.append(f"{m.group(0)!r}: {u[:160]!r}")
+            if "showValues" not in u:
+                m = [m for m in self.DIFFERS.finditer(n) if not self.d.locally_denied(n, m)]
+                if m:
+                    found.append(f"{m[0].group(0)!r}: {u[:160]!r}")
+            later = ([1 for got, _s in self.segments(u, self.STEP_REF) if got & {"9", "10"}]
+                     or re.search(r"(?i)\bitem\s+16\b|\bSubscribe\b|(?<![\w#])#(77|80)\b", u))
+            if not later and self.stated(n, self.STILL_TO_RUN):
+                found.append(f"still to run: {u[:160]!r}")
+        self.assertEqual(found, [], f"{where}: steps 1-8 ran and every count equals SOQL (2026-10-26); the Result says "
+                                    "otherwise: " + "; ".join(found[:3]))
 
     def test_the_training_plan_is_in_progress_with_steps_9_and_10_left(self):
         sys.path.insert(0, os.path.join(REPO, "scripts"))
@@ -2176,23 +2300,50 @@ class TrainingDashboardDocs(unittest.TestCase):
         word, problem = docs_index.status_of(keys.get("status", ""))
         self.assertEqual(word, "in-progress", f"{name}: `status:` stays `in-progress` while step 9 waits for #77")
         units = self.result_units(raw)
-        steps = [(self.expand(m.group(1)), u) for u in units for m in self.STEP_REF.finditer(u)]
-        self.assertTrue([u for got, u in steps if "9" in got and re.search(r"(?<![\w#])#77\b", u)
-                         and self.REMAINS.search(u)],
+        steps = [(got, u, seg) for u in units for got, seg in self.segments(u, self.STEP_REF)]
+        # steps 1-8: done, said as such (in the text from the step reference, or in the lead-in before it)
+        done = set()
+        for u in units:
+            segs = self.segments(u, self.STEP_REF)
+            lead = u[:self.STEP_REF.search(u).start()] if segs else ""
+            for got, seg in segs:
+                if self.stated(self.norm(seg), self.DONE) or self.stated(self.norm(lead), self.DONE):
+                    done |= got
+        missing = sorted({str(i) for i in range(1, 9)} - done, key=int)
+        self.assertEqual(missing, [], f"{where}: say steps 1-8 are done (\"steps 1-8 done, 2026-10-26\"); not said "
+                                      f"of step(s) {', '.join(missing)}")
+        # steps 9 and 10: still to run, step 9 after #77
+        self.assertTrue([u for got, u, _seg in steps if "9" in got and re.search(r"(?<![\w#])#77\b", u)
+                         and self.stated(self.norm(u), self.REMAINS)],
                         f"{where}: say step 9 (item 16) remains, after #77 lands")
-        self.assertTrue([u for got, u in steps if "10" in got and self.REMAINS.search(u)]
-                        + [u for u in units if re.search(r"(?i)\bSubscribe\b", u) and self.REMAINS.search(u)],
+        self.assertTrue([u for got, u, _seg in steps if "10" in got and self.stated(self.norm(u), self.REMAINS)]
+                        + [u for u in units if re.search(r"(?i)\bSubscribe\b", u)
+                           and self.stated(self.norm(u), self.REMAINS)],
                         f"{where}: say step 10 (the weekly Subscribe) remains")
-        # what a reference to steps 2-8 says, to the next step reference or the end of its clause, never waits
-        done = []
-        for u in self.units(raw):
-            refs = list(self.STEP_REF.finditer(u))
-            for i, m in enumerate(refs):
-                seg = u[m.start():refs[i + 1].start() if i + 1 < len(refs) else len(u)]
-                got = self.expand(m.group(1))
-                if got & {str(i) for i in range(2, 9)} and self.stated(self.norm(seg), self.STILL_TO_RUN):
-                    done.append(seg)
-        self.assertEqual(done, [], f"{where}: steps 1-8 are done (2026-10-26); none of them waits: {done[:1]}")
+        over = [seg for got, _u, seg in steps if got & {"9", "10"} and self.stated(self.norm(seg), self.NOT_LEFT)]
+        self.assertEqual(over, [], f"{where}: steps 9 and 10 are still to run (step 9 after #77); none is done or "
+                                   f"not needed: {over[:1]}")
+        # what a reference to steps 2-8 says, to the next step reference, never waits
+        waits = [seg for got, _u, seg in steps if got & {str(i) for i in range(2, 9)}
+                 and self.stated(self.norm(seg), self.STILL_TO_RUN)]
+        self.assertEqual(waits, [], f"{where}: steps 1-8 are done (2026-10-26); none of them waits: {waits[:1]}")
+        # step 8: the two reports moved, the ledger holds 3 moves
+        moves = [u for u in units for m in re.finditer(r"(?i)\b(3|three)\s+(\w+\s+)?moves\b", u)
+                 if re.search(r"(?i)\bledger\b", u) and not self.d.locally_denied(u, m)
+                 and not self.WISH.search(re.split(r"[,(]", u[max(0, m.start() - 40):m.start()])[-1])]
+        self.assertTrue(moves, f"{where}: step 8 is done: say the ledger holds 3 moves")
+        for rid in self.MOVED:
+            self.assertTrue([u for u in units if rid in u and re.search(r"\bDecommissioned\b", u)
+                             and not self.d.denies(u)],
+                            f"{where}: step 8 moved `{rid}` to Decommissioned: say so beside its id")
+        # and no line of the Result says otherwise
+        self.assertNothingWentWrong(raw, where)
+
+    @staticmethod
+    def code_spans(text):
+        """`text` flattened (a fence made one span) and its inline code spans as [(position, content)]."""
+        t = re.sub(r"`{3,}[\w-]*", "`", flat(text))
+        return t, [(m.start(), m.group(1)) for m in re.finditer(r"`([^`]+)`", t)]
 
     def test_the_rollout_refresh_put_has_a_body(self):
         path = self.plan_path()
@@ -2201,24 +2352,40 @@ class TrainingDashboardDocs(unittest.TestCase):
         steps = [(n, st) for n, st, _c in self.step_clauses(raw, where) if re.search(r"\bPUT\b", st)]
         self.assertTrue(steps, f"{where}: the refresh step names its `PUT` on the dashboard")
         for n, st in steps:
-            self.assertRegex(st, self.PUT_BODY, f"{where}: step {n}'s PUT carries a body, `-b '{{}}'` (sf 2.151 "
-                                                f"refuses a bodiless PUT: \"No 'mode' found in 'body'\")")
+            t, spans = self.code_spans(st)
+            ok = [c for pos, c in spans if self.PUT_METHOD.search(c) and self.PUT_BODY.search(c)
+                  and not self.d.locally_denied(t, self.at(t, pos))]
+            self.assertTrue(ok, f"{where}: step {n}'s PUT carries a body, in the same command: `sf api request rest "
+                                f"… --method PUT -b '{{}}'` (sf 2.151 refuses a bodiless PUT: \"No 'mode' found in "
+                                f"'body'\")")
         for u in self.units(read(path)):
-            if re.search(r"--method\s+PUT\b", u):
-                self.assertRegex(u, self.PUT_BODY, f"{os.path.relpath(path, REPO)}: every `--method PUT` carries "
-                                                   f"`-b '{{}}'`: {u[:200]!r}")
+            t, spans = self.code_spans(u)
+            for _pos, c in spans:
+                if self.PUT_METHOD.search(c) and not self.PUT_BODY.search(c):
+                    self.assertRegex(u, r"(?i)\b(fail\w*|refus\w*|bodiless|without\s+a\s+body|no\s+body)\b",
+                                     f"{os.path.relpath(path, REPO)}: every `--method PUT` carries `-b '{{}}'` in "
+                                     f"the same command (or is the bodiless form that fails): {u[:200]!r}")
 
     def test_the_runbook_says_training_is_deployed(self):
         where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
         part = self.part()
         stale = re.compile(r"(?i)\buntil\s+(it|the\s+build|#78['’]s\s+build|D4)\s+(is|has\s+been)\s+deployed\b|"
-                           r"\bholds\s+the\s+vendor['’]s\b|\bnothing\s+(is\s+)?deployed\b|\bundeployed\b")
+                           r"\bholds\s+the\s+vendor['’]s\b|\bnothing\s+(is\s+)?deployed\b|\bundeployed\b|"
+                           r"\bstill\s+(runs|holds|shows|has)\b|"
+                           r"\b(runs|holds|shows)\s+(the\s+)?(old|vendor['’]s|previous|original)\s+(\w+\s+)?dashboards?\b")
         for s in self.clauses(part):
             m = stale.search(s)
             self.assertIsNone(m, f"{where}: the build is deployed (2026-10-26); drop {m and m.group(0)!r}: {s[:200]!r}")
-        said = [s for s in self.clauses(part) if "2026-10-26" in s
-                and [m for m in self.DEPLOY_WORD.finditer(s) if not self.d.locally_denied(s, m)]]
-        self.assertTrue(said, f"{where}: say #78's build is deployed, 2026-10-26 (one sentence, not negated)")
+        said = []
+        for s in self.clauses(part):
+            if "2026-10-26" not in s:
+                continue
+            for m in re.finditer(r"(?i)\b(deployed|went\s+live)\b", s):
+                pre = re.split(r"[,;(—–]|\bbut\b", s[max(0, m.start() - 50):m.start()])[-1]
+                if not self.WISH.search(pre) and not self.d.locally_denied(s, m):
+                    said.append(s)
+        self.assertTrue(said, f"{where}: say #78's build was deployed on 2026-10-26, as done (\"was deployed on "
+                              "2026-10-26\": past, not negated, not scheduled or to be)")
 
 
 if __name__ == "__main__":
