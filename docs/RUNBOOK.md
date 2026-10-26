@@ -4111,16 +4111,18 @@ its 6 partner managers), on every component (Ryan, 2026-10-24): each manager see
 It has no Partner or Month filter (Ryan, 2026-10-24); viewers read one partner's month from the
 reports' grouping by partner and month. The two tables it had, on the "DHIS2 Reports" reports
 "Mentors Discuss Program Implementation" (`00ORP000005uecc2AA`) and "Lead Training Session with
-Mentors LastM" (`00ORP000005ufNN2AY`), both on 2025 only, come off it; those two reports go to
-Decommissioned by `tools/sf_report_folders.py move` once D4 uses neither, on Ryan's go.
+Mentors LastM" (`00ORP000005ufNN2AY`), both on 2025 only, came off it with the deploy. On
+2026-10-26, on Ryan's go, `tools/sf_report_folders.py move` moved both reports to Decommissioned
+(the plan's step 8); its ledger `data/sf_dash_training_2026-10-24/ledger.csv` holds 3 moves, the
+ones the Rollback's step 1 undoes.
 
 For one partner's month, each query takes `AND Account__r.Name = '<partner>'`; for item 14:
 `SELECT SUM(how_many_training_sessions_did_you_lead__c) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`
 equals that partner's cell for that month in item 14's report.
 
 Rollback, in this order ([plan](plans/2026-10-25-sf-dash-training.md#rollback)):
-1. Once the two "DHIS2 Reports" reports are in Decommissioned, they go back first, since D4 as it
-   was reads them: `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_training_2026-10-24`
+1. The two "DHIS2 Reports" reports are in Decommissioned since 2026-10-26, and D4 as it was reads
+   them, so they go back first: `python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_training_2026-10-24`
    (the dry run lists 3 moves, last first: the plan's `--limit 1` run moved its first report and
    the full `--apply` run moved that report again, Decommissioned to Decommissioned, and the
    second; the undo puts both reports back in "DHIS2 Reports"), then the same with `--apply` on

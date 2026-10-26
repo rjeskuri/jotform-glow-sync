@@ -230,8 +230,7 @@ build in `build/` (3 reports and the dashboard, 4 files; the diff in
 
 - Step 1: the fresh retrieve `fresh_2026-10-26/` equals `before/` (4 files, byte-equal; it also
   equals `fresh_2026-10-25/`).
-- Step 2: the copies are in Decommissioned, tagged #78, each after its dry run: item 13
-  `00ORP000009kU9B2AU`, item 14 `00ORP000009kUAn2AM`, item 15 `00ORP000009kUCP2A2`, item 16
+- Step 2: the copies are in Decommissioned, tagged #78: item 13 `00ORP000009kU9B2AU`, item 14 `00ORP000009kUAn2AM`, item 15 `00ORP000009kUCP2A2`, item 16
   `00ORP000009kUE12AM` and D4 `01ZRP00000BPIjN2AX`. The ledger
   `data/sf_dash_training_2026-10-24/ledger.csv` holds their 5 copy rows, dated before the deploy:
   the copies ran before step 4. D4's copy is for Ryan to rename in Lightning
