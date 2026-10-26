@@ -39,7 +39,7 @@ import unittest
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import REPO, flat, md_part, read, sentences
 
-RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+RUNBOOK_MD = os.path.join(REPO, "docs", "RUNBOOK.md")
 DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
 PLAN_TEMPLATE = os.path.join(REPO, "docs", "templates", "plan.md")
 DECISION = "### 2026-10-26 — Backed-up live writes go through without a prompt"
@@ -136,7 +136,7 @@ class LiveGateDocs(unittest.TestCase):
         self.assertLessEqual(len(rule), self.RULE_1_BEFORE, "rule 1 grew")
 
     def test_the_runbook_describes_the_automatic_go(self):
-        part = flat(md_part(RUNBOOK, "## Live gate (Claude Code)"))
+        part = flat(md_part(RUNBOOK_MD, "## Live gate (Claude Code)"))
         for needle in (".claude/live_backups.log", "ALLOWED", "today", "backup_forms.py --form",
                        "sheets_client.py export", "github_switches.py backup", "--prune", "notif"):
             self.assertIn(needle, part, f"the RUNBOOK's live gate section does not say {needle!r}")
