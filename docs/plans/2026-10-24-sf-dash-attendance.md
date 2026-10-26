@@ -131,9 +131,13 @@ All with the VPN off, through the `sf` CLI login `glow`, in the interactive sess
   after a check-only.
 - The column `Attendance_submitted_electronically__c` added to the report type `Dhis2` is
   additive and harmless, so it may stay. To take it out as well, after the reports are back,
-  check-only and deploy `data/sf_dash_attendance_2026-10-24/fresh_2026-10-26/`'s
-  `Dhis2.reportType-meta.xml` (the report type as it was before the deploy) on Ryan's go: the
-  item 1 report in `before/` does not use the column.
+  retrieve `Dhis2` fresh, take that one column (`DHIS2__c$Attendance_submitted_electronically__c`)
+  out of the retrieved file, then check-only and deploy that file on Ryan's go, never an older
+  build or retrieve of `Dhis2` (DECISIONS 2026-10-16: `Dhis2` is shared with #76-#79, which may
+  add columns later); the item 1 report in `before/` does not use the column. While the fresh
+  retrieve still equals `after/`'s `Dhis2.reportType-meta.xml`, the result is byte-for-byte
+  `data/sf_dash_attendance_2026-10-24/fresh_2026-10-26/`'s file, the comparison, not a source to
+  deploy.
 - A Salesforce user restores a report from its copy in Decommissioned (step 2, tagged `#75`):
   open the copy, then Save As or move it into "GLOW Monthly Reports" (RUNBOOK, the archive rule).
 - Nothing is deleted: the copies stay in Decommissioned.
@@ -156,7 +160,7 @@ All with the VPN off, through the `sf` CLI login `glow`, in the interactive sess
   `DHIS2__c$Attendance_submitted_electronically__c` is not in the report type `Dhis2`. Ryan,
   2026-10-26: add the column in the same deploy. `build/` then also held
   `Dhis2.reportType-meta.xml`, the fresh retrieve plus that one column (not checked by default);
-  its rollback is `fresh_2026-10-26/`'s file (Rollback). The second check-only
+  its rollback takes that column out of a fresh retrieve (Rollback). The second check-only
   (`0AfRP000002i7Fx0AI`) passed, 5/5 components.
 - 2026-10-26, step 4, on Ryan's go: deploy `0AfRP000002i7HZ0AY`, 5/5 components, Succeeded.
 - 2026-10-26, step 5: `after/` equals `build/`, apart from CR line endings in one formula of

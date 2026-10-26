@@ -4062,9 +4062,12 @@ Decommissioned the same day; no dashboard subscription (Ryan, 2026-10-25)
   `Dhis2`, so the first check-only (`0AfRP000002i7EL0AY`) refused item 1; on Ryan's decision
   (2026-10-26) the same deploy added `DHIS2__c$Attendance_submitted_electronically__c` to
   `Dhis2` (not checked by default). Its rollback: the column is additive and harmless and may
-  stay; to take it out, deploy `data/sf_dash_attendance_2026-10-24/fresh_2026-10-26/`'s
-  `Dhis2.reportType-meta.xml` after a check-only, on Ryan's go, once item 1's report no longer
-  uses it.
+  stay; to take it out, once item 1's report no longer uses it, retrieve `Dhis2` fresh, take
+  that one column out of the retrieved file and deploy it after a check-only, on Ryan's go, never
+  an older build or retrieve (DECISIONS 2026-10-16: `Dhis2` is shared with #76-#79, which may add
+  columns later). While the fresh retrieve still equals `after/`'s, the result is byte-for-byte
+  `data/sf_dash_attendance_2026-10-24/fresh_2026-10-26/`'s file, the comparison, not a source to
+  deploy.
 
 The retrieve of 2026-10-24 has the labels and folders #73 left. D1 runs as the viewer
 (`LoggedInUser`, a dynamic dashboard), and its one dashboard filter today is Assigned Partner
