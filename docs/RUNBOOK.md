@@ -56,6 +56,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Attendance totals and partner-reported counts](#attendance-totals-and-partner-reported-counts)
   - [Attendance dashboard in Salesforce](#attendance-dashboard-in-salesforce)
   - [Submission timing in Salesforce](#submission-timing-in-salesforce)
+  - [Session notes in Salesforce](#session-notes-in-salesforce)
   - [Monthly Report dashboards in Salesforce](#monthly-report-dashboards-in-salesforce)
   - [Interactive dashboard in Salesforce](#interactive-dashboard-in-salesforce)
   - [September back-fill: the resolver](#september-back-fill-the-resolver)
@@ -1212,8 +1213,8 @@ company Shared Drive ("Photo mover", below). The photo stays required on the for
 before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
 <named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
 
-`python3 tools/integration_status.py` reads every form's integration: `ok (one action, 8
-fields, Account_Name__c from q5, no upload)` is right, a mapped photo reads `NOT RIGHT: the
+`python3 tools/integration_status.py` reads every form's integration: an `ok (one action, …,
+Account_Name__c from q5, …, no upload)` line is right, a mapped photo reads `NOT RIGHT: the
 upload field is ['19'], not []`, and `other integrations:` lists the other blocks the form
 carries - the Google Drive block's key once step 2 is done (whether the API shows the block at
 all is unverified until then; `none` on every form on 2026-10-06). A form with the session
@@ -1221,9 +1222,11 @@ notes mapped (ticket #106) reads `ok (one action, 9 fields, Account_Name__c from
 Session_Notes__c from q<N>, no upload)`, q<N> being that form's own question named
 `sessionNotes` (found by its name: the qid differs per form); a notes mapping from any other
 question is `NOT RIGHT`. Until step 1 below the template stays `NOT RIGHT` on its upload row
-(exit 1) whatever its notes: only a `Session_Notes__c` line there is the notes' concern. A form
-without it is right until `NOTES_MAPPING_WANTED` in the tool goes True, once all five live
-forms are mapped.
+(exit 1) whatever its notes: only a `Session_Notes__c` line there is the notes' concern. Since
+2026-10-26 `NOTES_MAPPING_WANTED` in the tool is True: a live form without the mapping is `NOT
+RIGHT`, except one whose `status` is exactly `DISABLED` (the U.S form), which reads `ok (one
+action, 8 fields, Account_Name__c from q5, Session_Notes__c not wanted (form DISABLED), no
+upload)` ("Session notes in Salesforce").
 
 *Setting it up (Ryan, in the builder; the API cannot; template first). Every builder save is a
 live write to a form, so each one follows the ritual: a quiet moment with no other rollout on
@@ -1241,9 +1244,10 @@ plain `diff` of the snapshot before and the one after.*
    → the only hunks are inside `integrations` (the upload row gone); `emails`, `conditions`,
    `clearFieldOnHide` byte-identical; `python3 backup_forms.py` again for the other four and
    the same diff on each → empty. Then `python3 tools/integration_status.py` → every live form
-   `ok (one action, 8 fields, Account_Name__c from q5, no upload)` (9 fields, with
-   `Session_Notes__c from q<N>`, once a form's notes are mapped), `integration: ok`. Until
-   this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
+   `ok (one action, 9 fields, Account_Name__c from q5, Session_Notes__c from q<N>, no upload)`
+   (the U.S form, DISABLED: 8 fields, `Session_Notes__c not wanted (form DISABLED)`),
+   `integration: ok`. Until this step the template reads `NOT RIGHT: the upload field is
+   ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
    Settings → Integrations → Google Drive → Authorize → log in as Ryan's company account (the
    one the photo mover runs on) → Folder Name `Attendance photos - Template` (the photo mover's
@@ -1507,7 +1511,8 @@ python3 tools/disable_form.py --form 262382706852058 --enable --apply   # the wa
   club", the way back), then `python3 tools/disable_form.py --form
   262382706852058 --enable --apply` (or the builder), one runner dry run
   (the region reads `in-sync` or plans the restores), `AUTO_SYNC_APPLY`
-  unchanged.
+  unchanged. Its Salesforce integration needs the session notes mapped
+  (q446) before or with the re-enabling ("Session notes in Salesforce").
 
 ## Building a new regional form (not maintenance)
 
@@ -3618,6 +3623,84 @@ archive rule of DECISIONS 2026-10-21), then the four fields `Submitted_At__c`,
 Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
 the four fields and only added their entries to the permission set and the Admin profile, which
 go with the fields when they are deleted, so nothing is redeployed from its `before/`.
+
+## Session notes in Salesforce
+
+- **When:** a question about the session notes on a batch; a form's Salesforce integration
+  changed or re-checked; the U.S form re-enabled; the monthly Salesforce checks.
+- **Status:** the field is live since 2026-10-26 (deploy `0AfRP000002i7O10AI`, about 03:40
+  UTC, Ryan's go); the template, Africa, Asia and Latin America map it since 2026-10-26 (Ryan,
+  in the builder); the U.S form is DISABLED and not mapped. The proof (the first batches through
+  a mapped form, a batch with a note counted) is pending
+  ([plan](plans/2026-10-26-session-notes-salesforce.md), Result).
+- **Dry run:** `python3 tools/integration_status.py` (read only).
+- **Apply:** a mapping is a builder save per form (a live write, Ryan's go); the field was a
+  metadata deploy (the plan's Rollout step 3).
+- **Verify:** `python3 tools/integration_status.py --form <id>` → `ok (one action, 9 fields,
+  Account_Name__c from q5, Session_Notes__c from q<N>, no upload)`.
+- **Rollback:** below.
+- **History:** [plan](plans/2026-10-26-session-notes-salesforce.md).
+
+A mentor's note - the optional question named `sessionNotes` on every attendance form ("Session
+notes on the attendance forms") - reaches Salesforce as `Attendance_Batch__c.Session_Notes__c`
+("Session notes", Long Text Area of 32,768 characters; the form takes 1,000, so no insert is
+refused for length), written by the forms' native integration when it creates the batch. Every
+Salesforce user may read it (Ryan, 2026-10-26; DECISIONS 2026-10-26): System Administrator
+reads and edits it (the integration's user) and the permission set `Attendance_Report_Viewer`
+reads it. It is on the batch's page ("Attendance_Batch Layout", Information section, last) and
+a column of the `Attendance_Totals` report type, not checked by default: add it to a report to
+show it. The processor does not read it. A note is free text and can name girls: fine in
+Salesforce, never in the repo, a log, a ticket or the conversation, so the tools count notes
+and never print one.
+
+**The mapping, per form** (the builder only: the API cannot write the integration).
+`Session_Notes__c` ← the question named `sessionNotes`, whose qid differs per form:
+
+| Form | id | `sessionNotes` | Mapped |
+|---|---|---|---|
+| template | 262352490535154 | q489 | 2026-10-26 |
+| Africa | 262382821971058 | q476 | 2026-10-26 |
+| Asia | 262383129464057 | q457 | 2026-10-26 |
+| Latin America | 262383455778067 | q454 | 2026-10-26 |
+| U.S | 262382706852058 | q446 | not mapped: DISABLED |
+
+To map a form, in a quiet moment: `python3 backup_forms.py --form <id>`; in the builder,
+Settings → Integrations → Salesforce → **edit** the action (create `Attendance_Batch`) → add a
+row: Session notes (`Session_Notes__c`) ← "Additional information about this session
+(optional)" → save, every other row as it is (never question 5's or question 18's), and **never
+remove the connected account** (it detaches all ten forms, 2026-09-30); `python3
+backup_forms.py --form <id>` again and the diff of the two properties snapshots → hunks inside
+`integrations` only; then `python3 tools/integration_status.py --form <id>` → 9 fields.
+
+**The audit.** `tools/integration_status.py` requires the mapping (`NOTES_MAPPING_WANTED`,
+True since 2026-10-26): a live form without it is `NOT RIGHT` (exit 1), told its own
+`sessionNotes` qid, and a mapping from any other question is `NOT RIGHT` on any form. A live
+form whose `status` is exactly `DISABLED` needs none: unmapped, it reads `ok (one action, 8
+fields, Account_Name__c from q5, Session_Notes__c not wanted (form DISABLED), no upload)`. Any
+other status (`ENABLED`, none, `DELETED`, another spelling) is an enabled form's. The template
+stays `NOT RIGHT` on its upload row until "Photos" step 1, whatever its notes.
+
+**Re-enabling the U.S form** ("Disabling a regional form", the way back): map q446 in its
+builder first, or with the re-enabling, before a mentor can submit; then `python3
+tools/integration_status.py --form 262382706852058` → 9 fields, `Session_Notes__c from q446`.
+Re-enabled and unmapped, it reads `NOT RIGHT`, and the notes typed until it is mapped stay in
+Jotform only.
+
+**Counting the notes** (read only, VPN off; the proof and the monthly checks). SOQL cannot
+filter a long text field, so the query selects it and a local one-liner counts the non-blank
+ones and prints the counts only, never a note:
+
+```bash
+sf data query -o glow --json -q "SELECT Session_Notes__c, Processing_Status__c FROM Attendance_Batch__c WHERE Creator__c = 'Jotform' AND CreatedDate >= 2026-10-26T05:40:00Z" \
+  | python3 -c 'import json,sys,collections; r=json.load(sys.stdin)["result"]["records"]; print(len(r), "batches,", sum(1 for x in r if (x.get("Session_Notes__c") or "").strip()), "with a note,", dict(collections.Counter(x["Processing_Status__c"] for x in r)))'
+```
+
+**Rollback** ([plan](plans/2026-10-26-session-notes-salesforce.md#rollback)): unmap in the
+builder, form by form (edit the action → remove the Session notes row → save; never remove the
+connected account), and set `NOTES_MAPPING_WANTED = False` in the tool; the field may stay. The
+field itself goes only on Ryan's word: the layout, the permission set and the report type from
+the deploy's `before/` while a fresh retrieve equals its `after/` (never an older build,
+DECISIONS 2026-10-16), and the field by a destructive change only while it holds no data.
 
 ## Monthly Report dashboards in Salesforce
 

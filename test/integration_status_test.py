@@ -8,7 +8,12 @@ the question named sessionNotes, whose qid differs per form (template q489, Afri
 q457, Latin America q454, U.S q446). During the rollout (NOTES_MAPPING_WANTED False) a form is
 right with or without the mapping, as long as a present one reads the form's own sessionNotes;
 once the switch is True a form without it is NOT RIGHT. Every test pins the switch itself, so
-the file holds whatever its committed value. The fake forms carry what a live form carries beside
+the file holds whatever its committed value - except
+SessionNotesDisabledForms.test_the_committed_switch_is_on, which pins the committed True (the
+rollout ended 2026-10-26: four forms mapped, U.S DISABLED). A live form whose `status` property
+is DISABLED (Ryan, 2026-10-26: "Skip U.S: it is disabled") needs no notes mapping - that exact
+value only: any other status is an enabled form's; a mapping a DISABLED form does carry is checked
+as on any form, and so is everything else. The fake forms carry what a live form carries beside
 the notes question - lookalike text fields, the retired partner list, a header, a special-event
 field, roster checkboxes of fictional clubs - so the question is found by its NAME, not as "the
 one question the tool does not know".
@@ -106,26 +111,42 @@ def layouts(own):
 
 
 class FakeJotform:
-    def __init__(self, blocks, others=None, notes=None):
+    def __init__(self, blocks, others=None, notes=None, status=None):
         self.blocks = blocks
         self.others = others or {}          # form id -> {key: block} of its other integrations
         self.notes = notes or {}            # form id -> its qids named sessionNotes (default: NOTES_QIDS)
+        # form id -> its `status` property (ENABLED / DISABLED, as GET /form/{id}/properties
+        # carries it); a form not named here, or named with None, has no `status` at all
+        self.status = status or {}
 
     def get(self, path):
-        _, _, form_id, part = path.split("/")
+        parts = path.split("/")
+        assert len(parts) == 4 and parts[3] in ("properties", "questions"), \
+            f"the fake serves GET /form/{{id}}/properties and /questions only, not {path}"
+        _, _, form_id, part = parts
         if part == "questions":
             own = [NOTES_QIDS[form_id]] if form_id in NOTES_QIDS else []
-            return questions(self.notes.get(form_id, own))
+            return as_sent(questions(self.notes.get(form_id, own)))
         found = self.blocks.get(form_id)
         integrations = dict(self.others.get(form_id, {}), **({"salesforceV2": found} if found else {}))
-        return {"integrations": integrations or []}
+        props = {"integrations": integrations or []}
+        if self.status.get(form_id) is not None:
+            props["status"] = self.status[form_id]
+        return as_sent(props)
 
 
-def run(blocks, *argv, others=None, notes=None):
+def as_sent(content):
+    """What glow/jotform.py hands back: the reply parsed by json.loads, so fresh objects - its
+    "DISABLED" is equal to, never the same object as, this module's literal or the tool's constant
+    (test round 3: a status compared by `is` must not pass here and fail live)."""
+    return json.loads(json.dumps(content))
+
+
+def run(blocks, *argv, others=None, notes=None, status=None):
     out = io.StringIO()
     try:
         with contextlib.redirect_stdout(out):
-            ist.main(list(argv), client=FakeJotform(blocks, others, notes))
+            ist.main(list(argv), client=FakeJotform(blocks, others, notes, status))
     except SystemExit as stop:
         return out.getvalue(), stop.code
     return out.getvalue(), None
@@ -442,6 +463,338 @@ class SessionNotesMapping(unittest.TestCase):
         with wanted(True):
             found = ist.problems(block(), two)
         self.assertTrue(any(NOTES in line for line in found), found)
+
+
+ENABLED, DISABLED = "ENABLED", "DISABLED"
+# statuses that are NOT the exact value DISABLED (Ruling, #106 orchestrator, test round 2): a form
+# carrying one is an enabled form - an unknown state never excuses a live form from the notes
+# mapping. Jotform's own DELETED, DISABLED in another case or padded, near misses on either side
+# (a prefix of it, it with a suffix), the empty string, and (test round 3) eight-letter all-caps
+# words that are not it: another word, and it with its last letter changed
+NOT_DISABLED = ["disabled", "Disabled", "DELETED", "DISABLED ", " DISABLED", "DISABLED_X", "DIS", "",
+                "ARCHIVED", "DISABLEX"]
+LIVE_IDS = list(glow_forms.LIVE)
+ASIA, LATAM = glow_forms.REGIONALS["Asia"], glow_forms.REGIONALS["Latin America"]
+
+
+def mapped_all(*unmapped):
+    """Every live form's block, each mapping Session_Notes__c from its OWN sessionNotes qid,
+    except the forms in `unmapped` (the eight fields only)."""
+    return {fid: block() if fid in unmapped else block(Session_Notes__c=NOTES_QIDS[fid]) for fid in LIVE_IDS}
+
+
+def bullets(lines):
+    """The problem lines under a form's NOT RIGHT."""
+    return [line for line in lines.splitlines()[1:] if line.startswith("  - ")]
+
+
+class SessionNotesDisabledForms(unittest.TestCase):
+    """Ticket #106, the rollout's end (2026-10-26): the switch on, and a live form whose `status`
+    property is DISABLED needs no Session_Notes__c mapping (Ryan: "Skip U.S: it is disabled"; if
+    U.S is re-enabled it must be mapped, q446). The rule follows each form's own status, never its
+    id: every live form is tried DISABLED, and U.S ENABLED or with no status at all. Only the
+    exact value DISABLED excuses a form: any other status (DELETED, `disabled`, `DISABLED `, ...)
+    reads exactly as ENABLED. A notes mapping a DISABLED form does carry, and everything else
+    about it, is checked as on any form; the old forms are unaffected."""
+
+    def assertNotWanted(self, out, fid):
+        """The form is right and its ok line says Session_Notes__c is not wanted, the form being
+        DISABLED (the essentials only: the wording is the coder's)."""
+        lines = section(out, glow_forms.LIVE[fid])
+        line = lines.splitlines()[0]
+        self.assertNotIn("NOT RIGHT", lines)
+        self.assertIn("ok (", line)
+        self.assertIn("8 fields", line)
+        self.assertNotIn("9 fields", line)
+        self.assertIn(NOTES_FIELD, line)
+        self.assertIn(DISABLED, line)
+
+    def assertMappedOk(self, out, fid, enabled=True):
+        """The form is right: nine fields, the notes from its own sessionNotes (and, enabled,
+        nothing calls it DISABLED)."""
+        label = glow_forms.LIVE[fid]
+        lines = section(out, label)
+        line = lines.splitlines()[0]
+        self.assertNotIn("NOT RIGHT", lines)
+        self.assertIn(f"{label}: connection 1234567 - ok (", line)
+        self.assertIn("9 fields", line)
+        self.assertIn(NOTES_FIELD, line)
+        self.assertTrue(reads(line, NOTES_QIDS[fid]), line)
+        if enabled:
+            self.assertNotIn(DISABLED, lines)
+
+    def assertNotesMissing(self, out, fid):
+        """The (enabled) form is NOT RIGHT for its missing notes mapping, told its OWN sessionNotes
+        qid and no other form's, and nothing calls it DISABLED."""
+        lines = section(out, glow_forms.LIVE[fid])
+        self.assertIn("NOT RIGHT", lines)
+        about = about_notes(bullets(lines))
+        self.assertTrue(about, lines)
+        self.assertTrue(any(reads(line, NOTES_QIDS[fid]) for line in about), lines)
+        for other in set(NOTES_QIDS.values()) - {NOTES_QIDS[fid]}:
+            self.assertFalse(reads(lines, other), lines)
+        self.assertNotIn(DISABLED, lines)
+
+    # --- broad: the end state through main() ------------------------------------------------
+
+    def test_the_end_state_through_main(self):
+        # 2026-10-26: template, Africa, Asia and Latin America map the notes from their own
+        # sessionNotes; U.S is DISABLED and unmapped -> right, integration: ok
+        blocks = mapped_all(US)
+        for enabled in (ENABLED, None):     # the four's status ENABLED, or none in the properties
+            four = {fid: enabled for fid in LIVE_IDS if fid != US}
+            with self.subTest(others=enabled, us=DISABLED), wanted(True):
+                out, stop = run(blocks, status=dict(four, **{US: DISABLED}))
+                self.assertIsNone(stop, out)
+                self.assertIn("integration: ok", out)
+                self.assertNotIn("NOT RIGHT", out)
+                self.assertNotWanted(out, US)
+                for fid in four:
+                    self.assertMappedOk(out, fid)
+                self.assertEqual(out.count("no Salesforce integration (as wanted)"), len(glow_forms.DEFUNCT))
+                # the old forms are unaffected by a status: whatever theirs, the same output
+                for old in (DISABLED, ENABLED):
+                    old_status = {fid: old for fid in glow_forms.DEFUNCT.values()}
+                    self.assertEqual(run(blocks, status=dict(four, **{US: DISABLED}, **old_status)), (out, stop))
+                    still = dict(blocks, **{OLD: block()})
+                    self.assertEqual(run(still, status=dict(four, **{US: DISABLED}, **old_status)),
+                                     run(still, status=dict(four, **{US: DISABLED})))
+                    self.assertIn("old Africa: STILL CONNECTED",
+                                  run(still, status=dict(four, **{US: DISABLED}, **old_status))[0])
+            # U.S re-enabled (ENABLED, or no status at all) and still unmapped: NOT RIGHT, q446
+            for us in (ENABLED, None):
+                with self.subTest(others=enabled, us=us), wanted(True):
+                    out, stop = run(blocks, status=dict(four, **{US: us}))
+                    self.assertEqual(stop, 1, out)
+                    self.assertNotIn("integration: ok", out)
+                    self.assertNotesMissing(out, US)
+                    for fid in four:
+                        self.assertMappedOk(out, fid)
+        # the U.S form alone
+        with wanted(True):
+            out, stop = run({US: block()}, "--form", US, status={US: DISABLED})
+        self.assertIsNone(stop, out)
+        self.assertIn("integration: ok", out)
+        self.assertNotWanted(out, US)
+        with wanted(True):
+            out, stop = run({US: block()}, "--form", US, status={US: ENABLED})
+        self.assertEqual(stop, 1, out)
+        self.assertNotesMissing(out, US)
+
+    def test_any_disabled_live_form_needs_no_notes_mapping_by_its_own_status(self):
+        # every live form in turn DISABLED and unmapped, the other four mapped and ENABLED: right;
+        # the same form ENABLED or without a status: NOT RIGHT, told its own sessionNotes qid
+        for off in LIVE_IDS:
+            label, blocks = glow_forms.LIVE[off], mapped_all(off)
+            others = {fid: ENABLED for fid in LIVE_IDS if fid != off}
+            with self.subTest(label, status=DISABLED), wanted(True):
+                out, stop = run(blocks, status=dict(others, **{off: DISABLED}))
+                self.assertIsNone(stop, out)
+                self.assertIn("integration: ok", out)
+                self.assertNotWanted(out, off)
+                for fid in others:
+                    self.assertMappedOk(out, fid)
+                out, stop = run({off: block()}, "--form", off, status={off: DISABLED})
+                self.assertIsNone(stop, out)
+                self.assertIn("integration: ok", out)
+                self.assertNotWanted(out, off)
+            for status in (ENABLED, None):
+                with self.subTest(label, status=status), wanted(True):
+                    out, stop = run(blocks, status=dict(others, **{off: status}))
+                    self.assertEqual(stop, 1, out)
+                    self.assertNotIn("integration: ok", out)
+                    self.assertNotesMissing(out, off)
+                    for fid in others:
+                        self.assertMappedOk(out, fid)
+                    out, stop = run({off: block()}, "--form", off, status={off: status})
+                    self.assertEqual(stop, 1, out)
+                    self.assertNotesMissing(out, off)
+        # one form's DISABLED excuses no other: U.S and Asia both unmapped, one of them DISABLED
+        for disabled, enabled in ((US, ASIA), (ASIA, US)):
+            with self.subTest(disabled=glow_forms.LIVE[disabled]), wanted(True):
+                out, stop = run(mapped_all(US, ASIA), status={disabled: DISABLED, enabled: ENABLED})
+                self.assertEqual(stop, 1, out)
+                self.assertNotWanted(out, disabled)
+                self.assertNotesMissing(out, enabled)
+        # several DISABLED at once (all five here), none mapped: right
+        with wanted(True):
+            out, stop = run(mapped_all(*LIVE_IDS), status={fid: DISABLED for fid in LIVE_IDS})
+        self.assertIsNone(stop, out)
+        self.assertIn("integration: ok", out)
+        for fid in LIVE_IDS:
+            self.assertNotWanted(out, fid)
+
+    def test_only_the_exact_status_DISABLED_excuses_a_form(self):
+        # Ruling (#106 orchestrator, test round 2): a status that is not exactly DISABLED - DELETED,
+        # DISABLED in another case or padded, a near miss, the empty string - is an enabled
+        # form's: unmapped with the switch on it is NOT RIGHT, told Session_Notes__c and its own
+        # sessionNotes qid, nothing calls it DISABLED, and it reads exactly as the same form ENABLED
+        for fid in LIVE_IDS:
+            label, own = glow_forms.LIVE[fid], NOTES_QIDS[fid]
+            # what the same form reads ENABLED: alone, among the four mapped, and mapped itself
+            with wanted(True):
+                alone = run({fid: block()}, "--form", fid, status={fid: ENABLED})
+                every = run(mapped_all(fid), status={f: ENABLED for f in LIVE_IDS})
+                mapped = run({fid: block(Session_Notes__c=own)}, "--form", fid, status={fid: ENABLED})
+            for status in NOT_DISABLED:
+                with self.subTest(label, status=status, run="--form"), wanted(True):
+                    out, stop = run({fid: block()}, "--form", fid, status={fid: status})
+                    self.assertEqual(stop, 1, out)
+                    self.assertNotIn("integration: ok", out)
+                    self.assertNotesMissing(out, fid)
+                    self.assertEqual((out, stop), alone)
+                with self.subTest(label, status=status, run="every form"), wanted(True):
+                    # the other four mapped and ENABLED
+                    out, stop = run(mapped_all(fid), status=dict({f: ENABLED for f in LIVE_IDS}, **{fid: status}))
+                    self.assertEqual(stop, 1, out)
+                    self.assertNotIn("integration: ok", out)
+                    self.assertNotesMissing(out, fid)
+                    for other in set(LIVE_IDS) - {fid}:
+                        self.assertMappedOk(out, other)
+                    self.assertEqual((out, stop), every)
+                    # every live form carrying that status, the other four mapped: the same
+                    self.assertEqual(run(mapped_all(fid), status={f: status for f in LIVE_IDS}), every)
+                with self.subTest(label, status=status, run="--form, mapped"), wanted(True):
+                    # mapped, it is right as an enabled form is: nine fields, nothing says DISABLED
+                    out, stop = run({fid: block(Session_Notes__c=own)}, "--form", fid, status={fid: status})
+                    self.assertIsNone(stop, out)
+                    self.assertMappedOk(out, fid)
+                    self.assertEqual((out, stop), mapped)
+                # beside it in the same run, another unmapped form whose status is exactly DISABLED
+                # is excused: the near miss alone is NOT RIGHT
+                partner = LIVE_IDS[(LIVE_IDS.index(fid) + 1) % len(LIVE_IDS)]
+                with self.subTest(label, status=status, beside=f"{glow_forms.LIVE[partner]} {DISABLED}"), \
+                        wanted(True):
+                    status_of = dict({f: ENABLED for f in LIVE_IDS}, **{fid: status, partner: DISABLED})
+                    out, stop = run(mapped_all(fid, partner), status=status_of)
+                    self.assertEqual(stop, 1, out)
+                    self.assertNotIn("integration: ok", out)
+                    self.assertNotesMissing(out, fid)
+                    self.assertNotWanted(out, partner)
+                    self.assertEqual(out.count("NOT RIGHT"), 1, out)
+
+    # --- a DISABLED form: no mapping needed, one it carries checked ---------------------------
+
+    def test_a_disabled_form_needs_no_mapping_but_one_it_carries_is_checked(self):
+        for fid in LIVE_IDS:
+            own, label = NOTES_QIDS[fid], glow_forms.LIVE[fid]
+            # unmapped: right, whether the form has its sessionNotes question once, not at all or
+            # twice (that is form_status's to flag, as during the rollout)
+            for notes in ([own], [], [own, "490"]):
+                with self.subTest(label, unmapped=True, notes=notes), wanted(True):
+                    out, stop = run({fid: block()}, "--form", fid, notes={fid: notes}, status={fid: DISABLED})
+                    self.assertIsNone(stop, out)
+                    self.assertNotWanted(out, fid)
+            # mapped: checked like any form's, the switch on or off
+            sources = {q: name for q, (name, _, _) in USUAL.items()}
+            sources.update({"17": "the date", "5": "question 5 (Club Name)", PICKER: "the Club picker",
+                            "999": "no question at all"})
+            sources.update({q: "another form's sessionNotes" for q in NOTES_QIDS.values() if q != own})
+            for switch in (False, True):
+                with self.subTest(label, source="its own sessionNotes", wanted=switch), wanted(switch):
+                    out, stop = run({fid: block(Session_Notes__c=own)}, "--form", fid, status={fid: DISABLED})
+                    self.assertIsNone(stop, out)
+                    self.assertMappedOk(out, fid, enabled=False)
+                for got, what in sources.items():
+                    with self.subTest(label, source=what, q=got, wanted=switch), wanted(switch):
+                        out, stop = run({fid: block(Session_Notes__c=got)}, "--form", fid,
+                                        status={fid: DISABLED})
+                        self.assertEqual(stop, 1, out)
+                        self.assertNotIn("integration: ok", out)
+                        lines = section(out, label)
+                        self.assertIn("NOT RIGHT", lines)
+                        about = about_notes(bullets(lines))
+                        self.assertTrue(any(reads(line, own) for line in about), lines)
+                        # only the notes are wrong
+                        self.assertEqual([line for line in bullets(lines) if line not in about], [], lines)
+                # two questions named sessionNotes and a mapping from one of them: a problem by name
+                with self.subTest(label, notes="two", wanted=switch), wanted(switch):
+                    out, stop = run({fid: block(Session_Notes__c=own)}, "--form", fid,
+                                    notes={fid: [own, "490"]}, status={fid: DISABLED})
+                    self.assertEqual(stop, 1, out)
+                    self.assertTrue(any(NOTES in line for line in about_notes(bullets(section(out, label)))), out)
+
+    def test_a_disabled_form_is_otherwise_checked_as_today(self):
+        # unmapped and DISABLED, the switch on: every other difference is still NOT RIGHT, and the
+        # notes are not among its problems
+        cases = {
+            "Module__c reads q99; it must read q98": dict(Module__c="99"),
+            "Account_Name__c reads q444 (the Club picker); it must read q5 (clubName)": dict(Account_Name__c="444"),
+            "Creator__c is not mapped from a question": dict(Creator__c=None),
+            "Processing_Status__c is mapped too": dict(Processing_Status__c="17"),
+            "the upload field is ['19'], not [] (no photo goes to Salesforce since 2026-10-01)": dict(uploads=("19",)),
+            "no connected Salesforce account": dict(account=""),
+        }
+        for fid in LIVE_IDS:
+            label = glow_forms.LIVE[fid]
+            for message, change in cases.items():
+                with self.subTest(label, problem=message), wanted(True):
+                    out, stop = run({fid: block(**change)}, "--form", fid, status={fid: DISABLED})
+                    self.assertEqual(stop, 1, out)
+                    lines = section(out, label)
+                    self.assertIn("NOT RIGHT", lines)
+                    self.assertIn(message, lines)
+                    self.assertEqual(about_notes(bullets(lines)), [], lines)
+            with self.subTest(label, case="no Salesforce integration"), wanted(True):
+                out, stop = run({}, "--form", fid, status={fid: DISABLED})
+                self.assertEqual(stop, 1, out)
+                self.assertIn(f"{label}: NO Salesforce integration", out)
+            # its connection still counts: a DISABLED form on another account is a second one
+            with self.subTest(label, case="another connection"), wanted(True):
+                blocks = dict(mapped_all(fid), **{fid: block(account="7654321")})
+                status = dict({f: ENABLED for f in LIVE_IDS}, **{fid: DISABLED})
+                out, stop = run(blocks, status=status)
+                self.assertEqual(stop, 1, out)
+                self.assertIn("2 different connections", out)
+                lines = section(out, label)
+                self.assertNotIn("NOT RIGHT", lines)
+                self.assertIn(DISABLED, lines.splitlines()[0])
+
+    def test_only_the_switch_makes_a_disabled_form_different(self):
+        # the switch off: a DISABLED (or ENABLED) form reads exactly as without a status - today
+        for fid in LIVE_IDS:
+            own, label = NOTES_QIDS[fid], glow_forms.LIVE[fid]
+            cases = {"unmapped": block(), "mapped": block(Session_Notes__c=own),
+                     "notes from the date": block(Session_Notes__c="17"), "Module__c wrong": block(Module__c="99"),
+                     "an upload": block(uploads=("19",)), "no integration": None}
+            for name, found in cases.items():
+                with self.subTest(label, case=name, wanted=False), wanted(False):
+                    today = run({fid: found}, "--form", fid)
+                    for status in (DISABLED, ENABLED):
+                        self.assertEqual(run({fid: found}, "--form", fid, status={fid: status}), today, status)
+            # the switch on: unmapped, the DISABLED form is right where the same form enabled is not
+            with self.subTest(label, wanted=True), wanted(True):
+                self.assertEqual(run({fid: block()}, "--form", fid)[1], 1)
+                out, stop = run({fid: block()}, "--form", fid, status={fid: DISABLED})
+                self.assertIsNone(stop, out)
+                self.assertNotWanted(out, fid)
+        # every form at once, the switch off, U.S DISABLED and unmapped: as without a status, and
+        # its line is today's very line
+        with wanted(False):
+            today = run(mapped_all(US))
+            self.assertEqual(run(mapped_all(US), status={US: DISABLED}), today)
+            self.assertEqual(run(mapped_all(US), status=dict({f: ENABLED for f in LIVE_IDS}, **{US: DISABLED})), today)
+        self.assertIsNone(today[1], today[0])
+        self.assertIn("U.S: connection 1234567 - ok (one action, 8 fields, Account_Name__c from q5, no upload)",
+                      today[0])
+
+    # --- the committed value ------------------------------------------------------------------
+
+    def test_the_committed_switch_is_on(self):
+        """The rollout's committed end. The five live forms were settled on 2026-10-26: the
+        template, Africa, Asia and Latin America map Session_Notes__c from their own sessionNotes
+        (q489, q476, q457, q454, read back that day) and U.S is DISABLED (Ryan: "Skip U.S: it is
+        disabled"), so NOTES_MAPPING_WANTED is committed True: from now on an enabled live form
+        without the mapping is NOT RIGHT. The one test that does not pin the switch."""
+        self.assertIs(getattr(ist, "NOTES_MAPPING_WANTED", None), True,
+                      "tools/integration_status.py must commit NOTES_MAPPING_WANTED = True")
+        out, stop = run(mapped_all(US), status={US: DISABLED})
+        self.assertIsNone(stop, out)
+        self.assertIn("integration: ok", out)
+        self.assertNotWanted(out, US)
+        out, stop = run(mapped_all(US), status={US: ENABLED})
+        self.assertEqual(stop, 1, out)
+        self.assertNotesMissing(out, US)
 
 
 if __name__ == "__main__":
