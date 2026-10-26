@@ -19,7 +19,12 @@ Club accounts of the name, the club's is the one under its partner's account (gl
 And the accounts of the partners marked `no` in the Partners tab's `jotform` column ("Clubs that do
 not use Jotform"). A deactivated club with no account or with twins the parent does not tell apart,
 a marked partner missing from the map, and a Partners export without the `jotform` column each stop
-the run naming what to fix: nothing is guessed.
+the run naming what to fix: nothing is guessed. Before every Account script, dryRun, flag and clear alike,
+the tool runs the household-naming guard (Ryan, 2026-10-26): one SOQL count of the NPSP Households Settings
+rows with Automatic Household Naming on, `SELECT COUNT() FROM npo02__Households_Settings__c WHERE
+npo02__Advanced_Household_Naming__c = true` - every row, the org default's, a profile's or a user's - since
+with naming on an Account update would rename the partners' households; it writes no script while the
+count is not 0.
     Database.executeBatch(new RecordFlagBatch('Account', '<mode>', new Set<Id>{...}, new Set<Id>{...}), 200);
 
 Contact: the criteria are Salesforce's own, so the script is the two-argument call. Before writing it
@@ -71,6 +76,10 @@ GUARD_WHAT = {
     "volunteer": ("Contacts with a Volunteers web signup dated today",
                   "the Volunteer Signup workflow rule would send mail"),
 }
+# the household-naming guard (Ryan, 2026-10-26): with NPSP's Automatic Household Naming on, an Account update
+# renames the partners' households. A hierarchy custom setting: every row counts, whoever owns it
+NAMING_SOQL = ("SELECT COUNT() FROM npo02__Households_Settings__c "
+               "WHERE npo02__Advanced_Household_Naming__c = true")
 RUNBOOK = 'RUNBOOK "Duplicate and obsolete records in Salesforce"'
 
 
@@ -189,6 +198,13 @@ def run(args, org, partners_path):
     require_vpn_off(args)
     org = org or Org(args.alias)
     if args.sobject == "Account":
+        naming = org.count(NAMING_SOQL)
+        print(f"household-naming guard: Households Settings rows with NPSP Automatic Household Naming on: {naming}")
+        if naming:
+            raise Refused(f"the household-naming guard refuses the Account script: {naming} Households Settings row(s) "
+                          "have NPSP Automatic Household Naming on, and an Account update would rename the partners' "
+                          f"households ({RUNBOOK}, The flagging batch): turn Automatic Household Naming off in NPSP "
+                          "Settings, or ask Ryan, then run again")
         partner_map = read_partners(partners_path)
         partner_ids = partner_report_partner_ids(args.partners, partner_map)
         accounts = plain(org.query(ACCOUNT_SOQL))
