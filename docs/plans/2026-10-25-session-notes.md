@@ -262,8 +262,9 @@ python3 tools/add_session_notes.py
 
 ## Result
 Done 2026-10-26: the field and its translations are live on all five forms. Run 03:15-03:30 UTC
-in Ryan's interactive session, from this branch at `c7d3f55`, on Ryan's go (given on the ticket
-2026-10-25; each live-gate prompt approved by him 2026-10-26). No Auto sync run was in progress
+in Ryan's interactive session, from this branch at `c7d3f55`, on Ryan's go (his 2026-10-25 go in
+his interactive session, recorded in the handoff; confirmed on 2026-10-26 by his approval of each
+live-gate prompt during the rollout in the interactive session). No Auto sync run was in progress
 (the last had run 2026-10-25 15:25 UTC).
 
 - Dry runs first, read in full: on every form the notes tool planned 9 moves and one
@@ -304,10 +305,13 @@ in Ryan's interactive session, from this branch at `c7d3f55`, on Ryan's go (give
   they go in both, GLOW staff's Notification 1 and the mentor confirmation: he adds
   `{sessionNotes}` to both bodies on each form (ten bodies) by hand in the builder, ticket #148,
   after this branch lands. Pending #148.
-- Still to read: the runner's next scheduled run (cron 11:00 UTC daily), in-sync in every
-  region. None had run since the rollout when this was written (2026-10-26 05:20 UTC; the last
-  was 2026-10-25 15:25 UTC). The runner runs `main`, where `NOTES_EXPECTED` is `False` until
-  this branch lands: a run before the land shows the sync leaving the field alone, the first
-  run after it the regions in-sync with the field expected. As the Rollout says, the post-land
-  `auto_sync.py` dry run and that run go in a dated bullet here on the next ticket branch that
-  touches the docs; a region not in-sync is a ticket of its own.
+- Still to read: the runner's first run after the land, in-sync in every region with the field
+  expected. No run since the rollout when this was written (2026-10-26 05:20 UTC) nor at 06:06
+  UTC (`gh run list --workflow auto-sync.yml`); the last was 2026-10-25 15:25 UTC. The next
+  scheduled run, 2026-10-26 11:00 UTC (cron `0 11 * * *`, `.github/workflows/auto-sync.yml`),
+  comes before the land: the runner runs `main`, where `NOTES_EXPECTED` is still `False`, so
+  that run shows only that the live sync leaves the field alone on Africa, Asia and Latin
+  America (U.S is skipped, disabled), not the regions in-sync with the field expected. The
+  first run after the land, with the field expected, and the post-land `auto_sync.py` dry run
+  go in the dated bullet the Rollout promises (its last bullet): at the end of this Result, on
+  the next ticket branch that touches the docs; a region not in-sync is a ticket of its own.
