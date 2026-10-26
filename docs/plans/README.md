@@ -14,6 +14,7 @@ names the BACKLOG items a plan is about. Newest first.
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
 | 2026-10-24 | GLOW Club Reporting (the dashboard "Reporting", items 17 and 18) and the GLOW of the Month table (item 19) by Partner and Month | done |  | [2026-10-24-sf-dash-reporting.md](2026-10-24-sf-dash-reporting.md) |
+| 2026-10-24 | GLOW Club Observations (D3) by partner and month, over the last 12 months | in-progress |  | [2026-10-24-sf-dash-observations.md](2026-10-24-sf-dash-observations.md) |
 | 2026-10-24 | GLOW Club Implementation (D2) by partner and month, over the last 12 months | done 2026-10-26 |  | [2026-10-24-sf-dash-implementation.md](2026-10-24-sf-dash-implementation.md) |
 | 2026-10-24 | A Period date on the Monthly Report (DHIS2) records and in the Dhis2 report type, for the last-12-months period | done 2026-10-24 |  | [2026-10-24-dhis2-period-date.md](2026-10-24-dhis2-period-date.md) |
 | 2026-10-23 | Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them | done 2026-10-24 |  | [2026-10-23-submission-timing.md](2026-10-23-submission-timing.md) |

@@ -53,6 +53,13 @@ query); its rollback is the reports' copies in Decommissioned, or this change's 
 retrieve equals `after/`, never an older build (D2 is dynamic and has no API copy); the plan
 `docs/plans/<date>-sf-dash-implementation.md` names #76, its Rollout copies, checks, waits for Ryan's go,
 deploys, reads back and checks by SOQL, in that order, and it has a `## Result`. No count from the org.
+
+ObservationsDashboardDocs (ticket #77): the RUNBOOK's `### GLOW Club Observations` names items 9-11 (GLOW's words and
+the report labels from `glow/sf_keep_list.csv`) with each one's `DHIS2__c` field and SOQL signal, the one dashboard
+filter Partner Manager (no Partner or Month filter, Ryan 2026-10-24), item 16 taken off, the grouping (`Account__c`, then `Period__c`), the last 12 months and the test-record rule; the
+rollback is the Decommissioned copies, or this change's `before/` only while a fresh retrieve equals `after/`, never
+an older build; the plan `docs/plans/<date>-sf-dash-observations.md` names #77 and its Rollout has the copies, the
+check-only, Ryan's go, the read-back and the SOQL check, in that order, and a `## Result`.
 """
 import glob
 import os
@@ -2657,6 +2664,1200 @@ class ImplementationDashboardDocs(unittest.TestCase):
         self.assertIn("Decommissioned", rollback, f"{where}: the reports come back from their copies in Decommissioned")
         self.assertIn("before/", rollback, f"{where}: the dashboard comes back from this change's `before/` retrieve")
         self.assertRollback(rollback, where, runbook=False)
+
+
+class ObservationsDashboardDocs(unittest.TestCase):
+    """Ticket #77: the dashboard "GLOW Club Observations" (D3 in `glow/sf_keep_list.csv`) and its reports, items
+    9-11, by Partner and Month. Ryan, 2026-10-24 on #77: the default period is the last 12 months through
+    `DHIS2__c.Period__c` (#128); every report groups by the partner (`DHIS2__c.Account__c`), then the month; the
+    test-record rule of #70 on every report; labels stay; copies into Decommissioned first
+    (`tools/sf_report_folders.py copy`); every deploy waits for Ryan's go.
+
+    The measures, labels and ids are read from `glow/sf_keep_list.csv`; each item's `DHIS2__c` field and the shape
+    of its SOQL check (a picklist counted by value, a number summed, item 11 the partners with a count above 0)
+    come from the RUNBOOK's check for these items (#74, "Why the dashboards showed old data"). The RUNBOOK's
+    `### GLOW Club Observations` and the plan `docs/plans/<date>-sf-dash-observations.md` are what is read."""
+
+    longMessage = False         # the messages say what to fix
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    KEEP_LIST = CategoryFoldersDocs.KEEP_LIST
+    PLANS = os.path.join(REPO, "docs", "plans", "*-sf-dash-observations.md")
+    MONTHLY = "## Monthly Report dashboards in Salesforce"
+    PART = "### GLOW Club Observations"
+    TICKET = re.compile(r"(?<![\w#])#77\b")
+    ITEMS = ("9", "10", "11")
+    DASHBOARD = "D3"
+    # each item's DHIS2__c field and the clauses its own SOQL must carry ON THAT FIELD (RUNBOOK, #74: 9 is a
+    # picklist, SELECT <field>, COUNT(Id) ... GROUP BY <field>; 10 a number, SUM(<field>); 11 the same field `> 0`,
+    # counted: the partners who observed)
+    F9, F10 = "did_you_submit_your_GC_observation_form__c", "GC_sessions_did_you_observe_last_month__c"
+    FIELDS = {
+        "9": (F9, (re.compile(r"(?i)\bGROUP\s+BY\s+" + F9 + r"\b(?!\s*,)"), re.compile(r"(?i)\bCOUNT\s*\("))),
+        "10": (F10, (re.compile(r"(?i)\bSUM\s*\(\s*" + F10 + r"\s*\)"),)),
+        "11": (F10, (re.compile(r"\b" + F10 + r"\s*(>\s*0(?![.\d])|>=\s*1(?![.\d]))"), re.compile(r"(?i)\bCOUNT\s*\("))),
+    }
+    # what every item's SOQL carries: DHIS2__c, the report's test-record rule and one month, the last complete one
+    SOQL_FROM = re.compile(r"(?i)\bSELECT\b.*\bFROM\s+DHIS2__c\b")
+    NOT_BLANK_SOQL = re.compile(r"\bAccount__c\s*(!=|<>)\s*null\b")
+    NO_TEST_SOQL = re.compile(r"(?i)\bNOT\s*\(?\s*Account__r\.Name\s+LIKE\s+'%test%'")
+    ONE_MONTH = re.compile(r"\bPeriod__c\s*=\s*LAST_MONTH\b|\bYearMonth__c\s*=\s*20\d\d(0[1-9]|1[0-2])\b|"
+                           r"\bYear__c\s*=\s*20\d\d\s+AND\s+Month__c\s*=\s*'[A-Z][a-z]+'|"
+                           r"\bPeriod__c\s*=\s*20\d\d-\d\d-01\b")
+    ONE_PARTNER = re.compile(r"(?i)\bAND\s+Account__(c|r\.Name)\s*=\s*'")
+    # what turns a query's clauses into something other than all of them, or cuts its rows
+    LOOSE_SOQL = re.compile(r"(?i)\bOR\b|\bLIMIT\b")
+    # a dashboard filter on the partner or the month ("Partner filter", "Partner and Month filters", "filters by
+    # month"); "Partner Manager filter" is not one (Ryan, 2026-10-24 on #77: the only dashboard filter is Partner
+    # Manager)
+    PM_FILTER = re.compile(r"Assigned_Partner_Manager__c\b|\bPartner Manager\b")     # norm() makes `x.Assigned_…` `x_Assigned_…`
+    PARTNER_OR_MONTH_FILTER = re.compile(
+        r"(?i)\b(Partner|Month)\s+(and|or|&|/)\s+(Partner|Month)\s+filters?\b|"
+        r"\b(Partner|Month)\s+filters?\b|"
+        r"\bfilters?\s+(on|by|for)\s+(the\s+|a\s+|one\s+)?(partners?|months?)\b(?!\s+Manager)|"
+        r"\bfilters?[,:]?\s+(Partner|Month)\s+(and|or|&)\s+(Partner|Month)\b")
+    REMOVED = re.compile(r"(?i)\b(tak(e|es|en|ing)\b[^.;]{0,100}?\boff|remov\w*|comes?\s+off|moved?\s+off|"
+                         r"no longer on|drop(s|ped)?)\b")
+    CODE = re.compile(r"(`+)(.+?)\1")
+    # what makes a statement of the current design a past, removed or abandoned one (anywhere in its sentence)
+    UNDONE = re.compile(r"(?i)\b(remov\w*|dropp\w*|delet\w*|replaced|no longer|retired|gone|unused|alone|abandon\w*|"
+                        r"revert\w*|was|were|had|used to|formerly|previous(ly)?|earlier|old|former|"
+                        r"rather than|instead|disabled|turned off|missing|lacks?|without)\b")
+    # softeners #69's sweep does not know
+    MORE_SOFT = re.compile(r"(?i)\b(at most (once|twice|\w+ times)|rarely|seldom|informational|advisory|"
+                           r"for information( only)?|best[- ]effort|nice to have|if convenient|not required|"
+                           r"not mandatory|once a (year|quarter)|from time to time|occasionally|now and then)\b")
+    # this change's own retrieve folder (the outline: data/sf_dash_observations_<date>/before/)
+    BEFORE = re.compile(r"data/sf_dash_observations_(\d{4}-\d\d-\d\d|<date>)/before/")
+    OLDER_BUILD = re.compile(r"(?i)\b(older|earlier|previous|old|stale|another\s+change['’]s)\s+(\w+\s+)?"
+                             r"(builds?|retrieves?|deploys?|`?build/`?|`?before/`?)")
+    ONLY_WHILE = re.compile(r"(?i)\bonly\s+(while|if|when|as long as|so long as)\b|\bas long as\b|\bprovided\b")
+    EQUALS = re.compile(r"(?i)\bequal\w*|\bmatch\w*|\bsame as\b|\bidentical\b|\bno differences?\b|\bunchanged\b")
+    RESTORE = re.compile(r"(?i)\b(restor\w*|revert\w*|roll\w*\s+back|rollback|undo|bring\w*\s+back|put\w*\s+back)\b")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = DecommissionedFoldersDocs()     # #69's helpers: locally_denied, contradictions, denies
+        KeepListDocs.setUpClass()
+        cls.k = KeepListDocs()                  # #70's helper: assertTestRecordRule
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def keep(self):
+        import csv
+        with open(self.KEEP_LIST, encoding="utf-8", newline="") as f:
+            rows = {r["item"]: r for r in csv.DictReader(f)}
+        for item in self.ITEMS + (self.DASHBOARD,):
+            self.assertIn(item, rows, f"glow/sf_keep_list.csv: no row {item}")
+            self.assertEqual(rows[item]["group"], "GLOW Club Observations",
+                             f"glow/sf_keep_list.csv: row {item} is in the group \"GLOW Club Observations\"")
+        return rows
+
+    def part(self):
+        """The `### GLOW Club Observations` part of the Monthly Report section, to the next `###` or `##`."""
+        section = md_part(self.RUNBOOK, self.MONTHLY)
+        m = re.search(r"^" + re.escape(self.PART) + r"(?!\w).*$", section, re.M)
+        self.assertTrue(m, f"RUNBOOK section {self.MONTHLY[3:]!r}: no `{self.PART}` part under it (ticket #77)")
+        rest = section[m.start():]
+        nxt = re.search(r"\n#{1,3} ", rest)
+        return rest[:nxt.start()] if nxt else rest
+
+    @staticmethod
+    def blocks(text):
+        """`text` cut into blocks, each flattened: a table row, a top-level list item with its indented lines
+        (sub-items included), or a paragraph."""
+        out, cur = [], None
+        for line in text.splitlines():
+            st = line.strip()
+            if not st:
+                cur = None
+                continue
+            starts = (st.startswith("|") or st.startswith("#")
+                      or (not line[:1].isspace() and re.match(r"([-*+]|\d+[.)])\s", st)))
+            if cur is None or starts:
+                cur = [st]
+                out.append(cur)
+            else:
+                cur.append(st)
+        return [flat(" ".join(b)) for b in out]
+
+    def plan_path(self):
+        found = sorted(glob.glob(self.PLANS))
+        self.assertEqual(len(found), 1, "docs/plans/: one plan `YYYY-MM-DD-sf-dash-observations.md` for ticket #77 "
+                                        f"(found {[os.path.basename(p) for p in found]})")
+        self.assertRegex(os.path.basename(found[0]), r"^\d{4}-\d\d-\d\d-sf-dash-observations\.md$",
+                         "docs/plans/: the plan is named `YYYY-MM-DD-sf-dash-observations.md`")
+        return found[0]
+
+    def plan_part(self, path, heading, least):
+        return RetiredReportsDocs.plan_part(self, path, heading, least)
+
+    def stated(self, s, rx):
+        return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
+
+    def assertRollback(self, raw, where, whole=True):
+        """The rollback: from the Decommissioned copies, or from this change's `before/` only while a fresh retrieve
+        equals `after/`; never from an older build; nothing deleted, nothing optional. #69's contradiction sweep
+        reads all of `raw` when `whole`, else only its sentences about the rollback (a restore, `before/`, an
+        older build)."""
+        text = flat(raw)
+        restore_or_deploy = re.compile(self.RESTORE.pattern + r"|\b(re-?)?deploy\w*")
+        # what the rollback says: all of `raw` (the plan's Rollback), or the RUNBOOK's sentences about a rollback
+        cl = [s for s in sentences(text, ".;")
+              if whole or self.RESTORE.search(s) or "before/" in s or self.OLDER_BUILD.search(s)]
+        self.assertTrue([s for s in cl if "Decommissioned" in s and re.search(r"(?i)\bcop(y|ies)\b", s)
+                         and self.stated(s, self.RESTORE)],
+                        f"{where}: say the rollback restores from the copies in Decommissioned (one sentence, not "
+                        "negated)")
+        self.assertRegex(text, self.BEFORE, f"{where}: name this change's retrieve, "
+                                            "`data/sf_dash_observations_<date>/before/`")
+        # only this change's before/: no other retrieve folder, no other ticket's build or retrieve
+        for s in cl:
+            for p in re.findall(r"\bdata/[^\s`'\"()]*?/before/", s):
+                self.assertTrue(p.startswith("data/sf_dash_observations_"),
+                                f"{where}: the rollback restores only this change's `before/` "
+                                f"(`data/sf_dash_observations_<date>/before/`), not {p!r}: {s[:200]!r}")
+            for m in restore_or_deploy.finditer(s):
+                near = s[max(0, m.start() - 30):m.end() + 30]
+                other = [t for t in re.findall(r"(?<![\w#])#(\d+)\b", near) if t != "77"]
+                self.assertFalse(other, f"{where}: the rollback restores this change's (#77) copies or `before/`, not "
+                                        f"ticket #{other[:1]}'s: {s[:200]!r}")
+        # the guard: before/ only while a fresh retrieve EQUALS after/
+        eq = self.EQUALS.pattern.replace("(?i)", "")
+        tied = re.compile(r"(?i)\bretriev\w*[^.;]{0,80}?(" + eq + r")[^.;]{0,40}?after/|"
+                          r"after/[^.;]{0,40}?(" + eq + r")[^.;]{0,80}?\bretriev\w*")
+        guarded = [s for s in cl if "before/" in s and "after/" in s and self.ONLY_WHILE.search(s)
+                   and tied.search(s) and self.stated(s, restore_or_deploy)]
+        self.assertTrue(guarded, f"{where}: say, in one sentence, that `before/` is redeployed only while a fresh "
+                                 "retrieve equals `after/` (the equality between the retrieve and `after/`)")
+        for s in guarded:
+            self.assertFalse(re.search(r"(?i)\bdiffer\w*|\bmismatch\w*|\bnot\s+(equal|match|the same)\w*|"
+                                       r"\bdoes\s+not\s+(equal|match)\b|\bdoesn['’]t\s+(equal|match)\b|"
+                                       r"\b(even if|even when|regardless|"
+                                       r"whether or not)\b", s),
+                             f"{where}: `before/` only while the fresh retrieve equals `after/`, never when it differs "
+                             f"(no \"differ\", \"not equal\", \"even if\" in that sentence): {s[:200]!r}")
+        never = [s for s in cl for m in self.OLDER_BUILD.finditer(s) if self.d.locally_denied(s, m)]
+        self.assertTrue(never, f"{where}: say a rollback never deploys an older build (DECISIONS 2026-10-16), in one "
+                               "sentence")
+        for s in cl:
+            for m in self.OLDER_BUILD.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: an older build is never a rollback (DECISIONS 2026-10-16): {s[:200]!r}")
+        # the folder names hold the words "before" and "after", which #69's sweep reads as a time limit
+        plain = re.sub(r"\b(before|after|build)/", "DIR/", " ".join(cl) if not whole else raw)
+        self.d.assertNoContradiction(plain, where, rollback=True)
+        self.assertNotSoftened(plain, where)
+
+    def assertNotSoftened(self, text, where):
+        for s in sentences(flat(text), ".;:?!"):
+            for m in self.MORE_SOFT.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: the step is the rule, not {m.group(0)!r}: {s[:200]!r}")
+
+    def numbered_steps(self, raw):
+        """The Rollout's numbered steps (`1. …`), each flattened with its indented lines, in order."""
+        steps, cur = [], None
+        for line in raw.splitlines():
+            if re.match(r"\d+[.)]\s", line):
+                cur = [line]
+                steps.append(cur)
+            elif cur is not None and line.strip() and line[:1].isspace():
+                cur.append(line)
+            elif cur is not None and line.strip():
+                cur = None
+        return [flat(" ".join(s)) for s in steps]
+
+    # --- the RUNBOOK ---------------------------------------------------------------------------------------
+
+    def test_the_runbook_describes_observations_by_partner_and_month(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        rows = self.keep()
+        part = self.part()
+        text = flat(part)
+        blocks = self.blocks(part)
+        dash = rows[self.DASHBOARD]
+        self.assertTrue(dash["id"] in text or dash["label_today"] in text,
+                        f"{where}: name the dashboard as the org holds it, its Id {dash['id']} or its label "
+                        f"{dash['label_today']!r} (row {self.DASHBOARD} of `glow/sf_keep_list.csv`)")
+        # each measure: GLOW's words and the report's label, its DHIS2__c field and its own SOQL, in one block
+        spans = [m.group(2) for m in self.CODE.finditer(text)]
+        partner_variant = [c for c in spans if self.SOQL_FROM.search(c) and self.ONE_PARTNER.search(c)
+                           and not self.LOOSE_SOQL.search(c)]
+        for item in self.ITEMS:
+            r = rows[item]
+            field, shapes = self.FIELDS[item]
+            for col in ("measure", "label_today"):
+                self.assertIn(r[col], text, f"{where}: name item {item}'s {col.replace('_today', '')} as "
+                                            f"`glow/sf_keep_list.csv` gives it, {r[col]!r}")
+            others = {self.FIELDS[i][0] for i in self.ITEMS} - {field}
+            mine = [b for b in blocks if r["measure"] in b and r["label_today"] in b and field in b
+                    and not [f for f in others if f in b]]
+            self.assertTrue(mine, f"{where}: item {item} ({r['measure']!r}, the report {r['label_today']!r}) and the "
+                                  f"`DHIS2__c` field it counts, `{field}` (and no other item's field), in one table "
+                                  "row, list item or paragraph")
+            # the item's own SOQL: one code span in its block, on its field, with the report's filters
+            soql = [c for b in mine for c in (m.group(2) for m in self.CODE.finditer(b)) if self.SOQL_FROM.search(c)]
+            self.assertTrue(soql, f"{where}: item {item}'s SOQL signal in its own row, item or paragraph, as code "
+                                  "(`SELECT … FROM DHIS2__c …`)")
+            need = [(rx, f"on its field: {rx.pattern!r}") for rx in shapes] + [
+                (self.NOT_BLANK_SOQL, "`Account__c != null`"),
+                (self.NO_TEST_SOQL, "`NOT Account__r.Name LIKE '%test%'`"),
+                (self.ONE_MONTH, "one month, the last complete one (`Period__c = LAST_MONTH`, `YearMonth__c = "
+                                 "202609`, or `Year__c = 2026 AND Month__c = 'September'`)")]
+            good = [c for c in soql if all(rx.search(c) for rx, _ in need) and not [f for f in others if f in c]
+                    and not self.LOOSE_SOQL.search(c)]
+            missing = [what for rx, what in need if not [c for c in soql if rx.search(c)]]
+            self.assertTrue(good, f"{where}: item {item}'s SOQL (one code span, `{field}` and no other item's field, "
+                                  "its clauses joined by AND: no OR, no LIMIT; item 9 grouped by its field alone) "
+                                  f"carries every clause; missing {missing or 'some clause in the same span'}")
+            self.assertTrue([c for c in good if self.ONE_PARTNER.search(c)] or partner_variant,
+                            f"{where}: item {item}'s SOQL for one partner's month: `AND Account__r.Name = '<partner>'` "
+                            "in its span, or one per-partner query (`SELECT … FROM DHIS2__c … AND Account__r.Name = "
+                            "'<partner>'`, no OR, no LIMIT) in code")
+        cl = sentences(self.norm(part), ".;")
+        # the dashboard's one filter is Partner Manager (Ryan, 2026-10-24 on #77), stated as what it has now
+        filt = re.compile(r"(?i)\bfilters?\b")
+        said = [s for s in cl if re.search(r"(?i)\bdashboard", s) and self.stated(s, self.PM_FILTER)
+                and self.stated(s, filt) and not self.UNDONE.search(s)]
+        self.assertTrue(said, f"{where}: say the dashboard's filter is Partner Manager (`Assigned_Partner_Manager__c`), "
+                              "in one sentence, present tense, not negated (no \"removed\", \"was\", \"no longer\" … in "
+                              "it)")
+        # ... and never a Partner or a Month dashboard filter (a report's grouping by Partner and Month is not one)
+        for s in cl:
+            if re.search(r"(?i)\breports?\b", s) and not re.search(r"(?i)\bdashboard", s):
+                continue
+            for m in self.PARTNER_OR_MONTH_FILTER.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m) or self.UNDONE.search(s),
+                                f"{where}: the dashboard has no Partner or Month filter (Ryan, 2026-10-24 on #77: its "
+                                f"only filter is Partner Manager): {s[:200]!r}")
+        # item 16 is taken off this dashboard (#77; #78 reworks it on its own dashboard)
+        r16 = rows["16"]
+        names16 = re.compile(re.escape(r16["label_today"]) + "|" + r16["id"] + r"|\bitem\s+16\b", re.I)
+        self.assertTrue([s for s in sentences(flat(part), ".;") if names16.search(s) and self.stated(s, self.REMOVED)],
+                        f"{where}: say item 16 ({r16['label_today']!r}, {r16['id']}) is taken off this dashboard, in one "
+                        "sentence, not negated")
+        # every report grouped by the partner, then the month: `group(ed) by … Account__c … Period__c` in one clause
+        order = re.compile(r"(?i)\bgroup(s|ed|ing)?\s+(\w+\s+){0,3}?by\b[^.;:]{0,80}?Account__c\b[^.;:]{0,80}?"
+                           r"\bPeriod__c\b")
+        grouped = [s for s in cl if self.stated(s, order) and not self.UNDONE.search(s)
+                   and not re.search(r"(?i)\bonly\b|\bnot\b|\bnever\b", s)]
+        self.assertTrue(grouped, f"{where}: say each report groups by the partner (`DHIS2__c.Account__c`), then the "
+                                 "month (`Period__c`): `grouped by … Account__c … Period__c` in one clause, not negated, "
+                                 "not \"alone\", \"unused\", \"only\" or past")
+        self.assertFalse([s for s in grouped if re.search(r"\bCreatedDate\b", s)],
+                         f"{where}: the month is `Period__c`, never `CreatedDate`")
+        # the default period: the last 12 months through Period__c, stated as the default now
+        twelve = r"(LAST_N_MONTHS:12\b|last 12 months\b)"
+        default = re.compile(r"(?i)\bdefault\b[^.;]{0,60}?\b(is|are|stays|becomes|=)?[^.;]{0,60}?" + twelve + "|"
+                             + twelve + r"[^.;]{0,60}?\b(is|as)\s+the\s+default\b")
+        past = re.compile(r"(?i)\b(was|were|used to|formerly|previous(ly)?|no longer|old|former|earlier|until)\b|"
+                          r"(?<!range )(?<!range: )\ball[- ]time\b")
+        self.assertTrue([s for s in cl if "Period__c" in s and self.stated(s, default) and not self.d.denies(s)
+                         and not past.search(s)],
+                        f"{where}: say the default period is the last 12 months on `Period__c` (`LAST_N_MONTHS:12`), "
+                        "in one sentence, as the default now (no \"was\", \"old\", \"previously\", \"all time\")")
+        # the filters: the test-record rule (#70) as a report filter, nothing negated between its two halves
+        self.k.assertTestRecordRule(self.norm(part), where)
+        for s in sentences(self.norm(part), ".;"):
+            a, b = self.k.NOT_BLANK.search(s), self.k.NO_TEST.search(s)
+            if a and b:
+                mid = s[min(a.end(), b.end()):max(a.start(), b.start())]
+                self.assertFalse(self.d.NEGATION.search(mid) or self.k.REJECT.search(mid) or re.search(r"\bOR\b", mid),
+                                 f"{where}: the two halves of the test-record rule are joined by AND, nothing negated "
+                                 f"or rejected between them: {s[:200]!r}")
+
+    def test_the_observations_rollback_names_the_copies_and_the_before_folder(self):
+        # the RUNBOOK's part says how to roll back ...
+        self.assertRollback(self.part(), f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}", whole=False)
+        # ... and so does the plan's Rollback
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        raw = self.plan_part(path, "## Rollback", 15)
+        self.assertRollback(raw, f"{name}: `## Rollback`")
+        for rx, what in ((r"destructiveChanges", "a `destructiveChanges` deploy"),
+                         (r"\bsf project delete\b", "`sf project delete`"),
+                         (r"(-X\s*|--method\s+)DELETE\b|\bDELETE\s+/services/", "an HTTP DELETE")):
+            self.assertNotRegex(raw, rx, f"{name}: `## Rollback`: {what} deletes; the rollback restores and deletes "
+                                         "nothing")
+
+    # --- the plan ---------------------------------------------------------------------------------------------
+
+    def test_a_plan_carries_the_observations_deploy(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        rows = self.keep()
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        word, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertNotEqual(word, "superseded", f"{name}: the plan is the change in force")
+        self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
+                         f"{name}: name ticket #77 in the frontmatter, the title or the opening paragraph")
+        self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        raw = self.plan_part(path, "## Rollout", 40)
+        where = f"{name}: `## Rollout`"
+        flat_out = flat(raw)
+        cl = sentences(flat_out, ".;")
+        # the copies: every item, the dashboard and its three reports, each the `--id` of a copy command of its kind,
+        # tagged with the ticket
+        copies = [flat(seg) for seg in re.split(r"`+|\n\s*\n", raw) if re.search(r"sf_report_folders\.py\s+copy\b", seg)]
+        self.assertTrue(copies, f"{where}: the copies by `python3 tools/sf_report_folders.py copy --vpn-off --kind … "
+                                "--id … --tag \"#77\"`")
+        for c in copies:
+            self.assertIn("--vpn-off", c, f"{where}: the tool refuses to run without `--vpn-off`: {c[:160]!r}")
+            tags = re.findall(r"--tag(?:=|\s+)[\"']?(#?\w+)", c)
+            self.assertTrue(tags and set(tags) == {"#77"},
+                            f"{where}: every copy carries this ticket, `--tag \"#77\"`: {c[:160]!r}")
+        for item in self.ITEMS + (self.DASHBOARD,):
+            kind = rows[item]["kind"]
+            self.assertTrue([c for c in copies if rows[item]["id"] in re.findall(r"--id(?:=|\s+)[\"']?(\w+)", c)
+                             and re.search(r"--kind(=|\s+)" + kind + r"\b", c)],
+                            f"{where}: copy item {item} ({rows[item]['label_today']!r}) into Decommissioned; skip none: "
+                            f"a copy command with `--kind {kind} --id {rows[item]['id']}`")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s
+                         and re.search(r"(?i)\bbefore\b", s) and not self.d.denies(s)],
+                        f"{where}: say the copies go to Decommissioned before anything changes (one sentence)")
+        # the check-only, then Ryan's go, then the deploy
+        self.assertTrue([s for s in cl if re.search(r"(?i)(check-only|--dry-run)[^.;]*?\bdeploy", s)
+                         and not self.d.denies(s)],
+                        f"{where}: validate check-only (`sf project deploy start --dry-run`) before the deploy (one "
+                        "sentence, in that order)")
+        late = re.compile(r"(?i)\b(afterwards?|after\s+(the\s+|it\s+is\s+|it['’]s\s+)?deploy\w*|once\s+(it\s+is\s+)?"
+                          r"deployed|later|retroactive\w*|post[- ]hoc|after the fact|informed|told|notified)\b")
+        for s in cl:
+            if re.search(r"Ryan['’]s go\b", s):
+                self.assertFalse(late.search(s), f"{where}: Ryan's go comes before the deploy, never after it: "
+                                                 f"{s[:200]!r}")
+        # the read-back: retrieve into after/ and compare with build/
+        self.assertTrue([s for s in cl if "after/" in s and "build/" in s and re.search(r"(?i)\bretriev\w*", s)
+                         and re.search(r"(?i)\bcompar\w*|\bequal\w*|\bdiff\w*|\bmatch\w*", s) and not self.d.denies(s)],
+                        f"{where}: read back: retrieve into `after/` and compare it with `build/` (one sentence)")
+        # the SOQL check: each component against DHIS2__c, and no test account's records
+        self.assertTrue([s for s in cl if re.search(r"\bSOQL\b", s) and "DHIS2__c" in s and not self.d.denies(s)],
+                        f"{where}: check each component against SOQL on `DHIS2__c` (one sentence)")
+        absent = re.compile(r"(?i)\b(no|zero|0|none of the)\s+(\w+\s+){0,3}?(records?|rows?)\b|"
+                            r"\b(records?|rows?)\b[^.;]{0,40}?\b(absent|excluded|left out|are 0|count 0|zero)\b|"
+                            r"\b(absent|excluded|left out)\b[^.;]{0,40}?\b(records?|rows?)\b")
+        unchecked = re.compile(r"(?i)\bno\s+(\w+\s+)?checks?\b|\bnot\s+(\w+\s+)?(checked|verified|tested|confirmed)\b|"
+                               r"\bunchecked\b|\bwithout\s+(a\s+|any\s+)?check\w*|\bskip\w*\b|\bassum\w*")
+        tests = [s for s in cl if re.search(r"(?i)\btest\s+(accounts?|records?)\b", s)]
+        self.assertTrue([s for s in tests if absent.search(s) and not unchecked.search(s)],
+                        f"{where}: check that a test account's records are absent from every component (one sentence: "
+                        "\"no records\", \"absent\", \"0 rows\"), not \"no check\"")
+        for s in tests:
+            self.assertFalse(unchecked.search(s), f"{where}: the test accounts' absence is checked, not skipped or "
+                                                  f"assumed: {s[:200]!r}")
+        # the order, in the numbered steps: copies, check-only, Ryan's go, deploy, read-back, SOQL
+        steps = CategoryFoldersDocs.steps(self, raw, where)
+        copy_at = [m.start() for m in re.finditer(r"sf_report_folders\.py\s+copy\b", steps)]
+        check_only = re.search(r"(?i)check-only|--dry-run", steps)
+        self.assertTrue(copy_at and check_only, f"{where}: the copies and the check-only are numbered steps")
+        self.assertLess(copy_at[-1], check_only.start(), f"{where}: every copy into Decommissioned comes before the "
+                                                         "check-only and the deploy")
+        deploys = [m for m in re.finditer(r"[^.;,]+", steps) if m.start() > check_only.start()
+                   and re.search(r"(?i)\bdeploy", m.group(0))
+                   and not re.search(r"(?i)check-only|--dry-run|\bvalidat", m.group(0))]
+        self.assertTrue(deploys, f"{where}: no deploy step after the check-only (on Ryan's go)")
+        deploy = deploys[0]
+        goes = [m.start() for m in re.finditer(r"Ryan['’]s go\b", steps)]
+        self.assertTrue([g for g in goes if check_only.start() < g < deploy.end()],
+                        f"{where}: Ryan's go comes between the check-only and the deploy (or in the deploy's own "
+                        "clause: \"On Ryan's go, deploy\")")
+        after = [m.start() for m in re.finditer(r"\bafter/", steps) if m.start() > deploy.start()]
+        self.assertTrue(after, f"{where}: the read-back into `after/` comes after the deploy (a later step)")
+        # the SOQL check after the deploy: the three items, one partner, against DHIS2__c
+        later = [s for s in self.numbered_steps(raw) if re.search(r"\bSOQL\b", s) and steps.find(s[:40]) > deploy.start()]
+        self.assertTrue(later, f"{where}: the SOQL check is a numbered step after the deploy")
+
+        def names(s, item):
+            r = rows[item]
+            return (r["id"] in s or r["label_today"] in s or r["measure"] in s
+                    or re.search(r"(?i)\bitems?\s+(\d+\s*(,|and|&)\s*)*" + item + r"\b", s))
+        whole = re.compile(r"(?i)\bitems\s+9\s*(-|–|to)\s*11\b|\b9,\s*10\s*(,\s*)?and\s+11\b")
+        fields = (re.compile(self.F9), re.compile(self.F10))
+        good = [s for s in later if (whole.search(s) or all(names(s, i) for i in self.ITEMS)
+                                     or all(f.search(s) for f in fields))
+                and re.search(r"(?i)\b(one|a|each|single|every)\s+partner\b|\bper partner\b|Account__r\.Name\s*=", s)]
+        self.assertTrue(good, f"{where}: the SOQL step names the three items (items 9-11, their report Ids or labels, "
+                              "or their fields) and checks one partner's month too, not one count for the whole org")
+        raw_plain = re.sub(r"\b(before|after|build)/", "DIR/", raw)
+        self.d.assertNoContradiction(raw_plain, where)
+        self.assertNotSoftened(raw_plain, where)
+
+    # --- the live rollout of 2026-10-25 and item 11's fix forward ------------------------------------------------
+    #
+    # #77 on 2026-10-25: steps 1-6 ran (copies, check-only, deploy, read-back, refresh); item 11's component
+    # (01aRP0000089gWVYAY) failed the refresh with 406 "One or more of the fields selected in the component is no
+    # longer available in the report". Cause (Analytics describe, the reviewer's finding confirmed on #77): item
+    # 11's report has its record count OFF (`<params><name>co</name><value>0</value></params>`, describe
+    # `hasRecordCount: false`, since before/), so its aggregates list only its Sum and no RowCount, while its
+    # component measures RowCount. Not the Sum: item 10's report sums the same column with co=1 and lists Sum AND
+    # RowCount; item 9 has co=1 and RowCount. The fix: item 11's report gets co=1 (record count on) and KEEPS its
+    # Sum; its chart measures the record count; item 11's report alone is redeployed on Ryan's go, then a refresh.
+
+    # the live ids of steps 1-6 (the ticket comment of 2026-10-25): each copy and the original it copies
+    COPIES = (("00ORP000009kM0L2AU", "00ORP000004RJZC2A4"), ("00ORP000009kM1x2AE", "00ORP000004RJZD2A4"),
+              ("00ORP000009kM3Z2AU", "00ORP000005uf412AA"), ("01ZRP00000BP52z2AD", "01ZRP000006k2D32AI"))
+    CHECK_ONLY_ID, DEPLOY_ID = "0AfRP000002i5dx0AA", "0AfRP000002i5hB0AQ"
+    ITEM11_COMPONENT = "01aRP0000089gWVYAY"
+    ITEM11_MDAPI = "Completed_Observing_Clubs_Alteast_Once_P_cn6"
+    OTHER_MDAPI = ("Submission_of_GC_observation_forms_M_P_iuz", "Total_Number_of_Club_Observations_by_M_q3M")
+    SF_ID = re.compile(r"\b0[0-9A-Za-z]{2}[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?\b")
+    # the record count a component measures
+    RECORD_COUNT = re.compile(r"(?i)\bRowCount\b|\brecords?\s+counts?\b|\bcounts?\s+of\s+(the\s+)?(\w+\s+)?records\b|"
+                              r"\bnumber\s+of\s+(\w+\s+)?records\b")
+    # a report's record count ON: the report param `co` 1 (`co=1`, "`co` 1", "co set to 1", the XML), describe
+    # `hasRecordCount: true`, "record count on / shown / enabled", "turns on the record count"
+    RECORD_COUNT_ON = re.compile(
+        r"(?i)<name>co</name>\s*<value>1</value>|"
+        r"(?<![\w-])`?co`?\s*(=|:|is|to|set\s+to|of|at)?\s*`?1\b(?!\.?\d)|"
+        r"\bhasRecordCount`?\s*(:|=|is|as)?\s*`?true\b|"
+        r"\brecord\s+count`?\s+(is\s+|turned\s+|switched\s+|set\s+|stays\s+)?(on|shown|enabled|visible)\b|"
+        r"\b(shows?|showing|turns?\s+on|turning\s+on|enables?|enabling|switch(es)?\s+on)\s+(the\s+|its\s+|a\s+)?"
+        r"record\s+count\b")
+    # ... and OFF: `co` 0, `hasRecordCount: false`, "record count off / hidden / disabled"
+    RECORD_COUNT_OFF = re.compile(
+        r"(?i)<name>co</name>\s*<value>0</value>|"
+        r"(?<![\w-])`?co`?\s*(=|:|is|was|to|set\s+to|of|at)?\s*`?0\b(?!\.?\d)|"
+        r"\bhasRecordCount`?\s*(:|=|is|was|as)?\s*`?false\b|"
+        r"\brecord\s+count`?\s+(is\s+|was\s+|turned\s+|switched\s+|set\s+)?(off|hidden|disabled)\b")
+    # "RowCount ... only when / if / while / requires / needs" the record count is on
+    CONDITION = re.compile(r"(?i)\bonly\s+(when|if|while|with)\b|\bas\s+long\s+as\b|\brequir\w*|\bneeds?\b|"
+                           r"\bdepends?\s+on\b|\bunless\b|\bprovided\b|\bwhenever\b|\bwhen\b|\bif\b")
+    # the wrong mechanism: a Sum (a summarized column) causes, removes or blocks RowCount
+    # ("a Sum, so no RowCount" is the Sum with "no RowCount" in one sentence: sum_blamed's other branch)
+    SUM_CAUSE = re.compile(r"(?i)(\bSum\b|\bsummari[sz]\w*|aggregateTypes)[^.;]{0,100}?\b("
+                           r"caus\w*|remov\w*|block\w*|takes?\s+away|took\s+away|drops?|dropp\w*|hides?|hid|"
+                           r"replac\w*|prevent\w*|suppress\w*|costs?|loses?|lost)\b[^.;]{0,100}?RowCount|"
+                           r"(\bSum\b|\bsummari[sz]\w*|aggregateTypes)[^.;]{0,100}?\b(takes?|took|taking|taken)\b"
+                           r"[^.;]{0,60}?RowCount\b[^.;]{0,60}?\baway\b|"
+                           r"RowCount[^.;]{0,60}?\b(because|since|due\s+to)\b[^.;]{0,60}?"
+                           r"(\bSum\b|\bsummari[sz]\w*|aggregateTypes)")
+    # what disowns a sentence about the Sum: the first, wrong diagnosis said as such
+    DISOWNED = re.compile(r"(?i)\b(thought|suspected|misread|mistaken\w*|wrong(ly)?|ruled\s+out|first\s+diagnosis|"
+                          r"not\s+the\s+cause|isn['’]t\s+the\s+cause|is\s+not\s+what)\b")
+    # dropping the Sum (the fix keeps it)
+    SUM_DROP = re.compile(r"(?i)\b(drops?|dropping|dropped|removes?|removing|removed|deletes?|deleted|takes?\s+out)\s+"
+                          r"(the\s+|its\s+|that\s+|item\s+11['’]s\s+)?(one\s+)?(`?<?aggregateTypes>?\b|`?Sum\b|summar\w*)")
+    # the measure a sum (for "measures the sum, not the record count (RowCount)")
+    SUM_MEASURE = re.compile(r"(?i)\b(measur\w*|charts?|counts?)\s+(the\s+|a\s+|its\s+)?(sum|total)\b")
+    # the org fact: a component's measure must be one of its report's aggregates
+    RULE = re.compile(r"(?i)\bcomponents?\b[^.;]{0,120}?\b(must|only|has\s+to|have\s+to|needs?\s+to|always)\b"
+                      r"[^.;]{0,120}?\baggregates?\b|"
+                      r"\baggregates?\b[^.;]{0,120}?\b(must|only|has\s+to|have\s+to|needs?\s+to|always)\b"
+                      r"[^.;]{0,120}?\bcomponents?\b")
+    PAST = re.compile(r"(?i)\b(was|were|had|used\s+to|no\s+longer|formerly|previously|once)\b")
+    HEDGE = re.compile(r"(?i)\b(may|might|usually|often|sometimes|probably|likely|perhaps|seems?|apparently)\b")
+    SUMMARIZES = re.compile(r"(?i)\bsummari[sz]e[sd]?\b|\bSum\b|aggregateTypes")
+    # where a SUM_CAUSE match may start: every Sum and RowCount of a sentence, so a later clause is read on its own
+    # ("summarizes no column, but item 11's Sum removes RowCount": the match from "summarizes" holds the "no")
+    CAUSE_START = re.compile(r"(?i)\bSum\b|\bsummari[sz]|aggregateTypes|RowCount")
+    NO_ROWCOUNT = re.compile(r"(?i)\b(no|without|lacks?|lacking|loses?|lost|omits?|omitted|drops?|dropped|"
+                             r"not\s+(offer|list|includ|provid)\w*)\s+(a\s+|the\s+|any\s+)?`?RowCount\b|"
+                             r"`?RowCount`?[^.;]{0,40}?\b(missing|absent|gone|disappear\w*|"
+                             r"not\s+(offered|listed|available|included))\b")
+
+    def item_blocks(self, part, item):
+        r = self.keep()[item]
+        return [b for b in self.blocks(part) if r["measure"] in b and r["label_today"] in b]
+
+    def affirmed(self, s, m):
+        """Match `m` of clause `s` said, not denied: no negation in the words before it and no "no", "none" or
+        "nothing" right after it ("summarizes no column")."""
+        return not self.d.locally_denied(s, m) and not re.match(r"`?\s+(nothing|none|no)\b", s[m.end():])
+
+    def sum_blamed(self, text):
+        """The sentences of `text` that blame the Sum for the missing RowCount: a Sum (a summarized column) said to
+        cause, remove or block RowCount, or said with "no RowCount" and no record count off beside it; not denied
+        ("not the Sum") and not disowned as the first, wrong diagnosis."""
+        out = []
+        for s in sentences(flat(text), ".;"):
+            if self.DISOWNED.search(s):
+                continue
+            sums = [m for m in self.SUMMARIZES.finditer(s) if self.affirmed(s, m)]
+            starts = (self.SUM_CAUSE.match(s, c.start()) for c in self.CAUSE_START.finditer(s))
+            causal = [m for m in starts if m and not self.d.locally_denied(s, m)
+                      and not self.d.NEGATION.search(m.group(0))]
+            if causal or (sums and self.NO_ROWCOUNT.search(s) and not self.RECORD_COUNT_OFF.search(s)):
+                out.append(s)
+        return out
+
+    def test_the_runbook_says_item_11_charts_the_record_count_with_its_reports_record_count_on(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        rows = self.keep()
+        part = self.part()
+        mine = self.item_blocks(part, "11")
+        self.assertTrue(mine, f"{where}: item 11 ({rows['11']['measure']!r}, the report "
+                              f"{rows['11']['label_today']!r}) has its own row, list item or paragraph")
+        cl = [s for b in mine for s in sentences(b, ".;")]
+        # the component measures the record count (RowCount): partner-months per Yes/No per month
+        counted = [s for s in cl if re.search(r"(?i)\b(component|chart)s?\b", s)
+                   and any(self.affirmed(s, m) and not self.PAST.search(s[:m.end()]) for m in self.RECORD_COUNT.finditer(s))
+                   and not [m for m in self.SUM_MEASURE.finditer(s) if self.affirmed(s, m)]]
+        self.assertTrue(counted, f"{where}: item 11's block says its component (chart) measures the record count "
+                                 "(`RowCount`), in one sentence, present tense, not negated")
+        # its report has the record count on (`co` 1, `hasRecordCount: true`): what makes RowCount one of its
+        # aggregates (2026-10-25: item 11's report had co=0, hence the 406); it may keep its Sum
+        self.assertTrue([s for s in cl for m in self.RECORD_COUNT_ON.finditer(s) if self.affirmed(s, m)],
+                        f"{where}: item 11's block says its report has the record count on (the report param `co` 1, "
+                        "describe `hasRecordCount: true`, \"record count on\"), in one sentence, not negated")
+        # ... and never that its Sum took RowCount away (item 10 sums the same column and lists RowCount)
+        blamed = self.sum_blamed(" ".join(mine))
+        self.assertFalse(blamed, f"{where}: item 11's 406 came from its record count off (`co` 0), not from its Sum: "
+                                 f"item 10's report sums the same column and offers RowCount: {blamed[0][:200]!r}"
+                         if blamed else "")
+        for s in cl:
+            for m in self.SUM_DROP.finditer(s):
+                self.assertFalse(self.affirmed(s, m) and not self.PAST.search(s),
+                                 f"{where}: item 11's fix keeps its Sum (it turns the record count on): {s[:200]!r}")
+        # the part no longer says the deploy is still to come
+        for s in sentences(flat(part), ".;"):
+            self.assertNotRegex(s, r"(?i)\buntil\s+(it\s+is\s+)?deployed\b|\bthe\s+org\s+holds\s+the\s+vendor['’]s\b|"
+                                   r"\bnothing\s+(is\s+|was\s+|has\s+been\s+)?deployed\b",
+                                f"{where}: the build was deployed on 2026-10-25 (deploy {self.DEPLOY_ID}); the part "
+                                f"still says it is not: {s[:200]!r}")
+
+    def test_the_monthly_section_states_that_a_component_measures_one_of_its_reports_aggregates(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}"
+        section = md_part(self.RUNBOOK, self.MONTHLY)
+        # the rule, present tense, not negated, not hedged
+        ruled = []
+        for s in sentences(self.norm(section), ".;"):
+            for m in self.RULE.finditer(s):
+                if (not self.d.locally_denied(s, m) and not self.PAST.search(s[:m.end()])
+                        and not self.HEDGE.search(m.group(0)) and not self.MORE_SOFT.search(s)):
+                    ruled.append(s)
+        self.assertTrue(ruled, f"{where}: state the org fact, present tense and not negated: a dashboard component's "
+                               "measure must be one of its report's aggregates (\"A component's measure must be one of "
+                               "its report's aggregates\")")
+        # the fact seen on 2026-10-25, in one row, item or paragraph with the date and the 406: a report offers
+        # RowCount only when its record count is on (`co` 1, `hasRecordCount: true`); item 11's report had it off
+        # (`co` 0), so its RowCount component failed with 406
+        r11 = self.keep()["11"]
+        names11 = re.compile(r"(?i)\bitem\s+11\b|" + r11["id"] + "|" + re.escape(r11["label_today"]))
+        on_cond = re.compile(r"(?i)\bRowCount\b")
+        seen = []
+        for b in self.blocks(section):
+            if "406" not in b or "2026-10-25" not in b:
+                continue
+            ss = sentences(b, ".;")
+            cond = [s for s in ss if on_cond.search(s) and self.CONDITION.search(s)
+                    and [m for m in self.RECORD_COUNT_ON.finditer(s) if not self.d.locally_denied(s, m)]
+                    and not self.HEDGE.search(s)
+                    and not re.search(r"(?i)\beven\s+(when|if|with)\b|\bregardless\s+of\s+(the\s+|its\s+)?record", s)]
+            off = [s for s in ss if names11.search(s) and self.RECORD_COUNT_OFF.search(s)]
+            if cond and off:
+                seen.append(b)
+        self.assertTrue(seen, f"{where}: say, in one row, item or paragraph with the date 2026-10-25 and the 406, that a "
+                              "report offers `RowCount` only when its record count is on (the param `co` 1, describe "
+                              "`hasRecordCount: true`), and that item 11's report had it off (`co` 0), hence the 406")
+        # ... and nowhere that a summarized column (a Sum) removes RowCount: item 10 sums a column and lists RowCount
+        blamed = self.sum_blamed(section)
+        self.assertFalse(blamed, f"{where}: a Sum does not take RowCount away (item 10's report sums the same column "
+                                 "with the record count on and lists Sum and RowCount); the 406 was item 11's record "
+                                 f"count off: {blamed[0][:200]!r}" if blamed else "")
+
+    def test_the_plan_records_the_live_steps_of_2026_10_25(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        word, _ = docs_index.status_of(keys.get("status", ""))
+        self.assertIn(word, ("in-progress", "done"), f"{name}: the deploy ran on 2026-10-25, so `status:` is "
+                                                     f"`in-progress` (or `done` when complete), not {word!r}")
+        self.assertNotRegex(keys.get("status", ""), r"(?i)nothing\s+deployed",
+                            f"{name}: the status comment still says nothing is deployed")
+        raw = self.plan_part(path, "## Result", 40)
+        where = f"{name}: `## Result`"
+        body = flat(raw)
+        blocks = self.blocks(raw)
+        self.assertNotRegex(body, r"(?i)\bpending\s+until\s+the\s+deploy\b|\bnothing\s+(is\s+|was\s+|has\s+been\s+)?"
+                                  r"deployed\b|\bnot\s+(yet\s+)?deployed\b",
+                            f"{where}: the deploy ran on 2026-10-25; the Result still says it is pending")
+        # steps 1-2: each copy in Decommissioned with the original it copies, in one row, item or paragraph
+        for copy, orig in self.COPIES:
+            self.assertIn(copy, body, f"{where}: record the copy {copy} (of {orig}) made in Decommissioned")
+            self.assertTrue([b for b in blocks if copy in b and orig in b],
+                            f"{where}: the copy {copy} and the original it copies, {orig}, in one row, item or "
+                            "paragraph")
+        self.assertTrue([s for s in sentences(body, ".;") if "Decommissioned" in s
+                         and [c for c, _ in self.COPIES if c in s]],
+                        f"{where}: say the copies are in Decommissioned (a sentence with a copy's id and "
+                        "\"Decommissioned\")")
+
+        # steps 3-4: the check-only and the deploy, each id beside its own word, each succeeded
+        def window(s, ident):
+            at = s.find(ident)
+            prev = [m.end() for m in self.SF_ID.finditer(s[:at])]
+            return s[(prev[-1] if prev else max(0, at - 120)):at]
+        check_only = re.compile(r"(?i)check-only|--dry-run|\bvalidat\w*")
+        for ident, what in ((self.CHECK_ONLY_ID, "check-only"), (self.DEPLOY_ID, "deploy")):
+            self.assertIn(ident, body, f"{where}: record the {what} id {ident}")
+            near = [window(b, ident) for b in blocks if ident in b]
+            if what == "check-only":
+                ok = [w for w in near if check_only.search(w)]
+            else:
+                ok = [w for w in near if re.search(r"(?i)\bdeploy", w) and not check_only.search(w)]
+            self.assertTrue(ok, f"{where}: the {what} id {ident} right after the word {what!r} (no other id between)")
+            self.assertTrue([b for b in blocks if ident in b and re.search(r"(?i)\bsucce\w+|\b0 errors\b", b)],
+                            f"{where}: the {what} {ident} succeeded (\"Succeeded\")")
+        # step 5: the read-back; the reports equal build/, the dashboard differs only in showValues true -> false on
+        # the two ColumnStacked components, which Ryan accepted as normalisation
+        cl = sentences(body, ".;")
+        self.assertTrue([s for s in cl if "build/" in s and re.search(r"(?i)\breports?\b", s)
+                         and self.EQUALS.search(s) and not self.d.denies(s.replace("no differences", ""))],
+                        f"{where}: say the read-back's reports equal `build/` (one sentence)")
+        accept = re.compile(r"(?i)\baccept\w*")
+        sv = [b for b in blocks if "showValues" in b]
+        good = [b for b in sv if re.search(r"(?i)\btrue\b[^.;]{0,30}?\bfalse\b", b)
+                and re.search(r"(?i)ColumnStacked|stacked\s+column", b) and re.search(r"Ryan", b)
+                and re.search(r"(?i)\bnormali[sz]\w*", b)
+                and [s for s in sentences(b, ".;") for m in accept.finditer(s) if self.affirmed(s, m)]]
+        self.assertTrue(good, f"{where}: the read-back's one difference, `showValues` true -> false on the two "
+                              "ColumnStacked components, and that Ryan accepted it as Salesforce's normalisation, in one "
+                              "row, item or paragraph")
+        # step 6: the refresh, item 11's 406 and its cause
+        r11 = self.keep()["11"]
+        names11 = re.compile(r"(?i)\bitem\s+11\b|" + r11["id"] + "|" + self.ITEM11_COMPONENT + "|"
+                             + re.escape(r11["label_today"]))
+        failed = [b for b in blocks if re.search(r"\b406\b", b) and names11.search(b)]
+        self.assertTrue(failed, f"{where}: record that item 11's component ({self.ITEM11_COMPONENT}) failed the "
+                                "refresh with 406, in one row, item or paragraph")
+        self.assertTrue([b for b in failed if re.search(r"\bRowCount\b", b) and self.RECORD_COUNT_OFF.search(b)],
+                        f"{where}: the 406's cause beside it: item 11's report has its record count off (the param "
+                        "`co` 0, describe `hasRecordCount: false`), so it offers no `RowCount`, which its component "
+                        "measures")
+        # ... not its Sum, anywhere in the plan; and the fix keeps the Sum
+        blamed = self.sum_blamed(read(path))
+        self.assertFalse(blamed, f"{name}: the 406 came from item 11's record count off (`co` 0), not from its Sum "
+                                 "(item 10's report sums the same column and lists RowCount): "
+                                 f"{blamed[0][:200]!r}" if blamed else "")
+        for s in sentences(flat(read(path)), ".;"):
+            for m in self.SUM_DROP.finditer(s):
+                self.assertFalse(self.affirmed(s, m) and not self.PAST.search(s) and not self.DISOWNED.search(s),
+                                 f"{name}: item 11's fix keeps its Sum and turns its record count on (`co` 1): "
+                                 f"{s[:200]!r}")
+
+    def test_the_rollout_fixes_item_11_forward_before_the_soql_check_and_the_moves(self):
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        raw = self.plan_part(path, "## Rollout", 40)
+        where = f"{name}: `## Rollout`"
+        steps = self.numbered_steps(raw)
+        r11 = self.keep()["11"]
+        names11 = re.compile(r"(?i)\bitem\s+11\b|" + r11["id"] + "|" + self.ITEM11_MDAPI + "|"
+                             + re.escape(r11["label_today"]))
+        redeploy = re.compile(r"(?i)\bre-?deploy\w*|\bdeploy\w*")
+        eq = self.EQUALS.pattern.replace("(?i)", "")
+        fresh_eq_after = re.compile(r"(?i)\bfresh\b[^.;]{0,20}?\bretriev\w*[^.;]{0,80}?(" + eq + r")[^.;]{0,40}?after/|"
+                                    r"after/[^.;]{0,40}?(" + eq + r")[^.;]{0,80}?\bfresh\b[^.;]{0,20}?\bretriev\w*")
+        fix = [i for i, s in enumerate(steps) if names11.search(s) and redeploy.search(s)
+               and fresh_eq_after.search(s) and re.search(r"Ryan['’]s go\b", s)
+               and re.search(r"(?i)check-only|--dry-run", s) and re.search(r"(?i)\brefresh", s)]
+        self.assertTrue(fix, f"{where}: a numbered step fixes item 11 forward: from a fresh retrieve that equals "
+                             "`after/`, check-only, on Ryan's go redeploy item 11's report, then refresh the dashboard")
+        i = fix[0]
+        s = steps[i]
+        self.assertTrue(self.ITEM11_MDAPI in s or re.search(r"(?i)\b(only|alone)\b", s),
+                        f"{where}: the fix step redeploys item 11's report only (`-m \"Report:GLOW_Monthly_Reports/"
+                        f"{self.ITEM11_MDAPI}\"`, or \"only\"): {s[:200]!r}")
+        for other in self.OTHER_MDAPI + ("Dashboard:",):
+            self.assertNotIn(other, s, f"{where}: the fix step redeploys item 11's report only, not {other!r}")
+        self.assertTrue([m for m in self.RECORD_COUNT_ON.finditer(s) if self.affirmed(s, m)]
+                        and re.search(r"\bRowCount\b", s),
+                        f"{where}: the fix step says what changes: item 11's report gets its record count on (the "
+                        "param `co` 1, describe `hasRecordCount: true`) so it offers `RowCount`, which its component "
+                        "measures")
+        blamed = self.sum_blamed(s)
+        self.assertFalse(blamed, f"{where}: the fix step blames the Sum; the cause is item 11's record count off "
+                                 f"(`co` 0): {blamed[0][:200]!r}" if blamed else "")
+        for m in self.SUM_DROP.finditer(s):
+            self.assertFalse(self.affirmed(s, m), f"{where}: the fix step keeps item 11's Sum (it changes `co` "
+                                                  f"only): {s[:200]!r}")
+        dep = [m.start() for m in redeploy.finditer(s) if not re.search(r"(?i)check-only|--dry-run", s[m.start():m.end() + 12])]
+        self.assertTrue(dep and max(m.start() for m in re.finditer(r"(?i)\brefresh", s)) > dep[0],
+                        f"{where}: the fix step refreshes the dashboard after the redeploy")
+        # after the first deploy (steps 3-6), before the SOQL check and the moves
+        first_deploy = [j for j, t in enumerate(steps) if re.search(r"sf project deploy start\b(?![^`]*--dry-run)", t)
+                        and j != i]
+        self.assertTrue(first_deploy and first_deploy[0] < i,
+                        f"{where}: the fix step comes after the deploy of the build")
+        soql = [j for j, t in enumerate(steps) if j != i and j > first_deploy[0] and re.search(r"\bSOQL\b", t)
+                and "DHIS2__c" in t]
+        moves = [j for j, t in enumerate(steps) if j != i and re.search(r"sf_report_folders\.py\s+move\b", t)]
+        self.assertTrue(soql and moves, f"{where}: the SOQL check and the moves stay numbered steps")
+        self.assertLess(i, soql[0], f"{where}: item 11's fix comes before the SOQL check (steps 7-8 wait until item "
+                                    "11 works)")
+        self.assertLess(i, moves[0], f"{where}: item 11's fix comes before the moves")
+
+    # --- the guard itself: sum_blamed flags every phrasing that blames the Sum, and nothing else -----------------
+    #
+    # A review of #77 (low) found two phrasings the guard let through: the verb split from "away" around RowCount
+    # ("A Sum aggregate takes RowCount away."), and a Sum-blaming clause after "summarizes no column" in the same
+    # sentence (the exemption for "summarizes no column" swallowed the clause that followed it).
+
+    BLAMES_SUM = (
+        # the review's phrasing (a): "takes ... away" around RowCount
+        "A Sum aggregate takes RowCount away.",
+        "Its Sum takes the RowCount away from item 11's report.",
+        "The Sum took `RowCount` away.",
+        "A summarized column takes RowCount away from the report.",
+        # the review's phrasing (b): a Sum-blaming clause after "summarizes no column", one sentence
+        "Item 9's report summarizes no column, but item 11's Sum removes RowCount.",
+        "Item 9's report summarizes no column, while a Sum blocks RowCount.",
+        "Item 9's report summarizes no column, and its Sum caused the missing RowCount.",
+        "Item 9's report summarizes nothing, and item 11's Sum takes RowCount away.",
+        # what the guard already flags (kept flagged)
+        "The Sum removes RowCount.",
+        "Item 11's Sum causes the missing RowCount.",
+        "Item 11's report has a Sum, so no RowCount.",
+        "RowCount is gone because of the Sum.",
+    )
+    CLEARS_SUM = (
+        "Item 11's report summarizes no column.",
+        "Item 9's report summarizes no column, and it lists RowCount.",
+        "Item 11's report has its record count off (`co` 0), so its aggregates list only its Sum and no `RowCount`.",
+        "Item 10's report sums the same column with `co` 1 and lists the Sum and `RowCount`.",
+        "Not the Sum: item 10's report sums the same column and lists RowCount.",
+        "A first diagnosis named the wrong cause: the Sum took RowCount away.",
+        "Item 11's report keeps its Sum and turns its record count on (`co` 1), so it offers RowCount.",
+        "The component measures the record count (`RowCount`).",
+    )
+
+    def test_the_sum_blaming_guard_flags_every_phrasing_that_blames_the_sum(self):
+        missed = [s for s in self.BLAMES_SUM if not self.sum_blamed(s)]
+        self.assertFalse(missed, "sum_blamed (the guard of #77's docs) lets through sentences that blame the Sum for "
+                                 f"the missing RowCount: {missed!r}")
+        # inside a paragraph of correct sentences too
+        for s in self.BLAMES_SUM:
+            text = ("Item 11's report has its record count off (`co` 0). " + s
+                    + " Item 10's report sums the same column with `co` 1 and lists RowCount.")
+            self.assertTrue(self.sum_blamed(text), f"sum_blamed misses {s!r} inside a paragraph")
+
+    def test_the_sum_blaming_guard_passes_what_does_not_blame_the_sum(self):
+        flagged = [s for s in self.CLEARS_SUM if self.sum_blamed(s)]
+        self.assertFalse(flagged, f"sum_blamed flags sentences that do not blame the Sum: {flagged!r}")
+        self.assertFalse(self.sum_blamed(" ".join(self.CLEARS_SUM)),
+                         "sum_blamed flags the paragraph of sentences that do not blame the Sum")
+
+    # --- the live steps of 2026-10-26: item 11 fixed forward, the SOQL check, the moves --------------------------
+    #
+    # #77 on 2026-10-26 ~03:10 UTC, on Ryan's go: step 7 redeployed item 11's report with `co` 1 (check-only
+    # 0AfRP000002i7JB0AY, deploy 0AfRP000002i6yE0AQ) after a fresh retrieve `fresh_2026-10-26/` equalled `after/`;
+    # the read-back `after_item11/` equals `build_item11/`; the refresh at 03:06 UTC returned data on 3/3 components,
+    # item 11's 01aRP0000089gWVYAY included. Step 8: SOQL for September 2026 equals the components (item 9 23 Yes /
+    # 3 No, item 10 sum 93 over 42, item 11 27 Yes / 15 No, one partner's September equal); the test-record rule:
+    # item 11 No 33 in January and 19 in March 2026 with the rule (34 and 20 without), item 10 46 records each month
+    # (47 without). Step 9: 5 reports moved to Decommissioned, 5/5 read back, the ledger holds 5 move rows. Step 10
+    # (the weekly Subscribe) and the dashboard copy's rename are Ryan's and stay open.
+    #
+    # The test-breaker passed the first version with a false Result: the ids beside "failed" and "rolled back",
+    # `co` 1 said of the plan, a retrieve that "differed", a read-back that "would" equal, a refresh that "still
+    # fails with 406; 3/3 is the goal", the counts swapped between the items, a step 9 "refused", and the stale
+    # words put before the step numbers. Each claim is now read in its own sentence (or table row): bound to its
+    # id, folder, item or month, said (not denied), real (not a plan, a hope or a guess) and free of failure words.
+    LIVE_DAY = "2026-10-26"
+    CHECK_ONLY_7, DEPLOY_7 = "0AfRP000002i7JB0AY", "0AfRP000002i6yE0AQ"
+    STEP_REF = re.compile(r"(?i)\bsteps?\s+(\d+)(?:\s*(?:-|–|to|through)\s*(\d+))?")
+    # what says a live step did not do what the Result claims ("0 errors", "no errors" are no error)
+    FAILED = re.compile(r"(?i)\bfail\w*|\brolled\s+back\b|\brollback\b|\brefus\w*|\berrors?\b|\b406\b|\bNO_DATA\b|"
+                        r"\babort\w*|\bcancel\w*|\breject\w*|\bundone\b")
+    NO_ERRORS = re.compile(r"(?i)\b(0|no|zero|without)\s+errors?\b")
+    # what makes a claim a plan, a hope or a guess instead of what happened
+    UNREAL = re.compile(r"(?i)\b(would|should|could|might|may|will|shall|in\s+theory|theoretically|expect\w*|"
+                        r"supposed|hop(e|es|ed|ing)|plans?\s+to|planned|goal|target|aim(s|ed)?|assum\w*|presum\w*|"
+                        r"probably|likely|perhaps|maybe|ideally)\b")
+    SUCCEEDED = re.compile(r"(?i)\bsucce\w+|\b0\s+errors\b")
+    DIFFERS = re.compile(r"(?i)\bdiffer\w*|\bmismatch\w*|\bdiscrepanc\w*|\bdeviat\w*")
+    WAITS = re.compile(r"(?i)\b(a)?wait\w*|\bnot\s+yet\b|\byet\s+to\b|\bstill\s+to\s+(do|run|come)\b|\bpending\b|"
+                       r"\bto\s+be\s+(run|done)\b")
+    # a side of the test-record rule's check as the label of a count beside it ("33 with the rule", "without it
+    # 34", "19 with and 20 without"); "with the VPN off" or "with Yes and No" is no side
+    SIDE = re.compile(r"(?i)\b(with(?:out)?)\b(?=\s+(?:the\s+)?(?:test[- ]record\s+)?(?:rule|filter)\b|\s+(?:it|them)\b|"
+                      r"\s*[/,;:.()|]|\s*$|\s+\d|\s+and\b)")
+    SIDES = re.compile(r"(?i)\b(with(?:out)?)\s*/\s*(with(?:out)?)\b")      # a table's "with / without" header
+    # round 2's false Result ended "At 05:10 UTC Ryan undid all of it ... Nothing of the above is in the org now":
+    # what says the live steps were taken back afterwards ("read back" is the read-back, not this)
+    UNDID = re.compile(r"(?i)\bundid\b|\bundone\b|\bundo(es|ing)\b|\brevert(ed|s|ing)\b|\brestored\b|"
+                       r"\b(roll(s|ed|ing)?|went|go(es|ne)?|put|moved?|brought|turned|set)\s+(\w+\s+){0,3}?"
+                       r"(?<!read )back\b|"
+                       r"(?<!read-)(?<!read )\bback\s+(to|on|in|at|into)\b|\bout\s+of\s+(the\s+)?Decommissioned\b|"
+                       r"\b(nothing|none)\s+of\s+(the\s+above|this|that|it)\b")
+    # a failure state of item 11 (406, the record count off); a sentence with it is history only when it also says
+    # the fix, or says it in the past with no word of a later change
+    BROKEN = re.compile(r"(?i)\b406\b|\bNO_DATA\b")
+    FIXED = re.compile(r"(?i)\breturn\w*\s+(its\s+)?data\b|\bYes\s+and\s+No\b|\bno\s+longer\b|\bfixed\b|\bgone\b")
+    LATER = re.compile(r"(?i)\b(again|now|currently|still|today|back|since|set|changed|switched|turned|"
+                       r"redeployed|deployed|moved|returned|is|are|has|have|remains?|stays?|fails?)\b|\b\d\d:\d\d\b")
+    PAST = re.compile(r"(?i)\b(had|was|were|failed|before|first|earlier|previously|old)\b|\bbefore/")
+    HISTORY_DAY = re.compile(r"\b2026-10-2[45]\b")
+
+    def names_step(self, s, n):
+        """`s` names Rollout step `n`: "step n", or a range "steps a-b" around it."""
+        for m in self.STEP_REF.finditer(s):
+            lo, hi = int(m.group(1)), int(m.group(2) or m.group(1))
+            if lo <= n <= hi:
+                return True
+        return False
+
+    def result_blocks(self):
+        path = self.plan_path()
+        raw = self.plan_part(path, "## Result", 40)
+        return os.path.relpath(path, REPO), raw, self.blocks(raw)
+
+    def step_parts(self, blocks, n):
+        """Each block of the Result that names step `n`, with the table rows right after it (a list per block)."""
+        out = []
+        for i, b in enumerate(blocks):
+            if not self.names_step(b, n) or b.startswith("|"):
+                continue
+            j, parts = i + 1, [b]
+            while j < len(blocks) and blocks[j].startswith("|"):
+                parts.append(blocks[j])
+                j += 1
+            out.append(parts)
+        return out
+
+    @staticmethod
+    def units(parts_list):
+        """The claims of a step: each sentence of its blocks, and each table row as one claim with every cell
+        prefixed by its column's header ("Item: 9 | Yes: 23 | No: 3")."""
+        def cells(row):
+            return [c.strip() for c in row.strip().strip("|").split("|")]
+
+        def rule(row):
+            return row.startswith("|") and all(re.fullmatch(r":?-{2,}:?", c) for c in cells(row))
+        out = []
+        for parts in parts_list:
+            header = None
+            for i, p in enumerate(parts):
+                if not p.startswith("|"):
+                    header = None
+                    out += sentences(p, ".;")
+                elif i + 1 < len(parts) and rule(parts[i + 1]):
+                    header = cells(p)           # the row above a |---| rule names the columns
+                elif rule(p):
+                    continue
+                elif header is None:
+                    out.append(p)
+                else:
+                    row = cells(p)
+                    out.append(" | ".join(f"{h}: {c}" for h, c in zip(header + [""] * len(row), row)))
+        return out
+
+    def said(self, u, rx):
+        """The matches of `rx` in claim `u` said, not denied ("0 errors", "no errors" taken out first)."""
+        u = self.NO_ERRORS.sub(" ", u)
+        return [m.group(0) for m in rx.finditer(u) if self.affirmed(u, m)]
+
+    def real(self, u):
+        """Claim `u` says what happened: no failure word said and no plan, hope or guess."""
+        return not self.said(u, self.FAILED) and not self.UNREAL.search(u)
+
+    def equal_said(self, u):
+        """Claim `u` affirms an equality ("equals", "matches", "no differences") and no difference, really."""
+        plain = re.sub(r"(?i)\bno\s+differences?\b", " ", u)
+        return (bool([m for m in self.EQUALS.finditer(u) if self.affirmed(u, m)])
+                and not [m for m in self.DIFFERS.finditer(plain) if self.affirmed(plain, m)]
+                and not self.UNREAL.search(u))
+
+    def succeeded(self, u, ident):
+        """Claim `u` says the job `ident` succeeded: "Succeeded" (or "0 errors") after the id and before the next
+        id, or anywhere in `u` when it names no other id, or "both / each ... succeeded" after the last id."""
+        ok = [m for m in self.SUCCEEDED.finditer(u) if self.affirmed(u, m)]
+        ids = list(self.SF_ID.finditer(u))
+        end = u.find(ident) + len(ident)
+        nxt = [m.start() for m in ids if m.start() >= end]
+        stop = nxt[0] if nxt else len(u)
+        if [m for m in ok if end <= m.start() < stop]:
+            return True
+        if ok and {m.group(0) for m in ids} == {ident}:
+            return True
+        last = ids[-1].end() if ids else 0
+        return bool([m for m in ok if m.start() >= last and re.search(r"(?i)\b(both|each|all)\b", u[last:m.start()])])
+
+    @staticmethod
+    def num(n):
+        return r"(?<![\d.,/:-])" + n + r"(?![\d.,:-]\d|\d)"
+
+    def pair(self, n, label):
+        """`n` bound to `label` ("23 Yes", "27 partners Yes", "Yes 23", "Yes: 23"), no other count or label between."""
+        return re.compile(r"(?i)" + self.num(n) + r"(?:\s+(?!(?:yes|no)\b)[A-Za-z]\w*){0,2}\s+" + label + r"\b|"
+                          r"\b" + label + r"\s*[:=]?\s*" + self.num(n))
+
+    @staticmethod
+    def item_parts(u, item):
+        """The parts of claim `u` about `item`: from "item <item>" (a table's "Item: <item>") to the next item."""
+        marks = list(re.finditer(r"(?i)\bitem\W{1,3}(9|10|11)\b", u))
+        return [u[m.end():(marks[k + 1].start() if k + 1 < len(marks) else len(u))]
+                for k, m in enumerate(marks) if m.group(1) == item]
+
+    def in_order(self, u, *words):
+        """`words` (a number, or a word) in claim `u` in this order."""
+        at = 0
+        for w in words:
+            m = re.compile(self.num(w) if w.isdigit() else r"(?i)\b" + w + r"\b").search(u, at)
+            if not m:
+                return False
+            at = m.end()
+        return True
+
+    def sides(self, u, numbers):
+        """{number: {side}}: each of `numbers` in claim `u` bound to "with" or "without" (the test-record rule). A
+        table cell "with / without: 46, 43 / 47, 43" binds by its slash; anywhere else the sides and these numbers,
+        in their order, bind each number to the side after it when the run starts with a number and ends with a side
+        ("33 with the rule and 34 without it"), to the side before it when it starts with a side and ends with a
+        number ("with the rule 33, without it 34"); a run with a side at both ends or at neither binds nothing."""
+        got = {}
+        for cell in u.split(" | "):
+            head = self.SIDES.search(cell)
+            halves = cell[head.end():].split("/") if head else []
+            if len(halves) == 2:
+                for side, half in zip(head.groups(), halves):
+                    for n in numbers:
+                        if re.search(self.num(n), half):
+                            got.setdefault(n, set()).add(side.lower())
+                continue
+            toks = sorted([(m.start(), m.group(1).lower()) for m in self.SIDE.finditer(cell)]
+                          + [(m.start(), n) for n in numbers for m in re.finditer(self.num(n), cell)])
+            seq = [t for _, t in toks]
+            if not seq or (seq[0] in ("with", "without")) == (seq[-1] in ("with", "without")):
+                continue
+            side = None
+            for t in (seq if seq[0] in ("with", "without") else reversed(seq)):
+                if t in ("with", "without"):
+                    side = t
+                else:
+                    got.setdefault(t, set()).add(side)
+        return got
+
+    def step_refs(self, s):
+        return [(int(m.group(1)), int(m.group(2) or m.group(1))) for m in self.STEP_REF.finditer(s)]
+
+    def live_ref(self, s):
+        """`s` names one of steps 7-9 (or what only step 7 made), the steps of 2026-10-26."""
+        return (bool([r for r in self.step_refs(s) if r[0] <= 9 and r[1] >= 7])
+                or bool(re.search(r"fresh_2026-10-26/|after_item11/|build_item11/", s)))
+
+    def history(self, s):
+        """`s` is about the dry runs of 2026-10-24 or steps 1-6 of 2026-10-25: it says one of those days, or names
+        only steps up to 6, and says neither 2026-10-26 nor one of steps 7-9."""
+        early = self.HISTORY_DAY.search(s) or (self.step_refs(s) and all(hi <= 6 for _, hi in self.step_refs(s)))
+        return bool(early) and self.LIVE_DAY not in s and not self.live_ref(s)
+
+    def assertNotUndone(self, blocks, where):
+        """No sentence of the Result says steps 7-9 were taken back (undid, went back), and none from their first
+        claim on says `co` 0 or 406 as the state after, unless it is the history of 2026-10-24 and 2026-10-25: an
+        undo word is history only in a sentence of its own about those days; a failure state also in a block led by
+        such a sentence (step 6's 406, `co` 0 in `before/`)."""
+        seen = False
+        for b in blocks:
+            said = sentences(b, ".;")
+            lead_history = self.history(said[0])
+            for s in said:
+                if self.history(s):
+                    continue
+                undid = self.said(s, self.UNDID)
+                self.assertFalse(undid, f"{where}: steps 7-9 ran on {self.LIVE_DAY} and stand; a sentence says they "
+                                        f"were taken back ({undid[0]!r}): {s[:200]!r}" if undid else "")
+                seen = seen or (self.LIVE_DAY in s and self.live_ref(s))
+                if not seen or (lead_history and not self.live_ref(s) and self.LIVE_DAY not in s):
+                    continue
+                broken = [m.group(0) for rx in (self.BROKEN, self.RECORD_COUNT_OFF) for m in rx.finditer(s)
+                          if self.affirmed(s, m)]
+                if not broken or self.FIXED.search(s) or [m for m in self.RECORD_COUNT_ON.finditer(s)
+                                                          if self.affirmed(s, m)]:
+                    continue
+                self.assertFalse(self.LATER.search(s) or not self.PAST.search(s),
+                                 f"{where}: item 11 works since step 7 ({self.LIVE_DAY}); a sentence says "
+                                 f"{broken[0]!r} as its state after: {s[:200]!r}")
+
+    def test_the_result_records_item_11s_redeploy_and_refresh_of_2026_10_26(self):
+        name, raw, blocks = self.result_blocks()
+        where = f"{name}: `## Result`"
+        body = flat(raw)
+        self.assertIn(self.LIVE_DAY, body, f"{where}: record the live steps of {self.LIVE_DAY} (steps 7-9)")
+        self.assertTrue([b for b in blocks if self.LIVE_DAY in b and self.names_step(b, 7)],
+                        f"{where}: say step 7 ran on {self.LIVE_DAY} (\"Step 7\" or \"Steps 7-9\" beside the date)")
+        parts7 = self.step_parts(blocks, 7)
+        self.assertTrue(parts7, f"{where}: a row, item or paragraph for step 7 (\"Step 7, ...\")")
+        s7 = " ".join(" ".join(p) for p in parts7)
+        units7 = self.units(parts7)
+
+        # the check-only and the deploy, each id beside its own word (no other id between), each succeeded in its
+        # own sentence, and no failure, rollback or refusal said beside either id
+        def window(s, ident):
+            at = s.find(ident)
+            prev = [m.end() for m in self.SF_ID.finditer(s[:at])]
+            return s[(prev[-1] if prev else max(0, at - 120)):at]
+        check_only = re.compile(r"(?i)check-only|--dry-run|\bvalidat\w*")
+        for ident, what in ((self.CHECK_ONLY_7, "check-only"), (self.DEPLOY_7, "deploy")):
+            self.assertIn(ident, s7, f"{where}: step 7 records item 11's {what} id {ident}")
+            w = window(s7, ident)
+            ok = check_only.search(w) if what == "check-only" else (re.search(r"(?i)\b(re-?)?deploy", w)
+                                                                     and not check_only.search(w))
+            self.assertTrue(ok, f"{where}: step 7's {what} id {ident} right after the word {what!r} (no other id "
+                                "between)")
+            mine = [u for u in units7 if ident in u]
+            for u in mine:
+                bad = self.said(u, self.FAILED)
+                self.assertFalse(bad, f"{where}: step 7's {what} {ident} succeeded; its sentence says {bad[0]!r}: "
+                                      f"{u[:200]!r}" if bad else "")
+            self.assertTrue([u for u in mine if self.succeeded(u, ident) and not self.UNREAL.search(u)],
+                            f"{where}: step 7's {what} {ident} succeeded (\"Succeeded\" after the id, in its sentence)")
+        # what changed: item 11's report redeployed with the record count on (`co` 1), in one sentence
+        redeploy = re.compile(r"(?i)\b(re-?)?deploy\w*")
+        self.assertTrue([u for u in units7 if [m for m in self.RECORD_COUNT_ON.finditer(u) if self.affirmed(u, m)]
+                         and [m for m in redeploy.finditer(u) if self.affirmed(u, m)]
+                         and self.real(u) and not re.search(r"(?i)\bplan\b|\bRollout\b", u)],
+                        f"{where}: step 7 says item 11's report was redeployed with its record count on (`co` 1), in "
+                        "one sentence, not denied, not a plan")
+        # the guard before it: the fresh retrieve equalled after/
+        self.assertTrue([u for u in units7 if "fresh_2026-10-26/" in u and "after/" in u and self.equal_said(u)
+                         and self.real(u)],
+                        f"{where}: step 7 says the fresh retrieve `fresh_2026-10-26/` equalled `after/` before the "
+                        "redeploy (one sentence, no difference)")
+        # the read-back after it: after_item11/ equals build_item11/
+        self.assertTrue([u for u in units7 if "after_item11/" in u and "build_item11/" in u and self.equal_said(u)
+                         and self.real(u)],
+                        f"{where}: step 7's read-back `after_item11/` equals `build_item11/` (one sentence, said as "
+                        "what happened, no difference)")
+        # the refresh: item 11's component returns data, in the sentence that names it, with no failure
+        data = re.compile(r"(?i)\b(return\w*|with|show\w*|ha[sd]|have|gave|gives)\s+(its\s+|their\s+)?data\b|"
+                          r"\b3/3\b|\b(all\s+)?(three|3)\s+of\s+(the\s+)?(three|3)\b|\ball\s+(three|3)\s+components\b|"
+                          r"\bYes\s+and\s+No\b")
+        refreshed = [b for b in blocks if self.ITEM11_COMPONENT in b and re.search(r"(?i)\brefresh", b)
+                     and (self.LIVE_DAY in b or "03:06" in b)
+                     and [u for u in sentences(b, ".;") if self.ITEM11_COMPONENT in u and self.real(u)
+                          and [m for m in data.finditer(u) if self.affirmed(u, m)]]]
+        self.assertTrue(refreshed, f"{where}: the refresh of {self.LIVE_DAY} (03:06 UTC) and item 11's component "
+                                   f"{self.ITEM11_COMPONENT} returning data (3/3 components), the id and the data in "
+                                   "one sentence with no failure (406, error) and no goal or expectation")
+        blamed = self.sum_blamed(raw)
+        self.assertFalse(blamed, f"{where}: the 406 was item 11's record count off, not its Sum: {blamed[0][:200]!r}"
+                         if blamed else "")
+        self.assertNotUndone(blocks, where)
+
+    def test_the_result_records_the_soql_check_and_the_moves_of_2026_10_26(self):
+        name, raw, blocks = self.result_blocks()
+        where = f"{name}: `## Result`"
+        # step 8: the September counts equal the components, one partner's month equal, the test-record months
+        parts8 = self.step_parts(blocks, 8)
+        self.assertTrue([p for p in parts8 if self.LIVE_DAY in " ".join(p)],
+                        f"{where}: a row, item or paragraph for step 8 (\"Step 8, ...\"), run on {self.LIVE_DAY}")
+        s8 = " ".join(" ".join(p) for p in parts8)
+        units8 = self.units(parts8)
+        self.assertTrue([u for u in units8 if re.search(r"(?i)\bcomponents?\b", u) and self.equal_said(u)
+                         and self.real(u)],
+                        f"{where}: step 8 says the SOQL counts equal the components (one sentence, not denied)")
+        for u in units8:
+            if re.search(r"(?i)\bwithout\b", u):
+                continue        # the counts without the test-record rule are meant to differ
+            plain = re.sub(r"(?i)\bno\s+differences?\b", " ", u)
+            denied = [m.group(0) for m in self.EQUALS.finditer(u) if self.d.locally_denied(u, m)]
+            denied += self.said(plain, self.DIFFERS)
+            self.assertFalse(denied, f"{where}: step 8's SOQL equals the components; a sentence says otherwise "
+                                     f"({denied[0]!r}): {u[:200]!r}" if denied else "")
+        for month in ("September", "January", "March"):
+            self.assertIn(month, s8, f"{where}: step 8 names {month} 2026")
+        # each count bound to its item and its answer, in one sentence or table row
+        for item, binds, what in (("9", (self.pair("23", "Yes"), self.pair("3", "No")), "23 Yes and 3 No"),
+                                  ("11", (self.pair("27", "Yes"), self.pair("15", "No")), "27 Yes and 15 No")):
+            self.assertTrue([u for u in units8 for t in self.item_parts(u, item)
+                             if all(rx.search(t) for rx in binds) and self.real(u)],
+                            f"{where}: step 8 records item {item}'s September, {what}, after \"item {item}\" in one "
+                            "sentence or table row")
+        def summed(n):
+            # `n` beside "sum"/"total", or bound to "sessions" ("93 sessions", a table's "Sessions: 93"): item 10's
+            # Sum is its sessions, so "93 sessions in 42 Monthly Reports" is accurate
+            return re.compile(r"(?i)\b(sum\w*|total)(\s+(of|was|is|came\s+to|to))?\s*[:=]?\s*" + self.num(n) + "|"
+                              + self.num(n) + r"\s+(in\s+)?(sum|total|sessions?)\b|"
+                              r"\bsessions?\s*[:=]\s*" + self.num(n))
+
+        def over(n):
+            return re.compile(r"(?i)\b(over|across|from|in)\s+(the\s+)?" + self.num(n) + "|" + self.num(n)
+                              + r"\s+(\w+\s+)?(Monthly\s+Reports?|records?|reports?)\b")
+        self.assertTrue([u for u in units8 for t in self.item_parts(u, "10")
+                         if summed("93").search(t) and over("42").search(t)
+                         and not summed("42").search(t) and not over("93").search(t) and self.real(u)],
+                        f"{where}: step 8 records item 10's September, sum 93 over 42 Monthly Reports (93 beside "
+                        "\"sum\" or \"sessions\", 42 beside \"over\" or \"Monthly Reports\"), after \"item 10\" in one "
+                        "sentence or table row")
+        # the test-record rule's check, each count bound to its side: with the rule 33 (January), 19 (March) and 46
+        # records; without it 34, 20 and 47 (round 2 swapped the sides and passed)
+        with_rule, without_rule = ("33", "19", "46"), ("34", "20", "47")
+        for at, w, wo, what in ((r"\bJanuary\b", "33", "34", "item 11's No in January 2026"),
+                                (r"\bMarch\b", "19", "20", "item 11's No in March 2026"),
+                                (r"(?i)\bitem\W{1,3}10\b|\brecords\b", "46", "47", "item 10's records each month")):
+            self.assertTrue([u for u in units8 if re.search(at, u) and self.real(u)
+                             and self.sides(u, with_rule + without_rule).get(w) == {"with"}
+                             and self.sides(u, with_rule + without_rule).get(wo) == {"without"}],
+                            f"{where}: step 8 records {what}, {w} with the rule and {wo} without it, each count beside "
+                            "its side (\"33 with the rule and 34 without it\", or a table's \"with / without\" "
+                            "columns), in one sentence or table row")
+        for u in units8:
+            got = self.sides(u, with_rule + without_rule)
+            wrong = ([n for n in with_rule if got.get(n, set()) - {"with"}]
+                     + [n for n in without_rule if got.get(n, set()) - {"without"}])
+            self.assertFalse(wrong, f"{where}: step 8's test-record counts are 33, 19, 46 with the rule and 34, 20, "
+                                    f"47 without it; a claim binds {wrong[0] if wrong else ''} to the other side: "
+                                    f"{u[:200]!r}" if wrong else "")
+        self.assertTrue([u for u in units8 if re.search(r"(?i)\b(one|a|single)\s+partner", u) and self.equal_said(u)
+                         and self.real(u)],
+                        f"{where}: step 8 says one partner's month equals the per-partner query (one sentence)")
+        # step 9: the 5 moves to Decommissioned, read back, and the ledger's 5 move rows; no refusal or failure
+        parts9 = self.step_parts(blocks, 9)
+        self.assertTrue(parts9, f"{where}: a row, item or paragraph for step 9 (\"Step 9, ...\")")
+        units9 = self.units(parts9)
+        dated9 = self.units([p for p in parts9 if self.LIVE_DAY in " ".join(p)])     # the moves' own claims, dated
+        bad9 = re.compile(r"(?i)\brefus\w*|\bfail\w*|\berrors?\b|\bnone\b|\brolled\s+back\b|\bundone\b|\bskipp\w*")
+
+        def clean9(u):
+            return not self.said(u, bad9) and not self.UNREAL.search(u)
+        for u in units9:
+            if "2026-10-24" in u:
+                continue        # the dry run of 2026-10-24 refused the moves while D3 still used the reports
+            bad = self.said(u, re.compile(r"(?i)\brefus\w*|\bfail\w*"))
+            self.assertFalse(bad, f"{where}: step 9 moved the 5 reports on {self.LIVE_DAY}; a sentence says "
+                                  f"{bad[0]!r}: {u[:200]!r}" if bad else "")
+        moved = re.compile(r"(?i)\bmov(e|es|ed)\b")
+        self.assertTrue([u for u in dated9 if "Decommissioned" in u and clean9(u)
+                         and [m for m in moved.finditer(u) if self.affirmed(u, m)]
+                         and re.search(r"(?i)\b(5|five)\s+([\w\"“”'’]+\s+){0,4}reports?\b|\b5/5\b", u)],
+                        f"{where}: step 9 moved the 5 reports to Decommissioned on {self.LIVE_DAY} (one sentence, "
+                        "not denied, in a part of step 9 that says the date)")
+        self.assertTrue([u for u in dated9 if clean9(u)
+                         and re.search(r"(?i)\b5/5\b|\b(5|five)\s+of\s+(the\s+)?(5|five)\b", u)
+                         and [m for m in re.finditer(r"(?i)\bread\s*-?\s*back\b|\bre-?read\w*", u)
+                              if self.affirmed(u, m)]],
+                        f"{where}: step 9 read the 5 back in Decommissioned (\"5/5 read back\", one sentence)")
+        self.assertTrue([u for u in dated9 if clean9(u) and re.search(
+                            r"(?i)\bledger\b[^.;]{0,80}?\b(5|five)\s+(\w+\s+)?move\s+rows?\b|"
+                            r"\b(5|five)\s+(\w+\s+)?move\s+rows?\b[^.;]{0,80}?\bledger\b", u)],
+                        f"{where}: step 9 says the ledger holds 5 move rows (one sentence, no failure)")
+        # no longer: step 7 not yet run, steps 8-10 waiting; each stale word is read against the step reference
+        # nearest it in its sentence (`build_item11/` counts as step 7), before or after it
+        for s in sentences(flat(raw), ".;"):
+            refs = [(m.start(), m.end(), int(m.group(1)), int(m.group(2) or m.group(1)))
+                    for m in self.STEP_REF.finditer(s)]
+            refs += [(m.start(), m.end(), 7, 7) for m in re.finditer(r"build_item11/", s)]
+            if not [r for r in refs if r[2] <= 9 and r[3] >= 7]:
+                continue
+            for w in self.WAITS.finditer(s):
+                if self.d.locally_denied(s, w):
+                    continue
+                near = min(refs, key=lambda r: max(r[0] - w.end(), w.start() - r[1], 0))
+                self.assertFalse(near[2] <= 9 and near[3] >= 7,
+                                 f"{where}: steps 7-9 ran on {self.LIVE_DAY}; the Result still says "
+                                 f"{s[near[0]:near[1]]!r} {w.group(0)!r}: {s[:200]!r}")
+        self.assertNotUndone(blocks, where)
 
 
 if __name__ == "__main__":

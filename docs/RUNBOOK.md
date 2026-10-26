@@ -3614,7 +3614,7 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 ## Monthly Report dashboards in Salesforce
 
 - **When:** before any change to a Monthly Report (`DHIS2__c`) report or dashboard (epic #68), and to revert one.
-- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)).
+- **Status:** inventoried read-only 2026-10-21 (#69); the two Decommissioned folders (below) exist since 2026-10-21, deployed on Ryan's go (deploy `0AfRP000002hjLh0AI`, check-only `0AfRP000002hisf0AA`), read back, hidden, with no share; the API proof 2026-10-21: a report is copied and moved by the Analytics API, a dashboard is cloned by it and moved or renamed by hand in Lightning (Ryan; the API refuses a dashboard `PATCH`, 400 `JSON_PARSER_ERROR`), proved 2026-10-23; the two proof copies stay in Decommissioned ([plan and Result](plans/2026-10-21-sf-reporting-inventory.md#result)); the items off the keep list moved to Decommissioned 2026-10-23 and 2026-10-24 on Ryan's go (#72, Decommissioned, below); the folders of the kept items, "GLOW Monthly Reports" and "GLOW Monthly Dashboards" (#73), deployed and filled 2026-10-24 on Ryan's go ([plan](plans/2026-10-23-sf-category-folders.md)); `DHIS2__c.Period__c` and its column in the `Dhis2` report type deployed 2026-10-24 on Ryan's go (#128; deploy `0AfRP000002i4l70AA`, check-only `0AfRP000002i4ht0AA`), read back, the before/after retrieve compare showing only those additions ([plan and Result](plans/2026-10-24-dhis2-period-date.md#result)); D3 and items 9-11 (#77) deployed 2026-10-25 on Ryan's go (deploy `0AfRP000002i5hB0AQ`, check-only `0AfRP000002i5dx0AA`) and read back; item 11's report redeployed 2026-10-26 on Ryan's go with its record count on (`co` 1; deploy `0AfRP000002i6yE0AQ`, check-only `0AfRP000002i7JB0AY`), read back equal to `build_item11/`, that day's refresh returning data on all three D3 components; the 5 "DHIS2 Reports" reports D3 no longer uses moved to Decommissioned 2026-10-26 ([plan and Result](plans/2026-10-24-sf-dash-observations.md#result)).
 - **Dry run:** the check-only deploy (`--dry-run`); the inventory itself is reads (SOQL, the retrieve, the shares API).
 - **Apply:** the same deploy without `--dry-run`, Ryan's go (VPN off); each non-GET Analytics API call (a copy, a move), Ryan's go.
 - **Verify:** retrieve again and compare with the build; SOQL on `Report` or `Dashboard` shows the same Id after a move, with `FolderName` following.
@@ -3652,6 +3652,16 @@ dashboard in Salesforce"); epic #68 leaves them untouched. A change here follows
 ritual: VPN off, retrieve live into `data/sf_<topic>_<date>/before/`, build in a copy,
 check-only, Ryan's go, deploy, retrieve `after/` and compare; never an older build (DECISIONS
 2026-10-16).
+
+A dashboard component's measure must be one of its report's aggregates, as the Analytics describe
+lists them (`GET /analytics/reports/<id>/describe`, its `aggregates`). A report offers `RowCount`
+only when its record count is on (the report param `co` 1, describe `hasRecordCount: true`),
+whatever columns it summarizes: item 10's report sums `GC_sessions_did_you_observe_last_month__c`
+with `co` 1 and lists the Sum and `RowCount` together. On 2026-10-25 item 11's report (#77) had
+its record count off (`co` 0, describe `hasRecordCount: false`) and listed only its Sum, so its
+component, which measures `RowCount`, failed the refresh with 406 ("One or more of the fields
+selected in the component is no longer available in the report"). The check-only deploy passes
+such a component; only the refresh shows the 406.
 
 ### Decommissioned
 
@@ -4078,6 +4088,113 @@ Questions for GLOW:
 - The sources are answered: Ryan, 2026-10-23 on #74, "use the candidates": item 1 counts
   `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
   and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
+
+### GLOW Club Observations
+
+D3 in `glow/sf_keep_list.csv`, the GLOW Club Observations dashboard, is the dashboard "GLOW Club
+Training" (`01ZRP000006k2D32AI`) in "GLOW Monthly Dashboards", with items 9-11 (ticket #77,
+[plan](plans/2026-10-24-sf-dash-observations.md)). Its label and its reports' labels stay as they
+are (Ryan, 2026-10-23), and each component's title is its report's label. It runs as the
+specified running user (`SpecifiedUser`), so it shows the data of its last refresh: a refresh
+after each change (a PUT, Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current.
+#77's build `data/sf_dash_observations_2026-10-24/build/` is deployed since 2026-10-25 on Ryan's
+go (deploy `0AfRP000002i5hB0AQ`, the plan's Result) and read back into `after/`. Item 11's report
+was redeployed from `data/sf_dash_observations_2026-10-24/build_item11/` on 2026-10-26 on Ryan's
+go (deploy `0AfRP000002i6yE0AQ`; item 11, below), and that day's refresh returned data on all
+three components.
+
+The three components, each on its report in "GLOW Monthly Reports":
+- Item 9, "GLOW Club observation form submitted": the report "Submission of GC observation forms
+  M & P" (`00ORP000004RJZC2A4`, matrix) counts Monthly Reports by the answer to
+  `did_you_submit_your_GC_observation_form__c` (its values across: Yes, No, and NA in some older
+  months; a blank answer is filtered out), for each partner and month. The form in use today
+  (`dHIS2Controller`) clears this answer when the partner observed no session, so a partner with
+  0 sessions has no answer here. The component is a stacked column for each month, one segment
+  per answer. SOQL signal (September 2026: 23 Yes, 3 No; January 2026: 7 Yes, 7 No, 8 NA):
+  `SELECT did_you_submit_your_GC_observation_form__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND did_you_submit_your_GC_observation_form__c != null GROUP BY did_you_submit_your_GC_observation_form__c`.
+- Item 10, "Number of GLOW Club sessions observed": the report "Total Number of Club Observations
+  M&P" (`00ORP000004RJZD2A4`, summary) sums `GC_sessions_did_you_observe_last_month__c` for each
+  partner and month. The component is a column of the sum for each month. SOQL signal (September
+  2026: 42 Monthly Reports, sum 93):
+  `SELECT COUNT(Id), SUM(GC_sessions_did_you_observe_last_month__c) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c != null`.
+- Item 11, "Whether or not PC has observed sessions": the report "Completed Observing Clubs
+  Alteast Once P" (`00ORP000005uf412AA`, matrix) is a yes/no for each partner and month. Its
+  bucket "Observed" on `GC_sessions_did_you_observe_last_month__c` reads Yes for 1 or more
+  sessions and No for 0 (across); each Monthly Report is one partner's month, so its counts are
+  partners. Its report keeps the sum of `GC_sessions_did_you_observe_last_month__c` as a column
+  and has its record count on (the report param `co` 1, redeployed on 2026-10-26), so
+  its aggregates offer `RowCount` beside the Sum. The component is a stacked column for each
+  month, Yes and No; its chart measures the record count (`RowCount`), the partner-months in each
+  Yes/No bucket for each month. Before that redeploy from `build_item11/` its record count was
+  off (`co` 0) and the chart failed the refresh with 406 (2026-10-25). SOQL signal, the partners who observed (September 2026: 27, and 15 with 0):
+  `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND GC_sessions_did_you_observe_last_month__c > 0`;
+  the partners who observed none: the same query with `= 0`.
+  The field is never blank: the form shows it as 0 until the partner types a number, and
+  `dHIS2Controller` (`setNumber`) saves a blank number as 0. So a No is either 0 sessions
+  observed or the question left unanswered, and the report does not tell the two apart; the report's
+  `!= null` filter removes nothing (0 blank in September 2026, by the form, not by chance).
+
+Two kinds of "no answer" the reports show differently:
+- A partner that filed no Monthly Report for a month has no `DHIS2__c` record for it, so it has
+  no row in any of the three reports: a missing response, which the reports keep apart from a No
+  by leaving it out. Who filed is "Reports completed on time" (item 18, D5).
+- A partner that filed but left the sessions question unanswered counts as 0 sessions: a No in item 11
+  and nothing added in item 10 (above).
+
+How the reports read the data:
+- Each report is grouped by the partner (`DHIS2__c.Account__c`), then by `Period__c` by calendar
+  month; the month is never `CreatedDate`, and a grouping is never also a column.
+- The default period is the last 12 months: the report filter `Period__c equals LAST_N_MONTHS:12`,
+  which leaves out the current, incomplete month. The standard date filter's column is
+  `Period__c`, range All Time, so the field filter sets the period.
+- Each report carries the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
+  (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
+  `notContain` `test` (the lookup matches on the account's name). In September 2026 no Monthly
+  Report is on a test account or a blank Account; in the last 12 months, 2 are, both on a test
+  account: one in January 2026 and one in March 2026, each with 0 sessions and no item 9 answer.
+  With the rule, item 11 counts 33 No in January and 19 in March (34 and 20 without it), and
+  item 10's report 46 records in each of the two months (47 without it).
+- Each report also keeps its filter on a non-blank answer (its own field `!= null`).
+
+The dashboard's only filter is Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`,
+its 6 partner managers), on every component, and viewers read the partner and the month from the
+reports' groupings (Ryan, 2026-10-24 on #77). It has no Partner filter and no Month filter. #77
+takes item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`) off this
+dashboard, with the five components on reports in "DHIS2 Reports"; #78 puts item 16 on D4. Those
+five reports were moved to Decommissioned by `tools/sf_report_folders.py move` on 2026-10-26,
+once this dashboard used none of them; the only components still on them are on dashboards in
+Decommissioned.
+
+For one partner's month, the same queries take `AND Account__r.Name = '<partner>'`; the three
+items' values for one partner in one query (September 2026, Abaana Community Outreach (ACO)
+Africa: Yes, 3 sessions, so observed):
+`SELECT Account__r.Name, did_you_submit_your_GC_observation_form__c, GC_sessions_did_you_observe_last_month__c FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`.
+
+Rollback:
+- The dashboard and items 9-11 roll back together: redeploy those 4 components of this change's
+  retrieve `data/sf_dash_observations_2026-10-24/before/` (check-only, Ryan's go, deploy) only
+  while a fresh retrieve of the same 4 equals `after/`. The deploy names each of the 4 with `-m`,
+  within `before/`:
+  `sf project deploy start -o glow -m "Dashboard:GLOW_Monthly_Dashboards/vbKFAhzWWcXLOmmkSckbvWkgmwtdrM" -m "Report:GLOW_Monthly_Reports/Submission_of_GC_observation_forms_M_P_iuz" -m "Report:GLOW_Monthly_Reports/Total_Number_of_Club_Observations_by_M_q3M" -m "Report:GLOW_Monthly_Reports/Completed_Observing_Clubs_Alteast_Once_P_cn6"`,
+  with `--dry-run` for the check-only. `before/` also holds item 16's report, the five "DHIS2
+  Reports" reports, two report types and `DHIS2__c`, which a whole-folder deploy would put back
+  too, unseen by the `after/` compare: the rollback deploy is the 4 only. That keeps every Id, so
+  the dashboard's components read the old reports again and the FlexiPage
+  `Monthly_Report_Dashboards` keeps D3 in its place. The five "DHIS2 Reports" reports go back to
+  their folder first (the plan's Rollback). After item 11's fix forward (the plan's Rollout),
+  item 11's report is compared with `data/sf_dash_observations_2026-10-24/build_item11/` in place
+  of `after/`; the fix alone rolls back by redeploying item 11's report from `after/` only while
+  a fresh retrieve of it equals `build_item11/`.
+- When they differ, someone has changed the dashboard or a report since the deploy, and the
+  rollback starts from a fresh retrieve by the ritual above. A rollback never deploys an older
+  build or another change's retrieve (DECISIONS 2026-10-16).
+- The copies in Decommissioned made before the deploy (`copy --tag "#77"`) restore D3 and its
+  reports in Lightning only as a set. The dashboard copy points at the reports' original Ids,
+  whose content this deploy rewrites, so its three observation components show the new reports.
+  Move the three report copies and the dashboard copy back (Decommissioned, above), then point
+  each of the dashboard copy's three components at its report's copy. The copies keep their own
+  Ids, so the FlexiPage then needs the dashboard copy in D3's place (the ritual: check-only,
+  Ryan's go, deploy).
 
 ### GLOW Club Implementation
 
