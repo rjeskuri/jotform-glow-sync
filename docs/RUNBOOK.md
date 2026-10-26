@@ -4047,6 +4047,108 @@ Questions for GLOW:
   `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
   and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
 
+### GLOW Club Implementation
+
+D2 in `glow/sf_keep_list.csv`, the GLOW Club Implementation dashboard, is the dashboard
+"Implementation Dashboard" (`01ZRP000006jU9o2AE`) in "GLOW Monthly Dashboards", with items 5-8
+(ticket #76, [plan](plans/2026-10-24-sf-dash-implementation.md)). Its label and its reports'
+labels stay as they are (Ryan, 2026-10-23), and each component's title is its report's label.
+It runs as the viewer (`LoggedInUser`); a daily Subscribe in Lightning refreshes it (a
+subscription, not metadata; Ryan's to set, as for "Jotform Attendance"). #76's changes are live since 2026-10-26 on Ryan's go (deploy
+`0AfRP000002i7Cj0AI`, check-only `0AfRP000002i7B70AI`), read back into `after/` and checked
+against SOQL (the plan's Result).
+
+The four components, each a stacked column for each month, one segment per answer or module:
+- Item 5, "GLOW Club activities carried out": the report "Copy of GLOW Club Implementation by
+  M&P" (`00ORP000005rY3t2AE`, matrix) counts Monthly Reports by the answer to
+  `Did_you_implement_GLOW_Club_last_month_f__c` (across), for each partner and month. Its filter
+  leaves out a blank answer and the answer "No, we did not implement at all", as before #76 (4
+  answers in the last 12 months). SOQL signal (2026-10-26: 565 in the last 12 months, September
+  2026 41 from 41 partners):
+  `SELECT Did_you_implement_GLOW_Club_last_month_f__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Did_you_implement_GLOW_Club_last_month_f__c != null AND Did_you_implement_GLOW_Club_last_month_f__c != 'No, we did not implement at all' GROUP BY Did_you_implement_GLOW_Club_last_month_f__c`.
+- Item 6, "GLOW Club modules implemented": the report "Glow Club Modules Implemented by M&P"
+  (`00ORP000009kUNh2AM`, matrix, new in #76 on the report type `Attendance_Totals`) counts the
+  Jotform batches on `Attendance_Batch__c` by their `Module__c`, one batch per club and session
+  date, where `Processing_Status__c` equals `Success`, `Creator__c` starts with `Jotform`, and
+  `Attendance_Date__c` (the session date) is in the last 12 months and on or after 2026-09-01
+  (Ryan, 2026-10-25: the February-August 2026 pilot batches stay out). In the report filter that
+  floor is in the locale format, `9/1/2026`. Item 6 is grouped by the partner, the club's parent
+  (`Account__c.Parent`), then by month of `Attendance_Date__c`, then by `Module__c` across. Item 6
+  takes the test-record rule on the club's parent: not blank, and its name does not contain
+  "test". The old item 6 report (`00ORP000005rZxd2AE`) counted the form's module field, which is
+  blank since 2025-10; it is in Decommissioned since 2026-10-26, and `glow/sf_keep_list.csv`
+  keeps its id as #70 recorded it. SOQL signal (2026-10-26: 533 batches in 17 modules, all in
+  September 2026, from 31 partners):
+  `SELECT Module__c, COUNT(Id) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c = LAST_N_MONTHS:12 AND Attendance_Date__c >= 2026-09-01 AND Account__r.ParentId != null AND (NOT Account__r.Parent.Name LIKE '%test%') GROUP BY Module__c`.
+- Item 7, "GLOW Club modules adapted to the local context": the report "GLOW Club Modules Adapted
+  By Month" (`00ORP000005uehR2AQ`, matrix) counts Monthly Reports by the answer to
+  `Adapted_to_the_local_culture_or_context__c` (Yes or No, across), for each partner and month;
+  a blank answer is filtered out. SOQL signal (2026-10-26: 543 in the last 12 months, September
+  2026 42 from 42 partners):
+  `SELECT Adapted_to_the_local_culture_or_context__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Adapted_to_the_local_culture_or_context__c != null GROUP BY Adapted_to_the_local_culture_or_context__c`.
+- Item 8, "Summits completed": the report "Local and Regional Summits By Month 2"
+  (`00ORP000005uekf2AA`, matrix) counts Monthly Reports by the answer to
+  `Select_summits_completed_last_month__c` (across, 5 answers in the last 12 months), for each
+  partner and month; a blank answer is filtered out. SOQL signal (2026-10-26: 437 in the last 12
+  months, September 2026 38 from 38 partners):
+  `SELECT Select_summits_completed_last_month__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Select_summits_completed_last_month__c != null GROUP BY Select_summits_completed_last_month__c`.
+
+How the reports read the data:
+- Items 5, 7 and 8 are each grouped by the partner (`DHIS2__c.Account__c`), then by `Period__c`
+  by calendar month (the Monthly Report's month, never `CreatedDate`), the answer across; a
+  grouping is never also a column.
+- Their period is the last 12 months, the report filter `Period__c equals LAST_N_MONTHS:12`,
+  which leaves out the current, incomplete month; the standard date filter's column is
+  `Period__c`, range All Time, so the field filter sets the period.
+- Items 5, 7 and 8 carry the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
+  (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
+  `notContain` `test` (the lookup matches on the account's name).
+- Item 6 reads `Attendance_Batch__c`, not the Monthly Report: its period, grouping and
+  test-record rule are in its own entry above.
+
+The dashboard's only filter is Partner Manager ("Assigned Partner Manager", 6 partner managers),
+on `DHIS2__c$Account__c.Assigned_Partner_Manager__c` for items 5, 7 and 8 and on
+`Attendance_Batch__c$Account__c.Parent.Assigned_Partner_Manager__c` for item 6 (Ryan, 2026-10-24
+on #76). It has no Partner filter and no Month filter: viewers read the partner and the month
+from the reports' groupings. The shared report type `Attendance_Totals` gets one new column,
+`Account__c.Parent.Assigned_Partner_Manager__c` (the partner's manager, through the club's
+parent), so that the Partner Manager filter reaches item 6; the Attendance reports on that type
+are unchanged. The 7 "DHIS2 Reports" reports D2 used before #76 and the old item 6 report moved
+to Decommissioned on 2026-10-26; no dashboard component uses any of them.
+
+For one partner's month, the three `DHIS2__c` answers in one query (`Period__c = LAST_MONTH` is
+September 2026 until 2026-10-31):
+`SELECT Account__r.Name, Did_you_implement_GLOW_Club_last_month_f__c, Adapted_to_the_local_culture_or_context__c, Select_summits_completed_last_month__c FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name = '<partner>'`;
+and for one partner's month of item 6:
+`SELECT Module__c, COUNT(Id) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c = LAST_MONTH AND Account__r.Parent.Name = '<partner>' GROUP BY Module__c`.
+
+Rollback (#76; this change's retrieve is `data/sf_dash_implementation_2026-10-24/before/`):
+- Each of the four reports has a copy in Decommissioned, made 2026-10-26 before the deploy
+  (`copy --tag "#76"`, ledger `data/sf_dash_implementation_2026-10-24/ledger.csv`):
+  `00ORP000009kUFd2AM` of item 5, `00ORP000009kUHF2A2` of the old item 6, `00ORP000009kUIr2AM`
+  of item 7 and `00ORP000009kUKT2A2` of item 8.
+- The reports roll back from their copies in Decommissioned: move a copy back into "GLOW Monthly
+  Reports" (Decommissioned, above) and point D2's component at it in Lightning; the copies keep
+  their own Ids.
+- D2 is a dynamic dashboard and the org is at its limit of 5 dynamic dashboards, so the
+  Analytics API refuses its copy and D2 has no copy in Decommissioned: its rollback is this
+  change's retrieve `data/sf_dash_implementation_2026-10-24/before/`.
+- First the 8 moved reports go back to their folders by the undo of this change's ledger
+  (`python3 tools/sf_report_folders.py undo --vpn-off --dir data/sf_dash_implementation_2026-10-24`,
+  its dry run, then the same with the apply flag on Ryan's go), because D2's old components read
+  them.
+- Then D2, items 5, 7 and 8 and `Attendance_Totals` roll back together: redeploy those 5
+  components of `data/sf_dash_implementation_2026-10-24/before/` (check-only, Ryan's go, deploy,
+  each named with `-m` within `before/`) only while a fresh retrieve of the same 5 equals
+  `after/`. That keeps every Id, so D2's components read the old reports again; the new item 6
+  report then goes to Decommissioned by `move` (the plan's Rollback).
+- `before/` also holds the old item 6 report, the 7 "DHIS2 Reports" reports and the report type
+  `Dhis2`, which #76 leaves as they are: the rollback deploy is the 5 only, never the whole
+  folder.
+- When a fresh retrieve and `after/` differ, someone has changed D2 or a report since the
+  deploy: stop, ask Ryan, and start the rollback from that fresh retrieve by the ritual above.
+- A rollback never deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
+
 ## Interactive dashboard in Salesforce
 
 - **When:** before a change to the interactive dashboard (#81, #82, #83), or to read how it counts.
