@@ -1,7 +1,7 @@
 ---
 title: Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them
 author: Claude (with Ryan's answers of 2026-10-22)
-status: in-progress    # ticket #101 done 2026-10-24 (the four fields live, the check OK: Result); ticket #102's four reports built, their deploy waits for Ryan's go ("Task #102: the timing reports")
+status: in-progress    # ticket #101 done 2026-10-24 (the four fields live, the check OK: Result); ticket #102's four reports deployed 2026-10-26 (#157, "Task #102: the timing reports", Result); task #103 puts them on the dashboard
 created: 2026-10-23
 intent: Ryan, 2026-10-22 (GLOW staff meeting, epic #93) - bring into Salesforce "the time the Jotform form was submitted AND which month/week the session belongs to (e.g. week 2, week 3), displayable in reports, so upper-level staff can see which clubs haven't submitted for a week, or have a big delay between session and submission"
 ---
@@ -311,9 +311,9 @@ cross filter's `LAST_N_DAYS:14` passed as it is on 2026-10-07), the chart type
 refusal is fixed in `build/` and run check-only again; a changed window changes the RUNBOOK and
 its SOQL check with it.
 
-### Rollout (live; pending Ryan's go, in the main session)
+### Rollout (live; run 2026-10-26 on Ryan's go, in the main session, ticket #157)
 
-Step 1 is done (2026-10-26); steps 2-8 have not run. Steps 2-8 with the VPN off, through the CLI
+All eight steps ran on 2026-10-26 (Result). Steps 2-8 with the VPN off, through the CLI
 login `glow`; only counts and partner names reach the ticket, the conversation or this plan.
 1. Done 2026-10-26: Ryan confirmed on the ticket how `Late_Submissions_Last_Month` sorts: grouped
    by partner (the outline), the largest delay first within each partner's group, so the month's
@@ -408,4 +408,30 @@ it.
 - 2026-10-26: Rollout step 1 done: Ryan confirmed on the ticket that the late report stays grouped
   by partner, largest first within each partner; `build/` is unchanged. The build was copied
   unchanged from the job folder into `data/sf_session_timing_2026-10-24/t102_build/` (`build/`,
-  `pattern/`). Steps 2-8 wait for his go.
+  `pattern/`). Steps 2-8 waited for his go.
+- 2026-10-26, Rollout steps 2-8 (ticket #157), in Ryan's interactive session with the VPN off and
+  his go at each live-gate prompt:
+  - Step 2: the fresh retrieve of `Attendance_Totals` into `before/` differed from `pattern/`. Two
+    columns had been added live since the build: `Account__c.Parent.Assigned_Partner_Manager__c`
+    (the Monthly Report dashboards) and `Session_Notes__c` (#106). The report type was rebuilt in
+    `build_2026-10-26/` as the live one plus exactly the four timing columns, so the deploy kept
+    both; deploying `t102_build/build/` would have removed them. The four reports were unchanged.
+    Their sources, `Clubs_Not_Submitting_Last_14_Days` and `Blank_Submissions`, were last
+    modified on 2026-10-07. By SOQL, none of the four DeveloperNames existed.
+  - Step 3: check-only `0AfRP000002i9w50AA`, 5/5 components (four reports and the report type),
+    0 errors.
+  - Step 5: deploy `0AfRP000002i9xh0AA`, 5/5, completed 12:34 UTC.
+  - Step 6: the read-back into `after/` equals `build_2026-10-26/` (0 differing lines). The report
+    type differs from `before/` by the four columns alone. The ids: `Clubs_Not_Submitting_Last_Week`
+    `00ORP000009kYPh2AM`, `Late_Submissions_Last_Month` `00ORP000009kYPi2AM`,
+    `Submission_Delay_by_Partner_by_Month` `00ORP000009kYPj2AM`, `Submissions_by_Club_and_Week`
+    `00ORP000009kYPk2AM`, all in the Attendance folder.
+  - Step 7, each report through the Analytics API against its SOQL check (12:3x UTC). The checks
+    selected rows ungrouped and totalled them offline, the RUNBOOK's fallback:
+    - not submitting last week: 202 clubs = 202;
+    - the matrix's grand total: 1,229 batches = 1,229;
+    - the late report: 170 rows = 170;
+    - the delay report: all 59 partner-months equal on average, maximum and count, and its 765
+      rows equal 765.
+    The delay report's blank-partner group ("-") holds pilot-era batches dated February and March
+    2026, with delays up to 209 days. Its whole-period maximum comes from them.

@@ -3748,13 +3748,12 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 
 ### The timing reports
 
-**Status:** built 2026-10-24 offline (task #102), in `data/sf_session_timing_2026-10-24/t102_build/`
-(`build/`, `pattern/`; owner only, never committed): the four reports below, and the report
-type `Attendance_Totals` with the four fields added to its columns (a custom report type offers
-a new field only once it is in its layout; the retrieve of 2026-10-24 09:24 UTC, after the fields' deploy, had none of
-them). Nothing is deployed: the fresh retrieve, the check-only deploy, the deploy, the read-back
-and each report's run through the Analytics API against its SOQL check wait for Ryan's go, VPN
-off ([plan](plans/2026-10-23-submission-timing.md), "Task #102: the timing reports").
+**Status:** deployed 2026-10-26 12:34 UTC on Ryan's go (ticket #157; deploy `0AfRP000002i9xh0AA`,
+check-only `0AfRP000002i9w50AA`, 5/5): the four reports below, and the report type
+`Attendance_Totals` with the four fields added to its columns. It was rebuilt from the live report
+type on the day, so the Partner Manager and Session notes columns added since #102's build stay.
+Each report equals its SOQL check, and the read-back equals the build
+([plan](plans/2026-10-23-submission-timing.md), "Task #102: the timing reports").
 
 The four reports are in the Attendance report folder (`Attendance`), beside the dashboard's other
 reports, and answer what GLOW staff asked on 2026-10-22: which clubs have not submitted for a
