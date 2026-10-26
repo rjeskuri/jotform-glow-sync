@@ -14,20 +14,23 @@ applied by hand; DECISIONS 2026-10-14), and — through the forms — Salesforce
 gates and rollbacks are in `.claude/skills/salesforce`.
 
 ## The gate
-`.claude/hooks/live_gate.sh` puts each of these to Ryan as an approval prompt in the session, and
-his answer is the go: `--apply`, `--prune`, `--rehearse`, `clasp push` / `clasp:push`; raw
-`api.jotform.com` calls and Sheets writes; `sf`/`sfdx` deploys (check-only ones too), data
-writes, `apex run`, `sf api request` writes and the REST API by URL; `gh variable|secret
-set|delete`, `gh workflow enable|disable`, a `gh workflow run` that applies, `gh run rerun`, and
-any `gh api` (or `api.github.com`) call on `actions/`, `dispatches` or `graphql`. It refuses
-outright a self-approval (setting `GLOW_LIVE_OK`, which no longer opens the gate, writing a shell
-startup file or `.env`, `launchctl setenv`), a live command from a subagent, and one in a session
-that cannot prompt (`bypassPermissions`, `dontAsk`, a missing mode); a headless or dispatched run
-in `default` mode gets the ask, which Claude Code denies (logged `ASKED`). A read-only
-command that only mentions a flag (`grep`, `cat`, `git log` …, alone) passes. The hook is a
-seatbelt, not the permission: **every live write needs Ryan's explicit go in this conversation**,
-gated or not (it does not see the connectors or a write through another program). RUNBOOK "Live
-gate (Claude Code)".
+`.claude/hooks/live_gate.sh` decides each of these: `--apply`, `--prune`, `--rehearse`, `clasp
+push` / `clasp:push`; raw `api.jotform.com` calls and Sheets writes; `sf`/`sfdx` deploys
+(check-only ones too), data writes, `apex run`, `sf api request` writes and the REST API by URL;
+`gh variable|secret set|delete`, `gh workflow enable|disable`, a `gh workflow run` that applies,
+`gh run rerun`, and any `gh api` (or `api.github.com`) call on `actions/`, `dispatches` or
+`graphql`. Since 2026-10-26 (#146) a live write whose backup from today is on record goes through
+automatically, logged `ALLOWED` and notified - from a subagent or a headless run too - when it is
+one simple command of a tool or raw shape the hook lists. The backups: `backup_forms.py --form
+<id>` (or every form: `jotform all`), `sheets_client.py export <Tab> <file>` / `export-all`,
+`tools/github_switches.py backup`, a committed `appsscript/`, a plan's `before/` retrieve from
+today for a raw `sf` write, a Salesforce tool's own ledger. Deletes and `--prune` still ask Ryan
+in the session, and are refused where no prompt can show; so is a write without its backup, and
+any other live command. It refuses outright a self-approval (setting `GLOW_LIVE_OK`, writing a
+shell startup file or `.env`, `launchctl setenv`, a backup record or a `before/` made by hand). A
+read-only command that only mentions a flag (`grep`, `cat`, `git log` …, alone) passes. The hook
+is a seatbelt: it does not see the connectors or a write through another program, and a write it
+does not see needs Ryan's explicit go in this conversation. RUNBOOK "Live gate (Claude Code)".
 
 ## Writers (one per row; every other command is read-only or writes only under `data/` and `backups/`)
 | Writer | What it changes | Saved before the write | Rollback |
@@ -58,9 +61,11 @@ disabled form, and every other writer in the table.
 
 1. Dry run and read the plan (`CREATE` / `UPDATE` / `DELETE` / `REPLACE` lines and every `!` / `?`).
 2. Back up the exact thing you will write: `backup_forms.py --form <id>`,
-   `sheets_client.py export-all data/live_<date>`, or note the last pushed commit for Apps Script.
-3. Get Ryan's explicit go: he runs it, or Claude runs it and his yes to the gate's approval
-   prompt is the go.
+   `sheets_client.py export-all data/live_<date>`, `tools/github_switches.py backup` for a switch,
+   or commit `appsscript/` (and note the last pushed commit) for Apps Script.
+3. The go: with step 2's backup on record from today, the gate lets a listed write through
+   automatically (logged, notified); otherwise - a delete, `--prune`, a tool it does not list -
+   Ryan's yes to its prompt is the go, or he runs it himself.
 4. Apply. Then verify with a read: `form_status.py --form <id> --roster <csv> --partners <csv>`
    (CLEAN), `sheets_client.py tabs`, or the sheet menu.
 5. Say what was written, where the backup is, and how to roll back.

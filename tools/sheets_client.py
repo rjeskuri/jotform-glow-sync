@@ -13,6 +13,10 @@ Usage (also importable):
     python3 tools/sheets_client.py tabs                     # list tabs + used rows
     python3 tools/sheets_client.py export "Enrollment Responses" out.csv
     python3 tools/sheets_client.py export-all DIR           # every tab -> DIR/<tab>.csv
+
+An export inside the checkout is recorded in .claude/live_backups.log (`sheet <tab>`, or
+`sheet all` once export-all wrote every tab): the backup from today the live gate wants
+before it lets a Sheet write through without a prompt (ticket #146).
 """
 import csv
 import json
@@ -262,6 +266,19 @@ def export_tab(svc, title, out):
     return len(rows)
 
 
+def record_backup(tab, out):
+    """`sheet <tab> <out>` in .claude/live_backups.log (glow/live_backups.py): the export from
+    today the live gate lets a Sheet write through on without a prompt (ticket #146). An export
+    outside the checkout is not recorded (the gate would never count it); it says so."""
+    if REPO not in sys.path:
+        sys.path.insert(0, REPO)
+    from glow import live_backups
+    try:
+        live_backups.record("sheet", tab, out)
+    except ValueError as err:
+        print(f"  not recorded for the live gate: {err}")
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -276,11 +293,13 @@ def main():
     elif cmd == "export":
         n = export_tab(svc, sys.argv[2], sys.argv[3])
         print(f"{n} rows -> {sys.argv[3]}")
+        record_backup(sys.argv[2], sys.argv[3])
     elif cmd == "export-all":
         out_dir = sys.argv[2]
         for title, _used, _, _ in list_tabs(svc):
             n = export_tab(svc, title, os.path.join(out_dir, title + ".csv"))
             print(f"  {title:<24} {n:>6} rows")
+        record_backup("all", out_dir)             # only once every tab is written
     else:
         sys.exit(f"unknown command {cmd!r}")
 

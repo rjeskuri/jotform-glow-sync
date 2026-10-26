@@ -2,7 +2,8 @@
 before a live write).
 
 snapshot() GETs a form's questions and properties (conditions, e-mails, the Salesforce
-integration, status) into backups/<form id>/<part>-<stamp>.json and <part>-latest.json;
+integration, status) into backups/<form id>/<part>-<stamp>.json and <part>-latest.json
+and records it in .claude/live_backups.log (glow/live_backups.py, the live gate's backups);
 path() names such a file; stamp() is the one stamp format, to the second, so a re-run
 within the minute never writes the half-changed form over the true "before";
 save_conditions() writes the conditions-only copy, the one file of a snapshot that may
@@ -13,6 +14,8 @@ command line; restore_conditions.py puts the conditions back.
 import datetime
 import json
 import os
+
+from glow import live_backups
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARTS = ("questions", "properties")
@@ -39,8 +42,10 @@ def path(form_id, part, stamp="latest"):
 
 def snapshot(form_id, client, stamp=None, latest=True):
     """GET the form's questions and properties into <part>-<stamp>.json and, with
-    `latest`, <part>-latest.json (what restore_conditions.py restores by default).
-    Returns counts: {"questions", "conditions", "emails", "salesforce": yes|NO, "stamp"}."""
+    `latest`, <part>-latest.json (what restore_conditions.py restores by default), then
+    record `jotform <form id> backups/<form id>` for the live gate (glow/live_backups.py) -
+    only once both parts are saved. Returns counts: {"questions", "conditions", "emails",
+    "salesforce": yes|NO, "stamp"}."""
     stamp = stamp or _stamp()
     os.makedirs(folder(form_id), exist_ok=True)
     got = {}
@@ -50,6 +55,7 @@ def snapshot(form_id, client, stamp=None, latest=True):
             with open(path(form_id, part, name), "w") as f:
                 json.dump(content, f, indent=1)
         got[part] = content
+    live_backups.record("jotform", form_id, folder(form_id), repo=REPO)
 
     props = got["properties"]
     integ = props.get("integrations") or {}

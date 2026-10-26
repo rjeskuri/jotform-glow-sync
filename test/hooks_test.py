@@ -4,33 +4,54 @@ The Claude Code guardrail hooks, run as Claude Code runs them: the tool input as
 standard input, the decision in the exit code and on standard output (0 and nothing: no
 decision; 0 and an ask JSON: Ryan is asked in the session; 2, or a deny JSON: refused).
 
-  - .claude/hooks/live_gate.sh (Bash): every live-system command asks Ryan in the session
-    (since 2026-10-14 GLOW_LIVE_OK pre-approves nothing), and is refused outright when the
-    session cannot show him the prompt (permission_mode bypassPermissions, dontAsk, missing or
-    unknown), from a subagent (agent_id in the input; agent_type alone is a main session started
-    with --agent), and when the command approves itself; a read-only command that
-    only mentions a live flag passes, a chained one does not. "Prompt, don't parse" (Ryan,
-    2026-10-14): the command is matched as text - as written and with quote and backslash
-    characters removed, in any case - never read as shell words. A gh api call is live when the
-    command holds a gh word, api, and actions/, dispatches or graphql anywhere, whatever the
-    method; every other gh api call is ungated, as on main;
+  - .claude/hooks/live_gate.sh (Bash), since 2026-10-26 (ticket #146): a live WRITE whose backup
+    from today is on record goes through with no prompt - an "allow" - in default, acceptEdits,
+    auto, dontAsk, bypassPermissions and a missing mode, from a subagent too; it is logged ALLOWED
+    (mode, target, backup) and notified (osascript, the command only ever an argument, run
+    detached). The backups: a `<date time>\t<target>\t<id>\t<path>` line in
+    .claude/live_backups.log (glow/live_backups.py) from today - its first field - whose path still
+    exists inside the project without climbing out of it - `jotform <form id>|all` (a form id is
+    one after --form or in an API path /form/<id>; FORM_TOOLS lists the tools that write forms),
+    `sheet <Tab>|all`, `github all` -, a clean committed appsscript/ for clasp push, a
+    data/sf_<topic>/before/ file modified today for a raw sf write naming that folder, and for
+    the Salesforce tools on SF_LISTED their own ledger or rollback file, written before each write.
+    Without one the write asks Ryan in the session, and is refused - with the reason and the
+    backup command - where no prompt can show (bypassPermissions, dontAsk, missing or unknown
+    mode, a subagent). Never automatic: plan mode, an unknown mode, a chained command (a # too), one
+    whose first word is no allowed launcher (python3 by its name or any path ending /python3, node,
+    npm, npx, sf, sfdx, gh, curl, clasp - never env, sudo, nohup, time, exec, command, xargs, a
+    shell's -c or a VAR=value), a tool no pinned list names by its exact file name (FORM_TOOLS,
+    SF_LISTED, sheets_client.py import; auto_sync.py with --apply-salesforce), and the DELETES
+    (`--prune`, delete/remove/destructive in any case and position, sf_dupes.py --apply), which ask
+    or are refused as before whatever the backups. A command that approves itself (GLOW_LIVE_OK, a
+    startup file, .claude/live_backups.log written, copied, touched or recorded by hand in any
+    spelling, a Salesforce plan's before/ written by hand) is refused outright. A read-only command that only mentions a live
+    flag passes, a chained one does not. "Prompt, don't parse" (Ryan, 2026-10-14): the command is matched as
+    text - as written and with quote and backslash characters removed, in any case - never read
+    as shell words. A gh api call is live when the command holds a gh word, api, and actions/,
+    dispatches or graphql anywhere, whatever the method; every other gh api call is ungated;
   - .claude/settings.json: the permission rules behind the hook (gh api allowed and never asked:
-    an ask would stall the harness's resume reads; ask rules for the live families; the hook
-    entry that blocks on failure);
+    an ask would stall the harness's resume reads; no ask rule on an automatic family - a hook's
+    allow does not get past one -, ask rules kept on the deletes; the hook entry that blocks on
+    failure);
   - .claude/hooks/protected_paths.sh (Edit|Write|MultiEdit): data/, backups/, credentials/,
-    .env, the generated Regions.gs and the guardrails themselves are refused in every copy of the
-    repository (main checkout, worktree, sibling checkout) and for a relative path;
+    .env, the generated Regions.gs, the backup records and the guardrails themselves are refused
+    in every copy of the repository (main checkout, worktree, sibling checkout) and for a
+    relative path;
   - .githooks/pre-commit, in a scratch repository: the lines a commit adds are scanned for
     secrets, and ruff checks every added, changed or renamed .py file as staged.
 
 The hooks are read from $GLOW_HOOKS_DIR (default .claude/hooks) and the settings from
-$GLOW_SETTINGS_FILE, else $GLOW_SETTINGS_JSON (default .claude/settings.json): no agent may edit
-.claude/, so a candidate staged elsewhere is proven here before Ryan applies it by hand.
+$GLOW_SETTINGS_FILE, else $GLOW_SETTINGS_JSON (default .claude/settings.json), a relative path
+taken from the directory the suite starts in: no agent may edit .claude/, so a candidate staged
+elsewhere is proven here before Ryan applies it by hand.
 CLAUDE_PROJECT_DIR is a temporary folder, so the gate's log never lands in the repository, and
-GLOW_LIVE_OK is removed from the environment unless a test sets it.
+GLOW_LIVE_OK is removed from the environment unless a test sets it. An `osascript` stub stands
+first on the hook's PATH, so no test posts a real notification: it appends its argv to a file.
 """
 import collections
 import concurrent.futures
+import datetime
 import json
 import os
 import re
@@ -39,15 +60,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import uuid
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import REPO
 
-HOOKS = os.environ.get("GLOW_HOOKS_DIR") or os.path.join(REPO, ".claude", "hooks")
-SETTINGS = (os.environ.get("GLOW_SETTINGS_FILE") or os.environ.get("GLOW_SETTINGS_JSON")
-            or os.path.join(REPO, ".claude", "settings.json"))
+# absolute, from the directory the suite starts in: each hook runs with the temporary project as its
+# working directory, where a relative GLOW_HOOKS_DIR (.guardrails/hooks) would name nothing
+HOOKS = os.path.abspath(os.environ.get("GLOW_HOOKS_DIR") or os.path.join(REPO, ".claude", "hooks"))
+SETTINGS = os.path.abspath(os.environ.get("GLOW_SETTINGS_FILE") or os.environ.get("GLOW_SETTINGS_JSON")
+                           or os.path.join(REPO, ".claude", "settings.json"))
 BASH = "/bin/bash"                  # the hooks' shebang
 
 # the permission modes Claude Code puts in the hook's input: in exactly these four, spelt exactly
@@ -74,9 +98,22 @@ class Hooks(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         os.makedirs(os.path.join(self.tmp.name, ".claude"))
         self.log = os.path.join(self.tmp.name, ".claude", "live_gate.log")
+        # the notification's stand-in: first on the hook's PATH, it appends its argv (JSON, one
+        # line per call) to self.calls; with self.slow present it first sleeps 8 s (a hung osascript)
+        self.side = tempfile.TemporaryDirectory()
+        self.bin = os.path.join(self.side.name, "bin")
+        os.makedirs(self.bin)
+        self.calls = os.path.join(self.side.name, "osascript.calls")
+        self.slow = os.path.join(self.side.name, "slow")
+        record = 'import json, sys\nwith open(sys.argv[1], "a", encoding="utf-8") as f:\n    f.write(json.dumps(sys.argv[2:]) + "\\n")\n'
+        with open(os.path.join(self.bin, "osascript"), "w", encoding="utf-8") as f:
+            f.write(f"#!/bin/sh\n[ -f {shlex.quote(self.slow)} ] && sleep 8\n"
+                    f"exec {shlex.quote(sys.executable)} -c {shlex.quote(record)} {shlex.quote(self.calls)} \"$@\"\n")
+        os.chmod(os.path.join(self.bin, "osascript"), 0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
+        self.side.cleanup()
 
     def run_hook(self, name, tool_input, live_ok=None, tool="Bash", project=None, mode="default", agent=None,
                  agent_type=None, extra=None, raw=None):
@@ -84,7 +121,8 @@ class Hooks(unittest.TestCase):
         permission_mode (None leaves it out); `agent` an agent_id (True: a fresh one, with an
         agent_type), `agent_type` that field alone; `extra` fields are set last (a null, a
         number); `raw` replaces the whole of stdin."""
-        env = {k: v for k, v in os.environ.items() if k != "GLOW_LIVE_OK"}
+        env = {k: v for k, v in os.environ.items() if k != "GLOW_LIVE_OK" and not k.startswith("GIT_")}
+        env["PATH"] = self.bin + os.pathsep + env.get("PATH", "/usr/bin:/bin")
         env["CLAUDE_PROJECT_DIR"] = project or self.tmp.name
         if live_ok is not None:
             env["GLOW_LIVE_OK"] = live_ok
@@ -117,12 +155,15 @@ class Hooks(unittest.TestCase):
             data["permission_mode"] = mode
         return data
 
-    def gate(self, command, live_ok=None, mode="default", **kw):
+    def gate(self, command, live_ok=None, mode="default", may_allow=False, **kw):
         run = self.run_hook("live_gate.sh", {"command": command, "description": "Run one command for the test"},
                             live_ok, mode=mode, **kw)
-        # the one answer no input may ever get: Claude Code would skip Ryan's prompt
-        self.assertNotEqual(self.verdict(run), "allow", f"{command!r} (mode {mode!r}, {kw}, "
-                                                        f"GLOW_LIVE_OK {live_ok}) was ALLOWED: {run.out}")
+        # the answer Claude Code runs a live command on without Ryan's prompt: only a backed write
+        # may get it (may_allow). Without a backup from today, for a delete or --prune, a chained
+        # command, a self-approval, in plan mode or an unknown one, never
+        if not may_allow:
+            self.assertNotEqual(self.verdict(run), "allow", f"{command!r} (mode {mode!r}, {kw}, "
+                                                            f"GLOW_LIVE_OK {live_ok}) was ALLOWED: {run.out}")
         return run
 
     @staticmethod
@@ -172,17 +213,42 @@ class Hooks(unittest.TestCase):
     def refused(self):
         """The refusals logged, under either word for one."""
         counts = self.logged()
-        self.assertNotIn("ALLOWED", counts, "the gate logged an ALLOWED: nothing is pre-approved")
+        self.assertNotIn("ALLOWED", counts, "the gate logged an ALLOWED with no backup on record")
         return counts["BLOCKED"] + counts["DENIED"]
 
     @staticmethod
     def all_of(fn, items):
-        """fn over items, eight hooks at a time (each is a few processes), results in order."""
-        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+        """fn over items, sixteen hooks at a time (each is a few short processes, mostly waiting on
+        process start-up), results in order."""
+        with concurrent.futures.ThreadPoolExecutor(16) as pool:
             return list(pool.map(fn, items))
 
     def runs(self, commands, **kw):
         return list(zip(commands, self.all_of(lambda c: self.gate(c, **kw), commands)))
+
+    def verdicts(self, cases):
+        """[(command, kw, run)] of the gate on each (command, kw) - every case in one batch, so a
+        test that walks commands, modes and callers waits once, not once per mode."""
+        return [(command, kw, run) for (command, kw), run
+                in zip(cases, self.all_of(lambda case: self.gate(case[0], **case[1]), cases))]
+
+    def assert_never_automatic(self, commands, project, saying=()):
+        """Each command, in `project`: asked in a main session that can show the prompt (default,
+        auto - the reason as check_reason reads it), refused where none can (dontAsk,
+        bypassPermissions, a missing mode, a subagent in auto) - never allowed, in one batch."""
+        callers = ([{"mode": "default"}, {"mode": "auto"}] + [{"mode": m} for m in self.HEADLESS]
+                   + [{"mode": "auto", "agent": True}])
+        cases = [(command, dict(caller, project=project)) for command in commands for caller in callers]
+        for command, kw, run in self.verdicts(cases):
+            with self.subTest(command=command, mode=kw["mode"], agent=kw.get("agent")):
+                if kw["mode"] in self.HEADLESS or kw.get("agent"):
+                    self.assertEqual(self.verdict(run), "deny", self.show(run))
+                    message = (run.err + self.reason(run)).lower()
+                    if saying:
+                        self.assertTrue(any(s in message for s in saying), f"none of {saying} in the message: {message!r}")
+                else:
+                    self.assertEqual(self.verdict(run), "ask", self.show(run))
+                    self.check_reason(command, self.reason(run))
 
     def check_reason(self, command, reason):
         """The prompt's text: the matched text, the command, why, and where to read more."""
@@ -288,7 +354,12 @@ class Hooks(unittest.TestCase):
         "sf data import tree -f accounts.json",
         "sf apex run --file merge.apex -o glow",
         "/opt/homebrew/bin/sf apex run -f merge.apex",
-        "python3 tools/sf_dupes.py merge --plan data/plan.json --rehearse",
+        # (2026-10-26, #146: the tools/sf_*.py on SF_LISTED write their own rollback record before
+        # each write and are automatic - test_a_listed_salesforce_tool_goes_through_on_its_own_...
+        # - so the --rehearse family is sampled here on a tool no list names, and sf_dupes.py by its
+        # --apply, a delete: its merge deletes the losing contact)
+        "python3 tools/sf_rehearsal_example.py merge --plan data/plan.json --rehearse",
+        "python3 tools/sf_dupes.py merge --plan data/plan.json --apply",
         # ... and the other spellings of the same writes (review of 2026-10-09)
         "sfdx apex run -f merge.apex -o glow", "sfdx project deploy start -d force-app",
         "sf force:apex:execute -f merge.apex", "sfdx force:apex:execute -f merge.apex -u glow",
@@ -298,7 +369,7 @@ class Hooks(unittest.TestCase):
         "sf deploy metadata -d force-app", "sf project delete source -m ApexClass:GlowSync",
         "curl -X PATCH https://example.my.salesforce.com/services/data/v60.0/sobjects/Account/001x -d @a.json",
         "curl https://login.salesforce.com/services/oauth2/token -d grant_type=client_credentials",
-        "python3 -m sf_dupes merge --rehearse", "cd tools && python3 sf_dupes.py merge --rehearse",
+        "python3 -m sf_dupes merge --apply", "cd tools && python3 sf_dupes.py merge --rehearse",
         # the REST and GraphQL API through the CLI, a relative path (found 2026-10-09)
         "sf api request rest '/services/data/v60.0/sobjects/Account/001x' -X PATCH --body '{}'",
         "sf api request rest /services/data/v60.0/sobjects/Account --method POST --body @account.json",
@@ -315,7 +386,7 @@ class Hooks(unittest.TestCase):
               "gh variable set SF_SYNC --body apply", "gh workflow run auto-sync.yml -f apply=true",
               "gh api -X PATCH repos/o/r/actions/variables/SF_SYNC -f value=apply",
               "sf project deploy start --source-dir force-app -o glow",
-              "python3 tools/sf_dupes.py merge --plan data/plan.json --rehearse"]
+              "python3 tools/sf_rehearsal_example.py merge --plan data/plan.json --rehearse"]
     # what the prompt must name for one command of each family: its own trigger
     TRIGGERS = {
         LIVE[0]: "--apply", LIVE[1]: "--prune",
@@ -334,7 +405,8 @@ class Hooks(unittest.TestCase):
         "sf project deploy start --source-dir force-app -o glow": "sf project deploy start",
         "sf data create record -s Account -v \"Name='Sunrise Club'\" -o glow": "sf data create",
         "sf apex run --file merge.apex -o glow": "sf apex run",
-        "python3 tools/sf_dupes.py merge --plan data/plan.json --rehearse": "--rehearse",
+        "python3 tools/sf_rehearsal_example.py merge --plan data/plan.json --rehearse": "--rehearse",
+        "python3 tools/sf_dupes.py merge --plan data/plan.json --apply": "--apply",
         "sfdx force:source:deploy -p force-app": "force:source:deploy",
         "sf deploy metadata -d force-app": "sf deploy metadata",
         "curl -X PATCH https://example.my.salesforce.com/services/data/v60.0/sobjects/Account/001x -d @a.json":
@@ -566,19 +638,21 @@ class Hooks(unittest.TestCase):
         self.assert_silent(self.READS, live_ok="1")
         self.assertEqual(self.logged(), {})
 
+    # 20 of the 31 blocks logged by 2026-10-09 were these: grep, git, cat on the docs
+    MENTIONS = ["grep -n -- '--apply' docs/RUNBOOK.md",
+                "grep -rn 'GLOW_LIVE_OK=' docs .claude",
+                "rg -n -- '--apply-salesforce' docs tools",
+                "cat docs/plans/2026-10-06-sf-new-club-accounts.md --apply",
+                "head -50 docs/RUNBOOK.md --prune", "tail -n 5 .claude/live_gate.log --apply",
+                "wc -l --apply", "ls --apply",
+                "git log --oneline --grep=--apply", "git show HEAD -- '*--apply*'",
+                "git diff main -- docs/RUNBOOK.md --apply", "git grep -n 'sf apex run' -- docs",
+                "git blame -L 1,5 docs/RUNBOOK.md --apply", "git status --apply",
+                "  grep -c 'gh variable set SF_SYNC' CLAUDE.md",
+                "grep -n \"gh api repos/o/r/actions/variables\" docs/RUNBOOK.md"]
+
     def test_a_read_only_command_that_only_mentions_a_live_flag_passes(self):
-        # 20 of the 31 blocks logged by 2026-10-09 were these: grep, git, cat on the docs
-        mentions = ["grep -n -- '--apply' docs/RUNBOOK.md",
-                    "grep -rn 'GLOW_LIVE_OK=' docs .claude",
-                    "rg -n -- '--apply-salesforce' docs tools",
-                    "cat docs/plans/2026-10-06-sf-new-club-accounts.md --apply",
-                    "head -50 docs/RUNBOOK.md --prune", "tail -n 5 .claude/live_gate.log --apply",
-                    "wc -l --apply", "ls --apply",
-                    "git log --oneline --grep=--apply", "git show HEAD -- '*--apply*'",
-                    "git diff main -- docs/RUNBOOK.md --apply", "git grep -n 'sf apex run' -- docs",
-                    "git blame -L 1,5 docs/RUNBOOK.md --apply", "git status --apply",
-                    "  grep -c 'gh variable set SF_SYNC' CLAUDE.md",
-                    "grep -n \"gh api repos/o/r/actions/variables\" docs/RUNBOOK.md"]
+        mentions = self.MENTIONS
         for mode in ("default", "bypassPermissions", None):
             self.assert_silent(mentions, mode=mode)
         self.assert_silent(mentions, agent=True)
@@ -709,9 +783,11 @@ class Hooks(unittest.TestCase):
             self.assertIn(mode, rest, f"the log line does not name the mode: {decision} {rest}")
 
     def test_a_subagent_never_gets_the_prompt(self):
-        # CLAUDE.md: live writes never from a subagent; the main session asks Ryan. The input
-        # says "subagent" with agent_id (any value). agent_type alone is a main session started
-        # with --agent (review of 253135b): it is no subagent, and gets the mode's decision
+        # a subagent cannot show Ryan a prompt: without a backup from today (none here) its live
+        # command is refused, and the refusal says it came from a subagent (since #146 a backed
+        # write is allowed to it as to the main session: test_a_backed_write_goes_through_...).
+        # The input says "subagent" with agent_id (any value). agent_type alone is a main session
+        # started with --agent (review of 253135b): it is no subagent, and gets the mode's decision
         runs = 0
         for mode in ASK_MODES + NO_PROMPT_MODES:
             self.assert_denies(self.SAMPLE, mode=mode, agent=True, saying=("agent",))   # a fresh id each
@@ -734,8 +810,10 @@ class Hooks(unittest.TestCase):
         self.assertEqual(self.logged()["ASKED"], len(self.SAMPLE) * len(ASK_MODES) * len(types))
         self.assertEqual(self.refused(), runs + len(self.SAMPLE) * len(types))
 
-    def test_the_gate_never_allows_and_never_stays_silent_on_a_live_command(self):
-        # whatever the mode, the caller and the environment: Ryan's prompt or a refusal, logged
+    def test_without_a_backup_the_gate_never_allows_and_never_stays_silent_on_a_live_command(self):
+        # no backup on record (this project has no .claude/live_backups.log and is no git
+        # repository): whatever the mode, the caller and the environment, Ryan's prompt or a
+        # refusal, logged - never an allow, and no notification
         cases = [(command, mode, agent, live_ok) for command in self.SAMPLE
                  for mode in ASK_MODES + NO_PROMPT_MODES + ["foo", "Default", "default\n"]
                  for agent in (None, True) for live_ok in (None, "1")]
@@ -746,6 +824,7 @@ class Hooks(unittest.TestCase):
                     self.assertNotIn("GLOW_LIVE_OK=1", run.err)         # no longer a way through
         self.assertEqual(sum(self.logged().values()), len(cases))
         self.assertEqual(self.logged()["ASKED"] + self.refused(), len(cases))
+        self.assertEqual(self.quiet_notifications(), [], "a notification without an allow")
 
     def test_the_real_pretooluse_input_is_read_as_claude_code_sends_it(self):
         # the whole input of a main-session Bash call, spelt out: it asks; with the subagent
@@ -787,6 +866,955 @@ class Hooks(unittest.TestCase):
                 run = self.run_hook("live_gate.sh", {}, raw=raw)
                 self.assertIn(self.verdict(run), ("silent", "deny"), self.show(run))
         self.assertEqual(self.logged(), {})
+
+    # ---- live_gate.sh: the automatic go for a backed write (ticket #146, Ryan 2026-10-26)
+    F1, F2, F3 = "261234567890123", "262345678901234", "263456789012345"     # fictional form ids
+    # a backed write is allowed to a main session in these modes (None: the field missing) ...
+    ALLOW_MODES = ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", None]
+    # ... and to a subagent, in its session's mode
+    AGENT_MODES = ["auto", "dontAsk", None]
+    HEADLESS = ["dontAsk", "bypassPermissions", None]
+    TITLE = "GLOW live write auto-approved"
+    # the notification's AppleScript: fixed text, the title and message only ever its argv
+    SCRIPTS = ["on run argv", "display notification (item 2 of argv) with title (item 1 of argv)", "end run"]
+    ALLOWED = re.compile(r"^mode=(?P<mode>\S*)(?P<agent> agent)? target=(?P<target>\S+) backup=(?P<rest>.*)$", re.S)
+
+    def jotform_write(self, form_id=None):
+        return ("python3 sync_attendance_form.py data/roster.csv --roster --region Africa "
+                f"--form {form_id or self.F1} --apply")
+
+    @staticmethod
+    def write(folder, rel, text):
+        full = os.path.join(folder, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(text)
+        return full
+
+    @staticmethod
+    def git(project, *args):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        return subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.org",
+                               "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", *args],
+                              cwd=project, env=env, check=True, capture_output=True, text=True).stdout
+
+    def project(self, git=False, appsscript=True):
+        """A fresh CLAUDE_PROJECT_DIR with .claude/ and no backup. With git: a repository whose
+        README and (unless appsscript is False) appsscript/ are committed - a clean Apps Script."""
+        path = tempfile.mkdtemp(dir=self.tmp.name)
+        os.makedirs(os.path.join(path, ".claude"))
+        if git:
+            if not shutil.which("git"):
+                self.skipTest("needs git")
+            if appsscript:
+                self.write(path, "appsscript/Code.gs", "function onEdit(e) {}\n")
+                self.write(path, "appsscript/appsscript.json", '{"timeZone": "Etc/UTC"}\n')
+            self.write(path, "README.md", "A fictional checkout.\n")
+            self.git(path, "init", "-q")
+            self.git(path, "add", "-A")
+            self.git(path, "commit", "-q", "-m", "start")
+        return path
+
+    def head(self, project):
+        return self.git(project, "rev-parse", "HEAD").strip()
+
+    def back_up(self, project, target, ident, path, day=None, make=True):
+        """A backup record as glow/live_backups.py writes it - `<date time>\\t<target>\\t<id>\\t<path>`
+        appended to <project>/.claude/live_backups.log - and, with make, the backup it names (a
+        file when the path has an extension, else a folder with a file in it). `day` dates the
+        record (default: now); a past day gets its last second, a future one its first: the
+        nearest a record can be to today without being from today."""
+        if day is None:
+            when = datetime.datetime.now()
+        elif day < datetime.date.today():
+            when = datetime.datetime.combine(day, datetime.time(23, 59, 59))
+        else:
+            when = datetime.datetime.combine(day, datetime.time(0, 0, 0))
+        with open(os.path.join(project, ".claude", "live_backups.log"), "a", encoding="utf-8") as f:
+            f.write(f"{when:%Y-%m-%d %H:%M:%S}\t{target}\t{ident}\t{path}\n")
+        if make:
+            if os.path.splitext(path)[1]:
+                self.write(project, path, "{}\n")
+            else:
+                self.write(os.path.join(project, path), "questions-latest.json", "{}\n")
+
+    def salesforce_before(self, project, rel, day=None):
+        """A file of a plan's before/ retrieve (data/sf_<topic>/before/...): modified now, or at noon
+        of `day`. Its folders stay modified now - only a file's own date counts."""
+        full = self.write(project, rel, "<Report/>\n")
+        if day is not None:
+            t = datetime.datetime.combine(day, datetime.time(12, 0)).timestamp()
+            os.utime(full, (t, t))
+        return full
+
+    def fully_backed(self):
+        """A project with every backup there is, from today: jotform all and each fictional form,
+        sheet all and the Roster tab, github all, data/sf_x/before/ (beside data/sf_x/after/), and a
+        clean committed appsscript/."""
+        p = self.project(git=True)
+        for target, ident, path in [("jotform", "all", "backups"), ("jotform", self.F1, f"backups/{self.F1}"),
+                                    ("jotform", self.F2, f"backups/{self.F2}"), ("jotform", self.F3, f"backups/{self.F3}"),
+                                    ("sheet", "all", "data/sheet"), ("sheet", "Roster", "data/sheet/Roster.csv"),
+                                    ("github", "all", "backups/github/switches-2026-10-26T090000.json")]:
+            self.back_up(p, target, ident, path)
+        self.salesforce_before(p, "data/sf_x/before/Attendance.report-meta.xml")
+        self.write(p, "data/sf_x/after/Attendance.report-meta.xml", "<Report/>\n")
+        return p
+
+    def lines_of(self, project):
+        """[(decision, the rest of the line)] of a project's .claude/live_gate.log."""
+        path = os.path.join(project, ".claude", "live_gate.log")
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as f:
+            return self.LINE.findall(f.read())
+
+    def osascript_calls(self):
+        """Each osascript call's argv, in the order they ended (complete lines only)."""
+        if not os.path.exists(self.calls):
+            return []
+        with open(self.calls, encoding="utf-8") as f:
+            return [json.loads(line) for line in f.read().split("\n")[:-1] if line.strip()]
+
+    def notifications(self, expect, wait=15.0):
+        """The osascript calls, once `expect` have arrived or `wait` s have passed: the gate runs it
+        detached, so a call may land after the hook has answered."""
+        deadline = time.monotonic() + wait
+        while True:
+            calls = self.osascript_calls()
+            if len(calls) >= expect or time.monotonic() > deadline:
+                return calls
+            time.sleep(0.05)
+
+    def quiet_notifications(self):
+        """The osascript calls after a second's wait, for a test that expects none (or no more)."""
+        time.sleep(1.0)
+        return self.osascript_calls()
+
+    @staticmethod
+    def split_osascript(argv):
+        """(the -e scripts, the other arguments in order) of one osascript call."""
+        scripts, args, items = [], [], iter(argv)
+        for item in items:
+            if item == "-e":
+                scripts.append(next(items, None))
+            else:
+                args.append(item)
+        return scripts, args
+
+    def assert_backed(self, project):
+        """The control of a test whose point needs real backups: a write they cover is allowed
+        here (one ALLOWED line, one notification)."""
+        run = self.gate(self.jotform_write(), mode="dontAsk", project=project, may_allow=True)
+        self.assertEqual(self.verdict(run), "allow", "the control: this project's backups back no write - " + self.show(run))
+
+    def backed_writes(self):
+        """(command, project, the targets its log line may name, the backup it must name): one
+        backed write of each kind, each in a project of its own holding only the backup that
+        covers it."""
+        F1, F2, F3 = self.F1, self.F2, self.F3
+        day = datetime.date.today().isoformat()
+        cases = []
+
+        def case(command, targets, backup, records=(), before=None, git=False):
+            p = self.project(git=git)
+            for record in records:
+                self.back_up(p, *record)
+            if before:
+                self.salesforce_before(p, before)
+            if git:
+                backup += self.head(p)[:7]
+            cases.append((command, p, targets, backup))
+
+        # Jotform: a form tool's --apply, the raw API, each form id the command names backed by
+        # its own record or by `jotform all`; a command naming no form by `jotform all`
+        case(self.jotform_write(F1), ("jotform",), f"backups/{F1}", [("jotform", F1, f"backups/{F1}")])
+        case(f"python3 restore_conditions.py --form {F2} --from conditions-2026-10-20T101530.json --apply",
+             ("jotform",), f"backups/{F2}", [("jotform", F2, f"backups/{F2}")])
+        case(f"curl -sS -X POST https://api.jotform.com/form/{F3}/properties --data-binary @data/props.json",
+             ("jotform",), f"backups/{F3}", [("jotform", F3, f"backups/{F3}")])
+        case("python3 tools/update_static_fields.py --apply", ("jotform",), "backups/all-forms",
+             [("jotform", "all", "backups/all-forms")])
+        case(f"python3 tools/add_translations.py --form {F1} --form {F2} --apply", ("jotform",), "backups/every-form",
+             [("jotform", "all", "backups/every-form")])
+        case(f"python3 tools/fix_roster_order.py --form {F1} --form {F3} --apply", ("jotform",), f"backups/{F3}",
+             [("jotform", F1, f"backups/{F1}"), ("jotform", F3, f"backups/{F3}")])
+        # a form id is one after --form or in the API path /form/<id> (ruling after the breaker):
+        # the form translations are read from (--source) and an id in a file name write nothing
+        case(f"python3 tools/restore_translations.py --form={F2} --source {F1} --apply", ("jotform",), f"backups/{F2}",
+             [("jotform", F2, f"backups/{F2}")])
+        case(f"curl -sS -X POST https://api.jotform.com/form/{F3}/questions --data-binary @data/{F1}-questions.json",
+             ("jotform",), f"backups/{F3}", [("jotform", F3, f"backups/{F3}")])
+        # the Sheet: an import by its tab's export (a path with a space; a quoted tab) or by
+        # `sheet all`; a Sheets API write by `sheet all`
+        case("python3 tools/sheets_client.py import Roster data/roster.csv", ("sheet",), "data/sheet export/Roster.csv",
+             [("sheet", "Roster", "data/sheet export/Roster.csv")])
+        case("python3 tools/sheets_client.py import Partners data/partners.csv", ("sheet",), "data/sheet_all",
+             [("sheet", "all", "data/sheet_all")])
+        case('python3 tools/sheets_client.py import "ClubRegistry" data/clubs.csv', ("sheet",), "data/ClubRegistry.csv",
+             [("sheet", "ClubRegistry", "data/ClubRegistry.csv")])
+        # a tab's name is matched whole, a space in it too, in either quotes (ruling after the breaker,
+        # round 2)
+        case('python3 tools/sheets_client.py import "SF Pending" data/p.csv', ("sheet",), "data/SF Pending.csv",
+             [("sheet", "SF Pending", "data/SF Pending.csv")])
+        case("python3 tools/sheets_client.py import 'Roster Archive' data/archive.csv", ("sheet",),
+             "data/archive export.csv", [("sheet", "Roster Archive", "data/archive export.csv")])
+        case("python3 -c 'svc.spreadsheets().values().update(body=b).execute()'", ("sheet",), "data/sheet_full",
+             [("sheet", "all", "data/sheet_full")])
+        # Apps Script: what is pushed is committed
+        case("npx clasp push -f", ("appsscript",), "appsscript/ at HEAD ", git=True)
+        case("npm run clasp:push", ("appsscript",), "appsscript/ at HEAD ", git=True)
+        # Salesforce, raw: the plan folder the command names has a before/ file from today
+        case(f"sf project deploy start --source-dir data/sf_tiles_{day}/after -o glow", ("salesforce", "sf"),
+             f"data/sf_tiles_{day}/before", before=f"data/sf_tiles_{day}/before/Attendance.dashboard-meta.xml")
+        case("sf apex run --file data/sf_fix_names/fix.apex -o glow", ("salesforce", "sf"), "data/sf_fix_names/before",
+             before="data/sf_fix_names/before/contacts.csv")
+        case("sf data upsert bulk -s Contact -f data/sf_contacts/after/contacts.csv -i Id -o glow", ("salesforce", "sf"),
+             "data/sf_contacts/before", before="data/sf_contacts/before/main/default/contacts.csv")
+        # GitHub: a switch by `github all` (tools/github_switches.py backup); a run of the sync,
+        # which writes the forms, by `jotform all`
+        for n, command in enumerate(["gh variable set SF_SYNC --body apply", "gh secret set JOTFORM_API_KEY",
+                                     "gh workflow disable auto-sync.yml",
+                                     "gh api -X PATCH repos/o/r/actions/variables/SF_SYNC -f value=apply"]):
+            path = f"backups/github/switches-{day}T09000{n}.json"
+            case(command, ("github",), path, [("github", "all", path)])
+        case("gh workflow run auto-sync.yml -f apply=true", ("github", "jotform"), "backups/sync-forms",
+             [("jotform", "all", "backups/sync-forms")])
+        case("gh run rerun 1234", ("github", "jotform"), "backups/rerun-forms", [("jotform", "all", "backups/rerun-forms")])
+        return cases
+
+    def test_a_backed_write_goes_through_in_every_mode_but_plan_logged_and_notified(self):
+        # Ryan, 2026-10-26: SF, Jotform, Sheet, Apps Script and the sync's switches go through with
+        # no prompt once their backup from today exists - interactive, headless and from a subagent
+        cases = self.backed_writes()
+        callers = ([(mode, None, None) for mode in self.ALLOW_MODES] + [(None, None, {"permission_mode": None})]
+                   + [(mode, True, None) for mode in self.AGENT_MODES])
+        runs = [(case, caller) for case in cases for caller in callers]
+        results = self.all_of(lambda r: self.gate(r[0][0], mode=r[1][0], agent=r[1][1], extra=r[1][2],
+                                                  project=r[0][1], may_allow=True), runs)
+        for ((command, _project, targets, backup), caller), run in zip(runs, results):
+            with self.subTest(command=command, caller=caller):
+                self.assertEqual(self.verdict(run), "allow", self.show(run))
+                reason = self.reason(run)
+                self.assertTrue(any(t in reason.lower() for t in targets), f"the reason names none of {targets}: {reason!r}")
+                self.assertIn(backup, reason, "the reason does not name the backup used")
+        for command, project, targets, backup in cases:
+            with self.subTest(command=command, check="log"):
+                lines = self.lines_of(project)
+                self.assertEqual([d for d, _ in lines], ["ALLOWED"] * len(callers), lines)    # one line per allow
+                modes, agents = set(), 0
+                for _, rest in lines:
+                    m = self.ALLOWED.match(rest)
+                    self.assertIsNotNone(m, f"not `mode=<mode>[ agent] target=<target> backup=<what> <command>`: {rest!r}")
+                    self.assertIn(m.group("target"), targets, rest)
+                    self.assertIn(backup, m.group("rest"), rest)
+                    self.assertTrue(rest.endswith(command), f"the line does not end with the command: {rest!r}")
+                    modes.add(m.group("mode").strip('"'))
+                    agents += bool(m.group("agent"))
+                self.assertEqual(agents, len(self.AGENT_MODES), "a subagent's line says ' agent', a main session's not")
+                for mode in self.ALLOW_MODES:
+                    if mode:
+                        self.assertIn(mode, modes, f"no ALLOWED line names mode {mode}: {lines}")
+        calls = self.notifications(len(runs))
+        self.assertEqual(len(calls), len(runs), "one notification per allow")
+        for command, *_ in cases:
+            with self.subTest(command=command, check="notified"):
+                mine = [self.split_osascript(c)[1] for c in calls if any(command[:120] in a for a in c)]
+                self.assertEqual(len(mine), len(callers), "one notification per allow of this command")
+                for args in mine:
+                    self.assertEqual(args[0], self.TITLE, args)
+
+    def test_the_notification_carries_the_command_only_as_an_argument(self):
+        # AppleScript text built from the command could run `do shell script`: the scripts are
+        # fixed, the title and the message (target, id, the command's first line cut to 120
+        # characters) come only as argv items after them - a double quote arrives as it was typed
+        F1 = self.F1
+        p = self.project()
+        self.back_up(p, "jotform", F1, f"backups/{F1}")
+        commands = [f"python3 sync_attendance_form.py \"data/Grace's roster.csv\" --roster --region Africa --form {F1} --apply",
+                    f"python3 sync_attendance_form.py \"data/x\\\" with title \\\"y.csv\" --roster --region Africa --form {F1} --apply",
+                    f"python3 sync_attendance_form.py data/{'roster_' * 20}.csv --roster --region Africa --form {F1} --apply"]
+        for command in commands:
+            run = self.gate(command, mode="dontAsk", project=p, may_allow=True)
+            self.assertEqual(self.verdict(run), "allow", self.show(run))
+        calls = self.notifications(len(commands))
+        self.assertEqual(len(calls), len(commands), calls)
+        for command in commands:
+            with self.subTest(command=command):
+                mine = [c for c in calls if any(command[:120] in a for a in c)]
+                self.assertEqual(len(mine), 1, calls)
+                scripts, args = self.split_osascript(mine[0])
+                self.assertEqual(scripts, self.SCRIPTS, "an -e script is not the fixed text")
+                self.assertEqual(len(args), 2, f"not exactly a title and a message: {mine[0]}")
+                self.assertEqual(mine[0][-2:], args, "the title and message do not come after the scripts")
+                title, message = args
+                self.assertEqual(title, self.TITLE)
+                self.assertTrue(message.startswith(f"jotform {F1}: "), message)
+                self.assertIn(command[:120], message)
+                if len(command) > 120:
+                    self.assertNotIn(command[:121], message, "the command is not cut to 120 characters")
+
+    def test_the_hook_does_not_wait_for_the_notification(self):
+        # its timeout is 5 s (settings.json): a hung osascript must not hold the answer
+        with open(self.slow, "w", encoding="utf-8"):
+            pass
+        p = self.project()
+        self.back_up(p, "jotform", self.F1, f"backups/{self.F1}")
+        started = time.monotonic()
+        run = self.gate(self.jotform_write(), mode="auto", project=p, may_allow=True)
+        took = time.monotonic() - started
+        self.assertEqual(self.verdict(run), "allow", self.show(run))
+        self.assertLess(took, 4.0, f"the hook waited {took:.1f} s on osascript")
+
+    # every tool whose --apply writes a Jotform form (read 2026-10-26: each writes questions,
+    # properties or translations through glow.jotform's Client, or - auto_sync.py - runs
+    # sync_attendance_form.py --apply per region): the command with {forms} where its --form goes,
+    # and whether --form is required (None: the tool has none). Not on it, their --apply writing no
+    # form: deactivate_clubs.py and upload_roster.py (the Sheet), fix_module_values.py
+    # (Salesforce) - NEVER_AUTOMATIC; club_names.py, backfill_resolve.py, form_status.py,
+    # integration_status.py and backup_forms.py write nothing live
+    FORM_TOOLS = {
+        "sync_attendance_form.py": ("python3 sync_attendance_form.py data/roster.csv --roster --region Asia {forms} --apply", True),
+        "restore_conditions.py": ("python3 restore_conditions.py {forms} --from conditions-2026-10-20T101530.json --apply", True),
+        "add_feedback_link.py": ("python3 tools/add_feedback_link.py --link roster {forms} --apply", False),
+        "add_language.py": ("python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json {forms} --apply",
+                            False),
+        "add_session_notes.py": ("python3 tools/add_session_notes.py {forms} --apply", False),
+        "add_translations.py": ("python3 tools/add_translations.py {forms} --apply", False),
+        "auto_sync.py": ("python3 tools/auto_sync.py --region Asia --apply", None),
+        "disable_form.py": ("python3 tools/disable_form.py {forms} --apply", True),
+        "fix_name_translations.py": ("python3 tools/fix_name_translations.py {forms} --apply", True),
+        "fix_roster_order.py": ("python3 tools/fix_roster_order.py {forms} --apply", False),
+        "rename_club.py": ('python3 tools/rename_club.py --partner "Demo Partner" --old "Old Club" --new "New Club" {forms} --apply',
+                           False),
+        "restore_translations.py": ("python3 tools/restore_translations.py {forms} --apply", True),
+        "switcher_flags.py": ("python3 tools/switcher_flags.py {forms} --apply", False),
+        "update_static_fields.py": ("python3 tools/update_static_fields.py {forms} --apply", False),
+    }
+
+    def form_tool_cases(self):
+        """(tool, command, project, the backups the reason must name, allowed?) for every form tool:
+        backed by `jotform all`; by the records of the forms its --form names (`--form <id>` or
+        `--form=<id>`, one or two); and the same commands with another form's records only, or
+        each form's but not `jotform all` - each in a project of its own. rename_club.py writes the
+        Sheet too: its projects hold `sheet all` besides."""
+        F1, F2, F3 = self.F1, self.F2, self.F3
+        cases = []
+
+        def case(tool, command, records, backup, allowed):
+            p = self.project()
+            for record in records + ([("sheet", "all", "data/sheet_all")] if tool == "rename_club.py" else []):
+                self.back_up(p, *record)
+            cases.append((tool, command, p, backup, allowed))
+
+        for n, (tool, (template, required)) in enumerate(sorted(self.FORM_TOOLS.items())):
+            every = f"backups/all-{n}"
+            forms = f"--form {F1}" if required else ""
+            command = " ".join(template.format(forms=forms).split())
+            case(tool, command, [("jotform", "all", every)], [every], True)
+            if required is None:
+                case(tool, command, [("jotform", F, f"backups/{F}") for F in (F1, F2, F3)], [], False)
+                continue
+            if not required:                 # no --form: every form it writes, so `jotform all` only
+                case(tool, command, [("jotform", F, f"backups/{F}") for F in (F1, F2, F3)], [], False)
+            spelt = [f"--form {F2}", f"--form={F2}", f"--form {F2} --form {F3}"][n % 3]
+            if required and " --form " in spelt[1:]:
+                spelt = f"--form {F2}"       # (a required --form takes one id; fix_name_translations.py one only)
+            command = " ".join(template.format(forms=spelt).split())
+            named = [F for F in (F2, F3) if F in spelt]
+            case(tool, command, [("jotform", F, f"backups/{F}") for F in named], [f"backups/{F}" for F in named], True)
+            case(tool, command, [("jotform", F1, f"backups/{F1}")], [], False)
+        return cases
+
+    def test_every_form_tool_s_apply_goes_through_on_its_forms_backups_only(self):
+        # Ryan, 2026-10-26: Jotform form changes go through once the form's backup from today
+        # exists - for every tool that writes a form, not a sample; with another form's backup, or
+        # each form's when the command picks the forms itself, it is refused where no prompt shows
+        cases = self.form_tool_cases()
+        self.assertEqual(len({c[0] for c in cases}), len(self.FORM_TOOLS))
+        callers = [("dontAsk", None), ("auto", True)]
+        runs = [(case, caller) for case in cases for caller in (callers if case[4] else callers[:1])]
+        results = self.all_of(lambda r: self.gate(r[0][1], mode=r[1][0], agent=r[1][1], project=r[0][2],
+                                                  may_allow=r[0][4]), runs)
+        for ((tool, command, _project, backups, allowed), caller), run in zip(runs, results):
+            with self.subTest(tool=tool, command=command, caller=caller):
+                self.assertEqual(self.verdict(run), "allow" if allowed else "deny", self.show(run))
+                message = (self.reason(run) + "\n" + run.err).lower()
+                if allowed:
+                    self.assertIn("jotform", message, "the reason does not name the target")
+                    for backup in backups:
+                        self.assertIn(backup, self.reason(run), "the reason does not name each backup used")
+                else:
+                    for needle in ("backup", "today", "backup_forms.py"):
+                        self.assertIn(needle, message, f"the refusal does not say {needle!r}")
+        for tool, command, project, backups, allowed in cases:
+            with self.subTest(tool=tool, command=command, check="log"):
+                lines = self.lines_of(project)
+                if allowed:
+                    self.assertEqual([d for d, _ in lines], ["ALLOWED"] * len(callers), lines)
+                    for _, rest in lines:
+                        m = self.ALLOWED.match(rest)
+                        self.assertIsNotNone(m, rest)
+                        self.assertIn("jotform", m.group("target"), rest)
+                        for backup in backups:
+                            self.assertIn(backup, m.group("rest").split(command)[0], rest)
+                else:
+                    self.assertNotIn("ALLOWED", [d for d, _ in lines], lines)
+        allowed = sum(len(callers) for c in cases if c[4])
+        self.assertEqual(len(self.notifications(allowed)), allowed, "one notification per allow")
+
+    def unbacked_writes(self):
+        """(why, command, project, what the reason must name) for a write whose backup is missing,
+        stale, of another form, tab or target, gone or outside the project - each in its own
+        project."""
+        F1, F2, F3 = self.F1, self.F2, self.F3
+        today = datetime.date.today()
+        yesterday, tomorrow = today - datetime.timedelta(days=1), today + datetime.timedelta(days=1)
+        try:
+            last_year = today.replace(year=today.year - 1)
+        except ValueError:                                              # 29 February
+            last_year = today - datetime.timedelta(days=366)
+        jot = self.jotform_write(F1)
+        on_f1 = ("backup", "today", f"backup_forms.py --form {F1}")
+        cases = []
+
+        def case(why, command, records=(), hint=(), before=(), git=False, appsscript=True, change=None):
+            p = self.project(git=git, appsscript=appsscript)
+            for record in records:
+                self.back_up(p, *record)
+            for rel, day in before:
+                self.salesforce_before(p, rel, day)
+            if change:
+                change(p)
+            cases.append((why, command, p, hint))
+
+        case("no record at all", jot, hint=on_f1)
+        case("a record from yesterday", jot, [("jotform", F1, f"backups/{F1}", yesterday)], on_f1)
+        case("a record from this day last year", jot, [("jotform", F1, f"backups/{F1}", last_year)], on_f1)
+        case("a record dated tomorrow", jot, [("jotform", F1, f"backups/{F1}", tomorrow)], on_f1)
+        case("a record of another form", jot, [("jotform", F2, f"backups/{F2}")], on_f1)
+        case("a record of another target", jot, [("sheet", F1, f"backups/{F1}")], on_f1)
+        case("a record whose id only contains the form id", jot, [("jotform", "9" + F1, f"backups/9{F1}")], on_f1)
+        case("a record whose backup is gone", jot, [("jotform", F1, f"backups/{F1}", None, False)], on_f1)
+        case("a record whose backup is outside the project", jot, [("jotform", F1, "../elsewhere")], on_f1)
+        case("a record whose backup path is absolute", jot, [("jotform", F1, os.path.join(self.side.name, "abs"))], on_f1)
+
+        def climbs_out(p):                  # backups/../../x: inside at first, out of the project after
+            os.makedirs(os.path.join(p, "backups"), exist_ok=True)
+            self.write(os.path.dirname(p), "x/questions-latest.json", "{}\n")
+            self.back_up(p, "jotform", F1, "backups/../../x", make=False)
+        case("a record whose path climbs out partway", jot, hint=on_f1, change=climbs_out)
+        case("a record whose path climbs out and back in", jot, hint=on_f1,
+             change=lambda p: self.back_up(p, "jotform", F1, f"../{os.path.basename(p)}/backups/{F1}"))
+        case("yesterday's record whose path holds today's date and time", jot,
+             [("jotform", F1, f"backups/{today.isoformat()} 09:00:00/{F1}", yesterday)], on_f1)
+        case("one of two forms not backed", f"python3 tools/add_translations.py --form {F1} --form {F2} --apply",
+             [("jotform", F1, f"backups/{F1}")], ("backup", "today", f"backup_forms.py --form {F2}"))
+        case("a command naming no form, each form backed but not all",
+             "python3 tools/update_static_fields.py --apply",
+             [("jotform", F, f"backups/{F}") for F in (F1, F2, F3)], ("backup", "today", "backup_forms.py"))
+        case("the raw API without its form's record",
+             f"curl -sS -X POST https://api.jotform.com/form/{F3}/properties --data-binary @data/props.json",
+             [("jotform", F1, f"backups/{F1}")], ("backup", "today", f"backup_forms.py --form {F3}"))
+        # a 15-digit number that is not after --form names no form: the command writes the forms it
+        # picks itself, so only `jotform all` backs it - never that number's own record
+        on_all = ("backup", "today", "backup_forms.py")
+        case("a form id only in a file path", f"python3 tools/update_static_fields.py --apply --notes docs/{F1}-notes.md",
+             [("jotform", F1, f"backups/{F1}")], on_all)
+        case("a form id only after another flag", f"python3 tools/switcher_flags.py --apply --ref {F1}",
+             [("jotform", F1, f"backups/{F1}")], on_all)
+        case("a form id after a flag that only starts with --form", f"python3 tools/fix_roster_order.py --apply --formerly {F1}",
+             [("jotform", F1, f"backups/{F1}")], on_all)
+        case("the form an apply reads from backed, the one it writes not",
+             f"python3 tools/restore_translations.py --form {F2} --source {F1} --apply",
+             [("jotform", F1, f"backups/{F1}")], ("backup", "today", f"backup_forms.py --form {F2}"))
+        on_sheet = ("backup", "today", "sheets_client.py export")
+        case("an import with another tab's export", "python3 tools/sheets_client.py import Roster data/roster.csv",
+             [("sheet", "Partners", "data/Partners.csv")], on_sheet)
+        case("an import with yesterday's export", "python3 tools/sheets_client.py import Roster data/roster.csv",
+             [("sheet", "Roster", "data/Roster.csv", yesterday)], on_sheet)
+        case("an import with a form backup", "python3 tools/sheets_client.py import Roster data/roster.csv",
+             [("jotform", "all", "backups")], on_sheet)
+        case("a Sheets API write with one tab's export", "python3 -c 'svc.spreadsheets().values().update(body=b).execute()'",
+             [("sheet", "Roster", "data/Roster.csv")], on_sheet)
+        # a tab is matched whole - no prefix, no first word of a longer name (ruling after the breaker,
+        # round 2); unquoted, the tab is the one word after import
+        case("an import of Roster with the Roster Archive tab's export only", "python3 tools/sheets_client.py import Roster data/roster.csv",
+             [("sheet", "Roster Archive", "data/Roster Archive.csv")], on_sheet)
+        case("an import of a two-word tab with its first word's export only",
+             'python3 tools/sheets_client.py import "SF Pending" data/p.csv', [("sheet", "SF", "data/SF.csv")], on_sheet)
+        case("an import of a two-word tab with a longer tab's export only",
+             "python3 tools/sheets_client.py import 'SF Pending' data/p.csv",
+             [("sheet", "SF Pending Old", "data/SF Pending Old.csv")], on_sheet)
+        case("an unquoted two-word tab, whose tab is its first word", "python3 tools/sheets_client.py import SF Pending data/p.csv",
+             [("sheet", "SF Pending", "data/SF Pending.csv")], on_sheet)
+        # a tool that writes two targets needs both backups (ruling after the test-author, round 1):
+        # rename_club.py renames the club on the forms and in the Sheet - with its forms' backup and
+        # no `sheet all` it asks, the reason naming the Sheet's export; with the Sheet's and no form's,
+        # naming the forms' backup
+        rename = 'python3 tools/rename_club.py --partner "Demo Partner" --old "Old Club" --new "New Club"'
+        case("rename_club.py with jotform all and no Sheet export", rename + " --apply",
+             [("jotform", "all", "backups")], on_sheet)
+        case("rename_club.py with its form's backup and one tab's export", f"{rename} --form {F1} --apply",
+             [("jotform", F1, f"backups/{F1}"), ("sheet", "Roster", "data/Roster.csv")], on_sheet)
+        case("rename_club.py with the Sheet's export and no form backup", rename + " --apply",
+             [("sheet", "all", "data/sheet_all")], ("backup", "today", "backup_forms.py"))
+        on_switches = ("backup", "today", "github_switches.py backup")
+        case("a switch with a form backup only", "gh variable set SF_SYNC --body apply", [("jotform", "all", "backups")],
+             on_switches)
+        case("a switch with yesterday's backup", "gh workflow enable auto-sync.yml",
+             [("github", "all", "backups/github/switches.json", yesterday)], on_switches)
+        case("an applying run with the switches' backup only", "gh workflow run auto-sync.yml -f apply=true",
+             [("github", "all", "backups/github/switches.json")], ("backup", "today", "backup_forms.py"))
+        on_before = ("backup", "today", "before/")
+        deploy = "sf project deploy start --source-dir data/sf_tiles/after -o glow"
+        case("a before/ retrieve from yesterday", deploy, before=[("data/sf_tiles/before/Attendance.xml", yesterday)],
+             hint=on_before)
+        case("an empty before/", deploy, change=lambda p: os.makedirs(os.path.join(p, "data", "sf_tiles", "before")),
+             hint=on_before)
+        case("another plan's before/", deploy, before=[("data/sf_other/before/Attendance.xml", None)], hint=on_before)
+        case("a data write naming no plan folder", "sf data update record -s Account -i 001000000000001 -v \"Name='Rising Stars'\" -o glow",
+             before=[("data/sf_tiles/before/Attendance.xml", None)], hint=on_before)
+        case("a quick deploy by its job id", "sf project deploy quick --job-id 0Af000000000001 -o glow",
+             before=[("data/sf_tiles/before/Attendance.xml", None)], hint=on_before)
+        case("a tracked Apps Script file changed", "npx clasp push -f", git=True, hint=("commit",),
+             change=lambda p: self.write(p, "appsscript/Code.gs", "function onEdit(e) { return 1; }\n"))
+        case("an untracked Apps Script file", "npm run clasp:push", git=True, hint=("commit",),
+             change=lambda p: self.write(p, "appsscript/Extra.gs", "function extra() {}\n"))
+
+        def staged(p):
+            self.write(p, "appsscript/Code.gs", "function onEdit(e) { return 2; }\n")
+            self.git(p, "add", "appsscript/Code.gs")
+        case("a staged Apps Script change", "npx clasp push -f", git=True, hint=("commit",), change=staged)
+        case("no git repository", "npx clasp push -f",
+             change=lambda p: self.write(p, "appsscript/Code.gs", "function onEdit(e) {}\n"))
+        case("a repository without appsscript/", "npx clasp push -f", git=True, appsscript=False)
+        return cases
+
+    def test_a_write_without_a_backup_from_today_asks_or_is_refused_saying_which(self):
+        # the same writes with their backup missing, stale, of another form, tab or target, gone, or
+        # outside the project: asked in a session that can show the prompt, refused (needs-input)
+        # where none can - the reason says there is no backup from today and how to make one
+        cases = self.unbacked_writes()
+        callers = [(mode, None) for mode in ASK_MODES] + [(mode, None) for mode in self.HEADLESS] + [("auto", True)]
+        runs = [(case, caller) for case in cases for caller in callers]
+        results = self.all_of(lambda r: self.gate(r[0][1], mode=r[1][0], agent=r[1][1], project=r[0][2]), runs)
+        for ((why, command, _project, hint), (mode, agent)), run in zip(runs, results):
+            with self.subTest(why=why, mode=mode, agent=agent):
+                expected = "ask" if mode in ASK_MODES and not agent else "deny"
+                self.assertEqual(self.verdict(run), expected, self.show(run))
+                if expected == "ask":
+                    self.check_reason(command, self.reason(run))
+                message = (self.reason(run) + "\n" + run.err).lower()
+                for needle in hint:
+                    self.assertIn(needle.lower(), message, f"the reason does not say {needle!r}")
+        for why, _command, project, _hint in cases:
+            with self.subTest(why=why, check="log"):
+                counts = collections.Counter(d for d, _ in self.lines_of(project))
+                self.assertNotIn("ALLOWED", counts)
+                self.assertEqual(counts["ASKED"], len(ASK_MODES))
+                self.assertEqual(counts["BLOCKED"] + counts["DENIED"], len(callers) - len(ASK_MODES))
+        self.assertEqual(self.quiet_notifications(), [], "a notification without an allow")
+
+    NEVER_AUTOMATIC = [
+        "python3 tools/drive_photos.py --apply",                       # no backup kind of its own
+        "node drive-sync/move.js --apply",
+        # the Salesforce tools off SF_LISTED (read 2026-10-26): no rollback record of their own
+        # before each write - sf_new_clubs.py and sf_session_timing.py have no standalone write at
+        # all, the others are no tool of the repository - and fix_module_values.py, a Salesforce
+        # writer whose name is no tools/sf_*.py
+        "python3 tools/sf_madeup_tool.py --apply --vpn-off",
+        "python3 tools/sf_rehearsal_example.py merge --plan data/plan.json --rehearse",
+        "python3 tools/sf_new_clubs.py check --vpn-off --roster data/roster.csv --summary data/plan_Asia.json --apply",
+        "python3 tools/sf_session_timing.py check --vpn-off --apply",
+        "python3 tools/sf_backfill_v2.py send --apply --vpn-off",
+        "python3 tools/sf_partner_monthly_old.py --month 2026-09 --apply --vpn-off",
+        "python3 tools/fix_module_values.py --vpn-off --apply --limit 1",
+        # tools whose --apply writes the Sheet, not a form (read 2026-10-26), and no sheets_client.py
+        # import: no backup kind covers them
+        "python3 tools/upload_roster.py --apply --replace",
+        "python3 tools/deactivate_clubs.py --partner \"Demo Partner\" --club \"Sunrise Club\" --reason \"moved\" --apply",
+        "gh api repos/o/r/dispatches -f event_type=roster-changed",
+        "gh api repos/o/r/actions/workflows/auto-sync.yml/dispatches -f ref=main",
+        "gh api graphql -F query=@m.graphql",
+        "curl -X POST https://api.github.com/repos/o/r/dispatches -d @in.json",
+        "curl -X POST https://api.github.com/graphql -d @query.json",
+        # an allowlist, not a denylist (ruling after the breaker, round 2): a tool is automatic only
+        # by its exact file name on FORM_TOOLS or SF_LISTED (or sheets_client.py import) - a made-up
+        # writer, a tool whose --apply writes nothing live, and names that only resemble a listed
+        # tool ask, a --form whose backup is on record notwithstanding
+        "python3 tools/madeup_writer.py --apply",
+        f"python3 tools/madeup_writer.py --form {F1} --apply",
+        "python3 tools/club_names.py --apply",
+        "python3 tools/auto_sync_v2.py --apply",
+        "python3 tools/rename_club_accounts.py --apply",
+        f"python3 tools/rename_club_accounts.py --form {F2} --apply",
+        "python3 tools/old_update_static_fields.py --apply",
+        f"python3 tools/add_translations_v2.py --form {F1} --apply",
+        f"python3 sync_attendance_form_old.py data/roster.csv --roster --region Africa --form {F1} --apply",
+        "python3 tools/sf_backfill_old.py send --apply --vpn-off",
+        # auto_sync.py with --apply-salesforce creates Salesforce accounts with no rollback record
+        # (ruling after the test-author, round 1), whatever else it holds and in either order
+        "python3 tools/auto_sync.py --apply --apply-salesforce",
+        "python3 tools/auto_sync.py --apply-salesforce",
+        "python3 tools/auto_sync.py --apply-salesforce --apply --region Asia",
+    ]
+
+    def test_an_unrecognised_write_is_never_automatic_whatever_the_backups(self):
+        p = self.fully_backed()
+        self.assert_backed(p)
+        self.assert_never_automatic(self.NEVER_AUTOMATIC, p)
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
+        self.assertEqual(counts["ASKED"], len(self.NEVER_AUTOMATIC) * 2)
+        self.assertEqual(len(self.quiet_notifications()), 1, "only the control is notified")
+
+    def chained(self):
+        jot = self.jotform_write()
+        return [jot + "; echo done", "echo start; " + jot, jot + " && echo done", jot + " || true",
+                jot + " | tee data/out.txt", jot + " &", jot + " 2>&1", jot + " > data/out.txt", jot + " >> data/out.txt",
+                jot + " $(echo --quiet)", jot + " `echo --quiet`", jot + " --roster-file <(cat data/r.csv)",
+                jot + "\necho done", jot + "\r\necho done", "echo start\n" + jot,
+                f"python3 sync_attendance_form.py data/roster.csv --roster \\\n  --region Africa --form {self.F1} --apply",
+                f"python3 sync_attendance_form.py data/roster.csv --roster \\\r\n  --region Africa --form {self.F1} --apply",
+                "LANG=C " + jot, "JOTFORM_TIMEOUT=60 " + jot, "  TZ=UTC " + jot,
+                "npx clasp push -f; echo done", "gh variable set SF_SYNC --body apply && echo done",
+                "TZ=UTC gh variable set SF_SYNC --body apply",
+                "sf project deploy start --source-dir data/sf_x/after -o glow | tee data/deploy.txt",
+                "python3 tools/sheets_client.py import Roster data/roster.csv > data/import.txt",
+                "python3 tools/sf_girls_present.py set --apply --vpn-off | tee data/set.txt",
+                # a # can start a comment that hides text: never automatic, quoted or not (ruling
+                # after the breaker)
+                jot + "  # Ryan's go", jot + "#", f"python3 tools/add_translations.py --form {self.F1} --apply --note '#146'",
+                "python3 tools/sheets_client.py import Roster data/roster#2.csv",
+                "python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off # September",
+                # a launcher before it (ruling after the breaker, round 2): the first word is python3
+                # (or a path ending /python3), node, npm, npx, sf, sfdx, gh, curl or clasp, or the
+                # command is never automatic
+                "env LANG=C " + jot, "env " + jot, "sudo " + jot, "sudo -u someone " + jot, "nohup " + jot,
+                "time " + jot, "exec " + jot, "command " + jot, "xargs " + jot, "nice " + jot,
+                "caffeinate -i " + jot, nest(jot, 1), "sh -c " + shlex.quote(jot), "zsh -c " + shlex.quote(jot),
+                "sudo gh variable set SF_SYNC --body apply", "nohup npx clasp push -f",
+                "time sf project deploy start --source-dir data/sf_x/after -o glow",
+                "env python3 tools/sheets_client.py import Roster data/roster.csv",
+                "exec python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off",
+                nest("gh workflow run auto-sync.yml -f apply=true", 1)]
+
+    def test_a_chained_or_prefixed_backed_write_is_never_automatic(self):
+        # one simple command or nothing: a second command, a redirection, a substitution, a line
+        # break (a backslash-newline too), a #, a VAR=value or a launcher before it takes it back
+        # to the prompt
+        p = self.fully_backed()
+        self.assert_backed(p)
+        commands = self.chained()
+        self.assert_never_automatic(commands, p)
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
+        self.assertEqual(len(self.quiet_notifications()), 1, "only the control is notified")
+
+    def test_the_interpreter_by_any_path_is_the_command_itself_and_goes_through(self):
+        # the control of the launcher allowlist: python3 by its name, the venv's or any other path
+        # ending /python3, and clasp by its own name, are the command itself - allowed on their
+        # backups, where each launcher of chained() is not
+        p = self.fully_backed()
+        tail = self.jotform_write()[len("python3"):]
+        commands = [python + tail for python in ("python3", ".venv/bin/python3", "/usr/bin/python3",
+                                                 "/opt/homebrew/bin/python3", os.path.join(p, ".venv", "bin", "python3"))]
+        commands += [".venv/bin/python3 tools/sheets_client.py import Roster data/roster.csv", "clasp push -f",
+                     "/opt/homebrew/bin/python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off"]
+        callers = [{"mode": "dontAsk"}, {"mode": None}, {"mode": "auto", "agent": True}]
+        cases = [(command, dict(caller, project=p, may_allow=True)) for command in commands for caller in callers]
+        for command, kw, run in self.verdicts(cases):
+            with self.subTest(command=command, mode=kw["mode"], agent=kw.get("agent")):
+                self.assertEqual(self.verdict(run), "allow", self.show(run))
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts, {"ALLOWED": len(cases)}, "one ALLOWED line per allow, nothing else")
+
+    def test_plan_mode_and_an_unknown_mode_never_get_the_automatic_go(self):
+        # plan: a hook's allow has no effect there (Claude Code 2.1.299) - it asks; an unknown or
+        # odd mode fails closed - refused. The control: each is allowed in auto in this project
+        p = self.fully_backed()
+        commands = [self.jotform_write(), "npx clasp push -f", "gh variable set SF_SYNC --body apply",
+                    "sf project deploy start --source-dir data/sf_x/after -o glow",
+                    "python3 tools/sheets_client.py import Roster data/roster.csv",
+                    "gh workflow run auto-sync.yml -f apply=true"]
+        for command in commands:
+            with self.subTest(command=command, mode="auto"):
+                run = self.gate(command, mode="auto", project=p, may_allow=True)
+                self.assertEqual(self.verdict(run), "allow", "the control - " + self.show(run))
+        self.assert_asks(commands, mode="plan", project=p)
+        for mode in UNKNOWN_MODES:
+            self.assert_denies(commands, mode=mode, project=p)
+        odd = [{"permission_mode": v} for v in (1, True, ["default"], {"mode": "auto"}, "dontask", "Auto")]
+        for fields in odd:
+            self.assert_denies(commands, mode=None, extra=fields, project=p)
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], len(commands), "only the controls are allowed")
+        self.assertEqual(counts["ASKED"], len(commands))
+
+    def deletes(self):
+        F1 = self.F1
+        return [
+            "sf data delete record -s Contact -i 003000000000001 -o glow",
+            "sf data delete bulk -s Contact -f data/sf_x/after/ids.csv -o glow",
+            "sf project delete source -m ApexClass:GlowSync -o glow",
+            "sfdx force:source:delete -m ApexClass:GlowSync",
+            "sf project deploy start --source-dir data/sf_x/after --post-destructive-changes "
+            "data/sf_x/after/destructiveChangesPost.xml -o glow",
+            "sf project deploy start --manifest data/sf_x/after/package.xml --pre-destructive-changes "
+            "data/sf_x/after/destructiveChanges.xml -o glow",
+            "sf api request rest /services/data/v60.0/sobjects/Account/001x -X DELETE -o glow",
+            "gh variable delete SF_SYNC", "gh secret delete GLOW_SA_JSON", "gh variable remove AUTO_SYNC_APPLY",
+            "gh secret remove GLOW_SA_JSON", "gh -R o/r variable delete SF_SYNC", "gh secret --repo=o/r remove X",
+            "gh api -X DELETE repos/o/r/actions/variables/SF_SYNC",
+            f"curl -sS -X DELETE https://api.jotform.com/form/{F1}/question/7",
+            f"curl -sS --request DELETE https://api.jotform.com/form/{F1}/question/12",
+            "curl -sS -XDELETE https://api.jotform.com/submission/6123456789012345678",
+            f"python3 -c \"__import__('requests').delete('https://api.jotform.com/form/{F1}/question/7')\"",
+            f"python3 -c \"__import__('requests').request(method='DELETE', url='https://api.jotform.com/form/{F1}')\"",
+            # the method as a positional argument, in any case (ruling after the breaker, round 2)
+            f"python3 -c \"__import__('requests').request('DELETE', 'https://api.jotform.com/form/{F1}/question/7')\"",
+            f"python3 -c \"__import__('requests').request('delete', 'https://api.jotform.com/form/{F1}/question/9')\"",
+            f"python3 -c \"import http.client as h; c = h.HTTPSConnection('api.jotform.com'); "
+            f"c.request('DELETE', '/form/{F1}/question/7')\"",
+            f"python3 sync_attendance_form.py data/roster.csv --roster --region Africa --form {F1} --prune",
+            f"python3 sync_attendance_form.py data/roster.csv --roster --region Africa --form {F1} --apply --prune",
+            # the form tools' --remove takes their element or field off the form: a question deleted
+            "python3 tools/add_feedback_link.py --link roster --remove --apply",
+            f"python3 tools/add_session_notes.py --form {F1} --remove --apply",
+            # a merge deletes the losing contact; the cleanup deletes affiliations (design addendum);
+            # every sf_dupes.py --apply, its rename too, is one class: only its --rehearse is a write
+            "python3 tools/sf_dupes.py merge data/sf_dupes/merge_plan.json --apply --vpn-off",
+            "python3 tools/sf_dupes.py cleanup data/sf_dupes/merge_plan.json --apply --vpn-off",
+            "python3 tools/sf_dupes.py rename data/sf_dupes/merge_plan.json --roster data/roster.csv --apply --vpn-off",
+        ]
+
+    def test_a_delete_or_prune_asks_or_is_refused_even_with_every_backup(self):
+        # Ryan, 2026-10-26: deletes and --prune still ask; where no prompt can show, refused
+        p = self.fully_backed()
+        self.assert_backed(p)
+        commands = self.deletes()
+        for mode in ASK_MODES:
+            self.assert_asks(commands, mode=mode, project=p)
+        for mode in self.HEADLESS + ["foo"]:
+            self.assert_denies(commands, mode=mode, project=p)
+        self.assert_denies(commands, mode="auto", agent=True, project=p)
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
+        self.assertEqual(counts["ASKED"], len(commands) * len(ASK_MODES))
+        self.assertEqual(counts["BLOCKED"] + counts["DENIED"], len(commands) * 5)
+        self.assertEqual(len(self.quiet_notifications()), 1, "only the control is notified")
+
+    # the backup records written by hand: a forged record is a self-approval (any case: the Mac's
+    # file system ignores it)
+    LOG_WRITES = [
+        "printf '2026-10-26 09:00:00\\tjotform\\tall\\tbackups\\n' >> .claude/live_backups.log",
+        "echo x | tee -a .claude/live_backups.log",
+        "echo x | tee .claude/live_backups.log",
+        "sed -i '' 's/2026-10-25/2026-10-26/' .claude/live_backups.log",
+        "sed --in-place 's/a/b/' ./.claude/live_backups.log",
+        "perl -pi -e 's/25/26/' .claude/live_backups.log",
+        "echo x > \"$CLAUDE_PROJECT_DIR/.claude/live_backups.log\"",
+        "cat old.txt >>./.claude/live_backups.log",
+        "python3 tools/x.py > /Users/someone/jotform-glow-sync/.claude/live_backups.log",
+        "printf 'x' >> .claude/LIVE_BACKUPS.log",
+        # ... a copy, a move or a link put in its place, a file opened by a script, or the writer
+        # called by hand: records nobody backed up for (ruling after the breaker)
+        "cp data/forged.log .claude/live_backups.log",
+        "cp -p /tmp/records ./.claude/live_backups.log",
+        "mv /tmp/records .claude/live_backups.log",
+        "dd if=/tmp/records of=.claude/live_backups.log",
+        "ln -sf /tmp/records .claude/live_backups.log",
+        "rsync -a /tmp/records .claude/live_backups.log",
+        "install -m 600 /tmp/records .claude/live_backups.log",
+        "ditto /tmp/records .claude/live_backups.log",
+        "python3 -c \"open('.claude/live_backups.log','a').write('2026-10-26 09:00:00\\tjotform\\tall\\tbackups\\n')\"",
+        "python3 -c \"import os; open(os.path.join('.claude', 'live_backups.log'), 'a').write('x')\"",
+        "python3 -c \"from glow import live_backups; live_backups.record('jotform','all','backups')\"",
+        "python3 -c \"from glow.live_backups import record; record('jotform', 'all', 'backups')\"",
+        "python3 -c \"import glow.live_backups as lb; lb.record('github', 'all', 'backups/github')\"",
+        # ... in any spelling (ruling after the breaker, round 2): the writer imported under another
+        # name or by importlib, pathlib's writers, the bare name after a cd, a ./ inside the path,
+        # touch and truncate
+        "python3 -c \"from glow import live_backups as lb; lb.record('jotform','all','backups')\"",
+        "python3 -c \"import importlib; importlib.import_module('glow.live_backups').record('jotform', 'all', 'backups')\"",
+        "python3 -c \"from pathlib import Path; Path('.claude/live_backups.log').write_text('2026-10-26 09:00:00\\tjotform\\tall\\tbackups\\n')\"",
+        "python3 -c \"from pathlib import Path; Path('.claude/live_backups.log').open('a').write('x')\"",
+        "python3 -c \"import pathlib; pathlib.Path('.claude', 'live_backups.log').write_bytes(b'x')\"",
+        "cd .claude && printf x >> live_backups.log",
+        "printf x >> .claude/./live_backups.log",
+        "touch .claude/live_backups.log",
+        "truncate -s 0 .claude/live_backups.log",
+    ]
+    # a Salesforce plan's before/ retrieve made by hand - the backup a raw sf write goes through on,
+    # forged - is a self-approval too (ruling after the breaker, round 2): touch under a before/
+    # folder, a copy, move, sync or link whose destination (its last word) is a before/ path, a
+    # redirect or tee into one
+    BEFORE_WRITES = ["touch data/sf_x_2026-10-26/before/a.xml",
+                     "cp -R data/sf_x/after data/sf_x/before",
+                     "cp a.xml data/sf_x/before/",
+                     "rsync -a data/sf_x/after/ data/sf_x/before",
+                     "echo x > data/sf_x/before/a.xml",
+                     "mv /tmp/a.xml data/sf_x/before/a.xml",
+                     "ditto data/sf_x/after data/sf_x/before",
+                     "ln -s ../after data/sf_tiles/before",
+                     "install -m 644 a.xml data/sf_x/before/a.xml",
+                     "echo x | tee data/sf_tiles/before/Attendance.report-meta.xml",
+                     "printf '<Report/>' >> data/sf_x/before/main/default/a.xml"]
+    # ... and what reads it, copies from it, or retrieves into it (the before/ retrieve itself): no
+    # decision
+    BEFORE_NOT_WRITES = ["cp -R data/sf_x/before data/sf_x/after",
+                         "sf project retrieve start -o glow --target-dir data/sf_x/before",
+                         "sf project retrieve start -m Report:Attendance --target-dir data/sf_tiles/before -o glow",
+                         "ls -la data/sf_x/before", "cat data/sf_x/before/a.xml",
+                         "diff -r data/sf_x/before data/sf_x/after"]
+    LOG_READS = ["cat .claude/live_backups.log", "tail -5 .claude/live_backups.log",
+                 "grep -c jotform .claude/live_backups.log", "wc -l .claude/live_backups.log",
+                 "ls -la .claude/live_backups.log"]
+    # what names the records or their writer without writing a record (ruling after the breaker)
+    LOG_NOT_WRITES = LOG_READS + [
+        "scripts/harness_tests.sh test/live_backups_test.py",
+        "scripts/harness_tests.sh test/hooks_test.py test/live_backups_test.py test/live_gate_docs_test.py",
+        ".venv/bin/python3 -m unittest discover -s test -p live_backups_test.py",
+        "git commit -m \"gate: read .claude/live_backups.log\"",
+        "git add glow/live_backups.py test/live_backups_test.py",
+        "grep -n 'def record' glow/live_backups.py", "head -40 glow/live_backups.py",
+    ]
+
+    def test_self_approval_is_refused_whatever_the_backups(self):
+        p = self.fully_backed()
+        self.assert_backed(p)
+        commands = self.SELF_APPROVING + self.STARTUP_WRITES + self.LOG_WRITES + self.BEFORE_WRITES
+        # every mode: without backups, above and below
+        callers = [{"mode": "auto"}, {"mode": "dontAsk"}, {"mode": "auto", "agent": True}, {"mode": "dontAsk", "live_ok": "1"}]
+        cases = [(command, dict(caller, project=p)) for command in commands for caller in callers]
+        for command, kw, run in self.verdicts(cases):
+            with self.subTest(command=command, caller=kw):
+                self.assertEqual(self.verdict(run), "deny", self.show(run))
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
+        self.assertNotIn("ASKED", counts)
+        self.assertEqual(len(self.quiet_notifications()), 1, "only the control is notified")
+
+    def assert_refused_never_asked(self, commands):
+        """Each command refused in a project with no backups - in default, auto, plan, dontAsk, a
+        missing mode and from a subagent - never asked; one refusal logged per call."""
+        callers = [{"mode": m} for m in ("default", "auto", "plan", "dontAsk", None)] + [{"mode": "auto", "agent": True}]
+        cases = [(command, dict(caller)) for command in commands for caller in callers]
+        before = self.logged()
+        for command, kw, run in self.verdicts(cases):
+            with self.subTest(command=command, mode=kw["mode"], agent=kw.get("agent")):
+                self.assertEqual(self.verdict(run), "deny", self.show(run))
+        after = self.logged()
+        self.assertEqual(after["ASKED"], before["ASKED"], "a self-approval was asked")
+        self.assertEqual(self.refused(), before["BLOCKED"] + before["DENIED"] + len(cases))
+
+    def assert_no_decision(self, commands):
+        """Each command passes with no decision - default, dontAsk, a missing mode, a subagent - and
+        nothing is logged."""
+        callers = [{"mode": "default"}, {"mode": "dontAsk"}, {"mode": None}, {"mode": "auto", "agent": True}]
+        cases = [(command, dict(caller)) for command in commands for caller in callers]
+        before = self.logged()
+        for command, kw, run in self.verdicts(cases):
+            with self.subTest(command=command, mode=kw["mode"], agent=kw.get("agent")):
+                self.assertEqual(self.verdict(run), "silent", self.show(run))
+        self.assertEqual(self.logged(), before, "nothing live: nothing logged")
+
+    def test_writing_the_backup_records_by_hand_is_refused_and_naming_them_is_not(self):
+        # no live flag in them: refused for what they write, in a project with no backups too
+        self.assert_refused_never_asked(self.LOG_WRITES)
+        # the other side: reading the records, running their tests, a commit message or a git add
+        # that names them - no record written, no live match: no decision, in every mode and from
+        # a subagent, nothing logged (the refusal above must not over-match)
+        self.assert_no_decision(self.LOG_NOT_WRITES)
+
+    def test_a_salesforce_before_retrieve_made_by_hand_is_refused_and_copying_from_it_is_not(self):
+        # the before/ a raw sf write goes through on, written by hand: refused in every mode and
+        # from a subagent, in a project with no backups too; reading it, copying from it or the
+        # retrieve that fills it: no decision (with every backup on record too:
+        # test_a_read_still_passes_silently_with_every_backup_on_record; refused with them:
+        # test_self_approval_is_refused_whatever_the_backups)
+        self.assert_refused_never_asked(self.BEFORE_WRITES)
+        self.assert_no_decision(self.BEFORE_NOT_WRITES)
+
+    def test_a_read_still_passes_silently_with_every_backup_on_record(self):
+        p = self.fully_backed()
+        commands = self.READS + self.MENTIONS + self.LOG_NOT_WRITES + self.BEFORE_NOT_WRITES
+        for mode in ("auto", None):
+            self.assert_silent(commands, mode=mode, project=p)
+        self.assert_silent(commands, agent=True, project=p)
+        self.assertEqual(self.lines_of(p), [], "nothing live: nothing logged")
+        self.assertEqual(self.quiet_notifications(), [])
+
+    # the tools/sf_*.py whose write - --apply, sf_dupes.py's --rehearse - puts its own rollback
+    # record on disk before every request (read 2026-10-26, each tool and its test): the gate keeps
+    # exactly this list, and allows these with no other record, the reason and the log naming that
+    # file. (command, the file it writes first, the file it does not)
+    #   sf_backfill.py send       ledger.csv: a "sending" row before each insert (`status` lists what a
+    #                             rollback removes, by batch id)
+    #   sf_dupes.py merge         merge_rollback.json: every contact, row and affiliation of the merge,
+    #     --rehearse              saved before the first Apex run (the rehearsal's own is rolled back;
+    #                             every sf_dupes.py --apply is a delete: deletes())
+    #   sf_girls_present.py set   ledger.csv: an "open" row before each PATCH of a batch whose value is
+    #                             empty, the only kind it writes
+    #   sf_partner_monthly.py     ledger.csv: a row with the old count before each insert or PATCH
+    #   sf_report_folders.py      ledger.csv: a "sending" row with the old folder and label before each
+    #     copy|move|undo          request (a copy's id on disk before its PATCH)
+    # Off the list: sf_new_clubs.py and sf_session_timing.py (no standalone write), and any other
+    # name (NEVER_AUTOMATIC)
+    SF_LISTED = [
+        ("python3 tools/sf_backfill.py send --apply --vpn-off", "ledger.csv", "merge_rollback.json"),
+        ("python3 tools/sf_backfill.py send --apply --vpn-off --limit 1", "ledger.csv", "merge_rollback.json"),
+        ("python3 tools/sf_dupes.py merge data/sf_dupes_2026-10-26/merge_plan.json --rehearse --vpn-off",
+         "merge_rollback.json", "ledger.csv"),
+        ("python3 tools/sf_girls_present.py set --apply --vpn-off --limit 1", "ledger.csv", "merge_rollback.json"),
+        ("python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off", "ledger.csv", "merge_rollback.json"),
+        ("python3 tools/sf_report_folders.py move --vpn-off --plan data/sf_report_folders/plan.csv --apply",
+         "ledger.csv", "merge_rollback.json"),
+        ("python3 tools/sf_report_folders.py copy --vpn-off --kind report --id 00O000000000001AAA --tag ticket-72 --apply",
+         "ledger.csv", "merge_rollback.json"),
+        ("python3 tools/sf_report_folders.py undo --vpn-off --ledger data/sf_report_folders/ledger.csv --apply",
+         "ledger.csv", "merge_rollback.json"),
+    ]
+
+    def test_a_listed_salesforce_tool_goes_through_on_its_own_rollback_record(self):
+        # a project with no backup record, no git and no data/: the tool's own record is the backup.
+        # Allowed in every mode but plan, from a subagent too, logged and notified like any backed
+        # write; plan asks and an unknown mode is refused, as for every write
+        p = self.project()
+        callers = ([(mode, None, None) for mode in self.ALLOW_MODES] + [(None, None, {"permission_mode": None})]
+                   + [(mode, True, None) for mode in self.AGENT_MODES])
+        runs = [(case, caller) for case in self.SF_LISTED for caller in callers]
+        results = self.all_of(lambda r: self.gate(r[0][0], mode=r[1][0], agent=r[1][1], extra=r[1][2], project=p,
+                                                  may_allow=True), runs)
+        for ((command, named, other), caller), run in zip(runs, results):
+            with self.subTest(command=command, caller=caller):
+                self.assertEqual(self.verdict(run), "allow", self.show(run))
+                reason = self.reason(run)
+                self.assertTrue(any(t in reason.lower() for t in ("salesforce", "sf")), f"no target in {reason!r}")
+                self.assertIn(named, reason, "the reason does not name the tool's own rollback record")
+                self.assertNotIn(other, reason, "the reason names another tool's rollback record")
+        lines = self.lines_of(p)
+        self.assertEqual([d for d, _ in lines], ["ALLOWED"] * len(runs), lines)
+        for command, named, other in self.SF_LISTED:
+            with self.subTest(command=command, check="log"):
+                mine = [rest for _, rest in lines if rest.endswith(" " + command)]
+                self.assertEqual(len(mine), len(callers), lines)
+                for rest in mine:
+                    m = self.ALLOWED.match(rest)
+                    self.assertIsNotNone(m, f"not `mode=<mode>[ agent] target=<target> backup=<what> <command>`: {rest!r}")
+                    self.assertIn(m.group("target"), ("salesforce", "sf"), rest)
+                    backup = m.group("rest").split(command)[0]
+                    self.assertIn(named, backup, "the log's backup= is not the tool's record")
+                    self.assertNotIn(other, backup, "the log's backup= names another tool's record")
+        self.assertEqual(len(self.notifications(len(runs))), len(runs), "one notification per allow")
+        for command, *_ in self.SF_LISTED[:3]:
+            self.assert_asks([command], mode="plan", project=p)
+            self.assert_denies([command], mode="foo", project=p)
+        self.assertEqual(collections.Counter(d for d, _ in self.lines_of(p))["ALLOWED"], len(runs),
+                         "plan mode or an unknown mode was allowed")
+        # (the tools off the list, with every backup there is: NEVER_AUTOMATIC; sf_dupes.py's
+        # --apply: deletes())
 
     # ---- protected_paths.sh
     def edit(self, path, project=None):
@@ -866,13 +1894,26 @@ class Hooks(unittest.TestCase):
                           os.path.join(home, ".claude", "hooks", "gate.sh")], 2)
         self.assert_edit([os.path.join(home, ".claude", "CLAUDE.md"), os.path.join(home, "notes", "todo.md")], 0)
 
+    def test_the_backup_records_are_protected(self):
+        # .claude/live_backups.log is what the live gate trusts for an automatic go (#146): an Edit
+        # or Write of it is a forged record, refused in every copy of the repository
+        root = self.tmp.name
+        homes = [root, os.path.join(root, ".claude", "worktrees", "t-99-x"),
+                 os.path.dirname(root) + os.sep + "jotform-glow-sync-wf20"]
+        self.assert_edit([os.path.join(home, ".claude", "live_backups.log") for home in homes]
+                         + [".claude/live_backups.log", "./.claude/live_backups.log", root + "//.claude/./live_backups.log",
+                            root + "/.claude/LIVE_BACKUPS.log"], 2)
+        why = self.run_hook("protected_paths.sh", {"file_path": root + "/.claude/live_backups.log"}, tool="Edit").err
+        self.assertIn("BLOCKED by .claude/hooks/protected_paths.sh: '.claude/live_backups.log'", why)
+
 
 class GateSettings(unittest.TestCase):
     """.claude/settings.json, the second layer behind live_gate.sh: the rules read as Claude Code
     reads them (research on 2.1.299, 2026-10-14): Bash(x:*) is Bash(x *), which needs a word
     break after x - x alone or x, a space and anything (Bash(gh api repos/:*) never matched a real
     call, nor Bash(npm run clasp:*) npm run clasp:push); any other * stands for any text; a rule
-    without * is the whole command. And the hook entries."""
+    without * is the whole command. Since #146 (2026-10-26) ask rules stand only in front of the
+    deletes: a hook's allow does not get past one. And the hook entries."""
 
     @classmethod
     def setUpClass(cls):
@@ -917,32 +1958,54 @@ class GateSettings(unittest.TestCase):
              # the deploy verbs that only read (review of 253135b: Bash(sf project deploy:*) asked on them)
              "sf project deploy report --job-id 0Af000000000001",
              "sf project deploy preview --source-dir force-app -o glow"]
-    # the live families a prefix rule can name: the sync's switches on GitHub, the Apps Script
-    # push, the Salesforce deploys, data writes and anonymous Apex. Not --apply, --prune,
-    # --rehearse, api.jotform.com or apply=true: those sit anywhere in a command, and a rule like
-    # Bash(*--apply*) would prompt on every grep of the docs (20 of 31 blocks by 2026-10-09)
-    ASKED_FAMILIES = ["gh variable set SF_SYNC --body apply", "gh variable delete SF_SYNC",
-                      "gh secret set JOTFORM_API_KEY", "gh secret delete GLOW_SA_JSON",
-                      "gh workflow run auto-sync.yml -f apply=true", "gh workflow enable auto-sync.yml",
-                      "gh workflow disable auto-sync.yml", "gh run rerun 1234",
-                      "npx clasp push -f", "npm run clasp:push",
-                      "sf project deploy start --source-dir force-app -o glow",
-                      # the deploy verbs that deploy, or wait on one (review of 253135b)
-                      "sf project deploy quick --job-id 0Af000000000001 -o glow",
-                      "sf project deploy validate --source-dir force-app -o glow",
-                      "sf project deploy resume --job-id 0Af000000000001",
-                      "sf apex run --file merge.apex -o glow",
-                      "sf data create record -s Account -v \"Name='Sunrise Club'\" -o glow",
-                      "sf data update record -s Account -i 001000000000001 -v \"Name=X\"",
-                      "sf data delete record -s Contact -i 003000000000001",
-                      "sf data upsert bulk -s Contact -f contacts.csv -i Id",
-                      "sf data import tree -f accounts.json"]
-    CLASP_PUSH = ["npm run clasp:push", "npm run clasp:push -- --force", "npx clasp push", "npx clasp push -f"]
-    # as of 2026-10-14: what the ticket leaves alone, with Bash(npm run clasp*) (Bash(npm run
-    # clasp:*) never covered npm run clasp:push, see CLASP_PUSH)
-    ASK_BEFORE = ["Read(./data/**)", "Read(./backups/**)", "Bash(git tag:*)", "Bash(npm run clasp*)",
-                  "Bash(npx clasp:*)", "Bash(python3 tools/derive_partner_regions.py:*)",
+    # the live families the hook may now let through on a backup from today (ticket #146): the
+    # sync's switches on GitHub, the Apps Script push, the Salesforce deploys, data writes and
+    # anonymous Apex. No ask rule may stand in front of them - "a matching ask rule still prompts
+    # even when the hook returned allow", and in dontAsk or headless it denies - nor a deny rule;
+    # the hook alone asks (or refuses) when the backup is missing
+    AUTO_FAMILIES = ["gh variable set SF_SYNC --body apply", "gh secret set JOTFORM_API_KEY",
+                     "gh workflow run auto-sync.yml -f apply=true", "gh workflow enable auto-sync.yml",
+                     "gh workflow disable auto-sync.yml", "gh run rerun 1234",
+                     "npx clasp push -f", "npx clasp push", "npm run clasp:push", "npm run clasp:push -- --force",
+                     "sf project deploy start --source-dir data/sf_x/after -o glow",
+                     "sf project deploy quick --job-id 0Af000000000001 -o glow",
+                     "sf project deploy validate --source-dir data/sf_x/after -o glow",
+                     "sf project deploy resume --job-id 0Af000000000001",
+                     "sf apex run --file data/sf_x/fix.apex -o glow",
+                     "sf data create record -s Account -v \"Name='Sunrise Club'\" -o glow",
+                     "sf data update record -s Account -i 001000000000001 -v \"Name=X\"",
+                     "sf data upsert bulk -s Contact -f data/sf_x/after/contacts.csv -i Id",
+                     "sf data import tree -f data/sf_x/after/accounts.json"]
+    # the deletes keep their ask rules, and get the spellings they lacked (Ryan, 2026-10-26:
+    # deletes still ask). Not --prune or an HTTP DELETE: those sit anywhere in a command - the hook
+    # asks on them
+    DELETE_FAMILIES = ["sf data delete record -s Contact -i 003000000000001",
+                       "sf data delete bulk -s Contact -f ids.csv -o glow",
+                       "sf project delete source -m ApexClass:GlowSync -o glow",
+                       "gh variable delete SF_SYNC", "gh secret delete GLOW_SA_JSON",
+                       "gh variable remove AUTO_SYNC_APPLY", "gh secret remove GLOW_SA_JSON"]
+    DELETE_RULES = ["Bash(sf data delete:*)", "Bash(gh variable delete:*)", "Bash(gh secret delete:*)",
+                    "Bash(sf project delete source:*)", "Bash(gh variable remove:*)", "Bash(gh secret remove:*)"]
+    # as of 2026-10-26: what the ticket leaves alone (2026-10-14's list without the clasp rules,
+    # whose push is now automatic on a clean committed appsscript/)
+    ASK_BEFORE = ["Read(./data/**)", "Read(./backups/**)", "Bash(git tag:*)",
+                  "Bash(python3 tools/derive_partner_regions.py:*)",
                   "Bash(python3 test/fixtures/make_fixture.py --write)", "Bash(make fixtures)"]
+    # the allow list of 2026-10-26, kept whole
+    ALLOW_BEFORE = ["Bash(scripts/verify.sh)", "Bash(make check)", "Bash(make test)", "Bash(make py)", "Bash(make gs)",
+                    "Bash(make secrets)", "Bash(make docs-links)", "Bash(make fixtures-check)", "Bash(make lint)",
+                    "Bash(make help)", "Bash(npm test)", "Bash(npm run check)", "Bash(node test/:*)",
+                    "Bash(node scripts/check_gs.js)", "Bash(python3 test/python_test.py)",
+                    "Bash(.venv/bin/python3 test/python_test.py)", "Bash(python3 scripts/check_:*)",
+                    "Bash(.venv/bin/python3 scripts/check_:*)", "Bash(python3 test/fixtures/make_fixture.py --check)",
+                    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+                    "Bash(git ls-files:*)", "Bash(git check-ignore:*)", "Bash(git branch:*)", "Bash(git blame:*)",
+                    "Bash(python3 tools/form_status.py:*)", "Bash(python3 backup_forms.py:*)",
+                    "Bash(python3 tools/needs_attention.py:*)", "Bash(python3 tools/add_translations.py --audit:*)",
+                    "Bash(python3 tools/sheets_client.py tabs)", "Bash(python3 tools/sheets_client.py whoami)",
+                    "Bash(python3 tools/sheets_client.py export:*)", "Bash(ls:*)", "Bash(wc:*)", "Bash(which:*)",
+                    "Bash(git commit:*)", "Bash(git push:*)", "Bash(harness-*:*)", "Bash(gh issue:*)", "Bash(gh pr:*)",
+                    "Bash(gh api:*)", "Bash(git worktree:*)", "Bash(git fetch:*)", "Bash(git add:*)"]
     DENY_BEFORE = ["Read(./credentials/service-account.json)", "Read(./credentials/config.json)",
                    "Read(./.env)", "Read(./.env.local)", "Read(./.claude/settings.local.json)",
                    "Read(~/.clasprc.json)", "Read(~/.config/gcloud/**)"]
@@ -969,23 +2032,31 @@ class GateSettings(unittest.TestCase):
         for rule in self.ASK_BEFORE:
             self.assertIn(rule, ask)
 
-    def test_ask_rules_back_the_hook_for_the_live_families(self):
+    def test_no_ask_or_deny_rule_stands_in_front_of_an_automatic_family(self):
+        # (until 2026-10-26 ask rules backed the hook on these; a hook's allow does not get past one)
+        for command in self.AUTO_FAMILIES:
+            with self.subTest(command=command):
+                self.assertEqual(self.covering("ask", command), [], f"an ask rule would prompt (or, headless, "
+                                                                     f"deny) a backed {command!r}")
+                self.assertEqual(self.covering("deny", command), [], f"a deny rule on {command!r}")
+
+    def test_ask_rules_stay_on_the_deletes_and_nothing_else_changed(self):
         # explicit ask rules prompt in every mode, bypassPermissions included: the layer under the hook
-        for command in self.ASKED_FAMILIES:
+        ask = self.permissions["ask"]
+        for rule in self.DELETE_RULES:
+            self.assertIn(rule, ask)
+        for command in self.DELETE_FAMILIES:
             with self.subTest(command=command):
                 self.assertTrue(self.covering("ask", command), f"no ask rule for {command!r}")
-        # the Apps Script push, both ways it is spelt: Bash(npm run clasp:*) is "npm run clasp" and a
-        # word break, so it never covered npm run clasp:push (orchestrator, 2026-10-14: fix it here)
-        for command in self.CLASP_PUSH:
-            with self.subTest(command=command):
-                self.assertTrue(self.covering("ask", command), f"no ask rule for {command!r} (a word break "
-                                                               f"is needed after a :* rule's prefix)")
         for command in self.PLAIN + self.LOOP_READS:
             with self.subTest(command=command):
                 self.assertEqual(self.covering("ask", command), [], "a read would prompt")
-        for rule in self.ASK_BEFORE:
-            self.assertIn(rule, self.permissions["ask"])
+        self.assertEqual(sorted(set(ask)), sorted(set(self.ASK_BEFORE + self.DELETE_RULES)),
+                         "the ask list is 2026-10-14's without the automatic families, with the delete spellings")
+        self.assertEqual(len(ask), len(set(ask)), "a rule listed twice")
         self.assertEqual(self.permissions["deny"], self.DENY_BEFORE)
+        missing = [rule for rule in self.ALLOW_BEFORE if rule not in self.permissions["allow"]]
+        self.assertEqual(missing, [], "an allow rule was dropped")
         self.assertEqual(sorted(self.settings["env"]), ["CLAUDE_VERIFY_CMD", "HARNESS_TEST_CMD", "HARNESS_WORKTREE_SETUP"])
 
     def test_the_live_gate_still_runs_on_every_bash_command(self):

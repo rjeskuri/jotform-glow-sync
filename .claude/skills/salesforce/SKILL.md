@@ -64,8 +64,11 @@ description: Salesforce for this project - what lives there (attendance batches 
   live into a dated `before/` folder → check-only (`sf project deploy validate -o glow …` with the
   tests an Apex change needs, or `sf project deploy start --dry-run`) → Ryan's go → quick deploy of
   the validation (`sf project deploy quick -o glow -i <validation id>`) or the same `start` without
-  `--dry-run` → retrieve again and compare with the build. The hook gates the check-only run too;
-  Claude Code's auto mode may refuse a production deploy (2026-10-02): then Ryan runs it.
+  `--dry-run` → retrieve again and compare with the build. The hook gates the check-only run too:
+  since 2026-10-26 (#146) a `validate` or `start` that names the plan folder `data/sf_<topic>/`
+  goes through automatically when its `before/` holds a file from today; a `quick` deploy by its
+  id names no folder and asks Ryan. Claude Code's auto mode may refuse a production deploy
+  (2026-10-02): then Ryan runs it.
   **Never redeploy an older build** (Ryan, 2026-10-16): every deploy, a rollback included, edits a
   fresh retrieve of what is live; a `before/` is a rollback only for its own change, only for the
   components that change made, and only while a fresh retrieve of them still equals that change's
@@ -76,30 +79,30 @@ description: Salesforce for this project - what lives there (attendance batches 
   An error is reported by its codes only (`glow.salesforce.error_codes`: `DUPLICATES_DETECTED`,
   `UNABLE_TO_LOCK_ROW`), never its words or a response body: a message can quote a girl's name.
 
-## Writers (one per row; every one needs Ryan's go in the conversation)
+## Writers (one per row; the Gate column says which the live gate lets through automatically and which ask Ryan)
 | Writer | What it changes | Gate | Rollback |
 |---|---|---|---|
 | Write connector `Global_Glow_Full_Access` | One record per call (a Club account by hand, a `ParentId`, a permission-set assignment) | Ryan's go only; no hook sees it | The record's values read before the write; a created account is deleted only while it has no Contacts and no attendance |
-| `tools/sf_backfill.py send --apply` | New attendance batches (the processor makes the contacts and rows) | Hook (`--apply`), `--vpn-off`, `--limit 1` first | By id from `ledger.csv` and `created_contacts.csv`, never a time window; never delete a back-fill contact that carries live rows (BACKLOG 78) |
-| `tools/fix_module_values.py --apply` | `Module__c` on batches and their rows | Hook, `--vpn-off` | `--undo <ledger> --vpn-off --apply` |
-| `tools/sf_partner_monthly.py --apply` | One `Partner report` batch per partner a month (the three partners' Monthly Max), or its `Girls_Present__c` when the report changed | Hook (`--apply`), `--vpn-off`, `--limit 1` first | By id from `data/sf_partner_monthly/ledger.csv`: delete an inserted batch, set an updated one back to its `old` count |
-| `tools/sf_report_folders.py copy`, `move`, `undo` with `--apply` | `copy`: a clone of a report or dashboard in Decommissioned; `move`: a report's folder and label (its Id kept); `undo`: those moves put back. Never a dashboard's folder or name (by hand in Lightning) and never the Attendance folders | Hook (`--apply`), `--vpn-off`, `move --limit 1` first | `undo --ledger data/sf_report_folders/ledger.csv --vpn-off --apply`, last first; a copy stays in Decommissioned |
-| `tools/sf_girls_present.py set --apply` | `Girls_Present__c` on `Success` batches that had none | Hook, `--vpn-off` | The ledger (`data/sf_girls_present/`) lists every batch written; no undo command |
-| `tools/sf_dupes.py merge --rehearse` | The merges' DML in production, then thrown and rolled back (records locked, triggers run) | Hook (`--rehearse`), `--vpn-off`, the same quiet moment as `--apply` | Nothing left; should one keep a change, `merge_rollback.json` |
-| `tools/sf_dupes.py merge --apply` | Duplicate contacts of one girl merged (anonymous Apex, one all-or-nothing run per club) | Hook, `--vpn-off`; after the dry run and `--rehearse` | `merge_rollback.json`: undelete within 15 days, rows inserted again |
-| `tools/sf_dupes.py rename --apply` | A stored name's whitespace | Hook, `--vpn-off` | The `renames` old values |
-| `tools/sf_dupes.py cleanup --apply` | Extra affiliations and duplicate-rule sets deleted | Hook, `--vpn-off` | Each deleted record is saved in the rollback file first |
+| `tools/sf_backfill.py send --apply` | New attendance batches (the processor makes the contacts and rows) | Hook: automatic on its own `ledger.csv` row (#146), `--vpn-off`, `--limit 1` first | By id from `ledger.csv` and `created_contacts.csv`, never a time window; never delete a back-fill contact that carries live rows (BACKLOG 78) |
+| `tools/fix_module_values.py --apply` | `Module__c` on batches and their rows | Hook: asks (not on the gate's list), `--vpn-off` | `--undo <ledger> --vpn-off --apply` |
+| `tools/sf_partner_monthly.py --apply` | One `Partner report` batch per partner a month (the three partners' Monthly Max), or its `Girls_Present__c` when the report changed | Hook: automatic on its own `ledger.csv` row, `--vpn-off`, `--limit 1` first | By id from `data/sf_partner_monthly/ledger.csv`: delete an inserted batch, set an updated one back to its `old` count |
+| `tools/sf_report_folders.py copy`, `move`, `undo` with `--apply` | `copy`: a clone of a report or dashboard in Decommissioned; `move`: a report's folder and label (its Id kept); `undo`: those moves put back. Never a dashboard's folder or name (by hand in Lightning) and never the Attendance folders | Hook: automatic on its own `ledger.csv` row, `--vpn-off`, `move --limit 1` first | `undo --ledger data/sf_report_folders/ledger.csv --vpn-off --apply`, last first; a copy stays in Decommissioned |
+| `tools/sf_girls_present.py set --apply` | `Girls_Present__c` on `Success` batches that had none | Hook: automatic on its own `ledger.csv` row, `--vpn-off` | The ledger (`data/sf_girls_present/`) lists every batch written; no undo command |
+| `tools/sf_dupes.py merge --rehearse` | The merges' DML in production, then thrown and rolled back (records locked, triggers run) | Hook: automatic on its own `merge_rollback.json`, `--vpn-off`, the same quiet moment as `--apply` | Nothing left; should one keep a change, `merge_rollback.json` |
+| `tools/sf_dupes.py merge --apply` | Duplicate contacts of one girl merged (anonymous Apex, one all-or-nothing run per club) | Hook: asks (a merge deletes a record), `--vpn-off`; after the dry run and `--rehearse` | `merge_rollback.json`: undelete within 15 days, rows inserted again |
+| `tools/sf_dupes.py rename --apply` | A stored name's whitespace | Hook: asks (every `sf_dupes.py --apply`), `--vpn-off` | The `renames` old values |
+| `tools/sf_dupes.py cleanup --apply` | Extra affiliations and duplicate-rule sets deleted | Hook: asks (a delete), `--vpn-off` | Each deleted record is saved in the rollback file first |
 | `tools/auto_sync.py --apply-salesforce` (GitHub Actions, as Ryan's own user through the External Client App GLOW Sync (client credentials), through `tools/sf_new_clubs.py`) | Creates new clubs' Club accounts (at most 5 per region per run) and marks their SF Pending rows | `SF_SYNC=apply` and `AUTO_SYNC_APPLY=1`, repository variables that only Ryan changes | `SF_SYNC=off`; a created account (Description `created by the automatic sync <date>`; `CreatedById` is Ryan's, not the sync's) is deleted only while it has no Contacts and no attendance. A freeze of Ryan's user also revokes the Jotform connection (RUNBOOK "New clubs' accounts, automatically", The risks of running as Ryan) |
-| `sf project deploy validate`, `start`, `quick` | Metadata | Hook (check-only too) | Redeploy only the components that change made, from its `before/`, after a fresh retrieve of them equals its `after/`, never an older build (2026-10-15: RUNBOOK "Attendance dashboard in Salesforce", Rollback); a `destructiveChanges.xml` for new components |
-| `sf apex run` (the rolled-back proof of a processor change) | Inserts inside a transaction that ends in `Database.rollback` | Hook; the script pasted in full first | Nothing left, unless the script misses its rollback call |
-| `sf data create`, `update`, `delete`, `upsert`, `import` | Records | Hook | Prefer the write connector (one record) or a tool with a ledger |
-| `sf api request rest` with a method other than GET, a body (`-b`/`--body`) or a request file (`-f`/`--file`); `sf api request graphql` | Anything | Hook (a GET without a body or file passes: a read) | As for the record or metadata it changed |
+| `sf project deploy validate`, `start`, `quick` | Metadata | Hook (check-only too): automatic when the command names `data/sf_<topic>/` and its `before/` holds a file from today, else asks; destructive changes ask | Redeploy only the components that change made, from its `before/`, after a fresh retrieve of them equals its `after/`, never an older build (2026-10-15: RUNBOOK "Attendance dashboard in Salesforce", Rollback); a `destructiveChanges.xml` for new components |
+| `sf apex run` (the rolled-back proof of a processor change) | Inserts inside a transaction that ends in `Database.rollback` | Hook: automatic as for a deploy (`--file data/sf_<topic>/…`), else asks; the script pasted in full first | Nothing left, unless the script misses its rollback call |
+| `sf data create`, `update`, `delete`, `upsert`, `import` | Records | Hook: automatic as for a deploy, else asks; `delete` always asks | Prefer the write connector (one record) or a tool with a ledger |
+| `sf api request rest` with a method other than GET, a body (`-b`/`--body`) or a request file (`-f`/`--file`); `sf api request graphql` | Anything | Hook: automatic as for a deploy, else asks; a DELETE always asks (a GET without a body or file passes: a read) | As for the record or metadata it changed |
 
 `SF_SYNC` is `off` (or unset: no login), `plan` (reads, checks, and turns every account it would
 create into an ATTENTION item with the exact body) or `apply`. `gh variable set SF_SYNC …` and
-`gh variable set AUTO_SYNC_APPLY …` are Ryan's to decide; the hook puts them to him as an
-approval prompt when Claude runs one, and his yes is the go (RUNBOOK
-"New clubs' accounts, automatically").
+`gh variable set AUTO_SYNC_APPLY …` are Ryan's to decide; the hook lets one through without a
+prompt only on a `github all` backup from today (`tools/github_switches.py backup`), and asks
+him otherwise (RUNBOOK "New clubs' accounts, automatically"; "Live gate (Claude Code)").
 
 ## Where the files go
 Salesforce metadata and Apex are not in git. Every retrieve, build and piece of evidence lives
