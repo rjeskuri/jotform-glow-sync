@@ -25,6 +25,12 @@ from glow import usage
 from glow.text import md5
 
 
+# The fixtures below predate the session-notes field (live on every form since task #105, which set
+# glow.layout.NOTES_EXPECTED): its absence is pinned in test/session_notes_test.py, not here.
+NOTES_NOT_EXPECTED = mock.patch.object(layout, "NOTES_EXPECTED", False)
+
+
+@NOTES_NOT_EXPECTED
 class FormStatusAudit(FormStatusFixture, unittest.TestCase):
     """tools/form_status.py audit_rules on forms built by the sync's own rules."""
 
@@ -756,6 +762,7 @@ class FormStatusRoster(unittest.TestCase):
             self.assertNotIn("'africa'", out)                     # under its form's region
 
 
+@NOTES_NOT_EXPECTED
 class FormStatusLayout(unittest.TestCase):
     """tools/form_status.py: the layout audit joins rule_problems (CLEAN needs
     none, and the runner's verify_report sees a relapse)."""
@@ -819,6 +826,7 @@ class FormStatusLayout(unittest.TestCase):
 # audit it tests does not move with the live type list. The two-type state is
 # test/special_events_test.py (IdgAudit).
 @mock.patch.object(glow_sync, "SPECIAL_EVENTS", ("Welcome Session",))
+@NOTES_NOT_EXPECTED
 class ModuleAndNamesAudit(unittest.TestCase):
     """tools/form_status.py: the module dropdowns' calcValues (as MODULE_CALC_VALUES says)
     and the form's names dictionary (emulated), through the API and on the served page;

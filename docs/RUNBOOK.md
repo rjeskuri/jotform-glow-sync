@@ -56,6 +56,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Attendance totals and partner-reported counts](#attendance-totals-and-partner-reported-counts)
   - [Attendance dashboard in Salesforce](#attendance-dashboard-in-salesforce)
   - [Submission timing in Salesforce](#submission-timing-in-salesforce)
+  - [Session notes in Salesforce](#session-notes-in-salesforce)
   - [Monthly Report dashboards in Salesforce](#monthly-report-dashboards-in-salesforce)
   - [Interactive dashboard in Salesforce](#interactive-dashboard-in-salesforce)
   - [September back-fill: the resolver](#september-back-fill-the-resolver)
@@ -976,7 +977,7 @@ agree.
 - **Dry run:** each command without `--apply`.
 - **Apply:** with `--apply`, Ryan's go.
 - **Verify:** `--audit` again; `switcher_flags.py --check-page`.
-- **Rollback:** each write saves the form's whole store before its POST, to `backups/translations/<form>-<stamp>-before.json` (mode 600, never over an earlier file); without that file `glow/translations.py` sends nothing. Since 2026-10-09 that includes `add_language.py` and `restore_translations.py`, which used to POST without it.
+- **Rollback:** each write saves the form's whole store before its POST, to `backups/translations/<form>-<stamp>-before.json` (mode 600, never over an earlier file); without that file `glow/translations.py` sends nothing. Since 2026-10-09 that includes `add_language.py` and `restore_translations.py`, which used to POST without it. To put a saved store back: `python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json` (a dry run: per language how many keys differ, are added, are removed), then the same command with `--apply` on Ryan's go (the current store saved first, each differing language posted whole, re-read: RESTORED or MISMATCH).
 
 ```bash
 python3 tools/add_translations.py --audit                 # which labels lack translations
@@ -985,6 +986,8 @@ python3 tools/add_translations.py --apply
 python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json          # preview
 python3 tools/add_language.py --code or --name Oriya --dict tools/translations_or.json --apply
 python3 tools/restore_translations.py --form <clone id> --check   # after a clone: is the switcher intact?
+python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json   # put a saved store back: dry run
+python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json --apply   # on Ryan's go
 python3 tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict tools/translations_hi.json     # Asia only (2026-09-20)
 python3 tools/add_language.py --form 262383129464057 --code fa --name Persian --dict tools/translations_fa.json   # Asia only (2026-09-20)
 python3 tools/switcher_flags.py --check-page             # which switcher languages have no built-in flag (public page, no key)
@@ -1031,7 +1034,8 @@ by a test to the table in "The forms"):
 
 The Club Roster Form link sits above the problem link, so a mentor with a
 roster change meets it first. Place it only after the session-notes field
-(task #105; "Session notes on the attendance forms"): the notes go on first,
+(on all five forms since 2026-10-26, task #105; "Session notes on the
+attendance forms"): the notes go on first,
 because placing this link leaves Submit sharing an order with the hidden field
 below it, and `add_session_notes.py` then refuses on the tie. Adding,
 re-checking or removing one:
@@ -1105,11 +1109,11 @@ what `--undo` can still restore: [plan](plans/2026-09-29-rosters-above-submit.md
 ## Session notes on the attendance forms
 
 - **When:** placing, re-checking or removing the optional session-notes field; `form_status` says `session notes: absent` once the field is expected, or flags one (`!!` lines naming `sessionNotes`).
-- **Status:** built, not live (ticket #104, 2026-10-23). Task #105 places it on the template and the four regional forms on Ryan's go, after a read-only `GET /form/{id}/questions` of a live textarea confirms the limit property (`entryLimit`, `Letters-1000`: the name from Jotform's own example, the value from the runtime; not yet read from this account), and flips `glow/layout.py` `NOTES_EXPECTED` to `True`.
-- **Dry run:** `python3 tools/add_session_notes.py`.
-- **Apply:** its `--apply`, the template first; the label's translations are a second step (task #105): until then every language shows it in English.
-- **Verify:** the tool's re-read after the write; `form_status` (`session notes:`, `layout:`).
-- **Rollback:** `--remove --apply`, the questions snapshot, or Revision History.
+- **Status:** live on all five forms since 2026-10-26, the label translated in every language each form offers ([plan](plans/2026-10-25-session-notes.md), status done; ticket #105, on Ryan's go): the template q489, Africa q476, Asia q457, Latin America q454 and the disabled U.S q446, each CLEAN. `glow/layout.py` `NOTES_EXPECTED` is `True` from #105's land on (a form without the field is then NOT CLEAN); the runner's first run after the land is still to be read for in-sync (plan, Result). The limit is `entryLimit` `Letters-1000`, verified by the template write's re-read. Neither e-mail shows the notes yet: ticket #148 adds them to both (below).
+- **Dry run:** `python3 tools/add_session_notes.py --form <id>`, then `python3 tools/add_translations.py --form <id>`.
+- **Apply:** per form, after `python3 backup_forms.py --form <id>`: `python3 tools/add_session_notes.py --form <id> --apply`, then its translations with `python3 tools/add_translations.py --form <id> --apply` (GET, merge, POST; the store saved first), the template first.
+- **Verify:** the tool's re-read after the write; `python3 tools/form_status.py --form <id> --roster data/roster_<date>.csv --partners data/partners_<date>.csv --rendered` (`session notes: present`, `layout:`, CLEAN); once all five carry it, `python3 tools/add_translations.py --audit` (the label untranslated nowhere; the audit truncates its lists, so the 2026-10-26 rollout's proof was a direct read of each form's store, plan Result).
+- **Rollback:** `python3 tools/add_session_notes.py --form <id> --remove --apply`, the questions snapshot, or Revision History. A language a translations POST damaged (`MISMATCH after write`) comes back from the translation store that POST saved first: `python3 tools/restore_translations.py --form <id> --from-file backups/translations/<id>-<stamp>-before.json` (a dry run: per language how many keys differ, are added, are removed), then the same command with `--apply` on Ryan's go (the current store saved first, each differing language posted whole, re-read: RESTORED or MISMATCH; [plan](plans/2026-10-25-session-notes.md), Rollback).
 
 One textarea named `sessionNotes` on every attendance form, found by its name
 (the qid differs per form): the label "Additional information about this
@@ -1122,23 +1126,41 @@ goes above it (the field is the first element of the fence `glow/layout.py`
 guards, like the links and Submit; test-pinned). Mentors' notes are free text
 that can name girls: no tool prints a submission's notes, counts only.
 
+The e-mails (ticket #105; [plan](plans/2026-10-25-session-notes.md), Result). Mentors' notes
+can name girls, so Ryan decided per e-mail, on 2026-10-26: the notes go in both. The staff
+notification e-mail ("Notification 1", to GLOW's fixed staff address) carries them, and so does
+the mentor's confirmation (the autoresponder, to the address she typed). Both are custom bodies
+that list fixed fields (read in the template's builder, Settings, Emails, 2026-10-26), and
+Jotform rebuilds only a default body when questions change, so today neither shows the notes:
+they are in Jotform's submissions only. Ticket #148, Ryan's by hand in the builder after #105
+lands, adds `{sessionNotes}` to both bodies on each of the five forms (ten bodies).
+
+The label is translated in every form language (`tools/translations_additions.json`, and the
+Odia, Hindi and Persian files; written by us, not native-reviewed): per form, the translations
+go on right after the field, since `tools/add_translations.py` posts a string only to a form
+that shows it.
+
 ```bash
-python3 tools/add_session_notes.py                                # dry run, template + 4 regionals
-python3 tools/add_session_notes.py --form 262352490535154 --apply # the template first; open its page
-python3 tools/add_session_notes.py --apply                        # the four regional forms
-python3 tools/add_session_notes.py --remove --apply               # take it out again (the rollback)
+python3 tools/add_session_notes.py                                     # dry run, template + 4 regionals
+python3 backup_forms.py --form 262352490535154
+python3 tools/add_session_notes.py --form 262352490535154 --apply      # the template first; open its page
+python3 tools/add_translations.py --form 262352490535154               # dry run: one new entry per language
+python3 tools/add_translations.py --form 262352490535154 --apply       # the store saved first; GET, merge, POST
+python3 tools/add_translations.py --audit                              # after all five: nothing untranslated
+python3 tools/add_session_notes.py --form <id> --remove --apply        # take it out again (the rollback)
 ```
 
 The tool plans all five forms before it writes any. The field goes at an
 empty order between the last roster and the first link, where nothing moves
-whether Jotform inserts or ties. The live forms have none today (the
-2026-09-30 repair put the links, Submit and the hidden bridge fields at the
-orders right after the last roster, and every roster inserted since kept them
-there), so the tool first makes room the way `add_feedback_link.py` does
-(Ryan, 2026-10-23): the first link through Submit and the hidden fields at the
-orders right after move one down, bottom-up so each lands on an empty order
-(the path Jotform keeps exactly), then one create at the freed order - about
-ten writes per form, each printed as `move <name> (qN) a -> b`. So the
+whether Jotform inserts or ties. The live forms had none before the
+2026-10-26 rollout (the 2026-09-30 repair put the links, Submit and the hidden
+bridge fields at the orders right after the last roster, and every roster
+inserted since kept them there), so the tool first made room the way
+`add_feedback_link.py` does (Ryan, 2026-10-23): the first link through Submit
+and the hidden fields at the orders right after move one down, bottom-up so
+each lands on an empty order (the path Jotform keeps exactly), then one create
+at the freed order - ten writes per form (9 moves and the create), each
+printed as `move <name> (qN) a -> b`. So the
 sequence matters: **the session notes go on before the Club Roster Form link**
 (`add_feedback_link.py --link roster`, BACKLOG 46; "Links above Submit"), whose
 placing leaves Submit sharing an order with the hidden field below it. After
@@ -1212,11 +1234,20 @@ company Shared Drive ("Photo mover", below). The photo stays required on the for
 before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
 <named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
 
-`python3 tools/integration_status.py` reads every form's integration: `ok (one action, 8
-fields, Account_Name__c from q5, no upload)` is right, a mapped photo reads `NOT RIGHT: the
+`python3 tools/integration_status.py` reads every form's integration: an `ok (one action, …,
+Account_Name__c from q5, …, no upload)` line is right, a mapped photo reads `NOT RIGHT: the
 upload field is ['19'], not []`, and `other integrations:` lists the other blocks the form
 carries - the Google Drive block's key once step 2 is done (whether the API shows the block at
-all is unverified until then; `none` on every form on 2026-10-06).
+all is unverified until then; `none` on every form on 2026-10-06). A form with the session
+notes mapped (ticket #106) reads `ok (one action, 9 fields, Account_Name__c from q5,
+Session_Notes__c from q<N>, no upload)`, q<N> being that form's own question named
+`sessionNotes` (found by its name: the qid differs per form); a notes mapping from any other
+question is `NOT RIGHT`. Until step 1 below the template stays `NOT RIGHT` on its upload row
+(exit 1) whatever its notes: only a `Session_Notes__c` line there is the notes' concern. Since
+2026-10-26 `NOTES_MAPPING_WANTED` in the tool is True: a live form without the mapping is `NOT
+RIGHT`, except one whose `status` is exactly `DISABLED` (the U.S form), which reads `ok (one
+action, 8 fields, Account_Name__c from q5, Session_Notes__c not wanted (form DISABLED), no
+upload)` ("Session notes in Salesforce").
 
 *Setting it up (Ryan, in the builder; the API cannot; template first). Every builder save is a
 live write to a form, so each one follows the ritual: a quiet moment with no other rollout on
@@ -1234,8 +1265,10 @@ plain `diff` of the snapshot before and the one after.*
    → the only hunks are inside `integrations` (the upload row gone); `emails`, `conditions`,
    `clearFieldOnHide` byte-identical; `python3 backup_forms.py` again for the other four and
    the same diff on each → empty. Then `python3 tools/integration_status.py` → every live form
-   `ok (one action, 8 fields, Account_Name__c from q5, no upload)`, `integration: ok`. Until
-   this step the template reads `NOT RIGHT: the upload field is ['19'], not []`.
+   `ok (one action, 9 fields, Account_Name__c from q5, Session_Notes__c from q<N>, no upload)`
+   (the U.S form, DISABLED: 8 fields, `Session_Notes__c not wanted (form DISABLED)`),
+   `integration: ok`. Until this step the template reads `NOT RIGHT: the upload field is
+   ['19'], not []`.
 2. **Template, Google Drive**. Before: `python3 backup_forms.py --form 262352490535154`. Then
    Settings → Integrations → Google Drive → Authorize → log in as Ryan's company account (the
    one the photo mover runs on) → Folder Name `Attendance photos - Template` (the photo mover's
@@ -1499,7 +1532,8 @@ python3 tools/disable_form.py --form 262382706852058 --enable --apply   # the wa
   club", the way back), then `python3 tools/disable_form.py --form
   262382706852058 --enable --apply` (or the builder), one runner dry run
   (the region reads `in-sync` or plans the restores), `AUTO_SYNC_APPLY`
-  unchanged.
+  unchanged. Its Salesforce integration needs the session notes mapped
+  (q446) before or with the re-enabling ("Session notes in Salesforce").
 
 ## Building a new regional form (not maintenance)
 
@@ -1961,7 +1995,9 @@ Their clubs stay in the Roster — the girls are active and enrolled, their ids
 are kept, the Club Roster Form still lists the clubs — but they leave the
 attendance forms' Club picker. Never give such a club a blank region (CLAUDE.md
 rule 6: that says "fix me" and raises ATTENTION on every run); mark the
-partner instead.
+partner instead. A partner marked `no` also goes, by hand, into the partner-name
+filter of the Salesforce report `Clubs_Not_Submitting_Last_Week` ("Submission
+timing in Salesforce", The timing reports), or its clubs show there every week.
 
 **The marker.** The Partners tab's fourth column, `jotform`: `no` = the
 partner's clubs are not on Jotform; `yes` or blank = on Jotform (the default;
@@ -2889,11 +2925,11 @@ python3 tools/sf_dupes.py check --vpn-off --roster data/roster_<stamp>.csv    # 
 ## Duplicate and obsolete records in Salesforce
 
 - **When:** the monthly check (with "Duplicate girls in Salesforce"); a flag to set or clear; GLOW's own definitions arrive (DECISIONS 2026-10-21).
-- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day, 12:58 UTC, on his go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch is ticket #85.
+- **Status:** deployed 2026-10-22 12:33 UTC on Ryan's go (ticket #84; deploy `0AfRP000002htOH0AY`, 9/9, check-only `0AfRP000002hlVZ0AY`): the three Account rules active and report only, the `Datacloud.FindDuplicates` diagnostic run the same day, 12:58 UTC, on his go ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md), [Result](plans/2026-10-21-sf-duplicate-obsolete-flags.md#result)); step 8, the next day's batch check, is pending, due on or after 2026-10-23; the flagging batch `RecordFlagBatch` (ticket #85) is deployed (`0AfRP000002i7np0AA`, 2026-10-26 07:03 UTC). The flagging batch ran on 2026-10-26 on Ryan's go: Account in flag mode, job `707RP00002cLzc0YAC`, 07:45 UTC, duplicate 0, obsolete 26; Contact in flag mode, job `707RP00002cM4WlYAK`, 07:48 UTC, duplicate 20, obsolete 0 ("The flagging batch", below; the plan's [Result](plans/2026-10-23-sf-record-flag-batch.md#result)).
 - **Dry run:** the check-only deploy (`sf project deploy start --dry-run`), step 3 of the plan's Rollout.
 - **Apply:** the same with its dry-run flag taken off, Ryan's go (VPN off); then the proof, also on his go: the no-DML `Datacloud.FindDuplicates` diagnostic (`sf apex run -f diag.apex`, the plan's step 6), which runs the active rules over three unsaved copies of existing accounts, inserts nothing and prints only `DIAG|` lines with each rule's name and its match count.
 - **Verify:** SOQL on `DuplicateRule` and `MatchingRule` (the three Account rules active, the Contact rule as before), the four fields in `describe`, `glow.salesforce.duplicate_account_groups` against the rules' `DuplicateRecordSet`s (a cross-type pair, a Household account and a Club of one name and parent, is a set without a group: looked at by hand), and the next day no `Attendance_Batch__c` `Failed` with `DUPLICATES_DETECTED` among its `Status_Message__c` codes (`glow.salesforce.error_codes`).
-- **Rollback:** deactivate the two Account Duplicate Rules, each rule by the same step (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)).
+- **Rollback:** deactivate the two Account Duplicate Rules, each rule by the same step (`isActive` false, by a deploy or in Setup, Duplicate Rules), Ryan's go; the four fields stay ([plan](plans/2026-10-21-sf-duplicate-obsolete-flags.md#rollback)). The flags the batch (#85) set: a `clear` run of the same batch, `new RecordFlagBatch('Account', 'clear')` then `new RecordFlagBatch('Contact', 'clear')`, through `tools/sf_record_flags.py --mode clear` and `sf apex run`, Ryan's go, the hand-set flags counted first since `clear` takes them off too (the plan's Rollback, "The flagging batch" below).
 
 GLOW's annotated SOW (p.9) asks for "Duplicate Record" and "Obsolete Record" checkbox fields on
 Account and Contact, and for one Matching Rule and one Duplicate Rule on Account. The definitions
@@ -3005,6 +3041,89 @@ Club of one name and parent (cross-type), which Salesforce may report and
 `duplicate_account_groups`, keeping its own definition, never groups. Look at the two records of
 such a pair by id and decide by hand whether one is a stray of the other (Ryan, 2026-10-22).
 Counts and ids only in what is said about it.
+
+### The flagging batch
+
+`RecordFlagBatch` (ticket #85; [plan](plans/2026-10-23-sf-record-flag-batch.md); deployed and
+run on 2026-10-26, the Status line above) sets the two flags by the criteria above, one batch job per object in scopes of 200
+(`Database.Batchable` with `Database.Stateful`); the class and its test class live in
+`data/sf_record_flags_2026-10-23/build/`, never in git. Three modes: `dryRun` counts and writes
+nothing; `flag` only sets a flag and never unsets one - it sets a flag where the criteria ask for
+one, and a flag set by hand on a record outside the criteria stays (Ryan, 2026-10-24, option a,
+after the review of PR #133); `clear` alone takes a flag off: it sets both flags false on every
+record that has one, a flag set by hand included. A stale flag - an obsolete flag on a club that
+reports again - stays until a `clear` run and a `flag` run, each on Ryan's go. A run writes only
+the two flag fields, and only on a record whose flag changes, so a second `flag` run writes
+nothing, and so does a `flag` run over a hand-set flag the criteria do not ask for; `finish` logs
+counts alone, never a name or a field's value. Account duplicates are judged in code, as
+`glow.salesforce.duplicate_account_groups` judges them (the same name ignoring capitals and
+spacing - every run of whitespace, a tab or a no-break space included, is one space - the same
+parent and the same record type), computed once per job over every Account; every member of a
+group is flagged, with no keeper (Ryan, decision 2a). One divergence between the two sides: the
+batch lower-cases a name (`toLowerCase`) where `glow.salesforce.duplicate_account_groups` uses
+Python's `casefold`, so `Straße` and `STRASSE` are two names to the batch and one to the monthly
+check, and a group the check shows with no flag on its members is looked at by hand before
+anything else. `Datacloud.FindDuplicates`
+is not used by the batch: it does not see records inserted in the same transaction, so the tests
+could not prove it. A Contact is a duplicate when it sits in a `DuplicateRecordSet` of the Contact
+rule "First & Last & Account" holding two or more records (a set left with one item is no group:
+`tools/sf_dupes.py cleanup`). Obsolete is as defined above: a Club's six months are read on
+`Attendance_Batch__c.Attendance_Date__c` of its own batches, any status, or, for a club of a
+`jotform=no` partner, of the partner account's `Partner report` batches; a Participant's twelve
+months on `Attendance__c.Attendance_Date__c`.
+
+**Running it** (the plan's Rollout; each live step on Ryan's go, VPN off, from the repository
+root). The script writer `tools/sf_record_flags.py` reads the sheet's exports and Salesforce and
+writes the anonymous Apex, ids only: for Account it needs the day's Roster and Partners exports
+(the deactivated clubs' Club accounts and the `jotform=no` partners' accounts, which Apex cannot
+read: Ryan, decision 1a); for Account it first counts the Households Settings rows with NPSP Automatic Household Naming
+on, and for Contact the three things the NPSP and Volunteers workflow rules act on; it writes no
+script while any count is not 0 (the guards, below). Each
+script is pasted in full in the session, then `sf apex run` runs it and prints no job id (a
+one-statement script prints nothing): the read-only `AsyncApexJob` query below, newest first,
+gives the job's id and status, and the batch job's finish line in the debug log,
+`RecordFlagBatch|<object>|<mode>|duplicate=N|obsolete=N|written=N|failed=N`, gives the counts.
+
+```bash
+python3 tools/sheets_client.py export Roster data/roster_<date>.csv
+python3 tools/sheets_client.py export Partners data/partners_<date>.csv
+python3 tools/sf_record_flags.py --sobject Account --mode dryRun --roster data/roster_<date>.csv --partners data/partners_<date>.csv --out data/sf_record_flags_<date>/scripts/account_dryRun.apex --vpn-off
+sf apex run -o glow -f data/sf_record_flags_<date>/scripts/account_dryRun.apex      # Ryan's go
+python3 tools/sf_record_flags.py --sobject Contact --mode dryRun --out data/sf_record_flags_<date>/scripts/contact_dryRun.apex --vpn-off
+sf apex run -o glow -f data/sf_record_flags_<date>/scripts/contact_dryRun.apex      # Ryan's go
+sf data query -o glow -q "SELECT Id, Status, JobItemsProcessed, TotalJobItems, NumberOfErrors, CreatedDate FROM AsyncApexJob WHERE ApexClass.Name = 'RecordFlagBatch' ORDER BY CreatedDate DESC LIMIT 1"   # after each run: the job's id and status, read only
+```
+
+The same with `--mode flag` is the run (Account first, then the guard and Contact, at a quiet
+hour), after Ryan confirmed the dry run's counts on the ticket; `--mode clear` is the way back.
+
+**The guard** (Ryan, 2026-10-23, option a): two NPSP workflow rules, `Preferred_Email__c` and
+`Preferred_Phone__c`, fire on any edit of a Contact whose Email or Phone is blank and fill it from
+the Work, Home and Alternate e-mail fields (or the Work, Home, Mobile and Other phone fields), and
+the Volunteers signup rule sends mail for a web signup of the day; the other Contact rules need a
+changed Email or Phone or a new record, and Account has only a Flow that acts when the owner
+changes. On 2026-10-23 the three counts were 0, 0 and 0, so a flag-only update changes nothing
+else. The tool counts them right before each Contact script (three `SELECT COUNT() FROM Contact
+WHERE …`, counts only) and refuses the script while any count is not 0; the plan's Rollout counts
+them again before the Contact run. The NPSP handlers and MC4SF are accepted as harmless for a
+flag-only update (Ryan, 2026-10-23).
+
+**The household-naming guard** (Ryan, 2026-10-26): with NPSP's Automatic Household Naming on, an
+update of a partner's household Account renames it, so a `flag` or `clear` run over Accounts would
+rename partners. Production has it off (the org default, `npo02__Households_Settings__c`), but
+NPSP forces it on inside Apex tests, which is how the second check-only of 2026-10-26 found it.
+Before every Account script, in each mode, the tool runs `SELECT COUNT() FROM
+npo02__Households_Settings__c WHERE npo02__Advanced_Household_Naming__c = true` (every row: the
+org default, a profile's or a user's), prints it, and writes no script while it is not 0: turn
+the naming off in NPSP Settings, or ask Ryan.
+
+**The way back:** a `clear` run of the same batch, `new RecordFlagBatch('Account', 'clear')` and
+`new RecordFlagBatch('Contact', 'clear')` through `tools/sf_record_flags.py --mode clear` and
+`sf apex run`, sets both flags false on every record that has one - the only way a flag comes off,
+since a `flag` run never unsets one; every flag was false before the fields were created on
+2026-10-22, and the flags set by hand come off with it, so the plan's Rollout counts those first. The ids a run flagged are saved in
+`data/sf_record_flags_<date>/flagged.csv` (ids only) for a rollback of that run alone, record by
+record through the write connector.
 
 ## Attendance totals and partner-reported counts
 
@@ -3437,7 +3556,8 @@ sharing stays as it is"):
 - Test report: superseded 2026-10-16 - do not redeploy `before/` (it would undo the 2026-10-09
   label). To undo a change to it, retrieve it, edit only that change in the copy, check-only,
   Ryan's go, deploy.
-- The new components: delete them with a `destructiveChanges.xml`. Never delete
+- The new components: delete them with a `destructiveChanges.xml`, except task #102's (the last
+  entry below), which are moved to Decommissioned and never deleted. Never delete
   `Jotform_Monthly_Attendance_test`; it predates this work. The new components are:
   - the reports `Jotform_Attendance_by_Week`, `Jotform_Attendance_by_Month`,
     `Jotform_Attendance_Last_Month`, `Jotform_Attendance_This_Month` (deleted 2026-10-21),
@@ -3453,6 +3573,16 @@ sharing stays as it is"):
     2026-10-16: they would undo the 2026-10-09 and 2026-10-15 changes); before the six reports go,
     retrieve it, remove the `totals1/` tiles in that copy, check-only, Ryan's go, deploy (the six
     reports and the type may stay).
+  - the exception, never deleted: since task #102 (built 2026-10-24; deployed only on Ryan's
+    go), the reports
+    `Clubs_Not_Submitting_Last_Week`, `Submissions_by_Club_and_Week`,
+    `Late_Submissions_Last_Month` and `Submission_Delay_by_Partner_by_Month`, each moved to
+    Decommissioned, never deleted (DECISIONS 2026-10-21), after any dashboard component that
+    reads them (task #103), and edited there to drop the timing fields before the columns go; and
+    the four columns `Submitted_At__c`, `Submission_Delay_Days__c`,
+    `Session_Month__c` and `Session_Week__c` that #102 adds to the report type `Attendance_Totals`,
+    taken out of a fresh retrieve of it and deployed (check-only, Ryan's go), never by deleting
+    the type or redeploying an older copy ("Submission timing in Salesforce", The timing reports).
 - The 2026-10-15 change (the total as Jotform plus the three partners, ticket #35): it changed
   three components, the dashboard `Attendance/Jotform_Attendance_test` and the reports
   `Attendance/Total_Attendance_Last_Month` and `Attendance/Total_Attendance_by_Partner_by_Month`
@@ -3533,7 +3663,8 @@ sharing stays as it is"):
   06:41 UTC, Ryan's go). The first delay formula was a day short for submissions before about
   07:00 UTC (the check: 153 of 1,123 batches); `Submission_Delay_Days__c` was redeployed alone
   with the corrected text the same day (deploy `0AfRP000002i4LJ0AY`, 06:59 UTC), and the check
-  reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result).
+  reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result). The four
+  timing reports of task #102 are built, not deployed ("The timing reports", below).
 - **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
   is read-only.
 - **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
@@ -3603,13 +3734,226 @@ dropped silently ("Attendance dashboard in Salesforce", Access). A new report on
 needs that field's Read added to the set.
 
 **Rollback** ([plan](plans/2026-10-23-submission-timing.md#rollback)): the reports that use or
-filter on the fields go first (edited or deleted, each copied to Decommissioned before, the
-archive rule of DECISIONS 2026-10-21), then the four fields `Submitted_At__c`,
+filter on the fields go first, never deleted (the archive rule of DECISIONS 2026-10-21): each is
+edited to drop the fields, since a report that uses a field blocks its deletion wherever the
+report is: a report kept is edited, and its copy to Decommissioned is edited to drop them too
+(a copy that kept them would block the deletion), so the report as it was, fields and all, is
+kept only in the fresh retrieve the edit starts from; a report retired is moved to
+Decommissioned and edited there to drop them; then the four fields `Submitted_At__c`,
 `Submission_Delay_Days__c`, `Session_Month__c` and `Session_Week__c` are deleted by a
 `destructiveChanges.xml` deploy, check-only first and on Ryan's go, their permission-set and
 Admin profile entries with them. Never an older build (DECISIONS 2026-10-16): the deploy created
 the four fields and only added their entries to the permission set and the Admin profile, which
 go with the fields when they are deleted, so nothing is redeployed from its `before/`.
+
+### The timing reports
+
+**Status:** built 2026-10-24 offline (task #102), in `data/sf_session_timing_2026-10-24/t102_build/`
+(`build/`, `pattern/`; owner only, never committed): the four reports below, and the report
+type `Attendance_Totals` with the four fields added to its columns (a custom report type offers
+a new field only once it is in its layout; the retrieve of 2026-10-24 09:24 UTC, after the fields' deploy, had none of
+them). Nothing is deployed: the fresh retrieve, the check-only deploy, the deploy, the read-back
+and each report's run through the Analytics API against its SOQL check wait for Ryan's go, VPN
+off ([plan](plans/2026-10-23-submission-timing.md), "Task #102: the timing reports").
+
+The four reports are in the Attendance report folder (`Attendance`), beside the dashboard's other
+reports, and answer what GLOW staff asked on 2026-10-22: which clubs have not submitted for a
+week, and how long clubs take from a session to its submission. Each report carries the partner,
+the column the dashboard's Partner filter uses (`PARENT.NAME` on the Account report,
+`Attendance_Batch__c$Account__c.Parent` on the three batch reports), and the unlocked Partner and
+Club "contains" filters of the other attendance reports. They read only fields the existing
+reports already show and the four timing fields, which `Attendance_Report_Viewer` reads (Access,
+above). The SOQL check beside each name reproduces the report's total (read only, VPN off, the CLI
+login `glow` or the read-only connector; counts and partner names only):
+
+- `Clubs_Not_Submitting_Last_Week` ("Clubs Not Submitting - Last Week", on Accounts, built from
+  `Clubs_Not_Submitting_Last_14_Days`) answers which clubs sent nothing for last week's sessions:
+  the club accounts with a partner and no batch of any status dated last week, grouped by
+  partner, less the partners left out (below). Check: `SELECT COUNT(Id) FROM Account WHERE
+  RecordType.DeveloperName = 'Club' AND ParentId != null AND Parent.Name NOT IN ('Education and
+  English for You', 'Tumaini La Maisha', 'Ng\'aa Maskani', 'Angelo Patri School', 'Detroit Public
+  Schools', 'Ewa Makai Middle School', 'Farmington Municipal School District', 'HOLA', 'Holbrook
+  Unified School District') AND Id NOT IN (SELECT Account__c FROM Attendance_Batch__c WHERE
+  Attendance_Date__c = LAST_WEEK)`.
+- `Submissions_by_Club_and_Week` ("Submissions by Club and Week", a matrix on `Attendance_Totals`)
+  answers in which weeks each club submitted: rows partner then club, columns the session week
+  (`Session_Week__c`, as `2026-10 week 2`), each cell the count of batches of any status, for
+  sessions dated this week and the 8 weeks before it (`N_WEEKS_AGO:8` to `THIS_WEEK`); a blank
+  cell is a week with no submission. Check: `SELECT Account__r.Parent.Name, Account__r.Name,
+  Session_Week__c, COUNT(Id) FROM Attendance_Batch__c WHERE Attendance_Date__c >= N_WEEKS_AGO:8
+  AND Attendance_Date__c <= THIS_WEEK GROUP BY Account__r.Parent.Name, Account__r.Name,
+  Session_Week__c`.
+- `Late_Submissions_Last_Month` ("Late Submissions - Last Month", a summary on
+  `Attendance_Totals`) answers how long each submission of last month took: every live Jotform
+  batch (`Creator__c` `Jotform`, `Processing_Status__c` `Success`) with a session date last month,
+  grouped by partner, with its club, session date, submission time (`Submitted_At__c`) and days
+  from session to submission (`Submission_Delay_Days__c`), each partner's batches sorted with the
+  largest delay first. Check: `SELECT
+  Account__r.Parent.Name, Account__r.Name, Attendance_Date__c, Submitted_At__c,
+  Submission_Delay_Days__c FROM Attendance_Batch__c WHERE Creator__c = 'Jotform' AND
+  Processing_Status__c = 'Success' AND Attendance_Date__c = LAST_MONTH ORDER BY
+  Submission_Delay_Days__c DESC`.
+- `Submission_Delay_by_Partner_by_Month` ("Submission Delay by Partner by Month", a summary with a
+  bar chart) answers how long each partner's clubs take, month by month: the average and the
+  maximum of `Submission_Delay_Days__c` over the live Jotform batches, by partner and session
+  month (`Session_Month__c`), this month and the 11 before it (`N_MONTHS_AGO:11`); the chart shows
+  the average, a bar per partner and month. Check: `SELECT Account__r.Parent.Name,
+  Session_Month__c, AVG(Submission_Delay_Days__c), MAX(Submission_Delay_Days__c), COUNT(Id) FROM
+  Attendance_Batch__c WHERE Creator__c = 'Jotform' AND Processing_Status__c = 'Success' AND
+  Attendance_Date__c >= N_MONTHS_AGO:11 GROUP BY Account__r.Parent.Name, Session_Month__c`.
+
+Not confirmed offline: SOQL often refuses `GROUP BY`, `AVG` or `MAX` on a formula field
+(`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`). The `GROUP BY` statements
+above are the first try. When SOQL refuses one, the check that the plan's Task #102 Rollout step 7 runs is
+the fallback: select the same rows ungrouped, with the same `WHERE` and the fields the statement
+would group or aggregate, and total them offline (the count per partner, club and week; the
+average and the maximum per partner and month). The reports themselves group by those fields,
+which reports allow.
+
+**Who is left out** (Ryan, 2026-10-24): the clubs of the three partners that report monthly
+through Salesforce (Education and English for You, Tumaini La Maisha and Ng'aa Maskani, 38 clubs
+off the forms since 2026-10-16) and the U.S clubs (their form is disabled) are left out of
+`Clubs_Not_Submitting_Last_Week`, where they would otherwise show every week. They are left out
+by a filter on their partner account names, `Parent.Name` in the SOQL check and a locked
+`PARENT.NAME` "not equal to" in the report, which names the three partners and the six U.S
+partner accounts, Angelo Patri School, Detroit Public Schools, Ewa Makai Middle School,
+Farmington Municipal School District, HOLA and Holbrook Unified School District, as
+`glow/sf_partners.csv` spells them. A new partner of that kind needs the report's filter edited by
+hand (a fresh retrieve, check-only, Ryan's go, deploy): one that reports monthly through
+Salesforce, or whose clubs stop using Jotform (the Partners tab's `jotform` set to `no`, "Clubs
+that do not use Jotform"). `Submissions_by_Club_and_Week` is unaffected: it shows only the clubs
+with a batch in its window. The two delay reports keep every partner: they show a club only for
+a month in which it submitted through Jotform.
+
+**Not submitting last week** means no batch of any status whose session date
+(`Attendance_Date__c`) is in last week, as the existing lists count it (DECISIONS 2026-10-06): a
+blank or a refused duplicate counts as submitted, and the day a submission arrived plays no part.
+The week runs Sunday to Saturday for en_US viewers and on the dashboard, which runs as Ryan:
+`LAST_WEEK`, in the report's cross filter and in its SOQL check, is then the Sunday-to-Saturday
+week before this one. `LAST_WEEK` follows the locale of the user who runs the report (a report
+runs as its viewer), so a staff user whose locale starts the week on another day sees that
+locale's week when opening the report by hand; the SOQL check follows the locale of whoever runs
+it the same way. That week is a different thing from the session week `Session_Week__c` (the week of the month), which
+only labels the matrix's columns. `LAST_WEEK` needs no new field, so the formula checkbox
+`In_Last_Week__c` the ticket weighed is not built (DECISIONS 2026-10-24).
+
+**The late report:** `Late_Submissions_Last_Month` has no cut-off: every live Jotform batch of
+last month is in it with its delay, the largest delay first (Ryan, 2026-10-24; DECISIONS
+2026-10-23: nothing is flagged, staff read the delays). It is grouped by partner, as the ticket's
+outline has it, and the largest delay comes first only within each partner's group: the month's
+largest delay heads its partner's group, which need not be the first. Ryan confirmed that reading
+on the ticket on 2026-10-26 (the plan's Task #102 Rollout step 1); if it is ever changed to one list
+across partners, the report becomes Tabular, sorted by the delay across every partner.
+
+**Rollback** of the timing reports: the dashboard components that read them go first (task
+#103); then the four reports are retired, never deleted (the archive rule, DECISIONS
+2026-10-21): each is moved to Decommissioned and keeps its Id, by the Analytics API move
+(`PATCH …/analytics/reports/<id>` with `reportMetadata.folderId`, as "Copying and moving reports
+and dashboards" describes; `tools/sf_report_folders.py` refuses the Attendance folder as a
+source) or by hand in Lightning, on Ryan's go, read back by SOQL on `Report`. A moved report
+still uses the timing fields, and a report that uses a field blocks its deletion wherever the
+report is, so the three moved reports on `Attendance_Totals` are edited next to drop the fields:
+retrieve them fresh from Decommissioned; take `Session_Week__c` (the column grouping; the format
+becomes Summary) out of `Submissions_by_Club_and_Week`, the `Submitted_At__c` and
+`Submission_Delay_Days__c` columns and the sort on the delay out of
+`Late_Submissions_Last_Month`, and the `Session_Month__c` grouping, the delay column and the
+chart out of `Submission_Delay_by_Partner_by_Month`; check-only, Ryan's go, deploy.
+`Clubs_Not_Submitting_Last_Week` (on Accounts) uses none of the fields and moves as it is; the
+read-back `after/` keeps all four as deployed, to put one back from. Then the four columns come
+off the report type `Attendance_Totals`: retrieve it fresh, delete the four `<columns>` entries
+in that copy, check-only, Ryan's go, deploy. Never redeploy an older copy of `Attendance_Totals`
+(DECISIONS 2026-10-16). The fields' own rollback (above) needs both
+done first.
+
+## Session notes in Salesforce
+
+- **When:** a question about the session notes on a batch; a form's Salesforce integration
+  changed or re-checked; the U.S form re-enabled; the monthly Salesforce checks.
+- **Status:** the field is live since 2026-10-26 (deploy `0AfRP000002i7O10AI`, about 03:40
+  UTC, Ryan's go); the template, Africa, Asia and Latin America map it since 2026-10-26 (Ryan,
+  in the builder); the U.S form is DISABLED and not mapped. The proof (the first batches through
+  a mapped form, a batch with a note counted) is pending
+  ([plan](plans/2026-10-26-session-notes-salesforce.md), Result).
+- **Dry run:** `python3 tools/integration_status.py` (read only).
+- **Apply:** a mapping is a builder save per form (a live write, Ryan's go); the field was a
+  metadata deploy (the plan's Rollout step 3).
+- **Verify:** `python3 tools/integration_status.py --form <id>` → `ok (one action, 9 fields,
+  Account_Name__c from q5, Session_Notes__c from q<N>, no upload)`.
+- **Rollback:** below.
+- **History:** [plan](plans/2026-10-26-session-notes-salesforce.md).
+
+A mentor's note - the optional question named `sessionNotes` on every attendance form ("Session
+notes on the attendance forms") - reaches Salesforce as `Attendance_Batch__c.Session_Notes__c`
+("Session notes", Long Text Area of 32,768 characters; the form takes 1,000, so no insert is
+refused for length), written by the forms' native integration when it creates the batch. Every
+Salesforce user may read it (Ryan, 2026-10-26; DECISIONS 2026-10-26): System Administrator
+reads and edits it (the integration's user) and the permission set `Attendance_Report_Viewer`
+reads it. It is on the batch's page ("Attendance_Batch Layout", Information section, last) and
+a column of the `Attendance_Totals` report type, not checked by default: add it to a report to
+show it. The processor does not read it. A note is free text and can name girls: fine in
+Salesforce, never in the repo, a log, a ticket or the conversation, so the tools count notes
+and never print one.
+
+**The mapping, per form** (the builder only: the API cannot write the integration).
+`Session_Notes__c` ← the question named `sessionNotes`, whose qid differs per form:
+
+| Form | id | `sessionNotes` | Mapped |
+|---|---|---|---|
+| template | 262352490535154 | q489 | 2026-10-26 |
+| Africa | 262382821971058 | q476 | 2026-10-26 |
+| Asia | 262383129464057 | q457 | 2026-10-26 |
+| Latin America | 262383455778067 | q454 | 2026-10-26 |
+| U.S | 262382706852058 | q446 | not mapped: DISABLED |
+
+To map a form, in a quiet moment: `python3 backup_forms.py --form <id>`; in the builder,
+Settings → Integrations → Salesforce → **edit** the action (create `Attendance_Batch`) → add a
+row: Session notes (`Session_Notes__c`) ← "Additional information about this session
+(optional)" → save, every other row as it is (never question 5's or question 18's), and **never
+remove the connected account** (it detaches all ten forms, 2026-09-30); `python3
+backup_forms.py --form <id>` again and the diff of the two properties snapshots → hunks inside
+`integrations` only; then `python3 tools/integration_status.py --form <id>` → 9 fields.
+
+**The audit.** `tools/integration_status.py` requires the mapping (`NOTES_MAPPING_WANTED`,
+True since 2026-10-26): a live form without it is `NOT RIGHT` (exit 1), told its own
+`sessionNotes` qid, and a mapping from any other question is `NOT RIGHT` on any form. A live
+form whose `status` is exactly `DISABLED` needs none: unmapped, it reads `ok (one action, 8
+fields, Account_Name__c from q5, Session_Notes__c not wanted (form DISABLED), no upload)`. Any
+other status (`ENABLED`, none, `DELETED`, another spelling) is an enabled form's. The template
+stays `NOT RIGHT` on its upload row until "Photos" step 1, whatever its notes.
+
+**Re-enabling the U.S form** ("Disabling a regional form", the way back): map q446 in its
+builder first, or with the re-enabling, before a mentor can submit; then `python3
+tools/integration_status.py --form 262382706852058` → 9 fields, `Session_Notes__c from q446`.
+Re-enabled and unmapped, it reads `NOT RIGHT`, and the notes typed until it is mapped stay in
+Jotform only.
+
+**Counting the notes** (read only, VPN off; the proof and the monthly checks). SOQL cannot
+filter a long text field, so the query selects it and a local one-liner counts the non-blank
+ones and prints the counts only, never a note:
+
+```bash
+sf data query -o glow --json -q "SELECT Session_Notes__c, Processing_Status__c FROM Attendance_Batch__c WHERE Creator__c = 'Jotform' AND CreatedDate >= 2026-10-26T05:40:00Z" \
+  | python3 -c 'import json,sys,collections; r=json.load(sys.stdin)["result"]["records"]; print(len(r), "batches,", sum(1 for x in r if (x.get("Session_Notes__c") or "").strip()), "with a note,", dict(collections.Counter(x["Processing_Status__c"] for x in r)))'
+```
+
+**Rollback** ([plan](plans/2026-10-26-session-notes-salesforce.md#rollback)): unmap in the
+builder, form by form (edit the action → remove the Session notes row → save; never remove the
+connected account), and set `NOTES_MAPPING_WANTED = False` in the tool; the field may stay. The
+field itself goes only on Ryan's word and only after every form is unmapped:
+`NOTES_MAPPING_WANTED = False` first (so the audit does not demand the mapping), then `python3
+tools/integration_status.py` → 8 fields on every live form but the template. Until "Photos"
+step 1 the template prints only its upload row (`NOT RIGHT`, exit 1), mapped or not: confirm it
+unmapped by its properties diff instead, `python3 backup_forms.py --form 262352490535154` before
+and after its builder save, `diff` of the two `backups/262352490535154/properties-<stamp>.json`
+→ the Session notes row (`Session_Notes__c`) gone inside `integrations`, nothing else changed.
+A field deleted while a form still maps it (empty, because no note was typed yet, is not enough)
+makes Salesforce refuse each insert from that form, and the whole batch is lost. Then the
+layout, the permission set and the
+report type from the deploy's `before/` while a fresh retrieve equals its `after/` (never an
+older build, DECISIONS 2026-10-16), and the field by a destructive change
+(`destructiveChanges.xml`, check-only first, Ryan's go). While it holds no data that loses
+nothing; once a note has reached Salesforce, deleting the field deletes the notes, so it goes
+only on Ryan's decision with the count of notes (above) in front of him.
 
 ## Monthly Report dashboards in Salesforce
 
@@ -4740,6 +5084,58 @@ The live commands of the procedure refuse without `--vpn-off`: the word that you
     ones included.** Before removing a contact listed in `created_contacts.csv`, count its rows
     whose batch is not in `ledger.csv`; if there is any, do not delete that contact (remove only
     the back-fill's own rows and batches). A guard in `sf_backfill.py` for this is BACKLOG 78.
+
+### Re-send of the corrections failed as "Duplicate" (`resend`)
+
+- **When:** corrected re-submissions the processor failed whole as `Duplicate` before 2026-10-24
+  (it merges a correction since: ticket #108); their girls are missing from that club and day.
+- **Status:** built 2026-10-24 (ticket #109, [plan](plans/2026-10-24-resend-duplicate-batches.md)); the live run waits for Ryan's go.
+- **Dry run:** `python3 tools/sf_backfill.py resend --vpn-off` (it reads Salesforce, so `--vpn-off` too).
+- **Apply:** `resend --apply --vpn-off --limit 1`, read back, then the rest, Ryan's go.
+- **Verify:** every copy is read back as it is sent; `sf_backfill.py status`.
+- **Rollback:** by id from `resend_ledger.csv` and `resend_added.csv` (below).
+
+`resend` reads every `Failed` batch whose message starts `Duplicate:` created since `--since`
+(default 2026-09-07), in `CreatedDate` order, and predicts in memory, by the processor's merge rule,
+what a copy of it would add to the day's original batch (the oldest `Success`): the girls it ticked
+without a row on that club and day, and how many of them get a new contact. Each candidate prints
+one line - the failed batch, the original, the club, the date, names ticked / girls to add / new
+contacts - then the totals, a line per club and `skipped, <reason>: N`: `no_success_original`,
+`original_not_mergeable` (a `Partner report` or no rows of its own), `module_differs`, `no_names`,
+`fuzzy_matching` (`enable_fuzzy_matching__c` true: the processor would match the names by edit
+distance, which the exact-match prediction cannot follow), `adds_nobody`, `own_batch` (a copy of
+this tool), `already_resent` (in the ledger, whatever the outcome). A skipped batch is counted,
+never listed and never sent; `--only` on it refuses with `skipped, <reason>`. Corrections of one
+club and day are predicted in order, each after the earlier ones.
+Girls' names are compared inside the script; it prints counts, club names, dates and ids only.
+
+`--apply` sends one copy per request, in that order: the failed batch's fields as they are, with
+`Creator__c` `Jotform back-fill re-send <failed id>` (its marker; the copy gets no `Submitted_At__c`).
+Before each copy it reads the club and day again and refuses when the prediction changed (a live
+correction got there first); after it, it reads back that the copy is `Success` `merged into
+<original id>` with no rows or count of its own, that the original gained exactly the predicted
+rows and the club exactly the predicted contacts (the rows and contacts written inside the copy's
+window: `CreatedDate` from the copy's `CreatedDate` to its `LastModifiedDate`, the processor's
+status update and its last write, since nothing promises one timestamp for the whole
+transaction; a live correction merged into the same original after the window is neither counted
+nor listed for the copy's rollback), and that the original's `Girls_Present__c` is
+its rows - else the copy is `CHECK` and nothing more is sent until it is closed (`close <failed
+id> --removed` or `--accepted`). Another batch of the club and day created inside the window is
+`CHECK` too: its rows cannot be told from the copy's by time, so the window's rows and contacts
+are listed with `uncertain` `yes`. When the CHECK's rollback list may be incomplete (another
+batch in the window, or fewer rows or contacts in it than predicted or than the original and the
+club grew by) the message says so instead of "listed by id": find the copy's rows by hand before
+removing anything. A lost answer is `unknown` and settled by the marker before the
+next `--apply` sends anything. `--only <failed id>` sends one (refused while an earlier correction
+of its club and day is not re-sent), `--limit N` the first N. The original Failed batches stay as
+they are (history); a failed batch is never copied twice.
+
+- **Rollback** (only with Ryan's go): `resend_added.csv` lists, per copy, every attendance row it
+  added to the original and every contact it created. Delete those rows, then each listed contact
+  only while it carries no other attendance row (master-detail: deleting a contact deletes its
+  rows), then the copies (`batch_id` in `resend_ledger.csv`); set each original's
+  `Girls_Present__c` back to the count of its own rows (`tools/sf_girls_present.py check`), and
+  `close <failed id> --removed` for each.
 
 # Admin and work log
 
