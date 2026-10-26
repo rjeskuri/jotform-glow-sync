@@ -4314,7 +4314,8 @@ The backups, from today (the Mac's local date), and the command that makes each:
 - Salesforce, raw - `sf`/`sfdx` deploys, data writes, `apex run`, `sf api
   request` writes, `.salesforce.com/services/`: no record; the command names a
   path inside `data/sf_<topic>/` and `data/sf_<topic>/before/` holds a file
-  modified today (the plan's `before/` retrieve). `apex run` also needs
+  modified today (the plan's `before/` retrieve, or a lone `sf data query` or `sf
+  data export` saved there). `apex run` also needs
   `--file` (`-f`) naming a file the hook reads: a regular file inside the
   checkout, no link. An Apex file holding a word that starts `delete`,
   `undelete`, `merge` or `emptyRecycleBin`, and a deploy naming a folder with a
@@ -4329,7 +4330,7 @@ The backups, from today (the Mac's local date), and the command that makes each:
 Never automatic: `gh api` or `api.github.com` on `dispatches` or `graphql`;
 `auto_sync.py --apply-salesforce` (Salesforce accounts, no rollback record); a
 metadata (mdapi) deploy (`--metadata-dir`, `force:mdapi:deploy`) and
-`force:apex:execute`, whose changes the hook does not read; any
+`force:apex:execute` and `apex run` with the Apex on standard input, whose changes the hook does not read; any
 tool the hook does not list (the Drive photo mover, `upload_roster.py`,
 `deactivate_clubs.py`, `fix_module_values.py`, `sf_new_clubs.py`).
 
