@@ -136,7 +136,12 @@ files: it would overwrite them, and `before/` is the redeploy's source.
 
 - Restore the dashboard D4 from its copy in Decommissioned, made with the tag #80 before the
   deploy: open the copy, then Save As or move it back into "GLOW Monthly Dashboards" (RUNBOOK
-  "Decommissioned"). A copy put back keeps the copy's Id, so D4's Id changes that way.
+  "Decommissioned"). A copy put back keeps the copy's Id, so D4's Id changes that way, and D4's
+  row in `glow/sf_keep_list.csv` takes the copy's Id in place of `01ZRP000006quAj2AI`. The
+  deployed D4, `01ZRP000006quAj2AI`, still carries item 12's component: Ryan moves it to
+  Decommissioned by hand in Lightning before the report's move below, or that move is refused
+  (`tools/sf_report_folders.py move` retires no report that a dashboard outside Decommissioned
+  still uses).
 - Or redeploy D4 from this change's retrieve `data/sf_new_mentors_2026-10-26/before/`, and only
   while a fresh retrieve of D4 equals `after/`. That keeps D4's Id.
 - The scope is the manifest `data/sf_new_mentors_2026-10-26/rollback/package.xml`, written by
@@ -153,7 +158,7 @@ files: it would overwrite them, and `before/` is the redeploy's source.
 - When the fresh retrieve and `after/` differ, someone has changed the dashboard since the deploy
   (#78's step 9, item 16, among them): the rollback then starts from that fresh retrieve, by the
   epic's ritual.
-- Once D4 is back, the new report, "Partners that recruited new mentors", which D4 no longer
+- Once D4 is back (on the first path, with the deployed D4 in Decommissioned), the new report, "Partners that recruited new mentors", which D4 no longer
   uses, moves to Decommissioned by a one-row move plan written by script
   (`kind,id,to_folder,new_label` with `report,<its id>,Decommissioned,`): the dry run
   `python3 tools/sf_report_folders.py move --vpn-off --dir data/sf_new_mentors_2026-10-26 --plan <that plan>`,
