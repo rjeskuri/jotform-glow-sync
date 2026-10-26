@@ -5579,7 +5579,16 @@ class NewMentorsDocs(unittest.TestCase):
 
     The live deploy runs later, in an interactive session: the report's id does not exist yet, so item 12's id
     in `glow/sf_keep_list.csv` (test/sf_keep_list_test.py) is not tested here, and the plan's `## Result` may
-    say the deploy is pending. The helpers are #78's (`TrainingDashboardDocs`) and #69's; counts and ids only."""
+    say the deploy is pending. The helpers are #78's (`TrainingDashboardDocs`) and #69's; counts and ids only.
+
+    Round 2 (the test-breaker passed with wrong claims beside the right ones): a wrong claim fails wherever it
+    stands, in item 12's RUNBOOK units, the whole plan (its `## Result` included) and the whole decision but its
+    Rejected bullet: a mentor headcount (a quantity word beside "mentor(s)", not denied: "how many new mentors
+    each partner recruited", "adds up the Yes answers as the new mentors", "a mentor headcount"), a month from
+    any date field but `Period__c` (standard, or a custom one like `Submitted_On__c`), `Newly_recruited__c` or a
+    "Lead Mentor" contact as the source. The plan's six-month query has a period on `Period__c` and runs month by
+    month; Rejected gives each source's reason; Consequences says the figure counts partners. The "No" of a
+    Yes/No answer is masked before a denial is looked for."""
 
     longMessage = False         # the messages say what to fix
     DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
@@ -5623,6 +5632,36 @@ class NewMentorsDocs(unittest.TestCase):
     OTHER_CHANGE = re.compile(r"#(?!80\b)\d+['’]s\s+(\w+\s+)?`?(build|retrieve|before/|after/|build/|copy|copies|backup)|"
                               r"\b(build|retrieve|before/|after/|build/)`?\s+(of|from)\s+(ticket\s+)?#(?!80\b)\d+|"
                               r"\bdata/sf_(?!new_mentors_)[\w.-]+/(build|before|after)/")
+    # round 2 (the test-breaker): the "No" of a Yes/No answer is no negation ("the Yes and No answers for each
+    # partner and month"); it is masked (same length) before a denial is looked for
+    ANSWER_NO = re.compile(r"\bYes\b\s*(,|and|or|/|&)\s*\bNo\b|\bNo\b\s*(,|and|or|/|&)\s*\bYes\b|"
+                           r"\b(a|the|each|every|one)\s+No\b|\bNo\s+answers?\b|\bNo\s+(counts?|groups?|columns?)\b")
+    # a headcount claim: a quantity word and "mentor(s)" in one clause, neither denied, once the names that hold
+    # "mentors" (field names, the report's label, the keep list's labels, the question) are blanked
+    QUANTITY = re.compile(r"(?i)\b(numbers?|counts?|counted|counting|totals?|totall?ed|sums?|summed|summing|"
+                          r"add(s|ed|ing)?\s+up|how\s+many|head\s*counts?|tall(y|ies)|figures?|amounts?)\b")
+    MENTOR_WORD = re.compile(r"(?i)\bmentors?\b")
+    QUESTION = "Did you recruit any new mentors last month?"
+    NAME_TOKEN = re.compile(r"\b\w+__[cr]\b")
+    # the one way to speak of a mentor count: the true count a future form question would give
+    TRUE_COUNT = re.compile(r"(?i)\b(true|real|actual|exact)\s+(number|count|total|headcount)\b")
+    FORM_QUESTION = re.compile(r"(?i)\b(question|form)\b")
+    # a custom field that reads as a date (`Submitted_On__c`, `YearMonth__c`), which is never the month
+    IDENT = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_]*?__c\b")
+    DATE_LIKE = re.compile(r"(?i)date|day|week|month|year|time|stamp|period|created|submitted|modified|_on$|_at$")
+    BUILT_FROM = re.compile(r"(?i)\b(built|computed|made|derived|formula|calculated)\b")
+    # a query's period on Period__c, and one that gives month by month (grouped by the month, or one month)
+    Q_PERIOD = re.compile(r"(?i)\bPeriod__c\s*(=\s*(LAST_N_MONTHS:\d+|LAST_MONTH|\d{4}-\d\d-\d\d)\b|"
+                          r"(>=|<=|>|<)\s*\d{4}-\d\d-\d\d\b)")
+    BY_MONTH_Q = re.compile(r"(?i)\bGROUP\s+BY\s+[^`;]*?(CALENDAR_MONTH\(\s*Period__c\s*\)|\bPeriod__c\b)|"
+                            r"\bPeriod__c\s*=\s*(LAST_MONTH|\d{4}-\d\d-\d\d)\b|\bPeriod__c\s*>=?\s*\d{4}-\d\d-\d\d\b")
+    # what the measure counts, as a consequence: partners or partner-months, not mentors
+    PARTNER_UNIT = re.compile(r"(?i)\bpartner['’]s\s+months?\b|\bpartner[- ]months?\b|\b(number|count)\s+of\s+"
+                              r"partners\b|\bcounts?\s+(\w+\s+){0,2}?partners\b|\bpartners,?\s+not\s+mentors\b")
+    # each rejected source with its reason
+    LEAD_REASON = re.compile(r"(?i)\bhousehold|\bno partner\b|\bnot linked\b|\bno link\b|\bpartner link\b|"
+                             r"\bnot (tied|attached|connected) to\b|\bno mentor list\b")
+    DASH_REASON = re.compile(r"(?i)\bD4\b|\bcomponent\b|GLOW Club Training|\bkeep list\b|\benough\b")
 
     @classmethod
     def setUpClass(cls):
@@ -5630,6 +5669,14 @@ class NewMentorsDocs(unittest.TestCase):
         cls.t = TrainingDashboardDocs()         # #78's helpers: part, units, step_clauses, the guards
         cls.d = cls.t.d                         # #69's: locally_denied, denies, assertNoContradiction
         cls.k = cls.t.k                         # #70's
+        import csv
+        with open(TrainingDashboardDocs.KEEP_LIST, encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+        # names of two words or more: D4's label is the bare word "Mentors", which is the word looked for
+        names = {r[c] for r in rows for c in ("measure", "label_today", "label_target") if len(r[c].split()) > 1}
+        names |= {cls.LABEL, cls.QUESTION}
+        cls.NAMES = re.compile("|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+                               + r"|\bLead Mentors?\b", re.I)
 
     @staticmethod
     def norm(text):
@@ -5638,8 +5685,50 @@ class NewMentorsDocs(unittest.TestCase):
     def clauses(self, text, ends=".;"):
         return sentences(self.norm(text), ends)
 
+    @classmethod
+    def unno(cls, s):
+        """`s` with the "No" of a Yes/No answer masked, the same length (positions hold)."""
+        return cls.ANSWER_NO.sub(lambda m: re.sub(r"\bNo\b", "N_", m.group(0)), s)
+
+    def denied(self, s, m):
+        return self.d.locally_denied(self.unno(s), m)
+
     def stated(self, s, rx):
-        return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
+        return any(not self.denied(s, m) for m in rx.finditer(s))
+
+    def assertNoHeadcount(self, text, where):
+        """No clause of `text` says the measure is a number of mentors ("how many new mentors each partner
+        recruited", "adds up the Yes answers as the new mentors", "a mentor headcount"): each Yes is one partner's
+        month (Ryan, 2026-10-26). A quantity word beside "mentor(s)" is only ever denied, but for the true count a
+        form question would give."""
+        for s in sentences(flat(text), ".;:"):
+            if self.TRUE_COUNT.search(s) and self.FORM_QUESTION.search(s):
+                continue
+            k = self.unno(self.NAMES.sub(lambda m: "X" * len(m.group(0)), self.NAME_TOKEN.sub(
+                lambda m: "X" * len(m.group(0)), s)))
+            qty = [m for m in self.QUANTITY.finditer(k) if not self.d.locally_denied(k, m)]
+            who = [m for m in self.MENTOR_WORD.finditer(k) if not self.d.locally_denied(k, m)]
+            if qty and who:
+                self.fail(f"{where}: item 12 counts Monthly Reports, each Yes one partner's month, never a number of "
+                          f"mentors (Ryan, 2026-10-26); {qty[0].group(0)!r} beside \"mentor\" says otherwise (name a "
+                          f"mentor count only to deny it): {s[:200]!r}")
+
+    def assertMonthIsPeriod(self, text, where):
+        """The month is `Period__c`: a standard date field (#78's `assertNoOtherDate`) or a custom field that reads
+        as a date (`Submitted_On__c`, `YearMonth__c`) is only ever denied; `Year__c` and `Month__c` may be named
+        as what `Period__c` is built from."""
+        self.t.assertNoOtherDate(text, where)
+        exempt = {"Period__c", self.FIELD, self.NEWLY, "DHIS2__c", "Account__c"} | set(self.OTHER_FIELDS.values())
+        for s in sentences(flat(text), ".;:"):
+            for m in self.IDENT.finditer(s):
+                name = m.group(0)
+                if name in exempt or not self.DATE_LIKE.search(name[:-3]):
+                    continue
+                if name in ("Year__c", "Month__c") and "Period__c" in s and self.BUILT_FROM.search(s):
+                    continue
+                self.assertTrue(self.denied(s, m),
+                                f"{where}: the month is the Monthly Report's `Period__c`, never `{name}`; name it only "
+                                f"to deny it: {s[:200]!r}")
 
     def item_units(self, part):
         """The units (table row, list item, sentence) of `part` about item 12: those carrying its field, or naming
@@ -5670,7 +5759,7 @@ class NewMentorsDocs(unittest.TestCase):
         """Every clause of `text` naming `rx` denies or rejects it."""
         for s in self.clauses(text, ".;:"):
             for m in rx.finditer(s):
-                self.assertTrue(self.d.locally_denied(s, m) or self.d.NEGATION.search(s) or self.REJECT.search(s),
+                self.assertTrue(self.denied(s, m) or self.d.NEGATION.search(self.unno(s)) or self.REJECT.search(s),
                                 f"{where}: {what} is not item 12's source (Ryan, 2026-10-26); name it only to deny or "
                                 f"reject it: {s[:200]!r}")
 
@@ -5731,7 +5820,7 @@ class NewMentorsDocs(unittest.TestCase):
         self.assertTrue([s for s in cl if self.stated(s, self.t.PERIOD) and re.search(r"(?i)\bmonths?\b", s)],
                         f"{where}: the month is the report's `Period__c` (the month the Monthly Report covers), in one "
                         "sentence, not negated")
-        self.t.assertNoOtherDate(text, where)
+        self.assertMonthIsPeriod(text, where)
         self.assertTrue(self.stated(self.norm(text), self.t.ACCOUNT),
                         f"{where}: the partner is the Monthly Report's `Account__c`")
         self.assertTrue([s for s in cl if self.stated(s, self.EACH_PARTNER_MONTH)],
@@ -5741,6 +5830,7 @@ class NewMentorsDocs(unittest.TestCase):
         self.assertTrue([s for s in cl if self.stated(s, self.YES) and self.stated(s, self.PARTNER_MONTH)
                          and self.NOT_HEADCOUNT.search(s)],
                         f"{where}: say, in one sentence, that each Yes is one partner's month, not a number of mentors")
+        self.assertNoHeadcount(text, where)
         # the SOQL signal: GROUP BY the answer over the last 12 months on Period__c, with the test-record rule
         f = self.FIELD
         self.assertTrue([q for u in units for q in self.queries(u) if self.item_query(q, self.LAST_12_Q)],
@@ -5785,7 +5875,11 @@ class NewMentorsDocs(unittest.TestCase):
         self.assertIn(self.FIELD, text, f"{name}: name the field the report counts, `DHIS2__c.{self.FIELD}`")
         self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
         self.t.assertNoPartnerOrMonthFilter(text, name)
+        # the whole plan, `## Result` included: no rejected source, no other month, no mentor headcount
         self.assertOnlyDenied(text, re.compile(re.escape(self.NEWLY)), name, f"`{self.NEWLY}`")
+        self.assertOnlyDenied(text, self.LEAD_MENTOR, name, "a \"Lead Mentor\" contact")
+        self.assertMonthIsPeriod(text, name)
+        self.assertNoHeadcount(text, name)
         dash = self.t.dashboard()
 
         # --- the Rollout
@@ -5836,12 +5930,14 @@ class NewMentorsDocs(unittest.TestCase):
                         f"{where}: check one partner's figures equal SOQL (one sentence naming one partner and that "
                         "they equal)")
         qs = self.queries(raw)
-        self.assertTrue([q for q in qs if self.item_query(q)],
-                        f"{where}: give the check's query: item 12's (`SELECT {self.FIELD}, COUNT(Id) … GROUP BY "
-                        f"{self.FIELD}`, the period on `Period__c`, the test-record rule, `{self.FIELD} != null`, no OR)")
-        self.assertTrue([q for q in qs if self.item_query(q) and self.PARTNER_Q.search(q)],
-                        f"{where}: give the one-partner query: item 12's query with `AND Account__r.Name = "
-                        "'<partner>'`")
+        self.assertTrue([q for q in qs if self.item_query(q, self.Q_PERIOD) and self.BY_MONTH_Q.search(q)],
+                        f"{where}: give the six months' query, month by month: item 12's (`SELECT "
+                        f"CALENDAR_MONTH(Period__c), {self.FIELD}, COUNT(Id) … GROUP BY CALENDAR_MONTH(Period__c), "
+                        f"{self.FIELD}`, or one month's `Period__c = <date>`), with a period on `Period__c` "
+                        f"(`LAST_N_MONTHS:6`, a date range), the test-record rule, `{self.FIELD} != null`, no OR")
+        self.assertTrue([q for q in qs if self.item_query(q, self.Q_PERIOD) and self.PARTNER_Q.search(q)],
+                        f"{where}: give the one-partner query: item 12's query, with a period on `Period__c`, and `AND "
+                        "Account__r.Name = '<partner>'`")
         self.t.assertNotSoft(raw, where)
         self.t.assertNoOlderBuild(raw, where)
         self.d.assertNoContradiction(raw, where)
@@ -5953,7 +6049,6 @@ class NewMentorsDocs(unittest.TestCase):
         self.assertRegex(head, self.YES_AND_NO, f"{dw}: the report counts the Yes and the No answers")
         self.assertTrue([s for s in hc if self.stated(s, self.t.PERIOD) and re.search(r"(?i)\bmonths?\b", s)],
                         f"{dw}: the month is `Period__c`, the month the Monthly Report covers (one sentence, not negated)")
-        self.t.assertNoOtherDate(head, dw)
         self.assertTrue(self.stated(self.norm(head), self.t.ACCOUNT), f"{dw}: the partner is `Account__c`")
         self.assertTrue([s for s in hc if self.stated(s, self.BLANK_OUT)
                          and not re.search(r"(?i)\b(not|never)\s+(left|excluded|dropped)\b", s)],
@@ -5970,20 +6065,35 @@ class NewMentorsDocs(unittest.TestCase):
         # Why: Ryan's answer on the ticket
         self.assertRegex(why, r"\bRyan\b", f"{where}: **Why** gives Ryan's answer")
         self.assertIn("2026-10-26", why, f"{where}: **Why** dates Ryan's answer (2026-10-26)")
-        # Rejected: Newly_recruited__c (with why), the Lead Mentor contacts, a separate dashboard
-        self.assertIn(self.NEWLY, rejected, f"{where}: **Rejected** names `{self.NEWLY}`")
-        self.assertRegex(self.norm(rejected), r"(?i)\borientation\b",
-                         f"{where}: **Rejected** says why `{self.NEWLY}` is not it: it counts recruits still needing "
-                         "orientation, not recruits")
-        self.assertRegex(rejected, self.LEAD_MENTOR, f"{where}: **Rejected** names the \"Lead Mentor\" contacts")
-        self.assertRegex(rejected, self.SEPARATE_DASHBOARD, f"{where}: **Rejected** names a separate dashboard")
+        # Rejected: each source with its reason, in one clause (`;`, `.` or a sub-bullet apart from the others):
+        # Newly_recruited__c (recruits still needing orientation), the Lead Mentor contacts (household accounts, no
+        # partner link), a separate dashboard (a component on D4 is enough)
+        rw = f"{where}: **Rejected**"
+        items = [flat(x) for x in re.split(r"[.;]\s|\n\s*[-*+]\s", rejected) if x.strip()]
+        self.assertTrue([x for x in items if self.NEWLY in x and re.search(r"(?i)\borientation\b", x)],
+                        f"{rw}: name `{self.NEWLY}` with why it is not it, in its clause: it counts recruits still "
+                        "needing orientation, not recruits")
+        self.assertTrue([x for x in items if self.LEAD_MENTOR.search(x) and self.LEAD_REASON.search(x)],
+                        f"{rw}: name the \"Lead Mentor\" contacts with why, in their clause: household accounts, no "
+                        "partner link")
+        self.assertTrue([x for x in items if self.SEPARATE_DASHBOARD.search(x) and self.DASH_REASON.search(x)],
+                        f"{rw}: name a separate dashboard with why, in its clause: a component on D4 (GLOW Club "
+                        "Training) is enough")
+        # Consequences: what the figure is, partners (partner-months), not mentors
         self.assertGreaterEqual(len({w.lower() for w in re.findall(r"[A-Za-z]\w*", self.norm(cons))}), 10,
                                 f"{where}: **Consequences** says too little")
+        self.assertTrue([s for s in self.clauses(cons) if self.stated(s, self.PARTNER_UNIT)],
+                        f"{where}: **Consequences** says what the figure counts: partners (one partner's month each), "
+                        "not mentors, in one clause, not negated")
         self.assertNotRegex(e, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{where}: a placeholder")
-        # outside Rejected, the rejected sources are only ever denied; nothing contradicts the rules
+        # outside Rejected (Consequences included), the rejected sources are only ever denied, the month is only
+        # Period__c, no clause makes the figure a mentor headcount, and nothing contradicts the rules
         rest = re.sub(r"(?ms)^- \*\*Rejected.*?(?=^- \*\*|\Z)", "", e)
+        self.assertNotIn("**Rejected", rest, f"{where}: **Rejected** is a bullet of its own (`- **Rejected:** …`)")
         self.assertOnlyDenied(rest, re.compile(re.escape(self.NEWLY)), where, f"`{self.NEWLY}`")
         self.assertOnlyDenied(rest, self.LEAD_MENTOR, where, "a \"Lead Mentor\" contact")
+        self.assertMonthIsPeriod(rest, where)
+        self.assertNoHeadcount(rest, where)
         self.d.assertNoContradiction(rest, where)
 
 
