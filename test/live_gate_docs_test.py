@@ -31,6 +31,12 @@ The RUNBOOK says the same of headless runs and subagents (the automatic go, said
 above), of a write without its backup (asked, and refused where no prompt shows - never "too",
 "also" or "as well", which say a backed write asks), and of the notification (on an automatic go,
 said prompt-less, as above). The reviewer judges the meaning; these stop the cheap inversions.
+
+After review 1 of PR #154: CLAUDE.md rule 12 keeps "VPN off" and a clause that names the connector
+with "main session" and "Ryan's go" (no hook sees a connector write), in a CLAUDE.md of at most 73
+lines; the RUNBOOK's Apps Script deploy section and the deploy-appsscript skill no longer say the
+push is put to Ryan as a prompt, and say - prompt-less, as above - that it goes through when
+appsscript/ is committed, with Ryan's word before running it.
 """
 import os
 import re
@@ -42,6 +48,9 @@ from helpers.common import REPO, flat, md_part, read, sentences
 RUNBOOK_MD = os.path.join(REPO, "docs", "RUNBOOK.md")
 DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
 PLAN_TEMPLATE = os.path.join(REPO, "docs", "templates", "plan.md")
+CLAUDE_MD = os.path.join(REPO, "CLAUDE.md")
+DEPLOY_SKILL = os.path.join(REPO, ".claude", "skills", "deploy-appsscript", "SKILL.md")
+CLAUDE_MD_LINES = 73        # CLAUDE.md's length on 2026-10-26: no longer than it
 DECISION = "### 2026-10-26 — Backed-up live writes go through without a prompt"
 
 BACKUP = re.compile(r"backup|backed[- ]up", re.I)
@@ -68,6 +77,13 @@ LETS_THROUGH = re.compile(r"\bgo(es)? (through|ahead)\b|\bpass(es)? (through|una
                           r"|\bwith no prompt\b|\bauto-approv|\bautomatic(ally)? (go|allow|approv|appl)|\ballowed\b"
                           r"|\bon (its|their) own\b|\bunasked\b|\b(nobody|no one) (asks|is asked)\b", re.I)
 HEADLESS = re.compile(r"headless|dispatched|dontAsk|subagent", re.I)
+# review 1 of PR #154, F3: the connector clause of rule 12 loosened
+CONNECTOR_LOOSENED = re.compile(r"\bno longer\b|\bnot\b[^.;]{0,30}\bmain session\b|\bwithout\b[^.;]{0,20}\bRyan\b|n't\b"
+                                r"|\bany session\b", re.I)
+# F4: the Apps Script push said to be put to Ryan as a prompt (the wording of 2026-10-26)
+PUSH = re.compile(r"clasp[: ]push|\bpush(es|ed|ing)?\b", re.I)
+PUSH_ASKED = re.compile(r"\bClaude asks\b|\b(his|Ryan's|your) (yes|answer)\b[^.;]{0,40}\bis the go\b|\bon (his|Ryan's) yes\b"
+                        r"|\bas an approval prompt\b|\bgated:|\bputs the push to Ryan\b", re.I)
 MISSING_BACKUP = re.compile(r"\b(without|no|missing)\b[^.;]{0,20}\bbackup", re.I)
 TOO = re.compile(r"\btoo\b|\balso\b|\bas well\b|\blikewise\b|\bjust like\b|\bas (a|any|every) backed", re.I)
 INVERSIONS = ("counts for nothing", "changes nothing", "makes no difference", "not adopted")
@@ -183,6 +199,44 @@ class LiveGateDocs(unittest.TestCase):
         self.assert_states_the_rule(decided, "the 2026-10-26 decision")
         for word in ("rejected", "not adopted", "withdrawn"):
             self.assertNotIn(word, decided.lower(), f"the decision's bullets say {word!r}")
+
+    # ---- review 1 of PR #154 (the design's "Rulings for review 1's findings", F3 F4)
+    def test_claude_md_rule_12_keeps_the_vpn_and_the_connector_clause(self):
+        # F3: the write connector is seen by no hook, so its writes stay main-session only, on Ryan's
+        # go - said in rule 12 itself, beside the VPN; CLAUDE.md grows no line for it
+        part = md_part(CLAUDE_MD, "## Things Claude gets wrong")
+        m = re.search(r"^12\. .*?(?=^13\. |\Z)", part, re.S | re.M)
+        self.assertIsNotNone(m, "no rule 12 in CLAUDE.md's Things Claude gets wrong")
+        rule = flat(m.group(0))
+        self.assertIn("VPN off", rule, f"rule 12 no longer says VPN off: {rule}")
+        connector = [s for s in statements(rule) if re.search(r"\bconnectors?\b", s, re.I)]
+        self.assertTrue(connector, f"rule 12 has no clause on the connector: {rule}")
+        kept = [s for s in connector if re.search(r"\bmain[- ]session\b", s, re.I) and re.search(r"\bRyan['’]s go\b", s)
+                and not CONNECTOR_LOOSENED.search(s)]
+        self.assertTrue(kept, f"no clause of rule 12 says connector writes are main session only, on Ryan's go: {connector}")
+        self.assertLessEqual(len(read(CLAUDE_MD).splitlines()), CLAUDE_MD_LINES, "CLAUDE.md grew")
+
+    def assert_push_goes_through_on_its_own(self, text, where):
+        """F4: no sentence on the push says it is put to Ryan as a prompt; one says, prompt-less (the
+        go-sentence rules above), that it goes through when appsscript/ is committed; one puts Ryan's
+        word before running it."""
+        sents = statements(text)
+        asked = [s for s in sents if PUSH.search(s) and PUSH_ASKED.search(s)]
+        self.assertEqual(asked, [], f"{where} still says the push is put to Ryan as a prompt")
+        go = [s for s in sents if PUSH.search(s) and re.search(r"\bcommit", s, re.I) and promptless_go(s)]
+        self.assertTrue(go, f"{where}: no sentence says the push goes through on its own when appsscript/ is committed "
+                            "(one sentence naming the push, commit and on its own / automatic / without a prompt, with "
+                            "no negation and no answer, wait, prompt, ask or refuse in it)")
+        first = [s for s in sents if re.search(r"\bRyan\b", s) and re.search(r"\bbefore\b", s, re.I)
+                 and re.search(r"\bpush|\brun", s, re.I)]
+        self.assertTrue(first, f"{where}: no sentence puts Ryan's word (the decision to deploy) before running the push")
+
+    def test_the_runbook_s_apps_script_deploy_says_the_push_goes_through_once_committed(self):
+        self.assert_push_goes_through_on_its_own(flat(md_part(RUNBOOK_MD, "## Apps Script deploy")),
+                                                 "the RUNBOOK's Apps Script deploy section")
+
+    def test_the_deploy_skill_says_the_push_goes_through_once_committed(self):
+        self.assert_push_goes_through_on_its_own(flat(read(DEPLOY_SKILL)), "the deploy-appsscript skill")
 
 
 if __name__ == "__main__":

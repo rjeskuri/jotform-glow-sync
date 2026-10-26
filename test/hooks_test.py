@@ -29,7 +29,14 @@ decision; 0 and an ask JSON: Ryan is asked in the session; 2, or a deny JSON: re
     flag passes, a chained one does not. "Prompt, don't parse" (Ryan, 2026-10-14): the command is matched as
     text - as written and with quote and backslash characters removed, in any case - never read
     as shell words. A gh api call is live when the command holds a gh word, api, and actions/,
-    dispatches or graphql anywhere, whatever the method; every other gh api call is ungated;
+    dispatches or graphql anywhere, whatever the method; every other gh api call is ungated.
+    After review 1 of PR #154: `sf|sfdx apex run` is automatic only on a --file inside the checkout
+    that the gate reads - holding delete, merge, undelete or emptyRecycleBin it is a delete, with no
+    readable file it is not automatic; a --metadata-dir deploy never is, and a deploy of a folder
+    holding a destructiveChanges*.xml is a delete; clasp push is automatic only from the input's cwd
+    <project>/appsscript (npm run clasp:push from <project>), never with -P, --project or --rootDir;
+    a redirect writes the backup records only when they are its target, and a query or export saved
+    into a before/ is no forgery;
   - .claude/settings.json: the permission rules behind the hook (gh api allowed and never asked:
     an ask would stall the harness's resume reads; no ask rule on an automatic family - a hook's
     allow does not get past one -, ask rules kept on the deletes; the hook entry that blocks on
@@ -115,18 +122,25 @@ class Hooks(unittest.TestCase):
         self.tmp.cleanup()
         self.side.cleanup()
 
+    # run_hook's cwd that leaves the input's cwd field out
+    NO_CWD = object()
+
     def run_hook(self, name, tool_input, live_ok=None, tool="Bash", project=None, mode="default", agent=None,
-                 agent_type=None, extra=None, raw=None):
+                 agent_type=None, extra=None, raw=None, cwd=None):
         """The hook on one tool call: exit code, stdout, stderr. `mode` is the input's
         permission_mode (None leaves it out); `agent` an agent_id (True: a fresh one, with an
-        agent_type), `agent_type` that field alone; `extra` fields are set last (a null, a
-        number); `raw` replaces the whole of stdin."""
+        agent_type), `agent_type` that field alone; `cwd` the input's cwd - the Bash tool's working
+        folder (default: the project; NO_CWD leaves the field out) - while the hook itself always
+        runs in the project; `extra` fields are set last (a null, a number); `raw` replaces the
+        whole of stdin."""
         env = {k: v for k, v in os.environ.items() if k != "GLOW_LIVE_OK" and not k.startswith("GIT_")}
         env["PATH"] = self.bin + os.pathsep + env.get("PATH", "/usr/bin:/bin")
         env["CLAUDE_PROJECT_DIR"] = project or self.tmp.name
         if live_ok is not None:
             env["GLOW_LIVE_OK"] = live_ok
-        data = self.pretooluse(tool, tool_input, env["CLAUDE_PROJECT_DIR"], mode)
+        data = self.pretooluse(tool, tool_input, cwd if isinstance(cwd, str) else env["CLAUDE_PROJECT_DIR"], mode)
+        if cwd is self.NO_CWD:
+            del data["cwd"]
         if agent is True:
             data["agent_id"] = "agent-" + uuid.uuid4().hex
             data["agent_type"] = agent_type or "harness:coder"
@@ -232,15 +246,21 @@ class Hooks(unittest.TestCase):
         return [(command, kw, run) for (command, kw), run
                 in zip(cases, self.all_of(lambda case: self.gate(case[0], **case[1]), cases))]
 
-    def assert_never_automatic(self, commands, project, saying=()):
+    def assert_never_automatic(self, commands, project, saying=(), light=False):
         """Each command, in `project`: asked in a main session that can show the prompt (default,
         auto - the reason as check_reason reads it), refused where none can (dontAsk,
-        bypassPermissions, a missing mode, a subagent in auto) - never allowed, in one batch."""
+        bypassPermissions, a missing mode, a subagent in auto) - never allowed, in one batch. A
+        command may come as (command, {more of gate's keywords}): its cwd, an extra field. light:
+        default, dontAsk and a subagent only."""
         callers = ([{"mode": "default"}, {"mode": "auto"}] + [{"mode": m} for m in self.HEADLESS]
                    + [{"mode": "auto", "agent": True}])
-        cases = [(command, dict(caller, project=project)) for command in commands for caller in callers]
+        if light:
+            callers = [{"mode": "default"}, {"mode": "dontAsk"}, {"mode": "auto", "agent": True}]
+        cases = [(command, dict(caller, project=project, **more))
+                 for command, more in ((c, {}) if isinstance(c, str) else c for c in commands) for caller in callers]
         for command, kw, run in self.verdicts(cases):
-            with self.subTest(command=command, mode=kw["mode"], agent=kw.get("agent")):
+            with self.subTest(command=command, mode=kw["mode"], agent=kw.get("agent"),
+                              cwd=kw.get("cwd"), extra=kw.get("extra")):
                 if kw["mode"] in self.HEADLESS or kw.get("agent"):
                     self.assertEqual(self.verdict(run), "deny", self.show(run))
                     message = (run.err + self.reason(run)).lower()
@@ -1008,23 +1028,51 @@ class Hooks(unittest.TestCase):
         run = self.gate(self.jotform_write(), mode="dontAsk", project=project, may_allow=True)
         self.assertEqual(self.verdict(run), "allow", "the control: this project's backups back no write - " + self.show(run))
 
+    # anonymous Apex that writes and deletes nothing (2026-10-26, F1 of PR #154's review: the gate
+    # reads the file `sf apex run --file` names); a field named IsDeleted holds no word delete
+    APEX_UPDATES = [
+        "List<Contact> cs = [SELECT Id, FirstName FROM Contact WHERE Club__c = 'Sunrise Club'];\n"
+        "for (Contact c : cs) { c.FirstName = c.FirstName.trim(); }\nupdate cs;\n",
+        "Account a = [SELECT Id, Name FROM Account WHERE IsDeleted = false AND Name = 'Rising Stars' LIMIT 1];\n"
+        "a.Name = 'Rising Stars Club';\nDatabase.update(a);\n",
+    ]
+    # ... and Apex that deletes, merges (a merge deletes the losing record), undeletes or empties the
+    # recycle bin: DML or Database. calls, in any case
+    APEX_DELETES = [
+        "delete [SELECT Id FROM Contact WHERE LastName = 'Example' LIMIT 1];\n",
+        "List<Account> toRemove = [SELECT Id FROM Account WHERE Name = 'Old Club'];\nDelete toRemove;\n",
+        "List<Contact> dupes = [SELECT Id FROM Contact WHERE LastName = 'Example'];\nDatabase.delete(dupes, false);\n",
+        "List<Id> ids = new List<Id>{'003000000000001'};\nDATABASE.DELETE(ids);\n",
+        "Account keep = [SELECT Id FROM Account WHERE Name = 'Sunrise Club' LIMIT 1];\n"
+        "Account dup = [SELECT Id FROM Account WHERE Name = 'Sunrise Club 2' LIMIT 1];\nmerge keep dup;\n",
+        "Contact keep = [SELECT Id FROM Contact LIMIT 1];\nId dupId = '003000000000002';\nMERGE keep dupId;\n",
+        "Contact keep = [SELECT Id FROM Contact LIMIT 1];\nDatabase.merge(keep, '003000000000002');\n",
+        "Contact keep = [SELECT Id FROM Contact LIMIT 1];\ndatabase.Merge(keep, '003000000000003', false);\n",
+        "undelete [SELECT Id FROM Contact WHERE IsDeleted = true ALL ROWS];\n",
+        "List<Account> back = [SELECT Id FROM Account WHERE IsDeleted = true ALL ROWS];\nUnDelete back;\n",
+        "List<Id> ids = new List<Id>{'001000000000001'};\nDatabase.emptyRecycleBin(ids);\n",
+        "List<Id> ids = new List<Id>{'001000000000002'};\nDATABASE.EMPTYRECYCLEBIN(ids);\n",
+    ]
+
     def backed_writes(self):
-        """(command, project, the targets its log line may name, the backup it must name): one
-        backed write of each kind, each in a project of its own holding only the backup that
-        covers it."""
+        """(command, project, the targets its log line may name, the backup it must name, the
+        input's cwd or None): one backed write of each kind, each in a project of its own holding
+        only the backup that covers it."""
         F1, F2, F3 = self.F1, self.F2, self.F3
         day = datetime.date.today().isoformat()
         cases = []
 
-        def case(command, targets, backup, records=(), before=None, git=False):
+        def case(command, targets, backup, records=(), before=None, git=False, files=None, cwd=None):
             p = self.project(git=git)
             for record in records:
                 self.back_up(p, *record)
             if before:
                 self.salesforce_before(p, before)
+            for rel, text in (files or {}).items():
+                self.write(p, rel, text)
             if git:
                 backup += self.head(p)[:7]
-            cases.append((command, p, targets, backup))
+            cases.append((command, p, targets, backup, cwd and os.path.join(p, cwd)))
 
         # Jotform: a form tool's --apply, the raw API, each form id the command names backed by
         # its own record or by `jotform all`; a command naming no form by `jotform all`
@@ -1061,14 +1109,16 @@ class Hooks(unittest.TestCase):
              "data/archive export.csv", [("sheet", "Roster Archive", "data/archive export.csv")])
         case("python3 -c 'svc.spreadsheets().values().update(body=b).execute()'", ("sheet",), "data/sheet_full",
              [("sheet", "all", "data/sheet_full")])
-        # Apps Script: what is pushed is committed
-        case("npx clasp push -f", ("appsscript",), "appsscript/ at HEAD ", git=True)
-        case("npm run clasp:push", ("appsscript",), "appsscript/ at HEAD ", git=True)
-        # Salesforce, raw: the plan folder the command names has a before/ file from today
+        # Apps Script: what is pushed is committed - npx clasp and clasp run in appsscript/, npm run
+        # clasp:push in the checkout (the input's cwd: F2 of PR #154's review)
+        case("npx clasp push -f", ("appsscript",), "appsscript/ at HEAD ", git=True, cwd="appsscript")
+        case("npm run clasp:push", ("appsscript",), "appsscript/ at HEAD ", git=True, cwd=".")
+        # Salesforce, raw: the plan folder the command names has a before/ file from today (and an
+        # Apex file there that deletes nothing)
         case(f"sf project deploy start --source-dir data/sf_tiles_{day}/after -o glow", ("salesforce", "sf"),
              f"data/sf_tiles_{day}/before", before=f"data/sf_tiles_{day}/before/Attendance.dashboard-meta.xml")
         case("sf apex run --file data/sf_fix_names/fix.apex -o glow", ("salesforce", "sf"), "data/sf_fix_names/before",
-             before="data/sf_fix_names/before/contacts.csv")
+             before="data/sf_fix_names/before/contacts.csv", files={"data/sf_fix_names/fix.apex": self.APEX_UPDATES[0]})
         case("sf data upsert bulk -s Contact -f data/sf_contacts/after/contacts.csv -i Id -o glow", ("salesforce", "sf"),
              "data/sf_contacts/before", before="data/sf_contacts/before/main/default/contacts.csv")
         # GitHub: a switch by `github all` (tools/github_switches.py backup); a run of the sync,
@@ -1091,14 +1141,14 @@ class Hooks(unittest.TestCase):
                    + [(mode, True, None) for mode in self.AGENT_MODES])
         runs = [(case, caller) for case in cases for caller in callers]
         results = self.all_of(lambda r: self.gate(r[0][0], mode=r[1][0], agent=r[1][1], extra=r[1][2],
-                                                  project=r[0][1], may_allow=True), runs)
-        for ((command, _project, targets, backup), caller), run in zip(runs, results):
+                                                  project=r[0][1], cwd=r[0][4], may_allow=True), runs)
+        for ((command, _project, targets, backup, _cwd), caller), run in zip(runs, results):
             with self.subTest(command=command, caller=caller):
                 self.assertEqual(self.verdict(run), "allow", self.show(run))
                 reason = self.reason(run)
                 self.assertTrue(any(t in reason.lower() for t in targets), f"the reason names none of {targets}: {reason!r}")
                 self.assertIn(backup, reason, "the reason does not name the backup used")
-        for command, project, targets, backup in cases:
+        for command, project, targets, backup, _cwd in cases:
             with self.subTest(command=command, check="log"):
                 lines = self.lines_of(project)
                 self.assertEqual([d for d, _ in lines], ["ALLOWED"] * len(callers), lines)    # one line per allow
@@ -1278,7 +1328,7 @@ class Hooks(unittest.TestCase):
         on_f1 = ("backup", "today", f"backup_forms.py --form {F1}")
         cases = []
 
-        def case(why, command, records=(), hint=(), before=(), git=False, appsscript=True, change=None):
+        def case(why, command, records=(), hint=(), before=(), git=False, appsscript=True, change=None, cwd=None):
             p = self.project(git=git, appsscript=appsscript)
             for record in records:
                 self.back_up(p, *record)
@@ -1286,7 +1336,7 @@ class Hooks(unittest.TestCase):
                 self.salesforce_before(p, rel, day)
             if change:
                 change(p)
-            cases.append((why, command, p, hint))
+            cases.append((why, command, p, hint, cwd and os.path.join(p, cwd)))
 
         case("no record at all", jot, hint=on_f1)
         case("a record from yesterday", jot, [("jotform", F1, f"backups/{F1}", yesterday)], on_f1)
@@ -1377,7 +1427,9 @@ class Hooks(unittest.TestCase):
              before=[("data/sf_tiles/before/Attendance.xml", None)], hint=on_before)
         case("a quick deploy by its job id", "sf project deploy quick --job-id 0Af000000000001 -o glow",
              before=[("data/sf_tiles/before/Attendance.xml", None)], hint=on_before)
-        case("a tracked Apps Script file changed", "npx clasp push -f", git=True, hint=("commit",),
+        # (npx clasp run in appsscript/, npm run in the checkout: the folder each pushes from is right,
+        # so what is missing is the commit - F2 of PR #154's review)
+        case("a tracked Apps Script file changed", "npx clasp push -f", git=True, hint=("commit",), cwd="appsscript",
              change=lambda p: self.write(p, "appsscript/Code.gs", "function onEdit(e) { return 1; }\n"))
         case("an untracked Apps Script file", "npm run clasp:push", git=True, hint=("commit",),
              change=lambda p: self.write(p, "appsscript/Extra.gs", "function extra() {}\n"))
@@ -1385,10 +1437,11 @@ class Hooks(unittest.TestCase):
         def staged(p):
             self.write(p, "appsscript/Code.gs", "function onEdit(e) { return 2; }\n")
             self.git(p, "add", "appsscript/Code.gs")
-        case("a staged Apps Script change", "npx clasp push -f", git=True, hint=("commit",), change=staged)
-        case("no git repository", "npx clasp push -f",
+        case("a staged Apps Script change", "npx clasp push -f", git=True, hint=("commit",), change=staged,
+             cwd="appsscript")
+        case("no git repository", "npx clasp push -f", cwd="appsscript",
              change=lambda p: self.write(p, "appsscript/Code.gs", "function onEdit(e) {}\n"))
-        case("a repository without appsscript/", "npx clasp push -f", git=True, appsscript=False)
+        case("a repository without appsscript/", "npx clasp push -f", git=True, appsscript=False, cwd="appsscript")
         return cases
 
     def test_a_write_without_a_backup_from_today_asks_or_is_refused_saying_which(self):
@@ -1398,8 +1451,9 @@ class Hooks(unittest.TestCase):
         cases = self.unbacked_writes()
         callers = [(mode, None) for mode in ASK_MODES] + [(mode, None) for mode in self.HEADLESS] + [("auto", True)]
         runs = [(case, caller) for case in cases for caller in callers]
-        results = self.all_of(lambda r: self.gate(r[0][1], mode=r[1][0], agent=r[1][1], project=r[0][2]), runs)
-        for ((why, command, _project, hint), (mode, agent)), run in zip(runs, results):
+        results = self.all_of(lambda r: self.gate(r[0][1], mode=r[1][0], agent=r[1][1], project=r[0][2], cwd=r[0][4]),
+                              runs)
+        for ((why, command, _project, hint, _cwd), (mode, agent)), run in zip(runs, results):
             with self.subTest(why=why, mode=mode, agent=agent):
                 expected = "ask" if mode in ASK_MODES and not agent else "deny"
                 self.assertEqual(self.verdict(run), expected, self.show(run))
@@ -1408,7 +1462,7 @@ class Hooks(unittest.TestCase):
                 message = (self.reason(run) + "\n" + run.err).lower()
                 for needle in hint:
                     self.assertIn(needle.lower(), message, f"the reason does not say {needle!r}")
-        for why, _command, project, _hint in cases:
+        for why, _command, project, _hint, _cwd in cases:
             with self.subTest(why=why, check="log"):
                 counts = collections.Counter(d for d, _ in self.lines_of(project))
                 self.assertNotIn("ALLOWED", counts)
@@ -1506,11 +1560,16 @@ class Hooks(unittest.TestCase):
         # to the prompt
         p = self.fully_backed()
         self.assert_backed(p)
-        commands = self.chained()
+        # the clasp ones run in appsscript/, where clasp push alone goes through (F2 of PR #154's
+        # review): what keeps them from the automatic go is the chain or the launcher
+        appsscript = os.path.join(p, "appsscript")
+        run = self.gate("npx clasp push -f", mode="dontAsk", project=p, cwd=appsscript, may_allow=True)
+        self.assertEqual(self.verdict(run), "allow", "the control: clasp push in appsscript/ - " + self.show(run))
+        commands = [(c, {"cwd": appsscript}) if "clasp" in c else c for c in self.chained()]
         self.assert_never_automatic(commands, p)
         counts = collections.Counter(d for d, _ in self.lines_of(p))
-        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
-        self.assertEqual(len(self.quiet_notifications()), 1, "only the control is notified")
+        self.assertEqual(counts["ALLOWED"], 2, "only the controls are allowed")
+        self.assertEqual(len(self.quiet_notifications()), 2, "only the controls are notified")
 
     def test_the_interpreter_by_any_path_is_the_command_itself_and_goes_through(self):
         # the control of the launcher allowlist: python3 by its name, the venv's or any other path
@@ -1523,7 +1582,10 @@ class Hooks(unittest.TestCase):
         commands += [".venv/bin/python3 tools/sheets_client.py import Roster data/roster.csv", "clasp push -f",
                      "/opt/homebrew/bin/python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off"]
         callers = [{"mode": "dontAsk"}, {"mode": None}, {"mode": "auto", "agent": True}]
-        cases = [(command, dict(caller, project=p, may_allow=True)) for command in commands for caller in callers]
+        # (clasp in appsscript/, the folder it pushes from: F2 of PR #154's review)
+        cases = [(command, dict(caller, project=p, may_allow=True,
+                                cwd=os.path.join(p, "appsscript") if "clasp" in command else None))
+                 for command in commands for caller in callers]
         for command, kw, run in self.verdicts(cases):
             with self.subTest(command=command, mode=kw["mode"], agent=kw.get("agent")):
                 self.assertEqual(self.verdict(run), "allow", self.show(run))
@@ -1538,16 +1600,22 @@ class Hooks(unittest.TestCase):
                     "sf project deploy start --source-dir data/sf_x/after -o glow",
                     "python3 tools/sheets_client.py import Roster data/roster.csv",
                     "gh workflow run auto-sync.yml -f apply=true"]
+        # (npx clasp in appsscript/, the folder it pushes from: F2 of PR #154's review)
+        where = {c: os.path.join(p, "appsscript") if "clasp" in c else None for c in commands}
         for command in commands:
             with self.subTest(command=command, mode="auto"):
-                run = self.gate(command, mode="auto", project=p, may_allow=True)
+                run = self.gate(command, mode="auto", project=p, cwd=where[command], may_allow=True)
                 self.assertEqual(self.verdict(run), "allow", "the control - " + self.show(run))
-        self.assert_asks(commands, mode="plan", project=p)
-        for mode in UNKNOWN_MODES:
-            self.assert_denies(commands, mode=mode, project=p)
         odd = [{"permission_mode": v} for v in (1, True, ["default"], {"mode": "auto"}, "dontask", "Auto")]
-        for fields in odd:
-            self.assert_denies(commands, mode=None, extra=fields, project=p)
+        cases = ([(c, {"mode": "plan"}) for c in commands] + [(c, {"mode": m}) for m in UNKNOWN_MODES for c in commands]
+                 + [(c, {"mode": None, "extra": fields}) for fields in odd for c in commands])
+        for command, kw, run in self.verdicts([(c, dict(kw, project=p, cwd=where[c])) for c, kw in cases]):
+            with self.subTest(command=command, mode=kw["mode"], extra=kw.get("extra")):
+                if kw["mode"] == "plan":
+                    self.assertEqual(self.verdict(run), "ask", self.show(run))
+                    self.check_reason(command, self.reason(run))
+                else:
+                    self.assertEqual(self.verdict(run), "deny", self.show(run))
         counts = collections.Counter(d for d, _ in self.lines_of(p))
         self.assertEqual(counts["ALLOWED"], len(commands), "only the controls are allowed")
         self.assertEqual(counts["ASKED"], len(commands))
@@ -1821,6 +1889,266 @@ class Hooks(unittest.TestCase):
         # (the tools off the list, with every backup there is: NEVER_AUTOMATIC; sf_dupes.py's
         # --apply: deletes())
 
+    # ---- live_gate.sh: the fixes after review 1 of PR #154 (the design's "Rulings for review 1's
+    # findings", F1 F2 F5; 2026-10-26)
+    def sf_plan(self, files=None):
+        """A project of its own whose plan folder data/sf_x/ holds a before/ retrieve from today, and
+        `files` ({path: text})."""
+        p = self.project()
+        self.salesforce_before(p, "data/sf_x/before/Contact.object-meta.xml")
+        for rel, text in (files or {}).items():
+            self.write(p, rel, text)
+        return p
+
+    # one text whatever the file holds: only what the file holds can tell an update from a delete
+    APEX_RUNS = ["sf apex run --file data/sf_x/fix.apex -o glow", "sf apex run -f data/sf_x/fix.apex -o glow",
+                 "sf apex run --file=data/sf_x/fix.apex --target-org glow", "sfdx apex run -f data/sf_x/fix.apex -o glow"]
+
+    def assert_delete_class(self, cases):
+        """Each (label, command, project): asked in default and auto, refused in dontAsk,
+        bypassPermissions, a missing mode and from a subagent - never allowed, the plan's before/
+        from today notwithstanding - and the message calls it a delete."""
+        callers = ([{"mode": "default"}, {"mode": "auto"}] + [{"mode": m} for m in self.HEADLESS]
+                   + [{"mode": "auto", "agent": True}])
+        labels = {}
+        runs = []
+        for label, command, p in cases:
+            labels[p] = label
+            runs += [(command, dict(caller, project=p)) for caller in callers]
+        for command, kw, run in self.verdicts(runs):
+            with self.subTest(case=labels[kw["project"]], command=command, mode=kw["mode"], agent=kw.get("agent")):
+                expected = "deny" if kw["mode"] in self.HEADLESS or kw.get("agent") else "ask"
+                self.assertEqual(self.verdict(run), expected, self.show(run))
+                if expected == "ask":
+                    self.check_reason(command, self.reason(run))
+                self.assertIn("delet", (run.err + self.reason(run)).lower(), "the message does not call it a delete")
+
+    def test_anonymous_apex_goes_through_only_when_its_file_deletes_nothing(self):
+        # F1: `sf|sfdx apex run --file` (-f, --file=) names the Apex the org runs, and the gate reads
+        # it. Holding only updates, it goes through on the plan's before/ from today, in every mode
+        # but plan and from a subagent; holding delete, merge (a merge deletes the losing record),
+        # undelete or emptyRecycleBin - as a word, DML or a Database. call, in any case - it is a
+        # delete: asked, refused where no prompt can show, whatever the backups. The command is the
+        # same text in every project
+        updates = [self.sf_plan({"data/sf_x/fix.apex": text}) for text in self.APEX_UPDATES]
+        callers = [{"mode": "default"}, {"mode": "dontAsk"}, {"mode": None}, {"mode": "auto", "agent": True}]
+        runs = [(command, dict(caller, project=p, may_allow=True))
+                for p in updates for command in self.APEX_RUNS for caller in callers]
+        for command, kw, run in self.verdicts(runs):
+            with self.subTest(apex=f"APEX_UPDATES[{updates.index(kw['project'])}]", command=command, mode=kw["mode"],
+                              agent=kw.get("agent")):
+                self.assertEqual(self.verdict(run), "allow", self.show(run))
+                self.assertIn("data/sf_x/before", self.reason(run), "the reason does not name the before/ retrieve")
+        deletes = [(f"APEX_DELETES[{n}]", self.APEX_RUNS[n % len(self.APEX_RUNS)],
+                    self.sf_plan({"data/sf_x/fix.apex": text})) for n, text in enumerate(self.APEX_DELETES)]
+        self.assert_delete_class(deletes)
+        # the older spelling of the same run, on a file that deletes: never automatic
+        for label, _command, p in deletes[:2]:
+            for command in ("sfdx force:apex:execute -f data/sf_x/fix.apex -u glow",
+                            "sf force:apex:execute --apexcodefile data/sf_x/fix.apex"):
+                with self.subTest(case=label, command=command):
+                    self.assertEqual(self.verdict(self.gate(command, mode="dontAsk", project=p)), "deny")
+        for label, _command, p in deletes:
+            with self.subTest(case=label, check="log"):
+                self.assertNotIn("ALLOWED", [d for d, _ in self.lines_of(p)])
+        for p in updates:
+            self.assertEqual([d for d, _ in self.lines_of(p)], ["ALLOWED"] * len(self.APEX_RUNS) * len(callers))
+        self.assertEqual(len(self.notifications(len(runs))), len(runs), "one notification per allow")
+
+    def test_anonymous_apex_without_a_readable_file_in_the_checkout_is_never_automatic(self):
+        # F1: no --file (the Apex on standard input), a file that is not there, one that cannot be
+        # read, or a link to one outside the checkout - the gate cannot read what the org will run:
+        # never automatic, the plan's before/ from today notwithstanding
+        outside = self.write(self.side.name, "outside/fix.apex", self.APEX_UPDATES[0])
+        p = self.sf_plan({"data/sf_x/fix.apex": self.APEX_UPDATES[0], "data/sf_x/locked.apex": self.APEX_UPDATES[1]})
+        os.symlink(outside, os.path.join(p, "data", "sf_x", "linked.apex"))
+        run = self.gate("sf apex run --file data/sf_x/fix.apex -o glow", mode="dontAsk", project=p, may_allow=True)
+        self.assertEqual(self.verdict(run), "allow", "the control: an Apex file here that deletes nothing - " + self.show(run))
+        commands = ["sf apex run --file data/sf_x/absent.apex -o glow", "sf apex run -f data/sf_x/linked.apex -o glow",
+                    "sf apex run -o glow < data/sf_x/fix.apex", "sfdx apex run --target-org glow < data/sf_x/fix.apex"]
+        if os.geteuid() != 0:                                           # root reads a file whatever its mode
+            os.chmod(os.path.join(p, "data", "sf_x", "locked.apex"), 0)
+            commands.append("sf apex run --file=data/sf_x/locked.apex -o glow")
+        self.assert_never_automatic(commands, p)
+        self.assertEqual(collections.Counter(d for d, _ in self.lines_of(p))["ALLOWED"], 1, "only the control is allowed")
+
+    def test_a_metadata_dir_deploy_is_never_automatic_and_destructive_changes_are_a_delete(self):
+        # F1: a deploy of a metadata (mdapi) folder - --metadata-dir in any spelling, force:mdapi:deploy
+        # - is never automatic; a deploy whose folder holds a destructiveChanges*.xml anywhere below it
+        # deletes what that file lists: a delete. The control: a deploy of a folder with none goes
+        # through on the same before/ from today
+        p = self.sf_plan({"data/sf_x/mdapi/package.xml": "<Package/>\n",
+                          "data/sf_x/mdapi/reports/Glow/Attendance.report": "<Report/>\n",
+                          "data/sf_x/after/main/default/reports/Attendance.report-meta.xml": "<Report/>\n"})
+        control = "sf project deploy start --source-dir data/sf_x/after -o glow"
+        run = self.gate(control, mode="dontAsk", project=p, may_allow=True)
+        self.assertEqual(self.verdict(run), "allow", "the control: a source deploy here - " + self.show(run))
+        self.assert_never_automatic(["sf project deploy start --metadata-dir data/sf_x/mdapi -o glow",
+                                     "sf project deploy start --metadata-dir=data/sf_x/mdapi -o glow",
+                                     "sf project deploy validate --metadata-dir data/sf_x/mdapi -o glow",
+                                     "sfdx project deploy start --metadata-dir data/sf_x/mdapi --target-org glow",
+                                     "sf deploy metadata --metadata-dir data/sf_x/mdapi -o glow",
+                                     "sfdx force:mdapi:deploy -d data/sf_x/mdapi -u glow"], p)
+        self.assertEqual(collections.Counter(d for d, _ in self.lines_of(p))["ALLOWED"], 1, "only the control is allowed")
+        destructive = []
+        for rel in ("destructiveChanges.xml", "main/default/destructiveChangesPost.xml", "a/b/c/destructiveChangesPre.xml"):
+            q = self.sf_plan({f"data/sf_x/after/{rel}": "<Package/>\n",
+                              "data/sf_x/after/main/default/reports/Attendance.report-meta.xml": "<Report/>\n",
+                              "data/sf_x/other/main/default/reports/Attendance.report-meta.xml": "<Report/>\n"})
+            run = self.gate("sf project deploy start --source-dir data/sf_x/other -o glow", mode="dontAsk", project=q,
+                            may_allow=True)
+            self.assertEqual(self.verdict(run), "allow", f"the control beside after/{rel}: a folder with none - " + self.show(run))
+            destructive += [(f"after/{rel}", command, q) for command in
+                            ("sf project deploy start --source-dir data/sf_x/after -o glow",
+                             "sf project deploy start -d data/sf_x/after -o glow",
+                             "sf project deploy start --source-dir=data/sf_x/after --target-org glow")]
+        self.assert_delete_class(destructive)
+        for label, _command, q in destructive:
+            with self.subTest(case=label, check="log"):
+                self.assertEqual(collections.Counter(d for d, _ in self.lines_of(q))["ALLOWED"], 1,
+                                 "only the control is allowed")
+
+    def clasp_project(self):
+        """A checkout whose appsscript/, drive-sync/ (the Drive photo mover, with its own .clasp.json)
+        and appsscript-old/ are committed, every .clasp.json ignored as in the repository: all clean."""
+        p = self.project(git=True)
+        self.write(p, ".gitignore", ".clasp.json\n")
+        for folder in ("appsscript", "drive-sync", "appsscript-old"):
+            self.write(p, f"{folder}/.clasp.json", json.dumps({"scriptId": f"fictional-{folder}", "rootDir": "."}) + "\n")
+        self.write(p, "drive-sync/Mover.gs", "function moveFolder() {}\n")
+        self.write(p, "drive-sync/appsscript.json", '{"timeZone": "Etc/UTC"}\n')
+        self.write(p, "appsscript-old/Code.gs", "function onEdit(e) {}\n")
+        self.git(p, "add", "-A")
+        self.git(p, "commit", "-q", "-m", "the other clasp projects")
+        return p
+
+    def test_clasp_push_goes_through_only_from_the_folder_it_pushes(self):
+        # F2: clasp pushes the .clasp.json project of the Bash tool's working folder - the input's
+        # cwd, which persists between calls. npx clasp push and clasp push are automatic only when
+        # cwd resolves (a link, a trailing /, a .. followed) to <project>/appsscript; npm run
+        # clasp:push, which goes there itself, only when it resolves to <project>. drive-sync/ (the
+        # photo mover: never automatic), any other folder, a missing cwd, or a -P/--project/--rootDir
+        # flag: not automatic - asked, refused where no prompt can show - appsscript/ clean and
+        # committed notwithstanding
+        p = self.clasp_project()
+        appsscript = os.path.join(p, "appsscript")
+        linked_appsscript = os.path.join(self.side.name, "aliased-appsscript")
+        linked_project = os.path.join(self.side.name, "aliased-checkout")
+        os.symlink(appsscript, linked_appsscript)
+        os.symlink(p, linked_project)
+        go = [("npx clasp push -f", appsscript), ("clasp push", appsscript), ("npx clasp push", appsscript + os.sep),
+              ("npx clasp push -f", os.path.realpath(appsscript)),
+              ("clasp push -f", os.path.join(p, "drive-sync", "..", "appsscript")),
+              ("npx clasp push -f", linked_appsscript),
+              ("npm run clasp:push", p), ("npm run clasp:push", os.path.realpath(p)), ("npm run clasp:push", linked_project),
+              ("npm run clasp:push -- --force", p + os.sep)]
+        callers = [{"mode": "default"}, {"mode": "dontAsk"}, {"mode": None}, {"mode": "auto", "agent": True}]
+        runs = [(command, dict(caller, project=p, cwd=cwd, may_allow=True)) for command, cwd in go for caller in callers]
+        head = self.head(p)[:7]
+        for command, kw, run in self.verdicts(runs):
+            with self.subTest(command=command, cwd=kw["cwd"], mode=kw["mode"], agent=kw.get("agent")):
+                self.assertEqual(self.verdict(run), "allow", self.show(run))
+                self.assertIn(f"appsscript/ at HEAD {head}", self.reason(run), "the reason does not name the commit")
+        other = self.project(git=True)                  # another checkout, its appsscript/ clean and committed too
+        drive = os.path.join(p, "drive-sync")
+        self.assert_never_automatic([
+            ("npx clasp push -f", {"cwd": drive}), ("clasp push", {"cwd": drive}),
+            ("npx clasp push -f", {"cwd": p}), ("clasp push -f", {"cwd": p}),
+            ("npx clasp push -f", {"cwd": os.path.join(p, "appsscript-old")}),
+            ("npx clasp push -f", {"cwd": os.path.join(other, "appsscript")}),
+            ("npx clasp push -f", {"cwd": os.path.join(p, "no-such-folder")}),
+            ("npx clasp push -f", {"cwd": self.NO_CWD}), ("clasp push", {"cwd": self.NO_CWD}),
+            ("npx clasp push -f", {"cwd": ""}), ("npx clasp push -f", {"extra": {"cwd": None}}),
+            ("npm run clasp:push", {"cwd": appsscript}), ("npm run clasp:push", {"cwd": drive}),
+            ("npm run clasp:push", {"cwd": other}), ("npm run clasp:push", {"cwd": self.NO_CWD}),
+            ("npx clasp push -f -P ../drive-sync", {"cwd": appsscript}),
+            ("clasp push --project ../drive-sync/.clasp.json", {"cwd": appsscript}),
+            ("npx clasp push -f --project=../drive-sync/.clasp.json", {"cwd": appsscript}),
+            ("npx clasp push --rootDir ../drive-sync", {"cwd": appsscript}),
+            ("clasp push -f --rootDir=../drive-sync", {"cwd": appsscript}),
+            ("npm run clasp:push -- -P drive-sync/.clasp.json", {"cwd": p}),
+            ("npm run clasp:push -- --rootDir drive-sync", {"cwd": p}),
+        ], p, light=True)
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], len(runs), "only the pushes from appsscript/ (npm run: the checkout) are allowed")
+
+    # F5: a redirect writes the records only when its target is them (> >> &> then the path); a read
+    # that sends its errors or output elsewhere is no forgery, and neither is a query or an export
+    # saved into a plan's before/ - the backup itself (absolute paths assembled: make check's
+    # docs-links refuses literal ones)
+    TMP_X = os.path.join(os.sep, "tmp", "x.txt")
+    TMP_ALL = os.path.join(os.sep, "tmp", "all_records.txt")
+    TMP_CUT = os.path.join(os.sep, "tmp", "targets.txt")
+    LOG_READS_REDIRECTED = ["tail -5 .claude/live_backups.log 2>/dev/null",
+                            f"grep jotform .claude/live_backups.log > {TMP_X}",
+                            "cat .claude/live_backups.log 2>&1",
+                            "grep -c sheet .claude/live_backups.log 2> /dev/null",
+                            "wc -l .claude/live_backups.log > data/count.txt",
+                            f"cat .claude/live_backups.log >> {TMP_ALL}",
+                            f"cut -f2 .claude/live_backups.log > {TMP_CUT} 2>&1"]
+    BEFORE_SAVED = ["sf data query -q \"SELECT Id FROM Account\" -o glow > data/sf_x/before/accounts.csv",
+                    "sf data query -q \"SELECT Id, Name FROM Contact\" -r csv -o glow > data/sf_y/before/contacts.csv",
+                    "sfdx data query -q \"SELECT Id FROM Account\" -o glow > data/sf_x/before/accounts.csv",
+                    "sf data query --file data/sf_x/q.soql --result-format csv -o glow >> data/sf_x/before/main/contacts.csv",
+                    "sf data export tree -q \"SELECT Id, Name FROM Account\" --output-dir data/sf_x/before -o glow",
+                    "sf data export bulk -q \"SELECT Id FROM Contact\" --output-file data/sf_x/before/contacts.csv -o glow",
+                    "sf project retrieve start -m Report:Attendance --target-dir data/sf_x/before -o glow --json "
+                    "> data/sf_x/before/retrieve.json"]
+    # ... and still forgeries: a redirect whose target is the records, whatever 2>/dev/null or 2>&1
+    # stands beside it and when the same command reads them; a before/ written by anything but a
+    # query, an export or a retrieve (a write's output, a copy by redirect, a query chained to a
+    # forged file)
+    LOG_REDIRECTS = ["grep x a.txt > .claude/live_backups.log",
+                     "cat a >> .claude/live_backups.log 2>/dev/null",
+                     "echo x &> .claude/live_backups.log",
+                     "echo x &>> .claude/live_backups.log",
+                     "tail -5 .claude/live_backups.log > .claude/live_backups.log",
+                     "cat .claude/live_backups.log 2>/dev/null >> .claude/live_backups.log",
+                     "printf x 2>&1 >>.claude/live_backups.log",
+                     "printf x 1> ./.claude/live_backups.log",
+                     "printf x >| .claude/live_backups.log",
+                     "grep x a.txt 2>/dev/null > \"$CLAUDE_PROJECT_DIR\"/.claude/live_backups.log",
+                     f"grep jotform {TMP_X} > .claude/live_backups.log 2>&1",
+                     "cat a 2>/dev/null >> .claude/LIVE_BACKUPS.log"]
+    BEFORE_FORGED = ["cat data/sf_x/after/a.xml > data/sf_x/before/a.xml",
+                     "sf data query -q \"SELECT Id FROM Account\" -o glow; echo x > data/sf_x/before/a.xml",
+                     "echo sf data query > data/sf_x/before/a.xml",
+                     "sf data update record -s Account -i 001000000000001 -v \"Name=X\" -o glow > data/sf_x/before/out.txt",
+                     "sf data query -q \"SELECT Id FROM Account\" -o glow > data/sf_x/before/a.csv && touch data/sf_x/before/b.xml",
+                     "python3 tools/x.py > data/sf_x/before/a.csv"]
+
+    def test_a_read_of_the_records_or_a_query_saved_into_before_is_no_forgery(self):
+        # F5: no decision and nothing logged - with no backups (default, dontAsk, a missing mode, a
+        # subagent) and with every backup on record
+        commands = self.LOG_READS_REDIRECTED + self.BEFORE_SAVED
+        self.assert_no_decision(commands)
+        p = self.fully_backed()
+        for kw in ({"mode": "auto"}, {"mode": "dontAsk"}, {"mode": "auto", "agent": True}):
+            self.assert_silent(commands, project=p, **kw)
+        self.assertEqual(self.lines_of(p), [], "nothing live: nothing logged")
+        self.assertEqual(self.quiet_notifications(), [])
+
+    def test_a_redirect_into_the_records_or_a_hand_made_before_is_refused_saying_what_to_run_instead(self):
+        # F5, the other side: refused in every mode and from a subagent, never asked, with no backups
+        # and with every backup on record. The refusal says what to rephrase: a read without
+        # redirecting into the records; a before/ taken with sf project retrieve start, or a sf data
+        # query saved there
+        commands = self.LOG_REDIRECTS + self.BEFORE_FORGED
+        self.assert_refused_never_asked(commands)
+        p = self.fully_backed()
+        self.assert_denies(commands, mode="auto", project=p)
+        self.assertNotIn("ALLOWED", [d for d, _ in self.lines_of(p)])
+        for command, run in self.runs(self.LOG_REDIRECTS, mode="default"):
+            with self.subTest(command=command, check="how to read"):
+                message = (run.err + "\n" + self.reason(run)).lower()
+                self.assertIn("redirect", message, "the refusal does not say how to read without redirecting into the records")
+                self.assertRegex(message, r"\bread", "the refusal does not say how to read the records")
+        for command, run in self.runs(self.BEFORE_FORGED + ["echo x > data/sf_x/before/a.xml"], mode="default"):
+            with self.subTest(command=command, check="how to take a before/"):
+                message = run.err + "\n" + self.reason(run)
+                for needle in ("sf project retrieve start", "sf data query"):
+                    self.assertIn(needle, message, f"the refusal does not name {needle!r} for a before/")
+
     # ---- protected_paths.sh
     def edit(self, path, project=None):
         return self.run_hook("protected_paths.sh", {"file_path": path, "content": "x"}, tool="Write",
@@ -2063,6 +2391,38 @@ class GateSettings(unittest.TestCase):
         missing = [rule for rule in self.ALLOW_BEFORE if rule not in self.permissions["allow"]]
         self.assertEqual(missing, [], "an allow rule was dropped")
         self.assertEqual(sorted(self.settings["env"]), ["CLAUDE_VERIFY_CMD", "HARNESS_TEST_CMD", "HARNESS_WORKTREE_SETUP"])
+
+    # F6 of PR #154's review: in dontAsk (a headless run) only allow-listed commands run, so the
+    # backups the automatic go needs - besides backup_forms.py and one tab's export, allowed already
+    # - get their rules: the GitHub switches, the whole Sheet, a Salesforce plan's before/ retrieve
+    BACKUP_RULES = ["Bash(python3 tools/github_switches.py backup)", "Bash(python3 tools/sheets_client.py export-all:*)",
+                    "Bash(sf project retrieve start:*)"]
+    BACKUPS = ["python3 tools/github_switches.py backup",
+               "python3 tools/sheets_client.py export-all data/sheet_2026-10-26",
+               "sf project retrieve start -m Report:Attendance --target-dir data/sf_x/before -o glow",
+               "sf project retrieve start -o glow --target-dir data/sf_tiles/before",
+               "python3 backup_forms.py --form 261234567890123",
+               "python3 tools/sheets_client.py export Roster data/sheet_2026-10-26/Roster.csv"]
+
+    def test_a_headless_run_may_take_every_backup_and_the_allow_list_gains_nothing_else(self):
+        allow = self.permissions["allow"]
+        for rule in self.BACKUP_RULES:
+            self.assertIn(rule, allow)
+        for command in self.BACKUPS:
+            with self.subTest(command=command):
+                self.assertTrue(self.covering("allow", command), f"no allow rule lets a headless run take {command!r}")
+                self.assertEqual(self.covering("ask", command), [], "an ask rule would stall a headless backup")
+                self.assertEqual(self.covering("deny", command), [])
+        self.assertEqual(sorted(allow), sorted(self.ALLOW_BEFORE + self.BACKUP_RULES),
+                         "the allow list is 2026-10-26's with the three backup rules, and nothing else")
+        self.assertEqual(len(allow), len(set(allow)), "a rule listed twice")
+        # no allow rule lets a live write or a delete past the hook's decision
+        for command in (self.AUTO_FAMILIES + self.DELETE_FAMILIES
+                        + ["python3 tools/sheets_client.py import Roster data/roster.csv",
+                           "python3 tools/github_switches.py restore backups/github/switches.json",
+                           "sf project deploy start --source-dir data/sf_x/before -o glow"]):
+            with self.subTest(command=command, check="no allow"):
+                self.assertEqual(self.covering("allow", command), [], f"an allow rule covers the live {command!r}")
 
     def test_the_live_gate_still_runs_on_every_bash_command(self):
         pre = self.settings["hooks"]["PreToolUse"]
