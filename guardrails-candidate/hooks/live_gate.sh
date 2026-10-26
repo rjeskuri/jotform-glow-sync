@@ -12,9 +12,12 @@
 #     command only ever an argument) tells Ryan what went through;
 #   - "ask" (Ryan's prompt in the session; his answer is the go) for everything else
 #     live, in default, acceptEdits, auto and plan: a DELETE (--prune, the words
-#     delete, remove or destructive in any case and position, sf_dupes.py --apply),
-#     a write without its backup from today (the reason names the backup command),
-#     a chained or prefixed command, a tool no list names, plan mode;
+#     delete, remove or destructive in any case and position, sf_dupes.py --apply;
+#     and by what a file holds: the Apex file of sf apex run --file holding a word
+#     starting delete, undelete, merge or emptyRecycleBin, a deploy naming a folder
+#     with a destructiveChanges*.xml below it), a write without its backup from today
+#     (the reason names the backup command), a chained or prefixed command, a tool
+#     no list names, plan mode;
 #   - "deny" where nobody can answer that prompt: a subagent (agent_id in the input;
 #     agent_type alone is the main thread of a session started with --agent), and
 #     the modes dontAsk, bypassPermissions, a missing or an unknown value (a
@@ -24,8 +27,11 @@
 #     (~/.zshrc and the other shell startup files, a direnv .envrc, the repository's
 #     .env: a redirect, tee, sed -i or perl -i into one, or launchctl setenv), or
 #     forges a backup - writes, copies, touches or records .claude/live_backups.log
-#     by hand, imports its writer glow/live_backups.py, or writes a Salesforce plan's
-#     before/ (touch under it, cp|mv|rsync|ditto|ln|install onto it, > or tee into it).
+#     by hand (a redirect whose target is the records: after the first > they, a $,
+#     a backtick or a glob appear), imports its writer glow/live_backups.py, or
+#     writes a Salesforce plan's before/ (touch under it, cp|mv|rsync|ditto|ln|install
+#     onto it, > or tee into it - unless a query, export or retrieve alone saves its
+#     output there). A read of the records whose output goes elsewhere is no forgery.
 #
 # The automatic go needs ALL of:
 #   - one simple command: none of ; & | ` $( <( > # or a line break (a
@@ -52,17 +58,24 @@
 #                              run the sync, which writes the forms;
 #     and with no record:
 #       appsscript             clasp push: appsscript/ tracked, nothing uncommitted
-#                              or untracked under it (the version before is in git);
+#                              or untracked under it (the version before is in git),
+#                              and pushed from the folder whose project it is - the
+#                              input's cwd, resolved: npx clasp push | clasp push in
+#                              <checkout>/appsscript, npm run clasp:push in the
+#                              checkout - bare or with -f/--force only;
 #       salesforce, raw        sf|sfdx deploys, data writes, apex run, sf api
 #                              request writes, .salesforce.com/services/: the
 #                              command names a path inside data/sf_<topic>/ and
 #                              data/sf_<topic>/before/ holds a file modified today
-#                              (the plan's before/ retrieve);
+#                              (the plan's before/ retrieve); apex run only with a
+#                              --file the gate reads - a regular file, no link,
+#                              inside the checkout - that deletes nothing;
 #       salesforce, tools      SF_TOOLS below: each writes its own rollback record
 #                              (a ledger row, merge_rollback.json) before every write.
 #   Never automatic: gh api or api.github.com on dispatches or graphql; auto_sync.py
-#   with --apply-salesforce (Salesforce accounts, no rollback record); any other
-#   tool (the Drive photo mover, upload_roster.py, deactivate_clubs.py, ...).
+#   with --apply-salesforce (Salesforce accounts, no rollback record); a metadata
+#   (mdapi) deploy (--metadata-dir, force:mdapi:deploy) and force:apex:execute; any
+#   other tool (the Drive photo mover, upload_roster.py, deactivate_clubs.py, ...).
 #
 # Fast: a few greps, awk, find and git, no network, well inside the 5 s timeout.
 # Every decision on a live command is appended to .claude/live_gate.log
@@ -173,24 +186,49 @@ elif has "${SF}api[[:space:]]+request[[:space:]]+rest" \
 fi
 [ -z "$MATCH" ] && MATCH=$SF_API
 # A forged backup is a self-approval too (#146): the records the automatic go trusts
-# (.claude/live_backups.log, any spelling of its path) named together with a write verb;
-# their writer (glow/live_backups.py) imported or called by hand; a Salesforce plan's
-# before/ written by hand. Reading them, copying FROM a before/, the retrieve into one,
-# their tests and a commit message that names them are no forgery.
+# (.claude/live_backups.log, any spelling of its path) named together with a write verb, or
+# as a redirect's target - anywhere after the command's first > it names them, a $, a
+# backtick or a glob (a target the gate cannot read: a variable, a substitution); their
+# writer (glow/live_backups.py) imported or called by hand; a Salesforce plan's before/
+# written by hand. Reading them (its output or errors redirected elsewhere: > out.txt,
+# 2>/dev/null), copying FROM a before/, the retrieve into one, a query or an export saved
+# into one - alone: sf|sfdx data query|export or project retrieve start, no ; & | ` $( <( or
+# line break -, their tests and a commit message that names them are no forgery (F5 of PR #154's
+# review).
 VERB='(^|[^[:alnum:]_.-])(tee|cp|mv|dd|ln|install|rsync|ditto|touch|truncate)([^[:alnum:]_.-]|$)'
-FORGED=
-if has 'live_backups\.log' && has ">|${VERB}|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i|open\(|write_text|write_bytes"; then
-  FORGED=$(first 'live_backups\.log')
+# each spelling of the command from its first > on: every redirect's target is in it
+after_redirect() {
+  local t
+  while IFS= read -r t; do
+    case "$t" in *'>'*) printf '%s\n' "${t#*>}" ;; esac
+  done <<EOF
+$TEXTS
+EOF
+}
+FORGED= FORGED_KIND=
+if has 'live_backups\.log' \
+    && { has "${VERB}|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i|open\(|write_text|write_bytes" \
+         || after_redirect | grep -Eiq 'live_backup|[$*?`]|\['; }; then
+  FORGED=$(first 'live_backups\.log') FORGED_KIND=records
 elif has 'live_backups' && has 'import|live_backups\.record'; then
-  FORGED=$(first 'live_backups')
+  FORGED=$(first 'live_backups') FORGED_KIND=writer
 else
   TRIMMED=${BARE%"${BARE##*[![:space:]]}"}
   LAST=${TRIMMED##*[[:space:]]}
   case "$LAST" in before | before/* | */before | */before/*) LAST_BEFORE=1 ;; *) LAST_BEFORE= ;; esac
+  SAVED=      # a query, an export or a retrieve alone: what it saves into a before/ is the backup
+  case "$CMD" in
+    *';'* | *'&'* | *'|'* | *'`'* | *'$('* | *'<('* | *$'\n'* | *$'\r'*) ;;
+    *) read -r S1 S2 S3 S4 _ <<<"$CMD"
+       case "$S1" in sf | sfdx | */sf | */sfdx)
+         case "$S2 $S3" in 'data query' | 'data export') SAVED=1 ;; esac
+         [ "$S2 $S3 ${S4:-}" = 'project retrieve start' ] && SAVED=1 ;;
+       esac ;;
+  esac
   if { has '(^|[^[:alnum:]_.-])touch([^[:alnum:]_.-]|$)' && has '(^|[[:space:]/=])before/'; } \
       || { [ -n "$LAST_BEFORE" ] && has '(^|[^[:alnum:]_.-])(cp|mv|rsync|ditto|ln|install)([^[:alnum:]_.-]|$)'; } \
-      || has '(>|(^|[^[:alnum:]_.-])tee[[:space:]])[^;&|]*(^|[[:space:]/=])before/'; then
-    FORGED="before/"
+      || { [ -z "$SAVED" ] && has '(>|(^|[^[:alnum:]_.-])tee[[:space:]])[^;&|]*(^|[[:space:]/=])before/'; }; then
+    FORGED="before/" FORGED_KIND=before
   fi
 fi
 [ -z "$MATCH" ] && MATCH=$FORGED
@@ -289,11 +327,25 @@ or Ryan runs it in his terminal."
 }
 
 if has "$SELF" || [ -n "$FORGED" ]; then
-  refuse "The command approves itself: it sets GLOW_LIVE_OK, writes a file the next launch
-reads its environment from, or forges a backup - writes .claude/live_backups.log or a
-Salesforce plan's before/ by hand, or calls their writer. Nothing pre-approves a live
-command: a backup tool's own record, or Ryan's answer to the session's prompt, is the go.
-GLOW_LIVE_OK grants nothing since 2026-10-14."
+  case "$FORGED_KIND" in
+    records) HOW="It forges a backup record: it writes .claude/live_backups.log by hand (a redirect
+into it, a copy, move or link onto it, tee, touch, truncate or an edit in place). Only a
+backup tool writes a record, once its backup is on disk. To read the records, run the read
+alone without redirecting into them: cat, tail or grep .claude/live_backups.log (its output
+or errors may go elsewhere, > out.txt or 2>/dev/null)." ;;
+    writer) HOW="It forges a backup record: it imports or calls the records' writer
+(glow/live_backups.py) by hand. Only a backup tool calls it, once its backup is on disk." ;;
+    before) HOW="It forges a Salesforce plan's before/ retrieve: it writes a before/ folder by hand
+(touch, a copy, move, sync or link onto it, a redirect or tee into it from anything but a
+query). Take the before/ with sf project retrieve start ... --target-dir
+data/sf_<topic>/before, or save a query there, alone: sf data query ... >
+data/sf_<topic>/before/<name>.csv (or sf data export ... --output-dir it)." ;;
+    *) HOW="It sets GLOW_LIVE_OK, or writes a file the next launch reads its environment from (a
+shell startup file, .envrc, .env), or runs launchctl setenv." ;;
+  esac
+  refuse "The command approves itself. $HOW
+Nothing pre-approves a live command: a backup tool's own record, or Ryan's answer to the
+session's prompt, is the go. GLOW_LIVE_OK grants nothing since 2026-10-14."
 fi
 
 # DELETES ask whatever the backups (Ryan, 2026-10-26): --prune (and the words argparse
@@ -304,6 +356,126 @@ fi
 if has '--prune|delete|remove|destructive|(^|[[:space:]])--(p|pr|pru|prun|r|re|rem|remo|remov)([[:space:]=]|$)' \
     || { has 'sf_dupes' && has '--apply'; }; then
   not_automatic "A delete or --prune: it asks whatever the backups (ticket #146)."
+fi
+
+# the command's words, quotes and backslashes removed (for the flags and paths read below)
+set -f
+WORDS=($BARE)
+set +f
+words() { [ ${#WORDS[@]} -gt 0 ] && printf '%s\n' "${WORDS[@]}"; }
+# the checkout and the Bash tool's working folder (the input's cwd, where a relative path in
+# the command starts and clasp looks for its project), each resolved - links and .. followed;
+# empty when missing, relative, not a folder, or unreadable input
+input_cwd() {
+  local c
+  if command -v jq >/dev/null 2>&1; then
+    c=$(printf '%s' "$INPUT" | jq -j '.cwd | if type == "string" then . else "" end' 2>/dev/null; printf x)
+  else
+    c=$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+c = json.load(sys.stdin).get("cwd")
+print(c if isinstance(c, str) else "", end="")' 2>/dev/null; printf x)
+  fi
+  printf '%s' "${c%x}"
+}
+resolved() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
+PROJECT_REAL=
+[ -n "$PROJECT" ] && case "$PROJECT" in /*) PROJECT_REAL=$(resolved "$PROJECT") ;; esac
+CWD_IN=$(input_cwd)
+WD=
+case "$CWD_IN" in
+  *$'\n'* | *$'\r'*) ;;
+  /*) WD=$(resolved "$CWD_IN") ;;
+esac
+
+# ... and the deletes that only a file shows (F1 of PR #154's review): anonymous Apex whose
+# file holds delete, merge (a merge deletes the losing record), undelete or emptyRecycleBin -
+# a word starting so, in any case: DML or a Database. call (a field like IsDeleted is no
+# such word) -, and a deploy naming a folder with a destructiveChanges*.xml anywhere below it
+# (it deletes what that file lists).
+# the files `sf|sfdx apex run` runs: each -f, --file, --file=, -f=, -f<name> value, as "f:<name>"
+apex_files() {
+  local w expecting=
+  while IFS= read -r w; do
+    if [ -n "$expecting" ]; then
+      expecting=
+      printf 'f:%s\n' "$w"
+      continue
+    fi
+    case "$w" in
+      -f | --file) expecting=1 ;;
+      --file=*) printf 'f:%s\n' "${w#--file=}" ;;
+      -f=*) printf 'f:%s\n' "${w#-f=}" ;;
+      -f?*) printf 'f:%s\n' "${w#-f}" ;;
+    esac
+  done <<EOF
+$(words)
+EOF
+  [ -n "$expecting" ] && printf 'f:\n'
+  return 0
+}
+# a file the gate can read for what the org will run: a regular file, no link, readable, its
+# folder (links followed) inside the checkout; a relative name from the working folder
+apex_path() {
+  local f=$1 dir
+  [ -n "$f" ] && [ -n "$PROJECT_REAL" ] || return 1
+  case "$f" in /*) ;; *) [ -n "$WD" ] || return 1; f="$WD/$f" ;; esac
+  [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] || return 1
+  dir=$(resolved "$(dirname -- "$f")") || return 1
+  case "$dir/" in "$PROJECT_REAL"/*) ;; *) return 1 ;; esac
+  printf '%s' "$f"
+}
+APEX=           # sf apex run: none (no --file), unread (a file it cannot read here), deletes, ok
+if has "${SF}apex[[:space:]]+run"; then
+  APEX_FILES=$(apex_files)
+  if [ -z "$APEX_FILES" ]; then
+    APEX=none
+  else
+    APEX=ok
+    while IFS= read -r line; do
+      if p=$(apex_path "${line#f:}"); then
+        grep -Eiq '(^|[^[:alnum:]_])(delete|undelete|merge|emptyrecyclebin)' "$p"
+        case $? in
+          0) APEX=deletes; break ;;
+          1) ;;
+          *) APEX=unread ;;
+        esac
+      else
+        APEX=unread
+      fi
+    done <<EOF
+$APEX_FILES
+EOF
+  fi
+fi
+[ "$APEX" = deletes ] && not_automatic "Anonymous Apex that deletes: the file sf apex run runs holds delete, merge (a merge
+deletes the losing record), undelete or emptyRecycleBin. A delete asks whatever the backups
+(ticket #146)."
+# the first folder a deploy names (from the working folder or the checkout) with a
+# destructiveChanges*.xml anywhere below it
+destructive_below() {
+  local w c base d
+  while IFS= read -r w; do
+    for c in "$w" "${w#--*=}" "${w#-?=}" "${w#@}" "${w#-?}"; do
+      [ -n "$c" ] || continue
+      for base in "$WD" "$PROJECT"; do
+        case "$c" in /*) d=$c ;; *) [ -n "$base" ] || continue; d="$base/$c" ;; esac
+        [ -d "$d" ] || continue
+        if [ -n "$(find -L "$d" -iname 'destructiveChanges*.xml' 2>/dev/null | head -1)" ]; then
+          printf '%s' "$c"
+          return 0
+        fi
+      done
+    done
+  done <<EOF
+$(words)
+EOF
+  return 1
+}
+DEPLOY="${SF}(project[[:space:]]+deploy|deploy[[:space:]]+metadata|force:(source:(deploy|push)|mdapi:deploy))"
+if has "$DEPLOY" && DESTRUCTIVE=$(destructive_below); then
+  not_automatic "A deploy of $DESTRUCTIVE, which holds a destructiveChanges*.xml: destructive changes delete
+what they list. A delete asks whatever the backups (ticket #146)."
 fi
 
 # ---- a WRITE: automatic when it is one simple command, recognised, and backed up today
@@ -354,11 +526,6 @@ if [ "$LAUNCHER" = python ]; then
 fi
 [ "$LAUNCHER" = node ] && nope "no node tool's write is automatic."
 
-# the command's words, quotes and backslashes removed (for the flags and paths read below)
-set -f
-WORDS=($BARE)
-set +f
-words() { [ ${#WORDS[@]} -gt 0 ] && printf '%s\n' "${WORDS[@]}"; }
 # a word argparse would take for FLAG: FLAG itself or a prefix of it at least MIN long
 abbrev_of() {   # FLAG MIN
   local w
@@ -472,7 +639,32 @@ if [ -z "$WHY" ]; then
             abbrev_of --synclog 3 && need sheet all
           fi
         fi ;;
-      clasp) need appsscript HEAD ;;
+      clasp)
+        # clasp pushes the .clasp.json project of its working folder (F2 of PR #154's review):
+        # npx clasp push or clasp push from appsscript/, npm run clasp:push (it goes there
+        # itself) from the checkout - the folder is checked with the backup below -, bare or
+        # with -f/--force only: -P, --project, --rootDir or any other flag can push another one
+        CLASP_IN=
+        case "$LAUNCHER" in
+          npm) [ "${WORDS[1]:-}" = run ] && [ "${WORDS[2]:-}" = clasp:push ] && CLASP_IN=. ;;
+          npx) [ "${WORDS[1]:-}" = clasp ] && [ "${WORDS[2]:-}" = push ] && CLASP_IN=appsscript ;;
+          clasp) [ "${WORDS[1]:-}" = push ] && CLASP_IN=appsscript ;;
+        esac
+        if [ -z "$CLASP_IN" ]; then
+          nope "the automatic Apps Script push is npx clasp push or clasp push run in appsscript/, or npm run clasp:push run in the checkout."
+        else
+          case "$LAUNCHER" in clasp) i=2 ;; *) i=3 ;; esac
+          while [ "$i" -lt ${#WORDS[@]} ]; do
+            case "${WORDS[$i]}" in
+              -f | --force) ;;
+              --) [ "$LAUNCHER" = npm ] && [ "$i" -eq 3 ] \
+                    || nope "clasp push goes through bare or with -f (--force) only, not with ${WORDS[$i]}." ;;
+              *) nope "clasp push goes through bare or with -f (--force) only, not with ${WORDS[$i]}: -P, --project, --rootDir and the other flags can push another project." ;;
+            esac
+            i=$((i + 1))
+          done
+          need appsscript "$CLASP_IN"
+        fi ;;
       sheetimport) TAB=$(sheet_tab); need sheet "${TAB:-all}" ;;
       jotform) jotform_needs ;;
       sheetapi) need sheet all ;;
@@ -482,7 +674,19 @@ if [ -z "$WHY" ]; then
         else
           need github all
         fi ;;
-      sfurl | sfraw) need salesforce-plan - ;;
+      sfurl | sfraw)
+        # F1 of PR #154's review: what a metadata folder or force:apex:execute changes is not
+        # read here; anonymous Apex only from a file the gate read above
+        if has '--metadata-dir|force:mdapi:'; then
+          nope "a deploy of a metadata (mdapi) folder (--metadata-dir, force:mdapi:deploy) is never automatic: deploy a source folder (--source-dir)."
+        elif has 'force:apex:execute'; then
+          nope "force:apex:execute is never automatic: sf apex run --file <a file in the checkout> is, when that file deletes nothing."
+        elif [ "$APEX" = none ]; then
+          nope "anonymous Apex goes through only from a --file in the checkout that the gate reads; this one has none (its Apex comes from standard input)."
+        elif [ "$APEX" = unread ]; then
+          nope "anonymous Apex goes through only from a --file in the checkout that the gate reads; this file is not there, cannot be read, is a link, or lies outside the checkout."
+        fi
+        need salesforce-plan - ;;
       ghswitch) need github all ;;
       ghrun) need jotform all ;;
     esac
@@ -579,9 +783,16 @@ if [ -z "$WHY" ]; then
           HINTS="$HINTS
 - no backup from today of the sync's GitHub switches (github all): run python3 tools/github_switches.py backup first."
         fi ;;
-      appsscript)
+      appsscript)   # ident: the folder the push must run in, from the checkout (. or appsscript)
         if sha=$(appsscript_head); then
-          add_used "appsscript/ at HEAD $sha"; add_target appsscript "$sha"
+          WANT=$PROJECT_REAL
+          [ "$ident" = . ] || WANT="$PROJECT_REAL/$ident"
+          if [ -n "$PROJECT_REAL" ] && [ -n "$WD" ] && [ "$WD" = "$WANT" ]; then
+            add_used "appsscript/ at HEAD $sha"; add_target appsscript "$sha"
+          else
+            case "$ident" in .) WHERE="the checkout" ;; *) WHERE="$ident/" ;; esac
+            nope "Not automatic: clasp pushes the project of the folder it runs in, and this push runs in ${CWD_IN:-a folder the input does not name}, not $WHERE (npx clasp push in appsscript/, npm run clasp:push in the checkout)."
+          fi
         else
           HINTS="$HINTS
 - appsscript/ is not clean and committed (a change, an untracked file, or no git): commit it first, so the version before the push is in git."

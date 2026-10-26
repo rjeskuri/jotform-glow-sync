@@ -21,6 +21,8 @@
       "Bash(python3 tools/add_translations.py --audit:*)",
       "Bash(python3 tools/sheets_client.py tabs)", "Bash(python3 tools/sheets_client.py whoami)",
       "Bash(python3 tools/sheets_client.py export:*)",
+      "Bash(python3 tools/sheets_client.py export-all:*)", "Bash(python3 tools/github_switches.py backup)",
+      "Bash(sf project retrieve start:*)",
       "Bash(ls:*)", "Bash(wc:*)", "Bash(which:*)", "Bash(git commit:*)", "Bash(git push:*)",
       "Bash(harness-*:*)", "Bash(gh issue:*)", "Bash(gh pr:*)", "Bash(gh api:*)",
       "Bash(git worktree:*)", "Bash(git fetch:*)", "Bash(git add:*)"
