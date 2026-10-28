@@ -141,6 +141,9 @@ starting either beside it means a merge of `live_gate.sh` by hand.
   green. Protected path; Ryan lands it.
 - **#178** Python 3.12 and the lockfile. Its own rollout plan with a watched morning run; pick a
   week with no other change to the runner.
+  One known blocker, found while checking this document: on Python 3.13 the suite has 18 errors
+  in `test/sf_record_flags_test.py` (a regex with an inline flag not at the start of the
+  pattern, an error since 3.11 and a warning on the 3.10 CI runs). #178 fixes it first.
 
 ## What was deliberately not filed
 
