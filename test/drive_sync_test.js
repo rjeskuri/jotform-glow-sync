@@ -67,6 +67,9 @@
  * Never a file, a non-empty folder, a source folder itself, anything on the Shared Drive, a
  * permanent delete or emptyTrash.
  *
+ * #181: planTrash_ and retentionFolders_, the Shared Drive's 90-day trash planned offline (epic #179), have their
+ * own contract and section after planMoves_'s (search `#181`).
+ *
  * Every club name is fictional (test/fixtures/make_fixture.py's word lists).
  */
 const fs = require('fs');
@@ -846,6 +849,934 @@ console.log('\nplanMoves_ — the dry run: a plan and no side effects');
   check('the same inputs give the same plan', !err && same(norm(p1), norm(p2)) && norm(p1).moves.length > 0, err);
   const stray = ctx ? loadGs.strayGlobals(ctx) : ['not loaded'];
   check('no implicit globals made by the planner', !stray.length, stray.join(', '));
+}
+
+// ================================================================ #181: the 90-day trash on the Shared Drive
+/**
+ * planTrash_ and retentionFolders_ (drive-sync/Plan.gs, ticket #181, epic #179 rulings R1-R3, R6, R14): pure, like
+ * planMoves_. Nothing calls them yet (#182 wires them into Mover.gs).
+ *
+ *   retentionFolders_(drive, now, retentionDays) -> [folder id]
+ *   planTrash_(drive, now, retentionDays, maxFiles) -> {files, folders, capped, outside}
+ *
+ *   drive    {regions: {<Region>: <folder id>}   only a region of PHOTO_REGIONS that is an OWN key counts
+ *             rootId: <the Shared Drive's id>,
+ *             folders: [{id, name, parent, created: Date, complete}]   every untrashed folder, region folders included
+ *             files: [{id, parent, created: Date}]}
+ *   walk up  from an item's parent: the first configured region folder met is its region; rootId, null, an id not in
+ *            `folders`, or one met already first: outside, never trashed. A region folder and rootId never are.
+ *   due      now - max(file.created, its parent folder's created) >= retentionDays * 86,400,000 (ms, 24-hour days,
+ *            no time zone); never without a valid Date on both sides
+ *   files    [{region, id, parent, top, due}]  earliest due moment first, then id, at most maxFiles; top = the region
+ *            folder's direct subfolder it is under (null directly in the region folder); due = its due moment
+ *   folders  [{region, id, name, parent, top}]  strictly below a region folder, complete === true, itself at least
+ *            retentionDays old, every file in it in `files`, every folder in it earlier in `folders` (children first);
+ *            top = the direct subfolder of the region folder it is, or is under
+ *   capped   how many due files maxFiles left out;   outside  how many files reach no region folder
+ *
+ * The inputs are written here with `created` in ms (or null, 'invalid', or absent) and revived into the sandbox's
+ * Dates ('invalid' an Invalid Date). Every club name is fictional.
+ */
+{
+  console.log('\nplanTrash_ — generated Shared Drive trees against an independent oracle');
+  const DAY = 24 * 60 * MIN;
+  const planTrashFn = ctx && typeof ctx.planTrash_ === 'function' ? ctx.planTrash_ : null;
+  const oldFoldersFn = ctx && typeof ctx.retentionFolders_ === 'function' ? ctx.retentionFolders_ : null;
+  check('planTrash_ and retentionFolders_ are top-level functions of drive-sync/', !!planTrashFn && !!oldFoldersFn,
+        ctx ? 'planTrash_ ' + typeof ctx.planTrash_ + ', retentionFolders_ ' + typeof ctx.retentionFolders_ : 'not loaded');
+
+  const reviveDrive = ctx ? vm.runInContext(
+    '(function (s) { return JSON.parse(s, function (k, v) { if (k !== "created") return v; ' +
+    'return typeof v === "number" ? new Date(v) : v === "invalid" ? new Date(NaN) : v; }); })', ctx) : null;
+  const ARGS = '__retentionTestArgs__';
+  /** ctx[fn](...args) run inside the sandbox with a time limit: a walk up that never ends fails, it does not hang. */
+  const inSandbox = (fn, args) => {
+    if (!ctx || typeof ctx[fn] !== 'function') return { out: null, error: fn + ' is not defined' };
+    ctx[ARGS] = args;
+    try {
+      return { out: vm.runInContext(fn + '.apply(null, ' + ARGS + ')', ctx, { timeout: 5000 }), error: '' };
+    } catch (e) {
+      return { out: null, error: String(e && e.message || e) || 'threw' };
+    } finally { delete ctx[ARGS]; }
+  };
+  const sandboxDrive = (drive, tweak) => { const d = reviveDrive(JSON.stringify(drive)); if (tweak) tweak(d); return d; };
+  const trashPlan = (drive, nowMs, days, maxFiles, tweak) => {
+    if (!reviveDrive) return { plan: null, error: 'not loaded' };
+    const r = inSandbox('planTrash_', [sandboxDrive(drive, tweak), new CtxDate(nowMs), days, maxFiles]);
+    return { plan: r.out, error: r.error };
+  };
+  const oldFolders = (drive, nowMs, days, tweak) => {
+    if (!reviveDrive) return { ids: null, error: 'not loaded' };
+    const r = inSandbox('retentionFolders_', [sandboxDrive(drive, tweak), new CtxDate(nowMs), days]);
+    return { ids: r.out, error: r.error || (Array.isArray(r.out) ? '' : 'not an array: ' + JSON.stringify(r.out)) };
+  };
+  const sortedIds = a => (Array.isArray(a) ? a.map(String).sort() : a);
+
+  const tv = x => (x && typeof x.getTime === 'function' ? x.getTime() : x);
+  const tag = (...a) => a.map(v => (v === null ? '<null>' : v === undefined ? '<undefined>' : String(v))).join('|');
+  const fileKey = f => tag(f.region, f.id, f.parent, f.top, tv(f.due));
+  const folderKey = f => tag(f.region, f.id, f.name, f.parent, f.top);
+  /** The plan as strings: files in their order, folders as a set, the two counts. */
+  const normT = p => ({ files: list(p, 'files').map(fileKey), folders: list(p, 'folders').map(folderKey).sort(),
+                        capped: p ? p.capped : undefined, outside: p ? p.outside : undefined });
+  const planIds = p => list(p, 'files').map(e => e && e.id).concat(list(p, 'folders').map(e => e && e.id));
+  const folderOrder = p => list(p, 'folders').map(e => e && e.id);
+  /** '' when every folder comes before the folder it is in (children before parents) and nothing is listed twice. */
+  const orderProblems = p => {
+    const fl = list(p, 'folders'), at = new Map(), bad = [];
+    fl.forEach((f, i) => { if (at.has(f.id)) bad.push(f.id + ' twice'); else at.set(f.id, i); });
+    fl.forEach((f, i) => { if (at.has(f.parent) && at.get(f.parent) < i) bad.push(f.id + ' after the folder it is in, ' + f.parent); });
+    const fi = list(p, 'files').map(f => f.id);
+    if (new Set(fi).size !== fi.length) bad.push('a file twice');
+    return bad.join(', ');
+  };
+  const shuffle = (a, r) => {
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  };
+  const defineKey = (o, k, v) => Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+
+  /**
+   * What planTrash_ and retentionFolders_ must return, worked out from the rules alone (the ticket's Context), on a
+   * drive written here (created in ms; null, 'invalid' or absent: no valid Date).
+   */
+  function trashOracle(drive, nowMs, days, maxFiles) {
+    const R = days * DAY;
+    const byId = new Map(drive.folders.map(d => [d.id, d]));
+    const regionAt = new Map();
+    for (const reg of REGIONS) {
+      if (own(drive.regions, reg) && typeof drive.regions[reg] === 'string') regionAt.set(drive.regions[reg], reg);
+    }
+    const valid = t => typeof t === 'number' && isFinite(t);
+    const guarded = id => regionAt.has(id) || id === drive.rootId;
+    const climb = start => {   // {region, chain: the folders met, nearest first} or {why}
+      const met = new Set(), chain = [];
+      let cur = start;
+      for (;;) {
+        if (cur === null || cur === undefined) return { why: 'null' };
+        if (regionAt.has(cur)) return { region: regionAt.get(cur), chain };
+        if (cur === drive.rootId) return { why: 'root' };
+        if (!byId.has(cur)) return { why: 'unknown' };
+        if (met.has(cur)) return { why: 'loop' };
+        met.add(cur);
+        chain.push(cur);
+        cur = byId.get(cur).parent;
+      }
+    };
+    const due = [], notDue = [], outside = [];
+    for (const f of drive.files) {
+      const w = climb(f.parent);
+      if (!w.region) { outside.push({ id: f.id, why: w.why }); continue; }
+      const pf = byId.get(f.parent);
+      const e = { region: w.region, id: f.id, parent: f.parent, top: w.chain.length ? w.chain[w.chain.length - 1] : null,
+                  depth: w.chain.length, file: f, folder: pf };
+      if (guarded(f.id)) { e.why = 'guarded'; notDue.push(e); continue; }
+      if (!pf || !valid(f.created) || !valid(pf.created)) { e.why = 'no date'; notDue.push(e); continue; }
+      e.due = Math.max(f.created, pf.created);
+      if (nowMs - e.due >= R) due.push(e);
+      else { e.why = 'young'; notDue.push(e); }
+    }
+    due.sort((a, b) => a.due - b.due || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const files = due.slice(0, maxFiles), capped = due.slice(files.length);
+    const planned = new Set(files.map(e => e.id)), cappedIds = new Set(capped.map(e => e.id));
+    const kids = new Map(), held = new Map();
+    for (const d of drive.folders) { if (!kids.has(d.parent)) kids.set(d.parent, []); kids.get(d.parent).push(d); }
+    for (const f of drive.files) { if (!held.has(f.parent)) held.set(f.parent, []); held.get(f.parent).push(f); }
+    const memo = new Map();
+    const goes = d => {
+      if (memo.has(d.id)) return memo.get(d.id);
+      memo.set(d.id, false);
+      const ok = !!climb(d.parent).region && !guarded(d.id) && d.complete === true && valid(d.created) &&
+                 nowMs - d.created >= R && (held.get(d.id) || []).every(f => planned.has(f.id)) &&
+                 (kids.get(d.id) || []).every(goes);
+      memo.set(d.id, ok);
+      return ok;
+    };
+    const folders = [], kept = [], old = [];
+    for (const d of drive.folders) {
+      const w = climb(d.parent);
+      if (!w.region || guarded(d.id)) continue;
+      const e = { region: w.region, id: d.id, name: d.name, parent: d.parent,
+                  top: w.chain.length ? w.chain[w.chain.length - 1] : d.id, depth: w.chain.length + 1, d };
+      if (valid(d.created) && nowMs - d.created >= R) old.push(d.id);
+      if (goes(d)) { folders.push(e); continue; }
+      const why = new Set();   // why it stays (for the table's coverage)
+      if (d.complete !== true) why.add('incomplete');
+      if (!valid(d.created) || nowMs - d.created < R) why.add('young');
+      for (const f of held.get(d.id) || []) why.add(cappedIds.has(f.id) ? 'capped' : planned.has(f.id) ? '' : 'descendant');
+      for (const c of kids.get(d.id) || []) if (!goes(c)) why.add(regionAt.has(c.id) ? 'region inside' : 'descendant');
+      why.delete('');
+      e.why = [...why];
+      kept.push(e);
+    }
+    return {
+      want: { files: files.map(e => tag(e.region, e.id, e.parent, e.top, e.due)), folders: folders.map(folderKey).sort(),
+              capped: capped.length, outside: outside.length },
+      due, files, capped, notDue, outside, folders, kept, old: old.sort(), R, valid,
+    };
+  }
+
+  /**
+   * A Shared Drive: each region's folder at the root (four in five configured; the rest are plain folders there) with
+   * subfolders down to depth 3 (half of them old) and files at depths 0 to 3, every time straddling the retention
+   * time, exactly on it or 1 ms short now and then, and now and then null, unparseable or missing; `complete` now and
+   * then false, missing, 'true' or 1. Now and then one region's folder sits inside another region's tree. Outside every
+   * region folder: a `Kept` folder at the root, files at the root, items with no parent or an unknown one (some named
+   * like Object built-ins), a two-folder loop with a folder hanging off it, a folder that is its own parent, and keys
+   * of `regions` that are no region (Europe, `U.S `, asia, __proto__, constructor, toString) naming root folders.
+   * Folders and files come in a shuffled order.
+   */
+  function trashLayout(seed, nowMs, days) {
+    const r = prng(7000 + seed * 7);
+    const R = days * DAY;
+    const pick = a => a[Math.floor(r() * a.length)];
+    const pad = (x, w) => String(x).padStart(w, '0');
+    let n = 0;
+    const nid = p => p + pad(seed, 2) + '-' + pad(++n, 4);
+    const rootId = 'root' + pad(seed, 2);
+    const regions = {}, folders = [], files = [];
+    const age = () => { const x = r(); return x < 0.07 ? R : x < 0.14 ? R - 1 : Math.floor(r() * 2.2 * R); };
+    const when = () => { const x = r(); return x < 0.025 ? null : x < 0.05 ? 'invalid' : x < 0.07 ? undefined : nowMs - age(); };
+    const old = () => nowMs - R - Math.floor(r() * R);
+    const club = () => pick(WORDS) + ' ' + pick(NOUNS) + ' ' + pad(1 + Math.floor(r() * 12), 2) + '-' +
+                       pad(1 + Math.floor(r() * 28), 2) + '-2026';
+    const folder = (parent, name, created, complete) => {
+      const d = { id: nid('d'), name, parent, created, complete };
+      folders.push(d);
+      return d;
+    };
+    const file = (parent, created) => { const f = { id: nid('f'), parent, created }; files.push(f); return f; };
+    const tree = (parent, depth, into) => {
+      const nf = Math.floor(r() * 3);
+      for (let i = 0; i < nf; i++) file(parent, when());
+      if (depth >= 3) return;
+      const nk = depth === 0 ? 2 + Math.floor(r() * 4) : r() < 0.6 ? 1 + Math.floor(r() * 2) : 0;
+      for (let i = 0; i < nk; i++) {
+        const d = folder(parent, depth === 0 ? club() : pick(['extra', 'more photos', 'Day 2', club()]), r() < 0.45 ? old() : when(),
+                         r() < 0.85 ? true : pick([false, undefined, 'true', 1]));
+        into.push(d);
+        tree(d.id, depth + 1, into);
+      }
+    };
+    const regionTree = {};
+    for (const reg of REGIONS) {
+      const d = folder(rootId, reg, nowMs - age(), r() < 0.6);
+      regionTree[reg] = [d];
+      if (r() < 0.8) regions[reg] = d.id;
+      tree(d.id, 0, regionTree[reg]);
+    }
+    if (Object.keys(regions).length < 2) { regions.Africa = regionTree.Africa[0].id; regions.Asia = regionTree.Asia[0].id; }
+    const configured = REGIONS.filter(reg => own(regions, reg));
+    let nested = null;
+    if (r() < 0.45) {   // a misconfiguration: a region's folder inside another region's folder, or deeper in its tree
+      const i = Math.floor(r() * (configured.length - 1));
+      const j = i + 1 + Math.floor(r() * (configured.length - 1 - i));
+      // the host: any folder of that tree, or a new one made in it (old, complete, nothing else in it: kept for that alone)
+      const host = r() < 0.5 ? pick(regionTree[configured[i]]) : folder(pick(regionTree[configured[i]]).id, club(), old(), true);
+      regionTree[configured[j]][0].parent = host.id;
+      nested = { region: configured[j], id: regionTree[configured[j]][0].id, host: host.id };
+    }
+    const kept = folder(rootId, 'Kept', old(), true);
+    file(kept.id, old());
+    folder(kept.id, club(), old(), true);
+    file(rootId, old());
+    file(null, old());
+    const orphan = folder(null, club(), old(), true);
+    file(orphan.id, old());
+    const lost = folder('ghost' + pad(seed, 2), club(), old(), true);
+    file(lost.id, old());
+    file('gone' + pad(seed, 2), old());
+    file(pick(['toString', 'constructor', '__proto__', 'hasOwnProperty', 'valueOf']), old());
+    const l1 = folder(null, club(), old(), true), l2 = folder(l1.id, club(), old(), true);
+    l1.parent = l2.id;
+    file(l2.id, old());
+    const l3 = folder(l1.id, 'extra', old(), true);
+    file(l3.id, old());
+    const self = folder(null, club(), old(), true);
+    self.parent = self.id;
+    file(self.id, old());
+    const odd = [];
+    for (const k of ['Europe', 'U.S ', 'asia', '__proto__', 'constructor', 'toString']) {
+      if (r() < 0.5) continue;
+      const d = folder(rootId, k, old(), true);
+      defineKey(regions, k, d.id);
+      file(d.id, old());
+      odd.push(k);
+    }
+    shuffle(folders, r);
+    shuffle(files, r);
+    return { drive: { regions, rootId, folders, files }, nested, odd };
+  }
+
+  const T_NOWS = [Date.UTC(2027, 0, 22, 9, 0, 0), Date.UTC(2027, 3, 10, 0, 0, 0), Date.UTC(2026, 11, 30, 23, 59, 59, 999)];
+  const T_DAYS = [90, 91, 120];
+  const tseen = { due0: 0, due1: 0, due2: 0, due3: 0, young: 0, noDate: 0, keptByFolderTime: 0, keptByFileTime: 0,
+                  dueExactly: 0, shortByOneMs: 0, foldersTrashed: 0, trashedAboveTrashed: 0, trashedAtDepth3: 0,
+                  keptIncomplete: 0, keptTooYoung: 0, keptForCappedFile: 0, keptYoungDescendant: 0, keptAroundRegionFolder: 0,
+                  outsideRoot: 0, outsideNull: 0, outsideUnknown: 0, outsideLoop: 0, nestedRegionFiles: 0, cappedLayouts: 0,
+                  uncappedLayouts: 0, oddKeys: 0, dueInIncompleteFolder: 0 };
+  const dueRegions = new Set();
+  let tRuns = 0, tMatched = 0;
+  for (let seed = 1; seed <= 8; seed++) {
+    for (let k = 0; k < T_NOWS.length; k++) {
+      const nowMs = T_NOWS[k], days = T_DAYS[(seed + k) % T_DAYS.length];
+      const { drive, nested, odd } = trashLayout(seed, nowMs, days);
+      const all = trashOracle(drive, nowMs, days, Infinity).due.length;
+      const maxFiles = [100, Math.max(1, Math.floor(all / 2)), Math.max(1, all - 1), all + 2][(seed + 2 * k) % 4];
+      const o = trashOracle(drive, nowMs, days, maxFiles);
+      const { plan: p, error } = trashPlan(drive, nowMs, days, maxFiles);
+      tRuns++;
+      const got = normT(p);
+      const label = 'seed ' + seed + ', now ' + new Date(nowMs).toISOString() + ', ' + days + ' days, maxFiles ' + maxFiles;
+      const ok = !error && same(got, o.want);
+      check(label + ': files (in order, with region, parent, top and due moment), folders, capped and outside are the rules\' answer',
+            ok, error || (ok ? o.files.length + ' file(s), ' + o.folders.length + ' folder(s), capped ' + o.capped.length +
+                          ', outside ' + o.outside.length : show(got, o.want)));
+      const guardedIds = new Set([drive.rootId].concat(Object.values(drive.regions)));
+      const outsideIds = new Set(o.outside.map(e => e.id));
+      for (const d of drive.folders) if (!o.folders.some(e => e.id === d.id) && !o.kept.some(e => e.id === d.id)) outsideIds.add(d.id);
+      const wrong = planIds(p).filter(x => guardedIds.has(x) || outsideIds.has(x));
+      const order = orderProblems(p);
+      check(label + ': folders children before parents, nothing twice; no region folder, rootId or outside item in the plan',
+            !error && !!p && !order && !wrong.length, error || order + (wrong.length ? ' WRONG: ' + wrong.join(', ') : ''));
+      if (!ok) continue;
+      tMatched++;
+      for (const e of o.due) {
+        tseen['due' + Math.min(e.depth, 3)]++;
+        dueRegions.add(e.region);
+        if (nowMs - e.due === o.R) tseen.dueExactly++;
+        if (e.folder && e.folder.complete !== true) tseen.dueInIncompleteFolder++;
+      }
+      for (const e of o.notDue) {
+        if (e.why === 'no date') { tseen.noDate++; continue; }
+        if (e.why !== 'young') continue;
+        tseen.young++;
+        const fileOld = nowMs - e.file.created >= o.R, folderOld = nowMs - e.folder.created >= o.R;
+        if (fileOld && !folderOld) tseen.keptByFolderTime++;
+        if (folderOld && !fileOld) tseen.keptByFileTime++;
+        if (nowMs - Math.max(e.file.created, e.folder.created) === o.R - 1) tseen.shortByOneMs++;
+      }
+      tseen.foldersTrashed += o.folders.length;
+      tseen.trashedAboveTrashed += o.folders.filter(e => o.folders.some(c => c.parent === e.id)).length;
+      tseen.trashedAtDepth3 += o.folders.filter(e => e.depth === 3).length;
+      for (const e of o.kept) {
+        if (e.why.length !== 1) continue;   // kept for one reason alone
+        const w = e.why[0];
+        if (w === 'incomplete') tseen.keptIncomplete++;
+        if (w === 'young') tseen.keptTooYoung++;
+        if (w === 'capped') tseen.keptForCappedFile++;
+        if (w === 'descendant') tseen.keptYoungDescendant++;
+        if (w === 'region inside') tseen.keptAroundRegionFolder++;
+      }
+      for (const e of o.outside) tseen['outside' + e.why[0].toUpperCase() + e.why.slice(1)]++;
+      if (nested) tseen.nestedRegionFiles += o.due.concat(o.notDue).filter(e => e.region === nested.region).length;
+      tseen[o.capped.length ? 'cappedLayouts' : 'uncappedLayouts']++;
+      tseen.oddKeys += odd.length;
+    }
+  }
+  check('planTrash_ — the table covers every outcome (' + tMatched + ' of ' + tRuns + ' layouts planned as the rules say): ' +
+        'due at depth 0 to 3 in every region, young, no date, kept by either time, due at exactly the moment and not 1 ms ' +
+        'before, emptied folders bottom-up, a folder kept for each reason alone (a young descendant, an incomplete listing, ' +
+        'too young itself, a capped file, a region folder inside), outside by the root, null, an unknown id and a loop, ' +
+        'a nested region folder, capped and uncapped, keys that are no region',
+        tRuns > 0 && tMatched === tRuns && Object.values(tseen).every(v => v > 0) && dueRegions.size === REGIONS.length,
+        JSON.stringify(tseen) + ' regions with due files: ' + [...dueRegions].join(', '));
+
+  // ---------------------------------------------------------------- specific cases
+  const ROOT = 'drive-root-181';
+  const tm = v => (typeof v === 'string' && v !== 'invalid' ? Date.parse(v) : v);
+  const FD = (id, name, parent, created, extra) => Object.assign({ id, name, parent, created: tm(created), complete: true }, extra || {});
+  const FL = (id, parent, created) => ({ id, parent, created: tm(created) });
+  const AFRICA = FD('reg-africa', 'Africa', ROOT, '2026-10-21T15:00:00Z');   // the worked examples' region folder A
+  const fe = (region, id, parent, top, moment) => tag(region, id, parent, top, tm(moment));
+  const fo = (region, id, name, parent, top) => tag(region, id, name, parent, top);
+
+  console.log('\nplanTrash_ — the later of the file\'s and its folder\'s createdTime decides (worked examples 1, 5, 6)');
+  {
+    // the worked examples of the ticket (1, 2, 4, 5, 6) on one Shared Drive
+    const drive = {
+      regions: { Africa: 'reg-africa', Asia: 'reg-asia', 'Latin America': 'reg-latam' }, rootId: ROOT,
+      folders: [AFRICA, FD('reg-asia', 'Asia', ROOT, '2026-10-21T15:00:00Z'), FD('reg-latam', 'Latin America', ROOT, '2026-10-21T15:00:00Z'),
+                FD('sunrise', 'Sunrise Club 10-23-2026', 'reg-africa', '2026-10-24T09:00:00Z'),
+                FD('morning', 'Morning Star Club', 'reg-asia', '2026-10-25T10:00:00Z'),
+                FD('held-new', 'Bright Lights 07-01-2026', 'reg-latam', '2026-11-02T10:00:00Z'),
+                FD('old-club', 'Silver Roots Club', 'reg-latam', '2026-10-01T00:00:00Z'),
+                FD('new-club', 'Evening Flames Club', 'reg-africa', '2027-01-10T00:00:00Z')],
+      files: [FL('f2', 'sunrise', '2026-10-23T08:01:00Z'), FL('f1', 'sunrise', '2026-10-23T08:00:00Z'),
+              FL('a', 'morning', '2026-10-25T09:50:00Z'), FL('b', 'morning', '2026-10-29T15:00:00Z'),
+              FL('d', 'reg-africa', '2026-10-22T10:00:00Z'),
+              FL('h5new', 'held-new', '2026-07-01T00:00:00Z'), FL('h5merged', 'morning', '2026-07-01T00:00:00Z'),
+              FL('h6old', 'old-club', '2026-05-01T00:00:00Z'), FL('h6new', 'new-club', '2026-05-01T00:00:00Z')],
+    };
+    // id: [region, parent, top, due moment, due from] - the ticket's numbers, worked by hand
+    const DUE = {
+      f1: ['Africa', 'sunrise', 'sunrise', '2026-10-24T09:00:00Z', '2027-01-22T09:00:00Z'],          // 1: the folder's time
+      f2: ['Africa', 'sunrise', 'sunrise', '2026-10-24T09:00:00Z', '2027-01-22T09:00:00Z'],
+      a: ['Asia', 'morning', 'morning', '2026-10-25T10:00:00Z', '2027-01-23T10:00:00Z'],             // 2: the folder's
+      b: ['Asia', 'morning', 'morning', '2026-10-29T15:00:00Z', '2027-01-27T15:00:00Z'],             // 2: its own
+      d: ['Africa', 'reg-africa', null, '2026-10-22T10:00:00Z', '2027-01-20T10:00:00Z'],             // 4: its own
+      h5new: ['Latin America', 'held-new', 'held-new', '2026-11-02T10:00:00Z', '2027-01-31T10:00:00Z'],   // 5: the new folder's
+      h5merged: ['Asia', 'morning', 'morning', '2026-10-25T10:00:00Z', '2027-01-23T10:00:00Z'],      // 5: merged
+      h6old: ['Latin America', 'old-club', 'old-club', '2026-10-01T00:00:00Z', '2026-12-30T00:00:00Z'],   // 6: on arrival
+      h6new: ['Africa', 'new-club', 'new-club', '2027-01-10T00:00:00Z', '2027-04-10T00:00:00Z'],     // 6: the new folder's
+    };
+    const entryOf = id => fe(DUE[id][0], id, DUE[id][1], DUE[id][2], DUE[id][3]);
+    const wrongEdges = [];
+    for (const id of Object.keys(DUE)) {
+      const from = tm(DUE[id][4]);
+      const before = trashPlan(drive, from - 1, 90, 100), on = trashPlan(drive, from, 90, 100);
+      const err = before.error || on.error;
+      const entry = list(on.plan, 'files').find(e => e.id === id);
+      if (err) wrongEdges.push(id + ': ' + err);
+      else if (list(before.plan, 'files').some(e => e.id === id)) wrongEdges.push(id + ': due 1 ms before ' + DUE[id][4]);
+      else if (!entry) wrongEdges.push(id + ': not due at ' + DUE[id][4]);
+      else if (fileKey(entry) !== entryOf(id)) wrongEdges.push(id + ': ' + show(fileKey(entry), entryOf(id)));
+    }
+    check('each file is due from the LATER of its own and its folder\'s createdTime, + 90 days, and not 1 ms before ' +
+          '(f1, f2, a, h5new by the folder; b, d by the file; h5merged and h6old due on arrival; h6new 90 days after its new folder), ' +
+          'with region, parent, top and that due moment',
+          !!planTrashFn && !wrongEdges.length, wrongEdges.join('; ') || (planTrashFn ? '' : 'planTrash_ is not defined'));
+    const SNAP = [   // now -> [files in order], [folders]
+      ['2027-01-21T12:00:00Z', ['h6old', 'd'], ['old-club']],
+      ['2027-01-22T09:00:00Z', ['h6old', 'd', 'f1', 'f2'], ['old-club', 'sunrise']],
+      ['2027-01-24T12:00:00Z', ['h6old', 'd', 'f1', 'f2', 'a', 'h5merged'], ['old-club', 'sunrise']],
+      ['2027-01-27T15:00:00Z', ['h6old', 'd', 'f1', 'f2', 'a', 'h5merged', 'b'], ['morning', 'old-club', 'sunrise']],
+      ['2027-01-31T10:00:00Z', ['h6old', 'd', 'f1', 'f2', 'a', 'h5merged', 'b', 'h5new'], ['held-new', 'morning', 'old-club', 'sunrise']],
+      ['2027-04-10T00:00:00Z', ['h6old', 'd', 'f1', 'f2', 'a', 'h5merged', 'b', 'h5new', 'h6new'],
+       ['held-new', 'morning', 'new-club', 'old-club', 'sunrise']],
+    ];
+    const FOLDER = { sunrise: ['Africa', 'Sunrise Club 10-23-2026', 'reg-africa'], morning: ['Asia', 'Morning Star Club', 'reg-asia'],
+                     'held-new': ['Latin America', 'Bright Lights 07-01-2026', 'reg-latam'],
+                     'old-club': ['Latin America', 'Silver Roots Club', 'reg-latam'], 'new-club': ['Africa', 'Evening Flames Club', 'reg-africa'] };
+    for (const [now, fileIds, folderIds] of SNAP) {
+      const r = trashPlan(drive, tm(now), 90, 100);
+      const want = { files: fileIds.map(entryOf), folders: folderIds.map(x => fo(FOLDER[x][0], x, FOLDER[x][1], FOLDER[x][2], x)).sort(),
+                     capped: 0, outside: 0 };
+      check('at ' + now + ': files ' + fileIds.join(', ') + ' (earliest due moment first, a tie by id); folders ' + folderIds.join(', ') +
+            ' (example 1: Sunrise Club 10-23-2026 goes once f1 and f2 do; example 2: Morning Star Club kept while b is young)',
+            !r.error && same(normT(r.plan), want), r.error || show(normT(r.plan), want));
+    }
+  }
+
+  console.log('\nplanTrash_ — exactly 90 days after the due moment is due, 1 ms less is not (24-hour days, UTC)');
+  {
+    // example 7: the folder made 2026-10-23T08:00:00.000Z, the file older; and a file younger than its old folder
+    const drive = {
+      regions: { Africa: 'reg-africa' }, rootId: ROOT,
+      folders: [AFRICA, FD('b7', 'Bright Stars 10-23-2026', 'reg-africa', '2026-10-23T08:00:00.000Z'),
+                FD('o7', 'Golden Voices 10-01-2026', 'reg-africa', '2026-10-01T00:00:00.000Z')],
+      files: [FL('q-older', 'b7', '2026-09-01T00:00:00.000Z'), FL('q-own', 'o7', '2026-10-30T23:59:59.999Z')],
+    };
+    const cases = [   // [file, folder that goes with it, due from at 90 days: worked by hand]
+      ['q-older', 'b7', '2027-01-21T08:00:00.000Z'],   // not 07:59:59.999Z; US daylight saving ends 2026-11-01, changing nothing
+      ['q-own', 'o7', '2027-01-28T23:59:59.999Z'],
+    ];
+    const origTz = process.env.TZ;
+    const zones = ['UTC', 'America/New_York', 'Europe/London', 'Australia/Lord_Howe', 'Asia/Kolkata'];
+    const misses = [];
+    try {
+      for (const zone of zones) {
+        process.env.TZ = zone;   // the host's zone must change nothing (a local-time `setDate(+90)` would)
+        for (const [id, dir, iso] of cases) {
+          const from = tm(iso);
+          const before = trashPlan(drive, from - 1, 90, 100), on = trashPlan(drive, from, 90, 100);
+          const inB = list(before.plan, 'files').some(e => e.id === id) || list(before.plan, 'folders').some(e => e.id === dir);
+          const inOn = list(on.plan, 'files').some(e => e.id === id) && list(on.plan, 'folders').some(e => e.id === dir);
+          if (before.error || on.error || inB || !inOn) misses.push(zone + ' ' + id + ': ' + (before.error || on.error || (inB ? 'due 1 ms early' : 'not due on time')));
+        }
+      }
+    } finally { if (origTz === undefined) delete process.env.TZ; else process.env.TZ = origTz; }
+    check('example 7: due (file and emptied folder) at exactly 2027-01-21T08:00:00.000Z, not at 07:59:59.999Z; a file younger ' +
+          'than its folder at its own time + 90 days to the ms; the same in UTC, New York, London, Lord Howe and Kolkata',
+          !!planTrashFn && !misses.length, misses.join('; ') || (planTrashFn ? '' : 'planTrash_ is not defined'));
+    const byDays = [];
+    for (const days of [90, 91, 120, 365]) {
+      for (const [id, dir, iso] of cases) {
+        const from = tm(iso) + (days - 90) * DAY;   // a day is 86,400,000 ms whatever the calendar
+        const before = trashPlan(drive, from - 1, days, 100), on = trashPlan(drive, from, days, 100);
+        if (before.error || on.error || list(before.plan, 'files').some(e => e.id === id) || !list(on.plan, 'files').some(e => e.id === id)) {
+          byDays.push(days + ' days, ' + id + ': ' + (before.error || on.error || 'wrong'));
+        }
+      }
+    }
+    check('retentionDays 91, 120 and 365 move the due moment by exactly that many times 86,400,000 ms (and 1 ms before is not due)',
+          !!planTrashFn && !byDays.length, byDays.join('; ') || (planTrashFn ? '' : 'planTrash_ is not defined'));
+    // no valid Date on either side: never due, however old the other side is
+    const nd = {
+      regions: { Africa: 'reg-africa', Asia: 'reg-asia' }, rootId: ROOT,
+      folders: [AFRICA, FD('reg-asia', 'Asia', ROOT, 'invalid'),
+                FD('ok', 'Rising Wings 09-01-2026', 'reg-africa', '2026-09-01T00:00:00Z'),
+                FD('fold-null', 'Silver Wings 09-01-2026', 'reg-africa', null),
+                FD('fold-bad', 'Golden Lights 09-01-2026', 'reg-africa', 'invalid'),
+                FD('fold-none', 'Evening Stars 09-01-2026', 'reg-africa', undefined)],
+      files: [FL('ok-1', 'ok', '2026-08-01T00:00:00Z'), FL('file-null', 'ok', null), FL('file-bad', 'ok', 'invalid'),
+              FL('file-none', 'ok', undefined), FL('in-null', 'fold-null', '2026-01-01T00:00:00Z'),
+              FL('in-bad', 'fold-bad', '2026-01-01T00:00:00Z'), FL('in-none', 'fold-none', '2026-01-01T00:00:00Z'),
+              FL('in-asia', 'reg-asia', '2026-01-01T00:00:00Z')],
+    };
+    const r = trashPlan(nd, Date.UTC(2027, 5, 1), 90, 100);
+    check('a file with a null, unparseable or missing created, or in a folder (a region folder included) whose created is so: ' +
+          'never due, however old the other side; its folder kept; the file beside them with both dates still due',
+          !r.error && same(list(r.plan, 'files').map(e => e.id), ['ok-1']) && !list(r.plan, 'folders').length &&
+          r.plan.capped === 0 && r.plan.outside === 0, r.error || JSON.stringify(normT(r.plan)));
+  }
+
+  console.log('\nplanTrash_ — files directly in a region folder and nested at depth 1 to 3 are trashed when due');
+  {
+    const nowMs = Date.UTC(2027, 2, 1, 0, 0, 0);
+    const regions = {}, folders = [], files = [], want = [], chains = [];
+    REGIONS.forEach((reg, i) => {
+      const R0 = 'reg-' + i, d1 = 'r' + i + '-d1', d2 = 'r' + i + '-d2', d3 = 'r' + i + '-d3', s1 = 'r' + i + '-s1', s2 = 'r' + i + '-s2';
+      regions[reg] = R0;
+      // listed deepest first and the region folder last: the order of the input decides nothing
+      folders.push(FD(d3, 'more photos', d2, '2026-09-03T00:00:00Z'), FD(s2, 'extra', s1, '2026-09-02T00:00:00Z'),
+                   FD(d2, 'extra', d1, '2026-09-02T00:00:00Z'), FD(s1, WORDS[(i + 3) % 6] + ' ' + NOUNS[i] + ' 09-01-2026', R0, '2026-09-01T00:00:00Z'),
+                   FD(d1, WORDS[i] + ' ' + NOUNS[i] + ' 09-01-2026', R0, '2026-09-01T00:00:00Z'), FD(R0, reg, ROOT, '2026-08-01T00:00:00Z'));
+      // each file later than its folder (its own time decides); region i's hour i keeps the regions interleaved
+      const t = k => Date.UTC(2026, 9, 1 + 3 * k, i);
+      [[R0, null], [d1, d1], [d2, d1], [d3, d1]].forEach(([parent, top], k) => {
+        files.push(FL('r' + i + '-f' + k, parent, t(k)));
+        want.push({ key: tag(reg, 'r' + i + '-f' + k, parent, top, t(k)), at: t(k), id: 'r' + i + '-f' + k });
+      });
+      files.push(FL('r' + i + '-o1', s1, t(4)));
+      want.push({ key: tag(reg, 'r' + i + '-o1', s1, s1, t(4)), at: t(4), id: 'r' + i + '-o1' });
+      files.push(FL('r' + i + '-y0', R0, '2027-02-15T00:00:00Z'), FL('r' + i + '-y2', s2, '2027-02-16T00:00:00Z'));   // young
+      chains.push({ reg, R0, go: [d3, d2, d1], keep: [s2, s1],
+                    names: { [d1]: WORDS[i] + ' ' + NOUNS[i] + ' 09-01-2026', [d2]: 'extra', [d3]: 'more photos' }, parents: { [d1]: R0, [d2]: d1, [d3]: d2 } });
+    });
+    // depth 6 in Africa: z1 > z2 > ... > z6, a due file at the bottom
+    const z = [1, 2, 3, 4, 5, 6].map(k => 'z' + k);
+    z.forEach((id, k) => folders.push(FD(id, k ? 'level ' + (k + 1) : 'Rising Roots 09-05-2026', k ? z[k - 1] : 'reg-0', '2026-09-05T00:00:00Z')));
+    files.push(FL('z-f', 'z6', '2026-10-20T00:00:00Z'));
+    want.push({ key: tag('Africa', 'z-f', 'z6', 'z1', Date.parse('2026-10-20T00:00:00Z')), at: Date.parse('2026-10-20T00:00:00Z'), id: 'z-f' });
+    want.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
+    const drive = { regions, rootId: ROOT, folders, files };
+    const r = trashPlan(drive, nowMs, 90, 100);
+    check('every region (Africa, Asia, Latin America, U.S, Template): the due file directly in the region folder (top null) ' +
+          'and those at depth 1, 2 and 3 (top the region folder\'s direct subfolder) are in `files`, with region, parent and ' +
+          'due moment, earliest first across the regions; nothing capped, nothing outside',
+          !r.error && same(normT(r.plan).files, want.map(w => w.key)) && r.plan.capped === 0 && r.plan.outside === 0,
+          r.error || show(normT(r.plan).files, want.map(w => w.key)));
+    const young = list(r.plan, 'files').filter(e => /-y\d$/.test(e.id)).map(e => e.id);
+    const keptGone = chains.flatMap(c => c.keep).filter(x => folderOrder(r.plan).includes(x));
+    check('…a young file at depth 0 or 2 is not, and the folders above it (with a due file of their own) stay',
+          !r.error && !!r.plan && !young.length && !keptGone.length, r.error || young.concat(keptGone).join(', '));
+    const order = folderOrder(r.plan);
+    const wantFolders = chains.flatMap(c => c.go.map(x => fo(c.reg, x, c.names[x], c.parents[x], c.go[2]))).concat(
+      z.map((id, k) => fo('Africa', id, k ? 'level ' + (k + 1) : 'Rising Roots 09-05-2026', k ? z[k - 1] : 'reg-0', 'z1'))).sort();
+    const chainOrder = chains.every(c => c.go.every((x, k) => k === 0 || order.indexOf(c.go[k - 1]) < order.indexOf(x)));
+    const zOrder = z.every((x, k) => k === 0 || order.indexOf(x) < order.indexOf(z[k - 1]));
+    check('…the emptied folders at depth 3, 2 and 1 go, deepest first, with region, name, parent and top; depth 6 too: the ' +
+          'due file, then its six folders from the bottom up; never a region folder',
+          !r.error && same(normT(r.plan).folders, wantFolders) && chainOrder && zOrder && !orderProblems(r.plan) &&
+          !order.some(x => /^reg-/.test(x)),
+          r.error || show(normT(r.plan).folders, wantFolders) + ' order ' + order.join(','));
+  }
+
+  console.log('\nplanTrash_ — emptied folders go children before parents; a folder with a kept descendant is kept with all its ancestors');
+  {
+    // example 3, Latin America: G holds g1 and a folder a person made, E, which holds x
+    const ex3 = {
+      regions: { 'Latin America': 'reg-latam' }, rootId: ROOT,
+      folders: [FD('reg-latam', 'Latin America', ROOT, '2026-10-21T15:00:00Z'),
+                FD('G', 'Golden Wings 11-02-2026', 'reg-latam', '2026-11-02T12:00:00Z'), FD('E', 'extra', 'G', '2026-11-05T09:00:00Z')],
+      files: [FL('x', 'E', '2026-11-02T11:55:00Z'), FL('g1', 'G', '2026-11-02T11:50:00Z')],
+    };
+    const on = trashPlan(ex3, tm('2027-02-03T09:00:00Z'), 90, 100), early = trashPlan(ex3, tm('2027-02-03T09:00:00Z') - 1, 90, 100);
+    const wantOn = [fe('Latin America', 'g1', 'G', 'G', '2026-11-02T12:00:00Z'), fe('Latin America', 'x', 'E', 'G', '2026-11-05T09:00:00Z')];
+    check('example 3 at 2027-02-03T09:00Z: files g1 (due by G\'s time), x (by E\'s); folders [E, G] in that order, top G for both',
+          !on.error && same(normT(on.plan).files, wantOn) && same(folderOrder(on.plan), ['E', 'G']) &&
+          same(list(on.plan, 'folders').map(folderKey), [fo('Latin America', 'E', 'extra', 'G', 'G'),
+                                                          fo('Latin America', 'G', 'Golden Wings 11-02-2026', 'reg-latam', 'G')]),
+          on.error || JSON.stringify(normT(on.plan)) + ' order ' + folderOrder(on.plan));
+    check('…1 ms earlier: g1 only; E is kept (x not due) and so is G above it',
+          !early.error && same(normT(early.plan).files, wantOn.slice(0, 1)) && !folderOrder(early.plan).length,
+          early.error || JSON.stringify(normT(early.plan)));
+    // a chain, a branch, and a kept descendant, the folders listed in three orders
+    const O = '2026-09-01T00:00:00Z', nowMs = Date.UTC(2027, 2, 1);
+    const base = [FD('reg-africa', 'Africa', ROOT, '2026-08-01T00:00:00Z'), FD('reg-asia', 'Asia', ROOT, '2026-08-01T00:00:00Z'),
+                  FD('reg-tp', 'Template', ROOT, '2026-08-01T00:00:00Z'),
+                  FD('c1', 'Bright Stars 09-01-2026', 'reg-africa', O), FD('c2', 'extra', 'c1', O), FD('c3', 'extra', 'c2', O), FD('c4', 'extra', 'c3', O),
+                  FD('b1', 'Silver Wings 09-01-2026', 'reg-asia', O), FD('b2a', 'Day 1', 'b1', O), FD('b3', 'more photos', 'b2a', O), FD('b2b', 'Day 2', 'b1', O),
+                  FD('k1', 'Evening Roots 09-01-2026', 'reg-tp', O), FD('k2', 'extra', 'k1', O), FD('k3', 'more photos', 'k2', O),
+                  FD('k2b', 'Day 2', 'k1', O)];
+    const files = [FL('c1-f', 'c1', '2026-10-01T00:00:00Z'), FL('c2-f', 'c2', '2026-10-02T00:00:00Z'), FL('c3-f', 'c3', '2026-10-03T00:00:00Z'),
+                   FL('c4-f', 'c4', '2026-10-04T00:00:00Z'), FL('b3-f', 'b3', '2026-10-05T00:00:00Z'), FL('b2b-f', 'b2b', '2026-10-06T00:00:00Z'),
+                   FL('k1-f', 'k1', '2026-10-07T00:00:00Z'), FL('k2-f', 'k2', '2026-10-08T00:00:00Z'),
+                   FL('k3-young', 'k3', '2027-02-20T00:00:00Z')];
+    const orders = { 'parents first': base.slice(), 'children first': base.slice().reverse(), shuffled: shuffle(base.slice(), prng(1181)) };
+    for (const [how, fl] of Object.entries(orders)) {
+      const r = trashPlan({ regions: { Africa: 'reg-africa', Asia: 'reg-asia', Template: 'reg-tp' }, rootId: ROOT, folders: fl, files },
+                          nowMs, 90, 100);
+      const order = folderOrder(r.plan);
+      const pos = x => order.indexOf(x);
+      check('folders listed ' + how + ': a chain of four goes exactly c4, c3, c2, c1; a branch: b3 before b2a, b2a and b2b before b1',
+            !r.error && same(order.filter(x => /^c/.test(x)), ['c4', 'c3', 'c2', 'c1']) &&
+            same(order.filter(x => /^b/.test(x)).sort(), ['b1', 'b2a', 'b2b', 'b3']) &&
+            pos('b3') < pos('b2a') && pos('b2a') < pos('b1') && pos('b2b') < pos('b1') && !orderProblems(r.plan),
+            r.error || order.join(', '));
+      check('…a young file three levels down (k3): k3, k2 and k1 are kept while their due files go, and k1\'s other, emptied ' +
+            'subfolder (k2b) goes', !r.error && same(order.filter(x => /^k/.test(x)), ['k2b']) &&
+            ['k1-f', 'k2-f'].every(x => list(r.plan, 'files').some(e => e.id === x)) &&
+            !list(r.plan, 'files').some(e => e.id === 'k3-young'), r.error || JSON.stringify(normT(r.plan)));
+    }
+  }
+
+  console.log('\nplanTrash_ — an emptied folder younger than 90 days (a move cut short) is kept; an incomplete one is kept');
+  {
+    const nowMs = Date.UTC(2027, 1, 1, 12, 0, 0), R = 90 * DAY, OLD_T = nowMs - 200 * DAY;
+    const sub = (id, created, extra) => FD(id, 'Rising Stars 10-01-2026', 'reg-africa', created, extra);
+    const drive = {
+      regions: { Africa: 'reg-africa' }, rootId: ROOT,
+      folders: [FD('reg-africa', 'Africa', ROOT, OLD_T),
+                sub('e-exact', nowMs - R), sub('e-short', nowMs - R + 1), sub('e-new', nowMs - 2 * 60 * MIN),
+                sub('e-false', OLD_T, { complete: false }), sub('e-absent', OLD_T, { complete: undefined }),
+                sub('e-string', OLD_T, { complete: 'true' }), sub('e-one', OLD_T, { complete: 1 }),
+                sub('e-bad', 'invalid'), sub('e-null', null),
+                sub('p-short', OLD_T), FD('e-short2', 'extra', 'p-short', nowMs - 10 * DAY),
+                sub('p-ok', OLD_T), FD('e-ok', 'extra', 'p-ok', OLD_T),
+                sub('i-due', OLD_T, { complete: false }),
+                sub('y-folder', nowMs - 10 * DAY)],
+      files: [FL('i-f1', 'i-due', OLD_T + DAY), FL('i-f2', 'i-due', OLD_T + 2 * DAY), FL('y-old', 'y-folder', '2026-01-01T00:00:00Z')],
+    };
+    const r = trashPlan(drive, nowMs, 90, 100);
+    const order = folderOrder(r.plan), has = x => order.includes(x);
+    check('an emptied folder exactly 90 days old goes; 1 ms younger, or made 2 hours ago (a move cut short, merged into next run), is kept',
+          !r.error && has('e-exact') && !has('e-short') && !has('e-new'), r.error || order.join(', '));
+    check('complete false, missing, \'true\' or 1: kept (only complete === true is a full listing); the due files of an incomplete ' +
+          'folder are still trashed',
+          !r.error && !['e-false', 'e-absent', 'e-string', 'e-one', 'i-due'].some(has) &&
+          same(list(r.plan, 'files').map(e => e.id), ['i-f1', 'i-f2']), r.error || JSON.stringify(normT(r.plan)));
+    check('a folder with no valid created (unparseable or null) is kept; above a young emptied folder its parent is kept; ' +
+          'a young folder\'s old file waits for the folder; e-ok then p-ok go, in that order, and nothing else',
+          !r.error && same(order.slice().sort(), ['e-exact', 'e-ok', 'p-ok']) && order.indexOf('e-ok') < order.indexOf('p-ok') &&
+          !list(r.plan, 'files').some(e => e.id === 'y-old'), r.error || order.join(', '));
+    const r91 = trashPlan(drive, nowMs, 91, 100);
+    check('…with retentionDays 91 the 90-day-old emptied folder is kept too',
+          !r91.error && same(folderOrder(r91.plan).slice().sort(), ['e-ok', 'p-ok']), r91.error || folderOrder(r91.plan).join(', '));
+  }
+
+  console.log('\nplanTrash_ — region folder ids and rootId never appear in the plan, even a region folder nested empty and old in another region\'s folder');
+  {
+    const O = '2026-08-01T00:00:00Z', nowMs = Date.UTC(2027, 3, 1);
+    const regions = { Africa: 'reg-af', Asia: 'reg-as', Template: 'reg-tp', 'U.S': 'reg-us', 'Latin America': 'reg-la' };
+    const drive = {
+      regions, rootId: ROOT,
+      folders: [FD('reg-af', 'Africa', ROOT, O), FD('reg-as', 'Asia', ROOT, O), FD('reg-la', 'Latin America', ROOT, O),
+                FD('reg-tp', 'Template', 'reg-af', O),                          // Template's folder inside Africa's, empty and old
+                FD('af-empty', 'Golden Flames 08-02-2026', 'reg-af', O),
+                FD('as-x', 'Morning Lights 08-02-2026', 'reg-as', O), FD('reg-us', 'U.S', 'as-x', O),   // U.S's inside an Asia subfolder
+                FD('us-sub', 'Bright Roots 08-03-2026', 'reg-us', O)],
+      files: [FL('as-x-f', 'as-x', '2026-08-05T00:00:00Z'), FL('us-1', 'reg-us', '2026-08-06T00:00:00Z'), FL('us-2', 'us-sub', '2026-08-07T00:00:00Z')],
+    };
+    const r = trashPlan(drive, nowMs, 90, 100);
+    const want = { files: [fe('Asia', 'as-x-f', 'as-x', 'as-x', '2026-08-05T00:00:00Z'), fe('U.S', 'us-1', 'reg-us', null, '2026-08-06T00:00:00Z'),
+                           fe('U.S', 'us-2', 'us-sub', 'us-sub', '2026-08-07T00:00:00Z')],
+                   folders: [fo('Africa', 'af-empty', 'Golden Flames 08-02-2026', 'reg-af', 'af-empty'),
+                             fo('U.S', 'us-sub', 'Bright Roots 08-03-2026', 'reg-us', 'us-sub')].sort(), capped: 0, outside: 0 };
+    check('every region folder old, complete and empty (Latin America at the root, Template\'s inside Africa\'s): none in the plan; ' +
+          'U.S\'s folder inside an Asia subfolder: never trashed, its contents count for U.S (the first region met), and the ' +
+          'Asia subfolder holding it is kept; the empty subfolder beside them goes',
+          !r.error && same(normT(r.plan), want), r.error || show(normT(r.plan), want));
+    // the root listed among the folders (a reader's mistake), with no parent and with a region folder as its parent
+    const leaks = [];
+    for (const rootParent of [null, 'reg-af']) {
+      const d2 = { regions: { Africa: 'reg-af' }, rootId: ROOT,
+                   folders: [FD('reg-af', 'Africa', ROOT, O), FD(ROOT, 'GLOW Shared Drive', rootParent, O), FD('af-1', 'Silver Stars 08-02-2026', 'reg-af', O)],
+                   files: [FL('in-root', ROOT, O), FL('af-1-f', 'af-1', O)] };
+      const r2 = trashPlan(d2, nowMs, 90, 100);
+      const ok = !r2.error && same(normT(r2.plan).files, [fe('Africa', 'af-1-f', 'af-1', 'af-1', O)]) &&
+                 same(folderOrder(r2.plan), ['af-1']) && r2.plan.outside === 1;
+      if (!ok) leaks.push('root\'s parent ' + rootParent + ': ' + (r2.error || JSON.stringify(normT(r2.plan))));
+    }
+    check('rootId listed as a folder, old, complete and empty (no parent, or even a region folder as its parent): never in ' +
+          '`folders`; a file in it is outside', !leaks.length, leaks.join('; '));
+    // file entries carrying a region folder's id or the root's (a reader's mistake) inside an old, complete subfolder
+    const d3 = { regions: { Africa: 'reg-af', Asia: 'reg-as' }, rootId: ROOT,
+                 folders: [FD('reg-af', 'Africa', ROOT, O), FD('reg-as', 'Asia', ROOT, O), FD('af-club', 'Evening Lights 08-02-2026', 'reg-af', O)],
+                 files: [FL('reg-af', 'af-club', O), FL(ROOT, 'af-club', O), FL('reg-as', 'reg-af', O), FL('af-ok', 'af-club', O)] };
+    const r3 = trashPlan(d3, nowMs, 90, 100);
+    check('a file entry whose id is a region folder\'s or the root\'s is never in `files`, and the folder holding it is not ' +
+          'trashed (that would take it along); the real file beside it is',
+          !r3.error && same(list(r3.plan, 'files').map(e => e.id), ['af-ok']) && !folderOrder(r3.plan).length,
+          r3.error || JSON.stringify(normT(r3.plan)));
+  }
+
+  console.log('\nplanTrash_ — a walk up reaching the root, null, an unknown id or a loop before a region folder: outside, never trashed, no crash');
+  {
+    const O = '2026-08-01T00:00:00Z', nowMs = Date.UTC(2027, 1, 1, 12);
+    const folders = [FD('reg-af', 'Africa', ROOT, O), FD('af-club', 'Sunrise Club 08-02-2026', 'reg-af', O),
+                     FD('kept', 'Kept', ROOT, O), FD('kept-sub', 'Golden Roots 08-02-2026', 'kept', O),
+                     FD('archive', 'Archive', ROOT, O), FD('archive-a', 'Silver Voices 08-02-2026', 'archive', O), FD('archive-b', 'extra', 'archive', O),
+                     FD('orphan', 'Rising Lights 08-02-2026', null, O), FD('lost', 'Evening Wings 08-02-2026', 'ghost-1', O),
+                     FD('loop-1', 'Bright Wings 08-02-2026', 'loop-2', O), FD('loop-2', 'Morning Roots 08-02-2026', 'loop-1', O),
+                     FD('loop-3', 'extra', 'loop-1', O), FD('self', 'Golden Stars 08-02-2026', 'self', O),
+                     FD('tri-1', 'Silver Flames 08-02-2026', 'tri-2', O), FD('tri-2', 'Day 2', 'tri-3', O), FD('tri-3', 'Day 3', 'tri-1', O)];
+    const outsideFiles = [FL('k-1', 'kept', O), FL('ar-1', 'archive-a', O), FL('o-1', 'orphan', O), FL('g-1', 'lost', O),
+                          FL('l-1', 'loop-1', O), FL('l-2', 'loop-2', O), FL('s-1', 'self', O), FL('t-1', 'tri-3', O),
+                          FL('n-1', null, O), FL('r-1', ROOT, O), FL('u-1', 'gone-1', O), FL('e-1', '', O),
+                          FL('x-ts', 'toString', O), FL('x-ctor', 'constructor', O), FL('x-proto', '__proto__', O),
+                          FL('x-hop', 'hasOwnProperty', O), FL('x-vo', 'valueOf', O)];
+    const files = [FL('af-1', 'af-club', O)].concat(outsideFiles);
+    const want = { files: [fe('Africa', 'af-1', 'af-club', 'af-club', O)],
+                   folders: [fo('Africa', 'af-club', 'Sunrise Club 08-02-2026', 'reg-af', 'af-club')], capped: 0, outside: outsideFiles.length };
+    for (const [how, fl, fi] of [['as listed', folders, files], ['loops first, reversed', folders.slice().reverse(), files.slice().reverse()]]) {
+      const r = trashPlan({ regions: { Africa: 'reg-af' }, rootId: ROOT, folders: fl, files: fi }, nowMs, 90, 100);
+      check('(' + how + ') old files at the root, in a root folder (Kept, Archive and below), with no parent, an unknown parent ' +
+            '(ghost, \'\', toString, constructor, __proto__, hasOwnProperty, valueOf), in a two- or three-folder loop or a folder ' +
+            'that is its own parent: outside (' + outsideFiles.length + '), none trashed, none of those folders trashed; the ' +
+            'Africa file and folder still are', !r.error && same(normT(r.plan), want), r.error || show(normT(r.plan), want));
+    }
+    const ex8 = trashPlan({ regions: { Africa: 'reg-africa' }, rootId: ROOT, folders: [AFRICA, FD('kept', 'Kept', ROOT, '2026-01-05T00:00:00Z')],
+                            files: [FL('old-photo', 'kept', '2026-01-04T00:00:00Z')] }, Date.UTC(2027, 1, 1), 90, 100);
+    check('example 8: a root folder `Kept` with an old photo: outside 1, nothing in `files` or `folders`',
+          !ex8.error && same(normT(ex8.plan), { files: [], folders: [], capped: 0, outside: 1 }), ex8.error || JSON.stringify(normT(ex8.plan)));
+    const nullRegion = trashPlan({ regions: { Africa: null }, rootId: ROOT, folders: [FD('d-null', 'Silver Roots 08-02-2026', null, O)],
+                                   files: [FL('p-null', null, O), FL('p-in', 'd-null', O)] }, nowMs, 90, 100);
+    check('a region whose folder id is null: a file with no parent, and a folder with none, are still outside; nothing trashed',
+          !nullRegion.error && same(normT(nullRegion.plan), { files: [], folders: [], capped: 0, outside: 2 }),
+          nullRegion.error || JSON.stringify(normT(nullRegion.plan)));
+  }
+
+  console.log('\nplanTrash_ — Europe, "U.S " (trailing space), asia, __proto__, constructor, toString as region keys: ignored, no crash');
+  {
+    const O = '2026-08-01T00:00:00Z', nowMs = Date.UTC(2027, 1, 1, 12);
+    const ODD = ['Europe', 'U.S ', 'asia', '__proto__', 'constructor', 'toString', 'hasOwnProperty', ' Asia', 'africa'];
+    const build = withAsia => {
+      const regions = {};
+      if (withAsia) regions.Asia = 'reg-as';
+      const folders = [FD('reg-as', 'Asia', ROOT, O), FD('as-club', 'Morning Star Club', 'reg-as', O)];
+      const files = [FL('as-1', 'as-club', O)];
+      ODD.forEach((k, i) => {
+        defineKey(regions, k, 'odd-' + i);
+        folders.push(FD('odd-' + i, k, ROOT, O), FD('odd-' + i + '-sub', 'Bright Stars 08-02-2026', 'odd-' + i, O));
+        files.push(FL('odd-' + i + '-f', 'odd-' + i, O));
+      });
+      return { regions, rootId: ROOT, folders, files };
+    };
+    const want = { files: [fe('Asia', 'as-1', 'as-club', 'as-club', O)], folders: [fo('Asia', 'as-club', 'Morning Star Club', 'reg-as', 'as-club')],
+                   capped: 0, outside: ODD.length };
+    const r = trashPlan(build(true), nowMs, 90, 100);
+    check('Asia beside keys Europe, `U.S `, asia, __proto__, constructor, toString, hasOwnProperty, ` Asia`, africa (each naming ' +
+          'an old root folder with an old photo and an empty subfolder): only Asia counts; the rest are outside, never trashed',
+          !r.error && same(normT(r.plan), want), r.error || show(normT(r.plan), want));
+    const none = trashPlan(build(false), nowMs, 90, 100);
+    check('…with no real region key at all: nothing trashed, every file outside, no crash',
+          !none.error && same(normT(none.plan), { files: [], folders: [], capped: 0, outside: ODD.length + 1 }),
+          none.error || JSON.stringify(normT(none.plan)));
+    const inherited = trashPlan(build(true), nowMs, 90, 100, d => Object.setPrototypeOf(d.regions, { Africa: 'odd-0', Template: 'odd-1' }));
+    check('…and Africa or Template inherited from the regions object\'s prototype, not its own key: ignored too',
+          !inherited.error && same(normT(inherited.plan), want), inherited.error || show(normT(inherited.plan), want));
+  }
+
+  console.log('\nplanTrash_ — the cap: maxFiles by the earliest due moment across regions, capped counted, their folders kept');
+  {
+    const nowMs = Date.UTC(2027, 1, 1);
+    // [id, region, parent, top, created]: in the order the rules give (each file younger than its folder, so its own time)
+    const CAP = [['cap-q', 'Asia', 'as-1', 'as-1', '2026-09-01T00:00:00Z'], ['cap-b', 'Africa', 'af-1', 'af-1', '2026-09-01T06:00:00Z'],
+                 ['cap-z', 'Latin America', 'la-1', 'la-1', '2026-09-02T00:00:00Z'], ['cap-d', 'Africa', 'af-2', 'af-2', '2026-09-03T00:00:00Z'],
+                 ['cap-h', 'Asia', 'as-2', 'as-2', '2026-09-04T00:00:00Z'], ['cap-m', 'Asia', 'as-2', 'as-2', '2026-09-04T00:00:00Z'],
+                 ['cap-a', 'Africa', 'af-2', 'af-2', '2026-09-05T00:00:00Z'], ['cap-y', 'Latin America', 'la-2a', 'la-2', '2026-09-06T00:00:00Z'],
+                 ['cap-e', 'Latin America', 'la-2a', 'la-2', '2026-09-07T00:00:00Z'], ['cap-k', 'Asia', 'reg-as', null, '2026-09-08T00:00:00Z']];
+    const F = '2026-08-15T00:00:00Z';
+    const FOLD = { 'as-1': ['Asia', 'Rising Stars 08-15-2026', 'reg-as', 'as-1'], 'af-1': ['Africa', 'Bright Voices 08-15-2026', 'reg-af', 'af-1'],
+                   'la-1': ['Latin America', 'Golden Roots 08-15-2026', 'reg-la', 'la-1'], 'af-2': ['Africa', 'Silver Wings 08-15-2026', 'reg-af', 'af-2'],
+                   'as-2': ['Asia', 'Evening Stars 08-15-2026', 'reg-as', 'as-2'], 'la-2': ['Latin America', 'Morning Flames 08-15-2026', 'reg-la', 'la-2'],
+                   'la-2a': ['Latin America', 'extra', 'la-2', 'la-2'] };
+    const NEEDS = { 'as-1': ['cap-q'], 'af-1': ['cap-b'], 'la-1': ['cap-z'], 'af-2': ['cap-d', 'cap-a'], 'as-2': ['cap-h', 'cap-m'],
+                    'la-2a': ['cap-y', 'cap-e'], 'la-2': ['cap-y', 'cap-e'] };   // la-2 holds la-2a only
+    const drive = {
+      regions: { Africa: 'reg-af', Asia: 'reg-as', 'Latin America': 'reg-la' }, rootId: ROOT,
+      folders: [FD('reg-la', 'Latin America', ROOT, '2026-08-01T00:00:00Z'), FD('reg-as', 'Asia', ROOT, '2026-08-01T00:00:00Z'),
+                FD('reg-af', 'Africa', ROOT, '2026-08-01T00:00:00Z'), FD('af-3', 'Rising Roots 08-15-2026', 'reg-af', F)]
+        .concat(Object.entries(FOLD).map(([id, [, name, parent]]) => FD(id, name, parent, F))),
+      files: CAP.slice().reverse().map(([id, , parent, , c]) => FL(id, parent, c)).concat([FL('cap-young', 'af-3', '2027-01-20T00:00:00Z')]),
+    };
+    const wrong = [];
+    for (let k = 1; k <= CAP.length + 1; k++) {
+      const r = trashPlan(drive, nowMs, 90, k);
+      const sel = CAP.slice(0, k), chosen = new Set(sel.map(c => c[0]));
+      const want = { files: sel.map(([id, reg, parent, top, c]) => fe(reg, id, parent, top, c)),
+                     folders: Object.keys(NEEDS).filter(f => NEEDS[f].every(x => chosen.has(x)))
+                       .map(f => fo(FOLD[f][0], f, FOLD[f][1], FOLD[f][2], FOLD[f][3])).sort(),
+                     capped: Math.max(0, CAP.length - k), outside: 0 };
+      if (r.error || !same(normT(r.plan), want) || orderProblems(r.plan)) {
+        wrong.push('maxFiles ' + k + ': ' + (r.error || show(normT(r.plan), want) + ' ' + orderProblems(r.plan)));
+      }
+    }
+    check('maxFiles 1 to 11 over ten due files in Africa, Asia and Latin America: the first maxFiles by due moment across the ' +
+          'regions (a tie by id, whatever the input order), capped the rest; a folder goes only once all its files are in, ' +
+          'and the folder above a capped file\'s folder stays (la-2 above la-2a)', !!planTrashFn && !wrong.length,
+          wrong.join(' || ') || (planTrashFn ? '' : 'planTrash_ is not defined'));
+    // the mover's own cap (R6): 150 due files, 100 per run
+    const rr = prng(18100);
+    const big = { regions: { Africa: 'reg-af', Asia: 'reg-as', 'Latin America': 'reg-la' }, rootId: ROOT,
+                  folders: [FD('reg-af', 'Africa', ROOT, '2026-08-01T00:00:00Z'), FD('reg-as', 'Asia', ROOT, '2026-08-01T00:00:00Z'),
+                            FD('reg-la', 'Latin America', ROOT, '2026-08-01T00:00:00Z')], files: [] };
+    const regIds = ['reg-af', 'reg-as', 'reg-la'], regNames = ['Africa', 'Asia', 'Latin America'], expect = [];
+    for (let i = 0; i < 30; i++) {
+      const id = 'big-' + String(i).padStart(2, '0');
+      big.folders.push(FD(id, WORDS[i % 6] + ' ' + NOUNS[(i * 5) % 6] + ' 08-20-2026', regIds[i % 3], '2026-08-20T00:00:00Z'));
+      for (let j = 0; j < 5; j++) {
+        const fidv = 'bf-' + String(Math.floor(rr() * 1e6)).padStart(6, '0') + '-' + String(i * 5 + j).padStart(3, '0');
+        const c = Date.UTC(2026, 8, 1) + Math.floor(rr() * 40) * DAY;   // whole days: many ties, broken by id
+        big.files.push(FL(fidv, id, c));
+        expect.push({ id: fidv, folder: id, key: tag(regNames[i % 3], fidv, id, id, c), c });
+      }
+    }
+    shuffle(big.files, rr);
+    expect.sort((a, b) => a.c - b.c || (a.id < b.id ? -1 : 1));
+    const first = expect.slice(0, 100), inFirst = new Set(first.map(e => e.id));
+    const goneFolders = big.folders.filter(d => /^big-/.test(d.id) && expect.filter(e => e.folder === d.id).every(e => inFirst.has(e.id)))
+      .map(d => d.id).sort();
+    const rb = trashPlan(big, nowMs, 90, 100);
+    check('150 due files in 30 folders, maxFiles 100: the 100 earliest by due moment then id, capped 50, and only the folders ' +
+          'all of whose files are among them', !rb.error && same(normT(rb.plan).files, first.map(e => e.key)) && rb.plan.capped === 50 &&
+          same(folderOrder(rb.plan).slice().sort(), goneFolders),
+          rb.error || 'files ' + list(rb.plan, 'files').length + ', capped ' + (rb.plan && rb.plan.capped) + ', folders ' + folderOrder(rb.plan).join(','));
+  }
+
+  console.log('\nplanTrash_ — retentionDays below 90 or not a whole number, maxFiles below 1: throws');
+  {
+    const drive = { regions: { Africa: 'reg-africa' }, rootId: ROOT,
+                    folders: [AFRICA, FD('s', 'Sunrise Club 10-23-2026', 'reg-africa', '2026-10-24T09:00:00Z')],
+                    files: [FL('f1', 's', '2026-10-23T08:00:00Z'), FL('f2', 's', '2026-10-23T08:01:00Z')] };
+    const nowMs = Date.UTC(2027, 1, 1);   // 100 days after the folder: due at 90, and at 89
+    const BAD_DAYS = [89, 0, -90, 90.5, 89.999, NaN, '90', null, undefined, Infinity];
+    const BAD_MAX = [0, -1, 1.5, NaN, '100', null, undefined, Infinity];
+    const shown = v => (typeof v === 'string' ? JSON.stringify(v) : String(v));
+    const notThrown = BAD_DAYS.filter(v => !trashPlan(drive, nowMs, v, 100).error).map(shown);
+    check('retentionDays 89, 0, -90, 90.5, 89.999, NaN, \'90\', null, undefined, Infinity: refused (throws)',
+          !!planTrashFn && !notThrown.length, planTrashFn ? 'not refused: ' + notThrown.join(', ') : 'planTrash_ is not defined');
+    const notThrownMax = BAD_MAX.filter(v => !trashPlan(drive, nowMs, 90, v).error).map(shown);
+    check('maxFiles 0, -1, 1.5, NaN, \'100\', null, undefined, Infinity: refused (throws)',
+          !!planTrashFn && !notThrownMax.length, planTrashFn ? 'not refused: ' + notThrownMax.join(', ') : 'planTrash_ is not defined');
+    const fine = [[90, 100, 2], [91, 100, 2], [99, 100, 2], [100, 100, 0], [365, 100, 0], [90, 1, 1]].map(([d, m, n]) => {
+      const r = trashPlan(drive, nowMs, d, m);
+      return r.error || list(r.plan, 'files').length !== n ? d + '/' + m + ': ' + (r.error || list(r.plan, 'files').length + ' file(s), want ' + n) : '';
+    }).filter(Boolean);
+    check('…while retentionDays 90, 91, 99, 100, 365 and maxFiles 1 or 100 plan (2, 2, 2, 0, 0 files: the folder is 99 days 15 hours old; 1 with maxFiles 1)',
+          !!planTrashFn && !fine.length, fine.join('; ') || (planTrashFn ? '' : 'planTrash_ is not defined'));
+  }
+
+  console.log('\nretentionFolders_ — exactly the folders strictly below a region folder whose own created is at least retentionDays old; never a region folder, rootId or an outside folder');
+  {
+    let checked = 0, nonEmpty = 0;
+    const misses = [];
+    for (let seed = 1; seed <= 8; seed++) {
+      for (let k = 0; k < T_NOWS.length; k++) {
+        const nowMs = T_NOWS[k], days = T_DAYS[(seed + k) % T_DAYS.length];
+        const { drive } = trashLayout(seed, nowMs, days);
+        const want = trashOracle(drive, nowMs, days, Infinity).old;
+        const got = oldFolders(drive, nowMs, days), bare = oldFolders(Object.assign({}, drive, { files: [] }), nowMs, days);
+        checked++;
+        if (want.length) nonEmpty++;
+        if (got.error || bare.error || !same(sortedIds(got.ids), want) || !same(sortedIds(bare.ids), want)) {
+          misses.push('seed ' + seed + ' now ' + new Date(nowMs).toISOString() + ': ' +
+                      (got.error || bare.error || show(sortedIds(got.ids), want)));
+        }
+      }
+    }
+    check('generated trees (' + checked + '): the old folders below a region folder, whatever their files or `complete`, ' +
+          'the same with `files` empty; no region folder, root, outside, loop or undated folder',
+          !!oldFoldersFn && !misses.length && nonEmpty === checked, misses.join(' || ') || (oldFoldersFn ? '' : 'retentionFolders_ is not defined'));
+    const nowMs = Date.UTC(2027, 1, 1, 12), R = 90 * DAY, O = nowMs - 150 * DAY;
+    const drive = {
+      regions: { Africa: 'reg-af', Template: 'reg-tp', Europe: 'odd-eu' }, rootId: ROOT,
+      folders: [FD('reg-af', 'Africa', ROOT, O), FD('reg-tp', 'Template', 'reg-af', O), FD('reg-us', 'U.S', ROOT, O),
+                FD('exact', 'Sunrise Club 10-01-2026', 'reg-af', nowMs - R, { complete: false }),
+                FD('short', 'Rising Stars 10-01-2026', 'reg-af', nowMs - R + 1),
+                FD('deep', 'extra', 'exact', O), FD('bad', 'Golden Wings 10-01-2026', 'reg-af', 'invalid'),
+                FD('none', 'Silver Roots 10-01-2026', 'reg-af', null), FD('tp-sub', 'Evening Voices 10-01-2026', 'reg-tp', O),
+                FD('us-sub', 'Bright Flames 10-01-2026', 'reg-us', O), FD('odd-eu', 'Europe', ROOT, O), FD('eu-sub', 'Morning Wings 10-01-2026', 'odd-eu', O),
+                FD('kept', 'Kept', ROOT, O), FD('orphan', 'Silver Stars 10-01-2026', null, O), FD('lost', 'Golden Stars 10-01-2026', 'ghost-1', O),
+                FD('loop-1', 'Day 1', 'loop-2', O), FD('loop-2', 'Day 2', 'loop-1', O), FD(ROOT, 'GLOW Shared Drive', 'reg-af', O)],
+      files: [FL('x', 'exact', O)],
+    };
+    const r90 = oldFolders(drive, nowMs, 90), r120 = oldFolders(drive, nowMs, 120);
+    check('exactly 90 days old (even listed incomplete) and one deeper: in; 1 ms younger, no valid created, a region folder ' +
+          '(Template\'s inside Africa\'s), U.S\'s unconfigured folder and its subfolder, a key that is no region (Europe), the root ' +
+          '(even listed below Africa), Kept, no parent, an unknown parent, a loop: never; inside Template\'s folder: in',
+          !r90.error && same(sortedIds(r90.ids), ['deep', 'exact', 'tp-sub']), r90.error || JSON.stringify(r90.ids));
+    check('…with retentionDays 120 the 90-day-old folder is out', !r120.error && same(sortedIds(r120.ids), ['deep', 'tp-sub']),
+          r120.error || JSON.stringify(r120.ids));
+  }
+
+  console.log('\nplanTrash_ — no Google service touched, inputs unchanged, the same inputs give the same plan, no implicit globals');
+  {
+    const nowMs = Date.UTC(2027, 1, 1, 12), days = 90;
+    const { drive } = trashLayout(42, nowMs, days);
+    const d = reviveDrive ? sandboxDrive(drive) : null;
+    const now = new CtxDate(nowMs);
+    const snap = x => JSON.stringify(x, function (k, v) {
+      const o = this[k];
+      return Object.prototype.toString.call(o) === '[object Date]' ? 'Date ' + o.getTime() : v;
+    });
+    const before = snap(d);
+    touched.length = 0;
+    const p1 = inSandbox('planTrash_', [d, now, days, 7]), p2 = inSandbox('planTrash_', [d, now, days, 7]);
+    const o1 = inSandbox('retentionFolders_', [d, now, days]), o2 = inSandbox('retentionFolders_', [d, now, days]);
+    const err = p1.error || p2.error || o1.error || o2.error;
+    check('no Google service is touched by planTrash_ or retentionFolders_ (DriveApp, Drive, PropertiesService …)',
+          !err && !touched.length, err || touched.join(', '));
+    check('the inputs are unchanged after planning (Dates, order and every field included; `now` too)',
+          !err && !!d && snap(d) === before && now.getTime() === nowMs, err || 'changed');
+    check('the same inputs give the same plan and the same folder list, in the same order',
+          !err && snap(p1.out) === snap(p2.out) && snap(o1.out) === snap(o2.out) && list(p1.out, 'files').length > 0 &&
+          list(p1.out, 'folders').length > 0, err || snap(p1.out).slice(0, 300));
+    const stray = ctx ? loadGs.strayGlobals(ctx) : ['not loaded'];
+    check('no implicit globals made by planTrash_ or retentionFolders_', !err && !stray.length, err || stray.join(', '));
+  }
+
+  console.log('\nplanTrash_ — run after run, the plan applied each time: everything due is gone within ceil(due / maxFiles) runs, and nothing else');
+  {
+    let spread = 0;
+    for (let seed = 21; seed <= 26; seed++) {
+      const nowMs = Date.UTC(2027, 1, 14, 9, 0, 0), days = 90;
+      const { drive } = trashLayout(seed, nowMs, days);
+      const start = trashOracle(drive, nowMs, days, Infinity);
+      const dueIds = start.due.map(e => e.id).sort(), goIds = start.folders.map(e => e.id).sort();
+      const maxFiles = 2 + seed % 5;
+      const bound = Math.max(1, Math.ceil(dueIds.length / maxFiles));
+      const model = { regions: drive.regions, rootId: drive.rootId, folders: drive.folders.slice(), files: drive.files.slice() };
+      const trashedFiles = [], trashedFolders = [], problems = [];
+      let worked = 0, error = '', ended = false;
+      for (let run = 0; run < bound + 3; run++) {
+        const got = trashPlan(model, nowMs, days, maxFiles);
+        if (got.error) { error = got.error; break; }
+        const p = got.plan, want = trashOracle(model, nowMs, days, maxFiles).want;
+        if (!same(normT(p), want)) problems.push('run ' + run + ': ' + show(normT(p), want));
+        if (!list(p, 'files').length && !list(p, 'folders').length) { ended = true; break; }
+        worked++;
+        for (const f of list(p, 'files')) {
+          const i = model.files.findIndex(x => x.id === f.id);
+          if (i < 0) { problems.push('run ' + run + ': ' + f.id + ' is not on the drive'); continue; }
+          model.files.splice(i, 1);
+          trashedFiles.push(f.id);
+        }
+        for (const fd of list(p, 'folders')) {   // in the plan's order, as the mover trashes them
+          const inIt = model.files.filter(x => x.parent === fd.id).length + model.folders.filter(x => x.parent === fd.id).length;
+          if (inIt) problems.push('run ' + run + ': folder ' + fd.id + ' trashed with ' + inIt + ' item(s) still in it');
+          const i = model.folders.findIndex(x => x.id === fd.id);
+          if (i < 0) { problems.push('run ' + run + ': folder ' + fd.id + ' is not on the drive'); continue; }
+          model.folders.splice(i, 1);
+          trashedFolders.push(fd.id);
+        }
+      }
+      check('seed ' + seed + ': ' + dueIds.length + ' due file(s), maxFiles ' + maxFiles + ': gone within ' + bound + ' run(s) (' + worked +
+            ' used), every emptied folder with them, and the next run plans nothing',
+            !error && ended && worked <= bound && same(trashedFiles.slice().sort(), dueIds) && same(trashedFolders.slice().sort(), goIds),
+            error || 'files ' + show(trashedFiles.slice().sort(), dueIds) + ' folders ' + show(trashedFolders.slice().sort(), goIds));
+      check('seed ' + seed + ': nothing else - each run the rules\' answer, no folder trashed with anything in it, never a ' +
+            'region folder, the root or an outside item',
+            !error && !problems.length && !trashedFolders.concat(trashedFiles).some(x => x === drive.rootId ||
+              Object.values(drive.regions).includes(x) || start.outside.some(e => e.id === x)),
+            error || problems.join('; '));
+      if (!error && ended && !problems.length && worked >= 3) spread++;
+    }
+    check('…and at least one of those drives took three or more runs, as the rules said (the cap spreads the trash over runs)',
+          spread > 0, String(spread));
+  }
 }
 
 // ---------------------------------------------------------------- the entry points, run on fakes

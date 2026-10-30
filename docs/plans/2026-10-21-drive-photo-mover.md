@@ -1,7 +1,7 @@
 ---
 title: A standalone Apps Script moves Jotform's photo subfolders from Ryan's My Drive to the company Shared Drive
 author: Claude (ticket #89, with Ryan's decision of 2026-10-21)
-status: in-progress      # set up and its trigger live 2026-10-23; every move failed (#132); the file-by-file fix pasted live 2026-10-25; #144 (the emptied subfolders trashed, the rescue) built offline 2026-10-30, awaits Ryan's confirmation of its rule and his paste (Result)
+status: in-progress      # set up and its trigger live 2026-10-23; every move failed (#132); the file-by-file fix pasted live 2026-10-25; #144 (the emptied subfolders trashed, the rescue) pasted live 2026-10-30, the rescue still unexercised (Result)
 created: 2026-10-21
 intent: Ryan, 2026-10-21 (ticket #89) - "Jotform will only use my local company gmail, but it needs to go to a company shared drive. So photos will be uploaded to me and then need to be transferred to the shared drive. Can we create a custom way to do this sync."
 ---
@@ -299,3 +299,12 @@ another account). The manifest is unchanged: no new scope, no new service.
   of the "safe to remove" rule and his paste (Rollout, #144). The rescue is unproven live (Ryan
   skipped the template test, 2026-10-30) and rests on Drive semantics the research could only
   partly confirm (Risks). The counts of the first `previewMoves` and `moveSettledPhotos` go here.
+- 2026-10-30 (#144, live; Ryan's paste, about 12:00 UTC): Rollout #144 steps 2 to 6.
+  `removeTrigger`; `Plan.gs` and `Mover.gs` pasted from main 8e5dabc. `previewMoves` (20:57 JST,
+  11:57 UTC): would move 1 (Africa), would merge 4 (0 files in, 4 kept: Africa), would remove
+  162 (Africa 91, Asia 47, Latin America 24, Template 0), would rescue 0 in every region.
+  `moveSettledPhotos` (21:05 JST, 12:05 UTC): 1 folder moved (1 file), 0 files merged, 0 out of
+  the trash, 162 emptied folders removed (to the trash), 0 failures - equal to the preview. Then
+  `installTrigger`. The rescue is still unexercised live (nothing to rescue). The 4 Africa
+  subfolders whose files were kept (already on the Shared Drive) stay until Ryan trashes those
+  files, then the folders.
