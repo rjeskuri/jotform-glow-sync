@@ -18,16 +18,25 @@ What it does and never does:
 - a settled subfolder moves as its files: Drive cannot move a folder from My Drive into a Shared
   Drive (#132, 2026-10-24: `teamDrivesFolderMoveInNotSupported`, whatever the role), so the mover
   makes a folder of the subfolder's name in the region folder and moves the files into it one by
-  one (`Drive.Files.update` with `addParents`/`removeParents`, `supportsAllDrives`); the emptied
-  subfolder stays in My Drive (expected; each leftover costs every run one listing, so Ryan
-  clears them regularly by hand). When that name is already in the
-  region folder once (a resubmission) its files move in the same way beside what is there, and a
-  file whose name and size are both already there stays in My Drive (logged as kept). Nothing is
-  ever replaced;
+  one (`Drive.Files.update` with `addParents`/`removeParents`, `supportsAllDrives`). When that
+  name is already in the region folder once (a resubmission) its files move in the same way
+  beside what is there, and a file whose name and size are both already there stays in My Drive
+  (logged as kept). Nothing is ever replaced;
+- the emptied subfolder is removed by a later run (#144): once it holds no file and no subfolder
+  and has not changed for 10 minutes, the real run re-reads and re-lists it and moves it to My
+  Drive's trash (restorable there for 30 days; logged `remove "<name>"`). One trash helper,
+  `moveToTrash_`, does every trash and refuses a configured source or target folder and the
+  Shared Drive's root whatever its caller asks. A subfolder still holding kept files, waiting,
+  refused, or holding a subfolder is never removed;
+- the rescue (#144): Jotform may write an edited submission's photos into a subfolder the mover
+  has already trashed. Every run lists each source folder's subfolders in the trash, and a photo
+  in one (in the trash through its folder only) moves like any other, out of the trash in the
+  same update; a photo a person trashed is left alone. So: to discard a photo in My Drive, trash
+  the photo itself, not only its subfolder;
 - two or more folders of that name on the Shared Drive: refused and logged, moved by hand;
 - the `Attendance photos - <Region>` folders themselves stay: Jotform writes into them;
-- it never shares, links, copies, trashes or e-mails a file. The photos show girls' faces; only
-  the Shared Drive's members see them;
+- it never shares, links, copies or e-mails a file, never trashes one, and never deletes anything
+  for good. The photos show girls' faces; only the Shared Drive's members see them;
 - the log (Executions) holds counts and folder names, never a file's name or contents.
 
 Files: `Plan.gs` (the planner, pure, tested by `test/drive_sync_test.js`), `Mover.gs` (the entry
@@ -83,8 +92,8 @@ upload on it, and step 9 (the regional forms) comes last.
    (`CONFIG refused …`) before it reads a subfolder or moves anything.
 6. **Dry run.** In the editor, run `previewMoves`; accept Google's authorisation (Drive, and the
    trigger scope). Executions → its log: one line per region, `would move N, would merge N (…),
-   waiting N, refused N`, then the folder names; on the empty folders every count is 0 and no
-   `CONFIG refused`. Nothing changes.
+   waiting N, refused N, would remove N, would rescue N`, then the folder names; on the empty
+   folders every count is 0 and no `CONFIG refused`. Nothing changes.
 
 Then #63 for the template only (Ryan, in the builder): its Google Drive integration pointed at
 `Attendance photos - Template`, and a test upload on it with its read-back (RUNBOOK "Photos",
@@ -103,8 +112,10 @@ steps 1-4). No regional form yet.
 ## Stopping it
 
 Run `removeTrigger`, or delete the trigger in the editor (Triggers, the clock icon). Nothing else
-runs the mover. Undo a move by moving its files back into the emptied subfolder in
-`Attendance photos - <Region>` (or a new folder of its name, once it was cleared) by hand. That
+runs the mover. A removed subfolder is in My Drive's trash for 30 days: Drive → Trash → the
+folder → Restore puts it back in `Attendance photos - <Region>`. Undo a move by moving its files
+back into the emptied subfolder there (restored first if it was removed, or a new folder of its
+name) by hand. That
 move out of the Shared Drive needs **Manager** on it (Google, "How file access works in shared
 drives", https://support.google.com/a/users/answer/12380484: "If you have Manager access to a
 shared drive, you can move files and folders out of shared drive to My Drive"; no lower role is

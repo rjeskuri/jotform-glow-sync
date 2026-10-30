@@ -1,7 +1,7 @@
 ---
 title: A standalone Apps Script moves Jotform's photo subfolders from Ryan's My Drive to the company Shared Drive
 author: Claude (ticket #89, with Ryan's decision of 2026-10-21)
-status: in-progress      # set up and its trigger live 2026-10-23; every move failed (#132); the file-by-file fix of 2026-10-24 awaits Ryan's paste into the live project (Result)
+status: in-progress      # set up and its trigger live 2026-10-23; every move failed (#132); the file-by-file fix pasted live 2026-10-25; #144 (the emptied subfolders trashed, the rescue) built offline 2026-10-30, awaits Ryan's confirmation of its rule and his paste (Result)
 created: 2026-10-21
 intent: Ryan, 2026-10-21 (ticket #89) - "Jotform will only use my local company gmail, but it needs to go to a company shared drive. So photos will be uploaded to me and then need to be transferred to the shared drive. Can we create a custom way to do this sync."
 ---
@@ -35,7 +35,7 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
   it one by one through the advanced Drive service, v3 (`Drive.Files.create`, then
   `Drive.Files.update` with `addParents`/`removeParents` and `supportsAllDrives: true`; the
   manifest enables the service, the `drive` scope covers it); a merge moves files the same way.
-  The emptied subfolder stays in My Drive (nothing is trashed; Ryan clears them by hand), and a
+  The emptied subfolder stays in My Drive until a later run removes it (#144, below), and a
   move cut short by a failure or the time budget is finished by a later run as a merge.
 - **What moves** (`planMoves_` in `drive-sync/Plan.gs`, pure, tested offline by
   `test/drive_sync_test.js`):
@@ -53,6 +53,41 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
   - two settled subfolders of one name in one region: one moves or merges files, the other waits
     for the next run (never two same-name folders created by one run); a merge whose files are
     all kept moves nothing, so it never holds up the other copy and never waits itself.
+- **What is removed** (#144, Ryan's request of 2026-10-25; `remove` in `planMoves_`, carried
+  out by the real run only). The rule, **for Ryan to confirm before the paste** (the ticket's
+  definition of done): a source subfolder is "safe to remove" when
+  - it is a direct subfolder of a configured `Attendance photos - <Region>` folder, not in the
+    trash, holding no file and no subfolder (a file in the trash still in it counts: such a
+    folder is never removed);
+  - it has itself not changed for at least `SETTLE_MINUTES` (10);
+  - just before the trash, the real run re-reads it (still a folder in that source folder, not in
+    the trash, unchanged for 10 minutes) and re-lists it with `trashed = true or trashed = false`:
+    anything in it, and it stays (`not trashed "<name>"`, no error; the next run looks again);
+  - it goes to the trash (`Drive.Files.update {trashed: true}`, restorable for 30 days), never
+    deleted for good, and only through `moveToTrash_`, the one trash, which refuses on its own a
+    configured source or target folder and the Shared Drive's root (the drive's id) whatever its
+    caller passes (#185, the Shared Drive's retention, reuses it);
+  - never a subfolder that still holds a merge's `kept` files, a `waiting` or `REFUSED` one (they
+    hold files), the `Attendance photos - <Region>` folder itself, anything outside the
+    configured source folders, or anything on the Shared Drive.
+
+  Which ones: every emptied, settled subfolder the run reads, whoever emptied it, so the
+  leftovers of earlier runs (and of the weeks before #144) go on the first run. The subfolders a
+  run empties are removed by a later run, once 10 minutes have passed: the planner sees Drive's
+  state, not a history, and a folder the run just emptied has not settled.
+- **The rescue** (#144, Ryan's option (b), 2026-10-30). Jotform staff say an edited submission
+  re-sends its files into the folder of the same name, and no source says where that upload goes
+  when the folder is in the trash (the ticket's research). So every run also lists each source
+  folder's subfolders in the trash and their files, through the advanced Drive service with
+  `trashed = true` stated in every query (Drive's default lists the trash too); the files of up
+  to 20 such subfolders come in one query, since each trashed subfolder stays there 30 days. A
+  file there that Drive reads as in the trash through its folder only (`explicitlyTrashed`
+  false) is planned like any other (moved, merged with kept, waiting, refused; one per name per
+  run with a live subfolder of its name) and moved by one `Drive.Files.update` carrying
+  `{trashed: false}` with `addParents`/`removeParents`, then re-read (`Drive.Files.get`): still in
+  the trash, or not in the folder it was sent to, is `RESCUE_FAILED`. Settled from the later of
+  its `modifiedTime` and `createdTime`. A file a person trashed (`explicitlyTrashed` true) is left
+  alone; a subfolder in the trash with nothing to move is in no list.
 - **The run** (`drive-sync/Mover.gs`): the folder ids come from Script Properties
   (`SOURCE_FOLDER_<KEY>`, `TARGET_FOLDER_<KEY>`, KEY = AFRICA, ASIA, LATIN_AMERICA, US,
   TEMPLATE; never in the repo). A region with neither is skipped; half a pair, an id used twice,
@@ -65,12 +100,15 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
   its one listing and nothing more). Every failure is logged
   by code (`MOVE_FAILED`, `MERGE_FAILED`, `CONFIG refused`, `LOCKED`, `TIME_BUDGET`) and a run
   with a failure ends in an error, so the execution shows as failed.
-- **The log**: per region `move N, merge N (F file(s) in, K kept), waiting N, refused N`, then one
-  line per subfolder by name (club names and dates, as in the folder names). Never a file name,
-  never contents.
-- **Never** a share, a link, a copy, a trash or an e-mail (the test forbids the calls). Who sees
-  the photos is the Shared Drive's membership: the named list (the CEO and Ryan), never "anyone
-  with the link".
+- **The log**: per region `move N, merge N (F file(s) in, K kept), waiting N, refused N, remove
+  N, rescue N` (`would …` in the dry run), then one line per subfolder by name (club names and
+  dates, as in the folder names; `(in the trash)` after a rescued one); the real run's `done:`
+  line gives the folders actually removed. Never a file name, never contents.
+- **Never** a share, a link, a copy or an e-mail; never a file trashed, a folder with anything in
+  it, anything on the Shared Drive, a permanent delete or an emptied trash: the one trash is an
+  emptied source subfolder's (above; the test forbids every other call, as rules a later ticket
+  can extend). Who sees the photos is the Shared Drive's membership: the named list (the CEO and
+  Ryan), never "anyone with the link".
 - **Entry points**: `previewMoves` (the dry run: reads, plans, logs, changes nothing),
   `moveSettledPhotos` (the real run; the trigger's handler), `installTrigger` (every 15 minutes,
   once), `removeTrigger` (stops it).
@@ -78,7 +116,14 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
 ### Not chosen
 
 - **Copy, then trash the original**: a second copy of minors' photos sits in Ryan's trash for 30
-  days, and the copy has a new owner and date. A move keeps one copy.
+  days, and the copy has a new owner and date. A move keeps one copy. (An emptied subfolder holds
+  no photo, so #144's trash does not run into this; it never trashes a file.)
+- **#144, the template test first** (option (a): one test submission edited after its subfolder
+  was trashed, to see where the re-upload lands): Ryan skipped it on 2026-10-30, so the rescue is
+  built without knowing whether it is needed. **Keep deleting by hand** (option (c)): no change.
+- **#144, only the subfolders this run emptied**: such a folder has just changed, so it is not
+  settled at the end of that run, and the planner would need a history of runs to tell them
+  apart; the earlier runs' leftovers would stay for Ryan to delete by hand.
 - **A GitHub Actions job with a service account**: Ryan's My Drive shared to a robot account,
   its key as a repository secret, the photos readable from the runner. More secrets, more
   places that can see the photos.
@@ -122,6 +167,26 @@ template test and the trigger come next, and only then the regional forms' integ
    then the next run's log for that region (no `CONFIG refused`, no `UNKNOWN`), and its first
    real submission's subfolder on the Shared Drive within half an hour, before the next form.
 
+### #144: the emptied subfolders removed, and the rescue (Ryan's paste, on his go)
+
+The code is in the repo; the live project is updated by hand, as for #132 (clasp is logged in as
+another account). The manifest is unchanged: no new scope, no new service.
+
+0. **Ryan confirms the "safe to remove" rule** (Design, "What is removed") on ticket #144,
+   before any paste.
+1. Land the pull request (code only; nothing live).
+2. As the company account, open the `GLOW photo mover` project; replace the editor's `Plan.gs`
+   and `Mover.gs` with the repo's (the whole file each). Save.
+3. Run `previewMoves`. Each region's line now ends `would remove N, would rescue N`, and each
+   folder it would remove is named on a `would remove "<name>"` line: they are the emptied
+   subfolders in `Attendance photos - <Region>` (the leftovers of earlier runs at first), and
+   none of them holds a file. `would rescue` is expected to be 0 (no photo has been seen in a
+   trashed subfolder yet). Nothing changes.
+4. Run `moveSettledPhotos` once. Its `done:` line gives `N emptied folder(s) removed (to the
+   trash)`, N the `would remove` total (fewer only with a `not trashed "<name>"` line); those
+   folders are in My Drive's trash and gone from `Attendance photos - <Region>`; the photos and
+   the Shared Drive are as before. The trigger needs no change. The counts go in the Result.
+
 ## Rollback
 
 - Stop: `removeTrigger`, or delete the trigger in the editor (Triggers). Nothing else runs it.
@@ -131,6 +196,10 @@ template test and the trigger come next, and only then the regional forms' integ
   of a shared drive needs Manager on it (Google, "How file access works in shared drives": "If
   you have Manager access to a shared drive, you can move files and folders out of shared drive
   to My Drive"; RUNBOOK "Photo mover", Rollback): a Manager does it, or Ryan's role is raised.
+- Undo a removal (#144): a removed subfolder is in My Drive's trash for 30 days; Drive → Trash →
+  the folder → Restore puts it back in `Attendance photos - <Region>` (the log names it on a
+  `remove "<name>"` line). To stop removing: paste back the previous `Mover.gs` and `Plan.gs`
+  (`git show 4e77831:drive-sync/Mover.gs`, the same for `Plan.gs`), or `removeTrigger`.
 - Remove entirely: delete the trigger, then the standalone project. Jotform's integration keeps
   writing into Ryan's My Drive as before; `appsscript/` and the forms are untouched by any of it.
 
@@ -151,10 +220,26 @@ template test and the trigger come next, and only then the regional forms' integ
   is merged on a later run; if it writes into the moved folder, it is already on the Shared
   Drive.
 - **Leftovers in My Drive.** A merge leaves the files it kept (same name and size already on
-  the Shared Drive) in their subfolder, logged as kept every run. Ryan deletes such a subfolder
-  by hand after a look; the mover never trashes. Every move leaves its subfolder emptied; each
-  costs every run one listing of the read budget, so Ryan clears them regularly (RUNBOOK "Photo
-  mover", step 6).
+  the Shared Drive) in their subfolder, logged as kept every run. Ryan clears such a subfolder by
+  hand after a look, by trashing its files (not the folder: see the rescue, next); the mover then
+  removes the emptied folder. Every move leaves its subfolder emptied; since #144 a later run
+  removes it (Design).
+- **The rescue cannot tell who trashed a folder** (#144). A subfolder a person trashed with
+  photos still in it reads like one the mover trashed and Jotform wrote into: its photos are
+  moved to the Shared Drive. To discard a photo in My Drive, trash the photo itself (a file
+  trashed explicitly is left alone). The RUNBOOK says so.
+- **The rescue is unproven live** (#144): Ryan skipped the template test on 2026-10-30, so the
+  first real case is its test. Partly unverified (the ticket's research of 2026-10-30): whether
+  an edited submission re-sends its photos at all, and where they land when the folder is in
+  the trash; whether `'<id>' in parents` with `trashed = true` lists the children of a trashed
+  folder; what `createdTime` an upload into a trashed folder gets; whether a parent change takes
+  a file out of the trash (the mover does not rely on it: `{trashed: false}` goes in the same
+  update, and the file is re-read). A rescue Drive accepts but does not carry out is
+  `RESCUE_FAILED` (the photo may sit in the Shared Drive's trash or still in its subfolder in My
+  Drive's trash: found and restored by hand, RUNBOOK "Photo mover").
+- **The trash's cost** (#144): every run lists each source folder's subfolders in the trash
+  (one query per region) and their files (one query per 20 of them); a removal costs one read
+  and one listing more.
 - **A backlog** (the first run after a pause, or a busy day): a run reads for at most about 2
   minutes (half its budget, `TIME_BUDGET` in the log) and never moves a subfolder it did not
   read; the rest waits for the next run, 15 minutes later. Same-name copies clear one per run
@@ -193,3 +278,10 @@ template test and the trigger come next, and only then the regional forms' integ
   move into it one by one through the advanced Drive service (Design, "The move"; Risks). The
   live project awaits Ryan's paste of `Plan.gs`, `Mover.gs` and the manifest, then one
   `moveSettledPhotos` and its log (RUNBOOK "Photo mover", the update steps).
+- 2026-10-25: Ryan pasted the #132 fix; `previewMoves` and `moveSettledPhotos` worked. Every move
+  left its emptied subfolder in My Drive, deleted by hand (ticket #144's request).
+- 2026-10-30 (#144): built offline - the emptied, settled subfolders go to the trash, and the
+  rescue (Design); `test/drive_sync_test.js` passes. Not live: it waits for Ryan's confirmation
+  of the "safe to remove" rule and his paste (Rollout, #144). The rescue is unproven live (Ryan
+  skipped the template test, 2026-10-30) and rests on Drive semantics the research could only
+  partly confirm (Risks). The counts of the first `previewMoves` and `moveSettledPhotos` go here.
