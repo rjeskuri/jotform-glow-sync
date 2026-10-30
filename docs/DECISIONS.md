@@ -343,6 +343,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - Policy: the folders are owned by a **GLOW Workspace role account**, never a staff member's own (which one is open; the account that owns the enrollment sheet and the Apps Script is suggested); **uploaded files only, "Send Submission PDFs" OFF** - the PDF carries the girls' names, nothing in the repo can see the toggle, so this row and the RUNBOOK's read-back after every builder save are the only guard; one Drive folder per form (`Attendance photos - <Region>`; none for the U.S form while it is being disabled); one subfolder per submission named `<Club Name> <Attendance Date>` from the hidden question 5 if the Form Fields picker offers it, else the Club picker - **never question 18, never a roster**; the photo stays required; sharing = the owner plus a short named list (open); retention is the CEO's decision and nothing is deleted until it is taken; the 677 existing photos stay in Jotform (BACKLOG 69); "Require log-in to view uploaded files" stays on and "Auto Delete Submissions" off
 - **Why:** uploaded files need a Jotform login to view (an upload URL answers the login page with or without the API key), so no repo script or Apps Script can fetch them, and a Drive scope in the deployed script is a rule-11 outage; Zapier or Make would cost money at this volume and put a third processor in the path of every submission, names included; the integration does not support Shared Drives, so the owner must be a role account
 - **Consequences:** the `integrations` property is read-only, so the setup is Ryan's builder saves, each backed up before and diffed after (hunks inside `integrations` only); new submissions only; the Google token can lapse without an alarm (a monthly look at the newest subfolder's date, BACKLOG 70); copying to Drive frees nothing in Jotform - the next row ([plan](plans/2026-10-06-photos-to-drive.md))
+- **2026-10-30:** retention is decided: photos on the company Shared Drive go to its trash 90 days after they arrive, trash only (2026-10-30 below). The subfolder name is `{Club Name} {Date}` since 2026-10-30; before that it was the club name only.
 
 ### 2026-10-06 — Jotform's storage is watched, not bought ahead
 
@@ -864,3 +865,32 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - Item 12 stays apart from item 13, "Number of mentors who attended training", in its label, its field and its component.
   - A true count of new mentors needs a new question on the Monthly Report form ("How many new mentors did you recruit last month?"), outside #80; it would count from the day it is added.
   - `glow/sf_keep_list.csv` item 12 reads `new` until the deploy, then takes the report's id, and its `label_today` and `label_target` become "Partners that recruited new mentors".
+
+### 2026-10-30 — Photos on the Shared Drive go to its trash 90 days after they arrive
+
+- **The photo mover (`drive-sync/`) moves photos on the company Shared Drive to that drive's trash once they have been there 90 days.** GLOW's CEO approved it on 2026-10-30 (per Ryan). It is trash only: the mover never deletes anything for good and never empties the trash. A Content manager (Ryan's role) can restore an item from the Shared Drive's trash for 30 days; after that Google deletes it ([plan](plans/2026-10-30-photo-retention.md), Context).
+- **The clock** is the later of two times: the file's own Drive `createdTime` (Jotform's upload into Ryan's My Drive, expected to survive the mover's file-by-file move: no Google page says a move changes it or keeps it, so it is unverified until #183 checks one moved photo by eye) and the `createdTime` of the folder the file sits in on the Shared Drive. Drive records no time when a file entered a folder, so the folder's creation stands in for it. A day is 24 hours (UTC milliseconds), and a file is due at exactly 90 days. What the edge cases get, which Ryan accepted on 2026-10-30:
+  - a photo the mover moves on time: 90 days from the folder the mover made, minutes after the upload;
+  - a photo held up in My Drive, then moved into a new folder: the full 90 days on the Shared Drive;
+  - a held-up photo merged into an existing folder: the later of its own and that folder's creation, so it can be due on arrival;
+  - an old file dragged by hand into a new folder: 90 days from that folder;
+  - an old file dragged into an existing folder older than 90 days: both times are past 90 days, so it is trashed by the next run, within 15 minutes;
+  - until 2026-10-30 the folders carried the club name only, so one folder can hold photos of many dates: each of those photos goes by its own upload once that is later than the folder's creation.
+- **What it covers:** every level under each region folder - files directly in a region folder, and files and folders nested below it at any depth, whoever put them there. The region folders are `Africa`, `Asia`, `Latin America`, `Template`, and `U.S` if configured (the `TARGET_FOLDER_<KEY>` Script Properties); Ryan confirmed that all of them are on the one company Shared Drive.
+- **What is never trashed:** the region folders themselves (Ryan: "make sure the region folders do not get trashed somehow"), the Shared Drive's root, and anything outside the region folders. To keep a photo past 90 days, someone moves it out of the region folder.
+- **Emptied folders:** a folder below a region folder is trashed once nothing is left in it (it is re-listed just before), children before parents, as long as the folder itself is at least 90 days old.
+- **The switch:** retention is on only while the live project's Script Property `RETENTION_DAYS` is set; a value below 90 is refused. At most 100 files go to the trash per run, 9,600 a day, and there is no refusal by share (Ryan: "No there are hundreds of clubs in a region, it may need to trash many at once").
+- **The subfolder name:** since 2026-10-30 Jotform's Google Drive subfolder name is `{Club Name} {Date}` on the Template, Africa, Asia and Latin America forms (the U.S form is disabled), e.g. `Sunrise Club 10-30-2026` (question 17, "Date": mmddyyyy with `-`). Before 2026-10-30 it was the club name only, not the `<Club Name> <Attendance Date>` of the 2026-10-06 row. Ryan changed the setting himself in the builder.
+- **Why:** the CEO's decision. The photos are of minors, so they are kept only as long as staff need them; the 30 days in the trash are the undo.
+- **Rejected:**
+  - the file's `createdTime` alone: a held-up photo, or one dragged into a new folder, would get no time on the Shared Drive;
+  - the folder's creation alone: merges and the old club-only names would trash young photos early;
+  - leaving out files directly in a region folder, or nested ones (Ryan: trash them too);
+  - a refusal when a large share would be trashed (Ryan, above);
+  - deleting permanently: only a Manager can, and it has no undo;
+  - a short test age on Template (Ryan: wait for January).
+- **Consequences:**
+  - Jotform keeps its own copy of each photo: Auto Delete Submissions stays off (BACKLOG 68; proposed ticket #177).
+  - The first trashes come around 2027-01-19 to 2027-01-22 (the first uploads about 2026-10-23, the mover's first Shared Drive folders about 2026-10-24).
+  - Rollback: delete `RETENTION_DAYS` (off from the next run), and restore from the Shared Drive's trash within 30 days.
+  - The 2026-10-06 row's "nothing is deleted until it is taken" no longer holds once retention is live; until then nothing is deleted from Drive.
