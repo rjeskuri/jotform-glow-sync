@@ -1228,11 +1228,17 @@ files there were deleted that day and the four regional forms' mapping lost its 
 template follows in step 1). Since <date> the photos are copied by Jotform's Google Drive
 integration into the My Drive of Ryan's company account (Ryan, 2026-10-21: Jotform uses only
 that account), folder `Attendance photos - <Region>`, one subfolder per submission named
-`<Club Name> <Attendance Date>`, uploaded files only, no PDF (the PDF renders every ticked
+`{Club Name} {Date}` (since 2026-10-30, e.g. `Sunrise Club 10-30-2026`; before that the club
+name only), uploaded files only, no PDF (the PDF renders every ticked
 girl's name). The photo mover then moves each subfolder into that region's folder on the
 company Shared Drive ("Photo mover", below). The photo stays required on the forms. The photos
 before <date> (677 by 2026-10-06) are in Jotform only, behind its login. Sharing: the owner and
-<named list>. Retention: <CEO's decision, or "not yet decided: nothing is deleted">.
+<named list>. Retention (the CEO's decision, approved 2026-10-30 per Ryan; DECISIONS
+2026-10-30): photos on the company Shared Drive go to its trash 90 days after they arrive,
+trash only, never deleted for good; the photo mover does it, under every region folder, never
+the region folders themselves ([retention plan](plans/2026-10-30-photo-retention.md)). Nothing
+is deleted from Drive until the photo mover's retention is live. Jotform keeps its own copy
+(Auto Delete Submissions stays off, BACKLOG 68).
 
 `python3 tools/integration_status.py` reads every form's integration: an `ok (one action, …,
 Account_Name__c from q5, …, no upload)` line is right, a mapped photo reads `NOT RIGHT: the
@@ -1275,7 +1281,9 @@ plain `diff` of the snapshot before and the one after.*
    source folder, made at its setup before this step: "Photo mover") → Create Subfolders for Submissions ON,
    name = the "Club Name" field that is **question 5** (the hidden text field; the builder shows
    the Club picker under the same label - prefer the hidden one; if only the picker is offered,
-   use it and say so in the plan's Result), a space, then "Attendance Date" → Send Uploaded Files
+   use it and say so in the plan's Result), a space, then the "Date" field (question 17,
+   mmddyyyy with `-`) - the setting reads `{Club Name} {Date}`, as on every active form since
+   2026-10-30 (before that it was the club name only) → Send Uploaded Files
    ON → **Send Submission PDFs OFF** → Save. After: `backup_forms.py --form 262352490535154`
    and the diff → hunks inside `integrations` only (a block added, or nothing visible: see the
    next line), nothing else changed. Then
@@ -1382,8 +1390,10 @@ plain `diff` of the snapshot before and the one after.*
 *Rollback.* Removing the Google Drive integration from a form in the builder stops the copies;
 the photos stay in Jotform and nothing else on the form changes (the before/after diff of that
 save says so). The template's Salesforce upload row is re-added only on the CEO's word, with
-`UPLOADS = ["19"]` put back in `tools/integration_status.py`. What is already in Drive is the
-owner's to delete (the CEO's retention decision).
+`UPLOADS = ["19"]` put back in `tools/integration_status.py`. What is already in Drive is
+trashed by the photo mover 90 days after it arrives, once its retention is live (DECISIONS
+2026-10-30); a Content manager can restore an item from the Shared Drive's trash within 30
+days, and after that Google deletes it.
 
 ## Photo mover
 
