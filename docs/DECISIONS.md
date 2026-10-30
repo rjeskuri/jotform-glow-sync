@@ -686,6 +686,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Rejected:** a GitHub Actions job with a service account (Ryan's My Drive shared to a robot, its key as a secret, the photos readable from the runner); putting the mover in `appsscript/` (a Drive scope there stops the form-submit trigger until re-authorised, CLAUDE.md rule 11); copy-then-trash (a second copy of the photos in Ryan's trash for 30 days).
 - **Consequences:** Ryan's account is at least a Content manager on the Shared Drive (Manager if Drive refuses the folder move); its members are the named list only; the mover goes live on Ryan's go (push, authorise, dry run, the template test, then the trigger); the monthly token check (BACKLOG 70) looks at the Shared Drive's folders.
 - 2026-10-22: the order is reversed: the mover is set up before #63, not after it (see the 2026-10-22 entry).
+- 2026-10-30 (#144, Ryan's option (b)): amended: the mover moves an emptied, settled source subfolder to My Drive's trash (restorable for 30 days), and rescues a photo Jotform writes into a subfolder it trashed; still never a file trashed, nothing on the Shared Drive, no permanent delete. The rule waits for Ryan's confirmation before the paste ([plan](plans/2026-10-21-drive-photo-mover.md), Design and Rollout).
 
 ### 2026-10-21 — Duplicate and obsolete records in Salesforce: four flags, and an Account duplicate rule that reports only
 
