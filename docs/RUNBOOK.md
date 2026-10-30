@@ -1414,14 +1414,27 @@ photo Jotform writes into one it trashed. Same paste as above, without the manif
 no new scope, no new service):
 
 1. Ryan confirms the plan's "safe to remove" rule (Design, "What is removed") on ticket #144.
-2. Replace the editor's `Plan.gs` and `Mover.gs` with the repo's (the whole file each). Save.
-3. Run `previewMoves`: each region's line ends `would remove N, would rescue N`, and each folder
+2. Run `removeTrigger` (`removeTrigger: 1 trigger(s) deleted; the mover is stopped`): the
+   trigger (installed 2026-10-23) would run the new code within 15 minutes of the paste,
+   trashing and rescuing before step 4's check. Until step 6, new photos wait in My Drive.
+3. Replace the editor's `Plan.gs` and `Mover.gs` with the repo's (the whole file each). Save.
+4. Run `previewMoves`: each region's line ends `would remove N, would rescue N`, and each folder
    it would remove is named on a `would remove "<name>"` line. Check they are emptied
-   subfolders (the leftovers in `Attendance photos - <Region>`); `would rescue` is expected 0.
-4. Run `moveSettledPhotos` once: `done: … N emptied folder(s) removed (to the trash)`, N the
-   `would remove` total (less one per `not trashed "<name>"` line). Those folders are in My
-   Drive's trash; the photos and the Shared Drive are as before. The counts go in the plan's
-   Result. From then on step 6 above is the mover's.
+   subfolders (the leftovers in `Attendance photos - <Region>`). `would rescue` is expected 0;
+   above 0, stop and look before going on, the trigger still off: each such subfolder is in My
+   Drive's trash, named on a `would move "<name>" (in the trash)` or `would merge "<name>" (in
+   the trash)` line. Did someone trash it to discard its photos? Then trash the photos
+   themselves (the rescue leaves those alone) and run `previewMoves` again. A leftover trashed
+   by hand that Jotform wrote into since is what the rescue is for.
+5. Run `moveSettledPhotos` once and compare its log with the preview: its region lines are the
+   preview's without `would` (unless a folder settled in between), and `done: … N of these
+   file(s) out of the trash; N emptied folder(s) removed (to the trash)`, the first 0 when
+   `would rescue` was 0, the second the `would remove` total (less one per `not trashed
+   "<name>"` line). Those folders are in My Drive's trash; apart from the moves its log names,
+   the photos and the Shared Drive are as before.
+6. Run `installTrigger` (`installTrigger: moveSettledPhotos every 15 minutes`). The counts go in
+   the plan's Result. From then on the mover removes the emptied subfolders (step 6 of the
+   paste above).
 
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N,
 remove N, rescue N`, then the folders by name (club and date; never a file's name or contents).
@@ -1433,8 +1446,9 @@ remove N, rescue N`, then the folders by name (club and date; never a file's nam
   beside what is there; **kept** files (same name and size already there) stay in My Drive. A
   subfolder of kept files only (`0 file(s) in`) changes nothing, never holds up a same-name copy
   with new photos, is never removed while it holds them, and is logged again every run until
-  Ryan clears it after a look: trash its **files** (not the folder, see **rescue**); the mover
-  then removes the emptied folder.
+  Ryan clears it after a look: trash its **files**, then the folder (a file trashed by itself is
+  left alone by the **rescue**; the mover never removes a subfolder still holding a file, even
+  one in the trash).
 - **remove** (#144): the subfolder held no file and no subfolder and had not changed for 10
   minutes; the real run re-read and re-listed it just before, then moved it to My Drive's trash
   (restore: Rollback, above). `not trashed "<name>": …` after the `done:` line: it changed

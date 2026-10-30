@@ -175,17 +175,30 @@ another account). The manifest is unchanged: no new scope, no new service.
 0. **Ryan confirms the "safe to remove" rule** (Design, "What is removed") on ticket #144,
    before any paste.
 1. Land the pull request (code only; nothing live).
-2. As the company account, open the `GLOW photo mover` project; replace the editor's `Plan.gs`
-   and `Mover.gs` with the repo's (the whole file each). Save.
-3. Run `previewMoves`. Each region's line now ends `would remove N, would rescue N`, and each
+2. As the company account, open the `GLOW photo mover` project and run `removeTrigger` (log:
+   `removeTrigger: 1 trigger(s) deleted; the mover is stopped`). Left on, the trigger (installed
+   2026-10-23, every 15 minutes) would run the new code before step 4's preview is read, trash
+   and rescue unchecked, and step 5's counts would not be the preview's. New photos wait in My
+   Drive until step 6.
+3. Replace the editor's `Plan.gs` and `Mover.gs` with the repo's (the whole file each). Save.
+4. Run `previewMoves`. Each region's line now ends `would remove N, would rescue N`, and each
    folder it would remove is named on a `would remove "<name>"` line: they are the emptied
    subfolders in `Attendance photos - <Region>` (the leftovers of earlier runs at first), and
-   none of them holds a file. `would rescue` is expected to be 0 (no photo has been seen in a
-   trashed subfolder yet). Nothing changes.
-4. Run `moveSettledPhotos` once. Its `done:` line gives `N emptied folder(s) removed (to the
-   trash)`, N the `would remove` total (fewer only with a `not trashed "<name>"` line); those
-   folders are in My Drive's trash and gone from `Attendance photos - <Region>`; the photos and
-   the Shared Drive are as before. The trigger needs no change. The counts go in the Result.
+   none of them holds a file. Nothing changes. `would rescue` is expected to be 0 (no photo has
+   been seen in a trashed subfolder yet). Above 0, stop and look before going on, the trigger
+   still off: each such subfolder is in My Drive's trash, named on a `would move "<name>" (in
+   the trash)` or `would merge "<name>" (in the trash)` line. If someone trashed it to discard
+   its photos, the photos are trashed by themselves (the rescue leaves those alone) and
+   `previewMoves` runs again; a leftover trashed by hand that Jotform wrote into since is what
+   the rescue is for.
+5. Run `moveSettledPhotos` once and compare its log with the preview: its region lines are the
+   preview's without `would` (unless a folder settled in between); its `done:` line gives `N of
+   these file(s) out of the trash`, 0 when `would rescue` was 0, and `N emptied folder(s)
+   removed (to the trash)`, N the `would remove` total (fewer only with a `not trashed
+   "<name>"` line). Those folders are in My Drive's trash and gone from `Attendance photos -
+   <Region>`; apart from the moves its log names, the photos and the Shared Drive are as before.
+6. Run `installTrigger` (`installTrigger: moveSettledPhotos every 15 minutes`). The counts go in
+   the Result.
 
 ## Rollback
 
@@ -221,9 +234,10 @@ another account). The manifest is unchanged: no new scope, no new service.
   Drive.
 - **Leftovers in My Drive.** A merge leaves the files it kept (same name and size already on
   the Shared Drive) in their subfolder, logged as kept every run. Ryan clears such a subfolder by
-  hand after a look, by trashing its files (not the folder: see the rescue, next); the mover then
-  removes the emptied folder. Every move leaves its subfolder emptied; since #144 a later run
-  removes it (Design).
+  hand after a look, by trashing its files, then the folder: a file trashed by itself is left
+  alone by the rescue (next), and the mover never removes a subfolder still holding a file, even
+  one in the trash. Every move leaves its subfolder emptied; since #144 a later run removes it
+  (Design).
 - **The rescue cannot tell who trashed a folder** (#144). A subfolder a person trashed with
   photos still in it reads like one the mover trashed and Jotform wrote into: its photos are
   moved to the Shared Drive. To discard a photo in My Drive, trash the photo itself (a file
