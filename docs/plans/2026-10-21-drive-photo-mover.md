@@ -299,12 +299,12 @@ another account). The manifest is unchanged: no new scope, no new service.
   of the "safe to remove" rule and his paste (Rollout, #144). The rescue is unproven live (Ryan
   skipped the template test, 2026-10-30) and rests on Drive semantics the research could only
   partly confirm (Risks). The counts of the first `previewMoves` and `moveSettledPhotos` go here.
-- 2026-10-30 (#144, live; Ryan's paste in the US Eastern evening, about 01:00 UTC on
-  2026-10-31): Rollout #144 steps 2 to 6. `removeTrigger`; `Plan.gs` and `Mover.gs` pasted from
-  main 8e5dabc. `previewMoves` (20:57 Eastern, 00:57 UTC): would move 1 (Africa), would merge 4
-  (0 files in, 4 kept: Africa), would remove 162 (Africa 91, Asia 47, Latin America 24,
-  Template 0), would rescue 0 in every region. `moveSettledPhotos` (21:05 Eastern, 01:05 UTC):
-  1 folder moved (1 file), 0 files merged, 0 out of the trash, 162 emptied folders removed (to
-  the trash), 0 failures - equal to the preview. Then `installTrigger`. The rescue is still
-  unexercised live (nothing to rescue). The 4 Africa subfolders whose files were kept (already
-  on the Shared Drive) stay until Ryan trashes those files, then the folders.
+- 2026-10-30 (#144, live; Ryan's paste, about 12:00 UTC): Rollout #144 steps 2 to 6.
+  `removeTrigger`; `Plan.gs` and `Mover.gs` pasted from main 8e5dabc. `previewMoves` (20:57 JST,
+  11:57 UTC): would move 1 (Africa), would merge 4 (0 files in, 4 kept: Africa), would remove
+  162 (Africa 91, Asia 47, Latin America 24, Template 0), would rescue 0 in every region.
+  `moveSettledPhotos` (21:05 JST, 12:05 UTC): 1 folder moved (1 file), 0 files merged, 0 out of
+  the trash, 162 emptied folders removed (to the trash), 0 failures - equal to the preview. Then
+  `installTrigger`. The rescue is still unexercised live (nothing to rescue). The 4 Africa
+  subfolders whose files were kept (already on the Shared Drive) stay until Ryan trashes those
+  files, then the folders.
