@@ -163,6 +163,11 @@ named), so a Manager does it, or Ryan's role is raised for it (RUNBOOK "Photo mo
 Retention alone is turned off by deleting the Script Property `RETENTION_DAYS`; the moves go on.
 What retention trashed is in the Shared Drive's trash for 30 days, then Google deletes it for
 good and nothing brings it back. Within those 30 days a Content manager of the Shared Drive (Ryan)
-restores it: the Shared Drive → Trash → the item → Restore. Restore a trashed folder first, then
-anything from it still in the trash, and see each back in place (where a restored item goes when
-its folder is in the trash too is unverified: the retention plan's Context, c, and Rollback).
+restores it: the Shared Drive → Trash → the item → Restore. Before a restore, delete
+`RETENTION_DAYS` (or `removeTrigger`): a restore changes neither the item's creation nor its
+folder's, so anything restored under a region folder is still due and the next run (within 15
+minutes) trashes it again, its 30 days starting over, and a restored folder still old and empty
+goes back too. To keep a photo with retention on, move it out of the region folders once
+restored. Restore a trashed folder first, then anything from it still in the trash, and see each
+back in place (where a restored item goes when its folder is in the trash too is unverified: the
+retention plan's Context, c, and Rollback).
