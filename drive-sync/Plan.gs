@@ -4,7 +4,8 @@
  * docs/plans/2026-10-21-drive-photo-mover.md), which emptied ones go to the trash (#144), and
  * which photos and emptied folders under the Shared Drive's region folders go to its trash once
  * 90 days old (planTrash_, retentionFolders_: #181, epic #179,
- * docs/plans/2026-10-30-photo-retention.md; nothing calls them yet, #182 wires them in).
+ * docs/plans/2026-10-30-photo-retention.md; Mover.gs reads the Shared Drive for them and logs the
+ * plan, #182, and the real run trashes it, each item re-checked just before, #185).
  * Mover.gs reads Drive, calls planMoves_ and does what the plan says; the dry run only logs it.
  * Tested offline in test/drive_sync_test.js.
  *

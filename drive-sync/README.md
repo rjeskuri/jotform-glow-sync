@@ -6,7 +6,10 @@ same account, moves each submission subfolder (`<Club Name> <Attendance Date>`) 
 `Attendance photos - <Region>` in Ryan's My Drive into that region's folder on the company Shared
 Drive, once the subfolder has not changed for 10 minutes. It runs every 15 minutes on a
 time-driven trigger. Plan: [docs/plans/2026-10-21-drive-photo-mover.md](../docs/plans/2026-10-21-drive-photo-mover.md);
-procedure: RUNBOOK "Photo mover".
+procedure: RUNBOOK "Photo mover". With the Script Property `RETENTION_DAYS` set, it also moves
+photos on the Shared Drive to that drive's trash once they have been there that many days (90,
+GLOW's CEO, 2026-10-30), and the folders they empty below the region folders: plan
+[docs/plans/2026-10-30-photo-retention.md](../docs/plans/2026-10-30-photo-retention.md), epic #179.
 
 It is **not** the sheet's Apps Script (`appsscript/`): a Drive scope there would stop the
 form-submit trigger until the owner re-authorises (CLAUDE.md rule 11). This project has its own
@@ -35,9 +38,38 @@ What it does and never does:
   the photo itself, not only its subfolder;
 - two or more folders of that name on the Shared Drive: refused and logged, moved by hand;
 - the `Attendance photos - <Region>` folders themselves stay: Jotform writes into them;
-- it never shares, links, copies or e-mails a file, never trashes one, and never deletes anything
-  for good. The photos show girls' faces; only the Shared Drive's members see them;
-- the log (Executions) holds counts and folder names, never a file's name or contents.
+- retention (#185, only with `RETENTION_DAYS` set, only on the real run, after the moves): every
+  photo under a region folder on the Shared Drive, at any depth (directly in the region folder,
+  in a club subfolder, or nested deeper), goes to the Shared Drive's trash once `RETENTION_DAYS`
+  have passed since the later of its own creation and its folder's; then every folder below a
+  region folder that is itself that old and has nothing left in it, children before parents. At
+  most 100 photos a run, the earliest due first (`RETENTION_CAP`: the rest go on the next run).
+  Each item is re-read just before its trash (still where the run read it, still due, a folder
+  re-listed empty, every folder above it still where it was) and skipped otherwise, and every
+  trash goes through `moveToTrash_`. Never trashed: a region folder (`TARGET_FOLDER_<KEY>`, one
+  nested inside another region's too), a source folder, the Shared Drive's root, anything not
+  under a region folder, a photo before its due moment, a folder with anything left in it. To
+  keep a photo longer, move it out of the region folders. The dry run (`previewMoves`) trashes
+  nothing and logs what the real run would;
+- it never shares, links, copies or e-mails a file, never trashes one in My Drive (only the
+  emptied subfolders above), on the Shared Drive only what retention says, and never deletes
+  anything for good (no permanent delete, no emptied trash). The photos show girls' faces; only
+  the Shared Drive's members see them;
+- the log (Executions) holds counts and folder names, never a file's name or contents; for
+  retention only the names of the region folders' direct subfolders (the club subfolders), with
+  everything deeper counted under them:
+
+  | Line | Means |
+  | --- | --- |
+  | `retention 90 days (due once … at or before <cutoff>)` | retention on; `retention off (RETENTION_DAYS not set)` when not |
+  | `<Region>: retention 90 days: would trash N file(s) and M folder(s)` | the plan, both entry points; a line `under "<club subfolder>"` per subfolder, one for the photos `directly in the region folder` |
+  | `<Region>: retention 90 days: trashed N file(s) and M folder(s)` | the real run: what went to the trash, the same lines under it |
+  | `not trashed "<club subfolder>": N item(s) kept by the re-check` | moved, trashed or re-dated since the read, or a folder not empty: no error, the next run looks again |
+  | `RETENTION_CAP: N due file(s) left for the next run` | more than 100 due |
+  | `TIME_BUDGET: retention …` | out of time: the rest waits for the next run |
+  | `TRASH_FAILED <Region> "<club subfolder>": <error>` | Drive refused a trash; the rest goes on, the run ends with an error |
+  | `TRASH_REFUSED <Region>: …` | the plan named a region folder, the root, or something not below its region folder: nothing trashed that run, an error (a bug: stop and look) |
+  | `RETENTION_FAILED <step>: <error>` | a retention read failed: nothing previewed or trashed, an error after the moves |
 
 Files: `Plan.gs` (the planner, pure, tested by `test/drive_sync_test.js`), `Mover.gs` (the entry
 points), `appsscript.json` (time zone America/New_York, the sheet's; the two scopes; the advanced
@@ -85,8 +117,12 @@ upload on it, and step 9 (the regional forms) comes last.
    | `SOURCE_FOLDER_LATIN_AMERICA` / `TARGET_FOLDER_LATIN_AMERICA` | Latin America |
    | `SOURCE_FOLDER_TEMPLATE` / `TARGET_FOLDER_TEMPLATE` | the template's test folder |
    | `SOURCE_FOLDER_US` / `TARGET_FOLDER_US` | U.S, only if that form is re-enabled |
+   | `RETENTION_DAYS` | not a folder: the Shared Drive's photo retention in days, `90` (none below 90); absent or blank, retention is off. Set it only as the retention plan's Rollout says (the trigger removed first, then a `previewMoves` read by Ryan) |
 
-   A region with neither property is skipped. Half a pair, the same id twice, no pair at all, a
+   With `RETENTION_DAYS` set, every target folder must be on one Shared Drive, none in the trash
+   and none that drive's root; a value that is not a whole number of at least 90 (spaces trimmed)
+   is refused like a bad folder (`CONFIG refused …`). Deleting it turns retention off from the
+   next run. A region with neither property is skipped. Half a pair, the same id twice, no pair at all, a
    source folder not named exactly `Attendance photos - <Region>`, or a target folder not named
    exactly the region (`Africa`, `Asia`, `Latin America`, `U.S`, `Template`): the run refuses
    (`CONFIG refused …`) before it reads a subfolder or moves anything.
@@ -120,3 +156,10 @@ move out of the Shared Drive needs **Manager** on it (Google, "How file access w
 drives", https://support.google.com/a/users/answer/12380484: "If you have Manager access to a
 shared drive, you can move files and folders out of shared drive to My Drive"; no lower role is
 named), so a Manager does it, or Ryan's role is raised for it (RUNBOOK "Photo mover", Rollback).
+
+Retention alone is turned off by deleting the Script Property `RETENTION_DAYS`; the moves go on.
+What retention trashed is in the Shared Drive's trash for 30 days, then Google deletes it for
+good and nothing brings it back. Within those 30 days a Content manager of the Shared Drive (Ryan)
+restores it: the Shared Drive → Trash → the item → Restore. Restore a trashed folder first, then
+anything from it still in the trash, and see each back in place (where a restored item goes when
+its folder is in the trash too is unverified: the retention plan's Context, c, and Rollback).
