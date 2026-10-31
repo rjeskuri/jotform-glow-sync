@@ -1402,7 +1402,7 @@ days, and after that Google deletes it.
 - **Dry run:** `previewMoves` in the standalone project's editor (as Ryan's company account): the log lists what would move, be removed (`would remove N`) and be rescued from the trash (`would rescue N`), by counts and folder names, and with `RETENTION_DAYS` set what retention would trash on the Shared Drive (`would trash N file(s) and M folder(s)` per region, by region subfolder); nothing changes.
 - **Apply:** Ryan's go, after the template's integration (#63, "Photos" steps 1-2) and its test upload, before any regional form's: `moveSettledPhotos` by hand once, then `installTrigger` (every 15 minutes). Pushing the code: `drive-sync/README.md`, step 4 (Node 18, clasp 2.4.2; or paste by hand, below). Retention: the Script Property `RETENTION_DAYS` = `90`, set only as "Updating the live project (retention, #183)" says (the trigger off, a `previewMoves` read first); from then the real run trashes what the preview lists.
 - **Verify:** the execution's log (`done: N folder(s) moved (N file(s)), N file(s) merged, …; N emptied folder(s) removed (to the trash); 0 failure(s)`); a folder of the subfolder's name is in the region's folder on the Shared Drive with its photos; the emptied subfolder stays in `Attendance photos - <Region>` until a later run removes it (`remove "<name>"`; then it is in My Drive's trash), and that folder itself stays. With retention on: the `retention 90 days (…)` line, per region `would trash N file(s) and M folder(s)` and, when something was due, `trashed N file(s) and M folder(s)` with the same counts (fewer only with a `not trashed` or `TIME_BUDGET` line); no `TRASH_FAILED`, `TRASH_REFUSED` or `RETENTION_FAILED`; the region folders still in place.
-- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it. A removed subfolder is in My Drive's trash for 30 days: Drive → Trash → the folder → Restore puts it back in `Attendance photos - <Region>`. To undo a move, move the files back into the emptied subfolder there (restored first, or a new folder of its name) by hand. That move out of the Shared Drive needs **Manager** on it: Google's "How file access works in shared drives" (https://support.google.com/a/users/answer/12380484) lets a Contributor or Content manager move files from My Drive into a shared drive and a Content manager move them within it, but for out of it says only "If you have Manager access to a shared drive, you can move files and folders out of shared drive to My Drive". So a Manager does it, or Ryan's role is raised for it. Retention alone: delete the Script Property `RETENTION_DAYS` (off from the next run; the moves go on). What it trashed is in the Shared Drive's trash for 30 days, then Google deletes it for good: a Content manager (Ryan) restores it before then (the Shared Drive → Trash → the item → Restore). A trashed folder first, then anything from it still in the trash, and see each back in place: where a restored item goes when its folder is in the trash too is unverified ([retention plan](plans/2026-10-30-photo-retention.md), Context c and Rollback).
+- **Rollback:** `removeTrigger` (or delete the trigger in the editor) stops it. A removed subfolder is in My Drive's trash for 30 days: Drive → Trash → the folder → Restore puts it back in `Attendance photos - <Region>`. To undo a move, move the files back into the emptied subfolder there (restored first, or a new folder of its name) by hand. That move out of the Shared Drive needs **Manager** on it: Google's "How file access works in shared drives" (https://support.google.com/a/users/answer/12380484) lets a Contributor or Content manager move files from My Drive into a shared drive and a Content manager move them within it, but for out of it says only "If you have Manager access to a shared drive, you can move files and folders out of shared drive to My Drive". So a Manager does it, or Ryan's role is raised for it. Retention alone: delete the Script Property `RETENTION_DAYS` (off from the next run; the moves go on). What it trashed is in the Shared Drive's trash for 30 days, then Google deletes it for good: a Content manager (Ryan) restores it before then (the Shared Drive → Trash → the item → Restore). Before a restore, delete `RETENTION_DAYS` (or `removeTrigger`): a restore changes neither the item's creation nor its folder's, so anything restored under a region folder is still due and the next run (within 15 minutes) trashes it again, its 30 days starting over, and a restored folder still old and empty goes back too. To keep a photo with retention on, move it out of the region folders once restored. Restore a trashed folder first, then anything from it still in the trash, and see each back in place: where a restored item goes when its folder is in the trash too is unverified ([retention plan](plans/2026-10-30-photo-retention.md), Context c and Rollback).
 
 Jotform's Google Drive integration writes only into Ryan's My Drive ("Photos", above); the
 photos belong on the company Shared Drive. `drive-sync/` is a standalone Apps Script project
@@ -1500,15 +1500,18 @@ Rollout). The mover gains "Retention" (below), off until `RETENTION_DAYS` is set
    `<Region>: retention 90 days: would trash 0 file(s) and 0 folder(s)`, and `retention: N old
    file(s) outside the region folders, left alone`; no `CONFIG refused`, no `RETENTION_FAILED`,
    no `TIME_BUDGET: retention skipped`. A count above 0 means something under the region folders
-   is already past its due moment (a file sitting directly in a region folder, for example): its
-   region subfolder is named on a `would trash … under "<name>"` line; look at it in Drive before
+   is already past its due moment (a file sitting directly in a region folder, for example): it
+   is counted on a `would trash N file(s) directly in the region folder` line, or under its
+   region subfolder's name on a `would trash … under "<name>"` line; look at it in Drive before
    going on. Anything unexpected: delete `RETENTION_DAYS` and stop (with it deleted,
    `installTrigger` restarts the moves alone).
-5. By eye, before the trigger: on the Shared Drive, a photo from a submission made before
-   2026-10-25 (every move failed until the #132 fix was pasted that day, so it moved later than
-   its upload), its details pane: "Created" shows the submission's date (yes), not the day it
-   moved, its folder's own "Created" (no; the retention plan's Context, b). Recorded yes or no
-   only. No: stop here, the trigger off; #183 goes to `needs-input` before `installTrigger`.
+5. By eye, before the trigger: a photo from a submission of 2026-10-23, the first day (every
+   move failed until the #132 fix was pasted, 2026-10-25 on Ryan's clock, so it moved a day or
+   more after its upload). Jotform gives that submission's club; on the Shared Drive its folder
+   in the region folder bears the club's name only (before 2026-10-30), and that folder's own
+   "Created" is the move day. In it, the photo's details pane: "Created" earlier than the
+   folder's is yes; the same day or later is no (the retention plan's Context, b). Recorded yes
+   or no only. No: stop here, the trigger off; #183 goes to `needs-input` before `installTrigger`.
 6. Run `installTrigger` (`installTrigger: moveSettledPhotos every 15 minutes`; it refuses a bad
    `RETENTION_DAYS` too). The next execution's log (Executions, within 15 minutes): the moves as
    usual, then `retention 90 days (…): the plan below goes to the trash, each item re-checked just
@@ -1579,17 +1582,17 @@ of at least 90 is on, anything else is `CONFIG refused`). It runs inside each ru
 moves, on what is left of the 4.5 minutes; no trigger of its own. `previewMoves` logs its plan and
 trashes nothing; `moveSettledPhotos` (the trigger) trashes that plan.
 
-- **What it covers:** every photo under a region folder on the Shared Drive (`Africa`, `Asia`,
-  `Latin America`, `Template`; `U.S` if configured: the `TARGET_FOLDER_<KEY>` ids) at any depth -
-  directly in the region folder, in a club subfolder, or nested deeper, whoever put it there -
-  once due; then every folder strictly below a region folder that is itself at least 90 days old
-  and has nothing left in it, children before parents.
+- **What it covers:** every file (photo or not) under a region folder on the Shared Drive
+  (`Africa`, `Asia`, `Latin America`, `Template`; `U.S` if configured: the `TARGET_FOLDER_<KEY>`
+  ids) at any depth - directly in the region folder, in a club subfolder, or nested deeper,
+  whoever put it there - once due; then every folder strictly below a region folder that is
+  itself at least 90 days old and has nothing left in it, children before parents.
 - **Never:** a region folder (one nested inside another region's too), a source folder, the
   Shared Drive's root, anything not under a region folder (to keep a photo past 90 days, move it
   out of the region folders), a photo before its due moment, a folder with anything left in it,
   a folder the run moved photos into or one above it (that run, #191). Never deleted for good: no
   permanent delete, no emptied trash.
-- **The clock:** a photo is due once 90 days (`RETENTION_DAYS` × 24 h, UTC milliseconds, due at
+- **The clock:** a file is due once 90 days (`RETENTION_DAYS` × 24 h, UTC milliseconds, due at
   exactly that moment) have passed since the later of its own creation (Jotform's upload into My
   Drive, expected to survive the move: step 5 above) and the creation of the folder it sits in
   on the Shared Drive (Drive records no time a file entered a folder; the folder's creation stands

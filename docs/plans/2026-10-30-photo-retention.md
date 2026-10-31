@@ -233,6 +233,10 @@ Then, on or after 2027-01-19 (#184, on hold until then):
   within 30 days of their trash; after that Google deletes them and nothing brings them back.
   Where a restored item goes when its folder is in the trash too is unverified (Context, c), so
   restore the folder first, then anything from it still in the trash, and see each back in place.
+  Delete `RETENTION_DAYS` before the restore: a restore changes neither creation time, so a
+  restored item under a region folder is still due and the next run trashes it again (a restored
+  folder still old and empty too); to keep a photo with retention on, move it out of the region
+  folders once restored.
 - **The code:** paste the previous `Plan.gs` and `Mover.gs` back (the repo's last commit before
   #182); with `RETENTION_DAYS` deleted the new code trashes nothing in any case.
 - Jotform's own copy of every photo stays (Auto Delete Submissions off), behind its login.
