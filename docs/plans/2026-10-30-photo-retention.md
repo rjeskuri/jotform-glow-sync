@@ -55,7 +55,7 @@ it uses (the hidden question 5 or the Club picker) is #63's Result, not this pla
   (https://developers.google.com/workspace/drive/api/guides/folder), so every folder below a
   region folder was made on the Shared Drive, by the mover or a person. A folder's `createdTime`
   as the time it was made: partly (the folder guide: "a folder is a type of file"; no page says
-  it for folders). Rollout step 6 checks it by eye.
+  it for folders). Rollout step 5 checks it by eye.
 - **c. Restoring an item whose folder is in the trash: UNVERIFIED.** No page settles where a
   restored item goes, whether its trashed folder has to be restored first, or what happens when
   the folder was trashed after its files (support.google.com/drive/answer/2405957, the shared
@@ -199,10 +199,11 @@ Ryan does every step, as the company account, in the `GLOW photo mover` editor: 
    region folders is already past its due moment (a file sitting directly in a region folder,
    for example): Ryan looks at it in Drive before going on. Anything unexpected: delete
    `RETENTION_DAYS` and stop.
-5. `installTrigger`. The next execution's log (within 15 minutes) shows the retention line and
+5. By eye, before the trigger: the details pane of one moved photo shows "Created" = its upload
+   date, not the move date (Context, b; RUNBOOK "Photo mover" says which photo tells them
+   apart). Recorded yes or no only; a no sends #183 to `needs-input` before step 6.
+6. `installTrigger`. The next execution's log (within 15 minutes) shows the retention line and
    the moves as usual, with no failure.
-6. By eye: the details pane of one moved photo shows "Created" = its upload date, not the move
-   date (Context, b). Recorded yes or no only; a no sends #183 to `needs-input` before step 5.
 7. The Result below: the steps with dates (UTC) and counts, `Live: <what, when UTC, Ryan's go>`,
    status `in-progress  # live <date>; first trashes due ~2027-01-19 to 01-22 (#184)`, then
    `make docs-index`.
@@ -247,7 +248,7 @@ Then, on or after 2027-01-19 (#184, on hold until then):
   or an old club-only folder cannot shorten a photo's own 90 days; a file dragged into an old
   folder by hand can be due on arrival (accepted by Ryan). The 30 days in the trash are the undo.
 - **`createdTime` not surviving the move** (Context, b): every moved photo would read as new,
-  so it would be kept longer, never trashed early. Step 6 checks it by eye.
+  so it would be kept longer, never trashed early. Step 5 checks it by eye.
 - **A folder looking empty because a listing was cut short.** R3 trashes only on a complete
   listing and a re-list just before; R7 skips retention for a run whose folder list is
   incomplete.
