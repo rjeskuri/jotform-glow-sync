@@ -266,5 +266,42 @@ Then, on or after 2027-01-19 (#184, on hold until then):
   per region, no `CONFIG refused`); from about 2027-01-19, the Executions log's retention lines
   and the Shared Drive's trash, counted by region.
 
+## Build notes
+
+**#182 (2026-10-30, `t/182-read-and-preview-due-shared-dr`; offline, nothing live).** The read
+path and the preview are in `drive-sync/Mover.gs`: `readRetentionDays_` (R4; `installTrigger`
+refuses a bad value too), `sharedDriveOf_` (R5), and `previewRetention_` with `listSharedDrive_`
+and `logRetention_` (R7, R14), run by both entry points after the moves. Nothing on the Shared
+Drive is trashed or changed: #185 adds the trash. Decided in the build, beyond the Design:
+
+- A target folder whose id is the Shared Drive's own id (its root) is `CONFIG refused` with
+  retention on (#181's low finding). The name check alone would let a root named like the
+  region through.
+- A retention search or listing that fails logs `RETENTION_FAILED <step>` and previews nothing
+  that run. The moves are done as ever, and the run (the dry run too) ends with an error after
+  them. When the moves failed as well, the error names both.
+- The time budget: if the folder search or the due-file search is not done by the deadline,
+  retention is skipped (`TIME_BUDGET: retention skipped (…)`). If the deadline cuts the
+  folder listings short, what was read is still planned. A folder not listed to its last page is
+  not `complete`, so it is never planned (`TIME_BUDGET: retention listed the files of N of M
+  folder(s) …`). Many old club-only folders could otherwise starve retention on every run.
+- Each configured region folder's own files are listed too (the ticket's comment of
+  2026-10-30), after the old folders. Those listings change no plan: a file is due only when its
+  own `createdTime` is past the cutoff, so the due-file search already finds every due file.
+- A `createdTime` that is not RFC 3339 is no date (never due). The cutoff goes to Drive with
+  milliseconds (`toISOString()`), so the search and `planTrash_` agree to the millisecond. Drive
+  documents RFC 3339; whether the live Drive takes fractional seconds is UNVERIFIED. A refusal
+  would show as `RETENTION_FAILED` at Rollout step 4.
+- #144's two `Files.list` calls (the rescue's listings and the re-list before a removal) now
+  carry `supportsAllDrives` and `includeItemsFromAllDrives` as well. Their queries name My
+  Drive folders, so what they return is unchanged.
+- The log, after the moves: a `retention 90 days (… cutoff …)` line, then per configured region
+  `<Region>: retention 90 days: would trash N file(s) and M folder(s)`, under it a line per
+  region subfolder affected (by name) and one for the files `directly in the region folder`,
+  then `retention: N old file(s) outside the region folders, left alone` and, past the cap,
+  `RETENTION_CAP: N due file(s) left for the next run`. With the property unset:
+  `retention off (RETENTION_DAYS not set)`.
+- `drive-sync/README.md` is unchanged; #185 describes retention there.
+
 ## Result
 
