@@ -303,5 +303,54 @@ Drive is trashed or changed: #185 adds the trash. Decided in the build, beyond t
   `retention off (RETENTION_DAYS not set)`.
 - `drive-sync/README.md` is unchanged; #185 describes retention there.
 
+**#185 (2026-10-31, `t/185-trash-due-shared-drive-photos`; offline, nothing live).** The trash on
+apply is `trashRetention_` in `drive-sync/Mover.gs`, run by `moveSettledPhotos` only, after the
+moves and #182's preview, on the plan the preview logged (`previewRetention_` now hands it back).
+`previewMoves` trashes nothing. Every trash is `moveToTrash_` (#144's helper, handed the configured
+ids and the drive's root): `Drive.Files.update({trashed: true}, id, null, {supportsAllDrives:
+true})`. Decided in the build, beyond the Design:
+
+- Before anything is trashed, the whole plan is checked against the run's own read: each item not
+  a configured `SOURCE_`/`TARGET_FOLDER_` id, not the drive's root, not a region folder, in the
+  read with its planned parent (a folder also listed in full), its walk up there reaching its
+  planned region's folder. One item that is not means the planner is wrong: `TRASH_REFUSED`, and
+  nothing on the Shared Drive is trashed that run (not only that item), then the run ends with an
+  error. The real planner never produces one; the tests reach it with a replaced planner.
+- The files go first, at most 100 a run, the earliest due first, enforced in the trash loop
+  (`RETENTION_CAP` from the loop only when the plan it got held more than 100; the preview's own
+  `RETENTION_CAP` line stays as it was); then the folders in the plan's order, children before
+  parents. The order across regions is global: every photo before any folder.
+- The re-checks just before each trash (R9), on Drive as it is then: the item's own `Files.get`
+  (untrashed, a file or a folder as planned, on the drive, its one parent the planned one); the
+  walk up from that parent to the planned region's folder, each folder on the way (planned or not)
+  read by `Files.get` once per run, before the first trash under it, and required untrashed, on
+  the drive and with its one parent still the one the run read. A folder moved within its own
+  region skips what is under it too: anything that changed since the read waits for the next
+  run's read (15 minutes). A file must still be due by the run's cutoff (the later of its own
+  createdTime and that of its folder as just read); a folder must be at least `RETENTION_DAYS`
+  old by its own createdTime and re-listed (`'<id>' in parents and trashed = false`, files and
+  folders, to the last page) with nothing in it. "Still due" uses the run's cutoff, the one the
+  log names, not the moment of the trash: never later than the plan's.
+- Whether a folder still holds something is its re-list's answer alone: a photo that left it
+  since the read does not keep it (an emptied folder goes), one whose trash failed, that the cap
+  left or a re-check kept does.
+- A failed re-check skips the item with no error, counted on `not trashed "<region subfolder>"`
+  (or `not trashed: N file(s) directly in the region folder`). Any Drive error in an item's
+  re-check reads or its trash is `TRASH_FAILED <Region> "<region subfolder>"` (`TRASH_FAILED
+  <Region>` for a photo directly in the region folder), the rest goes on, and the run ends with an
+  error. An ancestor's failed read is remembered for the run (one read, a TRASH_FAILED per item
+  under it).
+- The deadline (the run's 4.5 minutes) is checked before each item and again after its re-check
+  reads: `TIME_BUDGET: retention trash stopped with N of M planned item(s) left`.
+- The run's error names each failure: the moves', the retention read's (`RETENTION_FAILED`) and
+  the trash's (`TRASH_FAILED`, `TRASH_REFUSED`); a `MOVE_FAILED` alone still throws as before.
+- The log after the preview, per region with something planned: `<Region>: retention 90 days:
+  trashed N file(s) and M folder(s)`, then `trashed … under "<region subfolder>"` and `trashed N
+  file(s) directly in the region folder`. The preview's first line on the real run now says the
+  plan goes to the trash (it said "a preview, nothing … goes to the trash" on both entry points).
+- Accepted (the ticket's ruling): a folder above an item, read once this run, that a person moves
+  out of its region later in the same run is not seen; the item's own read and its folder's
+  re-list still are. RUNBOOK "Photo mover" is #183's.
+
 ## Result
 

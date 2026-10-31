@@ -27,9 +27,13 @@
  * what was not read or not moved waits for the next run). With retention on, both entry points
  * then read that Shared Drive, inside the same budget, plan with Plan.gs planTrash_ and log what
  * it would trash, per region: counts, and the names of the region folders' direct subfolders only
- * (ruling R14). Nothing on the Shared Drive is trashed or changed yet (#185 adds that, on apply). A
- * retention read that fails is RETENTION_FAILED: nothing previewed, the moves done as ever, and the
- * run ends with an error after them.
+ * (ruling R14). A retention read that fails is RETENTION_FAILED: nothing previewed or trashed, the
+ * moves done as ever, and the run ends with an error after them. The dry run changes nothing on the
+ * Shared Drive; the real run then trashes that plan (#185, trashRetention_): the due photos, at most
+ * 100 a run, then the emptied folders below the region folders, children first, each re-checked
+ * just before its trash and sent through moveToTrash_. Never a region folder, the Shared Drive's
+ * root, anything outside the region folders, a photo before its due moment or a folder with
+ * anything left in it.
  *
  * Drive cannot move a folder from My Drive into a Shared Drive (#132: 403
  * teamDrivesFolderMoveInNotSupported, and DriveApp's moveTo fails the same way), so a move makes
@@ -38,22 +42,24 @@
  * supportsAllDrives); a merge moves them the same way into the folder already there. A move cut
  * short by a failure or the time budget is finished by a later run as a merge.
  *
- * What it trashes (#144), and only on the real run: an emptied source subfolder, once it holds no
- * file and no subfolder and has not changed for SETTLE_MINUTES (Plan.gs `remove`), re-read and
- * re-listed just before, to Drive's trash (restorable for 30 days), through moveToTrash_, the one
- * trash, which refuses a configured folder and the Shared Drive's root whatever its caller says.
- * Never a file, a folder with anything in it, a source folder itself, anything on the Shared Drive,
- * a permanent delete or an emptied trash. The rescue: a photo Jotform writes into a subfolder the
+ * What it trashes in My Drive (#144), and only on the real run: an emptied source subfolder, once
+ * it holds no file and no subfolder and has not changed for SETTLE_MINUTES (Plan.gs `remove`),
+ * re-read and re-listed just before, to Drive's trash (restorable for 30 days), through
+ * moveToTrash_, the one trash, which refuses a configured folder and the Shared Drive's root
+ * whatever its caller says. Never a file there, a folder with anything in it, a source folder
+ * itself; on the Shared Drive only retention's plan (above); nowhere a permanent delete or an
+ * emptied trash. The rescue: a photo Jotform writes into a subfolder the
  * mover had trashed is in the trash through its folder; each run lists the source folders'
  * subfolders in the trash (the advanced Drive service, `trashed = true` stated), and moves such a
  * photo like any other, out of the trash in the same Files.update ({trashed: false}), then re-reads
  * it (RESCUE_FAILED when it is still in the trash or not where it was sent). A file a person
  * trashed is left alone.
  *
- * The log holds counts and folder names (`<Club Name> <Attendance Date>`), never a file's name
- * or contents. Nothing here shares, links, copies or e-mails anything: a file only ever moves
- * (its parent changes, and out of the trash when the rescue finds it there), and a move never
- * replaces a file.
+ * The log holds counts and folder names (`<Club Name> <Attendance Date>`; for retention only the
+ * region folders' direct subfolders), never a file's name or contents. Nothing here shares,
+ * links, copies or e-mails anything: a file only ever moves (its parent changes, and out of the
+ * trash when the rescue finds it there) or, on the Shared Drive once due, goes to its trash; a
+ * move never replaces a file.
  */
 
 const SETTLE_MINUTES = 10;
@@ -145,8 +151,8 @@ function readRetentionDays_() {
 
 /**
  * Read both drives, plan, log; with `apply`, carry the plan out. With RETENTION_DAYS set, then the retention preview
- * (#182), after the moves even when one failed (ruling R7); a failure of either ends the run with an error, after both.
- * One run at a time (the script lock).
+ * (#182), after the moves even when one failed (ruling R7), and with `apply` the trash of its plan (#185); a failure of
+ * any of them ends the run with an error that names each, after all. One run at a time (the script lock).
  */
 function runMover_(apply) {
   const started = Date.now();
@@ -173,9 +179,14 @@ function runMover_(apply) {
         moveError = e;
       }
     }
-    const retentionFailure = days === null ? '' : previewRetention_(config, driveId, days, started + RUN_BUDGET_MS);
-    if (moveError) throw retentionFailure ? new Error(errorText_(moveError) + '; ' + retentionFailure) : moveError;
-    if (retentionFailure) throw new Error(retentionFailure);
+    const retention = days === null ? null : previewRetention_(config, driveId, days, started + RUN_BUDGET_MS, apply);
+    const failures = retention && retention.failure ? [retention.failure] : [];
+    if (apply && retention && retention.planned) {
+      const trashFailure = trashRetention_(retention.planned, config, driveId, started + RUN_BUDGET_MS, protect);
+      if (trashFailure) failures.push(trashFailure);
+    }
+    if (moveError) throw failures.length ? new Error(errorText_(moveError) + '; ' + failures.join('; ')) : moveError;
+    if (failures.length) throw new Error(failures.join('; '));
   } finally {
     lock.releaseLock();
   }
@@ -536,30 +547,32 @@ function whyNotRemove_(entry, sourceId) {
  *      folder; a folder is `complete` once its listing reached its last page, and only then.
  * Steps 1 or 2 not done by the deadline: retention is skipped this run (TIME_BUDGET), so planTrash_ never sees a
  * partial folder list. Step 3 not done: the folders not listed in full stay incomplete (never emptied this run) and
- * the rest is planned. A Drive error at any step: RETENTION_FAILED, nothing planned; returned (the caller ends the run
- * with it), '' otherwise. Drive's createdTime reaches the planner as a Date (driveTime_); an item's parent is its one
- * parent, null with none or more.
+ * the rest is planned. A Drive error at any step: RETENTION_FAILED, nothing planned. Returns {failure: the
+ * RETENTION_FAILED text the caller ends the run with, '' otherwise; planned: {trash: planTrash_'s plan, drive: what it
+ * was given, now, days} for trashRetention_ (#185, on `apply` only), null when nothing was planned}. Drive's
+ * createdTime reaches the planner as a Date (driveTime_); an item's parent is its one parent, null with none or more.
  */
-function previewRetention_(config, driveId, days, deadline) {
+function previewRetention_(config, driveId, days, deadline, apply) {
   const now = new Date();
   const notFolder = "mimeType != '" + FOLDER_MIME + "' and trashed = false";
   let step = 'the cutoff';
   try {
     const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
     console.log('retention ' + days + ' days (due once a photo and its folder were both created at or before ' + cutoff +
-                '): a preview, nothing on the Shared Drive goes to the trash');
+                (apply ? '): the plan below goes to the trash, each item re-checked just before'
+                       : '): a preview, nothing on the Shared Drive goes to the trash'));
     step = 'the search for the Shared Drive\'s folders';
     const found = listSharedDrive_(driveId, "mimeType = '" + FOLDER_MIME + "' and trashed = false", 'id, name, createdTime, parents',
                                    deadline);
     if (!found.complete) {
       console.log('TIME_BUDGET: retention skipped (folder list incomplete); it waits for the next run');
-      return '';
+      return { failure: '', planned: null };
     }
     step = 'the search for the files created at or before the cutoff';
     const due = listSharedDrive_(driveId, notFolder + " and createdTime <= '" + cutoff + "'", 'id, createdTime, parents', deadline);
     if (!due.complete) {
       console.log('TIME_BUDGET: retention skipped (due-file search incomplete); it waits for the next run');
-      return '';
+      return { failure: '', planned: null };
     }
     const regions = {};
     for (const c of config) regions[c.region] = c.target;
@@ -591,12 +604,13 @@ function previewRetention_(config, driveId, days, deadline) {
                   ' folder(s) in time; no folder it did not list in full is planned this run');
     }
     step = 'the plan';
-    logRetention_(planTrash_(drive, now, days, RETENTION_MAX_FILES), config, days, byId);
-    return '';
+    const trash = planTrash_(drive, now, days, RETENTION_MAX_FILES);
+    logRetention_(trash, config, days, byId);
+    return { failure: '', planned: { trash: trash, drive: drive, now: now, days: days } };
   } catch (e) {
     const failure = 'RETENTION_FAILED ' + step + ': ' + errorText_(e) + '; nothing previewed this run';
     console.log(failure);
-    return failure;
+    return { failure: failure, planned: null };
   }
 }
 
@@ -661,6 +675,183 @@ function logRetention_(trash, config, days, foldersById) {
   }
   console.log('retention: ' + trash.outside + ' old file(s) outside the region folders, left alone');
   if (trash.capped) console.log('RETENTION_CAP: ' + trash.capped + ' due file(s) left for the next run');
+}
+
+/**
+ * The real run's trash of the retention plan (#185, epic #179, rulings R1, R3, R6, R8, R9, R14): `planned` is what
+ * previewRetention_ read and planTrash_ planned. Every trash is moveToTrash_(id, protect), the one trash (#144).
+ *
+ * First the whole plan is checked against the read, before any Drive call: each item a non-empty id, not a configured
+ * SOURCE_/TARGET_FOLDER_ id, not the drive's root, not a region folder, in the read with its planned parent (a folder
+ * also listed there in full), and its walk up there reaching its planned region's folder. One item that is not:
+ * TRASH_REFUSED, nothing trashed this run, the run ends with an error (refuse rather than guess: the planner is wrong).
+ *
+ * Then the files, at most RETENTION_MAX_FILES, the earliest due first (RETENTION_CAP for the rest), then the folders in
+ * the plan's order (children before parents), each re-checked just before its trash (R9), against Drive now:
+ *   the item   Files.get: not in the trash, a file (a folder), on the drive, its one parent the planned one;
+ *   its walk up  from that parent up to the planned region's folder, every folder on the way (planned or not, at any
+ *              depth) read by Files.get once per run, before the first trash under it: an untrashed folder on the
+ *              drive whose one live parent is still the one the run read; a folder moved (into another region's
+ *              folder, out of the region folders, or anywhere else) or trashed skips everything under it;
+ *   a file     the later of its own and its folder's createdTime still at or before the cutoff;
+ *   a folder   its own createdTime at or before the cutoff, and re-listed (`trashed = false`, files and folders) to its
+ *              last page with nothing in it.
+ * A failed re-check skips the item without an error (`not trashed "<region subfolder>"`); a Drive error is
+ * `TRASH_FAILED <Region> "<region subfolder>"` (no subfolder for a photo directly in the region folder) and the rest
+ * goes on; a folder still holding what was not trashed fails its re-list and stays. The deadline is checked before
+ * each item and after its re-check reads (TIME_BUDGET: the rest waits for the next run). The log: per region with
+ * something planned `<Region>: … trashed N file(s) and M folder(s)`, then per region subfolder, by name only (R14).
+ * Returns the failure the run ends with, '' when none.
+ */
+function trashRetention_(planned, config, driveId, deadline, protect) {
+  const trash = planned.trash, drive = planned.drive, days = planned.days;
+  const cutoffMs = planned.now.getTime() - days * 24 * 60 * 60 * 1000;
+  const tree = retentionTree_(drive, planned.now, days);
+  const never = new Set(configuredFolderIds_().all.concat(protect, driveId));
+  const regionFolder = new Map(config.map(c => [c.region, c.target]));
+  const readFiles = new Map(drive.files.map(f => [f.id, f])), readFolders = new Map(drive.folders.map(d => [d.id, d]));
+  const queue = [], refused = new Map();
+  const place = (e, isFolder) => {
+    const id = e && typeof e === 'object' ? e.id : null;
+    const read = typeof id === 'string' && id ? (isFolder ? readFolders : readFiles).get(id) : undefined;
+    const at = read && !never.has(id) && !tree.guarded(id) && read.parent === e.parent && (!isFolder || read.complete === true) ?
+      tree.walkUp(e.parent) : null;
+    if (!at || at.region !== e.region || !regionFolder.has(e.region)) {
+      const region = e && regionFolder.has(e.region) ? e.region : '?';
+      refused.set(region, (refused.get(region) || 0) + 1);
+      return;
+    }
+    queue.push({ isFolder: isFolder, id: id, parent: e.parent, region: e.region,
+                 top: isFolder && at.top === null ? id : at.top, due: isFolder ? NaN : timeOf_(e.due) });
+  };
+  for (const f of Array.isArray(trash.files) ? trash.files : []) place(f, false);
+  for (const d of Array.isArray(trash.folders) ? trash.folders : []) place(d, true);
+  if (refused.size) {
+    let n = 0;
+    for (const [region, count] of refused) {
+      n += count;
+      console.log('TRASH_REFUSED ' + region + ': ' + count + ' planned item(s) refused (a configured folder, the Shared Drive\'s ' +
+                  'root, a region folder, or not below its region folder as read); nothing on the Shared Drive trashed this run');
+    }
+    return 'TRASH_REFUSED: ' + n + ' planned item(s) refused; nothing on the Shared Drive trashed this run';
+  }
+  const dueOf = e => (isNaN(e.due) ? Infinity : e.due);
+  const files = queue.filter(e => !e.isFolder).sort((a, b) => dueOf(a) - dueOf(b) || compareIds_(a.id, b.id));
+  const capped = Math.max(0, files.length - RETENTION_MAX_FILES);
+  const order = files.slice(0, RETENTION_MAX_FILES).concat(queue.filter(e => e.isFolder));
+
+  const get = id => Drive.Files.get(id, { fields: 'id, mimeType, trashed, parents, createdTime, driveId', supportsAllDrives: true });
+  const walked = new Map();   // folder id -> its Files.get this run, or the error it gave: each folder read once
+  const folderNow = id => {
+    if (!walked.has(id)) {
+      try {
+        walked.set(id, get(id));
+      } catch (err) {
+        walked.set(id, { error: errorText_(err) });
+      }
+    }
+    const got = walked.get(id);
+    if (got.error) throw new Error(got.error);
+    return got;
+  };
+  const stillUnder = (parentId, regionId) => {
+    const met = new Set();
+    for (let id = parentId; id !== regionId;) {
+      const read = readFolders.get(id);
+      if (!read || never.has(id) || met.has(id)) return false;
+      met.add(id);
+      const got = folderNow(id);
+      if (got.mimeType !== FOLDER_MIME || got.trashed !== false || got.driveId !== driveId || oneParent_(got) !== read.parent) {
+        return false;
+      }
+      id = read.parent;
+    }
+    return true;
+  };
+  /** '' when the item may go to the trash now, else why not; a Drive error throws. */
+  const whyNot = e => {
+    const item = get(e.id);
+    if (item.trashed !== false || (item.mimeType === FOLDER_MIME) !== e.isFolder || item.driveId !== driveId ||
+        oneParent_(item) !== e.parent) {
+      return 'moved or trashed';
+    }
+    if (!stillUnder(e.parent, regionFolder.get(e.region))) return 'a folder above it moved or trashed';
+    const own = timeOf_(driveTime_(item.createdTime));
+    if (!e.isFolder) {
+      const folder = timeOf_(driveTime_(folderNow(e.parent).createdTime));
+      return Math.max(own, folder) <= cutoffMs ? '' : 'no longer due';
+    }
+    if (!(own <= cutoffMs)) return 'too young';
+    const inIt = listSharedDrive_(driveId, "'" + e.id + "' in parents and trashed = false", 'id', deadline);
+    return !inIt.complete ? 'not listed in time' : inIt.files.length ? 'not empty' : '';
+  };
+
+  const tally = new Map();   // region -> {files, folders, direct, keptDirect, tops: Map(top id -> {files, folders, kept})}
+  for (const e of order) {
+    if (!tally.has(e.region)) tally.set(e.region, { files: 0, folders: 0, direct: 0, keptDirect: 0, tops: new Map() });
+  }
+  const topOf = e => {
+    const t = tally.get(e.region).tops;
+    if (!t.has(e.top)) t.set(e.top, { files: 0, folders: 0, kept: 0 });
+    return t.get(e.top);
+  };
+  const nameOf = top => readFolders.get(top).name;
+  const failed = [];
+  const late = () => Date.now() > deadline;
+  let left = 0;
+  for (let i = 0; i < order.length; i++) {
+    const e = order[i];
+    if (late()) { left = order.length - i; break; }
+    try {
+      const why = whyNot(e);
+      if (late()) { left = order.length - i; break; }
+      if (why) {
+        if (e.top === null) tally.get(e.region).keptDirect++;
+        else topOf(e).kept++;
+        continue;
+      }
+      moveToTrash_(e.id, protect);
+      const t = tally.get(e.region);
+      if (e.isFolder) {
+        t.folders++;
+        topOf(e).folders++;
+      } else {
+        t.files++;
+        if (e.top === null) t.direct++;
+        else topOf(e).files++;
+      }
+    } catch (err) {
+      failed.push('TRASH_FAILED ' + e.region + (e.top === null ? '' : ' "' + nameOf(e.top) + '"') + ': ' + errorText_(err));
+    }
+  }
+  for (const c of config) {
+    const t = tally.get(c.region);
+    if (!t) continue;
+    console.log(c.region + ': retention ' + days + ' days: trashed ' + t.files + ' file(s) and ' + t.folders + ' folder(s)');
+    const tops = [...t.tops.entries()].map(([id, n]) => Object.assign({ name: nameOf(id) }, n))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const n of tops) {
+      if (n.files || n.folders) console.log('  trashed ' + n.files + ' file(s) and ' + n.folders + ' folder(s) under "' + n.name + '"');
+    }
+    if (t.direct) console.log('  trashed ' + t.direct + ' file(s) directly in the region folder');
+    for (const n of tops) {
+      if (n.kept) {
+        console.log('  not trashed "' + n.name + '": ' + n.kept + ' item(s) kept by the re-check (moved, trashed or re-dated ' +
+                    'since the read, or a folder not empty); the next run looks again');
+      }
+    }
+    if (t.keptDirect) {
+      console.log('  not trashed: ' + t.keptDirect + ' file(s) directly in the region folder kept by the re-check (moved, ' +
+                  'trashed or re-dated since the read); the next run looks again');
+    }
+  }
+  if (capped) console.log('RETENTION_CAP: ' + capped + ' due file(s) left for the next run (at most ' + RETENTION_MAX_FILES + ' a run)');
+  if (left) {
+    console.log('TIME_BUDGET: retention trash stopped with ' + left + ' of ' + order.length + ' planned item(s) left; they wait ' +
+                'for the next run');
+  }
+  for (const f of failed) console.log(f);
+  return failed.length ? failed.length + ' retention trash failure(s): ' + failed[0] : '';
 }
 
 /**

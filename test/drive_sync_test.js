@@ -64,13 +64,14 @@
  * {trashed: true} inside the one trash helper, moveToTrash_(id, protectedIds), which refuses
  * before any Drive call a configured SOURCE_/TARGET_FOLDER_ id and the Shared Drive's root
  * (#185 reuses it); and a rescued file's {trashed: false} in the same Files.update as its move.
- * Never a file, a non-empty folder, a source folder itself, anything on the Shared Drive, a
- * permanent delete or emptyTrash.
+ * Never a file, a non-empty folder, a source folder itself, a permanent delete or emptyTrash; on
+ * the Shared Drive only what #185's retention entry of TRASH_RULES allows (with RETENTION_DAYS set).
  *
  * #181: planTrash_ and retentionFolders_, the Shared Drive's 90-day trash planned offline (epic #179), have their
  * own contract and section after planMoves_'s (search `#181`). #182: RETENTION_DAYS, the one-Shared-Drive check, the
  * Shared Drive reads and the would-trash preview of both entry points, on the fake's dated Shared Drive (RET_ITEMS),
- * have theirs after the entry points' (search `#182`).
+ * have theirs after the entry points' (search `#182`). #185: the real run's trash of that plan, its re-checks, the
+ * cap, failures, the time budget and its log, inside #182's section (search `#185`).
  *
  * Every club name is fictional (test/fixtures/make_fixture.py's word lists).
  */
@@ -1870,7 +1871,7 @@ const TWIN_INTO = 'T:' + TWIN_REGION + '/' + TWIN;
 const FILE_STEMS = ['IMG_4471', 'IMG_4472', 'IMG_4480', 'IMG_4590', 'IMG_4601', 'IMG_4701', 'IMG_4702', 'IMG_4703', 'IMG_5501',
                     'IMG_5502', 'IMG_6001', 'IMG_6101', 'IMG_6201', 'IMG_6301', 'IMG_6400', 'IMG_6401', 'IMG_6402', 'IMG_6501',
                     'IMG_7100', 'IMG_7101', 'IMG_7201', 'IMG_7301', 'IMG_7777', 'IMG_8101', 'IMG_8102', 'IMG_9000', 'receipt',
-                    'RET_']; // #182's Shared Drive photos (RET_ITEMS)
+                    'RET_', 'IMG_8201']; // #182's Shared Drive photos (RET_ITEMS); #185's merged photo
 const S = (region, name, f) => 'S:' + region + '/' + name + (f ? '/' + f : '');
 // the real run (#132): a folder of each moved subfolder's name made ONCE in its region folder, each of its files moved
 // into it; the merges' new photos into the folder already there (no folder made for a merge); #144: the photos in
@@ -1976,11 +1977,29 @@ const RET_FILE_NAMES = RET_ITEMS.map(i => i[0].slice(i[0].lastIndexOf('/') + 1))
  * folder | 'source-root' | 'shared' | 'other' | 'file'), structural (a configured folder or the Shared Drive's root),
  * viaHelper (inside a moveToTrash_ call), wasTrashed, children (items in it at the trash), settled (itself unchanged
  * for FAKE_SETTLE_MIN at the trash)}; each Files.update as {kind ('move': resource {} | 'rescue': {trashed: false} |
- * 'trash': {trashed: true} | 'other'), resource, args, trash, wasTrashed, wasExplicit, fromTrashedSourceSub}.
+ * 'trash': {trashed: true} | 'other'), resource, media, args, trash, wasTrashed, wasExplicit, fromTrashedSourceSub}.
+ *
+ * #185 adds retention's entry, and only it: the union of #144's and retention's allowances. For it each trash also
+ * records, as the fake sees the item at the moment of the call: driveId (the drive it is on; undefined in My Drive),
+ * region (the first configured TARGET_FOLDER_ folder met walking up from its parent, null when the root, a missing
+ * parent or a loop comes first), createdMs and parentCreatedMs (Drive's createdTime of it and of its parent, NaN when
+ * unparseable), liveChildren (its untrashed files and folders), retentionDays (the Script Property as the run reads
+ * it: a whole number of at least 90, else null), t (the clock), and planned / parentAsPlanned / regionAsPlanned (the
+ * real planTrash_ planned it this run, with that parent and that region: runEntry's spy records the plan before any
+ * test replaces it). newly lists the ids the trash took out of service (it and what was in it, untrashed before).
  */
 const TRASH_RULES = [
   { what: 'an empty, settled subfolder of a configured `Attendance photos - <Region>` folder, by Drive.Files.update {trashed: true} (#144)',
     allows: t => t.via === 'Drive.Files.update' && t.isFolder && t.role === 'source-sub' && !t.wasTrashed && t.children === 0 && t.settled },
+  { what: 'retention (#185): a Shared Drive item planTrash_ planned this run, below a configured region folder (never one, never ' +
+          'the root), its parent and region as planned, by Drive.Files.update {trashed: true}: a file past its due moment ' +
+          '(RETENTION_DAYS after the later of its own and its folder\'s createdTime), or a folder at least RETENTION_DAYS old ' +
+          'with no untrashed child at the moment of the call',
+    allows: t => t.via === 'Drive.Files.update' && t.driveId === DRIVE_ROOT_ID && !t.structural && !t.wasTrashed && !!t.region &&
+                 t.planned === true && t.parentAsPlanned === true && t.regionAsPlanned === true &&
+                 typeof t.retentionDays === 'number' && t.retentionDays >= 90 &&
+                 (t.isFolder ? t.liveChildren === 0 && t.t - t.createdMs >= t.retentionDays * RDAY
+                   : t.t - Math.max(t.createdMs, t.parentCreatedMs) >= t.retentionDays * RDAY) },
 ];
 const UPDATE_RULES = [
   { what: 'a move: resource {}, with addParents and removeParents', allows: o => o.kind === 'move' },
@@ -1992,7 +2011,11 @@ const NEVER = c => /\.(moveTo|setTrashed|makeCopy|setSharing|addViewers?|addEdit
                    /^Drive\.(Files\.(remove|delete|emptyTrash|trash|untrash|copy)$|Permissions\b)/.test(c);
 function banned(r) {
   const why = t => [t.via, t.isFolder ? 'a folder' : 'a FILE', t.role, t.wasTrashed ? 'already in the trash' : '',
-                    t.children ? t.children + ' item(s) in it' : '', t.settled ? '' : 'not settled'].filter(Boolean).join(', ');
+                    t.children ? t.children + ' item(s) in it' : '', t.settled ? '' : 'not settled',
+                    t.driveId ? 'on the Shared Drive' : 'in My Drive', t.region ? 'under ' + t.region : 'under no region folder',
+                    t.liveChildren ? t.liveChildren + ' untrashed item(s) in it' : '', t.planned ? '' : 'not planned',
+                    t.planned && !t.parentAsPlanned ? 'not in its planned folder' : '',
+                    t.planned && !t.regionAsPlanned ? 'not in its planned region' : ''].filter(Boolean).join(', ');
   return [...new Set(r.calls.filter(NEVER).map(c => 'called ' + c)
     .concat(r.trashes.filter(t => t.structural).map(t => 'trashed ' + t.label + ' (a configured folder or the Shared Drive\'s root)'))
     .concat(r.trashes.filter(t => !t.viaHelper).map(t => 'trashed ' + t.label + ' outside ' + TRASH_HELPER))
@@ -2140,11 +2163,34 @@ function parseDriveQuery(q) {
  * folder's listing; opt.failSearch {kind, page, of}: that page of that kind of search throws (with `of`, a folder label,
  * only a listing naming that folder). model() lists every item as the fake holds it now; labelOf(id); planTrashCalls,
  * planTrash_'s calls (runEntry spies on it: each folder's id and `complete`, and the folders it planned).
+ *
+ * #185, the trash on the Shared Drive. A Files.update {trashed: true} trashes the item and everything in it, and every
+ * later read sees it (Files.get trashed true, a `trashed = false` listing leaves it out, DriveApp isTrashed() true).
+ * opt.failTrashOf [labels]: a {trashed: true} update of one of them throws (Drive says no; nothing trashed; the op keeps
+ * the attempt as its `trash`, refused: true, so UPDATE_RULES judge it as any trash).
+ * opt.trashAdvanceMin: the clock jumps that many minutes after each Shared Drive trash. opt.recheckAdvanceMin: after
+ * planTrash_ has returned, on each Files.get and each Files.list page. opt.afterPlan [[what, label, x]]: right after
+ * the run's first planTrash_ returns (after the read, before any trash), the Shared Drive changes: 'move' (label into
+ * the folder labelled x), 'trash' (a person trashes it), 'created' (its createdTime becomes now - x ms), 'add' (a new
+ * photo, or folder for a label not ending .jpg, created now - x ms). opt.afterFirstTrash [[what, label, x]]: the same
+ * changes, right after the run's first Shared Drive trash (mid-trash); opt.midTrash, changes picked after the n-th photo
+ * trash or the first folder trash (midTrash below). opt.replacePlan({idOf, Date, now, args, planTrash}): what
+ * planTrash_ returns instead of its own plan (args: the call's; planTrash: the real one; the real plan is still
+ * recorded, for TRASH_RULES). Every read and write carries `seq`, their order. opt.extraSources
+ * [[region, name, files]]: more My Drive subfolders, as in FAKE_SOURCES. opt.staleIndexOf (a Shared Drive folder's
+ * label): the first Files.list naming it in parents misses what this run moved into it (Drive's search index behind
+ * its writes); later listings see it.
  */
 function fakeEnv(mode, opt) {
   opt = opt || {};
   const calls = [], moved = [], attempted = [], created = [], ops = [], reads = [], trashes = [], logs = [], read = new Set();
   const planTrashCalls = [];
+  // #185: what planTrash_ planned this run (id -> {parent, region}), whether it has returned, whether opt.afterPlan ran;
+  // the ids this run moved (opt.staleIndexOf)
+  const planState = { planned: false, after: false, midDone: false, ids: new Map() }, movedIn = new Set(), stale = { used: false };
+  // #185: every Drive read and write gets the next number (`seq`: their order, the clock aside); the opt.midTrash changes
+  // made, and how many Shared Drive trashes (photos, folders) this run has made
+  const order = { seq: 0, files: 0, folders: 0 }, midApplied = [];
   const lookups = [], readCount = {}, firstListing = {}, idOf = {}, gone = {}, allFolders = [], listedAll = {}, byLabel = {};
   const helper = { depth: 0, calls: [] };   // moveToTrash_ calls (runEntry wraps it): depth > 0 while one runs
   const clock = { t: Date.now() };
@@ -2175,12 +2221,48 @@ function fakeEnv(mode, opt) {
     return self;
   };
   const below = m => (m.isFolder ? [].concat(...m.kids.map(k => [meta.get(k)].concat(below(meta.get(k)))), m.files.map(f => meta.get(f))) : []);
-  /** A trash by any door: recorded with the item's state at that moment, then done (the item and everything in it trashed). */
-  const trashItem = (item, via) => {
+  /** #185: the region an item is under now: the first configured TARGET_FOLDER_ folder met walking up from its parent. */
+  const regionWalk = m => {
+    const targets = {};
+    for (const reg of REGIONS) {
+      const id = propsValue('TARGET_FOLDER_' + PROP_KEYS[reg]);
+      if (id) targets[id] = reg;
+    }
+    const met = new Set();
+    for (let id = m.parent; ;) {
+      if (!id || id === DRIVE_ROOT_ID || met.has(id) || !byId[id]) return null;
+      if (own(targets, id)) return targets[id];
+      met.add(id);
+      id = meta.get(byId[id]).parent;
+    }
+  };
+  /** #185: RETENTION_DAYS as the run reads it (a whole number of at least 90, spaces trimmed), else null. */
+  const retentionDaysNow = () => {
+    const v = propsValue('RETENTION_DAYS');
+    const s = v === null || v === undefined ? '' : String(v).trim();
+    return /^\d+$/.test(s) && Number(s) >= 90 ? Number(s) : null;
+  };
+  /**
+   * A trash by any door: recorded with the item's state at that moment, then done (the item and everything in it
+   * trashed). #185: `refused` (opt.failTrashOf) describes the attempt the same way and throws, recording and changing
+   * nothing else, so the rules still judge what was asked for.
+   */
+  const trashItem = (item, via, refused) => {
     const m = meta.get(item);
+    const parentM = m.parent && byId[m.parent] ? meta.get(byId[m.parent]) : null;
+    const region = regionWalk(m), plannedAs = planState.ids.get(m.id);
     const t = { via, id: m.id, label: m.label, isFolder: m.isFolder, role: m.role, structural: !!m.structural,
                 viaHelper: helper.depth > 0, wasTrashed: m.trashed,
-                children: m.isFolder ? m.kids.length + m.files.length : 0, settled: clock.t - m.updatedAt >= FAKE_SETTLE_MIN * MIN, t: clock.t };
+                children: m.isFolder ? m.kids.length + m.files.length : 0, settled: clock.t - m.updatedAt >= FAKE_SETTLE_MIN * MIN, t: clock.t,
+                driveId: driveOf(m), region, createdMs: itemCreatedMs(m), parentCreatedMs: parentM ? itemCreatedMs(parentM) : NaN,
+                liveChildren: m.isFolder ? m.kids.concat(m.files).filter(k => !meta.get(k).trashed).length : 0,
+                retentionDays: retentionDaysNow(), planned: !!plannedAs,
+                parentAsPlanned: !!plannedAs && plannedAs.parent === m.parent, regionAsPlanned: !!plannedAs && plannedAs.region === region,
+                newly: [m].concat(below(m)).filter(d => !d.trashed).map(d => d.id) };
+    if (refused) {
+      refused.trash = Object.assign(t, { refused: true, newly: [] });
+      throw new Error('Drive said no (fake trash)');
+    }
     trashes.push(t);
     m.trashed = true;
     m.explicitlyTrashed = true;
@@ -2375,7 +2457,7 @@ function fakeEnv(mode, opt) {
   let pages = 0, chains = 0;
   const filesList = args => {
     args = args || {};
-    const rec = { op: 'list', t: clock.t, args: Object.assign({}, args) };
+    const rec = { op: 'list', t: clock.t, seq: ++order.seq, args: Object.assign({}, args) };
     reads.push(rec);
     let results, offset, chain;
     if (args.pageToken) {
@@ -2406,7 +2488,12 @@ function fakeEnv(mode, opt) {
           for (const nm of parsed.names) lookups.push(pm.label + ' getFoldersByName ' + nm);
           const kidsSnap = pm.kids.slice(), filesSnap = pm.listing();
           foldersOf(pm);
-          candidates.push(...kidsSnap, ...filesSnap);
+          let snap = kidsSnap.concat(filesSnap);
+          if (opt.staleIndexOf && idOf[opt.staleIndexOf] === pid && !stale.used) {   // #185: the index behind this run's moves
+            stale.used = true;
+            snap = snap.filter(x => !movedIn.has(meta.get(x).id));
+          }
+          candidates.push(...snap);
         }
       } else candidates = Object.values(byId).filter(x => meta.get(x).id !== DRIVE_ROOT_ID);   // a drive's root is no search result
       results = candidates.map(x => meta.get(x)).filter(m => (everyDrive || !m.label.startsWith('T:')) &&
@@ -2431,6 +2518,7 @@ function fakeEnv(mode, opt) {
                          trashedValues: chain.trashedValues, mimes: chain.mimes, created: chain.created, returned: page.length });
     if (opt.searchAdvanceMin && chain.kind === 'folders') clock.t += opt.searchAdvanceMin * MIN;
     if (opt.listAdvanceMin && chain.kind === 'listing') clock.t += opt.listAdvanceMin * MIN;
+    if (opt.recheckAdvanceMin && planState.planned) clock.t += opt.recheckAdvanceMin * MIN;
     if (opt.failSearch && opt.failSearch.kind === chain.kind && opt.failSearch.page === chain.pages &&
         (!opt.failSearch.of || chain.parents.includes(idOf[opt.failSearch.of]))) {
       rec.failed = true;   // the caller never got this page
@@ -2439,7 +2527,8 @@ function fakeEnv(mode, opt) {
     return shapeList(page, next, args.fields);
   };
   const filesGet = (fileId, args) => {
-    reads.push({ op: 'get', t: clock.t, fileId, args: Object.assign({}, args) });
+    reads.push({ op: 'get', t: clock.t, seq: ++order.seq, fileId, args: Object.assign({}, args) });
+    if (opt.recheckAdvanceMin && planState.planned) clock.t += opt.recheckAdvanceMin * MIN;
     const item = byId[fileId];
     if (!item) throw new Error('Files.get: File not found: ' + String(fileId) + ' (fake)');
     const m = meta.get(item);
@@ -2449,7 +2538,7 @@ function fakeEnv(mode, opt) {
     return shapeFile(resourceOf(m), args && args.fields);
   };
   const filesCreate = (resource, media, args) => {
-    ops.push({ op: 'create', t: clock.t, args: Object.assign({}, args) });
+    ops.push({ op: 'create', t: clock.t, seq: ++order.seq, args: Object.assign({}, args) });
     allDrives('Files.create', args);
     const r = resource || {};
     const parent = Array.isArray(r.parents) && r.parents.length === 1 ? byId[r.parents[0]] : null;
@@ -2468,7 +2557,8 @@ function fakeEnv(mode, opt) {
     const keys = Object.keys(r);
     const kind = !keys.length ? 'move' : keys.length === 1 && r.trashed === true ? 'trash' :
       keys.length === 1 && r.trashed === false ? 'rescue' : 'other';
-    const op = { op: 'update', kind, t: clock.t, args: Object.assign({}, args), fileId: fileId, resource: Object.assign({}, r), ok: false };
+    const op = { op: 'update', kind, t: clock.t, seq: ++order.seq, args: Object.assign({}, args), fileId: fileId,
+                 resource: Object.assign({}, r), media: media, ok: false };
     ops.push(op);
     allDrives('Files.update', args);
     const item = byId[fileId];
@@ -2480,8 +2570,15 @@ function fakeEnv(mode, opt) {
     op.label = m.label;
     if (kind === 'trash') {
       if (args.addParents || args.removeParents) { op.kind = 'other'; throw new Error('Files.update: a trash moves nothing (fake)'); }
+      if (opt.failTrashOf && opt.failTrashOf.includes(m.label)) trashItem(item, 'Drive.Files.update', op);   // #185: throws
       op.trash = trashItem(item, 'Drive.Files.update');
       op.ok = true;
+      if (opt.trashAdvanceMin && m.label.startsWith('T:')) clock.t += opt.trashAdvanceMin * MIN;
+      if (opt.afterFirstTrash && m.label.startsWith('T:') && !planState.midDone) {   // #185: the drive changes mid-trash
+        planState.midDone = true;
+        for (const step of opt.afterFirstTrash) mutate(step);
+      }
+      if (m.label.startsWith('T:')) midTrash(m);
       return shapeFile(resourceOf(m), args.fields);
     }
     attempted.push(m.label);
@@ -2513,6 +2610,7 @@ function fakeEnv(mode, opt) {
     meta.get(dest).updatedAt = clock.t;
     if (kind === 'rescue' && !opt.rescueStaysTrashed) Object.assign(m, { trashed: false, explicitlyTrashed: false });
     moved.push(m.label + ' -> ' + label(dest));
+    movedIn.add(m.id);
     op.ok = true;
     if (opt.moveAdvanceMin) clock.t += opt.moveAdvanceMin * MIN;
     return shapeFile(resourceOf(m), args.fields);
@@ -2520,7 +2618,8 @@ function fakeEnv(mode, opt) {
   const propId = propIdOf;
   const sourceFolders = [], propFolders = {}, targetFolders = [];
   for (const region of REGIONS) {
-    const subs = FAKE_SOURCES[region].map(([nm, fl, x]) => {
+    const extraSubs = (opt.extraSources || []).filter(e => e[0] === region).map(e => e.slice(1));   // #185
+    const subs = FAKE_SOURCES[region].concat(extraSubs).map(([nm, fl, x]) => {
       x = x || {};
       const where = S(region, nm);
       const inner = (x.folders || []).map(([inm, ifl]) =>
@@ -2582,6 +2681,68 @@ function fakeEnv(mode, opt) {
   for (const [reg, drive] of Object.entries(opt.targetDrive || {})) meta.get(byLabel['T:' + reg]).driveOverride = drive;
   if (opt.trashedTarget) toTrash.push(byLabel['T:' + opt.trashedTarget]);
   for (const x of toTrash) binned(x);
+  /** #185, opt.afterPlan: one change on the Shared Drive between the read and the trash. */
+  const mutate = ([what, lbl, x]) => {
+    if (what === 'add') return place(lbl, x);
+    const it = byLabel[lbl];
+    if (!it) throw new Error('fake: no item ' + lbl);
+    const m = meta.get(it);
+    if (what === 'move') {
+      const dest = byLabel[x], from = meta.get(byId[m.parent]), key = m.isFolder ? 'kids' : 'files';
+      if (!dest || !meta.get(dest).isFolder) throw new Error('fake: no folder ' + x);
+      from[key].splice(from[key].indexOf(it), 1);
+      meta.get(dest)[key].push(it);
+      m.parent = meta.get(dest).id;
+    } else if (what === 'trash') binned(it);
+    else if (what === 'created') { m.createdAt = clock.t - x; delete m.createdRaw; }
+    else throw new Error('fake: no change ' + what);
+    return undefined;
+  };
+  /**
+   * #185: runEntry's spy hands each planTrash_ result here: the real plan is recorded (TRASH_RULES' planned), the first
+   * time opt.afterPlan changes the Shared Drive, and opt.replacePlan's plan (if any) is what the code gets.
+   */
+  const onPlanned = (out, c, args, orig) => {
+    planState.planned = true;
+    for (const e of [].concat((out && out.files) || [], (out && out.folders) || [])) {
+      if (e && e.id) planState.ids.set(e.id, { parent: e.parent, region: e.region });
+    }
+    if (!planState.after) {
+      planState.after = true;
+      for (const step of opt.afterPlan || []) mutate(step);
+    }
+    return opt.replacePlan ? opt.replacePlan({ idOf, Date: vm.runInContext('Date', c), now: clock.t, args: [...args],
+                                               planTrash: (...a) => orig.apply(null, a) }) : out;
+  };
+  /**
+   * #185, opt.midTrash [{after: n (the n-th Shared Drive photo trash) | 'folder' (the first Shared Drive folder trash),
+   * change: view => [[what, label, x]]}]: right after that trash, change(view) picks the changes from what is left
+   * (view.left(): the planned items not yet in the trash, {label, isFolder, parent: its parent's label}); they are made
+   * and recorded in midApplied.
+   */
+  const midTrash = m => {
+    if (m.isFolder) order.folders++;
+    else order.files++;
+    for (const e of opt.midTrash || []) {
+      if (e.done || (e.after === 'folder' ? !(m.isFolder && order.folders === 1) : m.isFolder || order.files !== e.after)) continue;
+      e.done = true;
+      const left = () => [...planState.ids.keys()].filter(id => byId[id] && !meta.get(byId[id]).trashed).map(id => {
+        const x = meta.get(byId[id]);
+        return { label: x.label, isFolder: x.isFolder, parent: x.parent && byId[x.parent] ? meta.get(byId[x.parent]).label : null };
+      }).sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+      const steps = e.change({ left });
+      for (const step of steps) mutate(step);
+      midApplied.push({ after: e.after, steps });
+    }
+  };
+  const newRun = () => {   // the trigger's next run on the same fake Drive
+    Object.assign(planState, { planned: false, after: false, midDone: false });
+    planState.ids.clear();
+    movedIn.clear();
+    stale.used = false;
+    Object.assign(order, { files: 0, folders: 0 });
+    midApplied.length = 0;
+  };
   const receiptsSub = mkFolder('S:Receipts/Silver Roots 2026-10-01', 'Silver Roots 2026-10-01', [],
                                [mkFile('S:Receipts/Silver Roots 2026-10-01', 'receipt.pdf', 100, OLD)], false);
   const receiptsEmpty = mkFolder('S:Receipts/Rising Wings 2026-10-01', 'Rising Wings 2026-10-01', [], [], false);   // empty, settled
@@ -2654,7 +2815,7 @@ function fakeEnv(mode, opt) {
   });
   const labelOf = id => (byId[id] ? meta.get(byId[id]).label : own(gone, id) ? gone[id] : null);
   return { calls, moved, attempted, created, ops, reads, trashes, logs, read, readCount, firstListing, idOf, listedAll, lookups, t0,
-           globals, install, state, advance, helper, model, labelOf, planTrashCalls };
+           globals, install, state, advance, helper, model, labelOf, planTrashCalls, onPlanned, newRun, midApplied };
 }
 
 const violations = calls => calls.filter(c => {
@@ -2677,16 +2838,18 @@ function spyTrashHelper(c, helper) {
 }
 /**
  * #182: planTrash_ wrapped in the sandbox, each call recorded: the folders it was given ({id, complete}), retentionDays,
- * maxFiles, and the ids of the folders it planned.
+ * maxFiles, and the ids of the folders it planned. #185: its result goes through onPlanned (the fake's hook: the plan
+ * recorded, opt.afterPlan, opt.replacePlan), and the code gets what that returns.
  */
-function spyPlanTrash(c, calls) {
+function spyPlanTrash(c, calls, onPlanned) {
   const orig = c.planTrash_;
   if (typeof orig !== 'function') return;
   c.planTrash_ = function (drive, now, days, maxFiles) {
     const rec = { folders: drive && Array.isArray(drive.folders) ? drive.folders.map(d => ({ id: d && d.id, complete: d && d.complete })) : null,
                   days, maxFiles, planned: null };
     calls.push(rec);
-    const out = orig.apply(this, arguments);
+    let out = orig.apply(this, arguments);
+    if (onPlanned) out = onPlanned(out, c, arguments, orig);
     rec.planned = out && Array.isArray(out.folders) ? out.folders.map(f => f && f.id) : null;
     return out;
   };
@@ -2694,7 +2857,8 @@ function spyPlanTrash(c, calls) {
 /**
  * One entry point on a fresh fake Drive; the result's records are copies (state and idOf read the fake Drive as it is
  * now). Its `rerun(opt)` runs the same entry point again on the SAME fake Drive (the trigger's next run), with other
- * options and the records starting afresh; opt.advanceMin moves the clock on first.
+ * options and the records starting afresh; opt.advanceMin moves the clock on first. #185: modelBefore() is model()
+ * with this run's trashes undone (the Shared Drive as its retention read saw it: after the moves, before the trashes).
  */
 function runEntry(name, mode, opt) {
   opt = opt || {};
@@ -2703,21 +2867,30 @@ function runEntry(name, mode, opt) {
   const once = () => {
     let threw = '';
     try {
-      if (!c) { c = loadGs.sandbox(GS, env.globals); env.install(c); spyTrashHelper(c, env.helper); spyPlanTrash(c, env.planTrashCalls); }
+      if (!c) {
+        c = loadGs.sandbox(GS, env.globals);
+        env.install(c);
+        spyTrashHelper(c, env.helper);
+        spyPlanTrash(c, env.planTrashCalls, env.onPlanned);
+      }
       vm.runInContext(name + '();', c, { timeout: 5000 });
     } catch (e) { threw = String(e && e.message || e); }
+    const newly = new Set([].concat(...env.trashes.map(t => t.newly || [])));
     const res = { helperCalls: env.helper.calls.slice(), name, threw, text: env.logs.join('\n'), calls: env.calls.slice(), moved: env.moved.slice(),
                   attempted: env.attempted.slice(), created: env.created.slice(), ops: env.ops.slice(), reads: env.reads.slice(),
                   trashes: env.trashes.slice(), read: new Set(env.read), readCount: Object.assign({}, env.readCount),
                   firstListing: Object.assign({}, env.firstListing), listedAll: Object.assign({}, env.listedAll),
                   lookups: env.lookups.slice(), idOf: env.idOf, state: env.state, t0: env.t0, rerun,
-                  planTrashCalls: env.planTrashCalls.slice(), model: env.model, labelOf: env.labelOf, opt: Object.assign({}, opt) };
+                  planTrashCalls: env.planTrashCalls.slice(), model: env.model, labelOf: env.labelOf, opt: Object.assign({}, opt),
+                  modelBefore: () => env.model().map(m => (newly.has(m.id) ? Object.assign({}, m, { trashed: false }) : m)),
+                  midApplied: env.midApplied.slice() };
     RUNS.push(res);
     return res;
   };
   const rerun = next => {
     for (const k of Object.keys(opt)) delete opt[k];
     Object.assign(opt, next || {});
+    env.newRun();
     for (const a of [env.calls, env.moved, env.attempted, env.created, env.ops, env.reads, env.trashes, env.logs, env.lookups,
                      env.helper.calls, env.planTrashCalls]) a.length = 0;
     env.read.clear();
@@ -3113,8 +3286,8 @@ const removedNumbers = text => [].concat(...text.split('\n').map(l =>
 /**
  * #182 (epic #179, rulings R4, R5, R7, R12, R14; docs/plans/2026-10-30-photo-retention.md): with the Script Property
  * RETENTION_DAYS set, both entry points read the Shared Drive the target folders are on, run #181's planTrash_ and log
- * what it would trash; neither trashes or changes anything on the Shared Drive (#185 adds the trash, on apply). The
- * contract, as these tests read it:
+ * what it would trash; the dry run trashes or changes nothing on the Shared Drive, the real run nothing outside that
+ * plan (#185 trashes the plan, on apply: its own part at the end of this section). The contract, as these tests read it:
  *
  *   RETENTION_DAYS  absent or blank (spaces only): off, `retention off` logged, no retention read, planTrash_ not
  *                   called. A whole number of 90 or more, spaces trimmed: on. Anything else: CONFIG refused for the whole
@@ -3157,7 +3330,8 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
    * What the preview must say, from the rules alone (R1-R3, R6, R14), on the fake's Shared Drive as the run left it
    * (`model`). want: {regions: {<Region>: [files, folders]}, direct: {<Region>: files directly in its folder},
    * tops: {<region subfolder name>: [region, files, folders under it]}, outside, capped}; tops: every region folder's
-   * direct subfolder's name; never: names no log may hold; old: the folders retentionFolders_ names; stats.
+   * direct subfolder's name; never: names no log may hold; old: the folders retentionFolders_ names; stats; plan (#185):
+   * {files: the planned file ids, earliest due first; folders: the planned folder ids}.
    * `outside` counts the old files (createdTime at or before now - days) whose walk up meets no configured region
    * folder: the reads see no other file there.
    */
@@ -3240,9 +3414,12 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
     }
     stats.capped = want.capped;
     const topNames = [...new Set(tops)];
-    return { want, tops: topNames, never: [...new Set(never)].filter(nm => !topNames.includes(nm)), old, stats };
+    const plan = { files: planned.map(e => e.f.id), folders: [...folders.values()].filter(d => !guarded(d.id) && goes(d)).map(d => d.id) };
+    return { want, tops: topNames, never: [...new Set(never)].filter(nm => !topNames.includes(nm)), old, stats, plan };
   }
-  const wantOf = (r, days, regions) => retentionWant(r.model(), regions || TARGET_IDS, DRIVE_ROOT_ID, r.t0, days, R_MAX);
+  // the Shared Drive as the run's retention read saw it (#185: the real run's own trashes undone)
+  const wantOf = (r, days, regions) => retentionWant(r.modelBefore ? r.modelBefore() : r.model(), regions || TARGET_IDS, DRIVE_ROOT_ID,
+                                                     r.t0, days, R_MAX);
 
   /** The retention lines of a log, read back into the shape of retentionWant's `want` (lines naming nothing known: stray). */
   function retentionView(text, topNames) {
@@ -3312,13 +3489,33 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
     .concat(r.trashes.filter(t => t.label.startsWith('T:')).map(t => 'trashed ' + t.label));
   const IN_TRASH_AT_START = RET_ITEMS.filter(i => i[0].startsWith('T:Asia/Morning Flames 05-20-2026')).map(i => i[0]);
   const retStateChanged = r => RET_ITEMS.map(i => i[0]).filter(l => !r.state(l) || r.state(l).trashed !== IN_TRASH_AT_START.includes(l));
+  const myDriveTrashed = r => trashedOf(r).filter(l => !l.startsWith('T:'));
   const movesAsBefore = r => (same(r.moved.slice().sort(), EXPECTED_MOVES) ? [] : ['moved ' + show(r.moved.slice().sort(), EXPECTED_MOVES)])
     .concat(same(r.created.slice().sort(), EXPECTED_CREATED) ? [] : ['made ' + show(r.created.slice().sort(), EXPECTED_CREATED)])
-    .concat(same(trashedOf(r), EXPECTED_TRASHED) ? [] : ['trashed ' + show(trashedOf(r), EXPECTED_TRASHED)]);
+    .concat(same(myDriveTrashed(r), EXPECTED_TRASHED) ? [] : ['trashed in My Drive ' + show(myDriveTrashed(r), EXPECTED_TRASHED)]);
   /** Nothing written by retention: the dry run writes nothing at all; the real run only #144's moves and removals. */
   const noRetentionWrite = r => (r.name === PREVIEW ? (r.ops.length || r.trashes.length || r.calls.some(WRITES) ? ['the dry run wrote: ' +
     r.ops.length + ' op(s), ' + r.trashes.length + ' trash(es)'] : []) : movesAsBefore(r)).concat(sharedWrites(r))
     .concat(retStateChanged(r).map(l => 'changed ' + l)).concat(banned(r));
+  /** #185: a Shared Drive write that is not a trash by Files.update (a trash may be retention's; its own checks judge it). */
+  const sharedNonTrash = r => r.ops.filter(o => o.op === 'update' && o.kind !== 'trash' && /^T:/.test(r.labelOf(o.fileId) || ''))
+    .map(o => 'Files.update ' + JSON.stringify(o.resource) + ' on ' + r.labelOf(o.fileId))
+    .concat(r.trashes.filter(t => t.label.startsWith('T:') && t.via !== 'Drive.Files.update').map(t => 'trashed ' + t.label + ' by ' + t.via));
+  /**
+   * #185: a run whose retention plans in full: the dry run writes nothing at all; the real run #144's moves and removals
+   * as without retention and, on the Shared Drive, nothing outside the rules' plan (wantOf): what it trashes of the plan,
+   * and that it trashes all of it, is #185's to check below.
+   */
+  const outsideThePlan = (r, days, regions) => {
+    if (r.name === PREVIEW) return noRetentionWrite(r);
+    const w = wantOf(r, days, regions);
+    const plan = new Set(w.plan.files.concat(w.plan.folders).map(id => r.labelOf(id)));
+    return movesAsBefore(r).concat(sharedNonTrash(r))
+      .concat(r.trashes.filter(t => t.label.startsWith('T:') && !plan.has(t.label)).map(t => 'trashed ' + t.label + ', not in the plan'))
+      .concat(RET_ITEMS.map(i => i[0]).filter(l => !r.state(l) || (r.state(l).trashed !== IN_TRASH_AT_START.includes(l) && !plan.has(l)))
+        .map(l => 'changed ' + l))
+      .concat(banned(r));
+  };
   const budgetLine = r => /TIME_BUDGET[^\n]*\bretention\b|\bretention\b[^\n]*TIME_BUDGET/i.test(r.text);
 
   // the hand-worked plans of RET_ITEMS (with the fake's FAKE_TARGETS, all hours old, and what the moves make)
@@ -3400,14 +3597,14 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
     const name = BOTH[seed % 2];
     const r = retRun(name, dayStr, { extra: genRetention(seed, days) });
     const w = wantOf(r, days);
-    const p = previewProblems(r, days).concat(noRetentionWrite(r));
+    const p = previewProblems(r, days).concat(outsideThePlan(r, days));
     genRuns++;
     if (!p.length) genOk++;
     for (const [k2, v] of Object.entries(w.stats)) covered[k2] = (covered[k2] || 0) + v;
     check('RETENTION_DAYS ' + JSON.stringify(dayStr) + ', generated Shared Drive ' + seed + ' (' + name + '): per region the would-trash ' +
           'files and folders, per region subfolder affected its counts (nested ones under it), the files directly in a region ' +
           'folder, outside and RETENTION_CAP are the rules\' answer; no file, nested, outside or trashed folder named; nothing ' +
-          'written on the Shared Drive',
+          'written on the Shared Drive outside the plan (#185)',
           !p.length, p.slice(0, 6).join('; ') || canon(w.want));
   }
   {
@@ -3429,10 +3626,10 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
         'the subfolder ones, the emptied old subfolder, and outside 1; no write (Africa 7 files and 3 folders, Asia 5 and 1 with ' +
         '2 directly in it, Template 3 and 3, Latin America and U.S 0; not the young, the old-photo-in-a-new-folder, the ' +
         'unparseable or the trashed ones)', !dryP.length, dryP.slice(0, 8).join('; '));
-  const realP = previewProblems(real, 90, RET_WANT[90]).concat(noRetentionWrite(real));
-  check('the real run with RETENTION_DAYS 90 logs the same plan and trashes nothing (until #185): its moves, folders made and ' +
-        '#144\'s removals as without retention, nothing on the Shared Drive trashed or changed, nothing banned, no error',
-        !realP.length, realP.slice(0, 8).join('; '));
+  const realP = previewProblems(real, 90, RET_WANT[90]).concat(outsideThePlan(real, 90));
+  check('the real run with RETENTION_DAYS 90 logs the same plan: its moves, folders made and #144\'s removals as without ' +
+        'retention, nothing on the Shared Drive trashed or changed outside the plan (#185 trashes the plan: below), nothing ' +
+        'banned, no error', !realP.length, realP.slice(0, 8).join('; '));
   const capRun = retRun(REAL, '90', { extra: [['T:Latin America/Golden Roots 05-05-2026', 160 * RDAY]].concat(
     Array.from({ length: 110 }, (_, k) => ['T:Latin America/Golden Roots 05-05-2026/RET_B' + String(k).padStart(3, '0') + '.jpg',
                                            Math.round((141 + 8 * (k + 0.5) / 110) * RDAY)])) });
@@ -3442,9 +3639,10 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
                      tops: { 'Morning Star Club': ['Africa', 1, 0], 'Golden Wings 06-01-2026': ['Africa', 0, 1],
                              'Silver Wings 05-01-2026': ['Template', 3, 3], 'Golden Roots 05-05-2026': ['Latin America', 94, 0] },
                      outside: 1, capped: 25 };
-  const capP = previewProblems(capRun, 90, CAP_WANT).concat(noRetentionWrite(capRun));
+  const capP = previewProblems(capRun, 90, CAP_WANT).concat(outsideThePlan(capRun, 90));
   check('RETENTION_DAYS 90 with 125 files due: the preview counts the 100 with the earliest due moment (across regions; an ' +
-        'emptied folder still goes), RETENTION_CAP 25; the real run trashes none of them', !capP.length, capP.slice(0, 8).join('; '));
+        'emptied folder still goes), RETENTION_CAP 25; the real run trashes nothing outside the plan (none of the 25 left out; ' +
+        '#185 checks it trashes the 100)', !capP.length, capP.slice(0, 8).join('; '));
 
   // ---------------------------------------------------------------- RETENTION_DAYS
   const off = BOTH.map(nm => retRun(nm));
@@ -3486,7 +3684,7 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
         'run, naming RETENTION_DAYS, before any folder is opened or read (both entry points)', !badP.length, badP.join('; '));
   const trimP = [[' 90 ', 90, PREVIEW], [' 120 ', 120, REAL], ['365', 365, PREVIEW]].flatMap(([v, days, nm]) => {
     const r = retRun(nm, v);
-    return previewProblems(r, days, RET_WANT[days]).concat(noRetentionWrite(r)).map(x => JSON.stringify(v) + ' ' + nm + ': ' + x);
+    return previewProblems(r, days, RET_WANT[days]).concat(outsideThePlan(r, days)).map(x => JSON.stringify(v) + ' ' + nm + ': ' + x);
   });
   check('RETENTION_DAYS " 90 " is 90: the same preview as 90; " 120 " (spaces trimmed) and 365 preview with that many days ' +
         '(Africa 2 files and 1 folder at 120, nothing at all at 365, outside 0)', !trimP.length, trimP.slice(0, 8).join('; '));
@@ -3530,11 +3728,11 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
                       direct: { Africa: 1, Asia: 2 }, tops: NEST_TOPS, outside: 1, capped: 0 };
   const nestP = BOTH.flatMap(nm => {
     const r = retRun(nm, '90', { moveFolders: [['T:Template', 'T:Africa/Golden Wings 06-01-2026']] });
-    return previewProblems(r, 90, NEST_WANT).concat(noRetentionWrite(r)).map(x => nm + ': ' + x);
+    return previewProblems(r, 90, NEST_WANT).concat(outsideThePlan(r, 90)).map(x => nm + ': ' + x);
   });
   check('a configured region folder nested inside another region\'s folder (Template\'s inside Africa\'s emptied old ' +
         '"Golden Wings 06-01-2026"): its tree counts for Template, the folder holding it is kept and not named, Africa ' +
-        'would trash 7 files and 2 folders; no write', !nestP.length, nestP.slice(0, 6).join('; '));
+        'would trash 7 files and 2 folders; no write outside the plan', !nestP.length, nestP.slice(0, 6).join('; '));
 
   // ---------------------------------------------------------------- the reads
   const readP = [];
@@ -3699,6 +3897,661 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
         'those of the run without it (each source subfolder listed once, as #144 says), and every retention search is on the ' +
         'Shared Drive\'s corpus (corpora \'drive\', its driveId)', !myP.length, myP.join('; '));
 
+  // ================================================================ #185: the trash on apply
+  /**
+   * #185 (epic #179, rulings R1, R3, R6, R8, R9, R14; docs/plans/2026-10-30-photo-retention.md): with RETENTION_DAYS set,
+   * the real run (moveSettledPhotos) trashes what planTrash_ planned, after the moves and the preview; the dry run still
+   * writes nothing. The contract, as these tests read it:
+   *
+   *   what       every file of the plan, then its folders, each only after everything of the plan in it (children before
+   *              parents), each by moveToTrash_ (#144's one trash) handed PROTECTED_IDS: Drive.Files.update({trashed:
+   *              true}, id, null, {supportsAllDrives: true}). Nothing else on the Shared Drive is written.
+   *   never      a configured folder (source or target; a region folder nested inside another region's too), the
+   *              drive's root, anything outside the region folders, anything in My Drive but #144's removals, a file
+   *              before its due moment, a folder with an untrashed child: TRASH_RULES' retention entry, as the fake sees
+   *              the item at the moment of the call. With planTrash_ replaced by one that returns a configured id or the
+   *              drive's id: no Files.update carries it, TRASH_REFUSED is logged, the run ends with an error.
+   *   re-checks  just before the trash, against what the read saw: a file moved, trashed or no longer due (its own or its
+   *              folder's createdTime) is skipped; so is everything under a folder whose parent changed (into another
+   *              region's folder, or out of the region folders) at any level of the walk up; a folder with an untrashed
+   *              child at that moment (one that arrived after the read, or one its listing missed) is kept, and so are
+   *              the folders above it. A skip is no error.
+   *   cap        at most 100 files a run, the earliest due first (RETENTION_CAP); the next run trashes the rest.
+   *   failures   a trash Drive refuses: `TRASH_FAILED <Region> "<region subfolder>"` (`TRASH_FAILED <Region>` for a photo
+   *              directly in a region folder); the rest goes on, the run ends with an error. A MOVE_FAILED does not skip
+   *              retention, and the error names both.
+   *   budget     no trash once the run's time budget is spent (a TIME_BUDGET line saying trash or retention); the next run
+   *              goes on with the rest.
+   *   the log    per configured region with something trashed a line starting `<Region>:` with `trashed N file(s) and M
+   *              folder(s)`; per region subfolder with something trashed under it (itself included) `trashed N file(s)
+   *              and M folder(s) under "<name>"`; the numbers what was trashed. `not trashed "<region subfolder>"` where
+   *              a re-check kept something. Never a file's name, nor a deeper folder's.
+   *
+   * The expected trashes are worked by hand for RET_ITEMS (HAND below) and by #182's oracle (retentionWant's plan) for
+   * the generated drives; the oracle must agree with the hand-worked lists.
+   */
+  {
+    const R185 = [];   // this part's runs
+    const run185 = (name, days, opt) => { const r = retRun(name, days, opt); R185.push(r); return r; };
+    const AF = 'T:Africa/', AS = 'T:Asia/', TP = 'T:Template/';
+    const SUN = AF + 'Sunrise Club 07-01-2026', ZEBRA = SUN + '/Nested Zebra Album', BRIGHT = AF + 'Bright Stars 07-10-2026';
+    const GOLDEN = AF + 'Golden Wings 06-01-2026', MSC = AF + 'Morning Star Club', EVE = AS + 'Evening Lights 06-01-2026';
+    const SW = TP + 'Silver Wings 05-01-2026', KIWI = SW + '/Nested Kiwi Shots', MANGO = KIWI + '/Nested Mango Shots';
+    const F = { A0: AF + 'RET_A0.jpg', A1: SUN + '/RET_A1.jpg', A2: SUN + '/RET_A2.jpg', A4: ZEBRA + '/RET_A4.jpg',
+                A5: BRIGHT + '/RET_A5.jpg', A6: BRIGHT + '/RET_A6.jpg', A7: MSC + '/RET_A7.jpg', S0: AS + 'RET_S0.jpg',
+                S0b: AS + 'RET_S0b.jpg', S1: EVE + '/RET_S1.jpg', S2: EVE + '/RET_S2.jpg', S3: EVE + '/RET_S3.jpg',
+                T1: SW + '/RET_T1.jpg', T2: KIWI + '/RET_T2.jpg', T3: MANGO + '/RET_T3.jpg' };
+    // RETENTION_DAYS 90 on RET_ITEMS, by hand (RET_WANT[90]): 15 photos, then 7 folders
+    const HAND = Object.values(F).concat([ZEBRA, BRIGHT, GOLDEN, EVE, MANGO, KIWI, SW]).sort();
+    const TOPS_90 = Object.fromEntries(Object.entries(RET_TOPS_90).map(([nm, c]) => [nm, c.slice(1)]));
+    const NESTED = ['Nested Zebra Album', 'Nested Kiwi Shots', 'Nested Mango Shots', 'Nested Plum Shots', 'Kept Photos Archive'];
+    const minus = (a, b) => a.filter(x => !b.includes(x)).sort();
+    const diff = (got, want) => 'missing ' + JSON.stringify(minus(want, got).slice(0, 6)) + ', extra ' + JSON.stringify(minus(got, want).slice(0, 6));
+    const retTrashes = r => r.trashes.filter(t => t.label.startsWith('T:'));
+    const trashedT = r => retTrashes(r).map(t => t.label).sort();
+    const planOf = (r, days, regions) => { const w = wantOf(r, days, regions); return w.plan.files.concat(w.plan.folders).map(id => r.labelOf(id)).sort(); };
+    /** Was a trash ({trashed: true}) ever sent for the item `lbl`? */
+    const trashSent = (r, lbl) => r.idOf[lbl] !== undefined && r.ops.some(o => o.op === 'update' && o.fileId === r.idOf[lbl] &&
+                                                                         (o.kind === 'trash' || !!(o.resource && o.resource.trashed === true)));
+    /** Files first, then folders; a folder only after everything of the plan in it (labels are paths as created). */
+    const orderProblems = r => {
+      const ts = retTrashes(r), p = [];
+      const firstFolder = ts.findIndex(t => t.isFolder);
+      const lateFile = firstFolder < 0 ? null : ts.slice(firstFolder).find(t => !t.isFolder);
+      if (lateFile) p.push('a photo trashed after a folder (' + lateFile.label + ' after ' + ts[firstFolder].label + ')');
+      ts.forEach((t, i) => {
+        if (!t.isFolder) return;
+        const inIt = ts.slice(i + 1).find(u => u.label.startsWith(t.label + '/'));
+        if (inIt) p.push(t.label + ' trashed before ' + inIt.label + ', which is in it');
+      });
+      return p;
+    };
+    /** Each Shared Drive trash: inside moveToTrash_ handed PROTECTED_IDS, by Files.update({trashed: true}, id, null, {supportsAllDrives: true}). */
+    const callProblems = r => {
+      const p = [];
+      for (const t of retTrashes(r)) {
+        const op = r.ops.find(o => o.op === 'update' && o.trash === t);
+        if (!t.viaHelper) p.push(t.label + ': trashed outside ' + TRASH_HELPER);
+        const h = r.helperCalls.filter(x => x.id === t.id);
+        if (!h.length || h.some(x => !Array.isArray(x.protectedIds) || PROTECTED_IDS.some(id => !x.protectedIds.includes(id)))) {
+          p.push(t.label + ': ' + TRASH_HELPER + ' not handed every configured id and the root');
+        }
+        if (!op) { p.push(t.label + ': trashed by no Files.update'); continue; }
+        if (!same(Object.keys(op.resource), ['trashed']) || op.resource.trashed !== true) p.push(t.label + ': resource ' + JSON.stringify(op.resource));
+        if (op.media !== null && op.media !== undefined) p.push(t.label + ': media ' + typeof op.media);
+        if (op.args.supportsAllDrives !== true || 'addParents' in op.args || 'removeParents' in op.args) p.push(t.label + ': args ' + JSON.stringify(op.args));
+      }
+      return p;
+    };
+    const TRASHED_RX = /\btrashed (\d+) files?(?:\(s\))? and (\d+) folders?(?:\(s\))?/;
+    /** The `trashed N file(s) and M folder(s)` lines of a log: {regions, tops (by the region subfolder named), stray}. */
+    function trashedView(text, topNames) {
+      const v = { regions: {}, tops: {}, stray: [] };
+      for (const line of String(text).split('\n')) {
+        if (/\bwould trash\b/.test(line)) continue;
+        const m = TRASHED_RX.exec(line);
+        if (!m) continue;
+        const counts = [Number(m[1]), Number(m[2])];
+        const named = topNames.filter(nm => line.includes('"' + nm + '"'));
+        const reg = REGIONS.find(x => line.trim().startsWith(x + ':'));
+        if (named.length === 1) v.tops[named[0]] = counts;
+        else if (!named.length && !/"/.test(line) && reg !== undefined) v.regions[reg] = counts;
+        else if (!named.length && !/"/.test(line) && /\bdirectly\b/.test(line)) continue;
+        else v.stray.push(line.trim());
+      }
+      return v;
+    }
+    /** The log's trashed counts against {<Region>: [files, folders]} and {<region subfolder>: [files, folders]}; its names. */
+    function logProblems(r, days, wantRegions, wantTops) {
+      const w = wantOf(r, days), v = trashedView(r.text, w.tops), p = [];
+      for (const reg of REGIONS) {
+        const want = wantRegions[reg] || [0, 0], got = v.regions[reg];
+        if (got ? !same(got, want) : want[0] + want[1] > 0) {
+          p.push(reg + ': ' + (got ? 'trashed ' + show(got, want) : 'no `' + reg + ': … trashed N file(s) and M folder(s)` line, want ' + JSON.stringify(want)));
+        }
+      }
+      for (const nm of new Set(Object.keys(wantTops).concat(Object.keys(v.tops)))) {
+        const want = wantTops[nm] || [0, 0], got = v.tops[nm];
+        if (got ? !same(got, want) : want[0] + want[1] > 0) {
+          p.push('"' + nm + '": ' + (got ? 'trashed ' + show(got, want) : 'on no `trashed N file(s) and M folder(s) under "…"` line, want ' + JSON.stringify(want)));
+        }
+      }
+      return p.concat(v.stray.map(l => 'a trashed line naming something else: ' + l), namesProblems(said(r), w));
+    }
+
+    // ---------------------------------------------------------------- the fake's trash
+    {
+      const env = fakeEnv('ids', { retentionDays: '90' });
+      const D = env.globals.Drive.Files, all = { supportsAllDrives: true, includeItemsFromAllDrives: true };
+      const id = l => env.idOf[l];
+      D.update({ trashed: true }, id(BRIGHT), null, { supportsAllDrives: true });
+      const photo = D.get(id(F.A5), { fields: 'trashed, explicitlyTrashed', supportsAllDrives: true });
+      const folder = D.get(id(BRIGHT), { fields: 'trashed', supportsAllDrives: true });
+      const live = D.list(Object.assign({ q: "'" + id(BRIGHT) + "' in parents and trashed = false", fields: 'files(id)' }, all));
+      const binned = D.list(Object.assign({ q: "'" + id(BRIGHT) + "' in parents and trashed = true", fields: 'nextPageToken, files(id)' }, all));
+      const byName = D.list(Object.assign({ q: "'" + id('T:Africa') + "' in parents and name = 'Bright Stars 07-10-2026' and trashed = false",
+                                            fields: 'files(id)' }, all));
+      const app = env.globals.DriveApp.getFolderById(id(BRIGHT)).isTrashed();
+      check('the fake (#185): a Files.update({trashed: true}) of a Shared Drive folder is a trash every later read sees: it and ' +
+            'its photos read trashed (the photos not explicitly), a `trashed = false` listing of it, or of its parent by its ' +
+            'name, finds nothing, a `trashed = true` one finds its two photos, DriveApp says isTrashed()',
+            photo.trashed === true && photo.explicitlyTrashed === false && folder.trashed === true && !(live.files || []).length &&
+            !(byName.files || []).length && (binned.files || []).length === 2 && !binned.nextPageToken && app === true,
+            JSON.stringify({ photo, folder, live, binned, byName, app }));
+    }
+
+    // ---------------------------------------------------------------- what is trashed: the hand-worked layout, then generated drives
+    const handP = [];
+    {
+      const oracle = planOf(real, 90);
+      if (!same(oracle, HAND)) handP.push('THE TEST\'S ORACLE DISAGREES with the hand-worked plan: ' + diff(oracle, HAND));
+      if (real.threw) handP.push('threw: ' + real.threw);
+      if (!same(trashedT(real), HAND)) handP.push('trashed on the Shared Drive: ' + diff(trashedT(real), HAND));
+      handP.push(...orderProblems(real), ...callProblems(real), ...sharedNonTrash(real), ...banned(real), ...movesAsBefore(real));
+      const notInTrash = HAND.filter(l => !real.state(l).trashed);
+      if (notInTrash.length) handP.push('not in the trash after the run: ' + notInTrash.slice(0, 6).join(', '));
+      const changed = RET_ITEMS.map(i => i[0]).filter(l => !HAND.includes(l) && real.state(l).trashed !== IN_TRASH_AT_START.includes(l));
+      if (changed.length) handP.push('changed outside the plan: ' + changed.join(', '));
+      if (dry.trashes.length || dry.ops.length) handP.push('the dry run wrote: ' + dry.ops.length + ' op(s), ' + dry.trashes.length + ' trash(es)');
+    }
+    check('RETENTION_DAYS 90: the real run trashes exactly the plan: the photo directly in a region folder, the nested and ' +
+          'subfolder ones, then the emptied folders children first, through Files.update({trashed: true}) with supportsAllDrives ' +
+          '(Africa 7 photos and 3 folders, Asia 5 and 1, Template 3 and 3: every photo, then the folders, each after everything ' +
+          'of the plan in it; each by one ' + TRASH_HELPER + ' call handed every configured id and the root, resource ' +
+          '{trashed: true} alone, no media, no parent change; nothing else on the Shared Drive changed; #144\'s moves and ' +
+          'removals as without retention; no error; the dry run on the same drive writes nothing)',
+          !handP.length, handP.slice(0, 8).join('; '));
+    const GEN185 = [['90', 90], [' 120 ', 120], ['91', 91]];
+    const genP = [], cover = {};
+    let genN = 0, genTrashed = 0;
+    for (let seed = 7; seed <= 14; seed++) {
+      const [dayStr, days] = GEN185[seed % GEN185.length];
+      const extra = genRetention(seed, days);
+      const rr = run185(REAL, dayStr, { extra }), rd = run185(PREVIEW, dayStr, { extra });
+      const w = wantOf(rr, days);
+      for (const [k2, v] of Object.entries(w.stats)) cover[k2] = (cover[k2] || 0) + v;
+      const want = w.plan.files.concat(w.plan.folders).map(id => rr.labelOf(id)).sort();
+      const tops = Object.fromEntries(Object.entries(w.want.tops).map(([nm, c]) => [nm, c.slice(1)]));
+      genTrashed += retTrashes(rr).length;
+      const p = (rr.threw ? ['threw: ' + rr.threw] : [])
+        .concat(same(trashedT(rr), want) ? [] : ['trashed ' + diff(trashedT(rr), want)])
+        .concat(orderProblems(rr), callProblems(rr), sharedNonTrash(rr), banned(rr), movesAsBefore(rr),
+                logProblems(rr, days, w.want.regions, tops))
+        .concat(rd.trashes.length || rd.ops.length ? ['the dry run wrote: ' + rd.ops.length + ' op(s), ' + rd.trashes.length + ' trash(es)'] : []);
+      genN++;
+      if (p.length) genP.push('seed ' + seed + ' (' + JSON.stringify(dayStr) + '): ' + p.slice(0, 4).join('; '));
+    }
+    const uncovered = ['dueDirect', 'dueDeep', 'folders', 'foldersDeep', 'keptOld', 'dueExactly', 'shortByOneMs', 'noDate', 'inTrash',
+                       'oldFileYoungFolder'].filter(k2 => !(cover[k2] > 0));
+    check('…and on ' + genN + ' generated Shared Drives (RETENTION_DAYS "90", " 120 ", "91"; the real and the dry run on each; ' +
+          genTrashed + ' item(s) trashed): the real run trashes exactly what the rules plan (an oracle of their own), photos ' +
+          'first, folders children first, each through ' + TRASH_HELPER + ' with supportsAllDrives, its `trashed` lines counting ' +
+          'them per region and region subfolder, no file or nested folder named; the dry run writes nothing; the drives hold ' +
+          'due photos directly in a region folder and two or more deep, emptied folders at and below the region subfolders, an ' +
+          'old folder kept for what is in it, due at exactly the cutoff and 1 ms short, an unparseable date, a folder in the ' +
+          'trash, an old photo in a young folder',
+          genN > 0 && !genP.length && !uncovered.length,
+          genP.slice(0, 4).join(' | ') + (uncovered.length ? ' NOT COVERED: ' + uncovered.join(', ') : ''));
+
+    // ---------------------------------------------------------------- never trashed
+    const S7 = AS + 'RET_S7.jpg', S8 = AS + 'RET_S8.jpg', YOUNG_DIR = AS + 'Rising Voices 08-02-2026', EXACT_DIR = AS + 'Golden Lights 08-02-2026';
+    const edge = run185(REAL, '90', { extra: [[S7, 90 * RDAY - 1], [S8, 90 * RDAY], [YOUNG_DIR, 90 * RDAY - 1], [EXACT_DIR, 90 * RDAY]] });
+    const nest = run185(REAL, '90', { moveFolders: [['T:Template', GOLDEN]] });
+    const CONFIGURED = REGIONS.flatMap(reg => ['T:' + reg, 'S:' + reg]).concat('T:drive');
+    const OUTSIDE = ['T:drive/Kept Photos Archive', 'T:drive/Kept Photos Archive/RET_K1.jpg'];
+    const NOT_DUE = [AF + 'RET_A0y.jpg', AF + 'RET_A0z.jpg', SUN + '/RET_A3.jpg', MSC + '/RET_A8.jpg', AF + 'Silver Roots 10-25-2026/RET_A9.jpg',
+                     AF + 'Evening Roots 06-15-2026/RET_A10.jpg', AF + 'Golden Voices 06-20-2026/RET_A11.jpg', AF + 'Rising Lights 10-20-2026',
+                     S7, YOUNG_DIR];
+    const WITH_CHILD = [SUN, MSC, AF + 'Silver Roots 10-25-2026', AF + 'Evening Roots 06-15-2026', AF + 'Golden Voices 06-20-2026'];
+    const neverP = [];
+    for (const [tag, r, wantSet, more] of [['the 90-day edges', edge, HAND.concat(S8, EXACT_DIR).sort(), []],
+                                           ['Template\'s region folder inside Africa\'s "Golden Wings 06-01-2026"', nest, minus(HAND, [GOLDEN]),
+                                            ['T:Template', GOLDEN]]]) {
+      const oracle = planOf(r, 90);
+      if (!same(oracle, wantSet)) neverP.push(tag + ': THE TEST\'S ORACLE DISAGREES: ' + diff(oracle, wantSet));
+      if (r.threw) neverP.push(tag + ': threw ' + r.threw);
+      if (!same(trashedT(r), wantSet)) neverP.push(tag + ': trashed on the Shared Drive: ' + diff(trashedT(r), wantSet));
+      for (const [why, labels] of [['a configured folder or the root', CONFIGURED], ['outside the region folders', OUTSIDE],
+                                   ['not yet due', NOT_DUE], ['a folder with a child', WITH_CHILD],
+                                   ['already in the trash', IN_TRASH_AT_START], ['the nested region folder or the folder holding it', more]]) {
+        const hit = labels.filter(l => r.state(l) && (trashSent(r, l) || r.state(l).trashed !== IN_TRASH_AT_START.includes(l)));
+        if (hit.length) neverP.push(tag + ': ' + why + ', trashed or sent a trash: ' + hit.join(', '));
+      }
+      if (!same(myDriveTrashed(r), EXPECTED_TRASHED)) neverP.push(tag + ': My Drive trashed ' + show(myDriveTrashed(r), EXPECTED_TRASHED));
+      neverP.push(...banned(r).map(b => tag + ': ' + b));
+    }
+    check('never trashed: configured folders, a nested region folder, the root, outside the region folders, My Drive beyond ' +
+          '#144, items not yet due, folders with a child (nor what was in the trash already: no trash ever sent for any of them; ' +
+          'a photo and a folder 1 ms short of 90 days stay, the photo and the emptied folder at exactly 90 days go; with ' +
+          'Template\'s region folder inside Africa\'s "Golden Wings 06-01-2026" that folder stays too; in My Drive only #144\'s ' +
+          'removals; nothing banned)', !neverP.length, neverP.slice(0, 8).join('; '));
+
+    // ---------------------------------------------------------------- a wrong planner
+    const sid = reg => propIdOf('SOURCE_FOLDER_' + PROP_KEYS[reg]);
+    const longAgo = (D, now) => new D(now - 200 * RDAY);
+    const SANDBOX = [
+      ['the Africa region folder and the drive as due photos', {}, [TARGET_IDS.Africa, DRIVE_ROOT_ID], ({ Date: D, now }) => ({
+        files: [{ region: 'Africa', id: TARGET_IDS.Africa, parent: DRIVE_ROOT_ID, top: null, due: longAgo(D, now) },
+                { region: 'Africa', id: DRIVE_ROOT_ID, parent: null, top: null, due: longAgo(D, now) }],
+        folders: [], capped: 0, outside: 0 })],
+      ['the Africa region folder and the drive as emptied folders', {}, [TARGET_IDS.Africa, DRIVE_ROOT_ID], () => ({
+        files: [],
+        folders: [{ region: 'Africa', id: TARGET_IDS.Africa, name: 'Africa', parent: DRIVE_ROOT_ID, top: TARGET_IDS.Africa },
+                  { region: 'Asia', id: DRIVE_ROOT_ID, name: 'GLOW Shared Drive', parent: null, top: TARGET_IDS.Asia }],
+        capped: 0, outside: 0 })],
+      ['Template\'s region folder inside Africa\'s "Golden Wings 06-01-2026" as an Africa folder, the drive as a photo',
+       { moveFolders: [['T:Template', GOLDEN]] }, [TARGET_IDS.Template, DRIVE_ROOT_ID], ({ Date: D, now, idOf }) => ({
+        files: [{ region: 'Africa', id: DRIVE_ROOT_ID, parent: null, top: null, due: longAgo(D, now) }],
+        folders: [{ region: 'Africa', id: TARGET_IDS.Template, name: 'Template', parent: idOf[GOLDEN], top: idOf[GOLDEN] }],
+        capped: 0, outside: 0 })],
+      ['the Asia source folder (My Drive) as a due photo, the drive as a folder', {}, [sid('Asia'), DRIVE_ROOT_ID], ({ Date: D, now }) => ({
+        files: [{ region: 'Asia', id: sid('Asia'), parent: null, top: null, due: longAgo(D, now) }],
+        folders: [{ region: 'Asia', id: DRIVE_ROOT_ID, name: 'GLOW Shared Drive', parent: null, top: TARGET_IDS.Asia }],
+        capped: 0, outside: 0 })],
+      ['an old photo outside the region folders (in "Kept Photos Archive" at the root) as an Africa due photo, with its true ' +
+       'parent, and that archive folder as an emptied Africa folder', {}, ['T:drive/Kept Photos Archive/RET_K1.jpg', 'T:drive/Kept Photos Archive'],
+       ({ Date: D, now, idOf }) => ({
+         files: [{ region: 'Africa', id: idOf['T:drive/Kept Photos Archive/RET_K1.jpg'], parent: idOf['T:drive/Kept Photos Archive'],
+                   top: null, due: longAgo(D, now) }],
+         folders: [{ region: 'Africa', id: idOf['T:drive/Kept Photos Archive'], name: 'Kept Photos Archive', parent: DRIVE_ROOT_ID,
+                     top: idOf['T:drive/Kept Photos Archive'] }],
+         capped: 0, outside: 0 })],
+      // not refused by its id: the later-of clock, re-read on its live folder, keeps it (an error is not required)
+      ['an old photo in a young folder the plan does not hold (RET_A9, 200 days, in "Silver Roots 10-25-2026", 5 days) passed as due',
+       {}, [AF + 'Silver Roots 10-25-2026/RET_A9.jpg'], ({ Date: D, now, idOf }) => ({
+         files: [{ region: 'Africa', id: idOf[AF + 'Silver Roots 10-25-2026/RET_A9.jpg'], parent: idOf[AF + 'Silver Roots 10-25-2026'],
+                   top: idOf[AF + 'Silver Roots 10-25-2026'], due: longAgo(D, now) }],
+         folders: [], capped: 0, outside: 0 }), false],
+    ];
+    const boxP = [];
+    for (const [what, o, badRefs, replacePlan, refuse] of SANDBOX) {
+      const r = run185(REAL, '90', Object.assign({ replacePlan }, o)), p = [];
+      const bad = badRefs.map(x => (own(r.idOf, x) ? r.idOf[x] : x));   // a label, or an id
+      const sent = r.ops.filter(x => x.op === 'update' && bad.includes(x.fileId)).map(x => r.labelOf(x.fileId) + ' ' + JSON.stringify(x.resource));
+      if (sent.length) p.push('Files.update on ' + sent.join(', '));
+      const binnedBad = bad.map(id => r.labelOf(id)).filter(l => l && r.state(l) && r.state(l).trashed);
+      if (binnedBad.length) p.push('in the trash: ' + binnedBad.join(', '));
+      if (retTrashes(r).length) p.push('trashed on the Shared Drive: ' + trashedT(r).join(', '));
+      if (refuse !== false && !/\bTRASH_REFUSED\b/.test(r.text)) p.push('no TRASH_REFUSED line');
+      if (refuse !== false && !r.threw) p.push('the run ends with no error');
+      if (!r.planTrashCalls.length) p.push('(planTrash_ never called: the test replaced nothing)');
+      p.push(...movesAsBefore(r), ...banned(r));
+      if (p.length) boxP.push(what + ': ' + p.join('; '));
+    }
+    check('planTrash_ replaced by one returning a region folder id and the drive id: no Files.update carries either, ' +
+          'TRASH_REFUSED, the run ends in an error (as due photos, as emptied folders, a region folder nested inside another ' +
+          'region\'s, a configured source folder, a photo and a folder outside the region folders planned as Africa\'s: none ' +
+          'trashed or sent to Files.update, nothing on the Shared Drive trashed, the moves and #144\'s removals as without ' +
+          'retention, nothing banned; an old photo in a young folder the plan does not hold, passed as due, is never sent a ' +
+          'trash either)', !boxP.length, boxP.slice(0, 7).join(' | '));
+
+    // ---------------------------------------------------------------- the re-checks
+    const MERGED = 'S:Africa/Golden Wings 06-01-2026/IMG_8201.jpg';
+    const MERGE_SOURCES = [['Africa', 'Golden Wings 06-01-2026', [['IMG_8201.jpg', 3100, OLD]]]];
+    const L1 = MANGO + '/RET_L1.jpg', PLUM = EVE + '/Nested Plum Shots', L2 = GOLDEN + '/RET_L2.jpg';
+    // [what, opt, trashed (the rest of the plan), never trashed nor sent a trash, a folder the plan must hold]
+    const RECHECK = [
+      ['moved, trashed or no longer due after the read (a photo moved into the old emptied "Golden Wings 06-01-2026", one a ' +
+       'person trashed, one whose createdTime is now 10 days, a region subfolder whose createdTime is now 20 days, a nested ' +
+       'folder moved into Latin America\'s region folder)',
+       { afterPlan: [['move', F.A7, GOLDEN], ['trash', F.S1], ['created', F.A0, 10 * RDAY], ['created', BRIGHT, 20 * RDAY],
+                     ['move', KIWI, 'T:Latin America']] },
+       [F.A1, F.A2, F.A4, ZEBRA, F.S0, F.S0b, F.S2, F.S3, F.T1],
+       [F.A7, GOLDEN, F.S1, F.A0, F.A5, F.A6, BRIGHT, F.T2, F.T3, MANGO, KIWI]],
+      ['folders moved out of their region folder after the read (a region subfolder three levels above its last photo moved ' +
+       'outside the region folders; a nested folder, a region subfolder and the old emptied folder into another region\'s)',
+       { afterPlan: [['move', SW, 'T:drive/Kept Photos Archive'], ['move', ZEBRA, 'T:Asia'], ['move', EVE, 'T:Latin America'],
+                     ['move', GOLDEN, 'T:Asia']] },
+       [F.A0, F.A1, F.A2, F.A5, F.A6, BRIGHT, F.A7, F.S0, F.S0b],
+       [F.T1, F.T2, F.T3, KIWI, MANGO, SW, F.A4, ZEBRA, F.S1, F.S2, F.S3, EVE, GOLDEN]],
+      ['late children (after the read: a photo three deep, a folder in a region subfolder, a photo in the old emptied folder)',
+       { afterPlan: [['add', L1, 1 * RDAY], ['add', PLUM, 0], ['add', L2, 2 * RDAY]] },
+       minus(HAND, [MANGO, KIWI, SW, EVE, GOLDEN]), [MANGO, KIWI, SW, EVE, GOLDEN, L1, PLUM, L2]],
+      ['a photo merged this run into the old emptied "Golden Wings 06-01-2026"', { extraSources: MERGE_SOURCES },
+       minus(HAND, [GOLDEN]), [GOLDEN, MERGED]],
+      ['the same, that folder\'s listing missing the merged photo (Drive\'s index behind the move: the plan holds the folder)',
+       { extraSources: MERGE_SOURCES, staleIndexOf: GOLDEN }, minus(HAND, [GOLDEN]), [GOLDEN, MERGED], GOLDEN],
+      // folders the plan does NOT hold, above planned items: only a walk up Drive's live parents sees them move
+      ['unplanned folders moved into another region\'s folder after the read ("Sunrise Club 07-01-2026", kept for its young ' +
+       'photo, above two planned photos and the planned nested folder with its photo; "Morning Star Club" above a planned ' +
+       'photo); and a planned emptied folder\'s own createdTime now 20 days ("Golden Wings 06-01-2026", no photo in it)',
+       { afterPlan: [['move', SUN, 'T:Asia'], ['move', MSC, 'T:Latin America'], ['created', GOLDEN, 20 * RDAY]] },
+       minus(HAND, [F.A1, F.A2, F.A4, ZEBRA, F.A7, GOLDEN]), [F.A1, F.A2, F.A4, ZEBRA, F.A7, GOLDEN]],
+      ['an unplanned folder moved outside the region folders, another one\'s createdTime now 20 days, after the read ("Sunrise ' +
+       'Club 07-01-2026" into "Kept Photos Archive" at the root; "Morning Star Club": its old photo no longer due)',
+       { afterPlan: [['move', SUN, 'T:drive/Kept Photos Archive'], ['created', MSC, 20 * RDAY]] },
+       minus(HAND, [F.A1, F.A2, F.A4, ZEBRA, F.A7]), [F.A1, F.A2, F.A4, ZEBRA, F.A7]],
+      // mid-trash, right after the first Shared Drive trash: each item's own re-check is just before its trash (R9), not
+      // a snapshot taken once (whichever item went first is out of it: it was trashed before the change)
+      ['changes mid-trash, after the first trash (a photo moved outside the region folders, one whose createdTime is now ' +
+       '10 days, one a person trashed, a late photo in a planned folder, the old emptied folder moved into another region\'s)',
+       { afterFirstTrash: [['move', F.T2, 'T:drive/Kept Photos Archive'], ['created', F.A0, 10 * RDAY], ['trash', F.S2],
+                           ['add', EVE + '/RET_L3.jpg', 0], ['move', GOLDEN, 'T:Asia']] },
+       minus(HAND, [F.T2, F.A0, F.S2, EVE, GOLDEN]), [F.T2, F.A0, F.S2, EVE, GOLDEN, EVE + '/RET_L3.jpg'], null, true],
+      // an UNPLANNED nested folder above planned items ("Nested Kiwi Shots" holding a young photo, so neither it nor
+      // "Silver Wings 05-01-2026" is planned; T2 in it and "Nested Mango Shots" with T3 below it are): only a walk up
+      // Drive's live parents, nested folders included, sees it move
+      ['an unplanned nested folder moved into another region\'s folder after the read ("Nested Kiwi Shots", kept for a young ' +
+       'photo, above a planned photo and the planned "Nested Mango Shots" with its photo)',
+       { extra: [[KIWI + '/RET_Y1.jpg', 5 * RDAY]], afterPlan: [['move', KIWI, 'T:Latin America']] },
+       minus(HAND, [F.T2, F.T3, MANGO, KIWI, SW]), [F.T2, F.T3, MANGO, KIWI, SW, KIWI + '/RET_Y1.jpg'], MANGO, false, KIWI],
+      ['the same unplanned nested folder moved outside the region folders after the read (into "Kept Photos Archive" at the root)',
+       { extra: [[KIWI + '/RET_Y1.jpg', 5 * RDAY]], afterPlan: [['move', KIWI, 'T:drive/Kept Photos Archive']] },
+       minus(HAND, [F.T2, F.T3, MANGO, KIWI, SW]), [F.T2, F.T3, MANGO, KIWI, SW, KIWI + '/RET_Y1.jpg'], MANGO, false, KIWI],
+      // a planned folder a person trashed (its photo with it) is never sent a trash again
+      ['a planned folder a person trashed after the read ("Nested Zebra Album", its planned photo in the trash through it)',
+       { afterPlan: [['trash', ZEBRA]] }, minus(HAND, [ZEBRA, F.A4]), [ZEBRA, F.A4]],
+      ['the same, mid-trash (a person trashes "Nested Zebra Album" right after the first trash)',
+       { afterFirstTrash: [['trash', ZEBRA]] }, minus(HAND, [ZEBRA, F.A4]), [ZEBRA, F.A4], null, true],
+    ];
+    const recheckRuns = [], recheckP = [];
+    /** A re-check run: no error; `must` trashed; `kept` never trashed nor sent a trash; nothing outside HAND; nothing banned. */
+    const recheckProblems = (r, must, kept) => {
+      const p = r.threw ? ['threw: ' + r.threw] : [], got = trashedT(r);
+      const missing = must.filter(l => !got.includes(l));
+      if (missing.length) p.push('not trashed: ' + missing.join(', '));
+      const hit = kept.filter(l => got.includes(l) || trashSent(r, l));
+      if (hit.length) p.push('trashed, or sent a trash, though it changed after the read: ' + hit.join(', '));
+      const extra = got.filter(l => !HAND.includes(l));
+      if (extra.length) p.push('trashed outside the plan: ' + extra.join(', '));
+      return p.concat(banned(r));
+    };
+    for (const [what, o, mustAll, keptAll, plannedLbl, mid, unplannedLbl] of RECHECK) {
+      const r = run185(REAL, '90', o);
+      recheckRuns.push(r);
+      const first = mid && retTrashes(r).length ? retTrashes(r)[0].label : null;
+      const kept = keptAll.filter(l => l !== first), must = mustAll.concat(first && keptAll.includes(first) ? [first] : []);
+      const p = recheckProblems(r, must, kept);
+      if (mid && !first) p.push('(nothing trashed: the change never came)');
+      if (o.extraSources) {
+        const s = r.state(MERGED);
+        if (!s || s.parent !== GOLDEN || s.trashed) p.push('the merged photo is not in "Golden Wings 06-01-2026", untrashed: ' + JSON.stringify(s));
+      }
+      if (plannedLbl && !r.planTrashCalls.some(c => (c.planned || []).includes(r.idOf[plannedLbl]))) {
+        p.push('(the plan does not hold ' + plannedLbl + ': this row proves nothing)');
+      }
+      if (unplannedLbl && r.planTrashCalls.some(c => (c.planned || []).includes(r.idOf[unplannedLbl]))) {
+        p.push('(the plan holds ' + unplannedLbl + ': this row proves nothing)');
+      }
+      if (p.length) recheckP.push(what.split(' (')[0] + ': ' + p.slice(0, 5).join('; '));
+    }
+    // per-trash freshness: changes picked from what is left, after the 5th photo trash (a photo moved outside the region
+    // folders, another re-dated to 1 day, both in planned folders where there are such) and after the first folder trash
+    // (a young photo into a planned folder still there, "Silver Wings 05-01-2026" where it is; the emptied "Golden Wings
+    // 06-01-2026" into Asia's region folder): a snapshot taken once, after the first trash, misses both
+    {
+      const isPlanned = l => HAND.includes(l);
+      const r = run185(REAL, '90', { midTrash: [
+        { after: 5, change: v => {
+          const files = v.left().filter(x => !x.isFolder);
+          const moved = files.find(x => isPlanned(x.parent)) || files[0];
+          const redated = files.find(x => x !== moved && x.parent !== moved.parent && isPlanned(x.parent)) || files.find(x => x !== moved);
+          return [['move', moved.label, 'T:drive/Kept Photos Archive'], ['created', redated.label, 1 * RDAY]];
+        } },
+        { after: 'folder', change: v => {
+          const folders = v.left().filter(x => x.isFolder);
+          const young = folders.find(x => x.label === SW) || folders.find(x => x.label !== GOLDEN);
+          const steps = young ? [['add', young.label + '/RET_L4.jpg', 0]] : [];
+          if (folders.some(x => x.label === GOLDEN)) steps.push(['move', GOLDEN, 'T:Asia']);
+          return steps;
+        } }] });
+      const above = l => HAND.filter(x => l.startsWith(x + '/'));   // the planned folders holding l
+      const kept = [];
+      for (const a of r.midApplied) {
+        for (const [what, lbl] of a.steps) {
+          if (what === 'add') kept.push(lbl, ...above(lbl));
+          else if (what === 'created') kept.push(lbl, ...above(lbl));
+          else kept.push(lbl);   // moved: what was under it stays under it
+        }
+      }
+      const p = recheckProblems(r, minus(HAND, kept), [...new Set(kept)]);
+      if (!r.midApplied.some(a => a.after === 5)) p.push('(the 5th photo trash never came: nothing changed mid-trash)');
+      if (!r.midApplied.some(a => a.after === 'folder' && a.steps.length)) p.push('(no folder trashed: nothing changed after the first one)');
+      if (p.length) recheckP.push('changes picked after the 5th photo trash and after the first folder trash (' +
+                                  JSON.stringify(r.midApplied.map(a => a.steps.map(s => s[0] + ' ' + s[1]))) + '): ' + p.slice(0, 5).join('; '));
+    }
+    check('re-checks: moved, trashed or no-longer-due files skipped; a folder moved out of its region at any level keeps ' +
+          'everything under it; a late child keeps its folder and the ancestors; no error (thirteen runs: what changed after ' +
+          'the read is never trashed nor sent a trash, the rest of the plan is trashed, nothing outside it; a photo merged into ' +
+          'an old emptied folder this run keeps it, also when that folder\'s listing missed the photo; folders the plan does ' +
+          'not hold, a region subfolder or nested deeper, moved into another region\'s folder or outside, or their createdTime ' +
+          'changed, keep what is under them; an emptied folder whose own createdTime is now young is kept; a planned folder a ' +
+          'person trashed is never sent a trash; changes after the first trash, after the 5th photo trash and after the first ' +
+          'folder trash are seen too; nothing banned)',
+          !recheckP.length, recheckP.slice(0, 13).join(' | '));
+
+    // ---------------------------------------------------------------- the cap
+    const GR = 'T:Latin America/Golden Roots 05-05-2026';
+    const B = k => GR + '/RET_B' + String(k).padStart(3, '0') + '.jpg';
+    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+    const capExtra = [[GR, 160 * RDAY]].concat(range(0, 109).map(k => [B(k), Math.round((141 + 8 * (k + 0.5) / 110) * RDAY)]));
+    // 125 due: the 100 earliest are 6 of RET_ITEMS and B016-B109; then the other 25 (B000-B015 and 9 of RET_ITEMS)
+    const CAP1 = [F.S0, F.T1, F.T2, F.A7, F.T3, F.S0b, GOLDEN, MANGO, KIWI, SW].concat(range(16, 109).map(B)).sort();
+    const CAP2 = [F.S1, F.S2, F.S3, F.A0, F.A1, F.A2, F.A4, F.A5, F.A6, ZEBRA, BRIGHT, EVE, GR].concat(range(0, 15).map(B)).sort();
+    const capNums = r => [...r.text.matchAll(/\bRETENTION_CAP\b\D{0,40}?(\d+)/g)].map(m => Number(m[1]));
+    const capP2 = [];
+    {
+      const c1 = run185(REAL, '90', { extra: capExtra });
+      const o1 = planOf(c1, 90);
+      if (!same(o1, CAP1)) capP2.push('THE TEST\'S ORACLE DISAGREES (the first run): ' + diff(o1, CAP1));
+      if (c1.threw) capP2.push('the first run threw: ' + c1.threw);
+      if (!same(trashedT(c1), CAP1)) capP2.push('the first run trashed ' + diff(trashedT(c1), CAP1));
+      const n1 = retTrashes(c1).filter(t => !t.isFolder).length;
+      if (n1 !== 100) capP2.push('the first run trashed ' + n1 + ' photo(s), want 100');
+      const cap1 = capNums(c1);
+      if (!cap1.length || cap1.some(x => x !== 25)) capP2.push('the first run: RETENTION_CAP ' + JSON.stringify(cap1) + ', want 25');
+      capP2.push(...banned(c1).map(b => 'the first run: ' + b));
+      const firstRight = same(trashedT(c1), CAP1);
+      const c2 = c1.rerun({ retentionDays: '90', advanceMin: 15 });
+      R185.push(c2);
+      const o2 = planOf(c2, 90);   // (on what the first run left: the hand-worked CAP2 only once it trashed CAP1)
+      if (firstRight && !same(o2, CAP2)) capP2.push('THE TEST\'S ORACLE DISAGREES (the next run): ' + diff(o2, CAP2));
+      if (c2.threw) capP2.push('the next run threw: ' + c2.threw);
+      if (!same(trashedT(c2), CAP2)) capP2.push('the next run trashed ' + diff(trashedT(c2), CAP2));
+      if (capNums(c2).some(x => x !== 0)) capP2.push('the next run: RETENTION_CAP ' + JSON.stringify(capNums(c2)));
+      capP2.push(...banned(c2).map(b => 'the next run: ' + b));
+      // the cap holds in the trash itself: planTrash_ handed maxFiles 1000 (a wrong caller) plans all 125
+      const c3 = run185(REAL, '90', { extra: capExtra, replacePlan: ({ args, planTrash }) => planTrash(args[0], args[1], args[2], 1000) });
+      const n3 = retTrashes(c3).filter(t => !t.isFolder).length;
+      if (!c3.planTrashCalls.some(c => (c.planned || []).includes(c3.idOf[GR]))) capP2.push('(maxFiles 1000: the plan does not hold all 125: proves nothing)');
+      if (n3 > 100) capP2.push('maxFiles 1000: ' + n3 + ' photos trashed in one run, want at most 100');
+      const notEarliest = trashedT(c3).filter(l => !CAP1.includes(l));
+      if (notEarliest.length) capP2.push('maxFiles 1000: trashed beyond the 100 earliest: ' + notEarliest.slice(0, 6).join(', '));
+      if (!capNums(c3).some(x => x > 0)) capP2.push('maxFiles 1000: no RETENTION_CAP line from the trash (the preview, capped 0, has none)');
+      capP2.push(...banned(c3).map(b => 'maxFiles 1000: ' + b));
+    }
+    check('more than 100 due: the 100 earliest trashed, RETENTION_CAP logged, the next run trashes the rest (125 due: 6 of the ' +
+          'hand-worked layout and the 94 oldest of 110 photos 141-149 days old in Latin America, with the four folders they ' +
+          'empty, RETENTION_CAP 25; 15 minutes later the other 25 and the four folders they empty, no RETENTION_CAP; with ' +
+          'planTrash_ handed maxFiles 1000 the trash still stops at 100, none beyond the 100 earliest, RETENTION_CAP logged)',
+          !capP2.length, capP2.slice(0, 6).join('; '));
+
+    // ---------------------------------------------------------------- failures
+    const failP = [];
+    const failT = run185(REAL, '90', { failTrashOf: [F.A5, F.T3, ZEBRA, F.S0] });
+    {
+      const want = minus(HAND, [F.A5, F.T3, ZEBRA, F.S0, BRIGHT, MANGO, KIWI, SW]);   // the folders still holding them stay
+      if (!failT.threw) failP.push('refused trashes: the run ends with no error');
+      if (!same(trashedT(failT), want)) failP.push('refused trashes: trashed ' + diff(trashedT(failT), want));
+      for (const rx of [/TRASH_FAILED Africa "Bright Stars 07-10-2026"/, /TRASH_FAILED Africa "Sunrise Club 07-01-2026"/,
+                        /TRASH_FAILED Template "Silver Wings 05-01-2026"/, /TRASH_FAILED Asia\b/]) {
+        if (!rx.test(said(failT))) failP.push('refused trashes: no line matching ' + rx);
+      }
+      const named = NESTED.filter(nm => said(failT).includes(nm)).concat(fileNamesIn(said(failT)));
+      if (named.length) failP.push('refused trashes: names ' + named.join(', '));
+      failP.push(...banned(failT).map(b => 'refused trashes: ' + b));
+      const BS = 'Bright Stars 2026-10-14';   // a My Drive subfolder whose photos' moves fail (MOVE_FAILED)
+      const failM = run185(REAL, '90', { failMoveOf: BS });
+      if (!/\bMOVE_FAILED\b/.test(failM.threw)) failP.push('a failed move: the run does not end with MOVE_FAILED: ' + (failM.threw || 'no error'));
+      if (!same(trashedT(failM), HAND)) failP.push('a failed move: trashed ' + diff(trashedT(failM), HAND));
+      const preview = retentionProblems(retentionView(failM.text, wantOf(failM, 90).tops), RET_WANT[90]);
+      if (preview.length) failP.push('a failed move: the would-trash lines: ' + preview.slice(0, 3).join('; '));
+      failP.push(...banned(failM).map(b => 'a failed move: ' + b));
+      const failMT = run185(REAL, '90', { failMoveOf: BS, failTrashOf: [F.S0] });
+      if (!/\bMOVE_FAILED\b/.test(failMT.threw) || !/\bTRASH_FAILED\b/.test(failMT.threw)) {
+        failP.push('a failed move and a refused trash: the error does not name both: ' + (failMT.threw || 'no error'));
+      }
+      if (!same(trashedT(failMT), minus(HAND, [F.S0]))) failP.push('a failed move and a refused trash: trashed ' + diff(trashedT(failMT), minus(HAND, [F.S0])));
+      const failMR = run185(REAL, '90', { failMoveOf: BS, failSearch: { kind: 'folders', page: 2 } });
+      if (!/\bMOVE_FAILED\b/.test(failMR.threw) || !/\bRETENTION_FAILED\b/.test(failMR.threw)) {
+        failP.push('a failed move and a failed retention read: the error does not name both: ' + (failMR.threw || 'no error'));
+      }
+      if (retTrashes(failMR).length) failP.push('a failed move and a failed retention read: trashed ' + trashedT(failMR).join(', '));
+    }
+    check('TRASH_FAILED names the region and the region subfolder only, the rest goes on, the run ends in an error; a ' +
+          'MOVE_FAILED does not skip retention (four trashes Drive refuses: a photo in a region subfolder, one three deep, a ' +
+          'nested folder, a photo directly in a region folder: each region subfolder on a TRASH_FAILED line, no file or nested ' +
+          'folder named, the folders still holding them kept, the rest of the plan trashed; with a MOVE_FAILED the plan is ' +
+          'previewed and trashed all the same; the error names both with a TRASH_FAILED, and with a RETENTION_FAILED, which ' +
+          'trashes nothing)', !failP.length, failP.slice(0, 6).join('; '));
+
+    // ---------------------------------------------------------------- the time budget
+    const trashBudget = r => /TIME_BUDGET[^\n]*\b(trash|retention)|\b(trash|retention)[^\n]*TIME_BUDGET/i.test(r.text);
+    const budgetP = [];
+    {
+      const cut = (tag, r) => {
+        const got = trashedT(r), late = r.ops.filter(o => o.t - r.t0 >= BUDGET);
+        if (!got.length) budgetP.push(tag + ': nothing trashed before the budget ran out');
+        if (got.length >= HAND.length) budgetP.push(tag + ': all ' + got.length + ' trashed; the budget never stopped it');
+        if (late.length) {
+          budgetP.push(tag + ': ' + late.length + ' Drive write(s) from 5 minutes on: ' +
+                       late.slice(0, 3).map(o => (o.label || o.fileId) + ' at ' + ((o.t - r.t0) / MIN) + ' min').join(', '));
+        }
+        if (!trashBudget(r)) budgetP.push(tag + ': no TIME_BUDGET line for the trash');
+        const extra = got.filter(l => !HAND.includes(l));
+        if (extra.length) budgetP.push(tag + ': trashed outside the plan: ' + extra.join(', '));
+        budgetP.push(...banned(r).map(b => tag + ': ' + b));
+        return got;
+      };
+      const b1 = run185(REAL, '90', { trashAdvanceMin: 2 });
+      const first = cut('2 minutes a trash', b1);
+      const b2 = b1.rerun({ retentionDays: '90', advanceMin: 15 });
+      R185.push(b2);
+      if (b2.threw) budgetP.push('the next run threw: ' + b2.threw);
+      const both = first.concat(trashedT(b2)).sort();
+      if (!same(both, HAND)) budgetP.push('the two runs together trashed ' + diff(both, HAND));
+      cut('half a minute a re-check read', run185(REAL, '90', { recheckAdvanceMin: 0.5 }));
+    }
+    check('past the run budget: no trash, TIME_BUDGET logged (the clock 2 minutes on per Shared Drive trash: part of the plan ' +
+          'trashed, no Drive write from 5 minutes on, TIME_BUDGET for the trash, the next run 15 minutes later trashes the ' +
+          'rest; half a minute per Drive read after the plan: the same)', !budgetP.length, budgetP.slice(0, 6).join('; '));
+
+    // ---------------------------------------------------------------- the log
+    const lateKids = recheckRuns[2];
+    const logP = logProblems(real, 90, { Africa: [7, 3], Asia: [5, 1], Template: [3, 3] }, TOPS_90).map(x => 'the real run: ' + x)
+      .concat(logProblems(lateKids, 90, { Africa: [7, 2], Asia: [5, 0], Template: [3, 0] },
+                          { 'Sunrise Club 07-01-2026': [3, 1], 'Bright Stars 07-10-2026': [2, 1], 'Morning Star Club': [1, 0],
+                            'Evening Lights 06-01-2026': [3, 0], 'Silver Wings 05-01-2026': [3, 0] }).map(x => 'late children: ' + x))
+      .concat(['Silver Wings 05-01-2026', 'Evening Lights 06-01-2026', 'Golden Wings 06-01-2026']
+        .filter(nm => !new RegExp('\\bnot trashed\\b[^\\n]*"' + nm + '"').test(lateKids.text))
+        .map(nm => 'late children: no `not trashed "' + nm + '"` line'))
+      .concat(logProblems(failT, 90, { Africa: [6, 1], Asia: [4, 1], Template: [2, 0] },
+                          { 'Sunrise Club 07-01-2026': [3, 0], 'Bright Stars 07-10-2026': [1, 0], 'Golden Wings 06-01-2026': [0, 1],
+                            'Morning Star Club': [1, 0], 'Evening Lights 06-01-2026': [3, 1], 'Silver Wings 05-01-2026': [2, 0] })
+        .map(x => 'refused trashes: ' + x));
+    for (const [tag, r] of [['the real run', real], ['late children', lateKids], ['refused trashes', failT]]) {
+      for (const nm of NESTED) if (said(r).includes(nm)) logP.push(tag + ': names "' + nm + '"');
+    }
+    check('retention logs carry counts and region subfolder names, never a file name or a nested folder\'s name (per region ' +
+          '`<Region>: … trashed N file(s) and M folder(s)`, per region subfolder `… under "<name>"`, the numbers what was ' +
+          'trashed: the whole plan; with late children what the re-checks left; with refused trashes what Drive took; `not ' +
+          'trashed "<region subfolder>"` where a re-check kept something; never "Nested Zebra Album", "Nested Kiwi Shots", ' +
+          '"Nested Mango Shots", "Nested Plum Shots" or a file)', !logP.length, logP.slice(0, 8).join('; '));
+
+    // ---------------------------------------------------------------- each trash re-checked just before it (R9)
+    /**
+     * In the order of the fake's reads and writes (seq): every Shared Drive trash sent (refused ones too) follows, since
+     * the Drive write before it, a Files.get of that item; a folder's also a listing `'<id>' in parents and trashed =
+     * false` (no mimeType or createdTime clause: files and folders) followed to its last page. The walk up its parents
+     * may be read once per folder per run (the ticket's Context): not checked here.
+     */
+    const freshProblems = r => {
+      const p = [], writes = r.ops.slice().sort((a, b) => a.seq - b.seq), chains = chainsOf(r);
+      let checked = 0;
+      for (const o of writes) {
+        if (o.op !== 'update' || o.kind !== 'trash' || !o.trash || !/^T:/.test(o.trash.label)) continue;
+        checked++;
+        const before = writes.filter(w => w.seq < o.seq), since = before.length ? before[before.length - 1].seq : 0;
+        const between = x => x.seq > since && x.seq < o.seq;
+        if (!r.reads.some(x => x.op === 'get' && x.fileId === o.fileId && between(x))) {
+          p.push(o.trash.label + ': no Files.get of it since the Drive write before its trash');
+        }
+        if (o.trash.isFolder && !chains.some(ch => ch[0].parents.includes(o.fileId) && untrashedOnly(ch[0]) && !ch[0].mimes.length &&
+                                                   !ch[0].created.length && between(ch[0]) && between(ch[ch.length - 1]) &&
+                                                   ch[ch.length - 1].last === true && !ch[ch.length - 1].failed)) {
+          p.push(o.trash.label + ': not re-listed (`trashed = false`, to its last page) since the Drive write before its trash');
+        }
+      }
+      return { p, checked };
+    };
+    const freshRuns = [real].concat(R185).map(r => [r, freshProblems(r)]);
+    const freshChecked = freshRuns.reduce((n, [, f]) => n + f.checked, 0);
+    const freshP = freshRuns.filter(([, f]) => f.p.length).map(([r, f]) => r.name + ' ' + JSON.stringify(r.opt.retentionDays) + ': ' +
+                                                                         f.p.slice(0, 3).join('; '));
+    check('…re-checks just before each trash, in the order of Drive\'s reads and writes: each of the ' + freshChecked + ' Shared ' +
+          'Drive trash(es) in this part\'s runs follows a Files.get of that item made since the Drive write before it, and each ' +
+          'folder\'s also a listing of it (`\'<id>\' in parents and trashed = false`, no other clause) to its last page made since ' +
+          'then (the walk up its parents may be read once per folder per run)',
+          freshChecked > 0 && !freshP.length, freshP.slice(0, 6).join(' | ') || (freshChecked ? '' : 'no trash on the Shared Drive in any run'));
+
+    // ---------------------------------------------------------------- the rules, and every run of this part
+    const okFile = { via: 'Drive.Files.update', id: 'x1', label: SUN + '/RET_X1.jpg', isFolder: false, role: 'file', structural: false,
+                     viaHelper: true, wasTrashed: false, children: 0, settled: true, t: 1000 * RDAY, driveId: DRIVE_ROOT_ID,
+                     region: 'Africa', createdMs: 800 * RDAY, parentCreatedMs: 850 * RDAY, liveChildren: 0, retentionDays: 90,
+                     planned: true, parentAsPlanned: true, regionAsPlanned: true };
+    const okFolder = Object.assign({}, okFile, { id: 'x2', label: SUN, isFolder: true, role: 'shared', children: 2, parentCreatedMs: 600 * RDAY });
+    const ok144 = { via: 'Drive.Files.update', id: 'x3', label: S('Asia', EMPTIED), isFolder: true, role: 'source-sub', structural: false,
+                    viaHelper: true, wasTrashed: false, children: 0, settled: true, t: 1000 * RDAY, driveId: undefined, region: null,
+                    createdMs: 999 * RDAY, parentCreatedMs: NaN, liveChildren: 0, retentionDays: null, planned: false,
+                    parentAsPlanned: false, regionAsPlanned: false };
+    const asRun = x => ({ calls: x.calls || [], trashes: x.trashes || [], ops: x.ops || [] });
+    const trashOp = t => ({ op: 'update', kind: 'trash', fileId: t.id, label: t.label, resource: { trashed: true },
+                            args: { supportsAllDrives: true }, trash: t });
+    const withTrash = t => asRun({ trashes: [t], ops: [trashOp(t)] });
+    const fileTrash = o => withTrash(Object.assign({}, okFile, o)), dirTrash = o => withTrash(Object.assign({}, okFolder, o));
+    const upd = (resource, args, more) => asRun({ ops: [Object.assign({ op: 'update', kind: 'other', fileId: 'x9', label: AF + 'RET_X9.jpg',
+                                                                        resource, args: Object.assign({ supportsAllDrives: true }, args) }, more)] });
+    const PARENTS = { addParents: 'p', removeParents: 'q' };
+    const MUST_BAN = ['Drive.Files.delete', 'Drive.Files.remove', 'Drive.Files.emptyTrash', 'Drive.Files.trash', 'Drive.Files.untrash',
+                      'Folder.setTrashed', 'File.setTrashed'].map(c => ['a call of ' + c, asRun({ calls: [c] })]).concat([
+      ['{trashed: true} with addParents and removeParents', upd({ trashed: true }, PARENTS)],
+      ['{trashed: true} with another key', upd({ trashed: true, name: 'x' }, {})],
+      ['{trashed: false} of a file a person trashed', upd({ trashed: false }, PARENTS, { kind: 'rescue', wasTrashed: true, wasExplicit: true, fromTrashedSourceSub: true })],
+      ['{trashed: false} of a Shared Drive item', upd({ trashed: false }, PARENTS, { kind: 'rescue', wasTrashed: true, wasExplicit: false, fromTrashedSourceSub: false })],
+      ['{trashed: false} of a file not in the trash', upd({ trashed: false }, PARENTS, { kind: 'rescue', wasTrashed: false, wasExplicit: false, fromTrashedSourceSub: true })],
+      ['a trash of a configured folder', dirTrash({ structural: true })],
+      ['a trash outside the region folders', fileTrash({ region: null })],
+      ['a trash in My Drive but #144\'s', fileTrash({ driveId: undefined })],
+      ['a trash of a photo before its due moment (its folder too young)', fileTrash({ parentCreatedMs: 950 * RDAY })],
+      ['a trash of a photo with no date', fileTrash({ createdMs: NaN })],
+      ['a trash of a folder with an untrashed child', dirTrash({ liveChildren: 1 })],
+      ['a trash of a folder younger than RETENTION_DAYS', dirTrash({ createdMs: 950 * RDAY })],
+      ['a trash with retention off', fileTrash({ retentionDays: null })],
+      ['a trash of something planTrash_ did not plan', fileTrash({ planned: false, parentAsPlanned: false, regionAsPlanned: false })],
+      ['a trash of a photo moved since the plan', fileTrash({ parentAsPlanned: false })],
+      ['a trash of an item now in another region', fileTrash({ regionAsPlanned: false })],
+      ['a trash of an item already in the trash', fileTrash({ wasTrashed: true })],
+      ['a trash outside ' + TRASH_HELPER, fileTrash({ viaHelper: false })],
+      ['a trash by DriveApp setTrashed', asRun({ calls: ['Folder.setTrashed'], trashes: [Object.assign({}, okFolder, { via: 'DriveApp.setTrashed' })] })],
+    ]);
+    const MUST_ALLOW = [['a due Shared Drive photo', withTrash(okFile)], ['an emptied old Shared Drive folder (its photos in the trash)', withTrash(okFolder)],
+                        ['#144: an emptied, settled source subfolder', withTrash(ok144)], ['a move', upd({}, PARENTS, { kind: 'move' })],
+                        ['#144\'s rescue', upd({ trashed: false }, PARENTS, { kind: 'rescue', wasTrashed: true, wasExplicit: false, fromTrashedSourceSub: true })]];
+    const rulesP = MUST_BAN.filter(([, x]) => !banned(x).length).map(([w]) => 'not banned: ' + w)
+      .concat(MUST_ALLOW.filter(([, x]) => banned(x).length).map(([w, x]) => 'banned: ' + w + ' (' + banned(x).join('; ') + ')'));
+    const runsP = R185.flatMap(r => banned(r).concat(r.calls.filter(NEVER).map(c => 'called ' + c)).map(b => r.name + ': ' + b));
+    const trashing = R185.filter(r => retTrashes(r).length).length;
+    check('forbidden calls (the union with #144): delete, emptyTrash, setTrashed, a trash mixed with parent changes or other ' +
+          'keys, an untrash outside the rescue (the rules ban these, Files.trash and untrash, and every Shared Drive trash ' +
+          'retention\'s entry does not allow: a configured folder, outside the region folders, My Drive, not yet due, no date, ' +
+          'a folder with an untrashed child or too young, retention off, not planned, moved or in another region since, ' +
+          'already trashed, outside ' + TRASH_HELPER + ', by setTrashed; they allow #144\'s removal and rescue, a move, a due ' +
+          'photo and an emptied old folder; across this part\'s ' + R185.length + ' runs, ' + trashing + ' of them trashing on ' +
+          'the Shared Drive, nothing banned)',
+          !rulesP.length && trashing > 0 && !runsP.length,
+          rulesP.concat([...new Set(runsP)]).slice(0, 8).join('; ') || (trashing ? '' : 'no run trashed anything on the Shared Drive'));
+  }
+
   // ---------------------------------------------------------------- `complete`, in every run that plans
   const configuredIds = new Set(Object.values(TARGET_IDS).concat(DRIVE_ROOT_ID));   // complete plays no part for these
   const planning = RUNS.slice(FROM).filter(r => r.planTrashCalls.length);
@@ -3722,11 +4575,12 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
         'file, #144\'s listings of My Drive included; ' + RUNS.length + ' runs)',
         mine.some(r => retentionReads(r).length > 0) && !flagless.length,
         [...new Set(flagless)].slice(0, 6).join('; ') || (mine.some(r => retentionReads(r).length > 0) ? '' : 'no retention search in any run'));
-  const bannedHere = mine.flatMap(r => banned(r).concat(sharedWrites(r)).map(b => r.name + ': ' + b));
+  const bannedHere = mine.flatMap(r => banned(r).concat(r.name === PREVIEW ? sharedWrites(r) : sharedNonTrash(r)).map(b => r.name + ': ' + b));
   const previewed = mine.filter(r => r.name === REAL && /\bwould trash [1-9]/.test(r.text)).length;
-  check('the existing forbidden-call rules hold unchanged across this section\'s ' + mine.length + ' runs (#144\'s TRASH_RULES, no ' +
-        'Shared Drive allowance): real runs that preview would-trash counts (' + previewed + ') trash and change nothing on the ' +
-        'Shared Drive, and nothing banned', previewed > 0 && !bannedHere.length, [...new Set(bannedHere)].slice(0, 6).join('; '));
+  check('the forbidden-call rules (#144\'s TRASH_RULES and UPDATE_RULES, with retention\'s allowance of #185) hold across this ' +
+        'section\'s ' + mine.length + ' runs: real runs that preview would-trash counts (' + previewed + ') write nothing on the ' +
+        'Shared Drive but a trash TRASH_RULES allows, the dry runs nothing at all, and nothing banned',
+        previewed > 0 && !bannedHere.length, [...new Set(bannedHere)].slice(0, 6).join('; '));
 }
 
 console.log('\ndrive-sync/ — the one trash helper, ' + TRASH_HELPER + '(id, protectedIds) (#144; #185 reuses it)');
