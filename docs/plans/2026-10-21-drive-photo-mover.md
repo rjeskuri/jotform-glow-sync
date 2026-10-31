@@ -37,6 +37,10 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
   manifest enables the service, the `drive` scope covers it); a merge moves files the same way.
   The emptied subfolder stays in My Drive until a later run removes it (#144, below), and a
   move cut short by a failure or the time budget is finished by a later run as a merge.
+  2026-10-31 (epic #179): the moved photos do not stay on the Shared Drive for good: with the
+  Script Property `RETENTION_DAYS` set they go to its trash 90 days after they arrive, and the
+  folders they empty below the region folders with them
+  ([retention plan](2026-10-30-photo-retention.md)).
 - **What moves** (`planMoves_` in `drive-sync/Plan.gs`, pure, tested offline by
   `test/drive_sync_test.js`):
   - only folders named exactly `Attendance photos - <Region>`, region one of Africa, Asia,
@@ -108,7 +112,13 @@ something: `drive-sync/`, a standalone Apps Script project owned by Ryan's compa
   it, anything on the Shared Drive, a permanent delete or an emptied trash: the one trash is an
   emptied source subfolder's (above; the test forbids every other call, as rules a later ticket
   can extend). Who sees the photos is the Shared Drive's membership: the named list (the CEO and
-  Ryan), never "anyone with the link".
+  Ryan), never "anyone with the link". 2026-10-31 (epic #179): "never a file trashed … anything
+  on the Shared Drive" no longer holds there once `RETENTION_DAYS` is set: retention trashes the
+  photos under the region folders 90 days after they arrive, and the folders they empty below
+  them, through the same `moveToTrash_`; the test's allowances are #144's and retention's. Still
+  never a region folder, the Shared Drive's root, anything outside the region folders, a
+  permanent delete or an emptied trash ([retention plan](2026-10-30-photo-retention.md); RUNBOOK
+  "Photo mover").
 - **Entry points**: `previewMoves` (the dry run: reads, plans, logs, changes nothing),
   `moveSettledPhotos` (the real run; the trigger's handler), `installTrigger` (every 15 minutes,
   once), `removeTrigger` (stops it).
