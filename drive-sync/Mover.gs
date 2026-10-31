@@ -172,9 +172,10 @@ function runMover_(apply) {
     logPlan_(plan, config, apply, read.inTrash);
     if (days === null) console.log('retention off (RETENTION_DAYS not set)');
     let moveError = null;
+    const movedInto = [];   // #191: the Shared Drive folders carryOut_ made or merged files into, kept even when it throws
     if (apply) {
       try {
-        carryOut_(plan, started + RUN_BUDGET_MS, read, protect);
+        carryOut_(plan, started + RUN_BUDGET_MS, read, protect, movedInto);
       } catch (e) {
         moveError = e;
       }
@@ -182,7 +183,7 @@ function runMover_(apply) {
     const retention = days === null ? null : previewRetention_(config, driveId, days, started + RUN_BUDGET_MS, apply);
     const failures = retention && retention.failure ? [retention.failure] : [];
     if (apply && retention && retention.planned) {
-      const trashFailure = trashRetention_(retention.planned, config, driveId, started + RUN_BUDGET_MS, protect);
+      const trashFailure = trashRetention_(retention.planned, config, driveId, started + RUN_BUDGET_MS, protect, movedInto);
       if (trashFailure) failures.push(trashFailure);
     }
     if (moveError) throw failures.length ? new Error(errorText_(moveError) + '; ' + failures.join('; ')) : moveError;
@@ -429,8 +430,10 @@ function logPlan_(plan, config, apply, inTrash) {
  * moveToTrash_ with `protect`; one that changed since the planner read it stays, logged by name.
  * Every failure is logged by code, region and folder name, the rest of the run goes on, then one
  * error. A move whose folder exists but whose files did not all move is a merge on the next run.
+ * `movedInto` (#191) gets the id of each Shared Drive folder made, and each merged into, before its
+ * first file moves (an array the caller keeps, so a failure's error does not lose it).
  */
-function carryOut_(plan, deadline, read, protect) {
+function carryOut_(plan, deadline, read, protect, movedInto) {
   const failed = [], left = [];
   let deferred = 0, moved = 0, filesMoved = 0, filesMerged = 0, rescued = 0, removed = 0;
   const late = () => Date.now() > deadline;
@@ -445,6 +448,7 @@ function carryOut_(plan, deadline, read, protect) {
                   '(the next run merges if it exists): ' + errorText_(e));
       continue;
     }
+    movedInto.push(made.id);
     const r = moveFiles_(m, made.id, 'MOVE_FAILED', late, failed, fromTrash(m));
     filesMoved += r.moved;
     rescued += r.rescued;
@@ -454,6 +458,7 @@ function carryOut_(plan, deadline, read, protect) {
   for (const m of plan.merges) {
     if (!m.files.length) continue;
     if (late()) { deferred++; continue; }
+    movedInto.push(m.into);
     const r = moveFiles_(m, m.into, 'MERGE_FAILED', late, failed, fromTrash(m));
     filesMerged += r.moved;
     rescued += r.rescued;
@@ -696,6 +701,9 @@ function logRetention_(trash, config, days, foldersById) {
  *   a file     the later of its own and its folder's createdTime still at or before the cutoff;
  *   a folder   its own createdTime at or before the cutoff, and re-listed (`trashed = false`, files and folders) to its
  *              last page with nothing in it.
+ * Kept this run, before any Drive call for it (#191): each folder in `movedInto` (carryOut_ made it or merged files
+ * into it) and every folder above it up to its region folder, by the read's tree; Drive's search may not yet show a
+ * photo just moved in, at the read or at the re-list. Counted like a failed re-check.
  * A failed re-check skips the item without an error (`not trashed "<region subfolder>"`); a Drive error is
  * `TRASH_FAILED <Region> "<region subfolder>"` (no subfolder for a photo directly in the region folder) and the rest
  * goes on; a folder still holding what was not trashed fails its re-list and stays. The deadline is checked before
@@ -703,13 +711,19 @@ function logRetention_(trash, config, days, foldersById) {
  * something planned `<Region>: … trashed N file(s) and M folder(s)`, then per region subfolder, by name only (R14).
  * Returns the failure the run ends with, '' when none.
  */
-function trashRetention_(planned, config, driveId, deadline, protect) {
+function trashRetention_(planned, config, driveId, deadline, protect, movedInto) {
   const trash = planned.trash, drive = planned.drive, days = planned.days;
   const cutoffMs = planned.now.getTime() - days * 24 * 60 * 60 * 1000;
   const tree = retentionTree_(drive, planned.now, days);
   const never = new Set(configuredFolderIds_().all.concat(protect, driveId));
   const regionFolder = new Map(config.map(c => [c.region, c.target]));
   const readFiles = new Map(drive.files.map(f => [f.id, f])), readFolders = new Map(drive.folders.map(d => [d.id, d]));
+  const keptNow = new Set();   // #191: the folders this run moved files into and those above them, as read
+  for (const id of movedInto) {
+    for (let at = id; readFolders.has(at) && !tree.guarded(at) && !keptNow.has(at); at = readFolders.get(at).parent) {
+      keptNow.add(at);
+    }
+  }
   const queue = [], refused = new Map();
   const place = (e, isFolder) => {
     const id = e && typeof e === 'object' ? e.id : null;
@@ -802,6 +816,10 @@ function trashRetention_(planned, config, driveId, deadline, protect) {
   for (let i = 0; i < order.length; i++) {
     const e = order[i];
     if (late()) { left = order.length - i; break; }
+    if (keptNow.has(e.id)) {   // #191: a folder, so under a region subfolder (or one itself)
+      topOf(e).kept++;
+      continue;
+    }
     try {
       const why = whyNot(e);
       if (late()) { left = order.length - i; break; }
@@ -837,7 +855,8 @@ function trashRetention_(planned, config, driveId, deadline, protect) {
     for (const n of tops) {
       if (n.kept) {
         console.log('  not trashed "' + n.name + '": ' + n.kept + ' item(s) kept by the re-check (moved, trashed or re-dated ' +
-                    'since the read, or a folder not empty); the next run looks again');
+                    'since the read, a folder not empty, or a folder this run moved photos into or one above it); the next ' +
+                    'run looks again');
       }
     }
     if (t.keptDirect) {

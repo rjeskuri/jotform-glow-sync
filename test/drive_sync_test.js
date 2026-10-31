@@ -1871,7 +1871,7 @@ const TWIN_INTO = 'T:' + TWIN_REGION + '/' + TWIN;
 const FILE_STEMS = ['IMG_4471', 'IMG_4472', 'IMG_4480', 'IMG_4590', 'IMG_4601', 'IMG_4701', 'IMG_4702', 'IMG_4703', 'IMG_5501',
                     'IMG_5502', 'IMG_6001', 'IMG_6101', 'IMG_6201', 'IMG_6301', 'IMG_6400', 'IMG_6401', 'IMG_6402', 'IMG_6501',
                     'IMG_7100', 'IMG_7101', 'IMG_7201', 'IMG_7301', 'IMG_7777', 'IMG_8101', 'IMG_8102', 'IMG_9000', 'receipt',
-                    'RET_', 'IMG_8201']; // #182's Shared Drive photos (RET_ITEMS); #185's merged photo
+                    'RET_', 'IMG_8201', 'IMG_8202']; // #182's Shared Drive photos (RET_ITEMS); #185's and #191's merged photos
 const S = (region, name, f) => 'S:' + region + '/' + name + (f ? '/' + f : '');
 // the real run (#132): a folder of each moved subfolder's name made ONCE in its region folder, each of its files moved
 // into it; the merges' new photos into the folder already there (no folder made for a merge); #144: the photos in
@@ -2180,6 +2180,18 @@ function parseDriveQuery(q) {
  * [[region, name, files]]: more My Drive subfolders, as in FAKE_SOURCES. opt.staleIndexOf (a Shared Drive folder's
  * label): the first Files.list naming it in parents misses what this run moved into it (Drive's search index behind
  * its writes); later listings see it.
+ *
+ * #191, Drive's search index behind a merge for the whole run. opt.staleIndexAlways [Shared Drive folder labels]: every
+ * search this run (any Files.list, whatever its q, and DriveApp's doors onto a folder's files) misses the files this
+ * run moved into one of those folders, at the read and at the re-check alike; Files.get by id sees them where they
+ * are; the next run's searches see them (the index caught up). staleHits records each search that missed one
+ * ({folder: its label, afterPlan: planTrash_ had returned}). opt.beforeRetentionRead [[what, label, x]]: opt.afterPlan's
+ * changes, made right before the run's first drive-wide folder search (the retention read's first step: after the
+ * moves, before the Shared Drive is read). opt.unlistedAlways [labels]: Drive's search at its most contrary: no
+ * `'<parent>' in parents` search this run, nor DriveApp's doors onto the parent, returns these items; a drive-wide
+ * search still finds them (with their parents) and Files.get sees them. opt.moveKeepsModified [folder labels]: a move
+ * into one of them leaves its modifiedTime as it was (Drive need not bump a folder's when a file lands in it).
+ * planSeq: the `seq` of the last Drive read or write before the run's first planTrash_ returned (null before).
  */
 function fakeEnv(mode, opt) {
   opt = opt || {};
@@ -2187,7 +2199,8 @@ function fakeEnv(mode, opt) {
   const planTrashCalls = [];
   // #185: what planTrash_ planned this run (id -> {parent, region}), whether it has returned, whether opt.afterPlan ran;
   // the ids this run moved (opt.staleIndexOf)
-  const planState = { planned: false, after: false, midDone: false, ids: new Map() }, movedIn = new Set(), stale = { used: false };
+  const planState = { planned: false, after: false, midDone: false, beforeRead: false, planSeq: null, ids: new Map() },
+        movedIn = new Set(), stale = { used: false }, staleHits = [];   // #191: beforeRead, planSeq, staleHits
   // #185: every Drive read and write gets the next number (`seq`: their order, the clock aside); the opt.midTrash changes
   // made, and how many Shared Drive trashes (photos, folders) this run has made
   const order = { seq: 0, files: 0, folders: 0 }, midApplied = [];
@@ -2213,6 +2226,15 @@ function fakeEnv(mode, opt) {
     byId[m.id] = self;
     if (!own(byLabel, m.label)) { byLabel[m.label] = self; idOf[m.label] = m.id; }
   };
+  /** #191, opt.staleIndexAlways: true (and recorded) for an item this run moved into one of those folders: no search finds it. */
+  const staleHit = mm => {
+    const lbls = [].concat(opt.staleIndexAlways || []);
+    if (!lbls.length || !mm || !movedIn.has(mm.id) || !lbls.some(l => idOf[l] === mm.parent)) return false;
+    staleHits.push({ folder: meta.get(byId[mm.parent]).label, afterPlan: planState.planned });
+    return true;
+  };
+  /** #191, opt.unlistedAlways: true for an item no listing of its parent returns this run. */
+  const unlisted = x => [].concat(opt.unlistedAlways || []).includes((meta.get(x) || {}).label);
   // DriveApp's moveTo: into a Shared Drive folder it fails as the live one did (#132)
   const moveTo = (self, dest) => {
     attempted.push(label(self));
@@ -2329,7 +2351,7 @@ function fakeEnv(mode, opt) {
     m.kids.push(k);
   };
   const foldersOf = m => {   // a listing of a folder's own folders (the snapshot is what was there before)
-    const snap = m.kids.slice();
+    const snap = m.kids.filter(k => !unlisted(k));   // (#191: all of them, unless opt.unlistedAlways says otherwise)
     m.seen.folders = true;
     lateFolder(m);
     return snap;
@@ -2343,7 +2365,7 @@ function fakeEnv(mode, opt) {
                 seen: { files: false, folders: false } };
     m.listing = () => {
       listedAll[lbl] = (listedAll[lbl] || 0) + 1;
-      return isSourceSub ? listed(m) : files.slice();
+      return isSourceSub ? listed(m) : files.filter(f => !staleHit(meta.get(f)) && !unlisted(f));   // #191: the index behind
     };
     const self = wrap('Folder', {
       getId: () => id, getName: () => name, getFolders: () => iter(foldersOf(m)),
@@ -2469,6 +2491,11 @@ function fakeEnv(mode, opt) {
     } else {
       if (typeof args.q !== 'string' || !args.q.trim()) throw new Error('Files.list: no q (fake: the mover never lists every file)');
       const parsed = parseDriveQuery(args.q);
+      if (opt.beforeRetentionRead && !planState.beforeRead && !parsed.parents.length && !parsed.created.length &&
+          parsed.mimes.some(x => x.op === '=' && x.value === DRIVE_FOLDER_MIME)) {   // #191: a change before the retention read
+        planState.beforeRead = true;
+        for (const step of opt.beforeRetentionRead) mutate(step);
+      }
       // #182: corpora as Drive takes it: 'drive' needs a driveId and returns that drive's items only
       if (args.corpora !== undefined && args.corpora !== 'drive' && args.corpora !== 'user') {
         throw new Error('Files.list: corpora ' + JSON.stringify(args.corpora) + ' (fake knows drive and user)');
@@ -2488,7 +2515,7 @@ function fakeEnv(mode, opt) {
           for (const nm of parsed.names) lookups.push(pm.label + ' getFoldersByName ' + nm);
           const kidsSnap = pm.kids.slice(), filesSnap = pm.listing();
           foldersOf(pm);
-          let snap = kidsSnap.concat(filesSnap);
+          let snap = kidsSnap.concat(filesSnap).filter(x => !unlisted(x));   // #191: opt.unlistedAlways
           if (opt.staleIndexOf && idOf[opt.staleIndexOf] === pid && !stale.used) {   // #185: the index behind this run's moves
             stale.used = true;
             snap = snap.filter(x => !movedIn.has(meta.get(x).id));
@@ -2497,7 +2524,8 @@ function fakeEnv(mode, opt) {
         }
       } else candidates = Object.values(byId).filter(x => meta.get(x).id !== DRIVE_ROOT_ID);   // a drive's root is no search result
       results = candidates.map(x => meta.get(x)).filter(m => (everyDrive || !m.label.startsWith('T:')) &&
-                                                             (args.corpora !== 'drive' || driveOf(m) === args.driveId) && parsed.test(m))
+                                                             (args.corpora !== 'drive' || driveOf(m) === args.driveId) && parsed.test(m) &&
+                                                             !staleHit(m))   // #191: the index behind a merge, any search
         .map(resourceOf);
       offset = 0;
       const labels = parsed.parents.map(pid => (byId[pid] ? meta.get(byId[pid]).label : ''));
@@ -2607,7 +2635,7 @@ function fakeEnv(mode, opt) {
     meta.get(dest).files.push(item);
     m.parent = meta.get(dest).id;
     from.updatedAt = clock.t;
-    meta.get(dest).updatedAt = clock.t;
+    if (![].concat(opt.moveKeepsModified || []).includes(meta.get(dest).label)) meta.get(dest).updatedAt = clock.t;   // #191
     if (kind === 'rescue' && !opt.rescueStaysTrashed) Object.assign(m, { trashed: false, explicitlyTrashed: false });
     moved.push(m.label + ' -> ' + label(dest));
     movedIn.add(m.id);
@@ -2709,6 +2737,7 @@ function fakeEnv(mode, opt) {
     }
     if (!planState.after) {
       planState.after = true;
+      planState.planSeq = order.seq;   // #191
       for (const step of opt.afterPlan || []) mutate(step);
     }
     return opt.replacePlan ? opt.replacePlan({ idOf, Date: vm.runInContext('Date', c), now: clock.t, args: [...args],
@@ -2736,10 +2765,11 @@ function fakeEnv(mode, opt) {
     }
   };
   const newRun = () => {   // the trigger's next run on the same fake Drive
-    Object.assign(planState, { planned: false, after: false, midDone: false });
+    Object.assign(planState, { planned: false, after: false, midDone: false, beforeRead: false, planSeq: null });
     planState.ids.clear();
     movedIn.clear();
     stale.used = false;
+    staleHits.length = 0;
     Object.assign(order, { files: 0, folders: 0 });
     midApplied.length = 0;
   };
@@ -2815,7 +2845,8 @@ function fakeEnv(mode, opt) {
   });
   const labelOf = id => (byId[id] ? meta.get(byId[id]).label : own(gone, id) ? gone[id] : null);
   return { calls, moved, attempted, created, ops, reads, trashes, logs, read, readCount, firstListing, idOf, listedAll, lookups, t0,
-           globals, install, state, advance, helper, model, labelOf, planTrashCalls, onPlanned, newRun, midApplied };
+           globals, install, state, advance, helper, model, labelOf, planTrashCalls, onPlanned, newRun, midApplied, staleHits,
+           planSeq: () => planState.planSeq };
 }
 
 const violations = calls => calls.filter(c => {
@@ -2883,14 +2914,14 @@ function runEntry(name, mode, opt) {
                   lookups: env.lookups.slice(), idOf: env.idOf, state: env.state, t0: env.t0, rerun,
                   planTrashCalls: env.planTrashCalls.slice(), model: env.model, labelOf: env.labelOf, opt: Object.assign({}, opt),
                   modelBefore: () => env.model().map(m => (newly.has(m.id) ? Object.assign({}, m, { trashed: false }) : m)),
-                  midApplied: env.midApplied.slice() };
+                  midApplied: env.midApplied.slice(), staleHits: env.staleHits.slice(), planSeq: env.planSeq() };
     RUNS.push(res);
     return res;
   };
   const rerun = next => {
     for (const k of Object.keys(opt)) delete opt[k];
     Object.assign(opt, next || {});
-    env.newRun();
+    env.newRun();   // (#191: staleHits too)
     for (const a of [env.calls, env.moved, env.attempted, env.created, env.ops, env.reads, env.trashes, env.logs, env.lookups,
                      env.helper.calls, env.planTrashCalls]) a.length = 0;
     env.read.clear();
@@ -4319,6 +4350,266 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
           'person trashed is never sent a trash; changes after the first trash, after the 5th photo trash and after the first ' +
           'folder trash are seen too; nothing banned)',
           !recheckP.length, recheckP.slice(0, 13).join(' | '));
+
+    // ---------------------------------------------------------------- #191: the folders this run merged into
+    /**
+     * #191 (epic #179; the low finding on PR #190): a young photo this run merged into an old Shared Drive folder, Drive's
+     * search index behind the merge at the read's listing AND at the re-list just before the trash (opt.staleIndexAlways:
+     * every search this run misses it, Files.get sees it), so the folder looks emptied both times. That folder (that one:
+     * old empty folders of its name elsewhere, in another region or nested, still go), and every planned folder above it up
+     * to (never) the region folder, and nothing else (old empty folders beside it, beside a folder above it or inside it,
+     * in the same region subfolder, still go), is not trashed nor sent a trash that run, whatever Drive's search returns: also when
+     * no listing of the folders above it returns the one below (opt.unlistedAlways), and when the merge left the folder's
+     * modifiedTime as it was (opt.moveKeepsModified). Each is skipped before any Drive call for it: once planTrash_ has
+     * returned, no listing names it, no write touches it, and no Files.get reads it but the walk up of a planned item below
+     * it. The rest of the plan is trashed (other due folders of the same region included); no error, no failure; `not
+     * trashed "<region subfolder>"` logged, the `trashed` counts without them, no file's name and no nested folder's on a
+     * retention line. The next run, the index caught up, keeps it: the photo is young. The dry run on the same drive writes
+     * nothing and previews as ever. Not repeated here: the index behind at the read only (RECHECK's stale row: the re-list
+     * sees the photo) or at the re-list only (the read sees the photo: the plan never holds the folder, RECHECK's merge row).
+     */
+    {
+      const EVE_MERGED = 'S:Asia/Evening Lights 06-01-2026/IMG_8202.jpg';
+      const EVE_SOURCES = [['Asia', 'Evening Lights 06-01-2026', [['IMG_8202.jpg', 3200, OLD]]]];
+      // decoys: old, empty, due folders named as the merged-into one, in Asia's region folder and nested in an Africa one
+      const ASIA_GW = AS + 'Golden Wings 06-01-2026', SUN_GW = SUN + '/Golden Wings 06-01-2026';
+      // decoys beside and below the kept chain, in its region subfolder: old, empty, due folders that still go (the
+      // merged-into folder and the folders above it are kept, nothing else): beside it in the folder above it (FIG in
+      // "Bright Stars 07-10-2026", LIME in "Nested Mango Shots"), beside a folder above it (PEAR in "Silver Wings
+      // 05-01-2026", beside "Nested Kiwi Shots"), inside it (DATE in "Golden Wings 06-01-2026"); ages varied
+      const FIG = BRIGHT + '/Nested Fig Album', LIME = MANGO + '/Nested Lime Shots', PEAR = SW + '/Nested Pear Shots',
+            DATE = GOLDEN + '/Nested Date Album';
+      const DECOY_NAMES = ['Nested Fig Album', 'Nested Lime Shots', 'Nested Pear Shots', 'Nested Date Album'];
+      const DEEP_EXTRA = [[PEAR, 160 * RDAY], [LIME, 95 * RDAY], [DATE, 130 * RDAY]];
+      // decoys holding due photos (they go with them), and folders above the merged one holding no photo of their own
+      // (kept all the same): FIG holds RET_F1 (and, in the blind nested run, "Bright Stars 07-10-2026"'s own two photos,
+      // moved into it before the read: that folder then holds only FIG and the merged-into folder); in both three-deep runs
+      // "Nested Kiwi Shots"'s photo RET_T2 is moved into PEAR before the read, so it holds only "Nested Mango Shots"
+      const F1 = FIG + '/RET_F1.jpg', FIG_EXTRA = [[FIG, 120 * RDAY], [F1, 140 * RDAY]];
+      const N ={ sun: 'Sunrise Club 07-01-2026', bright: 'Bright Stars 07-10-2026', golden: 'Golden Wings 06-01-2026',
+                  msc: 'Morning Star Club', eve: 'Evening Lights 06-01-2026', sw: 'Silver Wings 05-01-2026' };
+      const tops90 = over => Object.assign({}, TOPS_90, over);
+
+      // the fake: the index behind the merge at every search of the run, Files.get not; the next run's searches see it;
+      // opt.unlistedAlways and opt.moveKeepsModified
+      {
+        const env = fakeEnv('ids', { retentionDays: '90', staleIndexAlways: [GOLDEN], unlistedAlways: [ZEBRA],
+                                     moveKeepsModified: [GOLDEN] });
+        const D = env.globals.Drive.Files, all = { supportsAllDrives: true, includeItemsFromAllDrives: true };
+        const id = l => env.idOf[l];
+        const every = q => {
+          const got = [];
+          let tok = null;
+          do {
+            const pg = D.list(Object.assign({ q, fields: 'nextPageToken, files(id)', corpora: 'drive', driveId: DRIVE_ROOT_ID }, all,
+                                            tok ? { pageToken: tok } : {}));
+            got.push(...(pg.files || []).map(f => f.id));
+            tok = pg.nextPageToken || null;
+          } while (tok);
+          return got;
+        };
+        const modified = l => D.get(id(l), { fields: 'modifiedTime', supportsAllDrives: true }).modifiedTime;
+        const SRC = S('Africa', 'Bright Stars 2026-10-14'), PHOTO = SRC + '/IMG_4471.jpg';
+        const before = { golden: modified(GOLDEN), src: modified(SRC) };
+        env.advance(1);   // (so a bumped modifiedTime differs)
+        D.update({}, id(PHOTO), null, { addParents: id(GOLDEN), removeParents: id(SRC), supportsAllDrives: true });
+        const inGolden = "'" + id(GOLDEN) + "' in parents and trashed = false";
+        const first = every(inGolden), second = every(inGolden);
+        const wide = every("mimeType != '" + DRIVE_FOLDER_MIME + "' and trashed = false");
+        const app = [];
+        for (const it = env.globals.DriveApp.getFolderById(id(GOLDEN)).getFiles(); it.hasNext();) app.push(it.next().getId());
+        const got = D.get(id(PHOTO), { fields: 'parents, trashed', supportsAllDrives: true });
+        const hits = env.staleHits.length;
+        const inSun = every("'" + id(SUN) + "' in parents and trashed = false");
+        const sunApp = [];
+        for (const it = env.globals.DriveApp.getFolderById(id(SUN)).getFolders(); it.hasNext();) sunApp.push(it.next().getId());
+        const allFolders = every("mimeType = '" + DRIVE_FOLDER_MIME + "' and trashed = false");
+        const zebra = D.get(id(ZEBRA), { fields: 'parents, trashed', supportsAllDrives: true });
+        const kept = { golden: modified(GOLDEN), src: modified(SRC) };
+        env.newRun();
+        const after = every(inGolden);
+        check('the fake (#191): with staleIndexAlways, every search of the run misses a photo the run moved into that folder ' +
+              '(its listing twice, a drive-wide search, DriveApp\'s getFiles), Files.get sees it there, the next run\'s listing ' +
+              'finds it; with unlistedAlways a folder is in no listing of its parent (Files.list, DriveApp\'s getFolders) but in ' +
+              'the drive-wide folder search, Files.get giving its parent; with moveKeepsModified the move leaves that folder\'s ' +
+              'modifiedTime (the source subfolder\'s still changes)',
+              !first.includes(id(PHOTO)) && !second.includes(id(PHOTO)) && !wide.includes(id(PHOTO)) && wide.includes(id(F.A5)) &&
+              !app.includes(id(PHOTO)) && same(got.parents, [id(GOLDEN)]) && got.trashed === false && hits >= 4 &&
+              after.includes(id(PHOTO)) && !inSun.includes(id(ZEBRA)) && inSun.includes(id(F.A1)) && !sunApp.includes(id(ZEBRA)) &&
+              allFolders.includes(id(ZEBRA)) && same(zebra.parents, [id(SUN)]) && zebra.trashed === false &&
+              kept.golden === before.golden && kept.src !== before.src,
+              JSON.stringify({ first, second, wideHasIt: wide.includes(id(PHOTO)), app, got, hits, after,
+                               zebraInSun: inSun.includes(id(ZEBRA)), sunApp: sunApp.length, zebra, before, kept }));
+      }
+
+      /**
+       * Each run: opt; plan, what the plan holds (as the read sees it); kept, never trashed nor sent a trash this run (the
+       * rest of the plan is trashed); photos, [merged photo, the folder it must still be in]; regions / tops, the `trashed`
+       * counts [files, folders] per region and per region subfolder; notTrashed, the region subfolders on a `not trashed`
+       * line; hidden, the merged-into folder's name when it is nested (on no retention line).
+       */
+      const nested = { plan: HAND.concat(FIG, F1).sort(), regions: { Africa: [8, 2], Asia: [5, 1], Template: [3, 3] },
+                       tops: { [N.sun]: [3, 1], [N.bright]: [3, 1], [N.msc]: [1, 0], [N.eve]: [3, 1], [N.sw]: [3, 3] },
+                       notTrashed: [N.bright], hidden: [N.golden] };
+      const deep = { plan: HAND.concat(PEAR, LIME, DATE).sort(), regions: { Africa: [7, 2], Asia: [5, 1], Template: [3, 3] },
+                     tops: { [N.sun]: [3, 1], [N.bright]: [2, 1], [N.msc]: [1, 0], [N.eve]: [3, 1], [N.sw]: [3, 3] },
+                     notTrashed: [N.sw], hidden: [N.golden] };
+      const ROWS = [
+        { what: 'a young photo merged into the old emptied "Golden Wings 06-01-2026" (Africa; the merge leaves its modifiedTime; ' +
+                'two old empty folders of its name, Asia\'s region subfolder and one nested in "Sunrise Club 07-01-2026", still ' +
+                'go, and so does the old empty "Nested Date Album" inside it)',
+          opt: { extraSources: MERGE_SOURCES, staleIndexAlways: [GOLDEN], moveKeepsModified: [GOLDEN],
+                 extra: [[ASIA_GW, 150 * RDAY], [SUN_GW, 150 * RDAY], [DATE, 130 * RDAY]] },
+          plan: HAND.concat(ASIA_GW, SUN_GW, DATE).sort(), kept: [GOLDEN], photos: [[MERGED, GOLDEN]],
+          regions: { Africa: [7, 4], Asia: [5, 2], Template: [3, 3] },
+          // (two region subfolders of one name: Africa's line for "Nested Date Album" and Asia's decoy's both read [0, 1])
+          tops: tops90({ [N.sun]: [3, 2], [N.golden]: [0, 1] }), notTrashed: [N.golden], hidden: [] },
+        { what: 'young photos merged into it and into Asia\'s old "Evening Lights 06-01-2026", whose three due photos go this run ' +
+                '(neither merge changes its folder\'s modifiedTime)',
+          opt: { extraSources: MERGE_SOURCES.concat(EVE_SOURCES), staleIndexAlways: [GOLDEN, EVE], moveKeepsModified: [GOLDEN, EVE] },
+          plan: HAND, kept: [GOLDEN, EVE], photos: [[MERGED, GOLDEN], [EVE_MERGED, EVE]],
+          regions: { Africa: [7, 2], Asia: [5, 0], Template: [3, 3] }, tops: tops90({ [N.golden]: [0, 0], [N.eve]: [3, 0] }),
+          notTrashed: [N.golden, N.eve], hidden: [] },
+        Object.assign({ what: 'nested: "Golden Wings 06-01-2026", merged into, moved by a person into the old "Bright Stars ' +
+                              '07-10-2026" before the retention read (its two due photos go, it and the folder above it stay; ' +
+                              '"Nested Fig Album" beside it there with its due photo, and "Nested Zebra Album" in Africa, still go)',
+                        opt: { extraSources: MERGE_SOURCES, staleIndexAlways: [GOLDEN], beforeRetentionRead: [['move', GOLDEN, BRIGHT]],
+                               extra: FIG_EXTRA },
+                        kept: [GOLDEN, BRIGHT], photos: [[MERGED, GOLDEN]] }, nested),
+        Object.assign({ what: 'nested three deep: the same folder moved into Template\'s "Nested Mango Shots" before the retention ' +
+                              'read, "Nested Kiwi Shots"\'s photo into "Nested Pear Shots" (the three planned folders above it ' +
+                              'stay, "Nested Kiwi Shots" with no photo of its own, the three due photos go; "Nested Lime Shots" ' +
+                              'beside it, "Nested Pear Shots" beside "Nested Kiwi Shots" with that photo, "Nested Date Album" ' +
+                              'inside it and Africa\'s due folders still go)',
+                        opt: { extraSources: MERGE_SOURCES, staleIndexAlways: [GOLDEN],
+                               beforeRetentionRead: [['move', GOLDEN, MANGO], ['move', F.T2, PEAR]], extra: DEEP_EXTRA },
+                        kept: [GOLDEN, MANGO, KIWI, SW], bare: [KIWI], photos: [[MERGED, GOLDEN]] }, deep),
+        Object.assign({ what: 'nested, the folder above it blind to it and holding no photo of its own: as the nested run, its ' +
+                              'two photos moved into "Nested Fig Album" before the read, and no listing of "Bright Stars ' +
+                              '07-10-2026" this run returns "Golden Wings 06-01-2026"',
+                        opt: { extraSources: MERGE_SOURCES, staleIndexAlways: [GOLDEN],
+                               beforeRetentionRead: [['move', GOLDEN, BRIGHT], ['move', F.A5, FIG], ['move', F.A6, FIG]],
+                               unlistedAlways: [GOLDEN], extra: FIG_EXTRA },
+                        kept: [GOLDEN, BRIGHT], bare: [BRIGHT], photos: [[MERGED, GOLDEN]] }, nested),
+        Object.assign({ what: 'three deep, each folder above it blind to the one below: as the three-deep run, and no listing of ' +
+                              '"Nested Mango Shots", "Nested Kiwi Shots" or "Silver Wings 05-01-2026" this run returns the ' +
+                              'folder in it ("Nested Kiwi Shots" holding no photo of its own, as there)',
+                        opt: { extraSources: MERGE_SOURCES, staleIndexAlways: [GOLDEN],
+                               beforeRetentionRead: [['move', GOLDEN, MANGO], ['move', F.T2, PEAR]],
+                               unlistedAlways: [GOLDEN, MANGO, KIWI], extra: DEEP_EXTRA },
+                        kept: [GOLDEN, MANGO, KIWI, SW], bare: [KIWI], photos: [[MERGED, GOLDEN]] }, deep),
+      ];
+      const photoProblems = (r, photos) => photos.flatMap(([photo, folder]) => {
+        const s = r.state(photo);
+        return s && s.parent === folder && !s.trashed ? [] : ['the merged photo is not in ' + folder + ', untrashed: ' + JSON.stringify(s)];
+      });
+      /** No error; the plan but `kept` trashed; `kept` never trashed nor sent a trash; nothing outside the plan; nothing banned. */
+      const mergedProblems = (r, plan, kept) => {
+        const p = r.threw ? ['threw: ' + r.threw] : [], got = trashedT(r);
+        const missing = minus(plan, kept).filter(l => !got.includes(l));
+        if (missing.length) p.push('not trashed: ' + missing.join(', '));
+        const hit = kept.filter(l => got.includes(l) || trashSent(r, l));
+        if (hit.length) p.push('trashed, or sent a trash, though this run merged into it or into a folder below it: ' + hit.join(', '));
+        const extra = got.filter(l => !plan.includes(l));
+        if (extra.length) p.push('trashed outside the plan: ' + extra.join(', '));
+        return p.concat(banned(r));
+      };
+      /**
+       * Skipped before any Drive call: once planTrash_ has returned, no Files.list names a kept folder in parents, no write
+       * touches one, and no Files.get reads one with nothing of the plan below it (the walk up of a planned item reads the
+       * folders above that item, kept or not).
+       */
+      const touchProblems = (r, plan, kept) => {
+        if (r.planSeq === null || r.planSeq === undefined) return ['(planTrash_ never returned: this row proves nothing)'];
+        const rest = minus(plan, kept), quiet = kept.filter(k => !rest.some(l => l.startsWith(k + '/')));
+        const labelOf = new Map(kept.filter(l => r.idOf[l] !== undefined).map(l => [r.idOf[l], l]));
+        const p = [];
+        for (const x of r.reads) {
+          if (x.seq <= r.planSeq) continue;
+          if (x.op === 'list') for (const id of x.parents || []) if (labelOf.has(id)) p.push('a listing of ' + labelOf.get(id));
+          if (x.op === 'get' && labelOf.has(x.fileId) && quiet.includes(labelOf.get(x.fileId))) p.push('a Files.get of ' + labelOf.get(x.fileId));
+        }
+        for (const o of r.ops) if (o.seq > r.planSeq && labelOf.has(o.fileId)) p.push('a Files.' + o.op + ' of ' + labelOf.get(o.fileId));
+        return [...new Set(p)].map(x => x + ' after planTrash_ returned');
+      };
+      const mergedRuns = [], mergedP = [];
+      for (const row of ROWS) {
+        const r = run185(REAL, '90', row.opt);
+        mergedRuns.push(r);
+        const p = mergedProblems(r, row.plan, row.kept).concat(photoProblems(r, row.photos), touchProblems(r, row.plan, row.kept));
+        if (/\bTRASH_(FAILED|REFUSED)\b|\bRETENTION_FAILED\b/.test(r.text)) p.push('a retention failure or refusal logged');
+        const counts = [...r.text.matchAll(/\b(\d+) (?:retention trash )?failure/g)].map(m => Number(m[1])).filter(x => x > 0);
+        if (counts.length) p.push('a failure count of ' + counts.join(', '));
+        for (const [, folder] of row.photos) {
+          if (!r.staleHits.some(h => h.folder === folder && !h.afterPlan)) p.push('(the read saw the photo in ' + folder + ': this row proves nothing)');
+        }
+        for (const [, lbl, into] of row.opt.beforeRetentionRead || []) {
+          if (!r.state(lbl) || r.state(lbl).parent !== into) p.push('(' + lbl + ' is not in ' + into + ': this row proves nothing)');
+        }
+        const before = r.modelBefore();
+        for (const lbl of row.bare || []) {   // a kept folder above the merged one with no photo of its own, as the read saw it
+          if (before.some(m => !m.isFolder && !m.trashed && m.parent === r.idOf[lbl])) p.push('(' + lbl + ' holds a photo: this row proves nothing)');
+        }
+        if (p.length) mergedP.push(row.what.split(' (')[0] + ': ' + p.slice(0, 6).join('; '));
+      }
+      // the dry run on the same drive: nothing written, the preview as without the merges (nothing merges in a dry run)
+      {
+        const d = run185(PREVIEW, '90', ROWS[1].opt);
+        const p = (d.threw ? ['threw: ' + d.threw] : []).concat(d.ops.length || d.trashes.length ? ['wrote ' + d.ops.length + ' op(s), ' +
+          d.trashes.length + ' trash(es)'] : []).concat(retentionProblems(retentionView(d.text, wantOf(d, 90).tops), RET_WANT[90]));
+        if (p.length) mergedP.push('the dry run: ' + p.slice(0, 4).join('; '));
+      }
+      check('a folder this run merged a young photo into is not trashed that run though Drive\'s index misses the photo at the ' +
+            'read and at the re-list, nor any planned folder above it, never the region folder, each skipped before any Drive ' +
+            'call for it; the rest of the plan is trashed, old empty folders beside it, beside a folder above it and inside ' +
+            'it included (six runs: "Golden Wings 06-01-2026" emptied and old, the merge leaving its modifiedTime, while old ' +
+            'empty folders of its name in Asia and nested in Africa, and one inside it, go; it and Asia\'s "Evening Lights ' +
+            '06-01-2026", whose due photos go; it nested in "Bright Stars 07-10-2026", "Nested Fig Album" beside it and ' +
+            '"Nested Zebra Album" still trashed; it three deep in Template, the three folders above it kept, "Nested Lime ' +
+            'Shots" beside it, "Nested Pear Shots" beside "Nested Kiwi Shots" and one inside it trashed; the decoys holding ' +
+            'due photos go with them; a folder above it with no photo of its own is kept; both nested ones again with no ' +
+            'listing of a folder above it returning the folder below: each merged photo still in its folder, untrashed; after ' +
+            'planTrash_ no listing or write of a kept folder, no Files.get of one with nothing planned below it; no error, no ' +
+            'failure; nothing banned; the dry run writes nothing and previews as ever)',
+            !mergedP.length, mergedP.slice(0, 6).join(' | '));
+
+      // the next run, 15 minutes later, the index caught up: the photo is seen, and young
+      const nextP = [];
+      for (const i of [1, 2]) {
+        const { what, kept, photos } = ROWS[i];
+        const r2 = mergedRuns[i].rerun({ retentionDays: '90', advanceMin: 15 });
+        R185.push(r2);
+        const p = r2.threw ? ['threw: ' + r2.threw] : [];
+        const hit = kept.filter(l => (r2.state(l) && r2.state(l).trashed) || trashSent(r2, l));
+        if (hit.length) p.push('in the trash, or sent a trash by the next run: ' + hit.join(', '));
+        p.push(...photoProblems(r2, photos));
+        if (retTrashes(r2).length) p.push('the next run trashed on the Shared Drive: ' + trashedT(r2).join(', '));
+        p.push(...banned(r2));
+        if (p.length) nextP.push(what.split(' (')[0].split(',')[0] + ': ' + p.slice(0, 5).join('; '));
+      }
+      check('…and the next run, 15 minutes later with the index caught up, keeps them: the photos are young (both merged ' +
+            'folders, and the nested one with the folder above it: none in the trash or sent a trash, the photos where they were ' +
+            'merged, nothing trashed on the Shared Drive, no error, nothing banned)', !nextP.length, nextP.slice(0, 4).join(' | '));
+
+      // the log: counts and region subfolder names only
+      const logM = [];
+      ROWS.forEach(({ what, regions, tops, notTrashed, hidden }, i) => {
+        const r = mergedRuns[i];
+        // (a nested merged-into folder's name is in the log as the My Drive subfolder merged: #132's line, not retention's)
+        const p = logProblems(r, 90, regions, tops).filter(x => !hidden.some(nm => x === 'the log names "' + nm + '"'));
+        for (const nm of notTrashed) {
+          if (!new RegExp('\\bnot trashed\\b[^\\n]*"' + nm + '"').test(r.text)) p.push('no `not trashed "' + nm + '"` line');
+        }
+        const named = r.text.split('\n').filter(l => /\btrashed\b|\bTRASH_|\bRETENTION_/.test(l) &&
+                                                     hidden.concat(NESTED, DECOY_NAMES).some(nm => l.includes(nm)));
+        if (named.length) p.push('a retention line names a nested folder: ' + named[0].trim());
+        if (p.length) logM.push(what.split(' (')[0] + ': ' + p.slice(0, 5).join('; '));
+      });
+      check('…its log: `not trashed "<region subfolder>"` for each kept merged-into folder (by its region subfolder when ' +
+            'nested), the `trashed` counts per region and region subfolder without the kept folders (the decoys of its name ' +
+            'counted), no file\'s name, no nested folder\'s name on a retention line (the six runs above)',
+            !logM.length, logM.slice(0, 6).join(' | '));
+    }
 
     // ---------------------------------------------------------------- the cap
     const GR = 'T:Latin America/Golden Roots 05-05-2026';
