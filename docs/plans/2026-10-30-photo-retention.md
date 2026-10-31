@@ -352,5 +352,20 @@ true})`. Decided in the build, beyond the Design:
   out of its region later in the same run is not seen; the item's own read and its folder's
   re-list still are. RUNBOOK "Photo mover" is #183's.
 
+**#191 (2026-10-31, `t/191-keep-the-folders-a-run-merged`; offline, nothing live).** PR #190's low
+finding, in `drive-sync/Mover.gs`:
+
+- A young photo merged this run into an old, emptied Shared Drive folder was protected only by
+  Drive's search showing it, at the read and at the re-list before the folder's trash; with the
+  index behind at both, the folder went to the trash with the photo in it. `carryOut_` now
+  records each Shared Drive folder it makes or merges files into, before the first file moves (in
+  an array `runMover_` keeps, so a move failure's error does not lose it), and `trashRetention_`
+  keeps each of them, and every folder above it up to its region folder by the read's tree, that
+  run: skipped before any Drive call, counted on `not trashed "<region subfolder>"`. Folders
+  inside or beside them are trashed as planned; the next run's read sees the photo, young, and
+  the planner keeps the folder. The dry run is unchanged. `drive-sync/README.md` says so, and its
+  re-check list now says each folder above an item is read once per run (PR #190's README
+  finding).
+
 ## Result
 

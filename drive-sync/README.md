@@ -45,8 +45,11 @@ What it does and never does:
   region folder that is itself that old and has nothing left in it, children before parents. At
   most 100 photos a run, the earliest due first (`RETENTION_CAP`: the rest go on the next run).
   Each item is re-read just before its trash (still where the run read it, still due, a folder
-  re-listed empty, every folder above it still where it was) and skipped otherwise, and every
-  trash goes through `moveToTrash_`. Never trashed: a region folder (`TARGET_FOLDER_<KEY>`, one
+  re-listed empty; every folder above it read once per run, before the first trash under it, and
+  then untrashed in the folder the run read it in: a folder moved after that one read is not
+  seen) and skipped otherwise; a folder this run merged into or made, and every folder above it,
+  is kept that run (#191: Drive's search may not yet show a photo just moved in). Every trash
+  goes through `moveToTrash_`. Never trashed: a region folder (`TARGET_FOLDER_<KEY>`, one
   nested inside another region's too), a source folder, the Shared Drive's root, anything not
   under a region folder, a photo before its due moment, a folder with anything left in it. To
   keep a photo longer, move it out of the region folders. The dry run (`previewMoves`) trashes
@@ -64,7 +67,7 @@ What it does and never does:
   | `retention 90 days (due once … at or before <cutoff>)` | retention on; `retention off (RETENTION_DAYS not set)` when not |
   | `<Region>: retention 90 days: would trash N file(s) and M folder(s)` | the plan, both entry points; a line `under "<club subfolder>"` per subfolder, one for the photos `directly in the region folder` |
   | `<Region>: retention 90 days: trashed N file(s) and M folder(s)` | the real run: what went to the trash, the same lines under it |
-  | `not trashed "<club subfolder>": N item(s) kept by the re-check` | moved, trashed or re-dated since the read, or a folder not empty: no error, the next run looks again |
+  | `not trashed "<club subfolder>": N item(s) kept by the re-check` | moved, trashed or re-dated since the read, a folder not empty, or a folder this run moved photos into or one above it: no error, the next run looks again |
   | `RETENTION_CAP: N due file(s) left for the next run` | more than 100 due |
   | `TIME_BUDGET: retention …` | out of time: the rest waits for the next run |
   | `TRASH_FAILED <Region> "<club subfolder>": <error>` | Drive refused a trash; the rest goes on, the run ends with an error |
