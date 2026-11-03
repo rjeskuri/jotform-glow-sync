@@ -895,3 +895,16 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - The first trashes come around 2027-01-19 to 2027-01-22 (the first uploads about 2026-10-23, the mover's first Shared Drive folders about 2026-10-24).
   - Rollback: delete `RETENTION_DAYS` (off from the next run), and restore from the Shared Drive's trash within 30 days.
   - The 2026-10-06 row's "nothing is deleted until it is taken" no longer holds once retention is live; until then nothing is deleted from Drive.
+
+### 2026-11-02 — The Monthly Report dashboards show the reporting year, which changes on 15 February
+
+- **The five Monthly Report dashboards and the stories table show one reporting year, never 2025 and 2026 together,** through the formula `In_Reporting_Year__c` (`YEAR(<date>) = YEAR(TODAY() - 45)`) on `DHIS2__c` and `Attendance_Batch__c` (#195), and each gets a Month filter (#196-#200). GLOW asked for 2026 only (review of 2026-11-02, epic #194): the two years have different numbers of partners. Ryan chose the self-rolling year on 2026-11-02.
+- **Why:** reports for a month are filed in the next month, between the 5th and about the 15th, so December's reports arrive in January; 45 days keeps them in until 14 February. No one has to edit a report each year.
+- **Rejected:**
+  - a fixed year (`Year__c equals 2026` or a 2026 date range): the cause of the stale dashboards found in #74, repeated each January unless someone remembers;
+  - `THIS_YEAR`: no new field, but the dashboards would be empty from 1 January until the January reports come in, and December's reports would never show in the dashboards once the year changed;
+  - the last 12 months (#74, #128): it mixes two years, which GLOW asked to stop.
+- **Consequences:**
+  - From 15 February 2027 the dashboards show 2027 only; 2026 stays in Salesforce and in the reports without the filter.
+  - The Month filter offers month names without a year, which is unambiguous inside one reporting year.
+  - `Period__c` stays (the field the formula reads); `LAST_N_MONTHS:12` leaves each report as its dashboard's task lands.

@@ -4518,6 +4518,17 @@ Questions for GLOW:
   `Attendance_submitted_electronically__c` (#75), item 6 the Jotform batches' `Module__c` (#76),
   and item 2, with no source, is retired from D1 and its report goes to Decommissioned, kept (#75).
 
+The reporting year (GLOW's review, epic #194; Ryan, 2026-11-02): the dashboards show the current
+reporting year only, never 2025 and 2026 together, and offer a Month filter. Since #195
+([plan](plans/2026-11-02-sf-reporting-year.md)) the period filter is `In_Reporting_Year__c equals
+true`, a checkbox formula on `DHIS2__c` (from `Period__c`) and on `Attendance_Batch__c` (from
+`Attendance_Date__c`): the year of today less 45 days, so the dashboards move to the new year on
+15 February, once December's reports are in. Never a fixed `Year__c` (the cause above), and never
+`THIS_YEAR` (it drops December's reports on 1 January). The Month filter is on
+`DHIS2__c$Month__c`, and on `Attendance_Batch__c$Month_Name__c` (the same month names) for item 6.
+Tasks #196 to #200 apply both, dashboard by dashboard; until each lands, its dashboard keeps the
+last 12 months.
+
 ### GLOW Club Attendance
 
 D1 (ticket #75, [plan](plans/2026-10-24-sf-dash-attendance.md)): the dashboard "Glow Club
