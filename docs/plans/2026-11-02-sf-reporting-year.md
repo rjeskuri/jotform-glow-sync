@@ -1,7 +1,7 @@
 ---
 title: A reporting-year flag and a month name for the Monthly Report dashboards (2026 only, a Month filter)
 author: Claude (ticket #195, with Ryan's decisions of 2026-11-02)
-status: in-progress      # ticket #195; check-only 0AfRP000002iyVZ0AY succeeded 2026-11-03; the deploy waits for Ryan's go
+status: done      # ticket #195; deployed 2026-11-03 07:50 UTC (0AfRP000002iz3R0AQ, 8/8), checks passed
 created: 2026-11-02
 intent: GLOW's review of 2026-11-02 (epic #194) - "Please exclude 2025 data from all the dashboards" and "Can a filter be added by month"
 ---
@@ -72,4 +72,24 @@ reads, and leaving them is harmless.
 
 ## Result
 
-Open: the deploy waits for Ryan's go.
+Deployed 2026-11-03 07:50 UTC on Ryan's go, VPN off: `0AfRP000002iz3R0AQ` Succeeded, 8 of 8
+components, 0 errors. The quick deploy of `0AfRP000002iyVZ0AY` was refused
+(`CannotQuickDeployError`: in production only a validation that ran Apex tests can be
+quick-deployed, and a `--dry-run` check runs none), so step 3's fallback ran: the same `start`
+without `--dry-run`. Next time, skip the quick deploy for a change with no Apex.
+
+- Step 4: `after/` retrieved (13 files). Against `before/`, the only new files are the three fields.
+  The two profiles, the permission set and the two report types gained only lines (0 removed); every
+  added line is the new fields' read permission or report-type column. The three fields differ from
+  `build/` only in how Salesforce writes them back (`'` as `&apos;`, default `externalId` and
+  `formulaTreatBlanksAs` elements dropped); the formulas are the same.
+- Step 5, the counts:
+  - `DHIS2__c`: `In_Reporting_Year__c = true` 429 = `Period__c >= 2026-01-01` 429 (none in 2027).
+  - `Attendance_Batch__c`: `In_Reporting_Year__c = true` 1,539 = `Attendance_Date__c >= 2026-01-01`
+    1,539; none flagged without a date.
+  - `Month_Name__c` equals the month of `Attendance_Date__c` on all 1,539 batches of 2026 (0
+    mismatches; months 1-4, 8, 9, 10, 11 present).
+  - The report types offer the fields (Analytics `GET reportTypes/<name>__c`, in place of an unsaved
+    report query: a read, nothing posted): `Attendance_Totals__c` has
+    `Attendance_Batch__c.In_Reporting_Year__c` and `Attendance_Batch__c.Month_Name__c`; `Dhis2__c`
+    has `DHIS2__c.In_Reporting_Year__c`.
