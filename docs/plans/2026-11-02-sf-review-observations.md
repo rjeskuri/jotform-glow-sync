@@ -55,8 +55,8 @@ VPN off (`route -n get default` shows `en0`), in the main session, through the `
 `glow`. Ryan gave his go in chat on 2026-11-04; each live command also passed the live-gate
 prompt.
 
-1. Retrieve live into `data/sf_glow_review_2026-11/observations/before/`: D3, and items 9, 10 and
-   11. Compare it with `data/sf_dash_observations_2026-10-24/fresh_2026-10-26/`; a difference
+1. Retrieve live into `data/sf_glow_review_2026-11/observations/before/`: D3 (`01ZRP000006k2D32AI`), and items 9 (`00ORP000004RJZC2A4`), 10 (`00ORP000004RJZD2A4`) and
+   11 (`00ORP000005uf412AA`). Compare it with `data/sf_dash_observations_2026-10-24/fresh_2026-10-26/`; a difference
    stops for Ryan.
 2. Copies into Decommissioned before anything changes, each on Ryan's go after its dry run:
    `python3 tools/sf_report_folders.py copy --kind <dashboard|report> --id <id> --tag "#198" --vpn-off --dir data/sf_glow_review_2026-11/observations/copies --apply`
