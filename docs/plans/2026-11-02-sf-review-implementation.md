@@ -121,19 +121,26 @@ prompt.
 
 DECISIONS 2026-10-16, each write on Ryan's go after a check-only, VPN off.
 
-- The reports of items 5, 6, 7 and 8 are restored from their copies in Decommissioned
+- The reports of items 5, 6, 7 and 8 are restored by a deploy, and their copies in Decommissioned
   (`00ORP000009p0IX2AY`, `00ORP000009p0K92AI`, `00ORP000009p0Ll2AI`, `00ORP000009p0NN2AY`, tagged
-  `#197`): a Salesforce user opens the copy, then Save As or moves it into "GLOW Monthly Reports"
-  (RUNBOOK, the archive rule). A report's metadata rollback is a fresh retrieve of it, edited back
-  where #197 changed it, then a check-only and a deploy.
-- D2 is dynamic and the API refuses its copy, so the dashboard is restored by deploying only its
-  own file in `data/sf_glow_review_2026-11/implementation/before/`, and only while a fresh
-  retrieve of D2 equals `after/` (nothing has changed it since this deploy).
+  `#197`) are the record of what they were. A copy saved back into "GLOW Monthly Reports" would be
+  a separate report: D2's components point at the reports themselves, so D2 would still show the
+  reports as #197 left them.
+- Each report's deploy is one of two, after a check-only: a fresh retrieve of it, edited back
+  where #197 changed it; or its file in `data/sf_glow_review_2026-11/implementation/before/`, only
+  while a fresh retrieve of it equals `after/` (DECISIONS 2026-10-16).
+- D2 is dynamic and the API refuses its copy, so the dashboard is restored the same way: by
+  deploying only its own file in `data/sf_glow_review_2026-11/implementation/before/`, only while a
+  fresh retrieve of D2 equals `after/` (nothing has changed it since this deploy), or a fresh
+  retrieve of it edited back. D2 and the four reports go in one deploy, so D2's old components meet
+  the reports as they were.
 - Never from an older build or retrieve (DECISIONS 2026-10-16): #76's
-  `data/sf_dash_implementation_2026-10-24/` is no rollback for this change.
+  `data/sf_dash_implementation_2026-10-24/` (its `before/` or `build/`) is no rollback for this
+  change.
 - The two new reports, "Summit Types Completed" (`00ORP000009p0Qc2AI`) and "Modules Adapted
-  Responses" (`00ORP000009p0Qb2AI`), are not in `before/`, and D2 as `before/` has it shows no
-  component on them: once D2 is restored they move to Decommissioned. Nothing is deleted.
+  Responses" (`00ORP000009p0Qb2AI`), are not in `before/`: D2's redeploy takes them off the
+  dashboard first, as D2 in `before/` has no component on them, and then they move to
+  Decommissioned. Nothing is deleted.
 
 ## Result
 

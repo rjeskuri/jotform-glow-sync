@@ -4934,19 +4934,25 @@ Rollback of #197 ([plan](plans/2026-11-02-sf-review-implementation.md#rollback);
 2026-10-16), each write on Ryan's go after a check-only, VPN off:
 - Since #197's deploy a fresh retrieve no longer equals #76's `after/`, so #76's rollback above
   runs only after this one.
-- A Salesforce user restores items 5, 6, 7 and 8 from their copies in Decommissioned, made by
-  `copy --tag "#197"` before the change (`00ORP000009p0IX2AY`, `00ORP000009p0K92AI`,
-  `00ORP000009p0Ll2AI` and `00ORP000009p0NN2AY`): open the copy, then Save As or move it into
-  "GLOW Monthly Reports" (the archive rule above).
+- Items 5, 6, 7 and 8 come back by a deploy, not from their copies: D2's components point at the
+  reports themselves, so a copy saved into "GLOW Monthly Reports" would be a separate report that
+  D2 does not show. The copies in Decommissioned (`00ORP000009p0IX2AY`, `00ORP000009p0K92AI`,
+  `00ORP000009p0Ll2AI` and `00ORP000009p0NN2AY`, made by `copy --tag "#197"` before the change)
+  are the record of what the reports were.
+- Each report's deploy is one of two, after a check-only: a fresh retrieve of it, edited back
+  where #197 changed it; or its file in #197's retrieve
+  `data/sf_glow_review_2026-11/implementation/before/`, only while a fresh retrieve of it equals
+  `after/` (DECISIONS 2026-10-16).
 - D2 is dynamic and has no Decommissioned copy (the org is at its limit of 5 dynamic dashboards),
-  so its rollback is #197's retrieve `data/sf_glow_review_2026-11/implementation/before/`: the
-  dashboard is restored by deploying only its own file in that `before/`, only while a fresh
-  retrieve of it equals `after/` (nothing has changed it since #197's deploy), never from an
-  older build or retrieve.
+  so the dashboard is restored the same way, by deploying only its own file in that `before/`,
+  only while a fresh retrieve of it equals `after/` (nothing has changed it since #197's deploy),
+  or a fresh retrieve of it edited back, never from an older build or retrieve. D2 and the four
+  reports go in one deploy, so D2's old components meet the reports as they were.
+- This rollback never deploys #76's `data/sf_dash_implementation_2026-10-24/before/` or `build/`.
 - The two new reports, "Summit Types Completed" (`00ORP000009p0Qc2AI`) and "Modules Adapted
-  Responses" (`00ORP000009p0Qb2AI`), are not in `before/`, and D2 as `before/` has it shows no
-  component on them: once D2 is restored they move to Decommissioned (the archive rule above).
-  Nothing is deleted.
+  Responses" (`00ORP000009p0Qb2AI`), are not in `before/`: D2's redeploy takes them off the
+  dashboard first, as D2 in `before/` has no component on them, and then they move to
+  Decommissioned (the archive rule above). Nothing is deleted.
 
 ### GLOW Club Reporting
 
