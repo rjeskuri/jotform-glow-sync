@@ -6491,12 +6491,12 @@ class GlowReviewObservationsDocs(unittest.TestCase):
                         f"{where}: say never from an older build or retrieve (DECISIONS 2026-10-16), in one sentence")
         self.assertTrue([s for s in cl if re.search(r"(?i)\b(nothing|never)\b[^.;]{0,30}?\bdelet\w*", s)],
                         f"{where}: say nothing is deleted (the copies stay in Decommissioned), in one sentence")
-        # ... and the RUNBOOK's "Rollback of #198" likewise
+        # ... and the RUNBOOK's #198 rollback paragraph likewise
         part = self.o.part()
         m = re.search(r"(?im)^\W*rollback\b[^\n]*#198\b", part)
         self.assertTrue(m, f"RUNBOOK {ObservationsDashboardDocs.PART!r}: no rollback of #198 (a paragraph starting "
                            "`Rollback of #198`)")
-        self.assertRollbackSources(part[m.start():], f"RUNBOOK {ObservationsDashboardDocs.PART!r}, Rollback of #198")
+        self.assertRollbackSources(part[m.start():], f"RUNBOOK {ObservationsDashboardDocs.PART!r}, the #198 rollback")
 
     def test_the_keep_list_has_no_alteast_and_stays_within_40_characters(self):
         import csv
