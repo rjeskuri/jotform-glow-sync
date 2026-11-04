@@ -4811,8 +4811,9 @@ The six components:
   of `Attendance_Date__c`, a matrix, and its period was the last 12 months. Item 6 takes the
   test-record rule on the club's parent: not blank, and its name does not contain "test". The old
   item 6 report (`00ORP000005rZxd2AE`) counted the form's module field, which is blank since
-  2025-10; it is in Decommissioned since 2026-10-26, and `glow/sf_keep_list.csv` keeps its id as
-  #70 recorded it. SOQL signal (2026-11-04: 20 modules, for example Power of Girls 101 20
+  2025-10; it is in Decommissioned since 2026-10-26. Until #197 `glow/sf_keep_list.csv` kept its
+  id as #70 recorded it; since #197 the keep list carries the live report's id,
+  `00ORP000009kUNh2AM`. SOQL signal (2026-11-04: 20 modules, for example Power of Girls 101 20
   partners, Community 101 16, Self Advocacy 13):
   `SELECT Module__c, COUNT_DISTINCT(Account__r.ParentId) FROM Attendance_Batch__c WHERE Processing_Status__c = 'Success' AND Creator__c LIKE 'Jotform%' AND In_Reporting_Year__c = true AND Attendance_Date__c >= 2026-09-01 AND Account__r.ParentId != null AND (NOT Account__r.Parent.Name LIKE '%test%') GROUP BY Module__c`;
   with the Month filter on September, the same query with `AND Month_Name__c = 'September'`

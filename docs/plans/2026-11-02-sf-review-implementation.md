@@ -77,7 +77,8 @@ made by `make_build.py` from a copy of the retrieve `before/`, text edits each w
 The two new reports get no row in `glow/sf_keep_list.csv`: the file is GLOW's keep list, one row
 per item 1-19 and D1-D5, and `test/sf_keep_list_test.py` holds it to exactly those rows. The
 RUNBOOK names the reports and their Ids instead. The keep list's `label_target` of items 5-7
-becomes GLOW's names.
+becomes GLOW's names, and item 6's `id` the live report D2 shows, `00ORP000009kUNh2AM` (#70's
+`00ORP000005rZxd2AE` is in Decommissioned since #76).
 
 ## Rollout (live; each write on Ryan's go)
 
@@ -148,8 +149,8 @@ All on 2026-11-04 UTC, VPN off, on Ryan's go.
 
 - Step 1: D2 and the four reports equal `data/sf_dash_implementation_2026-10-24/after/`;
   `Attendance_Totals` differs only by #195's new columns (equal to #195's `after/`). The keep list
-  still carries the old item 6 report (`00ORP000005rZxd2AE`, in Decommissioned since #76); D2
-  shows #76's `00ORP000009kUNh2AM`.
+  then still carried the old item 6 report (`00ORP000005rZxd2AE`, in Decommissioned since #76),
+  while D2 shows #76's `00ORP000009kUNh2AM`; since #197 the keep list carries that live id.
 - Step 2: item 5 to `00ORP000009p0IX2AY` (07:22:56Z), item 6 to `00ORP000009p0K92AI`
   (07:23:02Z), item 7 to `00ORP000009p0Ll2AI` (07:23:07Z), item 8 to `00ORP000009p0NN2AY`
   (07:23:14Z), each read back, every ledger row `ok`, all before the deploy. D2 has no copy
