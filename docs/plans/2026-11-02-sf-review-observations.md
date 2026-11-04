@@ -131,9 +131,10 @@ All on 2026-11-04 UTC, VPN off, on Ryan's go.
     same 24/4/1, 45/95 and 29 when run again with it.
   - The RUNBOOK's earlier September figures, from the check of 2026-10-24 (item 9: 23 Yes and 3
     No; item 10: 93 sessions over 42 Monthly Reports; item 11: 27 partners who observed and 15
-    with 0), are older. The deploy does not touch records, so the difference (24 and 4, 95 over
-    45, 29) is most likely Monthly Reports for September that reached Salesforce after
-    2026-10-24, due by 15 October; it is not a before-figure of this change.
+    with 0), are older. The deploy does not touch records, so the difference (item 9 26 Monthly
+    Reports to 29, with a first NA; item 10 42 to 45; item 11 27 to 29 who observed) is Monthly
+    Reports for September filed or corrected after 2026-10-24 (not checked); it is not a
+    before-figure of this change.
   - No grouping label in any component reads 2025 (0 of 78 labels).
   - The live Partner Manager filter has 5 options, none of them the former PO's (6 before); the
     Month filter has 12.

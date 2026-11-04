@@ -4163,8 +4163,8 @@ dashboard that becomes it:
   items 5-8.
 - D3, the GLOW Club Observations dashboard: the dashboard `01ZRP000006k2D32AI` ("GLOW Club
   Training" in the keep list's `label_today`; titled "Club Observation Dashboards" since #198),
-  items 9-11. Five of its nine components are observations, and no
-  dashboard today is about observations alone.
+  items 9-11. It has three components, one per item, and is the observations dashboard: since
+  #198 it is titled "Club Observation Dashboards".
 - D4, the GLOW Club Training dashboard: "Mentors" (`01ZRP000006quAj2AI`), items 12-16. The group
   "GLOW Club Training" is this dashboard, D4, and the keep list's `label_today` "GLOW Club
   Training" is D3's: the file's Ids tell them apart.
@@ -4192,7 +4192,11 @@ filters. Tasks #75 to #79 bring each dashboard and its reports to that, with cur
 Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
 `label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
 keep the dashboard names listed above. Item 12's `label_today` and `label_target` are the label
-of the report #80 deployed, "Partners that recruited new mentors" (Ryan, 2026-10-26).
+of the report #80 deployed, "Partners that recruited new mentors" (Ryan, 2026-10-26). GLOW's
+review of 2026-11-02 (epic #194) supersedes that for items 9-11 and D3's title only: since #198
+the `label_target` of items 9-11 is GLOW's name within 40 characters, live in the org, and
+`label_today` stays the label #70 recorded; D3's title in the org is "Club Observation
+Dashboards" and its `label_target` stays "GLOW Club Training" (RUNBOOK "GLOW Club Observations").
 
 Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
 a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's three folders, which
@@ -4743,7 +4747,10 @@ The dashboard's filters are Partner Manager (`DHIS2__c$Account__c.Assigned_Partn
 its 5 partner managers) and Month (`DHIS2__c$Month__c`, 12 `equals` options, January to December),
 both mapped on every component (Ryan, 2026-10-24 on #77; the Month filter is GLOW's request of
 2026-11-02, #198). The former PO (user `005RP000001RERJYA4`) is off the Partner Manager filter,
-which had 6 options until #198: neither of that user's partners reported in 2026. Viewers read
+which had 6 options until #198: none of that user's partners reported in 2026 (read-only SOQL,
+2026-11-04: 4 accounts have that user as `Assigned_Partner_Manager__c`; their 19 Monthly Reports
+are all from before 2026, the latest `Period__c` 2025-12-01, and 0 have `In_Reporting_Year__c`
+true). Viewers read
 the partner from the reports' groupings: the dashboard has no Partner filter. #77
 takes item 16 ("Meeting with mentors to discuss program", `00ORP000004RJZ72AO`) off this
 dashboard, with the five components on reports in "DHIS2 Reports"; #78 puts item 16 on D4. Those
