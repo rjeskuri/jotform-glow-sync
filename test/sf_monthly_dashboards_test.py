@@ -6379,6 +6379,21 @@ class GlowReviewAttendanceDocs(unittest.TestCase):
                                     f"their copies or a fresh retrieve, never from {m.group(0)!r} (DECISIONS "
                                     f"2026-10-16): {s[:200]!r}")
 
+    # the reports in a rollback unit ("the reports", "each report's deploy", "items 1, 3 and 4")
+    REPORTS = re.compile(r"(?i)\breports?\b|\bitems?\s+(\d+\s*(,|and|&)\s*)*[134]\b")
+    DEPLOY = re.compile(r"(?i)\b(re-?)?deploy\w*\b")
+    # a deploy's sources: a fresh retrieve edited back, or `before/` guarded by a fresh retrieve that equals `after/`
+    EDITED_BACK = re.compile(r"(?i)\bfresh\s+retriev\w*\b[^.;]{0,40}?\bedit\w*\s+back\b")
+    GUARD = re.compile(r"(?i)\b(only|while|as long as|so long as|provided)\b[^.;]{0,30}?\bfresh\s+retriev\w*\b[^.;]{0,40}?"
+                       r"\b(equals?|matches|match|is the same as|identical to)\b[^.;]{0,20}?\bafter/")
+
+    def deployed(self, u):
+        """A sentence of unit `u` that restores by a deploy, not denied."""
+        return any(self.a.said(s, self.DEPLOY) for s in sentences(u, ".;"))
+
+    def deploy_source(self, u):
+        return bool(self.EDITED_BACK.search(u) or ("before/" in u and self.GUARD.search(u)))
+
     def runbook_rollback(self):
         """The RUNBOOK part's rollback of #196: from the line that starts `Rollback` and names #196 to the end."""
         part = self.a.part()
@@ -6539,20 +6554,25 @@ class GlowReviewAttendanceDocs(unittest.TestCase):
         self.assertTrue([m for m in re.finditer(r"\bafter/", steps) if m.start() > deploys[0]],
                         f"{where}: the `after/` read-back comes after the deploy")
 
-        # the rollback: the reports from their copies, D1 from this change's before/, never an older build
+        # the rollback: the reports and D1 restored by a deploy, from a fresh retrieve edited back or from #196's
+        # own `before/` while a fresh retrieve equals `after/`; the Decommissioned copies are the record of what the
+        # reports were, never the restore on their own (D1's components point at the reports themselves)
         raw = self.a.plan_part(self.PLAN, "## Rollback", 15)
         where = f"{name}: `## Rollback`"
         cl = sentences(self.norm(raw), ".;")
-        self.assertTrue([s for s in cl if self.a.said(s, AttendanceDashboardDocs.RESTORE)
-                         and re.search(r"(?i)\breports?\b", s) and re.search(r"(?i)\bcop(y|ies)\b", s)
-                         and "Decommissioned" in s],
-                        f"{where}: say the reports are restored from their copies in Decommissioned (one sentence, not "
-                        "negated)")
-        self.assertTrue([s for s in cl if re.search(r"(?i)\b(dashboard|D1)\b", s) and "before/" in s
-                         and (self.a.said(s, AttendanceDashboardDocs.RESTORE)
-                              or self.a.said(s, r"(?i)\b(re-?)?deploy\w*\b"))],
-                        f"{where}: say D1 is restored by deploying this change's `before/` retrieve (one sentence, not "
-                        "negated)")
+        units = [self.norm(u) for u in self.own_units(raw)]
+        reports_unit = [u for u in units if self.REPORTS.search(u) and self.deployed(u) and self.deploy_source(u)]
+        self.assertTrue(reports_unit,
+                        f"{where}: say the reports of items 1, 3 and 4 are restored by a deploy (after a check-only) "
+                        "from a fresh retrieve edited back where #196 changed it, or from their files in #196's "
+                        "`before/` only while a fresh retrieve equals `after/`, in one list item or paragraph; their "
+                        "copies in Decommissioned are the record, not the restore")
+        d1_unit = [u for u in units if re.search(r"(?i)\b(dashboard|D1)\b", u) and self.deployed(u)
+                   and self.deploy_source(u)]
+        self.assertTrue(d1_unit,
+                        f"{where}: say D1 is restored by a deploy of its own file in #196's `before/` only while a "
+                        "fresh retrieve equals `after/` (or a fresh retrieve edited back), in one list item or "
+                        "paragraph, not negated")
         self.assertTrue([s for s in cl if re.search(r"(?i)\b(never|not|no)\b[^.;]{0,60}?\b(older|old|earlier|previous|"
                                                     r"stale)\s+(\w+\s+)?(build|retrieve)\b", s)],
                         f"{where}: say never from an older build or retrieve (DECISIONS 2026-10-16), in one sentence")
