@@ -1,7 +1,7 @@
 ---
 title: GLOW Club Training (D4, "Mentors") by partner and month, over the last 12 months
 author: Claude (ticket #78, with Ryan's decisions of 2026-10-23 and 2026-10-24)
-status: in-progress      # ticket #78; steps 1-8 ran 2026-10-26 (items 13-15 and D4 deployed); step 9 (item 16) after #77 and step 10 (Ryan's Subscribe) left
+status: in-progress      # ticket #78; steps 1-8 ran 2026-10-26 (items 13-15 and D4 deployed) and step 9 (item 16) ran 2026-11-04 (#152); step 10 (Ryan's Subscribe) left
 created: 2026-10-25
 intent: none - SOW p.5, Approach 1 (dashboards that reflect current data) and Ryan, 2026-10-21, "This data should be displayed by the Partner and Month."
 ---
@@ -220,8 +220,8 @@ folder directly in the work folder); the one of item 16 and D4 is `item16/packag
 ## Result
 
 Rollout steps 1-8 done on 2026-10-26 (UTC), in an interactive session with the VPN off (route
-`en0`), on Ryan's go (2026-10-25, and the live-gate prompts on the day). Steps 9 and 10 remain:
-step 9 (item 16) waits for #77 to land, and step 10 is Ryan's weekly Subscribe in Lightning.
+`en0`), on Ryan's go (2026-10-25, and the live-gate prompts on the day). Step 9 (item 16, ticket #152)
+ran on 2026-11-04 (below). Step 10 remains: Ryan's weekly Subscribe in Lightning.
 
 Before them, offline and read-only, 2026-10-24 and 2026-10-25: the retrieve into `before/`, the
 build in `build/` (3 reports and the dashboard, 4 files; the diff in
@@ -253,6 +253,26 @@ build in `build/` (3 reports and the dashboard, 4 files; the diff in
 - Step 8: both "DHIS2 Reports" reports D4 used are in Decommissioned: `00ORP000005ufNN2AY` first
   (`--limit 1`, then a SOQL check of it), then by the plan `00ORP000005uecc2AA`. The ledger holds 3
   moves (the first report moved twice, the second time Decommissioned to Decommissioned).
+
+- Step 9 ran on 2026-11-04 (UTC, VPN off, Ryan's go and each live-gate prompt), ticket #152, after
+  #77 took item 16 off D3: item 16 joined D4. The fresh retrieve into `item16/before/` (manifest
+  `item16/package.xml`: D4 `01ZRP000006quAj2AI`, item 16's report `00ORP000004RJZ72AO` and items
+  13-15 for the pattern) found item 16's report as #73 left it, items 13-15 equal to `after/`, and
+  D4 equal to the retrieve #80 left (item 12 on its row 16), so there was no drift. D4's copy
+  `01ZRP00000BV4Qo2AL` (11:58:00Z, for Ryan to rename in Lightning) and item 16's report copy
+  `00ORP000009p2Af2AI` (11:58:07Z) are in Decommissioned, tagged #78. The ledger
+  `item16/copies/ledger.csv` holds both rows, dated before the deploy.
+  The build (`item16/make_build.py`, from that retrieve only) groups item 16 by Partner
+  (`Account__c`) and Month (`Period__c`) like items 13-15, with the answer
+  `Did_you_meet_with_mentors_as_a_group__c` across (a blank answer left out, as in item 15), and
+  the same last 12 months and test-account filters; its label stays. Its D4 component is a stacked
+  column like item 15's, in D4's free half row (row 8, columns 6-11, beside item 15's); every other
+  component is as retrieved. The check-only `0AfRP000002jAgP0AU` succeeded (2 of 2 components),
+  then the deploy `0AfRP000002jAi10AE` succeeded (2 of 2, 12:02:42Z). Read back into
+  `item16/after/`, both files are byte-identical to `item16/build/`: `after/` equals `build/`. The
+  refresh (the PUT with `-b '{}'`, 12:04:11Z) left all 5 D4 components with DATA (items 12-16).
+  Item 16 for September 2026 equals SOQL (`FROM DHIS2__c`, the test-record rule, answer not
+  blank): 44 answered, Yes 38, No 6; the dashboard shows 38 and 6.
 
 The September 2026 baseline, #74's SOQL on `DHIS2__c` for the last complete month, run 2026-10-23
 (RUNBOOK "Why the dashboards showed old data"): item 13 152, item 14 27, item 15 41 answered (19
