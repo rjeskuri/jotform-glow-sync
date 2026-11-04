@@ -6301,7 +6301,15 @@ class GlowReviewAttendanceDocs(unittest.TestCase):
                         r"\bnot\s+(\w+\s+){0,4}?unique\s+girls\b")
     # a total still shown ("the grand total row stays", "`showGrandTotal` true")
     TOTAL_ON = re.compile(r"(?i)\b(grand\s+totals?|totals?\s+rows?|showGrandTotal|showTotal|Monthly Max totals?)\b"
-                          r"[^.;]{0,30}?\b(stays?|remains?|kept|still|true)\b")
+                          r"[^.;]{0,30}?\b(stays?|remains?|kept|still|true)\b|"
+                          r"\b(shows?|showing|displays?|displaying|keeps?|keeping|has|have)\s+(its\s+|the\s+|a\s+|their\s+)?"
+                          r"(grand\s+totals?|totals?\s+rows?|column\s+totals?|sub-?totals?|Sum Monthly Max totals?)\b")
+    # an old source for #196's rollback: #75's folder, another data/ folder, an older build ("the older build",
+    # "#75's `before/`"); #196's own `data/sf_glow_review_<month>/` and a fresh retrieve are its sources
+    OLD_SOURCE = re.compile(r"(?i)\bdata/sf_(?!glow_review_)[\w-]+/|"
+                            r"\b(older|old|earlier|previous|prior|stale|another|other|original)\s+([\w-]+\s+)?"
+                            r"(retrieves?|builds?|backups?|exports?|snapshots?|versions?)\b|"
+                            r"#75['’]s\s+`?(before/|build/|retrieve|build)")
 
     @classmethod
     def setUpClass(cls):
@@ -6335,7 +6343,49 @@ class GlowReviewAttendanceDocs(unittest.TestCase):
 
     def names_item(self, u, item, r):
         return (r["label_today"] in u or r["id"] in u
-                or re.search(r"(?i)\bitems?\s+(\d+\s*(,|and|&)\s*)*" + item + r"\b", u))
+                or re.search(r"(?i)\bitems?\s+(\d+\s*(,|and|&)\s*)*" + item + r"\b", u)
+                or re.match(r"\|\s*" + item + r"\s*\|", u))
+
+    @staticmethod
+    def own_units(part):
+        """The part's table rows and list items (each with its continuation lines), and its paragraphs that hold
+        neither: a list's paragraph is not one more unit, so one item's sentence never stands for another's."""
+        units = AttendanceDashboardDocs.units(part)     # rows and items first, then the paragraphs
+        paragraphs = [p for p in re.split(r"\n\s*\n", part) if p.strip()]
+        rows_and_items = units[:len(units) - len(paragraphs)]
+        return rows_and_items + [flat(p) for p in paragraphs
+                                 if not re.search(r"(?m)^\s*([-*+]|\d+[.)])\s|^\s*\|", p)]
+
+    def unit_for(self, units, item, reports):
+        """The units about item `item` alone: its label, Id or "item N" in the unit's first 120 characters (its
+        subject), and no other D1 item named there."""
+        out = []
+        for u in units:
+            head = re.sub(r"^\s*([-*+]|\d+[.)])\s+", "", u)[:120]
+            if self.names_item(head, item, reports[item]) and not any(
+                    self.names_item(head, k, r) for k, r in reports.items() if k != item):
+                out.append(u)
+        return out
+
+    def assertNoOldSource(self, raw, where):
+        """#196's rollback names no older source for D1 or the reports (#75's `data/sf_dash_attendance_…/`, another
+        data/ folder, an older build or retrieve) unless the clause denies it ("never from an older build",
+        "#75's folder is no rollback for this change")."""
+        for s in sentences(self.norm(raw), ".;"):
+            for c in re.split(r"[:,(]|\bbut\b|\bwhile\b|\bthen\b", s):
+                for m in self.OLD_SOURCE.finditer(c):
+                    self.assertTrue(self.d.NEGATION.search(c),
+                                    f"{where}: #196's rollback restores D1 from #196's own `before/` and the reports from "
+                                    f"their copies or a fresh retrieve, never from {m.group(0)!r} (DECISIONS "
+                                    f"2026-10-16): {s[:200]!r}")
+
+    def runbook_rollback(self):
+        """The RUNBOOK part's rollback of #196: from the line that starts `Rollback` and names #196 to the end."""
+        part = self.a.part()
+        m = re.search(r"(?im)^\W*rollback\b[^\n]*#196\b", part)
+        self.assertTrue(m, f"RUNBOOK {AttendanceDashboardDocs.PART!r}: no rollback of #196 (a paragraph starting "
+                           "`Rollback of #196`)")
+        return part[m.start():]
 
     # --- the RUNBOOK ----------------------------------------------------------------------------------------
 
@@ -6381,7 +6431,7 @@ class GlowReviewAttendanceDocs(unittest.TestCase):
         where = f"RUNBOOK {AttendanceDashboardDocs.PART!r}"
         reports, _ = self.reports()
         part = self.a.part()
-        units = self.a.units(part)
+        units = self.own_units(part)
 
         def off(u):
             """The sentences of unit `u` that take a total off, not denied."""
@@ -6393,23 +6443,25 @@ class GlowReviewAttendanceDocs(unittest.TestCase):
                     out.append(s)
             return out
         r3 = reports["3"]
-        self.assertTrue([u for u in units if self.names_item(u, "3", r3) and off(u)],
+        self.assertTrue([u for u in self.unit_for(units, "3", reports) if off(u)],
                         f"{where}: say item 3 ({r3['label_today']!r}) shows no grand total any more (`showGrandTotal` "
-                        "false), in a row, list item or paragraph naming it")
+                        "false), in a row, list item or paragraph of its own (naming it first, no other item)")
         r4 = reports["4"]
-        self.assertTrue([u for u in units if self.names_item(u, "4", r4)
-                         and [s for s in off(u) if re.search(r"(?i)\bMonthly Max\b|\bMonthly_Total__c\b", s)]],
+        self.assertTrue([u for u in self.unit_for(units, "4", reports)
+                         if [s for s in off(u) if re.search(r"(?i)\bMonthly Max\b|\bMonthly_Total__c\b", s)]],
                         f"{where}: say item 4's table ({r4['label_today']!r}) shows no total row, the Sum Monthly Max "
-                        "total included (`showTotal` false on every column), in one sentence of a unit naming it")
+                        "total included (`showTotal` false on every column), in one sentence of a row, list item or "
+                        "paragraph of its own (naming it first, no other item)")
         cl = sentences(self.norm(part), ".;")
         self.assertTrue([s for s in cl if self.TOTAL.search(s)
                          and [m for m in self.DOUBLE.finditer(s) if not self.d.locally_denied(s, m)]],
                         f"{where}: say why the totals are off: adding the weekly or monthly counts double-counts girls "
                         "who attend several sessions, so a total is not the number of unique girls (one sentence "
                         "naming the totals)")
-        for s in cl:
+        for s in cl:            # a total kept is said only as the past, marked before it ("until #196 it showed")
             for m in self.TOTAL_ON.finditer(s):
-                self.assertTrue(self.history(s, m) or self.d.NEGATION.search(m.group(0)),
+                self.assertTrue(self.HISTORY.search(s[max(0, m.start() - 50):m.start()]) or self.d.locally_denied(s, m)
+                                or self.d.NEGATION.search(m.group(0)),
                                 f"{where}: the totals are off since #196; no sentence keeps one on: {s[:200]!r}")
 
     # --- the plan -------------------------------------------------------------------------------------------
@@ -6504,6 +6556,9 @@ class GlowReviewAttendanceDocs(unittest.TestCase):
         self.assertTrue([s for s in cl if re.search(r"(?i)\b(never|not|no)\b[^.;]{0,60}?\b(older|old|earlier|previous|"
                                                     r"stale)\s+(\w+\s+)?(build|retrieve)\b", s)],
                         f"{where}: say never from an older build or retrieve (DECISIONS 2026-10-16), in one sentence")
+        # ... and no older source stands for D1 or the reports, in the plan or in the RUNBOOK's rollback of #196
+        self.assertNoOldSource(raw, where)
+        self.assertNoOldSource(self.runbook_rollback(), f"RUNBOOK {AttendanceDashboardDocs.PART!r}, Rollback of #196")
 
 
 if __name__ == "__main__":
