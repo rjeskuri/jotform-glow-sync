@@ -93,14 +93,18 @@ prompt.
 
 DECISIONS 2026-10-16, each write on Ryan's go after a check-only, VPN off.
 
-- The reports of items 1, 3 and 4 are restored from their copies in Decommissioned
-  (`00ORP000009p02P2AQ`, `00ORP000009p0412AA`, `00ORP000009p05d2AA`, tagged `#196`): a Salesforce
-  user opens the copy, then Save As or moves it into "GLOW Monthly Reports" (RUNBOOK, the archive
-  rule). A report's metadata rollback is a fresh retrieve of it, edited back where #196 changed
-  it, then a check-only and a deploy.
-- D1 is dynamic and the API refuses its copy, so the dashboard is restored by deploying only its
-  own file in `data/sf_glow_review_2026-11/attendance/before/`, and only while a fresh retrieve of
-  D1 equals `after/` (nothing has changed it since this deploy).
+- The reports of items 1, 3 and 4 are restored by a deploy, and their copies in Decommissioned
+  (`00ORP000009p02P2AQ`, `00ORP000009p0412AA`, `00ORP000009p05d2AA`, tagged `#196`) are the record
+  of what they were. A copy saved back into "GLOW Monthly Reports" would be a separate report:
+  D1's components point at the reports themselves, so D1 would still show 2026 only and no grand
+  total.
+- Each report's deploy is one of two, after a check-only: a fresh retrieve of it, edited back
+  where #196 changed it; or its file in `data/sf_glow_review_2026-11/attendance/before/`, only
+  while a fresh retrieve of it equals `after/` (DECISIONS 2026-10-16).
+- D1 is dynamic and the API refuses its copy, so the dashboard is restored the same way: by
+  deploying only its own file in `data/sf_glow_review_2026-11/attendance/before/`, only while a
+  fresh retrieve of D1 equals `after/` (nothing has changed it since this deploy), or a fresh
+  retrieve of it edited back.
 - Never from an older build or retrieve (DECISIONS 2026-10-16): #75's
   `data/sf_dash_attendance_2026-10-24/` is no rollback for this change.
 - The new report "Overall Attendance by Month" (`00ORP000009p0FJ2AY`) is not in `before/`, and D1
@@ -126,7 +130,12 @@ All on 2026-11-04 UTC, VPN off, on Ryan's go.
 - Step 8:
   - The overall chart equals the SOQL in every month of 2026: January 3,409, February 5,019,
     March 5,673, April 5,068, May 5,433, June 5,275, July 4,856, August 4,826, September 5,385
-    (unchanged by #196) and October 0 (3 early reports, no figure yet).
+    and October 0 (3 early reports, no figure yet).
+  - September is not otherwise changed: before #196, on 2026-11-02, Salesforce's September
+    Monthly Max with these filters was 5,385 (the 2026-11-02/03 handoff, quoted in ticket #201),
+    and after the deploy the overall chart shows 5,385. The RUNBOOK's older September figure,
+    4,861 (item 3's SOQL signal, 2026-10-24), predates late or corrected September reports:
+    they were due by 15 October and kept reaching Salesforce between 2026-10-24 and 2026-11-02.
   - No grouping label in any component contains 2025 (0 of 949).
   - With the Month filter on September, every component shows September 2026 only, all with data.
   - The live Partner Manager filter has 6 options, none the former PO's.

@@ -4654,8 +4654,12 @@ sides):
 - The overall chart equals
   `SELECT CALENDAR_MONTH(Period__c), SUM(Monthly_Total__c) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY CALENDAR_MONTH(Period__c)`
   in every month: January 3,409, February 5,019, March 5,673, April 5,068, May 5,433, June 5,275,
-  July 4,856, August 4,826, September 5,385 (as before #196) and October 0 (3 early reports, no
-  figure yet).
+  July 4,856, August 4,826, September 5,385 and October 0 (3 early reports, no figure yet).
+- September is the same as before #196: Salesforce's September Monthly Max with these filters was
+  5,385 on 2026-11-02 (the 2026-11-02/03 handoff, quoted in ticket #201), and the overall chart
+  shows 5,385. Item 3's September signal above, 4,861 on 2026-10-24, is older: September's
+  reports were due by 15 October, and late or corrected September reports reached Salesforce
+  between 2026-10-24 and 2026-11-02.
 - No grouping label in any component reads 2025 (0 of 949 labels).
 - With the Month filter on September, every component shows September 2026 only, with data.
 - The live Partner Manager filter has 6 options, none of them the former PO's.
@@ -4691,15 +4695,20 @@ Rollback of #196 ([plan](plans/2026-11-02-sf-review-attendance.md#rollback); DEC
 2026-10-16), each write on Ryan's go after a check-only, VPN off:
 - Since #196's deploy a fresh retrieve no longer equals #75's `after/`, so #75's rollback above
   runs only after this one.
-- A Salesforce user restores items 1, 3 and 4 from their copies in Decommissioned, made by
-  `copy --tag "#196"` before the change (`00ORP000009p02P2AQ`, `00ORP000009p0412AA` and
-  `00ORP000009p05d2AA`): open the copy, then Save As or move it into "GLOW Monthly Reports" (the
-  archive rule above).
+- Items 1, 3 and 4 come back by a deploy, not from their copies: D1's components point at the
+  reports themselves, so a copy saved into "GLOW Monthly Reports" would be a separate report that
+  D1 does not show. The copies in Decommissioned (`00ORP000009p02P2AQ`, `00ORP000009p0412AA` and
+  `00ORP000009p05d2AA`, made by `copy --tag "#196"` before the change) are the record of what the
+  reports were.
+- Each report's deploy is one of two, after a check-only: a fresh retrieve of it, edited back
+  where #196 changed it; or its file in #196's retrieve
+  `data/sf_glow_review_2026-11/attendance/before/`, only while a fresh retrieve of it equals
+  `after/` (DECISIONS 2026-10-16).
 - D1 is dynamic and has no Decommissioned copy (the org is at its limit of 5 dynamic dashboards),
-  so its rollback is #196's retrieve `data/sf_glow_review_2026-11/attendance/before/`: the
-  dashboard is restored by deploying only its own file in that `before/`, only while a fresh
-  retrieve of it equals `after/` (nothing has changed it since #196's deploy), never from an
-  older build or retrieve.
+  so the dashboard is restored the same way, by deploying only its own file in that `before/`,
+  only while a fresh retrieve of it equals `after/` (nothing has changed it since #196's deploy),
+  or a fresh retrieve of it edited back, never from an older build or retrieve.
+- This rollback never deploys #75's `data/sf_dash_attendance_2026-10-24/before/` or `build/`.
 - The new report "Overall Attendance by Month" (`00ORP000009p0FJ2AY`) is not in `before/`, and
   D1 as `before/` has it shows no component on it: the report may stay, harmless, or move to
   Decommissioned once D1 no longer uses it. Nothing is deleted.
