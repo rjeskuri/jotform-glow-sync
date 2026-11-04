@@ -8,7 +8,8 @@ GLOW team via Ryan, 2026-10-21; the test carries the list), mapped to the ids Ry
 ticket (2026-10-23, "all as proposed"; item 12 had no report until task #80 built it). Ryan's answer
 (c), "do NOT change the labels. Kept reports and dashboards keep their current names", replaces the
 ticket's first label convention (drop "M&P", a dashboard named after its group): every row's target
-label is its label today.
+label is its label today, except the rows GLOW's review of 2026-11-02 (epic #194) renames: RENAMED, items 9-11
+since ticket #198, whose target is GLOW's name within 40 characters (label_today stays the label #70 recorded).
 
 NewMentorsReport (ticket #80, plan docs/plans/2026-10-26-sf-new-mentors.md, Rollout step 8): item 12
 is the report #80 deployed on 2026-10-26, "Partners that recruited new mentors" (GLOW Monthly Reports),
@@ -84,6 +85,13 @@ AGREED = {
     "D4": ("dashboard", "01ZRP000006quAj2AI", "Mentors"),
     "D5": ("dashboard", "01ZRP000006oxSr2AI", "Reporting"),
 }
+# GLOW's review of 2026-11-02 (epic #194) renames some kept reports, superseding (c) for these rows only:
+# item: label_target. Ticket #198 (Outline step 3): items 9-11, GLOW's names within 40 characters.
+RENAMED = {
+    "9": "GC Observation Forms by Month & Partner",
+    "10": "Club Observations by Month and Partner",
+    "11": "Clubs Observed at Least Once by Month",
+}
 # ticket #80: the report it deployed for item 12 (2026-10-26, folder GLOW Monthly Reports)
 ITEM_12_ID = "00ORP000009kXev2AE"
 ITEM_12_LABEL = "Partners that recruited new mentors"
@@ -156,6 +164,7 @@ class KeepList(unittest.TestCase):
 
     def test_kept_items_keep_their_current_labels(self):
         # Ryan, 2026-10-23, (c): "do NOT change the labels. Kept reports and dashboards keep their current names."
+        # GLOW's review of 2026-11-02 renames the rows of RENAMED (#198: items 9-11); every other row keeps its label.
         rows = self.by_item()
         for item, row in rows.items():
             where = f"glow/sf_keep_list.csv item {item}"
@@ -165,6 +174,11 @@ class KeepList(unittest.TestCase):
             self.assertLessEqual(len(target), 40, f"{where}: label_target {target!r} is over 40 characters "
                                                   "(Salesforce's limit on a report's name)")
             self.assertTrue(row["label_today"].strip(), f"{where}: label_today is blank")
+            if item in RENAMED:
+                self.assertEqual(target, RENAMED[item],
+                                 f"{where}: label_target is GLOW's name {RENAMED[item]!r} (GLOW's review, 2026-11-02; "
+                                 f"ticket #198), not {target!r}")
+                continue
             self.assertEqual(target, row["label_today"],
                              f"{where}: label_target is the label today, {row['label_today']!r} (Ryan, "
                              "2026-10-23: kept reports and dashboards keep their current names)")

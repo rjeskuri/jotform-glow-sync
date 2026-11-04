@@ -88,6 +88,14 @@ only ever denied. The plan `docs/plans/<date>-sf-new-mentors.md` names #80; its 
 D4, check-only, Ryan's go, deploy, `after/` against `build/`, SOQL for six complete months and one partner; its
 Rollback restores D4 from its copy or a guarded `before/`, then moves the new report to Decommissioned, deleting
 nothing. A dated DECISIONS entry records the definition with **Why**, **Rejected** and **Consequences**.
+
+GlowReviewObservationsDocs (ticket #198, epic #194, GLOW's review of 2026-11-02): the keep list gives items 9-11 GLOW's
+names (`label_target`), none with "Alteast" and every report's within 40 characters; the RUNBOOK's `### GLOW Club
+Observations` says item 11 derives Observed Yes/No from the sessions observed
+(`GC_sessions_did_you_observe_last_month__c`), not from the count question
+(`many_clubs_do_you_still_need_to_observe__c`, no answers in 2026). ObservationsDashboardDocs (#77) accepts #198's
+reporting year, Month filter, new report labels and `data/sf_glow_review_<month>/` rollback folder, and
+CategoryFoldersDocs the new title of D3 in the dashboards table.
 """
 import glob
 import os
@@ -1066,6 +1074,8 @@ class CategoryFoldersDocs(unittest.TestCase):
     TICKET = re.compile(r"(?<![\w#])#73\b")
     GROUPS = KeepListDocs.GROUPS
     TABLE_GROUP = "Report/Data Table Format"
+    # dashboards GLOW's review of 2026-11-02 renames (epic #194): item: the title since its ticket's deploy
+    RENAMED_DASHBOARDS = {"D3": "Club Observation Dashboards"}      # #198
     REPORT_FOLDER, REPORT_DEV = "GLOW Monthly Reports", "GLOW_Monthly_Reports"
     DASH_FOLDER, DASH_DEV = "GLOW Monthly Dashboards", "GLOW_Monthly_Dashboards"
     DHIS2_FOLDERS = DecommissionedFoldersDocs.DHIS2_FOLDERS
@@ -1224,10 +1234,14 @@ class CategoryFoldersDocs(unittest.TestCase):
             dash = [k for k in keep if k["group"] == group and k["kind"] == "dashboard"]
             self.assertEqual(len(dash), 1, f"glow/sf_keep_list.csv: one dashboard row for {group!r}")
             label = self.cell(r[cols["label"]])
-            self.assertEqual(label, dash[0]["label_today"],
-                             f"{at}: the dashboard label is its current label {dash[0]['label_today']!r} "
-                             f"({dash[0]['item']} in `glow/sf_keep_list.csv`; labels do not change, Ryan 2026-10-23), "
-                             f"not {label!r}")
+            # GLOW's review of 2026-11-02 renames D3 (ticket #198): its title is "Club Observation Dashboards" since
+            # the deploy, the Id unchanged; every other dashboard keeps its label
+            labels = {dash[0]["label_today"], self.RENAMED_DASHBOARDS.get(dash[0]["item"], dash[0]["label_today"])}
+            self.assertIn(label, labels,
+                          f"{at}: the dashboard label is its current label {dash[0]['label_today']!r} "
+                          f"({dash[0]['item']} in `glow/sf_keep_list.csv`; labels do not change, Ryan 2026-10-23"
+                          f"{'; D3 since #198: ' + repr(self.RENAMED_DASHBOARDS['D3']) if dash[0]['item'] == 'D3' else ''}), "
+                          f"not {label!r}")
             self.assertEqual(self.cell(r[cols["dashboard_folder"]]), self.DASH_FOLDER,
                              f"{at}: the dashboard folder is {self.DASH_FOLDER!r} exactly (one dashboard folder for the "
                              f"five dashboards, Ryan 2026-10-21), not {r[cols['dashboard_folder']]!r}")
@@ -2755,7 +2769,8 @@ class ObservationsDashboardDocs(unittest.TestCase):
                            r"for information( only)?|best[- ]effort|nice to have|if convenient|not required|"
                            r"not mandatory|once a (year|quarter)|from time to time|occasionally|now and then)\b")
     # this change's own retrieve folder (the outline: data/sf_dash_observations_<date>/before/)
-    BEFORE = re.compile(r"data/sf_dash_observations_(\d{4}-\d\d-\d\d|<date>)/before/")
+    BEFORE = re.compile(r"data/sf_dash_observations_(\d{4}-\d\d-\d\d|<date>)/before/"
+                        r"|data/sf_glow_review_(\d{4}-\d\d|<month>)/[\w<>-]+/before/")
     OLDER_BUILD = re.compile(r"(?i)\b(older|earlier|previous|old|stale|another\s+change['’]s)\s+(\w+\s+)?"
                              r"(builds?|retrieves?|deploys?|`?build/`?|`?before/`?)")
     ONLY_WHILE = re.compile(r"(?i)\bonly\s+(while|if|when|as long as|so long as)\b|\bas long as\b|\bprovided\b")
@@ -2824,6 +2839,12 @@ class ObservationsDashboardDocs(unittest.TestCase):
     def stated(self, s, rx):
         return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
 
+    @staticmethod
+    def labelled(text, r):
+        """`text` names the report `r` by its label today or, since #198 (GLOW's review of 2026-11-02), by its
+        target label: the keep list's two columns differ for the rows #198 renames."""
+        return r["label_today"] in text or r["label_target"] in text
+
     def assertRollback(self, raw, where, whole=True):
         """The rollback: from the Decommissioned copies, or from this change's `before/` only while a fresh retrieve
         equals `after/`; never from an older build; nothing deleted, nothing optional. #69's contradiction sweep
@@ -2839,16 +2860,19 @@ class ObservationsDashboardDocs(unittest.TestCase):
                         f"{where}: say the rollback restores from the copies in Decommissioned (one sentence, not "
                         "negated)")
         self.assertRegex(text, self.BEFORE, f"{where}: name this change's retrieve, "
-                                            "`data/sf_dash_observations_<date>/before/`")
-        # only this change's before/: no other retrieve folder, no other ticket's build or retrieve
+                                            "`data/sf_dash_observations_<date>/before/` (or, since #198, "
+                                            "`data/sf_glow_review_<month>/<topic>/before/`)")
+        # only this change's before/: no other retrieve folder, no other ticket's build or retrieve (#198's own
+        # retrieve folder, `data/sf_glow_review_<month>/`, is this change's since GLOW's review of 2026-11-02)
         for s in cl:
             for p in re.findall(r"\bdata/[^\s`'\"()]*?/before/", s):
-                self.assertTrue(p.startswith("data/sf_dash_observations_"),
+                self.assertTrue(p.startswith(("data/sf_dash_observations_", "data/sf_glow_review_")),
                                 f"{where}: the rollback restores only this change's `before/` "
-                                f"(`data/sf_dash_observations_<date>/before/`), not {p!r}: {s[:200]!r}")
+                                f"(`data/sf_dash_observations_<date>/before/`, since #198 "
+                                f"`data/sf_glow_review_<month>/<topic>/before/`), not {p!r}: {s[:200]!r}")
             for m in restore_or_deploy.finditer(s):
                 near = s[max(0, m.start() - 30):m.end() + 30]
-                other = [t for t in re.findall(r"(?<![\w#])#(\d+)\b", near) if t != "77"]
+                other = [t for t in re.findall(r"(?<![\w#])#(\d+)\b", near) if t not in ("77", "198")]
                 self.assertFalse(other, f"{where}: the rollback restores this change's (#77) copies or `before/`, not "
                                         f"ticket #{other[:1]}'s: {s[:200]!r}")
         # the guard: before/ only while a fresh retrieve EQUALS after/
@@ -2916,11 +2940,12 @@ class ObservationsDashboardDocs(unittest.TestCase):
         for item in self.ITEMS:
             r = rows[item]
             field, shapes = self.FIELDS[item]
-            for col in ("measure", "label_today"):
-                self.assertIn(r[col], text, f"{where}: name item {item}'s {col.replace('_today', '')} as "
-                                            f"`glow/sf_keep_list.csv` gives it, {r[col]!r}")
+            self.assertIn(r["measure"], text, f"{where}: name item {item}'s measure as `glow/sf_keep_list.csv` gives "
+                                              f"it, {r['measure']!r}")
+            self.assertTrue(self.labelled(text, r), f"{where}: name item {item}'s report by its label, "
+                                                    f"{r['label_today']!r} or, since #198, {r['label_target']!r}")
             others = {self.FIELDS[i][0] for i in self.ITEMS} - {field}
-            mine = [b for b in blocks if r["measure"] in b and r["label_today"] in b and field in b
+            mine = [b for b in blocks if r["measure"] in b and self.labelled(b, r) and field in b
                     and not [f for f in others if f in b]]
             self.assertTrue(mine, f"{where}: item {item} ({r['measure']!r}, the report {r['label_today']!r}) and the "
                                   f"`DHIS2__c` field it counts, `{field}` (and no other item's field), in one table "
@@ -2953,13 +2978,17 @@ class ObservationsDashboardDocs(unittest.TestCase):
                               "in one sentence, present tense, not negated (no \"removed\", \"was\", \"no longer\" … in "
                               "it)")
         # ... and never a Partner or a Month dashboard filter (a report's grouping by Partner and Month is not one)
+        # (since #198, GLOW's review of 2026-11-02, it has a Month filter: GlowReviewObservationsDocs' ticket; only a
+        # Partner filter stays denied)
         for s in cl:
             if re.search(r"(?i)\breports?\b", s) and not re.search(r"(?i)\bdashboard", s):
                 continue
             for m in self.PARTNER_OR_MONTH_FILTER.finditer(s):
+                if not re.search(r"(?i)\bPartner\b", m.group(0)):       # a Month filter alone
+                    continue
                 self.assertTrue(self.d.locally_denied(s, m) or self.UNDONE.search(s),
-                                f"{where}: the dashboard has no Partner or Month filter (Ryan, 2026-10-24 on #77: its "
-                                f"only filter is Partner Manager): {s[:200]!r}")
+                                f"{where}: the dashboard has no Partner filter (Ryan, 2026-10-24 on #77; a Month filter "
+                                f"since #198): {s[:200]!r}")
         # item 16 is taken off this dashboard (#77; #78 reworks it on its own dashboard)
         r16 = rows["16"]
         names16 = re.compile(re.escape(r16["label_today"]) + "|" + r16["id"] + r"|\bitem\s+16\b", re.I)
@@ -2982,10 +3011,14 @@ class ObservationsDashboardDocs(unittest.TestCase):
                              + twelve + r"[^.;]{0,60}?\b(is|as)\s+the\s+default\b")
         past = re.compile(r"(?i)\b(was|were|used to|formerly|previous(ly)?|no longer|old|former|earlier|until)\b|"
                           r"(?<!range )(?<!range: )\ball[- ]time\b")
-        self.assertTrue([s for s in cl if "Period__c" in s and self.stated(s, default) and not self.d.denies(s)
-                         and not past.search(s)],
+        # (since #198, GLOW's review of 2026-11-02, the reporting year: `In_Reporting_Year__c equals true`)
+        in_year = re.compile(r"\bIn_Reporting_Year__c\b")
+        self.assertTrue([s for s in cl if ("Period__c" in s and self.stated(s, default) and not self.d.denies(s)
+                                           and not past.search(s))
+                         or (self.stated(s, in_year) and not self.d.denies(s))],
                         f"{where}: say the default period is the last 12 months on `Period__c` (`LAST_N_MONTHS:12`), "
-                        "in one sentence, as the default now (no \"was\", \"old\", \"previously\", \"all time\")")
+                        "in one sentence, as the default now (no \"was\", \"old\", \"previously\", \"all time\"), or "
+                        "since #198 the reporting year, `In_Reporting_Year__c`")
         # the filters: the test-record rule (#70) as a report filter, nothing negated between its two halves
         self.k.assertTestRecordRule(self.norm(part), where)
         for s in sentences(self.norm(part), ".;"):
@@ -3192,7 +3225,7 @@ class ObservationsDashboardDocs(unittest.TestCase):
 
     def item_blocks(self, part, item):
         r = self.keep()[item]
-        return [b for b in self.blocks(part) if r["measure"] in b and r["label_today"] in b]
+        return [b for b in self.blocks(part) if r["measure"] in b and self.labelled(b, r)]
 
     def affirmed(self, s, m):
         """Match `m` of clause `s` said, not denied: no negation in the words before it and no "no", "none" or
@@ -3267,7 +3300,8 @@ class ObservationsDashboardDocs(unittest.TestCase):
         # RowCount only when its record count is on (`co` 1, `hasRecordCount: true`); item 11's report had it off
         # (`co` 0), so its RowCount component failed with 406
         r11 = self.keep()["11"]
-        names11 = re.compile(r"(?i)\bitem\s+11\b|" + r11["id"] + "|" + re.escape(r11["label_today"]))
+        names11 = re.compile(r"(?i)\bitem\s+11\b|" + r11["id"] + "|" + re.escape(r11["label_today"]) + "|"
+                             + re.escape(r11["label_target"]))
         on_cond = re.compile(r"(?i)\bRowCount\b")
         seen = []
         for b in self.blocks(section):
@@ -6235,6 +6269,100 @@ class NewMentorsDocs(unittest.TestCase):
         self.assertTwelveMonths(rest, where)
         self.assertNoSeparateDashboard(rest, where)
         self.d.assertNoContradiction(rest, where)
+
+
+class GlowReviewObservationsDocs(unittest.TestCase):
+    """Ticket #198 (epic #194, GLOW's review of 2026-11-02): D3, the dashboard "GLOW Club Training" in the org, is
+    titled "Club Observation Dashboards" (its Id unchanged), shows 2026 only, has a Month filter and offers no option
+    for the former PO; its three reports get GLOW's names within the 40 characters of a report's name: item 9 "GC
+    Observation Forms by Month & Partner", item 10 "Club Observations by Month and Partner", item 11 "Clubs Observed at
+    Least Once by Month" (no "Alteast"). `glow/sf_keep_list.csv` carries them in `label_target` (`label_today` stays
+    the label #70 recorded). GLOW asked whether item 11 still reads the count question
+    `many_clubs_do_you_still_need_to_observe__c`, which has no answers in 2026: it does not, it derives Observed
+    Yes/No from the sessions observed, `GC_sessions_did_you_observe_last_month__c`, answered in every month of 2026;
+    the RUNBOOK's `### GLOW Club Observations` says so."""
+
+    longMessage = False         # the messages say what to fix
+    KEEP_LIST = CategoryFoldersDocs.KEEP_LIST
+    # item: GLOW's name for the report (the task's Outline step 3), each within 40 characters
+    TARGETS = {"9": "GC Observation Forms by Month & Partner",
+               "10": "Club Observations by Month and Partner",
+               "11": "Clubs Observed at Least Once by Month"}
+    COUNT_QUESTION = "many_clubs_do_you_still_need_to_observe__c"
+    SESSIONS = "GC_sessions_did_you_observe_last_month__c"
+    # the count question said not to be item 11's source: a negation before it ("does not use `…`", "not from `…`"),
+    # or "`…` is not used" / "unused"
+    NOT_USED = re.compile(r"(?i)\b(is|are|was|were)\s+(no longer\s+|not\s+)(used|read|counted|the source|item 11['’]s)\b|"
+                          r"\bnot\s+used\b|\bunused\b")
+    # ... and no answers in 2026 ("has no answers in 2026", "was never answered in 2026", "0 answers in 2026")
+    NO_ANSWERS = re.compile(r"(?i)\bno\s+(\w+\s+){0,2}?(answers?|responses?)\b|\b(0|zero)\s+(answers?|responses?)\b|"
+                            r"\b(unanswered|never answered|not answered|no one answered|nobody answered)\b")
+
+    @classmethod
+    def setUpClass(cls):
+        ObservationsDashboardDocs.setUpClass()
+        cls.o = ObservationsDashboardDocs()     # #77's helpers: part, blocks, keep
+        cls.d = cls.o.d                         # #69's helpers: locally_denied
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def test_the_keep_list_has_no_alteast_and_stays_within_40_characters(self):
+        import csv
+        with open(self.KEEP_LIST, encoding="utf-8", newline="") as f:
+            rows = {r["item"]: r for r in csv.DictReader(f)}
+        for item, want in sorted(self.TARGETS.items(), key=lambda kv: int(kv[0])):
+            self.assertIn(item, rows, f"glow/sf_keep_list.csv: no row {item}")
+            self.assertEqual(rows[item]["kind"], "report", f"glow/sf_keep_list.csv item {item}: a report")
+            self.assertEqual(rows[item]["label_target"], want,
+                             f"glow/sf_keep_list.csv item {item}: label_target is GLOW's name {want!r} (GLOW's review, "
+                             f"2026-11-02; ticket #198), not {rows[item]['label_target']!r}")
+            self.assertLessEqual(len(want), 40, f"test: GLOW's name {want!r} is within 40 characters")
+        for item, r in rows.items():
+            self.assertNotIn("alteast", r["label_target"].lower(),
+                             f"glow/sf_keep_list.csv item {item}: label_target {r['label_target']!r} still has the "
+                             "typo \"Alteast\" (GLOW's review, 2026-11-02)")
+            if r["kind"] in ("report", "table"):
+                self.assertLessEqual(len(r["label_target"]), 40,
+                                     f"glow/sf_keep_list.csv item {item}: label_target {r['label_target']!r} is over 40 "
+                                     "characters (Salesforce's limit on a report's name)")
+
+    def test_the_runbook_names_the_source_of_item_11(self):
+        where = f"RUNBOOK section {ObservationsDashboardDocs.MONTHLY[3:]!r}, {ObservationsDashboardDocs.PART[4:]!r}"
+        r11 = self.o.keep()["11"]
+        part = self.o.part()
+        names11 = re.compile(r"(?i)\bitem\s+11\b(?!\d)|" + re.escape(r11["id"]) + "|" + re.escape(r11["measure"]) + "|"
+                             + "|".join(re.escape(r11[c]) for c in ("label_today", "label_target")))
+        mine = [b for b in self.o.blocks(part) if names11.search(b)]
+        self.assertTrue(mine, f"{where}: item 11 ({r11['measure']!r}) has its own row, list item or paragraph")
+        in11 = [s for b in mine for s in sentences(self.norm(b), ".;")]
+        # the count question, wherever the part names it, is said not to be item 11's source or to have no 2026 answers
+        count = re.compile(re.escape(self.COUNT_QUESTION))
+        named = [s for s in sentences(self.norm(part), ".;") if count.search(s)]
+        self.assertTrue(named, f"{where}: item 11's block names the count question `{self.COUNT_QUESTION}` (GLOW asked "
+                               "whether it was removed from the form)")
+        for s in named:
+            m = count.search(s)
+            ok = (self.d.locally_denied(s, m) or self.NOT_USED.search(s)
+                  or (re.search(r"\b2026\b", s) and self.NO_ANSWERS.search(s)))
+            self.assertTrue(ok, f"{where}: `{self.COUNT_QUESTION}` is only ever said not to be item 11's source, or to "
+                                f"have no answers in 2026: {s[:200]!r}")
+        not_source = [s for s in in11 if count.search(s)
+                      and (self.d.locally_denied(s, count.search(s)) or self.NOT_USED.search(s))]
+        self.assertTrue(not_source, f"{where}: say, in item 11's block, that item 11 does not use the count question "
+                                    f"`{self.COUNT_QUESTION}` (one sentence naming it, denied)")
+        no_answers = [s for s in in11 if count.search(s) and re.search(r"\b2026\b", s) and self.NO_ANSWERS.search(s)]
+        self.assertTrue(no_answers, f"{where}: say, in item 11's block, that the count question "
+                                    f"`{self.COUNT_QUESTION}` has no answers in 2026 (one sentence naming it and 2026)")
+        # ... and the source: Observed Yes/No from the sessions observed, not denied, not the count question
+        sessions = re.compile(re.escape(self.SESSIONS))
+        derived = [s for s in in11 if sessions.search(s) and not count.search(s)
+                   and not self.d.locally_denied(s, sessions.search(s))
+                   and re.search(r"(?i)\bobserved\b", s) and re.search(r"\bYes\b", s) and re.search(r"\bNo\b", s)]
+        self.assertTrue(derived, f"{where}: say, in item 11's block, that item 11 derives Observed Yes/No from the "
+                                 f"sessions observed, `{self.SESSIONS}` (one sentence naming the field, \"Observed\", "
+                                 "Yes and No, not negated)")
 
 
 if __name__ == "__main__":
