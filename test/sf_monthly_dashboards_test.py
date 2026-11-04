@@ -6327,6 +6327,32 @@ class GlowReviewImplementationDocs(unittest.TestCase):
     # ... and from September 2026 the modules come from Jotform
     FROM_SEPT = re.compile(r"(?i)\b(from|since|starting|beginning|on\s+or\s+after)\s+(\w+\s+){0,2}?September\b(?!\s+2025)|"
                            r"\bSeptember\b(?!\s+2025)[^.;]{0,30}?\bonwards?\b|\b(from|since|on\s+or\s+after)\s+2026-09-01\b")
+    # what a "2026 only" sentence is about: D2, the dashboard, its reports, a component, items 5-8
+    SHOWN = re.compile(r"(?i)\b(D2|dashboards?|components?)\b|\b(its|the|their|D2['’]s|four|all)\s+reports\b|"
+                       r"\bitems?\s+[5-8]\b")
+
+    # --- the rollback (review of #197): the reports and D2 restored by a deploy, never from the copies --------
+    # the reports in a rollback unit ("the reports", "each report's deploy", "items 5, 6, 7 and 8")
+    REPORTS = re.compile(r"(?i)\breports?\b|\bitems?\s+(\d+\s*(,|and|&)\s*)*[5-8]\b")
+    DEPLOY = re.compile(r"(?i)\b(re-?)?deploy\w*\b")
+    # a deploy's sources: a fresh retrieve edited back, or `before/` guarded by a fresh retrieve that equals `after/`
+    EDITED_BACK = re.compile(r"(?i)\bfresh\s+retriev\w*\b[^.;]{0,40}?\bedit\w*\s+back\b")
+    GUARD = re.compile(r"(?i)\b(only|while|as long as|so long as|provided)\b[^.;]{0,30}?\bfresh\s+retriev\w*\b[^.;]{0,40}?"
+                       r"\b(equals?|matches|match|is the same as|identical to)\b[^.;]{0,20}?\bafter/")
+    # an old source: another change's data/ folder, any build/, an older build or retrieve, another ticket's
+    # before/ or build ("#76's `before/`"); #197's own `data/sf_glow_review_<month>/` and a fresh retrieve are its sources
+    OLD_SOURCE = re.compile(r"(?i)\bdata/sf_(?!glow_review_)[\w-]+/|\bbuild/|"
+                            r"\b(older|old|earlier|previous|prior|stale|another|other|original)\s+([\w-]+\s+)?"
+                            r"(retrieves?|builds?|backups?|exports?|snapshots?|versions?)\b|"
+                            r"#(?!197\b)\d+['’]s\s+`?(before/|build/|retrieve|build)")
+    # a restore from the Decommissioned copies ("Save As", "move a copy back", "restored from their copies", "point
+    # D2's component at the copy")
+    COPY_RESTORE = re.compile(r"(?i)\bSave\s+As\b|\b(move|moves|moved|moving|put|puts|bring|brings)\s+(a|the|each|its|"
+                              r"their|that)\s+cop(y|ies)\s+back\b|\bopen\s+(a|the|its|each|their)\s+cop(y|ies)\b|"
+                              r"\bpoint\w*\s+(\w+\s+){0,4}?at\s+(a|the|its|their|that)\s+cop(y|ies)\b|"
+                              r"\bfrom\s+(a|the|their|its|each|that)\s+(\w+\s+)?cop(y|ies)\b")
+    RESTORE = re.compile(r"(?i)\brestor\w*|\broll(s|ed|ing)?\s+(\w+\s+)?back\b|\brollback\b|\brevert\w*|"
+                         r"\b(come|comes|came|go|goes|brought|bring|brings|put|puts)\s+back\b|\bre-?deploy\w*|\bdeploy\w*")
 
     @classmethod
     def setUpClass(cls):
@@ -6350,6 +6376,44 @@ class GlowReviewImplementationDocs(unittest.TestCase):
         """Match `m` of `s` said as the past or as what was replaced: a marker in the 50 characters before it or
         the 30 after, or a denial."""
         return bool(self.HISTORY.search(s[max(0, m.start() - 50):m.end() + 30]) or self.d.locally_denied(s, m))
+
+    def denied_before(self, s, m):
+        """A negation in clause `s` before match `m`, back to the last comma, semicolon, dash, "but", "however",
+        "then" or "otherwise" and at most 160 characters: "never from #76's `build/`", "not from their copies".
+        A denial after the match ("#76's folder is no rollback") does not count."""
+        pre = re.split(r"[,;—–]|\bbut\b|\bhowever\b|\bthen\b|\botherwise\b", s[max(0, m.start() - 160):m.start()])[-1]
+        return bool(self.d.NEGATION.search(pre))
+
+    def deployed(self, u):
+        """A sentence of unit `u` that restores by a deploy, not denied."""
+        return any(self.stated(s, self.DEPLOY) for s in sentences(u, ".;"))
+
+    def deploy_source(self, u):
+        return bool(self.EDITED_BACK.search(u) or ("before/" in u and self.GUARD.search(u)))
+
+    def assertRollbackSources(self, raw, where):
+        """No old source (another change's data/ folder, a `build/`, an older build or retrieve), no restore from
+        the Decommissioned copies, unless denied before the match; `before/` never redeployed "even if" or when a
+        fresh retrieve differs from `after/`."""
+        for s in sentences(self.norm(raw), ".;"):
+            for m in self.OLD_SOURCE.finditer(s):
+                self.assertTrue(self.denied_before(s, m),
+                                f"{where}: #197's rollback deploys a fresh retrieve edited back or #197's own `before/`, "
+                                f"never {m.group(0)!r} (DECISIONS 2026-10-16); deny it before naming it (\"never from "
+                                f"#76's `build/`\"): {s[:200]!r}")
+            for m in self.COPY_RESTORE.finditer(s):
+                self.assertTrue(self.denied_before(s, m),
+                                f"{where}: the reports come back by a deploy, not from their copies in Decommissioned "
+                                f"(D2's components point at the reports themselves); the copies are the record "
+                                f"({m.group(0)!r}): {s[:200]!r}")
+            if "before/" not in s:
+                continue
+            self.assertFalse(self.i.EVEN.search(s), f"{where}: `before/` is deployed only while a fresh retrieve equals "
+                                                    f"`after/`, never \"even if\" or \"regardless\": {s[:200]!r}")
+            diff = [m for m in self.i.DIFFERS.finditer(s) if not self.d.locally_denied(s, m)]
+            redo = [m for m in self.RESTORE.finditer(s) if not self.d.locally_denied(s, m)]
+            self.assertFalse(diff and redo, f"{where}: `before/` is never deployed when a fresh retrieve differs from "
+                                            f"`after/` (stop and ask instead): {s[:200]!r}")
 
     def keep_rows(self):
         import csv
@@ -6410,8 +6474,11 @@ class GlowReviewImplementationDocs(unittest.TestCase):
                          and self.stated(s, self.YEAR_ON)],
                         f"{where}: say D2's reports filter `In_Reporting_Year__c equals true` (#195) in place of "
                         "`LAST_N_MONTHS:12` (one sentence naming the reports or the filter, not negated)")
-        self.assertTrue([s for s in cl if self.stated(s, self.ONE_YEAR)],
-                        f"{where}: say D2 and its reports show 2026 only, no 2025 month (one sentence)")
+        # said of D2, its reports or a component, never only the data gap's "no answers after September 2025"
+        self.assertTrue([s for s in cl if self.stated(s, self.ONE_YEAR) and self.SHOWN.search(s)
+                         and not self.GAP_MONTHS.search(s)],
+                        f"{where}: say D2 and its reports show 2026 only, no 2025 month (one sentence naming D2, the "
+                        "dashboard, its reports or a component; the data gap's sentence does not count)")
         for s in cl:
             if not self.PERIOD_TALK.search(s):
                 continue
@@ -6549,20 +6616,31 @@ class GlowReviewImplementationDocs(unittest.TestCase):
                         f"{where}: the SOQL check (each component against SOQL) comes after the deploy")
 
         # the rollback: the reports from their copies, D2 from this change's before/, the new reports to
-        # Decommissioned, never an older build
+        # Decommissioned, never an older build. Review of #197: the reports and D2 come back by a deploy (D2's
+        # components point at the reports themselves, so a copy saved back would be a separate report D2 does not
+        # show), from a fresh retrieve edited back or from #197's own `before/` only while a fresh retrieve equals
+        # `after/`; the Decommissioned copies are the record of what the reports were, never the restore.
         raw = self.i.plan_part(self.PLAN, "## Rollback", 15)
         where = f"{name}: `## Rollback`"
         cl = sentences(self.norm(raw), ".;")
-        self.assertTrue([s for s in cl if self.stated(s, ImplementationDashboardDocs.ROLLBACK)
-                         and re.search(r"(?i)\breports?\b", s) and re.search(r"(?i)\bcop(y|ies)\b", s)
-                         and "Decommissioned" in s],
-                        f"{where}: say the reports are restored from their copies in Decommissioned (one sentence, not "
-                        "negated)")
-        self.assertTrue([s for s in cl if re.search(r"(?i)\b(dashboard|D2)\b", s) and "before/" in s
-                         and (self.stated(s, ImplementationDashboardDocs.ROLLBACK)
-                              or self.stated(s, re.compile(r"(?i)\b(re-?)?deploy\w*\b")))],
-                        f"{where}: say D2 is restored by deploying this change's `before/` retrieve (one sentence, not "
-                        "negated)")
+        units = [self.norm(u) for u in self.i.blocks(raw)]
+        self.assertTrue([u for u in units if self.REPORTS.search(u) and self.deployed(u) and self.deploy_source(u)],
+                        f"{where}: say the reports of items 5-8 are restored by a deploy (after a check-only) from a "
+                        "fresh retrieve edited back where #197 changed it, or from their files in #197's `before/` only "
+                        "while a fresh retrieve equals `after/`, in one list item or paragraph; their copies in "
+                        "Decommissioned are the record, not the restore")
+        self.assertTrue([u for u in units if re.search(r"(?i)\b(dashboard|D2)\b", u) and "before/" in u
+                         and self.deployed(u) and self.deploy_source(u)],
+                        f"{where}: say D2 is restored by a deploy of its own file in #197's `before/` only while a fresh "
+                        "retrieve equals `after/` (or a fresh retrieve edited back), in one list item or paragraph, not "
+                        "negated")
+        self.assertRollbackSources(raw, where)
+        # ... and the RUNBOOK's rollback of #197 likewise (#76's rollback above it keeps its own sources)
+        part = self.i.part()
+        m = re.search(r"(?im)^\W*rollback\b[^\n]*#197\b", part)
+        self.assertTrue(m, f"RUNBOOK {ImplementationDashboardDocs.PART!r}: no rollback of #197 (a paragraph starting "
+                           "`Rollback of #197`)")
+        self.assertRollbackSources(part[m.start():], f"RUNBOOK {ImplementationDashboardDocs.PART!r}, Rollback of #197")
         self.assertTrue([s for s in cl if re.search(r"(?i)\bnew\b[^.;]{0,60}?\breports?\b", s) and "Decommissioned" in s
                          and self.stated(s, re.compile(r"(?i)\b(go(es)?|mov\w*|put)\b"))],
                         f"{where}: say the new reports (\"Modules Adapted Responses\", any new summit report) move to "

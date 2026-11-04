@@ -65,7 +65,9 @@ AGREED = {
     "3": ("report", "00ORP000005rSbB2AU", "Participation by Month and Partner"),
     "4": ("report", "00ORP000005ufOz2AI", "GLOW Club Each Week"),
     "5": ("report", "00ORP000005rY3t2AE", "Copy of GLOW Club Implementation by M&P"),
-    "6": ("report", "00ORP000005rZxd2AE", "Glow Club Modules Implemented by M&P"),
+    # item 6: since #76 (2026-10-26) the report it built on `Attendance_Totals`, the same label; #70's
+    # 00ORP000005rZxd2AE is in Decommissioned (ticket #197's review)
+    "6": ("report", "00ORP000009kUNh2AM", "Glow Club Modules Implemented by M&P"),
     "7": ("report", "00ORP000005uehR2AQ", "GLOW Club Modules Adapted By Month"),
     "8": ("report", "00ORP000005uekf2AA", "Local and Regional Summits By Month 2"),
     "9": ("report", "00ORP000004RJZC2A4", "Submission of GC observation forms M & P"),
