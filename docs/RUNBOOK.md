@@ -4189,16 +4189,19 @@ grouping: it stays a tabular report, not grouped, with Partner and Month as its 
 filters. Tasks #75 to #79 bring each dashboard and its reports to that, with current data; #79
 ("Fix GLOW Club Reporting and the GLOW of the Month table") does item 19 too.
 
-Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
-`label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
+Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row but those of
+items 5-7, 9-11 and 17 `label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
 keep the dashboard names listed above. Item 12's `label_today` and `label_target` are the label
 of the report #80 deployed, "Partners that recruited new mentors" (Ryan, 2026-10-26). GLOW's
-review of 2026-11-02 (epic #194) supersedes that for items 5-7, items 9-11 and D3's title only: since
-#197 the `label_target` of items 5-7 is GLOW's name within 40 characters, live in the org, and
-`label_today` stays the label #70 recorded (RUNBOOK "GLOW Club Implementation"); since #198 the
-`label_target` of items 9-11 is GLOW's name within 40 characters, live in the org, and
+review of 2026-11-02 (epic #194) supersedes that for items 5-7, items 9-11, item 17 and D3's title
+only: since #197 the `label_target` of items 5-7 is GLOW's name within 40 characters, live in the
+org, and `label_today` stays the label #70 recorded (RUNBOOK "GLOW Club Implementation"); since
+#198 the `label_target` of items 9-11 is GLOW's name within 40 characters, live in the org, and
 `label_today` stays the label #70 recorded; D3's title in the org is "Club Observation
 Dashboards" and its `label_target` stays "GLOW Club Training" (RUNBOOK "GLOW Club Observations").
+Item 17: since #200 its `label_target` is GLOW's name "Monthly Report Approval Status", live in
+the org with the Id unchanged, and `label_today` stays the label #70 recorded (RUNBOOK "GLOW Club
+Reporting").
 
 Every report and dashboard not on the keep list goes to Decommissioned and is kept there, in case
 a pick changes later (Ryan, 2026-10-23). The scope is the Monthly Report's three folders, which
@@ -4247,7 +4250,9 @@ the five dashboards. The five groups are categories, the rows of this table:
   `DashboardFolder` `GLOW_Monthly_Dashboards`, both new, built in
   `data/sf_folders_2026-10-23/build/` from a retrieve of the three DHIS2 folders.
 - The kept reports and dashboards keep their current labels (Ryan, 2026-10-23): the labels in this
-  table and in `glow/sf_keep_list.csv` are the ones in the org.
+  table and in `glow/sf_keep_list.csv` are the ones in the org, except items 5-7 (#197), items 9-11 (#198)
+  and item 17 (#200), whose org labels are GLOW's names since those tickets, the keep list's
+  `label_target` (item 17's "Monthly Report Approval Status").
 
 Shares:
 - Both new folders get the same shares, since a dashboard's viewers need its reports' folder: the
@@ -5098,27 +5103,52 @@ Rollback of #197 ([plan](plans/2026-11-02-sf-review-implementation.md#rollback);
 ### GLOW Club Reporting
 
 The dashboard "Reporting" (`01ZRP000006oxSr2AI`, D5 in `glow/sf_keep_list.csv`, in "GLOW Monthly
-Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18. Item 19 is the table, on no
-dashboard. Ticket #79, [plan](plans/2026-10-24-sf-dash-reporting.md). Status: deployed 2026-10-26
+Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18, and since #200 the approval
+overview chart. Item 19 is the table, on no dashboard. Ticket #79,
+[plan](plans/2026-10-24-sf-dash-reporting.md). Status: deployed 2026-10-26
 (`0AfRP000002i7330AA`) from `data/sf_dash_reporting_2026-10-24/build/`, read back into `after/`
 and checked against SOQL (the plan's Result).
+Ticket #200 (epic #194, GLOW's review of 2026-11-02;
+[plan](plans/2026-11-02-sf-review-reporting.md)): retrieved live 2026-11-04 into
+`data/sf_glow_review_2026-11/reporting/before/` (D5 and items 17-19 equal to #79's `after/`),
+items 17-19 copied to Decommissioned the same day (`copy --tag "#200"`), and live on Ryan's go
+(deploy `0AfRP000002j9lx0AA`, check-only `0AfRP000002j9kL0AQ`, 09:03 UTC), read back into
+`after/` and checked against SOQL ([Result](plans/2026-11-02-sf-review-reporting.md#result)).
+
+D5 and its reports show 2026 only, no 2025 month (GLOW's review), until the reporting year moves
+on 15 February 2027 (#195).
 
 What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
-- Item 17, GLOW's "Report approved by PO", is the report "Approved Approvals monthly report"
-  (`00ORP000006XXEf2AO`): the Monthly Reports with `Approved__c` ticked, a record count.
+- Item 17, GLOW's "Report approved by PO", is the report "Monthly Report Approval Status"
+  (`00ORP000006XXEf2AO`; "Approved Approvals monthly report" until #200, GLOW's name since, the
+  Id unchanged): the Monthly Reports with `Approved__c` ticked, a record count. Its D5 table is
+  titled the same.
 - Item 18, GLOW's "Report submitted on time", is the report "Reports completed on time"
   (`00ORP0000054DyH2AU`): the Monthly Reports filed, a record count, with each one's
   `Monthly_Report_submission_date__c` and `Monthly_Report_Modified_Date__c` as columns. No report
   computes "on time" yet (#119, on hold).
 - Item 19, GLOW's "GLOW of the Month Stories", is the report "GLOW of the Month Stories Report"
   (`00ORP000005p2L32AI`): one row per Monthly Report with its stories (outstanding stories, peer
-  support, community impact, success story, personal growth).
+  support, community impact, success story, personal growth). Its "Formatted Report" export cuts
+  every story at 255 characters (#201, tested 2026-11-04 through the Reports API's Excel export,
+  lengths only).
+- The approval overview (#200) is the new report "Approval Status by Month"
+  (`00ORP000009p0qb2AA`, `Approval_Status_by_Month`, in "GLOW Monthly Reports") shown on D5 as a
+  stacked column (`ColumnStacked`), "Monthly Report Approval Status: Approved vs Not Yet Approved
+  by Month", full width below the two tables: the partner reports approved versus not yet
+  approved, by month. The report is a summary report grouped by `Period__c` by calendar month,
+  then by `Approved__c`, a record count, with item 17's filters without its `Approved__c equals 1`
+  filter: the reporting year, the account not blank, the account name not containing "test".
+  Item 17 lists approved reports only (`Approved__c equals 1`), so the overview needs its own
+  report; item 17 keeps that filter. SOQL signal, every month of the
+  reporting year: `SELECT CALENDAR_MONTH(Period__c), Approved__c, COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY CALENDAR_MONTH(Period__c), Approved__c`.
 
 How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
-- Each report filters `Period__c equals LAST_N_MONTHS:12`, the last 12 months through `Period__c`
-  (#128), which leaves out the current, incomplete month. Its standard date column is `Period__c`,
-  range All Time, in place of `CreatedDate`. Item 19's fixed year (`Year__c equals 2026`) is
-  removed.
+- Since #200 each report, items 17, 18 and 19, filters `In_Reporting_Year__c equals true` (#195),
+  in place of #79's `Period__c equals LAST_N_MONTHS:12` (the last 12 months, until #200). D5, its
+  components and item 19 show only 2026, the reporting year. Each report's standard date column is
+  `Period__c`, range All Time, in place of `CreatedDate`. Item 19's fixed year (`Year__c equals
+  2026`) was removed by #79.
 - Both dashboard reports, items 17 and 18, group by Partner (`DHIS2__c.Account__c`, the partner
   account), then by Month (`Period__c` by calendar month). The owner groupings
   (`Account_Owner_Check__c`, `Account__c.Owner`) and item 17's `Approved__c` grouping are removed,
@@ -5130,25 +5160,32 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - Item 19 is a tabular report: the org had it as a summary report grouped by `Month__c`, and the
   build makes it tabular, with no grouping. Item 19 has Partner and Month as its columns and its
   filters: the columns `Account__c` and `Period__c`, beside the stories.
-- Item 19's Month filter reads `Period__c` (`Period__c equals LAST_N_MONTHS:12`, which a viewer
-  can narrow to one month) and its Partner filter reads `Account__c` (Account not blank, which a
+- Item 19's period filter is `In_Reporting_Year__c equals true` since #200 (until then `Period__c
+  equals LAST_N_MONTHS:12`), and its Partner filter reads `Account__c` (Account not blank, which a
   viewer can narrow to one partner). The "test" condition is locked.
-- The dashboard has one filter, Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`),
-  as today, so each manager picks their own partners (Ryan, 2026-10-24 on #79). It has no Partner
-  filter and no Month filter (Ryan, 2026-10-24, for every Monthly Report dashboard; DECISIONS
-  2026-10-24). The filter offers 7 managers: the 6 it offered plus the active manager it lacked
-  (Ryan, 2026-10-25); of the 8 managers with partners in the window, the eighth, inactive, is
-  left out by a Ruling made in the build, not by Ryan: open for him to reverse, and no rule for
-  the other Monthly Report dashboards until he confirms it.
-- The dashboard's components are two tables titled with the reports' labels, "Approved Approvals
-  monthly report" and "Reports completed on time", each a row per partner and month with its
-  count. They take the place of the one component today, on "Partner Report Submission On Time"
-  (`00ORP000005u1WP2AY`), one of the 19 reports held in "DHIS2 Reports", which moves to
-  Decommissioned once the dashboard no longer uses it.
-- The dashboard runs as the viewer (`LoggedInUser`), as today; its running user is unchanged.
+- The dashboard filters on Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`), so
+  each manager picks their own partners (Ryan, 2026-10-24 on #79). Since #200 (GLOW's review, Ryan
+  2026-11-02) the dashboard D5 has a Month filter on `DHIS2__c$Month__c` beside it: 12 `equals`
+  options, January to December, mapped on all three components. Until #200 Partner Manager was
+  its only filter and it had no Month filter (Ryan, 2026-10-24, for every Monthly Report
+  dashboard; DECISIONS 2026-10-24). It has no Partner filter.
+- Until #200 the Partner Manager filter offered 7 managers: the 6 it had offered plus the active
+  manager it lacked (Ryan, 2026-10-25); of the 8 managers with partners in #79's window, the
+  eighth, inactive, was left out by a Ruling made in #79's build, not by Ryan. Since #200 it
+  offers 6: the former PO's option (user `005RP000001RERJYA4`) is off it (GLOW's review).
+- The dashboard's components are two tables titled with the reports' labels, "Monthly Report
+  Approval Status" (item 17; "Approved Approvals monthly report" until #200) and "Reports
+  completed on time", each a row per partner and month with its count and its totals, which #200
+  leaves as they were (GLOW asked nothing about them), and since #200 the overview's stacked
+  column below them (row 10, 12 columns wide, 8 rows high). The two tables took the place of the
+  one component before #79, on "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), one of
+  the 19 reports held in "DHIS2 Reports", which moves to Decommissioned once the dashboard no
+  longer uses it.
+- The dashboard runs as the viewer (`LoggedInUser`), as before; its running user is unchanged.
 
-The SOQL signals, for the last complete month, each with the period and the test-record rule. A
-component is right when, refreshed, it shows the same total and the same number for one partner:
+The SOQL signals, for the last complete month (item 19's also for the reporting year), each with
+the period and the test-record rule. A component is right when, refreshed, it shows the same
+total and the same number for one partner:
 - Item 17, "Report approved by PO": the total is `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c =
   LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Approved__c = true`,
   and one partner's number is `SELECT Account__r.Name, COUNT(Id) FROM DHIS2__c WHERE Period__c =
@@ -5162,14 +5199,33 @@ component is right when, refreshed, it shows the same total and the same number 
 - Item 19, "GLOW of the Month Stories": the table's rows are `SELECT Account__r.Name, Period__c
   FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE
   '%test%') ORDER BY Account__r.Name`, and their count `SELECT COUNT(Id) FROM DHIS2__c WHERE
-  Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`.
+  Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`; since
+  #200 the table's rows in the reporting year number `SELECT COUNT() FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%')`.
 
 The baseline, 2026-10-24 (September 2026, before the change; `evidence/` of this change): 16
 approved, 42 filed, 42 stories rows, from 42 partners; one partner, Development Consortium, 1 each.
 
+#200's check (2026-11-04, after the refresh at 09:04:30 UTC; a Monthly Report filed or approved
+later moves these figures):
+- All 3 components of D5 return data, and no grouping label contains 2025 (0 of 910 labels). The
+  Partner Manager filter offers 6 managers, none of them the former PO, and the Month filter 12
+  months.
+- The overview equals the SOQL signal above in every month, approved / not yet approved: January
+  39/7, February 43/4, March 40/8, April 45/2, May 41/7, June 39/9, July 36/13, August 38/8,
+  September 33/12, October 1/2. September on 2026-11-02 (the ticket, before #200) was 27 approved
+  and 18 not yet approved: six September reports were approved between 2026-11-02 and 2026-11-04
+  (45 reports on both days).
+- Item 19's table has 427 rows, the SOQL count of 2026 Monthly Reports with its filters (above).
+- The read-back: the four reports in `after/` are byte-identical to `build/`. D5 differs from
+  `build/` in two lines: Salesforce stored the stacked chart's `showValues` as false (the build
+  asked true; a stacked column keeps no values printed on its bars, as on D2's stacked charts),
+  and it added the default `sortLegendValues` false.
+
 Rollback, each step on Ryan's go:
 - The reports, items 17-19, are restored from their copies in Decommissioned (`copy --tag "#79"`,
-  made before the change), as Decommissioned (above) says.
+  made before the change), as Decommissioned (above) says. Since #200 they come back by a deploy,
+  not from these copies: a fresh retrieve edited back, or #200's `before/` only while a fresh
+  retrieve equals `after/` ("Rollback of #200", below).
 - "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), moved to Decommissioned once the
   dashboard no longer uses it, comes back first, before the dashboard, whose `before/` has its one
   component on that report. It is one move in this change's own ledger:
@@ -5184,6 +5240,29 @@ Rollback, each step on Ryan's go:
   `Dhis2`, the folders or the "DHIS2 Reports" report it also holds.
 - If a fresh retrieve differs from `after/`, stop and ask Ryan. A rollback never deploys an older
   build or an earlier retrieve (DECISIONS 2026-10-16). Nothing is deleted.
+
+Rollback of #200 ([plan](plans/2026-11-02-sf-review-reporting.md#rollback); DECISIONS
+2026-10-16), each write on Ryan's go after a check-only, VPN off:
+- Since #200's deploy a fresh retrieve no longer equals #79's `after/`, so #79's rollback above
+  runs only after this one.
+- Items 17, 18 and 19 come back by a deploy, not from their copies: D5's components point at the
+  reports themselves, so a copy saved into "GLOW Monthly Reports" would be a separate report that
+  D5 does not show. The copies in Decommissioned (`00ORP000009p0wr2AA` of item 17,
+  `00ORP000009p0yT2AQ` of item 18 and `00ORP000009p1052AA` of item 19, made by `copy --tag
+  "#200"` before the change) are the record of what the reports were.
+- Each report's deploy is one of two, after a check-only: a fresh retrieve of it, edited back
+  where #200 changed it; or its file in #200's retrieve
+  `data/sf_glow_review_2026-11/reporting/before/`, only while a fresh retrieve of it equals
+  `after/` (DECISIONS 2026-10-16).
+- D5 is dynamic and has no Decommissioned copy (the org is at its limit of 5 dynamic dashboards),
+  so the dashboard is restored the same way, by deploying only its own file in that `before/`,
+  only while a fresh retrieve of it equals `after/` (nothing has changed it since #200's deploy),
+  or a fresh retrieve of it edited back, never from an older build or retrieve. D5 and the three
+  reports go in one deploy, so D5's old components meet the reports as they were.
+- This rollback never deploys #79's `data/sf_dash_reporting_2026-10-24/before/` or `build/`.
+- The new report "Approval Status by Month" (`00ORP000009p0qb2AA`) is not in `before/`: D5's
+  redeploy takes it off the dashboard first, as D5 in `before/` has no component on it, and then
+  it moves to Decommissioned (the archive rule above). Nothing is deleted.
 
 ### GLOW Club Training
 

@@ -115,6 +115,17 @@ Observations` says item 11 derives Observed Yes/No from the sessions observed
 (`many_clubs_do_you_still_need_to_observe__c`, no answers in 2026). ObservationsDashboardDocs (#77) accepts #198's
 reporting year, Month filter, new report labels and `data/sf_glow_review_<month>/` rollback folder, and
 CategoryFoldersDocs the new title of D3 in the dashboards table.
+GlowReviewReportingDocs (ticket #200, epic #194, GLOW's review of 2026-11-02): item 17's `label_target` in
+`glow/sf_keep_list.csv` is "Monthly Report Approval Status"; the RUNBOOK's `### GLOW Club Reporting` describes the
+overview chart (approved versus not yet approved by month, a stacked column on D5, from the new report "Approval
+Status by Month" without item 17's `Approved__c equals 1` filter, with its SOQL signal) and why it needs its own
+report (item 17 lists approved reports only); D5 and items 17-19 show the reporting year (`In_Reporting_Year__c`),
+2026 only, said of D5, its reports or a component; D5 has a Month filter on `DHIS2__c$Month__c`; the last 12 months
+and "no Month filter" only as history. The plan `docs/plans/2026-11-02-sf-review-reporting.md` names #200; its
+Rollout runs before/, the copies (`--tag "#200"`), the check-only, Ryan's go, the deploy and `after/` in that order;
+its Rollback restores the reports and D5 by a deploy (a fresh retrieve edited back, or #200's own `before/` only
+while a fresh retrieve equals `after/`), the Decommissioned copies only the record, never an older build or another
+change's folder. ReportingDashboardDocs (#79) accepts #200's period, Month filter, label and rollback folder.
 """
 import glob
 import os
@@ -540,6 +551,31 @@ class KeepListDocs(unittest.TestCase):
     RENAME = re.compile(r"(?i)\b(renam\w*|re-?label\w*|chang(e|es|ed|ing)\s+(the\s+|their\s+|its\s+|a\s+|each\s+|"
                         r"every\s+|all\s+)?(\w+\s+)?(labels?|names?)|new\s+(labels?|names?))\b|"
                         r"\b(labels?|names?)\s+(will\s+be\s+|are\s+|is\s+|get\s+)?(chang(e|es|ed)|renamed|relabel\w*)\b")
+    # what a rename is said of: an item ("item 17", "items 5-7"), a dashboard (D1-D5), many ("the dashboards", "the
+    # reports", "the labels"), or item 17's new label. GLOW's review of 2026-11-02 (epic #194, ticket #200; the
+    # RUNBOOK's keep-list paragraph that "supersedes that for item 17") renames item 17 only.
+    RENAME_SUBJECT = re.compile(r"(?i)\bitems?\s+(?P<nums>\d+(\s*(,|and|&|-|–|to)\s*\d+)*)\b|\bD[1-5]\b|"
+                                r"\b(dashboards|reports|labels|names|tables)\b|(?P<new>\bMonthly Report Approval Status\b)")
+
+    def renames_item_17(self, s, m):
+        """Rename match `m` of `s` is item 17's: the nearest subject before it in the sentence is item 17 (or its new
+        label), or none is before it and the words after it, to the next comma or semicolon, name item 17; and no
+        other item, dashboard or plural is named between that subject and the end of that clause."""
+        before = list(self.RENAME_SUBJECT.finditer(s[:m.start()]))
+        tail = re.split(r"[,;]", s[m.end():], maxsplit=1)[0]
+        after = list(self.RENAME_SUBJECT.finditer(tail))
+
+        def is_17(x):
+            return bool(x.group("new")) or (x.group("nums") is not None
+                                            and re.findall(r"\d+", x.group("nums")) == ["17"])
+        if before:
+            subject, between = before[-1], []
+        elif after:
+            subject, between = after[0], after[1:]
+            after = []
+        else:
+            return False
+        return is_17(subject) and all(is_17(x) for x in between + after)
     OFF_LIST = re.compile(r"(?i)\b(not on|off)\s+the\s+(keep\s+)?list\b")
     MOVED = re.compile(r"(?i)\b(goes|go|going|moved?|moves|moving|retired?)\s+(\w+\s+){0,3}?(to|into)\s+(the\s+)?"
                        r"[`\"“]?Decommissioned")
@@ -629,6 +665,8 @@ class KeepListDocs(unittest.TestCase):
                                  f"{where}: kept reports and dashboards keep their current names (Ryan, 2026-10-23), "
                                  f"not negated: {s[:200]!r}")
             for m in self.RENAME.finditer(s):
+                if self.renames_item_17(s, m):
+                    continue    # item 17's rename (GLOW's review, epic #194, ticket #200): the exception may say so
                 self.assertFalse(self.said(s, m), f"{where}: the labels are not changed (Ryan, 2026-10-23); a rename "
                                                   "or relabel is only ever denied (`not renamed`, `nothing is "
                                                   f"relabelled`): {s[:200]!r}")
@@ -1456,7 +1494,13 @@ class ReportingDashboardDocs(unittest.TestCase):
     dashboards: no Partner filter and no Month filter on any dashboard; the only dashboard filter is Partner Manager
     (`Assigned_Partner_Manager__c`, each manager sees their partners); the reports stay grouped by Partner and Month,
     and item 19 stays tabular with Partner and Month columns. Labels, ids and measures are read from the CSV, not
-    pinned; the plan's Result waits for the live deploy, so no org figure is pinned either."""
+    pinned; the plan's Result waits for the live deploy, so no org figure is pinned either.
+
+    #200 (GLOW's review, Ryan 2026-11-02) replaces four of these rules, so this class accepts its new ones and
+    GlowReviewReportingDocs checks them: the period may be `In_Reporting_Year__c` (a signal may read `In_Reporting_Year__c
+    = true` as its window), D5 has a Month filter beside Partner Manager (still no Partner filter), item 17 may be
+    named by its new label (`label_target`), and a rollback may name #200's `data/sf_glow_review_<month>/` folder. The
+    overview's signal (grouped by `Approved__c`) is #200's report, not item 17's."""
 
     longMessage = False         # the messages say what to fix
     RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
@@ -1497,6 +1541,13 @@ class ReportingDashboardDocs(unittest.TestCase):
     ONLY_PM_FILTER = re.compile(r"(?i)\b(only|one|single|sole)\s+(dashboard\s+)?filter\b[^.;]{0,40}?\bPartner Manager\b|"
                                 r"\bPartner Manager\b[^.;]{0,40}?\b(is|as)\s+(its|the)\s+(only|one|single|sole)\s+"
                                 r"(dashboard\s+)?filter\b")
+    # since #200 (GLOW's review, Ryan 2026-11-02) D5 has a Month filter too: a Partner Manager filter, "only" or not
+    PM_FILTER = re.compile(r"(?i)\bfilter\w*[^.;]{0,40}?\bPartner Manager\b|\bPartner Manager\b[^.;]{0,20}?\bfilter\w*")
+    # since #200 the reports' period is the reporting year (#195)
+    IN_YEAR = re.compile(r"\bIn_Reporting_Year__c\b")
+    IN_YEAR_SOQL = re.compile(r"(?i)\bIn_Reporting_Year__c\s*=\s*true\b")
+    # #200's overview signal: grouped by `Approved__c` ("Approval Status by Month"), not item 17's
+    OVERVIEW_SIGNAL = re.compile(r"(?is)\bGROUP\s+BY\b[^`]*\bApproved__c\b")
     # a path in a rollback: only this change's retrieve, the copy tool's ledger folder, and the bare before/ after/
     PATH = re.compile(r"(?<![\w/.<>-])(?:[\w.<>*-]+/)+[\w.<>*-]*")
     # a fallback: "if before/ is missing, deploy …", "otherwise restore …"
@@ -1571,7 +1622,8 @@ class ReportingDashboardDocs(unittest.TestCase):
         out = set()
         for item in self.ITEMS:
             r = rows[item]
-            if any(v and v in text for v in (r["label_today"], r["measure"], r["id"])):
+            # (since #200 item 17 may be named by its new label, `label_target`)
+            if any(v and v in text for v in (r["label_today"], r["label_target"], r["measure"], r["id"])):
                 out.add(item)
             if re.match(r"\s*\|\s*%s\s*\|" % item, text):
                 out.add(item)
@@ -1658,6 +1710,10 @@ class ReportingDashboardDocs(unittest.TestCase):
             return False
         if re.match(self.THIS_DIR + r"(?![\w-])", p) or re.match(r"data/sf_report_folders(?![\w-])", p):
             return False
+        # since #200 (GLOW's review, Ryan 2026-11-02) its own retrieve, `data/sf_glow_review_<month>/<topic>/`
+        # (GlowReviewReportingDocs checks that #200's rollback names no other change's folder)
+        if re.match(r"data/sf_glow_review_(\d{4}-\d\d|<month>)(?![\w-])", p):
+            return False
         if re.match(r"(tools|docs|plans|scripts|glow|test)/", p) or re.search(r"\.(py|md|sh|csv)$", p):
             return p.startswith(("data/", "backups/"))
         return bool(re.match(r"(data|backups)/", p) or re.search(r"(^|/)(build|before|after|backups|data)/", p))
@@ -1694,8 +1750,10 @@ class ReportingDashboardDocs(unittest.TestCase):
                             and f"{int(years[0][1]):04d}-{self.MONTHS.index(mons[0]) + 1:02d}-01" in months,
                             f"{where}: `Year__c = <yyyy> AND Month__c = '<Month>'` names one last complete month: "
                             f"{soql[:200]!r}")
-        self.assertTrue(preds or years, f"{where}: the signal filters on the period (`Period__c = LAST_MONTH`, or one "
-                                        f"last complete month): {soql[:200]!r}")
+        # (since #200, GLOW's review of 2026-11-02, the reporting year `In_Reporting_Year__c = true` is a window too)
+        self.assertTrue(preds or years or self.IN_YEAR_SOQL.search(soql),
+                        f"{where}: the signal filters on the period (`Period__c = LAST_MONTH`, or one last complete month, "
+                        f"or since #200 `In_Reporting_Year__c = true`): {soql[:200]!r}")
 
     @staticmethod
     def top_split(text, word):
@@ -1758,7 +1816,8 @@ class ReportingDashboardDocs(unittest.TestCase):
                 self.assertTrue(period_ok.fullmatch(c) or ym_ok.fullmatch(c),
                                 f"{where}: a conjunct on the period is `Period__c = LAST_MONTH`, `= LAST_N_MONTHS:12` or "
                                 f"one last complete month, alone, not {c!r}: {soql[:220]!r}")
-        self.assertTrue([c for c in cs if period_ok.fullmatch(c)] or len([c for c in cs if ym_ok.fullmatch(c)]) == 2,
+        self.assertTrue([c for c in cs if period_ok.fullmatch(c)] or len([c for c in cs if ym_ok.fullmatch(c)]) == 2
+                        or [c for c in cs if re.fullmatch(r"(?i)In_Reporting_Year__c = true", c)],     # since #200
                         f"{where}: the period is a top-level conjunct of the WHERE (`… WHERE Period__c = LAST_MONTH AND "
                         f"…`): {soql[:220]!r}")
         self.assertTrue([c for c in cs if re.fullmatch(r"(?i)Account__c (!=|<>) null", c)],
@@ -1799,9 +1858,13 @@ class ReportingDashboardDocs(unittest.TestCase):
         # the measures, in GLOW's words, with the org's labels and ids
         for item in self.ITEMS:
             r = rows[item]
-            for key in ("measure", "label_today", "id"):
+            for key in ("measure", "id"):
                 self.assertIn(r[key], flat_part, f"{where}: name item {item}'s {key.replace('_', ' ')} {r[key]!r} "
                                                  "(`glow/sf_keep_list.csv`)")
+            # (since #200, GLOW's review of 2026-11-02, item 17's label is its `label_target`)
+            self.assertTrue(r["label_today"] in flat_part or r["label_target"] in flat_part,
+                            f"{where}: name item {item}'s label {r['label_today']!r} (or its new label "
+                            f"{r['label_target']!r}, `glow/sf_keep_list.csv`)")
         d5 = rows[self.DASH]
         self.assertIn(d5["id"], flat_part, f"{where}: give the dashboard's Id {d5['id']} ({self.DASH})")
         self.assertTrue([s for s in cl if re.search(r"(?i)\bdashboard\b", s)
@@ -1817,26 +1880,28 @@ class ReportingDashboardDocs(unittest.TestCase):
                         f"{where}: say, in one sentence, each report (items 17 and 18) groups by Partner "
                         "(`Account__c`) and Month (`Period__c`), not negated")
         self.assertIn("Account__c", text, f"{where}: name the Partner field, `DHIS2__c.Account__c`")
-        # the period
-        self.assertTrue([s for s in cl if "Period__c" in s and self.stated(s, self.LAST_12)],
+        # the period (the last 12 months through `Period__c`; since #200 `In_Reporting_Year__c`, which
+        # GlowReviewReportingDocs checks)
+        self.assertTrue([s for s in cl if ("Period__c" in s and self.stated(s, self.LAST_12))
+                         or self.stated(s, self.IN_YEAR)],
                         f"{where}: state the period in one sentence: the last 12 months (`LAST_N_MONTHS:12`) through "
-                        "`Period__c`")
+                        "`Period__c`, or since #200 the reporting year, `In_Reporting_Year__c`")
         # the test records
         self.assertRegex(text, r"(?i)\btest records?\b", f"{where}: call what the rule excludes test records")
         self.k.assertTestRecordRule(text, where)
-        # the dashboard's filter: Partner Manager only (Ryan, 2026-10-24 on #79, every Monthly Report dashboard)
+        # the dashboard's filter: Partner Manager (Ryan, 2026-10-24 on #79, every Monthly Report dashboard); since #200
+        # (GLOW's review, Ryan 2026-11-02) a Month filter beside it, so "only" is no longer required
         self.assertTrue([s for s in cl if re.search(r"(?i)\bdashboard\b", s) and "Assigned_Partner_Manager__c" in s
-                         and self.stated(s, self.ONLY_PM_FILTER) and not self.items_named(s, rows) & {"19"}],
-                        f"{where}: say, in one sentence, the dashboard's only filter is Partner Manager "
+                         and self.stated(s, self.PM_FILTER) and not self.items_named(s, rows) & {"19"}],
+                        f"{where}: say, in one sentence, the dashboard filters on Partner Manager "
                         "(`Assigned_Partner_Manager__c`), not negated (Ryan, 2026-10-24)")
-        for s in cl:                    # no Partner or Month filter on the dashboard, except denied
+        for s in cl:                    # no Partner filter on the dashboard, except denied (a Month filter is #200's)
             if self.items_named(s, rows) & {"19"}:
                 continue                # item 19's own report columns and filters are not the dashboard's
-            for rx in (self.PARTNER_FILTER, self.MONTH_FILTER):
-                for m in rx.finditer(s):
-                    self.assertTrue(self.d.locally_denied(s, m),
-                                    f"{where}: the dashboard has no Partner filter and no Month filter, only Partner "
-                                    f"Manager (Ryan, 2026-10-24); name them only to deny them: {s[:200]!r}")
+            for m in self.PARTNER_FILTER.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: the dashboard has no Partner filter (Ryan, 2026-10-24); name it only to deny "
+                                f"it: {s[:200]!r}")
         self.assertCreatedDateOnlyReplaced(part, where)
         # item 19: tabular, Partner and Month its columns and filters
         about_19 = [s for s in cl if "19" in self.items_named(s, rows)]
@@ -1854,6 +1919,10 @@ class ReportingDashboardDocs(unittest.TestCase):
                                  f"list item or table row that names item {item} ({r['label_today']!r}) and no other of "
                                  "items 17-19")
             spans = [m.group(0) for b in own for m in self.SOQL_SPAN.finditer(b)]
+            if item == "17":            # #200's overview signal (grouped by `Approved__c`) may sit beside item 17's
+                spans = [q for q in spans if not self.OVERVIEW_SIGNAL.search(q)]
+                self.assertTrue(spans, f"{where}: give item 17's own SOQL signal (`… Approved__c = true`), not only the "
+                                       "overview's (grouped by `Approved__c`)")
             for soql in spans:          # every signal of the item, so a wrong one cannot sit beside a right one
                 at = f"{where}, item {item}'s SOQL signal"
                 self.assertSignalWindow(soql, at)
@@ -7308,6 +7377,459 @@ class GlowReviewObservationsDocs(unittest.TestCase):
         self.assertTrue(derived, f"{where}: say, in item 11's block, that item 11 derives Observed Yes/No from the "
                                  f"sessions observed, `{self.SESSIONS}` (one sentence naming the field, \"Observed\", "
                                  "Yes and No, not negated)")
+
+
+class GlowReviewReportingDocs(unittest.TestCase):
+    """Ticket #200 (epic #194, GLOW's review of 2026-11-02): D5, the dashboard "Reporting", and its items 17-19. Item
+    17 is relabelled "Monthly Report Approval Status" (its Id unchanged; `glow/sf_keep_list.csv` carries it in
+    `label_target`, `label_today` stays the label #70 recorded). Item 17 lists approved reports only (`Approved__c
+    equals 1`), so GLOW's overview, the partner reports approved versus not yet approved by month, is a new report,
+    "Approval Status by Month", without that filter, grouped by `Period__c` by month and `Approved__c`, shown as a
+    stacked column on D5. Items 17-19 filter `In_Reporting_Year__c equals true` (#195), 2026 only; D5 gains a Month
+    filter on `DHIS2__c$Month__c`. The RUNBOOK's `### GLOW Club Reporting` says so, and keeps the old rules (the last
+    12 months, no Month filter, Partner Manager the only filter) only as history; the plan
+    `docs/plans/2026-11-02-sf-review-reporting.md` carries the copies, the check-only, Ryan's go, the deploy and the
+    read-back in that order, a Rollback by deploy and a `## Result`. The wording is free: each rule is looked for as
+    a claim in a sentence or unit, not denied."""
+
+    longMessage = False         # the messages say what to fix
+    PLAN = os.path.join(REPO, "docs", "plans", "2026-11-02-sf-review-reporting.md")
+    KEEP_LIST = ReportingDashboardDocs.KEEP_LIST
+    TICKET = re.compile(r"(?<![\w#])#200\b")
+    ITEMS = ReportingDashboardDocs.ITEMS
+    ITEM_17_ID = "00ORP000006XXEf2AO"                   # ticket #70's id for item 17: the rename keeps it
+    ITEM_17_LABEL_TODAY = "Approved Approvals monthly report"
+    NEW_LABEL = "Monthly Report Approval Status"        # GLOW's name for item 17 (Outline step 3)
+    OVERVIEW = "Approval Status by Month"               # the new report behind the overview chart (Outline step 3)
+    GO = re.compile(r"Ryan['’]s go\b")
+    EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
+    # the reporting-year filter, as set ("`In_Reporting_Year__c equals true`", "`In_Reporting_Year__c = true`")
+    YEAR_ON = re.compile(r"\bIn_Reporting_Year__c\b[^.;]{0,25}?\btrue\b")
+    # 2026 only, 2025 out ("2026 only", "only 2026", "no 2025 month", "2025 is left out", "the reporting year only")
+    ONE_YEAR = re.compile(r"(?i)\b2026\s+only\b|\bonly\s+(\w+\s+){0,3}?2026\b|\bno\s+(\w+\s+){0,3}?2025\b|"
+                          r"\b2025\b[^.;]{0,40}?\b(excluded|left out|out|off|gone|dropped|hidden)\b|"
+                          r"\breporting year only\b|\bonly\s+(the\s+)?(current\s+)?reporting year\b")
+    # what a 2026-only sentence is about: D5, its reports (not "Monthly Reports", the records) or a component
+    D5_NAMED = re.compile(r"\bD5\b|\b01ZRP000006oxSr2AI\b|[\"“`]Reporting[\"”`]|(?i:\bdashboard\b)")
+    REPORTS_NAMED = re.compile(r"(?i)\b(the|its|their|each|every|all|three|both|these|D5['’]s)\s+(\w+\s+){0,2}?"
+                               r"reports?\b|\ball\s+three\b|\bcomponents?\b|\bcharts?\b|\btables?\b")
+    # every report: "each report", "all three", "items 17-19" (items_named reads the item numbers)
+    EVERY = re.compile(r"(?i)\b(each|every|all)\b[^.;]{0,40}?\breports?\b|\ball\s+three\b|\bthe\s+three\s+reports\b")
+    # the old period, said as today's rule when no history marker is near it
+    OLD_PERIOD = re.compile(r"\bLAST_N_MONTHS:12\b|(?i:\blast\s+(12|twelve)\s+months\b)")
+    PERIOD_TALK = re.compile(r"(?i)Period__c|\bperiod\b|\bdate filter\b|\bfield filter\b|\breports?['’]? filters?\b|"
+                             r"\bfilters?\b")
+    # said as the past or as what was replaced, near the old rule
+    HISTORY = re.compile(r"(?i)\b(was|were|had|until|before|formerly|former|no longer|previously|used to|replac\w*|"
+                         r"in place of|instead of|became|becomes|rather than|superseded|gave way)\b")
+    # a Month filter ("a Month filter", "the "Month" filter", "a filter on `DHIS2__c$Month__c`")
+    MONTH_FILTER = re.compile(r"(?i)\bMonth\b[\"”'’`]?\s*(\([^)]{0,60}\)\s*)?(dashboard\s+)?filters?\b|"
+                              r"\bfilter(s|ed|ing)?\s+(on|by|for)\s+(the\s+|a\s+|each\s+)?[`\"“]?(DHIS2__c\$)?"
+                              r"Month(__c)?\b")
+    MONTH_FIELD = re.compile(r"\bDHIS2__c\$Month__c\b")
+    NO_MONTH = re.compile(r"(?i)\b(no|not|without|neither|nor|never)\b[^.;]{0,25}?\bMonth\b[^.;]{0,20}?\bfilters?\b")
+    ONLY_PM = re.compile(r"(?i)\b(only|one|sole|single)\b[^.;]{0,30}?\bfilter\b[^.;]{0,40}?\bPartner Manager\b")
+    # the overview: a stacked column, approved versus not yet approved, by month
+    STACKED = re.compile(r"(?i)\bstacked\s+(vertical\s+)?(column|bar)s?\b|\bColumnStacked\b|\bcolumn\s+chart,?\s+"
+                         r"stacked\b")
+    NOT_APPROVED = re.compile(r"(?i)\bnot\s+(yet\s+)?approved\b|\bunapproved\b|\b(pending|awaiting)\s+approval\b")
+    BY_MONTH = re.compile(r"(?i)\bby\s+(calendar\s+)?month\b|\bmonth\s+by\s+month\b|\b(each|per)\s+month\b")
+    # item 17's filter ("`Approved__c equals 1`", "`Approved__c` = true", "a filter on `Approved__c`")
+    APPROVED_FILTER = re.compile(r"(?i)\bApproved__c`?\s*(equals|=)\s*`?(1|true)\b|\bfilters?\s+(on\s+)?`?Approved__c\b")
+    # left out of the overview: a negation, or "drops", "removes", "leaves out" before it
+    LEFT_OUT = re.compile(r"(?i)\b(drop\w*|remov\w*|leav\w*\s+out|lacks?|omit\w*|takes?\s+out|minus)\b")
+    # item 17 lists approved reports only
+    APPROVED_ONLY = re.compile(r"(?i)\bapproved\s+(\w+\s+){0,3}?only\b|\bonly\s+(\w+\s+){0,3}?approved\b|"
+                               r"\bApproved__c`?\s*(equals|=)\s*`?(1|true)\b|\bApproved__c`?\s+(ticked|checked)\b")
+    # the reason, said ("so", "because", "which is why")
+    REASON = re.compile(r"(?i)\b(so|because|since|hence|therefore|thus|which is why|that is why|that['’]s why|"
+                        r"for that reason)\b")
+    # an old source for #200's rollback: another data/ folder (#79's `data/sf_dash_reporting_…/`, another topic of the
+    # review), an older build, another ticket's folder; #200's own `data/sf_glow_review_<month>/reporting…/`, the copy
+    # tool's ledger and a fresh retrieve are its sources
+    OLD_SOURCE = re.compile(r"(?i)\bdata/sf_(?!glow_review_(\d{4}-\d\d|<month>)/(reporting[\w-]*|<topic>)(?![\w-])|"
+                            r"report_folders(?![\w-]))[\w<>-]+(/[\w<>-]+)*/?|"
+                            r"\b(older|old|earlier|previous|prior|stale|another|other|original)\s+([\w-]+\s+)?"
+                            r"(retrieves?|builds?|backups?|exports?|snapshots?|versions?)\b|"
+                            r"#(?!200\b)\d+['’]s\s+`?(data/|before/|build/|after/|retrieve|build|folder)")
+    REPORTS = re.compile(r"(?i)\breports?\b|\bitems?\s+(\d+\s*(,|and|&|-|–|to)\s*)*1[789]\b")
+    DEPLOY = re.compile(r"(?i)\b(re-?)?deploy\w*\b")
+    # a deploy's sources: a fresh retrieve edited back, or `before/` guarded by a fresh retrieve that equals `after/`
+    EDITED_BACK = re.compile(r"(?i)\bfresh\s+retriev\w*\b[^.;]{0,40}?\bedit\w*\s+back\b")
+    GUARD = re.compile(r"(?i)\b(only|while|as long as|so long as|provided)\b[^.;]{0,30}?\bfresh\s+retriev\w*\b[^.;]{0,40}?"
+                       r"\b(equals?|matches|match|is the same as|identical to)\b[^.;]{0,20}?\bafter/")
+    # a restore from the Decommissioned copies ("restored from their copies"): they are the record, not the restore
+    FROM_COPY = re.compile(r"(?i)\b(restor\w*|revert\w*|roll\w*\s+back|redeploy\w*|deploy\w*|brought\s+back|bring\w*\s+"
+                           r"back|re-?sav\w*|sav\w*\s+back)\b[^.;]{0,50}?\bfrom\s+(\w+\s+){0,2}?cop(y|ies)\b")
+
+    @classmethod
+    def setUpClass(cls):
+        ReportingDashboardDocs.setUpClass()
+        cls.r = ReportingDashboardDocs()        # #79's helpers: part, blocks, keep, items_named, plan_part, sweep
+        cls.d = cls.r.d                         # #69's helpers: locally_denied, NEGATION, denies
+        cls.c = cls.r.c                         # #73's helpers: steps, first
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    @staticmethod
+    def prose(s):
+        """Clause `s` without its backticked SOQL statements: a query is a check, not a claim."""
+        return re.sub(r"`[^`]*\bSELECT\b[^`]*`", " ", s)
+
+    def stated(self, s, rx):
+        return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
+
+    # after the old rule, only a dated end marks it as history ("…, until #200", "(until then …)"); "as before",
+    # "in place of `CreatedDate`" after it are no such marker
+    UNTIL_AFTER = re.compile(r"(?i)\buntil\s+(#\d+|then|\d{4}-\d\d-\d\d)\b")
+
+    def history(self, s, m):
+        """Match `m` of `s` said as the past or as what was replaced: a marker (`HISTORY`) in the 50 characters
+        before it, "until #N" in the 30 after it, or a denial."""
+        return bool(self.HISTORY.search(s[max(0, m.start() - 50):m.start()])
+                    or self.UNTIL_AFTER.search(s[m.end():m.end() + 30]) or self.d.locally_denied(s, m))
+
+    SHOW = re.compile(r"(?i)\b(show|shows|showing|shown|display|displays|displaying|cover|covers|hold|holds|keep|keeps)"
+                      r"\s+((data|records|rows|months?|reports|figures|data\s+from|from)\s+){0,2}$")
+
+    def claims_one_year(self, s, m, rows):
+        """Match `m` of ONE_YEAR in `s` is the claim that D5 and its reports show 2026 only: not denied, a verb of
+        showing right before it, and D5 and its reports (or components, items 17-19) named before it."""
+        if self.d.locally_denied(s, m) or not self.SHOW.search(s[:m.start()]):
+            return False
+        subject = re.sub(r"(?i)\bMonthly\s+Reports?\b", " ", s[:m.start()])
+        return bool(re.search(r"\bD5\b|\b01ZRP000006oxSr2AI\b|[\"“`]Reporting[\"”`]", subject)
+                    and (self.REPORTS_NAMED.search(subject) or self.r.items_named(subject, rows)))
+
+    def left_out(self, s, m):
+        """Match `m` of `s` said to be left out: a negation ("without") or a verb that drops it in the 40 characters
+        before it, back to the last comma or dash."""
+        pre = re.split(r"[,—–]|\bbut\b", s[max(0, m.start() - 40):m.start()])[-1]
+        return bool(self.d.NEGATION.search(pre) or self.LEFT_OUT.search(pre))
+
+    def names_17(self, s):
+        """`s` names item 17 by number, Id or GLOW's measure (its labels alone do not tie a label to it)."""
+        rows = self.r.keep()
+        return bool(re.search(r"(?i)\bitem\s+17\b", s) or rows["17"]["id"] in s or rows["17"]["measure"] in s
+                    or self.r.items_named(s, rows) & {"17"})
+
+    def where_by(self, soql):
+        m = re.search(r"(?is)\bWHERE\b(.*?)(?=\bGROUP\s+BY\b|\bORDER\s+BY\b|\bHAVING\b|\bLIMIT\b|$)", soql)
+        g = re.search(r"(?is)\bGROUP\s+BY\b(.*?)(?=\bORDER\s+BY\b|\bHAVING\b|\bLIMIT\b|$)", soql)
+        return (m.group(1) if m else ""), (g.group(1) if g else "")
+
+    def deployed(self, u):
+        """A sentence of unit `u` that restores by a deploy, not denied."""
+        return any(self.stated(s, self.DEPLOY) for s in sentences(u, ".;"))
+
+    def deploy_source(self, u):
+        return bool(self.EDITED_BACK.search(u) or ("before/" in u and self.GUARD.search(u)))
+
+    # --- the RUNBOOK ----------------------------------------------------------------------------------------
+
+    def test_the_runbook_states_the_approval_overview(self):
+        where = f"RUNBOOK section {ReportingDashboardDocs.MONTHLY[3:]!r}, {ReportingDashboardDocs.PART[4:]!r}"
+        rows = self.r.keep()
+        part = self.r.part()
+        blocks = self.r.blocks(part)
+        cl = [self.prose(s) for s in sentences(self.norm(part), ".;")]
+
+        # item 17's new name, in a unit that names item 17 by number, Id or measure
+        self.assertTrue([b for b in blocks if self.NEW_LABEL in b and self.names_17(b.replace(self.NEW_LABEL, " "))],
+                        f"{where}: name item 17 by its new label {self.NEW_LABEL!r} (GLOW's review, 2026-11-02), in a row, "
+                        f"list item or paragraph naming item 17 (by number, its Id {rows['17']['id']} or GLOW's measure)")
+
+        # the overview: a unit naming the new report says what it shows and how it is built
+        overview = [b for b in blocks if self.OVERVIEW in b]
+        self.assertTrue(overview, f"{where}: name the overview's new report {self.OVERVIEW!r} (Outline step 3)")
+        d5 = rows[ReportingDashboardDocs.DASH]
+        problems = {}
+
+        def check(b):
+            """What unit `b` lacks of the overview's description (an empty list: all of it)."""
+            ss = [self.prose(s) for s in sentences(self.norm(b), ".;")]
+            lacks = []
+            if not [s for s in ss if self.stated(s, self.STACKED)]:
+                lacks.append("a stacked column")
+            if not (re.search(r"\bD5\b", b) or d5["id"] in b):
+                lacks.append(f"on D5 ({d5['id']})")
+            if not [s for s in ss if self.stated(s, self.NOT_APPROVED) and re.search(r"(?i)\bapproved\b", s)]:
+                lacks.append("approved versus not yet approved")
+            if not [s for s in ss if self.stated(s, self.BY_MONTH)]:
+                lacks.append("by month")
+            for field in ("Approved__c", "Period__c"):
+                if field not in self.prose(self.norm(b)):
+                    lacks.append(f"grouped by `{field}`")
+            dropped = [s for s in ss for m in self.APPROVED_FILTER.finditer(s) if self.left_out(s, m)]
+            if not dropped:
+                lacks.append("without item 17's `Approved__c equals 1` filter (\"without …\")")
+            for s in ss:        # the filter said ON is said of item 17, never of the overview
+                for m in self.APPROVED_FILTER.finditer(s):
+                    if not self.left_out(s, m) and (self.OVERVIEW in s or not self.names_17(s)):
+                        lacks.append(f"no `Approved__c` filter on the overview ({s[:120]!r})")
+            return lacks
+        for b in overview:
+            problems[b[:80]] = check(b)
+        self.assertTrue([k for k, v in problems.items() if not v],
+                        f"{where}: describe the overview chart in one row, list item or paragraph naming "
+                        f"{self.OVERVIEW!r}: the partner reports approved versus not yet approved, by month, a stacked "
+                        f"column on D5, from the new report grouped by `Period__c` (by month) and `Approved__c`, without "
+                        f"item 17's `Approved__c equals 1` filter. Lacking: {problems}")
+
+        # ... and its SOQL signal: grouped by `Approved__c` and the month, no filter on `Approved__c`, 2026, test rule
+        spans = [m.group(0) for b in blocks if self.OVERVIEW in b for m in ReportingDashboardDocs.SOQL_SPAN.finditer(b)]
+        good = []
+        for q in spans:
+            wh, gb = self.where_by(q)
+            if not re.search(r"\bApproved__c\b", gb):
+                continue
+            self.assertNotRegex(wh, r"\bApproved__c\b", f"{where}: the overview's signal counts approved and not yet "
+                                                        f"approved, so its WHERE has no `Approved__c`: {q[:220]!r}")
+            month = re.search(r"\bPeriod__c\b", gb) or re.search(r"\bPeriod__c\s*=", wh)
+            year = self.r.IN_YEAR_SOQL.search(wh) or re.search(r"\bPeriod__c\s*=", wh)
+            rule = ReportingDashboardDocs.SOQL_NOT_BLANK.search(wh) and ReportingDashboardDocs.SOQL_NO_TEST.search(wh)
+            if month and year and rule:
+                good.append(q)
+        self.assertTrue(good, f"{where}: give the overview's SOQL signal in a unit naming {self.OVERVIEW!r}: `SELECT "
+                              "CALENDAR_MONTH(Period__c), Approved__c, COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = "
+                              "true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY "
+                              "CALENDAR_MONTH(Period__c), Approved__c` (or one month's, `Period__c = LAST_MONTH … GROUP BY "
+                              "Approved__c`)")
+
+        # why it needs its own report: item 17 lists approved reports only
+        why = []
+        for b in blocks:
+            ss = [self.prose(s) for s in sentences(self.norm(b), ".;")]
+            only = [s for s in ss if self.names_17(s) and self.stated(s, self.APPROVED_ONLY)]
+            because = [s for s in ss if self.stated(s, self.REASON)
+                       and (self.OVERVIEW in s or re.search(r"(?i)\boverview\b|\b(own|new|separate)\s+report\b", s))]
+            if only and because:
+                why.append(b)
+        self.assertTrue(why, f"{where}: say why the overview needs its own report: item 17 lists approved reports only "
+                             "(`Approved__c equals 1`), so the overview is the new report without that filter (one row, "
+                             "list item or paragraph: a sentence naming item 17 and \"approved … only\", and a sentence "
+                             "with \"so\" or \"because\" naming the overview or its own report)")
+
+        # the reporting year: items 17-19 and D5, `In_Reporting_Year__c equals true`
+        year = [s for s in cl if [m for m in self.YEAR_ON.finditer(s) if not self.d.locally_denied(s, m)]]
+        covered = set()
+        for s in year:
+            covered |= self.r.items_named(s, rows)
+            if self.EVERY.search(re.sub(r"(?i)\bMonthly\s+Reports?\b", " ", s)):
+                covered |= set(self.ITEMS)
+        self.assertEqual(covered, set(self.ITEMS),
+                         f"{where}: say items 17, 18 and 19 filter `In_Reporting_Year__c equals true` (#195), in place of "
+                         f"`Period__c equals LAST_N_MONTHS:12` (a sentence naming them, or \"each report\"; missing: "
+                         f"{sorted(set(self.ITEMS) - covered, key=int)})")
+        one_year = [s for s in cl if [m for m in self.ONE_YEAR.finditer(s) if not self.d.locally_denied(s, m)]]
+        # the claim itself, in one sentence: D5 and its reports (or components, items 17-19) as the subject, a verb of
+        # showing right before "2026 only" (a check's "no grouping label contains 2025" is no such claim)
+        about = [s for s in one_year for m in self.ONE_YEAR.finditer(s) if self.claims_one_year(s, m, rows)]
+        self.assertTrue(about, f"{where}: say D5 and its reports show 2026 only, in one sentence: D5 and its reports (or "
+                               "its components, items 17-19) as the subject, then \"show 2026 only\" or \"show no 2025 "
+                               "month\" (a sentence about something else, a check's figure, does not count)")
+        self.assertTrue([s for s in year + one_year if self.D5_NAMED.search(s)],
+                        f"{where}: say D5 shows the reporting year (a sentence naming D5 or the dashboard with "
+                        "`In_Reporting_Year__c` or \"2026 only\")")
+        for s in cl:            # the last 12 months stays only as history
+            if not self.PERIOD_TALK.search(s):
+                continue
+            for m in self.OLD_PERIOD.finditer(s):
+                self.assertTrue(self.history(s, m),
+                                f"{where}: since #200 the period is `In_Reporting_Year__c`; the last 12 months "
+                                f"({m.group(0)!r}) is said only as what it replaced (\"until #200\", \"was\", \"in place "
+                                f"of\"): {s[:200]!r}")
+
+        # the Month filter on DHIS2__c$Month__c, D5's, and nothing left that denies it or makes Partner Manager the only one
+        month = [s for s in cl if self.MONTH_FIELD.search(s) and self.D5_NAMED.search(s)
+                 and [m for m in self.MONTH_FILTER.finditer(s)
+                      if not (self.d.locally_denied(s, m) or self.d.NEGATION.search(m.group(0)))]]
+        self.assertTrue(month, f"{where}: say D5 has a Month filter on `DHIS2__c$Month__c` (one sentence naming the "
+                               "dashboard or D5, the filter and the field, not negated)")
+        for s in cl:
+            for m in self.NO_MONTH.finditer(s):
+                self.assertTrue(self.history(s, m),
+                                f"{where}: D5 has a Month filter since #200; \"no Month filter\" is said only as history "
+                                f"(\"until #200 it had no Month filter\"): {s[:200]!r}")
+            if s in month:
+                continue
+            for m in self.ONLY_PM.finditer(s):
+                self.assertTrue(self.history(s, m),
+                                f"{where}: Partner Manager is no longer D5's only filter (Month is the other); say it "
+                                f"only as history: {s[:200]!r}")
+
+        # the part's rollback of #200 follows the same rules as the plan's (review of #200)
+        self.assertRollbackOf200(self.runbook_rollback(), f"{where}, the rollback of #200")
+
+    # --- the keep list --------------------------------------------------------------------------------------
+
+    def test_the_keep_list_carries_the_approval_name(self):
+        import csv
+        with open(self.KEEP_LIST, encoding="utf-8", newline="") as f:
+            rows = {r["item"]: r for r in csv.DictReader(f)}
+        self.assertIn("17", rows, "glow/sf_keep_list.csv: no row 17")
+        r = rows["17"]
+        where = "glow/sf_keep_list.csv item 17"
+        self.assertEqual(r["kind"], "report", f"{where}: a report")
+        self.assertEqual(r["label_target"], self.NEW_LABEL,
+                         f"{where}: label_target is GLOW's name {self.NEW_LABEL!r} (GLOW's review, 2026-11-02; ticket "
+                         f"#200), not {r['label_target']!r}")
+        self.assertLessEqual(len(r["label_target"]), 40, f"{where}: label_target {r['label_target']!r} is over 40 "
+                                                         "characters (Salesforce's limit on a report's name)")
+        self.assertEqual(r["id"], self.ITEM_17_ID, f"{where}: the rename keeps the report's Id {self.ITEM_17_ID}, not "
+                                                   f"{r['id']!r}")
+        self.assertEqual(r["label_today"], self.ITEM_17_LABEL_TODAY,
+                         f"{where}: label_today stays the label #70 recorded, {self.ITEM_17_LABEL_TODAY!r}; the new name "
+                         "goes in label_target")
+        for item in ("18", "19"):       # #200 renames item 17 only
+            self.assertEqual(rows[item]["label_target"], rows[item]["label_today"],
+                             f"glow/sf_keep_list.csv item {item}: #200 renames item 17 only; label_target stays "
+                             f"{rows[item]['label_today']!r}")
+
+    # --- the plan -------------------------------------------------------------------------------------------
+
+    def test_the_plan_has_rollout_rollback_and_result(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        name = os.path.relpath(self.PLAN, REPO)
+        self.assertTrue(os.path.isfile(self.PLAN), f"{name}: no plan for ticket #200 (Rollout, Rollback, Result)")
+        rows = self.r.keep()
+        dash = rows[ReportingDashboardDocs.DASH]
+        text = read(self.PLAN)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        _, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
+                         f"{name}: name ticket #200 in the frontmatter, the title or the opening paragraph")
+        self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        self.assertNotRegex(text, self.EMAIL, f"{name}: counts, ids and names of reports and partners only, no address")
+
+        raw = self.r.plan_part(self.PLAN, "## Rollout", 40)
+        where = f"{name}: `## Rollout`"
+        cl = sentences(self.norm(raw), ".;")
+        for item in self.ITEMS:
+            r = rows[item]
+            self.assertIn(r["id"], raw, f"{where}: name item {item}'s report {r['label_today']!r} by its Id {r['id']} "
+                                        "(its copy to Decommissioned)")
+        self.assertIn(dash["id"], raw, f"{where}: name the dashboard {dash['label_today']!r} by its Id {dash['id']}")
+        self.assertIn(self.OVERVIEW, raw, f"{where}: the build adds the new report {self.OVERVIEW!r}")
+        # the copies: by the tool, VPN off, tagged with the ticket, into Decommissioned, on Ryan's go
+        segments = re.split(r"`+|\n\s*\n|\n(?=\s*(?:\$\s*)?python3\s)|(?=\bpython3\s)", raw)
+        copies = [flat(s) for s in segments if re.search(r"\bsf_report_folders\.py\s+copy\b", s)]
+        self.assertTrue(copies, f"{where}: give the copies' command, `python3 tools/sf_report_folders.py copy --vpn-off "
+                                "--kind report --id <id> --tag \"#200\"`")
+        for c in copies:
+            self.assertIn("--vpn-off", c, f"{where}: the tool refuses to run without `--vpn-off`: {c[:160]!r}")
+            self.assertRegex(c, r"--tag[ =]\\?[\"“']?#200\b", f"{where}: each copy carries the ticket, `--tag \"#200\"`: "
+                                                             f"{c[:160]!r}")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s
+                         and not self.d.denies(s)],
+                        f"{where}: the copies go to Decommissioned before the change (one sentence)")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\b(dashboard|D5)\b", s) and re.search(r"(?i)\bdynamic\b", s)
+                         and re.search(r"(?i)\brefus\w*\b|\bno\s+(API\s+)?cop(y|ies)\b|\bnot\s+(be\s+)?copied\b|"
+                                       r"\bcan(not|['’]t)\s+be\s+copied\b", s)],
+                        f"{where}: say D5 gets no Decommissioned copy because it is dynamic (the org is at 5), so "
+                        "`before/` is its rollback (one sentence)")
+        self.assertTrue([s for s in cl if self.stated(s, self.GO) and re.search(r"(?i)\bcop(y|ies)\b|--apply", s)],
+                        f"{where}: the copies wait for Ryan's go (one sentence, not negated)")
+        self.assertTrue([s for s in cl if self.stated(s, self.GO) and re.search(r"(?i)\bdeploy", s)
+                         and not re.search(r"(?i)\bcheck-only\b", s)],
+                        f"{where}: the deploy waits for Ryan's go (one sentence, not negated, apart from the check-only)")
+        self.assertTrue([s for s in cl if "after/" in s and "build/" in s
+                         and re.search(r"(?i)\b(compar\w*|equals?|differ\w*|diff)\b", s)],
+                        f"{where}: the read-back retrieves into `after/` and compares it with `build/` (one sentence)")
+        # the SOQL checks: the overview month by month, item 19's rows against the 2026 count
+        self.assertTrue([s for s in cl if re.search(r"\bSOQL\b|\bSELECT\b", s) and self.NOT_APPROVED.search(s)
+                         and re.search(r"(?i)\bmonths?\b|Period__c", s)],
+                        f"{where}: check the overview against SOQL, approved and not yet approved month by month (one "
+                        "sentence)")
+        self.assertTrue([s for s in cl if re.search(r"\bSOQL\b|\bSELECT\b|\bcount\b", s)
+                         and "19" in self.r.items_named(s, rows)
+                         and re.search(r"\b2026\b|\bIn_Reporting_Year__c\b|(?i:\breporting year\b)", s)],
+                        f"{where}: check that item 19's rows equal the 2026 count by SOQL (one sentence naming item 19)")
+        # the order, in the numbered steps: before/, copies, check-only, deploy, after/
+        steps = self.c.steps(raw, where)
+        before = self.c.first(r"\bbefore/", steps, where, "the steps start from a fresh retrieve into `before/`")
+        copy_at = [m.start() for m in re.finditer(r"\bsf_report_folders\.py\s+copy\b", steps)]
+        self.assertTrue(copy_at, f"{where}: the copies are a numbered step")
+        self.assertLess(before, copy_at[0], f"{where}: the `before/` retrieve comes before the copies")
+        check_only = [m.start() for m in re.finditer(r"(?i)\bcheck-only\b|--dry-run\b", steps) if m.start() > copy_at[-1]]
+        self.assertTrue(check_only, f"{where}: the check-only deploy comes after every copy (copy first, then change)")
+        deploys, at = [], 0
+        for piece in sentences(steps, ".;,"):
+            at = steps.find(piece, at)
+            m = re.search(r"(?i)\b(re-?)?deploy\w*", piece)
+            # a check-only is no deploy; "deploy ... without `--dry-run`" is one
+            if not m or re.search(r"(?i)check-only|(?<!without )(?<!without `)--dry-run|\bvalidat", piece) \
+                    or self.d.locally_denied(piece, m) \
+                    or re.search(r"(?i)\b(before|until|ahead of|prior to|after|once)\b[^.;,]{0,25}$", piece[:m.start()]) \
+                    or re.search(r"(?i)\b(in|at|from)\s+step\s+\d", piece):
+                continue
+            self.assertGreater(at, check_only[0], f"{where}: nothing is deployed before the check-only (and the "
+                                                  f"copies): {piece[:160]!r}")
+            deploys.append(at)
+        self.assertTrue(deploys, f"{where}: the deploy is a step after the check-only (on Ryan's go)")
+        self.assertTrue([m for m in re.finditer(r"\bafter/", steps) if m.start() > deploys[0]],
+                        f"{where}: the `after/` read-back comes after the deploy")
+
+        # the rollback: the reports and D5 restored by a deploy, from a fresh retrieve edited back or from #200's own
+        # `before/` while a fresh retrieve equals `after/`; the Decommissioned copies are the record of what the
+        # reports were, never the restore (D5's components point at the reports themselves)
+        raw = self.r.plan_part(self.PLAN, "## Rollback", 15)
+        self.assertRollbackOf200(raw, f"{name}: `## Rollback`")
+
+    # --- #200's rollback, in the plan and in the RUNBOOK (review of #200) -------------------------------------
+
+    def runbook_rollback(self):
+        """The RUNBOOK part's rollback of #200: from the line that starts `Rollback` and names #200 to the part's end."""
+        part = self.r.part()
+        m = re.search(r"(?im)^\W*rollback\b[^\n]*#200\b", part)
+        self.assertTrue(m, f"RUNBOOK section {ReportingDashboardDocs.PART[4:]!r}: no rollback of #200 (a paragraph "
+                           "starting `Rollback of #200`)")
+        return part[m.start():]
+
+    def assertRollbackOf200(self, raw, where):
+        """#200's rollback: the reports and D5 restored by a deploy, from a fresh retrieve edited back or from #200's
+        own `before/` only while a fresh retrieve equals `after/`; the Decommissioned copies only the record of what
+        the reports were, never the restore (D5's components point at the reports themselves); never an older build
+        or another change's folder unless a negation comes before it; nothing deleted."""
+        cl = sentences(self.norm(raw), ".;")
+        units = [self.norm(u) for u in self.r.blocks(raw)]
+        self.assertTrue([u for u in units if self.REPORTS.search(u) and self.deployed(u) and self.deploy_source(u)],
+                        f"{where}: say the reports of items 17-19 are restored by a deploy (after a check-only) from a "
+                        "fresh retrieve edited back where #200 changed it, or from their files in #200's `before/` only "
+                        "while a fresh retrieve equals `after/`, in one list item or paragraph; their copies in "
+                        "Decommissioned are the record, not the restore")
+        self.assertTrue([u for u in units if re.search(r"(?i)\b(dashboard|D5)\b", u) and self.deployed(u)
+                         and self.deploy_source(u)],
+                        f"{where}: say D5 is restored by a deploy of its own file in #200's `before/` only while a fresh "
+                        "retrieve equals `after/` (or a fresh retrieve edited back), in one list item or paragraph, not "
+                        "negated")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\b(never|not|no)\b[^.;]{0,60}?\b(older|old|earlier|previous|"
+                                                    r"stale)\s+(\w+\s+)?(build|retrieve)s?\b", s)],
+                        f"{where}: say never from an older build or retrieve (DECISIONS 2026-10-16), in one sentence")
+        for s in cl:
+            for m in self.OLD_SOURCE.finditer(s):       # an older or another change's source only ever denied
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: #200's rollback deploys from #200's own `before/` or a fresh retrieve, never "
+                                f"from {m.group(0)!r} (DECISIONS 2026-10-16); name it only after a negation (\"never "
+                                f"from …\"): {s[:200]!r}")
+            for m in self.FROM_COPY.finditer(s):        # the copies are the record, not the restore
+                self.assertTrue(self.d.locally_denied(s, m) or self.d.NEGATION.search(m.group(0)),
+                                f"{where}: the reports are not restored from their Decommissioned copies (a copy saved back "
+                                f"is a separate report; D5's components point at the reports themselves): {s[:200]!r}")
+            if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s:
+                self.assertTrue(re.search(r"(?i)(?<!test )\brecord\b", s) or self.d.denies(s),
+                                f"{where}: the copies in Decommissioned are named only as the record of what the reports "
+                                f"were (\"… are the record\"), not as the restore: {s[:200]!r}")
+        self.r.sweep(raw, where)
+        for rx, what in ((r"destructiveChanges", "a `destructiveChanges` deploy"),
+                         (r"\bsf project delete\b", "`sf project delete`"),
+                         (r"(-X\s*|--method\s+)DELETE\b|\bDELETE\s+/services/", "an HTTP DELETE")):
+            self.assertNotRegex(raw, rx, f"{where}: {what} deletes; the rollback restores and deletes nothing")
 
 
 if __name__ == "__main__":
