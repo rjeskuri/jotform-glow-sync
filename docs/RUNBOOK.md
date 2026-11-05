@@ -5274,9 +5274,9 @@ D3's, the GLOW Club Observations dashboard (titled "Club Observation Dashboards"
 (`SpecifiedUser`), so it shows the data of its last refresh: a refresh after each change (a PUT,
 Ryan's go) and Ryan's weekly Subscribe in Lightning keep it current. #78's build
 (`data/sf_dash_training_2026-10-24/build/`) was deployed on 2026-10-26 (deploy
-`0AfRP000002i76H0AQ`, the plan's Result): items 13-15 are live on D4, and item 16 joins it after
-#77 lands (the plan's step 9). Item 12's component joined D4 on 2026-10-26 (#80, deploy
-`0AfRP000002i9BJ0AY`; below).
+`0AfRP000002i76H0AQ`, the plan's Result): items 13-15 are live on D4. Item 12's component joined
+D4 on 2026-10-26 (#80, deploy `0AfRP000002i9BJ0AY`; below), and item 16 joined D4 on 2026-11-04
+(#152, the plan's step 9; below).
 
 The measures, each a report in "GLOW Monthly Reports" on the Monthly Report object `DHIS2__c`, and
 each component on its own report:
@@ -5300,10 +5300,16 @@ each component on its own report:
 - Item 16, "Whether PC met with mentors as a group to discuss program implementation": the report
   "Meeting with mentors to discuss program" (`00ORP000004RJZ72AO`, matrix) counts Monthly Reports
   by the answer to `DHIS2__c.Did_you_meet_with_mentors_as_a_group__c` (Yes or No, across; a blank
-  answer is left out), for each partner and month, as item 15 does. Its component goes on D4 once
-  #77 has taken it off D3 (Ryan, 2026-10-24: #77 lands first); until then item 16's report is as
-  #73 left it. SOQL signal, the last complete month:
+  answer is left out), for each partner and month, as item 15 does. The component is a stacked
+  column for each month, Yes and No, in D4's free half row (row 8, beside item 15's). SOQL signal,
+  the last complete month:
   `SELECT Did_you_meet_with_mentors_as_a_group__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Did_you_meet_with_mentors_as_a_group__c != null GROUP BY Did_you_meet_with_mentors_as_a_group__c`.
+  Status: item 16 joined D4 on 2026-11-04 (#152; deploy `0AfRP000002jAi10AE`, check-only
+  `0AfRP000002jAgP0AU`, after #77 took it off D3), the report regrouped by partner and month as
+  items 13-15 are; the copies of D4 (`01ZRP00000BV4Qo2AL`) and the report (`00ORP000009p2Af2AI`)
+  are in Decommissioned. Read back and refreshed (all 5 D4 components show data); September 2026
+  equals SOQL: 44 answered, Yes 38, No 6
+  ([plan and Result](plans/2026-10-25-sf-dash-training.md)).
 - Item 12, "New mentors recruited": the report "Partners that recruited new mentors" (matrix, in
   "GLOW Monthly Reports") counts the Monthly Reports (`DHIS2__c`) by the answer to
   `DHIS2__c.Recruit_any_new_mentors_last_month__c` (Yes or No, across), each in the month of its
@@ -5313,8 +5319,8 @@ each component on its own report:
   mentors: no Salesforce field holds how many were recruited (Ryan, 2026-10-26). It is not
   `Newly_recruited__c`, the recruits who still need orientation, and not a contact with a "Lead
   Mentor" role, which sits on a household account with no partner. The component is a stacked
-  column for each month, Yes and No, in the left half of D4's third row; the second row's right
-  half stays free for item 16. SOQL signal, the last 12 months:
+  column for each month, Yes and No, in the left half of D4's third row, with item 16's in the
+  half row beside item 15's (above). SOQL signal, the last 12 months:
   `SELECT Recruit_any_new_mentors_last_month__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Recruit_any_new_mentors_last_month__c != null GROUP BY Recruit_any_new_mentors_last_month__c`
   (2026-10-26: 73 Yes, 451 No). Status: deployed 2026-10-26 11:54 UTC on Ryan's go (#80; deploy
   `0AfRP000002i9BJ0AY`, check-only `0AfRP000002i9850AA`), the report `00ORP000009kXev2AE`, read

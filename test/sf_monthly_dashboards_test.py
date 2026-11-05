@@ -4077,10 +4077,16 @@ class TrainingDashboardDocs(unittest.TestCase):
     Tightened after the test-breaker: every occurrence of an id stands beside its own label (never another
     item's or step's); the ledger's "before the deploy" is a fact, not what the plan wanted; item 15's Yes 199 and
     No 325 are never crossed; the 2 test records are left out, not kept; step 1's fresh retrieve equals `before/`
-    and step 8's ledger holds 3 moves; steps 1-8 are said done, steps 9 and 10 neither done nor "not needed"; no
+    and step 8's ledger holds 3 moves; steps 1-9 are said done, step 10 neither done nor "not needed"; no
     Result line says failed, rolled back, mismatch, not equal, differs (but the read-back's `showValues` line) or
-    still to run (but steps 9 and 10); the PUT's body is in the same command as `--method PUT`; the RUNBOOK says
-    "was deployed", not "scheduled" or "still runs"."""
+    still to run (but step 10); the PUT's body is in the same command as `--method PUT`; the RUNBOOK says
+    "was deployed", not "scheduled" or "still runs".
+
+    Step 9 (ticket #152, item 16 on D4, after #77 landed): the plan's Result has a part that starts with `Step 9` and
+    holds its own facts (item 16's report and D4 by id, grouping by Partner and Month like items 13-15 with the
+    answer across, the two new Decommissioned copies, the check-only and deploy ids, the read-back, the refresh and
+    last complete month's figure equal to SOQL, with answered = Yes + No); steps 1-9 are done and only step 10 (the
+    Subscribe) remains; the frontmatter comment and the RUNBOOK say item 16 is on D4."""
 
     longMessage = False         # the messages say what to fix
     RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
@@ -4941,7 +4947,7 @@ class TrainingDashboardDocs(unittest.TestCase):
     def assertNothingWentWrong(self, raw, where):
         """The record of 2026-10-26 is steps 1-8 done, every count equal to SOQL: the Result says no step failed or
         was rolled back, no count disagrees, nothing but the read-back's `showValues` differs, and nothing but
-        steps 9 and 10 (item 16, #77, the Subscribe) is still to run."""
+        step 10 (the Subscribe) is still to run: a line about step 9, item 16 or #77 that says it waits is wrong."""
         found = []
         for u in self.result_units(raw):
             n = self.norm(u)
@@ -4958,14 +4964,15 @@ class TrainingDashboardDocs(unittest.TestCase):
                 m = [m for m in self.DIFFERS.finditer(n) if not self.d.locally_denied(n, m)]
                 if m:
                     found.append(f"{m[0].group(0)!r}: {u[:160]!r}")
-            later = ([1 for got, _s in self.segments(u, self.STEP_REF) if got & {"9", "10"}]
-                     or re.search(r"(?i)\bitem\s+16\b|\bSubscribe\b|(?<![\w#])#(77|80)\b", u))
+            # only step 10 (Ryan's Subscribe) is still to run: step 9, item 16 and #77 are done (ticket #152)
+            later = ([1 for got, _s in self.segments(u, self.STEP_REF) if "10" in got]
+                     or re.search(r"(?i)\bSubscribe\b|(?<![\w#])#80\b", u))
             if not later and self.stated(n, self.STILL_TO_RUN):
                 found.append(f"still to run: {u[:160]!r}")
         self.assertEqual(found, [], f"{where}: steps 1-8 ran and every count equals SOQL (2026-10-26); the Result says "
                                     "otherwise: " + "; ".join(found[:3]))
 
-    def test_the_training_plan_is_in_progress_with_steps_9_and_10_left(self):
+    def test_the_training_plan_is_in_progress_with_step_10_left(self):
         sys.path.insert(0, os.path.join(REPO, "scripts"))
         import docs_index
         path, raw = self.result()
@@ -4980,7 +4987,7 @@ class TrainingDashboardDocs(unittest.TestCase):
                 self.assertIsNone(m, f"{label}: the build is deployed (2026-10-26); drop {m and m.group(0)!r}: "
                                      f"{s[:200]!r}")
         word, problem = docs_index.status_of(keys.get("status", ""))
-        self.assertEqual(word, "in-progress", f"{name}: `status:` stays `in-progress` while step 9 waits for #77")
+        self.assertEqual(word, "in-progress", f"{name}: `status:` stays `in-progress` while step 10 (Ryan's Subscribe) waits")
         units = self.result_units(raw)
         steps = [(got, u, seg) for u in units for got, seg in self.segments(u, self.STEP_REF)]
         # steps 1-8: done, said as such (in the text from the step reference, or in the lead-in before it)
@@ -4991,24 +4998,21 @@ class TrainingDashboardDocs(unittest.TestCase):
             for got, seg in segs:
                 if self.stated(self.norm(seg), self.DONE) or self.stated(self.norm(lead), self.DONE):
                     done |= got
-        missing = sorted({str(i) for i in range(1, 9)} - done, key=int)
-        self.assertEqual(missing, [], f"{where}: say steps 1-8 are done (\"steps 1-8 done, 2026-10-26\"); not said "
-                                      f"of step(s) {', '.join(missing)}")
-        # steps 9 and 10: still to run, step 9 after #77
-        self.assertTrue([u for got, u, _seg in steps if "9" in got and re.search(r"(?<![\w#])#77\b", u)
-                         and self.stated(self.norm(u), self.REMAINS)],
-                        f"{where}: say step 9 (item 16) remains, after #77 lands")
+        missing = sorted({str(i) for i in range(1, 10)} - done, key=int)
+        self.assertEqual(missing, [], f"{where}: say steps 1-9 are done (\"steps 1-8 done, 2026-10-26\", \"step 9 "
+                                      f"ran\"); not said of step(s) {', '.join(missing)}")
+        # step 10: still to run (ticket #152: step 9, item 16, ran after #77 landed)
         self.assertTrue([u for got, u, _seg in steps if "10" in got and self.stated(self.norm(u), self.REMAINS)]
                         + [u for u in units if re.search(r"(?i)\bSubscribe\b", u)
                            and self.stated(self.norm(u), self.REMAINS)],
                         f"{where}: say step 10 (the weekly Subscribe) remains")
-        over = [seg for got, _u, seg in steps if got & {"9", "10"} and self.stated(self.norm(seg), self.NOT_LEFT)]
-        self.assertEqual(over, [], f"{where}: steps 9 and 10 are still to run (step 9 after #77); none is done or "
+        over = [seg for got, _u, seg in steps if "10" in got and self.stated(self.norm(seg), self.NOT_LEFT)]
+        self.assertEqual(over, [], f"{where}: step 10 (the weekly Subscribe) is still to run; it is neither done nor "
                                    f"not needed: {over[:1]}")
-        # what a reference to steps 2-8 says, to the next step reference, never waits
-        waits = [seg for got, _u, seg in steps if got & {str(i) for i in range(2, 9)}
+        # what a reference to steps 2-9 says, to the next step reference, never waits
+        waits = [seg for got, _u, seg in steps if got & {str(i) for i in range(2, 10)}
                  and self.stated(self.norm(seg), self.STILL_TO_RUN)]
-        self.assertEqual(waits, [], f"{where}: steps 1-8 are done (2026-10-26); none of them waits: {waits[:1]}")
+        self.assertEqual(waits, [], f"{where}: steps 1-9 are done; none of them waits: {waits[:1]}")
         # step 8: the two reports moved, the ledger holds 3 moves
         moves = [u for u in units for m in re.finditer(r"(?i)\b(3|three)\s+(\w+\s+)?moves\b", u)
                  if re.search(r"(?i)\bledger\b", u) and not self.d.locally_denied(u, m)
@@ -5020,6 +5024,202 @@ class TrainingDashboardDocs(unittest.TestCase):
                             f"{where}: step 8 moved `{rid}` to Decommissioned: say so beside its id")
         # and no line of the Result says otherwise
         self.assertNothingWentWrong(raw, where)
+
+    # --- step 9 (ticket #152): item 16 on D4 ---------------------------------------------------------------------
+
+    ITEM16_ID, D4_ID = "00ORP000004RJZ72AO", "01ZRP000006quAj2AI"
+    # every id the plan already carries before step 9 (steps 2-4, #80): a step 9 id is a new one
+    KNOWN_IDS = {"0AfRP000002i74f0AA", "0AfRP000002i76H0AQ", "0AfRP000002i9BJ0AY", "0AfRP000002i9850AA",
+                 "00ORP000009kU9B2AU", "00ORP000009kUAn2AM", "00ORP000009kUCP2A2", "00ORP000009kUE12AM",
+                 "01ZRP00000BPIjN2AX", "00ORP000009kXev2AE"}
+    ID_01Z = re.compile(r"(?<![A-Za-z0-9])01Z[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?(?![A-Za-z0-9])")
+    ID_00O = re.compile(r"(?<![A-Za-z0-9])00O[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?(?![A-Za-z0-9])")
+    STEP9_START = re.compile(r"(?i)^(\s*)(#{1,6}\s+|(?:[-*+]|\d+[.)])\s+)?(?:\*\*|__)?Steps?\s+9\b")
+    ANY_STEP_START = re.compile(r"(?i)^\s*(?:#{1,6}\s+|(?:[-*+]|\d+[.)])\s+)?(?:\*\*|__)?Steps?\s+\d")
+
+    def step9_block(self, raw):
+        """The Result's step 9 part: the lines from the one that starts with `Step 9` (a list item, a paragraph or a
+        heading) to the next line that starts another step or leaves the item (a list item runs over its indented
+        lines, a paragraph to its blank line, a heading to the next heading of its level or higher). None when no
+        line starts that way."""
+        lines = raw.splitlines()
+        start = next((n for n, ln in enumerate(lines) if self.STEP9_START.match(ln)), None)
+        if start is None:
+            return None
+        m = self.STEP9_START.match(lines[start])
+        indent, marker = len(m.group(1)), (m.group(2) or "").strip()
+        out = [lines[start]]
+        for line in lines[start + 1:]:
+            st = line.strip()
+            if self.ANY_STEP_START.match(line):
+                break
+            if marker.startswith("#"):
+                if st.startswith("#") and len(st) - len(st.lstrip("#")) <= len(marker):
+                    break
+            elif not st:
+                if not marker:
+                    break
+            elif marker and len(line) - len(line.lstrip()) <= indent:
+                break
+            out.append(line)
+        return "\n".join(out)
+
+    def beside(self, fl, rid, refs, want, what, where):
+        """Every occurrence of `rid` in `fl` stands nearest to a reference labelled `want`, never another's."""
+        got = [self.nearest(fl, m.start(), len(rid), refs) for m in re.finditer(re.escape(rid), fl)]
+        self.assertTrue(got, f"{where}: step 9 records {what}, `{rid}`")
+        self.assertEqual({k for k in got if k != want}, set(),
+                         f"{where}: `{rid}` is {what} only: name {want!r} nearest to it")
+
+    @staticmethod
+    def figure(s, word):
+        """The numbers written beside `word` in `s`, either side: `answered 41`, `41 answered`, `Yes 37`, `4 No`."""
+        return [int((a or b).replace(",", ""))
+                for a, b in re.findall(rf"\b{word}\s+(\d+(?:,\d{{3}})*)\b|\b(\d+(?:,\d{{3}})*)\s+{word}\b", s)]
+
+    def test_the_plan_result_records_step_9(self):
+        path, raw = self.result()
+        where = f"{os.path.relpath(path, REPO)}: `## Result`, step 9"
+        block = self.step9_block(raw)
+        self.assertIsNotNone(block, f"{where}: start a line of the Result with `Step 9` (a list item such as "
+                                    "\"- Step 9: ...\", a paragraph or a heading) and keep step 9's facts in it, up "
+                                    "to the next step")
+        fl = flat(block)
+        cl = self.clauses(block)
+        self.assertNotIn("@", fl, f"{where}: counts and ids only, no mentor e-mail")
+
+        def item_d4(u):
+            return ([(m, "16") for m in re.finditer(r"(?i)\bitem\s+16\b", u)]
+                    + [(m, "D4") for m in re.finditer(r"(?i)\bD4\b|\bdashboard\b", u)])
+        # item 16's report and D4, each id beside its own name
+        self.beside(fl, self.ITEM16_ID, item_d4(fl), "16", "item 16's report", where)
+        self.beside(fl, self.D4_ID, item_d4(fl), "D4", "the dashboard D4", where)
+
+        # item 16 is grouped by Partner and Month like items 13-15, its answer across
+        grouped = []
+        for s in cl:
+            if re.search(r"(?i)\bitem\s+16\b", s) and re.search(r"(?i)\bMonths?\b", s):
+                p = re.search(r"(?i)\bPartners?\b(?!\s+Manager)", s)
+                refs = [m for m in self.ITEM_REF.finditer(s) if {"13", "14", "15"} <= self.expand(m.group(1))]
+                if p and refs and not self.d.locally_denied(s, p):
+                    grouped.append(s)
+        self.assertTrue(grouped, f"{where}: say item 16 is grouped by Partner and Month like items 13-15 (one "
+                                 "sentence naming item 16, Partner, Month and items 13-15, not negated)")
+        field = self.FIELDS["16"]
+        across = [s for s in cl for m in re.finditer(r"(?i)\bacross\b", s)
+                  if field in s and not self.d.locally_denied(s, m)]
+        self.assertTrue(across, f"{where}: say item 16's answer `{field}` goes across (one sentence, not negated)")
+        for other in (v for k, v in self.FIELDS.items() if k != "16"):
+            self.assertNotIn(other, fl, f"{where}: step 9 is item 16's: it carries no other item's field")
+
+        # the two copies made that day: new ids, each beside its own name and in Decommissioned
+        for rx, label, what, skip in ((self.ID_01Z, "D4", "D4's copy (`01Z...`)", {self.D4_ID}),
+                                      (self.ID_00O, "16", "item 16's copy (`00O...`)", {self.ITEM16_ID})):
+            ids = set(rx.findall(fl)) - skip - self.KNOWN_IDS
+            self.assertTrue(ids, f"{where}: record {what} in Decommissioned: a new id, not one the plan already "
+                                 "carries")
+            for cid in sorted(ids):
+                self.beside(fl, cid, item_d4(fl), label, what, where)
+                self.assertTrue([s for s in cl if cid in s and "Decommissioned" in s and self.COPY.search(s)
+                                 and not self.d.denies(s)],
+                                f"{where}: `{cid}` is {what}: say in its sentence that it is a copy in "
+                                "Decommissioned")
+        before = []
+        for s in cl:
+            m = re.search(r"(?i)\bbefore\s+(the\s+|its\s+|this\s+)?(\w+\s+)?deploy\w*", s)
+            if m and re.search(r"(?i)\bledger\b", s) and not self.d.denies(s) and not self.WISH.search(s[:m.start()]):
+                before.append(s)
+        self.assertTrue(before, f"{where}: say the ledger rows of the two copies are dated before the deploy, as a "
+                                "fact (a sentence naming the ledger and \"before the deploy\")")
+
+        # the check-only and the deploy: two new ids, each beside its own word
+        new = set(self.ZERO_AF.findall(fl)) - self.KNOWN_IDS
+        self.assertGreaterEqual(len(new), 2, f"{where}: record the check-only's and the deploy's ids (`0Af...`, two "
+                                             f"new ids); found {sorted(new)}")
+        checks = list(self.CHECK_WORD.finditer(fl))
+        spans = [(c.start(), c.end()) for c in checks]
+        refs = [(m, "check") for m in checks]
+        refs += [(m, "deploy") for m in self.DEPLOY_WORD.finditer(fl)
+                 if not any(a <= m.start() < b or m.start() <= a < m.end() for a, b in spans)
+                 and not re.search(r"(?i)check[\s-]*$|--dry-run\s*$", fl[:m.start()])]
+        labels = {i: {self.nearest(fl, m.start(), len(i), refs) for m in re.finditer(re.escape(i), fl)} for i in new}
+        self.assertTrue([i for i, k in labels.items() if k == {"check"}],
+                        f"{where}: name the check-only beside its id (\"check-only `0Af...`\"); found {labels}")
+        self.assertTrue([i for i, k in labels.items() if k == {"deploy"}],
+                        f"{where}: name the deploy beside its id (\"deploy `0Af...`\"); found {labels}")
+
+        # the read-back
+        readback = [s for s in cl if "after/" in s and "build/" in s
+                    for m in re.finditer(r"(?i)\b(equals?|identical|matches|no differences)\b", s)
+                    if not self.d.locally_denied(s, m)]
+        self.assertTrue(readback, f"{where}: say the read-back: `after/` equals `build/` (one sentence naming both "
+                                  "folders and \"equals\", not negated)")
+
+        # the refresh: every component of D4 shows data
+        refreshed = []
+        for s in cl:
+            if re.search(r"(?i)\brefresh\w*", s) and not self.d.denies(s):
+                ofs = re.findall(r"\b(\d+)\s+of\s+(\d+)\b", s)
+                if "DATA" in s or (ofs and all(a == b and int(a) >= 4 for a, b in ofs)):
+                    refreshed.append(s)
+        self.assertTrue(refreshed, f"{where}: say the refresh left every component of D4 with data (\"DATA\", or "
+                                   "\"N of N components\" with N at least 4: items 12-16 less one)")
+
+        # the last complete month's figure equals SOQL: numbers, and they add up
+        found = []
+        for s in cl:
+            if not (re.search(r"\b(September|October)\b", s) and re.search(r"\bSOQL\b", s)):
+                continue
+            if not [m for m in re.finditer(r"(?i)\b(equal\w*|match\w*|agree\w*)\b|=", s)
+                    if not self.d.locally_denied(s, m)]:
+                continue
+            ans, yes, no = self.figure(s, "answered"), self.figure(s, "Yes"), self.figure(s, "No")
+            if len(ans) == len(yes) == len(no) == 1:
+                found.append((s, ans[0], yes[0], no[0]))
+        self.assertTrue(found, f"{where}: give item 16's figure for the last complete month, equal to SOQL, as "
+                               "numbers: one sentence with the month, \"SOQL\", \"equal\", \"N answered\", \"Yes N\" "
+                               "and \"No N\"")
+        for s, ans, yes, no in found:
+            self.assertGreater(ans, 0, f"{where}: a month with no answers proves nothing: {s[:160]!r}")
+            self.assertEqual(ans, yes + no, f"{where}: the answered count is Yes plus No: {s[:160]!r}")
+
+    def test_the_plan_front_matter_says_step_9_ran(self):
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        front = text.split("\n---", 1)[0] if text.startswith("---") else ""
+        self.assertTrue(front, f"{name}: the plan starts with its frontmatter")
+        nine = [seg for line in front.splitlines() for got, seg in self.segments(self.norm(line), self.STEP_REF)
+                if "9" in got]
+        self.assertTrue(nine, f"{name}: the frontmatter's status comment names step 9")
+        left = re.compile(r"(?i)\b(left|remain\w*|wait\w*|await\w*|pending|not yet|outstanding|to do)\b")
+        for seg in nine:
+            self.assertFalse(self.stated(seg, left), f"{name}: step 9 ran (ticket #152): the frontmatter no longer "
+                                                      f"leaves it: {seg[:120]!r}")
+        self.assertTrue([seg for seg in nine if self.stated(seg, self.DONE)],
+                        f"{name}: the frontmatter's status comment says step 9 ran (\"steps 1-9 ran\")")
+
+    def test_the_runbook_puts_item_16_on_d4(self):
+        where = f"RUNBOOK section {self.MONTHLY[3:]!r}, {self.PART[4:]!r}"
+        part = self.part()
+        said = []
+        for s in self.clauses(part):
+            if re.search(r"(?i)\bitem\s+16\b", s) and re.search(r"\bD4\b", s):
+                for m in re.finditer(r"(?i)\b(joined|deployed|went\s+live|is\s+live|is\s+on|are\s+live|live\s+on)\b",
+                                     s):
+                    # item 16 is the subject of the verb: it stands in the same part of the sentence
+                    pre = re.split(r"[,;(—–]|\bbut\b", s[max(0, m.start() - 60):m.start()])[-1]
+                    if (re.search(r"(?i)\bitem\s+16\b", pre) and not self.WISH.search(pre)
+                            and not self.d.locally_denied(s, m)):
+                        said.append(s)
+        self.assertTrue(said, f"{where}: say item 16's component is on D4, as done (\"item 16 joined D4 on <date>\": "
+                              "past, not negated, not to be)")
+        stale = re.compile(r"(?i)\bitem\s+16\b[^.;]{0,80}\b(joins|will\s+join|waits|to\s+join)\b|"
+                           r"\bjoins\s+it\s+after\s+#77\b|\bfree\s+for\s+item\s+16\b|"
+                           r"\buntil\s+then\b[^.;]{0,80}\bas\s+#73\s+left\s+it\b|\bgoes\s+on\s+D4\s+once\b")
+        for s in self.clauses(part):
+            m = stale.search(s)
+            self.assertIsNone(m, f"{where}: item 16 is on D4 (ticket #152); drop {m and m.group(0)!r}: {s[:200]!r}")
 
     @staticmethod
     def code_spans(text):
