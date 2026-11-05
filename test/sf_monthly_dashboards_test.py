@@ -4184,11 +4184,13 @@ class TrainingDashboardDocs(unittest.TestCase):
     DIFFER = re.compile(r"(?i)\b(differ\w*|different|changed|mismatch\w*|diverg\w*)\b")
     BUILD_DIR = re.compile(r"\bbuild/")
     # another ticket's or change's build, retrieve or folder
-    # (#199, GLOW's review of 2026-11-02, is this dashboard's next change: its own `data/sf_glow_review_<month>/` is no
-    # other change's; GlowReviewTrainingDocs holds #199's rollback to its own sources)
+    # (#199, GLOW's review of 2026-11-02, is this dashboard's next change: its own `data/sf_glow_review_<month>/training/`
+    # is no other change's; another topic's folder of the review, `…/attendance/build/`, is; GlowReviewTrainingDocs
+    # holds #199's rollback to its own sources)
     OTHER_CHANGE = re.compile(r"#(?!78\b|199\b)\d+['’]s\s+(\w+\s+)?`?(build|retrieve|before/|after/|build/|copy|copies|backup)|"
                               r"\b(build|retrieve|before/|after/|build/)`?\s+(of|from)\s+(ticket\s+)?#(?!78\b|199\b)\d+|"
-                              r"\bdata/sf_(?!dash_training_|glow_review_)[\w.-]+/(build|before|after)/")
+                              r"\bdata/sf_(?!dash_training_|glow_review_(?:\d{4}-\d\d|<month>)/training/)"
+                              r"[\w.<>-]+(?:/[\w.<>-]+)*?/(build|before|after)/")
     ACCOUNT = re.compile(r"(?<![A-Za-z0-9])Account__c\b")
     PERIOD = re.compile(r"(?<![A-Za-z0-9])Period__c\b")
     LAST_12 = re.compile(r"\bLAST_N_MONTHS:12\b")
@@ -4456,6 +4458,24 @@ class TrainingDashboardDocs(unittest.TestCase):
         return bool(re.search(r"(?i)(?<![\w-])Months?(?![\w-])", match_text)
                     and not re.search(r"(?i)Partners?(?!\s+Managers?)|Account__c|Period__c", match_text))
 
+    SECOND_WORD = re.compile(r"(?i)(two|2|second|another|other|additional|more|extra|further)\s+(dashboard\s+)?\w+")
+
+    def is_month_second(self, s, m):
+        """MORE_FILTERS match `m` of clause `s` is D4's Month filter and nothing more (since #199, GLOW's review of
+        2026-11-02): "two filters" in a clause that names both Partner Manager and Month; or a "second/another/other/
+        additional/extra filter" with Month named right after it ("another filter, Month") or right before it ("Month
+        is the second filter"). Anything else ("another filter on Region", "a Month filter and one more filter,
+        Region") is a third filter."""
+        if not self.SECOND_WORD.fullmatch(m.group(0)):
+            return False
+        word = m.group(0).split()[0].lower()
+        if word in ("two", "2"):
+            return bool(re.search(r"(?i)\bMonth\b", s) and re.search(r"(?i)\bPartner Manager\b", s))
+        after = re.match(r"\s*[:,—–(]\s*(the\s+)?[\"“`]?Month\b", s[m.end():])
+        before = re.search(r"(?i)\bMonth\b[\"”'’`]?\s*(\([^)]{0,60}\)\s*)?(,|is|being|as)\s+(the\s+|a\s+|its\s+)?$",
+                           s[:m.start()])
+        return bool(after or before)
+
     def assertNoPartnerOrMonthFilter(self, text, where):
         """No clause states a Partner filter or a third dashboard filter; each is only ever denied ("no Partner filter
         (Ryan, 2026-10-24)"). A Month filter is D4's since #199 (GLOW's review of 2026-11-02), not denied here."""
@@ -4477,13 +4497,12 @@ class TrainingDashboardDocs(unittest.TestCase):
                                 f"{where}: the dashboard has no Partner filter and no Month filter (Ryan, 2026-10-24: "
                                 f"its one filter is Partner Manager); name one only to deny it: {m.group(0)!r} in "
                                 f"{s[:200]!r}")
-            if self.DASHBOARD.search(s):
+            if self.DASHBOARD.search(s) or re.search(r"\bD4\b", s):
                 for m in self.MORE_FILTERS.finditer(s):
-                    # since #199 D4 has a second filter, Month: "two filters", "another filter" beside it are true
-                    # (a third one is not)
-                    if re.search(r"(?i)\bMonth\b", s) and re.fullmatch(r"(?i)(two|2|second|another|other|additional|"
-                                                                      r"more|extra|further)\s+(dashboard\s+)?\w+",
-                                                                      m.group(0)):
+                    # since #199 D4 has a second filter, Month: "two filters, Partner Manager and Month", "a second
+                    # filter, Month" are true; a match that is not the Month filter itself ("another filter on
+                    # Region", "one more filter, Region") is a third one
+                    if self.is_month_second(s, m):
                         continue
                     # a list keeps its negation across commas ("no Partner, Month or other filter")
                     pre = re.split(r"\bbut\b|\bhowever\b|\bactually\b", s[max(0, m.start() - 40):m.start()])[-1]
@@ -6190,7 +6209,9 @@ class NewMentorsDocs(unittest.TestCase):
         as a date (`Submitted_On__c`, `YearMonth__c`) is only ever denied; `Year__c` and `Month__c` may be named
         as what `Period__c` is built from."""
         self.t.assertNoOtherDate(text, where)
-        exempt = {"Period__c", self.FIELD, self.NEWLY, "DHIS2__c", "Account__c"} | set(self.OTHER_FIELDS.values())
+        # (`In_Reporting_Year__c`, since #199, is the year window of item 12's signal, not the month: that stays `Period__c`)
+        exempt = {"Period__c", "In_Reporting_Year__c", self.FIELD, self.NEWLY, "DHIS2__c", "Account__c"} \
+            | set(self.OTHER_FIELDS.values())
         for s in sentences(flat(text), ".;:"):
             for m in self.IDENT.finditer(s):
                 name = m.group(0)
@@ -8237,14 +8258,16 @@ class GlowReviewTrainingDocs(unittest.TestCase):
         self.assertTrue([s for s in year + one_year if self.D4_OR_DASHBOARD.search(s)],
                         f"{where}: say D4 shows the reporting year (a sentence naming D4 or the dashboard with "
                         "`In_Reporting_Year__c` or \"2026 only\")")
-        for s in cl:            # the last 12 months stays only as history
-            if not self.PERIOD_TALK.search(s):
-                continue
+        # the last 12 months stays only as history, in EVERY sentence of the part (a figure of item 12's signal, "D4 and
+        # each report show the last 12 months"): a marker of the past or of what it replaced (`history`), or a date
+        # right before it ("On 2026-10-24, over the last 12 months, …"); a date after it only is no history
+        for s in cl:
             for m in self.OLD_PERIOD.finditer(s):
-                self.assertTrue(self.history(s, m),
+                dated = re.search(r"\b\d{4}-\d\d-\d\d\b", s[max(0, m.start() - 40):m.start()])
+                self.assertTrue(self.history(s, m) or dated,
                                 f"{where}: since #199 the period is `In_Reporting_Year__c`; the last 12 months "
                                 f"({m.group(0)!r}) is said only as what it replaced (\"until #199\", \"was\", \"in place "
-                                f"of\"): {s[:200]!r}")
+                                f"of\") or as a dated figure (\"On 2026-10-24, in the last 12 months, …\"): {s[:200]!r}")
 
         # the Month filter on DHIS2__c$Month__c, D4's, and nothing left that denies it or makes Partner Manager the
         # only filter
@@ -8268,7 +8291,8 @@ class GlowReviewTrainingDocs(unittest.TestCase):
         # the former PO is off the Partner Manager filter, said by role or user Id, never by name
         po = [s for s in cl if self.FORMER_PO.search(s)]
         off = [s for s in po if re.search(r"(?i)\bPartner Manager\b", s) and re.search(r"(?i)\b(options?|filter)\b", s)
-               and self.OFF_PO.search(s) and not self.STILL_ON.search(s)]
+               and [m for m in self.OFF_PO.finditer(s) if not self.d.locally_denied(s, m)]
+               and not self.STILL_ON.search(s)]
         self.assertTrue(off, f"{where}: say the former PO is off the Partner Manager filter, by role (\"the former PO\") or "
                              f"user Id `{self.FORMER_PO_USER}`: one sentence naming the Partner Manager filter, its option "
                              "and that the former PO's is gone (\"has no option for\", \"is off\", \"was removed\")")
