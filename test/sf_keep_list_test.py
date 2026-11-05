@@ -8,8 +8,9 @@ GLOW team via Ryan, 2026-10-21; the test carries the list), mapped to the ids Ry
 ticket (2026-10-23, "all as proposed"; item 12 had no report until task #80 built it). Ryan's answer
 (c), "do NOT change the labels. Kept reports and dashboards keep their current names", replaces the
 ticket's first label convention (drop "M&P", a dashboard named after its group): every row's target
-label is its label today, except the rows GLOW's review of 2026-11-02 (epic #194) renames: RENAMED, items 9-11
-since ticket #198, whose target is GLOW's name within 40 characters (label_today stays the label #70 recorded).
+label is its label today, except the rows GLOW's review of 2026-11-02 (epic #194) renames: RENAMED, items 5-7
+since ticket #197 and items 9-11 since ticket #198, whose target is GLOW's name within 40 characters (label_today
+stays the label #70 recorded).
 
 NewMentorsReport (ticket #80, plan docs/plans/2026-10-26-sf-new-mentors.md, Rollout step 8): item 12
 is the report #80 deployed on 2026-10-26, "Partners that recruited new mentors" (GLOW Monthly Reports),
@@ -65,7 +66,9 @@ AGREED = {
     "3": ("report", "00ORP000005rSbB2AU", "Participation by Month and Partner"),
     "4": ("report", "00ORP000005ufOz2AI", "GLOW Club Each Week"),
     "5": ("report", "00ORP000005rY3t2AE", "Copy of GLOW Club Implementation by M&P"),
-    "6": ("report", "00ORP000005rZxd2AE", "Glow Club Modules Implemented by M&P"),
+    # item 6: since #76 (2026-10-26) the report it built on `Attendance_Totals`, the same label; #70's
+    # 00ORP000005rZxd2AE is in Decommissioned (ticket #197's review)
+    "6": ("report", "00ORP000009kUNh2AM", "Glow Club Modules Implemented by M&P"),
     "7": ("report", "00ORP000005uehR2AQ", "GLOW Club Modules Adapted By Month"),
     "8": ("report", "00ORP000005uekf2AA", "Local and Regional Summits By Month 2"),
     "9": ("report", "00ORP000004RJZC2A4", "Submission of GC observation forms M & P"),
@@ -86,8 +89,12 @@ AGREED = {
     "D5": ("dashboard", "01ZRP000006oxSr2AI", "Reporting"),
 }
 # GLOW's review of 2026-11-02 (epic #194) renames some kept reports, superseding (c) for these rows only:
-# item: label_target. Ticket #198 (Outline step 3): items 9-11, GLOW's names within 40 characters.
+# item: label_target. GLOW's names within 40 characters: items 5-7 (ticket #197, Outline step 4) and
+# items 9-11 (ticket #198, Outline step 3).
 RENAMED = {
+    "5": "Club Implementation by Month and Partner",
+    "6": "Modules Implemented by Month and Partner",
+    "7": "Modules Adapted by Month and Partner",
     "9": "GC Observation Forms by Month & Partner",
     "10": "Club Observations by Month and Partner",
     "11": "Clubs Observed at Least Once by Month",
@@ -164,7 +171,7 @@ class KeepList(unittest.TestCase):
 
     def test_kept_items_keep_their_current_labels(self):
         # Ryan, 2026-10-23, (c): "do NOT change the labels. Kept reports and dashboards keep their current names."
-        # GLOW's review of 2026-11-02 renames the rows of RENAMED (#198: items 9-11); every other row keeps its label.
+        # GLOW's review of 2026-11-02 renames the rows of RENAMED (#197: items 5-7; #198: items 9-11); every other row keeps its label.
         rows = self.by_item()
         for item, row in rows.items():
             where = f"glow/sf_keep_list.csv item {item}"
@@ -177,7 +184,7 @@ class KeepList(unittest.TestCase):
             if item in RENAMED:
                 self.assertEqual(target, RENAMED[item],
                                  f"{where}: label_target is GLOW's name {RENAMED[item]!r} (GLOW's review, 2026-11-02; "
-                                 f"ticket #198), not {target!r}")
+                                 f"tickets #197 and #198), not {target!r}")
                 continue
             self.assertEqual(target, row["label_today"],
                              f"{where}: label_target is the label today, {row['label_today']!r} (Ryan, "
@@ -252,11 +259,12 @@ class KeepList(unittest.TestCase):
     def test_no_report_from_the_attendance_folders_is_in_it(self):
         # the "Jotform Attendance" dashboard and the two Attendance folders stay untouched (epic #68); their
         # ids are the ones the RUNBOOK's Attendance section and the attendance plans name
-        # (not the Monthly Report dashboard plans, `<date>-sf-dash-<name>.md`: "GLOW Club Attendance" is a Monthly
-        # Report dashboard, ticket #75, and its ids are the keep list's own)
+        # (not the Monthly Report dashboard plans, `<date>-sf-dash-<name>.md` and GLOW's review of them,
+        # `<date>-sf-review-<name>.md`: "GLOW Club Attendance" is a Monthly Report dashboard, tickets #75 and #196,
+        # and its ids are the keep list's own)
         text = md_part(os.path.join(REPO, "docs", "RUNBOOK.md"), "## Attendance dashboard in Salesforce")
         plans = [p for p in glob.glob(os.path.join(REPO, "docs", "plans", "*attendance*.md"))
-                 if not re.match(r"\d{4}-\d\d-\d\d-sf-dash-", os.path.basename(p))]
+                 if not re.match(r"\d{4}-\d\d-\d\d-sf-(dash|review)-", os.path.basename(p))]
         self.assertIn(os.path.join(REPO, "docs", "plans", "2026-10-02-attendance-dashboard.md"), plans,
                       "test: the Jotform Attendance dashboard's plan is among the plans checked against")
         for plan in plans:
