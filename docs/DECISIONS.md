@@ -792,6 +792,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - The rule covers the Monthly Report reports only: the Attendance side (the "Jotform Attendance" dashboard and its folders) stays outside epic #68.
 - 2026-10-23: the kept items go into one report folder, "GLOW Monthly Reports" (`ReportFolder` `GLOW_Monthly_Reports`), and one dashboard folder, "GLOW Monthly Dashboards" (`DashboardFolder` `GLOW_Monthly_Dashboards`), instead of per-category folders (Ryan, 2026-10-21, on #73). The five groups stay as the dashboards' categories, and item 19, the table, goes in the same report folder. Both folders get the same shares, since a dashboard's viewers need its reports' folder: the union of the shares of "DHIS2 Reports", "DHIS2 Dashboards" and "Dhis2 Dashbords", 7 entries (4 internal users View, 2 internal users Manage, 1 group Manage), internal users and groups only, never a guest, portal, community or partner share (RUNBOOK "The five dashboards and their folders"; [plan](plans/2026-10-23-sf-category-folders.md)).
 - 2026-10-26: #80 names item 12's report "Partners that recruited new mentors" (the 2026-10-26 entry, Ryan's answer on #80); its row reads `new`, with GLOW's measure as its label, until #80's deploy gives it the report's id and label.
+- 2026-11-05 (#200, GLOW's review, epic #194): item 17's `label_target`, "Monthly Report Approval Status", differs from its `label_today` since #200; the report carries GLOW's name in the org (Id unchanged, live since #200's deploy on 2026-11-04), and `label_today` stays the label #70 recorded, "Approved Approvals monthly report" (RUNBOOK "The keep list", "GLOW Club Reporting").
 
 ### 2026-10-24 — The delay keeps the UTC day; the formula takes it through DATEVALUE(TEXT(...))
 
@@ -908,3 +909,16 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - From 15 February 2027 the dashboards show 2027 only; 2026 stays in Salesforce and in the reports without the filter.
   - The Month filter offers month names without a year, which is unambiguous inside one reporting year.
   - `Period__c` stays (the field the formula reads); `LAST_N_MONTHS:12` leaves each report as its dashboard's task lands.
+
+### 2026-11-02 — The modules' data gap: GLOW Club modules implemented from September 2026, from Jotform
+
+- **Item 6 of the keep list, "GLOW Club modules implemented", counts the modules from September 2026 onward, from Jotform (`Attendance_Batch__c.Module__c`), and January-August 2026 shows no module data.** GLOW's review (2026-11-02, epic #194) asked for the earlier 2026 months "based on the partner monthly report"; Ryan decided on 2026-11-02 that they stay empty. Since #197 item 6 is the number of unique partners that implemented each module, as GLOW asked, on D2 "Implementation Dashboard" ([plan](plans/2026-11-02-sf-review-implementation.md)).
+- **Why:** the Monthly Report's module question has no answers after September 2025: 400 rows in 2025, 0 in 2026 (the field has been blank since 2025-10). The only 2026 module data is the Jotform attendance batches, live since 2026-09-01.
+- **Rejected:**
+  - the Monthly Report's module question for January-August 2026: it has no answers to show;
+  - the 15 pilot batches of February-August 2026: they stay out, as Ryan decided on #76 (2026-10-25);
+  - counting clubs or batches per module (#76): GLOW asked for partners, "as opposed to the number of clubs".
+- **Consequences:**
+  - Item 6 keeps its floor `Attendance_Date__c` on or after 2026-09-01 inside the reporting year; from 15 February 2027 (the reporting year 2027) the floor no longer cuts anything.
+  - The adapted modules (item 7) are a table of the Monthly Report's responses, "Modules Adapted Responses", beside the Yes/No chart: that question has answers in 2026.
+  - The RUNBOOK's `### GLOW Club Implementation` states the gap, so the empty months are not read as no implementation.
