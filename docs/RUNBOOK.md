@@ -4183,8 +4183,8 @@ grouping: it stays a tabular report, not grouped, with Partner and Month as its 
 filters. Tasks #75 to #79 bring each dashboard and its reports to that, with current data; #79
 ("Fix GLOW Club Reporting and the GLOW of the Month table") does item 19 too.
 
-Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row
-`label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
+Kept reports and dashboards keep their current names (Ryan, 2026-10-23): in every row but item
+17's `label_target` is `label_today`, abbreviations and spelling as they are in the org, and D1 to D5
 keep the dashboard names listed above. Item 12's `label_today` and `label_target` are the label
 of the report #80 deployed, "Partners that recruited new mentors" (Ryan, 2026-10-26). GLOW's
 review of 2026-11-02 (epic #194) supersedes that for item 17: since #200 its `label_target` is
@@ -4238,7 +4238,8 @@ the five dashboards. The five groups are categories, the rows of this table:
   `DashboardFolder` `GLOW_Monthly_Dashboards`, both new, built in
   `data/sf_folders_2026-10-23/build/` from a retrieve of the three DHIS2 folders.
 - The kept reports and dashboards keep their current labels (Ryan, 2026-10-23): the labels in this
-  table and in `glow/sf_keep_list.csv` are the ones in the org.
+  table and in `glow/sf_keep_list.csv` are the ones in the org, except item 17, renamed by #200:
+  its org label is "Monthly Report Approval Status" since #200, the keep list's `label_target`.
 
 Shares:
 - Both new folders get the same shares, since a dashboard's viewers need its reports' folder: the
@@ -4979,7 +4980,9 @@ later moves these figures):
 
 Rollback, each step on Ryan's go:
 - The reports, items 17-19, are restored from their copies in Decommissioned (`copy --tag "#79"`,
-  made before the change), as Decommissioned (above) says.
+  made before the change), as Decommissioned (above) says. Since #200 they come back by a deploy,
+  not from these copies: a fresh retrieve edited back, or #200's `before/` only while a fresh
+  retrieve equals `after/` ("Rollback of #200", below).
 - "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), moved to Decommissioned once the
   dashboard no longer uses it, comes back first, before the dashboard, whose `before/` has its one
   component on that report. It is one move in this change's own ledger:
