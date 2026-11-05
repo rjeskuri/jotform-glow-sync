@@ -5320,9 +5320,9 @@ each component on its own report:
   `Newly_recruited__c`, the recruits who still need orientation, and not a contact with a "Lead
   Mentor" role, which sits on a household account with no partner. The component is a stacked
   column for each month, Yes and No, in the left half of D4's third row, with item 16's in the
-  half row beside item 15's (above). SOQL signal, the last 12 months:
-  `SELECT Recruit_any_new_mentors_last_month__c, COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Recruit_any_new_mentors_last_month__c != null GROUP BY Recruit_any_new_mentors_last_month__c`
-  (2026-10-26: 73 Yes, 451 No). Status: deployed 2026-10-26 11:54 UTC on Ryan's go (#80; deploy
+  half row beside item 15's (above). SOQL signal:
+  `SELECT Recruit_any_new_mentors_last_month__c, COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Recruit_any_new_mentors_last_month__c != null GROUP BY Recruit_any_new_mentors_last_month__c`
+  (on 2026-10-26, over the last 12 months, which the report showed until #199: 73 Yes, 451 No). Status: deployed 2026-10-26 11:54 UTC on Ryan's go (#80; deploy
   `0AfRP000002i9BJ0AY`, check-only `0AfRP000002i9850AA`), the report `00ORP000009kXev2AE`, read
   back and checked against SOQL month by month; the keep list carries its id
   ([plan and Result](plans/2026-10-26-sf-new-mentors.md#result)).
@@ -5340,12 +5340,13 @@ How the reports read the data:
   `Period__c`, range All Time, so the field filter sets the period.
 - Each report carries the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
   (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
-  `notContain` `test` (the lookup matches on the account's name). In the last 12 months the rule
-  leaves out 2 of 569 Monthly Reports (2026-10-24; on 2026-10-26 the same, 567 with the rule).
+  `notContain` `test` (the lookup matches on the account's name). On 2026-10-24, in the last 12 months,
+  the rule left out 2 of 569 Monthly Reports (on 2026-10-26 the same, 567 with the rule).
 - Items 15 and 16 also keep their filter on a non-blank answer.
 
 The dashboard's filters are Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`)
-and Month, each on every component (Ryan, 2026-10-24): each manager sees their partners. The Partner Manager
+and Month, each on every component: Partner Manager since Ryan's decision of 2026-10-24 (each manager
+sees their partners), Month since 2026-11-02 (#199). The Partner Manager
 filter has no option for the former PO (user `005RP000001RERJYA4`) since #199, so it has 5 options;
 it had 6 until #199. D4 has a Month filter on `DHIS2__c$Month__c` since #199 (12 options, January to
 December, on all 5 components); until #199 it had no Month filter. It has no Partner filter (Ryan,
