@@ -99,7 +99,9 @@ Every retrieve below goes into a new folder made for it, in `data/sf_dash_traini
 `force-app/`. A retrieve never runs within `before/`, `build/`, `item16/before/` or an `after/`
 that already holds files: it would overwrite them, and `before/` is the redeploy's source. The
 manifest of D4 and items 13-15 is `rollback/package.xml` (`-x ../rollback/package.xml` from a
-folder directly in the work folder); the one of item 16 and D4 is `item16/package.xml` (step 9).
+folder directly in the work folder); the one of step 9's fresh retrieve is `item16/package.xml` (5 members: D4, item 16 and items 13-15),
+and the one of its build, deploy, read-back and rollback is `item16/build/package.xml` (2 members:
+D4 and item 16).
 
 1. Retrieved 2026-10-24, read-only: `data/sf_dash_training_2026-10-24/before/` (Context). Just
    before step 2, a fresh retrieve of the dashboard and items 13-15, into a new folder
@@ -156,9 +158,11 @@ folder directly in the work folder); the one of item 16 and D4 is `item16/packag
 9. Item 16, once #77 has landed (Ryan, 2026-10-24), as its own change in
    `data/sf_dash_training_2026-10-24/item16/` (its own `before/`, `build/` and `after/`):
    - a fresh retrieve of item 16 and D4 into `item16/before/`, a new folder made as above (with
-     `cp before/sfdx-project.json item16/before/`), by the manifest `item16/package.xml` (item 16's
-     report and D4 by the developer names of their files in this change's retrieve, 2 members,
-     written by script; `-x ../package.xml` within `item16/before/`), compared with item 16 in
+     `cp before/sfdx-project.json item16/before/`), by the manifest `item16/package.xml` (5 members,
+     written by script: D4, item 16's report and items 13-15 for the pattern, by the developer
+     names of their files in this change's retrieve; `-x ../package.xml` within `item16/before/`;
+     the build and deploy manifest `item16/build/package.xml` has only 2, D4 and item 16),
+     compared with item 16 in
      `before/` and D4 in `after/`, and the differences written in the Result (#77 may have
      changed item 16; #80 may have added item 12 to D4 first);
    - before anything changes, a copy of each as it is that day into Decommissioned, on Ryan's go,
@@ -173,7 +177,7 @@ folder directly in the work folder); the one of item 16 and D4 is `item16/packag
      with every other component of the retrieve as it is; it never starts from this change's
      `build/` or `after/` when they differ from the fresh retrieve;
    - the same ritual follows: check-only of `item16/build/`, deploy on Ryan's go, read-back into
-     `item16/after/` (a new folder made as above, by `item16/package.xml`), and the SOQL check of
+     `item16/after/` (a new folder made as above, by `item16/build/package.xml`, 2 members), and the SOQL check of
      step 7 for item 16; the counts go in the Result.
      Its rollback is its own copies and `item16/before/`, as below.
 10. Ryan sets a weekly Subscribe on the dashboard in Lightning (the refresh is a subscription,
@@ -212,7 +216,11 @@ folder directly in the work folder); the one of item 16 and D4 is `item16/packag
   the deploy (step 9 among them): the rollback then starts from that fresh retrieve, by the epic's
   ritual. Step 9's own change goes back first, from its copies or from `item16/before/` only while
   a fresh retrieve of item 16 and D4, into a new folder `item16/fresh_<date>/` made as in the
-  Rollout by `item16/package.xml`, equals `item16/after/`.
+  Rollout, equals `item16/after/`. The fresh retrieve takes the 2-member manifest
+  `item16/build/package.xml` (the same members as `item16/after/package.xml`: D4 and item 16),
+  and only while it equals `item16/after/` the check-only and the deploy run from `item16/before/`
+  with that same manifest, never items 13-15 (DECISIONS 2026-10-16: only the components the
+  change touched).
 - A rollback never deploys an older build, never a `build/` and never another change's retrieve
   (DECISIONS 2026-10-16).
 - The copies stay in Decommissioned, and nothing is deleted.
@@ -272,7 +280,9 @@ build in `build/` (3 reports and the dashboard, 4 files; the diff in
   `item16/after/`, both files are byte-identical to `item16/build/`: `after/` equals `build/`. The
   refresh (the PUT with `-b '{}'`, 12:04:11Z) left all 5 D4 components with DATA (items 12-16).
   Item 16 for September 2026 equals SOQL (`FROM DHIS2__c`, the test-record rule, answer not
-  blank): 44 answered, Yes 38, No 6; the dashboard shows 38 and 6.
+  blank): 44 answered, Yes 38, No 6; the dashboard shows 38 and 6. September is the latest month
+  whose reports are in: on 2026-11-04 October's Monthly Reports are still coming in (on 2026-11-05
+  SOQL found 5 with Period 2026-10-01, 3 of them created on 2026-11-03 and 2026-11-04).
 
 The September 2026 baseline, #74's SOQL on `DHIS2__c` for the last complete month, run 2026-10-23
 (RUNBOOK "Why the dashboards showed old data"): item 13 152, item 14 27, item 15 41 answered (19
