@@ -5346,7 +5346,7 @@ How the reports read the data:
 
 The dashboard's filters are Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`)
 and Month, each on every component: Partner Manager since Ryan's decision of 2026-10-24 (each manager
-sees their partners), Month since 2026-11-02 (#199). The Partner Manager
+sees their partners), Month since #199 (GLOW's review of 2026-11-02, deployed 2026-11-05). The Partner Manager
 filter has no option for the former PO (user `005RP000001RERJYA4`) since #199, so it has 5 options;
 it had 6 until #199. D4 has a Month filter on `DHIS2__c$Month__c` since #199 (12 options, January to
 December, on all 5 components); until #199 it had no Month filter. It has no Partner filter (Ryan,
