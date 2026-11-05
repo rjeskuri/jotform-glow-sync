@@ -3925,7 +3925,7 @@ class TrainingDashboardDocs(unittest.TestCase):
     Tightened after the test-breaker: every occurrence of an id stands beside its own label (never another
     item's or step's); the ledger's "before the deploy" is a fact, not what the plan wanted; item 15's Yes 199 and
     No 325 are never crossed; the 2 test records are left out, not kept; step 1's fresh retrieve equals `before/`
-    and step 8's ledger holds 3 moves; steps 1-8 are said done, steps 9 and 10 neither done nor "not needed"; no
+    and step 8's ledger holds 3 moves; steps 1-9 are said done, step 10 neither done nor "not needed"; no
     Result line says failed, rolled back, mismatch, not equal, differs (but the read-back's `showValues` line) or
     still to run (but step 10); the PUT's body is in the same command as `--method PUT`; the RUNBOOK says
     "was deployed", not "scheduled" or "still runs".
@@ -4795,7 +4795,7 @@ class TrainingDashboardDocs(unittest.TestCase):
     def assertNothingWentWrong(self, raw, where):
         """The record of 2026-10-26 is steps 1-8 done, every count equal to SOQL: the Result says no step failed or
         was rolled back, no count disagrees, nothing but the read-back's `showValues` differs, and nothing but
-        steps 9 and 10 (item 16, #77, the Subscribe) is still to run."""
+        step 10 (the Subscribe) is still to run: a line about step 9, item 16 or #77 that says it waits is wrong."""
         found = []
         for u in self.result_units(raw):
             n = self.norm(u)
@@ -4812,8 +4812,9 @@ class TrainingDashboardDocs(unittest.TestCase):
                 m = [m for m in self.DIFFERS.finditer(n) if not self.d.locally_denied(n, m)]
                 if m:
                     found.append(f"{m[0].group(0)!r}: {u[:160]!r}")
-            later = ([1 for got, _s in self.segments(u, self.STEP_REF) if got & {"9", "10"}]
-                     or re.search(r"(?i)\bitem\s+16\b|\bSubscribe\b|(?<![\w#])#(77|80)\b", u))
+            # only step 10 (Ryan's Subscribe) is still to run: step 9, item 16 and #77 are done (ticket #152)
+            later = ([1 for got, _s in self.segments(u, self.STEP_REF) if "10" in got]
+                     or re.search(r"(?i)\bSubscribe\b|(?<![\w#])#80\b", u))
             if not later and self.stated(n, self.STILL_TO_RUN):
                 found.append(f"still to run: {u[:160]!r}")
         self.assertEqual(found, [], f"{where}: steps 1-8 ran and every count equals SOQL (2026-10-26); the Result says "
