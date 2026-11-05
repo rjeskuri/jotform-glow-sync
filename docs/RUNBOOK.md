@@ -5334,8 +5334,9 @@ out. Who filed is "Reports completed on time" (item 18, D5).
 How the reports read the data:
 - Each report is grouped by the partner (`DHIS2__c.Account__c`), then by `Period__c` by calendar
   month; the month is never `CreatedDate`, and a grouping is never also a column.
-- The default period is the last 12 months: the report filter `Period__c equals LAST_N_MONTHS:12`,
-  which leaves out the current, incomplete month. The standard date filter's column is
+- Since #199, D4 and its reports show 2026 only: each of the five reports (items 12-16) filters
+  `In_Reporting_Year__c equals true` (#195), in place of `Period__c equals LAST_N_MONTHS:12`, which
+  was the last 12 months until #199. The standard date filter's column is
   `Period__c`, range All Time, so the field filter sets the period.
 - Each report carries the test-record rule as a report filter: `Account is not blank AND Account: Account Name does not contain "test"`
   (#70), in the report XML `DHIS2__c$Account__c` `notEqual` blank and `DHIS2__c$Account__c`
@@ -5343,10 +5344,12 @@ How the reports read the data:
   leaves out 2 of 569 Monthly Reports (2026-10-24; on 2026-10-26 the same, 567 with the rule).
 - Items 15 and 16 also keep their filter on a non-blank answer.
 
-The dashboard's only filter is Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`,
-its 6 partner managers), on every component (Ryan, 2026-10-24): each manager sees their partners.
-It has no Partner or Month filter (Ryan, 2026-10-24); viewers read one partner's month from the
-reports' grouping by partner and month. The two tables it had, on the "DHIS2 Reports" reports
+The dashboard's filters are Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`)
+and Month, each on every component (Ryan, 2026-10-24): each manager sees their partners. The Partner Manager
+filter has no option for the former PO (user `005RP000001RERJYA4`) since #199, so it has 5 options;
+it had 6 until #199. D4 has a Month filter on `DHIS2__c$Month__c` since #199 (12 options, January to
+December, on all 5 components); until #199 it had no Month filter. It has no Partner filter (Ryan,
+2026-10-24); viewers read one partner's month from the reports' grouping by partner and month. The two tables it had, on the "DHIS2 Reports" reports
 "Mentors Discuss Program Implementation" (`00ORP000005uecc2AA`) and "Lead Training Session with
 Mentors LastM" (`00ORP000005ufNN2AY`), both on 2025 only, came off it with the deploy. On
 2026-10-26, on Ryan's go, `tools/sf_report_folders.py move` moved both reports to Decommissioned
@@ -5385,6 +5388,11 @@ Rollback, in this order ([plan](plans/2026-10-25-sf-dash-training.md#rollback)):
 When the fresh retrieve and `after/` differ, someone has changed the dashboard or a report since
 the deploy, and the rollback starts from a fresh retrieve by the ritual above. A rollback never
 deploys an older build or another change's retrieve (DECISIONS 2026-10-16).
+
+Rollback of #199 ([plan](plans/2026-11-02-sf-review-training.md#rollback)), in place of the steps above for what #199 changed:
+- D4 and the reports of items 12-16 are restored by a deploy of the six, after a check-only, on Ryan's go: a fresh retrieve edited back where #199 changed it, or their files in `data/sf_glow_review_2026-11/training/before/` only while a fresh retrieve equals `after/`. A copy saved back would be a separate report: D4's components point at the reports themselves.
+- The copies of D4 and the reports in Decommissioned (tagged `#199`) are the record of what they were, not the restore.
+- Never from an older build or retrieve (DECISIONS 2026-10-16), never from #152's or #78's folders. Nothing is deleted.
 
 ## Interactive dashboard in Salesforce
 
