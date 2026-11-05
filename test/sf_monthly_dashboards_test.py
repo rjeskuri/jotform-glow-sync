@@ -6030,7 +6030,8 @@ class NewMentorsDocs(unittest.TestCase):
     BEFORE = re.compile(r"data/sf_new_mentors_\d{4}-\d\d-\d\d/before/")
     LAST_12_Q = re.compile(r"(?i)\bPeriod__c\s*=\s*LAST_N_MONTHS:12\b")
     # since #199 (GLOW's review of 2026-11-02) item 12's report filters the reporting year, so its signal may too
-    LAST_12_OR_YEAR_Q = re.compile(r"(?i)\bPeriod__c\s*=\s*LAST_N_MONTHS:12\b|\bIn_Reporting_Year__c\s*=\s*true\b")
+    # (its current signal is the reporting year only: `LAST_N_MONTHS:12` is the past, GlowReviewTrainingDocs)
+    YEAR_Q = re.compile(r"(?i)\bIn_Reporting_Year__c\s*=\s*true\b")
     ANSWER_NOT_NULL = re.compile(r"(?i)\bRecruit_any_new_mentors_last_month__c\s*(!=|<>)\s*null\b")
     COUNT = re.compile(r"(?i)\bCOUNT\(\s*(Id)?\s*\)")
     OR = re.compile(r"(?i)\bOR\b")
@@ -6353,11 +6354,12 @@ class NewMentorsDocs(unittest.TestCase):
         self.assertNoHeadcount(text, where)
         self.assertTwelveMonths(text, where)
         self.assertNoSeparateDashboard(text, where)
-        # the SOQL signal: GROUP BY the answer over the last 12 months on Period__c, with the test-record rule
+        # the SOQL signal: GROUP BY the answer over the reporting year (since #199; it was the last 12 months on
+        # Period__c), with the test-record rule
         f = self.FIELD
-        self.assertTrue([q for u in units for q in self.queries(u) if self.item_query(q, self.LAST_12_OR_YEAR_Q)],
+        self.assertTrue([q for u in units for q in self.queries(u) if self.item_query(q, self.YEAR_Q)],
                         f"{where}: give item 12's SOQL signal as a query in its row, item or sentence: `SELECT {f}, "
-                        f"COUNT(Id) FROM DHIS2__c WHERE Period__c = LAST_N_MONTHS:12 AND Account__c != null AND (NOT "
+                        f"COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT "
                         f"Account__r.Name LIKE '%test%') AND {f} != null GROUP BY {f}` (no OR)")
         # kept apart from items 13-16: no unit carries both item 12's field and another item's
         for u in self.t.units(part):
@@ -8263,11 +8265,26 @@ class GlowReviewTrainingDocs(unittest.TestCase):
         # right before it ("On 2026-10-24, over the last 12 months, …"); a date after it only is no history
         for s in cl:
             for m in self.OLD_PERIOD.finditer(s):
-                dated = re.search(r"\b\d{4}-\d\d-\d\d\b", s[max(0, m.start() - 40):m.start()])
+                # a date counts when a past marker stands beside it ("On 2026-10-24", "on 2026-10-26, over", "until
+                # 2026-11-04", "as of …"); "Since 2026-11-05 each report counts the last 12 months" is present tense
+                dated = re.search(r"(?i)\b(on|until|as of|at)\s+\d{4}-\d\d-\d\d\b", s[max(0, m.start() - 40):m.start()])
                 self.assertTrue(self.history(s, m) or dated,
                                 f"{where}: since #199 the period is `In_Reporting_Year__c`; the last 12 months "
                                 f"({m.group(0)!r}) is said only as what it replaced (\"until #199\", \"was\", \"in place "
                                 f"of\") or as a dated figure (\"On 2026-10-24, in the last 12 months, …\"): {s[:200]!r}")
+        # a signal is a current claim: no backticked query of the part windows on the last 12 months (a query is
+        # stripped from `cl`), and item 12's reads the reporting year
+        for s in sentences(self.norm(part), ".;"):
+            for q in re.findall(r"`[^`]*\bSELECT\b[^`]*`", s):
+                self.assertNotRegex(q, self.OLD_PERIOD, f"{where}: since #199 a SOQL signal windows on "
+                                                        f"`In_Reporting_Year__c = true` or the last complete month, never "
+                                                        f"the last 12 months: {q[:200]!r}")
+        f12 = NewMentorsDocs.FIELD
+        self.assertTrue([q for q in re.findall(r"`[^`]*\bSELECT\b[^`]*`", flat(part))
+                         if f12 in q and re.search(r"(?i)\bGROUP\s+BY\b", q)
+                         and re.search(r"(?i)\bIn_Reporting_Year__c\s*=\s*true\b", q)],
+                        f"{where}: item 12's SOQL signal windows on the reporting year: `… FROM DHIS2__c WHERE "
+                        f"In_Reporting_Year__c = true AND … GROUP BY {f12}`")
 
         # the Month filter on DHIS2__c$Month__c, D4's, and nothing left that denies it or makes Partner Manager the
         # only filter
