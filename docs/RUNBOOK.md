@@ -4255,7 +4255,8 @@ Live:
   delete source`, `data create|update|delete|upsert|import`, `apex run`, the
   `force:` apex, source, mdapi and data commands, the REST API itself
   (`.salesforce.com/services/`), `sf api request graphql`, and `sf api request
-  rest` with a method other than GET, a body (`-b`) or a request file (`-f`);
+  rest` with a method other than GET, a body (`-b`), a request file (`-f`) or
+  `--flags-dir`;
 - the automatic sync's switches on GitHub: `gh variable|secret
   set|delete|remove`, `gh workflow enable|disable`, `gh workflow run` that
   applies (`apply` true, inputs from a file or as JSON), `gh run rerun` (a
@@ -4312,13 +4313,17 @@ The backups, from today (the Mac's local date), and the command that makes each:
   with `-f`/`--force`. From another folder (`drive-sync/`, another checkout),
   or with `-P`, `--project`, `--rootDir` or another flag, it asks.
 - Salesforce, raw - `sf`/`sfdx` deploys, data writes, `apex run`, `sf api
-  request` writes, `.salesforce.com/services/`: no record; the command names a
+  request rest` writes, `.salesforce.com/services/`: no record; the command names a
   path inside `data/sf_<topic>/` and `data/sf_<topic>/before/` holds a file
   modified today (the plan's `before/` retrieve, or a lone `sf data query` or `sf
   data export` saved there). `apex run` also needs
   `--file` (`-f`) naming a file the hook reads: a regular file inside the
-  checkout, no link. An Apex file holding a word that starts `delete`,
-  `undelete`, `merge` or `emptyRecycleBin`, and a deploy naming a folder with a
+  checkout, no link. A REST request (`sf api request rest`, `curl` to
+  `.salesforce.com/services/`) also needs the whole request on the command line:
+  the method (`-X`), the URL, the headers and an inline body (`--body '{…}'`, `-d
+  '{…}'`); its response may go to a file (`sf`'s `-S`, `curl`'s `-o`). An Apex
+  file holding a word that starts `delete`, `undelete`, `merge` or
+  `emptyRecycleBin`, and a deploy naming a folder with a
   `destructiveChanges*.xml` below it, are deletes: they ask, and are refused
   where no prompt can show.
 - Salesforce tools - `sf_backfill.py send`, `sf_dupes.py merge --rehearse`,
@@ -4330,7 +4335,18 @@ The backups, from today (the Mac's local date), and the command that makes each:
 Never automatic: `gh api` or `api.github.com` on `dispatches` or `graphql`;
 `auto_sync.py --apply-salesforce` (Salesforce accounts, no rollback record); a
 metadata (mdapi) deploy (`--metadata-dir`, `force:mdapi:deploy`) and
-`force:apex:execute` and `apex run` with the Apex on standard input, whose changes the hook does not read; any
+`force:apex:execute` and `apex run` with the Apex on standard input, whose changes the hook does not read;
+a request whose method, URL, headers, body or flags come from a file or standard
+input, which the hook does not read either (review 2 of PR #154: a request file, a
+composite body, a header file or a flags folder can hold a DELETE) - `sf`'s
+`--flags-dir` (a deploy's too), `sf api request graphql` (its `--body` is read
+from a file whenever one by that name exists), and a REST request (`sf api
+request rest`, `.salesforce.com/services/`) with `sf`'s `-f`/`--file`, `curl`'s
+`-T`/`--upload-file`, a `<`, a lone `-` (`--body -`, `--body=-`; `curl`'s `-o -`
+counts too) or an `@` in any word
+(`--body @file`, `-d @file`, `-H @file`, `-F f=@file`; an e-mail address in an
+inline body counts too), or sent by a `python3 -c` snippet; `curl` with a config
+file (`-K`, `--config`), whatever the host; any
 tool the hook does not list (the Drive photo mover, `upload_roster.py`,
 `deactivate_clubs.py`, `fix_module_values.py`, `sf_new_clubs.py`).
 

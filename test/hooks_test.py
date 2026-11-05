@@ -36,7 +36,10 @@ decision; 0 and an ask JSON: Ryan is asked in the session; 2, or a deny JSON: re
     holding a destructiveChanges*.xml is a delete; clasp push is automatic only from the input's cwd
     <project>/appsscript (npm run clasp:push from <project>), never with -P, --project or --rootDir;
     a redirect writes the backup records only when they are its target, and a query or export saved
-    into a before/ is no forgery;
+    into a before/ is no forgery. After review 2: a Salesforce request whose request, body, headers
+    or flags come from a file or standard input (sf api request rest --file, --body @file or -,
+    --flags-dir, graphql --body <file>, curl -d @file, -H @file, -T, < file, a python3 -c snippet)
+    is never automatic, nor is any curl with a config file (-K, --config), whatever the host;
   - .claude/settings.json: the permission rules behind the hook (gh api allowed and never asked:
     an ask would stall the harness's resume reads; no ask rule on an automatic family - a hook's
     allow does not get past one -, ask rules kept on the deletes; the hook entry that blocks on
@@ -2007,6 +2010,150 @@ class Hooks(unittest.TestCase):
             with self.subTest(case=label, check="log"):
                 self.assertEqual(collections.Counter(d for d, _ in self.lines_of(q))["ALLOWED"], 1,
                                  "only the control is allowed")
+
+    # ---- live_gate.sh: review 2 of PR #154 (2026-11-05): the gate tells a write from a delete by
+    # the command's text, so a Salesforce request whose method, URL, headers, body or flags come
+    # from a file or standard input is never automatic - a DELETE in the file or not: a request
+    # file (sf api request rest --file) carries its own method, a composite body DELETE
+    # sub-requests, a header file X-HTTP-Method-Override, sf's --flags-dir (a file per flag) a
+    # --method or a --post-destructive-changes, a curl config file (-K) a request = "DELETE" - for
+    # any host. Each file below is named by a command that the same command with the request on
+    # its command line (the controls) shows would otherwise go through on the same backups; half
+    # of them hold no delete at all, so reading the file is no way out
+    SF_REST = "https://example.my.salesforce.com/services/data/v60.0"
+    SF_REQUEST_FILES = {
+        # sf api request rest --file: a request whose method is DELETE, and one whose is PATCH
+        "data/sf_x/req.json": '{"url": "/services/data/v60.0/sobjects/Contact/003000000000001", "method": "DELETE"}\n',
+        "data/sf_x/patch.json": ('{"url": "/services/data/v60.0/sobjects/Account/001000000000001", "method": "PATCH", '
+                                 '"body": {"mode": "raw", "raw": {"Name": "Rising Stars Club"}}}\n'),
+        # a composite body with a DELETE sub-request, and a record's fields
+        "data/sf_x/body.json": ('{"allOrNone": true, "compositeRequest": [{"method": "DELETE", "referenceId": "gone", '
+                                '"url": "/services/data/v60.0/sobjects/Contact/003000000000001"}]}\n'),
+        "data/sf_x/fields.json": '{"Name": "Rising Stars Club"}\n',
+        # curl header files: a method override, and an ordinary header
+        "data/sf_x/headers.txt": "X-HTTP-Method-Override: DELETE\n",
+        "data/sf_x/accept.txt": "Accept: application/json\n",
+        # curl config files: a DELETE and a PATCH to Salesforce, a DELETE and a POST to Jotform, a
+        # DELETE to GitHub's Actions API
+        "data/sf_x/request.cfg": 'request = "DELETE"\n',
+        "data/sf_x/patch.cfg": 'request = "PATCH"\ndata = "{\\"Name\\": \\"Rising Stars Club\\"}"\n',
+        "data/jotform.cfg": 'request = "DELETE"\n',
+        "data/jotform_post.cfg": 'request = "POST"\ndata = "properties[title]=Attendance"\n',
+        "data/gh.cfg": 'request = "DELETE"\n',
+        # GraphQL from a file (sf api request graphql --body <an existing file> reads it): a delete
+        # and an update
+        "data/sf_x/mutation.graphql": 'mutation { uiapi { ContactDelete(input: {Id: "003000000000001"}) { Id } } }\n',
+        "data/sf_x/rename.graphql": ('mutation { uiapi { AccountUpdate(input: {Id: "001000000000001", '
+                                     'Account: {Name: "Rising Stars Club"}}) { Record { Id } } } }\n'),
+        # sf --flags-dir folders (each file a flag, its text the value): a request's --method DELETE,
+        # a request's --method PATCH and --body, a deploy's --post-destructive-changes, a deploy's
+        # --wait
+        "data/sf_x/flags_rest/method": "DELETE\n",
+        "data/sf_x/flags_patch/method": "PATCH\n",
+        "data/sf_x/flags_patch/body": "@data/sf_x/fields.json\n",
+        "data/sf_x/flags_deploy/post-destructive-changes": "data/sf_x/destructiveChangesPost.xml\n",
+        "data/sf_x/destructiveChangesPost.xml": "<Package/>\n",
+        "data/sf_x/flags_wait/wait": "33\n",
+        # what the source deploys deploy, an earlier response (an output file that exists is no
+        # input), and the body file of a Jotform write
+        "data/sf_x/after/main/default/reports/Attendance.report-meta.xml": "<Report/>\n",
+        "data/sf_x/after/account.json": '{"id": "001000000000001"}\n',
+        "data/props.json": '{"properties": {"title": "Attendance"}}\n',
+    }
+    SF_REQUESTS_FROM_FILES = [
+        # sf api request rest: a request file (-f, --file, --file=) ...
+        "sf api request rest --file data/sf_x/req.json -o glow",
+        "sf api request rest -f data/sf_x/req.json -o glow",
+        "sf api request rest --file=data/sf_x/req.json --target-org glow",
+        "sfdx api request rest -f data/sf_x/patch.json -o glow",
+        # ... a body from a file (@file after -b, --body, --body=) or from standard input (-)
+        "sf api request rest /services/data/v60.0/composite -X POST --body @data/sf_x/body.json -o glow",
+        "sf api request rest /services/data/v60.0/composite --method POST -b @data/sf_x/body.json -o glow",
+        "sf api request rest /services/data/v60.0/composite --method=POST --body=@data/sf_x/body.json -o glow",
+        "sf api request rest /services/data/v60.0/sobjects/Account/001000000000001 -X PATCH -b @data/sf_x/fields.json -o glow",
+        "sf api request rest /services/data/v60.0/composite -X POST --body - -o glow < data/sf_x/body.json",
+        # ... or the flags themselves from files: sf's --flags-dir, on a request (today: no decision
+        # at all) and on a deploy, whatever the folder holds
+        "sf api request rest /services/data/v60.0/sobjects/Contact/003000000000001 --flags-dir data/sf_x/flags_rest -o glow",
+        "sf api request rest /services/data/v60.0/sobjects/Account/001000000000001 --flags-dir data/sf_x/flags_patch -o glow",
+        "sf project deploy start --source-dir data/sf_x/after --flags-dir data/sf_x/flags_deploy -o glow",
+        "sf project deploy start --source-dir data/sf_x/after --flags-dir data/sf_x/flags_wait -o glow",
+        # sf api request graphql: its --body is a file whenever one by that name exists
+        "sf api request graphql --body data/sf_x/mutation.graphql -o glow",
+        "sf api request graphql --body data/sf_x/rename.graphql -o glow",
+        # curl to the REST API: a body or field from a file (-d, --data, --data-binary, --data=,
+        # --json, -d@ joined, -F name=@), a header file (-H @), standard input (@- and a < redirect),
+        # an upload (-T, --upload-file) or a config file (-K, -sSK, --config)
+        f"curl -sS -X POST {SF_REST}/composite -d @data/sf_x/body.json",
+        f"curl -sS -X POST {SF_REST}/composite --data @data/sf_x/body.json",
+        f"curl -sS -X POST {SF_REST}/composite --data-binary @data/sf_x/body.json",
+        f"curl -sS -X POST {SF_REST}/composite --data=@data/sf_x/body.json",
+        f"curl -sS -X POST {SF_REST}/composite --json @data/sf_x/body.json",
+        f"curl -sS -X POST {SF_REST}/composite -d@data/sf_x/body.json -o data/sf_x/after/out.json",
+        f"curl -sS -X POST {SF_REST}/sobjects/ContentVersion -F VersionData=@data/sf_x/fields.json -o data/sf_x/after/cv.json",
+        f"curl -sS -X PATCH {SF_REST}/sobjects/Account/001000000000001 -H @data/sf_x/headers.txt "
+        "-d '{\"Name\": \"Rising Stars Club\"}' -o data/sf_x/after/account.json",
+        f"curl -sS -X PATCH {SF_REST}/sobjects/Account/001000000000001 -H @data/sf_x/accept.txt "
+        "-d '{\"Name\": \"Rising Stars Club\"}' -o data/sf_x/after/account.json",
+        f"curl -sS -X POST {SF_REST}/composite -d @- -o data/sf_x/after/out.json < data/sf_x/body.json",
+        f"curl -sS -X PUT -T data/sf_x/fields.json {SF_REST}/sobjects/Account/Ext_Id__c/1",
+        f"curl -sS -X PUT --upload-file data/sf_x/fields.json {SF_REST}/sobjects/Account/Ext_Id__c/2",
+        f"curl -sS -K data/sf_x/request.cfg {SF_REST}/sobjects/Contact/003000000000001",
+        f"curl -sSK data/sf_x/request.cfg {SF_REST}/sobjects/Contact/003000000000001",
+        f"curl -sS --config data/sf_x/patch.cfg {SF_REST}/sobjects/Account/001000000000001",
+        # a python3 -c snippet: what it sends comes from any file it reads (open, pathlib)
+        f"python3 -c \"__import__('requests').post('{SF_REST}/composite', "
+        "data=open(__import__('sys').argv[1], 'rb'))\" data/sf_x/body.json",
+        f"python3 -c \"__import__('requests').post('{SF_REST}/composite', "
+        "data=__import__('pathlib').Path(__import__('sys').argv[1]).read_bytes())\" data/sf_x/body.json",
+    ]
+
+    def test_a_salesforce_request_or_body_from_a_file_is_never_automatic(self):
+        # review 2 of PR #154: the plan's before/ from today, the form's backup and the switches'
+        # backup notwithstanding, each is asked in default and auto and refused where no prompt can
+        # show (dontAsk, bypassPermissions, a missing mode, a subagent), the refusal saying the
+        # request comes from a file (or standard input), and logged. A curl config file (-K,
+        # --config) sets the method and URL for any host: a Jotform or GitHub call with one is
+        # never automatic either. The controls: the same writes with the request on the command
+        # line - an existing output file (-S, -o) and a Jotform body file included - go through
+        F1 = self.F1
+        p = self.sf_plan(self.SF_REQUEST_FILES)
+        self.back_up(p, "jotform", F1, f"backups/{F1}")
+        self.back_up(p, "github", "all", "backups/github/switches.json")
+        controls = [
+            "sf api request rest /services/data/v60.0/sobjects/Account/001000000000001 -X PATCH "
+            "--body '{\"Name\": \"Rising Stars Club\"}' -S data/sf_x/after/account.json -o glow",
+            "sf api request rest /services/data/v60.0/composite -X POST --body '{\"allOrNone\": true, "
+            "\"compositeRequest\": [{\"method\": \"PATCH\", \"referenceId\": \"a\", \"url\": "
+            "\"/services/data/v60.0/sobjects/Account/001000000000001\", \"body\": {\"Name\": \"Rising Stars Club\"}}]}' "
+            "-S data/sf_x/after/composite.json -o glow",
+            f"curl -sS -X PATCH {self.SF_REST}/sobjects/Account/001000000000001 -H 'Content-Type: application/json' "
+            "-d '{\"Name\": \"Rising Stars Club\"}' -o data/sf_x/after/account.json",
+            "sf project deploy start --source-dir data/sf_x/after -o glow",
+            f"curl -sS -X POST https://api.jotform.com/form/{F1}/properties --data-binary @data/props.json",
+            "curl -sS -X PATCH https://api.github.com/repos/o/r/actions/variables/SF_SYNC "
+            "-d '{\"name\": \"SF_SYNC\", \"value\": \"apply\"}'",
+        ]
+        for command in controls:
+            with self.subTest(control=command):
+                run = self.gate(command, mode="dontAsk", project=p, may_allow=True)
+                self.assertEqual(self.verdict(run), "allow", "the control: the request on the command line - " + self.show(run))
+        commands = self.SF_REQUESTS_FROM_FILES + [
+            f"curl -sS -K data/jotform.cfg https://api.jotform.com/form/{F1}/question/7",
+            f"curl -sS --config data/jotform.cfg https://api.jotform.com/form/{F1}/properties",
+            f"curl -sS --config=data/jotform_post.cfg https://api.jotform.com/form/{F1}/properties",
+            "curl -sS -K data/gh.cfg https://api.github.com/repos/o/r/actions/variables/SF_SYNC",
+        ]
+        # may_allow: an allow fails its own subtest (below), not the whole batch at the first one
+        self.assert_never_automatic([(c, {"may_allow": True}) for c in commands], p,
+                                    saying=("from a file", "standard input"))
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], len(controls), "only the controls are allowed")
+        self.assertEqual(counts["ASKED"], 2 * len(commands), "each from-file request asked in default and auto, logged")
+        self.assertEqual(counts["BLOCKED"] + counts["DENIED"], 4 * len(commands),
+                         "each from-file request refused headless and from a subagent, logged")
+        self.assertEqual(len(self.notifications(len(controls))), len(controls), "the controls are notified")
+        self.assertEqual(len(self.quiet_notifications()), len(controls), "only the controls are notified")
 
     def clasp_project(self):
         """A checkout whose appsscript/, drive-sync/ (the Drive photo mover, with its own .clasp.json)

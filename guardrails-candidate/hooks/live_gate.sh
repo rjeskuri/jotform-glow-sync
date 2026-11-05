@@ -69,13 +69,20 @@
 #                              data/sf_<topic>/before/ holds a file modified today
 #                              (the plan's before/ retrieve); apex run only with a
 #                              --file the gate reads - a regular file, no link,
-#                              inside the checkout - that deletes nothing;
+#                              inside the checkout - that deletes nothing; a REST
+#                              request only with all of it on the command line;
 #       salesforce, tools      SF_TOOLS below: each writes its own rollback record
 #                              (a ledger row, merge_rollback.json) before every write.
 #   Never automatic: gh api or api.github.com on dispatches or graphql; auto_sync.py
 #   with --apply-salesforce (Salesforce accounts, no rollback record); a metadata
-#   (mdapi) deploy (--metadata-dir, force:mdapi:deploy) and force:apex:execute; any
-#   other tool (the Drive photo mover, upload_roster.py, deactivate_clubs.py, ...).
+#   (mdapi) deploy (--metadata-dir, force:mdapi:deploy) and force:apex:execute; what
+#   takes its method, URL, headers, body or flags from a file or standard input (review
+#   2 of PR #154: a request file or a composite body can hold a DELETE) - sf's
+#   --flags-dir, sf api request graphql (its --body names a file whenever one exists),
+#   sf api request rest with -f/--file or a --body @file or -, curl with -K/--config
+#   (any host), and to .salesforce.com/services/ an @, a < or a lone - anywhere (-d
+#   @file, -H @file, -F f=<file), -T/--upload-file, or a python3 -c snippet; any other tool (the
+#   Drive photo mover, upload_roster.py, deactivate_clubs.py, ...).
 #
 # Fast: a few greps, awk, find and git, no network, well inside the 5 s timeout.
 # Every decision on a live command is appended to .claude/live_gate.log
@@ -175,13 +182,14 @@ fi
 [ -z "$MATCH" ] && MATCH=$GH_API
 # sf api request: any GraphQL call (a mutation writes), and a REST call that writes - a method
 # other than GET (the CLI offers GET POST PUT PATCH HEAD DELETE OPTIONS TRACE), a body (-b,
-# --body) or a request file (-f, --file: it carries its own method and body). A relative path
-# (/services/data/...) does not name the host, so the URL pattern above does not see it.
+# --body), a request file (-f, --file: it carries its own method and body) or --flags-dir (a
+# file per flag: the method too). A relative path (/services/data/...) does not name the host,
+# so the URL pattern above does not see it.
 SF_API=
 if has "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
   SF_API="sf api request graphql"
 elif has "${SF}api[[:space:]]+request[[:space:]]+rest" \
-    && has '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file)'; then
+    && has '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file|--flags-dir)'; then
   SF_API="sf api request rest that writes"
 fi
 [ -z "$MATCH" ] && MATCH=$SF_API
@@ -624,6 +632,48 @@ for f in $FAMILIES; do
   case "$OK_FAMILIES" in *" $f "*) ;; *) nope "it is no write the automatic go knows ($f text under $W1${TOOL:+ $SCRIPT})." ;; esac
 done
 
+# Review 2 of PR #154: what the gate decides on - the method above all, a DELETE or not - must be
+# in the command's text. A curl config file (-K, --config or a prefix curl takes for it, --conf;
+# a cluster like -sSK) sets the method, the URL and the data, for any host
+CURL_K='^-[^-X]*K' CURL_T='^-[^-X]*T'   # a short option in a cluster, not inside -X's value
+if [ "$LAUNCHER" = curl ]; then
+  while IFS= read -r w; do
+    case "$w" in
+      --conf*) ;;
+      --*) continue ;;
+      -*) [[ $w =~ $CURL_K ]] || continue ;;
+      *) continue ;;
+    esac
+    nope "curl with a config file ($w) is never automatic: its method, URL and data come from a file the gate does not read."
+    break
+  done <<EOF
+$(words)
+EOF
+fi
+# ... and a Salesforce REST request - sf api request rest, or the URL - whose method, URL, headers
+# or body come from a file or standard input (a request file carries its own method, a composite
+# body can hold DELETE sub-requests): a < redirect, an @ anywhere (sf's --body @file; curl's -d,
+# --data*, --json, -H, -F, --variable or --url-query with @file or @-), a lone - (sf's --body -,
+# --body=-, -b-), sf's -f/--file, curl's -T/--upload-file (or --up, a prefix curl takes for it).
+# Prints the word that shows it
+sf_request_file() {
+  local w
+  [ "$SF_API" = "sf api request rest that writes" ] || has '\.salesforce\.com/services/' || return 1
+  case "$CMD" in *'<'*) printf '<'; return 0 ;; esac
+  while IFS= read -r w; do
+    case "$LAUNCHER:$w" in
+      *:*@* | *:- | *:*=- | *:-b- | sf:-f* | sfdx:-f* | sf:--f* | sfdx:--f* | curl:--up*) ;;
+      curl:-[!-]*) [[ $w =~ $CURL_T ]] || continue ;;
+      *) continue ;;
+    esac
+    printf '%s' "$w"
+    return 0
+  done <<EOF
+$(words)
+EOF
+  return 1
+}
+
 # what each family writes, and so must be backed up
 if [ -z "$WHY" ]; then
   for f in $FAMILIES; do
@@ -685,6 +735,16 @@ if [ -z "$WHY" ]; then
           nope "anonymous Apex goes through only from a --file in the checkout that the gate reads; this one has none (its Apex comes from standard input)."
         elif [ "$APEX" = unread ]; then
           nope "anonymous Apex goes through only from a --file in the checkout that the gate reads; this file is not there, cannot be read, is a link, or lies outside the checkout."
+        # review 2 of PR #154: the method, URL, headers, body or flags from a file the gate does
+        # not read
+        elif has '--flags-dir'; then
+          nope "sf --flags-dir is never automatic: each flag's value comes from a file in that folder, which the gate does not read (a method, a destructive-changes file)."
+        elif [ "$SF_API" = "sf api request graphql" ]; then
+          nope "sf api request graphql is never automatic: its --body is read from a file whenever one by that name exists, and a mutation can delete."
+        elif [ "$TOOL" = snippet ] && has '\.salesforce\.com/services/'; then
+          nope "a python3 -c snippet to .salesforce.com/services/ is never automatic: what it sends can come from a file the gate does not read."
+        elif FROM=$(sf_request_file); then
+          nope "a Salesforce request whose method, URL, headers or body come from a file or standard input ($FROM) is never automatic: the gate does not read it, and a request file or a composite body can hold a DELETE. Put the request on the command line (-X and an inline --body)."
         fi
         need salesforce-plan - ;;
       ghswitch) need github all ;;
