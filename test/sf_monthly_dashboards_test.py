@@ -525,8 +525,31 @@ class KeepListDocs(unittest.TestCase):
     RENAME = re.compile(r"(?i)\b(renam\w*|re-?label\w*|chang(e|es|ed|ing)\s+(the\s+|their\s+|its\s+|a\s+|each\s+|"
                         r"every\s+|all\s+)?(\w+\s+)?(labels?|names?)|new\s+(labels?|names?))\b|"
                         r"\b(labels?|names?)\s+(will\s+be\s+|are\s+|is\s+|get\s+)?(chang(e|es|ed)|renamed|relabel\w*)\b")
-    # a sentence about the rows GLOW's review of 2026-11-02 renames (epic #194): item 17 since #200
-    REVIEW_RENAMED = re.compile(r"(?i)\bitem\s+17\b|\bMonthly Report Approval Status\b|(?<![\w#])#200\b")
+    # what a rename is said of: an item ("item 17", "items 5-7"), a dashboard (D1-D5), many ("the dashboards", "the
+    # reports", "the labels"), or item 17's new label. GLOW's review of 2026-11-02 (epic #194, ticket #200; the
+    # RUNBOOK's keep-list paragraph that "supersedes that for item 17") renames item 17 only.
+    RENAME_SUBJECT = re.compile(r"(?i)\bitems?\s+(?P<nums>\d+(\s*(,|and|&|-|–|to)\s*\d+)*)\b|\bD[1-5]\b|"
+                                r"\b(dashboards|reports|labels|names|tables)\b|(?P<new>\bMonthly Report Approval Status\b)")
+
+    def renames_item_17(self, s, m):
+        """Rename match `m` of `s` is item 17's: the nearest subject before it in the sentence is item 17 (or its new
+        label), or none is before it and the words after it, to the next comma or semicolon, name item 17; and no
+        other item, dashboard or plural is named between that subject and the end of that clause."""
+        before = list(self.RENAME_SUBJECT.finditer(s[:m.start()]))
+        tail = re.split(r"[,;]", s[m.end():], maxsplit=1)[0]
+        after = list(self.RENAME_SUBJECT.finditer(tail))
+
+        def is_17(x):
+            return bool(x.group("new")) or (x.group("nums") is not None
+                                            and re.findall(r"\d+", x.group("nums")) == ["17"])
+        if before:
+            subject, between = before[-1], []
+        elif after:
+            subject, between = after[0], after[1:]
+            after = []
+        else:
+            return False
+        return is_17(subject) and all(is_17(x) for x in between + after)
     OFF_LIST = re.compile(r"(?i)\b(not on|off)\s+the\s+(keep\s+)?list\b")
     MOVED = re.compile(r"(?i)\b(goes|go|going|moved?|moves|moving|retired?)\s+(\w+\s+){0,3}?(to|into)\s+(the\s+)?"
                        r"[`\"“]?Decommissioned")
@@ -615,9 +638,9 @@ class KeepListDocs(unittest.TestCase):
                 self.assertFalse(m.group(0).lower().startswith("keep") and not self.said(s, m),
                                  f"{where}: kept reports and dashboards keep their current names (Ryan, 2026-10-23), "
                                  f"not negated: {s[:200]!r}")
-            if self.REVIEW_RENAMED.search(s):
-                continue        # GLOW's review of 2026-11-02 renames item 17 (#200): the exception may say so
             for m in self.RENAME.finditer(s):
+                if self.renames_item_17(s, m):
+                    continue    # item 17's rename (GLOW's review, epic #194, ticket #200): the exception may say so
                 self.assertFalse(self.said(s, m), f"{where}: the labels are not changed (Ryan, 2026-10-23); a rename "
                                                   "or relabel is only ever denied (`not renamed`, `nothing is "
                                                   f"relabelled`): {s[:200]!r}")
