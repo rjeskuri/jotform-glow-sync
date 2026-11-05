@@ -254,11 +254,12 @@ class KeepList(unittest.TestCase):
     def test_no_report_from_the_attendance_folders_is_in_it(self):
         # the "Jotform Attendance" dashboard and the two Attendance folders stay untouched (epic #68); their
         # ids are the ones the RUNBOOK's Attendance section and the attendance plans name
-        # (not the Monthly Report dashboard plans, `<date>-sf-dash-<name>.md`: "GLOW Club Attendance" is a Monthly
-        # Report dashboard, ticket #75, and its ids are the keep list's own)
+        # (not the Monthly Report dashboard plans, `<date>-sf-dash-<name>.md` and GLOW's review of them,
+        # `<date>-sf-review-<name>.md`: "GLOW Club Attendance" is a Monthly Report dashboard, tickets #75 and #196,
+        # and its ids are the keep list's own)
         text = md_part(os.path.join(REPO, "docs", "RUNBOOK.md"), "## Attendance dashboard in Salesforce")
         plans = [p for p in glob.glob(os.path.join(REPO, "docs", "plans", "*attendance*.md"))
-                 if not re.match(r"\d{4}-\d\d-\d\d-sf-dash-", os.path.basename(p))]
+                 if not re.match(r"\d{4}-\d\d-\d\d-sf-(dash|review)-", os.path.basename(p))]
         self.assertIn(os.path.join(REPO, "docs", "plans", "2026-10-02-attendance-dashboard.md"), plans,
                       "test: the Jotform Attendance dashboard's plan is among the plans checked against")
         for plan in plans:
