@@ -9,7 +9,8 @@ ticket (2026-10-23, "all as proposed"; item 12 had no report until task #80 buil
 (c), "do NOT change the labels. Kept reports and dashboards keep their current names", replaces the
 ticket's first label convention (drop "M&P", a dashboard named after its group): every row's target
 label is its label today, except the rows GLOW's review of 2026-11-02 (epic #194) renames: RENAMED, items 5-7
-since ticket #197, whose target is GLOW's name within 40 characters (label_today stays the label #70 recorded).
+since ticket #197 and items 9-11 since ticket #198, whose target is GLOW's name within 40 characters (label_today
+stays the label #70 recorded).
 
 NewMentorsReport (ticket #80, plan docs/plans/2026-10-26-sf-new-mentors.md, Rollout step 8): item 12
 is the report #80 deployed on 2026-10-26, "Partners that recruited new mentors" (GLOW Monthly Reports),
@@ -88,11 +89,15 @@ AGREED = {
     "D5": ("dashboard", "01ZRP000006oxSr2AI", "Reporting"),
 }
 # GLOW's review of 2026-11-02 (epic #194) renames some kept reports, superseding (c) for these rows only:
-# item: label_target. Ticket #197 (Outline step 4): items 5-7, GLOW's names within 40 characters.
+# item: label_target. GLOW's names within 40 characters: items 5-7 (ticket #197, Outline step 4) and
+# items 9-11 (ticket #198, Outline step 3).
 RENAMED = {
     "5": "Club Implementation by Month and Partner",
     "6": "Modules Implemented by Month and Partner",
     "7": "Modules Adapted by Month and Partner",
+    "9": "GC Observation Forms by Month & Partner",
+    "10": "Club Observations by Month and Partner",
+    "11": "Clubs Observed at Least Once by Month",
 }
 # ticket #80: the report it deployed for item 12 (2026-10-26, folder GLOW Monthly Reports)
 ITEM_12_ID = "00ORP000009kXev2AE"
@@ -166,7 +171,7 @@ class KeepList(unittest.TestCase):
 
     def test_kept_items_keep_their_current_labels(self):
         # Ryan, 2026-10-23, (c): "do NOT change the labels. Kept reports and dashboards keep their current names."
-        # GLOW's review of 2026-11-02 renames the rows of RENAMED (#197: items 5-7); every other row keeps its label.
+        # GLOW's review of 2026-11-02 renames the rows of RENAMED (#197: items 5-7; #198: items 9-11); every other row keeps its label.
         rows = self.by_item()
         for item, row in rows.items():
             where = f"glow/sf_keep_list.csv item {item}"
@@ -179,7 +184,7 @@ class KeepList(unittest.TestCase):
             if item in RENAMED:
                 self.assertEqual(target, RENAMED[item],
                                  f"{where}: label_target is GLOW's name {RENAMED[item]!r} (GLOW's review, 2026-11-02; "
-                                 f"ticket #197), not {target!r}")
+                                 f"tickets #197 and #198), not {target!r}")
                 continue
             self.assertEqual(target, row["label_today"],
                              f"{where}: label_target is the label today, {row['label_today']!r} (Ryan, "

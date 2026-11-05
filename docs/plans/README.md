@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-02 | Club Observation Dashboards (D3) - GLOW's names, 2026 only, a Month filter, the former PO off the filter | done 2026-11-04 |  | [2026-11-02-sf-review-observations.md](2026-11-02-sf-review-observations.md) |
 | 2026-11-02 | GLOW Club Implementation (D2) - 2026 only, a Month filter, unique partners per module, summit types, adapted modules as a table | done 2026-11-04 |  | [2026-11-02-sf-review-implementation.md](2026-11-02-sf-review-implementation.md) |
 | 2026-11-02 | GLOW Club Attendance (D1) - 2026 only, a Month filter, no double-counting totals, an overall chart | done 2026-11-04 |  | [2026-11-02-sf-review-attendance.md](2026-11-02-sf-review-attendance.md) |
 | 2026-11-02 | A reporting-year flag and a month name for the Monthly Report dashboards (2026 only, a Month filter) | done |  | [2026-11-02-sf-reporting-year.md](2026-11-02-sf-reporting-year.md) |
