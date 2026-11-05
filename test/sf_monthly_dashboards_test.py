@@ -525,6 +525,8 @@ class KeepListDocs(unittest.TestCase):
     RENAME = re.compile(r"(?i)\b(renam\w*|re-?label\w*|chang(e|es|ed|ing)\s+(the\s+|their\s+|its\s+|a\s+|each\s+|"
                         r"every\s+|all\s+)?(\w+\s+)?(labels?|names?)|new\s+(labels?|names?))\b|"
                         r"\b(labels?|names?)\s+(will\s+be\s+|are\s+|is\s+|get\s+)?(chang(e|es|ed)|renamed|relabel\w*)\b")
+    # a sentence about the rows GLOW's review of 2026-11-02 renames (epic #194): item 17 since #200
+    REVIEW_RENAMED = re.compile(r"(?i)\bitem\s+17\b|\bMonthly Report Approval Status\b|(?<![\w#])#200\b")
     OFF_LIST = re.compile(r"(?i)\b(not on|off)\s+the\s+(keep\s+)?list\b")
     MOVED = re.compile(r"(?i)\b(goes|go|going|moved?|moves|moving|retired?)\s+(\w+\s+){0,3}?(to|into)\s+(the\s+)?"
                        r"[`\"“]?Decommissioned")
@@ -613,6 +615,8 @@ class KeepListDocs(unittest.TestCase):
                 self.assertFalse(m.group(0).lower().startswith("keep") and not self.said(s, m),
                                  f"{where}: kept reports and dashboards keep their current names (Ryan, 2026-10-23), "
                                  f"not negated: {s[:200]!r}")
+            if self.REVIEW_RENAMED.search(s):
+                continue        # GLOW's review of 2026-11-02 renames item 17 (#200): the exception may say so
             for m in self.RENAME.finditer(s):
                 self.assertFalse(self.said(s, m), f"{where}: the labels are not changed (Ryan, 2026-10-23); a rename "
                                                   "or relabel is only ever denied (`not renamed`, `nothing is "
@@ -6382,10 +6386,27 @@ class GlowReviewReportingDocs(unittest.TestCase):
     def stated(self, s, rx):
         return any(not self.d.locally_denied(s, m) for m in rx.finditer(s))
 
+    # after the old rule, only a dated end marks it as history ("…, until #200", "(until then …)"); "as before",
+    # "in place of `CreatedDate`" after it are no such marker
+    UNTIL_AFTER = re.compile(r"(?i)\buntil\s+(#\d+|then|\d{4}-\d\d-\d\d)\b")
+
     def history(self, s, m):
-        """Match `m` of `s` said as the past or as what was replaced: a marker in the 50 characters before it or
-        the 30 after, or a denial."""
-        return bool(self.HISTORY.search(s[max(0, m.start() - 50):m.end() + 30]) or self.d.locally_denied(s, m))
+        """Match `m` of `s` said as the past or as what was replaced: a marker (`HISTORY`) in the 50 characters
+        before it, "until #N" in the 30 after it, or a denial."""
+        return bool(self.HISTORY.search(s[max(0, m.start() - 50):m.start()])
+                    or self.UNTIL_AFTER.search(s[m.end():m.end() + 30]) or self.d.locally_denied(s, m))
+
+    SHOW = re.compile(r"(?i)\b(show|shows|showing|shown|display|displays|displaying|cover|covers|hold|holds|keep|keeps)"
+                      r"\s+((data|records|rows|months?|reports|figures|data\s+from|from)\s+){0,2}$")
+
+    def claims_one_year(self, s, m, rows):
+        """Match `m` of ONE_YEAR in `s` is the claim that D5 and its reports show 2026 only: not denied, a verb of
+        showing right before it, and D5 and its reports (or components, items 17-19) named before it."""
+        if self.d.locally_denied(s, m) or not self.SHOW.search(s[:m.start()]):
+            return False
+        subject = re.sub(r"(?i)\bMonthly\s+Reports?\b", " ", s[:m.start()])
+        return bool(re.search(r"\bD5\b|\b01ZRP000006oxSr2AI\b|[\"“`]Reporting[\"”`]", subject)
+                    and (self.REPORTS_NAMED.search(subject) or self.r.items_named(subject, rows)))
 
     def left_out(self, s, m):
         """Match `m` of `s` said to be left out: a negation ("without") or a verb that drops it in the 40 characters
@@ -6508,11 +6529,12 @@ class GlowReviewReportingDocs(unittest.TestCase):
                          f"`Period__c equals LAST_N_MONTHS:12` (a sentence naming them, or \"each report\"; missing: "
                          f"{sorted(set(self.ITEMS) - covered, key=int)})")
         one_year = [s for s in cl if [m for m in self.ONE_YEAR.finditer(s) if not self.d.locally_denied(s, m)]]
-        about = [s for s in one_year if self.D5_NAMED.search(s) or self.r.items_named(s, rows)
-                 or self.REPORTS_NAMED.search(re.sub(r"(?i)\bMonthly\s+Reports?\b", " ", s))]
-        self.assertTrue(about, f"{where}: say D5 and its reports show 2026 only (one sentence naming D5, its reports or a "
-                               "component with \"2026 only\" or \"no 2025 month\"; a sentence about something else does "
-                               "not count)")
+        # the claim itself, in one sentence: D5 and its reports (or components, items 17-19) as the subject, a verb of
+        # showing right before "2026 only" (a check's "no grouping label contains 2025" is no such claim)
+        about = [s for s in one_year for m in self.ONE_YEAR.finditer(s) if self.claims_one_year(s, m, rows)]
+        self.assertTrue(about, f"{where}: say D5 and its reports show 2026 only, in one sentence: D5 and its reports (or "
+                               "its components, items 17-19) as the subject, then \"show 2026 only\" or \"show no 2025 "
+                               "month\" (a sentence about something else, a check's figure, does not count)")
         self.assertTrue([s for s in year + one_year if self.D5_NAMED.search(s)],
                         f"{where}: say D5 shows the reporting year (a sentence naming D5 or the dashboard with "
                         "`In_Reporting_Year__c` or \"2026 only\")")
@@ -6542,6 +6564,9 @@ class GlowReviewReportingDocs(unittest.TestCase):
                 self.assertTrue(self.history(s, m),
                                 f"{where}: Partner Manager is no longer D5's only filter (Month is the other); say it "
                                 f"only as history: {s[:200]!r}")
+
+        # the part's rollback of #200 follows the same rules as the plan's (review of #200)
+        self.assertRollbackOf200(self.runbook_rollback(), f"{where}, the rollback of #200")
 
     # --- the keep list --------------------------------------------------------------------------------------
 
@@ -6659,7 +6684,23 @@ class GlowReviewReportingDocs(unittest.TestCase):
         # `before/` while a fresh retrieve equals `after/`; the Decommissioned copies are the record of what the
         # reports were, never the restore (D5's components point at the reports themselves)
         raw = self.r.plan_part(self.PLAN, "## Rollback", 15)
-        where = f"{name}: `## Rollback`"
+        self.assertRollbackOf200(raw, f"{name}: `## Rollback`")
+
+    # --- #200's rollback, in the plan and in the RUNBOOK (review of #200) -------------------------------------
+
+    def runbook_rollback(self):
+        """The RUNBOOK part's rollback of #200: from the line that starts `Rollback` and names #200 to the part's end."""
+        part = self.r.part()
+        m = re.search(r"(?im)^\W*rollback\b[^\n]*#200\b", part)
+        self.assertTrue(m, f"RUNBOOK section {ReportingDashboardDocs.PART[4:]!r}: no rollback of #200 (a paragraph "
+                           "starting `Rollback of #200`)")
+        return part[m.start():]
+
+    def assertRollbackOf200(self, raw, where):
+        """#200's rollback: the reports and D5 restored by a deploy, from a fresh retrieve edited back or from #200's
+        own `before/` only while a fresh retrieve equals `after/`; the Decommissioned copies only the record of what
+        the reports were, never the restore (D5's components point at the reports themselves); never an older build
+        or another change's folder unless a negation comes before it; nothing deleted."""
         cl = sentences(self.norm(raw), ".;")
         units = [self.norm(u) for u in self.r.blocks(raw)]
         self.assertTrue([u for u in units if self.REPORTS.search(u) and self.deployed(u) and self.deploy_source(u)],
