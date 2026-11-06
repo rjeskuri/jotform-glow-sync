@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-02 | Mentors (D4) - 2026 only, a Month filter, the former PO off the filter | done 2026-11-05 |  | [2026-11-02-sf-review-training.md](2026-11-02-sf-review-training.md) |
 | 2026-11-02 | GLOW Club Reporting (D5) - 2026 only, a Month filter, item 17 renamed, an approval overview chart | done 2026-11-04 |  | [2026-11-02-sf-review-reporting.md](2026-11-02-sf-review-reporting.md) |
 | 2026-11-02 | Club Observation Dashboards (D3) - GLOW's names, 2026 only, a Month filter, the former PO off the filter | done 2026-11-04 |  | [2026-11-02-sf-review-observations.md](2026-11-02-sf-review-observations.md) |
 | 2026-11-02 | GLOW Club Implementation (D2) - 2026 only, a Month filter, unique partners per module, summit types, adapted modules as a table | done 2026-11-04 |  | [2026-11-02-sf-review-implementation.md](2026-11-02-sf-review-implementation.md) |
