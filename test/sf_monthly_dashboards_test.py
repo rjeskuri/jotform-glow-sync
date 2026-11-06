@@ -143,7 +143,9 @@ report. The RUNBOOK's "Monthly Report dashboards in Salesforce" says each Monthl
 dashboard in Salesforce" says the three not-submitted lists filter `PARENT.NAME notEqual` the nine partners (the six and
 the three monthly partners, round 2) because coordinators chase Jotform submissions with them, the "Jotform Attendance"
 Partner filter offers no U.S partner, and item 6 and the attendance-row reports stay unchanged (the U.S has no batches);
-each rule in one sentence. The rollback (RUNBOOK and plan) is by deploy only, round 2 first; the copies are the record.
+each rule in one sentence; round 3 corrected the dashboard's How-to box, which says the lists leave those clubs out.
+The rollback (RUNBOOK and plan) is by deploy only, each part with its own guard, round 3 first, then 2, then 1; the
+copies are the record.
 The plan `docs/plans/2026-11-05-sf-us-partners.md` orders before/, the copies, item 11's metadata copy, the check-only,
 Ryan's go, the deploy, `after/`, the refresh and the SOQL figures; its Result carries the ids and the before -> after
 figures. A dated DECISIONS entry names #209 (Why, Rejected: a marker field, Consequences).
@@ -8565,7 +8567,9 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
     clubs of the three monthly partners, one `PARENT.NAME notEqual` holding the nine partners, as Clubs Not Submitting -
     Last Week (DECISIONS 2026-10-24), because coordinators chase Jotform submissions with them; the three monthly
     partners' Monthly Reports stay on D1-D5. Item 6 and the attendance-row reports stay unchanged: the U.S has no
-    batches. The rollback is by deploy only (round 2 first), the Decommissioned copies the record. The plan
+    batches. Round 3 corrected the dashboard's How-to box. The rollback is by deploy only, each part (round 1's
+    Monthly reports, round 1's Attendance side, round 2, round 3) with its own deploy and guard, round 3 first, then
+    round 2, then round 1; the Decommissioned copies the record. The plan
     `docs/plans/2026-11-05-sf-us-partners.md` carries the order, the rollback and the Result's ids and figures; a
     dated DECISIONS entry the why. The wording is free: each rule is looked for as a claim in one sentence, not
     denied and not history."""
@@ -8609,7 +8613,7 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
     # the U.S, after norm ("U.S" becomes "U_S"); case-sensitive so "us" is no match
     US_WORD = re.compile(r"\bU_?S\b")
     SIX = re.compile(r"\b([Ss]ix|6)\b[^.;]{0,40}?(\bU_?S\b|\bpartners?\b)|\bU_?S\b\s+partners?\b")
-    MONTHLY_REF = re.compile(r"(?i)\bmonthly\s+partners?\b|\bpartners?\s+(that|which|who)\s+report\s+monthly\b")
+    MONTHLY_REF = re.compile(r"(?i)\bmonthly\s+partners?\b|\bpartners?\s+(that|which|who)\s+report\s+(a\s+)?monthly\b")
     NINE = re.compile(r"(?i)\b(nine|9)\s+(\w+\s+){0,2}?partners?\b")
     NOT_EQUAL = re.compile(r"\bnotEqual\b|(?i:\bnot\s+equal(s|\s+to)?\b|\bdoes\s+not\s+equal\b|!=)")
     PARENT_NAME = re.compile(r"\bPARENT[._]NAME\b|\bParent[._]Name\b")
@@ -8643,7 +8647,7 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
     # the rollback (DECISIONS 2026-10-16): by a deploy from a fresh retrieve edited back or a guarded `before/`
     DEPLOY = re.compile(r"(?i)\b(re-?)?deploy\w*\b")
     FRESH_EDITED = re.compile(r"(?i)\bfresh\s+retriev\w*\b[^.;]{0,60}?(\bedit\w*\s+back\b|\bwith\s+[^.;]{0,60}?\b(removed|"
-                              r"taken\s+out|dropped|restored)\b|\b(remov\w*|tak\w*\s+out|drop\w*)\b)")
+                              r"taken\s+out|dropped|restored|put\s+back)\b|\b(remov\w*|tak\w*\s+out|drop\w*)\b)")
     GUARD = GlowReviewReportingDocs.GUARD
     FROM_COPY = GlowReviewReportingDocs.FROM_COPY
     # an older or another change's source: another data/ folder (#209's own `data/sf_us_partners_<date>/`, its
@@ -8654,12 +8658,32 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
                             r"(retrieves?|builds?|backups?|exports?|snapshots?|versions?)\b|"
                             r"#(?!209\b)\d+['’]s\s+`?(data/|before/|build/|after/|retrieve|build|folder)")
     ROUND2 = re.compile(r"(?i)\bround\s*2\b|\bround2/|\bsecond\s+round\b")
-    ROUND2_FIRST = re.compile(r"(?i)\b(round\s*2|second\s+round)\b[^.;]{0,80}?\bfirst\b|"
-                              r"\bfirst\b[^.;]{0,40}?\b(round\s*2|second\s+round)\b|"
-                              r"\b(round\s*2|second\s+round)\b[^.;]{0,120}?\b(then|before)\b[^.;]{0,60}?\b(round\s*1|"
-                              r"first\s+round)\b|"
-                              r"\b(round\s*1|first\s+round)\b[^.;]{0,80}?\b(after|once)\b[^.;]{0,60}?\b(round\s*2|"
-                              r"second\s+round)\b")
+    ROUND3 = re.compile(r"(?i)\bround\s*3\b|\bround3/|\bthird\s+round\b")
+    # a round named ("round 2", "round2/", "the second round"), for the rollback's parts and their order
+    ROUND_REF = re.compile(r"(?i)\bround\s*([123])(?![\d])|\b(first|second|third)\s+round\b")
+    ORDINAL = {"first": "1", "second": "2", "third": "3"}
+    # the order words of "round 3 first, then round 2, then round 1"; "after"/"once" would reverse the reading
+    ORDER_WORD = re.compile(r"(?i)\b(first|then|before|followed\s+by|last|lastly|finally)\b")
+    REVERSED = re.compile(r"(?i)\b(after|once|following)\b")
+    # a guard: "only while a fresh retrieve equals `after/`", the `after/` of that round's own folder
+    GUARD_HEAD = (r"(?i)\b(only|while|as long as|so long as|provided)\b[^.;]{0,30}?\bfresh\s+retriev\w*\b[^.;]{0,40}?"
+                  r"\b(equals?|matches|match|is the same as|identical to)\b[^.;]{0,30}?")
+    ROUND_DIRS = {"1": (r"(?<![\w/])`?before/|\bdata/sf_us_partners_[\w<>-]+/before/", r"(?<![\w/])after/"),
+                  "2": (r"\bround2/before/", r"\bround2/after/"),
+                  "3": (r"\bround3/before/", r"\bround3/after/")}
+    # the parts of the rollback, each a list item or paragraph of its own
+    PARTS = {"m1": "round 1, the Monthly reports", "a1": "round 1, the Attendance lists and the Jotform Attendance "
+             "dashboard", "r2": "round 2, the three lists' monthly partners", "r3": "round 3, the How-to box"}
+    MONTHLY_REPORTS = re.compile(r"(?i)\bMonthly\s+reports?\b")
+    ATT_SIDE = re.compile(r"(?i)\bAttendance\b|\bnot[- ]submitt\w*|\blists?\b|\bHow[- ]to\b|\bbox\b")
+    # what cuts the lists' filter value short: "the six alone", "while the three monthly partners are kept"
+    VALUE_END = re.compile(r"(?i)\b(while|but|whereas|although|though|except|apart\s+from|yet|alone|only|besides|"
+                           r"instead)\b")
+    KEPT = re.compile(r"(?i)\b(kept|keeps?|keeping|stay\w*|remain\w*|counted|included|still\s+(on|in))\b")
+    # the How-to box of the Jotform Attendance dashboard (round 3)
+    HOWTO = re.compile(r"(?i)\bHow[- ]to\b[^.;]{0,25}?\bbox\b|\bHow to read this dashboard\b")
+    LEAVE_OUT = re.compile(r"(?i)\b(leav\w*|left)\s+out\b|\bexclud\w*|\bwithout\b")
+    CHECK_3, DEPLOY_3 = "0AfRP000002jNgr0AE", "0AfRP000002jNiT0AU"
     CHECK = re.compile(r"(?i)\bcheck-only\b|--dry-run\b")
 
     @classmethod
@@ -8692,6 +8716,28 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
 
     def monthly_ref(self, s):
         return bool(self.MONTHLY_REF.search(s)) or all(rx.search(s) for _, rx in self.MONTHLY_PARTNERS)
+
+    def filter_value(self, s):
+        """What sentence `s` says the `PARENT.NAME notEqual` filter holds: the words after the first `notEqual` that
+        follows `PARENT.NAME`, to "alone", "only", "while", "but" or "except" (None: no such filter in `s`)."""
+        p = self.PARENT_NAME.search(s)
+        m = p and [m for m in self.NOT_EQUAL.finditer(s) if m.start() >= p.end() and not self.d.locally_denied(s, m)]
+        if not m:
+            return None
+        value = s[m[0].end():]
+        cut = self.VALUE_END.search(value)
+        return value[:cut.start()] if cut else value
+
+    def monthly_in_filter(self, value):
+        """The three monthly partners stated inside the filter value: named (each, or "the three monthly partners",
+        or "the nine partners") and not denied there, and not said to be kept on the lists."""
+        if value is None or self.KEPT.search(value):
+            return False
+        named = [m for _, rx in self.MONTHLY_PARTNERS for m in rx.finditer(value)]
+        if len({m.group(0) for m in named}) == 3 and not any(self.d.locally_denied(value, m) for m in named):
+            return True
+        return any(not self.d.locally_denied(value, m)
+                   for rx in (self.MONTHLY_REF, self.NINE) for m in rx.finditer(value))
 
     def lists_ref(self, s):
         return all(rx.search(s) for rx in self.LISTS.values()) or bool(
@@ -8740,11 +8786,12 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
 
         # the three not-submitted lists: one `PARENT.NAME notEqual` holding the nine partners
         lists = [s for s in cl_a if self.PARENT_NAME.search(s) and self.stated(s, self.NOT_EQUAL) and self.lists_ref(s)
-                 and self.us_ref(s) and self.monthly_ref(s)]
+                 and self.us_ref(self.filter_value(s) or "") and self.monthly_in_filter(self.filter_value(s))]
         self.assertTrue(lists, f"{a_where}: say the three not-submitted lists (" + ", ".join(self.LISTS) + ") filter "
                                "`PARENT.NAME notEqual` the nine partners, the six U.S partners and the three monthly "
-                               "partners, in one sentence naming the three lists (or \"the three not-submitted lists\"), "
-                               "the six and the three monthly partners (not negated, not history)")
+                               "partners, in one sentence naming the three lists (or \"the three not-submitted lists\"); "
+                               "the six and the three monthly partners are the filter's value, after `notEqual` (not "
+                               "\"the six alone, while the monthly partners are kept\"), not negated, not history")
         for name, rx in self.MONTHLY_PARTNERS:
             self.assertRegex(self.norm(attendance), rx, f"{a_where}: name the monthly partner {name!r} (the lists' filter)")
         self.assertTrue([s for s in cl_a if self.stated(s, self.REASON) and re.search(r"\bJotform\b", s)
@@ -8755,6 +8802,13 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
         self.assertTrue([s for s in cl_a if self.TILES.search(s) and self.monthly_ref(s) and self.stated(s, self.STAY)],
                         f"{a_where}: say the Girls Attended tiles keep the three monthly partners' `Partner report` "
                         "batches (one sentence naming the tiles and the monthly partners, not negated)")
+        # round 3: the dashboard's How-to box tells readers the lists leave out those clubs
+        self.assertTrue([s for s in cl_a if self.HOWTO.search(s) and re.search(r"(?i)\blists?\b|\bnot[- ]submitt", s)
+                         and self.stated(re.sub(r"(?i)\bnot[- ](submitt\w*)", r"un\1", s), self.LEAVE_OUT)
+                         and self.monthly_ref(s) and self.US_WORD.search(s)],
+                        f"{a_where}: say the \"How to read this dashboard\" box tells readers the not-submitted lists "
+                        "leave out the clubs of the three monthly partners and the U.S clubs (#209 round 3; one sentence "
+                        "naming the box, the lists, the monthly partners and the U.S, not negated)")
 
         # the "Jotform Attendance" dashboard's Partner filter offers no U.S partner
         self.assertTrue([s for s in cl_a if self.PARTNER_FILTER.search(s) and self.us_ref(s) and self.ABSENT.search(s)
@@ -8788,9 +8842,9 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
 
         # the rollback of #209 in each section: by deploy only
         self.assertRollbackOf209(self.runbook_rollback(monthly, m_where), f"{m_where}, Rollback of #209",
-                                 attendance=False, rounds=False)
+                                 parts=("m1",), order=False)
         self.assertRollbackOf209(self.runbook_rollback(attendance, a_where), f"{a_where}, Rollback of #209",
-                                 monthly=False)
+                                 parts=("a1", "r2", "r3"))
 
     def runbook_rollback(self, section, where):
         """The section's rollback of #209: a paragraph or list item starting `Rollback of #209`, with the list or
@@ -8819,33 +8873,67 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
     def deployed(self, u):
         return any(self.r.stated(s, self.DEPLOY) for s in sentences(u, ".;"))
 
-    def assertRollbackOf209(self, raw, where, monthly=True, attendance=True, rounds=True):
-        """#209's rollback: the Monthly reports by a deploy from a fresh retrieve with #209's criteria taken out or
-        #209's own `before/` only while a fresh retrieve equals `after/`; the Attendance reports and the dashboard by
-        a deploy of their `before/`, guarded the same way; round 2 undone first; the Decommissioned copies only the
-        record, never the restore; never an older build or another change's folder; nothing deleted."""
+    def rounds_in(self, text):
+        """{round number: position of its first mention} in `text`."""
+        out = {}
+        for m in self.ROUND_REF.finditer(text):
+            n = m.group(1) or self.ORDINAL[m.group(2).lower()]
+            out.setdefault(n, m.start())
+        return out
+
+    def part_units(self, units, part):
+        """The units that are about rollback part `part` alone: its side, and no other round named."""
+        def about(u):
+            rounds = set(self.rounds_in(u))
+            if part == "m1":
+                return bool(self.MONTHLY_REPORTS.search(u)) and rounds <= {"1"}
+            if part == "a1":
+                return bool(self.ATT_SIDE.search(u)) and not self.MONTHLY_REPORTS.search(u) and rounds <= {"1"}
+            return rounds == {part[1]}
+        return [u for u in units if about(u)]
+
+    def part_restored(self, u, n):
+        """Unit `u` restores round `n`'s part by a deploy, from a fresh retrieve edited back, or from round `n`'s own
+        `before/` only while a fresh retrieve equals that round's `after/`: both ways stated."""
+        before, after = self.ROUND_DIRS[n]
+        return bool(self.deployed(u) and self.FRESH_EDITED.search(u) and re.search(before, u)
+                    and re.search(self.GUARD_HEAD + after, u))
+
+    def assertRollbackOf209(self, raw, where, parts=("m1", "a1", "r2", "r3"), order=True):
+        """#209's rollback: each of its parts (round 1's Monthly reports, round 1's Attendance lists and dashboard,
+        round 2, round 3) in a list item or paragraph of its own, restored by a deploy from a fresh retrieve edited
+        back or from that round's own `before/` only while a fresh retrieve equals that round's `after/`; round 3
+        undone first, then round 2, then round 1; the Decommissioned copies only the record, never the restore;
+        never an older build or another change's folder; nothing deleted."""
         cl = sentences(self.norm(raw), ".;")
         units = [self.norm(u) for u in self.r.blocks(raw)]
-        if monthly:
-            self.assertTrue([u for u in units if re.search(r"(?i)\breports?\b", u) and self.deployed(u)
-                             and (self.FRESH_EDITED.search(u) or ("before/" in u and self.GUARD.search(u)))],
-                            f"{where}: say the Monthly reports are restored by a deploy (after a check-only) from a fresh "
-                            "retrieve with #209's `DHIS2__c$Account__c` criteria taken out, or from #209's own `before/` "
-                            "only while a fresh retrieve equals `after/`, in one list item or paragraph")
+        dirs = {"m1": "#209's own `before/` and `after/`", "a1": "#209's own `before/` and `after/`",
+                "r2": "`round2/before/` and `round2/after/`", "r3": "`round3/before/` and `round3/after/`"}
+        for part in parts:
+            n = "1" if part in ("m1", "a1") else part[1]
+            mine = self.part_units(units, part)
+            self.assertTrue([u for u in mine if self.part_restored(u, n)],
+                            f"{where}: say how {self.PARTS[part]} is restored, in a list item or paragraph of its own "
+                            f"(naming no other round): by a deploy (after a check-only) from a fresh retrieve edited back "
+                            f"(the change taken out or put back), or from {dirs[part].split(' and ')[0]} only while a "
+                            f"fresh retrieve equals {dirs[part].split(' and ')[1]}; both ways, each with its own guard "
+                            f"(found {len(mine)} unit(s) about it: {[u[:120] for u in mine]})")
+        if "m1" in parts:
             self.assertTrue([s for s in cl if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s
                              and re.search(r"(?i)(?<!test )\brecord\b", s)],
                             f"{where}: say the copies in Decommissioned are the record of what the reports were, not "
                             "the restore (one sentence)")
-        if attendance:
-            self.assertTrue([u for u in units if re.search(r"(?i)\bAttendance\b|\bnot[- ]submitt\w*|\blists?\b", u)
-                             and self.deployed(u) and "before/" in u and self.GUARD.search(u)],
-                            f"{where}: say the Attendance reports (the three lists) and the \"Jotform Attendance\" "
-                            "dashboard are restored by a deploy of their files in #209's `before/`, only while a fresh "
-                            "retrieve equals `after/` (they have no Decommissioned copy), in one list item or paragraph")
-        if rounds:
-            self.assertTrue([s for s in cl if self.ROUND2_FIRST.search(s) and not self.d.denies(
-                self.ROUND2_FIRST.search(s).group(0))],
-                            f"{where}: say round 2 (the monthly partners) is undone first, then round 1 (one sentence)")
+        if order:
+            ordered = []
+            for s in [s for u in units for s in sentences(u, ".;")]:
+                at = self.rounds_in(s)
+                said = s[min(at.values()):] if at else ""      # from the first round named: an intro is no order
+                if (set(at) >= {"1", "2", "3"} and at["3"] < at["2"] < at["1"] and self.ORDER_WORD.search(said)
+                        and not self.REVERSED.search(said) and not self.d.denies(said)):
+                    ordered.append(s)
+            self.assertTrue(ordered, f"{where}: say the rounds are undone in reverse: round 3 (the How-to box) first, "
+                                     "then round 2 (the monthly partners), then round 1 (the six U.S partners), in one "
+                                     "sentence naming them in that order")
         self.assertTrue([s for s in cl if re.search(r"(?i)\b(never|not|no)\b[^.;]{0,60}?\b(older|old|earlier|previous|"
                                                     r"stale)\s+(\w+\s+)?(build|retrieve)s?\b", s)],
                         f"{where}: say never from an older build or retrieve (DECISIONS 2026-10-16), in one sentence")
@@ -9009,7 +9097,8 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
                      and not re.search(r"(?i)check[\s-]*$|--dry-run\s*$", u[:m.start()])]
             return refs
         for rid, want, what in ((self.CHECK_1, "check", "round 1's check-only"), (self.DEPLOY_1, "deploy", "round 1's deploy"),
-                                (self.CHECK_2, "check", "round 2's check-only"), (self.DEPLOY_2, "deploy", "round 2's deploy")):
+                                (self.CHECK_2, "check", "round 2's check-only"), (self.DEPLOY_2, "deploy", "round 2's deploy"),
+                                (self.CHECK_3, "check", "round 3's check-only"), (self.DEPLOY_3, "deploy", "round 3's deploy")):
             got = t.labels(raw, rid, deploy_refs)
             self.assertTrue(got, f"{where}: record {what}'s id `{rid}`")
             self.assertIn(want, {k for k, _u in got}, f"{where}: `{rid}` is {what}'s id: name it beside that id")
@@ -9017,9 +9106,12 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
             self.assertEqual(wrong, [], f"{where}: `{rid}` is {what}'s id only; here it stands beside the other step's "
                                         f"name: {wrong[:1]}")
         units = t.result_units(raw)
-        for rid in (self.CHECK_2, self.DEPLOY_2):
-            self.assertTrue([u for u in units if rid in u and self.ROUND2.search(u)],
-                            f"{where}: `{rid}` is round 2's (the monthly partners); name round 2 beside it")
+        for rid, rx, what in ((self.CHECK_2, self.ROUND2, "round 2's (the monthly partners)"),
+                              (self.DEPLOY_2, self.ROUND2, "round 2's (the monthly partners)"),
+                              (self.CHECK_3, self.ROUND3, "round 3's (the How-to box)"),
+                              (self.DEPLOY_3, self.ROUND3, "round 3's (the How-to box)")):
+            self.assertTrue([u for u in units if rid in u and rx.search(u)],
+                            f"{where}: `{rid}` is {what}; name that round beside it")
         # item 11's copy, beside item 11
         self.assertTrue([s for s in t.clauses(raw) if t.stated(s, t.COPY) and "Decommissioned" in s],
                         f"{where}: say the copies are in Decommissioned (one sentence, not negated)")
