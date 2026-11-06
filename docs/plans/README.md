@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-06 | OMID Foundation as an Asia partner - Partners tab, the Jotform Attendance dashboard's Partner filter, the partner map | done 2026-11-06 |  | [2026-11-06-sf-omid-partner.md](2026-11-06-sf-omid-partner.md) |
 | 2026-11-05 | The six U.S partners off every dashboard and report; the not-submitted lists without the monthly partners | done 2026-11-06 |  | [2026-11-05-sf-us-partners.md](2026-11-05-sf-us-partners.md) |
 | 2026-11-02 | Mentors (D4) - 2026 only, a Month filter, the former PO off the filter | done 2026-11-05 |  | [2026-11-02-sf-review-training.md](2026-11-02-sf-review-training.md) |
 | 2026-11-02 | GLOW Club Reporting (D5) - 2026 only, a Month filter, item 17 renamed, an approval overview chart | done 2026-11-04 |  | [2026-11-02-sf-review-reporting.md](2026-11-02-sf-review-reporting.md) |

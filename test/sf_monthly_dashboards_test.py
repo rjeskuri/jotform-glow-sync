@@ -8815,13 +8815,21 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
                          and (self.JOTFORM_DASH.search(s) or re.search(r"(?i)\bdashboard['’]s\s+Partner\b", s))],
                         f"{a_where}: say the \"Jotform Attendance\" dashboard's Partner filter offers none of the six "
                         "U.S partners (one sentence naming the dashboard, its Partner filter and the six)")
-        for s in cl_a:          # its old 49 options only as history
+        for s in cl_a:          # its old 49 and 43 options only as history (#212 added OMID Foundation: 44)
             if not self.FILTER_COUNT.search(s):
                 continue
-            for m in re.finditer(r"(?<![\d,.])49(?!\d)", s):
-                self.assertTrue(GlowReviewReportingDocs.history(self, s, m),
-                                f"{a_where}: the Partner filter offers 43 partners since #209; its 49 is said only as "
-                                f"history (\"until #209 it held 49\"): {s[:200]!r}")
+            for old, until in (("49", "#209"), ("43", "#212")):
+                for m in re.finditer(r"(?<![\d,.])%s(?!\d)" % old, s):
+                    self.assertTrue(GlowReviewReportingDocs.history(self, s, m),
+                                    f"{a_where}: the Partner filter offers 44 partners since #212; its {old} is said "
+                                    f"only as history (\"until {until} it held {old}\"): {s[:200]!r}")
+        self.assertTrue([s for s in cl_a if (self.FILTER_COUNT.search(s) or self.PARTNER_FILTER.search(s))
+                         and re.search(r"(?<![\w#])#212\b", s)
+                         and any(not GlowReviewReportingDocs.history(self, s, m)
+                                 for m in re.finditer(r"(?<![\w,.])44(?!\w)", s))],
+                        f"{a_where}: say the Partner filter holds 44 partner names since #212 (OMID Foundation added), "
+                        "in one sentence naming the filter (or its values per filter), 44 and #212, the 44 not said "
+                        "as history (\"until\", \"became\", \"was\" before it)")
 
         # the scope: item 6 and the attendance-row reports unchanged, the U.S having no batches, said without a ban
         both = cl_m + cl_a
@@ -9189,6 +9197,74 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
                         "docs/DECISIONS.md 2026-10-24 (the weekly not-submitting list): its Rejected says the 14-day and "
                         "since-1-September lists keep the monthly partners' and U.S clubs, which #209 changed; add a "
                         "dated bullet pointing at #209 (\"- 2026-11-05: amended by #209 - …\")")
+
+
+class OmidPartnerDocs(unittest.TestCase):
+    """Ticket #212 (epic #68; Ryan, 2026-11-06): the new partner OMID Foundation (Asia, Household account
+    `001RP000002nJZiYAM`) joins `glow/sf_partners.csv` (50 partners) and the "Jotform Attendance" dashboard's Partner
+    filter (44 options; UsPartnersOffReportsDocs checks the count). The RUNBOOK's "Attendance dashboard in Salesforce"
+    names OMID Foundation and says the partner map keeps all 50; the plan `docs/plans/2026-11-06-sf-omid-partner.md`
+    has Rollout, Rollback and Result in that order, names the account, and rolls back by a deploy (from a fresh
+    retrieve, DECISIONS 2026-10-16), never an older build."""
+
+    longMessage = False
+    RUNBOOK = DecommissionedFoldersDocs.RUNBOOK
+    ATTENDANCE = UsPartnersOffReportsDocs.ATTENDANCE
+    PLAN = os.path.join(REPO, "docs", "plans", "2026-11-06-sf-omid-partner.md")
+    ACCOUNT = "001RP000002nJZiYAM"
+    OMID = re.compile(r"\bOMID Foundation\b|001RP000002nJZi")
+    DEPLOY = re.compile(r"(?i)\b(re-?)?deploy(s|ed|ing)?\b")
+    FRESH = re.compile(r"(?i)\bfresh\b[^.;]{0,20}\bretriev|\bretriev\w*\b[^.;]{0,30}\bfresh\b")
+    OLDER = re.compile(r"(?i)\b(older|old|earlier|previous|prior|stale|original)\s+([\w-]+\s+)?"
+                       r"(retrieves?|builds?|backups?|versions?|cop(y|ies)|packages?)\b")
+    NEGATION = re.compile(r"(?i)\b(never|not|no|nor|without)\b")
+
+    def plan(self):
+        self.assertTrue(os.path.isfile(self.PLAN), "docs/plans/2026-11-06-sf-omid-partner.md: no plan for #212")
+        return read(self.PLAN)
+
+    def test_the_plan_has_rollout_rollback_result_in_that_order(self):
+        text = self.plan()
+        at = []
+        for heading in ("## Rollout", "## Rollback", "## Result"):
+            m = re.search(r"(?m)^" + re.escape(heading) + r"\b", text)
+            self.assertIsNotNone(m, f"the #212 plan: no `{heading}` section")
+            at.append(m.start())
+        self.assertEqual(at, sorted(at), "the #212 plan: its sections run Rollout, Rollback, Result, in that order")
+        self.assertRegex(text, r"(?<![\w#])#212\b", "the #212 plan: name the ticket #212")
+
+    def test_the_plan_names_omid_foundations_account(self):
+        text = self.plan()
+        self.assertIn(self.ACCOUNT, text, f"the #212 plan: name OMID Foundation's account `{self.ACCOUNT}`")
+        self.assertIn("OMID Foundation", text, "the #212 plan: name OMID Foundation")
+
+    def test_the_plan_rolls_back_by_a_deploy_never_an_older_build(self):
+        self.plan()
+        part = md_part(self.PLAN, "## Rollback")
+        body = flat(part.split("\n", 1)[1] if "\n" in part else "")
+        self.assertNotRegex(body, r"(?i)\b(TBD|TODO|TBA|FIXME)\b", "the #212 plan: `## Rollback` is a placeholder")
+        said = [s for s in sentences(body, ".;") for m in self.DEPLOY.finditer(s)
+                if not self.NEGATION.search(s[max(0, m.start() - 30):m.start()])]
+        self.assertTrue(said, "the #212 plan: the Rollback is a deploy (DECISIONS 2026-10-16), said, not denied")
+        self.assertRegex(body, self.FRESH, "the #212 plan: the Rollback deploys from a fresh retrieve (edited back)")
+        self.assertRegex(body, r"(?i)\b(never|not)\b[^.;]{0,40}\b(older|old|earlier|previous)\b[^.;]{0,15}"
+                               r"\b(build|copy|package|retrieve|version)\b|2026-10-16",
+                         "the #212 plan: the Rollback says it never redeploys an older build (DECISIONS 2026-10-16)")
+        for s in sentences(body, ".;"):
+            for m in self.OLDER.finditer(s):
+                self.assertRegex(s[max(0, m.start() - 40):m.start()], self.NEGATION,
+                                 f"the #212 plan: the Rollback deploys no older build ({m.group(0)!r}): {s[:200]!r}")
+
+    def test_the_runbook_names_omid_foundation_among_the_partners(self):
+        where = f"RUNBOOK section {self.ATTENDANCE[3:]!r}"
+        clauses = sentences(flat(md_part(self.RUNBOOK, self.ATTENDANCE)), ".;")
+        named = [s for s in clauses if self.OMID.search(s) and re.search(r"(?i)\bpartners?\b", s)]
+        self.assertTrue(named, f"{where}: name OMID Foundation among the partners (the Partner filter, #212)")
+        counts = [(s, m.group(1)) for s in clauses if "sf_partners.csv" in s
+                  for m in re.finditer(r"(?i)\ball\s+(\d+)\s+partners\b", s)]
+        self.assertTrue(counts, f"{where}: say `glow/sf_partners.csv` keeps all its partners, by number")
+        for s, n in counts:
+            self.assertEqual(n, "50", f"{where}: `glow/sf_partners.csv` keeps all 50 partners since #212: {s[:200]!r}")
 
 
 if __name__ == "__main__":
