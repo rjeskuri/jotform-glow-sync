@@ -39,7 +39,11 @@ decision; 0 and an ask JSON: Ryan is asked in the session; 2, or a deny JSON: re
     into a before/ is no forgery. After review 2: a Salesforce request whose request, body, headers
     or flags come from a file or standard input (sf api request rest --file, --body @file or -,
     --flags-dir, graphql --body <file>, curl -d @file, -H @file, -T, < file, a python3 -c snippet)
-    is never automatic, nor is any curl with a config file (-K, --config), whatever the host;
+    is never automatic, nor is any curl with a config file (-K, --config), whatever the host.
+    Ryan, 2026-11-06 (PR #154's questions): a write to ~/.curlrc or $CURL_HOME/.curlrc is a
+    self-approval, refused in every mode; every curl -K/--config is live - asked, or refused where
+    no prompt can show - even naming no live host; sfdx force:source:push is never automatic, and
+    sf project deploy start only with an explicit -d/--source-dir, -m/--metadata or -x/--manifest;
   - .claude/settings.json: the permission rules behind the hook (gh api allowed and never asked:
     an ask would stall the harness's resume reads; no ask rule on an automatic family - a hook's
     allow does not get past one -, ask rules kept on the deletes; the hook entry that blocks on
@@ -2154,6 +2158,186 @@ class Hooks(unittest.TestCase):
                          "each from-file request refused headless and from a subagent, logged")
         self.assertEqual(len(self.notifications(len(controls))), len(controls), "the controls are notified")
         self.assertEqual(len(self.quiet_notifications()), len(controls), "only the controls are notified")
+
+    # ---- live_gate.sh: PR #154's three questions, answered yes by Ryan on 2026-11-06
+    # 1. curl reads ~/.curlrc (or $CURL_HOME/.curlrc) on every call: a `request = "DELETE"` written
+    # there turns a backed Jotform curl with no -X into a delete. A write to it - a redirect, tee,
+    # sed -i, perl -i, or a copy, move, link or install onto it - is a self-approval: refused in
+    # every mode, whatever the backups
+    CURLRC_WRITES = [
+        "echo 'request = \"DELETE\"' >> ~/.curlrc",
+        "printf 'request = DELETE\\n' > $HOME/.curlrc",
+        "echo x >~/.curlrc",
+        "echo x | tee ~/.curlrc",
+        "echo x | tee -a \"$CURL_HOME/.curlrc\"",
+        "printf 'request = DELETE' >> ${CURL_HOME}/.curlrc",
+        "sed -i '' 's/GET/DELETE/' ~/.curlrc",
+        "sed --in-place 's/a/b/' $CURL_HOME/.curlrc",
+        "perl -pi -e 's/GET/DELETE/' ~/.curlrc",
+        "cp data/delete.cfg ~/.curlrc",
+        "cp -p data/delete.cfg \"$CURL_HOME/.curlrc\"",
+        "mv data/delete.cfg ~/.curlrc",
+        "ln -sf data/delete.cfg ~/.curlrc",
+        "install -m 600 data/delete.cfg ~/.curlrc",
+        "rsync -a data/delete.cfg $HOME/.curlrc",
+        "ditto data/delete.cfg ~/.curlrc",
+    ]
+    # ... and what reads it, or copies it elsewhere (a file whose name only begins .curlrc is not it)
+    CURLRC_NOT_WRITES = ["cat ~/.curlrc", "grep -n request ~/.curlrc", "ls -la ~/.curlrc \"$CURL_HOME/.curlrc\"",
+                         "cp ~/.curlrc ~/.curlrc.bak", "cp ~/.curlrc data/curlrc-copy.txt",
+                         "echo x > ~/.curlrc.bak", "diff ~/.curlrc data/delete.cfg"]
+
+    def test_writing_a_curlrc_is_refused_in_every_mode_and_reading_one_is_not(self):
+        # with no backups: refused in default, auto, plan, dontAsk, a missing mode and from a
+        # subagent, never asked, each refusal logged
+        self.assert_refused_never_asked(self.CURLRC_WRITES)
+        # with every backup on record, GLOW_LIVE_OK set, and in the modes that allow a backed write
+        p = self.fully_backed()
+        self.assert_backed(p)
+        callers = [{"mode": "acceptEdits"}, {"mode": "bypassPermissions"}, {"mode": "dontAsk", "live_ok": "1"},
+                   {"mode": "auto", "agent": True}]
+        cases = [(command, dict(caller, project=p)) for command in self.CURLRC_WRITES for caller in callers]
+        for command, kw, run in self.verdicts(cases):
+            with self.subTest(command=command, caller=kw, backed=True):
+                self.assertEqual(self.verdict(run), "deny", self.show(run))
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
+        self.assertNotIn("ASKED", counts, "a curlrc write was asked, not refused")
+        self.assertEqual(counts["BLOCKED"] + counts["DENIED"], len(cases), "each refusal logged")
+        # the other side: reading it, or copying it elsewhere - no decision, nothing logged
+        self.assert_no_decision(self.CURLRC_NOT_WRITES)
+
+    # 2. a curl config file sets the method, the URL and the data, so a curl -K names whatever host
+    # its file holds: every curl -K / --config (-K<file>, --config=<file>, -K in a cluster, -K - from
+    # standard input) is live with no automatic go, the host on its command line or none
+    CURL_CONFIGS = {
+        "data/form_delete.cfg": 'url = "https://api.jotform.com/form/261234567890123/question/7"\nrequest = "DELETE"\n',
+        "data/form_post.cfg": ('url = "https://api.jotform.com/form/261234567890123/properties"\nrequest = "POST"\n'
+                               'data = "properties[title]=Attendance"\n'),
+        "data/props.json": '{"properties": {"title": "Attendance"}}\n',
+    }
+    CURL_K_NO_HOST = [
+        "curl -K data/form_delete.cfg",
+        "curl -sS -K data/form_post.cfg",
+        "curl -Kdata/form_delete.cfg",
+        "curl -sSK data/form_post.cfg",
+        "curl --config data/form_delete.cfg",
+        "curl --config=data/form_post.cfg -o data/out.json",
+        "curl -K data/form_delete.cfg https://example.com/status",
+        "curl -sS https://example.org/ping --config data/form_post.cfg",
+        "curl -K - https://example.com/status < data/form_delete.cfg",
+        "/usr/bin/curl -K data/form_delete.cfg",
+        "cd data && curl -K form_delete.cfg",
+    ]
+
+    def test_every_curl_with_a_config_file_is_live_even_naming_no_live_host(self):
+        F1 = self.F1
+        p = self.project()
+        for rel, text in self.CURL_CONFIGS.items():
+            self.write(p, rel, text)
+        self.back_up(p, "jotform", F1, f"backups/{F1}")
+        self.back_up(p, "jotform", "all", "backups/all-forms")
+        self.back_up(p, "github", "all", "backups/github/switches.json")
+        # the control: a curl with no config file to the backed form goes through on these backups
+        control = f"curl -sS -X POST https://api.jotform.com/form/{F1}/properties --data-binary @data/props.json"
+        run = self.gate(control, mode="dontAsk", project=p, may_allow=True)
+        self.assertEqual(self.verdict(run), "allow", "the control: a backed Jotform curl with no -K - " + self.show(run))
+        # asked in default and auto, refused in dontAsk, bypassPermissions, a missing mode and from a
+        # subagent, the refusal saying a config file is why; never allowed, the form's backup from
+        # today notwithstanding
+        self.assert_never_automatic([(c, {"may_allow": True}) for c in self.CURL_K_NO_HOST], p, saying=("config",))
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
+        self.assertEqual(counts["ASKED"], 2 * len(self.CURL_K_NO_HOST), "each curl -K asked in default and auto, logged")
+        self.assertEqual(counts["BLOCKED"] + counts["DENIED"], 4 * len(self.CURL_K_NO_HOST),
+                         "each curl -K refused headless and from a subagent, logged")
+        self.assertEqual(len(self.quiet_notifications()), 1, "only the control is notified")
+        # the other side: a curl with no config file to no live host, options whose names only begin
+        # like --config (--connect-timeout, --compressed), and a read that mentions curl -K stay
+        # silent, headless and from a subagent too
+        silent = ["curl -s https://example.com/status -o data/status.json",
+                  "curl --connect-timeout 5 -sS https://example.com/status",
+                  "curl --compressed -s https://example.com/status",
+                  "grep -rn -- 'curl -K' docs", "grep -n -- '--config' docs/RUNBOOK.md"]
+        for kw in ({"mode": "default"}, {"mode": "dontAsk"}, {"mode": None}, {"mode": "auto", "agent": True}):
+            self.assert_silent(silent, project=p, **kw)
+        self.assertEqual(collections.Counter(d for d, _ in self.lines_of(p))["ALLOWED"], 1, "nothing more allowed")
+
+    # 3. a source-tracked push or deploy deploys local DELETIONS too, which the gate cannot see:
+    # sfdx force:source:push is never automatic; sf project deploy start goes through only with an
+    # explicit -d/--source-dir, -m/--metadata or -x/--manifest - without one it deploys the
+    # project's tracked changes. Each below names the plan folder, whose before/ is from today
+    SOURCE_TRACKED = [
+        "sfdx force:source:push",
+        "sfdx force:source:push -u glow",
+        "sfdx force:source:push -f -u glow -w 33 data/sf_x/after",
+        "sfdx force:source:push -u glow --json -w 33 data/sf_x/after/main",
+        "sf force:source:push -o glow data/sf_x/after",
+        "sfdx force:source:push -u glow -d data/sf_x/after",
+        "sfdx force:source:push -u glow --source-dir data/sf_x/after",
+        "sf project deploy start -o glow",
+        "sf project deploy start --target-org glow --wait 30",
+        "sf project deploy start -o glow --results-dir data/sf_x/after/results",
+        "sf project deploy start --ignore-conflicts -o glow --junit --results-dir data/sf_x/tests",
+        "sf project deploy start -o glow --coverage-formatters json --results-dir data/sf_x/after --wait 30",
+        "sfdx project deploy start -o glow --results-dir data/sf_x/after",
+        "sf deploy metadata -o glow --results-dir data/sf_x/after",
+    ]
+    # ... and with an explicit source: the automatic go on the same before/ (the deploys of the
+    # first rounds keep theirs)
+    EXPLICIT_SOURCE = [
+        "sf project deploy start --source-dir data/sf_x/after -o glow",
+        "sf project deploy start -d data/sf_x/after -o glow",
+        "sf project deploy start --source-dir=data/sf_x/after --target-org glow",
+        "sf project deploy start -x data/sf_x/after/package.xml -o glow",
+        "sf project deploy start --manifest data/sf_x/after/package.xml -o glow",
+        "sf project deploy start --manifest=data/sf_x/after/package.xml -o glow",
+        "sf project deploy start -m Report:Glow/Attendance -o glow --results-dir data/sf_x/after",
+        "sf project deploy start --metadata Report:Glow/Attendance --results-dir data/sf_x/after/results -o glow",
+        "sf project deploy start --metadata=Report:Glow/Attendance -d data/sf_x/after -o glow",
+    ]
+
+    def test_a_source_tracked_push_or_deploy_without_an_explicit_source_is_never_automatic(self):
+        p = self.sf_plan({"data/sf_x/after/main/default/reports/Attendance.report-meta.xml": "<Report/>\n",
+                          "data/sf_x/after/package.xml": "<Package/>\n"})
+        plan = os.path.join(p, "data", "sf_x")
+        # the other side first: an explicit source goes through on the before/ from today, in a main
+        # session's modes and from a subagent, each logged ALLOWED and notified
+        callers = [{"mode": "default"}, {"mode": "auto"}, {"mode": "dontAsk"}, {"mode": None},
+                   {"mode": "auto", "agent": True}]
+        cases = [(command, dict(caller, project=p, may_allow=True)) for command in self.EXPLICIT_SOURCE for caller in callers]
+        for command, kw, run in self.verdicts(cases):
+            with self.subTest(command=command, mode=kw["mode"], agent=kw.get("agent"), side="explicit source"):
+                self.assertEqual(self.verdict(run), "allow", self.show(run))
+        allowed = len(cases)
+        self.assertEqual(collections.Counter(d for d, _ in self.lines_of(p))["ALLOWED"], allowed,
+                         "each explicit-source deploy logged ALLOWED")
+        self.assertEqual(len(self.notifications(allowed)), allowed, "each explicit-source deploy notified")
+        # a push, or a deploy with no -d, -m or -x - also run from the plan folder itself: asked in
+        # default and auto, refused where no prompt can show; never allowed
+        commands = ([(c, {"may_allow": True}) for c in self.SOURCE_TRACKED]
+                    + [("sfdx force:source:push -u glow", {"may_allow": True, "cwd": plan}),
+                       ("sf project deploy start -o glow", {"may_allow": True, "cwd": plan})])
+        self.assert_never_automatic(commands, p)
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], allowed, "a push or a deploy with no explicit source was allowed")
+        self.assertEqual(counts["ASKED"], 2 * len(commands), "each asked in default and auto, logged")
+        self.assertEqual(counts["BLOCKED"] + counts["DENIED"], 4 * len(commands),
+                         "each refused headless and from a subagent, logged")
+        self.assertEqual(len(self.quiet_notifications()), allowed, "only the explicit-source deploys are notified")
+
+    def test_a_deploy_without_an_explicit_source_is_refused_saying_which_flag_it_needs(self):
+        # headless, the refusal names what makes the deploy automatic: an explicit source
+        p = self.sf_plan()
+        for command in ("sf project deploy start -o glow --results-dir data/sf_x/after",
+                        "sf project deploy start -o glow"):
+            for kw in ({"mode": "dontAsk"}, {"mode": "auto", "agent": True}):
+                with self.subTest(command=command, **kw):
+                    run = self.gate(command, project=p, may_allow=True, **kw)
+                    self.assertEqual(self.verdict(run), "deny", self.show(run))
+                    message = (run.err + self.reason(run)).lower()
+                    self.assertTrue(any(s in message for s in ("--source-dir", "--manifest", "--metadata")),
+                                    f"the refusal does not name the explicit source it needs: {message!r}")
 
     def clasp_project(self):
         """A checkout whose appsscript/, drive-sync/ (the Drive photo mover, with its own .clasp.json)
