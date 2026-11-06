@@ -1,8 +1,8 @@
 ---
 title: The six U.S partners off every dashboard and report; the not-submitted lists without the monthly partners
 author: Claude (ticket #209, with Ryan's request and added scope of 2026-11-05)
-status: done      # ticket #209; deployed 2026-11-05 on Ryan's go (round 1 0AfRP000002jNNV0A2, round 2 0AfRP000002jNQj0AM), read back, checked against SOQL
-done: 2026-11-05
+status: done      # ticket #209; deployed 2026-11-05/06 UTC on Ryan's go (round 1 0AfRP000002jNNV0A2, round 2 0AfRP000002jNQj0AM, round 3 0AfRP000002jNiT0AU), read back, checked against SOQL
+done: 2026-11-06
 created: 2026-11-05
 intent: Ryan, 2026-11-05 - the U.S partners are inactive and distort the totals; their girls and clubs should not count as not submitted
 ---
@@ -35,6 +35,10 @@ dashboards in Salesforce" and "Attendance dashboard in Salesforce".
   Not Submitting - Last Week (`00ORP000009kYPh2AM`, DECISIONS 2026-10-24). Coordinators use the
   lists to chase Jotform submissions; those partners report through Salesforce. Their Monthly
   Reports stay on D1-D5, and the Girls Attended tiles keep their `Partner report` batches.
+- **Round 3** (a review finding on #209): the Jotform Attendance dashboard's "How to read this
+  dashboard" box said the monthly partners' clubs "show as not submitting until that count
+  arrives" and the U.S clubs "stay on the lists"; that one sentence is replaced so the box says
+  the lists leave those clubs out.
 - **Unchanged:** D1-D5 themselves; item 6 and the attendance-row reports (the U.S has no batches,
   and its form is disabled, DECISIONS 2026-10-06); the interactive dashboard (on hold, #81-#83).
 - This ticket lifts, for these changes only and on Ryan's request, the epic's rule that the
@@ -83,12 +87,21 @@ VPN off, in the main session; each write on Ryan's go.
    `round2/before/`, compared with round 1's `after/`; `round2/build/` sets each list's
    `PARENT.NAME notEqual` to the nine partners; check-only, Ryan's go, deploy; `round2/after/`
    compared with `round2/build/`; the three lists run again and each count equals SOQL.
+10. Round 3 in `data/sf_us_partners_2026-11-05/round3/` (a review finding: the dashboard's "How to
+    read this dashboard" box still said the monthly partners' clubs show as not submitting and the
+    U.S clubs stay on the lists): a fresh retrieve of the Jotform Attendance dashboard into
+    `round3/before/`, compared with round 1's `after/`; `round3/build/` replaces that one sentence
+    of the box's rich text; check-only, Ryan's go, deploy; `round3/after/` compared with
+    `round3/build/`.
 
 ## Rollback
 
 DECISIONS 2026-10-16, each write on Ryan's go after a check-only, VPN off.
 
-- Round 2 is undone first, then round 1.
+- Round 3 is undone first, then round 2, then round 1.
+- Round 3: the How-to box is restored by a deploy from a fresh retrieve with its sentence put
+  back, or by a deploy of the dashboard in `data/sf_us_partners_2026-11-05/round3/before/` only
+  while a fresh retrieve equals `round3/after/`.
 - Round 2: the three not-submitted lists are restored by a deploy from a fresh retrieve with the
   three monthly partners taken out of their `PARENT.NAME` value, or by a deploy of their files in
   `data/sf_us_partners_2026-11-05/round2/before/` only while a fresh retrieve equals
@@ -106,7 +119,7 @@ DECISIONS 2026-10-16, each write on Ryan's go after a check-only, VPN off.
 
 ## Result
 
-All on 2026-11-05 UTC, on Ryan's go through the live gate.
+2026-11-05 23:29 UTC to 2026-11-06 00:39 UTC, each write on Ryan's go through the live gate.
 
 - Before: the 09:48 UTC retrieve took 6 dashboards (D1-D5 and Jotform Attendance
   `Attendance/Jotform_Attendance_test`) and 25 reports: the 20 Dhis2 reports on D1-D5, item 6
@@ -134,6 +147,11 @@ All on 2026-11-05 UTC, on Ryan's go through the live gate.
   clubs, round 2 the 38 clubs of the three monthly partners).
 - Clubs Not Submitting - Since 1 Sept 124 → 113 → 75, each equal to SOQL (−11, then −38).
 - Clubs With No Attendance Last Month 139 → 128 → 90, each equal to SOQL (−11, then −38).
+- Round 3: check-only `0AfRP000002jNgr0AE` (1/1), deploy `0AfRP000002jNiT0AU` (1/1, completed
+  2026-11-06 00:38:38 UTC). `round3/before/` equalled round 1's `after/`, and `round3/after/`
+  equals `round3/build/`. The box's sentence now reads: "The not-submitting lists leave out the
+  clubs of the three partners that report a monthly count instead of using Jotform, and the U.S.
+  clubs: they are for following up Jotform submissions."
 
 The 20 copies by the tool (source → copy in Decommissioned):
 

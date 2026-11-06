@@ -2056,8 +2056,12 @@ are kept, the Club Roster Form still lists the clubs — but they leave the
 attendance forms' Club picker. Never give such a club a blank region (CLAUDE.md
 rule 6: that says "fix me" and raises ATTENTION on every run); mark the
 partner instead. A partner marked `no` also goes, by hand, into the partner-name
-filter of the Salesforce report `Clubs_Not_Submitting_Last_Week` ("Submission
-timing in Salesforce", The timing reports), or its clubs show there every week.
+filter (`PARENT.NAME` not equal to) of the four Salesforce not-submitted lists,
+which hold the same nine names since #209 (2026-11-05):
+`Clubs_Not_Submitting_Last_Week` ("Submission timing in Salesforce", The timing
+reports), `Clubs_Not_Submitting_Last_14_Days`, `Clubs_Not_Submitting_Since_1_Sept`
+and `Jotform_Clubs_No_Attendance_Last_Month` ("Attendance dashboard in
+Salesforce"), or its clubs show there as not submitting.
 
 **The marker.** The Partners tab's fourth column, `jotform`: `no` = the
 partner's clubs are not on Jotform; `yes` or blank = on Jotform (the default;
@@ -3483,6 +3487,11 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   count the Jotform girls and the three partners' Monthly Max together, as they did before #209.
 - The attendance-row reports stay unchanged by #209, because the U.S has no batches and no
   attendance rows (0 `Attendance_Batch__c`, 0 `Attendance__c`).
+- Since #209's round 3 (deploy `0AfRP000002jNiT0AU`, 2026-11-06 00:38 UTC) the "How to read this
+  dashboard" box tells readers the not-submitting lists leave out the clubs of the three monthly
+  partners and the U.S clubs. Its sentence reads: "The not-submitting lists leave out the clubs of
+  the three partners that report a monthly count instead of using Jotform, and the U.S. clubs:
+  they are for following up Jotform submissions."
 
 **Access** (Ryan's decisions of 2026-10-09,
 [plan](plans/2026-10-09-attendance-reports-public.md); they reverse his 2026-10-06 "folder
@@ -3739,7 +3748,11 @@ sharing stays as it is"):
   touched, nor the vendor's report type `Attendance_Batches`.
 - Rollback of #209 ([plan](plans/2026-11-05-sf-us-partners.md#rollback); DECISIONS 2026-10-16),
   VPN off, each deploy after a check-only and on Ryan's go:
-  - Round 2 (the three monthly partners) is undone first, then round 1 (the six U.S partners).
+  - Round 3 (the How-to box) is undone first, then round 2 (the three monthly partners), then
+    round 1 (the six U.S partners).
+  - Round 3: the How-to box is restored by a deploy from a fresh retrieve with its sentence put
+    back, or by a deploy of the dashboard in `data/sf_us_partners_2026-11-05/round3/before/` only
+    while a fresh retrieve equals `round3/after/`.
   - Round 2: the three not-submitted lists are restored by a deploy from a fresh retrieve with
     the three monthly partners taken out of their `PARENT.NAME` value, or by a deploy of their
     files in `data/sf_us_partners_2026-11-05/round2/before/` only while a fresh retrieve equals
@@ -3915,8 +3928,11 @@ by a filter on their partner account names, `Parent.Name` in the SOQL check and 
 `PARENT.NAME` "not equal to" in the report, which names the three partners and the six U.S
 partner accounts, Angelo Patri School, Detroit Public Schools, Ewa Makai Middle School,
 Farmington Municipal School District, HOLA and Holbrook Unified School District, as
-`glow/sf_partners.csv` spells them. A new partner of that kind needs the report's filter edited by
-hand (a fresh retrieve, check-only, Ryan's go, deploy): one that reports monthly through
+`glow/sf_partners.csv` spells them. Since #209 (2026-11-05) the three not-submitted lists of the
+Jotform Attendance dashboard (`Clubs_Not_Submitting_Last_14_Days`,
+`Clubs_Not_Submitting_Since_1_Sept`, `Jotform_Clubs_No_Attendance_Last_Month`) hold the same
+nine-partner filter ("Attendance dashboard in Salesforce"). A new partner of that kind needs the
+filter of all four lists edited by hand (a fresh retrieve, check-only, Ryan's go, deploy): one that reports monthly through
 Salesforce, or whose clubs stop using Jotform (the Partners tab's `jotform` set to `no`, "Clubs
 that do not use Jotform"). `Submissions_by_Club_and_Week` is unaffected: it shows only the clubs
 with a batch in its window. The two delay reports keep every partner: they show a club only for
@@ -5207,6 +5223,8 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   Item 17 lists approved reports only (`Approved__c equals 1`), so the overview needs its own
   report; item 17 keeps that filter. SOQL signal, every month of the
   reporting year: `SELECT CALENDAR_MONTH(Period__c), Approved__c, COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY CALENDAR_MONTH(Period__c), Approved__c`.
+  Since #209 add `AND Account__r.Name NOT IN (<the U.S partners' names>)` for it to equal the
+  overview ("The U.S partners", at the top of this section).
 
 How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - Since #200 each report, items 17, 18 and 19, filters `In_Reporting_Year__c equals true` (#195),
@@ -5249,8 +5267,10 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - The dashboard runs as the viewer (`LoggedInUser`), as before; its running user is unchanged.
 
 The SOQL signals, for the last complete month (item 19's also for the reporting year), each with
-the period and the test-record rule. A component is right when, refreshed, it shows the same
-total and the same number for one partner:
+the period and the test-record rule. Since #209 each also needs `AND Account__r.Name NOT IN
+(<the U.S partners' names>)` to equal its component ("The U.S partners", at the top of this
+section). A component is right when, refreshed, it shows the same total and the same number for
+one partner:
 - Item 17, "Report approved by PO": the total is `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c =
   LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Approved__c = true`,
   and one partner's number is `SELECT Account__r.Name, COUNT(Id) FROM DHIS2__c WHERE Period__c =
