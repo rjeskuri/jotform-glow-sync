@@ -3665,7 +3665,7 @@ sharing stays as it is"):
     2026-10-16: they would undo the 2026-10-09 and 2026-10-15 changes); before the six reports go,
     retrieve it, remove the `totals1/` tiles in that copy, check-only, Ryan's go, deploy (the six
     reports and the type may stay).
-  - the exception, never deleted: since task #102 (built 2026-10-24; deployed only on Ryan's
+  - the exception, never deleted: since task #102 (deployed 2026-10-26, #157, on Ryan's
     go), the reports
     `Clubs_Not_Submitting_Last_Week`, `Submissions_by_Club_and_Week`,
     `Late_Submissions_Last_Month` and `Submission_Delay_by_Partner_by_Month`, each moved to
@@ -3774,7 +3774,8 @@ sharing stays as it is"):
   07:00 UTC (the check: 153 of 1,123 batches); `Submission_Delay_Days__c` was redeployed alone
   with the corrected text the same day (deploy `0AfRP000002i4LJ0AY`, 06:59 UTC), and the check
   reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result). The four
-  timing reports of task #102 are built, not deployed ("The timing reports", below).
+  timing reports of task #102 are deployed since 2026-10-26 12:34 UTC (#157, deploy
+  `0AfRP000002i9xh0AA`; "The timing reports", below).
 - **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
   is read-only.
 - **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
@@ -3858,13 +3859,12 @@ go with the fields when they are deleted, so nothing is redeployed from its `bef
 
 ### The timing reports
 
-**Status:** built 2026-10-24 offline (task #102), in `data/sf_session_timing_2026-10-24/t102_build/`
-(`build/`, `pattern/`; owner only, never committed): the four reports below, and the report
-type `Attendance_Totals` with the four fields added to its columns (a custom report type offers
-a new field only once it is in its layout; the retrieve of 2026-10-24 09:24 UTC, after the fields' deploy, had none of
-them). Nothing is deployed: the fresh retrieve, the check-only deploy, the deploy, the read-back
-and each report's run through the Analytics API against its SOQL check wait for Ryan's go, VPN
-off ([plan](plans/2026-10-23-submission-timing.md), "Task #102: the timing reports").
+**Status:** deployed 2026-10-26 12:34 UTC on Ryan's go (ticket #157; deploy `0AfRP000002i9xh0AA`,
+check-only `0AfRP000002i9w50AA`, 5/5): the four reports below, and the report type
+`Attendance_Totals` with the four fields added to its columns. It was rebuilt from the live report
+type on the day, so the Partner Manager and Session notes columns added since #102's build stay.
+Each report equals its SOQL check, and the read-back equals the build
+([plan](plans/2026-10-23-submission-timing.md), "Task #102: the timing reports").
 
 The four reports are in the Attendance report folder (`Attendance`), beside the dashboard's other
 reports, and answer what GLOW staff asked on 2026-10-22: which clubs have not submitted for a
