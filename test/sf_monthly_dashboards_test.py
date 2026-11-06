@@ -137,6 +137,18 @@ runs before/, the copies (`--tag "#199"`), the check-only, Ryan's go, the deploy
 check in that order, and its `## Result` carries the six copies', the check-only's and the deploy's ids each beside its
 own label and September's item 16 figures (answered = Yes + No) equal to SOQL. TrainingDashboardDocs (#78) and
 NewMentorsDocs (#80) accept #199's reporting-year period, its Month filter, its two filters and its own folder.
+UsPartnersOffReportsDocs (ticket #209, epic #194; Ryan, 2026-11-05): the six U.S partners leave every dashboard and
+report. The RUNBOOK's "Monthly Report dashboards in Salesforce" says each Monthly report on D1-D5 and item 19 filters
+`DHIS2__c$Account__c notEqual` the six, the three monthly partners' Monthly Reports staying on D1-D5; its "Attendance
+dashboard in Salesforce" says the three not-submitted lists filter `PARENT.NAME notEqual` the nine partners (the six and
+the three monthly partners, round 2) because coordinators chase Jotform submissions with them, the "Jotform Attendance"
+Partner filter offers no U.S partner, and item 6 and the attendance-row reports stay unchanged (the U.S has no batches);
+each rule in one sentence; round 3 corrected the dashboard's How-to box, which says the lists leave those clubs out.
+The rollback (RUNBOOK and plan) is by deploy only, each part with its own guard, round 3 first, then 2, then 1; the
+copies are the record.
+The plan `docs/plans/2026-11-05-sf-us-partners.md` orders before/, the copies, item 11's metadata copy, the check-only,
+Ryan's go, the deploy, `after/`, the refresh and the SOQL figures; its Result carries the ids and the before -> after
+figures. A dated DECISIONS entry names #209 (Why, Rejected: a marker field, Consequences).
 """
 import glob
 import os
@@ -8545,6 +8557,638 @@ class GlowReviewTrainingDocs(unittest.TestCase):
                         f"{where}: give item 16's figures for September, equal to SOQL, in one sentence: the month, item "
                         f"16, \"SOQL\", \"equal\", \"{self.SEPT_ANSWERED} answered\", \"Yes {self.SEPT_YES}\" and "
                         f"\"No {self.SEPT_NO}\" (answered = Yes + No); found {[f[1:] for f in found]}")
+
+
+class UsPartnersOffReportsDocs(unittest.TestCase):
+    """Ticket #209 (epic #194; Ryan, 2026-11-05: "remove all US partners from all dashboards and reports as they are
+    inactive and distorting the total numbers"). The six U.S partner Accounts leave every Monthly report on D1-D5 and
+    item 19 (`DHIS2__c$Account__c notEqual` the six), the "Jotform Attendance" dashboard's Partner filter, and the three
+    not-submitted lists. Round 2 (Ryan's added scope, 2026-11-05, on the ticket): those three lists also leave out the
+    clubs of the three monthly partners, one `PARENT.NAME notEqual` holding the nine partners, as Clubs Not Submitting -
+    Last Week (DECISIONS 2026-10-24), because coordinators chase Jotform submissions with them; the three monthly
+    partners' Monthly Reports stay on D1-D5. Item 6 and the attendance-row reports stay unchanged: the U.S has no
+    batches. Round 3 corrected the dashboard's How-to box. The rollback is by deploy only, each part (round 1's
+    Monthly reports, round 1's Attendance side, round 2, round 3) with its own deploy and guard, round 3 first, then
+    round 2, then round 1; the Decommissioned copies the record. The plan
+    `docs/plans/2026-11-05-sf-us-partners.md` carries the order, the rollback and the Result's ids and figures; a
+    dated DECISIONS entry the why. The wording is free: each rule is looked for as a claim in one sentence, not
+    denied and not history."""
+
+    longMessage = False         # the messages say what to fix
+    RUNBOOK = DecommissionedFoldersDocs.RUNBOOK
+    DECISIONS = DecommissionedFoldersDocs.DECISIONS
+    MONTHLY = DecommissionedFoldersDocs.MONTHLY
+    ATTENDANCE = "## Attendance dashboard in Salesforce"
+    PLAN = os.path.join(REPO, "docs", "plans", "2026-11-05-sf-us-partners.md")
+    KEEP_LIST = os.path.join(REPO, "glow", "sf_keep_list.csv")
+    TICKET = re.compile(r"(?<![\w#])#209\b")
+    # the six U.S partner Accounts (region U.S in appsscript/Regions.gs and glow/sf_partners.csv; the ticket's outline)
+    US = (("Angelo Patri School", "001RP000002nJZUYA2"),
+          ("Detroit Public Schools", "001RP000002nJZNYA2"),
+          ("Ewa Makai Middle School", "001RP00000SL2ebYAD"),
+          ("Farmington Municipal School District", "001RP00000F1DPBYA3"),
+          ("HOLA", "001RP000002nJZXYA2"),
+          ("Holbrook Unified School District", "001RP00000VxX9PYAV"))
+    # the three partners that report monthly through Salesforce (DECISIONS 2026-10-24)
+    MONTHLY_PARTNERS = (("Education and English for You", re.compile(r"\bEducation and English for You\b")),
+                        ("Tumaini La Maisha", re.compile(r"\bTumaini La Maisha\b")),
+                        ("Ng'aa Maskani", re.compile(r"\bNg['’]aa Maskani\b")))
+    # the three not-submitted lists, by DeveloperName, Id or label
+    LISTS = {
+        "Clubs Not Submitting - Last 14 Days": re.compile(
+            r"Clubs_Not_Submitting_Last_14_Days|00ORP000009c8iY2AQ|(?i:\bLast\s+14\s+Days\b|\b14-day\b)"),
+        "Clubs Not Submitting - Since 1 Sept": re.compile(
+            r"Clubs_Not_Submitting_Since_1_Sept|00ORP000009c8iZ2AQ|(?i:\bSince\s+1\s+Sept\w*|\bsince-1-September\b)"),
+        "Clubs With No Attendance Last Month": re.compile(
+            r"Jotform_Clubs_No_Attendance_Last_Month|00ORP000009a6Un2AI|(?i:\bNo\s+Attendance\s+Last\s+Month\b)"),
+    }
+    JOTFORM_DASH = re.compile(r"Jotform Attendance|Jotform_Attendance_test|01ZRP00000BE2TR2A1")
+    # round 1's and round 2's ids (the live facts of 2026-11-05)
+    CHECK_1, DEPLOY_1 = "0AfRP000002jNIf0AM", "0AfRP000002jNNV0A2"
+    CHECK_2, DEPLOY_2 = "0AfRP000002jNP70AM", "0AfRP000002jNQj0AM"
+    ITEM_11_ID, ITEM_11_COPY = "00ORP000005uf412AA", "00ORP000009q7GL2AY"
+    GO = re.compile(r"Ryan['’]s go\b")
+    EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
+
+    # the U.S, after norm ("U.S" becomes "U_S"); case-sensitive so "us" is no match
+    US_WORD = re.compile(r"\bU_?S\b")
+    SIX = re.compile(r"\b([Ss]ix|6)\b[^.;]{0,40}?(\bU_?S\b|\bpartners?\b)|\bU_?S\b\s+partners?\b")
+    MONTHLY_REF = re.compile(r"(?i)\bmonthly\s+partners?\b|\bpartners?\s+(that|which|who)\s+report\s+(a\s+)?monthly\b")
+    NINE = re.compile(r"(?i)\b(nine|9)\s+(\w+\s+){0,2}?partners?\b")
+    NOT_EQUAL = re.compile(r"\bnotEqual\b|(?i:\bnot\s+equal(s|\s+to)?\b|\bdoes\s+not\s+equal\b|!=)")
+    PARENT_NAME = re.compile(r"\bPARENT[._]NAME\b|\bParent[._]Name\b")
+    D_ALL = re.compile(r"\bD1\s*(?:-|–|to|through)\s*D5\b|\bD1,\s*D2,\s*D3,\s*D4,?\s+and\s+D5\b|"
+                       r"(?i:\b(all|the|each\s+of\s+the)\s+five\s+(\w+\s+){0,3}?dashboards\b)")
+    ITEM_19 = re.compile(r"(?i)\bitems?\s+(\d+\s*(,|and|&)\s*)*19\b|\bstories\s+table\b|\bGLOW of the Month\b|"
+                         r"00ORP000005p2L32AI")
+    EVERY_REPORT = re.compile(r"(?i)\b(each|every|all)\b[^.;]{0,40}?\breports?\b")
+    HISTORY = GlowReviewReportingDocs.HISTORY
+    UNTIL_AFTER = GlowReviewReportingDocs.UNTIL_AFTER
+    # the Partner filter, and a U.S option said to be gone from it
+    PARTNER_FILTER = re.compile(r"(?i)\bPartner\b[\"”'’`]?\s*(\([^)]{0,40}\)\s*)?(dashboard\s+)?filter\b")
+    ABSENT = re.compile(r"(?i)\b(none|no|not|without|neither|never)\b|\b(remov\w*|taken\s+off|takes?\s+off|took\s+off|"
+                        r"dropp\w*|drops|left\s+out|leaves?\s+out|off)\b")
+    FILTER_COUNT = re.compile(r"(?i)\bPartner\s+filter\b|\bvalues?\s+per\s+filter\b|\bfilter\s+(options|values)\b")
+    # why the lists leave the monthly partners out: coordinators chase Jotform submissions with them
+    REASON = GlowReviewReportingDocs.REASON
+    # what stays: item 6 and the attendance-row reports, the monthly partners on D1-D5
+    ITEM_6 = re.compile(r"(?i)\bitems?\s+(\d+\s*(,|and|&)\s*)*6\b(?![\d-])")
+    ATT_ROWS = re.compile(r"(?i)\battendance[- ]rows?\b[^.;]{0,15}?\breports?\b|\breports?\s+(on|of|over)\s+(the\s+)?"
+                          r"(attendance\s+(rows?|batch\w*)|`?Attendance(_Batch)?__c`?)")
+    UNCHANGED = re.compile(r"(?i)\bunchanged\b|\buntouched\b|\b(stay|stays|remain|remains|are|is|left)\s+as\s+(it|they)\s+"
+                           r"(is|are|was|were)\b|\bno\s+change\b|\bnot\s+changed\b")
+    NO_BATCH = re.compile(r"(?i)\b(no|0|zero|none)\b[^.;]{0,40}?\b(batch\w*|Attendance_Batch__c|Attendance__c|"
+                          r"attendance\s+rows?)\b")
+    FORBID = re.compile(r"(?i)\b(never|must\s+not|mustn['’]t|may\s+not|do\s+not|don['’]t|forbidden|prohibited|"
+                        r"not\s+allowed|cannot|can['’]t|shall\s+not)\b")
+    STAY = re.compile(r"(?i)\b(stay|stays|stayed|remain|remains|kept|keep|keeps|still)\b")
+    TILES = re.compile(r"(?i)\bGirls\s+(who\s+)?Attended\b|\btiles?\b|`?Partner report`?\s+batch")
+
+    # the rollback (DECISIONS 2026-10-16): by a deploy from a fresh retrieve edited back or a guarded `before/`
+    DEPLOY = re.compile(r"(?i)\b(re-?)?deploy\w*\b")
+    FRESH_EDITED = re.compile(r"(?i)\bfresh\s+retriev\w*\b[^.;]{0,60}?(\bedit\w*\s+back\b|\bwith\s+[^.;]{0,60}?\b(removed|"
+                              r"taken\s+out|dropped|restored|put\s+back)\b|\b(remov\w*|tak\w*\s+out|drop\w*)\b)")
+    GUARD = GlowReviewReportingDocs.GUARD
+    FROM_COPY = GlowReviewReportingDocs.FROM_COPY
+    # an older or another change's source: another data/ folder (#209's own `data/sf_us_partners_<date>/`, its
+    # `round2/` and the copy tool's ledger are allowed), an older build, another ticket's folder
+    OLD_SOURCE = re.compile(r"(?i)\bdata/sf_(?!us_partners_(\d{4}-\d\d-\d\d|<date>)(?![\w-])|report_folders(?![\w-]))"
+                            r"[\w<>-]+(/[\w<>-]+)*/?|"
+                            r"\b(older|old|earlier|previous|prior|stale|another|other|original)\s+([\w-]+\s+)?"
+                            r"(retrieves?|builds?|backups?|exports?|snapshots?|versions?)\b|"
+                            r"#(?!209\b)\d+['’]s\s+`?(data/|before/|build/|after/|retrieve|build|folder)")
+    ROUND2 = re.compile(r"(?i)\bround\s*2\b|\bround2/|\bsecond\s+round\b")
+    ROUND3 = re.compile(r"(?i)\bround\s*3\b|\bround3/|\bthird\s+round\b")
+    # a round named ("round 2", "round2/", "the second round"), for the rollback's parts and their order
+    ROUND_REF = re.compile(r"(?i)\bround\s*([123])(?![\d])|\b(first|second|third)\s+round\b")
+    ORDINAL = {"first": "1", "second": "2", "third": "3"}
+    # the order words of "round 3 first, then round 2, then round 1"; "after"/"once" would reverse the reading
+    ORDER_WORD = re.compile(r"(?i)\b(first|then|before|followed\s+by|last|lastly|finally)\b")
+    REVERSED = re.compile(r"(?i)\b(after|once|following)\b")
+    # a guard: "only while a fresh retrieve equals `after/`", the `after/` of that round's own folder
+    GUARD_HEAD = (r"(?i)\b(only|while|as long as|so long as|provided)\b[^.;]{0,30}?\bfresh\s+retriev\w*\b[^.;]{0,40}?"
+                  r"\b(equals?|matches|match|is the same as|identical to)\b[^.;]{0,30}?")
+    ROUND_DIRS = {"1": (r"(?<![\w/])`?before/|\bdata/sf_us_partners_[\w<>-]+/before/", r"(?<![\w/])after/"),
+                  "2": (r"\bround2/before/", r"\bround2/after/"),
+                  "3": (r"\bround3/before/", r"\bround3/after/")}
+    # the parts of the rollback, each a list item or paragraph of its own
+    PARTS = {"m1": "round 1, the Monthly reports", "a1": "round 1, the Attendance lists and the Jotform Attendance "
+             "dashboard", "r2": "round 2, the three lists' monthly partners", "r3": "round 3, the How-to box"}
+    MONTHLY_REPORTS = re.compile(r"(?i)\bMonthly\s+reports?\b")
+    ATT_SIDE = re.compile(r"(?i)\bAttendance\b|\bnot[- ]submitt\w*|\blists?\b|\bHow[- ]to\b|\bbox\b")
+    # what cuts the lists' filter value short: "the six alone", "while the three monthly partners are kept"
+    VALUE_END = re.compile(r"(?i)\b(while|but|whereas|although|though|except|apart\s+from|yet|alone|only|besides|"
+                           r"instead)\b")
+    KEPT = re.compile(r"(?i)\b(kept|keeps?|keeping|stay\w*|remain\w*|counted|included|still\s+(on|in))\b")
+    # the How-to box of the Jotform Attendance dashboard (round 3)
+    HOWTO = re.compile(r"(?i)\bHow[- ]to\b[^.;]{0,25}?\bbox\b|\bHow to read this dashboard\b")
+    LEAVE_OUT = re.compile(r"(?i)\b(leav\w*|left)\s+out\b|\bexclud\w*|\bwithout\b")
+    CHECK_3, DEPLOY_3 = "0AfRP000002jNgr0AE", "0AfRP000002jNiT0AU"
+    CHECK = re.compile(r"(?i)\bcheck-only\b|--dry-run\b")
+
+    @classmethod
+    def setUpClass(cls):
+        ReportingDashboardDocs.setUpClass()
+        cls.r = ReportingDashboardDocs()        # #79's helpers: blocks, plan_part, sweep
+        cls.d = cls.r.d                         # #69's helpers: locally_denied, NEGATION, denies
+        TrainingDashboardDocs.setUpClass()
+        cls.t = TrainingDashboardDocs()         # #78's helpers: units, result_units, labels, nearest, num
+
+    @staticmethod
+    def norm(text):
+        return DecommissionedFoldersDocs.norm(text)
+
+    def cl(self, text):
+        """`text`'s sentences, a backticked SOQL statement taken out (a query is a check, not a claim)."""
+        return [GlowReviewReportingDocs.prose(s) for s in sentences(self.norm(text), ".;")]
+
+    def stated(self, s, rx):
+        """`rx` said in `s`: not denied in the words before it, and not said as the past."""
+        return any(not self.d.locally_denied(s, m) and not self.HISTORY.search(s[max(0, m.start() - 50):m.start()])
+                   for m in rx.finditer(s))
+
+    @staticmethod
+    def named(text, name, rid):
+        return name in text or rid[:15] in text
+
+    def us_ref(self, s):
+        return bool(self.SIX.search(s)) or all(self.named(s, n, i) for n, i in self.US)
+
+    def monthly_ref(self, s):
+        return bool(self.MONTHLY_REF.search(s)) or all(rx.search(s) for _, rx in self.MONTHLY_PARTNERS)
+
+    def filter_value(self, s):
+        """What sentence `s` says the `PARENT.NAME notEqual` filter holds: the words after the first `notEqual` that
+        follows `PARENT.NAME`, to "alone", "only", "while", "but" or "except" (None: no such filter in `s`)."""
+        p = self.PARENT_NAME.search(s)
+        m = p and [m for m in self.NOT_EQUAL.finditer(s) if m.start() >= p.end() and not self.d.locally_denied(s, m)]
+        if not m:
+            return None
+        value = s[m[0].end():]
+        cut = self.VALUE_END.search(value)
+        return value[:cut.start()] if cut else value
+
+    def monthly_in_filter(self, value):
+        """The three monthly partners stated inside the filter value: named (each, or "the three monthly partners",
+        or "the nine partners") and not denied there, and not said to be kept on the lists."""
+        if value is None or self.KEPT.search(value):
+            return False
+        named = [m for _, rx in self.MONTHLY_PARTNERS for m in rx.finditer(value)]
+        if len({m.group(0) for m in named}) == 3 and not any(self.d.locally_denied(value, m) for m in named):
+            return True
+        return any(not self.d.locally_denied(value, m)
+                   for rx in (self.MONTHLY_REF, self.NINE) for m in rx.finditer(value))
+
+    def lists_ref(self, s):
+        return all(rx.search(s) for rx in self.LISTS.values()) or bool(
+            re.search(r"(?i)\b(the|all|each\s+of\s+the)\s+three\s+(\w+[\s-]+){0,2}?(lists|reports)\b", s)
+            and re.search(r"(?i)\bnot[- ]submitt\w*|\bno\s+attendance\b|\blists\b", s))
+
+    def monthly(self):
+        return md_part(self.RUNBOOK, self.MONTHLY)
+
+    def attendance(self):
+        return md_part(self.RUNBOOK, self.ATTENDANCE)
+
+    def assertSixNamed(self, text, where):
+        missing = [f"{n} ({i})" for n, i in self.US if not self.named(text, n, i)]
+        self.assertEqual(missing, [], f"{where}: name the six U.S partners, each by its Account name or Id; missing: "
+                                      f"{missing}")
+
+    # --- the RUNBOOK ----------------------------------------------------------------------------------------
+
+    def test_the_runbook_states_the_us_exclusion(self):
+        m_where = f"RUNBOOK section {self.MONTHLY[3:]!r}"
+        a_where = f"RUNBOOK section {self.ATTENDANCE[3:]!r}"
+        monthly, attendance = self.monthly(), self.attendance()
+        self.assertSixNamed(self.norm(monthly), m_where)
+        self.assertSixNamed(self.norm(attendance), a_where)
+        cl_m, cl_a = self.cl(monthly), self.cl(attendance)
+
+        # the Monthly reports: each report on D1-D5 and item 19 filters `DHIS2__c$Account__c notEqual` the six
+        rule = [s for s in cl_m if "DHIS2__c$Account__c" in s and self.stated(s, self.NOT_EQUAL) and self.D_ALL.search(s)
+                and self.ITEM_19.search(s) and self.EVERY_REPORT.search(s) and self.us_ref(s)]
+        self.assertTrue(rule, f"{m_where}: say each Monthly report on D1-D5 and item 19 (the stories table) filters "
+                              "`DHIS2__c$Account__c notEqual` the six U.S partners, in one sentence naming every report, "
+                              "D1-D5, item 19 and the six (not negated, not history)")
+        # ... and that filter holds the six alone: the three monthly partners' Monthly Reports stay on D1-D5
+        for s in cl_m:
+            if "DHIS2__c$Account__c" not in s or not self.NOT_EQUAL.search(s):
+                continue
+            for m in [m for _, rx in self.MONTHLY_PARTNERS for m in rx.finditer(s)] + list(self.NINE.finditer(s)):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{m_where}: the D1-D5 filter leaves out the six U.S partners only; the three monthly "
+                                f"partners stay ({m.group(0)!r}): {s[:200]!r}")
+        self.assertTrue([s for s in cl_m if self.monthly_ref(s) and re.search(r"\bD1\b|(?i:\bdashboards\b)", s)
+                         and self.stated(s, self.STAY)],
+                        f"{m_where}: say the three monthly partners' Monthly Reports stay on D1-D5 (one sentence naming "
+                        "them, or \"the three monthly partners\", and D1-D5, not negated)")
+
+        # the three not-submitted lists: one `PARENT.NAME notEqual` holding the nine partners
+        lists = [s for s in cl_a if self.PARENT_NAME.search(s) and self.stated(s, self.NOT_EQUAL) and self.lists_ref(s)
+                 and self.us_ref(self.filter_value(s) or "") and self.monthly_in_filter(self.filter_value(s))]
+        self.assertTrue(lists, f"{a_where}: say the three not-submitted lists (" + ", ".join(self.LISTS) + ") filter "
+                               "`PARENT.NAME notEqual` the nine partners, the six U.S partners and the three monthly "
+                               "partners, in one sentence naming the three lists (or \"the three not-submitted lists\"); "
+                               "the six and the three monthly partners are the filter's value, after `notEqual` (not "
+                               "\"the six alone, while the monthly partners are kept\"), not negated, not history")
+        for name, rx in self.MONTHLY_PARTNERS:
+            self.assertRegex(self.norm(attendance), rx, f"{a_where}: name the monthly partner {name!r} (the lists' filter)")
+        self.assertTrue([s for s in cl_a if self.stated(s, self.REASON) and re.search(r"\bJotform\b", s)
+                         and (self.monthly_ref(s) or self.lists_ref(s) or re.search(r"(?i)\blists\b", s))],
+                        f"{a_where}: say why the lists leave the monthly partners out: coordinators use them to chase "
+                        "Jotform submissions, and those partners report through Salesforce, not Jotform (one sentence "
+                        "with \"because\" or \"so\", naming Jotform and the lists or the monthly partners)")
+        self.assertTrue([s for s in cl_a if self.TILES.search(s) and self.monthly_ref(s) and self.stated(s, self.STAY)],
+                        f"{a_where}: say the Girls Attended tiles keep the three monthly partners' `Partner report` "
+                        "batches (one sentence naming the tiles and the monthly partners, not negated)")
+        # round 3: the dashboard's How-to box tells readers the lists leave out those clubs
+        self.assertTrue([s for s in cl_a if self.HOWTO.search(s) and re.search(r"(?i)\blists?\b|\bnot[- ]submitt", s)
+                         and self.stated(re.sub(r"(?i)\bnot[- ](submitt\w*)", r"un\1", s), self.LEAVE_OUT)
+                         and self.monthly_ref(s) and self.US_WORD.search(s)],
+                        f"{a_where}: say the \"How to read this dashboard\" box tells readers the not-submitted lists "
+                        "leave out the clubs of the three monthly partners and the U.S clubs (#209 round 3; one sentence "
+                        "naming the box, the lists, the monthly partners and the U.S, not negated)")
+
+        # the "Jotform Attendance" dashboard's Partner filter offers no U.S partner
+        self.assertTrue([s for s in cl_a if self.PARTNER_FILTER.search(s) and self.us_ref(s) and self.ABSENT.search(s)
+                         and (self.JOTFORM_DASH.search(s) or re.search(r"(?i)\bdashboard['’]s\s+Partner\b", s))],
+                        f"{a_where}: say the \"Jotform Attendance\" dashboard's Partner filter offers none of the six "
+                        "U.S partners (one sentence naming the dashboard, its Partner filter and the six)")
+        for s in cl_a:          # its old 49 options only as history
+            if not self.FILTER_COUNT.search(s):
+                continue
+            for m in re.finditer(r"(?<![\d,.])49(?!\d)", s):
+                self.assertTrue(GlowReviewReportingDocs.history(self, s, m),
+                                f"{a_where}: the Partner filter offers 43 partners since #209; its 49 is said only as "
+                                f"history (\"until #209 it held 49\"): {s[:200]!r}")
+
+        # the scope: item 6 and the attendance-row reports unchanged, the U.S having no batches, said without a ban
+        both = cl_m + cl_a
+        for rx, what in ((self.ITEM_6, "item 6"), (self.ATT_ROWS, "the attendance-row reports")):
+            said = [s for s in both if rx.search(s) and self.UNCHANGED.search(s) and self.NO_BATCH.search(s)
+                    and (self.US_WORD.search(s) or self.SIX.search(s))]
+            self.assertTrue(said, f"RUNBOOK: say {what} stays unchanged because the U.S has no batches (one sentence "
+                                  f"naming {what}, \"unchanged\" and the U.S's missing batches)")
+            self.assertTrue([s for s in said if not self.FORBID.search(s)],
+                            f"RUNBOOK: say {what} stays unchanged as a fact of #209, not a ban (no \"never\", \"must "
+                            f"not\", \"do not\"): {said[0][:200]!r}")
+            for s in both:
+                if rx.search(s) and re.search(r"(?i)\b(chang\w*|edit\w*|filter\w*|touch\w*)\b", s):
+                    m = self.FORBID.search(s)
+                    self.assertFalse(m and re.search(r"(?i)\bU_?S\b|\bsix\b|#209", s),
+                                     f"RUNBOOK: {what} is left as it is because the U.S has no batches today, not "
+                                     f"forbidden a change ({m.group(0) if m else ''!r}): {s[:200]!r}")
+
+        # the rollback of #209 in each section: by deploy only
+        self.assertRollbackOf209(self.runbook_rollback(monthly, m_where), f"{m_where}, Rollback of #209",
+                                 parts=("m1",), order=False)
+        self.assertRollbackOf209(self.runbook_rollback(attendance, a_where), f"{a_where}, Rollback of #209",
+                                 parts=("a1", "r2", "r3"))
+
+    def runbook_rollback(self, section, where):
+        """The section's rollback of #209: a paragraph or list item starting `Rollback of #209`, with the list or
+        the continuation lines that belong to it, to the next heading, item of its level or paragraph."""
+        lines = section.split("\n")
+        start = next((i for i, x in enumerate(lines)
+                      if re.match(r"\s*(?:[-*+]\s+)?(?:\*\*)?Rollback of #209\b", x)), None)
+        self.assertIsNotNone(start, f"{where}: no rollback of #209 (a paragraph or list item starting `Rollback of "
+                                    "#209`)")
+        head = lines[start]
+        indent = len(head) - len(head.lstrip())
+        item = bool(re.match(r"\s*[-*+]\s", head))
+        out, blank = [head], False
+        for x in lines[start + 1:]:
+            st, xi = x.strip(), len(x) - len(x.lstrip())
+            if re.match(r"#{1,6}\s", x) or re.match(r"\*\*Rollback:\*\*\s*$", st):
+                break
+            if item and st and xi <= indent:
+                break
+            if not item and st and blank and xi == 0 and not re.match(r"([-*+]|\d+[.)])\s", st):
+                break
+            blank = not st
+            out.append(x)
+        return "\n".join(out)
+
+    def deployed(self, u):
+        return any(self.r.stated(s, self.DEPLOY) for s in sentences(u, ".;"))
+
+    def rounds_in(self, text):
+        """{round number: position of its first mention} in `text`."""
+        out = {}
+        for m in self.ROUND_REF.finditer(text):
+            n = m.group(1) or self.ORDINAL[m.group(2).lower()]
+            out.setdefault(n, m.start())
+        return out
+
+    def part_units(self, units, part):
+        """The units that are about rollback part `part` alone: its side, and no other round named."""
+        def about(u):
+            rounds = set(self.rounds_in(u))
+            if part == "m1":
+                return bool(self.MONTHLY_REPORTS.search(u)) and rounds <= {"1"}
+            if part == "a1":
+                return bool(self.ATT_SIDE.search(u)) and not self.MONTHLY_REPORTS.search(u) and rounds <= {"1"}
+            return rounds == {part[1]}
+        return [u for u in units if about(u)]
+
+    def part_restored(self, u, n):
+        """Unit `u` restores round `n`'s part by a deploy, from a fresh retrieve edited back, or from round `n`'s own
+        `before/` only while a fresh retrieve equals that round's `after/`: both ways stated."""
+        before, after = self.ROUND_DIRS[n]
+        return bool(self.deployed(u) and self.FRESH_EDITED.search(u) and re.search(before, u)
+                    and re.search(self.GUARD_HEAD + after, u))
+
+    def assertRollbackOf209(self, raw, where, parts=("m1", "a1", "r2", "r3"), order=True):
+        """#209's rollback: each of its parts (round 1's Monthly reports, round 1's Attendance lists and dashboard,
+        round 2, round 3) in a list item or paragraph of its own, restored by a deploy from a fresh retrieve edited
+        back or from that round's own `before/` only while a fresh retrieve equals that round's `after/`; round 3
+        undone first, then round 2, then round 1; the Decommissioned copies only the record, never the restore;
+        never an older build or another change's folder; nothing deleted."""
+        cl = sentences(self.norm(raw), ".;")
+        units = [self.norm(u) for u in self.r.blocks(raw)]
+        dirs = {"m1": "#209's own `before/` and `after/`", "a1": "#209's own `before/` and `after/`",
+                "r2": "`round2/before/` and `round2/after/`", "r3": "`round3/before/` and `round3/after/`"}
+        for part in parts:
+            n = "1" if part in ("m1", "a1") else part[1]
+            mine = self.part_units(units, part)
+            self.assertTrue([u for u in mine if self.part_restored(u, n)],
+                            f"{where}: say how {self.PARTS[part]} is restored, in a list item or paragraph of its own "
+                            f"(naming no other round): by a deploy (after a check-only) from a fresh retrieve edited back "
+                            f"(the change taken out or put back), or from {dirs[part].split(' and ')[0]} only while a "
+                            f"fresh retrieve equals {dirs[part].split(' and ')[1]}; both ways, each with its own guard "
+                            f"(found {len(mine)} unit(s) about it: {[u[:120] for u in mine]})")
+        if "m1" in parts:
+            self.assertTrue([s for s in cl if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s
+                             and re.search(r"(?i)(?<!test )\brecord\b", s)],
+                            f"{where}: say the copies in Decommissioned are the record of what the reports were, not "
+                            "the restore (one sentence)")
+        if order:
+            ordered = []
+            for s in [s for u in units for s in sentences(u, ".;")]:
+                at = self.rounds_in(s)
+                said = s[min(at.values()):] if at else ""      # from the first round named: an intro is no order
+                if (set(at) >= {"1", "2", "3"} and at["3"] < at["2"] < at["1"] and self.ORDER_WORD.search(said)
+                        and not self.REVERSED.search(said) and not self.d.denies(said)):
+                    ordered.append(s)
+            self.assertTrue(ordered, f"{where}: say the rounds are undone in reverse: round 3 (the How-to box) first, "
+                                     "then round 2 (the monthly partners), then round 1 (the six U.S partners), in one "
+                                     "sentence naming them in that order")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\b(never|not|no)\b[^.;]{0,60}?\b(older|old|earlier|previous|"
+                                                    r"stale)\s+(\w+\s+)?(build|retrieve)s?\b", s)],
+                        f"{where}: say never from an older build or retrieve (DECISIONS 2026-10-16), in one sentence")
+        for s in cl:
+            for m in self.OLD_SOURCE.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m),
+                                f"{where}: #209's rollback deploys from #209's own `before/` or a fresh retrieve, never "
+                                f"from {m.group(0)!r} (DECISIONS 2026-10-16); name it only after a negation: {s[:200]!r}")
+            for m in self.FROM_COPY.finditer(s):
+                self.assertTrue(self.d.locally_denied(s, m) or self.d.NEGATION.search(m.group(0)),
+                                f"{where}: the reports are not restored from their Decommissioned copies (a copy saved "
+                                f"back is a separate report the dashboards do not show): {s[:200]!r}")
+            if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s:
+                self.assertTrue(re.search(r"(?i)(?<!test )\brecord\b|\b(stays?|kept|remains?)\b", s) or self.d.denies(s),
+                                f"{where}: the copies in Decommissioned are named only as the record (or as staying), "
+                                f"not as the restore: {s[:200]!r}")
+        self.r.sweep(raw, where)
+        for rx, what in ((r"destructiveChanges", "a `destructiveChanges` deploy"),
+                         (r"\bsf project delete\b", "`sf project delete`"),
+                         (r"(-X\s*|--method\s+)DELETE\b|\bDELETE\s+/services/", "an HTTP DELETE")):
+            self.assertNotRegex(raw, rx, f"{where}: {what} deletes; the rollback restores and deletes nothing")
+
+    # --- the plan -------------------------------------------------------------------------------------------
+
+    def rollout_steps(self, raw, where):
+        """The Rollout's numbered steps, each flattened (a step's indented lines are its own)."""
+        out, cur = [], None
+        for line in raw.splitlines():
+            if re.match(r"\d+[.)]\s", line):
+                if cur is not None:
+                    out.append(cur)
+                cur = [line]
+            elif cur is not None and line.strip() and not line[:1].isspace():
+                break
+            elif cur is not None:
+                cur.append(line)
+        if cur is not None:
+            out.append(cur)
+        self.assertGreaterEqual(len(out), 6, f"{where}: the Rollout is a numbered list of steps (`1. …`)")
+        return [flat("\n".join(s)) for s in out]
+
+    def test_the_plan_has_rollout_rollback_and_result(self):
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        name = os.path.relpath(self.PLAN, REPO)
+        self.assertTrue(os.path.isfile(self.PLAN), f"{name}: no plan for ticket #209 (Rollout, Rollback, Result)")
+        text = read(self.PLAN)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        _, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
+                         f"{name}: name ticket #209 in the frontmatter, the title or the opening paragraph")
+        self.assertRegex(text, r"(?m)^## Result\b", f"{name}: no `## Result` section")
+        self.assertNotRegex(text, self.EMAIL, f"{name}: counts, ids and names of reports and partners only, no address")
+        self.assertSixNamed(text, name)
+
+        raw = self.r.plan_part(self.PLAN, "## Rollout", 40)
+        where = f"{name}: `## Rollout`"
+        cl = sentences(self.norm(raw), ".;")
+        # the copies: by the tool, VPN off, tagged with the ticket, into Decommissioned, on Ryan's go
+        segments = re.split(r"`+|\n\s*\n|\n(?=\s*(?:\$\s*)?python3\s)|(?=\bpython3\s)", raw)
+        copies = [flat(s) for s in segments if re.search(r"\bsf_report_folders\.py\s+copy\b", s)]
+        self.assertTrue(copies, f"{where}: give the copies' command, `python3 tools/sf_report_folders.py copy --vpn-off "
+                                "--kind report --id <id> --tag \"#209\"`")
+        for c in copies:
+            self.assertIn("--vpn-off", c, f"{where}: the tool refuses to run without `--vpn-off`: {c[:160]!r}")
+            self.assertRegex(c, r"--tag[ =]\\?[\"“']?#209\b", f"{where}: each copy carries the ticket, `--tag \"#209\"`: "
+                                                             f"{c[:160]!r}")
+        self.assertTrue([s for s in cl if re.search(r"(?i)\bcop(y|ies)\b", s) and "Decommissioned" in s
+                         and not self.d.denies(s)],
+                        f"{where}: the copies go to Decommissioned before the change (one sentence)")
+        self.assertTrue([s for s in cl if self.r.stated(s, self.GO) and re.search(r"(?i)\bcop(y|ies)\b|--apply", s)],
+                        f"{where}: the copies wait for Ryan's go (one sentence, not negated)")
+        self.assertTrue([s for s in cl if all(re.search(r"\b%s\b" % d, s) for d in ("D1", "D2", "D5"))
+                         and re.search(r"(?i)\bdynamic\b", s) and "before/" in s],
+                        f"{where}: say D1, D2 and D5 are dynamic (no Decommissioned copy), so their rollback is "
+                        "`before/` (one sentence)")
+        self.assertTrue([s for s in cl if re.search(r"\bAttendance\b", s) and re.search(
+            r"(?i)\bnot\s+(be\s+)?copied\b|\bno\s+(\w+\s+)?cop(y|ies)\b|\bnever\s+(takes|copies|touches|reads)\b", s)],
+                        f"{where}: say the Attendance reports and the \"Jotform Attendance\" dashboard get no copy (the "
+                        "tool never takes the Attendance folders), so their rollback is `before/` (one sentence)")
+        self.assertRegex(raw, r"\bround2/", f"{where}: round 2 (the monthly partners) works in its own folder "
+                                            "`data/sf_us_partners_2026-11-05/round2/`")
+        self.assertRolloutOrder(raw, where)
+
+        rb = self.r.plan_part(self.PLAN, "## Rollback", 15)
+        self.assertRollbackOf209(rb, f"{name}: `## Rollback`")
+        self.assertResult(name)
+
+    def assertRolloutOrder(self, raw, where):
+        """before/, the copies, item 11's metadata copy, the check-only, Ryan's go, the deploy, `after/` against
+        `build/`, the refresh, then the figures checked by SOQL, in that order in the numbered steps."""
+        steps = self.rollout_steps(raw, where)
+        joined, starts = "", []
+        for st in steps:
+            starts.append(len(joined))
+            joined += st + " "
+
+        def step_of(pos):
+            return max(i for i, a in enumerate(starts) if a <= pos)
+
+        def find(rx, after, what, pred=lambda m: True):
+            for m in re.finditer(rx, joined):
+                if m.start() > after and pred(m):
+                    return m.start()
+            self.fail(f"{where}: {what}")
+        before = find(r"\bbefore/", -1, "the steps start from a fresh retrieve into `before/`")
+        copy_at = [m.start() for m in re.finditer(r"\bsf_report_folders\.py\s+copy\b", joined)]
+        self.assertTrue(copy_at, f"{where}: the copies are a numbered step")
+        self.assertLess(before, copy_at[0], f"{where}: the `before/` retrieve comes before the copies")
+        item11 = find(r"(?i)\bitem\s+11\b|" + self.ITEM_11_ID, copy_at[0],
+                      "after the copies, a step copies item 11 (`00ORP000005uf412AA`) into Decommissioned by metadata "
+                      "(the Analytics API refused its copy)",
+                      pred=lambda m: re.search(r"(?i)\bmetadata\b", steps[step_of(m.start())])
+                      and re.search(r"(?i)\bcop(y|ies|ied)\b", steps[step_of(m.start())]))
+        k = step_of(item11) + 1
+        self.assertLess(k, len(steps), f"{where}: the check-only is a step after item 11's metadata copy")
+        check = find(self.CHECK, starts[k] - 1, "the check-only deploy is a step after item 11's metadata copy")
+        self.assertLess(copy_at[-1], check, f"{where}: the check-only comes after every copy (copy first, then change)")
+        deploy, at = None, 0
+        for piece in sentences(joined, ".;,"):
+            at = joined.find(piece, at)
+            m = re.search(r"(?i)\b(re-?)?deploy\w*", piece)
+            if not m or re.search(r"(?i)check-only|(?<!without )(?<!without `)--dry-run|\bvalidat", piece) \
+                    or self.d.locally_denied(piece, m) \
+                    or re.search(r"(?i)\b(before|until|ahead of|prior to|after|once)\b[^.;,]{0,25}$", piece[:m.start()]) \
+                    or re.search(r"(?i)\b(in|at|from)\s+step\s+\d", piece) or step_of(at) < k:
+                continue
+            self.assertGreater(at, check, f"{where}: nothing is deployed before the check-only: {piece[:160]!r}")
+            deploy = (at, at + len(piece))
+            break
+        self.assertTrue(deploy, f"{where}: the deploy is a step after the check-only (on Ryan's go)")
+        self.assertTrue([m for m in self.GO.finditer(joined) if check < m.start() < deploy[1]],
+                        f"{where}: Ryan's go comes between the check-only and the deploy")
+        pos = deploy[1]
+        after = None
+        for s in sentences(joined, ".;"):
+            p = joined.find(s)
+            if p > pos and "after/" in s and "build/" in s and re.search(r"(?i)\b(compar\w*|equals?|differ\w*|diff)\b", s):
+                after = p
+                break
+        self.assertIsNotNone(after, f"{where}: after the deploy, the read-back retrieves into `after/` and compares it "
+                                    "with `build/` (one sentence)")
+        refresh = find(r"(?i)\brefresh\w*\b|-X\s*PUT\b", after, "after the read-back, the dashboards are refreshed")
+        self.assertTrue([s for s in sentences(joined[refresh:], ".;") if re.search(r"\bSOQL\b|\bSELECT\b", s)
+                         and re.search(r"(?i)\b(equal\w*|match\w*)\b", s)],
+                        f"{where}: after the refresh, the before/after figures are checked equal to SOQL (one sentence)")
+
+    def assertResult(self, name):
+        raw = self.r.plan_part(self.PLAN, "## Result", 40)
+        where = f"{name}: `## Result`"
+        t = self.t
+
+        def deploy_refs(u):
+            checks = list(t.CHECK_WORD.finditer(u))
+            spans = [(c.start(), c.end()) for c in checks]
+            refs = [(m, "check") for m in checks]
+            refs += [(m, "deploy") for m in t.DEPLOY_WORD.finditer(u)
+                     if not any(a <= m.start() < b or m.start() <= a < m.end() for a, b in spans)
+                     and not re.search(r"(?i)check[\s-]*$|--dry-run\s*$", u[:m.start()])]
+            return refs
+        for rid, want, what in ((self.CHECK_1, "check", "round 1's check-only"), (self.DEPLOY_1, "deploy", "round 1's deploy"),
+                                (self.CHECK_2, "check", "round 2's check-only"), (self.DEPLOY_2, "deploy", "round 2's deploy"),
+                                (self.CHECK_3, "check", "round 3's check-only"), (self.DEPLOY_3, "deploy", "round 3's deploy")):
+            got = t.labels(raw, rid, deploy_refs)
+            self.assertTrue(got, f"{where}: record {what}'s id `{rid}`")
+            self.assertIn(want, {k for k, _u in got}, f"{where}: `{rid}` is {what}'s id: name it beside that id")
+            wrong = [u for k, u in got if k not in (want, None)]
+            self.assertEqual(wrong, [], f"{where}: `{rid}` is {what}'s id only; here it stands beside the other step's "
+                                        f"name: {wrong[:1]}")
+        units = t.result_units(raw)
+        for rid, rx, what in ((self.CHECK_2, self.ROUND2, "round 2's (the monthly partners)"),
+                              (self.DEPLOY_2, self.ROUND2, "round 2's (the monthly partners)"),
+                              (self.CHECK_3, self.ROUND3, "round 3's (the How-to box)"),
+                              (self.DEPLOY_3, self.ROUND3, "round 3's (the How-to box)")):
+            self.assertTrue([u for u in units if rid in u and rx.search(u)],
+                            f"{where}: `{rid}` is {what}; name that round beside it")
+        # item 11's copy, beside item 11
+        self.assertTrue([s for s in t.clauses(raw) if t.stated(s, t.COPY) and "Decommissioned" in s],
+                        f"{where}: say the copies are in Decommissioned (one sentence, not negated)")
+
+        def item_refs(u):
+            refs = [(m, m.group(1)) for m in re.finditer(r"(?i)\bitem\s+(\d+)\b", u)]
+            return refs + [(m, "11") for m in re.finditer(self.ITEM_11_ID, u)]
+        got = t.labels(raw, self.ITEM_11_COPY, item_refs)
+        self.assertTrue(got, f"{where}: record item 11's metadata copy in Decommissioned, `{self.ITEM_11_COPY}`")
+        self.assertIn("11", {k for k, _u in got}, f"{where}: the copy `{self.ITEM_11_COPY}` is item 11's; name item 11 "
+                                                  "beside it")
+        self.assertEqual([u for k, u in got if k not in ("11", None)], [],
+                         f"{where}: the copy `{self.ITEM_11_COPY}` is item 11's only")
+
+        # the figures, before -> after, each beside its own report and said equal to SOQL
+        labels = {"Approval Status by Month": re.compile(r"Approval Status by Month"),
+                  "item 17": re.compile(r"(?i)\bitem\s+17\b|Monthly Report Approval Status|00ORP000006XXEf2AO"),
+                  "Overall Attendance by Month": re.compile(r"(?i)\bOverall\s+Attendance\b")}
+        labels.update(self.LISTS)
+        l14, l1s, lna = list(self.LISTS)
+        pairs = [("Approval Status by Month", 430, 384), ("item 17", 355, 319),
+                 ("Overall Attendance by Month", 45118, 44513),
+                 (l14, 187, 176), (l1s, 124, 113), (lna, 139, 128),          # round 1: the 11 U.S clubs
+                 (l14, 176, 138), (l1s, 113, 75), (lna, 128, 90)]           # round 2: the 38 monthly partners' clubs
+
+        def pair(a, b):
+            return re.compile(t.num(a).pattern + r"`?\s*(?:→|->|–>|=>|to)\s*`?" + t.num(b).pattern)
+        for key, a, b in pairs:
+            hits = []
+            for u in units:
+                for s in sentences(u, "."):
+                    refs = [(m, k) for k, rx in labels.items() for m in rx.finditer(s)]
+                    for m in pair(a, b).finditer(s):
+                        if t.nearest(s, m.start(), len(m.group(0)), refs) == key:
+                            hits.append(s)
+            self.assertTrue(hits, f"{where}: give {key!r} {a:,} -> {b:,}, the report beside its figures (\"{key} "
+                                  f"{a:,} → {b:,}\")")
+            self.assertTrue([s for s in hits if re.search(r"\bSOQL\b", s) and t.stated(self.norm(s), t.EQUAL_STRICT)],
+                            f"{where}: say {key!r}'s {b:,} equals SOQL, in the sentence that gives {a:,} -> {b:,}")
+
+    # --- DECISIONS ------------------------------------------------------------------------------------------
+
+    def test_a_decision_records_the_us_exclusion(self):
+        entries = re.split(r"(?m)^(?=### )", read(self.DECISIONS))[1:]
+        mine = [e for e in entries if re.match(r"### (\d{4}-\d\d-\d\d) ", e)
+                and re.match(r"### (\d{4}-\d\d-\d\d) ", e).group(1) >= "2026-11-05" and self.TICKET.search(e)]
+        self.assertTrue(mine, "docs/DECISIONS.md: no dated entry (`### 2026-11-05 — …`, or later) naming #209, the U.S "
+                              "partners off every dashboard and report")
+        e = mine[0]
+        where = f"docs/DECISIONS.md {e.split(chr(10), 1)[0][4:14]}"
+        for part in ("**Why", "**Rejected", "**Consequences"):
+            self.assertIn(part, e, f"{where}: no {part}** bullet (the file's header)")
+        flat_e = self.norm(e)
+        self.assertTrue(self.US_WORD.search(flat_e) and self.monthly_ref(flat_e),
+                        f"{where}: name the U.S partners and the three monthly partners (round 2, the not-submitted lists)")
+        rejected = self.norm(e.split("**Rejected", 1)[1].split("**Consequences", 1)[0])
+        self.assertTrue([s for s in sentences(rejected, ".;") if re.search(
+            r"(?i)\bmarker\b[^.;]{0,30}?\bfield\b|\bfield\b[^.;]{0,30}?\bmarker\b", s) and re.search(r"\bAccount\b", s)],
+                        f"{where}: **Rejected** names a marker field on the Account")
+        cons = sentences(self.norm(e.split("**Consequences", 1)[1]), ".;")
+        self.assertTrue([s for s in cons if re.search(r"(?i)\brenam\w*\b", s)
+                         and re.search(r"(?i)\b(back|again|reappear\w*|return\w*)\b", s)
+                         and re.search(r"(?i)\bsilent\w*|\bunnoticed\b|\bwithout\s+(a\s+|any\s+)?(warning|alarm|error|"
+                                       r"notice)\b|\bno\s+(alarm|warning|error)\b", s)],
+                        f"{where}: **Consequences**: a renamed U.S account drops out of the filters and comes back "
+                        "silently (one sentence)")
+        self.assertTrue([s for s in cons if re.search(r"(?i)\binactive\b", s) and re.search(r"(?i)\bnew(ly)?\b", s)
+                         and re.search(r"(?i)\bticket\b", s)],
+                        f"{where}: **Consequences**: a newly inactive partner is a new ticket (one sentence)")
+        # the 2026-10-24 entry's "still true of those two lists" no longer holds: a dated line points at #209
+        old = [x for x in entries if x.startswith("### 2026-10-24 — The weekly not-submitting list")]
+        self.assertEqual(len(old), 1, "docs/DECISIONS.md: the 2026-10-24 entry on the weekly not-submitting list")
+        self.assertTrue([x for x in old[0].split("\n") if re.match(r"\s*-\s+(\*\*)?2026-11-\d\d\b", x)
+                         and self.TICKET.search(x)],
+                        "docs/DECISIONS.md 2026-10-24 (the weekly not-submitting list): its Rejected says the 14-day and "
+                        "since-1-September lists keep the monthly partners' and U.S clubs, which #209 changed; add a "
+                        "dated bullet pointing at #209 (\"- 2026-11-05: amended by #209 - …\")")
 
 
 if __name__ == "__main__":

@@ -309,6 +309,9 @@ label until the same deploy) shows a chart with its rows collapsed. Its filters 
   days before it, in the org's time zone (Pacific: on the evening of 2026-10-06 there, 09-22 to
   10-06); the last-month tile stays row-based. A
   **blank** is a submission with no girl ticked: `Failed` "No participants submitted", or a
-  legacy `Success` with `Girls_Present__c` 0. Clubs whose partner reports a monthly count show
-  as not submitting until that count arrives; the U.S clubs, which do not report attendance
-  here, stay on the lists ("Clubs that do not use Jotform").
+  legacy `Success` with `Girls_Present__c` 0. Until #209, clubs whose partner reports a monthly
+  count showed as not submitting until that count arrived, and the U.S clubs, which do not report
+  attendance here, stayed on the lists ("Clubs that do not use Jotform").
+  (2026-11-05, ticket #209: the not-submitted lists leave out the clubs of the three partners
+  that report a monthly count and the U.S clubs, and since 2026-11-06 the dashboard's How-to box
+  says so; RUNBOOK "Attendance dashboard in Salesforce", [plan](2026-11-05-sf-us-partners.md).)

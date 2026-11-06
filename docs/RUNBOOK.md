@@ -2056,8 +2056,12 @@ are kept, the Club Roster Form still lists the clubs — but they leave the
 attendance forms' Club picker. Never give such a club a blank region (CLAUDE.md
 rule 6: that says "fix me" and raises ATTENTION on every run); mark the
 partner instead. A partner marked `no` also goes, by hand, into the partner-name
-filter of the Salesforce report `Clubs_Not_Submitting_Last_Week` ("Submission
-timing in Salesforce", The timing reports), or its clubs show there every week.
+filter (`PARENT.NAME` not equal to) of the four Salesforce not-submitted lists,
+which hold the same nine names since #209 (2026-11-05):
+`Clubs_Not_Submitting_Last_Week` ("Submission timing in Salesforce", The timing
+reports), `Clubs_Not_Submitting_Last_14_Days`, `Clubs_Not_Submitting_Since_1_Sept`
+and `Jotform_Clubs_No_Attendance_Last_Month` ("Attendance dashboard in
+Salesforce"), or its clubs show there as not submitting.
 
 **The marker.** The Partners tab's fourth column, `jotform`: `no` = the
 partner's clubs are not on Jotform; `yes` or blank = on Jotform (the default;
@@ -3444,14 +3448,21 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   counts", Signals.
 
 **Filters:**
-- The dashboard's **Partner** filter covers every component. It holds the 49 partner names
-  that have clubs, typed in exactly (Salesforce allows 50 values per filter).
+- The dashboard's **Partner** filter covers every component. It holds 43 partner names, typed in
+  exactly (Salesforce allows 50 values per filter): the partners that have clubs, less the six
+  U.S partners since #209 (until #209 it held 49).
+- Since #209 (Ryan, 2026-11-05: the U.S partners are inactive) the Jotform Attendance dashboard's
+  Partner filter offers none of the six U.S partners: Angelo Patri School (`001RP000002nJZUYA2`),
+  Detroit Public Schools (`001RP000002nJZNYA2`), Ewa Makai Middle School (`001RP00000SL2ebYAD`),
+  Farmington Municipal School District (`001RP00000F1DPBYA3`), HOLA (`001RP000002nJZXYA2`) and
+  Holbrook Unified School District (`001RP00000VxX9PYAV`).
   - A new partner must be added by hand to **both** lists: the dashboard's `partners.json`
     (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
     map the automatic club accounts read, partner → its account; "New clubs' accounts,
-    automatically"). Two lists of the same 49 partners, kept separate on purpose: one is filter
-    text, the other account ids. Check its account name against the Monthly Reports' "test"
-    filter ("The keep list").
+    automatically"). The two lists are kept separate on purpose: one is filter text, the other
+    account ids. `glow/sf_partners.csv` keeps all 49 partners, the six U.S partners included:
+    #209 took them off the dashboard's filter only. Check its account name against the Monthly
+    Reports' "test" filter ("The keep list").
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -3460,6 +3471,27 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   (tested 2026-10-02). In Salesforce, "Fundacion Bibliotec" has no accent and "Fundación
   Kaleidos" has one, so "Fundacion" finds only the first. Type the name as Salesforce spells it,
   or an unaccented part of it.
+
+**The U.S partners and the three monthly partners** (#209, Ryan, 2026-11-05;
+[plan and Result](plans/2026-11-05-sf-us-partners.md); DECISIONS 2026-11-05):
+- Since #209 the three not-submitted lists (Clubs Not Submitting - Last 14 Days, Clubs Not
+  Submitting - Since 1 Sept and Clubs With No Attendance Last Month) filter `PARENT.NAME notEqual`
+  the nine partners: the six U.S partners and the three monthly partners (Education and English
+  for You, Tumaini La Maisha, Ng'aa Maskani), the same value as Clubs Not Submitting - Last Week
+  (DECISIONS 2026-10-24).
+- The lists leave out the three monthly partners' clubs because coordinators use the lists to
+  chase Jotform submissions, and those partners report monthly through Salesforce, not Jotform.
+  The six U.S partners' 11 clubs leave them because the U.S partners are inactive and their form
+  is disabled (DECISIONS 2026-10-06).
+- The Girls Attended tiles keep the three monthly partners' `Partner report` batches: the tiles
+  count the Jotform girls and the three partners' Monthly Max together, as they did before #209.
+- The attendance-row reports stay unchanged by #209, because the U.S has no batches and no
+  attendance rows (0 `Attendance_Batch__c`, 0 `Attendance__c`).
+- Since #209's round 3 (deploy `0AfRP000002jNiT0AU`, 2026-11-06 00:38 UTC) the "How to read this
+  dashboard" box tells readers the not-submitting lists leave out the clubs of the three monthly
+  partners and the U.S clubs. Its sentence reads: "The not-submitting lists leave out the clubs of
+  the three partners that report a monthly count instead of using Jotform, and the U.S. clubs:
+  they are for following up Jotform submissions."
 
 **Access** (Ryan's decisions of 2026-10-09,
 [plan](plans/2026-10-09-attendance-reports-public.md); they reverse his 2026-10-06 "folder
@@ -3714,6 +3746,24 @@ sharing stays as it is"):
   check-only, Ryan's go, deploy.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
+- Rollback of #209 ([plan](plans/2026-11-05-sf-us-partners.md#rollback); DECISIONS 2026-10-16),
+  VPN off, each deploy after a check-only and on Ryan's go:
+  - Round 3 (the How-to box) is undone first, then round 2 (the three monthly partners), then
+    round 1 (the six U.S partners).
+  - Round 3: the How-to box is restored by a deploy from a fresh retrieve with its sentence put
+    back, or by a deploy of the dashboard in `data/sf_us_partners_2026-11-05/round3/before/` only
+    while a fresh retrieve equals `round3/after/`.
+  - Round 2: the three not-submitted lists are restored by a deploy from a fresh retrieve with
+    the three monthly partners taken out of their `PARENT.NAME` value, or by a deploy of their
+    files in `data/sf_us_partners_2026-11-05/round2/before/` only while a fresh retrieve equals
+    `round2/after/`.
+  - Round 1: the three not-submitted lists and the Jotform Attendance dashboard are restored by a
+    deploy of their files in `data/sf_us_partners_2026-11-05/before/`, only while a fresh retrieve
+    equals `after/`; otherwise from a fresh retrieve with the six U.S partners taken out of the
+    lists' value and the six Partner options restored to the dashboard from `before/`.
+  - The Attendance folders have no copies: the copy tool never takes them, so `before/` is the
+    record of what the lists and the dashboard were.
+  - Never from an older build or retrieve. Nothing is deleted.
 
 ## Submission timing in Salesforce
 
@@ -3878,8 +3928,11 @@ by a filter on their partner account names, `Parent.Name` in the SOQL check and 
 `PARENT.NAME` "not equal to" in the report, which names the three partners and the six U.S
 partner accounts, Angelo Patri School, Detroit Public Schools, Ewa Makai Middle School,
 Farmington Municipal School District, HOLA and Holbrook Unified School District, as
-`glow/sf_partners.csv` spells them. A new partner of that kind needs the report's filter edited by
-hand (a fresh retrieve, check-only, Ryan's go, deploy): one that reports monthly through
+`glow/sf_partners.csv` spells them. Since #209 (2026-11-05) the three not-submitted lists of the
+Jotform Attendance dashboard (`Clubs_Not_Submitting_Last_14_Days`,
+`Clubs_Not_Submitting_Since_1_Sept`, `Jotform_Clubs_No_Attendance_Last_Month`) hold the same
+nine-partner filter ("Attendance dashboard in Salesforce"). A new partner of that kind needs the
+filter of all four lists edited by hand (a fresh retrieve, check-only, Ryan's go, deploy): one that reports monthly through
 Salesforce, or whose clubs stop using Jotform (the Partners tab's `jotform` set to `no`, "Clubs
 that do not use Jotform"). `Submissions_by_Club_and_Week` is unaffected: it shows only the clubs
 with a batch in its window. The two delay reports keep every partner: they show a club only for
@@ -4066,6 +4119,34 @@ its record count off (`co` 0, describe `hasRecordCount: false`) and listed only 
 component, which measures `RowCount`, failed the refresh with 406 ("One or more of the fields
 selected in the component is no longer available in the report"). The check-only deploy passes
 such a component; only the refresh shows the 406.
+
+**The U.S partners** (#209, Ryan, 2026-11-05: inactive and distorting the totals;
+[plan and Result](plans/2026-11-05-sf-us-partners.md); DECISIONS 2026-11-05), deployed
+2026-11-05 on Ryan's go (deploy `0AfRP000002jNNV0A2`, check-only `0AfRP000002jNIf0AM`) and read
+back:
+- The six U.S partners are Angelo Patri School (`001RP000002nJZUYA2`), Detroit Public Schools
+  (`001RP000002nJZNYA2`), Ewa Makai Middle School (`001RP00000SL2ebYAD`), Farmington Municipal
+  School District (`001RP00000F1DPBYA3`), HOLA (`001RP000002nJZXYA2`) and Holbrook Unified School
+  District (`001RP00000VxX9PYAV`), region U.S: 11 Club accounts, 46 Monthly Reports in 2026.
+- Since #209 every Monthly report on D1-D5 and item 19, the stories table, filters
+  `DHIS2__c$Account__c notEqual` the six U.S partners, a locked criteria item beside the test
+  rule. D1-D5 themselves are unchanged; the U.S Monthly Reports of January-October 2026 leave them
+  retroactively.
+- The three monthly partners' Monthly Reports stay on D1-D5: those partners do report, through
+  Salesforce.
+- Item 6 and the attendance-row reports are unchanged by #209, because the U.S has no batches.
+- The SOQL signals in this section equal the dashboards' components only with
+  `AND Account__r.Name NOT IN (<the six>)` added to their `WHERE` since #209, because the
+  components leave out the six U.S partners.
+
+Rollback of #209 ([plan](plans/2026-11-05-sf-us-partners.md#rollback); DECISIONS 2026-10-16),
+VPN off, after a check-only, on Ryan's go:
+- The 21 Monthly reports (the 20 on D1-D5 and item 19) are restored by a deploy from a fresh
+  retrieve with #209's `DHIS2__c$Account__c` criteria items removed, or from #209's own
+  `data/sf_us_partners_2026-11-05/before/` only while a fresh retrieve equals `after/`.
+- The copies in Decommissioned (tagged `#209`) are the record of what the reports were, not the
+  restore; item 11's metadata copy stays there too.
+- Never from an older build or retrieve. Nothing is deleted.
 
 ### Decommissioned
 
@@ -5142,6 +5223,8 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   Item 17 lists approved reports only (`Approved__c equals 1`), so the overview needs its own
   report; item 17 keeps that filter. SOQL signal, every month of the
   reporting year: `SELECT CALENDAR_MONTH(Period__c), Approved__c, COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY CALENDAR_MONTH(Period__c), Approved__c`.
+  Since #209 add `AND Account__r.Name NOT IN (<the U.S partners' names>)` for it to equal the
+  overview ("The U.S partners", at the top of this section).
 
 How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - Since #200 each report, items 17, 18 and 19, filters `In_Reporting_Year__c equals true` (#195),
@@ -5184,8 +5267,10 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - The dashboard runs as the viewer (`LoggedInUser`), as before; its running user is unchanged.
 
 The SOQL signals, for the last complete month (item 19's also for the reporting year), each with
-the period and the test-record rule. A component is right when, refreshed, it shows the same
-total and the same number for one partner:
+the period and the test-record rule. Since #209 each also needs `AND Account__r.Name NOT IN
+(<the U.S partners' names>)` to equal its component ("The U.S partners", at the top of this
+section). A component is right when, refreshed, it shows the same total and the same number for
+one partner:
 - Item 17, "Report approved by PO": the total is `SELECT COUNT(Id) FROM DHIS2__c WHERE Period__c =
   LAST_MONTH AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Approved__c = true`,
   and one partner's number is `SELECT Account__r.Name, COUNT(Id) FROM DHIS2__c WHERE Period__c =
