@@ -3457,13 +3457,15 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   Detroit Public Schools (`001RP000002nJZNYA2`), Ewa Makai Middle School (`001RP00000SL2ebYAD`),
   Farmington Municipal School District (`001RP00000F1DPBYA3`), HOLA (`001RP000002nJZXYA2`) and
   Holbrook Unified School District (`001RP00000VxX9PYAV`).
-  - A new partner must be added by hand to **both** lists: the dashboard's `partners.json`
-    (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
+  - A new partner must be added by hand to **both** lists: the dashboard's Partner filter
+    (its `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
     map the automatic club accounts read, partner → its account; "New clubs' accounts,
     automatically"). The two lists are kept separate on purpose: one is filter text, the other
     account ids. `glow/sf_partners.csv` keeps all 50 partners, the six U.S partners included:
     #209 took them off the dashboard's filter only. Check its account name against the Monthly
-    Reports' "test" filter ("The keep list").
+    Reports' "test" filter ("The keep list"). Since #209 (2026-11-05) the filter is edited in a
+    fresh retrieve of the dashboard and `partners.json` is no longer kept in step: the deployed
+    filter is the source of truth.
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -3622,8 +3624,8 @@ sharing stays as it is"):
      changed in Salesforce since. Since #59 (2026-10-21) the backup also takes its 10 components
      (as in `data/sf_girls_tiles_2026-10-20/after/`), and that `after/` is the latest read-back.
   2. Copy that retrieve and edit the copy, only the files that change. A new partner's Partner
-     filter value is in the dashboard's XML; add it to `partners.json` as well, so the lists stay
-     one. Not `gen.py` (above).
+     filter value is in the dashboard's XML; edit it there (since #209, 2026-11-05, `partners.json`
+     is no longer kept in step). Not `gen.py` (above).
   3. Keep only the changed files in a new folder with `sfdx-project.json` (as `fix1/`).
   4. Check-only: `cd` there, then `sf project deploy start --dry-run -o glow -d force-app`.
   5. Ryan's go; then the same command without `--dry-run`.

@@ -25,8 +25,13 @@ in the Asian form? Please make sure the Salesforce links to it properly." Proced
   dashboard's Partner filter (`01ZRP00000BE2TR2A1`), and `glow/sf_partners.csv` (the partner map
   the automatic club accounts read, so a new OMID club gets `001RP000002nJZiYAM` as its parent).
 - **Unchanged:** the not-submitted lists (OMID Foundation uses Jotform, so its clubs belong on
-  them); the interactive dashboard's `partners.json` (#81-#83 on hold); `appsscript/Regions.gs`
-  (the Partners tab wins over it, CLAUDE.md rule 8).
+  them); `appsscript/Regions.gs` (the Partners tab wins over it, CLAUDE.md rule 8).
+- **Left as is:** `partners.json`, the Jotform Attendance dashboard's old Partner-filter list
+  that its generator `gen.py` read, in the untracked `data/sf_dashboard_2026-10-02/` of the main
+  checkout. It still lists 49 names (the six U.S partners in, OMID Foundation out): #209 did not
+  update it either. It is untracked, main's `data/` is write-blocked, and the filter was built by
+  a text edit of a fresh retrieve, not regenerated (`gen.py` is not re-run). The deployed
+  dashboard's Partner filter is the source of truth.
 - Work folder (owner only, untracked, never committed; its contents are never quoted):
   `data/sf_omid_partner_2026-11-06/`, with `partners_before.csv`, `before/`, `build/` and
   `after/`.
